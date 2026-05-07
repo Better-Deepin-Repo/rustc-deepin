@@ -212,10 +212,10 @@ index 8ad5b42..f93d3da 100644
  
  ### The Rustdoc Book
 diff --git a/src/doc/reference/src/conditional-compilation.md b/src/doc/reference/src/conditional-compilation.md
-index 5255bb8..46a477b 100644
+index 6c2a505..71e97f0 100644
 --- a/src/doc/reference/src/conditional-compilation.md
 +++ b/src/doc/reference/src/conditional-compilation.md
-@@ -483,6 +483,6 @@ println!("I'm running on a {} machine!", machine_kind);
+@@ -469,6 +469,6 @@ println!("I'm running on a {} machine!", machine_kind);
  [`target_feature` attribute]: attributes/codegen.md#the-target_feature-attribute
  [attribute]: attributes.md
  [attributes]: attributes.md
@@ -239,10 +239,10 @@ index 4cd205b..25a7b49 100644
  [file an issue]: https://github.com/rust-lang/reference/issues
  [lifetime of temporaries]: expressions.html#temporaries
 diff --git a/src/doc/reference/src/linkage.md b/src/doc/reference/src/linkage.md
-index ff41a14..4d1b72e 100644
+index 23bd44c..412765a 100644
 --- a/src/doc/reference/src/linkage.md
 +++ b/src/doc/reference/src/linkage.md
-@@ -242,7 +242,7 @@ fn main() {
+@@ -241,7 +241,7 @@ fn main() {
  }
  ```
  
@@ -252,10 +252,10 @@ index ff41a14..4d1b72e 100644
  To use this feature locally, you typically will use the `RUSTFLAGS` environment
  variable to specify flags to the compiler through Cargo. For example to compile
 diff --git a/src/doc/reference/src/procedural-macros.md b/src/doc/reference/src/procedural-macros.md
-index 0ae6e26..e6b61be 100644
+index d717d9a..92d3125 100644
 --- a/src/doc/reference/src/procedural-macros.md
 +++ b/src/doc/reference/src/procedural-macros.md
-@@ -381,7 +381,7 @@ Note that neither declarative nor procedural macros support doc comment tokens
+@@ -374,7 +374,7 @@ Note that neither declarative nor procedural macros support doc comment tokens
  their equivalent `#[doc = r"str"]` attributes when passed to macros.
  
  [Attribute macros]: #attribute-macros
@@ -304,10 +304,10 @@ index 6c14941..7f548e9 100644
  ## Custom Target Lookup Path
  
 diff --git a/src/doc/rustc/src/tests/index.md b/src/doc/rustc/src/tests/index.md
-index 32baed9..2c36c1d 100644
+index d202651..f5f8386 100644
 --- a/src/doc/rustc/src/tests/index.md
 +++ b/src/doc/rustc/src/tests/index.md
-@@ -301,7 +301,7 @@ Experimental support for using custom test harnesses is available on the
+@@ -303,7 +303,7 @@ Experimental support for using custom test harnesses is available on the
  [`--test` option]: ../command-line-arguments.md#option-test
  [`-Z panic-abort-tests`]: https://github.com/rust-lang/rust/issues/67650
  [`available_parallelism`]: ../../std/thread/fn.available_parallelism.html
@@ -316,7 +316,7 @@ index 32baed9..2c36c1d 100644
  [`libtest`]: ../../test/index.html
  [`main` function]: ../../reference/crates-and-source-files.html#main-functions
  [`Result`]: ../../std/result/index.html
-@@ -311,7 +311,7 @@ Experimental support for using custom test harnesses is available on the
+@@ -313,7 +313,7 @@ Experimental support for using custom test harnesses is available on the
  [attribute-should_panic]: ../../reference/attributes/testing.html#the-should_panic-attribute
  [attribute-test]: ../../reference/attributes/testing.html#the-test-attribute
  [bench-docs]: ../../unstable-book/library-features/test.html
@@ -375,10 +375,10 @@ index 4679acf..b6c3eb5 100644
  # Working with other languages
  
 diff --git a/src/tools/linkchecker/main.rs b/src/tools/linkchecker/main.rs
-index d39ed99..4a64008 100644
+index 536f7bf..1582faa 100644
 --- a/src/tools/linkchecker/main.rs
 +++ b/src/tools/linkchecker/main.rs
-@@ -297,6 +297,10 @@ impl Checker {
+@@ -320,6 +320,10 @@ impl Checker {
                          return;
                      }
                  }

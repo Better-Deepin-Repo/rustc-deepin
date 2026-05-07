@@ -1,0 +1,84 @@
+From: Eric Huss <eric@huss.org>
+Date: Mon, 17 Feb 2025 09:41:52 -0800
+Subject: mdbook: Fix issue with None source_path
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+This fixes an issue where mdbook would panic if a non-draft chapter has
+a None source_path when generating the search index. The code was
+assuming that only draft chapters would have that behavior. However, API
+users can inject synthetic chapters that have no path on disk.
+
+This updates it to fall back to the path, or skip if neither is set.
+
+FG: cherry-picked from upstream mdbook 0.4.45
+see https://github.com/rust-lang/mdBook/commit/5777a0edc4af9cd4617ab795c82298913ae685bd
+https://github.com/rust-lang/rust/pull/137191 and https://github.com/rust-lang/mdBook/blob/master/CHANGELOG.md#mdbook-0445
+Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
+---
+ vendor/mdbook-0.4.44/src/book/book.rs                |  3 ++-
+ .../src/renderer/html_handlebars/search.rs           | 20 +++++++++++---------
+ 2 files changed, 13 insertions(+), 10 deletions(-)
+
+diff --git a/vendor/mdbook-0.4.44/src/book/book.rs b/vendor/mdbook-0.4.44/src/book/book.rs
+index 5bb4480..c715097 100644
+--- a/vendor/mdbook-0.4.44/src/book/book.rs
++++ b/vendor/mdbook-0.4.44/src/book/book.rs
+@@ -173,7 +173,8 @@ pub struct Chapter {
+     /// `index.md` via the [`Chapter::path`] field. The `source_path` field
+     /// exists if you need access to the true file path.
+     ///
+-    /// This is `None` for a draft chapter.
++    /// This is `None` for a draft chapter, or a synthetically generated
++    /// chapter that has no file on disk.
+     pub source_path: Option<PathBuf>,
+     /// An ordered list of the names of each chapter above this one in the hierarchy.
+     pub parent_names: Vec<String>,
+diff --git a/vendor/mdbook-0.4.44/src/renderer/html_handlebars/search.rs b/vendor/mdbook-0.4.44/src/renderer/html_handlebars/search.rs
+index f3bb25a..645a026 100644
+--- a/vendor/mdbook-0.4.44/src/renderer/html_handlebars/search.rs
++++ b/vendor/mdbook-0.4.44/src/renderer/html_handlebars/search.rs
+@@ -43,10 +43,11 @@ pub fn create_files(search_config: &Search, destination: &Path, book: &Book) ->
+             BookItem::Chapter(ch) if !ch.is_draft_chapter() => ch,
+             _ => continue,
+         };
+-        let chapter_settings =
+-            get_chapter_settings(&chapter_configs, chapter.source_path.as_ref().unwrap());
+-        if !chapter_settings.enable.unwrap_or(true) {
+-            continue;
++        if let Some(path) = settings_path(chapter) {
++            let chapter_settings = get_chapter_settings(&chapter_configs, path);
++            if !chapter_settings.enable.unwrap_or(true) {
++                continue;
++            }
+         }
+         render_item(&mut index, search_config, &mut doc_urls, chapter)?;
+     }
+@@ -319,6 +320,10 @@ fn clean_html(html: &str) -> String {
+     AMMONIA.clean(html).to_string()
+ }
+ 
++fn settings_path(ch: &Chapter) -> Option<&Path> {
++    ch.source_path.as_deref().or_else(|| ch.path.as_deref())
++}
++
+ fn validate_chapter_config(
+     chapter_configs: &[(PathBuf, SearchChapterSettings)],
+     book: &Book,
+@@ -327,13 +332,10 @@ fn validate_chapter_config(
+         let found = book
+             .iter()
+             .filter_map(|item| match item {
+-                BookItem::Chapter(ch) if !ch.is_draft_chapter() => Some(ch),
++                BookItem::Chapter(ch) if !ch.is_draft_chapter() => settings_path(ch),
+                 _ => None,
+             })
+-            .any(|chapter| {
+-                let ch_path = chapter.source_path.as_ref().unwrap();
+-                ch_path.starts_with(path)
+-            });
++            .any(|source_path| source_path.starts_with(path));
+         if !found {
+             bail!(
+                 "[output.html.search.chapter] key `{}` does not match any chapter paths",

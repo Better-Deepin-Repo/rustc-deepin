@@ -4,13 +4,13 @@ Subject: d-ignore-test_arc_condvar_poison-ppc
 
 Forwarded: no
 ---
- library/std/src/sync/poison/mutex/tests.rs | 1 +
+ library/std/tests/sync/mutex.rs | 1 +
  1 file changed, 1 insertion(+)
 
-diff --git a/library/std/src/sync/poison/mutex/tests.rs b/library/std/src/sync/poison/mutex/tests.rs
-index 395c8aa..e9a3ed5 100644
---- a/library/std/src/sync/poison/mutex/tests.rs
-+++ b/library/std/src/sync/poison/mutex/tests.rs
+diff --git a/library/std/tests/sync/mutex.rs b/library/std/tests/sync/mutex.rs
+index 74c6272..6ec59e1 100644
+--- a/library/std/tests/sync/mutex.rs
++++ b/library/std/tests/sync/mutex.rs
 @@ -260,6 +260,7 @@ fn test_mutex_arc_condvar() {
      }
  }

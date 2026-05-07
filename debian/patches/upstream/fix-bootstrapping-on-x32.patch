@@ -1,0 +1,42 @@
+From: =?utf-8?q?Fabian_Gr=C3=BCnbichler?= <git@fabian.gruenbichler.email>
+Date: Tue, 22 Jul 2025 10:03:06 +0200
+Subject: fix bootstrapping on x32
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Author: John Paul Adrian Glaubitz <glaubitz@physik.fu-berlin.de>
+Forwarded: https://github.com/rust-lang/rust/pull/144260
+
+Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
+---
+ src/tools/rust-analyzer/crates/hir-def/src/hir/type_ref.rs | 2 +-
+ src/tools/rust-analyzer/crates/hir-def/src/path.rs         | 2 +-
+ 2 files changed, 2 insertions(+), 2 deletions(-)
+
+diff --git a/src/tools/rust-analyzer/crates/hir-def/src/hir/type_ref.rs b/src/tools/rust-analyzer/crates/hir-def/src/hir/type_ref.rs
+index 6d4d519..4542925 100644
+--- a/src/tools/rust-analyzer/crates/hir-def/src/hir/type_ref.rs
++++ b/src/tools/rust-analyzer/crates/hir-def/src/hir/type_ref.rs
+@@ -170,7 +170,7 @@ pub enum TypeRef {
+     Error,
+ }
+ 
+-#[cfg(target_arch = "x86_64")]
++#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+ const _: () = assert!(size_of::<TypeRef>() == 16);
+ 
+ pub type TypeRefId = Idx<TypeRef>;
+diff --git a/src/tools/rust-analyzer/crates/hir-def/src/path.rs b/src/tools/rust-analyzer/crates/hir-def/src/path.rs
+index e59c371..69c9c47 100644
+--- a/src/tools/rust-analyzer/crates/hir-def/src/path.rs
++++ b/src/tools/rust-analyzer/crates/hir-def/src/path.rs
+@@ -65,7 +65,7 @@ pub enum Path {
+ }
+ 
+ // This type is being used a lot, make sure it doesn't grow unintentionally.
+-#[cfg(target_arch = "x86_64")]
++#[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
+ const _: () = {
+     assert!(size_of::<Path>() == 16);
+     assert!(size_of::<Option<Path>>() == 16);

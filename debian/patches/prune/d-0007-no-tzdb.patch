@@ -8,18 +8,44 @@ on Debian, we can just use the tzdata information..
 
 Forwarded: not-needed
 ---
- vendor/jiff-0.1.13/Cargo.toml | 1 -
- 1 file changed, 1 deletion(-)
+ vendor/jiff-0.1.29/Cargo.toml | 13 -------------
+ 1 file changed, 13 deletions(-)
 
-diff --git a/vendor/jiff-0.1.13/Cargo.toml b/vendor/jiff-0.1.13/Cargo.toml
-index 7ff813b..43b6e66 100644
---- a/vendor/jiff-0.1.13/Cargo.toml
-+++ b/vendor/jiff-0.1.13/Cargo.toml
-@@ -122,7 +122,6 @@ alloc = []
+diff --git a/vendor/jiff-0.1.29/Cargo.toml b/vendor/jiff-0.1.29/Cargo.toml
+index 772bc8e..ffb5faa 100644
+--- a/vendor/jiff-0.1.29/Cargo.toml
++++ b/vendor/jiff-0.1.29/Cargo.toml
+@@ -65,7 +65,6 @@ alloc = [
  default = [
      "std",
      "tz-system",
 -    "tzdb-bundle-platform",
      "tzdb-zoneinfo",
+     "tzdb-concatenated",
  ]
- js = [
+@@ -84,14 +83,6 @@ tz-system = [
+     "std",
+     "dep:windows-sys",
+ ]
+-tzdb-bundle-always = [
+-    "dep:jiff-tzdb",
+-    "alloc",
+-]
+-tzdb-bundle-platform = [
+-    "dep:jiff-tzdb-platform",
+-    "alloc",
+-]
+ tzdb-concatenated = ["std"]
+ tzdb-zoneinfo = ["std"]
+ 
+@@ -103,10 +94,6 @@ path = "src/lib.rs"
+ name = "integration"
+ path = "tests/lib.rs"
+ 
+-[dependencies.jiff-tzdb]
+-version = "0.1.2"
+-optional = true
+-
+ [dependencies.log]
+ version = "0.4.21"
+ optional = true

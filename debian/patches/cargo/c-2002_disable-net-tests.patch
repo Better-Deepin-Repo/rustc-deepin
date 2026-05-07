@@ -4,14 +4,14 @@ Subject: Disable network tests
 
 Forwarded: TODO
 ---
- .../cargo/tests/testsuite/credential_process.rs    |  14 +--
+ .../cargo/tests/testsuite/credential_process.rs    |  16 +--
  src/tools/cargo/tests/testsuite/git_auth.rs        |   4 +-
  src/tools/cargo/tests/testsuite/net_config.rs      |   4 +-
  src/tools/cargo/tests/testsuite/publish.rs         | 113 +++++++++++----------
- 4 files changed, 68 insertions(+), 67 deletions(-)
+ 4 files changed, 69 insertions(+), 68 deletions(-)
 
 diff --git a/src/tools/cargo/tests/testsuite/credential_process.rs b/src/tools/cargo/tests/testsuite/credential_process.rs
-index 130ca88..ab94fae 100644
+index 5ebabfa..2d1d279 100644
 --- a/src/tools/cargo/tests/testsuite/credential_process.rs
 +++ b/src/tools/cargo/tests/testsuite/credential_process.rs
 @@ -65,7 +65,7 @@ fn get_token_test() -> (Project, TestRegistry) {
@@ -29,10 +29,19 @@ index 130ca88..ab94fae 100644
  
 -#[cargo_test]
 +#[allow(dead_code)]
+ fn credential_provider_auth_failure() {
+     let _reg = registry::RegistryBuilder::new()
+         .http_index()
+@@ -112,7 +112,7 @@ Caused by:
+         .run();
+ }
+ 
+-#[cargo_test]
++#[allow(dead_code)]
  fn basic_unsupported() {
      // Non-action commands don't support login/logout.
      let registry = registry::RegistryBuilder::new()
-@@ -121,7 +121,7 @@ Caused by:
+@@ -147,7 +147,7 @@ Caused by:
          .run();
  }
  
@@ -41,7 +50,7 @@ index 130ca88..ab94fae 100644
  fn login() {
      let registry = registry::RegistryBuilder::new()
          .no_configure_token()
-@@ -142,7 +142,7 @@ fn login() {
+@@ -169,7 +169,7 @@ fn login() {
          .run();
  }
  
@@ -50,7 +59,7 @@ index 130ca88..ab94fae 100644
  fn logout() {
      let server = registry::RegistryBuilder::new()
          .no_configure_token()
-@@ -161,7 +161,7 @@ fn logout() {
+@@ -188,7 +188,7 @@ fn logout() {
          .run();
  }
  
@@ -59,7 +68,7 @@ index 130ca88..ab94fae 100644
  fn yank() {
      let (p, _t) = get_token_test();
  
-@@ -176,7 +176,7 @@ fn yank() {
+@@ -203,7 +203,7 @@ fn yank() {
          .run();
  }
  
@@ -68,7 +77,7 @@ index 130ca88..ab94fae 100644
  fn owner() {
      let (p, _t) = get_token_test();
  
-@@ -191,7 +191,7 @@ fn owner() {
+@@ -218,7 +218,7 @@ fn owner() {
          .run();
  }
  
@@ -122,7 +131,7 @@ index b765678..ed695bd 100644
      let p = project()
          .file(
 diff --git a/src/tools/cargo/tests/testsuite/publish.rs b/src/tools/cargo/tests/testsuite/publish.rs
-index 4bcb9194..0fce483 100644
+index e014a34..745fa85 100644
 --- a/src/tools/cargo/tests/testsuite/publish.rs
 +++ b/src/tools/cargo/tests/testsuite/publish.rs
 @@ -90,7 +90,7 @@ fn validate_upload_li() {

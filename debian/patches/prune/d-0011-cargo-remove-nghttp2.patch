@@ -8,14 +8,14 @@ Last-Update: 2023-05-17
 
 Forwarded: not-needed
 ---
- vendor/curl-sys-0.4.78+curl-8.11.0/Cargo.toml | 2 +-
+ vendor/curl-sys-0.4.79+curl-8.12.0/Cargo.toml | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
-diff --git a/vendor/curl-sys-0.4.78+curl-8.11.0/Cargo.toml b/vendor/curl-sys-0.4.78+curl-8.11.0/Cargo.toml
-index 565a506..f78fab8 100644
---- a/vendor/curl-sys-0.4.78+curl-8.11.0/Cargo.toml
-+++ b/vendor/curl-sys-0.4.78+curl-8.11.0/Cargo.toml
-@@ -61,7 +61,7 @@ version = "0.3.3"
+diff --git a/vendor/curl-sys-0.4.79+curl-8.12.0/Cargo.toml b/vendor/curl-sys-0.4.79+curl-8.12.0/Cargo.toml
+index 30582ac..a6ff4ab 100644
+--- a/vendor/curl-sys-0.4.79+curl-8.12.0/Cargo.toml
++++ b/vendor/curl-sys-0.4.79+curl-8.12.0/Cargo.toml
+@@ -62,7 +62,7 @@ version = "0.3.3"
  [features]
  default = ["ssl"]
  force-system-lib-on-osx = []

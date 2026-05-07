@@ -75,12 +75,14 @@ profiler = false
 [llvm]
 link-shared = true
 download-ci-llvm = false
+ninja = false
 
 [rust]
 download-rustc = false
 jemalloc = false
 optimize = MAKE_OPTIMISATIONS
 dist-src = false
+lld = false
 
 channel = "RELEASE_CHANNEL"
 

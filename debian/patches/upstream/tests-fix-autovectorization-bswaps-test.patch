@@ -1,0 +1,153 @@
+From: =?utf-8?q?Fabian_Gr=C3=BCnbichler?= <git@fabian.gruenbichler.email>
+Date: Tue, 22 Jul 2025 09:55:13 +0200
+Subject: tests: fix autovectorization bswaps test
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Debian's s390x baseline is too low for this test to work reliably, but we do
+want it to run on x86_64 and aarch64.
+
+(cherry picked from commit 59069986e7446123556630a32adce7f101eeaf8d)
+(cherry picked from commit 6b0deb2161b730be16c1ec13c1ab47455c054f37)
+
+with some additional changes on top
+
+
+Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
+---
+ tests/codegen/autovec/dont-shuffle-bswaps-opt2.rs | 31 ++++++++++++++++++
+ tests/codegen/autovec/dont-shuffle-bswaps-opt3.rs | 40 +++++++++++++++++++++++
+ tests/codegen/dont-shuffle-bswaps.rs              | 38 ---------------------
+ 3 files changed, 71 insertions(+), 38 deletions(-)
+ create mode 100644 tests/codegen/autovec/dont-shuffle-bswaps-opt2.rs
+ create mode 100644 tests/codegen/autovec/dont-shuffle-bswaps-opt3.rs
+ delete mode 100644 tests/codegen/dont-shuffle-bswaps.rs
+
+diff --git a/tests/codegen/autovec/dont-shuffle-bswaps-opt2.rs b/tests/codegen/autovec/dont-shuffle-bswaps-opt2.rs
+new file mode 100644
+index 0000000..c354228
+--- /dev/null
++++ b/tests/codegen/autovec/dont-shuffle-bswaps-opt2.rs
+@@ -0,0 +1,31 @@
++//@ compile-flags: -Copt-level=2
++
++#![crate_type = "lib"]
++#![no_std]
++
++// This test is paired with the arch-specific -opt3.rs test.
++
++// The code is from https://github.com/rust-lang/rust/issues/122805.
++// Ensure we do not generate the shufflevector instruction
++// to avoid complicating the code.
++
++// CHECK-LABEL: define{{.*}}void @convert(
++// CHECK-NOT: shufflevector
++#[no_mangle]
++pub fn convert(value: [u16; 8]) -> [u8; 16] {
++    #[cfg(target_endian = "little")]
++    let bswap = u16::to_be;
++    #[cfg(target_endian = "big")]
++    let bswap = u16::to_le;
++    let addr16 = [
++        bswap(value[0]),
++        bswap(value[1]),
++        bswap(value[2]),
++        bswap(value[3]),
++        bswap(value[4]),
++        bswap(value[5]),
++        bswap(value[6]),
++        bswap(value[7]),
++    ];
++    unsafe { core::mem::transmute::<_, [u8; 16]>(addr16) }
++}
+diff --git a/tests/codegen/autovec/dont-shuffle-bswaps-opt3.rs b/tests/codegen/autovec/dont-shuffle-bswaps-opt3.rs
+new file mode 100644
+index 0000000..b92b362
+--- /dev/null
++++ b/tests/codegen/autovec/dont-shuffle-bswaps-opt3.rs
+@@ -0,0 +1,40 @@
++//@ revisions: AARCH64 X86_64
++//@ compile-flags: -Copt-level=3
++//@[AARCH64] only-aarch64
++//@[X86_64] only-x86_64
++
++#![crate_type = "lib"]
++#![no_std]
++
++// This test is paired with the arch-neutral -opt2.rs test
++
++// The code is from https://github.com/rust-lang/rust/issues/122805.
++// Ensure we do not generate the shufflevector instruction
++// to avoid complicating the code.
++
++// CHECK-LABEL: define{{.*}}void @convert(
++// CHECK-NOT: shufflevector
++
++// On higher opt levels, this should just be a bswap:
++// CHECK: load <8 x i16>
++// CHECK-NEXT: call <8 x i16> @llvm.bswap
++// CHECK-NEXT: store <8 x i16>
++// CHECK-NEXT: ret void
++#[no_mangle]
++pub fn convert(value: [u16; 8]) -> [u8; 16] {
++    #[cfg(target_endian = "little")]
++    let bswap = u16::to_be;
++    #[cfg(target_endian = "big")]
++    let bswap = u16::to_le;
++    let addr16 = [
++        bswap(value[0]),
++        bswap(value[1]),
++        bswap(value[2]),
++        bswap(value[3]),
++        bswap(value[4]),
++        bswap(value[5]),
++        bswap(value[6]),
++        bswap(value[7]),
++    ];
++    unsafe { core::mem::transmute::<_, [u8; 16]>(addr16) }
++}
+diff --git a/tests/codegen/dont-shuffle-bswaps.rs b/tests/codegen/dont-shuffle-bswaps.rs
+deleted file mode 100644
+index 0e712bc..0000000
+--- a/tests/codegen/dont-shuffle-bswaps.rs
++++ /dev/null
+@@ -1,38 +0,0 @@
+-//@ revisions: OPT2 OPT3
+-//@[OPT2] compile-flags: -Copt-level=2
+-//@[OPT3] compile-flags: -C opt-level=3
+-// some targets don't do the opt we are looking for
+-//@[OPT3] only-64bit
+-//@ min-llvm-version: 18.1.3
+-
+-#![crate_type = "lib"]
+-#![no_std]
+-
+-// The code is from https://github.com/rust-lang/rust/issues/122805.
+-// Ensure we do not generate the shufflevector instruction
+-// to avoid complicating the code.
+-// CHECK-LABEL: define{{.*}}void @convert(
+-// CHECK-NOT: shufflevector
+-// On higher opt levels, this should just be a bswap:
+-// OPT3: load <8 x i16>
+-// OPT3-NEXT: call <8 x i16> @llvm.bswap
+-// OPT3-NEXT: store <8 x i16>
+-// OPT3-NEXT: ret void
+-#[no_mangle]
+-pub fn convert(value: [u16; 8]) -> [u8; 16] {
+-    #[cfg(target_endian = "little")]
+-    let bswap = u16::to_be;
+-    #[cfg(target_endian = "big")]
+-    let bswap = u16::to_le;
+-    let addr16 = [
+-        bswap(value[0]),
+-        bswap(value[1]),
+-        bswap(value[2]),
+-        bswap(value[3]),
+-        bswap(value[4]),
+-        bswap(value[5]),
+-        bswap(value[6]),
+-        bswap(value[7]),
+-    ];
+-    unsafe { core::mem::transmute::<_, [u8; 16]>(addr16) }
+-}

@@ -247,12 +247,12 @@ debian/config.toml: debian/config.toml.in debian/rules
 		sed -i -e 's/^debuginfo-level = .*/debuginfo-level = 0/g' "$@"; \
 	fi
 
-check-no-old-llvm:
+debian/check-no-old-llvm.stamp:
 	# fail the build if we have any instances of OLD_LLVM_VERSION in debian, except for debian/changelog
 	! grep --color=always -i '\(clang\|ll\(..\|d\)\)-\?$(subst .,\.,$(OLD_LLVM_VERSION))' --exclude=changelog --exclude=copyright --exclude='*.patch' --exclude-dir='.debhelper' -R debian
-.PHONY: check-no-old-llvm
+	touch "$@"
 
-extra-vendor:
+debian/extra-vendor.stamp:
 	if [ -d extra ]; then \
 	  cd extra; \
 	  for c in *; do \
@@ -263,14 +263,16 @@ extra-vendor:
 	    cp -r ./"$$c" ../vendor/; \
 	  done; \
 	fi
+	touch "$@"
 
-.PHONY: extra-vendor
-
-debian/dh_auto_configure.stamp: debian/config.toml check-no-old-llvm extra-vendor
+debian/dh_auto_configure.stamp: debian/config.toml debian/check-no-old-llvm.stamp debian/extra-vendor.stamp
 	# fail the build if we accidentally vendored openssl, indicates we pulled in unnecessary dependencies
 	test ! -e vendor/openssl-src-*
 	# fail the build if our version contains ~exp and we are not releasing to experimental
-	v="$(DEB_VERSION)"; test "$$v" = "$${v%~exp*}" -o "$(DEB_DISTRIBUTION)" = "experimental" -o "$(DEB_DISTRIBUTION)" = "UNRELEASED"
+	v="$(DEB_VERSION)"; test "$$v" = "$${v%~exp*}" \
+	  -o "$(DEB_DISTRIBUTION)" = "experimental" \
+	  -o "$(DEB_DISTRIBUTION)" = "UNRELEASED" \
+	  -o "$(DEB_DISTRIBUTION)" = "unreleased"
 	$(PRECONFIGURE_CHECK)
 	if [ -d stage0 ]; then mkdir -p build && ln -sfT ../stage0 build/cache; fi
 	# work around #842634
@@ -283,11 +285,7 @@ debian/dh_auto_configure.stamp: debian/config.toml check-no-old-llvm extra-vendo
 	  if [ -f "$$ws/Cargo.lock" ]; then mv "$$ws/Cargo.lock" "$$ws/Cargo.lock.orig"; fi \
 	done
 	# We patched some crates so have to rm the checksums
-	find vendor -name .cargo-checksum.json -execdir "$(CURDIR)/debian/prune-checksums" "{}" +
-	# Link against system liblzma, see https://github.com/alexcrichton/xz2-rs/issues/16
-	for c in vendor/lzma-sys-*; do \
-		echo 'fn main() { println!("cargo:rustc-link-lib=lzma"); }' > "$$c/build.rs"; \
-	done
+	find vendor -name .cargo-checksum.json -execdir cp "{}" "{}.orig" \; -execdir "$(CURDIR)/debian/prune-checksums" "{}" +
 	# We don't run ./configure because we use debian/config.toml directly
 	ln -sf debian/config.toml config.toml
 	touch "$@"
@@ -300,9 +298,25 @@ ifeq (true,$(BUILD_DOCS))
 endif
 
 override_dh_auto_clean:
+	if [ -e debian/extra-vendor.stamp ]; then \
+	  cd extra; \
+	  for c in *; do \
+	    echo "removing extra vendored dependency '$$c'"; \
+	    rm -rf ../vendor/"$$c"; \
+	    if [ -e ../vendor/"$$c".backup ]; then \
+	      mv -v ../vendor/"$$c".backup ../vendor/"$$c" ; \
+	    fi ; \
+	  done; \
+	fi
 	$(RM) -rf build tmp debian/cargo_home config.stamp config.mk Makefile
 	$(RM) -rf $(TEST_LOG) debian/config.toml debian/*.stamp
 	$(RM) -rf $(SRC_CLEAN) config.toml
+	# keep in sync with d/prune-unused-deps
+	for ws in . src/bootstrap library src/tools/rust-analyzer src/tools/cargo src/tools/rustbook; do \
+	  if [ -f "$$ws/Cargo.lock.orig" ]; then mv "$$ws/Cargo.lock.orig" "$$ws/Cargo.lock"; fi \
+	done
+	# We removed some checksums that we need to restore here
+	find vendor -name .cargo-checksum.json.orig -execdir mv "{}" ".cargo-checksum.json" \;
 
 debian/dh_auto_build.stamp:
 	$(RUSTBUILD) build $(RUSTBUILD_FLAGS)
@@ -330,15 +344,10 @@ endif
 TEST_LOG = debian/rustc-tests.log
 # This is advertised as "5 tests failed" in README.Debian because our counting
 # method is imprecise and in practise we count some failures twice.
-# temporarily bumped from 8 to 10 to account for test output changes depending
-# on build path length, bump down again once 1.78 is imported
 FAILURES_ALLOWED = 10
 ifneq (,$(filter $(DEB_BUILD_ARCH), armhf))
 # temporarily bumped from 12 to 15, see above
   FAILURES_ALLOWED = 15
-endif
-ifneq (,$(filter $(DEB_BUILD_ARCH), armel mips mips64el))
-  FAILURES_ALLOWED = 24
 endif
 # workaround broken gdb 13.1 - revert to 24 once fixed
 # #1031946 / #1032785
@@ -348,7 +357,7 @@ endif
 ifneq (,$(filter $(DEB_BUILD_ARCH), ppc64 s390x riscv64))
   FAILURES_ALLOWED = 40
 endif
-ifneq (,$(filter $(DEB_BUILD_ARCH), loong64 powerpc powerpcspe sparc64 x32 hurd-i386 hurd-amd64))
+ifneq (,$(filter $(DEB_BUILD_ARCH), armel loong64 mips mips64el powerpc powerpcspe sparc64 x32 hurd-i386 hurd-amd64))
   FAILURES_ALLOWED = 180
 endif
 FAILED_TESTS = grep "FAILED\|^command did not execute successfully" $(TEST_LOG) | grep -v '^test result: FAILED' | grep -v 'FAILED (allowed)'

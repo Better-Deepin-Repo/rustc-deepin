@@ -9,10 +9,10 @@ Forwarded: not-needed
  1 file changed, 4 insertions(+)
 
 diff --git a/src/bootstrap/src/core/builder/tests.rs b/src/bootstrap/src/core/builder/tests.rs
-index 21694cf..6f5ff53 100644
+index 5e3e0ef..406d1d1 100644
 --- a/src/bootstrap/src/core/builder/tests.rs
 +++ b/src/bootstrap/src/core/builder/tests.rs
-@@ -438,9 +438,13 @@ mod dist {
+@@ -512,9 +512,13 @@ mod dist {
          let b = TargetSelection::from_user(TEST_TRIPLE_2);
          let mut config =
              configure(&[TEST_TRIPLE_1, TEST_TRIPLE_2], &[TEST_TRIPLE_1, TEST_TRIPLE_2]);
@@ -25,4 +25,4 @@ index 21694cf..6f5ff53 100644
 +        config.tools = Some(tools);
          let mut cache = run_build(&[], config);
  
-         assert_eq!(first(cache.all::<dist::Rustc>()), &[dist::Rustc {
+         assert_eq!(

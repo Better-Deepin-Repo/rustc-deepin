@@ -1,0 +1,29 @@
+From: =?utf-8?q?Fabian_Gr=C3=BCnbichler?= <git@fabian.gruenbichler.email>
+Date: Wed, 23 Jul 2025 21:36:46 +0200
+Subject: cargo: do not force liblzma-sys static linking
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Forwarded: not-needed
+
+Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
+---
+ src/bootstrap/src/core/build_steps/tool.rs | 4 ----
+ 1 file changed, 4 deletions(-)
+
+diff --git a/src/bootstrap/src/core/build_steps/tool.rs b/src/bootstrap/src/core/build_steps/tool.rs
+index 1291a63..14408f9 100644
+--- a/src/bootstrap/src/core/build_steps/tool.rs
++++ b/src/bootstrap/src/core/build_steps/tool.rs
+@@ -168,10 +168,6 @@ pub fn prepare_tool_cargo(
+     // avoid rebuilding when running tests.
+     cargo.env("SYSROOT", builder.sysroot(compiler));
+ 
+-    // if tools are using lzma we want to force the build script to build its
+-    // own copy
+-    cargo.env("LZMA_API_STATIC", "1");
+-
+     // CFG_RELEASE is needed by rustfmt (and possibly other tools) which
+     // import rustc-ap-rustc_attr which requires this to be set for the
+     // `#[cfg(version(...))]` attribute.
