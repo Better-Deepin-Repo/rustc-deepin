@@ -39,14 +39,6 @@ repository = "https://github.com/rust-lang/cargo"
 name = "home"
 path = "src/lib.rs"
 
-[target."cfg(windows)".dependencies.windows-sys]
-version = "0.59"
-features = [
-    "Win32_Foundation",
-    "Win32_UI_Shell",
-    "Win32_System_Com",
-]
-
 [lints.clippy]
 dbg_macro = "warn"
 disallowed_methods = "warn"

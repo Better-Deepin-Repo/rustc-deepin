@@ -62,6 +62,7 @@ const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
     "ignore-gnu",
     "ignore-haiku",
     "ignore-horizon",
+    "ignore-hurd",
     "ignore-i686-pc-windows-gnu",
     "ignore-i686-pc-windows-msvc",
     "ignore-illumos",

@@ -2819,7 +2819,10 @@ declare_lint! {
     /// ### Example
     ///
     /// ```rust,compile_fail
-    /// # #![feature(asm_experimental_arch)]
+    /// #![cfg_attr(
+    ///  not(any(target_arch = "powerpc64", target_arch = "s390x")),
+    ///  feature(asm_experimental_arch)
+    /// )]
     /// use std::arch::asm;
     ///
     /// fn main() {

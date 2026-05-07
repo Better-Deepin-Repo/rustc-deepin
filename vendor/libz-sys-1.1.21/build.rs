@@ -81,12 +81,10 @@ fn main() {
     //
     // Apple platforms have libz.1.dylib, and it's usually available even when
     // cross compiling (via fat binary or in the target's Xcode SDK)
+    //
+    // Debian: allow cross-building!
     let cross_compiling = target != host;
-    if target.contains("msvc")
-        || target.contains("pc-windows-gnu")
-        || want_static
-        || (cross_compiling && !target.contains("-apple-"))
-    {
+    if target.contains("msvc") || target.contains("pc-windows-gnu") || want_static {
         return build_zlib(&mut cfg, &target);
     }
 

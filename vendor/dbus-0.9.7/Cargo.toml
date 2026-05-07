@@ -63,9 +63,5 @@ no-string-validation = []
 stdfd = []
 vendored = ["libdbus-sys/vendored"]
 
-[target."cfg(windows)".dependencies.winapi]
-version = "0.3.0"
-features = ["winsock2"]
-
 [badges.maintenance]
 status = "actively-developed"

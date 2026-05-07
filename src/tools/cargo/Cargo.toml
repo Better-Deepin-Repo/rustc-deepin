@@ -2,7 +2,9 @@
 resolver = "2"
 members = [
   "crates/*",
-  "credential/*",
+  "credential/cargo-credential",
+  "credential/cargo-credential-1password",
+  "credential/cargo-credential-libsecret",
   "benches/benchsuite",
   "benches/capture",
 ]
@@ -29,8 +31,6 @@ bytesize = "1.3"
 cargo = { path = "" }
 cargo-credential = { version = "0.4.2", path = "credential/cargo-credential" }
 cargo-credential-libsecret = { version = "0.4.12", path = "credential/cargo-credential-libsecret" }
-cargo-credential-macos-keychain = { version = "0.4.12", path = "credential/cargo-credential-macos-keychain" }
-cargo-credential-wincred = { version = "0.4.12", path = "credential/cargo-credential-wincred" }
 cargo-platform = { path = "crates/cargo-platform", version = "0.2.0" }
 cargo-test-macro = { version = "0.4.1", path = "crates/cargo-test-macro" }
 cargo-test-support = { version = "0.7.1", path = "crates/cargo-test-support" }
@@ -80,7 +80,7 @@ proptest = "1.6.0"
 pulldown-cmark = { version = "0.12.2", default-features = false, features = ["html"] }
 rand = "0.9.0"
 regex = "1.11.1"
-rusqlite = { version = "0.33.0", features = ["bundled"] }
+rusqlite = { version = "0.33.0" }
 rustc-hash = "2.1.1"
 rustc-stable-hash = "0.1.1"
 rustfix = { version = "0.9.0", path = "crates/rustfix" }
@@ -116,7 +116,6 @@ unicode-xid = "0.2.6"
 url = "2.5.4"
 varisat = "0.2.2"
 walkdir = "2.5.0"
-windows-sys = "0.59"
 
 [workspace.lints.rust]
 rust_2018_idioms = "warn" # TODO: could this be removed?
@@ -159,6 +158,7 @@ base64.workspace = true
 blake3.workspace = true
 bytesize.workspace = true
 cargo-credential.workspace = true
+cargo-credential-libsecret.workspace = true
 cargo-platform.workspace = true
 cargo-util-schemas.workspace = true
 cargo-util.workspace = true
@@ -229,27 +229,9 @@ libc.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 cargo-credential-libsecret.workspace = true
 
-[target.'cfg(target_os = "macos")'.dependencies]
-cargo-credential-macos-keychain.workspace = true
-
 [target.'cfg(not(windows))'.dependencies]
 openssl = { workspace = true, optional = true }
 openssl-sys = { workspace = true, optional = true } # HACK: for pinning to openssl v1.
-
-[target.'cfg(windows)'.dependencies]
-cargo-credential-wincred.workspace = true
-
-[target.'cfg(windows)'.dependencies.windows-sys]
-workspace = true
-features = [
-  "Win32_Foundation",
-  "Win32_Security",
-  "Win32_Storage_FileSystem",
-  "Win32_System_IO",
-  "Win32_System_Console",
-  "Win32_System_JobObjects",
-  "Win32_System_Threading",
-]
 
 [dev-dependencies]
 annotate-snippets = { workspace = true, features = ["testing-colors"] }
@@ -268,10 +250,8 @@ test = false
 doc = false
 
 [features]
-vendored-openssl = ["openssl/vendored"]
-vendored-libgit2 = ["libgit2-sys/vendored"]
+# Debian: removed vendoring flags
 # This is primarily used by rust-lang/rust distributing cargo the executable.
-all-static = ['vendored-openssl', 'curl/static-curl', 'curl/force-system-lib-on-osx', 'vendored-libgit2']
 
 [lints]
 workspace = true

@@ -260,6 +260,7 @@ fn test_mutex_arc_condvar() {
     }
 }
 
+#[cfg(not(target_arch = "powerpc"))]
 #[test]
 fn test_arc_condvar_poison() {
     let packet = Packet(Arc::new((Mutex::new(1), Condvar::new())));

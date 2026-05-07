@@ -98,13 +98,6 @@ unsafe-assume-single-core = []
 [target."cfg(unix)".dev-dependencies.libc]
 version = "=0.2.163"
 
-[target."cfg(windows)".dev-dependencies.windows-sys]
-version = "0.59"
-features = [
-    "Win32_Foundation",
-    "Win32_System_Threading",
-]
-
 [lints.clippy]
 all = "warn"
 as_ptr_cast_mut = "warn"

@@ -1,9 +1,5 @@
 #![allow(missing_docs)]
 
-pub mod playground_editor;
-
-pub mod fonts;
-
 #[cfg(feature = "search")]
 pub mod searcher;
 
@@ -26,19 +22,8 @@ pub static VARIABLES_CSS: &[u8] = include_bytes!("css/variables.css");
 pub static FAVICON_PNG: &[u8] = include_bytes!("favicon.png");
 pub static FAVICON_SVG: &[u8] = include_bytes!("favicon.svg");
 pub static JS: &[u8] = include_bytes!("book.js");
-pub static HIGHLIGHT_JS: &[u8] = include_bytes!("highlight.js");
 pub static TOMORROW_NIGHT_CSS: &[u8] = include_bytes!("tomorrow-night.css");
-pub static HIGHLIGHT_CSS: &[u8] = include_bytes!("highlight.css");
 pub static AYU_HIGHLIGHT_CSS: &[u8] = include_bytes!("ayu-highlight.css");
-pub static CLIPBOARD_JS: &[u8] = include_bytes!("clipboard.min.js");
-pub static FONT_AWESOME: &[u8] = include_bytes!("FontAwesome/css/font-awesome.min.css");
-pub static FONT_AWESOME_EOT: &[u8] = include_bytes!("FontAwesome/fonts/fontawesome-webfont.eot");
-pub static FONT_AWESOME_SVG: &[u8] = include_bytes!("FontAwesome/fonts/fontawesome-webfont.svg");
-pub static FONT_AWESOME_TTF: &[u8] = include_bytes!("FontAwesome/fonts/fontawesome-webfont.ttf");
-pub static FONT_AWESOME_WOFF: &[u8] = include_bytes!("FontAwesome/fonts/fontawesome-webfont.woff");
-pub static FONT_AWESOME_WOFF2: &[u8] =
-    include_bytes!("FontAwesome/fonts/fontawesome-webfont.woff2");
-pub static FONT_AWESOME_OTF: &[u8] = include_bytes!("FontAwesome/fonts/FontAwesome.otf");
 
 /// The `Theme` struct should be used instead of the static variables because
 /// the `new()` method will look if the user has a theme directory in their
@@ -63,11 +48,8 @@ pub struct Theme {
     pub favicon_png: Option<Vec<u8>>,
     pub favicon_svg: Option<Vec<u8>>,
     pub js: Vec<u8>,
-    pub highlight_css: Vec<u8>,
     pub tomorrow_night_css: Vec<u8>,
     pub ayu_highlight_css: Vec<u8>,
-    pub highlight_js: Vec<u8>,
-    pub clipboard_js: Vec<u8>,
 }
 
 impl Theme {
@@ -99,9 +81,6 @@ impl Theme {
                     theme_dir.join("css/variables.css"),
                     &mut theme.variables_css,
                 ),
-                (theme_dir.join("highlight.js"), &mut theme.highlight_js),
-                (theme_dir.join("clipboard.min.js"), &mut theme.clipboard_js),
-                (theme_dir.join("highlight.css"), &mut theme.highlight_css),
                 (
                     theme_dir.join("tomorrow-night.css"),
                     &mut theme.tomorrow_night_css,
@@ -191,11 +170,8 @@ impl Default for Theme {
             favicon_png: Some(FAVICON_PNG.to_owned()),
             favicon_svg: Some(FAVICON_SVG.to_owned()),
             js: JS.to_owned(),
-            highlight_css: HIGHLIGHT_CSS.to_owned(),
             tomorrow_night_css: TOMORROW_NIGHT_CSS.to_owned(),
             ayu_highlight_css: AYU_HIGHLIGHT_CSS.to_owned(),
-            highlight_js: HIGHLIGHT_JS.to_owned(),
-            clipboard_js: CLIPBOARD_JS.to_owned(),
         }
     }
 }
@@ -284,11 +260,8 @@ mod tests {
             favicon_png: Some(Vec::new()),
             favicon_svg: Some(Vec::new()),
             js: Vec::new(),
-            highlight_css: Vec::new(),
             tomorrow_night_css: Vec::new(),
             ayu_highlight_css: Vec::new(),
-            highlight_js: Vec::new(),
-            clipboard_js: Vec::new(),
         };
 
         assert_eq!(got, empty);

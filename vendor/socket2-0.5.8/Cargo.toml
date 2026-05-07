@@ -85,13 +85,3 @@ all = []
 
 [target."cfg(unix)".dependencies.libc]
 version = "0.2.150"
-
-[target."cfg(windows)".dependencies.windows-sys]
-version = "0.52"
-features = [
-    "Win32_Foundation",
-    "Win32_Networking_WinSock",
-    "Win32_System_IO",
-    "Win32_System_Threading",
-    "Win32_System_WindowsProgramming",
-]

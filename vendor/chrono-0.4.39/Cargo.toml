@@ -107,7 +107,6 @@ version = "1"
 __internal_bench = []
 alloc = []
 clock = [
-    "winapi",
     "iana-time-zone",
     "android-tzdata",
     "now",
@@ -144,7 +143,6 @@ wasmbind = [
     "wasm-bindgen",
     "js-sys",
 ]
-winapi = ["windows-targets"]
 
 [target.'cfg(all(target_arch = "wasm32", not(any(target_os = "emscripten", target_os = "wasi"))))'.dependencies.js-sys]
 version = "0.3"
@@ -165,10 +163,3 @@ optional = true
 version = "0.1.45"
 features = ["fallback"]
 optional = true
-
-[target."cfg(windows)".dependencies.windows-targets]
-version = "0.52"
-optional = true
-
-[target."cfg(windows)".dev-dependencies.windows-bindgen]
-version = "0.58"

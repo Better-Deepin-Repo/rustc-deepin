@@ -86,10 +86,3 @@ version = "0.223.0"
 
 [target."cfg(unix)".dependencies.libc]
 version = "0.2"
-
-[target."cfg(windows)".dependencies.windows-sys]
-version = "0.59"
-features = ["Win32_Foundation"]
-
-[target."cfg(windows)".dependencies.winsplit]
-version = "0.1"

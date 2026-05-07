@@ -150,11 +150,8 @@ pub enum Error {
     /// Contains the name of the responsible environment variable.
     EnvNoPkgConfig(String),
 
-    /// Detected cross compilation without a custom sysroot.
-    ///
-    /// Ignore the error with `PKG_CONFIG_ALLOW_CROSS=1`,
-    /// which may let `pkg-config` select libraries
-    /// for the host's architecture instead of the target's.
+    /// Cross compilation detected. Kept for compatibility;
+    /// the Debian package never emits this.
     CrossCompilation,
 
     /// Failed to run `pkg-config`.
@@ -269,14 +266,6 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match *self {
             Error::EnvNoPkgConfig(ref name) => write!(f, "Aborted because {} is set", name),
-            Error::CrossCompilation => f.write_str(
-                "pkg-config has not been configured to support cross-compilation.\n\
-                \n\
-                Install a sysroot for the target platform and configure it via\n\
-                PKG_CONFIG_SYSROOT_DIR and PKG_CONFIG_PATH, or install a\n\
-                cross-compiling wrapper for pkg-config and set it via\n\
-                PKG_CONFIG environment variable.",
-            ),
             Error::Command {
                 ref command,
                 ref cause,
@@ -402,7 +391,7 @@ impl fmt::Display for Error {
                 )?;
                 format_output(output, f)
             }
-            Error::__Nonexhaustive => panic!(),
+            Error::CrossCompilation | Error::__Nonexhaustive => panic!(),
         }
     }
 }
@@ -596,6 +585,8 @@ impl Config {
         if host == target {
             return true;
         }
+        // always enable PKG_CONFIG_ALLOW_CROSS override in Debian
+        return true;
 
         // pkg-config may not be aware of cross-compilation, and require
         // a wrapper script that sets up platform-specific prefixes.
@@ -653,7 +644,12 @@ impl Config {
     }
 
     fn run(&self, name: &str, args: &[&str]) -> Result<Vec<u8>, Error> {
-        let pkg_config_exe = self.targeted_env_var("PKG_CONFIG");
+        let pkg_config_exe = self.targeted_env_var("PKG_CONFIG").or_else(|| {
+            self.env_var_os("DEB_HOST_GNU_TYPE").map(|mut t| {
+                t.push(OsString::from("-pkgconf"));
+                t
+            })
+        });
         let fallback_exe = if pkg_config_exe.is_none() {
             Some(OsString::from("pkgconf"))
         } else {

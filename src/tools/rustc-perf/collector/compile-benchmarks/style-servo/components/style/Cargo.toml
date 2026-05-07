@@ -77,9 +77,6 @@ time = "0.1"
 unicode-bidi = "0.3"
 unicode-segmentation = "1.0"
 
-[target.'cfg(windows)'.dependencies]
-kernel32-sys = "0.2"
-
 [build-dependencies]
 lazy_static = "0.2"
 log = "0.3"

@@ -219,7 +219,7 @@ fn bindgen_headers(path: &str) {
 
 pub fn main() {
     let link_type = link_type_override();
-    let require_pkg_config = env_var_bool("RUSTONIG_SYSTEM_LIBONIG").unwrap_or(false);
+    let require_pkg_config = env_var_bool("RUSTONIG_SYSTEM_LIBONIG").unwrap_or(true);
 
     if require_pkg_config || link_type == Some(LinkType::Dynamic) {
         let mut conf = Config::new();

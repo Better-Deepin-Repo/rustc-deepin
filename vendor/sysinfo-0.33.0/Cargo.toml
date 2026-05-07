@@ -125,12 +125,6 @@ apple-app-store = ["apple-sandbox"]
 apple-sandbox = []
 c-interface = ["default"]
 component = [
-    "windows/Win32_Foundation",
-    "windows/Win32_Security",
-    "windows/Win32_System_Com",
-    "windows/Win32_System_Rpc",
-    "windows/Win32_System_Variant",
-    "windows/Win32_System_Wmi",
 ]
 debug = ["libc/extra_traits"]
 default = [
@@ -142,51 +136,17 @@ default = [
     "multithread",
 ]
 disk = [
-    "windows/Win32_Foundation",
-    "windows/Win32_Storage_FileSystem",
-    "windows/Win32_Security",
-    "windows/Win32_System_IO",
-    "windows/Win32_System_Ioctl",
-    "windows/Win32_System_SystemServices",
-    "windows/Win32_System_WindowsProgramming",
 ]
 linux-netdevs = []
 linux-tmpfs = []
 multithread = ["dep:rayon"]
 network = [
-    "windows/Win32_Foundation",
-    "windows/Win32_NetworkManagement_IpHelper",
-    "windows/Win32_NetworkManagement_Ndis",
-    "windows/Win32_Networking_WinSock",
 ]
 system = [
-    "windows/Win32_Foundation",
-    "windows/Wdk_System_SystemInformation",
-    "windows/Wdk_System_SystemServices",
-    "windows/Wdk_System_Threading",
-    "windows/Win32_Security_Authorization",
-    "windows/Win32_System_Diagnostics_Debug",
-    "windows/Win32_System_Kernel",
-    "windows/Win32_System_Memory",
-    "windows/Win32_System_Performance",
-    "windows/Win32_System_Power",
-    "windows/Win32_System_ProcessStatus",
-    "windows/Win32_System_Registry",
-    "windows/Win32_System_RemoteDesktop",
-    "windows/Win32_System_SystemInformation",
-    "windows/Win32_System_SystemServices",
-    "windows/Win32_System_Threading",
-    "windows/Win32_UI_Shell",
-    "dep:ntapi",
     "dep:memchr",
 ]
 unknown-ci = []
 user = [
-    "windows/Win32_Foundation",
-    "windows/Win32_NetworkManagement_NetManagement",
-    "windows/Win32_Security",
-    "windows/Win32_Security_Authentication_Identity",
-    "windows/Win32_Security_Authorization",
 ]
 
 [target.'cfg(all(target_os = "linux", not(target_os = "android")))'.dev-dependencies.tempfile]
@@ -197,11 +157,3 @@ version = "0.8.7"
 
 [target.'cfg(not(any(target_os = "unknown", target_arch = "wasm32")))'.dependencies.libc]
 version = "^0.2.164"
-
-[target."cfg(windows)".dependencies.ntapi]
-version = "0.4"
-optional = true
-
-[target."cfg(windows)".dependencies.windows]
-version = ">=0.54, <=0.57"
-optional = true

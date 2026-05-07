@@ -128,7 +128,7 @@ historical editions.
 
 ### The Cargo Book
 
-[The Cargo Book](cargo/index.html) is a guide to Cargo, Rust's build tool and
+[The Cargo Book](../../cargo/book/index.html) is a guide to Cargo, Rust's build tool and
 dependency manager.
 
 ### The Rustdoc Book

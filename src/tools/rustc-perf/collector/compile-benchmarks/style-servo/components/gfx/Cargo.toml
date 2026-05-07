@@ -59,7 +59,3 @@ xml5ever = {version = "0.10"}
 
 [target.'cfg(any(target_feature = "sse2", target_feature = "neon"))'.dependencies]
 simd = "0.2.0"
-
-[target.'cfg(target_os = "windows")'.dependencies]
-dwrote = "0.4"
-truetype = "0.26"

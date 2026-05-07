@@ -46,10 +46,6 @@ inquire = "0.7.5"
 benchlib = { path = "benchlib" }
 database = { path = "../database" }
 
-[target.'cfg(windows)'.dependencies]
-miow = "0.3"
-windows-sys = { version = "0.45.0", features = ["Win32_Foundation"] }
-
 [features]
 # Enable more precise Cachegrind profiles for runtime benchmarks.
 # Requires a recent Valgrind to be installed.

@@ -67,19 +67,6 @@ serde = [
 [target."cfg(not(windows))".dependencies.libc]
 version = "0.2.123"
 
-[target."cfg(windows)".dependencies.gix-path]
-version = "^0.10.14"
-
-[target."cfg(windows)".dependencies.windows-sys]
-version = "0.52.0"
-features = [
-    "Win32_Foundation",
-    "Win32_Security_Authorization",
-    "Win32_Storage_FileSystem",
-    "Win32_System_Memory",
-    "Win32_System_Threading",
-]
-
 [lints.clippy]
 bool_to_int_with_if = "allow"
 borrow_as_ptr = "allow"

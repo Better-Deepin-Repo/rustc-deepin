@@ -2878,11 +2878,13 @@ declare_lint! {
     ///
     /// use std::arch::naked_asm;
     ///
+    /// #[cfg(not(any(target_arch = "powerpc64", target_arch = "s390x")))]
     /// #[naked]
     /// pub fn default_abi() -> u32 {
     ///     unsafe { naked_asm!(""); }
     /// }
     ///
+    /// #[cfg(not(any(target_arch = "powerpc64", target_arch = "s390x")))]
     /// #[naked]
     /// pub extern "Rust" fn rust_abi() -> u32 {
     ///     unsafe { naked_asm!(""); }

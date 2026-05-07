@@ -4,6 +4,7 @@
 
 //@ build-pass
 // ignore-tidy-linelength
+//@ ignore-hurd
 
 // Regression for #93775, needs build-pass to test it.
 

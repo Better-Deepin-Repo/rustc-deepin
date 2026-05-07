@@ -80,6 +80,7 @@ impl Step for Docs {
         tarball.set_product_name("Rust Documentation");
         tarball.add_bulk_dir(builder.doc_out(host), dest);
         tarball.add_file(builder.src.join("src/doc/robots.txt"), dest, 0o644);
+        tarball.permit_symlinks(true);
         Some(tarball.generate())
     }
 }

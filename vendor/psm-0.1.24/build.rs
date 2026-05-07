@@ -51,7 +51,7 @@ fn find_assembly(
         ("sparc", _, _, _) => Some(("src/arch/sparc_sysv.s", true)),
         ("riscv32", _, _, _) => Some(("src/arch/riscv.s", true)),
         ("riscv64", _, _, _) => Some(("src/arch/riscv64.s", true)),
-        ("wasm32", _, _, _) => Some(("src/arch/wasm32.o", true)),
+        ("wasm32", _, _, _) => Some(("src/arch/wasm32.s", true)),
         ("loongarch64", _, _, _) => Some(("src/arch/loongarch64.s", true)),
         _ => None,
     }
@@ -99,11 +99,8 @@ fn main() {
         cfg.define(&*format!("CFG_TARGET_ENV_{}", env), None);
     }
 
-    // For wasm targets we ship a precompiled `*.o` file so we just pass that
-    // directly to `ar` to assemble an archive. Otherwise we're actually
-    // compiling the source assembly file.
     if asm.ends_with(".o") {
-        cfg.object(asm);
+        panic!("Debian does not allow embedded object files in source code")
     } else {
         cfg.file(asm);
     }

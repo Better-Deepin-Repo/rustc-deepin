@@ -204,7 +204,6 @@ version = "0.3"
 
 [target.'cfg(target = "wasm32-unknown-unknown")'.dev-dependencies.wasm-bindgen]
 version = "0.2"
-
 [badges.is-it-maintained-issue-resolution]
 repository = "uuid-rs/uuid"
 

@@ -36,12 +36,13 @@ pub struct Info {
 impl GitInfo {
     pub fn new(omit_git_hash: bool, dir: &Path) -> GitInfo {
         // See if this even begins to look like a git dir
-        if !dir.join(".git").exists() {
+        // Debian: always use commit info file, since our .git is not upstreams..
+        //if !dir.join(".git").exists() {
             match read_commit_info_file(dir) {
                 Some(info) => return GitInfo::RecordedForTarball(info),
                 None => return GitInfo::Absent,
             }
-        }
+        //}
 
         // Make sure git commands work
         match helpers::git(Some(dir)).arg("rev-parse").as_command_mut().output() {

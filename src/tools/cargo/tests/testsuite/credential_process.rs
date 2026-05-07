@@ -65,7 +65,7 @@ fn get_token_test() -> (Project, TestRegistry) {
     (p, server)
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish() {
     // Checks that credential-process is used for `cargo publish`.
     let (p, _t) = get_token_test();
@@ -87,7 +87,7 @@ You may press ctrl-c [..]
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn credential_provider_auth_failure() {
     let _reg = registry::RegistryBuilder::new()
         .http_index()
@@ -112,7 +112,7 @@ Caused by:
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn basic_unsupported() {
     // Non-action commands don't support login/logout.
     let registry = registry::RegistryBuilder::new()
@@ -147,7 +147,7 @@ Caused by:
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn login() {
     let registry = registry::RegistryBuilder::new()
         .no_configure_token()
@@ -169,7 +169,7 @@ fn login() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn logout() {
     let server = registry::RegistryBuilder::new()
         .no_configure_token()
@@ -188,7 +188,7 @@ fn logout() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn yank() {
     let (p, _t) = get_token_test();
 
@@ -203,7 +203,7 @@ fn yank() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn owner() {
     let (p, _t) = get_token_test();
 
@@ -218,7 +218,7 @@ fn owner() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn invalid_token_output() {
     // Error when credential process does not output the expected format for a token.
     let cred_proj = project()

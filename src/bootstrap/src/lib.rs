@@ -1178,10 +1178,9 @@ Executed at: {executed_at}"#,
 
         match which {
             GitRepo::Rustc => {
-                let sha = self.rust_sha().unwrap_or(&self.version);
-                Some(format!("/rustc/{sha}"))
+                Some(format!("/usr/src/rustc-{}", &self.version))
             }
-            GitRepo::Llvm => Some(String::from("/rustc/llvm")),
+            GitRepo::Llvm => panic!("GitRepo::Llvm unsupported on Debian"),
         }
     }
 

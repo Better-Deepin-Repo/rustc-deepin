@@ -27,9 +27,6 @@ default-features = false
 optional = true
 features = ['read_core', 'elf', 'macho', 'pe', 'xcoff', 'unaligned', 'archive']
 
-[target.'cfg(windows)'.dependencies]
-windows-targets = "0.52.6"
-
 [features]
 default = ['backtrace']
 backtrace = ['addr2line', 'miniz_oxide', 'object', 'ruzstd']

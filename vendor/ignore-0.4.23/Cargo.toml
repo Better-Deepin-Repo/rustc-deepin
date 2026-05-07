@@ -90,6 +90,3 @@ version = "0.5.8"
 
 [features]
 simd-accel = []
-
-[target."cfg(windows)".dependencies.winapi-util]
-version = "0.1.2"

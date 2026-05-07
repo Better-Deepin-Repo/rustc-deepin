@@ -1,6 +1,7 @@
 //@ run-pass
 //@ compile-flags:--test
 //@ needs-threads
+//@ ignore-hurd
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, RecvError, RecvTimeoutError, TryRecvError};

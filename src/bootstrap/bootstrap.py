@@ -1133,10 +1133,6 @@ class RustBuild(object):
         if "BOOTSTRAP_TRACING" in env:
             args.append("--features=tracing")
 
-        if self.use_locked_deps:
-            args.append("--locked")
-        if self.use_vendored_sources:
-            args.append("--frozen")
         if self.get_toml("metrics", "build"):
             args.append("--features")
             args.append("build-metrics")

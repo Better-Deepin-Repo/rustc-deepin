@@ -49,8 +49,5 @@ rpath = false
 [dependencies]
 [target."cfg(unix)".dependencies.libc]
 version = "0.2.66"
-[target."cfg(windows)".dependencies.winapi]
-version = "0.3.8"
-features = ["handleapi", "processenv", "wincon", "winbase"]
 [badges.cirrus-ci]
 repository = "JohnTitor/termize"

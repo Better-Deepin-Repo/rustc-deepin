@@ -190,7 +190,6 @@ cmd = [
     "dep:os_pipe",
     "dep:wait-timeout",
     "dep:libc",
-    "dep:windows-sys",
 ]
 color = [
     "dep:anstream",
@@ -230,11 +229,6 @@ term-svg = [
 
 [target."cfg(unix)".dependencies.libc]
 version = "0.2.137"
-optional = true
-
-[target."cfg(windows)".dependencies.windows-sys]
-version = "0.59.0"
-features = ["Win32_Foundation"]
 optional = true
 
 [lints.clippy]

@@ -1512,6 +1512,12 @@ impl Config {
             let build = toml.build.get_or_insert_with(Default::default);
             build.rustc = build.rustc.take().or(std::env::var_os("RUSTC").map(|p| p.into()));
             build.cargo = build.cargo.take().or(std::env::var_os("CARGO").map(|p| p.into()));
+            // Debian: don't optimize compiler-rt, the bundled sources are not available..
+            build.optimized_compiler_builtins = Some(false);
+
+            if let Some(ref mut rust) = toml.rust {
+                rust.download_rustc = Some(StringOrBool::Bool(false));
+            }
         }
 
         if GitInfo::new(false, &config.src).is_from_tarball() && toml.profile.is_none() {

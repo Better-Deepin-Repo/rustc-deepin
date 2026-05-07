@@ -45,13 +45,3 @@ version = "1.0.39"
 
 [features]
 derive_serde_style = ["serde"]
-
-[target."cfg(target_os=\"windows\")".dependencies.winapi]
-version = "0.3.4"
-features = [
-    "consoleapi",
-    "errhandlingapi",
-    "fileapi",
-    "handleapi",
-    "processenv",
-]

@@ -21,10 +21,6 @@ crossbeam-channel.workspace = true
 itertools.workspace = true
 # Think twice before adding anything here
 
-[target.'cfg(windows)'.dependencies]
-miow = "0.6.0"
-windows-sys = { version = "0.59", features = ["Win32_Foundation"] }
-
 [features]
 # Uncomment to enable for the whole crate graph
 # default = [ "backtrace" ]

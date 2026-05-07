@@ -160,7 +160,7 @@ harness = false
 
 [dependencies.anstream]
 version = "0.6.11"
-features = ["wincon"]
+features = []
 optional = true
 default-features = false
 

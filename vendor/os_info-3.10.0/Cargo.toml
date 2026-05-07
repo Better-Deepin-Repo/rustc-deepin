@@ -64,15 +64,3 @@ version = "1"
 
 [features]
 default = ["serde"]
-
-[target."cfg(windows)".dependencies.windows-sys]
-version = "0.52"
-features = [
-    "Win32_Foundation",
-    "Win32_System_LibraryLoader",
-    "Win32_System_Registry",
-    "Win32_System_SystemInformation",
-    "Win32_System_SystemServices",
-    "Win32_System_Threading",
-    "Win32_UI_WindowsAndMessaging",
-]

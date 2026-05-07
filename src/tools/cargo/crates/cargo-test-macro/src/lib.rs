@@ -289,6 +289,14 @@ fn check_command(command_path: &Path, args: &[&str]) -> bool {
         }
     };
     if !output.status.success() {
+        // Debian specific patch, upstream wontfix:
+        // qemu has a faulty vfork where it fails to fail if a command is not
+        // found, with a unix_wait_status of 32512, or 0x7f00, 7f meaning
+        // exit code 127. See https://github.com/rust-lang/rust/issues/90825
+        use std::os::unix::process::ExitStatusExt;
+        if output.status.into_raw() == 0x7f00 {
+            return false;
+        }
         panic!(
             "expected command `{command_name}` to be runnable, got error {}:\n\
             stderr:{}\n\

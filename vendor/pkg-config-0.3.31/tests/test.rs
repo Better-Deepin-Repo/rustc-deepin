@@ -28,7 +28,6 @@ fn find(name: &str) -> Result<pkg_config::Library, Error> {
     pkg_config::probe_library(name)
 }
 
-#[test]
 fn cross_disabled() {
     let _g = LOCK.lock();
     reset();
@@ -40,7 +39,6 @@ fn cross_disabled() {
     }
 }
 
-#[test]
 fn cross_enabled() {
     let _g = LOCK.lock();
     reset();

@@ -209,28 +209,4 @@ deny-warnings = []
 pretty-env-logger = ["pretty_env_logger"]
 vendored-openssl = ["openssl/vendored"]
 
-[target."cfg(windows)".dependencies.fwdansi]
-version = "1.1.0"
-
-[target."cfg(windows)".dependencies.winapi]
-version = "0.3"
-features = [
-    "basetsd",
-    "handleapi",
-    "jobapi",
-    "jobapi2",
-    "memoryapi",
-    "minwindef",
-    "ntdef",
-    "ntstatus",
-    "processenv",
-    "processthreadsapi",
-    "psapi",
-    "synchapi",
-    "winerror",
-    "winbase",
-    "wincon",
-    "winnt",
-]
-
 [workspace]

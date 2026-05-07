@@ -739,6 +739,9 @@ fn custom_build_linker_bad_host_with_arch() {
 #[cargo_test]
 fn custom_build_env_var_rustc_linker_cross_arch_host() {
     let target = rustc_host();
+    if cross_compile::disabled() {
+        return;
+    }
     let cross_target = cross_compile::alternate();
     let p = project()
         .file(
@@ -777,6 +780,9 @@ fn custom_build_env_var_rustc_linker_cross_arch_host() {
 #[cargo_test]
 fn custom_build_linker_bad_cross_arch_host() {
     let target = rustc_host();
+    if cross_compile::disabled() {
+        return;
+    }
     let cross_target = cross_compile::alternate();
     let p = project()
         .file(

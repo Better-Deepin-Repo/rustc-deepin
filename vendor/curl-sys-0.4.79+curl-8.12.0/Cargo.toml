@@ -62,7 +62,7 @@ version = "0.3.3"
 [features]
 default = ["ssl"]
 force-system-lib-on-osx = []
-http2 = ["libnghttp2-sys"]
+http2 = []
 mesalink = []
 ntlm = []
 poll_7_68_0 = []
@@ -85,7 +85,3 @@ optional = true
 
 [target.'cfg(target_env = "msvc")'.build-dependencies.vcpkg]
 version = "0.2"
-
-[target."cfg(windows)".dependencies.windows-sys]
-version = "0.52"
-features = ["Win32_Networking_WinSock"]

@@ -74,9 +74,6 @@ version = "3.2.0"
 [target.'cfg(target_os = "macos")'.dev-dependencies.defer]
 version = "0.2.1"
 
-[target."cfg(windows)".dependencies.dunce]
-version = "1.0.3"
-
 [lints.clippy]
 bool_to_int_with_if = "allow"
 borrow_as_ptr = "allow"

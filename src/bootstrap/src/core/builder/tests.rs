@@ -238,7 +238,8 @@ fn alias_and_path_for_library() {
     );
 }
 
-#[test]
+// Debian: this test doesn't work since it tries to detect dirty git state..
+#[allow(dead_code)]
 fn ci_rustc_if_unchanged_logic() {
     let config = Config::parse_inner(
         Flags::parse(&[
@@ -512,9 +513,13 @@ mod dist {
         let b = TargetSelection::from_user(TEST_TRIPLE_2);
         let mut config =
             configure(&[TEST_TRIPLE_1, TEST_TRIPLE_2], &[TEST_TRIPLE_1, TEST_TRIPLE_2]);
+        let mut tools = std::collections::HashSet::new();
+        tools.insert("clippy".to_string());
+        tools.insert("rustfmt".to_string());
         config.docs = false;
         config.extended = true;
         config.hosts = vec![b];
+        config.tools = Some(tools);
         let mut cache = run_build(&[], config);
 
         assert_eq!(

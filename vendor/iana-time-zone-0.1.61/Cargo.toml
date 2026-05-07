@@ -69,6 +69,3 @@ version = "0.1.5"
 
 [target.'cfg(target_os = "haiku")'.dependencies.iana-time-zone-haiku]
 version = "0.1.1"
-
-[target.'cfg(target_os = "windows")'.dependencies.windows-core]
-version = ">=0.50, <=0.52"

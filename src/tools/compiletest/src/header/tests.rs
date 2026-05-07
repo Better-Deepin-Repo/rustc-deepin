@@ -341,6 +341,7 @@ fn ignore_target() {
     assert!(check_ignore(&config, "//@ ignore-x86_64-unknown-linux-gnu"));
     assert!(check_ignore(&config, "//@ ignore-x86_64"));
     assert!(check_ignore(&config, "//@ ignore-linux"));
+    assert!(check_ignore(&config, "//@ ignore-hurd"));
     assert!(check_ignore(&config, "//@ ignore-unix"));
     assert!(check_ignore(&config, "//@ ignore-gnu"));
     assert!(check_ignore(&config, "//@ ignore-64bit"));

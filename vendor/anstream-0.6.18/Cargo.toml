@@ -152,14 +152,8 @@ version = "0.2.0"
 auto = ["dep:anstyle-query"]
 default = [
     "auto",
-    "wincon",
 ]
 test = []
-wincon = ["dep:anstyle-wincon"]
-
-[target."cfg(windows)".dependencies.anstyle-wincon]
-version = "3.0.5"
-optional = true
 
 [lints.clippy]
 bool_assert_comparison = "allow"

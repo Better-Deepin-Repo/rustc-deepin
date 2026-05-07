@@ -3,13 +3,14 @@ use crate::config::{BookConfig, Code, Config, HtmlConfig, Playground, RustEditio
 use crate::errors::*;
 use crate::renderer::html_handlebars::helpers;
 use crate::renderer::{RenderContext, Renderer};
-use crate::theme::{self, playground_editor, Theme};
+use crate::theme::{self, Theme};
 use crate::utils;
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::{self, File};
+use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
 use crate::utils::fs::get_404_output_file;
@@ -253,99 +254,28 @@ impl HtmlHandlebars {
         if let Some(contents) = &theme.favicon_svg {
             write_file(destination, "favicon.svg", contents)?;
         }
-        write_file(destination, "highlight.css", &theme.highlight_css)?;
         write_file(destination, "tomorrow-night.css", &theme.tomorrow_night_css)?;
         write_file(destination, "ayu-highlight.css", &theme.ayu_highlight_css)?;
-        write_file(destination, "highlight.js", &theme.highlight_js)?;
-        write_file(destination, "clipboard.min.js", &theme.clipboard_js)?;
-        write_file(
-            destination,
-            "FontAwesome/css/font-awesome.css",
-            theme::FONT_AWESOME,
+        symlink(
+            "/usr/share/fonts-font-awesome/css/font-awesome.min.css",
+            destination.join("css/font-awesome.min.css"),
         )?;
-        write_file(
-            destination,
-            "FontAwesome/fonts/fontawesome-webfont.eot",
-            theme::FONT_AWESOME_EOT,
+        symlink(
+            "/usr/share/fonts-font-awesome/fonts",
+            destination.join("fonts"),
         )?;
-        write_file(
-            destination,
-            "FontAwesome/fonts/fontawesome-webfont.svg",
-            theme::FONT_AWESOME_SVG,
+        symlink(
+            "/usr/share/javascript/highlight.js/styles/atelier-dune-light.css",
+            destination.join("highlight.css"),
         )?;
-        write_file(
-            destination,
-            "FontAwesome/fonts/fontawesome-webfont.ttf",
-            theme::FONT_AWESOME_TTF,
+        symlink(
+            "/usr/share/javascript/highlight.js/highlight.js",
+            destination.join("highlight.js"),
         )?;
-        write_file(
-            destination,
-            "FontAwesome/fonts/fontawesome-webfont.woff",
-            theme::FONT_AWESOME_WOFF,
+        symlink(
+            "/usr/share/javascript/mathjax/MathJax.js",
+            destination.join("MathJax.js"),
         )?;
-        write_file(
-            destination,
-            "FontAwesome/fonts/fontawesome-webfont.woff2",
-            theme::FONT_AWESOME_WOFF2,
-        )?;
-        write_file(
-            destination,
-            "FontAwesome/fonts/FontAwesome.ttf",
-            theme::FONT_AWESOME_TTF,
-        )?;
-        // Don't copy the stock fonts if the user has specified their own fonts to use.
-        if html_config.copy_fonts && theme.fonts_css.is_none() {
-            write_file(destination, "fonts/fonts.css", theme::fonts::CSS)?;
-            for (file_name, contents) in theme::fonts::LICENSES.iter() {
-                write_file(destination, file_name, contents)?;
-            }
-            for (file_name, contents) in theme::fonts::OPEN_SANS.iter() {
-                write_file(destination, file_name, contents)?;
-            }
-            write_file(
-                destination,
-                theme::fonts::SOURCE_CODE_PRO.0,
-                theme::fonts::SOURCE_CODE_PRO.1,
-            )?;
-        }
-        if let Some(fonts_css) = &theme.fonts_css {
-            if !fonts_css.is_empty() {
-                write_file(destination, "fonts/fonts.css", fonts_css)?;
-            }
-        }
-        if !html_config.copy_fonts && theme.fonts_css.is_none() {
-            warn!(
-                "output.html.copy-fonts is deprecated.\n\
-                This book appears to have copy-fonts=false in book.toml without a fonts.css file.\n\
-                Add an empty `theme/fonts/fonts.css` file to squelch this warning."
-            );
-        }
-        for font_file in &theme.font_files {
-            let contents = fs::read(font_file)?;
-            let filename = font_file.file_name().unwrap();
-            let filename = Path::new("fonts").join(filename);
-            write_file(destination, filename, &contents)?;
-        }
-
-        let playground_config = &html_config.playground;
-
-        // Ace is a very large dependency, so only load it when requested
-        if playground_config.editable && playground_config.copy_js {
-            // Load the editor
-            write_file(destination, "editor.js", playground_editor::JS)?;
-            write_file(destination, "ace.js", playground_editor::ACE_JS)?;
-            write_file(destination, "mode-rust.js", playground_editor::MODE_RUST_JS)?;
-            write_file(
-                destination,
-                "theme-dawn.js",
-                playground_editor::THEME_DAWN_JS,
-            )?;
-            write_file(
-                destination,
-                "theme-tomorrow_night.js",
-                playground_editor::THEME_TOMORROW_NIGHT_JS,
-            )?;
-        }
 
         Ok(())
     }

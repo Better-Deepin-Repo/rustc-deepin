@@ -168,10 +168,6 @@ pub fn prepare_tool_cargo(
     // avoid rebuilding when running tests.
     cargo.env("SYSROOT", builder.sysroot(compiler));
 
-    // if tools are using lzma we want to force the build script to build its
-    // own copy
-    cargo.env("LZMA_API_STATIC", "1");
-
     // CFG_RELEASE is needed by rustfmt (and possibly other tools) which
     // import rustc-ap-rustc_attr which requires this to be set for the
     // `#[cfg(version(...))]` attribute.

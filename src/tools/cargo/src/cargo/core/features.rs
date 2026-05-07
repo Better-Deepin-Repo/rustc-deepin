@@ -1410,9 +1410,8 @@ pub fn channel() -> String {
             return "dev".to_string();
         }
     }
-    crate::version()
-        .release_channel
-        .unwrap_or_else(|| String::from("dev"))
+    // Debian: always return dev channel
+    String::from("dev")
 }
 
 /// Only for testing and developing. See ["Running with gitoxide as default git backend in tests"][1].

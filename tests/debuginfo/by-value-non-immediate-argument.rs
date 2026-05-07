@@ -2,6 +2,8 @@
 //@ min-gdb-version: 13.0
 //@ compile-flags:-g
 //@ ignore-windows-gnu: #128973
+//Debian: broken, see https://github.com/rust-lang/rust/issues/129662#issuecomment-2313102689
+//@ ignore-gdb
 
 // === GDB TESTS ===================================================================================
 

@@ -134,8 +134,8 @@ The steps are roughly similar to the stable channel:
 > on nightly along with more information about their status.
 > A few months before the edition is stabilized, all of the new features should be fully implemented, and the [Rust Blog] will announce a call for testing.
 
-[`cargo fix`]: ../../cargo/commands/cargo-fix.html
-[`cargo test`]: ../../cargo/commands/cargo-test.html
+[`cargo fix`]: ../../../../cargo/book/commands/cargo-fix.html
+[`cargo test`]: ../../../../cargo/book/commands/cargo-test.html
 [Advanced migration strategies]: advanced-migrations.md
 [nightly channel]: ../../book/appendix-07-nightly-rust.html
 [Rust Blog]: https://blog.rust-lang.org/

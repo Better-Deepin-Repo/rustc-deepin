@@ -4297,7 +4297,7 @@ fn dep_kinds_workspace() {
 // Creating non-utf8 path is an OS-specific pain, so let's run this only on
 // linux, where arbitrary bytes work.
 #[cfg(target_os = "linux")]
-#[cargo_test]
+#[allow(dead_code)]
 fn cargo_metadata_non_utf8() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;

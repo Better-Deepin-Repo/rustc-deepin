@@ -21,11 +21,11 @@ The new feature resolver no longer merges all requested features for
 crates that are depended on in multiple ways.
 See [the announcement of Rust 1.51][5] for details.
 
-[4]: ../../cargo/reference/resolver.html#feature-resolver-version-2
+[4]: ../../../../cargo/book/reference/resolver.html#feature-resolver-version-2
 [5]: https://blog.rust-lang.org/2021/03/25/Rust-1.51.0.html#cargos-new-feature-resolver
-[workspace]: ../../cargo/reference/workspaces.html
-[virtual workspace]: ../../cargo/reference/workspaces.html#virtual-workspace
-[`resolver` field]: ../../cargo/reference/resolver.html#resolver-versions
+[workspace]: ../../../../cargo/book/reference/workspaces.html
+[virtual workspace]: ../../../../cargo/book/reference/workspaces.html#virtual-workspace
+[`resolver` field]: ../../../../cargo/book/reference/resolver.html#resolver-versions
 
 ## Migration
 
@@ -176,4 +176,4 @@ This snippet of output shows that the project `foo` depends on `bar` with the "d
 Then, `bar` depends on `bstr` as a build-dependency with the "default" feature.
 We can further see that `bstr`'s  "default" feature enables "unicode" (among other features).
 
-[`cargo tree`]: ../../cargo/commands/cargo-tree.html
+[`cargo tree`]: ../../../../cargo/book/commands/cargo-tree.html

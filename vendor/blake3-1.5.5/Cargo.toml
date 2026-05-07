@@ -110,7 +110,7 @@ version = "3.8.0"
 version = "1.1.12"
 
 [features]
-default = ["std"]
+default = ["std", "pure"]
 digest = ["dep:digest"]
 mmap = [
     "std",

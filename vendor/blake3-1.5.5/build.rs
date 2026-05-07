@@ -275,7 +275,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if is_x86_64() || is_x86_32() {
-        let support = c_compiler_support();
+        let support = if is_pure() {
+            NoCompiler
+        } else {
+            c_compiler_support()
+        };
         if is_x86_32() || should_prefer_intrinsics() || is_pure() || support == NoCompiler {
             build_sse2_sse41_avx2_rust_intrinsics();
         } else {
@@ -312,11 +316,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("cargo:rerun-if-env-changed=CFLAGS");
 
     // Ditto for source files, though these shouldn't change as often.
-    for file in std::fs::read_dir("c")? {
-        println!(
-            "cargo:rerun-if-changed={}",
-            file?.path().to_str().expect("utf-8")
-        );
+    if !is_pure() {
+        for file in std::fs::read_dir("c")? {
+            println!(
+                "cargo:rerun-if-changed={}",
+                file?.path().to_str().expect("utf-8")
+            );
+        }
     }
 
     Ok(())

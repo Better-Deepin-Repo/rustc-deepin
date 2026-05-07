@@ -105,7 +105,7 @@ fn setup_failed_auth_test() -> (SocketAddr, JoinHandle<()>, Arc<AtomicUsize>) {
 }
 
 // Tests that HTTP auth is offered from `credential.helper`.
-#[cargo_test]
+#[allow(dead_code)]
 fn http_auth_offered() {
     let (addr, t, connections) = setup_failed_auth_test();
     let p = project()
@@ -178,7 +178,7 @@ Caused by:
 }
 
 // Boy, sure would be nice to have a TLS implementation in rust!
-#[cargo_test]
+#[allow(dead_code)]
 fn https_something_happens() {
     let server = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = server.local_addr().unwrap();

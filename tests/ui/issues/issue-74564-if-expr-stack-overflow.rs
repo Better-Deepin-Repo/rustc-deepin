@@ -1,5 +1,6 @@
 //@ build-pass
 // ignore-tidy-filelength
+//@ ignore-hurd
 #![crate_type = "rlib"]
 
 fn banana(v: &str) -> u32 {

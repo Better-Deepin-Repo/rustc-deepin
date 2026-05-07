@@ -121,18 +121,6 @@ serialize-serde = ["serde"]
 std = []
 unix-backtrace = []
 verify-winapi = [
-    "winapi/dbghelp",
-    "winapi/handleapi",
-    "winapi/libloaderapi",
-    "winapi/memoryapi",
-    "winapi/minwindef",
-    "winapi/processthreadsapi",
-    "winapi/synchapi",
-    "winapi/tlhelp32",
-    "winapi/winbase",
-    "winapi/winnt",
-    "winapi/winnls",
-    "winapi/stringapiset",
 ]
 
 [target."cfg(not(all(windows, target_env = \"msvc\", not(target_vendor = \"uwp\"))))".dependencies.addr2line]
@@ -159,10 +147,6 @@ features = [
     "archive",
 ]
 default-features = false
-
-[target."cfg(windows)".dependencies.winapi]
-version = "0.3.9"
-optional = true
 
 [lints.rust]
 unexpected_cfgs = "allow"

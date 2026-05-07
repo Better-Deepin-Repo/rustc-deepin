@@ -56,6 +56,9 @@ fn download_ci_llvm() {
 //   - https://github.com/rust-lang/rust/pull/109162#issuecomment-1496782487
 #[test]
 fn detect_src_and_out() {
+    // Debian: this will attempt to download a toolchain
+    return;
+
     fn test(cfg: Config, build_dir: Option<&str>) {
         // This will bring absolute form of `src/bootstrap` path
         let current_dir = std::env::current_dir().unwrap();

@@ -137,8 +137,8 @@ We also want the reference to be as normative as possible, so if you see anythin
 [the Rust Reference repository]: https://github.com/rust-lang/reference/
 [Unstable Book]: https://doc.rust-lang.org/nightly/unstable-book/
 [_Expression_]: expressions.md
-[cargo book]: ../cargo/index.html
-[cargo reference]: ../cargo/reference/index.html
+[cargo book]: ../../../cargo/book/index.html
+[cargo reference]: ../../../cargo/book/reference/index.html
 [expressions chapter]: expressions.html
 [file an issue]: https://github.com/rust-lang/reference/issues
 [lifetime of temporaries]: expressions.html#temporaries

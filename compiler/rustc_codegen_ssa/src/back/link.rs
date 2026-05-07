@@ -2597,6 +2597,13 @@ fn add_order_independent_options(
     }
 
     add_rpath_args(cmd, sess, codegen_results, out_filename);
+
+    if (crate_type == config::CrateType::Dylib || crate_type == config::CrateType::Cdylib)
+       && sess.target.linker_flavor.is_gnu() {
+        let filename = String::from(out_filename.file_name().unwrap().to_str().unwrap());
+        let soname = [String::from("-Wl,-soname=") + &filename];
+        cmd.cc_args(&soname);
+    }
 }
 
 // Write the NatVis debugger visualizer files for each crate to the temp directory and gather the file paths.

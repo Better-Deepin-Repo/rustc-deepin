@@ -67,14 +67,3 @@ features = ["stdio"]
 
 [target.'cfg(target_os = "hermit")'.dependencies.hermit-abi]
 version = "0.4.0"
-
-[target."cfg(windows)".dependencies.windows-sys]
-version = ">=0.52, <0.60"
-features = [
-    "Win32_Foundation",
-    "Win32_Storage_FileSystem",
-    "Win32_System_Console",
-]
-
-[target."cfg(windows)".dev-dependencies.tempfile]
-version = "3"

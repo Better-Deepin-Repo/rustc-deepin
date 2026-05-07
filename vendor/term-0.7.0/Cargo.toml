@@ -28,12 +28,6 @@ version = "2"
 
 [features]
 default = []
-[target."cfg(windows)".dependencies.rustversion]
-version = "1"
-
-[target."cfg(windows)".dependencies.winapi]
-version = "0.3"
-features = ["consoleapi", "wincon", "handleapi", "fileapi"]
 [badges.appveyor]
 repository = "Stebalien/term"
 

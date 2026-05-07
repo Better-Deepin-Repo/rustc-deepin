@@ -374,7 +374,7 @@ Note that neither declarative nor procedural macros support doc comment tokens
 their equivalent `#[doc = r"str"]` attributes when passed to macros.
 
 [Attribute macros]: #attribute-macros
-[Cargo's build scripts]: ../cargo/reference/build-scripts.html
+[Cargo's build scripts]: ../../../cargo/book/reference/build-scripts.html
 [Derive macros]: #derive-macros
 [Function-like macros]: #function-like-procedural-macros
 [`Delimiter::None`]: proc_macro::Delimiter::None

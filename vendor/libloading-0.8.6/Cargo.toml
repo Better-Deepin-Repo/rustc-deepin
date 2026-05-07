@@ -44,13 +44,6 @@ version = "1.1"
 [target."cfg(unix)".dependencies.cfg-if]
 version = "1"
 
-[target."cfg(windows)".dependencies.windows-targets]
-version = ">=0.48, <0.53"
-
-[target."cfg(windows)".dev-dependencies.windows-sys]
-version = ">=0.52,<0.59"
-features = ["Win32_Foundation"]
-
 [lints.rust.unexpected_cfgs]
 level = "warn"
 priority = 0

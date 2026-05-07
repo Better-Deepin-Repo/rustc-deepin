@@ -13,8 +13,8 @@ Build-Depends:
  debhelper-compat (= 13),
  dpkg-dev (>= 1.17.14),
  python3:native,
- cargo,
- rustc,
+ cargo:native,
+ rustc:native,
  llvm-19-dev:native,
  llvm-19-tools:native,
  gcc-mingw-w64-x86-64-posix:native [amd64] <pkg.rustc.windows>,
@@ -37,7 +37,8 @@ Build-Depends:
  libssh2-1-dev,
  libssl-dev,
  libsqlite3-dev,
- libgit2-dev,
+ libgit2-dev (>= 1.9),
+ libgit2-dev (<< 1.10~~),
  libhttp-parser-dev,
  libonig-dev,
 # test dependencies:
@@ -50,7 +51,6 @@ Build-Depends:
 # Extra build-deps needed for x.py to download stuff in pkg.rustc.dlstage0.
  curl <pkg.rustc.dlstage0>,
  ca-certificates <pkg.rustc.dlstage0>,
- librust-sha1-checked-dev,
 Build-Depends-Indep:
  wasi-libc,
  clang-19:native,

@@ -7,7 +7,7 @@
 // true automatically. If paths to std library hasn't been remapped, we use the
 // above simulate-remapped-rust-src-base option to do it temporarily
 
-// CHECK: !DIFile(filename: "{{/rustc/.*/library/std/src/panic.rs}}"
+// CHECK: !DIFile(filename: "{{/usr/src/rustc-.*/library/std/src/panic.rs}}"
 fn main() {
     std::thread::spawn(|| {
         println!("hello");

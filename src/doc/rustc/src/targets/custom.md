@@ -14,7 +14,7 @@ To see it for a different target, add the `--target` flag:
 rustc +nightly -Z unstable-options --target=wasm32-unknown-unknown --print target-spec-json
 ```
 
-To use a custom target, see the (unstable) [`build-std` feature](../../cargo/reference/unstable.html#build-std) of `cargo`.
+To use a custom target, see the (unstable) [`build-std` feature](../../../../cargo/book/reference/unstable.html#build-std) of `cargo`.
 
 ## Custom Target Lookup Path
 

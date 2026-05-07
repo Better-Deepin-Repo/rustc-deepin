@@ -90,7 +90,7 @@ fn validate_upload_li() {
     );
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn simple() {
     let registry = RegistryBuilder::new().http_api().http_index().build();
 
@@ -182,7 +182,7 @@ See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for
 
 // Check that the `token` key works at the root instead of under a
 // `[registry]` table.
-#[cargo_test]
+#[allow(dead_code)]
 fn simple_publish_with_http() {
     let _reg = registry::RegistryBuilder::new()
         .http_api()
@@ -222,7 +222,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn simple_publish_with_asymmetric() {
     let _reg = registry::RegistryBuilder::new()
         .http_api()
@@ -265,7 +265,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn old_token_location() {
     // `publish` generally requires a remote registry
     let registry = registry::RegistryBuilder::new().http_api().build();
@@ -324,7 +324,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     // Other tests will verify the endpoint gets the right payload.
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn simple_with_index() {
     // `publish` generally requires a remote registry
     let registry = registry::RegistryBuilder::new().http_api().build();
@@ -369,7 +369,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     // Other tests will verify the endpoint gets the right payload.
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn git_deps() {
     // Use local registry for faster test times since no publish will occur
     let registry = registry::init();
@@ -407,7 +407,7 @@ the `git` specification will be removed from the dependency declaration.
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn path_dependency_no_version() {
     // Use local registry for faster test times since no publish will occur
     let registry = registry::init();
@@ -447,7 +447,7 @@ the `path` specification will be removed from the dependency declaration.
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn unpublishable_crate() {
     // Use local registry for faster test times since no publish will occur
     let registry = registry::init();
@@ -480,7 +480,7 @@ fn unpublishable_crate() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn dont_publish_dirty() {
     // Use local registry for faster test times since no publish will occur
     let registry = registry::init();
@@ -521,7 +521,7 @@ to proceed despite this and include the uncommitted changes, pass the `--allow-d
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_clean() {
     // `publish` generally requires a remote registry
     let registry = registry::RegistryBuilder::new().http_api().build();
@@ -569,7 +569,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     // Other tests will verify the endpoint gets the right payload.
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_in_sub_repo() {
     // `publish` generally requires a remote registry
     let registry = registry::RegistryBuilder::new().http_api().build();
@@ -618,7 +618,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     // Other tests will verify the endpoint gets the right payload.
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_when_ignored() {
     // `publish` generally requires a remote registry
     let registry = registry::RegistryBuilder::new().http_api().build();
@@ -667,7 +667,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     // Other tests will verify the endpoint gets the right payload.
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn ignore_when_crate_ignored() {
     // `publish` generally requires a remote registry
     let registry = registry::RegistryBuilder::new().http_api().build();
@@ -715,7 +715,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     // Other tests will verify the endpoint gets the right payload.
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn new_crate_rejected() {
     // Use local registry for faster test times since no publish will occur
     let registry = registry::init();
@@ -750,7 +750,7 @@ fn new_crate_rejected() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn dry_run() {
     // Use local registry for faster test times since no publish will occur
     let registry = registry::init();
@@ -793,7 +793,7 @@ See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for
     assert!(!registry::api_path().join("api/v1/crates/new").exists());
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn registry_not_in_publish_list() {
     let p = project()
         .file(
@@ -826,7 +826,7 @@ The registry `alternative` is not listed in the `package.publish` value in Cargo
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_empty_list() {
     let p = project()
         .file(
@@ -855,7 +855,7 @@ fn publish_empty_list() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_allowed_registry() {
     let _registry = RegistryBuilder::new()
         .http_api()
@@ -915,7 +915,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     );
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_implicitly_to_only_allowed_registry() {
     let _registry = RegistryBuilder::new()
         .http_api()
@@ -976,7 +976,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     );
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_failed_with_index_and_only_allowed_registry() {
     let registry = RegistryBuilder::new()
         .http_api()
@@ -1017,7 +1017,7 @@ fn publish_failed_with_index_and_only_allowed_registry() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_fail_with_no_registry_specified() {
     let p = project().build();
 
@@ -1050,7 +1050,7 @@ fn publish_fail_with_no_registry_specified() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn block_publish_no_registry() {
     let p = project()
         .file(
@@ -1080,7 +1080,7 @@ fn block_publish_no_registry() {
 }
 
 // Explicitly setting `crates-io` in the publish list.
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_with_crates_io_explicit() {
     // `publish` generally requires a remote registry
     let registry = registry::RegistryBuilder::new().http_api().build();
@@ -1132,7 +1132,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_with_select_features() {
     // `publish` generally requires a remote registry
     let registry = registry::RegistryBuilder::new().http_api().build();
@@ -1183,7 +1183,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_with_all_features() {
     // `publish` generally requires a remote registry
     let registry = registry::RegistryBuilder::new().http_api().build();
@@ -1234,7 +1234,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_with_no_default_features() {
     // Use local registry for faster test times since no publish will occur
     let registry = registry::init();
@@ -1275,7 +1275,7 @@ fn publish_with_no_default_features() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_with_patch() {
     let registry = RegistryBuilder::new().http_api().http_index().build();
     Package::new("bar", "1.0.0").publish();
@@ -1385,7 +1385,8 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     );
 }
 
-#[cargo_test]
+#[expect(deprecated)]
+#[allow(dead_code)]
 fn publish_checks_for_token_before_verify() {
     let registry = registry::RegistryBuilder::new()
         .no_configure_token()
@@ -1439,7 +1440,7 @@ See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_with_bad_source() {
     let p = project()
         .file(
@@ -1486,7 +1487,7 @@ include `--registry crates-io` to use crates.io
 }
 
 // A dependency with both `git` and `version`.
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_git_with_version() {
     let registry = RegistryBuilder::new().http_api().http_index().build();
 
@@ -1656,7 +1657,7 @@ dependencies = [
     );
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn publish_dev_dep_stripping() {
     let registry = RegistryBuilder::new().http_api().http_index().build();
     Package::new("normal-only", "1.0.0")
@@ -2092,7 +2093,7 @@ features = ["cat"]
     );
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn credentials_ambiguous_filename() {
     // `publish` generally requires a remote registry
     let registry = registry::RegistryBuilder::new().http_api().build();
@@ -2152,7 +2153,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
 
 // --index will not load registry.token to avoid possibly leaking
 // crates.io token to another server.
-#[cargo_test]
+#[allow(dead_code)]
 fn index_requires_token() {
     // Use local registry for faster test times since no publish will occur
     let registry = registry::init();
@@ -2187,7 +2188,7 @@ fn index_requires_token() {
 }
 
 // publish with source replacement without --registry
-#[cargo_test]
+#[allow(dead_code)]
 fn cratesio_source_replacement() {
     registry::init();
     let p = project()
@@ -2217,7 +2218,7 @@ include `--registry dummy-registry` or `--registry crates-io`
 }
 
 // Registry returns an API error.
-#[cargo_test]
+#[allow(dead_code)]
 fn api_error_json() {
     let _registry = registry::RegistryBuilder::new()
         .alternative()
@@ -2265,7 +2266,7 @@ Caused by:
 }
 
 // Registry returns an API error with a 200 status code.
-#[cargo_test]
+#[allow(dead_code)]
 fn api_error_200() {
     let _registry = registry::RegistryBuilder::new()
         .alternative()
@@ -2313,7 +2314,7 @@ Caused by:
 }
 
 // Registry returns an error code without a JSON message.
-#[cargo_test]
+#[allow(dead_code)]
 fn api_error_code() {
     let _registry = registry::RegistryBuilder::new()
         .alternative()
@@ -2368,7 +2369,7 @@ Caused by:
 }
 
 // Registry has a network error.
-#[cargo_test]
+#[allow(dead_code)]
 fn api_curl_error() {
     let _registry = registry::RegistryBuilder::new()
         .alternative()
@@ -2418,7 +2419,7 @@ Caused by:
 }
 
 // Registry returns an invalid response.
-#[cargo_test]
+#[allow(dead_code)]
 fn api_other_error() {
     let _registry = registry::RegistryBuilder::new()
         .alternative()
@@ -2468,7 +2469,7 @@ Caused by:
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn in_package_workspace() {
     let registry = RegistryBuilder::new().http_api().http_index().build();
 
@@ -2520,7 +2521,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     validate_upload_li();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn with_duplicate_spec_in_members() {
     // Use local registry for faster test times since no publish will occur
     let registry = registry::init();
@@ -2576,7 +2577,7 @@ fn with_duplicate_spec_in_members() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn in_package_workspace_with_members_with_features_old() {
     let registry = RegistryBuilder::new().http_api().http_index().build();
 
@@ -2628,7 +2629,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     validate_upload_li();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn in_virtual_workspace() {
     // Use local registry for faster test times since no publish will occur
     let registry = registry::init();
@@ -2666,7 +2667,7 @@ fn in_virtual_workspace() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn in_virtual_workspace_with_p() {
     // `publish` generally requires a remote registry
     let registry = registry::RegistryBuilder::new().http_api().build();
@@ -2725,7 +2726,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn in_package_workspace_not_found() {
     // Use local registry for faster test times since no publish will occur
     let registry = registry::init();
@@ -2769,7 +2770,7 @@ fn in_package_workspace_not_found() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn in_package_workspace_found_multiple() {
     // Use local registry for faster test times since no publish will occur
     let registry = registry::init();
@@ -2825,7 +2826,7 @@ fn in_package_workspace_found_multiple() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 // https://github.com/rust-lang/cargo/issues/10536
 fn publish_path_dependency_without_workspace() {
     // Use local registry for faster test times since no publish will occur
@@ -2871,7 +2872,7 @@ fn publish_path_dependency_without_workspace() {
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn http_api_not_noop() {
     let registry = registry::RegistryBuilder::new().http_api().build();
 
@@ -2933,7 +2934,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     p.cargo("build").run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn wait_for_first_publish() {
     // Counter for number of tries before the package is "published"
     let arc: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
@@ -3016,7 +3017,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
 /// A separate test is needed for package names with - or _ as they hit
 /// the responder twice per cargo invocation. If that ever gets changed
 /// this test will need to be changed accordingly.
-#[cargo_test]
+#[allow(dead_code)]
 fn wait_for_first_publish_underscore() {
     // Counter for number of tries before the package is "published"
     let arc: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
@@ -3113,7 +3114,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     p.cargo("build").with_status(0).run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn wait_for_subsequent_publish() {
     // Counter for number of tries before the package is "published"
     let arc: Arc<Mutex<u32>> = Arc::new(Mutex::new(0));
@@ -3206,7 +3207,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
     p.cargo("check").with_status(0).run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn skip_wait_for_publish() {
     // Intentionally using local registry so the crate never makes it to the index
     let registry = registry::init();
@@ -3250,7 +3251,7 @@ See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn timeout_waiting_for_publish() {
     // Publish doesn't happen within the timeout window.
     let registry = registry::RegistryBuilder::new()
@@ -3302,7 +3303,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn timeout_waiting_for_dependency_publish() {
     // Publish doesn't happen within the timeout window.
     let registry = registry::RegistryBuilder::new()
@@ -3402,7 +3403,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn package_selection() {
     let registry = registry::RegistryBuilder::new().http_api().build();
     let p = project()
@@ -3516,7 +3517,7 @@ See https://github.com/rust-lang/cargo/issues/10948 for more information about t
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn wait_for_git_publish() {
     // Slow publish to an index with a git index.
     let registry = registry::RegistryBuilder::new()
