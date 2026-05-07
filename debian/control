@@ -38,7 +38,6 @@ Build-Depends:
  libssl-dev,
  libsqlite3-dev,
  libgit2-dev (>= 1.9),
- libgit2-dev (<< 1.10~~),
  libhttp-parser-dev,
  libonig-dev,
 # test dependencies:
