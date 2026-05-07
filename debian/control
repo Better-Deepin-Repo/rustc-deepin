@@ -50,6 +50,7 @@ Build-Depends:
 # Extra build-deps needed for x.py to download stuff in pkg.rustc.dlstage0.
  curl <pkg.rustc.dlstage0>,
  ca-certificates <pkg.rustc.dlstage0>,
+ librust-sha1-checked-dev,
 Build-Depends-Indep:
  wasi-libc,
  clang-19:native,
