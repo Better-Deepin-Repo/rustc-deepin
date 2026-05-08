@@ -2,11 +2,8 @@
 #![allow(internal_features)]
 #![feature(
     stdarch_internal,
-    avx512_target_feature,
-    sha512_sm_x86,
     x86_amx_intrinsics,
     xop_target_feature,
-    keylocker_x86,
     movrs_target_feature
 )]
 

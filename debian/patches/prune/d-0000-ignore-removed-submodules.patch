@@ -12,14 +12,14 @@ Forwarded: not-needed
  src/bootstrap/src/core/build_steps/vendor.rs |  5 -----
  src/bootstrap/src/core/builder/cargo.rs      |  5 +----
  src/bootstrap/src/core/builder/mod.rs        | 20 --------------------
- src/build_helper/src/util.rs                 | 21 +--------------------
- 6 files changed, 2 insertions(+), 58 deletions(-)
+ src/build_helper/src/util.rs                 |  2 ++
+ 6 files changed, 3 insertions(+), 38 deletions(-)
 
 diff --git a/Cargo.toml b/Cargo.toml
-index 16ff0f6..84a0015 100644
+index e08f14d..189e796 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -10,7 +10,6 @@ members = [
+@@ -9,7 +9,6 @@ members = [
    "src/rustc-std-workspace/rustc-std-workspace-std",
    "src/rustdoc-json-types",
    "src/tools/build-manifest",
@@ -27,7 +27,7 @@ index 16ff0f6..84a0015 100644
    "src/tools/cargotest",
    "src/tools/clippy",
    "src/tools/clippy/clippy_dev",
-@@ -27,12 +26,8 @@ members = [
+@@ -26,12 +25,8 @@ members = [
    "src/tools/lint-docs",
    "src/tools/lld-wrapper",
    "src/tools/llvm-bitcode-linker",
@@ -41,7 +41,7 @@ index 16ff0f6..84a0015 100644
    "src/tools/run-make-support",
    "src/tools/rust-installer",
 diff --git a/src/bootstrap/bootstrap.py b/src/bootstrap/bootstrap.py
-index 42ad14a..11e18415 100644
+index d8c6be7..ceec53e 100644
 --- a/src/bootstrap/bootstrap.py
 +++ b/src/bootstrap/bootstrap.py
 @@ -1133,10 +1133,6 @@ class RustBuild(object):
@@ -75,10 +75,10 @@ index 0caeb32..a394d45 100644
      .into_iter()
      .map(|(path, submodules)| (builder.src.join(path), submodules))
 diff --git a/src/bootstrap/src/core/builder/cargo.rs b/src/bootstrap/src/core/builder/cargo.rs
-index d625c2e..2877929 100644
+index 99044e2..e94ff9a 100644
 --- a/src/bootstrap/src/core/builder/cargo.rs
 +++ b/src/bootstrap/src/core/builder/cargo.rs
-@@ -1189,10 +1189,7 @@ impl Builder<'_> {
+@@ -1228,10 +1228,7 @@ impl Builder<'_> {
              }
          }
  
@@ -91,10 +91,10 @@ index d625c2e..2877929 100644
          }
  
 diff --git a/src/bootstrap/src/core/builder/mod.rs b/src/bootstrap/src/core/builder/mod.rs
-index 75cc5d3..481cc68 100644
+index b26f47a..ed40c7c 100644
 --- a/src/bootstrap/src/core/builder/mod.rs
 +++ b/src/bootstrap/src/core/builder/mod.rs
-@@ -891,8 +891,6 @@ impl<'a> Builder<'a> {
+@@ -928,8 +928,6 @@ impl<'a> Builder<'a> {
                  tool::Linkchecker,
                  tool::CargoTest,
                  tool::Compiletest,
@@ -103,7 +103,7 @@ index 75cc5d3..481cc68 100644
                  tool::RustInstaller,
                  tool::Cargo,
                  tool::RustAnalyzer,
-@@ -900,17 +898,8 @@ impl<'a> Builder<'a> {
+@@ -937,17 +935,8 @@ impl<'a> Builder<'a> {
                  tool::Rustdoc,
                  tool::Clippy,
                  tool::CargoClippy,
@@ -121,7 +121,7 @@ index 75cc5d3..481cc68 100644
                  tool::OptimizedDist,
                  tool::CoverageDump,
                  tool::LlvmBitcodeLinker,
-@@ -951,9 +940,6 @@ impl<'a> Builder<'a> {
+@@ -987,9 +976,6 @@ impl<'a> Builder<'a> {
                  check::Rustdoc,
                  check::CodegenBackend,
                  check::Clippy,
@@ -131,7 +131,7 @@ index 75cc5d3..481cc68 100644
                  check::Rustfmt,
                  check::RustAnalyzer,
                  check::TestFloatParse,
-@@ -1004,8 +990,6 @@ impl<'a> Builder<'a> {
+@@ -1047,8 +1033,6 @@ impl<'a> Builder<'a> {
                  test::EmbeddedBook,
                  test::EditionGuide,
                  test::Rustfmt,
@@ -140,7 +140,7 @@ index 75cc5d3..481cc68 100644
                  test::Clippy,
                  test::CompiletestTest,
                  test::CrateRunMakeSupport,
-@@ -1046,7 +1030,6 @@ impl<'a> Builder<'a> {
+@@ -1089,7 +1073,6 @@ impl<'a> Builder<'a> {
                  doc::CargoBook,
                  doc::Clippy,
                  doc::ClippyBook,
@@ -148,7 +148,7 @@ index 75cc5d3..481cc68 100644
                  doc::EmbeddedBook,
                  doc::EditionGuide,
                  doc::StyleGuide,
-@@ -1072,7 +1055,6 @@ impl<'a> Builder<'a> {
+@@ -1115,7 +1098,6 @@ impl<'a> Builder<'a> {
                  dist::RustAnalyzer,
                  dist::Rustfmt,
                  dist::Clippy,
@@ -156,7 +156,7 @@ index 75cc5d3..481cc68 100644
                  dist::LlvmTools,
                  dist::LlvmBitcodeLinker,
                  dist::RustDev,
-@@ -1099,7 +1081,6 @@ impl<'a> Builder<'a> {
+@@ -1142,7 +1124,6 @@ impl<'a> Builder<'a> {
                  install::RustAnalyzer,
                  install::Rustfmt,
                  install::Clippy,
@@ -164,7 +164,7 @@ index 75cc5d3..481cc68 100644
                  install::LlvmTools,
                  install::Src,
              ),
-@@ -1107,7 +1088,6 @@ impl<'a> Builder<'a> {
+@@ -1150,7 +1131,6 @@ impl<'a> Builder<'a> {
                  run::BuildManifest,
                  run::BumpStage0,
                  run::ReplaceVersionPlaceholder,
@@ -173,32 +173,15 @@ index 75cc5d3..481cc68 100644
                  run::GenerateCopyright,
                  run::GenerateWindowsSys,
 diff --git a/src/build_helper/src/util.rs b/src/build_helper/src/util.rs
-index 72c05c4..3be35b7 100644
+index 80dd681..83c2a31 100644
 --- a/src/build_helper/src/util.rs
 +++ b/src/build_helper/src/util.rs
-@@ -52,24 +52,5 @@ pub fn try_run(cmd: &mut Command, print_cmd_on_fail: bool) -> Result<(), ()> {
+@@ -51,6 +51,8 @@ pub fn try_run(cmd: &mut Command, print_cmd_on_fail: bool) -> Result<(), ()> {
  
  /// Returns the submodule paths from the `.gitmodules` file in the given directory.
- pub fn parse_gitmodules(target_dir: &Path) -> &[String] {
--    static SUBMODULES_PATHS: OnceLock<Vec<String>> = OnceLock::new();
--    let gitmodules = target_dir.join(".gitmodules");
--    assert!(gitmodules.exists(), "'{}' file is missing.", gitmodules.display());
--
--    let init_submodules_paths = || {
--        let file = File::open(gitmodules).unwrap();
--
--        let mut submodules_paths = vec![];
--        for line in BufReader::new(file).lines().map_while(Result::ok) {
--            let line = line.trim();
--            if line.starts_with("path") {
--                let actual_path = line.split(' ').last().expect("Couldn't get value of path");
--                submodules_paths.push(actual_path.to_owned());
--            }
--        }
--
--        submodules_paths
--    };
--
--    SUBMODULES_PATHS.get_or_init(|| init_submodules_paths())
-+    return &[];
- }
+ pub fn parse_gitmodules(target_dir: &Path) -> Vec<String> {
++    return vec![];
++
+     let gitmodules = target_dir.join(".gitmodules");
+     assert!(gitmodules.exists(), "'{}' file is missing.", gitmodules.display());
+ 

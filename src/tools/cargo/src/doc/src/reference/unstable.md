@@ -84,13 +84,13 @@ Each new feature described below should explain how to use it.
     * [root-dir](#root-dir) --- Controls the root directory relative to which paths are printed
 * Compile behavior
     * [mtime-on-use](#mtime-on-use) --- Updates the last-modified timestamp on every dependency every time it is used, to provide a mechanism to delete unused artifacts.
-    * [doctest-xcompile](#doctest-xcompile) --- Supports running doctests with the `--target` flag.
     * [build-std](#build-std) --- Builds the standard library instead of using pre-built binaries.
     * [build-std-features](#build-std-features) --- Sets features to use with the standard library.
     * [binary-dep-depinfo](#binary-dep-depinfo) --- Causes the dep-info file to track binary dependencies.
     * [checksum-freshness](#checksum-freshness) --- When passed, the decision as to whether a crate needs to be rebuilt is made using file checksums instead of the file mtime.
     * [panic-abort-tests](#panic-abort-tests) --- Allows running tests with the "abort" panic strategy.
     * [host-config](#host-config) --- Allows setting `[target]`-like configuration settings for host build targets.
+    * [no-embed-metadata](#no-embed-metadata) --- Passes `-Zembed-metadata=no` to the compiler, which avoid embedding metadata into rlib and dylib artifacts, to save disk space.
     * [target-applies-to-host](#target-applies-to-host) --- Alters whether certain flags will be passed to host build targets.
     * [gc](#gc) --- Global cache garbage collection.
     * [open-namespaces](#open-namespaces) --- Allow multiple packages to participate in the same API namespace
@@ -101,12 +101,14 @@ Each new feature described below should explain how to use it.
     * [rustdoc-depinfo](#rustdoc-depinfo) --- Use dep-info files in rustdoc rebuild detection.
 * `Cargo.toml` extensions
     * [Profile `rustflags` option](#profile-rustflags-option) --- Passed directly to rustc.
+    * [Profile `hint-mostly-unused` option](#profile-hint-mostly-unused-option) --- Hint that a dependency is mostly unused, to optimize compilation time.
     * [codegen-backend](#codegen-backend) --- Select the codegen backend used by rustc.
     * [per-package-target](#per-package-target) --- Sets the `--target` to use for each individual package.
     * [artifact dependencies](#artifact-dependencies) --- Allow build artifacts to be included into other build artifacts and build them for different targets.
     * [Profile `trim-paths` option](#profile-trim-paths-option) --- Control the sanitization of file paths in build outputs.
     * [`[lints.cargo]`](#lintscargo) --- Allows configuring lints for Cargo.
     * [path bases](#path-bases) --- Named base directories for path dependencies.
+    * [`unstable-editions`](#unstable-editions) --- Allows use of editions that are not yet stable.
 * Information and metadata
     * [Build-plan](#build-plan) --- Emits JSON information on which commands will be run.
     * [unit-graph](#unit-graph) --- Emits JSON for Cargo's internal graph structure.
@@ -125,6 +127,7 @@ Each new feature described below should explain how to use it.
     * [native-completions](#native-completions) --- Move cargo shell completions to native completions.
     * [warnings](#warnings) --- controls warning behavior; options for allowing or denying warnings.
     * [Package message format](#package-message-format) --- Message format for `cargo package`.
+    * [`fix-edition`](#fix-edition) --- A permanently unstable edition migration helper.
 
 ## allow-features
 
@@ -264,7 +267,7 @@ The path to where internal files used as part of the build are placed.
 
 This option supports path templating.
 
-Avaiable template variables:
+Available template variables:
 * `{workspace-root}` resolves to root of the current workspace.
 * `{cargo-cache-home}` resolves to `CARGO_HOME`
 * `{workspace-path-hash}` resolves to a hash of the manifest path
@@ -276,21 +279,6 @@ Avaiable template variables:
 
 The `-Zroot-dir` flag sets the root directory relative to which paths are printed.
 This affects both diagnostics and paths emitted by the `file!()` macro.
-
-## doctest-xcompile
-* Tracking Issue: [#7040](https://github.com/rust-lang/cargo/issues/7040)
-* Tracking Rustc Issue: [#64245](https://github.com/rust-lang/rust/issues/64245)
-
-This flag changes `cargo test`'s behavior when handling doctests when
-a target is passed. Currently, if a target is passed that is different
-from the host cargo will simply skip testing doctests. If this flag is
-present, cargo will continue as normal, passing the tests to doctest,
-while also passing it a `--target` option, as well as passing along
-information from `.cargo/config.toml`. See the rustc issue for more information.
-
-```sh
-cargo test --target foo -Zdoctest-xcompile
-```
 
 ## Build-plan
 * Tracking Issue: [#5579](https://github.com/rust-lang/cargo/issues/5579)
@@ -936,6 +924,25 @@ profile-rustflags = true
 [profile.release]
 rustflags = [ "-C", "..." ]
 ```
+
+## Profile `hint-mostly-unused` option
+* Tracking Issue: [#15644](https://github.com/rust-lang/cargo/issues/15644)
+
+This feature provides a new option in the `[profile]` section to enable the
+rustc `hint-mostly-unused` option. This is primarily useful to enable for
+specific dependencies:
+
+```toml
+[profile.dev.package.huge-mostly-unused-dependency]
+hint-mostly-unused = true
+```
+
+To enable this feature, pass `-Zprofile-hint-mostly-unused`. However, since
+this option is a hint, using it without passing `-Zprofile-hint-mostly-unused`
+will only warn and ignore the profile option. Versions of Cargo prior to the
+introduction of this feature will give an "unused manifest key" warning, but
+will otherwise function without erroring. This allows using the hint in a
+crate's `Cargo.toml` without mandating the use of a newer Cargo to build it.
 
 ## rustdoc-map
 * Tracking Issue: [#8296](https://github.com/rust-lang/cargo/issues/8296)
@@ -1816,10 +1823,10 @@ When in doubt, you can discuss this in [#14520](https://github.com/rust-lang/car
 
 ### How to use native-completions feature:
 - bash:
-  Add `source <(CARGO_COMPLETE=bash cargo +nightly)` to your .bashrc.
+  Add `source <(CARGO_COMPLETE=bash cargo +nightly)` to `~/.local/share/bash-completion/completions/cargo`.
 
 - zsh:
-  Add `source <(CARGO_COMPLETE=zsh cargo +nightly)` to your .zshrc.
+  Add `source <(CARGO_COMPLETE=zsh cargo +nightly)` to your `.zshrc`.
   
 - fish:
   Add `source (CARGO_COMPLETE=fish cargo +nightly | psub)` to `$XDG_CONFIG_HOME/fish/completions/cargo.fish`
@@ -1895,6 +1902,52 @@ for more information.
 The `-Z rustdoc-depinfo` flag leverages rustdoc's dep-info files to determine
 whether documentations are required to re-generate. This can be combined with
 `-Z checksum-freshness` to detect checksum changes rather than file mtime.
+
+## no-embed-metadata
+* Original Pull Request: [#15378](https://github.com/rust-lang/cargo/pull/15378)
+* Tracking Issue: [#15495](https://github.com/rust-lang/cargo/issues/15495)
+
+The default behavior of Rust is to embed crate metadata into `rlib` and `dylib` artifacts.
+Since Cargo also passes `--emit=metadata` to these intermediate artifacts to enable pipelined
+compilation, this means that a lot of metadata ends up being duplicated on disk, which wastes
+disk space in the target directory.
+
+This feature tells Cargo to pass the `-Zembed-metadata=no` flag to the compiler, which instructs
+it not to embed metadata within rlib and dylib artifacts. In this case, the metadata will only
+be stored in `.rmeta` files.
+
+```console
+cargo +nightly -Zno-embed-metadata build
+```
+
+## `unstable-editions`
+
+The `unstable-editions` value in the `cargo-features` list allows a `Cargo.toml` manifest to specify an edition that is not yet stable.
+
+```toml
+cargo-features = ["unstable-editions"]
+
+[package]
+name = "my-package"
+edition = "future"
+```
+
+When new editions are introduced, the `unstable-editions` feature is required until the edition is stabilized.
+
+The special "future" edition is a home for new features that are under development, and is permanently unstable. The "future" edition also has no new behavior by itself. Each change in the future edition requires an opt-in such as a `#![feature(...)]` attribute.
+
+## `fix-edition`
+
+`-Zfix-edition` is a permanently unstable flag to assist with testing edition migrations, particularly with the use of crater. It only works with the `cargo fix` subcommand. It takes two different forms:
+
+- `-Zfix-edition=start=$INITIAL` --- This form checks if the current edition is equal to the given number. If not, it exits with success (because we want to ignore older editions). If it is, then it runs the equivalent of `cargo check`. This is intended to be used with crater's "start" toolchain to set a baseline for the "before" toolchain.
+- `-Zfix-edition=end=$INITIAL,$NEXT` --- This form checks if the current edition is equal to the given `$INITIAL` value. If not, it exits with success. If it is, then it performs an edition migration to the edition specified in `$NEXT`. Afterwards, it will modify `Cargo.toml` to add the appropriate `cargo-features = ["unstable-edition"]`, update the `edition` field, and run the equivalent of `cargo check` to verify that the migration works on the new edition.
+
+For example:
+
+```console
+cargo +nightly fix -Zfix-edition=end=2024,future
+```
 
 # Stabilized and removed features
 
@@ -2153,3 +2206,21 @@ See [`cargo fix --edition`](../commands/cargo-fix.md) and [The Edition Guide](..
 
 Support for automatically deleting old files was stabilized in Rust 1.88.
 More information can be found in the [config chapter](config.md#cache).
+
+## doctest-xcompile
+
+Doctest cross-compiling is now unconditionally enabled starting in Rust 1.89. Running doctests with `cargo test` will now honor the `--target` flag.
+
+## compile-time-deps
+
+This permanently-unstable flag to only build proc-macros and build scripts (and their required dependencies),
+as well as run the build scripts.
+
+It is intended for use by tools like rust-analyzer and will never be stabilized.
+
+Example:
+
+```console
+cargo +nightly build --compile-time-deps -Z unstable-options
+cargo +nightly check --compile-time-deps --all-targets -Z unstable-options
+```

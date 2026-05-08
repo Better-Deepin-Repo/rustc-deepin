@@ -10,7 +10,7 @@ set -ex
 #export RUST_TEST_NOCAPTURE=1
 #export RUST_TEST_THREADS=1
 
-export RUSTFLAGS="${RUSTFLAGS} -D warnings -Z merge-functions=disabled "
+export RUSTFLAGS="${RUSTFLAGS} -D warnings -Z merge-functions=disabled -Z verify-llvm-ir"
 export HOST_RUSTFLAGS="${RUSTFLAGS}"
 export PROFILE="${PROFILE:="--profile=release"}"
 
@@ -44,9 +44,8 @@ case ${TARGET} in
         ;;
     # Some of our test dependencies use the deprecated `gcc` crates which
     # doesn't detect RISC-V compilers automatically, so do it manually here.
-    riscv64*)
+    riscv*)
         export RUSTFLAGS="${RUSTFLAGS} -Ctarget-feature=+zk,+zks,+zbb,+zbc"
-        export TARGET_CC="riscv64-linux-gnu-gcc"
         ;;
 esac
 
@@ -187,7 +186,7 @@ case "${TARGET}" in
             --cppcompiler "${TEST_CXX_COMPILER}" \
             --skip "${TEST_SKIP_INTRINSICS}" \
             --target "${TARGET}" \
-            --linker "${CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER}" \
+            --linker "${CARGO_TARGET_AARCH64_BE_UNKNOWN_LINUX_GNU_LINKER}" \
             --cxx-toolchain-dir "${AARCH64_BE_TOOLCHAIN}"
         ;;
      *)

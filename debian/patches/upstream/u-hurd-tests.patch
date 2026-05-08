@@ -21,7 +21,7 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  7 files changed, 13 insertions(+)
 
 diff --git a/src/tools/compiletest/src/directive-list.rs b/src/tools/compiletest/src/directive-list.rs
-index 5757e42..5614c33 100644
+index 2ecb4fc..bc00144 100644
 --- a/src/tools/compiletest/src/directive-list.rs
 +++ b/src/tools/compiletest/src/directive-list.rs
 @@ -66,6 +66,7 @@ const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
@@ -33,7 +33,7 @@ index 5757e42..5614c33 100644
      "ignore-i686-pc-windows-msvc",
      "ignore-illumos",
 diff --git a/src/tools/compiletest/src/header/tests.rs b/src/tools/compiletest/src/header/tests.rs
-index e7e5ff0..d1692f8 100644
+index 31b49b09..98e2043 100644
 --- a/src/tools/compiletest/src/header/tests.rs
 +++ b/src/tools/compiletest/src/header/tests.rs
 @@ -334,6 +334,7 @@ fn ignore_target() {

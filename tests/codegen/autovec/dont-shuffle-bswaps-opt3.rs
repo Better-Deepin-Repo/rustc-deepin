@@ -1,7 +1,9 @@
-//@ revisions: AARCH64 X86_64
+//@ revisions: AARCH64 X86_64 Z13
 //@ compile-flags: -Copt-level=3
 //@[AARCH64] only-aarch64
 //@[X86_64] only-x86_64
+//@[Z13] only-s390x
+//@[Z13] compile-flags: -Ctarget-cpu=z13
 
 #![crate_type = "lib"]
 #![no_std]

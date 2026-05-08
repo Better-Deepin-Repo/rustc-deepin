@@ -2,8 +2,7 @@
 //@ min-gdb-version: 13.0
 //@ compile-flags:-g
 //@ ignore-windows-gnu: #128973
-//Debian: broken, see https://github.com/rust-lang/rust/issues/129662#issuecomment-2313102689
-//@ ignore-gdb
+//@ ignore-aarch64-unknown-linux-gnu (gdb tries to read from 0x0; FIXME: #128973)
 
 // === GDB TESTS ===================================================================================
 

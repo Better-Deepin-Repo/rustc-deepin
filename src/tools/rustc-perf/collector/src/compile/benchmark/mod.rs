@@ -78,6 +78,10 @@ pub struct BenchmarkConfig {
     excluded_scenarios: HashSet<Scenario>,
 
     artifact: ArtifactType,
+
+    /// Which package from a workspace should be compiled
+    #[serde(default)]
+    package: Option<String>,
 }
 
 impl BenchmarkConfig {
@@ -224,6 +228,7 @@ impl Benchmark {
             touch_file: self.config.touch_file.clone(),
             jobserver: None,
             target,
+            workspace_package: self.config.package.clone(),
         }
     }
 
@@ -461,14 +466,22 @@ pub fn compile_benchmark_dir() -> PathBuf {
     PathBuf::from("collector/compile-benchmarks")
 }
 
+pub enum CompileBenchmarkFilter<'a> {
+    All,
+    /// Select benchmarks exactly matching the given benchmark names.
+    Exact(&'a [String]),
+    /// Select benchmarks matching the given prefixes/suffixes.
+    Fuzzy {
+        include: &'a [String],
+        exclude: &'a [String],
+        exclude_suffix: &'a [String],
+    },
+}
+
 pub fn get_compile_benchmarks(
     benchmark_dir: &Path,
-    include: &[String],
-    exclude: &[String],
-    exclude_suffix: &[String],
+    filter: CompileBenchmarkFilter<'_>,
 ) -> anyhow::Result<Vec<Benchmark>> {
-    let mut benchmarks = Vec::new();
-
     let mut paths = Vec::new();
     for entry in std::fs::read_dir(benchmark_dir)
         .with_context(|| format!("failed to list benchmark dir '{}'", benchmark_dir.display()))?
@@ -487,6 +500,40 @@ pub fn get_compile_benchmarks(
 
         paths.push((path, name));
     }
+
+    let mut benchmarks = match filter {
+        CompileBenchmarkFilter::All => paths
+            .into_iter()
+            .map(|(path, name)| Benchmark::new(name, path))
+            .collect::<anyhow::Result<Vec<Benchmark>>>()?,
+        CompileBenchmarkFilter::Exact(names) => paths
+            .into_iter()
+            .filter(|(_, name)| names.contains(name))
+            .map(|(path, name)| Benchmark::new(name, path))
+            .collect::<anyhow::Result<Vec<Benchmark>>>()?,
+        CompileBenchmarkFilter::Fuzzy {
+            include,
+            exclude,
+            exclude_suffix,
+        } => select_benchmarks_fuzzy(paths, include, exclude, exclude_suffix)?,
+    };
+
+    benchmarks.sort_by_key(|benchmark| benchmark.name.clone());
+
+    if benchmarks.is_empty() {
+        eprintln!("Warning: no benchmarks selected! Try less strict filters.");
+    }
+
+    Ok(benchmarks)
+}
+
+fn select_benchmarks_fuzzy(
+    paths: Vec<(PathBuf, String)>,
+    include: &[String],
+    exclude: &[String],
+    exclude_suffix: &[String],
+) -> anyhow::Result<Vec<Benchmark>> {
+    let mut benchmarks = Vec::new();
 
     // For each --include/--exclude entry, we count how many times it's used,
     // to enable `check_for_unused` below.
@@ -546,12 +593,6 @@ Expected zero or more entries or substrings from list: {:?}."#,
     check_for_unused("exclude", excludes)?;
     check_for_unused("exclude-suffix", exclude_suffixes)?;
 
-    benchmarks.sort_by_key(|benchmark| benchmark.name.clone());
-
-    if benchmarks.is_empty() {
-        eprintln!("Warning: no benchmarks selected! Try less strict filters.");
-    }
-
     Ok(benchmarks)
 }
 
@@ -573,17 +614,28 @@ fn substring_matches(
 
 #[cfg(test)]
 mod tests {
-    use crate::compile::benchmark::get_compile_benchmarks;
+    use crate::compile::benchmark::{get_compile_benchmarks, CompileBenchmarkFilter};
     use std::path::Path;
 
     #[test]
     fn check_compile_benchmarks() {
         // Check that we can deserialize all perf-config.json files in the compile benchmark
-        // directory.
+        // directory and that they have [workspace] in their Cargo.toml.
         let root = env!("CARGO_MANIFEST_DIR");
+        let benchmark_dir = Path::new(root).join("compile-benchmarks");
         let benchmarks =
-            get_compile_benchmarks(&Path::new(root).join("compile-benchmarks"), &[], &[], &[])
-                .unwrap();
+            get_compile_benchmarks(&benchmark_dir, CompileBenchmarkFilter::All).unwrap();
         assert!(!benchmarks.is_empty());
+
+        for benchmark in benchmarks {
+            let dir = benchmark_dir.join(&benchmark.name.0);
+            let cargo_toml = std::fs::read_to_string(&dir.join("Cargo.toml"))
+                .expect(&format!("Cannot read Cargo.toml of {}", benchmark.name));
+            assert!(
+                cargo_toml.contains("[workspace]"),
+                "{} does not contain [workspace] in its Cargo.toml",
+                benchmark.name
+            );
+        }
     }
 }

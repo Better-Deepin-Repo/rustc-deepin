@@ -8,14 +8,14 @@ Last-Update: 2023-05-17
 
 Forwarded: not-needed
 ---
- vendor/curl-sys-0.4.80+curl-8.12.1/Cargo.toml | 2 +-
+ vendor/curl-sys-0.4.82+curl-8.14.1/Cargo.toml | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
-diff --git a/vendor/curl-sys-0.4.80+curl-8.12.1/Cargo.toml b/vendor/curl-sys-0.4.80+curl-8.12.1/Cargo.toml
-index d65e183..bcc56c1 100644
---- a/vendor/curl-sys-0.4.80+curl-8.12.1/Cargo.toml
-+++ b/vendor/curl-sys-0.4.80+curl-8.12.1/Cargo.toml
-@@ -62,7 +62,7 @@ version = "0.3.3"
+diff --git a/vendor/curl-sys-0.4.82+curl-8.14.1/Cargo.toml b/vendor/curl-sys-0.4.82+curl-8.14.1/Cargo.toml
+index 2ffb0b3..89131cb 100644
+--- a/vendor/curl-sys-0.4.82+curl-8.14.1/Cargo.toml
++++ b/vendor/curl-sys-0.4.82+curl-8.14.1/Cargo.toml
+@@ -35,7 +35,7 @@ repository = "https://github.com/alexcrichton/curl-rust"
  [features]
  default = ["ssl"]
  force-system-lib-on-osx = []

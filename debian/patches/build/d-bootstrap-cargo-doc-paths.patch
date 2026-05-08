@@ -224,10 +224,10 @@ index 7440fe0..7e6ecd2 100644
  [crate type]: linkage.md
  [static C runtime]: linkage.md#static-and-dynamic-c-runtimes
 diff --git a/src/doc/reference/src/introduction.md b/src/doc/reference/src/introduction.md
-index 3e926ed..4a6e3a9 100644
+index eee0c4b..630358d 100644
 --- a/src/doc/reference/src/introduction.md
 +++ b/src/doc/reference/src/introduction.md
-@@ -122,10 +122,10 @@ And of course, if you see anything that is wrong or is non-normative but not spe
+@@ -130,10 +130,10 @@ And of course, if you see anything that is wrong or is non-normative but not spe
  [book]: ../book/index.html
  [github issues]: https://github.com/rust-lang/reference/issues
  [standard library]: std
@@ -256,10 +256,10 @@ index 5ce8f6f..6ac1557 100644
  To use this feature locally, you typically will use the `RUSTFLAGS` environment
  variable to specify flags to the compiler through Cargo. For example to compile
 diff --git a/src/doc/reference/src/procedural-macros.md b/src/doc/reference/src/procedural-macros.md
-index d47ce2a..22587c2 100644
+index 545b48c..38b8332 100644
 --- a/src/doc/reference/src/procedural-macros.md
 +++ b/src/doc/reference/src/procedural-macros.md
-@@ -373,7 +373,7 @@ Note that neither declarative nor procedural macros support doc comment tokens
+@@ -374,7 +374,7 @@ Note that neither declarative nor procedural macros support doc comment tokens
  their equivalent `#[doc = r"str"]` attributes when passed to macros.
  
  [Attribute macros]: #attribute-macros
@@ -267,7 +267,7 @@ index d47ce2a..22587c2 100644
 +[Cargo's build scripts]: ../../../cargo/book/reference/build-scripts.html
  [Derive macros]: #derive-macros
  [Function-like macros]: #function-like-procedural-macros
- [`Delimiter::None`]: proc_macro::Delimiter::None
+ [`$crate`]: macro.decl.hygiene.crate
 diff --git a/src/doc/rustc/src/linker-plugin-lto.md b/src/doc/rustc/src/linker-plugin-lto.md
 index ab95aa2..8023f33 100644
 --- a/src/doc/rustc/src/linker-plugin-lto.md

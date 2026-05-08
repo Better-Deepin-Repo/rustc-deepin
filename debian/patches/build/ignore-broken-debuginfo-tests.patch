@@ -9,24 +9,10 @@ Forwarded: yes
 
 Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
 ---
- tests/debuginfo/by-value-non-immediate-argument.rs | 2 ++
- tests/debuginfo/macro-stepping.rs                  | 3 ++-
- tests/debuginfo/method-on-enum.rs                  | 2 ++
- 3 files changed, 6 insertions(+), 1 deletion(-)
+ tests/debuginfo/macro-stepping.rs | 3 ++-
+ tests/debuginfo/method-on-enum.rs | 2 ++
+ 2 files changed, 4 insertions(+), 1 deletion(-)
 
-diff --git a/tests/debuginfo/by-value-non-immediate-argument.rs b/tests/debuginfo/by-value-non-immediate-argument.rs
-index 192f6ef..f0807ee 100644
---- a/tests/debuginfo/by-value-non-immediate-argument.rs
-+++ b/tests/debuginfo/by-value-non-immediate-argument.rs
-@@ -2,6 +2,8 @@
- //@ min-gdb-version: 13.0
- //@ compile-flags:-g
- //@ ignore-windows-gnu: #128973
-+//Debian: broken, see https://github.com/rust-lang/rust/issues/129662#issuecomment-2313102689
-+//@ ignore-gdb
- 
- // === GDB TESTS ===================================================================================
- 
 diff --git a/tests/debuginfo/macro-stepping.rs b/tests/debuginfo/macro-stepping.rs
 index 35bb6de..dec0eff 100644
 --- a/tests/debuginfo/macro-stepping.rs

@@ -9,9 +9,9 @@ in debian/rust-doc.links
 Forwarded: not-needed
 ---
  src/tools/linkchecker/main.rs                      | 28 +++++++-
- vendor/mdbook-0.4.49/src/book/init.rs              | 19 -----
- vendor/mdbook-0.4.49/src/front-end/mod.rs          | 26 -------
- vendor/mdbook-0.4.49/src/front-end/searcher/mod.rs |  2 -
+ vendor/mdbook-0.4.51/src/book/init.rs              | 19 -----
+ vendor/mdbook-0.4.51/src/front-end/mod.rs          | 26 -------
+ vendor/mdbook-0.4.51/src/front-end/searcher/mod.rs |  2 -
  .../src/front-end/templates/index.hbs              | 48 +------------
  .../src/front-end/templates/toc.html.hbs           |  3 +-
  .../src/renderer/html_handlebars/search.rs         |  2 -
@@ -71,10 +71,10 @@ index 84cba3f..4e11bd8 100644
                  if is_exception(file, &target_pretty_path) {
                      report.links_ignored_exception += 1;
                  } else {
-diff --git a/vendor/mdbook-0.4.49/src/book/init.rs b/vendor/mdbook-0.4.49/src/book/init.rs
+diff --git a/vendor/mdbook-0.4.51/src/book/init.rs b/vendor/mdbook-0.4.51/src/book/init.rs
 index faca1d0..c1a82a3 100644
---- a/vendor/mdbook-0.4.49/src/book/init.rs
-+++ b/vendor/mdbook-0.4.49/src/book/init.rs
+--- a/vendor/mdbook-0.4.51/src/book/init.rs
++++ b/vendor/mdbook-0.4.51/src/book/init.rs
 @@ -153,25 +153,6 @@ impl BookBuilder {
          let mut js = File::create(themedir.join("book.js"))?;
          js.write_all(theme::JS)?;
@@ -101,10 +101,10 @@ index faca1d0..c1a82a3 100644
          Ok(())
      }
  
-diff --git a/vendor/mdbook-0.4.49/src/front-end/mod.rs b/vendor/mdbook-0.4.49/src/front-end/mod.rs
+diff --git a/vendor/mdbook-0.4.51/src/front-end/mod.rs b/vendor/mdbook-0.4.51/src/front-end/mod.rs
 index 8fd09fc..566f745 100644
---- a/vendor/mdbook-0.4.49/src/front-end/mod.rs
-+++ b/vendor/mdbook-0.4.49/src/front-end/mod.rs
+--- a/vendor/mdbook-0.4.51/src/front-end/mod.rs
++++ b/vendor/mdbook-0.4.51/src/front-end/mod.rs
 @@ -1,9 +1,5 @@
  #![allow(missing_docs)]
  
@@ -180,20 +180,20 @@ index 8fd09fc..566f745 100644
          };
  
          assert_eq!(got, empty);
-diff --git a/vendor/mdbook-0.4.49/src/front-end/searcher/mod.rs b/vendor/mdbook-0.4.49/src/front-end/searcher/mod.rs
+diff --git a/vendor/mdbook-0.4.51/src/front-end/searcher/mod.rs b/vendor/mdbook-0.4.51/src/front-end/searcher/mod.rs
 index d5029db..59eda8a 100644
---- a/vendor/mdbook-0.4.49/src/front-end/searcher/mod.rs
-+++ b/vendor/mdbook-0.4.49/src/front-end/searcher/mod.rs
+--- a/vendor/mdbook-0.4.51/src/front-end/searcher/mod.rs
++++ b/vendor/mdbook-0.4.51/src/front-end/searcher/mod.rs
 @@ -2,5 +2,3 @@
  //! the "search" cargo feature is disabled.
  
  pub static JS: &[u8] = include_bytes!("searcher.js");
 -pub static MARK_JS: &[u8] = include_bytes!("mark.min.js");
 -pub static ELASTICLUNR_JS: &[u8] = include_bytes!("elasticlunr.min.js");
-diff --git a/vendor/mdbook-0.4.49/src/front-end/templates/index.hbs b/vendor/mdbook-0.4.49/src/front-end/templates/index.hbs
-index 98f3b88..cc1ead1 100644
---- a/vendor/mdbook-0.4.49/src/front-end/templates/index.hbs
-+++ b/vendor/mdbook-0.4.49/src/front-end/templates/index.hbs
+diff --git a/vendor/mdbook-0.4.51/src/front-end/templates/index.hbs b/vendor/mdbook-0.4.51/src/front-end/templates/index.hbs
+index d30be27..c66adb8 100644
+--- a/vendor/mdbook-0.4.51/src/front-end/templates/index.hbs
++++ b/vendor/mdbook-0.4.51/src/front-end/templates/index.hbs
 @@ -33,10 +33,7 @@
          {{/if}}
  
@@ -215,7 +215,7 @@ index 98f3b88..cc1ead1 100644
          {{/if}}
  
          <!-- Provide site root and default themes to javascript -->
-@@ -251,48 +248,7 @@
+@@ -264,48 +261,7 @@
          </script>
          {{/if}}
  
@@ -252,8 +252,8 @@ index 98f3b88..cc1ead1 100644
 -
 -        {{#if playground_js}}
 -        <script src="{{ resource "ace.js" }}"></script>
--        <script src="{{ resource "editor.js" }}"></script>
 -        <script src="{{ resource "mode-rust.js" }}"></script>
+-        <script src="{{ resource "editor.js" }}"></script>
 -        <script src="{{ resource "theme-dawn.js" }}"></script>
 -        <script src="{{ resource "theme-tomorrow_night.js" }}"></script>
 -        {{/if}}
@@ -264,10 +264,10 @@ index 98f3b88..cc1ead1 100644
          <script src="{{ resource "searcher.js" }}"></script>
          {{/if}}
  
-diff --git a/vendor/mdbook-0.4.49/src/front-end/templates/toc.html.hbs b/vendor/mdbook-0.4.49/src/front-end/templates/toc.html.hbs
+diff --git a/vendor/mdbook-0.4.51/src/front-end/templates/toc.html.hbs b/vendor/mdbook-0.4.51/src/front-end/templates/toc.html.hbs
 index 93dea25..2853ec6 100644
---- a/vendor/mdbook-0.4.49/src/front-end/templates/toc.html.hbs
-+++ b/vendor/mdbook-0.4.49/src/front-end/templates/toc.html.hbs
+--- a/vendor/mdbook-0.4.51/src/front-end/templates/toc.html.hbs
++++ b/vendor/mdbook-0.4.51/src/front-end/templates/toc.html.hbs
 @@ -28,9 +28,8 @@
          <link rel="stylesheet" href="{{ resource "css/print.css" }}" media="print">
          {{/if}}
@@ -279,10 +279,10 @@ index 93dea25..2853ec6 100644
          {{/if}}
          <!-- Custom theme stylesheets -->
          {{#each additional_css}}
-diff --git a/vendor/mdbook-0.4.49/src/renderer/html_handlebars/search.rs b/vendor/mdbook-0.4.49/src/renderer/html_handlebars/search.rs
-index fe2edd5..10908ac 100644
---- a/vendor/mdbook-0.4.49/src/renderer/html_handlebars/search.rs
-+++ b/vendor/mdbook-0.4.49/src/renderer/html_handlebars/search.rs
+diff --git a/vendor/mdbook-0.4.51/src/renderer/html_handlebars/search.rs b/vendor/mdbook-0.4.51/src/renderer/html_handlebars/search.rs
+index 01ef44a..fa8289b 100644
+--- a/vendor/mdbook-0.4.51/src/renderer/html_handlebars/search.rs
++++ b/vendor/mdbook-0.4.51/src/renderer/html_handlebars/search.rs
 @@ -75,8 +75,6 @@ pub fn create_files(
              .as_bytes(),
          );
@@ -292,11 +292,11 @@ index fe2edd5..10908ac 100644
          debug!("Copying search files ✓");
      }
  
-diff --git a/vendor/mdbook-0.4.49/src/renderer/html_handlebars/static_files.rs b/vendor/mdbook-0.4.49/src/renderer/html_handlebars/static_files.rs
-index 1ecf2d5..3263acb 100644
---- a/vendor/mdbook-0.4.49/src/renderer/html_handlebars/static_files.rs
-+++ b/vendor/mdbook-0.4.49/src/renderer/html_handlebars/static_files.rs
-@@ -6,12 +6,13 @@ use once_cell::sync::Lazy;
+diff --git a/vendor/mdbook-0.4.51/src/renderer/html_handlebars/static_files.rs b/vendor/mdbook-0.4.51/src/renderer/html_handlebars/static_files.rs
+index e1531f4..9d19e4a 100644
+--- a/vendor/mdbook-0.4.51/src/renderer/html_handlebars/static_files.rs
++++ b/vendor/mdbook-0.4.51/src/renderer/html_handlebars/static_files.rs
+@@ -5,12 +5,13 @@ use log::{debug, warn};
  use crate::config::HtmlConfig;
  use crate::errors::*;
  use crate::renderer::html_handlebars::helpers::resources::ResourceHelper;
@@ -309,8 +309,8 @@ index 1ecf2d5..3263acb 100644
  use std::fs::{self, File};
 +use std::os::unix::fs::symlink;
  use std::path::{Path, PathBuf};
+ use std::sync::LazyLock;
  
- /// Map static files to their final names and contents.
 @@ -59,72 +60,8 @@ impl StaticFiles {
          if let Some(contents) = &theme.favicon_svg {
              this.add_builtin("favicon.svg", contents);

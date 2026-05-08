@@ -15,10 +15,10 @@ output matching as a result
  2 files changed, 2 insertions(+), 15 deletions(-)
 
 diff --git a/compiler/rustc_codegen_cranelift/scripts/test_rustc_tests.sh b/compiler/rustc_codegen_cranelift/scripts/test_rustc_tests.sh
-index 95a4302..ca1257b 100755
+index 32c71f4..7e356b4 100755
 --- a/compiler/rustc_codegen_cranelift/scripts/test_rustc_tests.sh
 +++ b/compiler/rustc_codegen_cranelift/scripts/test_rustc_tests.sh
-@@ -150,20 +150,6 @@ rm tests/ui/process/process-panic-after-fork.rs # same
+@@ -151,20 +151,6 @@ rm tests/ui/process/process-panic-after-fork.rs # same
  cp ../dist/bin/rustdoc-clif ../dist/bin/rustdoc # some tests expect bin/rustdoc to exist
  
  cat <<EOF | git apply -
@@ -40,10 +40,10 @@ index 95a4302..ca1257b 100755
  index 073116933bd..c3e4578204d 100644
  --- a/src/tools/compiletest/src/runtest/run_make.rs
 diff --git a/tests/run-make/linker-warning/rmake.rs b/tests/run-make/linker-warning/rmake.rs
-index bc21739..2c8c48a 100644
+index 344b880..26d03fd 100644
 --- a/tests/run-make/linker-warning/rmake.rs
 +++ b/tests/run-make/linker-warning/rmake.rs
-@@ -55,7 +55,8 @@ fn main() {
+@@ -57,7 +57,8 @@ fn main() {
          diff()
              .expected_file("short-error.txt")
              .actual_text("(linker error)", out.stderr())

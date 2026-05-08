@@ -131,6 +131,7 @@ pub struct CargoProcess<'a> {
     pub touch_file: Option<String>,
     pub jobserver: Option<jobserver::Client>,
     pub target: Target,
+    pub workspace_package: Option<String>,
 }
 /// Returns an optional list of Performance CPU cores, if the system has P and E cores.
 /// This list *should* be in a format suitable for the `taskset` command.
@@ -258,6 +259,10 @@ impl<'a> CargoProcess<'a> {
 
     fn get_pkgid(&self, cwd: &Path) -> anyhow::Result<String> {
         let mut pkgid_cmd = self.base_command(cwd, "pkgid");
+        if let Some(package) = &self.workspace_package {
+            pkgid_cmd.arg("-p").arg(package);
+        }
+
         let out = command_output(&mut pkgid_cmd)
             .with_context(|| format!("failed to obtain pkgid in '{:?}'", cwd))?
             .stdout;
@@ -290,9 +295,10 @@ impl<'a> CargoProcess<'a> {
             let _guard = EnsureImmutableFile::new(
                 &self.cwd.join("Cargo.lock"),
                 self.processor_name.0.clone(),
-            )?;
+            )
+            .context("cannot resolve Cargo.lock")?;
 
-            // Get the subcommand. If it's not `rustc` it must should be a
+            // Get the subcommand. If it's not `rustc` it should be a
             // subcommand that itself invokes `rustc` (so that the `FAKE_RUSTC`
             // machinery works).
             let cargo_subcommand =

@@ -1,3 +1,4 @@
+r[destructors]
 # Destructors
 
 r[destructors.intro]
@@ -209,6 +210,7 @@ smallest scope that contains the expression and is one of the following:
 * The body expression for a match arm.
 * Each operand of a [lazy boolean expression].
 * The pattern-matching condition(s) and consequent body of [`if`] ([destructors.scope.temporary.edition2024]).
+* The pattern-matching condition and loop body of [`while`].
 * The entirety of the tail expression of a block ([destructors.scope.temporary.edition2024]).
 
 > [!NOTE]
@@ -221,6 +223,7 @@ r[destructors.scope.temporary.edition2024]
 Some examples:
 
 ```rust
+# #![allow(irrefutable_let_patterns)]
 # struct PrintOnDrop(&'static str);
 # impl Drop for PrintOnDrop {
 #     fn drop(&mut self) {
@@ -246,6 +249,13 @@ else {
     PrintOnDrop("if let else").0
     // `if let else` dropped here
 };
+
+while let x = PrintOnDrop("while let scrutinee").0 {
+    PrintOnDrop("while let loop body").0;
+    break;
+    // `while let loop body` dropped here.
+    // `while let scrutinee` dropped here.
+}
 
 // Dropped before the first ||
 (PrintOnDrop("first operand").0 == ""
@@ -373,11 +383,11 @@ expression which is one of the following:
 * The operand(s) of an extending [array][array expression], [cast][cast
   expression], [braced struct][struct expression], or [tuple][tuple expression]
   expression.
+* The arguments to an extending [tuple struct] or [tuple variant] constructor expression.
 * The final expression of any extending [block expression].
 
-So the borrow expressions in `&mut 0`, `(&1, &mut 2)`, and `Some { 0: &mut 3 }`
-are all extending expressions. The borrows in `&0 + &1` and `Some(&mut 0)` are
-not: the latter is syntactically a function call expression.
+So the borrow expressions in `&mut 0`, `(&1, &mut 2)`, and `Some(&mut 3)`
+are all extending expressions. The borrows in `&0 + &1` and `f(&mut 0)` are not.
 
 The operand of any extending borrow expression has its temporary scope
 extended.
@@ -395,7 +405,7 @@ Here are some examples where expressions have extended temporary scopes:
 let x = &temp();
 let x = &temp() as &dyn Send;
 let x = (&*&temp(),);
-let x = { [Some { 0: &temp(), }] };
+let x = { [Some(&temp()) ] };
 let ref x = temp();
 let ref x = *&temp();
 # x;
@@ -410,7 +420,7 @@ Here are some examples where expressions don't have extended temporary scopes:
 // The temporary that stores the result of `temp()` only lives until the
 // end of the let statement in these cases.
 
-let x = Some(&temp());         // ERROR
+let x = std::convert::identity(&temp()); // ERROR
 let x = (&temp()).use_temp();  // ERROR
 # x;
 ```
@@ -467,6 +477,8 @@ There is one additional case to be aware of: when a panic reaches a [non-unwindi
 [struct pattern]: patterns.md#struct-patterns
 [tuple pattern]: patterns.md#tuple-patterns
 [tuple struct pattern]: patterns.md#tuple-struct-patterns
+[tuple struct]: type.struct.tuple
+[tuple variant]: type.enum.declaration
 
 [array expression]: expressions/array-expr.md#array-expressions
 [block expression]: expressions/block-expr.md

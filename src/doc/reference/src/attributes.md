@@ -110,12 +110,12 @@ r[attributes.meta]
 ## Meta Item Attribute Syntax
 
 r[attributes.meta.intro]
-A "meta item" is the syntax used for the _Attr_ rule by most [built-in
+A "meta item" is the syntax used for the [Attr] rule by most [built-in
 attributes]. It has the following grammar:
 
 r[attributes.meta.syntax]
 ```grammar,attributes
-MetaItem ->
+@root MetaItem ->
       SimplePath
     | SimplePath `=` Expression
     | SimplePath `(` MetaSeq? `)`
@@ -185,11 +185,11 @@ Some examples of meta items are:
 
 Style | Example
 ------|--------
-_MetaWord_ | `no_std`
-_MetaNameValueStr_ | `doc = "example"`
-_MetaListPaths_ | `allow(unused, clippy::inline_always)`
-_MetaListIdents_ | `macro_use(foo, bar)`
-_MetaListNameValueStr_ | `link(name = "CoreFoundation", kind = "framework")`
+[MetaWord] | `no_std`
+[MetaNameValueStr] | `doc = "example"`
+[MetaListPaths] | `allow(unused, clippy::inline_always)`
+[MetaListIdents] | `macro_use(foo, bar)`
+[MetaListNameValueStr] | `link(name = "CoreFoundation", kind = "framework")`
 
 r[attributes.activity]
 ## Active and inert attributes
@@ -291,7 +291,7 @@ The following is an index of all built-in attributes.
 - Code generation
   - [`inline`] --- Hint to inline code.
   - [`cold`] --- Hint that a function is unlikely to be called.
-  - [`naked`] - Prevent the compiler from emitting a function prologue.
+  - [`naked`] --- Prevent the compiler from emitting a function prologue.
   - [`no_builtins`] --- Disables use of certain built-in functions.
   - [`target_feature`] --- Configure platform-specific code generation.
   - [`track_caller`] --- Pass the parent call location to `std::panic::Location::caller()`.

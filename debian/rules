@@ -361,6 +361,7 @@ ifneq (,$(filter $(DEB_BUILD_ARCH), armel loong64 mips mips64el powerpc powerpcs
   FAILURES_ALLOWED = 180
 endif
 FAILED_TESTS = grep "FAILED\|^command did not execute successfully" $(TEST_LOG) | grep -v '^test result: FAILED' | grep -v 'FAILED (allowed)'
+FAILED_TEST_COMMANDS = grep "^[0-9]\+ command(s) did not execute successfully" $(TEST_LOG)
 # ignore debuginfo failures on armhf due to regression in GDB 11.2
 # https://sourceware.org/bugzilla/show_bug.cgi?id=29272
 ifneq (,$(filter $(DEB_BUILD_ARCH), armhf))
@@ -376,17 +377,23 @@ override_dh_auto_test-arch:
 	done
 ifeq (, $(filter nocheck,$(DEB_BUILD_PROFILES)))
 ifeq (, $(filter nocheck,$(DEB_BUILD_OPTIONS)))
-	{ $(RUSTBUILD_TEST) $(RUSTBUILD_FLAGS) $(RUSTBUILD_TEST_FLAGS); echo $$?; } | tee -a $(TEST_LOG)
+	{ $(RUSTBUILD_TEST) $(RUSTBUILD_FLAGS) $(RUSTBUILD_TEST_FLAGS) 2>&1; echo $$?; } | tee -a $(TEST_LOG)
+ifneq (,$(filter $(DEB_BUILD_ARCH), x32))
+	echo "Skipping test suite analysis on x32.."
+else
 	# test that the log has at least 1 pass, to prevent e.g. #57709
 	grep -l "^test .* \.\.\. ok$$" $(TEST_LOG)
 	echo "==== Debian rustc test report ===="; \
 	echo "Specific test failures:"; \
 	$(FAILED_TESTS); \
+	echo "Failed test invocations:"; \
+	$(FAILED_TEST_COMMANDS); \
 	num_failures=$$($(FAILED_TESTS) | wc -l); \
+	num_invocations=$$($(FAILED_TEST_COMMANDS)); \
 	exit_code=$$(tail -n1 $(TEST_LOG)); \
 	echo "Summary: exit code $$exit_code, counted $$num_failures tests failed."; \
 	echo -n "$(FAILURES_ALLOWED) maximum allowed. "; \
-	if test "$$num_failures" -eq 0 -a "$$exit_code" -ne 0; then \
+	if test "$$num_failures" -eq 0 -a "$$exit_code" -ne 0 -a -z "$$num_invocations"; then \
 	  echo "Aborting just in case, because we missed counting some test failures."; \
 	  echo "This could happen if we failed to build the tests, or if the testsuite runner is buggy."; \
 	  false; \
@@ -400,6 +407,7 @@ ifeq (, $(filter nocheck,$(DEB_BUILD_OPTIONS)))
 # don't continue if RUSTBUILD_TEST_FLAGS is non-empty
 	test -z "$(RUSTBUILD_TEST_FLAGS)"
 # don't run windows tests yet
+endif
 endif
 endif
 

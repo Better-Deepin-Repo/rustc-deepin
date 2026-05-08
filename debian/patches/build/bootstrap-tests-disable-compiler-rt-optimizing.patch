@@ -16,10 +16,10 @@ Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
  1 file changed, 2 insertions(+)
 
 diff --git a/src/bootstrap/src/core/config/config.rs b/src/bootstrap/src/core/config/config.rs
-index 65a3e76..80c954b 100644
+index d3393af..0c4ef63 100644
 --- a/src/bootstrap/src/core/config/config.rs
 +++ b/src/bootstrap/src/core/config/config.rs
-@@ -1637,6 +1637,8 @@ impl Config {
+@@ -595,6 +595,8 @@ impl Config {
              let build = toml.build.get_or_insert_with(Default::default);
              build.rustc = build.rustc.take().or(std::env::var_os("RUSTC").map(|p| p.into()));
              build.cargo = build.cargo.take().or(std::env::var_os("CARGO").map(|p| p.into()));
@@ -27,4 +27,4 @@ index 65a3e76..80c954b 100644
 +            build.optimized_compiler_builtins = Some(false);
          }
  
-         if GitInfo::new(false, &config.src).is_from_tarball() && toml.profile.is_none() {
+         if config.git_info(false, &config.src).is_from_tarball() && toml.profile.is_none() {

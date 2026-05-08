@@ -71,7 +71,7 @@ pub fn assert(shim_addr: usize, fnname: &str, expected: &str) {
     //eprintln!("  function: {:?}", function);
 
     let mut instrs = &function.instrs[..];
-    while instrs.last().map_or(false, |s| s == "nop" || s == "int3") {
+    while instrs.last().is_some_and(|s| s == "nop" || s == "int3") {
         instrs = &instrs[..instrs.len() - 1];
     }
 
@@ -164,7 +164,15 @@ pub fn assert(shim_addr: usize, fnname: &str, expected: &str) {
                 // Original limit was 20 instructions, but ARM DSP Intrinsics
                 // are exactly 20 instructions long. So, bump the limit to 22
                 // instead of adding here a long list of exceptions.
-                _ => 22,
+                _ => {
+                    // aarch64_be may add reverse instructions which increases
+                    // the number of instructions generated.
+                    if cfg!(all(target_endian = "big", target_arch = "aarch64")) {
+                        32
+                    } else {
+                        22
+                    }
+                }
             },
             |v| v.parse().unwrap(),
         );

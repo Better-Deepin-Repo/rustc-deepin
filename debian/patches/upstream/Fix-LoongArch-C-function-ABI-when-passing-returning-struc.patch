@@ -1,0 +1,554 @@
+From: WANG Rui <wangrui@loongson.cn>
+Date: Thu, 21 Aug 2025 14:15:08 +0800
+Subject: Fix LoongArch C function ABI when passing/returning structs
+ containing floats
+
+(cherry picked from commit b65a177b63237398dc3f49cb5598b16bb9318136)
+
+Forwarded: not-needed
+---
+ compiler/rustc_target/src/callconv/loongarch.rs    | 137 ++++++++++++++++-----
+ tests/assembly/loongarch-float-struct-abi.rs       | 134 ++++++++++++++++++++
+ tests/codegen/cast-target-abi.rs                   |  52 ++++++--
+ .../loongarch-abi/cast-local-large-enough.rs       |  44 +++++++
+ 4 files changed, 327 insertions(+), 40 deletions(-)
+ create mode 100644 tests/assembly/loongarch-float-struct-abi.rs
+ create mode 100644 tests/codegen/loongarch-abi/cast-local-large-enough.rs
+
+diff --git a/compiler/rustc_target/src/callconv/loongarch.rs b/compiler/rustc_target/src/callconv/loongarch.rs
+index c779720..76f939f 100644
+--- a/compiler/rustc_target/src/callconv/loongarch.rs
++++ b/compiler/rustc_target/src/callconv/loongarch.rs
+@@ -8,16 +8,16 @@ use crate::spec::HasTargetSpec;
+ 
+ #[derive(Copy, Clone)]
+ enum RegPassKind {
+-    Float(Reg),
+-    Integer(Reg),
++    Float { offset_from_start: Size, ty: Reg },
++    Integer { offset_from_start: Size, ty: Reg },
+     Unknown,
+ }
+ 
+ #[derive(Copy, Clone)]
+ enum FloatConv {
+-    FloatPair(Reg, Reg),
++    FloatPair { first_ty: Reg, second_ty_offset_from_start: Size, second_ty: Reg },
+     Float(Reg),
+-    MixedPair(Reg, Reg),
++    MixedPair { first_ty: Reg, second_ty_offset_from_start: Size, second_ty: Reg },
+ }
+ 
+ #[derive(Copy, Clone)]
+@@ -37,6 +37,7 @@ fn should_use_fp_conv_helper<'a, Ty, C>(
+     flen: u64,
+     field1_kind: &mut RegPassKind,
+     field2_kind: &mut RegPassKind,
++    offset_from_start: Size,
+ ) -> Result<(), CannotUseFpConv>
+ where
+     Ty: TyAbiInterface<'a, C> + Copy,
+@@ -49,16 +50,16 @@ where
+                 }
+                 match (*field1_kind, *field2_kind) {
+                     (RegPassKind::Unknown, _) => {
+-                        *field1_kind = RegPassKind::Integer(Reg {
+-                            kind: RegKind::Integer,
+-                            size: arg_layout.size,
+-                        });
++                        *field1_kind = RegPassKind::Integer {
++                            offset_from_start,
++                            ty: Reg { kind: RegKind::Integer, size: arg_layout.size },
++                        };
+                     }
+-                    (RegPassKind::Float(_), RegPassKind::Unknown) => {
+-                        *field2_kind = RegPassKind::Integer(Reg {
+-                            kind: RegKind::Integer,
+-                            size: arg_layout.size,
+-                        });
++                    (RegPassKind::Float { .. }, RegPassKind::Unknown) => {
++                        *field2_kind = RegPassKind::Integer {
++                            offset_from_start,
++                            ty: Reg { kind: RegKind::Integer, size: arg_layout.size },
++                        };
+                     }
+                     _ => return Err(CannotUseFpConv),
+                 }
+@@ -69,12 +70,16 @@ where
+                 }
+                 match (*field1_kind, *field2_kind) {
+                     (RegPassKind::Unknown, _) => {
+-                        *field1_kind =
+-                            RegPassKind::Float(Reg { kind: RegKind::Float, size: arg_layout.size });
++                        *field1_kind = RegPassKind::Float {
++                            offset_from_start,
++                            ty: Reg { kind: RegKind::Float, size: arg_layout.size },
++                        };
+                     }
+                     (_, RegPassKind::Unknown) => {
+-                        *field2_kind =
+-                            RegPassKind::Float(Reg { kind: RegKind::Float, size: arg_layout.size });
++                        *field2_kind = RegPassKind::Float {
++                            offset_from_start,
++                            ty: Reg { kind: RegKind::Float, size: arg_layout.size },
++                        };
+                     }
+                     _ => return Err(CannotUseFpConv),
+                 }
+@@ -96,13 +101,14 @@ where
+                             flen,
+                             field1_kind,
+                             field2_kind,
++                            offset_from_start,
+                         );
+                     }
+                     return Err(CannotUseFpConv);
+                 }
+             }
+             FieldsShape::Array { count, .. } => {
+-                for _ in 0..count {
++                for i in 0..count {
+                     let elem_layout = arg_layout.field(cx, 0);
+                     should_use_fp_conv_helper(
+                         cx,
+@@ -111,6 +117,7 @@ where
+                         flen,
+                         field1_kind,
+                         field2_kind,
++                        offset_from_start + elem_layout.size * i,
+                     )?;
+                 }
+             }
+@@ -121,7 +128,15 @@ where
+                 }
+                 for i in arg_layout.fields.index_by_increasing_offset() {
+                     let field = arg_layout.field(cx, i);
+-                    should_use_fp_conv_helper(cx, &field, xlen, flen, field1_kind, field2_kind)?;
++                    should_use_fp_conv_helper(
++                        cx,
++                        &field,
++                        xlen,
++                        flen,
++                        field1_kind,
++                        field2_kind,
++                        offset_from_start + arg_layout.fields.offset(i),
++                    )?;
+                 }
+             }
+         },
+@@ -140,14 +155,52 @@ where
+ {
+     let mut field1_kind = RegPassKind::Unknown;
+     let mut field2_kind = RegPassKind::Unknown;
+-    if should_use_fp_conv_helper(cx, arg, xlen, flen, &mut field1_kind, &mut field2_kind).is_err() {
++    if should_use_fp_conv_helper(
++        cx,
++        arg,
++        xlen,
++        flen,
++        &mut field1_kind,
++        &mut field2_kind,
++        Size::ZERO,
++    )
++    .is_err()
++    {
+         return None;
+     }
+     match (field1_kind, field2_kind) {
+-        (RegPassKind::Integer(l), RegPassKind::Float(r)) => Some(FloatConv::MixedPair(l, r)),
+-        (RegPassKind::Float(l), RegPassKind::Integer(r)) => Some(FloatConv::MixedPair(l, r)),
+-        (RegPassKind::Float(l), RegPassKind::Float(r)) => Some(FloatConv::FloatPair(l, r)),
+-        (RegPassKind::Float(f), RegPassKind::Unknown) => Some(FloatConv::Float(f)),
++        (
++            RegPassKind::Integer { offset_from_start, .. }
++            | RegPassKind::Float { offset_from_start, .. },
++            _,
++        ) if offset_from_start != Size::ZERO => {
++            panic!("type {:?} has a first field with non-zero offset {offset_from_start:?}", arg.ty)
++        }
++        (
++            RegPassKind::Integer { ty: first_ty, .. },
++            RegPassKind::Float { offset_from_start, ty: second_ty },
++        ) => Some(FloatConv::MixedPair {
++            first_ty,
++            second_ty_offset_from_start: offset_from_start,
++            second_ty,
++        }),
++        (
++            RegPassKind::Float { ty: first_ty, .. },
++            RegPassKind::Integer { offset_from_start, ty: second_ty },
++        ) => Some(FloatConv::MixedPair {
++            first_ty,
++            second_ty_offset_from_start: offset_from_start,
++            second_ty,
++        }),
++        (
++            RegPassKind::Float { ty: first_ty, .. },
++            RegPassKind::Float { offset_from_start, ty: second_ty },
++        ) => Some(FloatConv::FloatPair {
++            first_ty,
++            second_ty_offset_from_start: offset_from_start,
++            second_ty,
++        }),
++        (RegPassKind::Float { ty, .. }, RegPassKind::Unknown) => Some(FloatConv::Float(ty)),
+         _ => None,
+     }
+ }
+@@ -165,11 +218,19 @@ where
+             FloatConv::Float(f) => {
+                 arg.cast_to(f);
+             }
+-            FloatConv::FloatPair(l, r) => {
+-                arg.cast_to(CastTarget::pair(l, r));
++            FloatConv::FloatPair { first_ty, second_ty_offset_from_start, second_ty } => {
++                arg.cast_to(CastTarget::offset_pair(
++                    first_ty,
++                    second_ty_offset_from_start,
++                    second_ty,
++                ));
+             }
+-            FloatConv::MixedPair(l, r) => {
+-                arg.cast_to(CastTarget::pair(l, r));
++            FloatConv::MixedPair { first_ty, second_ty_offset_from_start, second_ty } => {
++                arg.cast_to(CastTarget::offset_pair(
++                    first_ty,
++                    second_ty_offset_from_start,
++                    second_ty,
++                ));
+             }
+         }
+         return false;
+@@ -233,15 +294,27 @@ fn classify_arg<'a, Ty, C>(
+                 arg.cast_to(f);
+                 return;
+             }
+-            Some(FloatConv::FloatPair(l, r)) if *avail_fprs >= 2 => {
++            Some(FloatConv::FloatPair { first_ty, second_ty_offset_from_start, second_ty })
++                if *avail_fprs >= 2 =>
++            {
+                 *avail_fprs -= 2;
+-                arg.cast_to(CastTarget::pair(l, r));
++                arg.cast_to(CastTarget::offset_pair(
++                    first_ty,
++                    second_ty_offset_from_start,
++                    second_ty,
++                ));
+                 return;
+             }
+-            Some(FloatConv::MixedPair(l, r)) if *avail_fprs >= 1 && *avail_gprs >= 1 => {
++            Some(FloatConv::MixedPair { first_ty, second_ty_offset_from_start, second_ty })
++                if *avail_fprs >= 1 && *avail_gprs >= 1 =>
++            {
+                 *avail_gprs -= 1;
+                 *avail_fprs -= 1;
+-                arg.cast_to(CastTarget::pair(l, r));
++                arg.cast_to(CastTarget::offset_pair(
++                    first_ty,
++                    second_ty_offset_from_start,
++                    second_ty,
++                ));
+                 return;
+             }
+             _ => (),
+diff --git a/tests/assembly/loongarch-float-struct-abi.rs b/tests/assembly/loongarch-float-struct-abi.rs
+new file mode 100644
+index 0000000..4991004
+--- /dev/null
++++ b/tests/assembly/loongarch-float-struct-abi.rs
+@@ -0,0 +1,134 @@
++//@ add-core-stubs
++//@ assembly-output: emit-asm
++//@ compile-flags: -Copt-level=3 --target loongarch64-unknown-linux-gnu
++//@ needs-llvm-components: loongarch
++
++#![feature(no_core, lang_items)]
++#![no_std]
++#![no_core]
++#![crate_type = "lib"]
++
++extern crate minicore;
++use minicore::*;
++
++#[repr(C, align(64))]
++struct Aligned(f64);
++
++#[repr(C)]
++struct Padded(u8, Aligned);
++
++#[repr(C, packed)]
++struct Packed(u8, f32);
++
++impl Copy for Aligned {}
++impl Copy for Padded {}
++impl Copy for Packed {}
++
++extern "C" {
++    fn take_padded(x: Padded);
++    fn get_padded() -> Padded;
++    fn take_packed(x: Packed);
++    fn get_packed() -> Packed;
++}
++
++// CHECK-LABEL: pass_padded
++#[unsafe(no_mangle)]
++extern "C" fn pass_padded(out: &mut Padded, x: Padded) {
++    // CHECK: st.b $a1, $a0, 0
++    // CHECK-NEXT: fst.d $fa0, $a0, 64
++    // CHECK-NEXT: ret
++    *out = x;
++}
++
++// CHECK-LABEL: ret_padded
++#[unsafe(no_mangle)]
++extern "C" fn ret_padded(x: &Padded) -> Padded {
++    // CHECK: fld.d $fa0, $a0, 64
++    // CHECK-NEXT: ld.b $a0, $a0, 0
++    // CHECK-NEXT: ret
++    *x
++}
++
++#[unsafe(no_mangle)]
++extern "C" fn call_padded(x: &Padded) {
++    // CHECK: fld.d $fa0, $a0, 64
++    // CHECK-NEXT: ld.b $a0, $a0, 0
++    // CHECK-NEXT: pcaddu18i $t8, %call36(take_padded)
++    // CHECK-NEXT: jr $t8
++    unsafe {
++        take_padded(*x);
++    }
++}
++
++#[unsafe(no_mangle)]
++extern "C" fn receive_padded(out: &mut Padded) {
++    // CHECK: addi.d $sp, $sp, -16
++    // CHECK-NEXT: .cfi_def_cfa_offset 16
++    // CHECK-NEXT: st.d $ra, $sp, [[#%d,RA_SPILL:]]
++    // CHECK-NEXT: st.d [[TEMP:.*]], $sp, [[#%d,TEMP_SPILL:]]
++    // CHECK-NEXT: .cfi_offset 1, [[#%d,RA_SPILL - 16]]
++    // CHECK-NEXT: .cfi_offset [[#%d,TEMP_NUM:]], [[#%d,TEMP_SPILL - 16]]
++    // CHECK-NEXT: move [[TEMP]], $a0
++    // CHECK-NEXT: pcaddu18i $ra, %call36(get_padded)
++    // CHECK-NEXT: jirl $ra, $ra, 0
++    // CHECK-NEXT: st.b $a0, [[TEMP]], 0
++    // CHECK-NEXT: fst.d $fa0, [[TEMP]], 64
++    // CHECK-NEXT: ld.d [[TEMP]], $sp, [[#%d,TEMP_SPILL]]
++    // CHECK-NEXT: ld.d $ra, $sp, [[#%d,RA_SPILL]]
++    // CHECK: addi.d $sp, $sp, 16
++    // CHECK: ret
++    unsafe {
++        *out = get_padded();
++    }
++}
++
++// CHECK-LABEL: pass_packed
++#[unsafe(no_mangle)]
++extern "C" fn pass_packed(out: &mut Packed, x: Packed) {
++    // CHECK: st.b $a1, $a0, 0
++    // CHECK-NEXT: fst.s $fa0, $a0, 1
++    // CHECK-NEXT: ret
++    *out = x;
++}
++
++// CHECK-LABEL: ret_packed
++#[unsafe(no_mangle)]
++extern "C" fn ret_packed(x: &Packed) -> Packed {
++    // CHECK: fld.s $fa0, $a0, 1
++    // CHECK-NEXT: ld.b $a0, $a0, 0
++    // CHECK-NEXT: ret
++    *x
++}
++
++#[unsafe(no_mangle)]
++extern "C" fn call_packed(x: &Packed) {
++    // CHECK: fld.s $fa0, $a0, 1
++    // CHECK-NEXT: ld.b $a0, $a0, 0
++    // CHECK-NEXT: pcaddu18i $t8, %call36(take_packed)
++    // CHECK-NEXT: jr $t8
++    unsafe {
++        take_packed(*x);
++    }
++}
++
++#[unsafe(no_mangle)]
++extern "C" fn receive_packed(out: &mut Packed) {
++    // CHECK: addi.d $sp, $sp, -16
++    // CHECK-NEXT: .cfi_def_cfa_offset 16
++    // CHECK-NEXT: st.d $ra, $sp, [[#%d,RA_SPILL:]]
++    // CHECK-NEXT: st.d [[TEMP:.*]], $sp, [[#%d,TEMP_SPILL:]]
++    // CHECK-NEXT: .cfi_offset 1, [[#%d,RA_SPILL - 16]]
++    // CHECK-NEXT: .cfi_offset [[#%d,TEMP_NUM:]], [[#%d,TEMP_SPILL - 16]]
++    // CHECK-NEXT: move [[TEMP]], $a0
++    // CHECK-NEXT: pcaddu18i $ra, %call36(get_packed)
++    // CHECK-NEXT: jirl $ra, $ra, 0
++    // CHECK-NEXT: st.b $a0, [[TEMP]], 0
++    // CHECK-NEXT: fst.s $fa0, [[TEMP]], 1
++    // CHECK-NEXT: ld.d [[TEMP]], $sp, [[#%d,TEMP_SPILL]]
++    // CHECK-NEXT: ld.d $ra, $sp, [[#%d,RA_SPILL]]
++    // CHECK: addi.d $sp, $sp, 16
++    // CHECK: ret
++    unsafe {
++        *out = get_packed();
++    }
++}
+diff --git a/tests/codegen/cast-target-abi.rs b/tests/codegen/cast-target-abi.rs
+index cbd49e2..af3fc5b 100644
+--- a/tests/codegen/cast-target-abi.rs
++++ b/tests/codegen/cast-target-abi.rs
+@@ -171,7 +171,15 @@ pub extern "C" fn receives_doubledouble(x: DoubleDouble) {
+ 
+     // CHECK: [[RUST_ALLOCA:%.+]] = alloca [16 x i8], align [[RUST_ALIGN:8]]
+ 
+-    // CHECK: store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // aarch64: store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_VALUE_0:%.+]] = extractvalue [[ABI_TYPE]] [[ABI_VALUE:%.+]], 0
++    // loongarch64: [[ABI_VALUE_1:%.+]] = extractvalue [[ABI_TYPE]] [[ABI_VALUE:%.+]], 1
++    // loongarch64: store double [[ABI_VALUE_0]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_ALLOCA_1:%.+]] = getelementptr inbounds i8, ptr [[ABI_ALLOCA]], i64 8
++    // loongarch64: store double [[ABI_VALUE_1]], ptr [[ABI_ALLOCA_1]], align [[ABI_ALIGN]]
++    // powerpc64: store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // sparc64: store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // x86_64: store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+ 
+     // CHECK: call void @llvm.memcpy.{{.+}}(ptr align [[RUST_ALIGN]] [[RUST_ALLOCA]], ptr align [[ABI_ALIGN]] [[ABI_ALLOCA]], i64 16, i1 false)
+ }
+@@ -190,7 +198,11 @@ pub extern "C" fn returns_doubledouble() -> DoubleDouble {
+     // x86_64:      [[ABI_ALLOCA:%.+]] = alloca [16 x i8], align [[ABI_ALIGN:8]]
+ 
+     // aarch64:     [[ABI_VALUE:%.+]] = load [[ABI_TYPE:\[2 x double\]]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+-    // loongarch64: [[ABI_VALUE:%.+]] = load [[ABI_TYPE:{ double, double }]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_VALUE_0:%.+]] = load double, ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_ALLOCA_1:%.+]] = getelementptr inbounds i8, ptr [[ABI_ALLOCA]], i64 8
++    // loongarch64: [[ABI_VALUE_1:%.+]] = load double, ptr [[ABI_ALLOCA_1]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_VALUE_2:%.+]] = insertvalue [[ABI_TYPE:{ double, double }]] poison, double [[ABI_VALUE_0]], 0
++    // loongarch64: [[ABI_VALUE:%.+]] = insertvalue { double, double } [[ABI_VALUE_2]], double [[ABI_VALUE_1]], 1
+     // sparc64:     [[ABI_VALUE:%.+]] = load [[ABI_TYPE:{ double, double }]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+     // x86_64:      [[ABI_VALUE:%.+]] = load [[ABI_TYPE:{ double, double }]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+ 
+@@ -269,7 +281,11 @@ pub extern "C" fn receives_doublefloat(x: DoubleFloat) {
+     // x86_64:      [[RUST_ALLOCA:%.+]] = alloca [16 x i8], align [[RUST_ALIGN:8]]
+ 
+     // aarch64:     store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+-    // loongarch64: store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_VALUE_0:%.+]] = extractvalue { double, float } [[ABI_VALUE]], 0
++    // loongarch64: [[ABI_VALUE_1:%.+]] = extractvalue { double, float } [[ABI_VALUE]], 1
++    // loongarch64: store double [[ABI_VALUE_0]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_ALLOCA_1:%.+]] = getelementptr inbounds i8, ptr [[ABI_ALLOCA]], i64 8
++    // loongarch64: store float [[ABI_VALUE_1]], ptr [[ABI_ALLOCA_1]], align [[ABI_ALIGN]]
+     // powerpc64:   store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+     // x86_64:      store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+ 
+@@ -297,7 +313,11 @@ pub extern "C" fn returns_doublefloat() -> DoubleFloat {
+     // x86_64:      [[ABI_ALLOCA:%.+]] = alloca [16 x i8], align [[ABI_ALIGN:8]]
+ 
+     // aarch64:     [[ABI_VALUE:%.+]] = load [[ABI_TYPE:\[2 x i64\]]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+-    // loongarch64: [[ABI_VALUE:%.+]] = load [[ABI_TYPE:{ double, float }]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_VALUE_0:%.+]] = load double, ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_ALLOCA_1:%.+]] = getelementptr inbounds i8, ptr [[ABI_ALLOCA]], i64 8
++    // loongarch64: [[ABI_VALUE_1:%.+]] = load float, ptr [[ABI_ALLOCA_1]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_VALUE_2:%.+]] = insertvalue [[ABI_TYPE:{ double, float }]] poison, double [[ABI_VALUE_0]], 0
++    // loongarch64: [[ABI_VALUE:%.+]] = insertvalue { double, float } [[ABI_VALUE_2]], float [[ABI_VALUE_1]], 1
+     // x86_64:      [[ABI_VALUE:%.+]] = load [[ABI_TYPE:{ double, double }]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+ 
+     // aarch64:     ret [[ABI_TYPE]] [[ABI_VALUE]]
+@@ -429,7 +449,11 @@ pub fn call_doubledouble() {
+     // CHECK: call void @llvm.memcpy.{{.+}}(ptr align [[ABI_ALIGN]] [[ABI_ALLOCA]], ptr align [[RUST_ALIGN]] [[RUST_ALLOCA]], i64 16, i1 false)
+ 
+     // aarch64:     [[ABI_VALUE:%.+]] = load [[ABI_TYPE:\[2 x double\]]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+-    // loongarch64: [[ABI_VALUE:%.+]] = load [[ABI_TYPE:{ double, double }]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_VALUE_0:%.+]] = load double, ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_ALLOCA_1:%.+]] = getelementptr inbounds i8, ptr [[ABI_ALLOCA]], i64 8
++    // loongarch64: [[ABI_VALUE_1:%.+]] = load double, ptr [[ABI_ALLOCA_1]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_VALUE_2:%.+]] = insertvalue [[ABI_TYPE:{ double, double }]] poison, double [[ABI_VALUE_0]], 0
++    // loongarch64: [[ABI_VALUE:%.+]] = insertvalue { double, double } [[ABI_VALUE_2]], double [[ABI_VALUE_1]], 1
+     // powerpc64:   [[ABI_VALUE:%.+]] = load [[ABI_TYPE:\[2 x i64\]]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+     // sparc64:     [[ABI_VALUE:%.+]] = load [[ABI_TYPE:{ double, double }]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+     // x86_64:      [[ABI_VALUE:%.+]] = load [[ABI_TYPE:{ double, double }]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+@@ -465,7 +489,11 @@ pub fn return_doubledouble() -> DoubleDouble {
+     // x86_64:      [[ABI_VALUE:%.+]] = call [[ABI_TYPE:{ double, double }]] @returns_doubledouble()
+ 
+     // aarch64:     store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+-    // loongarch64: store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_VALUE_0:%.+]] = extractvalue { double, double } [[ABI_VALUE]], 0
++    // loongarch64: [[ABI_VALUE_1:%.+]] = extractvalue { double, double } [[ABI_VALUE]], 1
++    // loongarch64: store double [[ABI_VALUE_0]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_ALLOCA_1:%.+]] = getelementptr inbounds i8, ptr [[ABI_ALLOCA]], i64 8
++    // loongarch64: store double [[ABI_VALUE_1]], ptr [[ABI_ALLOCA_1]], align [[ABI_ALIGN]]
+     // sparc64:     store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+     // x86_64:      store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+ 
+@@ -500,7 +528,11 @@ pub fn call_doublefloat() {
+     // x86_64:      call void @llvm.memcpy.{{.+}}(ptr align [[ABI_ALIGN]] [[ABI_ALLOCA]], ptr align [[RUST_ALIGN]] [[RUST_ALLOCA]], i64 16, i1 false)
+ 
+     // aarch64:     [[ABI_VALUE:%.+]] = load [[ABI_TYPE:\[2 x i64\]]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+-    // loongarch64: [[ABI_VALUE:%.+]] = load [[ABI_TYPE:{ double, float }]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_VALUE_0:%.+]] = load double, ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_ALLOCA_1:%.+]] = getelementptr inbounds i8, ptr [[ABI_ALLOCA]], i64 8
++    // loongarch64: [[ABI_VALUE_1:%.+]] = load float, ptr [[ABI_ALLOCA_1]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_VALUE_2:%.+]] = insertvalue [[ABI_TYPE:{ double, float }]] poison, double [[ABI_VALUE_0]], 0
++    // loongarch64: [[ABI_VALUE:%.+]] = insertvalue { double, float } [[ABI_VALUE_2]], float [[ABI_VALUE_1]], 1
+     // powerpc64:   [[ABI_VALUE:%.+]] = load [[ABI_TYPE:\[2 x i64\]]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+     // x86_64:      [[ABI_VALUE:%.+]] = load [[ABI_TYPE:{ double, double }]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+ 
+@@ -540,7 +572,11 @@ pub fn return_doublefloat() -> DoubleFloat {
+     // x86_64:      [[ABI_VALUE:%.+]] = call [[ABI_TYPE:{ double, double }]] @returns_doublefloat()
+ 
+     // aarch64:     store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+-    // loongarch64: store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_VALUE_0:%.+]] = extractvalue { double, float } [[ABI_VALUE]], 0
++    // loongarch64: [[ABI_VALUE_1:%.+]] = extractvalue { double, float } [[ABI_VALUE]], 1
++    // loongarch64: store double [[ABI_VALUE_0]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
++    // loongarch64: [[ABI_ALLOCA_1:%.+]] = getelementptr inbounds i8, ptr [[ABI_ALLOCA]], i64 8
++    // loongarch64: store float [[ABI_VALUE_1]], ptr [[ABI_ALLOCA_1]], align [[ABI_ALIGN]]
+     // x86_64:      store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
+ 
+     // aarch64:     call void @llvm.memcpy.{{.+}}(ptr align [[RUST_ALIGN]] [[RUST_ALLOCA]], ptr align [[ABI_ALIGN]] [[ABI_ALLOCA]], i64 16, i1 false)
+diff --git a/tests/codegen/loongarch-abi/cast-local-large-enough.rs b/tests/codegen/loongarch-abi/cast-local-large-enough.rs
+new file mode 100644
+index 0000000..e5a0e4c
+--- /dev/null
++++ b/tests/codegen/loongarch-abi/cast-local-large-enough.rs
+@@ -0,0 +1,44 @@
++//@ add-core-stubs
++//@ compile-flags: -Copt-level=0 -Cdebuginfo=0 --target loongarch64-unknown-linux-gnu
++//@ needs-llvm-components: loongarch
++
++#![feature(no_core, lang_items)]
++#![no_std]
++#![no_core]
++#![crate_type = "lib"]
++
++extern crate minicore;
++use minicore::*;
++
++#[repr(C, align(64))]
++struct Aligned(f64);
++
++#[repr(C, align(64))]
++struct AlignedPair(f32, f64);
++
++impl Copy for Aligned {}
++impl Copy for AlignedPair {}
++
++// CHECK-LABEL: define double @read_aligned
++#[unsafe(no_mangle)]
++pub extern "C" fn read_aligned(x: &Aligned) -> Aligned {
++    // CHECK: %[[TEMP:.*]] = alloca [64 x i8], align 64
++    // CHECK-NEXT: call void @llvm.memcpy.p0.p0.i64(ptr align 64 %[[TEMP]], ptr align 64 %[[PTR:.*]], i64 64, i1 false)
++    // CHECK-NEXT: %[[RES:.*]] = load double, ptr %[[TEMP]], align 64
++    // CHECK-NEXT: ret double %[[RES]]
++    *x
++}
++
++// CHECK-LABEL: define { float, double } @read_aligned_pair
++#[unsafe(no_mangle)]
++pub extern "C" fn read_aligned_pair(x: &AlignedPair) -> AlignedPair {
++    // CHECK: %[[TEMP:.*]] = alloca [64 x i8], align 64
++    // CHECK-NEXT: call void @llvm.memcpy.p0.p0.i64(ptr align 64 %[[TEMP]], ptr align 64 %[[PTR:.*]], i64 64, i1 false)
++    // CHECK-NEXT: %[[FIRST:.*]] = load float, ptr %[[TEMP]], align 64
++    // CHECK-NEXT: %[[SECOND_PTR:.*]] = getelementptr inbounds i8, ptr %[[TEMP]], i64 8
++    // CHECK-NEXT: %[[SECOND:.*]] = load double, ptr %[[SECOND_PTR]], align 8
++    // CHECK-NEXT: %[[RES1:.*]] = insertvalue { float, double } poison, float %[[FIRST]], 0
++    // CHECK-NEXT: %[[RES2:.*]] = insertvalue { float, double } %[[RES1]], double %[[SECOND]], 1
++    // CHECK-NEXT: ret { float, double } %[[RES2]]
++    *x
++}

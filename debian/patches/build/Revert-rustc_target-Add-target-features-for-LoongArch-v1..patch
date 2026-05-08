@@ -11,33 +11,33 @@ Description: this requires LLVM 20..
  2 files changed, 10 deletions(-)
 
 diff --git a/compiler/rustc_target/src/target_features.rs b/compiler/rustc_target/src/target_features.rs
-index 5a21925..280b0d4 100644
+index 3eea1e0..7434967 100644
 --- a/compiler/rustc_target/src/target_features.rs
 +++ b/compiler/rustc_target/src/target_features.rs
-@@ -694,18 +694,13 @@ static CSKY_FEATURES: &[(&str, Stability, ImpliedFeatures)] = &[
+@@ -699,18 +699,13 @@ static CSKY_FEATURES: &[(&str, Stability, ImpliedFeatures)] = &[
  static LOONGARCH_FEATURES: &[(&str, Stability, ImpliedFeatures)] = &[
      // tidy-alphabetical-start
-     ("d", Unstable(sym::loongarch_target_feature), &["f"]),
+     ("d", Stable, &["f"]),
 -    ("div32", Unstable(sym::loongarch_target_feature), &[]),
-     ("f", Unstable(sym::loongarch_target_feature), &[]),
-     ("frecipe", Unstable(sym::loongarch_target_feature), &[]),
+     ("f", Stable, &[]),
+     ("frecipe", Stable, &[]),
 -    ("lam-bh", Unstable(sym::loongarch_target_feature), &[]),
 -    ("lamcas", Unstable(sym::loongarch_target_feature), &[]),
-     ("lasx", Unstable(sym::loongarch_target_feature), &["lsx"]),
-     ("lbt", Unstable(sym::loongarch_target_feature), &[]),
+     ("lasx", Stable, &["lsx"]),
+     ("lbt", Stable, &[]),
 -    ("ld-seq-sa", Unstable(sym::loongarch_target_feature), &[]),
-     ("lsx", Unstable(sym::loongarch_target_feature), &["d"]),
-     ("lvz", Unstable(sym::loongarch_target_feature), &[]),
+     ("lsx", Stable, &["d"]),
+     ("lvz", Stable, &[]),
      ("relax", Unstable(sym::loongarch_target_feature), &[]),
 -    ("scq", Unstable(sym::loongarch_target_feature), &[]),
      ("ual", Unstable(sym::loongarch_target_feature), &[]),
      // tidy-alphabetical-end
  ];
 diff --git a/tests/ui/check-cfg/target_feature.stderr b/tests/ui/check-cfg/target_feature.stderr
-index eb66633..156805c 100644
+index f422919..28a0625 100644
 --- a/tests/ui/check-cfg/target_feature.stderr
 +++ b/tests/ui/check-cfg/target_feature.stderr
-@@ -69,7 +69,6 @@ LL |     cfg!(target_feature = "_UNEXPECTED_VALUE");
+@@ -70,7 +70,6 @@ LL |     cfg!(target_feature = "_UNEXPECTED_VALUE");
  `d32`
  `deflate-conversion`
  `dit`
@@ -45,7 +45,7 @@ index eb66633..156805c 100644
  `doloop`
  `dotprod`
  `dpb`
-@@ -143,11 +142,8 @@ LL |     cfg!(target_feature = "_UNEXPECTED_VALUE");
+@@ -144,11 +143,8 @@ LL |     cfg!(target_feature = "_UNEXPECTED_VALUE");
  `jsconv`
  `kl`
  `lahfsahf`
@@ -57,8 +57,8 @@ index eb66633..156805c 100644
  `leoncasa`
  `lor`
  `lse`
-@@ -204,7 +200,6 @@ LL |     cfg!(target_feature = "_UNEXPECTED_VALUE");
- `reserve-x18`
+@@ -213,7 +209,6 @@ LL |     cfg!(target_feature = "_UNEXPECTED_VALUE");
+ `relaxed-simd`
  `rtm`
  `sb`
 -`scq`

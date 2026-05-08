@@ -92,8 +92,8 @@ Patterns can be used to *destructure* [structs], [enums], and [tuples].
 Destructuring breaks up a value into its component pieces.
 The syntax used is almost the same as when creating such values.
 
-r[patterns.destructure.placeholder]
-In a pattern whose [scrutinee] expression has a `struct`, `enum` or `tuple` type, a placeholder (`_`) stands in for a *single* data field, whereas a wildcard `..`  stands in for *all* the remaining fields of a particular variant.
+r[patterns.destructure.wildcard]
+In a pattern whose [scrutinee] expression has a `struct`, `enum` or `tuple` type, a [wildcard pattern](#wildcard-pattern) (`_`) stands in for a *single* data field, whereas an [et cetera](#grammar-StructPatternEtCetera) or [rest pattern](#rest-patterns) (`..`) stands in for *all* the remaining fields of a particular variant.
 
 r[patterns.destructure.named-field-shorthand]
 When destructuring a data structure with named (but not numbered) fields, it is allowed to write `fieldname` as a shorthand for `fieldname: fieldname`.
@@ -139,23 +139,11 @@ r[patterns.literal]
 
 r[patterns.literal.syntax]
 ```grammar,patterns
-LiteralPattern ->
-      `true` | `false`
-    | CHAR_LITERAL
-    | BYTE_LITERAL
-    | STRING_LITERAL
-    | RAW_STRING_LITERAL
-    | BYTE_STRING_LITERAL
-    | RAW_BYTE_STRING_LITERAL
-    | C_STRING_LITERAL
-    | RAW_C_STRING_LITERAL
-    | `-`? INTEGER_LITERAL
-    | `-`? FLOAT_LITERAL
+LiteralPattern -> `-`? LiteralExpression
 ```
 
 r[patterns.literal.intro]
-_Literal patterns_ match exactly the same value as what is created by the literal.
-Since negative numbers are not [literals], literal patterns also accept an optional minus sign before the literal, which acts like the negation operator.
+_Literal patterns_ match exactly the same value as what is created by the literal. Since negative numbers are not [literals], literals in patterns may be prefixed by an optional minus sign, which acts like the negation operator.
 
 > [!WARNING]
 > C string and raw C string literals are accepted in literal patterns, but `&CStr` doesn't implement structural equality (`#[derive(Eq, PartialEq)]`) and therefore any such `match` on a `&CStr` will be rejected with a type error.
@@ -181,7 +169,7 @@ r[patterns.ident]
 
 r[patterns.ident.syntax]
 ```grammar,patterns
-IdentifierPattern -> `ref`? `mut`? IDENTIFIER (`@` PatternNoTopAlt ) ?
+IdentifierPattern -> `ref`? `mut`? IDENTIFIER ( `@` PatternNoTopAlt )?
 ```
 
 r[patterns.ident.intro]
@@ -497,14 +485,11 @@ ObsoleteRangePattern ->
     RangePatternBound `...` RangePatternBound
 
 RangePatternBound ->
-      CHAR_LITERAL
-    | BYTE_LITERAL
-    | `-`? INTEGER_LITERAL
-    | `-`? FLOAT_LITERAL
+      LiteralPattern
     | PathExpression
 ```
 
-[^obsolete-range-edition]: The _ObsoleteRangePattern_ syntax has been removed in the 2021 edition.
+[^obsolete-range-edition]: The [ObsoleteRangePattern] syntax has been removed in the 2021 edition.
 
 r[patterns.range.intro]
 *Range patterns* match scalar values within the range defined by their bounds.
@@ -553,7 +538,11 @@ A bound is written as one of:
 
 * A character, byte, integer, or float literal.
 * A `-` followed by an integer or float literal.
-* A [path]
+* A [path].
+
+> [!NOTE]
+>
+> We syntactically accept more than this for a *[RangePatternBound]*. We later reject the other things semantically.
 
 r[patterns.range.constraint-bound-path]
 If a bound is written as a path, after macro resolution, the path must resolve to a constant item of the type `char`, an integer type, or a float type.
@@ -659,7 +648,7 @@ r[patterns.range.refutable-char]
 The range of values for a `char` type are precisely those ranges containing all Unicode Scalar Values: `'\u{0000}'..='\u{D7FF}'` and `'\u{E000}'..='\u{10FFFF}'`.
 
 r[patterns.range.constraint-slice]
-_RangeFromPattern_ cannot be used as a top-level pattern for subpatterns in [slice patterns](#slice-patterns).
+[RangeFromPattern] cannot be used as a top-level pattern for subpatterns in [slice patterns](#slice-patterns).
 For example, the pattern `[1.., _]` is not a valid pattern.
 
 r[patterns.range.edition2021]
@@ -704,7 +693,7 @@ r[patterns.struct.syntax]
 ```grammar,patterns
 StructPattern ->
     PathInExpression `{`
-        StructPatternElements ?
+        StructPatternElements?
     `}`
 
 StructPatternElements ->
@@ -796,7 +785,7 @@ r[patterns.struct.constraint-union]
 A struct pattern used to match a union must specify exactly one field (see [Pattern matching on unions]).
 
 r[patterns.struct.binding-shorthand]
-The `ref` and/or `mut` _IDENTIFIER_ syntax matches any value and binds it to a variable with the same name as the given field.
+The `ref` and/or `mut` [IDENTIFIER] syntax matches any value and binds it to a variable with the same name as the given field.
 
 ```rust
 # struct Struct {
@@ -810,7 +799,7 @@ let Struct{a: x, b: y, c: z} = struct_value;          // destructure all fields
 ```
 
 r[patterns.struct.refutable]
-A struct pattern is refutable if the _PathInExpression_ resolves to a constructor of an enum with more than one variant, or one of its subpatterns is refutable.
+A struct pattern is refutable if the [PathInExpression] resolves to a constructor of an enum with more than one variant, or one of its subpatterns is refutable.
 
 r[patterns.tuple-struct]
 ## Tuple struct patterns
@@ -827,7 +816,7 @@ Tuple struct patterns match tuple struct and enum values that match all criteria
 They are also used to [destructure](#destructuring) a tuple struct or enum value.
 
 r[patterns.tuple-struct.refutable]
-A tuple struct pattern is refutable if the _PathInExpression_ resolves to a constructor of an enum with more than one variant, or one of its subpatterns is refutable.
+A tuple struct pattern is refutable if the [PathInExpression] resolves to a constructor of an enum with more than one variant, or one of its subpatterns is refutable.
 
 r[patterns.tuple]
 ## Tuple patterns
@@ -996,7 +985,7 @@ r[patterns.or]
 
 _Or-patterns_ are patterns that match on one of two or more sub-patterns (for example `A | B | C`).
 They can nest arbitrarily.
-Syntactically, or-patterns are allowed in any of the places where other patterns are allowed (represented by the _Pattern_ production), with the exceptions of `let`-bindings and function and closure arguments (represented by the _PatternNoTopAlt_ production).
+Syntactically, or-patterns are allowed in any of the places where other patterns are allowed (represented by the [Pattern] production), with the exceptions of `let`-bindings and function and closure arguments (represented by the [PatternNoTopAlt] production).
 
 r[patterns.constraints]
 ### Static semantics

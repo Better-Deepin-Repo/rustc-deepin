@@ -1,3 +1,20 @@
+rustc (1.89.0+dfsg1-1) unstable; urgency=medium
+
+  * cherry-pick f32/f64::{min,max}imum fallback
+  * loongarch: fix C function ABI wrt floats
+  * d/rules: count failed test invocations as test failures (again)
+  * x32: set panic strategy to abort
+  * x32: skip test suite analysis
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Mon, 13 Oct 2025 15:19:45 +0200
+
+rustc (1.89.0+dfsg1-1~exp1) experimental; urgency=medium
+
+  * New upstream release
+  * update config.toml.in
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Fri, 10 Oct 2025 11:57:40 +0200
+
 rustc (1.88.0+dfsg1-2) unstable; urgency=medium
 
   * add lld-19 to Build-Depends-Indep

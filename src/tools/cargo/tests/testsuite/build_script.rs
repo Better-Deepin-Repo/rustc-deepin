@@ -5426,7 +5426,7 @@ fn rerun_if_published_directory() {
 
     p.cargo("check").run();
 
-    // Delete regitry src to make directories being recreated with the latest timestamp.
+    // Delete registry src to make directories being recreated with the latest timestamp.
     cargo_home().join("registry/src").rm_rf();
 
     p.cargo("check --verbose")
@@ -5606,10 +5606,10 @@ test check_target ... ok
 "#]])
         .run();
 
+    // Remove check once 1.88 is stable
     if cargo_test_support::is_nightly() {
-        p.cargo("test --workspace -Z doctest-xcompile --doc --target")
+        p.cargo("test --workspace --doc --target")
             .arg(&target)
-            .masquerade_as_nightly_cargo(&["doctest-xcompile"])
             .with_stdout_data(str![[r#"
 ...
 test foo/src/lib.rs - (line 2) ... ok

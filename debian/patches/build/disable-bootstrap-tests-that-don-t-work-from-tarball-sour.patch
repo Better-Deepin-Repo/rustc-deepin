@@ -9,14 +9,14 @@ Forwarded: not-needed
 
 Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
 ---
- src/bootstrap/src/core/builder/tests.rs | 15 ++++++++++-----
- 1 file changed, 10 insertions(+), 5 deletions(-)
+ src/bootstrap/src/core/builder/tests.rs | 12 ++++++++----
+ 1 file changed, 8 insertions(+), 4 deletions(-)
 
 diff --git a/src/bootstrap/src/core/builder/tests.rs b/src/bootstrap/src/core/builder/tests.rs
-index 092fc19..2542bdb 100644
+index 500c835..8c235d8 100644
 --- a/src/bootstrap/src/core/builder/tests.rs
 +++ b/src/bootstrap/src/core/builder/tests.rs
-@@ -241,7 +241,8 @@ fn alias_and_path_for_library() {
+@@ -244,7 +244,8 @@ fn alias_and_path_for_library() {
      );
  }
  
@@ -26,17 +26,7 @@ index 092fc19..2542bdb 100644
  fn ci_rustc_if_unchanged_invalidate_on_compiler_changes() {
      git_test(|ctx| {
          prepare_rustc_checkout(ctx);
-@@ -254,7 +255,8 @@ fn ci_rustc_if_unchanged_invalidate_on_compiler_changes() {
-     });
- }
- 
--#[test]
-+//Debian: doesn't work in a tarball source
-+#[allow(dead_code)]
- fn ci_rustc_if_unchanged_invalidate_on_library_changes_in_ci() {
-     git_test(|ctx| {
-         prepare_rustc_checkout(ctx);
-@@ -267,7 +269,8 @@ fn ci_rustc_if_unchanged_invalidate_on_library_changes_in_ci() {
+@@ -257,7 +258,8 @@ fn ci_rustc_if_unchanged_invalidate_on_compiler_changes() {
      });
  }
  
@@ -46,7 +36,7 @@ index 092fc19..2542bdb 100644
  fn ci_rustc_if_unchanged_do_not_invalidate_on_library_changes_outside_ci() {
      git_test(|ctx| {
          prepare_rustc_checkout(ctx);
-@@ -280,7 +283,8 @@ fn ci_rustc_if_unchanged_do_not_invalidate_on_library_changes_outside_ci() {
+@@ -270,7 +272,8 @@ fn ci_rustc_if_unchanged_do_not_invalidate_on_library_changes_outside_ci() {
      });
  }
  
@@ -56,7 +46,7 @@ index 092fc19..2542bdb 100644
  fn ci_rustc_if_unchanged_do_not_invalidate_on_tool_changes() {
      git_test(|ctx| {
          prepare_rustc_checkout(ctx);
-@@ -694,7 +698,8 @@ mod dist {
+@@ -684,7 +687,8 @@ mod dist {
  
      /// This also serves as an important regression test for <https://github.com/rust-lang/rust/issues/138123>
      /// and <https://github.com/rust-lang/rust/issues/138004>.

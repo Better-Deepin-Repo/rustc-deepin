@@ -1,4 +1,4 @@
-change-id = 138986
+change-id = 142379
 
 [build]
 submodules = false
@@ -59,12 +59,15 @@ PROFILER_PATH
 
 )dnl
 [target.wasm32-wasip1]
+llvm-config = "LLVM_DESTDIR/usr/lib/llvm-LLVM_VERSION/bin/llvm-config"
 wasi-root = "/usr"
 profiler = false
 [target.wasm32-wasip2]
+llvm-config = "LLVM_DESTDIR/usr/lib/llvm-LLVM_VERSION/bin/llvm-config"
 wasi-root = "/usr"
 profiler = false
 [target.wasm32-unknown-unknown]
+llvm-config = "LLVM_DESTDIR/usr/lib/llvm-LLVM_VERSION/bin/llvm-config"
 profiler = false
 
 ifelse(WINDOWS_ARCH,,,

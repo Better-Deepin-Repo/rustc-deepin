@@ -31,18 +31,18 @@ index f4caa3e..dc58591 100644
  max_level_info = ['rustc_driver_impl/max_level_info']
  rustc_randomized_layouts = ['rustc_driver_impl/rustc_randomized_layouts']
 diff --git a/src/tools/rust-analyzer/crates/profile/Cargo.toml b/src/tools/rust-analyzer/crates/profile/Cargo.toml
-index 1fb1383..662f7fd 100644
+index bae891c..f8b1793 100644
 --- a/src/tools/rust-analyzer/crates/profile/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/profile/Cargo.toml
 @@ -13,7 +13,6 @@ rust-version.workspace = true
  
  [dependencies]
- cfg-if = "1.0.0"
+ cfg-if = "1.0.1"
 -jemalloc-ctl = { version = "0.5.4", package = "tikv-jemalloc-ctl", optional = true }
  
  [target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
  perf-event = "=0.4.7"
-@@ -29,7 +28,6 @@ windows-sys = { version = "0.59", features = [
+@@ -29,7 +28,6 @@ windows-sys = { version = "0.60", features = [
  
  [features]
  cpu_profiler = []
@@ -51,10 +51,10 @@ index 1fb1383..662f7fd 100644
  # Uncomment to enable for the whole crate graph
  # default = [ "cpu_profiler" ]
 diff --git a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-index b59d068..8ff48bc 100644
+index 5e63521..b97def4 100644
 --- a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-@@ -80,9 +80,6 @@ windows-sys = { version = "0.59", features = [
+@@ -80,9 +80,6 @@ windows-sys = { version = "0.60", features = [
    "Win32_System_Threading",
  ] }
  

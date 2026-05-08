@@ -14,7 +14,7 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/compiler/rustc_target/src/spec/targets/powerpc64_unknown_linux_gnu.rs b/compiler/rustc_target/src/spec/targets/powerpc64_unknown_linux_gnu.rs
-index 1f67bc7..26b813c 100644
+index ecf68dd..c504d92 100644
 --- a/compiler/rustc_target/src/spec/targets/powerpc64_unknown_linux_gnu.rs
 +++ b/compiler/rustc_target/src/spec/targets/powerpc64_unknown_linux_gnu.rs
 @@ -6,7 +6,7 @@ use crate::spec::{

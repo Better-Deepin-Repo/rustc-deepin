@@ -103,9 +103,8 @@ standard C ABI on the specific platform. Other ABIs may be specified using an
 `abi` string, as shown here:
 
 ```rust
-# #[cfg(any(windows, target_arch = "x86"))]
 // Interface to the Windows API
-unsafe extern "stdcall" { }
+unsafe extern "system" { }
 ```
 
 r[items.extern.abi.standard]
@@ -150,7 +149,7 @@ r[items.extern.abi.fastcall]
   `__fastcall` and GCC and clang's `__attribute__((fastcall))`
 
 r[items.extern.abi.thiscall]
-* `unsafe extern "thiscall"` -- The default for C++ member functions on MSVC -- corresponds to MSVC's
+* `unsafe extern "thiscall"` -- The default for C++ member functions on x86\_32 MSVC -- corresponds to MSVC's
   `__thiscall` and GCC and clang's `__attribute__((thiscall))`
 
 r[items.extern.abi.efiapi]
@@ -176,11 +175,17 @@ identifier.
 
 ```rust
 unsafe extern "C" {
-    safe fn foo(...);
+    unsafe fn foo(...);
     unsafe fn bar(x: i32, ...);
     unsafe fn with_name(format: *const u8, args: ...);
+    // SAFETY: This function guarantees it will not access
+    // variadic arguments.
+    safe fn ignores_variadic_arguments(x: i32, ...);
 }
 ```
+
+> [!WARNING]
+> The `safe` qualifier should not be used on a function in an `extern` block unless that function guarantees that it will not access the variadic arguments at all. Passing an unexpected number of arguments or arguments of unexpected type to a variadic function may lead to [undefined behavior][undefined].
 
 r[items.extern.attributes]
 ## Attributes on extern blocks
