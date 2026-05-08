@@ -79,7 +79,7 @@ pub use self::compilation::{Compilation, Doctest, UnitOutput};
 pub use self::compile_kind::{CompileKind, CompileKindFallback, CompileTarget};
 pub use self::crate_type::CrateType;
 pub use self::custom_build::LinkArgTarget;
-pub use self::custom_build::{BuildOutput, BuildScriptOutputs, BuildScripts};
+pub use self::custom_build::{BuildOutput, BuildScriptOutputs, BuildScripts, LibraryPath};
 pub(crate) use self::fingerprint::DirtyReason;
 pub use self::job_queue::Freshness;
 use self::job_queue::{Job, JobQueue, JobState, Work};
@@ -497,6 +497,8 @@ fn rustc(
         current_id: PackageId,
         mode: CompileMode,
     ) -> CargoResult<()> {
+        let mut library_paths = vec![];
+
         for key in build_scripts.to_link.iter() {
             let output = build_script_outputs.get(key.1).ok_or_else(|| {
                 internal(format!(
@@ -504,9 +506,30 @@ fn rustc(
                     key.0, key.1
                 ))
             })?;
-            for path in output.library_paths.iter() {
-                rustc.arg("-L").arg(path);
-            }
+            library_paths.extend(output.library_paths.iter());
+        }
+
+        // NOTE: This very intentionally does not use the derived ord from LibraryPath because we need to
+        // retain relative ordering within the same type (i.e. not lexicographic). The use of a stable sort
+        // is also important here because it ensures that paths of the same type retain the same relative
+        // ordering (for an unstable sort to work here, the list would need to retain the idx of each element
+        // and then sort by that idx when the type is equivalent.
+        library_paths.sort_by_key(|p| match p {
+            LibraryPath::CargoArtifact(_) => 0,
+            LibraryPath::External(_) => 1,
+        });
+
+        for path in library_paths.iter() {
+            rustc.arg("-L").arg(path.as_ref());
+        }
+
+        for key in build_scripts.to_link.iter() {
+            let output = build_script_outputs.get(key.1).ok_or_else(|| {
+                internal(format!(
+                    "couldn't find build script output for {}/{}",
+                    key.0, key.1
+                ))
+            })?;
 
             if key.0 == current_id {
                 if pass_l_flag {
@@ -654,13 +677,20 @@ fn add_plugin_deps(
             .get(*metadata)
             .ok_or_else(|| internal(format!("couldn't find libs for plugin dep {}", pkg_id)))?;
         search_path.append(&mut filter_dynamic_search_path(
-            output.library_paths.iter(),
+            output.library_paths.iter().map(AsRef::as_ref),
             root_output,
         ));
     }
     let search_path = paths::join_paths(&search_path, var)?;
     rustc.env(var, &search_path);
     Ok(())
+}
+
+fn get_dynamic_search_path(path: &Path) -> &Path {
+    match path.to_str().and_then(|s| s.split_once("=")) {
+        Some(("native" | "crate" | "dependency" | "framework" | "all", path)) => Path::new(path),
+        _ => path,
+    }
 }
 
 // Determine paths to add to the dynamic search path from -L entries
@@ -674,12 +704,9 @@ where
 {
     let mut search_path = vec![];
     for dir in paths {
-        let dir = match dir.to_str().and_then(|s| s.split_once("=")) {
-            Some(("native" | "crate" | "dependency" | "framework" | "all", path)) => path.into(),
-            _ => dir.clone(),
-        };
+        let dir = get_dynamic_search_path(dir);
         if dir.starts_with(&root_output) {
-            search_path.push(dir);
+            search_path.push(dir.to_path_buf());
         } else {
             debug!(
                 "Not including path {} in runtime library search path because it is \
@@ -763,6 +790,19 @@ fn prepare_rustdoc(build_runner: &BuildRunner<'_, '_>, unit: &Unit) -> CargoResu
     add_error_format_and_color(build_runner, &mut rustdoc);
     add_allow_features(build_runner, &mut rustdoc);
 
+    if build_runner.bcx.gctx.cli_unstable().rustdoc_depinfo {
+        // invocation-specific is required for keeping the original rustdoc emission
+        let mut arg = OsString::from("--emit=invocation-specific,dep-info=");
+        arg.push(rustdoc_dep_info_loc(build_runner, unit));
+        rustdoc.arg(arg);
+
+        if build_runner.bcx.gctx.cli_unstable().checksum_freshness {
+            rustdoc.arg("-Z").arg("checksum-hash-algorithm=blake3");
+        }
+
+        rustdoc.arg("-Zunstable-options");
+    }
+
     if let Some(trim_paths) = unit.profile.trim_paths.as_ref() {
         trim_paths_args_rustdoc(&mut rustdoc, build_runner, unit, trim_paths)?;
     }
@@ -838,6 +878,20 @@ fn rustdoc(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResult<W
     let package_id = unit.pkg.package_id();
     let manifest_path = PathBuf::from(unit.pkg.manifest_path());
     let target = Target::clone(&unit.target);
+
+    let rustdoc_dep_info_loc = rustdoc_dep_info_loc(build_runner, unit);
+    let dep_info_loc = fingerprint::dep_info_loc(build_runner, unit);
+    let build_dir = build_runner.bcx.ws.build_dir().into_path_unlocked();
+    let pkg_root = unit.pkg.root().to_path_buf();
+    let cwd = rustdoc
+        .get_cwd()
+        .unwrap_or_else(|| build_runner.bcx.gctx.cwd())
+        .to_path_buf();
+    let fingerprint_dir = build_runner.files().fingerprint_dir(unit);
+    let is_local = unit.is_local();
+    let env_config = Arc::clone(build_runner.bcx.gctx.env_config()?);
+    let rustdoc_depinfo_enabled = build_runner.bcx.gctx.cli_unstable().rustdoc_depinfo;
+
     let mut output_options = OutputOptions::new(build_runner, unit);
     let script_metadata = build_runner.find_build_script_metadata(unit);
     let scrape_outputs = if should_include_scrape_units(build_runner.bcx, unit) {
@@ -903,6 +957,7 @@ fn rustdoc(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResult<W
             paths::remove_dir_all(crate_dir)?;
         }
         state.running(&rustdoc);
+        let timestamp = paths::set_invocation_time(&fingerprint_dir)?;
 
         let result = rustdoc
             .exec_with_streaming(
@@ -928,6 +983,29 @@ fn rustdoc(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResult<W
             }
 
             return Err(e);
+        }
+
+        if rustdoc_depinfo_enabled && rustdoc_dep_info_loc.exists() {
+            fingerprint::translate_dep_info(
+                &rustdoc_dep_info_loc,
+                &dep_info_loc,
+                &cwd,
+                &pkg_root,
+                &build_dir,
+                &rustdoc,
+                // Should we track source file for doc gen?
+                is_local,
+                &env_config,
+            )
+            .with_context(|| {
+                internal(format_args!(
+                    "could not parse/generate dep info at: {}",
+                    rustdoc_dep_info_loc.display()
+                ))
+            })?;
+            // This mtime shift allows Cargo to detect if a source file was
+            // modified in the middle of the build.
+            paths::set_file_time_no_err(dep_info_loc, timestamp);
         }
 
         Ok(())
@@ -2011,4 +2089,11 @@ fn scrape_output_path(build_runner: &BuildRunner<'_, '_>, unit: &Unit) -> CargoR
     build_runner
         .outputs(unit)
         .map(|outputs| outputs[0].path.clone())
+}
+
+/// Gets the dep-info file emitted by rustdoc.
+fn rustdoc_dep_info_loc(build_runner: &BuildRunner<'_, '_>, unit: &Unit) -> PathBuf {
+    let mut loc = build_runner.files().fingerprint_file_path(unit, "");
+    loc.set_extension("d");
+    loc
 }

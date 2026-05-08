@@ -24,7 +24,8 @@ use humansize::{format_size, BINARY};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use tabled::builder::Builder;
 use tabled::settings::object::{Columns, Rows};
-use tabled::settings::{Alignment, Border, Color, Modify, Width};
+use tabled::settings::style::Border;
+use tabled::settings::{Alignment, Color, Modify, Width};
 use tokio::runtime::Runtime;
 
 use collector::api::next_artifact::NextArtifact;
@@ -36,6 +37,7 @@ use collector::compile::benchmark::category::Category;
 use collector::compile::benchmark::codegen_backend::CodegenBackend;
 use collector::compile::benchmark::profile::Profile;
 use collector::compile::benchmark::scenario::Scenario;
+use collector::compile::benchmark::target::Target;
 use collector::compile::benchmark::{
     compile_benchmark_dir, get_compile_benchmarks, ArtifactType, Benchmark, BenchmarkName,
 };
@@ -98,6 +100,7 @@ struct CompileBenchmarkConfig {
     iterations: Option<usize>,
     is_self_profile: bool,
     bench_rustc: bool,
+    targets: Vec<Target>,
 }
 
 struct RuntimeBenchmarkConfig {
@@ -132,14 +135,8 @@ fn check_measureme_installed() -> Result<(), String> {
     }
 }
 
-fn check_installed(name: &str) -> anyhow::Result<()> {
-    if !is_installed(name) {
-        anyhow::bail!("`{}` is not installed but must be", name);
-    }
-    Ok(())
-}
-
-fn generate_cachegrind_diffs(
+#[allow(clippy::too_many_arguments)]
+fn generate_diffs(
     id1: &str,
     id2: &str,
     out_dir: &Path,
@@ -147,6 +144,7 @@ fn generate_cachegrind_diffs(
     profiles: &[Profile],
     scenarios: &[Scenario],
     errors: &mut BenchmarkErrors,
+    profiler: &Profiler,
 ) -> Vec<PathBuf> {
     let mut annotated_diffs = Vec::new();
     for benchmark in benchmarks {
@@ -166,22 +164,28 @@ fn generate_cachegrind_diffs(
             }) {
                 let filename = |prefix, id| {
                     format!(
-                        "{}-{}-{}-{:?}-{}",
-                        prefix, id, benchmark.name, profile, scenario
+                        "{}-{}-{}-{:?}-{}{}",
+                        prefix,
+                        id,
+                        benchmark.name,
+                        profile,
+                        scenario,
+                        profiler.postfix()
                     )
                 };
                 let id_diff = format!("{}-{}", id1, id2);
-                let cgout1 = out_dir.join(filename("cgout", id1));
-                let cgout2 = out_dir.join(filename("cgout", id2));
-                let cgann_diff = out_dir.join(filename("cgann-diff", &id_diff));
+                let prefix = profiler.prefix();
+                let left = out_dir.join(filename(prefix, id1));
+                let right = out_dir.join(filename(prefix, id2));
+                let output = out_dir.join(filename(&format!("{prefix}-diff"), &id_diff));
 
-                if let Err(e) = cachegrind_diff(&cgout1, &cgout2, &cgann_diff) {
+                if let Err(e) = profiler.diff(&left, &right, &output) {
                     errors.incr();
                     eprintln!("collector error: {:?}", e);
                     continue;
                 }
 
-                annotated_diffs.push(cgann_diff);
+                annotated_diffs.push(output);
             }
         }
     }
@@ -198,6 +202,7 @@ fn profile_compile(
     scenarios: &[Scenario],
     backends: &[CodegenBackend],
     errors: &mut BenchmarkErrors,
+    targets: &[Target],
 ) {
     eprintln!("Profiling {} with {:?}", toolchain.id, profiler);
     if let Profiler::SelfProfile = profiler {
@@ -218,6 +223,7 @@ fn profile_compile(
                 backends,
                 toolchain,
                 Some(1),
+                targets,
             ));
             eprintln!("Finished benchmark {benchmark_id}");
 
@@ -908,6 +914,7 @@ fn main_result() -> anyhow::Result<i32> {
                 iterations: Some(iterations),
                 is_self_profile: self_profile.self_profile,
                 bench_rustc: bench_rustc.bench_rustc,
+                targets: vec![Target::default()],
             };
 
             run_benchmarks(&mut rt, conn, shared, Some(config), None)?;
@@ -1022,6 +1029,7 @@ fn main_result() -> anyhow::Result<i32> {
                             iterations: runs.map(|v| v as usize),
                             is_self_profile: self_profile.self_profile,
                             bench_rustc: bench_rustc.bench_rustc,
+                            targets: vec![Target::default()],
                         };
                         let runtime_suite = rt.block_on(load_runtime_benchmarks(
                             conn.as_mut(),
@@ -1134,6 +1142,7 @@ fn main_result() -> anyhow::Result<i32> {
                         scenarios,
                         backends,
                         &mut errors,
+                        &[Target::default()],
                     );
                     Ok(id)
                 };
@@ -1145,32 +1154,25 @@ fn main_result() -> anyhow::Result<i32> {
                 let id1 = get_toolchain_and_profile(local.rustc.as_str(), "1")?;
                 let id2 = get_toolchain_and_profile(rustc2.as_str(), "2")?;
 
-                if profiler == Profiler::Cachegrind {
-                    check_installed("valgrind")?;
-                    check_installed("cg_annotate")?;
-
-                    let diffs = generate_cachegrind_diffs(
-                        &id1,
-                        &id2,
-                        &out_dir,
-                        &benchmarks,
-                        profiles,
-                        scenarios,
-                        &mut errors,
-                    );
-                    match diffs.len().cmp(&1) {
-                        Ordering::Equal => {
-                            let short = out_dir.join("cgann-diff-latest");
-                            std::fs::copy(&diffs[0], &short).expect("copy to short path");
-                            eprintln!("Original diff at: {}", diffs[0].to_string_lossy());
-                            eprintln!("Short path: {}", short.to_string_lossy());
-                        }
-                        _ => {
-                            eprintln!("Diffs:");
-                            for diff in diffs {
-                                eprintln!("{}", diff.to_string_lossy());
-                            }
-                        }
+                let diffs = generate_diffs(
+                    &id1,
+                    &id2,
+                    &out_dir,
+                    &benchmarks,
+                    profiles,
+                    scenarios,
+                    &mut errors,
+                    &profiler,
+                );
+                if let [diff] = &diffs[..] {
+                    let short = out_dir.join(format!("{}-diff-latest", profiler.prefix()));
+                    std::fs::copy(diff, &short).expect("copy to short path");
+                    eprintln!("Original diff at: {}", diff.to_string_lossy());
+                    eprintln!("Short path: {}", short.to_string_lossy());
+                } else {
+                    eprintln!("Diffs:");
+                    for diff in diffs {
+                        eprintln!("{}", diff.to_string_lossy());
                     }
                 }
             } else {
@@ -1389,7 +1391,7 @@ fn print_binary_stats(
 
     let mut builder = Builder::default();
     if use_diff {
-        builder.set_header([
+        builder.push_record([
             name_header,
             "Size (before)",
             "Size (after)",
@@ -1397,7 +1399,7 @@ fn print_binary_stats(
             "Diff (%)",
         ]);
     } else {
-        builder.set_header([name_header, "Size"]);
+        builder.push_record([name_header, "Size"]);
     }
 
     struct Row {
@@ -1528,8 +1530,10 @@ fn print_binary_stats(
     table.with(tabled::settings::Style::sharp());
     table.with(
         Modify::new(Rows::last()).with(
-            Border::default()
+            Border::new()
                 .top('─')
+                .left('│')
+                .right('│')
                 .corner_top_left('│')
                 .corner_top_right('│'),
         ),
@@ -1737,6 +1741,7 @@ fn bench_published_artifact(
             iterations: Some(3),
             is_self_profile: false,
             bench_rustc: false,
+            targets: vec![Target::default()],
         }),
         Some(RuntimeBenchmarkConfig::new(
             runtime_suite,
@@ -1837,6 +1842,7 @@ fn bench_compile(
                     &config.backends,
                     &shared.toolchain,
                     config.iterations,
+                    &config.targets,
                 )))
                 .with_context(|| anyhow::anyhow!("Cannot compile {}", benchmark.name))
             },

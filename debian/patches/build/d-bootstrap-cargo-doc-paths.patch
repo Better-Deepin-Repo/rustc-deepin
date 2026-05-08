@@ -18,7 +18,7 @@ Forwarded: not-needed
  .../src/rust-2021/default-cargo-resolver.md            | 10 +++++-----
  src/doc/index.md                                       |  2 +-
  src/doc/reference/src/conditional-compilation.md       |  2 +-
- src/doc/reference/src/introduction.md                  |  4 ++--
+ src/doc/reference/src/introduction.md                  |  8 ++++----
  src/doc/reference/src/linkage.md                       |  2 +-
  src/doc/reference/src/procedural-macros.md             |  2 +-
  src/doc/rustc/src/linker-plugin-lto.md                 |  2 +-
@@ -30,7 +30,7 @@ Forwarded: not-needed
  .../src/compiler-flags/control-flow-guard.md           |  2 +-
  src/doc/unstable-book/src/compiler-flags/sanitizer.md  |  2 +-
  src/tools/linkchecker/main.rs                          |  4 ++++
- 23 files changed, 47 insertions(+), 43 deletions(-)
+ 23 files changed, 49 insertions(+), 45 deletions(-)
 
 diff --git a/compiler/rustc_error_codes/src/error_codes/E0460.md b/compiler/rustc_error_codes/src/error_codes/E0460.md
 index 001678a..e8b77bf 100644
@@ -94,10 +94,10 @@ index 12876e2..09bd221 100644
   * Recompiling the crate with different metadata (different name/
     `crate_type`).
 diff --git a/src/doc/edition-guide/book.toml b/src/doc/edition-guide/book.toml
-index 998a817..9ca0dc7 100644
+index 98447aa..38d1a99 100644
 --- a/src/doc/edition-guide/book.toml
 +++ b/src/doc/edition-guide/book.toml
-@@ -55,15 +55,15 @@ search.use-boolean-and = true
+@@ -54,15 +54,15 @@ search.use-boolean-and = true
  "/rust-2018/the-compiler/incremental-compilation-for-faster-compiles.html" = "https://blog.rust-lang.org/2018/02/15/Rust-1.24.html#incremental-compilation"
  "/rust-2018/the-compiler/an-attribute-for-deprecation.html" = "../../../reference/attributes/diagnostics.html#the-deprecated-attribute"
  "/rust-2018/rustup-for-managing-rust-versions.html" = "https://rust-lang.github.io/rustup/"
@@ -121,7 +121,7 @@ index 998a817..9ca0dc7 100644
  "/rust-2018/cargo-and-crates-io/crates-io-disallows-wildcard-dependencies.html" = "https://blog.rust-lang.org/2016/01/21/Rust-1.6.html#cratesio-disallows-wildcards"
  "/rust-2018/documentation/index.html" = "../../../index.html"
  "/rust-2018/documentation/new-editions-of-the-book.html" = "../../../book/index.html"
-@@ -96,4 +96,4 @@ search.use-boolean-and = true
+@@ -95,4 +95,4 @@ search.use-boolean-and = true
  "/rust-next/future.html" = "../../std/future/trait.Future.html"
  "/rust-next/alloc.html" = "https://blog.rust-lang.org/2019/07/04/Rust-1.36.0.html#the-alloc-crate-is-stable"
  "/rust-next/maybe-uninit.html" = "https://blog.rust-lang.org/2019/07/04/Rust-1.36.0.html#maybeuninitt-instead-of-memuninitialized"
@@ -212,10 +212,10 @@ index 8ad5b42..f93d3da 100644
  
  ### The Rustdoc Book
 diff --git a/src/doc/reference/src/conditional-compilation.md b/src/doc/reference/src/conditional-compilation.md
-index a214326..b96dcaa 100644
+index 7440fe0..7e6ecd2 100644
 --- a/src/doc/reference/src/conditional-compilation.md
 +++ b/src/doc/reference/src/conditional-compilation.md
-@@ -466,6 +466,6 @@ println!("I'm running on a {} machine!", machine_kind);
+@@ -463,6 +463,6 @@ println!("I'm running on a {} machine!", machine_kind);
  [`target_feature` attribute]: attributes/codegen.md#the-target_feature-attribute
  [attribute]: attributes.md
  [attributes]: attributes.md
@@ -224,25 +224,29 @@ index a214326..b96dcaa 100644
  [crate type]: linkage.md
  [static C runtime]: linkage.md#static-and-dynamic-c-runtimes
 diff --git a/src/doc/reference/src/introduction.md b/src/doc/reference/src/introduction.md
-index 7f90676..c679cee 100644
+index 3e926ed..4a6e3a9 100644
 --- a/src/doc/reference/src/introduction.md
 +++ b/src/doc/reference/src/introduction.md
-@@ -141,8 +141,8 @@ We also want the reference to be as normative as possible, so if you see anythin
- [the Rust Reference repository]: https://github.com/rust-lang/reference/
- [Unstable Book]: https://doc.rust-lang.org/nightly/unstable-book/
- [_Expression_]: expressions.md
+@@ -122,10 +122,10 @@ And of course, if you see anything that is wrong or is non-normative but not spe
+ [book]: ../book/index.html
+ [github issues]: https://github.com/rust-lang/reference/issues
+ [standard library]: std
+-[the Rust Reference repository]: https://github.com/rust-lang/reference/
+-[Unstable Book]: https://doc.rust-lang.org/nightly/unstable-book/
 -[cargo book]: ../cargo/index.html
 -[cargo reference]: ../cargo/reference/index.html
++[the Rust Reference repository]: ../reference/index.html
++[Unstable Book]: ../unstable-book/index.html
 +[cargo book]: ../../../cargo/book/index.html
 +[cargo reference]: ../../../cargo/book/reference/index.html
+ [example rule]: example.rule.label
  [expressions chapter]: expressions.html
  [file an issue]: https://github.com/rust-lang/reference/issues
- [lifetime of temporaries]: expressions.html#temporaries
 diff --git a/src/doc/reference/src/linkage.md b/src/doc/reference/src/linkage.md
-index f1076b2..3afbcea 100644
+index 5ce8f6f..6ac1557 100644
 --- a/src/doc/reference/src/linkage.md
 +++ b/src/doc/reference/src/linkage.md
-@@ -241,7 +241,7 @@ fn main() {
+@@ -240,7 +240,7 @@ fn main() {
  }
  ```
  
@@ -252,10 +256,10 @@ index f1076b2..3afbcea 100644
  To use this feature locally, you typically will use the `RUSTFLAGS` environment
  variable to specify flags to the compiler through Cargo. For example to compile
 diff --git a/src/doc/reference/src/procedural-macros.md b/src/doc/reference/src/procedural-macros.md
-index 4627ffc..9574c1f 100644
+index d47ce2a..22587c2 100644
 --- a/src/doc/reference/src/procedural-macros.md
 +++ b/src/doc/reference/src/procedural-macros.md
-@@ -374,7 +374,7 @@ Note that neither declarative nor procedural macros support doc comment tokens
+@@ -373,7 +373,7 @@ Note that neither declarative nor procedural macros support doc comment tokens
  their equivalent `#[doc = r"str"]` attributes when passed to macros.
  
  [Attribute macros]: #attribute-macros
@@ -278,10 +282,10 @@ index ab95aa2..8023f33 100644
  If you have dependencies using the `cc` crate, you will need to set these
  environment variables:
 diff --git a/src/doc/rustc/src/platform-support/fuchsia.md b/src/doc/rustc/src/platform-support/fuchsia.md
-index bed5b81..411a661 100644
+index e2befc5..c8285bc 100644
 --- a/src/doc/rustc/src/platform-support/fuchsia.md
 +++ b/src/doc/rustc/src/platform-support/fuchsia.md
-@@ -925,7 +925,7 @@ attach and load any relevant debug symbols.
+@@ -927,7 +927,7 @@ attach and load any relevant debug symbols.
  [Fuchsia]: https://fuchsia.dev/
  [source tree]: https://fuchsia.dev/fuchsia-src/get-started/learn/build
  [rustup]: https://rustup.rs/
@@ -304,10 +308,10 @@ index 6c14941..7f548e9 100644
  ## Custom Target Lookup Path
  
 diff --git a/src/doc/rustc/src/tests/index.md b/src/doc/rustc/src/tests/index.md
-index d202651..f5f8386 100644
+index 12de69a..bae4b6c 100644
 --- a/src/doc/rustc/src/tests/index.md
 +++ b/src/doc/rustc/src/tests/index.md
-@@ -303,7 +303,7 @@ Experimental support for using custom test harnesses is available on the
+@@ -305,7 +305,7 @@ Experimental support for using custom test harnesses is available on the
  [`--test` option]: ../command-line-arguments.md#option-test
  [`-Z panic-abort-tests`]: https://github.com/rust-lang/rust/issues/67650
  [`available_parallelism`]: ../../std/thread/fn.available_parallelism.html
@@ -316,7 +320,7 @@ index d202651..f5f8386 100644
  [`libtest`]: ../../test/index.html
  [`main` function]: ../../reference/crates-and-source-files.html#main-functions
  [`Result`]: ../../std/result/index.html
-@@ -313,7 +313,7 @@ Experimental support for using custom test harnesses is available on the
+@@ -315,7 +315,7 @@ Experimental support for using custom test harnesses is available on the
  [attribute-should_panic]: ../../reference/attributes/testing.html#the-should_panic-attribute
  [attribute-test]: ../../reference/attributes/testing.html#the-test-attribute
  [bench-docs]: ../../unstable-book/library-features/test.html
@@ -362,10 +366,10 @@ index e7414aa..ebd0dd4 100644
  For example:
  ```cmd
 diff --git a/src/doc/unstable-book/src/compiler-flags/sanitizer.md b/src/doc/unstable-book/src/compiler-flags/sanitizer.md
-index 4679acf..b6c3eb5 100644
+index 2f9d4d2..1156bea 100644
 --- a/src/doc/unstable-book/src/compiler-flags/sanitizer.md
 +++ b/src/doc/unstable-book/src/compiler-flags/sanitizer.md
-@@ -882,7 +882,7 @@ It is strongly recommended to combine sanitizers with recompiled and
+@@ -877,7 +877,7 @@ It is strongly recommended to combine sanitizers with recompiled and
  instrumented standard library, for example using [cargo `-Zbuild-std`
  functionality][build-std].
  

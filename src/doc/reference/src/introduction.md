@@ -1,15 +1,9 @@
 # Introduction
 
 This book is the primary reference for the Rust programming language.
-It provides three kinds of material:
 
-  - Chapters that informally describe each language construct and their use.
-  - Chapters that informally describe the memory model, concurrency model, runtime services, linkage model, and debugging facilities.
-  - Appendix chapters providing rationale and references to languages that influenced the design.
-
-> [!WARNING]
-> This book is incomplete. Documenting everything takes a while.
-> See the [GitHub issues] for what is not documented in this book.
+> [!NOTE]
+> For known bugs in and omissions of this book, see our [GitHub issues]. If you see a case where the compiler behavior and the text here do not agree, file an issue so we can think about which is correct.
 
 ## Rust releases
 
@@ -45,10 +39,6 @@ Instead, think of the compiled program as a black box.
 You can only probe by running it, feeding it input and observing its output.
 Everything that happens that way must conform to what the reference says.
 
-Finally, this book is not normative.
-It may include details that are specific to `rustc` itself, and should not be taken as a specification for the Rust language.
-We intend to produce such a book someday, and until then, the reference is the closest thing we have to one.
-
 ## How to use this book
 
 This book does not assume you are reading this book sequentially.
@@ -78,9 +68,10 @@ These conventions are documented here.
 
   An *example term* is an example of a term being defined.
 
-* Differences in the language by which edition the crate is compiled under are in a blockquote that start with the words "Edition differences:" in **bold**.
+* The main text describes the latest stable edition. Differences to previous editions are separated in edition blocks:
 
-  > **Edition differences**: In the 2015 edition, this syntax is valid that is disallowed as of the 2018 edition.
+  > [!EDITION-2018]
+  > In the 2015 edition, this syntax is valid that is disallowed as of the 2018 edition.
 
 * Notes that contain useful information about the state of the book or point out useful, but mostly out of scope, information are in note blocks.
 
@@ -105,17 +96,10 @@ These conventions are documented here.
 
   All examples are written for the latest edition unless otherwise stated.
 
-* The grammar and lexical structure is in blockquotes with either "Lexer" or "Syntax" in <sup>**bold superscript**</sup> as the first line.
-
-  > **<sup>Syntax</sup>**\
-  > _ExampleGrammar_:\
-  > &nbsp;&nbsp; &nbsp;&nbsp; `~` [_Expression_]\
-  > &nbsp;&nbsp; | `box` [_Expression_]
-
-  See [Notation] for more detail.
+* The grammar and lexical productions are described in the [Notation] chapter.
 
 r[example.rule.label]
-* Rule identifiers appear before each language rule enclosed in square brackets. These identifiers provide a way to refer to a specific rule in the language. The rule identifier uses periods to separate sections from most general to most specific ([destructors.scope.nesting.function-body] for example). On narrow screens, the rule name will collapse to display `[*]`.
+* Rule identifiers appear before each language rule enclosed in square brackets. These identifiers provide a way to refer to and link to a specific rule in the language ([e.g.][example rule]). The rule identifier uses periods to separate sections from most general to most specific ([destructors.scope.nesting.function-body] for example). On narrow screens, the rule name will collapse to display `[*]`.
 
   The rule name can be clicked to link to that rule.
 
@@ -133,16 +117,16 @@ We welcome contributions of all kinds.
 You can contribute to this book by opening an issue or sending a pull request to [the Rust Reference repository].
 If this book does not answer your question, and you think its answer is in scope of it, please do not hesitate to [file an issue] or ask about it in the `t-lang/doc` stream on [Zulip].
 Knowing what people use this book for the most helps direct our attention to making those sections the best that they can be.
-We also want the reference to be as normative as possible, so if you see anything that is wrong or is non-normative but not specifically called out, please also [file an issue].
+And of course, if you see anything that is wrong or is non-normative but not specifically called out as such, please also [file an issue].
 
 [book]: ../book/index.html
 [github issues]: https://github.com/rust-lang/reference/issues
 [standard library]: std
-[the Rust Reference repository]: https://github.com/rust-lang/reference/
-[Unstable Book]: https://doc.rust-lang.org/nightly/unstable-book/
-[_Expression_]: expressions.md
+[the Rust Reference repository]: ../reference/index.html
+[Unstable Book]: ../unstable-book/index.html
 [cargo book]: ../../../cargo/book/index.html
 [cargo reference]: ../../../cargo/book/reference/index.html
+[example rule]: example.rule.label
 [expressions chapter]: expressions.html
 [file an issue]: https://github.com/rust-lang/reference/issues
 [lifetime of temporaries]: expressions.html#temporaries

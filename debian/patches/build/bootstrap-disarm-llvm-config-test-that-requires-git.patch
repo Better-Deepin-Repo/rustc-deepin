@@ -13,10 +13,10 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  3 files changed, 12 insertions(+)
 
 diff --git a/src/bootstrap/src/core/builder/tests.rs b/src/bootstrap/src/core/builder/tests.rs
-index fc00651..bffb80c 100644
+index 1668ee7..092fc19 100644
 --- a/src/bootstrap/src/core/builder/tests.rs
 +++ b/src/bootstrap/src/core/builder/tests.rs
-@@ -1076,6 +1076,9 @@ fn test_prebuilt_llvm_config_path_resolution() {
+@@ -1148,6 +1148,9 @@ fn test_prebuilt_llvm_config_path_resolution() {
          .join(exe("llvm-config", builder.config.build));
      assert_eq!(expected, actual);
  
@@ -27,10 +27,10 @@ index fc00651..bffb80c 100644
          r#"
              [llvm]
 diff --git a/src/bootstrap/src/core/config/tests.rs b/src/bootstrap/src/core/config/tests.rs
-index 62b0a49..3c496fc 100644
+index cc20a81..8c513f3 100644
 --- a/src/bootstrap/src/core/config/tests.rs
 +++ b/src/bootstrap/src/core/config/tests.rs
-@@ -28,6 +28,8 @@ fn download_ci_llvm() {
+@@ -51,6 +51,8 @@ fn download_ci_llvm() {
      let config = parse("llvm.download-ci-llvm = false");
      assert!(!config.llvm_from_ci);
  
@@ -38,8 +38,8 @@ index 62b0a49..3c496fc 100644
 +    return;
      let if_unchanged_config = parse("llvm.download-ci-llvm = \"if-unchanged\"");
      if if_unchanged_config.llvm_from_ci && if_unchanged_config.is_running_on_ci {
-         let has_changes = if_unchanged_config
-@@ -447,6 +449,7 @@ fn check_rustc_if_unchanged_paths() {
+         let has_changes = if_unchanged_config.has_changes_from_upstream(LLVM_INVALIDATION_PATHS);
+@@ -468,6 +470,7 @@ fn check_rustc_if_unchanged_paths() {
          .collect();
  
      for p in normalised_allowed_paths {
@@ -47,7 +47,7 @@ index 62b0a49..3c496fc 100644
          assert!(config.src.join(p).exists(), "{p} doesn't exist.");
      }
  }
-@@ -529,6 +532,9 @@ fn test_exclude() {
+@@ -550,6 +553,9 @@ fn test_exclude() {
  
  #[test]
  fn test_ci_flag() {

@@ -1218,8 +1218,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
         .run();
 }
 
-#[ignore = "1-86 beta betaport"]
-#[cargo_test]
+#[cargo_test(nightly, reason = "-Zdoctest-xcompile is unstable")]
 fn doctest_xcompile_linker() {
     if cross_compile::disabled() {
         return;

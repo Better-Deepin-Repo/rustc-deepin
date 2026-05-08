@@ -14,10 +14,10 @@ Signed-off-by: Fabian Grünbichler <debian@fabian.gruenbichler.email>
  1 file changed, 4 insertions(+)
 
 diff --git a/src/bootstrap/src/core/config/config.rs b/src/bootstrap/src/core/config/config.rs
-index 8fa9b82..10447c0 100644
+index 80c954b..2b29ffe 100644
 --- a/src/bootstrap/src/core/config/config.rs
 +++ b/src/bootstrap/src/core/config/config.rs
-@@ -1571,6 +1571,10 @@ impl Config {
+@@ -1639,6 +1639,10 @@ impl Config {
              build.cargo = build.cargo.take().or(std::env::var_os("CARGO").map(|p| p.into()));
              // Debian: don't optimize compiler-rt, the bundled sources are not available..
              build.optimized_compiler_builtins = Some(false);

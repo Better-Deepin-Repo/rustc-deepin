@@ -9,10 +9,10 @@ Forwarded: not-needed
  1 file changed, 4 insertions(+)
 
 diff --git a/src/bootstrap/src/core/builder/tests.rs b/src/bootstrap/src/core/builder/tests.rs
-index fd3b28e..dd41e48 100644
+index 5185209..1668ee7 100644
 --- a/src/bootstrap/src/core/builder/tests.rs
 +++ b/src/bootstrap/src/core/builder/tests.rs
-@@ -518,9 +518,13 @@ mod dist {
+@@ -560,9 +560,13 @@ mod dist {
          let b = TargetSelection::from_user(TEST_TRIPLE_2);
          let mut config =
              configure(&[TEST_TRIPLE_1, TEST_TRIPLE_2], &[TEST_TRIPLE_1, TEST_TRIPLE_2]);

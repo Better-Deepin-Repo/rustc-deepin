@@ -1,0 +1,68 @@
+From: =?utf-8?q?Fabian_Gr=C3=BCnbichler?= <f.gruenbichler@proxmox.com>
+Date: Thu, 25 Sep 2025 09:32:47 +0200
+Subject: disable bootstrap tests that don't work from tarball sources
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Forwarded: not-needed
+
+Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
+---
+ src/bootstrap/src/core/builder/tests.rs | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/src/bootstrap/src/core/builder/tests.rs b/src/bootstrap/src/core/builder/tests.rs
+index 092fc19..2542bdb 100644
+--- a/src/bootstrap/src/core/builder/tests.rs
++++ b/src/bootstrap/src/core/builder/tests.rs
+@@ -241,7 +241,8 @@ fn alias_and_path_for_library() {
+     );
+ }
+ 
+-#[test]
++//Debian: doesn't work in a tarball source
++#[allow(dead_code)]
+ fn ci_rustc_if_unchanged_invalidate_on_compiler_changes() {
+     git_test(|ctx| {
+         prepare_rustc_checkout(ctx);
+@@ -254,7 +255,8 @@ fn ci_rustc_if_unchanged_invalidate_on_compiler_changes() {
+     });
+ }
+ 
+-#[test]
++//Debian: doesn't work in a tarball source
++#[allow(dead_code)]
+ fn ci_rustc_if_unchanged_invalidate_on_library_changes_in_ci() {
+     git_test(|ctx| {
+         prepare_rustc_checkout(ctx);
+@@ -267,7 +269,8 @@ fn ci_rustc_if_unchanged_invalidate_on_library_changes_in_ci() {
+     });
+ }
+ 
+-#[test]
++//Debian: doesn't work in a tarball source
++#[allow(dead_code)]
+ fn ci_rustc_if_unchanged_do_not_invalidate_on_library_changes_outside_ci() {
+     git_test(|ctx| {
+         prepare_rustc_checkout(ctx);
+@@ -280,7 +283,8 @@ fn ci_rustc_if_unchanged_do_not_invalidate_on_library_changes_outside_ci() {
+     });
+ }
+ 
+-#[test]
++//Debian: doesn't work in a tarball source
++#[allow(dead_code)]
+ fn ci_rustc_if_unchanged_do_not_invalidate_on_tool_changes() {
+     git_test(|ctx| {
+         prepare_rustc_checkout(ctx);
+@@ -694,7 +698,8 @@ mod dist {
+ 
+     /// This also serves as an important regression test for <https://github.com/rust-lang/rust/issues/138123>
+     /// and <https://github.com/rust-lang/rust/issues/138004>.
+-    #[test]
++    // Debian: this tries to download LLVM with ninja and fails
++    #[allow(dead_code)]
+     fn dist_all_cross() {
+         let cmd_args =
+             &["dist", "--stage", "2", "--dry-run", "--config=/does/not/exist"].map(str::to_owned);

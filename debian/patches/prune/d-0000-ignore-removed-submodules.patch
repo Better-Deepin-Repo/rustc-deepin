@@ -41,7 +41,7 @@ index 16ff0f6..84a0015 100644
    "src/tools/run-make-support",
    "src/tools/rust-installer",
 diff --git a/src/bootstrap/bootstrap.py b/src/bootstrap/bootstrap.py
-index 68400ba..1d63299 100644
+index 42ad14a..11e18415 100644
 --- a/src/bootstrap/bootstrap.py
 +++ b/src/bootstrap/bootstrap.py
 @@ -1133,10 +1133,6 @@ class RustBuild(object):
@@ -75,10 +75,10 @@ index 0caeb32..a394d45 100644
      .into_iter()
      .map(|(path, submodules)| (builder.src.join(path), submodules))
 diff --git a/src/bootstrap/src/core/builder/cargo.rs b/src/bootstrap/src/core/builder/cargo.rs
-index a96ccdd..1a27b3e 100644
+index d625c2e..2877929 100644
 --- a/src/bootstrap/src/core/builder/cargo.rs
 +++ b/src/bootstrap/src/core/builder/cargo.rs
-@@ -1184,10 +1184,7 @@ impl Builder<'_> {
+@@ -1189,10 +1189,7 @@ impl Builder<'_> {
              }
          }
  
@@ -91,7 +91,7 @@ index a96ccdd..1a27b3e 100644
          }
  
 diff --git a/src/bootstrap/src/core/builder/mod.rs b/src/bootstrap/src/core/builder/mod.rs
-index a9058f8..eab2a11 100644
+index 75cc5d3..481cc68 100644
 --- a/src/bootstrap/src/core/builder/mod.rs
 +++ b/src/bootstrap/src/core/builder/mod.rs
 @@ -891,8 +891,6 @@ impl<'a> Builder<'a> {
@@ -131,7 +131,7 @@ index a9058f8..eab2a11 100644
                  check::Rustfmt,
                  check::RustAnalyzer,
                  check::TestFloatParse,
-@@ -1003,8 +989,6 @@ impl<'a> Builder<'a> {
+@@ -1004,8 +990,6 @@ impl<'a> Builder<'a> {
                  test::EmbeddedBook,
                  test::EditionGuide,
                  test::Rustfmt,
@@ -140,7 +140,7 @@ index a9058f8..eab2a11 100644
                  test::Clippy,
                  test::CompiletestTest,
                  test::CrateRunMakeSupport,
-@@ -1045,7 +1029,6 @@ impl<'a> Builder<'a> {
+@@ -1046,7 +1030,6 @@ impl<'a> Builder<'a> {
                  doc::CargoBook,
                  doc::Clippy,
                  doc::ClippyBook,
@@ -148,7 +148,7 @@ index a9058f8..eab2a11 100644
                  doc::EmbeddedBook,
                  doc::EditionGuide,
                  doc::StyleGuide,
-@@ -1071,7 +1054,6 @@ impl<'a> Builder<'a> {
+@@ -1072,7 +1055,6 @@ impl<'a> Builder<'a> {
                  dist::RustAnalyzer,
                  dist::Rustfmt,
                  dist::Clippy,
@@ -156,7 +156,7 @@ index a9058f8..eab2a11 100644
                  dist::LlvmTools,
                  dist::LlvmBitcodeLinker,
                  dist::RustDev,
-@@ -1098,7 +1080,6 @@ impl<'a> Builder<'a> {
+@@ -1099,7 +1081,6 @@ impl<'a> Builder<'a> {
                  install::RustAnalyzer,
                  install::Rustfmt,
                  install::Clippy,
@@ -164,7 +164,7 @@ index a9058f8..eab2a11 100644
                  install::LlvmTools,
                  install::Src,
              ),
-@@ -1106,7 +1087,6 @@ impl<'a> Builder<'a> {
+@@ -1107,7 +1088,6 @@ impl<'a> Builder<'a> {
                  run::BuildManifest,
                  run::BumpStage0,
                  run::ReplaceVersionPlaceholder,

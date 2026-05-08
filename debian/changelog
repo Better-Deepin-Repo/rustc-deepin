@@ -1,3 +1,24 @@
+rustc (1.88.0+dfsg1-2) unstable; urgency=medium
+
+  * add lld-19 to Build-Depends-Indep
+  * fix cargo-doc references in rust-doc
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Fri, 03 Oct 2025 10:19:57 +0200
+
+rustc (1.88.0+dfsg1-1) unstable; urgency=medium
+
+  * cherry-pick libc fix for hurd
+  * loongarch64: fix typo in patch disabling f16
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Tue, 30 Sep 2025 08:45:39 +0200
+
+rustc (1.88.0+dfsg1-1~exp1) experimental; urgency=medium
+
+  * New upstream release
+  * fix or disable more broken tests
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Thu, 25 Sep 2025 10:36:50 +0200
+
 rustc (1.87.0+dfsg1-1) unstable; urgency=medium
 
   * revert changes requiring LLVM >=20 (fix loongarch64/mips64el)

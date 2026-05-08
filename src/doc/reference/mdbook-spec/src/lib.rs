@@ -1,11 +1,11 @@
 #![deny(rust_2018_idioms, unused_lifetimes)]
 
 use crate::rules::Rules;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
+use mdbook::BookItem;
 use mdbook::book::{Book, Chapter};
 use mdbook::errors::Error;
 use mdbook::preprocess::{CmdPreprocessor, Preprocessor, PreprocessorContext};
-use mdbook::BookItem;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use semver::{Version, VersionReq};
@@ -14,6 +14,7 @@ use std::io;
 use std::ops::Range;
 use std::path::PathBuf;
 
+pub mod grammar;
 mod rules;
 mod std_links;
 mod test_links;
@@ -23,6 +24,10 @@ mod test_links;
 static ADMONITION_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?m)^ *> \[!(?<admon>[^]]+)\]\n(?<blockquote>(?: *>.*\n)+)").unwrap()
 });
+
+/// A primitive regex to find link reference definitions.
+static MD_LINK_REFERENCE_DEFINITION: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"(?m)^\[(?<label>[^]]+)]: +(?<dest>.*)").unwrap());
 
 pub fn handle_preprocessing() -> Result<(), Error> {
     let pre = Spec::new(None)?;
@@ -114,6 +119,34 @@ impl Spec {
         Ok(Spec { rust_root })
     }
 
+    /// Converts link reference definitions that point to a rule to the correct link.
+    ///
+    /// For example:
+    /// ```markdown
+    /// See [this rule].
+    ///
+    /// [this rule]: expr.array
+    /// ```
+    ///
+    /// This will convert the `[this rule]` definition to point to the actual link.
+    fn rule_link_references(&self, chapter: &Chapter, rules: &Rules) -> String {
+        let current_path = chapter.path.as_ref().unwrap().parent().unwrap();
+        MD_LINK_REFERENCE_DEFINITION
+            .replace_all(&chapter.content, |caps: &Captures<'_>| {
+                let dest = &caps["dest"];
+                if let Some((_source_path, path)) = rules.def_paths.get(dest) {
+                    let label = &caps["label"];
+                    let relative = pathdiff::diff_paths(path, current_path).unwrap();
+                    // Adjust paths for Windows.
+                    let relative = relative.display().to_string().replace('\\', "/");
+                    format!("[{label}]: {relative}#r-{dest}")
+                } else {
+                    caps.get(0).unwrap().as_str().to_string()
+                }
+            })
+            .to_string()
+    }
+
     /// Generates link references to all rules on all pages, so you can easily
     /// refer to rules anywhere in the book.
     fn auto_link_references(&self, chapter: &Chapter, rules: &Rules) -> String {
@@ -155,6 +188,18 @@ impl Spec {
                 let blockquote = &caps["blockquote"];
                 let initial_spaces = blockquote.chars().position(|ch| ch != ' ').unwrap_or(0);
                 let space = &blockquote[..initial_spaces];
+                if lower.starts_with("edition-") {
+                    let edition = &lower[8..];
+                    return format!("{space}<div class=\"alert alert-edition\">\n\
+                        \n\
+                        {space}> <p class=\"alert-title\">\
+                            <span class=\"alert-title-edition\">{edition}</span> Edition differences</p>\n\
+                        {space} >\n\
+                        {blockquote}\n\
+                        \n\
+                        {space}</div>\n");
+                }
+
                 // These icons are from GitHub, MIT License, see https://github.com/primer/octicons
                 let svg = match lower.as_str() {
                     "note" => "<path d=\"M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z\"></path>",
@@ -224,6 +269,7 @@ impl Preprocessor for Spec {
         if diag.deny_warnings && self.rust_root.is_none() {
             bail!("error: SPEC_RUST_ROOT environment variable must be set");
         }
+        let grammar = grammar::load_grammar(&book, &mut diag);
         let rules = self.collect_rules(&book, &mut diag);
         let tests = self.collect_tests(&rules);
         let summary_table = test_links::make_summary_table(&book, &tests, &rules);
@@ -243,11 +289,16 @@ impl Preprocessor for Spec {
                 return;
             }
             ch.content = self.admonitions(&ch, &mut diag);
+            ch.content = self.rule_link_references(&ch, &rules);
             ch.content = self.auto_link_references(&ch, &rules);
             ch.content = self.render_rule_definitions(&ch.content, &tests, &git_ref);
             if ch.name == "Test summary" {
                 ch.content = ch.content.replace("{{summary-table}}", &summary_table);
             }
+            if grammar::is_summary(ch) {
+                ch.content = grammar::insert_summary(&grammar, &ch, &mut diag);
+            }
+            ch.content = grammar::insert_grammar(&grammar, &ch, &mut diag);
         });
 
         // Final pass will resolve everything as a std link (or error if the

@@ -10,14 +10,14 @@ Forwarded: not-needed
  1 file changed, 1 deletion(-)
 
 diff --git a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-index 80e2e04..7a80a14 100644
+index 8ff48bc..4266012 100644
 --- a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-@@ -38,7 +38,6 @@ serde.workspace = true
+@@ -39,7 +39,6 @@ serde.workspace = true
  serde_derive.workspace = true
  tenthash = "1.0.0"
- num_cpus = "1.15.0"
--mimalloc = { version = "0.1.30", default-features = false, optional = true }
+ num_cpus = "1.16.0"
+-mimalloc = { version = "0.1.44", default-features = false, optional = true }
  lsp-server.workspace = true
  tracing.workspace = true
  tracing-subscriber.workspace = true

@@ -1426,6 +1426,56 @@ edition = "2021"
 }
 
 #[cargo_test]
+fn dirty_file_outside_pkg_root_inside_submodule() {
+    if !symlink_supported() {
+        return;
+    }
+    let (p, repo) = git::new_repo("foo", |p| {
+        p.file(
+            "Cargo.toml",
+            r#"
+                [workspace]
+                members = ["isengard"]
+                resolver = "2"
+            "#,
+        )
+        .file(
+            "isengard/Cargo.toml",
+            r#"
+                [package]
+                name = "isengard"
+                edition = "2015"
+                homepage = "saruman"
+                description = "saruman"
+                license = "ISC"
+            "#,
+        )
+        .file("isengard/src/lib.rs", "")
+    });
+    let submodule = git::new("submodule", |p| {
+        p.no_manifest().file("file.txt", "from-submodule")
+    });
+    git::add_submodule(
+        &repo,
+        &submodule.root().to_url().to_string(),
+        Path::new("submodule"),
+    );
+    p.symlink("submodule/file.txt", "isengard/src/file.txt");
+    git::add(&repo);
+    git::commit(&repo);
+    // This dirtyness should be detected in the future.
+    p.change_file("submodule/file.txt", "changed");
+
+    p.cargo("package --workspace --no-verify")
+        .with_stderr_data(str![[r#"
+[PACKAGING] isengard v0.0.0 ([ROOT]/foo/isengard)
+[PACKAGED] 6 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
 fn issue_13695_allow_dirty_vcs_info() {
     let p = project()
         .file(
@@ -6065,6 +6115,7 @@ src/main.rs
 
 #[cargo_test]
 fn workspace_with_local_deps_index_mismatch() {
+    registry::init();
     let alt_reg = registry::RegistryBuilder::new()
         .http_api()
         .http_index()
@@ -6123,12 +6174,12 @@ fn workspace_with_local_deps_index_mismatch() {
 [PACKAGING] level2 v0.0.1 ([ROOT]/foo/level2)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [PACKAGING] level1 v0.0.1 ([ROOT]/foo/level1)
-[UPDATING] crates.io index
+[UPDATING] `dummy-registry` index
 [ERROR] failed to prepare local package for uploading
 
 Caused by:
   no matching package named `level2` found
-  location searched: crates.io index
+  location searched: `dummy-registry` index (which is replacing registry `crates-io`)
   required by package `level1 v0.0.1 ([ROOT]/foo/level1)`
 
 "#]])

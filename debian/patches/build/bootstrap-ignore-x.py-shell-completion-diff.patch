@@ -14,10 +14,10 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/bootstrap/src/core/build_steps/test.rs b/src/bootstrap/src/core/build_steps/test.rs
-index 0948a88..c542baa 100644
+index 29fb576..7cd3fa5 100644
 --- a/src/bootstrap/src/core/build_steps/test.rs
 +++ b/src/bootstrap/src/core/build_steps/test.rs
-@@ -1156,7 +1156,8 @@ HELP: to skip test's attempt to check tidiness, pass `--skip src/tools/tidy` to
+@@ -1145,7 +1145,8 @@ HELP: to skip test's attempt to check tidiness, pass `--skip src/tools/tidy` to
              eprintln!(
                  "x.py completions were changed; run `x.py run generate-completions` to update them"
              );

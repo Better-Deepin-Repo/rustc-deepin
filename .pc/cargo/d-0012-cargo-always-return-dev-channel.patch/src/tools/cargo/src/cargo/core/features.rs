@@ -790,6 +790,7 @@ unstable_cli_options!(
     public_dependency: bool = ("Respect a dependency's `public` field in Cargo.toml to control public/private dependencies"),
     publish_timeout: bool = ("Enable the `publish.timeout` key in .cargo/config.toml file"),
     root_dir: Option<PathBuf> = ("Set the root directory relative to which paths are printed (defaults to workspace root)"),
+    rustdoc_depinfo: bool = ("Use dep-info files in rustdoc rebuild detection"),
     rustdoc_map: bool = ("Allow passing external documentation mappings to rustdoc"),
     rustdoc_scrape_examples: bool = ("Allows Rustdoc to scrape code examples from reverse-dependencies"),
     sbom: bool = ("Enable the `sbom` option in build config in .cargo/config.toml file"),
@@ -1278,10 +1279,8 @@ impl CliUnstable {
             "feature-unification" => self.feature_unification = parse_empty(k, v)?,
             "gc" => self.gc = parse_empty(k, v)?,
             "git" => {
-                self.git = v.map_or_else(
-                    || Ok(Some(GitFeatures::all())),
-                    |v| parse_git(v.split(',')),
-                )?
+                self.git =
+                    v.map_or_else(|| Ok(Some(GitFeatures::all())), |v| parse_git(v.split(',')))?
             }
             "gitoxide" => {
                 self.gitoxide = v.map_or_else(
@@ -1296,13 +1295,14 @@ impl CliUnstable {
             // can also be set in .cargo/config or with and ENV
             "mtime-on-use" => self.mtime_on_use = parse_empty(k, v)?,
             "no-index-update" => self.no_index_update = parse_empty(k, v)?,
-            "package-workspace" => self.package_workspace= parse_empty(k, v)?,
+            "package-workspace" => self.package_workspace = parse_empty(k, v)?,
             "panic-abort-tests" => self.panic_abort_tests = parse_empty(k, v)?,
             "public-dependency" => self.public_dependency = parse_empty(k, v)?,
             "profile-rustflags" => self.profile_rustflags = parse_empty(k, v)?,
             "trim-paths" => self.trim_paths = parse_empty(k, v)?,
             "publish-timeout" => self.publish_timeout = parse_empty(k, v)?,
             "root-dir" => self.root_dir = v.map(|v| v.into()),
+            "rustdoc-depinfo" => self.rustdoc_depinfo = parse_empty(k, v)?,
             "rustdoc-map" => self.rustdoc_map = parse_empty(k, v)?,
             "rustdoc-scrape-examples" => self.rustdoc_scrape_examples = parse_empty(k, v)?,
             "sbom" => self.sbom = parse_empty(k, v)?,
@@ -1313,10 +1313,13 @@ impl CliUnstable {
             "target-applies-to-host" => self.target_applies_to_host = parse_empty(k, v)?,
             "unstable-options" => self.unstable_options = parse_empty(k, v)?,
             "warnings" => self.warnings = parse_empty(k, v)?,
-            _ => bail!("\
+            _ => bail!(
+                "\
             unknown `-Z` flag specified: {k}\n\n\
-            For available unstable features, see https://doc.rust-lang.org/nightly/cargo/reference/unstable.html\n\
-            If you intended to use an unstable rustc feature, try setting `RUSTFLAGS=\"-Z{k}\"`"),
+            For available unstable features, see \
+            https://doc.rust-lang.org/nightly/cargo/reference/unstable.html\n\
+            If you intended to use an unstable rustc feature, try setting `RUSTFLAGS=\"-Z{k}\"`"
+            ),
         }
 
         Ok(())

@@ -13,7 +13,7 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
 ---
  src/tools/compiletest/src/directive-list.rs           | 1 +
  src/tools/compiletest/src/header/tests.rs             | 1 +
- tests/crashes/115994.rs                               | 1 +
+ tests/crashes/108499.rs                               | 1 +
  tests/run-make/long-linker-command-lines/foo.rs       | 7 +++++++
  tests/ui/associated-consts/issue-93775.rs             | 1 +
  tests/ui/issues/issue-74564-if-expr-stack-overflow.rs | 1 +
@@ -21,10 +21,10 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  7 files changed, 13 insertions(+)
 
 diff --git a/src/tools/compiletest/src/directive-list.rs b/src/tools/compiletest/src/directive-list.rs
-index b2ad5a3..7939329 100644
+index 5757e42..5614c33 100644
 --- a/src/tools/compiletest/src/directive-list.rs
 +++ b/src/tools/compiletest/src/directive-list.rs
-@@ -63,6 +63,7 @@ const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
+@@ -66,6 +66,7 @@ const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
      "ignore-gnu",
      "ignore-haiku",
      "ignore-horizon",
@@ -33,7 +33,7 @@ index b2ad5a3..7939329 100644
      "ignore-i686-pc-windows-msvc",
      "ignore-illumos",
 diff --git a/src/tools/compiletest/src/header/tests.rs b/src/tools/compiletest/src/header/tests.rs
-index 007318b..8a58c2e 100644
+index e7e5ff0..d1692f8 100644
 --- a/src/tools/compiletest/src/header/tests.rs
 +++ b/src/tools/compiletest/src/header/tests.rs
 @@ -334,6 +334,7 @@ fn ignore_target() {
@@ -44,17 +44,16 @@ index 007318b..8a58c2e 100644
      assert!(check_ignore(&config, "//@ ignore-unix"));
      assert!(check_ignore(&config, "//@ ignore-gnu"));
      assert!(check_ignore(&config, "//@ ignore-64bit"));
-diff --git a/tests/crashes/115994.rs b/tests/crashes/115994.rs
-index 23d1507..e0714e5 100644
---- a/tests/crashes/115994.rs
-+++ b/tests/crashes/115994.rs
-@@ -1,5 +1,6 @@
- //@ known-bug: #115994
- //@ compile-flags: -Cdebuginfo=2 --crate-type lib
+diff --git a/tests/crashes/108499.rs b/tests/crashes/108499.rs
+index 4a0638c..658d631 100644
+--- a/tests/crashes/108499.rs
++++ b/tests/crashes/108499.rs
+@@ -1,4 +1,5 @@
+ //@ known-bug: #108499
 +//@ ignore-hurd
  
- // To prevent "overflow while adding drop-check rules".
- use std::mem::ManuallyDrop;
+ // at lower recursion limits the recursion limit is reached before the bug happens
+ #![recursion_limit = "2000"]
 diff --git a/tests/run-make/long-linker-command-lines/foo.rs b/tests/run-make/long-linker-command-lines/foo.rs
 index 5b30c06..9ef0d5a 100644
 --- a/tests/run-make/long-linker-command-lines/foo.rs

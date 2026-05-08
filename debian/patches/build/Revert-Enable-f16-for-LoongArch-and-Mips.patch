@@ -1,0 +1,27 @@
+From: =?utf-8?q?Fabian_Gr=C3=BCnbichler?= <git@fabian.gruenbichler.email>
+Date: Sat, 20 Sep 2025 13:55:48 +0200
+Subject: Disable `f16` for LoongArch and MIPS*
+
+This effectively reverts commit 30703af6f34e96d3e51b665aeb56f44749d11265 and
+commit cf1242c461e035fd2cfb99f620e810015744cac4.
+
+Can be dropped once rustc switches to LLVM20+
+---
+ compiler/rustc_codegen_llvm/src/llvm_util.rs | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/compiler/rustc_codegen_llvm/src/llvm_util.rs b/compiler/rustc_codegen_llvm/src/llvm_util.rs
+index 8f57f09..d9b25a6 100644
+--- a/compiler/rustc_codegen_llvm/src/llvm_util.rs
++++ b/compiler/rustc_codegen_llvm/src/llvm_util.rs
+@@ -458,6 +458,10 @@ fn update_target_reliable_float_cfg(sess: &Session, cfg: &mut TargetConfig) {
+         // Infinite recursion <https://github.com/llvm/llvm-project/issues/97981>
+         ("csky", _) => false,
+         ("hexagon", _) => false,
++        // Debian: requires LLVM 20+
++        ("loongarch64", _) => false,
++        // Debian: requires LLVM 20+
++        ("mips" | "mips64" | "mips32r6" | "mips64r6", _) => false,
+         ("powerpc" | "powerpc64", _) => false,
+         ("sparc" | "sparc64", _) => false,
+         ("wasm32" | "wasm64", _) => false,

@@ -9,7 +9,7 @@ Bug: https://github.com/rust-lang/rust/issues/89607
  2 files changed, 2 insertions(+)
 
 diff --git a/library/alloctests/tests/arc.rs b/library/alloctests/tests/arc.rs
-index 0baa50f..9c19872 100644
+index 00bdf52..65fc1b8 100644
 --- a/library/alloctests/tests/arc.rs
 +++ b/library/alloctests/tests/arc.rs
 @@ -94,6 +94,7 @@ const SHARED_ITER_MAX: u16 = 100;

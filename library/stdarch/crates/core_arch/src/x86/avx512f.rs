@@ -16515,7 +16515,10 @@ pub fn _mm512_setr_epi64(
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgatherdpd, SCALE = 1))]
 #[rustc_legacy_const_generics(2)]
-pub unsafe fn _mm512_i32gather_pd<const SCALE: i32>(offsets: __m256i, slice: *const u8) -> __m512d {
+pub unsafe fn _mm512_i32gather_pd<const SCALE: i32>(
+    offsets: __m256i,
+    slice: *const f64,
+) -> __m512d {
     static_assert_imm8_scale!(SCALE);
     let zero = f64x8::ZERO;
     let neg_one = -1;
@@ -16537,7 +16540,7 @@ pub unsafe fn _mm512_mask_i32gather_pd<const SCALE: i32>(
     src: __m512d,
     mask: __mmask8,
     offsets: __m256i,
-    slice: *const u8,
+    slice: *const f64,
 ) -> __m512d {
     static_assert_imm8_scale!(SCALE);
     let src = src.as_f64x8();
@@ -16555,7 +16558,10 @@ pub unsafe fn _mm512_mask_i32gather_pd<const SCALE: i32>(
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgatherqpd, SCALE = 1))]
 #[rustc_legacy_const_generics(2)]
-pub unsafe fn _mm512_i64gather_pd<const SCALE: i32>(offsets: __m512i, slice: *const u8) -> __m512d {
+pub unsafe fn _mm512_i64gather_pd<const SCALE: i32>(
+    offsets: __m512i,
+    slice: *const f64,
+) -> __m512d {
     static_assert_imm8_scale!(SCALE);
     let zero = f64x8::ZERO;
     let neg_one = -1;
@@ -16577,7 +16583,7 @@ pub unsafe fn _mm512_mask_i64gather_pd<const SCALE: i32>(
     src: __m512d,
     mask: __mmask8,
     offsets: __m512i,
-    slice: *const u8,
+    slice: *const f64,
 ) -> __m512d {
     static_assert_imm8_scale!(SCALE);
     let src = src.as_f64x8();
@@ -16595,7 +16601,7 @@ pub unsafe fn _mm512_mask_i64gather_pd<const SCALE: i32>(
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgatherqps, SCALE = 1))]
 #[rustc_legacy_const_generics(2)]
-pub unsafe fn _mm512_i64gather_ps<const SCALE: i32>(offsets: __m512i, slice: *const u8) -> __m256 {
+pub unsafe fn _mm512_i64gather_ps<const SCALE: i32>(offsets: __m512i, slice: *const f32) -> __m256 {
     static_assert_imm8_scale!(SCALE);
     let zero = f32x8::ZERO;
     let neg_one = -1;
@@ -16617,7 +16623,7 @@ pub unsafe fn _mm512_mask_i64gather_ps<const SCALE: i32>(
     src: __m256,
     mask: __mmask8,
     offsets: __m512i,
-    slice: *const u8,
+    slice: *const f32,
 ) -> __m256 {
     static_assert_imm8_scale!(SCALE);
     let src = src.as_f32x8();
@@ -16635,7 +16641,7 @@ pub unsafe fn _mm512_mask_i64gather_ps<const SCALE: i32>(
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgatherdps, SCALE = 1))]
 #[rustc_legacy_const_generics(2)]
-pub unsafe fn _mm512_i32gather_ps<const SCALE: i32>(offsets: __m512i, slice: *const u8) -> __m512 {
+pub unsafe fn _mm512_i32gather_ps<const SCALE: i32>(offsets: __m512i, slice: *const f32) -> __m512 {
     static_assert_imm8_scale!(SCALE);
     let zero = f32x16::ZERO;
     let neg_one = -1;
@@ -16657,7 +16663,7 @@ pub unsafe fn _mm512_mask_i32gather_ps<const SCALE: i32>(
     src: __m512,
     mask: __mmask16,
     offsets: __m512i,
-    slice: *const u8,
+    slice: *const f32,
 ) -> __m512 {
     static_assert_imm8_scale!(SCALE);
     let src = src.as_f32x16();
@@ -16677,7 +16683,7 @@ pub unsafe fn _mm512_mask_i32gather_ps<const SCALE: i32>(
 #[rustc_legacy_const_generics(2)]
 pub unsafe fn _mm512_i32gather_epi32<const SCALE: i32>(
     offsets: __m512i,
-    slice: *const u8,
+    slice: *const i32,
 ) -> __m512i {
     static_assert_imm8_scale!(SCALE);
     let zero = i32x16::ZERO;
@@ -16700,7 +16706,7 @@ pub unsafe fn _mm512_mask_i32gather_epi32<const SCALE: i32>(
     src: __m512i,
     mask: __mmask16,
     offsets: __m512i,
-    slice: *const u8,
+    slice: *const i32,
 ) -> __m512i {
     static_assert_imm8_scale!(SCALE);
     let src = src.as_i32x16();
@@ -16721,7 +16727,7 @@ pub unsafe fn _mm512_mask_i32gather_epi32<const SCALE: i32>(
 #[rustc_legacy_const_generics(2)]
 pub unsafe fn _mm512_i32gather_epi64<const SCALE: i32>(
     offsets: __m256i,
-    slice: *const u8,
+    slice: *const i64,
 ) -> __m512i {
     static_assert_imm8_scale!(SCALE);
     let zero = i64x8::ZERO;
@@ -16744,7 +16750,7 @@ pub unsafe fn _mm512_mask_i32gather_epi64<const SCALE: i32>(
     src: __m512i,
     mask: __mmask8,
     offsets: __m256i,
-    slice: *const u8,
+    slice: *const i64,
 ) -> __m512i {
     static_assert_imm8_scale!(SCALE);
     let src = src.as_i64x8();
@@ -16765,7 +16771,7 @@ pub unsafe fn _mm512_mask_i32gather_epi64<const SCALE: i32>(
 #[rustc_legacy_const_generics(2)]
 pub unsafe fn _mm512_i64gather_epi64<const SCALE: i32>(
     offsets: __m512i,
-    slice: *const u8,
+    slice: *const i64,
 ) -> __m512i {
     static_assert_imm8_scale!(SCALE);
     let zero = i64x8::ZERO;
@@ -16788,7 +16794,7 @@ pub unsafe fn _mm512_mask_i64gather_epi64<const SCALE: i32>(
     src: __m512i,
     mask: __mmask8,
     offsets: __m512i,
-    slice: *const u8,
+    slice: *const i64,
 ) -> __m512i {
     static_assert_imm8_scale!(SCALE);
     let src = src.as_i64x8();
@@ -16809,7 +16815,7 @@ pub unsafe fn _mm512_mask_i64gather_epi64<const SCALE: i32>(
 #[rustc_legacy_const_generics(2)]
 pub unsafe fn _mm512_i64gather_epi32<const SCALE: i32>(
     offsets: __m512i,
-    slice: *const u8,
+    slice: *const i32,
 ) -> __m256i {
     static_assert_imm8_scale!(SCALE);
     let zeros = i32x8::ZERO;
@@ -16832,7 +16838,7 @@ pub unsafe fn _mm512_mask_i64gather_epi32<const SCALE: i32>(
     src: __m256i,
     mask: __mmask8,
     offsets: __m512i,
-    slice: *const u8,
+    slice: *const i32,
 ) -> __m256i {
     static_assert_imm8_scale!(SCALE);
     let src = src.as_i32x8();
@@ -16852,7 +16858,7 @@ pub unsafe fn _mm512_mask_i64gather_epi32<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vscatterdpd, SCALE = 1))]
 #[rustc_legacy_const_generics(3)]
 pub unsafe fn _mm512_i32scatter_pd<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut f64,
     offsets: __m256i,
     src: __m512d,
 ) {
@@ -16873,7 +16879,7 @@ pub unsafe fn _mm512_i32scatter_pd<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vscatterdpd, SCALE = 1))]
 #[rustc_legacy_const_generics(4)]
 pub unsafe fn _mm512_mask_i32scatter_pd<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut f64,
     mask: __mmask8,
     offsets: __m256i,
     src: __m512d,
@@ -16894,7 +16900,7 @@ pub unsafe fn _mm512_mask_i32scatter_pd<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vscatterqpd, SCALE = 1))]
 #[rustc_legacy_const_generics(3)]
 pub unsafe fn _mm512_i64scatter_pd<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut f64,
     offsets: __m512i,
     src: __m512d,
 ) {
@@ -16915,7 +16921,7 @@ pub unsafe fn _mm512_i64scatter_pd<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vscatterqpd, SCALE = 1))]
 #[rustc_legacy_const_generics(4)]
 pub unsafe fn _mm512_mask_i64scatter_pd<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut f64,
     mask: __mmask8,
     offsets: __m512i,
     src: __m512d,
@@ -16936,7 +16942,7 @@ pub unsafe fn _mm512_mask_i64scatter_pd<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vscatterdps, SCALE = 1))]
 #[rustc_legacy_const_generics(3)]
 pub unsafe fn _mm512_i32scatter_ps<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut f32,
     offsets: __m512i,
     src: __m512,
 ) {
@@ -16957,7 +16963,7 @@ pub unsafe fn _mm512_i32scatter_ps<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vscatterdps, SCALE = 1))]
 #[rustc_legacy_const_generics(4)]
 pub unsafe fn _mm512_mask_i32scatter_ps<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut f32,
     mask: __mmask16,
     offsets: __m512i,
     src: __m512,
@@ -16978,7 +16984,7 @@ pub unsafe fn _mm512_mask_i32scatter_ps<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vscatterqps, SCALE = 1))]
 #[rustc_legacy_const_generics(3)]
 pub unsafe fn _mm512_i64scatter_ps<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut f32,
     offsets: __m512i,
     src: __m256,
 ) {
@@ -16999,7 +17005,7 @@ pub unsafe fn _mm512_i64scatter_ps<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vscatterqps, SCALE = 1))]
 #[rustc_legacy_const_generics(4)]
 pub unsafe fn _mm512_mask_i64scatter_ps<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut f32,
     mask: __mmask8,
     offsets: __m512i,
     src: __m256,
@@ -17020,7 +17026,7 @@ pub unsafe fn _mm512_mask_i64scatter_ps<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vpscatterdq, SCALE = 1))]
 #[rustc_legacy_const_generics(3)]
 pub unsafe fn _mm512_i32scatter_epi64<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut i64,
     offsets: __m256i,
     src: __m512i,
 ) {
@@ -17041,7 +17047,7 @@ pub unsafe fn _mm512_i32scatter_epi64<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vpscatterdq, SCALE = 1))]
 #[rustc_legacy_const_generics(4)]
 pub unsafe fn _mm512_mask_i32scatter_epi64<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut i64,
     mask: __mmask8,
     offsets: __m256i,
     src: __m512i,
@@ -17063,7 +17069,7 @@ pub unsafe fn _mm512_mask_i32scatter_epi64<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vpscatterqq, SCALE = 1))]
 #[rustc_legacy_const_generics(3)]
 pub unsafe fn _mm512_i64scatter_epi64<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut i64,
     offsets: __m512i,
     src: __m512i,
 ) {
@@ -17084,7 +17090,7 @@ pub unsafe fn _mm512_i64scatter_epi64<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vpscatterqq, SCALE = 1))]
 #[rustc_legacy_const_generics(4)]
 pub unsafe fn _mm512_mask_i64scatter_epi64<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut i64,
     mask: __mmask8,
     offsets: __m512i,
     src: __m512i,
@@ -17106,7 +17112,7 @@ pub unsafe fn _mm512_mask_i64scatter_epi64<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vpscatterdd, SCALE = 1))]
 #[rustc_legacy_const_generics(3)]
 pub unsafe fn _mm512_i32scatter_epi32<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut i32,
     offsets: __m512i,
     src: __m512i,
 ) {
@@ -17127,7 +17133,7 @@ pub unsafe fn _mm512_i32scatter_epi32<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vpscatterdd, SCALE = 1))]
 #[rustc_legacy_const_generics(4)]
 pub unsafe fn _mm512_mask_i32scatter_epi32<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut i32,
     mask: __mmask16,
     offsets: __m512i,
     src: __m512i,
@@ -17149,7 +17155,7 @@ pub unsafe fn _mm512_mask_i32scatter_epi32<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vpscatterqd, SCALE = 1))]
 #[rustc_legacy_const_generics(3)]
 pub unsafe fn _mm512_i64scatter_epi32<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut i32,
     offsets: __m512i,
     src: __m256i,
 ) {
@@ -17170,7 +17176,7 @@ pub unsafe fn _mm512_i64scatter_epi32<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vpscatterqd, SCALE = 1))]
 #[rustc_legacy_const_generics(4)]
 pub unsafe fn _mm512_mask_i64scatter_epi32<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut i32,
     mask: __mmask8,
     offsets: __m512i,
     src: __m256i,
@@ -17194,9 +17200,9 @@ pub unsafe fn _mm512_mask_i64scatter_epi32<const SCALE: i32>(
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm512_i32logather_epi64<const SCALE: i32>(
     vindex: __m512i,
-    base_addr: *const u8,
+    base_addr: *const i64,
 ) -> __m512i {
-    _mm512_i32gather_epi64::<SCALE>(_mm512_castsi512_si256(vindex), base_addr as _)
+    _mm512_i32gather_epi64::<SCALE>(_mm512_castsi512_si256(vindex), base_addr)
 }
 
 /// Loads 8 64-bit integer elements from memory starting at location base_addr at packed 32-bit integer
@@ -17213,9 +17219,9 @@ pub unsafe fn _mm512_mask_i32logather_epi64<const SCALE: i32>(
     src: __m512i,
     k: __mmask8,
     vindex: __m512i,
-    base_addr: *const u8,
+    base_addr: *const i64,
 ) -> __m512i {
-    _mm512_mask_i32gather_epi64::<SCALE>(src, k, _mm512_castsi512_si256(vindex), base_addr as _)
+    _mm512_mask_i32gather_epi64::<SCALE>(src, k, _mm512_castsi512_si256(vindex), base_addr)
 }
 
 /// Loads 8 double-precision (64-bit) floating-point elements from memory starting at location base_addr
@@ -17229,9 +17235,9 @@ pub unsafe fn _mm512_mask_i32logather_epi64<const SCALE: i32>(
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm512_i32logather_pd<const SCALE: i32>(
     vindex: __m512i,
-    base_addr: *const u8,
+    base_addr: *const f64,
 ) -> __m512d {
-    _mm512_i32gather_pd::<SCALE>(_mm512_castsi512_si256(vindex), base_addr as _)
+    _mm512_i32gather_pd::<SCALE>(_mm512_castsi512_si256(vindex), base_addr)
 }
 
 /// Loads 8 double-precision (64-bit) floating-point elements from memory starting at location base_addr
@@ -17248,9 +17254,9 @@ pub unsafe fn _mm512_mask_i32logather_pd<const SCALE: i32>(
     src: __m512d,
     k: __mmask8,
     vindex: __m512i,
-    base_addr: *const u8,
+    base_addr: *const f64,
 ) -> __m512d {
-    _mm512_mask_i32gather_pd::<SCALE>(src, k, _mm512_castsi512_si256(vindex), base_addr as _)
+    _mm512_mask_i32gather_pd::<SCALE>(src, k, _mm512_castsi512_si256(vindex), base_addr)
 }
 
 /// Stores 8 64-bit integer elements from a to memory starting at location base_addr at packed 32-bit integer
@@ -17263,11 +17269,11 @@ pub unsafe fn _mm512_mask_i32logather_pd<const SCALE: i32>(
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm512_i32loscatter_epi64<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i64,
     vindex: __m512i,
     a: __m512i,
 ) {
-    _mm512_i32scatter_epi64::<SCALE>(base_addr as _, _mm512_castsi512_si256(vindex), a)
+    _mm512_i32scatter_epi64::<SCALE>(base_addr, _mm512_castsi512_si256(vindex), a)
 }
 
 /// Stores 8 64-bit integer elements from a to memory starting at location base_addr at packed 32-bit integer
@@ -17281,12 +17287,12 @@ pub unsafe fn _mm512_i32loscatter_epi64<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm512_mask_i32loscatter_epi64<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i64,
     k: __mmask8,
     vindex: __m512i,
     a: __m512i,
 ) {
-    _mm512_mask_i32scatter_epi64::<SCALE>(base_addr as _, k, _mm512_castsi512_si256(vindex), a)
+    _mm512_mask_i32scatter_epi64::<SCALE>(base_addr, k, _mm512_castsi512_si256(vindex), a)
 }
 
 /// Stores 8 double-precision (64-bit) floating-point elements from a to memory starting at location base_addr
@@ -17299,11 +17305,11 @@ pub unsafe fn _mm512_mask_i32loscatter_epi64<const SCALE: i32>(
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm512_i32loscatter_pd<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f64,
     vindex: __m512i,
     a: __m512d,
 ) {
-    _mm512_i32scatter_pd::<SCALE>(base_addr as _, _mm512_castsi512_si256(vindex), a)
+    _mm512_i32scatter_pd::<SCALE>(base_addr, _mm512_castsi512_si256(vindex), a)
 }
 
 /// Stores 8 double-precision (64-bit) floating-point elements from a to memory starting at location base_addr
@@ -17317,12 +17323,12 @@ pub unsafe fn _mm512_i32loscatter_pd<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm512_mask_i32loscatter_pd<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f64,
     k: __mmask8,
     vindex: __m512i,
     a: __m512d,
 ) {
-    _mm512_mask_i32scatter_pd::<SCALE>(base_addr as _, k, _mm512_castsi512_si256(vindex), a)
+    _mm512_mask_i32scatter_pd::<SCALE>(base_addr, k, _mm512_castsi512_si256(vindex), a)
 }
 
 /// Stores 8 32-bit integer elements from a to memory starting at location base_addr at packed 32-bit integer
@@ -17335,7 +17341,7 @@ pub unsafe fn _mm512_mask_i32loscatter_pd<const SCALE: i32>(
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_i32scatter_epi32<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i32,
     vindex: __m256i,
     a: __m256i,
 ) {
@@ -17354,7 +17360,7 @@ pub unsafe fn _mm256_i32scatter_epi32<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_mask_i32scatter_epi32<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i32,
     k: __mmask8,
     vindex: __m256i,
     a: __m256i,
@@ -17372,7 +17378,7 @@ pub unsafe fn _mm256_mask_i32scatter_epi32<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vpscatterdq, SCALE = 1))]
 #[rustc_legacy_const_generics(3)]
 pub unsafe fn _mm256_i32scatter_epi64<const SCALE: i32>(
-    slice: *mut u8,
+    slice: *mut i64,
     offsets: __m128i,
     src: __m256i,
 ) {
@@ -17394,7 +17400,7 @@ pub unsafe fn _mm256_i32scatter_epi64<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_mask_i32scatter_epi64<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i64,
     k: __mmask8,
     vindex: __m128i,
     a: __m256i,
@@ -17413,7 +17419,7 @@ pub unsafe fn _mm256_mask_i32scatter_epi64<const SCALE: i32>(
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_i32scatter_pd<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f64,
     vindex: __m128i,
     a: __m256d,
 ) {
@@ -17432,7 +17438,7 @@ pub unsafe fn _mm256_i32scatter_pd<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_mask_i32scatter_pd<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f64,
     k: __mmask8,
     vindex: __m128i,
     a: __m256d,
@@ -17451,7 +17457,7 @@ pub unsafe fn _mm256_mask_i32scatter_pd<const SCALE: i32>(
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_i32scatter_ps<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f32,
     vindex: __m256i,
     a: __m256,
 ) {
@@ -17470,7 +17476,7 @@ pub unsafe fn _mm256_i32scatter_ps<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_mask_i32scatter_ps<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f32,
     k: __mmask8,
     vindex: __m256i,
     a: __m256,
@@ -17489,7 +17495,7 @@ pub unsafe fn _mm256_mask_i32scatter_ps<const SCALE: i32>(
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_i64scatter_epi32<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i32,
     vindex: __m256i,
     a: __m128i,
 ) {
@@ -17508,7 +17514,7 @@ pub unsafe fn _mm256_i64scatter_epi32<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_mask_i64scatter_epi32<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i32,
     k: __mmask8,
     vindex: __m256i,
     a: __m128i,
@@ -17527,7 +17533,7 @@ pub unsafe fn _mm256_mask_i64scatter_epi32<const SCALE: i32>(
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_i64scatter_epi64<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i64,
     vindex: __m256i,
     a: __m256i,
 ) {
@@ -17546,7 +17552,7 @@ pub unsafe fn _mm256_i64scatter_epi64<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_mask_i64scatter_epi64<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i64,
     k: __mmask8,
     vindex: __m256i,
     a: __m256i,
@@ -17565,7 +17571,7 @@ pub unsafe fn _mm256_mask_i64scatter_epi64<const SCALE: i32>(
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_i64scatter_pd<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f64,
     vindex: __m256i,
     a: __m256d,
 ) {
@@ -17584,7 +17590,7 @@ pub unsafe fn _mm256_i64scatter_pd<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_mask_i64scatter_pd<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f64,
     k: __mmask8,
     vindex: __m256i,
     a: __m256d,
@@ -17603,7 +17609,7 @@ pub unsafe fn _mm256_mask_i64scatter_pd<const SCALE: i32>(
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_i64scatter_ps<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f32,
     vindex: __m256i,
     a: __m128,
 ) {
@@ -17622,7 +17628,7 @@ pub unsafe fn _mm256_i64scatter_ps<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm256_mask_i64scatter_ps<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f32,
     k: __mmask8,
     vindex: __m256i,
     a: __m128,
@@ -17645,7 +17651,7 @@ pub unsafe fn _mm256_mmask_i32gather_epi32<const SCALE: i32>(
     src: __m256i,
     k: __mmask8,
     vindex: __m256i,
-    base_addr: *const u8,
+    base_addr: *const i32,
 ) -> __m256i {
     static_assert_imm8_scale!(SCALE);
     transmute(vpgatherdd_256(
@@ -17671,7 +17677,7 @@ pub unsafe fn _mm256_mmask_i32gather_epi64<const SCALE: i32>(
     src: __m256i,
     k: __mmask8,
     vindex: __m128i,
-    base_addr: *const u8,
+    base_addr: *const i64,
 ) -> __m256i {
     static_assert_imm8_scale!(SCALE);
     transmute(vpgatherdq_256(
@@ -17697,7 +17703,7 @@ pub unsafe fn _mm256_mmask_i32gather_pd<const SCALE: i32>(
     src: __m256d,
     k: __mmask8,
     vindex: __m128i,
-    base_addr: *const u8,
+    base_addr: *const f64,
 ) -> __m256d {
     static_assert_imm8_scale!(SCALE);
     transmute(vgatherdpd_256(
@@ -17723,7 +17729,7 @@ pub unsafe fn _mm256_mmask_i32gather_ps<const SCALE: i32>(
     src: __m256,
     k: __mmask8,
     vindex: __m256i,
-    base_addr: *const u8,
+    base_addr: *const f32,
 ) -> __m256 {
     static_assert_imm8_scale!(SCALE);
     transmute(vgatherdps_256(
@@ -17749,7 +17755,7 @@ pub unsafe fn _mm256_mmask_i64gather_epi32<const SCALE: i32>(
     src: __m128i,
     k: __mmask8,
     vindex: __m256i,
-    base_addr: *const u8,
+    base_addr: *const i32,
 ) -> __m128i {
     static_assert_imm8_scale!(SCALE);
     transmute(vpgatherqd_256(
@@ -17775,7 +17781,7 @@ pub unsafe fn _mm256_mmask_i64gather_epi64<const SCALE: i32>(
     src: __m256i,
     k: __mmask8,
     vindex: __m256i,
-    base_addr: *const u8,
+    base_addr: *const i64,
 ) -> __m256i {
     static_assert_imm8_scale!(SCALE);
     transmute(vpgatherqq_256(
@@ -17801,7 +17807,7 @@ pub unsafe fn _mm256_mmask_i64gather_pd<const SCALE: i32>(
     src: __m256d,
     k: __mmask8,
     vindex: __m256i,
-    base_addr: *const u8,
+    base_addr: *const f64,
 ) -> __m256d {
     static_assert_imm8_scale!(SCALE);
     transmute(vgatherqpd_256(
@@ -17827,7 +17833,7 @@ pub unsafe fn _mm256_mmask_i64gather_ps<const SCALE: i32>(
     src: __m128,
     k: __mmask8,
     vindex: __m256i,
-    base_addr: *const u8,
+    base_addr: *const f32,
 ) -> __m128 {
     static_assert_imm8_scale!(SCALE);
     transmute(vgatherqps_256(
@@ -17849,7 +17855,7 @@ pub unsafe fn _mm256_mmask_i64gather_ps<const SCALE: i32>(
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm_i32scatter_epi32<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i32,
     vindex: __m128i,
     a: __m128i,
 ) {
@@ -17868,7 +17874,7 @@ pub unsafe fn _mm_i32scatter_epi32<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm_mask_i32scatter_epi32<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i32,
     k: __mmask8,
     vindex: __m128i,
     a: __m128i,
@@ -17887,7 +17893,7 @@ pub unsafe fn _mm_mask_i32scatter_epi32<const SCALE: i32>(
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm_i32scatter_epi64<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i64,
     vindex: __m128i,
     a: __m128i,
 ) {
@@ -17906,7 +17912,7 @@ pub unsafe fn _mm_i32scatter_epi64<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm_mask_i32scatter_epi64<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i64,
     k: __mmask8,
     vindex: __m128i,
     a: __m128i,
@@ -17924,7 +17930,11 @@ pub unsafe fn _mm_mask_i32scatter_epi64<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vscatterdpd, SCALE = 1))]
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-pub unsafe fn _mm_i32scatter_pd<const SCALE: i32>(base_addr: *mut u8, vindex: __m128i, a: __m128d) {
+pub unsafe fn _mm_i32scatter_pd<const SCALE: i32>(
+    base_addr: *mut f64,
+    vindex: __m128i,
+    a: __m128d,
+) {
     static_assert_imm8_scale!(SCALE);
     vscatterdpd_128(base_addr as _, 0xff, vindex.as_i32x4(), a.as_f64x2(), SCALE)
 }
@@ -17940,7 +17950,7 @@ pub unsafe fn _mm_i32scatter_pd<const SCALE: i32>(base_addr: *mut u8, vindex: __
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm_mask_i32scatter_pd<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f64,
     k: __mmask8,
     vindex: __m128i,
     a: __m128d,
@@ -17958,7 +17968,7 @@ pub unsafe fn _mm_mask_i32scatter_pd<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vscatterdps, SCALE = 1))]
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-pub unsafe fn _mm_i32scatter_ps<const SCALE: i32>(base_addr: *mut u8, vindex: __m128i, a: __m128) {
+pub unsafe fn _mm_i32scatter_ps<const SCALE: i32>(base_addr: *mut f32, vindex: __m128i, a: __m128) {
     static_assert_imm8_scale!(SCALE);
     vscatterdps_128(base_addr as _, 0xff, vindex.as_i32x4(), a.as_f32x4(), SCALE)
 }
@@ -17974,7 +17984,7 @@ pub unsafe fn _mm_i32scatter_ps<const SCALE: i32>(base_addr: *mut u8, vindex: __
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm_mask_i32scatter_ps<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f32,
     k: __mmask8,
     vindex: __m128i,
     a: __m128,
@@ -17993,7 +18003,7 @@ pub unsafe fn _mm_mask_i32scatter_ps<const SCALE: i32>(
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm_i64scatter_epi32<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i32,
     vindex: __m128i,
     a: __m128i,
 ) {
@@ -18012,7 +18022,7 @@ pub unsafe fn _mm_i64scatter_epi32<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm_mask_i64scatter_epi32<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i32,
     k: __mmask8,
     vindex: __m128i,
     a: __m128i,
@@ -18031,7 +18041,7 @@ pub unsafe fn _mm_mask_i64scatter_epi32<const SCALE: i32>(
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm_i64scatter_epi64<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i64,
     vindex: __m128i,
     a: __m128i,
 ) {
@@ -18050,7 +18060,7 @@ pub unsafe fn _mm_i64scatter_epi64<const SCALE: i32>(
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm_mask_i64scatter_epi64<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut i64,
     k: __mmask8,
     vindex: __m128i,
     a: __m128i,
@@ -18068,7 +18078,11 @@ pub unsafe fn _mm_mask_i64scatter_epi64<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vscatterqpd, SCALE = 1))]
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-pub unsafe fn _mm_i64scatter_pd<const SCALE: i32>(base_addr: *mut u8, vindex: __m128i, a: __m128d) {
+pub unsafe fn _mm_i64scatter_pd<const SCALE: i32>(
+    base_addr: *mut f64,
+    vindex: __m128i,
+    a: __m128d,
+) {
     static_assert_imm8_scale!(SCALE);
     vscatterqpd_128(base_addr as _, 0xff, vindex.as_i64x2(), a.as_f64x2(), SCALE)
 }
@@ -18084,7 +18098,7 @@ pub unsafe fn _mm_i64scatter_pd<const SCALE: i32>(base_addr: *mut u8, vindex: __
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm_mask_i64scatter_pd<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f64,
     k: __mmask8,
     vindex: __m128i,
     a: __m128d,
@@ -18102,7 +18116,7 @@ pub unsafe fn _mm_mask_i64scatter_pd<const SCALE: i32>(
 #[cfg_attr(test, assert_instr(vscatterqps, SCALE = 1))]
 #[rustc_legacy_const_generics(3)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-pub unsafe fn _mm_i64scatter_ps<const SCALE: i32>(base_addr: *mut u8, vindex: __m128i, a: __m128) {
+pub unsafe fn _mm_i64scatter_ps<const SCALE: i32>(base_addr: *mut f32, vindex: __m128i, a: __m128) {
     static_assert_imm8_scale!(SCALE);
     vscatterqps_128(base_addr as _, 0xff, vindex.as_i64x2(), a.as_f32x4(), SCALE)
 }
@@ -18117,7 +18131,7 @@ pub unsafe fn _mm_i64scatter_ps<const SCALE: i32>(base_addr: *mut u8, vindex: __
 #[rustc_legacy_const_generics(4)]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub unsafe fn _mm_mask_i64scatter_ps<const SCALE: i32>(
-    base_addr: *mut u8,
+    base_addr: *mut f32,
     k: __mmask8,
     vindex: __m128i,
     a: __m128,
@@ -18140,7 +18154,7 @@ pub unsafe fn _mm_mmask_i32gather_epi32<const SCALE: i32>(
     src: __m128i,
     k: __mmask8,
     vindex: __m128i,
-    base_addr: *const u8,
+    base_addr: *const i32,
 ) -> __m128i {
     static_assert_imm8_scale!(SCALE);
     transmute(vpgatherdd_128(
@@ -18166,7 +18180,7 @@ pub unsafe fn _mm_mmask_i32gather_epi64<const SCALE: i32>(
     src: __m128i,
     k: __mmask8,
     vindex: __m128i,
-    base_addr: *const u8,
+    base_addr: *const i64,
 ) -> __m128i {
     static_assert_imm8_scale!(SCALE);
     transmute(vpgatherdq_128(
@@ -18192,7 +18206,7 @@ pub unsafe fn _mm_mmask_i32gather_pd<const SCALE: i32>(
     src: __m128d,
     k: __mmask8,
     vindex: __m128i,
-    base_addr: *const u8,
+    base_addr: *const f64,
 ) -> __m128d {
     static_assert_imm8_scale!(SCALE);
     transmute(vgatherdpd_128(
@@ -18218,7 +18232,7 @@ pub unsafe fn _mm_mmask_i32gather_ps<const SCALE: i32>(
     src: __m128,
     k: __mmask8,
     vindex: __m128i,
-    base_addr: *const u8,
+    base_addr: *const f32,
 ) -> __m128 {
     static_assert_imm8_scale!(SCALE);
     transmute(vgatherdps_128(
@@ -18244,7 +18258,7 @@ pub unsafe fn _mm_mmask_i64gather_epi32<const SCALE: i32>(
     src: __m128i,
     k: __mmask8,
     vindex: __m128i,
-    base_addr: *const u8,
+    base_addr: *const i32,
 ) -> __m128i {
     static_assert_imm8_scale!(SCALE);
     transmute(vpgatherqd_128(
@@ -18270,7 +18284,7 @@ pub unsafe fn _mm_mmask_i64gather_epi64<const SCALE: i32>(
     src: __m128i,
     k: __mmask8,
     vindex: __m128i,
-    base_addr: *const u8,
+    base_addr: *const i64,
 ) -> __m128i {
     static_assert_imm8_scale!(SCALE);
     transmute(vpgatherqq_128(
@@ -18296,7 +18310,7 @@ pub unsafe fn _mm_mmask_i64gather_pd<const SCALE: i32>(
     src: __m128d,
     k: __mmask8,
     vindex: __m128i,
-    base_addr: *const u8,
+    base_addr: *const f64,
 ) -> __m128d {
     static_assert_imm8_scale!(SCALE);
     transmute(vgatherqpd_128(
@@ -18322,7 +18336,7 @@ pub unsafe fn _mm_mmask_i64gather_ps<const SCALE: i32>(
     src: __m128,
     k: __mmask8,
     vindex: __m128i,
-    base_addr: *const u8,
+    base_addr: *const f32,
 ) -> __m128 {
     static_assert_imm8_scale!(SCALE);
     transmute(vgatherqps_128(
@@ -18605,7 +18619,7 @@ pub fn _mm_maskz_compress_pd(k: __mmask8, a: __m128d) -> __m128d {
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpcompressd))]
-pub unsafe fn _mm512_mask_compressstoreu_epi32(base_addr: *mut u8, k: __mmask16, a: __m512i) {
+pub unsafe fn _mm512_mask_compressstoreu_epi32(base_addr: *mut i32, k: __mmask16, a: __m512i) {
     vcompressstored(base_addr as *mut _, a.as_i32x16(), k)
 }
 
@@ -18616,7 +18630,7 @@ pub unsafe fn _mm512_mask_compressstoreu_epi32(base_addr: *mut u8, k: __mmask16,
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpcompressd))]
-pub unsafe fn _mm256_mask_compressstoreu_epi32(base_addr: *mut u8, k: __mmask8, a: __m256i) {
+pub unsafe fn _mm256_mask_compressstoreu_epi32(base_addr: *mut i32, k: __mmask8, a: __m256i) {
     vcompressstored256(base_addr as *mut _, a.as_i32x8(), k)
 }
 
@@ -18627,7 +18641,7 @@ pub unsafe fn _mm256_mask_compressstoreu_epi32(base_addr: *mut u8, k: __mmask8, 
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpcompressd))]
-pub unsafe fn _mm_mask_compressstoreu_epi32(base_addr: *mut u8, k: __mmask8, a: __m128i) {
+pub unsafe fn _mm_mask_compressstoreu_epi32(base_addr: *mut i32, k: __mmask8, a: __m128i) {
     vcompressstored128(base_addr as *mut _, a.as_i32x4(), k)
 }
 
@@ -18638,7 +18652,7 @@ pub unsafe fn _mm_mask_compressstoreu_epi32(base_addr: *mut u8, k: __mmask8, a: 
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpcompressq))]
-pub unsafe fn _mm512_mask_compressstoreu_epi64(base_addr: *mut u8, k: __mmask8, a: __m512i) {
+pub unsafe fn _mm512_mask_compressstoreu_epi64(base_addr: *mut i64, k: __mmask8, a: __m512i) {
     vcompressstoreq(base_addr as *mut _, a.as_i64x8(), k)
 }
 
@@ -18649,7 +18663,7 @@ pub unsafe fn _mm512_mask_compressstoreu_epi64(base_addr: *mut u8, k: __mmask8, 
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpcompressq))]
-pub unsafe fn _mm256_mask_compressstoreu_epi64(base_addr: *mut u8, k: __mmask8, a: __m256i) {
+pub unsafe fn _mm256_mask_compressstoreu_epi64(base_addr: *mut i64, k: __mmask8, a: __m256i) {
     vcompressstoreq256(base_addr as *mut _, a.as_i64x4(), k)
 }
 
@@ -18660,7 +18674,7 @@ pub unsafe fn _mm256_mask_compressstoreu_epi64(base_addr: *mut u8, k: __mmask8, 
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpcompressq))]
-pub unsafe fn _mm_mask_compressstoreu_epi64(base_addr: *mut u8, k: __mmask8, a: __m128i) {
+pub unsafe fn _mm_mask_compressstoreu_epi64(base_addr: *mut i64, k: __mmask8, a: __m128i) {
     vcompressstoreq128(base_addr as *mut _, a.as_i64x2(), k)
 }
 
@@ -18671,7 +18685,7 @@ pub unsafe fn _mm_mask_compressstoreu_epi64(base_addr: *mut u8, k: __mmask8, a: 
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vcompressps))]
-pub unsafe fn _mm512_mask_compressstoreu_ps(base_addr: *mut u8, k: __mmask16, a: __m512) {
+pub unsafe fn _mm512_mask_compressstoreu_ps(base_addr: *mut f32, k: __mmask16, a: __m512) {
     vcompressstoreps(base_addr as *mut _, a.as_f32x16(), k)
 }
 
@@ -18682,7 +18696,7 @@ pub unsafe fn _mm512_mask_compressstoreu_ps(base_addr: *mut u8, k: __mmask16, a:
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vcompressps))]
-pub unsafe fn _mm256_mask_compressstoreu_ps(base_addr: *mut u8, k: __mmask8, a: __m256) {
+pub unsafe fn _mm256_mask_compressstoreu_ps(base_addr: *mut f32, k: __mmask8, a: __m256) {
     vcompressstoreps256(base_addr as *mut _, a.as_f32x8(), k)
 }
 
@@ -18693,7 +18707,7 @@ pub unsafe fn _mm256_mask_compressstoreu_ps(base_addr: *mut u8, k: __mmask8, a: 
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vcompressps))]
-pub unsafe fn _mm_mask_compressstoreu_ps(base_addr: *mut u8, k: __mmask8, a: __m128) {
+pub unsafe fn _mm_mask_compressstoreu_ps(base_addr: *mut f32, k: __mmask8, a: __m128) {
     vcompressstoreps128(base_addr as *mut _, a.as_f32x4(), k)
 }
 
@@ -18704,7 +18718,7 @@ pub unsafe fn _mm_mask_compressstoreu_ps(base_addr: *mut u8, k: __mmask8, a: __m
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vcompresspd))]
-pub unsafe fn _mm512_mask_compressstoreu_pd(base_addr: *mut u8, k: __mmask8, a: __m512d) {
+pub unsafe fn _mm512_mask_compressstoreu_pd(base_addr: *mut f64, k: __mmask8, a: __m512d) {
     vcompressstorepd(base_addr as *mut _, a.as_f64x8(), k)
 }
 
@@ -18715,7 +18729,7 @@ pub unsafe fn _mm512_mask_compressstoreu_pd(base_addr: *mut u8, k: __mmask8, a: 
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vcompresspd))]
-pub unsafe fn _mm256_mask_compressstoreu_pd(base_addr: *mut u8, k: __mmask8, a: __m256d) {
+pub unsafe fn _mm256_mask_compressstoreu_pd(base_addr: *mut f64, k: __mmask8, a: __m256d) {
     vcompressstorepd256(base_addr as *mut _, a.as_f64x4(), k)
 }
 
@@ -18726,7 +18740,7 @@ pub unsafe fn _mm256_mask_compressstoreu_pd(base_addr: *mut u8, k: __mmask8, a: 
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vcompresspd))]
-pub unsafe fn _mm_mask_compressstoreu_pd(base_addr: *mut u8, k: __mmask8, a: __m128d) {
+pub unsafe fn _mm_mask_compressstoreu_pd(base_addr: *mut f64, k: __mmask8, a: __m128d) {
     vcompressstorepd128(base_addr as *mut _, a.as_f64x2(), k)
 }
 
@@ -24799,10 +24813,7 @@ pub fn _mm256_maskz_shuffle_f64x2<const MASK: i32>(k: __mmask8, a: __m256d, b: _
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextractf32x4, IMM8 = 3)
-)]
+#[cfg_attr(test, assert_instr(vextractf32x4, IMM8 = 3))]
 #[rustc_legacy_const_generics(1)]
 pub fn _mm512_extractf32x4_ps<const IMM8: i32>(a: __m512) -> __m128 {
     unsafe {
@@ -24822,10 +24833,7 @@ pub fn _mm512_extractf32x4_ps<const IMM8: i32>(a: __m512) -> __m128 {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextractf32x4, IMM8 = 3)
-)]
+#[cfg_attr(test, assert_instr(vextractf32x4, IMM8 = 3))]
 #[rustc_legacy_const_generics(3)]
 pub fn _mm512_mask_extractf32x4_ps<const IMM8: i32>(src: __m128, k: __mmask8, a: __m512) -> __m128 {
     unsafe {
@@ -24841,10 +24849,7 @@ pub fn _mm512_mask_extractf32x4_ps<const IMM8: i32>(src: __m128, k: __mmask8, a:
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextractf32x4, IMM8 = 3)
-)]
+#[cfg_attr(test, assert_instr(vextractf32x4, IMM8 = 3))]
 #[rustc_legacy_const_generics(2)]
 pub fn _mm512_maskz_extractf32x4_ps<const IMM8: i32>(k: __mmask8, a: __m512) -> __m128 {
     unsafe {
@@ -24861,7 +24866,7 @@ pub fn _mm512_maskz_extractf32x4_ps<const IMM8: i32>(k: __mmask8, a: __m512) -> 
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(
-    all(test, not(target_env = "msvc")),
+    test,
     assert_instr(vextract, IMM8 = 1) //should be vextractf32x4
 )]
 #[rustc_legacy_const_generics(1)]
@@ -24881,10 +24886,7 @@ pub fn _mm256_extractf32x4_ps<const IMM8: i32>(a: __m256) -> __m128 {
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextractf32x4, IMM8 = 1)
-)]
+#[cfg_attr(test, assert_instr(vextractf32x4, IMM8 = 1))]
 #[rustc_legacy_const_generics(3)]
 pub fn _mm256_mask_extractf32x4_ps<const IMM8: i32>(src: __m128, k: __mmask8, a: __m256) -> __m128 {
     unsafe {
@@ -24900,10 +24902,7 @@ pub fn _mm256_mask_extractf32x4_ps<const IMM8: i32>(src: __m128, k: __mmask8, a:
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextractf32x4, IMM8 = 1)
-)]
+#[cfg_attr(test, assert_instr(vextractf32x4, IMM8 = 1))]
 #[rustc_legacy_const_generics(2)]
 pub fn _mm256_maskz_extractf32x4_ps<const IMM8: i32>(k: __mmask8, a: __m256) -> __m128 {
     unsafe {
@@ -24920,7 +24919,7 @@ pub fn _mm256_maskz_extractf32x4_ps<const IMM8: i32>(k: __mmask8, a: __m256) -> 
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(
-    all(test, not(target_env = "msvc")),
+    test,
     assert_instr(vextractf64x4, IMM1 = 1) //should be vextracti64x4
 )]
 #[rustc_legacy_const_generics(1)]
@@ -24940,10 +24939,7 @@ pub fn _mm512_extracti64x4_epi64<const IMM1: i32>(a: __m512i) -> __m256i {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextracti64x4, IMM1 = 1)
-)]
+#[cfg_attr(test, assert_instr(vextracti64x4, IMM1 = 1))]
 #[rustc_legacy_const_generics(3)]
 pub fn _mm512_mask_extracti64x4_epi64<const IMM1: i32>(
     src: __m256i,
@@ -24963,10 +24959,7 @@ pub fn _mm512_mask_extracti64x4_epi64<const IMM1: i32>(
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextracti64x4, IMM1 = 1)
-)]
+#[cfg_attr(test, assert_instr(vextracti64x4, IMM1 = 1))]
 #[rustc_legacy_const_generics(2)]
 pub fn _mm512_maskz_extracti64x4_epi64<const IMM1: i32>(k: __mmask8, a: __m512i) -> __m256i {
     unsafe {
@@ -24982,10 +24975,7 @@ pub fn _mm512_maskz_extracti64x4_epi64<const IMM1: i32>(k: __mmask8, a: __m512i)
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextractf64x4, IMM8 = 1)
-)]
+#[cfg_attr(test, assert_instr(vextractf64x4, IMM8 = 1))]
 #[rustc_legacy_const_generics(1)]
 pub fn _mm512_extractf64x4_pd<const IMM8: i32>(a: __m512d) -> __m256d {
     unsafe {
@@ -25003,10 +24993,7 @@ pub fn _mm512_extractf64x4_pd<const IMM8: i32>(a: __m512d) -> __m256d {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextractf64x4, IMM8 = 1)
-)]
+#[cfg_attr(test, assert_instr(vextractf64x4, IMM8 = 1))]
 #[rustc_legacy_const_generics(3)]
 pub fn _mm512_mask_extractf64x4_pd<const IMM8: i32>(
     src: __m256d,
@@ -25026,10 +25013,7 @@ pub fn _mm512_mask_extractf64x4_pd<const IMM8: i32>(
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextractf64x4, IMM8 = 1)
-)]
+#[cfg_attr(test, assert_instr(vextractf64x4, IMM8 = 1))]
 #[rustc_legacy_const_generics(2)]
 pub fn _mm512_maskz_extractf64x4_pd<const IMM8: i32>(k: __mmask8, a: __m512d) -> __m256d {
     unsafe {
@@ -25046,7 +25030,7 @@ pub fn _mm512_maskz_extractf64x4_pd<const IMM8: i32>(k: __mmask8, a: __m512d) ->
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(
-    all(test, not(target_env = "msvc")),
+    test,
     assert_instr(vextractf32x4, IMM2 = 3) //should be vextracti32x4
 )]
 #[rustc_legacy_const_generics(1)]
@@ -25071,10 +25055,7 @@ pub fn _mm512_extracti32x4_epi32<const IMM2: i32>(a: __m512i) -> __m128i {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextracti32x4, IMM2 = 3)
-)]
+#[cfg_attr(test, assert_instr(vextracti32x4, IMM2 = 3))]
 #[rustc_legacy_const_generics(3)]
 pub fn _mm512_mask_extracti32x4_epi32<const IMM2: i32>(
     src: __m128i,
@@ -25094,10 +25075,7 @@ pub fn _mm512_mask_extracti32x4_epi32<const IMM2: i32>(
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextracti32x4, IMM2 = 3)
-)]
+#[cfg_attr(test, assert_instr(vextracti32x4, IMM2 = 3))]
 #[rustc_legacy_const_generics(2)]
 pub fn _mm512_maskz_extracti32x4_epi32<const IMM2: i32>(k: __mmask8, a: __m512i) -> __m128i {
     unsafe {
@@ -25114,7 +25092,7 @@ pub fn _mm512_maskz_extracti32x4_epi32<const IMM2: i32>(k: __mmask8, a: __m512i)
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(
-    all(test, not(target_env = "msvc")),
+    test,
     assert_instr(vextract, IMM1 = 1) //should be vextracti32x4
 )]
 #[rustc_legacy_const_generics(1)]
@@ -25137,10 +25115,7 @@ pub fn _mm256_extracti32x4_epi32<const IMM1: i32>(a: __m256i) -> __m128i {
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextracti32x4, IMM1 = 1)
-)]
+#[cfg_attr(test, assert_instr(vextracti32x4, IMM1 = 1))]
 #[rustc_legacy_const_generics(3)]
 pub fn _mm256_mask_extracti32x4_epi32<const IMM1: i32>(
     src: __m128i,
@@ -25160,10 +25135,7 @@ pub fn _mm256_mask_extracti32x4_epi32<const IMM1: i32>(
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vextracti32x4, IMM1 = 1)
-)]
+#[cfg_attr(test, assert_instr(vextracti32x4, IMM1 = 1))]
 #[rustc_legacy_const_generics(2)]
 pub fn _mm256_maskz_extracti32x4_epi32<const IMM1: i32>(k: __mmask8, a: __m256i) -> __m128i {
     unsafe {
@@ -25558,7 +25530,7 @@ pub fn _mm512_maskz_inserti32x4<const IMM8: i32>(k: __mmask16, a: __m512i, b: __
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(
-    all(test, not(target_env = "msvc")),
+    test,
     assert_instr(vinsert, IMM8 = 1) //should be vinserti32x4
 )]
 #[rustc_legacy_const_generics(2)]
@@ -25581,10 +25553,7 @@ pub fn _mm256_inserti32x4<const IMM8: i32>(a: __m256i, b: __m128i) -> __m256i {
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vinserti32x4, IMM8 = 1)
-)]
+#[cfg_attr(test, assert_instr(vinserti32x4, IMM8 = 1))]
 #[rustc_legacy_const_generics(4)]
 pub fn _mm256_mask_inserti32x4<const IMM8: i32>(
     src: __m256i,
@@ -25605,10 +25574,7 @@ pub fn _mm256_mask_inserti32x4<const IMM8: i32>(
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vinserti32x4, IMM8 = 1)
-)]
+#[cfg_attr(test, assert_instr(vinserti32x4, IMM8 = 1))]
 #[rustc_legacy_const_generics(3)]
 pub fn _mm256_maskz_inserti32x4<const IMM8: i32>(k: __mmask8, a: __m256i, b: __m128i) -> __m256i {
     unsafe {
@@ -25759,7 +25725,7 @@ pub fn _mm512_maskz_insertf32x4<const IMM8: i32>(k: __mmask16, a: __m512, b: __m
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(
-    all(test, not(target_env = "msvc")),
+    test,
     assert_instr(vinsert, IMM8 = 1) //should be vinsertf32x4
 )]
 #[rustc_legacy_const_generics(2)]
@@ -25780,10 +25746,7 @@ pub fn _mm256_insertf32x4<const IMM8: i32>(a: __m256, b: __m128) -> __m256 {
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vinsertf32x4, IMM8 = 1)
-)]
+#[cfg_attr(test, assert_instr(vinsertf32x4, IMM8 = 1))]
 #[rustc_legacy_const_generics(4)]
 pub fn _mm256_mask_insertf32x4<const IMM8: i32>(
     src: __m256,
@@ -25804,10 +25767,7 @@ pub fn _mm256_mask_insertf32x4<const IMM8: i32>(
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(
-    all(test, not(target_env = "msvc")),
-    assert_instr(vinsertf32x4, IMM8 = 1)
-)]
+#[cfg_attr(test, assert_instr(vinsertf32x4, IMM8 = 1))]
 #[rustc_legacy_const_generics(3)]
 pub fn _mm256_maskz_insertf32x4<const IMM8: i32>(k: __mmask8, a: __m256, b: __m128) -> __m256 {
     unsafe {
@@ -26944,7 +26904,7 @@ pub fn _mm512_castsi512_pd(a: __m512i) -> __m512d {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(all(test, not(target_env = "msvc")), assert_instr(vmovd))]
+#[cfg_attr(test, assert_instr(vmovd))]
 pub fn _mm512_cvtsi512_si32(a: __m512i) -> i32 {
     unsafe { simd_extract!(a.as_i32x16(), 0) }
 }
@@ -29696,7 +29656,7 @@ pub unsafe fn _mm512_stream_pd(mem_addr: *mut f64, a: __m512d) {
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vmovntdq))]
 #[allow(clippy::cast_ptr_alignment)]
-pub unsafe fn _mm512_stream_si512(mem_addr: *mut i32, a: __m512i) {
+pub unsafe fn _mm512_stream_si512(mem_addr: *mut __m512i, a: __m512i) {
     crate::arch::asm!(
         vps!("vmovntdq", ",{a}"),
         p = in(reg) mem_addr,
@@ -33746,8 +33706,9 @@ pub fn _mm512_mask_reduce_or_epi64(k: __mmask8, a: __m512i) -> i64 {
 }
 
 /// Returns vector of type `__m512d` with indeterminate elements.
-/// Despite being "undefined", this is some valid value and not equivalent to [`mem::MaybeUninit`].
-/// In practice, this is equivalent to [`mem::zeroed`].
+/// Despite using the word "undefined" (following Intel's naming scheme), this non-deterministically
+/// picks some valid value and is not equivalent to [`mem::MaybeUninit`].
+/// In practice, this is typically equivalent to [`mem::zeroed`].
 ///
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_undefined_pd)
 #[inline]
@@ -33759,8 +33720,9 @@ pub fn _mm512_undefined_pd() -> __m512d {
 }
 
 /// Returns vector of type `__m512` with indeterminate elements.
-/// Despite being "undefined", this is some valid value and not equivalent to [`mem::MaybeUninit`].
-/// In practice, this is equivalent to [`mem::zeroed`].
+/// Despite using the word "undefined" (following Intel's naming scheme), this non-deterministically
+/// picks some valid value and is not equivalent to [`mem::MaybeUninit`].
+/// In practice, this is typically equivalent to [`mem::zeroed`].
 ///
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_undefined_ps)
 #[inline]
@@ -33772,8 +33734,9 @@ pub fn _mm512_undefined_ps() -> __m512 {
 }
 
 /// Return vector of type __m512i with indeterminate elements.
-/// Despite being "undefined", this is some valid value and not equivalent to [`mem::MaybeUninit`].
-/// In practice, this is equivalent to [`mem::zeroed`].
+/// Despite using the word "undefined" (following Intel's naming scheme), this non-deterministically
+/// picks some valid value and is not equivalent to [`mem::MaybeUninit`].
+/// In practice, this is typically equivalent to [`mem::zeroed`].
 ///
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_undefined_epi32&expand=5995)
 #[inline]
@@ -33785,8 +33748,9 @@ pub fn _mm512_undefined_epi32() -> __m512i {
 }
 
 /// Return vector of type __m512 with indeterminate elements.
-/// Despite being "undefined", this is some valid value and not equivalent to [`mem::MaybeUninit`].
-/// In practice, this is equivalent to [`mem::zeroed`].
+/// Despite using the word "undefined" (following Intel's naming scheme), this non-deterministically
+/// picks some valid value and is not equivalent to [`mem::MaybeUninit`].
+/// In practice, this is typically equivalent to [`mem::zeroed`].
 ///
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_undefined&expand=5994)
 #[inline]
@@ -33837,8 +33801,8 @@ pub unsafe fn _mm_loadu_epi32(mem_addr: *const i32) -> __m128i {
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovdw))]
-pub unsafe fn _mm512_mask_cvtepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask16, a: __m512i) {
-    vpmovdwmem(mem_addr, a.as_i32x16(), k);
+pub unsafe fn _mm512_mask_cvtepi32_storeu_epi16(mem_addr: *mut i16, k: __mmask16, a: __m512i) {
+    vpmovdwmem(mem_addr.cast(), a.as_i32x16(), k);
 }
 
 /// Convert packed 32-bit integers in a to packed 16-bit integers with truncation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -33848,8 +33812,8 @@ pub unsafe fn _mm512_mask_cvtepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask16,
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovdw))]
-pub unsafe fn _mm256_mask_cvtepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m256i) {
-    vpmovdwmem256(mem_addr, a.as_i32x8(), k);
+pub unsafe fn _mm256_mask_cvtepi32_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m256i) {
+    vpmovdwmem256(mem_addr.cast(), a.as_i32x8(), k);
 }
 
 /// Convert packed 32-bit integers in a to packed 16-bit integers with truncation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -33859,8 +33823,8 @@ pub unsafe fn _mm256_mask_cvtepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask8, 
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovdw))]
-pub unsafe fn _mm_mask_cvtepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m128i) {
-    vpmovdwmem128(mem_addr, a.as_i32x4(), k);
+pub unsafe fn _mm_mask_cvtepi32_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m128i) {
+    vpmovdwmem128(mem_addr.cast(), a.as_i32x4(), k);
 }
 
 /// Convert packed signed 32-bit integers in a to packed 16-bit integers with signed saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -33870,8 +33834,8 @@ pub unsafe fn _mm_mask_cvtepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: 
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovsdw))]
-pub unsafe fn _mm512_mask_cvtsepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask16, a: __m512i) {
-    vpmovsdwmem(mem_addr, a.as_i32x16(), k);
+pub unsafe fn _mm512_mask_cvtsepi32_storeu_epi16(mem_addr: *mut i16, k: __mmask16, a: __m512i) {
+    vpmovsdwmem(mem_addr.cast(), a.as_i32x16(), k);
 }
 
 /// Convert packed signed 32-bit integers in a to packed 16-bit integers with signed saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -33881,8 +33845,8 @@ pub unsafe fn _mm512_mask_cvtsepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask16
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovsdw))]
-pub unsafe fn _mm256_mask_cvtsepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m256i) {
-    vpmovsdwmem256(mem_addr, a.as_i32x8(), k);
+pub unsafe fn _mm256_mask_cvtsepi32_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m256i) {
+    vpmovsdwmem256(mem_addr.cast(), a.as_i32x8(), k);
 }
 
 /// Convert packed signed 32-bit integers in a to packed 16-bit integers with signed saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -33892,8 +33856,8 @@ pub unsafe fn _mm256_mask_cvtsepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask8,
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovsdw))]
-pub unsafe fn _mm_mask_cvtsepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m128i) {
-    vpmovsdwmem128(mem_addr, a.as_i32x4(), k);
+pub unsafe fn _mm_mask_cvtsepi32_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m128i) {
+    vpmovsdwmem128(mem_addr.cast(), a.as_i32x4(), k);
 }
 
 /// Convert packed unsigned 32-bit integers in a to packed 16-bit integers with unsigned saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -33903,8 +33867,8 @@ pub unsafe fn _mm_mask_cvtsepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a:
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovusdw))]
-pub unsafe fn _mm512_mask_cvtusepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask16, a: __m512i) {
-    vpmovusdwmem(mem_addr, a.as_i32x16(), k);
+pub unsafe fn _mm512_mask_cvtusepi32_storeu_epi16(mem_addr: *mut i16, k: __mmask16, a: __m512i) {
+    vpmovusdwmem(mem_addr.cast(), a.as_i32x16(), k);
 }
 
 /// Convert packed unsigned 32-bit integers in a to packed unsigned 16-bit integers with unsigned saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -33914,8 +33878,8 @@ pub unsafe fn _mm512_mask_cvtusepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask1
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovusdw))]
-pub unsafe fn _mm256_mask_cvtusepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m256i) {
-    vpmovusdwmem256(mem_addr, a.as_i32x8(), k);
+pub unsafe fn _mm256_mask_cvtusepi32_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m256i) {
+    vpmovusdwmem256(mem_addr.cast(), a.as_i32x8(), k);
 }
 
 /// Convert packed unsigned 32-bit integers in a to packed unsigned 16-bit integers with unsigned saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -33925,8 +33889,8 @@ pub unsafe fn _mm256_mask_cvtusepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask8
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovusdw))]
-pub unsafe fn _mm_mask_cvtusepi32_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m128i) {
-    vpmovusdwmem128(mem_addr, a.as_i32x4(), k);
+pub unsafe fn _mm_mask_cvtusepi32_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m128i) {
+    vpmovusdwmem128(mem_addr.cast(), a.as_i32x4(), k);
 }
 
 /// Convert packed 32-bit integers in a to packed 8-bit integers with truncation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34035,8 +33999,8 @@ pub unsafe fn _mm_mask_cvtusepi32_storeu_epi8(mem_addr: *mut i8, k: __mmask8, a:
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovqw))]
-pub unsafe fn _mm512_mask_cvtepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m512i) {
-    vpmovqwmem(mem_addr, a.as_i64x8(), k);
+pub unsafe fn _mm512_mask_cvtepi64_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m512i) {
+    vpmovqwmem(mem_addr.cast(), a.as_i64x8(), k);
 }
 
 /// Convert packed 64-bit integers in a to packed 16-bit integers with truncation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34046,8 +34010,8 @@ pub unsafe fn _mm512_mask_cvtepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8, 
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovqw))]
-pub unsafe fn _mm256_mask_cvtepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m256i) {
-    vpmovqwmem256(mem_addr, a.as_i64x4(), k);
+pub unsafe fn _mm256_mask_cvtepi64_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m256i) {
+    vpmovqwmem256(mem_addr.cast(), a.as_i64x4(), k);
 }
 
 /// Convert packed 64-bit integers in a to packed 16-bit integers with truncation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34057,8 +34021,8 @@ pub unsafe fn _mm256_mask_cvtepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8, 
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovqw))]
-pub unsafe fn _mm_mask_cvtepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m128i) {
-    vpmovqwmem128(mem_addr, a.as_i64x2(), k);
+pub unsafe fn _mm_mask_cvtepi64_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m128i) {
+    vpmovqwmem128(mem_addr.cast(), a.as_i64x2(), k);
 }
 
 /// Convert packed signed 64-bit integers in a to packed 16-bit integers with signed saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34068,8 +34032,8 @@ pub unsafe fn _mm_mask_cvtepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: 
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovsqw))]
-pub unsafe fn _mm512_mask_cvtsepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m512i) {
-    vpmovsqwmem(mem_addr, a.as_i64x8(), k);
+pub unsafe fn _mm512_mask_cvtsepi64_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m512i) {
+    vpmovsqwmem(mem_addr.cast(), a.as_i64x8(), k);
 }
 
 /// Convert packed signed 64-bit integers in a to packed 16-bit integers with signed saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34079,8 +34043,8 @@ pub unsafe fn _mm512_mask_cvtsepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8,
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovsqw))]
-pub unsafe fn _mm256_mask_cvtsepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m256i) {
-    vpmovsqwmem256(mem_addr, a.as_i64x4(), k);
+pub unsafe fn _mm256_mask_cvtsepi64_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m256i) {
+    vpmovsqwmem256(mem_addr.cast(), a.as_i64x4(), k);
 }
 
 /// Convert packed signed 64-bit integers in a to packed 16-bit integers with signed saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34090,8 +34054,8 @@ pub unsafe fn _mm256_mask_cvtsepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8,
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovsqw))]
-pub unsafe fn _mm_mask_cvtsepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m128i) {
-    vpmovsqwmem128(mem_addr, a.as_i64x2(), k);
+pub unsafe fn _mm_mask_cvtsepi64_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m128i) {
+    vpmovsqwmem128(mem_addr.cast(), a.as_i64x2(), k);
 }
 
 /// Convert packed unsigned 64-bit integers in a to packed 16-bit integers with unsigned saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34101,8 +34065,8 @@ pub unsafe fn _mm_mask_cvtsepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a:
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovusqw))]
-pub unsafe fn _mm512_mask_cvtusepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m512i) {
-    vpmovusqwmem(mem_addr, a.as_i64x8(), k);
+pub unsafe fn _mm512_mask_cvtusepi64_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m512i) {
+    vpmovusqwmem(mem_addr.cast(), a.as_i64x8(), k);
 }
 
 /// Convert packed unsigned 64-bit integers in a to packed 16-bit integers with unsigned saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34112,8 +34076,8 @@ pub unsafe fn _mm512_mask_cvtusepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovusqw))]
-pub unsafe fn _mm256_mask_cvtusepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m256i) {
-    vpmovusqwmem256(mem_addr, a.as_i64x4(), k);
+pub unsafe fn _mm256_mask_cvtusepi64_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m256i) {
+    vpmovusqwmem256(mem_addr.cast(), a.as_i64x4(), k);
 }
 
 /// Convert packed unsigned 64-bit integers in a to packed 16-bit integers with unsigned saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34123,8 +34087,8 @@ pub unsafe fn _mm256_mask_cvtusepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovusqw))]
-pub unsafe fn _mm_mask_cvtusepi64_storeu_epi16(mem_addr: *mut i8, k: __mmask8, a: __m128i) {
-    vpmovusqwmem128(mem_addr, a.as_i64x2(), k);
+pub unsafe fn _mm_mask_cvtusepi64_storeu_epi16(mem_addr: *mut i16, k: __mmask8, a: __m128i) {
+    vpmovusqwmem128(mem_addr.cast(), a.as_i64x2(), k);
 }
 
 /// Convert packed 64-bit integers in a to packed 8-bit integers with truncation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34233,8 +34197,8 @@ pub unsafe fn _mm_mask_cvtusepi64_storeu_epi8(mem_addr: *mut i8, k: __mmask8, a:
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovqd))]
-pub unsafe fn _mm512_mask_cvtepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8, a: __m512i) {
-    vpmovqdmem(mem_addr, a.as_i64x8(), k);
+pub unsafe fn _mm512_mask_cvtepi64_storeu_epi32(mem_addr: *mut i32, k: __mmask8, a: __m512i) {
+    vpmovqdmem(mem_addr.cast(), a.as_i64x8(), k);
 }
 
 ///Convert packed 64-bit integers in a to packed 32-bit integers with truncation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34244,8 +34208,8 @@ pub unsafe fn _mm512_mask_cvtepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8, 
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovqd))]
-pub unsafe fn _mm256_mask_cvtepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8, a: __m256i) {
-    vpmovqdmem256(mem_addr, a.as_i64x4(), k);
+pub unsafe fn _mm256_mask_cvtepi64_storeu_epi32(mem_addr: *mut i32, k: __mmask8, a: __m256i) {
+    vpmovqdmem256(mem_addr.cast(), a.as_i64x4(), k);
 }
 
 ///Convert packed 64-bit integers in a to packed 32-bit integers with truncation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34255,8 +34219,8 @@ pub unsafe fn _mm256_mask_cvtepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8, 
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovqd))]
-pub unsafe fn _mm_mask_cvtepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8, a: __m128i) {
-    vpmovqdmem128(mem_addr, a.as_i64x2(), k);
+pub unsafe fn _mm_mask_cvtepi64_storeu_epi32(mem_addr: *mut i32, k: __mmask8, a: __m128i) {
+    vpmovqdmem128(mem_addr.cast(), a.as_i64x2(), k);
 }
 
 /// Convert packed signed 64-bit integers in a to packed 32-bit integers with signed saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34266,8 +34230,8 @@ pub unsafe fn _mm_mask_cvtepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8, a: 
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovsqd))]
-pub unsafe fn _mm512_mask_cvtsepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8, a: __m512i) {
-    vpmovsqdmem(mem_addr, a.as_i64x8(), k);
+pub unsafe fn _mm512_mask_cvtsepi64_storeu_epi32(mem_addr: *mut i32, k: __mmask8, a: __m512i) {
+    vpmovsqdmem(mem_addr.cast(), a.as_i64x8(), k);
 }
 
 /// Convert packed signed 64-bit integers in a to packed 32-bit integers with signed saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34277,8 +34241,8 @@ pub unsafe fn _mm512_mask_cvtsepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8,
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovsqd))]
-pub unsafe fn _mm256_mask_cvtsepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8, a: __m256i) {
-    vpmovsqdmem256(mem_addr, a.as_i64x4(), k);
+pub unsafe fn _mm256_mask_cvtsepi64_storeu_epi32(mem_addr: *mut i32, k: __mmask8, a: __m256i) {
+    vpmovsqdmem256(mem_addr.cast(), a.as_i64x4(), k);
 }
 
 /// Convert packed signed 64-bit integers in a to packed 32-bit integers with signed saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34288,8 +34252,8 @@ pub unsafe fn _mm256_mask_cvtsepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8,
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovsqd))]
-pub unsafe fn _mm_mask_cvtsepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8, a: __m128i) {
-    vpmovsqdmem128(mem_addr, a.as_i64x2(), k);
+pub unsafe fn _mm_mask_cvtsepi64_storeu_epi32(mem_addr: *mut i32, k: __mmask8, a: __m128i) {
+    vpmovsqdmem128(mem_addr.cast(), a.as_i64x2(), k);
 }
 
 /// Convert packed unsigned 64-bit integers in a to packed 32-bit integers with unsigned saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34299,8 +34263,8 @@ pub unsafe fn _mm_mask_cvtsepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8, a:
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovusqd))]
-pub unsafe fn _mm512_mask_cvtusepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8, a: __m512i) {
-    vpmovusqdmem(mem_addr, a.as_i64x8(), k);
+pub unsafe fn _mm512_mask_cvtusepi64_storeu_epi32(mem_addr: *mut i32, k: __mmask8, a: __m512i) {
+    vpmovusqdmem(mem_addr.cast(), a.as_i64x8(), k);
 }
 
 /// Convert packed unsigned 64-bit integers in a to packed 32-bit integers with unsigned saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34310,8 +34274,8 @@ pub unsafe fn _mm512_mask_cvtusepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovusqd))]
-pub unsafe fn _mm256_mask_cvtusepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8, a: __m256i) {
-    vpmovusqdmem256(mem_addr, a.as_i64x4(), k);
+pub unsafe fn _mm256_mask_cvtusepi64_storeu_epi32(mem_addr: *mut i32, k: __mmask8, a: __m256i) {
+    vpmovusqdmem256(mem_addr.cast(), a.as_i64x4(), k);
 }
 
 /// Convert packed unsigned 64-bit integers in a to packed 32-bit integers with unsigned saturation, and store the active results (those with their respective bit set in writemask k) to unaligned memory at base_addr.
@@ -34321,8 +34285,8 @@ pub unsafe fn _mm256_mask_cvtusepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpmovusqd))]
-pub unsafe fn _mm_mask_cvtusepi64_storeu_epi32(mem_addr: *mut i8, k: __mmask8, a: __m128i) {
-    vpmovusqdmem128(mem_addr, a.as_i64x2(), k);
+pub unsafe fn _mm_mask_cvtusepi64_storeu_epi32(mem_addr: *mut i32, k: __mmask8, a: __m128i) {
+    vpmovusqdmem128(mem_addr.cast(), a.as_i64x2(), k);
 }
 
 /// Store 512-bits (composed of 16 packed 32-bit integers) from a into memory. mem_addr does not need to be aligned on any particular boundary.
@@ -34431,8 +34395,8 @@ pub unsafe fn _mm_storeu_epi64(mem_addr: *mut i64, a: __m128i) {
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vmovups))] //should be vmovdqu32
-pub unsafe fn _mm512_loadu_si512(mem_addr: *const i32) -> __m512i {
-    ptr::read_unaligned(mem_addr as *const __m512i)
+pub unsafe fn _mm512_loadu_si512(mem_addr: *const __m512i) -> __m512i {
+    ptr::read_unaligned(mem_addr)
 }
 
 /// Store 512-bits of integer data from a into memory. mem_addr does not need to be aligned on any particular boundary.
@@ -34504,9 +34468,12 @@ pub unsafe fn _mm512_storeu_ps(mem_addr: *mut f32, a: __m512) {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa32
-pub unsafe fn _mm512_load_si512(mem_addr: *const i32) -> __m512i {
-    ptr::read(mem_addr as *const __m512i)
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa32
+pub unsafe fn _mm512_load_si512(mem_addr: *const __m512i) -> __m512i {
+    ptr::read(mem_addr)
 }
 
 /// Store 512-bits of integer data from a into memory. mem_addr must be aligned on a 64-byte boundary or a general-protection exception may be generated.
@@ -34515,7 +34482,10 @@ pub unsafe fn _mm512_load_si512(mem_addr: *const i32) -> __m512i {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa32
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa32
 pub unsafe fn _mm512_store_si512(mem_addr: *mut __m512i, a: __m512i) {
     ptr::write(mem_addr, a);
 }
@@ -34526,7 +34496,10 @@ pub unsafe fn _mm512_store_si512(mem_addr: *mut __m512i, a: __m512i) {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa32
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa32
 pub unsafe fn _mm512_load_epi32(mem_addr: *const i32) -> __m512i {
     ptr::read(mem_addr as *const __m512i)
 }
@@ -34537,7 +34510,10 @@ pub unsafe fn _mm512_load_epi32(mem_addr: *const i32) -> __m512i {
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa32
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa32
 pub unsafe fn _mm256_load_epi32(mem_addr: *const i32) -> __m256i {
     ptr::read(mem_addr as *const __m256i)
 }
@@ -34548,7 +34524,10 @@ pub unsafe fn _mm256_load_epi32(mem_addr: *const i32) -> __m256i {
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa32
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa32
 pub unsafe fn _mm_load_epi32(mem_addr: *const i32) -> __m128i {
     ptr::read(mem_addr as *const __m128i)
 }
@@ -34559,7 +34538,10 @@ pub unsafe fn _mm_load_epi32(mem_addr: *const i32) -> __m128i {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa32
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa32
 pub unsafe fn _mm512_store_epi32(mem_addr: *mut i32, a: __m512i) {
     ptr::write(mem_addr as *mut __m512i, a);
 }
@@ -34570,7 +34552,10 @@ pub unsafe fn _mm512_store_epi32(mem_addr: *mut i32, a: __m512i) {
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa32
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa32
 pub unsafe fn _mm256_store_epi32(mem_addr: *mut i32, a: __m256i) {
     ptr::write(mem_addr as *mut __m256i, a);
 }
@@ -34581,7 +34566,10 @@ pub unsafe fn _mm256_store_epi32(mem_addr: *mut i32, a: __m256i) {
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa32
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa32
 pub unsafe fn _mm_store_epi32(mem_addr: *mut i32, a: __m128i) {
     ptr::write(mem_addr as *mut __m128i, a);
 }
@@ -34592,7 +34580,10 @@ pub unsafe fn _mm_store_epi32(mem_addr: *mut i32, a: __m128i) {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa64
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa64
 pub unsafe fn _mm512_load_epi64(mem_addr: *const i64) -> __m512i {
     ptr::read(mem_addr as *const __m512i)
 }
@@ -34603,7 +34594,10 @@ pub unsafe fn _mm512_load_epi64(mem_addr: *const i64) -> __m512i {
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa64
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa64
 pub unsafe fn _mm256_load_epi64(mem_addr: *const i64) -> __m256i {
     ptr::read(mem_addr as *const __m256i)
 }
@@ -34614,7 +34608,10 @@ pub unsafe fn _mm256_load_epi64(mem_addr: *const i64) -> __m256i {
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa64
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa64
 pub unsafe fn _mm_load_epi64(mem_addr: *const i64) -> __m128i {
     ptr::read(mem_addr as *const __m128i)
 }
@@ -34625,7 +34622,10 @@ pub unsafe fn _mm_load_epi64(mem_addr: *const i64) -> __m128i {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa64
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa64
 pub unsafe fn _mm512_store_epi64(mem_addr: *mut i64, a: __m512i) {
     ptr::write(mem_addr as *mut __m512i, a);
 }
@@ -34636,7 +34636,10 @@ pub unsafe fn _mm512_store_epi64(mem_addr: *mut i64, a: __m512i) {
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa64
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa64
 pub unsafe fn _mm256_store_epi64(mem_addr: *mut i64, a: __m256i) {
     ptr::write(mem_addr as *mut __m256i, a);
 }
@@ -34647,7 +34650,10 @@ pub unsafe fn _mm256_store_epi64(mem_addr: *mut i64, a: __m256i) {
 #[inline]
 #[target_feature(enable = "avx512f,avx512vl")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovdqa64
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovdqa64
 pub unsafe fn _mm_store_epi64(mem_addr: *mut i64, a: __m128i) {
     ptr::write(mem_addr as *mut __m128i, a);
 }
@@ -34658,7 +34664,10 @@ pub unsafe fn _mm_store_epi64(mem_addr: *mut i64, a: __m128i) {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))]
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)]
 pub unsafe fn _mm512_load_ps(mem_addr: *const f32) -> __m512 {
     ptr::read(mem_addr as *const __m512)
 }
@@ -34669,7 +34678,10 @@ pub unsafe fn _mm512_load_ps(mem_addr: *const f32) -> __m512 {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))]
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)]
 pub unsafe fn _mm512_store_ps(mem_addr: *mut f32, a: __m512) {
     ptr::write(mem_addr as *mut __m512, a);
 }
@@ -34680,7 +34692,10 @@ pub unsafe fn _mm512_store_ps(mem_addr: *mut f32, a: __m512) {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovapd
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovapd
 pub unsafe fn _mm512_load_pd(mem_addr: *const f64) -> __m512d {
     ptr::read(mem_addr as *const __m512d)
 }
@@ -34691,7 +34706,10 @@ pub unsafe fn _mm512_load_pd(mem_addr: *const f64) -> __m512d {
 #[inline]
 #[target_feature(enable = "avx512f")]
 #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
-#[cfg_attr(test, assert_instr(vmovaps))] //should be vmovapd
+#[cfg_attr(
+    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
+    assert_instr(vmovaps)
+)] //should be vmovapd
 pub unsafe fn _mm512_store_pd(mem_addr: *mut f64, a: __m512d) {
     ptr::write(mem_addr as *mut __m512d, a);
 }
@@ -49633,7 +49651,7 @@ mod tests {
         #[rustfmt::skip]
         let index = _mm512_setr_epi32(0, 16, 32, 48, 64, 80, 96, 112,
                                       120, 128, 136, 144, 152, 160, 168, 176);
-        let r = _mm512_i32gather_ps::<4>(index, arr.as_ptr() as *const u8);
+        let r = _mm512_i32gather_ps::<4>(index, arr.as_ptr());
         #[rustfmt::skip]
         assert_eq_m512(r, _mm512_setr_ps(0., 16., 32., 48., 64., 80., 96., 112.,
                                          120., 128., 136., 144., 152., 160., 168., 176.));
@@ -49648,7 +49666,7 @@ mod tests {
         let index = _mm512_setr_epi32(0, 16, 32, 48, 64, 80, 96, 112,
                                       120, 128, 136, 144, 152, 160, 168, 176);
         // A multiplier of 4 is word-addressing
-        let r = _mm512_mask_i32gather_ps::<4>(src, mask, index, arr.as_ptr() as *const u8);
+        let r = _mm512_mask_i32gather_ps::<4>(src, mask, index, arr.as_ptr());
         #[rustfmt::skip]
         assert_eq_m512(r, _mm512_setr_ps(2., 16., 2., 48., 2., 80., 2., 112.,
                                          2., 128., 2., 144., 2., 160., 2., 176.));
@@ -49661,7 +49679,7 @@ mod tests {
         #[rustfmt::skip]
         let index = _mm512_setr_epi32(0, 16, 32, 48, 64, 80, 96, 112,
                                       120, 128, 136, 144, 152, 160, 168, 176);
-        let r = _mm512_i32gather_epi32::<4>(index, arr.as_ptr() as *const u8);
+        let r = _mm512_i32gather_epi32::<4>(index, arr.as_ptr());
         #[rustfmt::skip]
         assert_eq_m512i(r, _mm512_setr_epi32(0, 16, 32, 48, 64, 80, 96, 112,
                                              120, 128, 136, 144, 152, 160, 168, 176));
@@ -49676,7 +49694,7 @@ mod tests {
             0, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240,
         );
         // A multiplier of 4 is word-addressing
-        let r = _mm512_mask_i32gather_epi32::<4>(src, mask, index, arr.as_ptr() as *const u8);
+        let r = _mm512_mask_i32gather_epi32::<4>(src, mask, index, arr.as_ptr());
         assert_eq_m512i(
             r,
             _mm512_setr_epi32(2, 16, 2, 48, 2, 80, 2, 112, 2, 144, 2, 176, 2, 208, 2, 240),
@@ -49693,7 +49711,7 @@ mod tests {
             1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
         );
         // A multiplier of 4 is word-addressing
-        _mm512_i32scatter_ps::<4>(arr.as_mut_ptr() as *mut u8, index, src);
+        _mm512_i32scatter_ps::<4>(arr.as_mut_ptr(), index, src);
         let mut expected = [0f32; 256];
         for i in 0..16 {
             expected[i * 16] = (i + 1) as f32;
@@ -49712,7 +49730,7 @@ mod tests {
             1., 2., 3., 4., 5., 6., 7., 8., 9., 10., 11., 12., 13., 14., 15., 16.,
         );
         // A multiplier of 4 is word-addressing
-        _mm512_mask_i32scatter_ps::<4>(arr.as_mut_ptr() as *mut u8, mask, index, src);
+        _mm512_mask_i32scatter_ps::<4>(arr.as_mut_ptr(), mask, index, src);
         let mut expected = [0f32; 256];
         for i in 0..8 {
             expected[i * 32 + 16] = 2. * (i + 1) as f32;
@@ -49729,7 +49747,7 @@ mod tests {
                                       128, 144, 160, 176, 192, 208, 224, 240);
         let src = _mm512_setr_epi32(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
         // A multiplier of 4 is word-addressing
-        _mm512_i32scatter_epi32::<4>(arr.as_mut_ptr() as *mut u8, index, src);
+        _mm512_i32scatter_epi32::<4>(arr.as_mut_ptr(), index, src);
         let mut expected = [0i32; 256];
         for i in 0..16 {
             expected[i * 16] = (i + 1) as i32;
@@ -49746,7 +49764,7 @@ mod tests {
                                       128, 144, 160, 176, 192, 208, 224, 240);
         let src = _mm512_setr_epi32(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
         // A multiplier of 4 is word-addressing
-        _mm512_mask_i32scatter_epi32::<4>(arr.as_mut_ptr() as *mut u8, mask, index, src);
+        _mm512_mask_i32scatter_epi32::<4>(arr.as_mut_ptr(), mask, index, src);
         let mut expected = [0i32; 256];
         for i in 0..8 {
             expected[i * 32 + 16] = 2 * (i + 1) as i32;
@@ -56714,9 +56732,9 @@ mod tests {
     unsafe fn test_mm512_mask_compressstoreu_epi32() {
         let a = _mm512_setr_epi32(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16);
         let mut r = [0_i32; 16];
-        _mm512_mask_compressstoreu_epi32(r.as_mut_ptr() as *mut _, 0, a);
+        _mm512_mask_compressstoreu_epi32(r.as_mut_ptr(), 0, a);
         assert_eq!(&r, &[0_i32; 16]);
-        _mm512_mask_compressstoreu_epi32(r.as_mut_ptr() as *mut _, 0b1111000011001010, a);
+        _mm512_mask_compressstoreu_epi32(r.as_mut_ptr(), 0b1111000011001010, a);
         assert_eq!(&r, &[2, 4, 7, 8, 13, 14, 15, 16, 0, 0, 0, 0, 0, 0, 0, 0]);
     }
 
@@ -56724,9 +56742,9 @@ mod tests {
     unsafe fn test_mm256_mask_compressstoreu_epi32() {
         let a = _mm256_setr_epi32(1, 2, 3, 4, 5, 6, 7, 8);
         let mut r = [0_i32; 8];
-        _mm256_mask_compressstoreu_epi32(r.as_mut_ptr() as *mut _, 0, a);
+        _mm256_mask_compressstoreu_epi32(r.as_mut_ptr(), 0, a);
         assert_eq!(&r, &[0_i32; 8]);
-        _mm256_mask_compressstoreu_epi32(r.as_mut_ptr() as *mut _, 0b11001010, a);
+        _mm256_mask_compressstoreu_epi32(r.as_mut_ptr(), 0b11001010, a);
         assert_eq!(&r, &[2, 4, 7, 8, 0, 0, 0, 0]);
     }
 
@@ -56734,9 +56752,9 @@ mod tests {
     unsafe fn test_mm_mask_compressstoreu_epi32() {
         let a = _mm_setr_epi32(1, 2, 3, 4);
         let mut r = [0_i32; 4];
-        _mm_mask_compressstoreu_epi32(r.as_mut_ptr() as *mut _, 0, a);
+        _mm_mask_compressstoreu_epi32(r.as_mut_ptr(), 0, a);
         assert_eq!(&r, &[0_i32; 4]);
-        _mm_mask_compressstoreu_epi32(r.as_mut_ptr() as *mut _, 0b1011, a);
+        _mm_mask_compressstoreu_epi32(r.as_mut_ptr(), 0b1011, a);
         assert_eq!(&r, &[1, 2, 4, 0]);
     }
 
@@ -56744,9 +56762,9 @@ mod tests {
     unsafe fn test_mm512_mask_compressstoreu_epi64() {
         let a = _mm512_setr_epi64(1, 2, 3, 4, 5, 6, 7, 8);
         let mut r = [0_i64; 8];
-        _mm512_mask_compressstoreu_epi64(r.as_mut_ptr() as *mut _, 0, a);
+        _mm512_mask_compressstoreu_epi64(r.as_mut_ptr(), 0, a);
         assert_eq!(&r, &[0_i64; 8]);
-        _mm512_mask_compressstoreu_epi64(r.as_mut_ptr() as *mut _, 0b11001010, a);
+        _mm512_mask_compressstoreu_epi64(r.as_mut_ptr(), 0b11001010, a);
         assert_eq!(&r, &[2, 4, 7, 8, 0, 0, 0, 0]);
     }
 
@@ -56754,9 +56772,9 @@ mod tests {
     unsafe fn test_mm256_mask_compressstoreu_epi64() {
         let a = _mm256_setr_epi64x(1, 2, 3, 4);
         let mut r = [0_i64; 4];
-        _mm256_mask_compressstoreu_epi64(r.as_mut_ptr() as *mut _, 0, a);
+        _mm256_mask_compressstoreu_epi64(r.as_mut_ptr(), 0, a);
         assert_eq!(&r, &[0_i64; 4]);
-        _mm256_mask_compressstoreu_epi64(r.as_mut_ptr() as *mut _, 0b1011, a);
+        _mm256_mask_compressstoreu_epi64(r.as_mut_ptr(), 0b1011, a);
         assert_eq!(&r, &[1, 2, 4, 0]);
     }
 
@@ -56764,9 +56782,9 @@ mod tests {
     unsafe fn test_mm_mask_compressstoreu_epi64() {
         let a = _mm_setr_epi64x(1, 2);
         let mut r = [0_i64; 2];
-        _mm_mask_compressstoreu_epi64(r.as_mut_ptr() as *mut _, 0, a);
+        _mm_mask_compressstoreu_epi64(r.as_mut_ptr(), 0, a);
         assert_eq!(&r, &[0_i64; 2]);
-        _mm_mask_compressstoreu_epi64(r.as_mut_ptr() as *mut _, 0b10, a);
+        _mm_mask_compressstoreu_epi64(r.as_mut_ptr(), 0b10, a);
         assert_eq!(&r, &[2, 0]);
     }
 
@@ -56777,9 +56795,9 @@ mod tests {
             13_f32, 14_f32, 15_f32, 16_f32,
         );
         let mut r = [0_f32; 16];
-        _mm512_mask_compressstoreu_ps(r.as_mut_ptr() as *mut _, 0, a);
+        _mm512_mask_compressstoreu_ps(r.as_mut_ptr(), 0, a);
         assert_eq!(&r, &[0_f32; 16]);
-        _mm512_mask_compressstoreu_ps(r.as_mut_ptr() as *mut _, 0b1111000011001010, a);
+        _mm512_mask_compressstoreu_ps(r.as_mut_ptr(), 0b1111000011001010, a);
         assert_eq!(
             &r,
             &[
@@ -56793,9 +56811,9 @@ mod tests {
     unsafe fn test_mm256_mask_compressstoreu_ps() {
         let a = _mm256_setr_ps(1_f32, 2_f32, 3_f32, 4_f32, 5_f32, 6_f32, 7_f32, 8_f32);
         let mut r = [0_f32; 8];
-        _mm256_mask_compressstoreu_ps(r.as_mut_ptr() as *mut _, 0, a);
+        _mm256_mask_compressstoreu_ps(r.as_mut_ptr(), 0, a);
         assert_eq!(&r, &[0_f32; 8]);
-        _mm256_mask_compressstoreu_ps(r.as_mut_ptr() as *mut _, 0b11001010, a);
+        _mm256_mask_compressstoreu_ps(r.as_mut_ptr(), 0b11001010, a);
         assert_eq!(
             &r,
             &[2_f32, 4_f32, 7_f32, 8_f32, 0_f32, 0_f32, 0_f32, 0_f32]
@@ -56806,9 +56824,9 @@ mod tests {
     unsafe fn test_mm_mask_compressstoreu_ps() {
         let a = _mm_setr_ps(1_f32, 2_f32, 3_f32, 4_f32);
         let mut r = [0.; 4];
-        _mm_mask_compressstoreu_ps(r.as_mut_ptr() as *mut _, 0, a);
+        _mm_mask_compressstoreu_ps(r.as_mut_ptr(), 0, a);
         assert_eq!(&r, &[0.; 4]);
-        _mm_mask_compressstoreu_ps(r.as_mut_ptr() as *mut _, 0b1011, a);
+        _mm_mask_compressstoreu_ps(r.as_mut_ptr(), 0b1011, a);
         assert_eq!(&r, &[1_f32, 2_f32, 4_f32, 0_f32]);
     }
 
@@ -56816,9 +56834,9 @@ mod tests {
     unsafe fn test_mm512_mask_compressstoreu_pd() {
         let a = _mm512_setr_pd(1., 2., 3., 4., 5., 6., 7., 8.);
         let mut r = [0.; 8];
-        _mm512_mask_compressstoreu_pd(r.as_mut_ptr() as *mut _, 0, a);
+        _mm512_mask_compressstoreu_pd(r.as_mut_ptr(), 0, a);
         assert_eq!(&r, &[0.; 8]);
-        _mm512_mask_compressstoreu_pd(r.as_mut_ptr() as *mut _, 0b11001010, a);
+        _mm512_mask_compressstoreu_pd(r.as_mut_ptr(), 0b11001010, a);
         assert_eq!(&r, &[2., 4., 7., 8., 0., 0., 0., 0.]);
     }
 
@@ -56826,9 +56844,9 @@ mod tests {
     unsafe fn test_mm256_mask_compressstoreu_pd() {
         let a = _mm256_setr_pd(1., 2., 3., 4.);
         let mut r = [0.; 4];
-        _mm256_mask_compressstoreu_pd(r.as_mut_ptr() as *mut _, 0, a);
+        _mm256_mask_compressstoreu_pd(r.as_mut_ptr(), 0, a);
         assert_eq!(&r, &[0.; 4]);
-        _mm256_mask_compressstoreu_pd(r.as_mut_ptr() as *mut _, 0b1011, a);
+        _mm256_mask_compressstoreu_pd(r.as_mut_ptr(), 0b1011, a);
         assert_eq!(&r, &[1., 2., 4., 0.]);
     }
 
@@ -56836,9 +56854,9 @@ mod tests {
     unsafe fn test_mm_mask_compressstoreu_pd() {
         let a = _mm_setr_pd(1., 2.);
         let mut r = [0.; 2];
-        _mm_mask_compressstoreu_pd(r.as_mut_ptr() as *mut _, 0, a);
+        _mm_mask_compressstoreu_pd(r.as_mut_ptr(), 0, a);
         assert_eq!(&r, &[0.; 2]);
-        _mm_mask_compressstoreu_pd(r.as_mut_ptr() as *mut _, 0b10, a);
+        _mm_mask_compressstoreu_pd(r.as_mut_ptr(), 0b10, a);
         assert_eq!(&r, &[2., 0.]);
     }
 
@@ -57009,7 +57027,7 @@ mod tests {
     unsafe fn test_mm512_mask_cvtepi32_storeu_epi16() {
         let a = _mm512_set1_epi32(9);
         let mut r = _mm256_undefined_si256();
-        _mm512_mask_cvtepi32_storeu_epi16(&mut r as *mut _ as *mut i8, 0b11111111_11111111, a);
+        _mm512_mask_cvtepi32_storeu_epi16(&mut r as *mut _ as *mut i16, 0b11111111_11111111, a);
         let e = _mm256_set1_epi16(9);
         assert_eq_m256i(r, e);
     }
@@ -57018,7 +57036,7 @@ mod tests {
     unsafe fn test_mm256_mask_cvtepi32_storeu_epi16() {
         let a = _mm256_set1_epi32(9);
         let mut r = _mm_undefined_si128();
-        _mm256_mask_cvtepi32_storeu_epi16(&mut r as *mut _ as *mut i8, 0b11111111, a);
+        _mm256_mask_cvtepi32_storeu_epi16(&mut r as *mut _ as *mut i16, 0b11111111, a);
         let e = _mm_set1_epi16(9);
         assert_eq_m128i(r, e);
     }
@@ -57027,7 +57045,7 @@ mod tests {
     unsafe fn test_mm_mask_cvtepi32_storeu_epi16() {
         let a = _mm_set1_epi32(9);
         let mut r = _mm_set1_epi8(0);
-        _mm_mask_cvtepi32_storeu_epi16(&mut r as *mut _ as *mut i8, 0b11111111, a);
+        _mm_mask_cvtepi32_storeu_epi16(&mut r as *mut _ as *mut i16, 0b11111111, a);
         let e = _mm_set_epi16(0, 0, 0, 0, 9, 9, 9, 9);
         assert_eq_m128i(r, e);
     }
@@ -57036,7 +57054,7 @@ mod tests {
     unsafe fn test_mm512_mask_cvtsepi32_storeu_epi16() {
         let a = _mm512_set1_epi32(i32::MAX);
         let mut r = _mm256_undefined_si256();
-        _mm512_mask_cvtsepi32_storeu_epi16(&mut r as *mut _ as *mut i8, 0b11111111_11111111, a);
+        _mm512_mask_cvtsepi32_storeu_epi16(&mut r as *mut _ as *mut i16, 0b11111111_11111111, a);
         let e = _mm256_set1_epi16(i16::MAX);
         assert_eq_m256i(r, e);
     }
@@ -57045,7 +57063,7 @@ mod tests {
     unsafe fn test_mm256_mask_cvtsepi32_storeu_epi16() {
         let a = _mm256_set1_epi32(i32::MAX);
         let mut r = _mm_undefined_si128();
-        _mm256_mask_cvtsepi32_storeu_epi16(&mut r as *mut _ as *mut i8, 0b11111111, a);
+        _mm256_mask_cvtsepi32_storeu_epi16(&mut r as *mut _ as *mut i16, 0b11111111, a);
         let e = _mm_set1_epi16(i16::MAX);
         assert_eq_m128i(r, e);
     }
@@ -57054,7 +57072,7 @@ mod tests {
     unsafe fn test_mm_mask_cvtsepi32_storeu_epi16() {
         let a = _mm_set1_epi32(i32::MAX);
         let mut r = _mm_set1_epi8(0);
-        _mm_mask_cvtsepi32_storeu_epi16(&mut r as *mut _ as *mut i8, 0b11111111, a);
+        _mm_mask_cvtsepi32_storeu_epi16(&mut r as *mut _ as *mut i16, 0b11111111, a);
         let e = _mm_set_epi16(0, 0, 0, 0, i16::MAX, i16::MAX, i16::MAX, i16::MAX);
         assert_eq_m128i(r, e);
     }
@@ -57063,7 +57081,7 @@ mod tests {
     unsafe fn test_mm512_mask_cvtusepi32_storeu_epi16() {
         let a = _mm512_set1_epi32(i32::MAX);
         let mut r = _mm256_undefined_si256();
-        _mm512_mask_cvtusepi32_storeu_epi16(&mut r as *mut _ as *mut i8, 0b11111111_11111111, a);
+        _mm512_mask_cvtusepi32_storeu_epi16(&mut r as *mut _ as *mut i16, 0b11111111_11111111, a);
         let e = _mm256_set1_epi16(u16::MAX as i16);
         assert_eq_m256i(r, e);
     }
@@ -57072,7 +57090,7 @@ mod tests {
     unsafe fn test_mm256_mask_cvtusepi32_storeu_epi16() {
         let a = _mm256_set1_epi32(i32::MAX);
         let mut r = _mm_undefined_si128();
-        _mm256_mask_cvtusepi32_storeu_epi16(&mut r as *mut _ as *mut i8, 0b11111111, a);
+        _mm256_mask_cvtusepi32_storeu_epi16(&mut r as *mut _ as *mut i16, 0b11111111, a);
         let e = _mm_set1_epi16(u16::MAX as i16);
         assert_eq_m128i(r, e);
     }
@@ -57081,7 +57099,7 @@ mod tests {
     unsafe fn test_mm_mask_cvtusepi32_storeu_epi16() {
         let a = _mm_set1_epi32(i32::MAX);
         let mut r = _mm_set1_epi8(0);
-        _mm_mask_cvtusepi32_storeu_epi16(&mut r as *mut _ as *mut i8, 0b11111111, a);
+        _mm_mask_cvtusepi32_storeu_epi16(&mut r as *mut _ as *mut i16, 0b11111111, a);
         let e = _mm_set_epi16(
             0,
             0,
@@ -57227,7 +57245,7 @@ mod tests {
     #[simd_test(enable = "avx512f")]
     unsafe fn test_mm512_loadu_si512() {
         let a = &[4, 3, 2, 5, 8, 9, 64, 50, -4, -3, -2, -5, -8, -9, -64, -50];
-        let p = a.as_ptr();
+        let p = a.as_ptr().cast();
         let r = _mm512_loadu_si512(black_box(p));
         let e = _mm512_setr_epi32(4, 3, 2, 5, 8, 9, 64, 50, -4, -3, -2, -5, -8, -9, -64, -50);
         assert_eq_m512i(r, e);
@@ -57250,7 +57268,7 @@ mod tests {
         let a = Align {
             data: [4, 3, 2, 5, 8, 9, 64, 50, -4, -3, -2, -5, -8, -9, -64, -50],
         };
-        let p = (a.data).as_ptr();
+        let p = (a.data).as_ptr().cast();
         let r = _mm512_load_si512(black_box(p));
         let e = _mm512_setr_epi32(4, 3, 2, 5, 8, 9, 64, 50, -4, -3, -2, -5, -8, -9, -64, -50);
         assert_eq_m512i(r, e);

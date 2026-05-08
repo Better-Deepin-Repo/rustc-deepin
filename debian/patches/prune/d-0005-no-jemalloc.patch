@@ -31,18 +31,18 @@ index f4caa3e..dc58591 100644
  max_level_info = ['rustc_driver_impl/max_level_info']
  rustc_randomized_layouts = ['rustc_driver_impl/rustc_randomized_layouts']
 diff --git a/src/tools/rust-analyzer/crates/profile/Cargo.toml b/src/tools/rust-analyzer/crates/profile/Cargo.toml
-index 9384fe2..ad8b6c9 100644
+index 1fb1383..662f7fd 100644
 --- a/src/tools/rust-analyzer/crates/profile/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/profile/Cargo.toml
-@@ -14,7 +14,6 @@ rust-version.workspace = true
+@@ -13,7 +13,6 @@ rust-version.workspace = true
+ 
  [dependencies]
  cfg-if = "1.0.0"
- libc.workspace = true
--jemalloc-ctl = { version = "0.5.0", package = "tikv-jemalloc-ctl", optional = true }
+-jemalloc-ctl = { version = "0.5.4", package = "tikv-jemalloc-ctl", optional = true }
  
  [target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
  perf-event = "=0.4.7"
-@@ -27,7 +26,6 @@ windows-sys = { version = "0.59", features = [
+@@ -29,7 +28,6 @@ windows-sys = { version = "0.59", features = [
  
  [features]
  cpu_profiler = []
@@ -51,7 +51,7 @@ index 9384fe2..ad8b6c9 100644
  # Uncomment to enable for the whole crate graph
  # default = [ "cpu_profiler" ]
 diff --git a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-index 6c81c23..80e2e04 100644
+index b59d068..8ff48bc 100644
 --- a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
 @@ -80,9 +80,6 @@ windows-sys = { version = "0.59", features = [
@@ -59,10 +59,10 @@ index 6c81c23..80e2e04 100644
  ] }
  
 -[target.'cfg(not(target_env = "msvc"))'.dependencies]
--jemallocator = { version = "0.5.0", package = "tikv-jemallocator", optional = true }
+-jemallocator = { version = "0.5.4", package = "tikv-jemallocator", optional = true }
 -
  [dev-dependencies]
- expect-test = "1.4.0"
+ expect-test = "1.5.1"
  xshell.workspace = true
 @@ -92,7 +89,6 @@ test-fixture.workspace = true
  syntax-bridge.workspace = true
@@ -70,5 +70,5 @@ index 6c81c23..80e2e04 100644
  [features]
 -jemalloc = ["jemallocator", "profile/jemalloc"]
  force-always-assert = ["stdx/force-always-assert"]
- sysroot-abi = []
  in-rust-tree = [
+   "syntax/in-rust-tree",

@@ -9,14 +9,14 @@ in debian/rust-doc.links
 Forwarded: not-needed
 ---
  src/tools/linkchecker/main.rs                      | 28 +++++++-
- vendor/mdbook-0.4.47/src/book/init.rs              | 19 -----
+ vendor/mdbook-0.4.49/src/book/init.rs              | 19 -----
+ vendor/mdbook-0.4.49/src/front-end/mod.rs          | 26 -------
+ vendor/mdbook-0.4.49/src/front-end/searcher/mod.rs |  2 -
+ .../src/front-end/templates/index.hbs              | 48 +------------
+ .../src/front-end/templates/toc.html.hbs           |  3 +-
  .../src/renderer/html_handlebars/search.rs         |  2 -
  .../src/renderer/html_handlebars/static_files.rs   | 84 +++++-----------------
- vendor/mdbook-0.4.47/src/theme/index.hbs           | 48 +------------
- vendor/mdbook-0.4.47/src/theme/mod.rs              | 27 -------
- vendor/mdbook-0.4.47/src/theme/searcher/mod.rs     |  2 -
- vendor/mdbook-0.4.47/src/theme/toc.html.hbs        |  3 +-
- 8 files changed, 48 insertions(+), 165 deletions(-)
+ 8 files changed, 48 insertions(+), 164 deletions(-)
 
 diff --git a/src/tools/linkchecker/main.rs b/src/tools/linkchecker/main.rs
 index 84cba3f..4e11bd8 100644
@@ -71,10 +71,10 @@ index 84cba3f..4e11bd8 100644
                  if is_exception(file, &target_pretty_path) {
                      report.links_ignored_exception += 1;
                  } else {
-diff --git a/vendor/mdbook-0.4.47/src/book/init.rs b/vendor/mdbook-0.4.47/src/book/init.rs
+diff --git a/vendor/mdbook-0.4.49/src/book/init.rs b/vendor/mdbook-0.4.49/src/book/init.rs
 index faca1d0..c1a82a3 100644
---- a/vendor/mdbook-0.4.47/src/book/init.rs
-+++ b/vendor/mdbook-0.4.47/src/book/init.rs
+--- a/vendor/mdbook-0.4.49/src/book/init.rs
++++ b/vendor/mdbook-0.4.49/src/book/init.rs
 @@ -153,25 +153,6 @@ impl BookBuilder {
          let mut js = File::create(themedir.join("book.js"))?;
          js.write_all(theme::JS)?;
@@ -101,12 +101,190 @@ index faca1d0..c1a82a3 100644
          Ok(())
      }
  
-diff --git a/vendor/mdbook-0.4.47/src/renderer/html_handlebars/search.rs b/vendor/mdbook-0.4.47/src/renderer/html_handlebars/search.rs
-index d3f67fe..4062d8a 100644
---- a/vendor/mdbook-0.4.47/src/renderer/html_handlebars/search.rs
-+++ b/vendor/mdbook-0.4.47/src/renderer/html_handlebars/search.rs
-@@ -70,8 +70,6 @@ pub fn create_files(
-             format!("Object.assign(window.search, {});", index).as_bytes(),
+diff --git a/vendor/mdbook-0.4.49/src/front-end/mod.rs b/vendor/mdbook-0.4.49/src/front-end/mod.rs
+index 8fd09fc..566f745 100644
+--- a/vendor/mdbook-0.4.49/src/front-end/mod.rs
++++ b/vendor/mdbook-0.4.49/src/front-end/mod.rs
+@@ -1,9 +1,5 @@
+ #![allow(missing_docs)]
+ 
+-pub mod playground_editor;
+-
+-pub mod fonts;
+-
+ #[cfg(feature = "search")]
+ pub mod searcher;
+ 
+@@ -26,18 +22,8 @@ pub static VARIABLES_CSS: &[u8] = include_bytes!("css/variables.css");
+ pub static FAVICON_PNG: &[u8] = include_bytes!("images/favicon.png");
+ pub static FAVICON_SVG: &[u8] = include_bytes!("images/favicon.svg");
+ pub static JS: &[u8] = include_bytes!("js/book.js");
+-pub static HIGHLIGHT_JS: &[u8] = include_bytes!("js/highlight.js");
+ pub static TOMORROW_NIGHT_CSS: &[u8] = include_bytes!("css/tomorrow-night.css");
+-pub static HIGHLIGHT_CSS: &[u8] = include_bytes!("css/highlight.css");
+ pub static AYU_HIGHLIGHT_CSS: &[u8] = include_bytes!("css/ayu-highlight.css");
+-pub static CLIPBOARD_JS: &[u8] = include_bytes!("js/clipboard.min.js");
+-pub static FONT_AWESOME: &[u8] = include_bytes!("css/font-awesome.min.css");
+-pub static FONT_AWESOME_EOT: &[u8] = include_bytes!("fonts/fontawesome-webfont.eot");
+-pub static FONT_AWESOME_SVG: &[u8] = include_bytes!("fonts/fontawesome-webfont.svg");
+-pub static FONT_AWESOME_TTF: &[u8] = include_bytes!("fonts/fontawesome-webfont.ttf");
+-pub static FONT_AWESOME_WOFF: &[u8] = include_bytes!("fonts/fontawesome-webfont.woff");
+-pub static FONT_AWESOME_WOFF2: &[u8] = include_bytes!("fonts/fontawesome-webfont.woff2");
+-pub static FONT_AWESOME_OTF: &[u8] = include_bytes!("fonts/FontAwesome.otf");
+ 
+ /// The `Theme` struct should be used instead of the static variables because
+ /// the `new()` method will look if the user has a theme directory in their
+@@ -62,11 +48,8 @@ pub struct Theme {
+     pub favicon_png: Option<Vec<u8>>,
+     pub favicon_svg: Option<Vec<u8>>,
+     pub js: Vec<u8>,
+-    pub highlight_css: Vec<u8>,
+     pub tomorrow_night_css: Vec<u8>,
+     pub ayu_highlight_css: Vec<u8>,
+-    pub highlight_js: Vec<u8>,
+-    pub clipboard_js: Vec<u8>,
+ }
+ 
+ impl Theme {
+@@ -98,9 +81,6 @@ impl Theme {
+                     theme_dir.join("css/variables.css"),
+                     &mut theme.variables_css,
+                 ),
+-                (theme_dir.join("highlight.js"), &mut theme.highlight_js),
+-                (theme_dir.join("clipboard.min.js"), &mut theme.clipboard_js),
+-                (theme_dir.join("highlight.css"), &mut theme.highlight_css),
+                 (
+                     theme_dir.join("tomorrow-night.css"),
+                     &mut theme.tomorrow_night_css,
+@@ -190,11 +170,8 @@ impl Default for Theme {
+             favicon_png: Some(FAVICON_PNG.to_owned()),
+             favicon_svg: Some(FAVICON_SVG.to_owned()),
+             js: JS.to_owned(),
+-            highlight_css: HIGHLIGHT_CSS.to_owned(),
+             tomorrow_night_css: TOMORROW_NIGHT_CSS.to_owned(),
+             ayu_highlight_css: AYU_HIGHLIGHT_CSS.to_owned(),
+-            highlight_js: HIGHLIGHT_JS.to_owned(),
+-            clipboard_js: CLIPBOARD_JS.to_owned(),
+         }
+     }
+ }
+@@ -283,11 +260,8 @@ mod tests {
+             favicon_png: Some(Vec::new()),
+             favicon_svg: Some(Vec::new()),
+             js: Vec::new(),
+-            highlight_css: Vec::new(),
+             tomorrow_night_css: Vec::new(),
+             ayu_highlight_css: Vec::new(),
+-            highlight_js: Vec::new(),
+-            clipboard_js: Vec::new(),
+         };
+ 
+         assert_eq!(got, empty);
+diff --git a/vendor/mdbook-0.4.49/src/front-end/searcher/mod.rs b/vendor/mdbook-0.4.49/src/front-end/searcher/mod.rs
+index d5029db..59eda8a 100644
+--- a/vendor/mdbook-0.4.49/src/front-end/searcher/mod.rs
++++ b/vendor/mdbook-0.4.49/src/front-end/searcher/mod.rs
+@@ -2,5 +2,3 @@
+ //! the "search" cargo feature is disabled.
+ 
+ pub static JS: &[u8] = include_bytes!("searcher.js");
+-pub static MARK_JS: &[u8] = include_bytes!("mark.min.js");
+-pub static ELASTICLUNR_JS: &[u8] = include_bytes!("elasticlunr.min.js");
+diff --git a/vendor/mdbook-0.4.49/src/front-end/templates/index.hbs b/vendor/mdbook-0.4.49/src/front-end/templates/index.hbs
+index 98f3b88..cc1ead1 100644
+--- a/vendor/mdbook-0.4.49/src/front-end/templates/index.hbs
++++ b/vendor/mdbook-0.4.49/src/front-end/templates/index.hbs
+@@ -33,10 +33,7 @@
+         {{/if}}
+ 
+         <!-- Fonts -->
+-        <link rel="stylesheet" href="{{ resource "FontAwesome/css/font-awesome.css" }}">
+-        {{#if copy_fonts}}
+-        <link rel="stylesheet" href="{{ resource "fonts/fonts.css" }}">
+-        {{/if}}
++        <link rel="stylesheet" href="{{ path_to_root }}css/font-awesome.min.css">
+ 
+         <!-- Highlight.js Stylesheets -->
+         <link rel="stylesheet" id="highlight-css" href="{{ resource "highlight.css" }}">
+@@ -50,7 +47,7 @@
+ 
+         {{#if mathjax_support}}
+         <!-- MathJax -->
+-        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
++        <script async src="MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+         {{/if}}
+ 
+         <!-- Provide site root and default themes to javascript -->
+@@ -251,48 +248,7 @@
+         </script>
+         {{/if}}
+ 
+-        {{#if google_analytics}}
+-        <!-- Google Analytics Tag -->
+-        <script>
+-            const localAddrs = ["localhost", "127.0.0.1", ""];
+-
+-            // make sure we don't activate google analytics if the developer is
+-            // inspecting the book locally...
+-            if (localAddrs.indexOf(document.location.hostname) === -1) {
+-                (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
+-                (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
+-                m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
+-                })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
+-
+-                ga('create', '{{google_analytics}}', 'auto');
+-                ga('send', 'pageview');
+-            }
+-        </script>
+-        {{/if}}
+-
+-        {{#if playground_line_numbers}}
+-        <script>
+-            window.playground_line_numbers = true;
+-        </script>
+-        {{/if}}
+-
+-        {{#if playground_copyable}}
+-        <script>
+-            window.playground_copyable = true;
+-        </script>
+-        {{/if}}
+-
+-        {{#if playground_js}}
+-        <script src="{{ resource "ace.js" }}"></script>
+-        <script src="{{ resource "editor.js" }}"></script>
+-        <script src="{{ resource "mode-rust.js" }}"></script>
+-        <script src="{{ resource "theme-dawn.js" }}"></script>
+-        <script src="{{ resource "theme-tomorrow_night.js" }}"></script>
+-        {{/if}}
+-
+         {{#if search_js}}
+-        <script src="{{ resource "elasticlunr.min.js" }}"></script>
+-        <script src="{{ resource "mark.min.js" }}"></script>
+         <script src="{{ resource "searcher.js" }}"></script>
+         {{/if}}
+ 
+diff --git a/vendor/mdbook-0.4.49/src/front-end/templates/toc.html.hbs b/vendor/mdbook-0.4.49/src/front-end/templates/toc.html.hbs
+index 93dea25..2853ec6 100644
+--- a/vendor/mdbook-0.4.49/src/front-end/templates/toc.html.hbs
++++ b/vendor/mdbook-0.4.49/src/front-end/templates/toc.html.hbs
+@@ -28,9 +28,8 @@
+         <link rel="stylesheet" href="{{ resource "css/print.css" }}" media="print">
+         {{/if}}
+         <!-- Fonts -->
+-        <link rel="stylesheet" href="{{ resource "FontAwesome/css/font-awesome.css" }}">
++        <link rel="stylesheet" href="{{ path_to_root }}css/font-awesome.min.css">
+         {{#if copy_fonts}}
+-        <link rel="stylesheet" href="{{ resource "fonts/fonts.css" }}">
+         {{/if}}
+         <!-- Custom theme stylesheets -->
+         {{#each additional_css}}
+diff --git a/vendor/mdbook-0.4.49/src/renderer/html_handlebars/search.rs b/vendor/mdbook-0.4.49/src/renderer/html_handlebars/search.rs
+index fe2edd5..10908ac 100644
+--- a/vendor/mdbook-0.4.49/src/renderer/html_handlebars/search.rs
++++ b/vendor/mdbook-0.4.49/src/renderer/html_handlebars/search.rs
+@@ -75,8 +75,6 @@ pub fn create_files(
+             .as_bytes(),
          );
          static_files.add_builtin("searcher.js", searcher::JS);
 -        static_files.add_builtin("mark.min.js", searcher::MARK_JS);
@@ -114,10 +292,10 @@ index d3f67fe..4062d8a 100644
          debug!("Copying search files ✓");
      }
  
-diff --git a/vendor/mdbook-0.4.47/src/renderer/html_handlebars/static_files.rs b/vendor/mdbook-0.4.47/src/renderer/html_handlebars/static_files.rs
+diff --git a/vendor/mdbook-0.4.49/src/renderer/html_handlebars/static_files.rs b/vendor/mdbook-0.4.49/src/renderer/html_handlebars/static_files.rs
 index 1ecf2d5..3263acb 100644
---- a/vendor/mdbook-0.4.47/src/renderer/html_handlebars/static_files.rs
-+++ b/vendor/mdbook-0.4.47/src/renderer/html_handlebars/static_files.rs
+--- a/vendor/mdbook-0.4.49/src/renderer/html_handlebars/static_files.rs
++++ b/vendor/mdbook-0.4.49/src/renderer/html_handlebars/static_files.rs
 @@ -6,12 +6,13 @@ use once_cell::sync::Lazy;
  use crate::config::HtmlConfig;
  use crate::errors::*;
@@ -230,182 +408,3 @@ index 1ecf2d5..3263acb 100644
          let hash_map = self.hash_map;
          Ok(ResourceHelper { hash_map })
      }
-diff --git a/vendor/mdbook-0.4.47/src/theme/index.hbs b/vendor/mdbook-0.4.47/src/theme/index.hbs
-index b9d37f3..0c80a8d 100644
---- a/vendor/mdbook-0.4.47/src/theme/index.hbs
-+++ b/vendor/mdbook-0.4.47/src/theme/index.hbs
-@@ -33,10 +33,7 @@
-         {{/if}}
- 
-         <!-- Fonts -->
--        <link rel="stylesheet" href="{{ resource "FontAwesome/css/font-awesome.css" }}">
--        {{#if copy_fonts}}
--        <link rel="stylesheet" href="{{ resource "fonts/fonts.css" }}">
--        {{/if}}
-+        <link rel="stylesheet" href="{{ path_to_root }}css/font-awesome.min.css">
- 
-         <!-- Highlight.js Stylesheets -->
-         <link rel="stylesheet" id="highlight-css" href="{{ resource "highlight.css" }}">
-@@ -50,7 +47,7 @@
- 
-         {{#if mathjax_support}}
-         <!-- MathJax -->
--        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
-+        <script async src="MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
-         {{/if}}
- 
-         <!-- Provide site root to javascript -->
-@@ -248,48 +245,7 @@
-         </script>
-         {{/if}}
- 
--        {{#if google_analytics}}
--        <!-- Google Analytics Tag -->
--        <script>
--            var localAddrs = ["localhost", "127.0.0.1", ""];
--
--            // make sure we don't activate google analytics if the developer is
--            // inspecting the book locally...
--            if (localAddrs.indexOf(document.location.hostname) === -1) {
--                (function(i,s,o,g,r,a,m){i['GoogleAnalyticsObject']=r;i[r]=i[r]||function(){
--                (i[r].q=i[r].q||[]).push(arguments)},i[r].l=1*new Date();a=s.createElement(o),
--                m=s.getElementsByTagName(o)[0];a.async=1;a.src=g;m.parentNode.insertBefore(a,m)
--                })(window,document,'script','https://www.google-analytics.com/analytics.js','ga');
--
--                ga('create', '{{google_analytics}}', 'auto');
--                ga('send', 'pageview');
--            }
--        </script>
--        {{/if}}
--
--        {{#if playground_line_numbers}}
--        <script>
--            window.playground_line_numbers = true;
--        </script>
--        {{/if}}
--
--        {{#if playground_copyable}}
--        <script>
--            window.playground_copyable = true;
--        </script>
--        {{/if}}
--
--        {{#if playground_js}}
--        <script src="{{ resource "ace.js" }}"></script>
--        <script src="{{ resource "editor.js" }}"></script>
--        <script src="{{ resource "mode-rust.js" }}"></script>
--        <script src="{{ resource "theme-dawn.js" }}"></script>
--        <script src="{{ resource "theme-tomorrow_night.js" }}"></script>
--        {{/if}}
--
-         {{#if search_js}}
--        <script src="{{ resource "elasticlunr.min.js" }}"></script>
--        <script src="{{ resource "mark.min.js" }}"></script>
-         <script src="{{ resource "searcher.js" }}"></script>
-         {{/if}}
- 
-diff --git a/vendor/mdbook-0.4.47/src/theme/mod.rs b/vendor/mdbook-0.4.47/src/theme/mod.rs
-index b173bd4..46a6902 100644
---- a/vendor/mdbook-0.4.47/src/theme/mod.rs
-+++ b/vendor/mdbook-0.4.47/src/theme/mod.rs
-@@ -1,9 +1,5 @@
- #![allow(missing_docs)]
- 
--pub mod playground_editor;
--
--pub mod fonts;
--
- #[cfg(feature = "search")]
- pub mod searcher;
- 
-@@ -26,19 +22,8 @@ pub static VARIABLES_CSS: &[u8] = include_bytes!("css/variables.css");
- pub static FAVICON_PNG: &[u8] = include_bytes!("favicon.png");
- pub static FAVICON_SVG: &[u8] = include_bytes!("favicon.svg");
- pub static JS: &[u8] = include_bytes!("book.js");
--pub static HIGHLIGHT_JS: &[u8] = include_bytes!("highlight.js");
- pub static TOMORROW_NIGHT_CSS: &[u8] = include_bytes!("tomorrow-night.css");
--pub static HIGHLIGHT_CSS: &[u8] = include_bytes!("highlight.css");
- pub static AYU_HIGHLIGHT_CSS: &[u8] = include_bytes!("ayu-highlight.css");
--pub static CLIPBOARD_JS: &[u8] = include_bytes!("clipboard.min.js");
--pub static FONT_AWESOME: &[u8] = include_bytes!("FontAwesome/css/font-awesome.min.css");
--pub static FONT_AWESOME_EOT: &[u8] = include_bytes!("FontAwesome/fonts/fontawesome-webfont.eot");
--pub static FONT_AWESOME_SVG: &[u8] = include_bytes!("FontAwesome/fonts/fontawesome-webfont.svg");
--pub static FONT_AWESOME_TTF: &[u8] = include_bytes!("FontAwesome/fonts/fontawesome-webfont.ttf");
--pub static FONT_AWESOME_WOFF: &[u8] = include_bytes!("FontAwesome/fonts/fontawesome-webfont.woff");
--pub static FONT_AWESOME_WOFF2: &[u8] =
--    include_bytes!("FontAwesome/fonts/fontawesome-webfont.woff2");
--pub static FONT_AWESOME_OTF: &[u8] = include_bytes!("FontAwesome/fonts/FontAwesome.otf");
- 
- /// The `Theme` struct should be used instead of the static variables because
- /// the `new()` method will look if the user has a theme directory in their
-@@ -63,11 +48,8 @@ pub struct Theme {
-     pub favicon_png: Option<Vec<u8>>,
-     pub favicon_svg: Option<Vec<u8>>,
-     pub js: Vec<u8>,
--    pub highlight_css: Vec<u8>,
-     pub tomorrow_night_css: Vec<u8>,
-     pub ayu_highlight_css: Vec<u8>,
--    pub highlight_js: Vec<u8>,
--    pub clipboard_js: Vec<u8>,
- }
- 
- impl Theme {
-@@ -99,9 +81,6 @@ impl Theme {
-                     theme_dir.join("css/variables.css"),
-                     &mut theme.variables_css,
-                 ),
--                (theme_dir.join("highlight.js"), &mut theme.highlight_js),
--                (theme_dir.join("clipboard.min.js"), &mut theme.clipboard_js),
--                (theme_dir.join("highlight.css"), &mut theme.highlight_css),
-                 (
-                     theme_dir.join("tomorrow-night.css"),
-                     &mut theme.tomorrow_night_css,
-@@ -191,11 +170,8 @@ impl Default for Theme {
-             favicon_png: Some(FAVICON_PNG.to_owned()),
-             favicon_svg: Some(FAVICON_SVG.to_owned()),
-             js: JS.to_owned(),
--            highlight_css: HIGHLIGHT_CSS.to_owned(),
-             tomorrow_night_css: TOMORROW_NIGHT_CSS.to_owned(),
-             ayu_highlight_css: AYU_HIGHLIGHT_CSS.to_owned(),
--            highlight_js: HIGHLIGHT_JS.to_owned(),
--            clipboard_js: CLIPBOARD_JS.to_owned(),
-         }
-     }
- }
-@@ -284,11 +260,8 @@ mod tests {
-             favicon_png: Some(Vec::new()),
-             favicon_svg: Some(Vec::new()),
-             js: Vec::new(),
--            highlight_css: Vec::new(),
-             tomorrow_night_css: Vec::new(),
-             ayu_highlight_css: Vec::new(),
--            highlight_js: Vec::new(),
--            clipboard_js: Vec::new(),
-         };
- 
-         assert_eq!(got, empty);
-diff --git a/vendor/mdbook-0.4.47/src/theme/searcher/mod.rs b/vendor/mdbook-0.4.47/src/theme/searcher/mod.rs
-index d5029db..59eda8a 100644
---- a/vendor/mdbook-0.4.47/src/theme/searcher/mod.rs
-+++ b/vendor/mdbook-0.4.47/src/theme/searcher/mod.rs
-@@ -2,5 +2,3 @@
- //! the "search" cargo feature is disabled.
- 
- pub static JS: &[u8] = include_bytes!("searcher.js");
--pub static MARK_JS: &[u8] = include_bytes!("mark.min.js");
--pub static ELASTICLUNR_JS: &[u8] = include_bytes!("elasticlunr.min.js");
-diff --git a/vendor/mdbook-0.4.47/src/theme/toc.html.hbs b/vendor/mdbook-0.4.47/src/theme/toc.html.hbs
-index 93dea25..2853ec6 100644
---- a/vendor/mdbook-0.4.47/src/theme/toc.html.hbs
-+++ b/vendor/mdbook-0.4.47/src/theme/toc.html.hbs
-@@ -28,9 +28,8 @@
-         <link rel="stylesheet" href="{{ resource "css/print.css" }}" media="print">
-         {{/if}}
-         <!-- Fonts -->
--        <link rel="stylesheet" href="{{ resource "FontAwesome/css/font-awesome.css" }}">
-+        <link rel="stylesheet" href="{{ path_to_root }}css/font-awesome.min.css">
-         {{#if copy_fonts}}
--        <link rel="stylesheet" href="{{ resource "fonts/fonts.css" }}">
-         {{/if}}
-         <!-- Custom theme stylesheets -->
-         {{#each additional_css}}

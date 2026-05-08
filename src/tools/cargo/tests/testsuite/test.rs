@@ -3890,8 +3890,6 @@ fn cargo_test_env() {
     let cargo = format!(
         "{}[EXE]",
         cargo_exe()
-            .canonicalize()
-            .unwrap()
             .with_extension("")
             .to_str()
             .unwrap()
@@ -3913,8 +3911,6 @@ test env_test ... ok
     let stderr_other_cargo = format!(
         "{}[EXE]",
         other_cargo_path
-            .canonicalize()
-            .unwrap()
             .with_extension("")
             .to_str()
             .unwrap()
@@ -4011,7 +4007,7 @@ fn cyclical_dep_with_missing_feature() {
     ... required by package `foo v0.1.0 ([ROOT]/foo)`
 versions that meet the requirements `*` are: 0.1.0
 
-the package `foo` depends on `foo`, with features: `missing` but `foo` does not have these features.
+package `foo` depends on `foo` with feature `missing` but `foo` does not have that feature.
 
 
 failed to select a version for `foo` which could resolve this conflict
@@ -4740,11 +4736,9 @@ fn test_dep_with_dev() {
         .run();
 }
 
-#[ignore = "1-86 beta betaport"]
-#[cargo_test]
+#[cargo_test(nightly, reason = "-Zdoctest-xcompile is unstable")]
 fn cargo_test_doctest_xcompile_ignores() {
-    // -Zdoctest-xcompile also enables --enable-per-target-ignores which
-    // allows the ignore-TARGET syntax.
+    // Test for `ignore-...` syntax with -Zdoctest-xcompile.
     let p = project()
         .file("Cargo.toml", &basic_lib_manifest("foo"))
         .file(
@@ -4771,15 +4765,15 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
         .run();
     #[cfg(target_arch = "x86_64")]
     p.cargo("test")
-        .with_status(101)
         .with_stdout_data(str![[r#"
 ...
-test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in [ELAPSED]s
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in [ELAPSED]s
 ...
-"#]],
-        )
+"#]])
         .run();
 
+    // Should be the same with or without -Zdoctest-xcompile because `ignore-`
+    // syntax is always enabled.
     #[cfg(not(target_arch = "x86_64"))]
     p.cargo("test -Zdoctest-xcompile")
         .masquerade_as_nightly_cargo(&["doctest-xcompile"])
@@ -4801,8 +4795,7 @@ test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; fini
         .run();
 }
 
-#[ignore = "1-86 beta betaport"]
-#[cargo_test]
+#[cargo_test(nightly, reason = "-Zdoctest-xcompile is unstable")]
 fn cargo_test_doctest_xcompile() {
     if !cross_compile::can_run_on_host() {
         return;
@@ -4844,8 +4837,7 @@ test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
     .run();
 }
 
-#[ignore = "1-86 beta betaport"]
-#[cargo_test]
+#[cargo_test(nightly, reason = "-Zdoctest-xcompile is unstable")]
 fn cargo_test_doctest_xcompile_runner() {
     if !cross_compile::can_run_on_host() {
         return;
@@ -4932,8 +4924,7 @@ this is a runner
     .run();
 }
 
-#[ignore = "1-86 beta betaport"]
-#[cargo_test]
+#[cargo_test(nightly, reason = "-Zdoctest-xcompile is unstable")]
 fn cargo_test_doctest_xcompile_no_runner() {
     if !cross_compile::can_run_on_host() {
         return;

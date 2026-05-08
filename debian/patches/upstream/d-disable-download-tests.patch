@@ -8,10 +8,10 @@ Forwarded: no
  1 file changed, 3 insertions(+)
 
 diff --git a/src/bootstrap/src/core/config/tests.rs b/src/bootstrap/src/core/config/tests.rs
-index d8002ba..62b0a49 100644
+index 96ac8a6..cc20a81 100644
 --- a/src/bootstrap/src/core/config/tests.rs
 +++ b/src/bootstrap/src/core/config/tests.rs
-@@ -47,6 +47,9 @@ fn download_ci_llvm() {
+@@ -68,6 +68,9 @@ fn download_ci_llvm() {
  //   - https://github.com/rust-lang/rust/pull/109162#issuecomment-1496782487
  #[test]
  fn detect_src_and_out() {

@@ -98,6 +98,7 @@ Each new feature described below should explain how to use it.
     * [rustdoc-map](#rustdoc-map) --- Provides mappings for documentation to link to external sites like [docs.rs](https://docs.rs/).
     * [scrape-examples](#scrape-examples) --- Shows examples within documentation.
     * [output-format](#output-format-for-rustdoc) --- Allows documentation to also be emitted in the experimental [JSON format](https://doc.rust-lang.org/nightly/nightly-rustc/rustdoc_json_types/).
+    * [rustdoc-depinfo](#rustdoc-depinfo) --- Use dep-info files in rustdoc rebuild detection.
 * `Cargo.toml` extensions
     * [Profile `rustflags` option](#profile-rustflags-option) --- Passed directly to rustc.
     * [codegen-backend](#codegen-backend) --- Select the codegen backend used by rustc.
@@ -284,8 +285,7 @@ This flag changes `cargo test`'s behavior when handling doctests when
 a target is passed. Currently, if a target is passed that is different
 from the host cargo will simply skip testing doctests. If this flag is
 present, cargo will continue as normal, passing the tests to doctest,
-while also passing it a `--target` option, as well as enabling
-`-Zunstable-features --enable-per-target-ignores` and passing along
+while also passing it a `--target` option, as well as passing along
 information from `.cargo/config.toml`. See the rustc issue for more information.
 
 ```sh
@@ -1587,36 +1587,18 @@ This will not affect any hard-coded paths in the source code, such as in strings
 
 * Tracking Issue: [#12633](https://github.com/rust-lang/cargo/issues/12633)
 
-The `-Zgc` flag enables garbage-collection within cargo's global cache within the cargo home directory.
-This includes downloaded dependencies such as compressed `.crate` files, extracted `src` directories, registry index caches, and git dependencies.
-When `-Zgc` is present, cargo will track the last time any index and dependency was used,
-and then uses those timestamps to manually or automatically delete cache entries that have not been used for a while.
-
-```sh
-cargo build -Zgc
-```
-
-### Automatic garbage collection
-
-Automatic deletion happens on commands that are already doing a significant amount of work,
-such as all of the build commands (`cargo build`, `cargo test`, `cargo check`, etc.), and `cargo fetch`.
-The deletion happens just after resolution and packages have been downloaded.
-Automatic deletion is only done once per day (see `gc.auto.frequency` to configure).
-Automatic deletion is disabled if cargo is offline such as with `--offline` or `--frozen` to avoid deleting artifacts that may need to be used if you are offline for a long period of time.
+The `-Zgc` flag is used to enable certain features related to garbage-collection of cargo's global cache within the cargo home directory.
 
 #### Automatic gc configuration
 
-The automatic gc behavior can be specified via a cargo configuration setting.
+The `-Zgc` flag will enable Cargo to read extra configuration options related to garbage collection.
 The settings available are:
 
 ```toml
 # Example config.toml file.
 
-# This table defines the behavior for automatic garbage collection.
-[gc.auto]
-# The maximum frequency that automatic garbage collection happens.
-# Can be "never" to disable automatic-gc, or "always" to run on every command.
-frequency = "1 day"
+# Sub-table for defining specific settings for cleaning the global cache.
+[cache.global-clean]
 # Anything older than this duration will be deleted in the source cache.
 max-src-age = "1 month"
 # Anything older than this duration will be deleted in the compressed crate cache.
@@ -1629,9 +1611,13 @@ max-git-co-age = "1 month"
 max-git-db-age = "3 months"
 ```
 
+Note that the [`cache.auto-clean-frequency`] option was stabilized in Rust 1.88.
+
+[`cache.auto-clean-frequency`]: config.md#cacheauto-clean-frequency
+
 ### Manual garbage collection with `cargo clean`
 
-Manual deletion can be done with the `cargo clean gc` command.
+Manual deletion can be done with the `cargo clean gc -Zgc` command.
 Deletion of cache contents can be performed by passing one of the cache options:
 
 - `--max-src-age=DURATION` --- Deletes source cache files that have not been used since the given age.
@@ -1650,9 +1636,9 @@ A DURATION is specified in the form "N seconds/minutes/days/weeks/months" where 
 A SIZE is specified in the form "N *suffix*" where *suffix* is B, kB, MB, GB, kiB, MiB, or GiB, and N is an integer or floating point number. If no suffix is specified, the number is the number of bytes.
 
 ```sh
-cargo clean gc
-cargo clean gc --max-download-age=1week
-cargo clean gc --max-git-size=0 --max-download-size=100MB
+cargo clean gc -Zgc
+cargo clean gc -Zgc --max-download-age=1week
+cargo clean gc -Zgc --max-git-size=0 --max-download-size=100MB
 ```
 
 ## open-namespaces
@@ -1900,6 +1886,15 @@ Currently, it only works with the `--list` flag and affects the file listing for
 Requires `-Zunstable-options`.
 See [`cargo package --message-format`](../commands/cargo-package.md#option-cargo-package---message-format)
 for more information.
+
+## rustdoc depinfo
+
+* Original Issue: [#12266](https://github.com/rust-lang/cargo/issues/12266)
+* Tracking Issue: [#15370](https://github.com/rust-lang/cargo/issues/15370)
+
+The `-Z rustdoc-depinfo` flag leverages rustdoc's dep-info files to determine
+whether documentations are required to re-generate. This can be combined with
+`-Z checksum-freshness` to detect checksum changes rather than file mtime.
 
 # Stabilized and removed features
 
@@ -2154,3 +2149,7 @@ The 2024 edition has been stabilized in the 1.85 release.
 See the [`edition` field](manifest.md#the-edition-field) for more information on setting the edition.
 See [`cargo fix --edition`](../commands/cargo-fix.md) and [The Edition Guide](../../edition-guide/index.html) for more information on migrating existing projects.
 
+## Automatic garbage collection
+
+Support for automatically deleting old files was stabilized in Rust 1.88.
+More information can be found in the [config chapter](config.md#cache).

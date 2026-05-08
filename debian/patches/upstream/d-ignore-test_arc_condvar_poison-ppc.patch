@@ -8,7 +8,7 @@ Forwarded: no
  1 file changed, 1 insertion(+)
 
 diff --git a/library/std/tests/sync/mutex.rs b/library/std/tests/sync/mutex.rs
-index 88fb448..f4acf00 100644
+index ac82914..0ecbce5 100644
 --- a/library/std/tests/sync/mutex.rs
 +++ b/library/std/tests/sync/mutex.rs
 @@ -265,6 +265,7 @@ fn test_mutex_arc_condvar() {
