@@ -13,10 +13,10 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  3 files changed, 12 insertions(+)
 
 diff --git a/src/bootstrap/src/core/builder/tests.rs b/src/bootstrap/src/core/builder/tests.rs
-index 9e3d020..500c835 100644
+index a241287..7578679 100644
 --- a/src/bootstrap/src/core/builder/tests.rs
 +++ b/src/bootstrap/src/core/builder/tests.rs
-@@ -1136,6 +1136,9 @@ fn test_prebuilt_llvm_config_path_resolution() {
+@@ -528,6 +528,9 @@ fn test_prebuilt_llvm_config_path_resolution() {
          .join(exe("llvm-config", builder.config.host_target));
      assert_eq!(expected, actual);
  

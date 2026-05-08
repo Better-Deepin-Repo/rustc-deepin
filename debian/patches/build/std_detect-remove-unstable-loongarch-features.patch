@@ -1,0 +1,56 @@
+From: =?utf-8?q?Fabian_Gr=C3=BCnbichler?= <f.gruenbichler@proxmox.com>
+Date: Wed, 15 Oct 2025 14:44:54 +0200
+Subject: std_detect: remove unstable loongarch features
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+these require LLVM 20+
+
+Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
+---
+ library/std_detect/src/detect/arch/loongarch.rs     | 10 ----------
+ library/std_detect/src/detect/os/linux/loongarch.rs |  5 -----
+ 2 files changed, 15 deletions(-)
+
+diff --git a/library/std_detect/src/detect/arch/loongarch.rs b/library/std_detect/src/detect/arch/loongarch.rs
+index 68fc600..2e857c6 100644
+--- a/library/std_detect/src/detect/arch/loongarch.rs
++++ b/library/std_detect/src/detect/arch/loongarch.rs
+@@ -28,20 +28,10 @@ features! {
+     /// D
+     @FEATURE: #[stable(feature = "stdarch_loongarch_feature", since = "1.89.0")] frecipe: "frecipe";
+     /// Frecipe
+-    @FEATURE: #[unstable(feature = "stdarch_loongarch_feature_detection", issue = "117425")] div32: "div32";
+-    /// Div32
+     @FEATURE: #[stable(feature = "stdarch_loongarch_feature", since = "1.89.0")] lsx: "lsx";
+     /// LSX
+     @FEATURE: #[stable(feature = "stdarch_loongarch_feature", since = "1.89.0")] lasx: "lasx";
+     /// LASX
+-    @FEATURE: #[unstable(feature = "stdarch_loongarch_feature_detection", issue = "117425")] lam_bh: "lam-bh";
+-    /// LAM-BH
+-    @FEATURE: #[unstable(feature = "stdarch_loongarch_feature_detection", issue = "117425")] lamcas: "lamcas";
+-    /// LAM-CAS
+-    @FEATURE: #[unstable(feature = "stdarch_loongarch_feature_detection", issue = "117425")] ld_seq_sa: "ld-seq-sa";
+-    /// LD-SEQ-SA
+-    @FEATURE: #[unstable(feature = "stdarch_loongarch_feature_detection", issue = "117425")] scq: "scq";
+-    /// SCQ
+     @FEATURE: #[stable(feature = "stdarch_loongarch_feature", since = "1.89.0")] lbt: "lbt";
+     /// LBT
+     @FEATURE: #[stable(feature = "stdarch_loongarch_feature", since = "1.89.0")] lvz: "lvz";
+diff --git a/library/std_detect/src/detect/os/linux/loongarch.rs b/library/std_detect/src/detect/os/linux/loongarch.rs
+index e97fda1..82332e2 100644
+--- a/library/std_detect/src/detect/os/linux/loongarch.rs
++++ b/library/std_detect/src/detect/os/linux/loongarch.rs
+@@ -34,11 +34,6 @@ pub(crate) fn detect_features() -> cache::Initializer {
+         );
+     }
+     enable_feature(&mut value, Feature::frecipe, bit::test(cpucfg2, 25));
+-    enable_feature(&mut value, Feature::div32, bit::test(cpucfg2, 26));
+-    enable_feature(&mut value, Feature::lam_bh, bit::test(cpucfg2, 27));
+-    enable_feature(&mut value, Feature::lamcas, bit::test(cpucfg2, 28));
+-    enable_feature(&mut value, Feature::scq, bit::test(cpucfg2, 30));
+-    enable_feature(&mut value, Feature::ld_seq_sa, bit::test(cpucfg3, 23));
+ 
+     // The values are part of the platform-specific [asm/hwcap.h][hwcap]
+     //

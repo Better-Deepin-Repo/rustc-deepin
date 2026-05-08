@@ -9,9 +9,9 @@ in debian/rust-doc.links
 Forwarded: not-needed
 ---
  src/tools/linkchecker/main.rs                      | 28 +++++++-
- vendor/mdbook-0.4.51/src/book/init.rs              | 19 -----
- vendor/mdbook-0.4.51/src/front-end/mod.rs          | 26 -------
- vendor/mdbook-0.4.51/src/front-end/searcher/mod.rs |  2 -
+ vendor/mdbook-0.4.52/src/book/init.rs              | 19 -----
+ vendor/mdbook-0.4.52/src/front-end/mod.rs          | 26 -------
+ vendor/mdbook-0.4.52/src/front-end/searcher/mod.rs |  2 -
  .../src/front-end/templates/index.hbs              | 48 +------------
  .../src/front-end/templates/toc.html.hbs           |  3 +-
  .../src/renderer/html_handlebars/search.rs         |  2 -
@@ -19,10 +19,10 @@ Forwarded: not-needed
  8 files changed, 48 insertions(+), 164 deletions(-)
 
 diff --git a/src/tools/linkchecker/main.rs b/src/tools/linkchecker/main.rs
-index 84cba3f..4e11bd8 100644
+index 1dc4572..8b2b73a1 100644
 --- a/src/tools/linkchecker/main.rs
 +++ b/src/tools/linkchecker/main.rs
-@@ -194,7 +194,17 @@ impl Checker {
+@@ -252,7 +252,17 @@ impl Checker {
          for entry in t!(dir.read_dir()).map(|e| t!(e)) {
              let path = entry.path();
              // Goes through symlinks
@@ -41,7 +41,7 @@ index 84cba3f..4e11bd8 100644
              if metadata.is_dir() {
                  self.walk(&path, report);
              } else {
-@@ -207,7 +217,15 @@ impl Checker {
+@@ -265,7 +275,15 @@ impl Checker {
      fn check(&mut self, file: &Path, report: &mut Report) {
          let (pretty_path, entry) = self.load_file(file, report);
          let source = match entry {
@@ -58,7 +58,7 @@ index 84cba3f..4e11bd8 100644
              FileEntry::Dir => unreachable!("never with `check` path"),
              FileEntry::OtherFile => return,
              FileEntry::Redirect { .. } => return,
-@@ -296,6 +314,12 @@ impl Checker {
+@@ -354,6 +372,12 @@ impl Checker {
          let (target_pretty_path, target_entry) = self.load_file(&path, report);
          let (target_source, target_ids) = match target_entry {
              FileEntry::Missing => {
@@ -71,10 +71,10 @@ index 84cba3f..4e11bd8 100644
                  if is_exception(file, &target_pretty_path) {
                      report.links_ignored_exception += 1;
                  } else {
-diff --git a/vendor/mdbook-0.4.51/src/book/init.rs b/vendor/mdbook-0.4.51/src/book/init.rs
+diff --git a/vendor/mdbook-0.4.52/src/book/init.rs b/vendor/mdbook-0.4.52/src/book/init.rs
 index faca1d0..c1a82a3 100644
---- a/vendor/mdbook-0.4.51/src/book/init.rs
-+++ b/vendor/mdbook-0.4.51/src/book/init.rs
+--- a/vendor/mdbook-0.4.52/src/book/init.rs
++++ b/vendor/mdbook-0.4.52/src/book/init.rs
 @@ -153,25 +153,6 @@ impl BookBuilder {
          let mut js = File::create(themedir.join("book.js"))?;
          js.write_all(theme::JS)?;
@@ -101,10 +101,10 @@ index faca1d0..c1a82a3 100644
          Ok(())
      }
  
-diff --git a/vendor/mdbook-0.4.51/src/front-end/mod.rs b/vendor/mdbook-0.4.51/src/front-end/mod.rs
+diff --git a/vendor/mdbook-0.4.52/src/front-end/mod.rs b/vendor/mdbook-0.4.52/src/front-end/mod.rs
 index 8fd09fc..566f745 100644
---- a/vendor/mdbook-0.4.51/src/front-end/mod.rs
-+++ b/vendor/mdbook-0.4.51/src/front-end/mod.rs
+--- a/vendor/mdbook-0.4.52/src/front-end/mod.rs
++++ b/vendor/mdbook-0.4.52/src/front-end/mod.rs
 @@ -1,9 +1,5 @@
  #![allow(missing_docs)]
  
@@ -180,20 +180,20 @@ index 8fd09fc..566f745 100644
          };
  
          assert_eq!(got, empty);
-diff --git a/vendor/mdbook-0.4.51/src/front-end/searcher/mod.rs b/vendor/mdbook-0.4.51/src/front-end/searcher/mod.rs
+diff --git a/vendor/mdbook-0.4.52/src/front-end/searcher/mod.rs b/vendor/mdbook-0.4.52/src/front-end/searcher/mod.rs
 index d5029db..59eda8a 100644
---- a/vendor/mdbook-0.4.51/src/front-end/searcher/mod.rs
-+++ b/vendor/mdbook-0.4.51/src/front-end/searcher/mod.rs
+--- a/vendor/mdbook-0.4.52/src/front-end/searcher/mod.rs
++++ b/vendor/mdbook-0.4.52/src/front-end/searcher/mod.rs
 @@ -2,5 +2,3 @@
  //! the "search" cargo feature is disabled.
  
  pub static JS: &[u8] = include_bytes!("searcher.js");
 -pub static MARK_JS: &[u8] = include_bytes!("mark.min.js");
 -pub static ELASTICLUNR_JS: &[u8] = include_bytes!("elasticlunr.min.js");
-diff --git a/vendor/mdbook-0.4.51/src/front-end/templates/index.hbs b/vendor/mdbook-0.4.51/src/front-end/templates/index.hbs
-index d30be27..c66adb8 100644
---- a/vendor/mdbook-0.4.51/src/front-end/templates/index.hbs
-+++ b/vendor/mdbook-0.4.51/src/front-end/templates/index.hbs
+diff --git a/vendor/mdbook-0.4.52/src/front-end/templates/index.hbs b/vendor/mdbook-0.4.52/src/front-end/templates/index.hbs
+index 1be5bdb..57c53cb 100644
+--- a/vendor/mdbook-0.4.52/src/front-end/templates/index.hbs
++++ b/vendor/mdbook-0.4.52/src/front-end/templates/index.hbs
 @@ -33,10 +33,7 @@
          {{/if}}
  
@@ -215,7 +215,7 @@ index d30be27..c66adb8 100644
          {{/if}}
  
          <!-- Provide site root and default themes to javascript -->
-@@ -264,48 +261,7 @@
+@@ -275,48 +272,7 @@
          </script>
          {{/if}}
  
@@ -264,10 +264,10 @@ index d30be27..c66adb8 100644
          <script src="{{ resource "searcher.js" }}"></script>
          {{/if}}
  
-diff --git a/vendor/mdbook-0.4.51/src/front-end/templates/toc.html.hbs b/vendor/mdbook-0.4.51/src/front-end/templates/toc.html.hbs
+diff --git a/vendor/mdbook-0.4.52/src/front-end/templates/toc.html.hbs b/vendor/mdbook-0.4.52/src/front-end/templates/toc.html.hbs
 index 93dea25..2853ec6 100644
---- a/vendor/mdbook-0.4.51/src/front-end/templates/toc.html.hbs
-+++ b/vendor/mdbook-0.4.51/src/front-end/templates/toc.html.hbs
+--- a/vendor/mdbook-0.4.52/src/front-end/templates/toc.html.hbs
++++ b/vendor/mdbook-0.4.52/src/front-end/templates/toc.html.hbs
 @@ -28,9 +28,8 @@
          <link rel="stylesheet" href="{{ resource "css/print.css" }}" media="print">
          {{/if}}
@@ -279,10 +279,10 @@ index 93dea25..2853ec6 100644
          {{/if}}
          <!-- Custom theme stylesheets -->
          {{#each additional_css}}
-diff --git a/vendor/mdbook-0.4.51/src/renderer/html_handlebars/search.rs b/vendor/mdbook-0.4.51/src/renderer/html_handlebars/search.rs
-index 01ef44a..fa8289b 100644
---- a/vendor/mdbook-0.4.51/src/renderer/html_handlebars/search.rs
-+++ b/vendor/mdbook-0.4.51/src/renderer/html_handlebars/search.rs
+diff --git a/vendor/mdbook-0.4.52/src/renderer/html_handlebars/search.rs b/vendor/mdbook-0.4.52/src/renderer/html_handlebars/search.rs
+index ea8ae42..867788c 100644
+--- a/vendor/mdbook-0.4.52/src/renderer/html_handlebars/search.rs
++++ b/vendor/mdbook-0.4.52/src/renderer/html_handlebars/search.rs
 @@ -75,8 +75,6 @@ pub fn create_files(
              .as_bytes(),
          );
@@ -292,10 +292,10 @@ index 01ef44a..fa8289b 100644
          debug!("Copying search files ✓");
      }
  
-diff --git a/vendor/mdbook-0.4.51/src/renderer/html_handlebars/static_files.rs b/vendor/mdbook-0.4.51/src/renderer/html_handlebars/static_files.rs
+diff --git a/vendor/mdbook-0.4.52/src/renderer/html_handlebars/static_files.rs b/vendor/mdbook-0.4.52/src/renderer/html_handlebars/static_files.rs
 index e1531f4..9d19e4a 100644
---- a/vendor/mdbook-0.4.51/src/renderer/html_handlebars/static_files.rs
-+++ b/vendor/mdbook-0.4.51/src/renderer/html_handlebars/static_files.rs
+--- a/vendor/mdbook-0.4.52/src/renderer/html_handlebars/static_files.rs
++++ b/vendor/mdbook-0.4.52/src/renderer/html_handlebars/static_files.rs
 @@ -5,12 +5,13 @@ use log::{debug, warn};
  use crate::config::HtmlConfig;
  use crate::errors::*;

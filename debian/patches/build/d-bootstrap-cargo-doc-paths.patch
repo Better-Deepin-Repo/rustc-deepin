@@ -212,10 +212,10 @@ index 8ad5b42..f93d3da 100644
  
  ### The Rustdoc Book
 diff --git a/src/doc/reference/src/conditional-compilation.md b/src/doc/reference/src/conditional-compilation.md
-index 7440fe0..7e6ecd2 100644
+index d740194..b25dd05 100644
 --- a/src/doc/reference/src/conditional-compilation.md
 +++ b/src/doc/reference/src/conditional-compilation.md
-@@ -463,6 +463,6 @@ println!("I'm running on a {} machine!", machine_kind);
+@@ -475,6 +475,6 @@ println!("I'm running on a {} machine!", machine_kind);
  [`target_feature` attribute]: attributes/codegen.md#the-target_feature-attribute
  [attribute]: attributes.md
  [attributes]: attributes.md
@@ -224,7 +224,7 @@ index 7440fe0..7e6ecd2 100644
  [crate type]: linkage.md
  [static C runtime]: linkage.md#static-and-dynamic-c-runtimes
 diff --git a/src/doc/reference/src/introduction.md b/src/doc/reference/src/introduction.md
-index eee0c4b..630358d 100644
+index d5eb488..446576a 100644
 --- a/src/doc/reference/src/introduction.md
 +++ b/src/doc/reference/src/introduction.md
 @@ -130,10 +130,10 @@ And of course, if you see anything that is wrong or is non-normative but not spe
@@ -379,10 +379,10 @@ index 2f9d4d2..1156bea 100644
  # Working with other languages
  
 diff --git a/src/tools/linkchecker/main.rs b/src/tools/linkchecker/main.rs
-index 4e11bd8..f3498e1 100644
+index 8b2b73a1..88c5e20 100644
 --- a/src/tools/linkchecker/main.rs
 +++ b/src/tools/linkchecker/main.rs
-@@ -320,6 +320,10 @@ impl Checker {
+@@ -378,6 +378,10 @@ impl Checker {
                          return;
                      }
                  }

@@ -14,7 +14,7 @@ Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/compiler/rustc_target/src/spec/targets/x86_64_unknown_linux_gnux32.rs b/compiler/rustc_target/src/spec/targets/x86_64_unknown_linux_gnux32.rs
-index c5d556e..ce4bd07 100644
+index c5d556e..e24fa7f 100644
 --- a/compiler/rustc_target/src/spec/targets/x86_64_unknown_linux_gnux32.rs
 +++ b/compiler/rustc_target/src/spec/targets/x86_64_unknown_linux_gnux32.rs
 @@ -1,4 +1,4 @@

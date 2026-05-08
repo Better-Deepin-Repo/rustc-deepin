@@ -11,20 +11,20 @@ Forwarded: no
 
 Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
 ---
- src/tools/compiletest/src/directive-list.rs           | 1 +
- src/tools/compiletest/src/header/tests.rs             | 1 +
- tests/crashes/108499.rs                               | 1 +
- tests/run-make/long-linker-command-lines/foo.rs       | 7 +++++++
- tests/ui/associated-consts/issue-93775.rs             | 1 +
- tests/ui/issues/issue-74564-if-expr-stack-overflow.rs | 1 +
- tests/ui/threads-sendsync/mpsc_stress.rs              | 1 +
+ src/tools/compiletest/src/directives/directive_names.rs | 1 +
+ src/tools/compiletest/src/directives/tests.rs           | 1 +
+ tests/crashes/108499.rs                                 | 1 +
+ tests/run-make/long-linker-command-lines/foo.rs         | 7 +++++++
+ tests/ui/associated-consts/issue-93775.rs               | 1 +
+ tests/ui/issues/issue-74564-if-expr-stack-overflow.rs   | 1 +
+ tests/ui/threads-sendsync/mpsc_stress.rs                | 1 +
  7 files changed, 13 insertions(+)
 
-diff --git a/src/tools/compiletest/src/directive-list.rs b/src/tools/compiletest/src/directive-list.rs
-index 2ecb4fc..bc00144 100644
---- a/src/tools/compiletest/src/directive-list.rs
-+++ b/src/tools/compiletest/src/directive-list.rs
-@@ -66,6 +66,7 @@ const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
+diff --git a/src/tools/compiletest/src/directives/directive_names.rs b/src/tools/compiletest/src/directives/directive_names.rs
+index 7fc76a4..7e86b02 100644
+--- a/src/tools/compiletest/src/directives/directive_names.rs
++++ b/src/tools/compiletest/src/directives/directive_names.rs
+@@ -67,6 +67,7 @@ pub(crate) const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
      "ignore-gnu",
      "ignore-haiku",
      "ignore-horizon",
@@ -32,10 +32,10 @@ index 2ecb4fc..bc00144 100644
      "ignore-i686-pc-windows-gnu",
      "ignore-i686-pc-windows-msvc",
      "ignore-illumos",
-diff --git a/src/tools/compiletest/src/header/tests.rs b/src/tools/compiletest/src/header/tests.rs
-index 31b49b09..98e2043 100644
---- a/src/tools/compiletest/src/header/tests.rs
-+++ b/src/tools/compiletest/src/header/tests.rs
+diff --git a/src/tools/compiletest/src/directives/tests.rs b/src/tools/compiletest/src/directives/tests.rs
+index 5682cc5..ef2f9a1 100644
+--- a/src/tools/compiletest/src/directives/tests.rs
++++ b/src/tools/compiletest/src/directives/tests.rs
 @@ -334,6 +334,7 @@ fn ignore_target() {
      assert!(check_ignore(&config, "//@ ignore-x86_64-unknown-linux-gnu"));
      assert!(check_ignore(&config, "//@ ignore-x86_64"));

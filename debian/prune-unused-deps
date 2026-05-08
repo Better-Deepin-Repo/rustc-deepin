@@ -15,7 +15,7 @@ for i in "$scriptdir/debian/patches"/prune/d-00*.patch; do
 done
 
 # keep in sync with d/rules
-workspaces=". src/bootstrap library src/tools/rust-analyzer src/tools/cargo src/tools/rustbook"
+workspaces=". src/bootstrap library src/tools/clippy/clippy_test_deps src/tools/rust-analyzer src/tools/cargo src/tools/rustbook"
 for ws in $workspaces; do
 	test -f "$ws/Cargo.lock.org" || cp "$ws/Cargo.lock" "$ws/Cargo.lock.orig"
 	rm -f "$ws/Cargo.lock"

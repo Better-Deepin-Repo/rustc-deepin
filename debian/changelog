@@ -1,3 +1,18 @@
+rustc (1.90.0+dfsg1-1) unstable; urgency=medium
+
+  * rust-src: add lintian override for jquery copy in benchmark input
+  * d/control: let rust-analyzer recommends rust-src (Closes: #1117559)
+  * fix loongarch64 build
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Sat, 25 Oct 2025 10:07:56 +0200
+
+rustc (1.90.0+dfsg1-1~exp1) experimental; urgency=medium
+
+  * New upstream release
+  * loongarch: fix std_detect with LLVM 19
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Thu, 16 Oct 2025 11:20:34 +0200
+
 rustc (1.89.0+dfsg1-1) unstable; urgency=medium
 
   * cherry-pick f32/f64::{min,max}imum fallback

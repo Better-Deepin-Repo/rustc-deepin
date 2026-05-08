@@ -10,10 +10,10 @@ Forwarded: not-needed
  2 files changed, 3 insertions(+), 21 deletions(-)
 
 diff --git a/src/bootstrap/src/lib.rs b/src/bootstrap/src/lib.rs
-index f44fe454..43ffe0e 100644
+index 011b52d..9dc73ef 100644
 --- a/src/bootstrap/src/lib.rs
 +++ b/src/bootstrap/src/lib.rs
-@@ -1116,27 +1116,9 @@ impl Build {
+@@ -1198,27 +1198,9 @@ impl Build {
  
          match which {
              GitRepo::Rustc => {
@@ -43,10 +43,10 @@ index f44fe454..43ffe0e 100644
          }
      }
  
-diff --git a/tests/codegen/remap_path_prefix/issue-73167-remap-std.rs b/tests/codegen/remap_path_prefix/issue-73167-remap-std.rs
+diff --git a/tests/codegen-llvm/remap_path_prefix/issue-73167-remap-std.rs b/tests/codegen-llvm/remap_path_prefix/issue-73167-remap-std.rs
 index eb61016..9119c1d 100644
---- a/tests/codegen/remap_path_prefix/issue-73167-remap-std.rs
-+++ b/tests/codegen/remap_path_prefix/issue-73167-remap-std.rs
+--- a/tests/codegen-llvm/remap_path_prefix/issue-73167-remap-std.rs
++++ b/tests/codegen-llvm/remap_path_prefix/issue-73167-remap-std.rs
 @@ -7,7 +7,7 @@
  // true automatically. If paths to std library hasn't been remapped, we use the
  // above simulate-remapped-rust-src-base option to do it temporarily

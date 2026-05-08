@@ -11,7 +11,7 @@ Description: this requires LLVM 20..
  2 files changed, 10 deletions(-)
 
 diff --git a/compiler/rustc_target/src/target_features.rs b/compiler/rustc_target/src/target_features.rs
-index 3eea1e0..7434967 100644
+index b2af992..4c87b76 100644
 --- a/compiler/rustc_target/src/target_features.rs
 +++ b/compiler/rustc_target/src/target_features.rs
 @@ -699,18 +699,13 @@ static CSKY_FEATURES: &[(&str, Stability, ImpliedFeatures)] = &[

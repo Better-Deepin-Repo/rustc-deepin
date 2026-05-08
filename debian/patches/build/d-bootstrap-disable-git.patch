@@ -8,7 +8,7 @@ Forwarded: not-needed
  1 file changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/src/bootstrap/src/utils/channel.rs b/src/bootstrap/src/utils/channel.rs
-index b28ab57..5eab0a0 100644
+index 21b4257..6b4feb1 100644
 --- a/src/bootstrap/src/utils/channel.rs
 +++ b/src/bootstrap/src/utils/channel.rs
 @@ -37,12 +37,13 @@ pub struct Info {

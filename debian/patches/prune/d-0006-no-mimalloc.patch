@@ -10,10 +10,10 @@ Forwarded: not-needed
  1 file changed, 1 deletion(-)
 
 diff --git a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-index b97def4..b92b4e4 100644
+index 72768d6..4fa3c89 100644
 --- a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-@@ -39,7 +39,6 @@ serde.workspace = true
+@@ -40,7 +40,6 @@ serde.workspace = true
  serde_derive.workspace = true
  tenthash = "1.1.0"
  num_cpus = "1.17.0"

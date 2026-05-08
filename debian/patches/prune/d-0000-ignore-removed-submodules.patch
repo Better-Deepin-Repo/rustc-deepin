@@ -16,7 +16,7 @@ Forwarded: not-needed
  6 files changed, 3 insertions(+), 38 deletions(-)
 
 diff --git a/Cargo.toml b/Cargo.toml
-index e08f14d..189e796 100644
+index 67c7a9d..e273c4b 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -9,7 +9,6 @@ members = [
@@ -41,10 +41,10 @@ index e08f14d..189e796 100644
    "src/tools/run-make-support",
    "src/tools/rust-installer",
 diff --git a/src/bootstrap/bootstrap.py b/src/bootstrap/bootstrap.py
-index d8c6be7..ceec53e 100644
+index 40e0836..0ce28a1 100644
 --- a/src/bootstrap/bootstrap.py
 +++ b/src/bootstrap/bootstrap.py
-@@ -1133,10 +1133,6 @@ class RustBuild(object):
+@@ -1138,10 +1138,6 @@ class RustBuild(object):
          if "BOOTSTRAP_TRACING" in env:
              args.append("--features=tracing")
  
@@ -56,12 +56,12 @@ index d8c6be7..ceec53e 100644
              args.append("--features")
              args.append("build-metrics")
 diff --git a/src/bootstrap/src/core/build_steps/vendor.rs b/src/bootstrap/src/core/build_steps/vendor.rs
-index 0caeb32..a394d45 100644
+index 9050f40..7b4c69b 100644
 --- a/src/bootstrap/src/core/build_steps/vendor.rs
 +++ b/src/bootstrap/src/core/build_steps/vendor.rs
-@@ -20,14 +20,9 @@ pub fn default_paths_to_vendor(builder: &Builder<'_>) -> Vec<(PathBuf, Vec<&'sta
-     [
+@@ -21,14 +21,9 @@ pub fn default_paths_to_vendor(builder: &Builder<'_>) -> Vec<(PathBuf, Vec<&'sta
          ("src/tools/cargo/Cargo.toml", vec!["src/tools/cargo"]),
+         ("src/tools/clippy/clippy_test_deps/Cargo.toml", vec![]),
          ("src/tools/rust-analyzer/Cargo.toml", vec![]),
 -        ("compiler/rustc_codegen_cranelift/Cargo.toml", vec![]),
 -        ("compiler/rustc_codegen_gcc/Cargo.toml", vec![]),
@@ -75,10 +75,10 @@ index 0caeb32..a394d45 100644
      .into_iter()
      .map(|(path, submodules)| (builder.src.join(path), submodules))
 diff --git a/src/bootstrap/src/core/builder/cargo.rs b/src/bootstrap/src/core/builder/cargo.rs
-index 99044e2..e94ff9a 100644
+index 6b3236e..10af1ee 100644
 --- a/src/bootstrap/src/core/builder/cargo.rs
 +++ b/src/bootstrap/src/core/builder/cargo.rs
-@@ -1228,10 +1228,7 @@ impl Builder<'_> {
+@@ -1247,10 +1247,7 @@ impl Builder<'_> {
              }
          }
  
@@ -91,19 +91,19 @@ index 99044e2..e94ff9a 100644
          }
  
 diff --git a/src/bootstrap/src/core/builder/mod.rs b/src/bootstrap/src/core/builder/mod.rs
-index b26f47a..ed40c7c 100644
+index deee041..fb03b4f 100644
 --- a/src/bootstrap/src/core/builder/mod.rs
 +++ b/src/bootstrap/src/core/builder/mod.rs
-@@ -928,8 +928,6 @@ impl<'a> Builder<'a> {
+@@ -960,8 +960,6 @@ impl<'a> Builder<'a> {
                  tool::Linkchecker,
                  tool::CargoTest,
                  tool::Compiletest,
 -                tool::RemoteTestServer,
 -                tool::RemoteTestClient,
                  tool::RustInstaller,
+                 tool::FeaturesStatusDump,
                  tool::Cargo,
-                 tool::RustAnalyzer,
-@@ -937,17 +935,8 @@ impl<'a> Builder<'a> {
+@@ -970,17 +968,8 @@ impl<'a> Builder<'a> {
                  tool::Rustdoc,
                  tool::Clippy,
                  tool::CargoClippy,
@@ -121,7 +121,7 @@ index b26f47a..ed40c7c 100644
                  tool::OptimizedDist,
                  tool::CoverageDump,
                  tool::LlvmBitcodeLinker,
-@@ -987,9 +976,6 @@ impl<'a> Builder<'a> {
+@@ -1022,9 +1011,6 @@ impl<'a> Builder<'a> {
                  check::Rustdoc,
                  check::CodegenBackend,
                  check::Clippy,
@@ -131,7 +131,7 @@ index b26f47a..ed40c7c 100644
                  check::Rustfmt,
                  check::RustAnalyzer,
                  check::TestFloatParse,
-@@ -1047,8 +1033,6 @@ impl<'a> Builder<'a> {
+@@ -1084,8 +1070,6 @@ impl<'a> Builder<'a> {
                  test::EmbeddedBook,
                  test::EditionGuide,
                  test::Rustfmt,
@@ -140,7 +140,7 @@ index b26f47a..ed40c7c 100644
                  test::Clippy,
                  test::CompiletestTest,
                  test::CrateRunMakeSupport,
-@@ -1089,7 +1073,6 @@ impl<'a> Builder<'a> {
+@@ -1124,7 +1108,6 @@ impl<'a> Builder<'a> {
                  doc::CargoBook,
                  doc::Clippy,
                  doc::ClippyBook,
@@ -148,7 +148,7 @@ index b26f47a..ed40c7c 100644
                  doc::EmbeddedBook,
                  doc::EditionGuide,
                  doc::StyleGuide,
-@@ -1115,7 +1098,6 @@ impl<'a> Builder<'a> {
+@@ -1150,7 +1133,6 @@ impl<'a> Builder<'a> {
                  dist::RustAnalyzer,
                  dist::Rustfmt,
                  dist::Clippy,
@@ -156,7 +156,7 @@ index b26f47a..ed40c7c 100644
                  dist::LlvmTools,
                  dist::LlvmBitcodeLinker,
                  dist::RustDev,
-@@ -1142,7 +1124,6 @@ impl<'a> Builder<'a> {
+@@ -1177,7 +1159,6 @@ impl<'a> Builder<'a> {
                  install::RustAnalyzer,
                  install::Rustfmt,
                  install::Clippy,
@@ -164,7 +164,7 @@ index b26f47a..ed40c7c 100644
                  install::LlvmTools,
                  install::Src,
              ),
-@@ -1150,7 +1131,6 @@ impl<'a> Builder<'a> {
+@@ -1185,7 +1166,6 @@ impl<'a> Builder<'a> {
                  run::BuildManifest,
                  run::BumpStage0,
                  run::ReplaceVersionPlaceholder,
@@ -173,10 +173,10 @@ index b26f47a..ed40c7c 100644
                  run::GenerateCopyright,
                  run::GenerateWindowsSys,
 diff --git a/src/build_helper/src/util.rs b/src/build_helper/src/util.rs
-index 80dd681..83c2a31 100644
+index a8355f7..6b9e277 100644
 --- a/src/build_helper/src/util.rs
 +++ b/src/build_helper/src/util.rs
-@@ -51,6 +51,8 @@ pub fn try_run(cmd: &mut Command, print_cmd_on_fail: bool) -> Result<(), ()> {
+@@ -50,6 +50,8 @@ pub fn try_run(cmd: &mut Command, print_cmd_on_fail: bool) -> Result<(), ()> {
  
  /// Returns the submodule paths from the `.gitmodules` file in the given directory.
  pub fn parse_gitmodules(target_dir: &Path) -> Vec<String> {

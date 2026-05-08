@@ -34,16 +34,14 @@ Forwarded: not-needed
  .../rust-analyzer/crates/rust-analyzer/Cargo.toml  |  6 -----
  src/tools/rust-analyzer/crates/stdx/Cargo.toml     |  4 ----
  src/tools/rustc-perf/collector/Cargo.toml          |  4 ----
- .../style-servo/components/gfx/Cargo.toml          |  4 ----
- .../style-servo/components/style/Cargo.toml        |  3 ---
  .../native-tls-0.1.5/Cargo.toml                    |  4 +---
- 22 files changed, 5 insertions(+), 138 deletions(-)
+ 20 files changed, 5 insertions(+), 131 deletions(-)
 
 diff --git a/compiler/rustc_codegen_ssa/Cargo.toml b/compiler/rustc_codegen_ssa/Cargo.toml
-index cfae1b3..bfd9941 100644
+index 30956fd..bb989c4 100644
 --- a/compiler/rustc_codegen_ssa/Cargo.toml
 +++ b/compiler/rustc_codegen_ssa/Cargo.toml
-@@ -55,7 +55,3 @@ libc = "0.2.50"
+@@ -54,7 +54,3 @@ libc = "0.2.50"
  version = "0.37.0"
  default-features = false
  features = ["read_core", "elf", "macho", "pe", "xcoff", "unaligned", "archive", "write", "wasm"]
@@ -73,7 +71,7 @@ index 1720488..fa7380d 100644
  # tidy-alphabetical-start
  libc = "0.2"
 diff --git a/compiler/rustc_driver_impl/Cargo.toml b/compiler/rustc_driver_impl/Cargo.toml
-index 1971d06..23140b0 100644
+index ae1dbd2..c764853 100644
 --- a/compiler/rustc_driver_impl/Cargo.toml
 +++ b/compiler/rustc_driver_impl/Cargo.toml
 @@ -59,12 +59,6 @@ tracing = { version = "0.1.35" }
@@ -90,11 +88,11 @@ index 1971d06..23140b0 100644
  # tidy-alphabetical-start
  ctrlc = "3.4.4"
 diff --git a/compiler/rustc_errors/Cargo.toml b/compiler/rustc_errors/Cargo.toml
-index 82e7468..aa1ec11 100644
+index 3e8cf62..cde6e5f 100644
 --- a/compiler/rustc_errors/Cargo.toml
 +++ b/compiler/rustc_errors/Cargo.toml
-@@ -31,11 +31,3 @@ termcolor = "1.2.0"
- termize = "0.1.1"
+@@ -30,11 +30,3 @@ termcolor = "1.2.0"
+ termize = "0.2"
  tracing = "0.1"
  # tidy-alphabetical-end
 -
@@ -106,10 +104,10 @@ index 82e7468..aa1ec11 100644
 -    "Win32_System_Threading",
 -]
 diff --git a/compiler/rustc_session/Cargo.toml b/compiler/rustc_session/Cargo.toml
-index f0ee19e..4463c85 100644
+index 0516982..e40594e 100644
 --- a/compiler/rustc_session/Cargo.toml
 +++ b/compiler/rustc_session/Cargo.toml
-@@ -31,10 +31,3 @@ tracing = "0.1"
+@@ -30,10 +30,3 @@ tracing = "0.1"
  # tidy-alphabetical-start
  libc = "0.2"
  # tidy-alphabetical-end
@@ -149,12 +147,12 @@ index 8d6d681..69b0409 100644
  default = ['backtrace']
  backtrace = ['addr2line', 'miniz_oxide', 'object', 'ruzstd']
 diff --git a/src/bootstrap/Cargo.toml b/src/bootstrap/Cargo.toml
-index 9785a30..7df7d49 100644
+index 8dc41d1..62c57ce 100644
 --- a/src/bootstrap/Cargo.toml
 +++ b/src/bootstrap/Cargo.toml
 @@ -66,21 +66,6 @@ tracing-chrome = { version = "0.7", optional = true }
  tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter", "fmt", "registry", "std"] }
- tracing-tree = { version = "0.4.0", optional = true }
+ tracing-forest = { version = "0.1.6", optional = true, default-features =  false, features = ["smallvec", "ansi", "env-filter"] }
  
 -[target.'cfg(windows)'.dependencies.junction]
 -version = "1.0.0"
@@ -175,7 +173,7 @@ index 9785a30..7df7d49 100644
  pretty_assertions = "1.4"
  tempfile = "3.15.0"
 diff --git a/src/tools/cargo/Cargo.toml b/src/tools/cargo/Cargo.toml
-index ef6cd19..d05e09e 100644
+index ef3543b..105a0b7 100644
 --- a/src/tools/cargo/Cargo.toml
 +++ b/src/tools/cargo/Cargo.toml
 @@ -2,7 +2,9 @@
@@ -197,12 +195,12 @@ index ef6cd19..d05e09e 100644
 -cargo-credential-wincred = { version = "0.4.15", path = "credential/cargo-credential-wincred" }
  cargo-platform = { path = "crates/cargo-platform", version = "0.3.0" }
  cargo-test-macro = { version = "0.4.4", path = "crates/cargo-test-macro" }
- cargo-test-support = { version = "0.7.5", path = "crates/cargo-test-support" }
+ cargo-test-support = { version = "0.8.0", path = "crates/cargo-test-support" }
 @@ -117,7 +117,6 @@ unicode-xid = "0.2.6"
  url = "2.5.4"
  varisat = "0.2.2"
  walkdir = "2.5.0"
--windows-sys = "0.59"
+-windows-sys = "0.60"
  
  [workspace.lints.rust]
  rust_2018_idioms = "warn" # TODO: could this be removed?
@@ -243,10 +241,10 @@ index ef6cd19..d05e09e 100644
  annotate-snippets = { workspace = true, features = ["testing-colors"] }
  cargo-test-support.workspace = true
 diff --git a/src/tools/cargo/crates/cargo-test-support/Cargo.toml b/src/tools/cargo/crates/cargo-test-support/Cargo.toml
-index 9d7494c..e05e239 100644
+index 41a8f31..84dc49f 100644
 --- a/src/tools/cargo/crates/cargo-test-support/Cargo.toml
 +++ b/src/tools/cargo/crates/cargo-test-support/Cargo.toml
-@@ -31,8 +31,5 @@ toml = { workspace = true, features = ["display"] }
+@@ -31,8 +31,5 @@ toml = { workspace = true, features = ["display", "serde"] }
  url.workspace = true
  walkdir.workspace = true
  
@@ -256,7 +254,7 @@ index 9d7494c..e05e239 100644
  [lints]
  workspace = true
 diff --git a/src/tools/cargo/crates/cargo-util/Cargo.toml b/src/tools/cargo/crates/cargo-util/Cargo.toml
-index 75b2618..ecd286f 100644
+index a11f709..05194d8 100644
 --- a/src/tools/cargo/crates/cargo-util/Cargo.toml
 +++ b/src/tools/cargo/crates/cargo-util/Cargo.toml
 @@ -21,15 +21,8 @@ tempfile.workspace = true
@@ -289,7 +287,7 @@ index 747316f..5a313a9 100644
  [lints]
  workspace = true
 diff --git a/src/tools/cargo/credential/cargo-credential/Cargo.toml b/src/tools/cargo/credential/cargo-credential/Cargo.toml
-index 713fa41..5017448 100644
+index 585a7a5..1f4d360 100644
 --- a/src/tools/cargo/credential/cargo-credential/Cargo.toml
 +++ b/src/tools/cargo/credential/cargo-credential/Cargo.toml
 @@ -18,9 +18,6 @@ time.workspace = true
@@ -303,10 +301,10 @@ index 713fa41..5017448 100644
  snapbox = { workspace = true, features = ["examples"] }
  
 diff --git a/src/tools/cargo/src/cargo/util/auth/mod.rs b/src/tools/cargo/src/cargo/util/auth/mod.rs
-index 0ce9d41..9beca0f 100644
+index fa4b4e1..103ca5c 100644
 --- a/src/tools/cargo/src/cargo/util/auth/mod.rs
 +++ b/src/tools/cargo/src/cargo/util/auth/mod.rs
-@@ -561,10 +561,6 @@ fn credential_action(
+@@ -564,10 +564,6 @@ fn credential_action(
              }
              "cargo:paseto" => bail!("cargo:paseto requires -Zasymmetric-token"),
              "cargo:token-from-stdout" => Box::new(BasicProcessCredential {}),
@@ -318,10 +316,10 @@ index 0ce9d41..9beca0f 100644
              "cargo:libsecret" => Box::new(get_credential_libsecret()?),
              name if BUILT_IN_PROVIDERS.contains(&name) => {
 diff --git a/src/tools/compiletest/Cargo.toml b/src/tools/compiletest/Cargo.toml
-index 3b544d8..a6ee407 100644
+index cdada5a..f24ffa1 100644
 --- a/src/tools/compiletest/Cargo.toml
 +++ b/src/tools/compiletest/Cargo.toml
-@@ -32,13 +32,3 @@ walkdir = "2"
+@@ -36,13 +36,3 @@ walkdir = "2"
  
  [target.'cfg(unix)'.dependencies]
  libc = "0.2"
@@ -336,10 +334,10 @@ index 3b544d8..a6ee407 100644
 -    "Win32_System_Diagnostics_Debug",
 -]
 diff --git a/src/tools/rust-analyzer/crates/profile/Cargo.toml b/src/tools/rust-analyzer/crates/profile/Cargo.toml
-index f8b1793..3d35154 100644
+index f60282f..67fe97e 100644
 --- a/src/tools/rust-analyzer/crates/profile/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/profile/Cargo.toml
-@@ -20,12 +20,6 @@ perf-event = "=0.4.7"
+@@ -21,12 +21,6 @@ perf-event = "=0.4.7"
  [target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
  libc.workspace = true
  
@@ -353,10 +351,10 @@ index f8b1793..3d35154 100644
  cpu_profiler = []
  
 diff --git a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-index b92b4e4..7bfbde9 100644
+index 4fa3c89..9cc6de6 100644
 --- a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-@@ -73,12 +73,6 @@ vfs-notify.workspace = true
+@@ -74,12 +74,6 @@ vfs-notify.workspace = true
  vfs.workspace = true
  paths.workspace = true
  
@@ -370,10 +368,10 @@ index b92b4e4..7bfbde9 100644
  expect-test = "1.5.1"
  xshell.workspace = true
 diff --git a/src/tools/rust-analyzer/crates/stdx/Cargo.toml b/src/tools/rust-analyzer/crates/stdx/Cargo.toml
-index a6d5781..957da55 100644
+index 2c19f00..8468f3c 100644
 --- a/src/tools/rust-analyzer/crates/stdx/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/stdx/Cargo.toml
-@@ -23,10 +23,6 @@ crossbeam-utils = "0.8.21"
+@@ -24,10 +24,6 @@ crossbeam-utils = "0.8.21"
  [target.'cfg(unix)'.dependencies]
  libc.workspace = true
  
@@ -385,10 +383,10 @@ index a6d5781..957da55 100644
  # Uncomment to enable for the whole crate graph
  # default = [ "backtrace" ]
 diff --git a/src/tools/rustc-perf/collector/Cargo.toml b/src/tools/rustc-perf/collector/Cargo.toml
-index 71459ce..3d1f911 100644
+index f43a71e..82b8ccc 100644
 --- a/src/tools/rustc-perf/collector/Cargo.toml
 +++ b/src/tools/rustc-perf/collector/Cargo.toml
-@@ -45,10 +45,6 @@ inquire = "0.7.5"
+@@ -45,10 +45,6 @@ ratatui = "0.29"
  benchlib = { path = "benchlib" }
  database = { path = "../database" }
  
@@ -399,32 +397,6 @@ index 71459ce..3d1f911 100644
  [features]
  # Enable more precise Cachegrind profiles for runtime benchmarks.
  # Requires a recent Valgrind to be installed.
-diff --git a/src/tools/rustc-perf/collector/compile-benchmarks/style-servo/components/gfx/Cargo.toml b/src/tools/rustc-perf/collector/compile-benchmarks/style-servo/components/gfx/Cargo.toml
-index 3d7aea1..57feefe 100644
---- a/src/tools/rustc-perf/collector/compile-benchmarks/style-servo/components/gfx/Cargo.toml
-+++ b/src/tools/rustc-perf/collector/compile-benchmarks/style-servo/components/gfx/Cargo.toml
-@@ -59,7 +59,3 @@ xml5ever = {version = "0.10"}
- 
- [target.'cfg(any(target_feature = "sse2", target_feature = "neon"))'.dependencies]
- simd = "0.2.0"
--
--[target.'cfg(target_os = "windows")'.dependencies]
--dwrote = "0.4"
--truetype = "0.26"
-diff --git a/src/tools/rustc-perf/collector/compile-benchmarks/style-servo/components/style/Cargo.toml b/src/tools/rustc-perf/collector/compile-benchmarks/style-servo/components/style/Cargo.toml
-index 23130d0..5f33889 100644
---- a/src/tools/rustc-perf/collector/compile-benchmarks/style-servo/components/style/Cargo.toml
-+++ b/src/tools/rustc-perf/collector/compile-benchmarks/style-servo/components/style/Cargo.toml
-@@ -77,9 +77,6 @@ time = "0.1"
- unicode-bidi = "0.3"
- unicode-segmentation = "1.0"
- 
--[target.'cfg(windows)'.dependencies]
--kernel32-sys = "0.2"
--
- [build-dependencies]
- lazy_static = "0.2"
- log = "0.3"
 diff --git a/src/tools/rustc-perf/collector/compile-benchmarks/tokio-webpush-simple/native-tls-0.1.5/Cargo.toml b/src/tools/rustc-perf/collector/compile-benchmarks/tokio-webpush-simple/native-tls-0.1.5/Cargo.toml
 index 38bd630e..6abd17c 100644
 --- a/src/tools/rustc-perf/collector/compile-benchmarks/tokio-webpush-simple/native-tls-0.1.5/Cargo.toml

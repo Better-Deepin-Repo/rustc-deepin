@@ -281,7 +281,7 @@ debian/dh_auto_configure.stamp: debian/config.toml debian/check-no-old-llvm.stam
 
 	# allow lock changes during build, but keep originals around in case we need them for rust-src
 	# keep in sync with d/prune-unused-deps
-	for ws in . src/bootstrap library src/tools/rust-analyzer src/tools/cargo src/tools/rustbook; do \
+	for ws in . src/bootstrap library src/tools/clippy/clippy_test_deps src/tools/rust-analyzer src/tools/cargo src/tools/rustbook; do \
 	  if [ -f "$$ws/Cargo.lock" ]; then mv "$$ws/Cargo.lock" "$$ws/Cargo.lock.orig"; fi \
 	done
 	# We patched some crates so have to rm the checksums

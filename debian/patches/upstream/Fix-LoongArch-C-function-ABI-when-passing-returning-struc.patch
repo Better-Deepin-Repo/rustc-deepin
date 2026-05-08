@@ -8,15 +8,15 @@ Subject: Fix LoongArch C function ABI when passing/returning structs
 Forwarded: not-needed
 ---
  compiler/rustc_target/src/callconv/loongarch.rs    | 137 ++++++++++++++++-----
- tests/assembly/loongarch-float-struct-abi.rs       | 134 ++++++++++++++++++++
- tests/codegen/cast-target-abi.rs                   |  52 ++++++--
+ tests/assembly-llvm/loongarch-float-struct-abi.rs  | 134 ++++++++++++++++++++
+ tests/codegen-llvm/cast-target-abi.rs              |  52 ++++++--
  .../loongarch-abi/cast-local-large-enough.rs       |  44 +++++++
  4 files changed, 327 insertions(+), 40 deletions(-)
- create mode 100644 tests/assembly/loongarch-float-struct-abi.rs
- create mode 100644 tests/codegen/loongarch-abi/cast-local-large-enough.rs
+ create mode 100644 tests/assembly-llvm/loongarch-float-struct-abi.rs
+ create mode 100644 tests/codegen-llvm/loongarch-abi/cast-local-large-enough.rs
 
 diff --git a/compiler/rustc_target/src/callconv/loongarch.rs b/compiler/rustc_target/src/callconv/loongarch.rs
-index c779720..76f939f 100644
+index d567ad4..9213d73 100644
 --- a/compiler/rustc_target/src/callconv/loongarch.rs
 +++ b/compiler/rustc_target/src/callconv/loongarch.rs
 @@ -8,16 +8,16 @@ use crate::spec::HasTargetSpec;
@@ -250,11 +250,11 @@ index c779720..76f939f 100644
                  return;
              }
              _ => (),
-diff --git a/tests/assembly/loongarch-float-struct-abi.rs b/tests/assembly/loongarch-float-struct-abi.rs
+diff --git a/tests/assembly-llvm/loongarch-float-struct-abi.rs b/tests/assembly-llvm/loongarch-float-struct-abi.rs
 new file mode 100644
 index 0000000..4991004
 --- /dev/null
-+++ b/tests/assembly/loongarch-float-struct-abi.rs
++++ b/tests/assembly-llvm/loongarch-float-struct-abi.rs
 @@ -0,0 +1,134 @@
 +//@ add-core-stubs
 +//@ assembly-output: emit-asm
@@ -390,10 +390,10 @@ index 0000000..4991004
 +        *out = get_packed();
 +    }
 +}
-diff --git a/tests/codegen/cast-target-abi.rs b/tests/codegen/cast-target-abi.rs
-index cbd49e2..af3fc5b 100644
---- a/tests/codegen/cast-target-abi.rs
-+++ b/tests/codegen/cast-target-abi.rs
+diff --git a/tests/codegen-llvm/cast-target-abi.rs b/tests/codegen-llvm/cast-target-abi.rs
+index 28d3ad5..090de00 100644
+--- a/tests/codegen-llvm/cast-target-abi.rs
++++ b/tests/codegen-llvm/cast-target-abi.rs
 @@ -171,7 +171,15 @@ pub extern "C" fn receives_doubledouble(x: DoubleDouble) {
  
      // CHECK: [[RUST_ALLOCA:%.+]] = alloca [16 x i8], align [[RUST_ALIGN:8]]
@@ -502,11 +502,11 @@ index cbd49e2..af3fc5b 100644
      // x86_64:      store [[ABI_TYPE]] [[ABI_VALUE]], ptr [[ABI_ALLOCA]], align [[ABI_ALIGN]]
  
      // aarch64:     call void @llvm.memcpy.{{.+}}(ptr align [[RUST_ALIGN]] [[RUST_ALLOCA]], ptr align [[ABI_ALIGN]] [[ABI_ALLOCA]], i64 16, i1 false)
-diff --git a/tests/codegen/loongarch-abi/cast-local-large-enough.rs b/tests/codegen/loongarch-abi/cast-local-large-enough.rs
+diff --git a/tests/codegen-llvm/loongarch-abi/cast-local-large-enough.rs b/tests/codegen-llvm/loongarch-abi/cast-local-large-enough.rs
 new file mode 100644
 index 0000000..e5a0e4c
 --- /dev/null
-+++ b/tests/codegen/loongarch-abi/cast-local-large-enough.rs
++++ b/tests/codegen-llvm/loongarch-abi/cast-local-large-enough.rs
 @@ -0,0 +1,44 @@
 +//@ add-core-stubs
 +//@ compile-flags: -Copt-level=0 -Cdebuginfo=0 --target loongarch64-unknown-linux-gnu

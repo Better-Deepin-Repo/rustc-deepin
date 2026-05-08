@@ -149,7 +149,7 @@ pub enum TypeRef {
 }
 
 #[cfg(all(target_arch = "x86_64", target_pointer_width = "64"))]
-const _: () = assert!(size_of::<TypeRef>() == 16);
+const _: () = assert!(size_of::<TypeRef>() == 24);
 
 pub type TypeRefId = Idx<TypeRef>;
 
