@@ -8,13 +8,13 @@ Forwarded: not-needed
  1 file changed, 1 insertion(+)
 
 diff --git a/src/bootstrap/src/core/build_steps/dist.rs b/src/bootstrap/src/core/build_steps/dist.rs
-index 5cfaa6a..7832c59 100644
+index 2453d44..67a53bc 100644
 --- a/src/bootstrap/src/core/build_steps/dist.rs
 +++ b/src/bootstrap/src/core/build_steps/dist.rs
-@@ -82,6 +82,7 @@ impl Step for Docs {
-         tarball.set_product_name("Rust Documentation");
+@@ -89,6 +89,7 @@ impl Step for Docs {
          tarball.add_bulk_dir(builder.doc_out(host), dest);
          tarball.add_file(builder.src.join("src/doc/robots.txt"), dest, FileType::Regular);
+         tarball.add_file(builder.src.join("src/doc/sitemap.txt"), dest, FileType::Regular);
 +        tarball.permit_symlinks(true);
          Some(tarball.generate())
      }

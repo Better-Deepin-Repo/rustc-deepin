@@ -37,7 +37,6 @@ ubuntu/ubuntu-disable-ppc64el-asm-tests.patch
 ubuntu/ubuntu-ignore-arm-doctest.patch
 vendor/onig_sys-use-system-lib.patch
 vendor/libz-sys-allow-cross-building.patch
-build/bootstrap-tests-disable-compiler-rt-optimizing.patch
 build/ignore-broken-debuginfo-tests.patch
 vendor/blake3-skip-embedded-C-code-use-pure-implementation.patch
 build/bootstrap-don-t-attempt-to-download-rustc-in-tests.patch
@@ -45,10 +44,7 @@ vendor/cargo-do-not-force-liblzma-sys-static-linking.patch
 behaviour/ppc64-downgrade-baseline-to-Power4.patch
 build/bootstrap-ignore-x.py-shell-completion-diff.patch
 build/bootstrap-disarm-llvm-config-test-that-requires-git.patch
-build/Revert-rustc_target-Add-target-features-for-LoongArch-v1..patch
-build/Revert-Enable-f16-for-LoongArch-and-Mips.patch
 build/disable-bootstrap-tests-that-don-t-work-from-tarball-sour.patch
-upstream/Fix-LoongArch-C-function-ABI-when-passing-returning-struc.patch
 behaviour/x32-set-panic-strategy-to-aborting.patch
 prune/d-0022-prune-ring-dependencies.patch
-build/std_detect-remove-unstable-loongarch-features.patch
+upstream/Enable-file-locking-support-for-Hurd.patch

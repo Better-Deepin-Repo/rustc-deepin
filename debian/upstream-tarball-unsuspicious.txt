@@ -37,6 +37,7 @@ CONTRIBUTING.md
 LICENSES/*.txt
 README.md
 RELEASES.md
+compiler/rustc_baked_icu_data/src/data/list_and_v1.rs.data
 compiler/rustc_baked_icu_data/src/data/mod.rs
 compiler/rustc_codegen_cranelift/docs/dwarf.md
 compiler/rustc_codegen_gcc/.github/workflows/stdarch.yml
@@ -74,6 +75,7 @@ src/doc/reference/src/behavior-considered-undefined.md
 src/doc/reference/src/comments.md
 src/doc/reference/src/conditional-compilation.md
 src/doc/reference/src/const_eval.md
+src/doc/reference/src/dynamically-sized-types.md
 src/doc/reference/src/expressions.md
 src/doc/reference/src/expressions/call-expr.md
 src/doc/reference/src/expressions/closure-expr.md
@@ -89,6 +91,7 @@ src/doc/reference/src/linkage.md
 src/doc/reference/src/memory-model.md
 src/doc/reference/src/names/preludes.md
 src/doc/reference/src/panic.md
+src/doc/reference/src/procedural-macros.md
 src/doc/reference/src/types/impl-trait.md
 src/doc/reference/src/types/trait-object.md
 src/doc/reference/src/unsafe-keyword.md
@@ -105,6 +108,7 @@ src/doc/rustc/src/lints/groups.md
 src/doc/rustc/src/platform-support/armeb-unknown-linux-gnueabi.md
 src/doc/rustc/src/platform-support/armv7-unknown-linux-uclibceabi.md
 src/doc/rustc/src/platform-support/armv7-unknown-linux-uclibceabihf.md
+src/doc/rustc/src/platform-support/armv7a-vex-v5.md
 src/doc/rustc/src/platform-support/netbsd.md
 src/doc/rustc/src/platform-support/unknown-uefi.md
 src/doc/rustc/src/platform-support/wasm32-wali-linux.md
@@ -130,6 +134,7 @@ src/tools/cargo/src/doc/contrib/src/process/release.md
 src/tools/cargo/src/doc/src/guide/continuous-integration.md
 src/tools/cargo/src/doc/src/reference/features.md
 src/tools/cargo/src/doc/src/reference/semver.md
+src/tools/clippy/.github/ISSUE_TEMPLATE/new_lint.yml
 src/tools/rust-analyzer/crates/hir-def/src/macro_expansion_tests/builtin_fn_macro.rs
 src/tools/rust-analyzer/crates/ide-completion/src/completions/env_vars.rs
 src/tools/rust-analyzer/crates/ide/src/view_syntax_tree.rs
@@ -151,6 +156,7 @@ tests/ui/lint/redundant-semicolon/redundant-semi-proc-macro.stderr
 tests/ui/parser/raw/too-many-hash.stderr
 vendor/*/*/*/LICENSE
 vendor/*/*/LICENSE
+vendor/*/.travis.yml
 vendor/*/CHANGELOG.md
 vendor/*/CODE_OF_CONDUCT.md
 vendor/*/CONTRIBUTORS.md
@@ -189,6 +195,19 @@ vendor/html-escape-*/src/decode/element/decode_impl.rs
 vendor/html-escape-*/src/encode/element/encode_impl.rs
 vendor/humansize-*/src/lib.rs
 vendor/icu_list-*/src/provider/serde_dfa.rs
+vendor/icu_locale_data-*/data/locale_aliases_v1.rs.data
+vendor/icu_locale_data-*/data/locale_exemplar_characters_auxiliary_v1.rs.data
+vendor/icu_locale_data-*/data/locale_exemplar_characters_index_v1.rs.data
+vendor/icu_locale_data-*/data/locale_exemplar_characters_main_v1.rs.data
+vendor/icu_locale_data-*/data/locale_exemplar_characters_numbers_v1.rs.data
+vendor/icu_locale_data-*/data/locale_exemplar_characters_punctuation_v1.rs.data
+vendor/icu_locale_data-*/data/locale_likely_subtags_extended_v1.rs.data
+vendor/icu_locale_data-*/data/locale_likely_subtags_language_v1.rs.data
+vendor/icu_locale_data-*/data/locale_likely_subtags_script_region_v1.rs.data
+vendor/icu_locale_data-*/data/locale_parents_v1.rs.data
+vendor/icu_locale_data-*/data/locale_script_direction_v1.rs.data
+vendor/intrusive-collections-*/DESIGN.md
+vendor/ipnet-*/RELEASES.md
 vendor/jiff-0.*/src/zoned.rs
 vendor/kstring-*/benches/clone.rs
 vendor/lazy_static-*/src/lib.rs
@@ -198,9 +217,11 @@ vendor/linux-raw-sys-*/src/s390x/ptrace.rs
 vendor/maplit-*/README.rst
 vendor/mdbook-*/CONTRIBUTING.md
 vendor/nu-ansi-term-*/src/style.rs
+vendor/oorandom-*/tarpaulin-report.html
 vendor/openssl-*/src/dh.rs
 vendor/openssl-sys-*/build/main.rs
 vendor/p384-*/src/arithmetic/hash2curve.rs
+vendor/papaya-*/BENCHMARKS.md
 vendor/pasetors-*/src/token.rs
 vendor/portable-atomic-*/build.rs
 vendor/portable-atomic-*/src/imp/atomic128/README.md
@@ -269,10 +290,9 @@ src/tools/rustc-perf/site/frontend/src/*/*/*/*/*.vue
 src/tools/rustc-perf/site/frontend/src/*/*/*/*/*/*.ts
 src/tools/rustc-perf/site/frontend/src/*/*/*/*/*/*.vue
 src/tools/rustc-perf/site/frontend/static/schedule.js
-src/tools/rustdoc-gui/.eslintrc.js
-src/tools/rustdoc-gui/tester.js
 src/tools/rustdoc-js/.eslintrc.js
 src/tools/rustdoc-js/tester.js
+vendor/atomic-polyfill-*/avr-specs/avr-atmega328p.json
 vendor/mdbook-0.*/src/front-end/templates/toc.js.hbs
 vendor/sysinfo-0.*/funding.json
 vendor/*/package.json
@@ -491,6 +511,11 @@ vendor/html5ever-*/examples/capi/tokenize.c
 vendor/sysinfo-*/examples/simple.c
 
 # Test data
+tests/run-make-cargo/x86_64-fortanix-unknown-sgx-lvi/enclave/foo.c
+vendor/icu_locale-*/benches/fixtures/*.json
+vendor/icu_locale-*/tests/fixtures/*.json
+tests/run-make-cargo/x86_64-fortanix-unknown-sgx-lvi/enclave/libcmake_foo/src/foo.c
+src/tools/cargo/tests/testsuite/script/rustc_fixtures/*.stdout
 vendor/elasticlunr-rs-3.*/tests/searchindex_fixture_ja.json
 vendor/elasticlunr-rs-3.*/tests/searchindex_fixture_en.json
 vendor/hyper-rustls-0.*/examples/sample.pem
@@ -499,10 +524,6 @@ vendor/tokio-rustls-0.*/tests/certs/*.key
 vendor/rustls-pki-types-1.*/tests/data/*.pem
 vendor/rustls-pki-types-1.*/tests/data/*.crt
 vendor/rustls-pki-types-1.*/tests/keys/*.der
-vendor/reqwest-0.*/tests/zstd.rs
-vendor/reqwest-0.*/tests/brotli.rs
-vendor/reqwest-0.*/tests/support/server.key
-vendor/reqwest-0.*/tests/support/server.cert
 vendor/icu_locale_core-2.*/tests/*.rs
 vendor/icu_locale_core-2.*/tests/fixtures/*.json
 vendor/icu_locale_core-2.*/benches/fixtures/*.json
@@ -570,8 +591,6 @@ tests/run-make/print-request-help-stable-unstable/help-diff.diff
 tests/run-make/print-request-help-stable-unstable/stable-invalid-print-request-help.err
 tests/run-make/print-request-help-stable-unstable/unstable-invalid-print-request-help.err
 tests/run-make/wasm-exceptions-nostd/verify.mjs
-tests/run-make/x86_64-fortanix-unknown-sgx-lvi/enclave/foo.c
-tests/run-make/x86_64-fortanix-unknown-sgx-lvi/enclave/libcmake_foo/src/foo.c
 tests/rustdoc-gui/src/huge_logo/src/lib.rs
 tests/rustdoc-gui/src/scrape_examples/examples/check-many-*.rs
 tests/rustdoc-js-std/*.js
@@ -629,16 +648,6 @@ vendor/hkdf-*/tests/data/*.blb
 vendor/hmac-*/tests/data/*.blb
 vendor/html5ever-*/data/bench/*.html
 vendor/html_parser-0.7.0/tests/snapshots/element__it_can_parse_script_with_content.snap
-vendor/icu_locid-*/benches/fixtures/*.json
-vendor/icu_locid-*/tests/fixtures/*.json
-vendor/icu_locid_transform-*/benches/fixtures/locales.json
-vendor/icu_locid_transform-*/benches/fixtures/uncanonicalized-locales.json
-vendor/icu_locid_transform-*/tests/fixtures/canonicalize.json
-vendor/icu_locid_transform-*/tests/fixtures/maximize.json
-vendor/icu_locid_transform-*/tests/fixtures/minimize.json
-vendor/icu_provider_adapters-*/tests/data/blob.postcard
-vendor/icu_provider_adapters-*/tests/data/langtest/*/*.json
-vendor/icu_provider_adapters-*/tests/data/langtest/*/*/*/*.json
 vendor/idna-*/tests/IdnaTest*.txt
 vendor/idna-*/tests/bad_punycode_tests.json
 vendor/idna-*/tests/punycode_tests.json
@@ -669,14 +678,10 @@ vendor/pkcs8-*/tests/examples/*.pem
 vendor/pkcs8-*/tests/private_key.rs
 vendor/proptest-*/proptest-regressions/test_runner/rng.txt
 vendor/proptest-*/src/regex-contrib/crates_regex.rs
-vendor/regex-*/record/compile-test/2023*
 vendor/regex-*/testdata/fowler/dat/basic.dat
 vendor/regex-*/tests/fuzz/testdata/*
 vendor/regex-1.*/tests/*.rs
 vendor/regex-automata-*/tests/gen/*/*.dfa
-vendor/regex-automata-0.1.10/data/fowler-tests/basic.dat
-vendor/regex-automata-0.1.10/data/tests/fowler/basic.dat
-vendor/regex-automata-0.2.0/tests/data/fowler/dat/basic.dat
 vendor/rusqlite-*/test.csv
 vendor/rustc-demangle-*/src/lib.rs
 vendor/rustc-demangle-*/src/v0-large-test-symbols/early-recursion-limit
@@ -725,16 +730,9 @@ compiler/rustc_baked_icu_data/src/data/macros/fallback_parents_v1.data.rs
 compiler/rustc_baked_icu_data/src/data/macros/fallback_supplement_co_v1.data.rs
 src/doc/rustc-dev-guide/src/mir/mir_*.svg
 src/librustdoc/html/static/css/normalize.css
+src/tools/cargo/src/etc/man/cargo-*.1
 src/tools/rust-analyzer/crates/ide-db/src/generated/lints.rs
 src/tools/rust-analyzer/crates/parser/src/syntax_kind/generated.rs
-vendor/icu_locid_transform_data-*/data/macros/fallback_likelysubtags_v1.rs.data
-vendor/icu_locid_transform_data-*/data/macros/fallback_parents_v1.rs.data
-vendor/icu_locid_transform_data-*/data/macros/fallback_supplement_co_v1.rs.data
-vendor/icu_locid_transform_data-*/data/macros/locid_transform_aliases_v2.rs.data
-vendor/icu_locid_transform_data-*/data/macros/locid_transform_likelysubtags_ext_v1.rs.data
-vendor/icu_locid_transform_data-*/data/macros/locid_transform_likelysubtags_l_v1.rs.data
-vendor/icu_locid_transform_data-*/data/macros/locid_transform_likelysubtags_sr_v1.rs.data
-vendor/icu_locid_transform_data-*/data/macros/locid_transform_script_dir_v1.rs.data
 vendor/icu_normalizer_data-2.*/data/*.rs.data
 vendor/icu_properties_data-2.*/data/*.rs.data
 vendor/linux-raw-sys-*/src/x86_64/general.rs
@@ -760,6 +758,7 @@ vendor/wit-component-*/tests/components/error-link-missing-symbols/error.txt
 src/librustdoc/html/static/fonts/*.woff2
 
 # file brokenness (detected as Algol source code)
+compiler/rustc_borrowck/src/root_cx.rs
 compiler/rustc_builtin_macros/src/global_allocator.rs
 compiler/rustc_codegen_gcc/build_system/src/rust_tools.rs
 compiler/rustc_codegen_gcc/build_system/src/utils.rs
@@ -885,8 +884,6 @@ vendor/handlebars-6.*/tests/block_context.rs
 vendor/handlebars-6.*/tests/whitespace.rs
 vendor/httparse-1.10.1/src/simd/neon.rs
 vendor/humansize-*/src/allocating.rs
-vendor/icu_locid-*/tests/langid.rs
-vendor/icu_locid-*/tests/locale.rs
 vendor/indoc-*/src/lib.rs
 vendor/jiff-0.*/src/fmt/friendly/parser.rs
 vendor/jiff-0.*/src/fmt/offset.rs
@@ -929,6 +926,8 @@ vendor/pest-*/src/span.rs
 vendor/pest-*/tests/calculator.rs
 vendor/pest_generator-*/src/generator.rs
 vendor/pest_generator-*/src/lib.rs
+vendor/postcard-*/src/de/mod.rs
+vendor/postcard-*/tests/loopback.rs
 vendor/proc-macro2-*/src/parse.rs
 vendor/protobuf-support-3.*/src/lexer/tokenizer.rs
 vendor/pulldown-cmark-*/benches/html_rendering.rs
@@ -940,9 +939,9 @@ vendor/regex-*/src/regex/bytes.rs
 vendor/regex-automata-*/src/dfa/automaton.rs
 vendor/regex-automata-*/src/hybrid/dfa.rs
 vendor/regex-automata-*/src/meta/regex.rs
-vendor/regex-automata-*/src/regex.rs
 vendor/rusqlite-*/src/util/sqlite_string.rs
 vendor/rustc_apfloat-*/src/lib.rs
+vendor/rustls-pki-types-*/src/base64.rs
 vendor/rustls-webpki-0.*/src/alg_tests.rs
 vendor/rustls-webpki-0.*/src/cert.rs
 vendor/rustls-webpki-0.*/src/der.rs

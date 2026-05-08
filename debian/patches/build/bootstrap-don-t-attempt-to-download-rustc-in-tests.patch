@@ -10,21 +10,27 @@ option..
 
 Signed-off-by: Fabian Grünbichler <debian@fabian.gruenbichler.email>
 ---
- src/bootstrap/src/core/config/config.rs | 4 ++++
- 1 file changed, 4 insertions(+)
+ src/bootstrap/src/core/config/config.rs | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/bootstrap/src/core/config/config.rs b/src/bootstrap/src/core/config/config.rs
-index cc3fc21..127db80 100644
+index 678a9b6..bc8fcff 100644
 --- a/src/bootstrap/src/core/config/config.rs
 +++ b/src/bootstrap/src/core/config/config.rs
-@@ -610,6 +610,10 @@ impl Config {
-             build.cargo = build.cargo.take().or(std::env::var_os("CARGO").map(|p| p.into()));
-             // Debian: don't optimize compiler-rt, the bundled sources are not available..
-             build.optimized_compiler_builtins = Some(false);
-+
-+            if let Some(ref mut rust) = toml.rust {
-+                rust.download_rustc = Some(StringOrBool::Bool(false));
-+            }
+@@ -543,7 +543,7 @@ impl Config {
+             new_symbol_mangling: rust_new_symbol_mangling,
+             profile_generate: rust_profile_generate,
+             profile_use: rust_profile_use,
+-            download_rustc: rust_download_rustc,
++            download_rustc: mut rust_download_rustc,
+             lto: rust_lto,
+             validate_mir_opts: rust_validate_mir_opts,
+             frame_pointers: rust_frame_pointers,
+@@ -657,6 +657,7 @@ impl Config {
+             // Cargo in their bootstrap.toml.
+             build_rustc = build_rustc.take().or(std::env::var_os("RUSTC").map(|p| p.into()));
+             build_cargo = build_cargo.take().or(std::env::var_os("CARGO").map(|p| p.into()));
++            rust_download_rustc = Some(StringOrBool::Bool(false));
          }
  
-         if config.git_info(false, &config.src).is_from_tarball() && toml.profile.is_none() {
+         if !flags_skip_stage0_validation {

@@ -21,10 +21,10 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  7 files changed, 13 insertions(+)
 
 diff --git a/src/tools/compiletest/src/directives/directive_names.rs b/src/tools/compiletest/src/directives/directive_names.rs
-index 7fc76a4..7e86b02 100644
+index 0ef84fb..4a83874 100644
 --- a/src/tools/compiletest/src/directives/directive_names.rs
 +++ b/src/tools/compiletest/src/directives/directive_names.rs
-@@ -67,6 +67,7 @@ pub(crate) const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
+@@ -69,6 +69,7 @@ pub(crate) const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
      "ignore-gnu",
      "ignore-haiku",
      "ignore-horizon",
@@ -33,10 +33,10 @@ index 7fc76a4..7e86b02 100644
      "ignore-i686-pc-windows-msvc",
      "ignore-illumos",
 diff --git a/src/tools/compiletest/src/directives/tests.rs b/src/tools/compiletest/src/directives/tests.rs
-index 5682cc5..ef2f9a1 100644
+index 33a02eb..54687d3 100644
 --- a/src/tools/compiletest/src/directives/tests.rs
 +++ b/src/tools/compiletest/src/directives/tests.rs
-@@ -334,6 +334,7 @@ fn ignore_target() {
+@@ -320,6 +320,7 @@ fn ignore_target() {
      assert!(check_ignore(&config, "//@ ignore-x86_64-unknown-linux-gnu"));
      assert!(check_ignore(&config, "//@ ignore-x86_64"));
      assert!(check_ignore(&config, "//@ ignore-linux"));

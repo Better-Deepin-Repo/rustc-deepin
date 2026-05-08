@@ -9,14 +9,14 @@ Forwarded: not-needed
 
 Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
 ---
- src/bootstrap/src/core/builder/tests.rs | 12 ++++++++----
- 1 file changed, 8 insertions(+), 4 deletions(-)
+ src/bootstrap/src/core/builder/tests.rs | 13 ++++++++-----
+ 1 file changed, 8 insertions(+), 5 deletions(-)
 
 diff --git a/src/bootstrap/src/core/builder/tests.rs b/src/bootstrap/src/core/builder/tests.rs
-index 7578679..c12f71f 100644
+index 2d568f8..8a2824b 100644
 --- a/src/bootstrap/src/core/builder/tests.rs
 +++ b/src/bootstrap/src/core/builder/tests.rs
-@@ -193,7 +193,8 @@ fn check_missing_paths_for_x_test_tests() {
+@@ -168,7 +168,8 @@ fn check_missing_paths_for_x_test_tests() {
      }
  }
  
@@ -26,7 +26,7 @@ index 7578679..c12f71f 100644
  fn ci_rustc_if_unchanged_invalidate_on_compiler_changes() {
      git_test(|ctx| {
          prepare_rustc_checkout(ctx);
-@@ -206,7 +207,8 @@ fn ci_rustc_if_unchanged_invalidate_on_compiler_changes() {
+@@ -181,7 +182,8 @@ fn ci_rustc_if_unchanged_invalidate_on_compiler_changes() {
      });
  }
  
@@ -36,7 +36,7 @@ index 7578679..c12f71f 100644
  fn ci_rustc_if_unchanged_do_not_invalidate_on_library_changes_outside_ci() {
      git_test(|ctx| {
          prepare_rustc_checkout(ctx);
-@@ -219,7 +221,8 @@ fn ci_rustc_if_unchanged_do_not_invalidate_on_library_changes_outside_ci() {
+@@ -194,7 +196,8 @@ fn ci_rustc_if_unchanged_do_not_invalidate_on_library_changes_outside_ci() {
      });
  }
  
@@ -46,13 +46,21 @@ index 7578679..c12f71f 100644
  fn ci_rustc_if_unchanged_do_not_invalidate_on_tool_changes() {
      git_test(|ctx| {
          prepare_rustc_checkout(ctx);
-@@ -1258,7 +1261,8 @@ mod snapshot {
+@@ -1533,7 +1536,7 @@ mod snapshot {
+         ");
+     }
  
-     /// This also serves as an important regression test for <https://github.com/rust-lang/rust/issues/138123>
-     /// and <https://github.com/rust-lang/rust/issues/138004>.
 -    #[test]
-+    // Debian: this tries to download LLVM with ninja and fails
 +    #[allow(dead_code)]
-     fn dist_all_cross() {
+     fn dist_all_cross_extended() {
          let ctx = TestCtx::new();
          insta::assert_snapshot!(
+@@ -1614,7 +1617,7 @@ mod snapshot {
+     ///
+     /// This is a regression test for <https://github.com/rust-lang/rust/issues/138123>
+     /// and <https://github.com/rust-lang/rust/issues/138004>.
+-    #[test]
++    #[allow(dead_code)]
+     fn dist_all_cross_extended_no_docs() {
+         let ctx = TestCtx::new();
+         let steps = ctx

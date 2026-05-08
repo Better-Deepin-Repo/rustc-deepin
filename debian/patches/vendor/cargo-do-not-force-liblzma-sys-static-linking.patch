@@ -13,10 +13,10 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  1 file changed, 4 deletions(-)
 
 diff --git a/src/bootstrap/src/core/build_steps/tool.rs b/src/bootstrap/src/core/build_steps/tool.rs
-index f5fa33b..a585daf 100644
+index dcc4898..8a5282d 100644
 --- a/src/bootstrap/src/core/build_steps/tool.rs
 +++ b/src/bootstrap/src/core/build_steps/tool.rs
-@@ -268,10 +268,6 @@ pub fn prepare_tool_cargo(
+@@ -224,10 +224,6 @@ pub fn prepare_tool_cargo(
      // avoid rebuilding when running tests.
      cargo.env("SYSROOT", builder.sysroot(compiler));
  
@@ -24,6 +24,6 @@ index f5fa33b..a585daf 100644
 -    // own copy
 -    cargo.env("LZMA_API_STATIC", "1");
 -
-     // CFG_RELEASE is needed by rustfmt (and possibly other tools) which
-     // import rustc-ap-rustc_attr which requires this to be set for the
-     // `#[cfg(version(...))]` attribute.
+     // Note that `miri` always uses jemalloc. As such, there is no checking of the jemalloc build flag.
+     // See also the "JEMALLOC_SYS_WITH_LG_PAGE" setting in the compile build step.
+     if env::var_os("JEMALLOC_SYS_WITH_LG_PAGE").is_none() {

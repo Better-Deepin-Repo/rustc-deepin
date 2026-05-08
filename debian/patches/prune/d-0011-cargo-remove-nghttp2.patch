@@ -8,13 +8,13 @@ Last-Update: 2023-05-17
 
 Forwarded: not-needed
 ---
- vendor/curl-sys-0.4.82+curl-8.14.1/Cargo.toml | 2 +-
+ vendor/curl-sys-0.4.83+curl-8.15.0/Cargo.toml | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
-diff --git a/vendor/curl-sys-0.4.82+curl-8.14.1/Cargo.toml b/vendor/curl-sys-0.4.82+curl-8.14.1/Cargo.toml
-index 2ffb0b3..89131cb 100644
---- a/vendor/curl-sys-0.4.82+curl-8.14.1/Cargo.toml
-+++ b/vendor/curl-sys-0.4.82+curl-8.14.1/Cargo.toml
+diff --git a/vendor/curl-sys-0.4.83+curl-8.15.0/Cargo.toml b/vendor/curl-sys-0.4.83+curl-8.15.0/Cargo.toml
+index e8d03ca..b7c2d37 100644
+--- a/vendor/curl-sys-0.4.83+curl-8.15.0/Cargo.toml
++++ b/vendor/curl-sys-0.4.83+curl-8.15.0/Cargo.toml
 @@ -35,7 +35,7 @@ repository = "https://github.com/alexcrichton/curl-rust"
  [features]
  default = ["ssl"]

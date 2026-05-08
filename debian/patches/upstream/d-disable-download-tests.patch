@@ -8,7 +8,7 @@ Forwarded: no
  1 file changed, 3 insertions(+)
 
 diff --git a/src/bootstrap/src/core/config/tests.rs b/src/bootstrap/src/core/config/tests.rs
-index 50eba12..010165e 100644
+index e93525f..802a232 100644
 --- a/src/bootstrap/src/core/config/tests.rs
 +++ b/src/bootstrap/src/core/config/tests.rs
 @@ -70,6 +70,9 @@ fn download_ci_llvm() {

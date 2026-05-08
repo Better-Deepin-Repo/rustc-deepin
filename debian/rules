@@ -34,8 +34,8 @@ export RUST_LONG_VERSION
 DEB_DESTDIR := $(CURDIR)/debian/tmp
 
 # Use system LLVM (comment out to use vendored LLVM)
-LLVM_VERSION = 19
-OLD_LLVM_VERSION = 18
+LLVM_VERSION = 21
+OLD_LLVM_VERSION = 19
 # Cargo-specific flags
 export LIBSSH2_SYS_USE_PKG_CONFIG=1
 # Make it easier to test against a custom LLVM
@@ -54,15 +54,18 @@ ifeq (armhf,$(DEB_TARGET_ARCH))
 CLANG_RT_ARCH = armhf
 endif
 
-ifneq (,$(filter $(DEB_TARGET_ARCH),sparc64 mips64el hurd-i386 hurd-amd64))
+ifneq (,$(filter $(DEB_TARGET_ARCH),sparc64 mips64el hurd-i386 hurd-amd64 x32))
 # sparc64: see https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1061125
 # mips64el: has profiler, but buggy atm (32-bit overflow in some counter?)
+# x32: has profiler, but no builtins support upstream, so disabled for now
 CLANG_RT_ARCH =
 PROFILER = "false"
 PROFILER_PATH = ""
+COMPILER_RT_PATH = "false"
 else
 PROFILER = "true"
 PROFILER_PATH = profiler = \"/usr/lib/llvm-$(LLVM_VERSION)/lib/clang/$(LLVM_VERSION)/lib/linux/libclang_rt.profile-$(CLANG_RT_ARCH).a\"
+COMPILER_RT_PATH = \"/usr/lib/llvm-$(LLVM_VERSION)/lib/clang/$(LLVM_VERSION)/lib/linux/libclang_rt.builtins-$(CLANG_RT_ARCH).a\"
 endif
 
 ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
@@ -73,6 +76,12 @@ RUSTBUILD = $(RUSTBUILD_COMMON) $(NJOBS)
 # force reproducibility
 RUSTBUILD_DOCS = $(RUSTBUILD_COMMON) -j1
 RUSTBUILD_FLAGS = --stage 2 --config debian/config.toml --on-fail env
+
+# 1.90 had no locking support yet, but 1.91.1 requires it, drop this with 1.92 again
+ifneq (,$(filter $(DEB_TARGET_ARCH),hurd-i386 hurd-amd64))
+RUSTBUILD_FLAGS = --stage 2 --config debian/config.toml --on-fail env --bypass-bootstrap-lock
+endif
+
 # rust-tidy depends on lots of modules that we strip out of the build.
 # it also tries to access the network for some reason. so just disable it.
 RUSTBUILD_TEST = $(RUSTBUILD) test --no-fail-fast --exclude src/tools/tidy
@@ -152,6 +161,12 @@ BUILD_WASM := true
 WASM_TARGETS := "wasm32-unknown-unknown,wasm32-wasip1,wasm32-wasip2"
 ifneq (,$(findstring nowasm,$(DEB_BUILD_PROFILES)))
   BUILD_WASM := false
+endif
+
+BUILD_BPF := true
+BPF_TARGETS := "bpfeb-unknown-none,bpfel-unknown-none"
+ifneq (,$(findstring pkg.rustc.nobpf,$(DEB_BUILD_PROFILES)))
+  BUILD_BPF := false
 endif
 
 WINDOWS_SUPPORT := amd64 i386
@@ -238,6 +253,7 @@ debian/config.toml: debian/config.toml.in debian/rules
 		-DPROFILER="$(PROFILER)" \
 		-DPROFILER_PATH="$(PROFILER_PATH)" \
 		-DWINDOWS_ARCH="$(WINDOWS_ARCH)" \
+		-DCOMPILER_RT_PATH="$(COMPILER_RT_PATH)" \
 		"$<" > "$@"
 	if $(DOWNLOAD_BOOTSTRAP) || [ $(HAVE_BINARY_TARBALL) != 0 ]; \
 	  then sed -i -e '/^rustc = /d' -e '/^cargo = /d' "$@"; fi
@@ -298,7 +314,7 @@ ifeq (true,$(BUILD_DOCS))
 endif
 
 override_dh_auto_clean:
-	if [ -e debian/extra-vendor.stamp ]; then \
+	if [ -e debian/extra-vendor.stamp -a -d extra ]; then \
 	  cd extra; \
 	  for c in *; do \
 	    echo "removing extra vendored dependency '$$c'"; \
@@ -317,6 +333,10 @@ override_dh_auto_clean:
 	done
 	# We removed some checksums that we need to restore here
 	find vendor -name .cargo-checksum.json.orig -execdir mv "{}" ".cargo-checksum.json" \;
+	# undo debian/scripts/build-wit-bindgen.sh
+	rm -f vendor/wit-bindgen-*/src/rt/wit_bindgen_*.{rs,o,c}
+	rm -f vendor/wit-bindgen-*/src/rt/libwit_bindgen_cabi.a
+
 
 debian/dh_auto_build.stamp:
 	$(RUSTBUILD) build $(RUSTBUILD_FLAGS)
@@ -331,9 +351,16 @@ endif
 
 override_dh_auto_build-indep: debian/dh_auto_build.stamp
 ifeq (true,$(BUILD_WASM))
+	debian/scripts/build-wit-bindgen.sh
 	$(RUSTBUILD) build $(RUSTBUILD_FLAGS) \
 	  --host $(DEB_BUILD_RUST_TYPE) \
 	  --target $(WASM_TARGETS) \
+	  library/std
+endif
+ifeq (true,$(BUILD_BPF))
+	$(RUSTBUILD) build $(RUSTBUILD_FLAGS) \
+	  --host $(DEB_BUILD_RUST_TYPE) \
+	  --target $(BPF_TARGETS) \
 	  library/std
 endif
 ifeq (true,$(BUILD_DOCS))
@@ -478,6 +505,12 @@ ifeq (true,$(BUILD_WASM))
 	DESTDIR=$(DEB_DESTDIR) $(RUSTBUILD) install $(RUSTBUILD_FLAGS) \
 	  --host $(DEB_BUILD_RUST_TYPE) \
 	  --target $(WASM_TARGETS) \
+	  library/std
+endif
+ifeq (true,$(BUILD_BPF))
+	DESTDIR=$(DEB_DESTDIR) $(RUSTBUILD) install $(RUSTBUILD_FLAGS) \
+	  --host $(DEB_BUILD_RUST_TYPE) \
+	  --target $(BPF_TARGETS) \
 	  library/std
 endif
 ifeq (true,$(BUILD_DOCS))

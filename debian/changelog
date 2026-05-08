@@ -1,3 +1,34 @@
+rustc (1.91.1+dfsg1-1) unstable; urgency=medium
+
+  * Upload to unstable
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Fri, 26 Dec 2025 20:54:51 +0100
+
+rustc (1.91.1+dfsg1-1~exp3) experimental; urgency=medium
+
+  * build: skip compiler-rt on x32
+  * hurd: enable flock support
+  * build: bypass bootstrap lock on hurd
+  * rules: fix dh_auto_clean if no extra vendor tarball exists
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Tue, 16 Dec 2025 13:00:29 +0100
+
+rustc (1.91.1+dfsg1-1~exp2) experimental; urgency=medium
+
+  * config: fix optimized-compiler-rt on sparc64/hurd
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Mon, 15 Dec 2025 15:21:33 +0100
+
+rustc (1.91.1+dfsg1-1~exp1) experimental; urgency=medium
+
+  * New upstream release
+  * upgrade to LLVM 21
+  * regenerate wit-bindgen object files
+  * config: set LLVM compiler-rt as optimized-compiler-builtins
+  * build: add bpfel/bpfeb stdlib package
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Fri, 12 Dec 2025 15:37:41 +0100
+
 rustc (1.90.0+dfsg1-1) unstable; urgency=medium
 
   * rust-src: add lintian override for jquery copy in benchmark input

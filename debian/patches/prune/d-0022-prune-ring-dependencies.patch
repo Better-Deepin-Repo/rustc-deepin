@@ -12,8 +12,8 @@ Forwarded: not-needed
 Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
 ---
  vendor/hyper-rustls-0.27.7/Cargo.toml   | 1 -
- vendor/reqwest-0.12.22/Cargo.toml       | 9 ---------
- vendor/rustls-0.23.29/Cargo.toml        | 8 --------
+ vendor/reqwest-0.12.23/Cargo.toml       | 9 ---------
+ vendor/rustls-0.23.31/Cargo.toml        | 8 --------
  vendor/rustls-webpki-0.103.4/Cargo.toml | 7 -------
  vendor/tokio-rustls-0.26.2/Cargo.toml   | 1 -
  5 files changed, 26 deletions(-)
@@ -30,11 +30,11 @@ index 96b44cd..2b122b7 100644
  tls12 = [
      "tokio-rustls/tls12",
      "rustls/tls12",
-diff --git a/vendor/reqwest-0.12.22/Cargo.toml b/vendor/reqwest-0.12.22/Cargo.toml
-index 2105de9..6ff452a 100644
---- a/vendor/reqwest-0.12.22/Cargo.toml
-+++ b/vendor/reqwest-0.12.22/Cargo.toml
-@@ -64,12 +64,6 @@ __rustls = [
+diff --git a/vendor/reqwest-0.12.23/Cargo.toml b/vendor/reqwest-0.12.23/Cargo.toml
+index 961a806..c4842d8 100644
+--- a/vendor/reqwest-0.12.23/Cargo.toml
++++ b/vendor/reqwest-0.12.23/Cargo.toml
+@@ -71,12 +71,6 @@ __rustls = [
      "dep:rustls",
      "__tls",
  ]
@@ -47,7 +47,7 @@ index 2105de9..6ff452a 100644
  __tls = [
      "dep:rustls-pki-types",
      "tokio/io-util",
-@@ -156,12 +150,10 @@ native-tls-vendored = [
+@@ -163,12 +157,10 @@ native-tls-vendored = [
  rustls-tls = ["rustls-tls-webpki-roots"]
  rustls-tls-manual-roots = [
      "rustls-tls-manual-roots-no-provider",
@@ -60,7 +60,7 @@ index 2105de9..6ff452a 100644
  ]
  rustls-tls-native-roots-no-provider = [
      "dep:rustls-native-certs",
-@@ -171,7 +163,6 @@ rustls-tls-native-roots-no-provider = [
+@@ -178,7 +170,6 @@ rustls-tls-native-roots-no-provider = [
  rustls-tls-no-provider = ["rustls-tls-manual-roots-no-provider"]
  rustls-tls-webpki-roots = [
      "rustls-tls-webpki-roots-no-provider",
@@ -68,10 +68,10 @@ index 2105de9..6ff452a 100644
  ]
  rustls-tls-webpki-roots-no-provider = [
      "dep:webpki-roots",
-diff --git a/vendor/rustls-0.23.29/Cargo.toml b/vendor/rustls-0.23.29/Cargo.toml
-index a7504ff..9a78166 100644
---- a/vendor/rustls-0.23.29/Cargo.toml
-+++ b/vendor/rustls-0.23.29/Cargo.toml
+diff --git a/vendor/rustls-0.23.31/Cargo.toml b/vendor/rustls-0.23.31/Cargo.toml
+index 6b7b031..e201335 100644
+--- a/vendor/rustls-0.23.31/Cargo.toml
++++ b/vendor/rustls-0.23.31/Cargo.toml
 @@ -85,10 +85,6 @@ read_buf = [
      "rustversion",
      "std",

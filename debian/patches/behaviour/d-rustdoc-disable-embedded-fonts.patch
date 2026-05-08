@@ -10,7 +10,7 @@ Forwarded: not-needed
  2 files changed, 10 deletions(-)
 
 diff --git a/src/librustdoc/html/static/css/rustdoc.css b/src/librustdoc/html/static/css/rustdoc.css
-index 99b3da8..0851b4b 100644
+index 09d289d..a4a142c 100644
 --- a/src/librustdoc/html/static/css/rustdoc.css
 +++ b/src/librustdoc/html/static/css/rustdoc.css
 @@ -178,14 +178,6 @@ xmlns="http://www.w3.org/2000/svg" fill="black" height="18px">\
@@ -29,10 +29,10 @@ index 99b3da8..0851b4b 100644
  	box-sizing: border-box;
  }
 diff --git a/src/librustdoc/html/static_files.rs b/src/librustdoc/html/static_files.rs
-index 45589a3..090a151 100644
+index e670c2f..3a09bff 100644
 --- a/src/librustdoc/html/static_files.rs
 +++ b/src/librustdoc/html/static_files.rs
-@@ -106,8 +106,6 @@ static_files! {
+@@ -107,8 +107,6 @@ static_files! {
      source_code_pro_semibold => "static/fonts/SourceCodePro-Semibold.ttf.woff2",
      source_code_pro_italic => "static/fonts/SourceCodePro-It.ttf.woff2",
      source_code_pro_license => "static/fonts/SourceCodePro-LICENSE.txt",

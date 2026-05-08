@@ -1,4 +1,4 @@
-change-id = 142379
+change-id = 146435
 
 [build]
 submodules = false
@@ -33,8 +33,7 @@ tools = [
   "wasm-component-ld",
 ]
 
-# we use pre-built LLVM, so can't optimize compiler-rt
-optimized-compiler-builtins = false
+optimized-compiler-builtins = COMPILER_RT_PATH
 
 [install]
 prefix = "/usr"
