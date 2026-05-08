@@ -13,7 +13,6 @@ license.workspace = true
 rust-version.workspace = true
 
 [lib]
-doctest = false
 
 [[bin]]
 name = "rust-analyzer"
@@ -89,7 +88,7 @@ test-fixture.workspace = true
 syntax-bridge.workspace = true
 
 [features]
-force-always-assert = ["always-assert/force"]
+force-always-assert = ["stdx/force-always-assert"]
 sysroot-abi = []
 in-rust-tree = [
   "sysroot-abi",

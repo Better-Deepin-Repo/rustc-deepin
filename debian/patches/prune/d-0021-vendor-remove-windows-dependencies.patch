@@ -30,7 +30,7 @@ Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
  vendor/console-0.15.10/Cargo.toml             | 12 -------
  vendor/ctrlc-3.4.5/Cargo.toml                 | 18 ----------
  vendor/curl-0.4.47/Cargo.toml                 | 11 ------
- vendor/curl-sys-0.4.79+curl-8.12.0/Cargo.toml |  4 ---
+ vendor/curl-sys-0.4.80+curl-8.12.1/Cargo.toml |  4 ---
  vendor/dbus-0.9.7/Cargo.toml                  |  4 ---
  vendor/dirs-sys-0.4.1/Cargo.toml              |  9 -----
  vendor/dirs-sys-next-0.1.2/Cargo.toml         |  3 --
@@ -50,6 +50,7 @@ Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
  vendor/is-terminal-0.4.15/Cargo.toml          | 11 ------
  vendor/is_executable-1.0.4/Cargo.toml         |  4 ---
  vendor/jiff-0.1.29/Cargo.toml                 | 14 --------
+ vendor/jiff-0.2.3/Cargo.toml                  | 10 ------
  vendor/libloading-0.8.6/Cargo.toml            |  7 ----
  vendor/libssh2-sys-0.3.1/Cargo.toml           |  8 -----
  vendor/mio-1.0.3/Cargo.toml                   | 15 ---------
@@ -60,6 +61,7 @@ Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
  vendor/opener-0.5.2/Cargo.toml                |  4 ---
  vendor/opener-0.7.2/Cargo.toml                | 12 -------
  vendor/os_info-3.10.0/Cargo.toml              | 12 -------
+ vendor/os_pipe-1.2.1/Cargo.toml               |  8 -----
  vendor/parking_lot_core-0.9.10/Cargo.toml     |  3 --
  vendor/portable-atomic-1.10.0/Cargo.toml      |  7 ----
  vendor/process-wrap-8.0.2/Cargo.toml          | 11 ------
@@ -67,10 +69,10 @@ Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
  vendor/same-file-1.0.6/Cargo.toml             |  2 --
  vendor/snapbox-0.6.21/Cargo.toml              |  6 ----
  vendor/socket2-0.5.8/Cargo.toml               | 10 ------
- vendor/stacker-0.1.17/Cargo.toml              |  8 -----
+ vendor/stacker-0.1.18/Cargo.toml              |  7 ----
  vendor/sysinfo-0.31.4/Cargo.toml              | 47 --------------------------
  vendor/sysinfo-0.33.0/Cargo.toml              | 48 ---------------------------
- vendor/tempfile-3.16.0/Cargo.toml             |  7 ----
+ vendor/tempfile-3.17.1/Cargo.toml             |  7 ----
  vendor/term-0.7.0/Cargo.toml                  |  6 ----
  vendor/termcolor-1.4.1/Cargo.toml             |  3 --
  vendor/terminal_size-0.4.1/Cargo.toml         |  6 ----
@@ -80,7 +82,7 @@ Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
  vendor/walkdir-2.5.0/Cargo.toml               |  3 --
  vendor/wasm-component-ld-0.5.12/Cargo.toml    |  7 ----
  vendor/yansi-term-0.1.2/Cargo.toml            |  3 --
- 60 files changed, 5 insertions(+), 532 deletions(-)
+ 62 files changed, 5 insertions(+), 549 deletions(-)
 
 diff --git a/vendor/android-tzdata-0.1.1/Cargo.toml b/vendor/android-tzdata-0.1.1/Cargo.toml
 index 805128a..0682717 100644
@@ -303,10 +305,10 @@ index 580f431f..7ac8e91 100644
 -    "Win32_System_LibraryLoader",
 -    "Win32_Security_Cryptography",
 -]
-diff --git a/vendor/curl-sys-0.4.79+curl-8.12.0/Cargo.toml b/vendor/curl-sys-0.4.79+curl-8.12.0/Cargo.toml
-index a6ff4ab..cb41361 100644
---- a/vendor/curl-sys-0.4.79+curl-8.12.0/Cargo.toml
-+++ b/vendor/curl-sys-0.4.79+curl-8.12.0/Cargo.toml
+diff --git a/vendor/curl-sys-0.4.80+curl-8.12.1/Cargo.toml b/vendor/curl-sys-0.4.80+curl-8.12.1/Cargo.toml
+index bcc56c1..51d6b1a 100644
+--- a/vendor/curl-sys-0.4.80+curl-8.12.1/Cargo.toml
++++ b/vendor/curl-sys-0.4.80+curl-8.12.1/Cargo.toml
 @@ -85,7 +85,3 @@ optional = true
  
  [target.'cfg(target_env = "msvc")'.build-dependencies.vcpkg]
@@ -633,6 +635,34 @@ index ffb5faa..f83cd6e 100644
  [profile.testrelease]
  debug-assertions = false
  inherits = "test"
+diff --git a/vendor/jiff-0.2.3/Cargo.toml b/vendor/jiff-0.2.3/Cargo.toml
+index 8b77a88..28f9ac1 100644
+--- a/vendor/jiff-0.2.3/Cargo.toml
++++ b/vendor/jiff-0.2.3/Cargo.toml
+@@ -89,7 +89,6 @@ std = [
+ tz-fat = ["jiff-static?/tz-fat"]
+ tz-system = [
+     "std",
+-    "dep:windows-sys",
+ ]
+ tzdb-bundle-always = [
+     "dep:jiff-tzdb",
+@@ -209,15 +208,6 @@ default-features = false
+ version = "0.2.4"
+ default-features = false
+ 
+-[target."cfg(windows)".dependencies.windows-sys]
+-version = ">=0.52.0, <=0.59.*"
+-features = [
+-    "Win32_Foundation",
+-    "Win32_System_Time",
+-]
+-optional = true
+-default-features = false
+-
+ [profile.testrelease]
+ debug-assertions = false
+ inherits = "test"
 diff --git a/vendor/libloading-0.8.6/Cargo.toml b/vendor/libloading-0.8.6/Cargo.toml
 index 338072a..712a40b 100644
 --- a/vendor/libloading-0.8.6/Cargo.toml
@@ -835,6 +865,22 @@ index 68feec6..95bf018 100644
 -    "Win32_System_Threading",
 -    "Win32_UI_WindowsAndMessaging",
 -]
+diff --git a/vendor/os_pipe-1.2.1/Cargo.toml b/vendor/os_pipe-1.2.1/Cargo.toml
+index fffb64e..59b3a60 100644
+--- a/vendor/os_pipe-1.2.1/Cargo.toml
++++ b/vendor/os_pipe-1.2.1/Cargo.toml
+@@ -53,11 +53,3 @@ io_safety = []
+ 
+ [target."cfg(not(windows))".dependencies.libc]
+ version = "0.2.62"
+-
+-[target."cfg(windows)".dependencies.windows-sys]
+-version = "0.59.0"
+-features = [
+-    "Win32_Foundation",
+-    "Win32_System_Pipes",
+-    "Win32_Security",
+-]
 diff --git a/vendor/parking_lot_core-0.9.10/Cargo.toml b/vendor/parking_lot_core-0.9.10/Cargo.toml
 index 3111f2b..c7a53ca 100644
 --- a/vendor/parking_lot_core-0.9.10/Cargo.toml
@@ -974,15 +1020,14 @@ index 68d8eb7..ae363b0 100644
 -    "Win32_System_Threading",
 -    "Win32_System_WindowsProgramming",
 -]
-diff --git a/vendor/stacker-0.1.17/Cargo.toml b/vendor/stacker-0.1.17/Cargo.toml
-index 2ce65c2..f6d74c0 100644
---- a/vendor/stacker-0.1.17/Cargo.toml
-+++ b/vendor/stacker-0.1.17/Cargo.toml
-@@ -44,11 +44,3 @@ version = "0.1.7"
- 
+diff --git a/vendor/stacker-0.1.18/Cargo.toml b/vendor/stacker-0.1.18/Cargo.toml
+index cab6f32..de667b9 100644
+--- a/vendor/stacker-0.1.18/Cargo.toml
++++ b/vendor/stacker-0.1.18/Cargo.toml
+@@ -59,10 +59,3 @@ version = "0.1.7"
  [build-dependencies.cc]
- version = "1.0.2"
--
+ version = "1.1.22"
+ 
 -[target."cfg(windows)".dependencies.windows-sys]
 -version = ">=0.52.0, <0.60.0"
 -features = [
@@ -1151,10 +1196,10 @@ index 6eebfa5..d9919f2 100644
 -[target."cfg(windows)".dependencies.windows]
 -version = ">=0.54, <=0.57"
 -optional = true
-diff --git a/vendor/tempfile-3.16.0/Cargo.toml b/vendor/tempfile-3.16.0/Cargo.toml
-index bee4154..eeebdc9 100644
---- a/vendor/tempfile-3.16.0/Cargo.toml
-+++ b/vendor/tempfile-3.16.0/Cargo.toml
+diff --git a/vendor/tempfile-3.17.1/Cargo.toml b/vendor/tempfile-3.17.1/Cargo.toml
+index 8c8420d..c084bd3 100644
+--- a/vendor/tempfile-3.17.1/Cargo.toml
++++ b/vendor/tempfile-3.17.1/Cargo.toml
 @@ -88,10 +88,3 @@ features = ["fs"]
  version = "0.3.0"
  optional = true

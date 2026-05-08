@@ -10,10 +10,10 @@ Forwarded: not-needed
  2 files changed, 3 insertions(+), 4 deletions(-)
 
 diff --git a/src/bootstrap/src/lib.rs b/src/bootstrap/src/lib.rs
-index 21b02a3..0da3bee 100644
+index 843d474..0e82ad46 100644
 --- a/src/bootstrap/src/lib.rs
 +++ b/src/bootstrap/src/lib.rs
-@@ -1178,10 +1178,9 @@ Executed at: {executed_at}"#,
+@@ -1236,10 +1236,9 @@ Executed at: {executed_at}"#,
  
          match which {
              GitRepo::Rustc => {

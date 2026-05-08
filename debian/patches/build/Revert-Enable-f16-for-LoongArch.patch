@@ -1,0 +1,23 @@
+From: =?utf-8?q?Fabian_Gr=C3=BCnbichler?= <git@fabian.gruenbichler.email>
+Date: Sat, 20 Sep 2025 13:55:48 +0200
+Subject: Revert "Enable `f16` for LoongArch"
+
+This reverts commit 30703af6f34e96d3e51b665aeb56f44749d11265.
+
+Description: this requires LLVM 20
+---
+ library/std/build.rs | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/library/std/build.rs b/library/std/build.rs
+index d76d07a..fe47088 100644
+--- a/library/std/build.rs
++++ b/library/std/build.rs
+@@ -115,6 +115,7 @@ fn main() {
+         // Infinite recursion <https://github.com/llvm/llvm-project/issues/97981>
+         ("csky", _) => false,
+         ("hexagon", _) => false,
++        ("loongarch64", _) => false,
+         ("powerpc" | "powerpc64", _) => false,
+         ("sparc" | "sparc64", _) => false,
+         ("wasm32" | "wasm64", _) => false,

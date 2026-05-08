@@ -15,7 +15,7 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  2 files changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/tools/rust-analyzer/crates/hir-def/src/hir/type_ref.rs b/src/tools/rust-analyzer/crates/hir-def/src/hir/type_ref.rs
-index 6d4d519..4542925 100644
+index 6de4026..aa235f0 100644
 --- a/src/tools/rust-analyzer/crates/hir-def/src/hir/type_ref.rs
 +++ b/src/tools/rust-analyzer/crates/hir-def/src/hir/type_ref.rs
 @@ -170,7 +170,7 @@ pub enum TypeRef {
@@ -28,7 +28,7 @@ index 6d4d519..4542925 100644
  
  pub type TypeRefId = Idx<TypeRef>;
 diff --git a/src/tools/rust-analyzer/crates/hir-def/src/path.rs b/src/tools/rust-analyzer/crates/hir-def/src/path.rs
-index e59c371..69c9c47 100644
+index 713e738..33ae473 100644
 --- a/src/tools/rust-analyzer/crates/hir-def/src/path.rs
 +++ b/src/tools/rust-analyzer/crates/hir-def/src/path.rs
 @@ -65,7 +65,7 @@ pub enum Path {

@@ -1,0 +1,73 @@
+From: =?utf-8?q?Fabian_Gr=C3=BCnbichler?= <git@fabian.gruenbichler.email>
+Date: Wed, 3 Sep 2025 14:45:32 +0200
+Subject: bootstrap: disarm tests that requires git context
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
+---
+ src/bootstrap/src/core/builder/tests.rs  | 3 +++
+ src/bootstrap/src/core/config/tests.rs   | 6 ++++++
+ src/bootstrap/src/utils/helpers/tests.rs | 3 +++
+ 3 files changed, 12 insertions(+)
+
+diff --git a/src/bootstrap/src/core/builder/tests.rs b/src/bootstrap/src/core/builder/tests.rs
+index fc00651..bffb80c 100644
+--- a/src/bootstrap/src/core/builder/tests.rs
++++ b/src/bootstrap/src/core/builder/tests.rs
+@@ -1076,6 +1076,9 @@ fn test_prebuilt_llvm_config_path_resolution() {
+         .join(exe("llvm-config", builder.config.build));
+     assert_eq!(expected, actual);
+ 
++    // Debian: if-unchanged fails for non-git sources
++    return;
++
+     let config = configure(
+         r#"
+             [llvm]
+diff --git a/src/bootstrap/src/core/config/tests.rs b/src/bootstrap/src/core/config/tests.rs
+index 62b0a49..3c496fc 100644
+--- a/src/bootstrap/src/core/config/tests.rs
++++ b/src/bootstrap/src/core/config/tests.rs
+@@ -28,6 +28,8 @@ fn download_ci_llvm() {
+     let config = parse("llvm.download-ci-llvm = false");
+     assert!(!config.llvm_from_ci);
+ 
++    // Debian: if-unchanged doesn't work in non-git context
++    return;
+     let if_unchanged_config = parse("llvm.download-ci-llvm = \"if-unchanged\"");
+     if if_unchanged_config.llvm_from_ci && if_unchanged_config.is_running_on_ci {
+         let has_changes = if_unchanged_config
+@@ -447,6 +449,7 @@ fn check_rustc_if_unchanged_paths() {
+         .collect();
+ 
+     for p in normalised_allowed_paths {
++        if p == "triagebot.toml" { continue };
+         assert!(config.src.join(p).exists(), "{p} doesn't exist.");
+     }
+ }
+@@ -529,6 +532,9 @@ fn test_exclude() {
+ 
+ #[test]
+ fn test_ci_flag() {
++    // Debian: if-unchanged doesn't work in non-git context
++    return;
++
+     let config = Config::parse_inner(Flags::parse(&["check".into(), "--ci=false".into()]), |&_| {
+         toml::from_str("")
+     });
+diff --git a/src/bootstrap/src/utils/helpers/tests.rs b/src/bootstrap/src/utils/helpers/tests.rs
+index 9030ca2..4a29a94 100644
+--- a/src/bootstrap/src/utils/helpers/tests.rs
++++ b/src/bootstrap/src/utils/helpers/tests.rs
+@@ -102,6 +102,9 @@ fn test_set_file_times_sanity_check() {
+ 
+ #[test]
+ fn test_submodule_path_of() {
++    // Debian: doesn't work in non-git context
++    return;
++
+     let config = Config::parse_inner(Flags::parse(&["build".into(), "--dry-run".into()]), |&_| {
+         Ok(Default::default())
+     });

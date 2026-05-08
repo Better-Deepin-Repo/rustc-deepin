@@ -5,7 +5,7 @@ Subject: d-0003-cc-psm-rebuild-wasm32
 Forwarded: not-needed
 ---
  vendor/cc-1.2.0/src/lib.rs | 2 +-
- vendor/psm-0.1.24/build.rs | 7 ++-----
+ vendor/psm-0.1.25/build.rs | 7 ++-----
  2 files changed, 3 insertions(+), 6 deletions(-)
 
 diff --git a/vendor/cc-1.2.0/src/lib.rs b/vendor/cc-1.2.0/src/lib.rs
@@ -21,11 +21,11 @@ index a0aaa30..202ff17 100644
          };
  
          // On historical Solaris systems, "cc" may have been Sun Studio, which
-diff --git a/vendor/psm-0.1.24/build.rs b/vendor/psm-0.1.24/build.rs
-index bc84149..a299ab5 100644
---- a/vendor/psm-0.1.24/build.rs
-+++ b/vendor/psm-0.1.24/build.rs
-@@ -51,7 +51,7 @@ fn find_assembly(
+diff --git a/vendor/psm-0.1.25/build.rs b/vendor/psm-0.1.25/build.rs
+index 0201308..6142bd3 100644
+--- a/vendor/psm-0.1.25/build.rs
++++ b/vendor/psm-0.1.25/build.rs
+@@ -48,7 +48,7 @@ fn find_assembly(
          ("sparc", _, _, _) => Some(("src/arch/sparc_sysv.s", true)),
          ("riscv32", _, _, _) => Some(("src/arch/riscv.s", true)),
          ("riscv64", _, _, _) => Some(("src/arch/riscv64.s", true)),
@@ -34,7 +34,7 @@ index bc84149..a299ab5 100644
          ("loongarch64", _, _, _) => Some(("src/arch/loongarch64.s", true)),
          _ => None,
      }
-@@ -99,11 +99,8 @@ fn main() {
+@@ -103,11 +103,8 @@ fn main() {
          cfg.define(&*format!("CFG_TARGET_ENV_{}", env), None);
      }
  

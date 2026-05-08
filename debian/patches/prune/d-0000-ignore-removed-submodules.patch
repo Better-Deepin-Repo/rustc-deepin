@@ -7,42 +7,41 @@ order to both reduce the orig tarball and the vendored crates within.
 
 Forwarded: not-needed
 ---
- Cargo.toml                                   |  6 ------
+ Cargo.toml                                   |  5 -----
  src/bootstrap/bootstrap.py                   |  4 ----
  src/bootstrap/src/core/build_steps/vendor.rs |  5 -----
  src/bootstrap/src/core/builder/cargo.rs      |  5 +----
- src/bootstrap/src/core/builder/mod.rs        | 23 -----------------------
+ src/bootstrap/src/core/builder/mod.rs        | 20 --------------------
  src/build_helper/src/util.rs                 | 21 +--------------------
- 6 files changed, 2 insertions(+), 62 deletions(-)
+ 6 files changed, 2 insertions(+), 58 deletions(-)
 
 diff --git a/Cargo.toml b/Cargo.toml
-index 97e782d..3dfb5a9 100644
+index 16ff0f6..84a0015 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -21,21 +21,15 @@ members = [
-   "src/tools/tidy",
-   "src/tools/tier-check",
+@@ -10,7 +10,6 @@ members = [
+   "src/rustc-std-workspace/rustc-std-workspace-std",
+   "src/rustdoc-json-types",
    "src/tools/build-manifest",
--  "src/tools/remote-test-client",
--  "src/tools/remote-test-server",
-   "src/tools/rust-installer",
-   "src/tools/rustdoc",
--  "src/tools/rls",
-   "src/tools/rustfmt",
+-  "src/tools/bump-stage0",
+   "src/tools/cargotest",
+   "src/tools/clippy",
+   "src/tools/clippy/clippy_dev",
+@@ -27,12 +26,8 @@ members = [
+   "src/tools/lint-docs",
+   "src/tools/lld-wrapper",
+   "src/tools/llvm-bitcode-linker",
 -  "src/tools/miri",
 -  "src/tools/miri/cargo-miri",
-   "src/tools/rustdoc-themes",
-   "src/tools/unicode-table-generator",
-   "src/tools/jsondocck",
-   "src/tools/jsondoclint",
-   "src/tools/llvm-bitcode-linker",
-   "src/tools/html-checker",
--  "src/tools/bump-stage0",
+   "src/tools/miropt-test-tools",
+   "src/tools/opt-dist",
+-  "src/tools/remote-test-client",
+-  "src/tools/remote-test-server",
    "src/tools/replace-version-placeholder",
-   "src/tools/lld-wrapper",
-   "src/tools/collect-license-metadata",
+   "src/tools/run-make-support",
+   "src/tools/rust-installer",
 diff --git a/src/bootstrap/bootstrap.py b/src/bootstrap/bootstrap.py
-index 01a9792..84a2aa3 100644
+index 68400ba..1d63299 100644
 --- a/src/bootstrap/bootstrap.py
 +++ b/src/bootstrap/bootstrap.py
 @@ -1133,10 +1133,6 @@ class RustBuild(object):
@@ -57,10 +56,10 @@ index 01a9792..84a2aa3 100644
              args.append("--features")
              args.append("build-metrics")
 diff --git a/src/bootstrap/src/core/build_steps/vendor.rs b/src/bootstrap/src/core/build_steps/vendor.rs
-index 410dbc0..6c0eba1 100644
+index 0caeb32..a394d45 100644
 --- a/src/bootstrap/src/core/build_steps/vendor.rs
 +++ b/src/bootstrap/src/core/build_steps/vendor.rs
-@@ -15,14 +15,9 @@ pub fn default_paths_to_vendor(builder: &Builder<'_>) -> Vec<(PathBuf, Vec<&'sta
+@@ -20,14 +20,9 @@ pub fn default_paths_to_vendor(builder: &Builder<'_>) -> Vec<(PathBuf, Vec<&'sta
      [
          ("src/tools/cargo/Cargo.toml", vec!["src/tools/cargo"]),
          ("src/tools/rust-analyzer/Cargo.toml", vec![]),
@@ -76,10 +75,10 @@ index 410dbc0..6c0eba1 100644
      .into_iter()
      .map(|(path, submodules)| (builder.src.join(path), submodules))
 diff --git a/src/bootstrap/src/core/builder/cargo.rs b/src/bootstrap/src/core/builder/cargo.rs
-index 1ec3e60..95b8504 100644
+index a96ccdd..1a27b3e 100644
 --- a/src/bootstrap/src/core/builder/cargo.rs
 +++ b/src/bootstrap/src/core/builder/cargo.rs
-@@ -1176,10 +1176,7 @@ impl Builder<'_> {
+@@ -1184,10 +1184,7 @@ impl Builder<'_> {
              }
          }
  
@@ -92,10 +91,10 @@ index 1ec3e60..95b8504 100644
          }
  
 diff --git a/src/bootstrap/src/core/builder/mod.rs b/src/bootstrap/src/core/builder/mod.rs
-index ecec589..c518f7b 100644
+index a9058f8..eab2a11 100644
 --- a/src/bootstrap/src/core/builder/mod.rs
 +++ b/src/bootstrap/src/core/builder/mod.rs
-@@ -870,26 +870,14 @@ impl<'a> Builder<'a> {
+@@ -891,8 +891,6 @@ impl<'a> Builder<'a> {
                  tool::Linkchecker,
                  tool::CargoTest,
                  tool::Compiletest,
@@ -103,9 +102,8 @@ index ecec589..c518f7b 100644
 -                tool::RemoteTestClient,
                  tool::RustInstaller,
                  tool::Cargo,
--                tool::Rls,
                  tool::RustAnalyzer,
-                 tool::RustAnalyzerProcMacroSrv,
+@@ -900,17 +898,8 @@ impl<'a> Builder<'a> {
                  tool::Rustdoc,
                  tool::Clippy,
                  tool::CargoClippy,
@@ -113,6 +111,7 @@ index ecec589..c518f7b 100644
 -                gcc::Gcc,
 -                llvm::Sanitizers,
                  tool::Rustfmt,
+                 tool::Cargofmt,
 -                tool::Miri,
 -                tool::CargoMiri,
 -                llvm::Lld,
@@ -122,18 +121,17 @@ index ecec589..c518f7b 100644
                  tool::OptimizedDist,
                  tool::CoverageDump,
                  tool::LlvmBitcodeLinker,
-@@ -931,10 +919,6 @@ impl<'a> Builder<'a> {
+@@ -951,9 +940,6 @@ impl<'a> Builder<'a> {
                  check::Rustdoc,
                  check::CodegenBackend,
                  check::Clippy,
 -                check::Miri,
 -                check::CargoMiri,
 -                check::MiroptTestTools,
--                check::Rls,
                  check::Rustfmt,
                  check::RustAnalyzer,
                  check::TestFloatParse,
-@@ -984,8 +968,6 @@ impl<'a> Builder<'a> {
+@@ -1003,8 +989,6 @@ impl<'a> Builder<'a> {
                  test::EmbeddedBook,
                  test::EditionGuide,
                  test::Rustfmt,
@@ -142,7 +140,7 @@ index ecec589..c518f7b 100644
                  test::Clippy,
                  test::CompiletestTest,
                  test::CrateRunMakeSupport,
-@@ -1026,7 +1008,6 @@ impl<'a> Builder<'a> {
+@@ -1045,7 +1029,6 @@ impl<'a> Builder<'a> {
                  doc::CargoBook,
                  doc::Clippy,
                  doc::ClippyBook,
@@ -150,11 +148,7 @@ index ecec589..c518f7b 100644
                  doc::EmbeddedBook,
                  doc::EditionGuide,
                  doc::StyleGuide,
-@@ -1049,11 +1030,9 @@ impl<'a> Builder<'a> {
-                 dist::Analysis,
-                 dist::Src,
-                 dist::Cargo,
--                dist::Rls,
+@@ -1071,7 +1054,6 @@ impl<'a> Builder<'a> {
                  dist::RustAnalyzer,
                  dist::Rustfmt,
                  dist::Clippy,
@@ -162,7 +156,7 @@ index ecec589..c518f7b 100644
                  dist::LlvmTools,
                  dist::LlvmBitcodeLinker,
                  dist::RustDev,
-@@ -1079,7 +1058,6 @@ impl<'a> Builder<'a> {
+@@ -1098,7 +1080,6 @@ impl<'a> Builder<'a> {
                  install::RustAnalyzer,
                  install::Rustfmt,
                  install::Clippy,
@@ -170,7 +164,7 @@ index ecec589..c518f7b 100644
                  install::LlvmTools,
                  install::Src,
              ),
-@@ -1087,7 +1065,6 @@ impl<'a> Builder<'a> {
+@@ -1106,7 +1087,6 @@ impl<'a> Builder<'a> {
                  run::BuildManifest,
                  run::BumpStage0,
                  run::ReplaceVersionPlaceholder,

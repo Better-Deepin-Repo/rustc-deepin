@@ -287,7 +287,7 @@ debian/dh_auto_configure.stamp: debian/config.toml debian/check-no-old-llvm.stam
 	# We patched some crates so have to rm the checksums
 	find vendor -name .cargo-checksum.json -execdir cp "{}" "{}.orig" \; -execdir "$(CURDIR)/debian/prune-checksums" "{}" +
 	# We don't run ./configure because we use debian/config.toml directly
-	ln -sf debian/config.toml config.toml
+	ln -sf debian/config.toml bootstrap.toml
 	touch "$@"
 
 override_dh_auto_configure-arch: debian/dh_auto_configure.stamp
@@ -310,7 +310,7 @@ override_dh_auto_clean:
 	fi
 	$(RM) -rf build tmp debian/cargo_home config.stamp config.mk Makefile
 	$(RM) -rf $(TEST_LOG) debian/config.toml debian/*.stamp
-	$(RM) -rf $(SRC_CLEAN) config.toml
+	$(RM) -rf $(SRC_CLEAN) bootstrap.toml
 	# keep in sync with d/prune-unused-deps
 	for ws in . src/bootstrap library src/tools/rust-analyzer src/tools/cargo src/tools/rustbook; do \
 	  if [ -f "$$ws/Cargo.lock.orig" ]; then mv "$$ws/Cargo.lock.orig" "$$ws/Cargo.lock"; fi \

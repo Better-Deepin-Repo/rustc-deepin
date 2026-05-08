@@ -9,10 +9,10 @@ Forwarded: not-needed
  2 files changed, 6 insertions(+), 1 deletion(-)
 
 diff --git a/compiler/rustc_lint/src/builtin.rs b/compiler/rustc_lint/src/builtin.rs
-index ecd40a5..025efa1 100644
+index 9dccd4a..2ce3ea6 100644
 --- a/compiler/rustc_lint/src/builtin.rs
 +++ b/compiler/rustc_lint/src/builtin.rs
-@@ -2819,7 +2819,10 @@ declare_lint! {
+@@ -2818,7 +2818,10 @@ declare_lint! {
      /// ### Example
      ///
      /// ```rust,compile_fail
@@ -25,10 +25,10 @@ index ecd40a5..025efa1 100644
      ///
      /// fn main() {
 diff --git a/compiler/rustc_lint_defs/src/builtin.rs b/compiler/rustc_lint_defs/src/builtin.rs
-index 10bf4ec..4118ce5 100644
+index 8a761a0..2b4ec07 100644
 --- a/compiler/rustc_lint_defs/src/builtin.rs
 +++ b/compiler/rustc_lint_defs/src/builtin.rs
-@@ -2878,11 +2878,13 @@ declare_lint! {
+@@ -2841,11 +2841,13 @@ declare_lint! {
      ///
      /// use std::arch::naked_asm;
      ///

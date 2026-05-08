@@ -1,0 +1,215 @@
+From: =?utf-8?q?Fabian_Gr=C3=BCnbichler?= <git@fabian.gruenbichler.email>
+Date: Sat, 20 Sep 2025 09:58:14 +0200
+Subject: Revert "rustc_target: Add target features for LoongArch v1.1"
+
+This reverts commit d989bf5bbe511769d23fb43361f59d6a6ac76bc7.
+
+Description: this requires LLVM 20..
+---
+ compiler/rustc_target/src/target_features.rs         |  5 -----
+ tests/ui/abi/compatibility.rs                        |  1 -
+ .../asm/loongarch/bad-reg.loongarch64_lp64d.stderr   | 12 ++++++------
+ .../asm/loongarch/bad-reg.loongarch64_lp64s.stderr   | 20 ++++++++++----------
+ tests/ui/asm/loongarch/bad-reg.rs                    |  1 -
+ tests/ui/check-cfg/target_feature.stderr             |  5 -----
+ 6 files changed, 16 insertions(+), 28 deletions(-)
+
+diff --git a/compiler/rustc_target/src/target_features.rs b/compiler/rustc_target/src/target_features.rs
+index a96caf2..4d214f3 100644
+--- a/compiler/rustc_target/src/target_features.rs
++++ b/compiler/rustc_target/src/target_features.rs
+@@ -603,18 +603,13 @@ static CSKY_FEATURES: &[(&str, Stability, ImpliedFeatures)] = &[
+ static LOONGARCH_FEATURES: &[(&str, Stability, ImpliedFeatures)] = &[
+     // tidy-alphabetical-start
+     ("d", Unstable(sym::loongarch_target_feature), &["f"]),
+-    ("div32", Unstable(sym::loongarch_target_feature), &[]),
+     ("f", Unstable(sym::loongarch_target_feature), &[]),
+     ("frecipe", Unstable(sym::loongarch_target_feature), &[]),
+-    ("lam-bh", Unstable(sym::loongarch_target_feature), &[]),
+-    ("lamcas", Unstable(sym::loongarch_target_feature), &[]),
+     ("lasx", Unstable(sym::loongarch_target_feature), &["lsx"]),
+     ("lbt", Unstable(sym::loongarch_target_feature), &[]),
+-    ("ld-seq-sa", Unstable(sym::loongarch_target_feature), &[]),
+     ("lsx", Unstable(sym::loongarch_target_feature), &["d"]),
+     ("lvz", Unstable(sym::loongarch_target_feature), &[]),
+     ("relax", Unstable(sym::loongarch_target_feature), &[]),
+-    ("scq", Unstable(sym::loongarch_target_feature), &[]),
+     ("ual", Unstable(sym::loongarch_target_feature), &[]),
+     // tidy-alphabetical-end
+ ];
+diff --git a/tests/ui/abi/compatibility.rs b/tests/ui/abi/compatibility.rs
+index be64902..68706f1 100644
+--- a/tests/ui/abi/compatibility.rs
++++ b/tests/ui/abi/compatibility.rs
+@@ -40,7 +40,6 @@
+ //@ revisions: loongarch64
+ //@[loongarch64] compile-flags: --target loongarch64-unknown-linux-gnu
+ //@[loongarch64] needs-llvm-components: loongarch
+-//@[loongarch64] min-llvm-version: 20
+ //FIXME: wasm is disabled due to <https://github.com/rust-lang/rust/issues/115666>.
+ //FIXME @ revisions: wasm
+ //FIXME @[wasm] compile-flags: --target wasm32-unknown-unknown
+diff --git a/tests/ui/asm/loongarch/bad-reg.loongarch64_lp64d.stderr b/tests/ui/asm/loongarch/bad-reg.loongarch64_lp64d.stderr
+index c88f3af..0e54411 100644
+--- a/tests/ui/asm/loongarch/bad-reg.loongarch64_lp64d.stderr
++++ b/tests/ui/asm/loongarch/bad-reg.loongarch64_lp64d.stderr
+@@ -1,35 +1,35 @@
+ error: invalid register `$r0`: constant zero cannot be used as an operand for inline asm
+-  --> $DIR/bad-reg.rs:23:18
++  --> $DIR/bad-reg.rs:22:18
+    |
+ LL |         asm!("", out("$r0") _);
+    |                  ^^^^^^^^^^^^
+ 
+ error: invalid register `$tp`: reserved for TLS
+-  --> $DIR/bad-reg.rs:25:18
++  --> $DIR/bad-reg.rs:24:18
+    |
+ LL |         asm!("", out("$tp") _);
+    |                  ^^^^^^^^^^^^
+ 
+ error: invalid register `$sp`: the stack pointer cannot be used as an operand for inline asm
+-  --> $DIR/bad-reg.rs:27:18
++  --> $DIR/bad-reg.rs:26:18
+    |
+ LL |         asm!("", out("$sp") _);
+    |                  ^^^^^^^^^^^^
+ 
+ error: invalid register `$r21`: reserved by the ABI
+-  --> $DIR/bad-reg.rs:29:18
++  --> $DIR/bad-reg.rs:28:18
+    |
+ LL |         asm!("", out("$r21") _);
+    |                  ^^^^^^^^^^^^^
+ 
+ error: invalid register `$fp`: the frame pointer cannot be used as an operand for inline asm
+-  --> $DIR/bad-reg.rs:31:18
++  --> $DIR/bad-reg.rs:30:18
+    |
+ LL |         asm!("", out("$fp") _);
+    |                  ^^^^^^^^^^^^
+ 
+ error: invalid register `$r31`: $r31 is used internally by LLVM and cannot be used as an operand for inline asm
+-  --> $DIR/bad-reg.rs:33:18
++  --> $DIR/bad-reg.rs:32:18
+    |
+ LL |         asm!("", out("$r31") _);
+    |                  ^^^^^^^^^^^^^
+diff --git a/tests/ui/asm/loongarch/bad-reg.loongarch64_lp64s.stderr b/tests/ui/asm/loongarch/bad-reg.loongarch64_lp64s.stderr
+index cb8e55a..6d0410d 100644
+--- a/tests/ui/asm/loongarch/bad-reg.loongarch64_lp64s.stderr
++++ b/tests/ui/asm/loongarch/bad-reg.loongarch64_lp64s.stderr
+@@ -1,59 +1,59 @@
+ error: invalid register `$r0`: constant zero cannot be used as an operand for inline asm
+-  --> $DIR/bad-reg.rs:23:18
++  --> $DIR/bad-reg.rs:22:18
+    |
+ LL |         asm!("", out("$r0") _);
+    |                  ^^^^^^^^^^^^
+ 
+ error: invalid register `$tp`: reserved for TLS
+-  --> $DIR/bad-reg.rs:25:18
++  --> $DIR/bad-reg.rs:24:18
+    |
+ LL |         asm!("", out("$tp") _);
+    |                  ^^^^^^^^^^^^
+ 
+ error: invalid register `$sp`: the stack pointer cannot be used as an operand for inline asm
+-  --> $DIR/bad-reg.rs:27:18
++  --> $DIR/bad-reg.rs:26:18
+    |
+ LL |         asm!("", out("$sp") _);
+    |                  ^^^^^^^^^^^^
+ 
+ error: invalid register `$r21`: reserved by the ABI
+-  --> $DIR/bad-reg.rs:29:18
++  --> $DIR/bad-reg.rs:28:18
+    |
+ LL |         asm!("", out("$r21") _);
+    |                  ^^^^^^^^^^^^^
+ 
+ error: invalid register `$fp`: the frame pointer cannot be used as an operand for inline asm
+-  --> $DIR/bad-reg.rs:31:18
++  --> $DIR/bad-reg.rs:30:18
+    |
+ LL |         asm!("", out("$fp") _);
+    |                  ^^^^^^^^^^^^
+ 
+ error: invalid register `$r31`: $r31 is used internally by LLVM and cannot be used as an operand for inline asm
+-  --> $DIR/bad-reg.rs:33:18
++  --> $DIR/bad-reg.rs:32:18
+    |
+ LL |         asm!("", out("$r31") _);
+    |                  ^^^^^^^^^^^^^
+ 
+ error: register class `freg` requires at least one of the following target features: d, f
+-  --> $DIR/bad-reg.rs:37:26
++  --> $DIR/bad-reg.rs:36:26
+    |
+ LL |         asm!("/* {} */", in(freg) f);
+    |                          ^^^^^^^^^^
+ 
+ error: register class `freg` requires at least one of the following target features: d, f
+-  --> $DIR/bad-reg.rs:39:26
++  --> $DIR/bad-reg.rs:38:26
+    |
+ LL |         asm!("/* {} */", out(freg) _);
+    |                          ^^^^^^^^^^^
+ 
+ error: register class `freg` requires at least one of the following target features: d, f
+-  --> $DIR/bad-reg.rs:41:26
++  --> $DIR/bad-reg.rs:40:26
+    |
+ LL |         asm!("/* {} */", in(freg) d);
+    |                          ^^^^^^^^^^
+ 
+ error: register class `freg` requires at least one of the following target features: d, f
+-  --> $DIR/bad-reg.rs:43:26
++  --> $DIR/bad-reg.rs:42:26
+    |
+ LL |         asm!("/* {} */", out(freg) d);
+    |                          ^^^^^^^^^^^
+diff --git a/tests/ui/asm/loongarch/bad-reg.rs b/tests/ui/asm/loongarch/bad-reg.rs
+index db1c778..685b460 100644
+--- a/tests/ui/asm/loongarch/bad-reg.rs
++++ b/tests/ui/asm/loongarch/bad-reg.rs
+@@ -1,7 +1,6 @@
+ //@ add-core-stubs
+ //@ needs-asm-support
+ //@ revisions: loongarch64_lp64d loongarch64_lp64s
+-//@ min-llvm-version: 20
+ //@[loongarch64_lp64d] compile-flags: --target loongarch64-unknown-linux-gnu
+ //@[loongarch64_lp64d] needs-llvm-components: loongarch
+ //@[loongarch64_lp64s] compile-flags: --target loongarch64-unknown-none-softfloat
+diff --git a/tests/ui/check-cfg/target_feature.stderr b/tests/ui/check-cfg/target_feature.stderr
+index a9d6748..5b82d3f 100644
+--- a/tests/ui/check-cfg/target_feature.stderr
++++ b/tests/ui/check-cfg/target_feature.stderr
+@@ -60,7 +60,6 @@ LL |     cfg!(target_feature = "_UNEXPECTED_VALUE");
+ `d32`
+ `deflate-conversion`
+ `dit`
+-`div32`
+ `doloop`
+ `dotprod`
+ `dpb`
+@@ -134,11 +133,8 @@ LL |     cfg!(target_feature = "_UNEXPECTED_VALUE");
+ `jsconv`
+ `kl`
+ `lahfsahf`
+-`lam-bh`
+-`lamcas`
+ `lasx`
+ `lbt`
+-`ld-seq-sa`
+ `leoncasa`
+ `lor`
+ `lse`
+@@ -194,7 +190,6 @@ LL |     cfg!(target_feature = "_UNEXPECTED_VALUE");
+ `reserve-x18`
+ `rtm`
+ `sb`
+-`scq`
+ `sha`
+ `sha2`
+ `sha3`

@@ -5,7 +5,11 @@
 # probably Doing It Wrong. Ask in #debian-rust or the mailing list for pointers.
 
 # False-positive, file(1) misidentifies mime type
+compiler/rustc_codegen_cranelift/patches/*.patch
+compiler/rustc_codegen_gcc/patches/*.patch
+compiler/rustc_codegen_gcc/patches/*/*.patch
 compiler/rustc_error_codes/src/error_codes/E0469.md
+src/ci/docker/host-x86_64/dist-riscv64-linux/patches/*/*/*.patch
 src/doc/book/nostarch/chapter17.md
 src/doc/reference/src/crates-and-source-files.md
 src/doc/reference/src/items/extern-crates.md
@@ -59,11 +63,19 @@ src/doc/nomicon/src/intro.md
 src/doc/reference/README.md
 src/doc/reference/docs/authoring.md
 src/doc/reference/docs/review-policy.md
+src/doc/reference/src/attributes/codegen.md
 src/doc/reference/src/attributes/diagnostics.md
+src/doc/reference/src/comments.md
 src/doc/reference/src/conditional-compilation.md
+src/doc/reference/src/expressions/call-expr.md
 src/doc/reference/src/expressions/closure-expr.md
 src/doc/reference/src/inline-assembly.md
 src/doc/reference/src/introduction.md
+src/doc/reference/src/items/functions.md
+src/doc/reference/src/items/use-declarations.md
+src/doc/reference/src/linkage.md
+src/doc/reference/src/names/preludes.md
+src/doc/reference/src/panic.md
 src/doc/reference/src/types/impl-trait.md
 src/doc/reference/src/unsafe-keyword.md
 src/doc/rust-by-example/src/flow_control/if_let.md
@@ -80,6 +92,7 @@ src/doc/rustc/src/platform-support/armeb-unknown-linux-gnueabi.md
 src/doc/rustc/src/platform-support/armv7-unknown-linux-uclibceabi.md
 src/doc/rustc/src/platform-support/armv7-unknown-linux-uclibceabihf.md
 src/doc/rustc/src/platform-support/unknown-uefi.md
+src/doc/rustc/src/platform-support/wasm32-wali-linux.md
 src/doc/rustc/src/platform-support/wasm32-wasip1-threads.md
 src/doc/rustc/src/platform-support/wasm32v1-none.md
 src/doc/rustc/src/targets/known-issues.md
@@ -106,11 +119,11 @@ src/tools/rust-analyzer/crates/hir-def/src/macro_expansion_tests/builtin_fn_macr
 src/tools/rust-analyzer/crates/ide-completion/src/completions/env_vars.rs
 src/tools/rust-analyzer/crates/ide/src/view_syntax_tree.rs
 src/tools/rust-analyzer/crates/rust-analyzer/src/diagnostics/to_proto.rs
-src/tools/rust-analyzer/docs/dev/setup.md
 src/tools/rustc-perf/LICENSES/Apache-2.0.txt
 src/tools/rustc-perf/LICENSES/MIT.txt
 src/tools/rustc-perf/collector/src/compile/execute/etw_parser.rs
 src/tools/rustc-perf/docs/*.md
+src/tools/rust-analyzer/docs/book/src/contributing/setup.md
 src/tools/rustc-perf/site/src/request_handlers/github.rs
 src/tools/rustc-perf/triage/*.md
 src/tools/rustfmt/*.md
@@ -132,6 +145,7 @@ vendor/*/FAQ.md
 vendor/*/LICENSE
 vendor/*/LICENSE-*
 vendor/*/README.md
+vendor/*/README.tpl
 vendor/*/Readme.md
 vendor/*/SPONSORS.md
 vendor/*/readme.md
@@ -212,18 +226,18 @@ vendor/zerovec-*/src/map2d/map.rs
 # and are not "embedded libraries".
 license-metadata.json
 src/ci/docker/scripts/qemu-bare-bones-addentropy.c
-src/ci/package-lock.json
-src/ci/package.json
 src/doc/book/*/ferris.js
 src/doc/book/ferris.js
 src/doc/reference/src/attributes-redirect.html
 src/doc/reference/theme/reference.js
 src/doc/rustc-dev-guide/mermaid-init.js
+src/doc/rust-by-example/theme/js/language-picker.js
 src/librustdoc/html/static/.eslintrc.js
 src/librustdoc/html/static/js/*.js
 src/librustdoc/html/static/js/tsconfig.json
 src/tools/cargo/src/cargo/core/compiler/timings.js
 src/tools/error_index_generator/*.js
+src/etc/rust_analyzer_zed.json
 src/tools/rustc-perf/collector/compile-benchmarks/*/perf-config.json
 src/tools/rustc-perf/site/frontend/*.json
 src/tools/rustc-perf/site/frontend/.parcelrc
@@ -333,6 +347,7 @@ src/tools/rustc-perf/collector/compile-benchmarks/piston-image/src/bmp/decoder.r
 src/tools/rustc-perf/collector/compile-benchmarks/exa-*/xtests/outputs/*.ansitxt
 src/tools/rustc-perf/collector/compile-benchmarks/webrender-2022/webrender/src/profiler.rs
 src/tools/rustc-perf/collector/compile-benchmarks/webrender-2022/webrender/doc/*.md
+src/tools/rustc-perf/collector/compile-benchmarks/webrender-2022/wrench/script/reftest-analyzer.xhtml
 src/tools/rustc-perf/collector/compile-benchmarks/webrender-2022/wrench/reftests/*/*.png
 
 # And these ones are actual helper files, not embedded bad code
@@ -427,6 +442,7 @@ library/std/src/sys/path/windows/tests.rs
 library/stdarch/crates/std_detect/src/detect/test_data/*.auxv
 library/stdarch/crates/stdarch-verify/x86-intel.xml
 library/stdarch/intrinsics_data/arm_intrinsics.json
+src/ci/citool/tests/jobs.rs
 src/etc/test-float-parse/src/gen/spot_checks.rs
 src/librustdoc/html/render/write_shared/tests.rs
 src/tools/*/tests/*/*.stderr
@@ -449,6 +465,7 @@ src/tools/clippy/tests/ui/wildcard_enum_match_arm.fixed
 src/tools/rust-analyzer/bench_data/numerous_macro_rules
 src/tools/rust-analyzer/crates/ide/src/syntax_highlighting/test_data/highlight_*.html
 src/tools/rust-analyzer/crates/parser/test_data/lexer/ok/*
+src/tools/rust-analyzer/crates/parser/test_data/parser/inline/err/generic_arg_list_recover*.rs
 src/tools/rust-analyzer/crates/project-model/test_data/*.json
 src/tools/rust-analyzer/crates/rust-analyzer/src/diagnostics/test_data/clippy_pass_by_ref.txt
 src/tools/rust-analyzer/crates/syntax/test_data/reparse/fuzz-failures/0005.rs
@@ -510,6 +527,7 @@ vendor/cargo_metadata*/tests/test_samples.rs
 vendor/chalk-solve-0.*/src/infer/test.rs
 vendor/content_inspector-*/testdata/*
 vendor/der-*/tests/examples/spki.der
+vendor/der-*/tests/examples/spki.pem
 vendor/diff-*/tests/data/gitignores.chars.diff
 vendor/dissimilar-*/benches/*.txt
 vendor/elasticlunr-rs-*/tests/data/*.in.txt
@@ -592,6 +610,7 @@ vendor/serde_json-*/tests/lexical/parse.rs
 vendor/sha1-*/tests/data/sha1.blb
 vendor/sha2-*/tests/data/*.blb
 vendor/spki-*/tests/examples/*.der
+vendor/spki-*/tests/examples/*.pem
 vendor/syntect-*/tests/public-api.txt
 vendor/tabled-*/tests/core/iter_table.rs
 vendor/tabled-*/tests/settings/colorization.rs
@@ -666,7 +685,8 @@ compiler/rustc_macros/src/symbols/tests.rs
 compiler/rustc_type_ir/src/search_graph/mod.rs
 compiler/stable_mir/src/mir/visit.rs
 extra-vendor/sha1-checked-0.*/src/lib.rs
-library/std/src/sys/pal/unix/process/process_unix.rs
+library/std/src/sys/process/unix/unix.rs
+library/stdarch/crates/core_arch/src/x86/kl.rs
 library/stdarch/crates/stdarch-verify/src/lib.rs
 src/librustdoc/html/markdown/tests.rs
 src/tools/cargo/crates/cargo-util-schemas/src/core/partial_version.rs
@@ -720,6 +740,7 @@ vendor/color-print-proc-macro-*/src/format_args/mod.rs
 vendor/color-print-proc-macro-*/src/parse/color_tag.rs
 vendor/color-print-proc-macro-*/src/parse/util.rs
 vendor/compiler_builtins-*/libm/src/math/atan.rs
+vendor/compiler_builtins-*/libm/src/math/support/big/tests.rs
 vendor/datafrog-*/src/lib.rs
 vendor/dateparser-0.2.1/src/datetime.rs
 vendor/dateparser-0.2.1/src/timezone.rs
@@ -772,6 +793,7 @@ vendor/icu_locid-*/tests/locale.rs
 vendor/indoc-*/src/lib.rs
 vendor/jiff-0.*/src/fmt/friendly/parser.rs
 vendor/jiff-0.*/src/fmt/offset.rs
+vendor/jsonpath-rust-*/src/parser/tests.rs
 vendor/libm-*/src/math/atan.rs
 vendor/lz4_flex-*/src/block/compress.rs
 vendor/lz4_flex-*/src/block/decompress_safe.rs

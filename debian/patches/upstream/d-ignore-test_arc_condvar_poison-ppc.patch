@@ -8,14 +8,14 @@ Forwarded: no
  1 file changed, 1 insertion(+)
 
 diff --git a/library/std/tests/sync/mutex.rs b/library/std/tests/sync/mutex.rs
-index 74c6272..6ec59e1 100644
+index 88fb448..f4acf00 100644
 --- a/library/std/tests/sync/mutex.rs
 +++ b/library/std/tests/sync/mutex.rs
-@@ -260,6 +260,7 @@ fn test_mutex_arc_condvar() {
+@@ -265,6 +265,7 @@ fn test_mutex_arc_condvar() {
      }
  }
  
 +#[cfg(not(target_arch = "powerpc"))]
  #[test]
+ #[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
  fn test_arc_condvar_poison() {
-     let packet = Packet(Arc::new((Mutex::new(1), Condvar::new())));

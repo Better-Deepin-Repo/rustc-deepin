@@ -1,3 +1,20 @@
+rustc (1.87.0+dfsg1-1) unstable; urgency=medium
+
+  * revert changes requiring LLVM >=20 (fix loongarch64/mips64el)
+  * fix more broken tests
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Sat, 20 Sep 2025 16:00:58 +0200
+
+rustc (1.87.0+dfsg1-1~exp1) experimental; urgency=medium
+
+  * New upstream release
+  * cherry-pick fix for PROFILER_RT linking
+  * fix some broken tests
+  * config: update to 1.87.0 change-id
+  * d/control: correctly pull in liblzma-dev
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Tue, 09 Sep 2025 21:23:03 +0200
+
 rustc (1.86.0+dfsg1-1) unstable; urgency=medium
 
   * upload to unstable

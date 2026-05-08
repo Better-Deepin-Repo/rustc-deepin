@@ -13,10 +13,10 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  1 file changed, 4 deletions(-)
 
 diff --git a/src/bootstrap/src/core/build_steps/tool.rs b/src/bootstrap/src/core/build_steps/tool.rs
-index 1291a63..14408f9 100644
+index cd57e06..1ba6c88 100644
 --- a/src/bootstrap/src/core/build_steps/tool.rs
 +++ b/src/bootstrap/src/core/build_steps/tool.rs
-@@ -168,10 +168,6 @@ pub fn prepare_tool_cargo(
+@@ -243,10 +243,6 @@ pub fn prepare_tool_cargo(
      // avoid rebuilding when running tests.
      cargo.env("SYSROOT", builder.sysroot(compiler));
  

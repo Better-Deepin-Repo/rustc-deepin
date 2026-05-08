@@ -79,6 +79,7 @@ Files-Excluded:
  vendor/anyhow-1.0.55
  vendor/anyhow-1.0.56
  vendor/anyhow-1.0.86
+ vendor/anyhow-1.0.95
  vendor/arbitrary-1.3.2
  vendor/arc-swap-1.6.0
  vendor/arrayvec-0.5.2
@@ -103,6 +104,7 @@ Files-Excluded:
  vendor/bitflags-2.7.0
  vendor/bit-set-0.5.2
  vendor/bit-vec-0.6.3
+ vendor/blake3-1.5.5
  vendor/boml-0.3.1
  vendor/brotli-3.3.4
  vendor/brotli-decompressor-2.3.4
@@ -132,8 +134,8 @@ Files-Excluded:
  vendor/cc-1.0.68
  vendor/cc-1.0.72
  vendor/cc-1.0.73
- vendor/cc-1.0.98
  vendor/cc-1.0.99
+ vendor/cc-1.1.22
  vendor/cc-1.2.10
  vendor/cfg-if-0.1.10
  vendor/chrono-0.4.19
@@ -149,7 +151,6 @@ Files-Excluded:
  vendor/clap_builder-4.5.20
  vendor/clap_builder-4.5.26
  vendor/clap_complete-4.5.37
- vendor/clap_complete-4.5.42
  vendor/clap_complete-4.5.43
  vendor/clap_derive-3.1.4
  vendor/clap_derive-4.1.9
@@ -256,6 +257,7 @@ Files-Excluded:
  vendor/flate2-1.0.22
  vendor/flate2-1.0.25
  vendor/flate2-1.0.31
+ vendor/flate2-1.0.35
  vendor/fm-0.2.2
  vendor/form_urlencoded-1.0.1
  vendor/form_urlencoded-1.1.0
@@ -408,6 +410,8 @@ Files-Excluded:
  vendor/libc-0.2.155
  vendor/libc-0.2.167
  vendor/libc-0.2.168
+ vendor/libc-0.2.169
+ vendor/libc-0.2.170
  vendor/libc-0.2.94
  vendor/libc-0.2.97
  vendor/libffi-3.2.0
@@ -436,8 +440,8 @@ Files-Excluded:
  vendor/mach2-0.4.2
  vendor/matches-0.1.9
  vendor/md-5-0.10.5
- vendor/mdbook-0.4.43
  vendor/measureme-10.1.3
+ vendor/measureme-11.0.1
  vendor/measureme-12.0.0
  vendor/memchr-0.1.11
  vendor/memchr-2.4.0
@@ -452,6 +456,7 @@ Files-Excluded:
  vendor/miniz_oxide-0.4.4
  vendor/miniz_oxide-0.6.2
  vendor/miniz_oxide-0.7.3
+ vendor/miniz_oxide-0.8.3
  vendor/mio-0.7.14
  vendor/mio-0.8.11
  vendor/mio-0.8.2
@@ -491,7 +496,7 @@ Files-Excluded:
  vendor/openssl-macros-0.1.0
  vendor/openssl-probe-0.1.5
  vendor/openssl-src-111.17.0+1.1.1m
- vendor/openssl-src-111.28.2+1.1.1w
+ vendor/openssl-src-300.4.2+3.4.1
  vendor/openssl-sys-0.9.102
  vendor/openssl-sys-0.9.104
  vendor/openssl-sys-0.9.72
@@ -524,8 +529,10 @@ Files-Excluded:
  vendor/phf-0.11.2
  vendor/phf_codegen-0.10.0
  vendor/phf_codegen-0.11.2
+ vendor/phf_generator-0.10.0
  vendor/phf_generator-0.11.2
  vendor/phf_macros-0.11.2
+ vendor/phf_shared-0.10.0
  vendor/phf_shared-0.11.1
  vendor/phf_shared-0.11.2
  vendor/pin-project-1.0.10
@@ -621,7 +628,7 @@ Files-Excluded:
  vendor/reqwest-0.12.7
  vendor/rgb-0.8.36
  vendor/ring-0.16.20
- vendor/ring-0.17.8
+ vendor/ring-0.17.14
  vendor/rmp-0.8.11
  vendor/rmp-serde-1.1.1
  vendor/rusqlite-0.28.0
@@ -630,6 +637,8 @@ Files-Excluded:
  vendor/rustc-demangle-0.1.21
  vendor/rustc-hash-2.0.0
  vendor/rustc-hash-2.1.0
+ vendor/rustc-stable-hash-0.1.1
+ vendor/rustc_tools_util-0.4.0
  vendor/rustc_version-0.4.0
  vendor/rustc-workspace-hack-1.0.0
  vendor/rust-embed-6.6.0
@@ -677,6 +686,7 @@ Files-Excluded:
  vendor/serde-1.0.210
  vendor/serde-1.0.215
  vendor/serde-1.0.216
+ vendor/serde-1.0.217
  vendor/serde_cbor-0.11.2
  vendor/serde_derive-1.0.126
  vendor/serde_derive-1.0.130
@@ -686,12 +696,14 @@ Files-Excluded:
  vendor/serde_derive-1.0.210
  vendor/serde_derive-1.0.215
  vendor/serde_derive-1.0.216
+ vendor/serde_derive-1.0.217
  vendor/serde_ignored-0.1.2
  vendor/serde_json-1.0.109
  vendor/serde_json-1.0.124
  vendor/serde_json-1.0.128
  vendor/serde_json-1.0.132
  vendor/serde_json-1.0.135
+ vendor/serde_json-1.0.138
  vendor/serde_json-1.0.64
  vendor/serde_json-1.0.69
  vendor/serde_json-1.0.74
@@ -712,6 +724,7 @@ Files-Excluded:
  vendor/similar-2.2.1
  vendor/similar-2.6.0
  vendor/siphasher-0.3.10
+ vendor/siphasher-0.3.11
  vendor/slab-0.4.5
  vendor/slab-0.4.8
  vendor/smallvec-1.10.0
@@ -722,8 +735,9 @@ Files-Excluded:
  vendor/socket2-0.4.9
  vendor/socket2-0.5.7
  vendor/spin-0.5.2
- vendor/spin-0.9.8
  vendor/spmc-0.3.0
+ vendor/string_cache-0.8.7
+ vendor/string_cache_codegen-0.5.2
  vendor/stringprep-0.1.2
  vendor/strip-ansi-escapes-0.1.1
  vendor/strsim-0.10.0
@@ -748,6 +762,7 @@ Files-Excluded:
  vendor/tabled-0.14.0
  vendor/tabled_derive-0.6.0
  vendor/tar-0.4.38
+ vendor/tar-0.4.43
  vendor/target-lexicon-0.13.1
  vendor/tempdir-0.3.7
  vendor/tempfile-3.14.0
@@ -831,7 +846,6 @@ Files-Excluded:
  vendor/typenum-1.16.0
  vendor/ucd-trie-0.1.5
  vendor/ucd-util-0.1.8
- vendor/ui_test-0.28.0
  vendor/unicase-2.6.0
  vendor/unicase-2.7.0
  vendor/unic-char-property-0.9.0
@@ -843,6 +857,7 @@ Files-Excluded:
  vendor/unicode-ident-1.0.12
  vendor/unicode-ident-1.0.13
  vendor/unicode-ident-1.0.14
+ vendor/unicode-ident-1.0.16
  vendor/unicode-ident-1.0.8
  vendor/unicode-normalization-0.1.19
  vendor/unicode-normalization-0.1.22
@@ -1006,7 +1021,7 @@ Files: C*.md
        LICENSE*
        compiler/*
        configure
-       config.example.toml
+       bootstrap.example.toml
        git-commit-hash
        git-commit-info
        library/*
@@ -1018,6 +1033,7 @@ Files: C*.md
        src/ci/*
        src/doc/*
        src/etc/*
+       src/gcc/notice.txt
        src/lib*
        src/rust*
        src/stage0
@@ -1062,10 +1078,6 @@ Files: src/doc/embedded-book/*
 Copyright: Rust on Embedded Devices Working Group
            The Rust Project Developers (see https://thanks.rust-lang.org)
 License: Apache-2.0 or MIT
-
-Files: src/doc/rustc-dev-guide/mermaid.min.js
-Copyright: 2014-2021 Knut Sveidqvist
-License: MIT
 
 Files: src/librustdoc/html/static/css/*
 Copyright: 2016 Ike Ku, Jessica Stokes and Leon Guan
@@ -1457,11 +1469,6 @@ Files: vendor/byteorder-*/*
 Copyright: 2015-2023 Andrew Gallant <jamslam@gmail.com>
 License: Unlicense OR MIT
 Comment: see https://github.com/BurntSushi/byteorder
-
-Files: vendor/bytesize-*/*
-Copyright: 2015-2023 Hyunsik Choi <hyunsik.choi@gmail.com>
-License: Apache-2.0
-Comment: see https://github.com/hyunsik/bytesize/
 
 Files:
  vendor/globset-*/*
@@ -2212,7 +2219,9 @@ Copyright: 2023-2024 Ed Page <eopage@gmail.com>
 License: MIT OR Apache-2.0
 Comment: see https://github.com/polyfill-rs/is_terminal_polyfill
 
-Files: vendor/jiff-0.*/*
+Files:
+ vendor/jiff-0.*/*
+ vendor/jiff-static-0.*/*
 Copyright: 2024-2025 Andrew Gallant <jamslam@gmail.com>
 License: Unlicense OR MIT
 Comment: see https://github.com/BurntSushi/jiff
@@ -2236,16 +2245,16 @@ License: MIT or Apache-2.0
 Comment:
  see https://github.com/rustwasm/wasm-bindgen
 
+Files: vendor/jsonpath-rust-1.*/*
+Copyright: 2021-2025 BorisZhguchev <zhguchev@gmail.com>
+License: MIT
+Comment: see https://github.com/besok/jsonpath-rust
+
 Files: vendor/web-sys-*/*
 Copyright: 2018-2024 The wasm-bindgen Developers
 License: MIT or Apache-2.0
 Comment:
  see https://github.com/rustwasm/wasm-bindgen/tee/master/crates/web-sys
-
-Files: vendor/jsonpath_lib-*/*
-Copyright: 2018-2021 Changseok Han <freestrings@gmail.com>
-License: MIT
-Comment: see https://github.com/freestrings/jsonpath
 
 Files: vendor/kqueue-1.*/*
 Copyright: 2016-2024 William Orr <will@worrbase.com>
@@ -2378,6 +2387,11 @@ Files: vendor/matchers-*/*
 Copyright: 2019-2019 Eliza Weisman <eliza@buoyant.io>
 License: MIT
 Comment: see https://github.com/hawkw/matchers
+
+Files: vendor/match_token-0.*/*
+Copyright: 2014-2025 UNKNOWN AUTHORS
+License: MIT OR Apache-2.0
+Comment: see https://github.com/servo/html5ever
 
 Files: vendor/maybe-async-*/*
 Copyright: 2020-2024 Guoli Lyu <guoli-lv@hotmail.com>
@@ -2589,6 +2603,11 @@ Copyright: 2015-2024 Jan Schulte <hello@unexpected-co.de>
            2015-2024 Stanislav Tkach <stanislav.tkach@gmail.com>
 License: MIT
 Comment: see https://github.com/stanislav-tkach/os_info
+
+Files: vendor/os_pipe-1.*/*
+Copyright: 2016-2025 Jack O'Connor
+License: MIT
+Comment: see https://github.com/oconnor663/os_pipe.rs
 
 Files: vendor/overload-*/*
 Copyright: 2019-2022 Daniel Salvadori <danaugrs@gmail.com>
@@ -2859,6 +2878,7 @@ Comment: see https://github.com/rust-analyzer/rowan
 
 Files:
  vendor/ra-ap-rustc_abi-*/*
+ vendor/ra-ap-rustc_hashes-*/*
  vendor/ra-ap-rustc_index-*/*
  vendor/ra-ap-rustc_index_macros-*/*
  vendor/ra-ap-rustc_lexer-*/*
@@ -2872,11 +2892,6 @@ Files: vendor/rustc_apfloat-*/*
 Copyright: 2003-2017 University of Illinois at Urbana-Champaign.
 License: Apache-2.0 with LLVM exception
 Comment: see https://github.com/rust-lang/rustc_apfloat , in particular LICENSE-DETAILS.md
-
-Files: vendor/rustc_tools_util-*/*
-Copyright: 2014-2022 The Rust Project Developers
-License: MIT or Apache-2.0
-Comment: see https://github.com/rust-lang/rust-clippy/tree/master/rustc_tools_util
 
 Files: vendor/rustc_version-*/*
 Copyright: 2015-2021 Dirkjan Ochtman <dirkjan@ochtman.nl>

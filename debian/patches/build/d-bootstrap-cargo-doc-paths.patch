@@ -212,10 +212,10 @@ index 8ad5b42..f93d3da 100644
  
  ### The Rustdoc Book
 diff --git a/src/doc/reference/src/conditional-compilation.md b/src/doc/reference/src/conditional-compilation.md
-index 6c2a505..71e97f0 100644
+index a214326..b96dcaa 100644
 --- a/src/doc/reference/src/conditional-compilation.md
 +++ b/src/doc/reference/src/conditional-compilation.md
-@@ -469,6 +469,6 @@ println!("I'm running on a {} machine!", machine_kind);
+@@ -466,6 +466,6 @@ println!("I'm running on a {} machine!", machine_kind);
  [`target_feature` attribute]: attributes/codegen.md#the-target_feature-attribute
  [attribute]: attributes.md
  [attributes]: attributes.md
@@ -224,10 +224,10 @@ index 6c2a505..71e97f0 100644
  [crate type]: linkage.md
  [static C runtime]: linkage.md#static-and-dynamic-c-runtimes
 diff --git a/src/doc/reference/src/introduction.md b/src/doc/reference/src/introduction.md
-index 4cd205b..25a7b49 100644
+index 7f90676..c679cee 100644
 --- a/src/doc/reference/src/introduction.md
 +++ b/src/doc/reference/src/introduction.md
-@@ -137,8 +137,8 @@ We also want the reference to be as normative as possible, so if you see anythin
+@@ -141,8 +141,8 @@ We also want the reference to be as normative as possible, so if you see anythin
  [the Rust Reference repository]: https://github.com/rust-lang/reference/
  [Unstable Book]: https://doc.rust-lang.org/nightly/unstable-book/
  [_Expression_]: expressions.md
@@ -239,7 +239,7 @@ index 4cd205b..25a7b49 100644
  [file an issue]: https://github.com/rust-lang/reference/issues
  [lifetime of temporaries]: expressions.html#temporaries
 diff --git a/src/doc/reference/src/linkage.md b/src/doc/reference/src/linkage.md
-index 23bd44c..412765a 100644
+index f1076b2..3afbcea 100644
 --- a/src/doc/reference/src/linkage.md
 +++ b/src/doc/reference/src/linkage.md
 @@ -241,7 +241,7 @@ fn main() {
@@ -252,7 +252,7 @@ index 23bd44c..412765a 100644
  To use this feature locally, you typically will use the `RUSTFLAGS` environment
  variable to specify flags to the compiler through Cargo. For example to compile
 diff --git a/src/doc/reference/src/procedural-macros.md b/src/doc/reference/src/procedural-macros.md
-index d717d9a..92d3125 100644
+index 4627ffc..9574c1f 100644
 --- a/src/doc/reference/src/procedural-macros.md
 +++ b/src/doc/reference/src/procedural-macros.md
 @@ -374,7 +374,7 @@ Note that neither declarative nor procedural macros support doc comment tokens
@@ -278,7 +278,7 @@ index ab95aa2..8023f33 100644
  If you have dependencies using the `cc` crate, you will need to set these
  environment variables:
 diff --git a/src/doc/rustc/src/platform-support/fuchsia.md b/src/doc/rustc/src/platform-support/fuchsia.md
-index 489f46e..8f299a9 100644
+index bed5b81..411a661 100644
 --- a/src/doc/rustc/src/platform-support/fuchsia.md
 +++ b/src/doc/rustc/src/platform-support/fuchsia.md
 @@ -925,7 +925,7 @@ attach and load any relevant debug symbols.
@@ -349,7 +349,7 @@ index f0cc44a..bf92669 100644
 -[build-std](../../cargo/reference/unstable.html#build-std) feature.
 +[build-std](../../../../cargo/book/reference/unstable.html#build-std) feature.
 diff --git a/src/doc/unstable-book/src/compiler-flags/control-flow-guard.md b/src/doc/unstable-book/src/compiler-flags/control-flow-guard.md
-index dbb7414..73876b0 100644
+index e7414aa..ebd0dd4 100644
 --- a/src/doc/unstable-book/src/compiler-flags/control-flow-guard.md
 +++ b/src/doc/unstable-book/src/compiler-flags/control-flow-guard.md
 @@ -39,7 +39,7 @@ It is strongly recommended to also enable CFG checks for all linked libraries, i
@@ -375,7 +375,7 @@ index 4679acf..b6c3eb5 100644
  # Working with other languages
  
 diff --git a/src/tools/linkchecker/main.rs b/src/tools/linkchecker/main.rs
-index 536f7bf..1582faa 100644
+index 4e11bd8..f3498e1 100644
 --- a/src/tools/linkchecker/main.rs
 +++ b/src/tools/linkchecker/main.rs
 @@ -320,6 +320,10 @@ impl Checker {

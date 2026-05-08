@@ -12,7 +12,7 @@ Forwarded: not-needed
  3 files changed, 12 deletions(-)
 
 diff --git a/compiler/rustc/Cargo.toml b/compiler/rustc/Cargo.toml
-index d24b630..2256524 100644
+index f4caa3e..dc58591 100644
 --- a/compiler/rustc/Cargo.toml
 +++ b/compiler/rustc/Cargo.toml
 @@ -20,14 +20,8 @@ rustc_smir = { path = "../rustc_smir" }
@@ -31,18 +31,18 @@ index d24b630..2256524 100644
  max_level_info = ['rustc_driver_impl/max_level_info']
  rustc_randomized_layouts = ['rustc_driver_impl/rustc_randomized_layouts']
 diff --git a/src/tools/rust-analyzer/crates/profile/Cargo.toml b/src/tools/rust-analyzer/crates/profile/Cargo.toml
-index 3179c81..82a464b 100644
+index 9384fe2..ad8b6c9 100644
 --- a/src/tools/rust-analyzer/crates/profile/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/profile/Cargo.toml
-@@ -15,7 +15,6 @@ doctest = false
+@@ -14,7 +14,6 @@ rust-version.workspace = true
  [dependencies]
  cfg-if = "1.0.0"
  libc.workspace = true
 -jemalloc-ctl = { version = "0.5.0", package = "tikv-jemalloc-ctl", optional = true }
  
- [target.'cfg(target_os = "linux")'.dependencies]
+ [target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
  perf-event = "=0.4.7"
-@@ -28,7 +27,6 @@ windows-sys = { version = "0.59", features = [
+@@ -27,7 +26,6 @@ windows-sys = { version = "0.59", features = [
  
  [features]
  cpu_profiler = []
@@ -51,10 +51,10 @@ index 3179c81..82a464b 100644
  # Uncomment to enable for the whole crate graph
  # default = [ "cpu_profiler" ]
 diff --git a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-index b8ce2b7..13b35e2 100644
+index 6c81c23..80e2e04 100644
 --- a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-@@ -81,9 +81,6 @@ windows-sys = { version = "0.59", features = [
+@@ -80,9 +80,6 @@ windows-sys = { version = "0.59", features = [
    "Win32_System_Threading",
  ] }
  
@@ -64,11 +64,11 @@ index b8ce2b7..13b35e2 100644
  [dev-dependencies]
  expect-test = "1.4.0"
  xshell.workspace = true
-@@ -93,7 +90,6 @@ test-fixture.workspace = true
+@@ -92,7 +89,6 @@ test-fixture.workspace = true
  syntax-bridge.workspace = true
  
  [features]
 -jemalloc = ["jemallocator", "profile/jemalloc"]
- force-always-assert = ["always-assert/force"]
+ force-always-assert = ["stdx/force-always-assert"]
  sysroot-abi = []
  in-rust-tree = [

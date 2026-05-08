@@ -9,7 +9,6 @@ These tests hang or make the box OOM
 
 Forwarded: no
 
-
 Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
 ---
  src/tools/compiletest/src/directive-list.rs           | 1 +
@@ -22,10 +21,10 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  7 files changed, 13 insertions(+)
 
 diff --git a/src/tools/compiletest/src/directive-list.rs b/src/tools/compiletest/src/directive-list.rs
-index a7ac875..a956603 100644
+index b2ad5a3..7939329 100644
 --- a/src/tools/compiletest/src/directive-list.rs
 +++ b/src/tools/compiletest/src/directive-list.rs
-@@ -62,6 +62,7 @@ const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
+@@ -63,6 +63,7 @@ const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
      "ignore-gnu",
      "ignore-haiku",
      "ignore-horizon",
@@ -34,10 +33,10 @@ index a7ac875..a956603 100644
      "ignore-i686-pc-windows-msvc",
      "ignore-illumos",
 diff --git a/src/tools/compiletest/src/header/tests.rs b/src/tools/compiletest/src/header/tests.rs
-index 522d340..45ca04e 100644
+index 007318b..8a58c2e 100644
 --- a/src/tools/compiletest/src/header/tests.rs
 +++ b/src/tools/compiletest/src/header/tests.rs
-@@ -341,6 +341,7 @@ fn ignore_target() {
+@@ -334,6 +334,7 @@ fn ignore_target() {
      assert!(check_ignore(&config, "//@ ignore-x86_64-unknown-linux-gnu"));
      assert!(check_ignore(&config, "//@ ignore-x86_64"));
      assert!(check_ignore(&config, "//@ ignore-linux"));
@@ -75,17 +74,17 @@ index 5b30c06..9ef0d5a 100644
      let ok = PathBuf::from("ok");
      if env::var("YOU_ARE_A_LINKER").is_ok() {
 diff --git a/tests/ui/associated-consts/issue-93775.rs b/tests/ui/associated-consts/issue-93775.rs
-index 88e88b5..0981abc 100644
+index a9b8d10..ac41a60 100644
 --- a/tests/ui/associated-consts/issue-93775.rs
 +++ b/tests/ui/associated-consts/issue-93775.rs
-@@ -4,6 +4,7 @@
- 
+@@ -7,6 +7,7 @@
  //@ build-pass
- // ignore-tidy-linelength
+ //@ revisions: current next
+ //@ ignore-compare-mode-next-solver (explicit revisions)
 +//@ ignore-hurd
+ //@[next] compile-flags: -Znext-solver
  
- // Regression for #93775, needs build-pass to test it.
- 
+ #![recursion_limit = "1001"]
 diff --git a/tests/ui/issues/issue-74564-if-expr-stack-overflow.rs b/tests/ui/issues/issue-74564-if-expr-stack-overflow.rs
 index c0ffed2..1e97353 100644
 --- a/tests/ui/issues/issue-74564-if-expr-stack-overflow.rs

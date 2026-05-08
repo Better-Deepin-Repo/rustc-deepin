@@ -11,12 +11,12 @@
 // Internal Compiler Error strangely, but it doesn't even go through normal diagnostic infra. Very
 // strange.
 
-#![feature(anonymous_pipe)]
-
 use std::io::Read;
 use std::process::{Command, Stdio};
 
-use run_make_support::env_var;
+// FIXME(#137532): replace `os_pipe` dependency with std `anonymous_pipe` once that stabilizes and
+// reaches beta.
+use run_make_support::{bare_rustc, rustdoc, os_pipe};
 
 #[derive(Debug, PartialEq)]
 enum Binary {
@@ -25,7 +25,7 @@ enum Binary {
 }
 
 fn check_broken_pipe_handled_gracefully(bin: Binary, mut cmd: Command) {
-    let (reader, writer) = std::io::pipe().unwrap();
+    let (reader, writer) = os_pipe::pipe().unwrap();
     drop(reader); // close read-end
     cmd.stdout(writer).stderr(Stdio::piped());
 
@@ -69,11 +69,13 @@ fn check_broken_pipe_handled_gracefully(bin: Binary, mut cmd: Command) {
 }
 
 fn main() {
-    let mut rustc = Command::new(env_var("RUSTC"));
+    let mut rustc = bare_rustc();
     rustc.arg("--print=sysroot");
+    let rustc = rustc.into_raw_command();
     check_broken_pipe_handled_gracefully(Binary::Rustc, rustc);
 
-    let mut rustdoc = Command::new(env_var("RUSTDOC"));
+    let mut rustdoc = rustdoc();
     rustdoc.arg("--version");
+    let rustdoc = rustdoc.into_raw_command();
     check_broken_pipe_handled_gracefully(Binary::Rustdoc, rustdoc);
 }

@@ -102,6 +102,9 @@ fn test_set_file_times_sanity_check() {
 
 #[test]
 fn test_submodule_path_of() {
+    // Debian: doesn't work in non-git context
+    return;
+
     let config = Config::parse_inner(Flags::parse(&["build".into(), "--dry-run".into()]), |&_| {
         Ok(Default::default())
     });

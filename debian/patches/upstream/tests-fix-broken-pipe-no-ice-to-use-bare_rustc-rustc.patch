@@ -1,0 +1,42 @@
+From: Jieyou Xu <jieyouxu@outlook.com>
+Date: Fri, 9 May 2025 19:52:36 +0800
+Subject: tests: fix `broken-pipe-no-ice` to use `bare_rustc`/`rustc`
+
+Where host compiler runtime libs are properly configured, instead of raw
+`RUSTC`/`RUSTDOC` commands.
+
+Co-authored-by: Jesus Checa Hidalgo <jchecahi@redhat.com>
+(cherry picked from commit 84ed40dc38cff2a25f0d6e6be1f11b3c1a12133d)
+---
+ tests/run-make/broken-pipe-no-ice/rmake.rs | 8 +++++---
+ 1 file changed, 5 insertions(+), 3 deletions(-)
+
+diff --git a/tests/run-make/broken-pipe-no-ice/rmake.rs b/tests/run-make/broken-pipe-no-ice/rmake.rs
+index 3e54b57..6a3cd00 100644
+--- a/tests/run-make/broken-pipe-no-ice/rmake.rs
++++ b/tests/run-make/broken-pipe-no-ice/rmake.rs
+@@ -16,7 +16,7 @@ use std::process::{Command, Stdio};
+ 
+ // FIXME(#137532): replace `os_pipe` dependency with std `anonymous_pipe` once that stabilizes and
+ // reaches beta.
+-use run_make_support::{env_var, os_pipe};
++use run_make_support::{bare_rustc, rustdoc, os_pipe};
+ 
+ #[derive(Debug, PartialEq)]
+ enum Binary {
+@@ -69,11 +69,13 @@ fn check_broken_pipe_handled_gracefully(bin: Binary, mut cmd: Command) {
+ }
+ 
+ fn main() {
+-    let mut rustc = Command::new(env_var("RUSTC"));
++    let mut rustc = bare_rustc();
+     rustc.arg("--print=sysroot");
++    let rustc = rustc.into_raw_command();
+     check_broken_pipe_handled_gracefully(Binary::Rustc, rustc);
+ 
+-    let mut rustdoc = Command::new(env_var("RUSTDOC"));
++    let mut rustdoc = rustdoc();
+     rustdoc.arg("--version");
++    let rustdoc = rustdoc.into_raw_command();
+     check_broken_pipe_handled_gracefully(Binary::Rustdoc, rustdoc);
+ }
