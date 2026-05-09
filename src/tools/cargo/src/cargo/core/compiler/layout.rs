@@ -128,6 +128,7 @@ impl Layout {
         target: Option<CompileTarget>,
         dest: &str,
         must_take_artifact_dir_lock: bool,
+        must_take_build_dir_lock_exclusively: bool,
     ) -> CargoResult<Layout> {
         let is_new_layout = ws.gctx().cli_unstable().build_dir_new_layout;
         let mut root = ws.target_dir();
@@ -160,11 +161,20 @@ impl Layout {
         {
             None
         } else {
-            Some(build_dest.open_rw_exclusive_create(
-                ".cargo-lock",
-                ws.gctx(),
-                "build directory",
-            )?)
+            if ws.gctx().cli_unstable().fine_grain_locking && !must_take_build_dir_lock_exclusively
+            {
+                Some(build_dest.open_ro_shared_create(
+                    ".cargo-lock",
+                    ws.gctx(),
+                    "build directory",
+                )?)
+            } else {
+                Some(build_dest.open_rw_exclusive_create(
+                    ".cargo-lock",
+                    ws.gctx(),
+                    "build directory",
+                )?)
+            }
         };
         let build_root = build_root.into_path_unlocked();
         let build_dest = build_dest.as_path_unlocked();
@@ -304,9 +314,9 @@ impl BuildDirLayout {
         if !self.is_new_layout {
             paths::create_dir_all(&self.deps)?;
             paths::create_dir_all(&self.fingerprint)?;
+            paths::create_dir_all(&self.examples)?;
         }
         paths::create_dir_all(&self.incremental)?;
-        paths::create_dir_all(&self.examples)?;
         paths::create_dir_all(&self.build)?;
 
         Ok(())
@@ -359,7 +369,7 @@ impl BuildDirLayout {
     /// Fetch the build script path.
     pub fn build_script(&self, pkg_dir: &str) -> PathBuf {
         if self.is_new_layout {
-            self.build_unit(pkg_dir).join("build-script")
+            self.deps(pkg_dir)
         } else {
             self.build().join(pkg_dir)
         }
@@ -367,7 +377,7 @@ impl BuildDirLayout {
     /// Fetch the build script execution path.
     pub fn build_script_execution(&self, pkg_dir: &str) -> PathBuf {
         if self.is_new_layout {
-            self.build_unit(pkg_dir).join("build-script-execution")
+            self.build_unit(pkg_dir).join("build-script")
         } else {
             self.build().join(pkg_dir)
         }

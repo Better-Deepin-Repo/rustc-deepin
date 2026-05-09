@@ -2,8 +2,11 @@
 
 use crate::core::PackageSet;
 use crate::core::Workspace;
+use crate::core::compiler::BuildConfig;
+use crate::core::compiler::CompileKind;
+use crate::core::compiler::Unit;
+use crate::core::compiler::UnitIndex;
 use crate::core::compiler::unit_graph::UnitGraph;
-use crate::core::compiler::{BuildConfig, CompileKind, Unit};
 use crate::core::profiles::Profiles;
 use crate::util::Rustc;
 use crate::util::context::GlobalContext;
@@ -78,6 +81,9 @@ pub struct BuildContext<'a, 'gctx> {
     /// The dependency graph of units to compile.
     pub unit_graph: UnitGraph,
 
+    /// A map from unit to index.
+    pub unit_to_index: HashMap<Unit, UnitIndex>,
+
     /// Reverse-dependencies of documented units, used by the `rustdoc --scrape-examples` flag.
     pub scrape_units: Vec<Unit>,
 
@@ -96,6 +102,7 @@ impl<'a, 'gctx> BuildContext<'a, 'gctx> {
         target_data: RustcTargetData<'gctx>,
         roots: Vec<Unit>,
         unit_graph: UnitGraph,
+        unit_to_index: HashMap<Unit, UnitIndex>,
         scrape_units: Vec<Unit>,
     ) -> CargoResult<BuildContext<'a, 'gctx>> {
         let all_kinds = unit_graph
@@ -116,6 +123,7 @@ impl<'a, 'gctx> BuildContext<'a, 'gctx> {
             target_data,
             roots,
             unit_graph,
+            unit_to_index,
             scrape_units,
             all_kinds,
         })

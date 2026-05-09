@@ -554,10 +554,12 @@ It is written as `..=` followed by the upper bound.
 
 For example, `..=10` will match any integer less than or equal to 10, such as 10, 1, 0, and for signed integer types, all negative values.
 
-r[patterns.range.constraint-less-than]
-The lower bound cannot be greater than the upper bound.
-That is, in `a..=b`, a &le; b must be the case.
-For example, it is an error to have a range pattern `10..=0`.
+r[patterns.range.constraint-nonempty]
+A range pattern must be nonempty; it must span at least one value in the set of possible values for its type. In other words:
+
+* In `a..=b`, a &le; b must be the case. For example, it is an error to have a range pattern `10..=0`, but `10..=10` is allowed.
+* In `a..b`, a &lt; b must be the case. For example, it is an error to have a range pattern `10..0` or `10..10`.
+* In `..b`, b must not be the smallest value of its type. For example, it is an error to have a range pattern `..-128i8` or `..f64::NEG_INFINITY`.
 
 r[patterns.range.bound]
 A bound is written as one of:
@@ -1057,7 +1059,7 @@ r[patterns.or]
 
 _Or-patterns_ are patterns that match on one of two or more sub-patterns (for example `A | B | C`).
 They can nest arbitrarily.
-Syntactically, or-patterns are allowed in any of the places where other patterns are allowed (represented by the [Pattern] production), with the exceptions of `let`-bindings and function and closure arguments (represented by the [PatternNoTopAlt] production).
+Syntactically, or-patterns are allowed in any of the places where other patterns are allowed (represented by the [Pattern] production), with the exceptions of `let`-bindings and function and closure parameters (represented by the [PatternNoTopAlt] production).
 
 r[patterns.constraints]
 ### Static semantics

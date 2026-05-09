@@ -104,10 +104,10 @@ index 6c5a174..947bbb4 100644
 -    "Win32_System_Threading",
 -]
 diff --git a/compiler/rustc_session/Cargo.toml b/compiler/rustc_session/Cargo.toml
-index 0516982..e40594e 100644
+index aebac38..26edafd 100644
 --- a/compiler/rustc_session/Cargo.toml
 +++ b/compiler/rustc_session/Cargo.toml
-@@ -30,10 +30,3 @@ tracing = "0.1"
+@@ -29,10 +29,3 @@ tracing = "0.1"
  # tidy-alphabetical-start
  libc = "0.2"
  # tidy-alphabetical-end
@@ -147,7 +147,7 @@ index 8d6d681..69b0409 100644
  default = ['backtrace']
  backtrace = ['addr2line', 'miniz_oxide', 'object', 'ruzstd']
 diff --git a/src/bootstrap/Cargo.toml b/src/bootstrap/Cargo.toml
-index e1725db..25327ea 100644
+index e66c057..7bcc15d 100644
 --- a/src/bootstrap/Cargo.toml
 +++ b/src/bootstrap/Cargo.toml
 @@ -66,21 +66,6 @@ tracing-chrome = { version = "0.7", optional = true }
@@ -173,7 +173,7 @@ index e1725db..25327ea 100644
  pretty_assertions = "1.4"
  tempfile = "3.15.0"
 diff --git a/src/tools/cargo/Cargo.toml b/src/tools/cargo/Cargo.toml
-index cee0a1c..b4c1e91 100644
+index 66d9985..d4cfde1 100644
 --- a/src/tools/cargo/Cargo.toml
 +++ b/src/tools/cargo/Cargo.toml
 @@ -2,7 +2,9 @@
@@ -190,13 +190,13 @@ index cee0a1c..b4c1e91 100644
 @@ -28,8 +30,6 @@ build-rs = { version = "0.3.1", path = "crates/build-rs" }
  cargo = { path = "" }
  cargo-credential = { version = "0.4.2", path = "credential/cargo-credential" }
- cargo-credential-libsecret = { version = "0.5.4", path = "credential/cargo-credential-libsecret" }
--cargo-credential-macos-keychain = { version = "0.4.19", path = "credential/cargo-credential-macos-keychain" }
--cargo-credential-wincred = { version = "0.4.19", path = "credential/cargo-credential-wincred" }
+ cargo-credential-libsecret = { version = "0.5.5", path = "credential/cargo-credential-libsecret" }
+-cargo-credential-macos-keychain = { version = "0.4.20", path = "credential/cargo-credential-macos-keychain" }
+-cargo-credential-wincred = { version = "0.4.20", path = "credential/cargo-credential-wincred" }
  cargo-platform = { path = "crates/cargo-platform", version = "0.3.0" }
- cargo-test-macro = { version = "0.4.8", path = "crates/cargo-test-macro" }
- cargo-test-support = { version = "0.9.1", path = "crates/cargo-test-support" }
-@@ -119,7 +119,6 @@ unicode-width = "0.2.2"
+ cargo-test-macro = { version = "0.4.9", path = "crates/cargo-test-macro" }
+ cargo-test-support = { version = "0.11.0", path = "crates/cargo-test-support" }
+@@ -118,7 +118,6 @@ unicode-width = "0.2.2"
  url = "2.5.7"
  varisat = "0.2.2"
  walkdir = "2.5.0"
@@ -204,7 +204,7 @@ index cee0a1c..b4c1e91 100644
  winnow = "0.7.14"
  
  [workspace.lints.rust]
-@@ -162,6 +161,7 @@ anyhow.workspace = true
+@@ -161,6 +160,7 @@ anyhow.workspace = true
  base64.workspace = true
  blake3.workspace = true
  cargo-credential.workspace = true
@@ -212,7 +212,7 @@ index cee0a1c..b4c1e91 100644
  cargo-platform.workspace = true
  cargo-util-schemas.workspace = true
  cargo-util.workspace = true
-@@ -233,27 +233,9 @@ libc.workspace = true
+@@ -232,27 +232,9 @@ libc.workspace = true
  [target.'cfg(target_os = "linux")'.dependencies]
  cargo-credential-libsecret.workspace = true
  
@@ -241,7 +241,7 @@ index cee0a1c..b4c1e91 100644
  annotate-snippets = { workspace = true, features = ["testing-colors"] }
  cargo-test-support.workspace = true
 diff --git a/src/tools/cargo/crates/cargo-test-support/Cargo.toml b/src/tools/cargo/crates/cargo-test-support/Cargo.toml
-index 89d1391..0e13345 100644
+index 19f04dd..e0a2a2e 100644
 --- a/src/tools/cargo/crates/cargo-test-support/Cargo.toml
 +++ b/src/tools/cargo/crates/cargo-test-support/Cargo.toml
 @@ -31,8 +31,5 @@ toml = { workspace = true, features = ["display", "serde"] }
@@ -254,7 +254,7 @@ index 89d1391..0e13345 100644
  [lints]
  workspace = true
 diff --git a/src/tools/cargo/crates/cargo-util/Cargo.toml b/src/tools/cargo/crates/cargo-util/Cargo.toml
-index a22ff6c..63f420a 100644
+index 581cb19..47af2f8 100644
 --- a/src/tools/cargo/crates/cargo-util/Cargo.toml
 +++ b/src/tools/cargo/crates/cargo-util/Cargo.toml
 @@ -21,15 +21,8 @@ tempfile.workspace = true
@@ -351,7 +351,7 @@ index f60282f..67fe97e 100644
  cpu_profiler = []
  
 diff --git a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-index f6debb6..c1fbf2f 100644
+index e15bc30..9760131 100644
 --- a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
 @@ -76,12 +76,6 @@ paths.workspace = true

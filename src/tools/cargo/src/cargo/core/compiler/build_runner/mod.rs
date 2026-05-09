@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::core::PackageId;
 use crate::core::compiler::compilation::{self, UnitOutput};
+use crate::core::compiler::locking::LockManager;
 use crate::core::compiler::{self, Unit, UserIntent, artifact};
 use crate::util::cache_lock::CacheLockMode;
 use crate::util::errors::CargoResult;
@@ -87,6 +88,9 @@ pub struct BuildRunner<'a, 'gctx> {
     /// because the target has a type error. This is in an Arc<Mutex<..>>
     /// because it is continuously updated as the job progresses.
     pub failed_scrape_units: Arc<Mutex<HashSet<UnitHash>>>,
+
+    /// Manages locks for build units when fine grain locking is enabled.
+    pub lock_manager: Arc<LockManager>,
 }
 
 impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
@@ -126,6 +130,7 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
             lto: HashMap::new(),
             metadata_for_doc_units: HashMap::new(),
             failed_scrape_units: Arc::new(Mutex::new(HashSet::new())),
+            lock_manager: Arc::new(LockManager::new()),
         })
     }
 
@@ -234,6 +239,7 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
             if unit.mode.is_doc_test() {
                 let mut unstable_opts = false;
                 let mut args = compiler::extern_args(&self, unit, &mut unstable_opts)?;
+                args.extend(compiler::lib_search_paths(&self, unit)?);
                 args.extend(compiler::lto_args(&self, unit));
                 args.extend(compiler::features_args(unit));
                 args.extend(compiler::check_cfg_args(unit));
@@ -278,7 +284,7 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
                     unstable_opts,
                     linker: self.compilation.target_linker(unit.kind).clone(),
                     script_metas,
-                    env: artifact::get_env(&self, self.unit_deps(unit))?,
+                    env: artifact::get_env(&self, unit, self.unit_deps(unit))?,
                 });
             }
 
@@ -315,17 +321,17 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
             if unit.mode == CompileMode::Test {
                 self.compilation
                     .tests
-                    .push(self.unit_output(unit, &output.path));
+                    .push(self.unit_output(unit, &output.path)?);
             } else if unit.target.is_executable() {
                 self.compilation
                     .binaries
-                    .push(self.unit_output(unit, bindst));
+                    .push(self.unit_output(unit, bindst)?);
             } else if unit.target.is_cdylib()
                 && !self.compilation.cdylibs.iter().any(|uo| uo.unit == *unit)
             {
                 self.compilation
                     .cdylibs
-                    .push(self.unit_output(unit, bindst));
+                    .push(self.unit_output(unit, bindst)?);
             }
         }
         Ok(())
@@ -408,7 +414,7 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
                 // Generally cargo check does not need to take the artifact-dir lock but there is
                 // one exception: If check has `--timings` we still need to lock artifact-dir since
                 // we will output the report files.
-                !self.bcx.build_config.timing_outputs.is_empty()
+                self.bcx.build_config.timing_report
             }
             UserIntent::Build
             | UserIntent::Test
@@ -416,7 +422,8 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
             | UserIntent::Doctest
             | UserIntent::Bench => true,
         };
-        let host_layout = Layout::new(self.bcx.ws, None, &dest, must_take_artifact_dir_lock)?;
+        let host_layout =
+            Layout::new(self.bcx.ws, None, &dest, must_take_artifact_dir_lock, false)?;
         let mut targets = HashMap::new();
         for kind in self.bcx.all_kinds.iter() {
             if let CompileKind::Target(target) = *kind {
@@ -425,6 +432,7 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
                     Some(target),
                     &dest,
                     must_take_artifact_dir_lock,
+                    false,
                 )?;
                 targets.insert(target, layout);
             }
@@ -553,13 +561,15 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
 
     /// Returns a [`UnitOutput`] which represents some information about the
     /// output of a unit.
-    pub fn unit_output(&self, unit: &Unit, path: &Path) -> UnitOutput {
+    pub fn unit_output(&self, unit: &Unit, path: &Path) -> CargoResult<UnitOutput> {
         let script_metas = self.find_build_script_metadatas(unit);
-        UnitOutput {
+        let env = artifact::get_env(&self, unit, self.unit_deps(unit))?;
+        Ok(UnitOutput {
             unit: unit.clone(),
             path: path.to_path_buf(),
             script_metas,
-        }
+            env,
+        })
     }
 
     /// Check if any output file name collision happens.

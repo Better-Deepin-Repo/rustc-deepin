@@ -11,6 +11,8 @@
 //@ ignore-visionos no 'head'
 //@ ignore-backends: gcc
 //@ normalize-stderr: ".rs:\d+:\d+" -> ".rs:LL:CC"
+//@ normalize-stderr: "/rustc(?:-dev)?/[a-z0-9.]+/" -> ""
+//@ normalize-stderr: "/usr/src/rustc-(?:[^/]*)?/" -> ""
 //@ compile-flags: -Zon-broken-pipe=error
 
 // Test what the error message looks like when `println!()` panics because of
@@ -40,8 +42,11 @@ fn main() {
         .stdout(Stdio::piped())
         .spawn()
         .unwrap();
-    let mut consumer =
-        Command::new("head").arg("-n1").stdin(producer.stdout.take().unwrap()).spawn().unwrap();
+    let mut consumer = Command::new("head")
+        .arg("-n1")
+        .stdin(producer.stdout.take().unwrap())
+        .spawn()
+        .unwrap();
     consumer.wait().unwrap();
     producer.wait().unwrap();
 }

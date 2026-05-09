@@ -12,10 +12,10 @@ The fix is as described in the upstream issue.
  2 files changed, 3 insertions(+), 3 deletions(-)
 
 diff --git a/compiler/rustc_error_codes/src/error_codes/E0778.md b/compiler/rustc_error_codes/src/error_codes/E0778.md
-index 467362d..d5688c2 100644
+index 4bdf854..af57fe8 100644
 --- a/compiler/rustc_error_codes/src/error_codes/E0778.md
 +++ b/compiler/rustc_error_codes/src/error_codes/E0778.md
-@@ -16,7 +16,7 @@ specified:
+@@ -17,7 +17,7 @@ specified:
  ```
  #![feature(isa_attribute)]
  
@@ -24,7 +24,7 @@ index 467362d..d5688c2 100644
  fn something() {}
  ```
  
-@@ -25,7 +25,7 @@ or:
+@@ -26,7 +26,7 @@ or:
  ```
  #![feature(isa_attribute)]
  
@@ -34,10 +34,10 @@ index 467362d..d5688c2 100644
  ```
  
 diff --git a/compiler/rustc_error_codes/src/error_codes/E0779.md b/compiler/rustc_error_codes/src/error_codes/E0779.md
-index 146e20c..9d23322 100644
+index 0369313..46969ef 100644
 --- a/compiler/rustc_error_codes/src/error_codes/E0779.md
 +++ b/compiler/rustc_error_codes/src/error_codes/E0779.md
-@@ -21,7 +21,7 @@ error. Example:
+@@ -22,7 +22,7 @@ error. Example:
  ```
  #![feature(isa_attribute)]
  

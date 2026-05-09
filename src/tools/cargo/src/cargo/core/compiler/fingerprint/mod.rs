@@ -64,30 +64,30 @@
 //! recompile, but it is desired to reuse the same filenames. A comparison
 //! of what is tracked:
 //!
-//! Value                                      | Fingerprint | `Metadata::unit_id` | `Metadata::c_metadata` | `Metadata::c_extra_filename`
-//! -------------------------------------------|-------------|---------------------|------------------------|----------
-//! rustc                                      | ✓           | ✓                   | ✓                      | ✓
-//! [`Profile`]                                | ✓           | ✓                   | ✓                      | ✓
-//! `cargo rustc` extra args                   | ✓           | ✓[^7]               |                        | ✓[^7]
-//! [`CompileMode`]                            | ✓           | ✓                   | ✓                      | ✓
-//! Target Name                                | ✓           | ✓                   | ✓                      | ✓
-//! `TargetKind` (bin/lib/etc.)                | ✓           | ✓                   | ✓                      | ✓
-//! Enabled Features                           | ✓           | ✓                   | ✓                      | ✓
-//! Declared Features                          | ✓           |                     |                        |
-//! Immediate dependency’s hashes              | ✓[^1]       | ✓                   | ✓                      | ✓
-//! [`CompileKind`] (host/target)              | ✓           | ✓                   | ✓                      | ✓
-//! `__CARGO_DEFAULT_LIB_METADATA`[^4]         |             | ✓                   | ✓                      | ✓
-//! `package_id`                               |             | ✓                   | ✓                      | ✓
-//! Target src path relative to ws             | ✓           |                     |                        |
-//! Target flags (test/bench/for_host/edition) | ✓           |                     |                        |
-//! -C incremental=… flag                      | ✓           |                     |                        |
-//! mtime of sources                           | ✓[^3]       |                     |                        |
-//! RUSTFLAGS/RUSTDOCFLAGS                     | ✓           | ✓[^7]               |                        | ✓[^7]
-//! [`Lto`] flags                              | ✓           | ✓                   | ✓                      | ✓
-//! config settings[^5]                        | ✓           |                     |                        |
-//! `is_std`                                   |             | ✓                   | ✓                      | ✓
-//! `[lints]` table[^6]                        | ✓           |                     |                        |
-//! `[lints.rust.unexpected_cfgs.check-cfg]`   | ✓           |                     |                        |
+//! Value                                      | Fingerprint | `Metadata::unit_id` [^8] | `Metadata::c_metadata`
+//! -------------------------------------------|-------------|--------------------------|-----------------------
+//! rustc                                      | ✓           | ✓                        | ✓
+//! [`Profile`]                                | ✓           | ✓                        | ✓
+//! `cargo rustc` extra args                   | ✓           | ✓[^7]                    |
+//! [`CompileMode`]                            | ✓           | ✓                        | ✓
+//! Target Name                                | ✓           | ✓                        | ✓
+//! `TargetKind` (bin/lib/etc.)                | ✓           | ✓                        | ✓
+//! Enabled Features                           | ✓           | ✓                        | ✓
+//! Declared Features                          | ✓           |                          |
+//! Immediate dependency’s hashes              | ✓[^1]       | ✓                        | ✓
+//! [`CompileKind`] (host/target)              | ✓           | ✓                        | ✓
+//! `__CARGO_DEFAULT_LIB_METADATA`[^4]         |             | ✓                        | ✓
+//! `package_id`                               |             | ✓                        | ✓
+//! Target src path relative to ws             | ✓           |                          |
+//! Target flags (test/bench/for_host/edition) | ✓           |                          |
+//! -C incremental=… flag                      | ✓           |                          |
+//! mtime of sources                           | ✓[^3]       |                          |
+//! RUSTFLAGS/RUSTDOCFLAGS                     | ✓           | ✓[^7]                    |
+//! [`Lto`] flags                              | ✓           | ✓                        | ✓
+//! config settings[^5]                        | ✓           |                          |
+//! `is_std`                                   |             | ✓                        | ✓
+//! `[lints]` table[^6]                        | ✓           |                          |
+//! `[lints.rust.unexpected_cfgs.check-cfg]`   | ✓           |                          |
 //!
 //! [^1]: Bin dependencies are not included.
 //!
@@ -103,6 +103,8 @@
 //!
 //! [^7]: extra-flags and RUSTFLAGS are conditionally excluded when `--remap-path-prefix` is
 //!       present to avoid breaking build reproducibility while we wait for trim-paths
+//!
+//! [^8]: including `-Cextra-filename`
 //!
 //! When deciding what should go in the Metadata vs the Fingerprint, consider
 //! that some files (like dylibs) do not have a hash in their filename. Thus,
@@ -402,8 +404,14 @@ use crate::util::log_message::LogMessage;
 use crate::util::{StableHasher, internal, path_args};
 use crate::{CARGO_ENV, GlobalContext};
 
+use super::BuildContext;
+use super::BuildRunner;
+use super::FileFlavor;
+use super::Job;
+use super::Unit;
+use super::UnitIndex;
+use super::Work;
 use super::custom_build::BuildDeps;
-use super::{BuildContext, BuildRunner, FileFlavor, Job, Unit, Work};
 
 pub use self::dep_info::Checksum;
 pub use self::dep_info::parse_dep_info;
@@ -411,6 +419,17 @@ pub use self::dep_info::parse_rustc_dep_info;
 pub use self::dep_info::translate_dep_info;
 pub use self::dirty_reason::DirtyReason;
 pub use self::rustdoc::RustdocFingerprint;
+
+/// Result of comparing fingerprints between the current and previous builds.
+enum FingerprintComparison {
+    /// The unit does not need rebuilding.
+    Fresh,
+    /// The unit needs rebuilding.
+    Dirty {
+        /// The reason why the unit is dirty.
+        reason: DirtyReason,
+    },
+}
 
 /// Determines if a [`Unit`] is up-to-date, and if not prepares necessary work to
 /// update the persisted fingerprint.
@@ -445,23 +464,33 @@ pub fn prepare_target(
     // information about failed comparisons to aid in debugging.
     let fingerprint = calculate(build_runner, unit)?;
     let mtime_on_use = build_runner.bcx.gctx.cli_unstable().mtime_on_use;
-    let dirty_reason = compare_old_fingerprint(unit, &loc, &*fingerprint, mtime_on_use, force);
+    let dirty_reason = match compare_old_fingerprint(unit, &loc, &*fingerprint, mtime_on_use, force)
+    {
+        FingerprintComparison::Fresh => None,
+        FingerprintComparison::Dirty { reason } => Some(reason),
+    };
+
+    if let Some(logger) = bcx.logger {
+        let index = bcx.unit_to_index[unit];
+        let mut cause = None;
+        let status = match dirty_reason.as_ref() {
+            Some(reason) if reason.is_fresh_build() => util::log_message::FingerprintStatus::New,
+            Some(reason) => {
+                cause = Some(reason.clone());
+                util::log_message::FingerprintStatus::Dirty
+            }
+            None => util::log_message::FingerprintStatus::Fresh,
+        };
+        logger.log(LogMessage::UnitFingerprint {
+            index,
+            status,
+            cause,
+        });
+    }
 
     let Some(dirty_reason) = dirty_reason else {
         return Ok(Job::new_fresh());
     };
-
-    if let Some(logger) = bcx.logger {
-        // Dont log FreshBuild as it is noisy.
-        if !dirty_reason.is_fresh_build() {
-            logger.log(LogMessage::Rebuild {
-                package_id: unit.pkg.package_id().to_spec(),
-                target: (&unit.target).into(),
-                mode: unit.mode,
-                cause: dirty_reason.clone(),
-            });
-        }
-    }
 
     // We're going to rebuild, so ensure the source of the crate passes all
     // verification checks before we build it.
@@ -634,6 +663,10 @@ pub struct Fingerprint {
     /// The rustc target. This is only relevant for `.json` files, otherwise
     /// the metadata hash segregates the units.
     compile_kind: u64,
+    /// Unit index for this fingerprint, used for tracing cascading rebuilds.
+    /// Not persisted to disk as indices can change between builds.
+    #[serde(skip)]
+    index: UnitIndex,
     /// Description of whether the filesystem status for this unit is up to date
     /// or should be considered stale.
     #[serde(skip)]
@@ -647,7 +680,7 @@ pub struct Fingerprint {
 }
 
 /// Indication of the status on the filesystem for a particular unit.
-#[derive(Clone, Default, Debug, Serialize)]
+#[derive(Clone, Default, Debug, Serialize, Deserialize)]
 #[serde(tag = "fs_status", rename_all = "kebab-case")]
 pub enum FsStatus {
     /// This unit is to be considered stale, even if hash information all
@@ -662,15 +695,15 @@ pub enum FsStatus {
 
     /// A dependency was stale.
     StaleDependency {
-        name: InternedString,
-        #[serde(serialize_with = "serialize_file_time")]
+        unit: UnitIndex,
+        #[serde(with = "serde_file_time")]
         dep_mtime: FileTime,
-        #[serde(serialize_with = "serialize_file_time")]
+        #[serde(with = "serde_file_time")]
         max_mtime: FileTime,
     },
 
-    /// A dependency was stale.
-    StaleDepFingerprint { name: InternedString },
+    /// A dependency's fingerprint was stale.
+    StaleDepFingerprint { unit: UnitIndex },
 
     /// This unit is up-to-date. All outputs and their corresponding mtime are
     /// listed in the payload here for other dependencies to compare against.
@@ -690,14 +723,31 @@ impl FsStatus {
     }
 }
 
-/// Serialize FileTime as milliseconds with nano.
-fn serialize_file_time<S>(ft: &FileTime, s: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    let secs_as_millis = ft.unix_seconds() as f64 * 1000.0;
-    let nanos_as_millis = ft.nanoseconds() as f64 / 1_000_000.0;
-    (secs_as_millis + nanos_as_millis).serialize(s)
+mod serde_file_time {
+    use filetime::FileTime;
+    use serde::Deserialize;
+    use serde::Serialize;
+
+    /// Serialize FileTime as milliseconds with nano.
+    pub(super) fn serialize<S>(ft: &FileTime, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let secs_as_millis = ft.unix_seconds() as f64 * 1000.0;
+        let nanos_as_millis = ft.nanoseconds() as f64 / 1_000_000.0;
+        (secs_as_millis + nanos_as_millis).serialize(s)
+    }
+
+    /// Deserialize FileTime from milliseconds with nano.
+    pub(super) fn deserialize<'de, D>(d: D) -> Result<FileTime, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let millis = f64::deserialize(d)?;
+        let secs = (millis / 1000.0) as i64;
+        let nanos = ((millis % 1000.0) * 1_000_000.0) as u32;
+        Ok(FileTime::from_unix_time(secs, nanos))
+    }
 }
 
 impl Serialize for DepFingerprint {
@@ -800,7 +850,7 @@ enum LocalFingerprint {
 }
 
 /// See [`FsStatus::StaleItem`].
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "stale_item", rename_all = "kebab-case")]
 pub enum StaleItem {
     MissingFile {
@@ -819,10 +869,10 @@ pub enum StaleItem {
     },
     ChangedFile {
         reference: PathBuf,
-        #[serde(serialize_with = "serialize_file_time")]
+        #[serde(with = "serde_file_time")]
         reference_mtime: FileTime,
         stale: PathBuf,
-        #[serde(serialize_with = "serialize_file_time")]
+        #[serde(with = "serde_file_time")]
         stale_mtime: FileTime,
     },
     ChangedChecksum {
@@ -988,6 +1038,7 @@ impl Fingerprint {
             rustflags: Vec::new(),
             config: 0,
             compile_kind: 0,
+            index: UnitIndex::default(),
             fs_status: FsStatus::Stale,
             outputs: Vec::new(),
         }
@@ -1138,8 +1189,8 @@ impl Fingerprint {
                 }
                 (a, b) => {
                     return DirtyReason::LocalFingerprintTypeChanged {
-                        old: b.kind(),
-                        new: a.kind(),
+                        old: b.kind().to_owned(),
+                        new: a.kind().to_owned(),
                     };
                 }
             }
@@ -1161,10 +1212,7 @@ impl Fingerprint {
 
             if a.fingerprint.hash_u64() != b.fingerprint.hash_u64() {
                 return DirtyReason::UnitDependencyInfoChanged {
-                    new_name: a.name,
-                    new_fingerprint: a.fingerprint.hash_u64(),
-                    old_name: b.name,
-                    old_fingerprint: b.fingerprint.hash_u64(),
+                    unit: a.fingerprint.index,
                 };
             }
         }
@@ -1240,7 +1288,9 @@ impl Fingerprint {
                 | FsStatus::StaleItem(_)
                 | FsStatus::StaleDependency { .. }
                 | FsStatus::StaleDepFingerprint { .. } => {
-                    self.fs_status = FsStatus::StaleDepFingerprint { name: dep.name };
+                    self.fs_status = FsStatus::StaleDepFingerprint {
+                        unit: dep.fingerprint.index,
+                    };
                     return Ok(());
                 }
             };
@@ -1282,7 +1332,7 @@ impl Fingerprint {
                 );
 
                 self.fs_status = FsStatus::StaleDependency {
-                    name: dep.name,
+                    unit: dep.fingerprint.index,
                     dep_mtime: *dep_mtime,
                     max_mtime: *max_mtime,
                 };
@@ -1596,6 +1646,15 @@ fn calculate_normal(
     if let Some(allow_features) = &build_runner.bcx.gctx.cli_unstable().allow_features {
         allow_features.hash(&mut config);
     }
+    // -Zno-embed-metadata changes how all units are compiled, and it also changes how we tell
+    // rustc to link to deps using `--extern`. If it changes, we should rebuild everything.
+    build_runner
+        .bcx
+        .gctx
+        .cli_unstable()
+        .no_embed_metadata
+        .hash(&mut config);
+
     let compile_kind = unit.kind.fingerprint_hash();
     let mut declared_features = unit.pkg.summary().features().keys().collect::<Vec<_>>();
     declared_features.sort(); // to avoid useless rebuild if the user orders it's features
@@ -1614,6 +1673,7 @@ fn calculate_normal(
         memoized_hash: Mutex::new(None),
         config: Hasher::finish(&config),
         compile_kind,
+        index: build_runner.bcx.unit_to_index[unit],
         rustflags: extra_flags,
         fs_status: FsStatus::Stale,
         outputs,
@@ -1680,6 +1740,7 @@ See https://doc.rust-lang.org/cargo/reference/build-scripts.html#rerun-if-change
         deps,
         outputs: if overridden { Vec::new() } else { vec![output] },
         rustflags,
+        index: build_runner.bcx.unit_to_index[unit],
 
         // Most of the other info is blank here as we don't really include it
         // in the execution of the build script, but... this may be a latent
@@ -1916,7 +1977,7 @@ fn compare_old_fingerprint(
     new_fingerprint: &Fingerprint,
     mtime_on_use: bool,
     forced: bool,
-) -> Option<DirtyReason> {
+) -> FingerprintComparison {
     if mtime_on_use {
         // update the mtime so other cleaners know we used it
         let t = FileTime::from_system_time(SystemTime::now());
@@ -1927,8 +1988,8 @@ fn compare_old_fingerprint(
     let compare = _compare_old_fingerprint(old_hash_path, new_fingerprint);
 
     match compare.as_ref() {
-        Ok(None) => {}
-        Ok(Some(reason)) => {
+        Ok(FingerprintComparison::Fresh) => {}
+        Ok(FingerprintComparison::Dirty { reason }) => {
             info!(
                 "fingerprint dirty for {}/{:?}/{:?}",
                 unit.pkg, unit.mode, unit.target,
@@ -1945,22 +2006,26 @@ fn compare_old_fingerprint(
     }
 
     match compare {
-        Ok(None) if forced => Some(DirtyReason::Forced),
-        Ok(reason) => reason,
-        Err(_) => Some(DirtyReason::FreshBuild),
+        Ok(FingerprintComparison::Fresh) if forced => FingerprintComparison::Dirty {
+            reason: DirtyReason::Forced,
+        },
+        Ok(cmp) => cmp,
+        Err(_) => FingerprintComparison::Dirty {
+            reason: DirtyReason::FreshBuild,
+        },
     }
 }
 
 fn _compare_old_fingerprint(
     old_hash_path: &Path,
     new_fingerprint: &Fingerprint,
-) -> CargoResult<Option<DirtyReason>> {
+) -> CargoResult<FingerprintComparison> {
     let old_fingerprint_short = paths::read(old_hash_path)?;
 
     let new_hash = new_fingerprint.hash_u64();
 
     if util::to_hex(new_hash) == old_fingerprint_short && new_fingerprint.fs_status.up_to_date() {
-        return Ok(None);
+        return Ok(FingerprintComparison::Fresh);
     }
 
     let old_fingerprint_json = paths::read(&old_hash_path.with_extension("json"))?;
@@ -1974,7 +2039,8 @@ fn _compare_old_fingerprint(
         );
     }
 
-    Ok(Some(new_fingerprint.compare(&old_fingerprint)))
+    let reason = new_fingerprint.compare(&old_fingerprint);
+    Ok(FingerprintComparison::Dirty { reason })
 }
 
 /// Calculates the fingerprint of a unit thats contains no dep-info files.

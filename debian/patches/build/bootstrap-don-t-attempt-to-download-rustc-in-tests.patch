@@ -14,10 +14,10 @@ Signed-off-by: Fabian Grünbichler <debian@fabian.gruenbichler.email>
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/bootstrap/src/core/config/config.rs b/src/bootstrap/src/core/config/config.rs
-index 2f49365..f42c0fd 100644
+index 07405a0..a23678b 100644
 --- a/src/bootstrap/src/core/config/config.rs
 +++ b/src/bootstrap/src/core/config/config.rs
-@@ -566,7 +566,7 @@ impl Config {
+@@ -568,7 +568,7 @@ impl Config {
              annotate_moves_size_limit: rust_annotate_moves_size_limit,
              profile_generate: rust_profile_generate,
              profile_use: rust_profile_use,
@@ -26,7 +26,7 @@ index 2f49365..f42c0fd 100644
              lto: rust_lto,
              validate_mir_opts: rust_validate_mir_opts,
              frame_pointers: rust_frame_pointers,
-@@ -705,6 +705,7 @@ impl Config {
+@@ -711,6 +711,7 @@ impl Config {
                  );
                  build_rustc = Some(stage0_rustc);
              }

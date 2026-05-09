@@ -67,6 +67,7 @@ Each new feature described below should explain how to use it.
 * Build scripts and linking
     * [Metabuild](#metabuild) --- Provides declarative build scripts.
     * [Multiple Build Scripts](#multiple-build-scripts) --- Allows use of multiple build scripts.
+    * [Any Build Script Metadata](#any-build-script-metadata) --- Allow any build script to specify env vars via `cargo::metadata=key=value`
 * Resolver and features
     * [no-index-update](#no-index-update) --- Prevents cargo from updating the index cache.
     * [avoid-dev-deps](#avoid-dev-deps) --- Prevents the resolver from including dev-dependencies during resolution.
@@ -98,6 +99,7 @@ Each new feature described below should explain how to use it.
     * [open-namespaces](#open-namespaces) --- Allow multiple packages to participate in the same API namespace
     * [panic-immediate-abort](#panic-immediate-abort) --- Passes `-Cpanic=immediate-abort` to the compiler.
     * [compile-time-deps](#compile-time-deps) --- Perma-unstable feature for rust-analyzer
+    * [fine-grain-locking](#fine-grain-locking) --- Use fine grain locking instead of locking the entire build cache
 * rustdoc
     * [rustdoc-map](#rustdoc-map) --- Provides mappings for documentation to link to external sites like [docs.rs](https://docs.rs/).
     * [scrape-examples](#scrape-examples) --- Shows examples within documentation.
@@ -120,7 +122,6 @@ Each new feature described below should explain how to use it.
     * [Build analysis](#build-analysis) --- Record and persist detailed build metrics across runs, with new commands to query past builds.
     * [`rustc-unicode`](#rustc-unicode) --- Enables `rustc`'s unicode error format in Cargo's error messages 
 * Configuration
-    * [config-include](#config-include) --- Adds the ability for config files to include other files.
     * [`cargo config`](#cargo-config) --- Adds a new subcommand for viewing config files.
 * Registries
     * [publish-timeout](#publish-timeout) --- Controls the timeout between uploading the crate and being available in the index
@@ -312,6 +313,16 @@ build = ["foo.rs", "bar.rs"]
 **Accessing Output Directories**:  Output directory of each build script can be accessed by using `<script-name>_OUT_DIR` 
   where the `<script-name>` is the file-stem of the build script, exactly as-is.
   For example, `bar_OUT_DIR` for script at `foo/bar.rs`. (Only set during compilation, can be accessed via `env!` macro)
+
+## Any Build Script Metadata
+* Tracking Issue: [#14903](https://github.com/rust-lang/cargo/issues/3544)
+
+Allow any build script to specify env vars via `cargo::metadata=key=value`
+
+Depedant build scripts can access these key/value pair by reading the `CARGO_DEP_<dep>_<key>` env variable at runtime.
+For build scripts of crates with a `links`, both `DEP_<links>_<key>` and `CARGO_DEP_<dep>_<key>` will be set.
+
+Note that `dep` and `key` in `CARGO_DEP_<dep>_<key>` are uppercased and hyphens (`-`) replaced with underscores (`_`).
 
 ## public-dependency
 * Tracking Issue: [#44663](https://github.com/rust-lang/rust/issues/44663)
@@ -636,85 +647,6 @@ It's currently unclear how this feature will be stabilized in Cargo, but we'd
 like to stabilize it somehow!
 
 [rust-lang/rust#64158]: https://github.com/rust-lang/rust/pull/64158
-
-## config-include
-* Tracking Issue: [#7723](https://github.com/rust-lang/cargo/issues/7723)
-
-This feature requires the `-Zconfig-include` command-line option.
-
-The `include` key in a config file can be used to load another config file.
-For example:
-
-```toml
-# .cargo/config.toml
-include = ["other-config.toml"]
-
-[build]
-jobs = 4
-```
-
-```toml
-# .cargo/other-config.toml
-[build]
-rustflags = ["-W", "unsafe-code"]
-```
-
-### Documentation updates
-
-> put this after `## Command-line overrides` before `## Config-relative paths`
-> to emphasize its special nature than other config keys.
-
-#### Including extra configuration files
-
-Configuration can include other configuration files using the top-level `include` key.
-This allows sharing configuration across multiple projects
-or splitting complex configurations into multiple files.
-
-##### `include`
-
-* Type: array of strings or tables
-* Default: none
-* Environment: not supported
-
-Loads additional configuration files.
-Paths are relative to the configuration file that includes them.
-Only paths ending with `.toml` are accepted.
-
-Supports the following formats:
-
-```toml
-# array of paths
-include = [
-    "frodo.toml",
-    "samwise.toml",
-]
-
-# inline tables for more control
-include = [
-    { path = "required.toml" },
-    { path = "optional.toml", optional = true },
-]
-```
-
-> **Note:** For better readability and to avoid confusion, it is recommended to:
-> - Place `include` at the top of the configuration file
-> - Put one include per line for clearer version control diffs
-> - Use inline table syntax when optional includes are needed
-
-When using table syntax, the following fields are supported:
-
-* `path` (string, required): Path to the config file to include.
-* `optional` (boolean, default: false): If `true`, missing files are silently
-  skipped instead of causing an error.
-
-The merge behavior of `include` is different from other config values:
-
-1. Config values are first loaded from the `include` paths.
-    * Included files are loaded left to right,
-      with values from later files taking precedence over earlier ones.
-    * This step recurses if included config files also contain `include` keys.
-2. Then, the config file's own values are merged on top of the included config,
-   taking highest precedence.
 
 ## target-applies-to-host
 * Original Pull Request: [#9322](https://github.com/rust-lang/cargo/pull/9322)
@@ -1744,6 +1676,14 @@ panic-immediate-abort = true
 panic = "immediate-abort"
 ```
 
+## fine-grain-locking
+
+* Tracking Issue: [#4282](https://github.com/rust-lang/cargo/issues/4282)
+
+Use fine grain locking instead of locking the entire build cache.
+
+Note: Fine grain locking implicitly enables [build-dir-new-layout](#build-dir-new-layout) as fine grain locking builds on that directory reoganization.
+
 ## `[lints.cargo]`
 
 * Tracking Issue: [#12235](https://github.com/rust-lang/cargo/issues/12235)
@@ -1820,21 +1760,37 @@ path bases without compatibility issues (as existing uses will shadow the
 built-in name).
 
 ## lockfile-path
+
 * Original Issue: [#5707](https://github.com/rust-lang/cargo/issues/5707)
 * Tracking Issue: [#14421](https://github.com/rust-lang/cargo/issues/14421)
 
-This feature allows you to specify the path of lockfile Cargo.lock. 
-By default, lockfile is written into `<workspace_root>/Cargo.lock`. 
-However, when sources are stored in read-only directory, most of the cargo commands 
-would fail, trying to write a lockfile. The `--lockfile-path`
-flag makes it easier to work with readonly sources. 
-Note, that currently path must end with `Cargo.lock`. Meaning, if you want to use 
-this feature in multiple projects, lockfiles should be stored in different directories.
-Example:
+The `-Zlockfile-path` flag enables the `resolver.lockfile-path` configuration option,
+which allows you to specify the path of the lockfile `Cargo.lock`.
 
-```sh
-cargo +nightly metadata --lockfile-path=$LOCKFILES_ROOT/my-project/Cargo.lock -Z unstable-options
-```
+By default, lockfile is written into `<workspace_root>/Cargo.lock`. 
+However, when sources are stored in read-only directory,
+most of the cargo commands would fail when trying to write a lockfile.
+This configuration makes it easier to work with readonly sources. 
+
+Note, that currently path must end with `Cargo.lock`.
+If you want to use this feature in multiple projects,
+lockfiles should be stored in different directories.
+
+### Documentation updates
+
+*as a new `resolver.lockfile-path` entry in config.md*
+
+#### `resolver.lockfile-path`
+
+* Type: string (path)
+* Default: `<workspace_root>/Cargo.lock`
+* Environment: `CARGO_RESOLVER_LOCKFILE_PATH`
+
+Specifies the path to the lockfile.
+By default, the lockfile is written to `<workspace_root>/Cargo.lock`.
+This option is useful when working with read-only source directories.
+
+The path must end with `Cargo.lock`.
 
 ## native-completions
 * Original Issue: [#6645](https://github.com/rust-lang/cargo/issues/6645)
@@ -1922,14 +1878,6 @@ Specify which packages participate in [feature unification](../reference/feature
   regardless of which packages are specified for the current build.
 * `package`: Dependency features are considered on a package-by-package basis,
   preferring duplicate builds of dependencies when different sets of features are activated by the packages.
-
-## pubtime
-
-* Original Issue: [#15491](https://github.com/rust-lang/cargo/issues/15491)
-* Tracking Issue: [#16270](https://github.com/rust-lang/cargo/issues/16270)
-
-Documentation updates:
-- Add `pubtime` field to the Index Summary description
 
 ## lockfile-publish-time
 
@@ -2022,16 +1970,41 @@ cargo +nightly -Zsection-timings build --timings
 * Original Issue: [rust-lang/rust-project-goals#332](https://github.com/rust-lang/rust-project-goals/pull/332)
 * Tracking Issue: [#15844](https://github.com/rust-lang/cargo/issues/15844)
 
-The `-Zbuild-analysis` feature records and persists detailed build metrics
-(timings, rebuild reasons, etc.) across runs, with new commands to query past builds.
+The `-Zbuild-analysis` feature records and persists detailed build metrics on disk,
+with new commands to query past builds.
+
+When enabled,
+Cargo writes build logs in JSONL format to the `$CARGO_HOME/log/` directory 
+Each cargo invocation produces a log file named with a unique session ID.
+These logs contain timing information, rebuild reasons, and other build metadata
+that can be analyzed with the `cargo report` subcommands.
+
+To enable build analysis, add the following [Cargo configuration](config.md):
 
 ```toml
 # Example config.toml file.
+
+[unstable]
+build-analysis = true
 
 # Enable the build metric collection
 [build.analysis]
 enabled = true
 ```
+
+Setting it on a stable toolchain only emits an unknown config warning,
+so it's safe to keep enabled in your Cargo configuration.
+
+### `cargo report` commands
+
+The following commands are available under `-Zbuild-analysis`:
+
+- `cargo report sessions` --- Lists previous build sessions.
+  Use this to find session IDs for other report commands.
+- `cargo report timings` --- Generates an HTML timing report from a previous session,
+  similar to `cargo build --timings` but without rebuilding.
+- `cargo report rebuilds` --- Reports why crates were rebuilt,
+  helping diagnose unexpected recompilations.
 
 ## build-dir-new-layout
 
@@ -2233,8 +2206,9 @@ See the [Features chapter](features.md#dependency-features) for more information
 ## timings
 
 The `-Ztimings` option has been stabilized as `--timings` in the 1.60 release.
-(`--timings=html` and the machine-readable `--timings=json` output remain
-unstable and require `-Zunstable-options`.)
+The timings output format option
+(e.g., the `--timings=html` and the machine-readable `--timings=json` output)
+has been removed in 1.94.0-nightly.
 
 ## config-cli
 
@@ -2347,3 +2321,13 @@ See the [config documentation](config.md#buildbuild-dir) for information about c
 
 The `--build-plan` argument for the `build` command has been removed in 1.93.0-nightly.
 See <https://github.com/rust-lang/cargo/issues/7614> for the reason for its removal.
+
+## config-include
+
+Support for including extra configuration files via the `include` config key
+has been stabilized in 1.93.0.
+See the [`include` config documentation](config.md#include) for more.
+
+## pubtime
+
+The `pubtime` index field  has been stabilized in Rust 1.94.0.

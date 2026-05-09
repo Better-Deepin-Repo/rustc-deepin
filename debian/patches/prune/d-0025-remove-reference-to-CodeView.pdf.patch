@@ -1,0 +1,35 @@
+From: =?utf-8?q?Fabian_Gr=C3=BCnbichler?= <f.gruenbichler@proxmox.com>
+Date: Thu, 9 Apr 2026 11:14:06 +0200
+Subject: d-0025-remove reference to CodeView.pdf
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+its license is unclear, prune and do not mention it for now.
+
+Forwarded: github.com/rust-lang/rustc-dev-guide/issues/2828
+
+Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
+---
+ src/doc/rustc-dev-guide/src/debuginfo/intro.md | 3 +--
+ 1 file changed, 1 insertion(+), 2 deletions(-)
+
+diff --git a/src/doc/rustc-dev-guide/src/debuginfo/intro.md b/src/doc/rustc-dev-guide/src/debuginfo/intro.md
+index 0f1e59f..7fc0e79 100644
+--- a/src/doc/rustc-dev-guide/src/debuginfo/intro.md
++++ b/src/doc/rustc-dev-guide/src/debuginfo/intro.md
+@@ -63,7 +63,6 @@ Due to its proprietary nature, it is very difficult to find information about PD
+ of the sources were made at vastly different times and contain incomplete or somewhat contradictory
+ information. As such this page will aim to collect as many sources as possible.
+ 
+-* [CodeView 1.0 specification](./CodeView.pdf)
+ * LLVM
+     * [CodeView Overview](https://llvm.org/docs/SourceLevelDebugging.html#codeview-debug-info-format)
+     * [PDB Overview and technical details](https://llvm.org/docs/PDB/index.html)
+@@ -111,4 +110,4 @@ in the future.
+ specifically to debug Rust programs. While promising, it is still in early development.
+ * [RAD Debugger](https://github.com/EpicGamesExt/raddebugger) is a Windows-only GUI debugger. It has
+ a custom debug info format that PDB is translated into. The project also includes a linker that can
+-generate their new debug info format during the linking phase.
+\ No newline at end of file
++generate their new debug info format during the linking phase.

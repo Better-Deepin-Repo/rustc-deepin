@@ -44,8 +44,8 @@ pub struct BuildConfig {
     pub export_dir: Option<PathBuf>,
     /// `true` to output a future incompatibility report at the end of the build
     pub future_incompat_report: bool,
-    /// Which kinds of build timings to output (empty if none).
-    pub timing_outputs: Vec<TimingOutput>,
+    /// Output timing report at the end of the build
+    pub timing_report: bool,
     /// Output SBOM precursor files.
     pub sbom: bool,
     /// Build compile time dependencies only, e.g., build scripts and proc macros
@@ -127,7 +127,7 @@ impl BuildConfig {
             rustfix_diagnostic_server: Rc::new(RefCell::new(None)),
             export_dir: None,
             future_incompat_report: false,
-            timing_outputs: Vec::new(),
+            timing_report: false,
             sbom,
             compile_time_deps_only: false,
         })
@@ -200,6 +200,36 @@ impl ser::Serialize for CompileMode {
             Doctest => "doctest".serialize(s),
             Docscrape => "docscrape".serialize(s),
             RunCustomBuild => "run-custom-build".serialize(s),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for CompileMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "test" => Ok(CompileMode::Test),
+            "build" => Ok(CompileMode::Build),
+            "check" => Ok(CompileMode::Check { test: false }),
+            "doc" => Ok(CompileMode::Doc),
+            "doctest" => Ok(CompileMode::Doctest),
+            "docscrape" => Ok(CompileMode::Docscrape),
+            "run-custom-build" => Ok(CompileMode::RunCustomBuild),
+            other => Err(serde::de::Error::unknown_variant(
+                other,
+                &[
+                    "test",
+                    "build",
+                    "check",
+                    "doc",
+                    "doctest",
+                    "docscrape",
+                    "run-custom-build",
+                ],
+            )),
         }
     }
 }
@@ -319,13 +349,4 @@ impl UserIntent {
             UserIntent::Test | UserIntent::Bench | UserIntent::Check { test: true }
         )
     }
-}
-
-/// Kinds of build timings we can output.
-#[derive(Clone, Copy, PartialEq, Debug, Eq, Hash, PartialOrd, Ord)]
-pub enum TimingOutput {
-    /// Human-readable HTML report
-    Html,
-    /// Machine-readable JSON (unstable)
-    Json,
 }

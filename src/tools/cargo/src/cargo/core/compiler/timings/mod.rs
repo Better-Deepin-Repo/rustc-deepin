@@ -3,21 +3,22 @@
 //! This module implements some simple tracking information for timing of how
 //! long it takes for different units to compile.
 
-mod report;
+pub mod report;
 
-use super::{CompileMode, Unit};
+use super::CompileMode;
+use super::Unit;
+use super::UnitIndex;
 use crate::core::PackageId;
+use crate::core::compiler::BuildContext;
+use crate::core::compiler::BuildRunner;
 use crate::core::compiler::job_queue::JobId;
-use crate::core::compiler::{BuildContext, BuildRunner, TimingOutput};
 use crate::util::cpu::State;
 use crate::util::log_message::LogMessage;
-use crate::util::machine_message::{self, Message};
 use crate::util::style;
 use crate::util::{CargoResult, GlobalContext};
 
 use cargo_util::paths;
 use indexmap::IndexMap;
-use itertools::Itertools as _;
 use std::collections::HashMap;
 use std::io::BufWriter;
 use std::time::{Duration, Instant};
@@ -36,8 +37,6 @@ pub struct Timings<'gctx> {
     enabled: bool,
     /// If true, saves an HTML report to disk.
     report_html: bool,
-    /// If true, emits JSON information with timing information.
-    report_json: bool,
     /// When Cargo started.
     start: Instant,
     /// A rendered string of when compilation started.
@@ -53,18 +52,12 @@ pub struct Timings<'gctx> {
     /// Total number of dirty units.
     total_dirty: u32,
     /// A map from unit to index.
-    ///
-    /// This for saving log size.
-    /// Only the unit-started event needs to hold the entire unit information.
-    unit_to_index: HashMap<Unit, u64>,
+    unit_to_index: HashMap<Unit, UnitIndex>,
     /// Time tracking for each individual unit.
     unit_times: Vec<UnitTime>,
     /// Units that are in the process of being built.
     /// When they finished, they are moved to `unit_times`.
     active: HashMap<JobId, UnitTime>,
-    /// Concurrency-tracking information. This is periodically updated while
-    /// compilation progresses.
-    concurrency: Vec<Concurrency>,
     /// Last recorded state of the system's CPUs and when it happened
     last_cpu_state: Option<State>,
     last_cpu_recording: Instant,
@@ -78,9 +71,9 @@ pub struct Timings<'gctx> {
 #[derive(Copy, Clone, serde::Serialize)]
 pub struct CompilationSection {
     /// Start of the section, as an offset in seconds from `UnitTime::start`.
-    start: f64,
+    pub start: f64,
     /// End of the section, as an offset in seconds from `UnitTime::start`.
-    end: Option<f64>,
+    pub end: Option<f64>,
 }
 
 /// Tracking information for an individual unit.
@@ -106,52 +99,35 @@ struct UnitTime {
     sections: IndexMap<String, CompilationSection>,
 }
 
-/// Periodic concurrency tracking information.
-#[derive(serde::Serialize)]
-struct Concurrency {
-    /// Time as an offset in seconds from `Timings::start`.
-    t: f64,
-    /// Number of units currently running.
-    active: usize,
-    /// Number of units that could run, but are waiting for a jobserver token.
-    waiting: usize,
-    /// Number of units that are not yet ready, because they are waiting for
-    /// dependencies to finish.
-    inactive: usize,
-}
-
 /// Data for a single compilation unit, prepared for serialization to JSON.
 ///
 /// This is used by the HTML report's JavaScript to render the pipeline graph.
 #[derive(serde::Serialize)]
-struct UnitData {
-    i: usize,
-    name: String,
-    version: String,
-    mode: String,
-    target: String,
-    start: f64,
-    duration: f64,
-    rmeta_time: Option<f64>,
-    unblocked_units: Vec<usize>,
-    unblocked_rmeta_units: Vec<usize>,
-    sections: Option<Vec<(String, report::SectionData)>>,
+pub struct UnitData {
+    pub i: UnitIndex,
+    pub name: String,
+    pub version: String,
+    pub mode: String,
+    pub target: String,
+    pub features: Vec<String>,
+    pub start: f64,
+    pub duration: f64,
+    pub unblocked_units: Vec<UnitIndex>,
+    pub unblocked_rmeta_units: Vec<UnitIndex>,
+    pub sections: Option<Vec<(report::SectionName, report::SectionData)>>,
 }
 
 impl<'gctx> Timings<'gctx> {
     pub fn new(bcx: &BuildContext<'_, 'gctx>, root_units: &[Unit]) -> Timings<'gctx> {
         let start = bcx.gctx.creation_time();
-        let has_report = |what| bcx.build_config.timing_outputs.contains(&what);
-        let report_html = has_report(TimingOutput::Html);
-        let report_json = has_report(TimingOutput::Json);
-        let enabled = report_html | report_json | bcx.logger.is_some();
+        let report_html = bcx.build_config.timing_report;
+        let enabled = report_html | bcx.logger.is_some();
 
         if !enabled {
             return Timings {
                 gctx: bcx.gctx,
                 enabled,
                 report_html,
-                report_json,
                 start,
                 start_str: String::new(),
                 root_targets: Vec::new(),
@@ -161,7 +137,6 @@ impl<'gctx> Timings<'gctx> {
                 unit_to_index: HashMap::new(),
                 unit_times: Vec::new(),
                 active: HashMap::new(),
-                concurrency: Vec::new(),
                 last_cpu_state: None,
                 last_cpu_recording: Instant::now(),
                 cpu_usage: Vec::new(),
@@ -192,29 +167,20 @@ impl<'gctx> Timings<'gctx> {
                 None
             }
         };
-        let unit_to_index = bcx
-            .unit_graph
-            .keys()
-            .sorted()
-            .enumerate()
-            .map(|(i, unit)| (unit.clone(), i as u64))
-            .collect();
 
         Timings {
             gctx: bcx.gctx,
             enabled,
             report_html,
-            report_json,
             start,
             start_str,
             root_targets,
             profile,
             total_fresh: 0,
             total_dirty: 0,
-            unit_to_index,
+            unit_to_index: bcx.unit_to_index.clone(),
             unit_times: Vec::new(),
             active: HashMap::new(),
-            concurrency: Vec::new(),
             last_cpu_state,
             last_cpu_recording: Instant::now(),
             cpu_usage: Vec::new(),
@@ -226,9 +192,10 @@ impl<'gctx> Timings<'gctx> {
         if !self.enabled {
             return;
         }
-        let mut target = if unit.target.is_lib() && unit.mode == CompileMode::Build {
-            // Special case for brevity, since most dependencies hit
-            // this path.
+        let mut target = if unit.target.is_lib()
+            && matches!(unit.mode, CompileMode::Build | CompileMode::Check { .. })
+        {
+            // Special case for brevity, since most dependencies hit this path.
             "".to_string()
         } else {
             format!(" {}", unit.target.description_named())
@@ -256,9 +223,6 @@ impl<'gctx> Timings<'gctx> {
         };
         if let Some(logger) = build_runner.bcx.logger {
             logger.log(LogMessage::UnitStarted {
-                package_id: unit_time.unit.pkg.package_id().to_spec(),
-                target: (&unit_time.unit.target).into(),
-                mode: unit_time.unit.mode,
                 index: self.unit_to_index[&unit_time.unit],
                 elapsed: start,
             });
@@ -319,18 +283,7 @@ impl<'gctx> Timings<'gctx> {
         unit_time
             .unblocked_units
             .extend(unblocked.iter().cloned().cloned());
-        if self.report_json {
-            let msg = machine_message::TimingInfo {
-                package_id: unit_time.unit.pkg.package_id().to_spec(),
-                target: &unit_time.unit.target,
-                mode: unit_time.unit.mode,
-                duration: unit_time.duration,
-                rmeta_time: unit_time.rmeta_time,
-                sections: unit_time.sections.clone().into_iter().collect(),
-            }
-            .to_json_string();
-            crate::drop_println!(self.gctx, "{}", msg);
-        }
+
         if let Some(logger) = build_runner.bcx.logger {
             let unblocked = unblocked.iter().map(|u| self.unit_to_index[u]).collect();
             logger.log(LogMessage::UnitFinished {
@@ -384,20 +337,6 @@ impl<'gctx> Timings<'gctx> {
         }
     }
 
-    /// This is called periodically to mark the concurrency of internal structures.
-    pub fn mark_concurrency(&mut self, active: usize, waiting: usize, inactive: usize) {
-        if !self.enabled {
-            return;
-        }
-        let c = Concurrency {
-            t: self.start.elapsed().as_secs_f64(),
-            active,
-            waiting,
-            inactive,
-        };
-        self.concurrency.push(c);
-    }
-
     /// Mark that a fresh unit was encountered. (No re-compile needed)
     pub fn add_fresh(&mut self) {
         self.total_fresh += 1;
@@ -444,7 +383,6 @@ impl<'gctx> Timings<'gctx> {
         if !self.enabled {
             return Ok(());
         }
-        self.mark_concurrency(0, 0, 0);
         self.unit_times
             .sort_unstable_by(|a, b| a.start.partial_cmp(&b.start).unwrap());
         if self.report_html {
@@ -464,28 +402,34 @@ impl<'gctx> Timings<'gctx> {
                 .lines()
                 .next()
                 .expect("rustc version");
-            let requested_targets = &build_runner
+            let requested_targets = build_runner
                 .bcx
                 .build_config
                 .requested_kinds
                 .iter()
-                .map(|kind| build_runner.bcx.target_data.short_name(kind))
+                .map(|kind| build_runner.bcx.target_data.short_name(kind).to_owned())
                 .collect::<Vec<_>>();
+            let num_cpus = std::thread::available_parallelism()
+                .ok()
+                .map(|x| x.get() as u64);
+
+            let unit_data = report::to_unit_data(&self.unit_times, &self.unit_to_index);
+            let concurrency = report::compute_concurrency(&unit_data);
 
             let ctx = report::RenderContext {
-                start: self.start,
-                start_str: &self.start_str,
-                root_units: &self.root_targets,
-                profile: &self.profile,
+                start_str: self.start_str.clone(),
+                root_units: self.root_targets.clone(),
+                profile: self.profile.clone(),
                 total_fresh: self.total_fresh,
                 total_dirty: self.total_dirty,
-                unit_times: &self.unit_times,
-                concurrency: &self.concurrency,
+                unit_data,
+                concurrency,
                 cpu_usage: &self.cpu_usage,
-                rustc_version,
-                host: &build_runner.bcx.rustc().host,
+                rustc_version: rustc_version.into(),
+                host: build_runner.bcx.rustc().host.to_string(),
                 requested_targets,
                 jobs: build_runner.bcx.jobs(),
+                num_cpus,
                 error,
             };
             report::write_html(ctx, &mut f)?;
@@ -504,10 +448,6 @@ impl<'gctx> Timings<'gctx> {
 }
 
 impl UnitTime {
-    fn name_ver(&self) -> String {
-        format!("{} v{}", self.unit.pkg.name(), self.unit.pkg.version())
-    }
-
     fn start_section(&mut self, name: &str, now: f64) {
         if self
             .sections

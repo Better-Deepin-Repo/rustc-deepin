@@ -1,3 +1,28 @@
+rustc (1.94.1+dfsg1-1) unstable; urgency=medium
+
+  * upload to unstable
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Thu, 16 Apr 2026 10:00:20 +0200
+
+rustc (1.94.1+dfsg1-1~exp3) experimental; urgency=medium
+
+  * also skip rust-analyzer tests on hurd
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Tue, 14 Apr 2026 09:25:46 +0200
+
+rustc (1.94.1+dfsg1-1~exp2) experimental; urgency=medium
+
+  * skip rust-analyzer tests on most architectures
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Mon, 13 Apr 2026 14:26:27 +0200
+
+rustc (1.94.1+dfsg1-1~exp1) experimental; urgency=medium
+
+  * New upstream release
+  * Update to wasi-libc 20251114.ac020b8
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Fri, 10 Apr 2026 09:15:06 +0200
+
 rustc (1.93.1+dfsg1-2) unstable; urgency=medium
 
   * doc: fix cargo book reference

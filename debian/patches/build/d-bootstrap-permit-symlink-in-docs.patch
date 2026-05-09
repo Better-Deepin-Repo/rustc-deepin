@@ -8,10 +8,10 @@ Forwarded: not-needed
  1 file changed, 1 insertion(+)
 
 diff --git a/src/bootstrap/src/core/build_steps/dist.rs b/src/bootstrap/src/core/build_steps/dist.rs
-index 40149ee..2358cd0 100644
+index cfcb144..1dd39af 100644
 --- a/src/bootstrap/src/core/build_steps/dist.rs
 +++ b/src/bootstrap/src/core/build_steps/dist.rs
-@@ -91,6 +91,7 @@ impl Step for Docs {
+@@ -94,6 +94,7 @@ impl Step for Docs {
          tarball.add_bulk_dir(builder.doc_out(host), dest);
          tarball.add_file(builder.src.join("src/doc/robots.txt"), dest, FileType::Regular);
          tarball.add_file(builder.src.join("src/doc/sitemap.txt"), dest, FileType::Regular);

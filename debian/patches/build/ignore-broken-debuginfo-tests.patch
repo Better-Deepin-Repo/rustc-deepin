@@ -14,7 +14,7 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  2 files changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/tests/debuginfo/macro-stepping.rs b/tests/debuginfo/macro-stepping.rs
-index 0dff383..e7ef6dc 100644
+index ba3a445..84235e1 100644
 --- a/tests/debuginfo/macro-stepping.rs
 +++ b/tests/debuginfo/macro-stepping.rs
 @@ -6,7 +6,8 @@

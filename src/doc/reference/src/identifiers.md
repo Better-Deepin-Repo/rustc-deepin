@@ -15,12 +15,13 @@ NON_KEYWORD_IDENTIFIER -> IDENTIFIER_OR_KEYWORD _except a [strict][lex.keywords.
 
 IDENTIFIER -> NON_KEYWORD_IDENTIFIER | RAW_IDENTIFIER
 
-RESERVED_RAW_IDENTIFIER -> `r#` (`_` | `crate` | `self` | `Self` | `super`)
+RESERVED_RAW_IDENTIFIER ->
+    `r#` (`_` | `crate` | `self` | `Self` | `super`) _not immediately followed by XID_Continue_
 ```
 
 <!-- When updating the version, update the UAX links, too. -->
 r[ident.unicode]
-Identifiers follow the specification in [Unicode Standard Annex #31][UAX31] for Unicode version 16.0, with the additions described below. Some examples of identifiers:
+Identifiers follow the specification in [Unicode Standard Annex #31][UAX31] for Unicode version 17.0, with the additions described below. Some examples of identifiers:
 
 * `foo`
 * `_identifier`
@@ -64,12 +65,10 @@ r[ident.raw]
 ## Raw identifiers
 
 r[ident.raw.intro]
-A raw identifier is like a normal identifier, but prefixed by `r#`. (Note that
-the `r#` prefix is not included as part of the actual identifier.)
+A raw identifier is like a normal identifier, but prefixed by `r#`. (Note that the `r#` prefix is not included as part of the actual identifier.)
 
 r[ident.raw.allowed]
-Unlike a normal identifier, a raw identifier may be any strict or reserved
-keyword except the ones listed above for `RAW_IDENTIFIER`.
+Unlike a normal identifier, a raw identifier may be any strict or reserved keyword except the ones listed above for `RAW_IDENTIFIER`.
 
 r[ident.raw.reserved]
 It is an error to use the [RESERVED_RAW_IDENTIFIER] token.
@@ -86,5 +85,5 @@ It is an error to use the [RESERVED_RAW_IDENTIFIER] token.
 [proc-macro]: procedural-macros.md
 [reserved]: keywords.md#reserved-keywords
 [strict]: keywords.md#strict-keywords
-[UAX15]: https://www.unicode.org/reports/tr15/tr15-56.html
-[UAX31]: https://www.unicode.org/reports/tr31/tr31-41.html
+[UAX15]: https://www.unicode.org/reports/tr15/tr15-57.html
+[UAX31]: https://www.unicode.org/reports/tr31/tr31-43.html

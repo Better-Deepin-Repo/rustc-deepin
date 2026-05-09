@@ -41,12 +41,13 @@ pub mod future_incompat;
 pub(crate) mod job_queue;
 pub(crate) mod layout;
 mod links;
+mod locking;
 mod lto;
 mod output_depinfo;
 mod output_sbom;
 pub mod rustdoc;
 pub mod standard_lib;
-mod timings;
+pub mod timings;
 mod unit;
 pub mod unit_dependencies;
 pub mod unit_graph;
@@ -71,7 +72,7 @@ use regex::Regex;
 use tracing::{debug, instrument, trace};
 
 pub use self::build_config::UserIntent;
-pub use self::build_config::{BuildConfig, CompileMode, MessageFormat, TimingOutput};
+pub use self::build_config::{BuildConfig, CompileMode, MessageFormat};
 pub use self::build_context::BuildContext;
 pub use self::build_context::FileFlavor;
 pub use self::build_context::FileType;
@@ -92,25 +93,29 @@ pub use self::lto::Lto;
 use self::output_depinfo::output_depinfo;
 use self::output_sbom::build_sbom;
 use self::unit_graph::UnitDep;
+
 use crate::core::compiler::future_incompat::FutureIncompatReport;
+use crate::core::compiler::locking::LockKey;
 use crate::core::compiler::timings::SectionTiming;
-pub use crate::core::compiler::unit::{Unit, UnitInterner};
+pub use crate::core::compiler::unit::Unit;
+pub use crate::core::compiler::unit::UnitIndex;
+pub use crate::core::compiler::unit::UnitInterner;
 use crate::core::manifest::TargetSourcePath;
 use crate::core::profiles::{PanicStrategy, Profile, StripInner};
 use crate::core::{Feature, PackageId, Target, Verbosity};
+use crate::lints::get_key_value;
 use crate::util::OnceExt;
 use crate::util::context::WarningHandling;
 use crate::util::errors::{CargoResult, VerboseError};
 use crate::util::interning::InternedString;
-use crate::util::lints::get_key_value;
 use crate::util::machine_message::{self, Message};
 use crate::util::{add_path_args, internal, path_args};
+
 use cargo_util::{ProcessBuilder, ProcessError, paths};
 use cargo_util_schemas::manifest::TomlDebugInfo;
 use cargo_util_schemas::manifest::TomlTrimPaths;
 use cargo_util_schemas::manifest::TomlTrimPathsValue;
 use rustfix::diagnostics::Applicability;
-pub(crate) use timings::CompilationSection;
 
 const RUSTDOC_CRATE_VERSION_FLAG: &str = "--crate-version";
 
@@ -185,6 +190,12 @@ fn compile<'gctx>(
         return Ok(());
     }
 
+    let lock = if build_runner.bcx.gctx.cli_unstable().fine_grain_locking {
+        Some(build_runner.lock_manager.lock_shared(build_runner, unit)?)
+    } else {
+        None
+    };
+
     // If we are in `--compile-time-deps` and the given unit is not a compile time
     // dependency, skip compiling the unit and jumps to dependencies, which still
     // have chances to be compile time dependencies
@@ -225,6 +236,23 @@ fn compile<'gctx>(
                 // Need to link targets on both the dirty and fresh.
                 work.then(link_targets(build_runner, unit, true)?)
             });
+
+            // If -Zfine-grain-locking is enabled, we wrap the job with an upgrade to exclusive
+            // lock before starting, then downgrade to a shared lock after the job is finished.
+            if build_runner.bcx.gctx.cli_unstable().fine_grain_locking && job.freshness().is_dirty()
+            {
+                if let Some(lock) = lock {
+                    // Here we unlock the current shared lock to avoid deadlocking with other cargo
+                    // processes. Then we configure our compile job to take an exclusive lock
+                    // before starting. Once we are done compiling (including both rmeta and rlib)
+                    // we downgrade to a shared lock to allow other cargo's to read the build unit.
+                    // We will hold this shared lock for the remainder of compilation to prevent
+                    // other cargo from re-compiling while we are still using the unit.
+                    build_runner.lock_manager.unlock(&lock)?;
+                    job.before(prebuild_lock_exclusive(lock.clone()));
+                    job.after(downgrade_lock_to_shared(lock));
+                }
+            }
 
             job
         };
@@ -587,6 +615,20 @@ fn verbose_if_simple_exit_code(err: Error) -> Error {
     }
 }
 
+fn prebuild_lock_exclusive(lock: LockKey) -> Work {
+    Work::new(move |state| {
+        state.lock_exclusive(&lock)?;
+        Ok(())
+    })
+}
+
+fn downgrade_lock_to_shared(lock: LockKey) -> Work {
+    Work::new(move |state| {
+        state.downgrade_to_shared(&lock)?;
+        Ok(())
+    })
+}
+
 /// Link the compiled target (often of form `foo-{metadata_hash}`) to the
 /// final target. This must happen during both "Fresh" and "Compile".
 fn link_targets(
@@ -760,6 +802,7 @@ fn prepare_rustc(build_runner: &BuildRunner<'_, '_>, unit: &Unit) -> CargoResult
             );
         }
         base.arg("-Z").arg("crate-attr=feature(frontmatter)");
+        base.arg("-Z").arg("crate-attr=allow(unused_features)");
     }
 
     base.inherit_jobserver(&build_runner.jobserver);
@@ -778,8 +821,11 @@ fn prepare_rustc(build_runner: &BuildRunner<'_, '_>, unit: &Unit) -> CargoResult
 
     if is_primary {
         base.env("CARGO_PRIMARY_PACKAGE", "1");
-        let file_list = std::env::join_paths(build_runner.sbom_output_files(unit)?)?;
-        base.env("CARGO_SBOM_PATH", file_list);
+        let file_list = build_runner.sbom_output_files(unit)?;
+        if !file_list.is_empty() {
+            let file_list = std::env::join_paths(file_list)?;
+            base.env("CARGO_SBOM_PATH", file_list);
+        }
     }
 
     if unit.target.is_test() || unit.target.is_bench() {
@@ -812,6 +858,7 @@ fn prepare_rustdoc(build_runner: &BuildRunner<'_, '_>, unit: &Unit) -> CargoResu
             );
         }
         rustdoc.arg("-Z").arg("crate-attr=feature(frontmatter)");
+        rustdoc.arg("-Z").arg("crate-attr=allow(unused_features)");
     }
     rustdoc.inherit_jobserver(&build_runner.jobserver);
     let crate_name = unit.target.crate_name();
@@ -1129,8 +1176,7 @@ fn add_allow_features(build_runner: &BuildRunner<'_, '_>, cmd: &mut ProcessBuild
 /// [`--error-format`]: https://doc.rust-lang.org/nightly/rustc/command-line-arguments.html#--error-format-control-how-errors-are-produced
 fn add_error_format_and_color(build_runner: &BuildRunner<'_, '_>, cmd: &mut ProcessBuilder) {
     let enable_timings = build_runner.bcx.gctx.cli_unstable().section_timings
-        && (!build_runner.bcx.build_config.timing_outputs.is_empty()
-            || build_runner.bcx.logger.is_some());
+        && (build_runner.bcx.build_config.timing_report || build_runner.bcx.logger.is_some());
     if enable_timings {
         cmd.arg("-Zunstable-options");
     }
@@ -1436,31 +1482,6 @@ fn build_base_args(
             .env("RUSTC_BOOTSTRAP", "1");
     }
 
-    // Add `CARGO_BIN_EXE_` environment variables for building tests.
-    if unit.target.is_test() || unit.target.is_bench() {
-        for bin_target in unit
-            .pkg
-            .manifest()
-            .targets()
-            .iter()
-            .filter(|target| target.is_bin())
-        {
-            // For `cargo check` builds we do not uplift the CARGO_BIN_EXE_ artifacts to the
-            // artifact-dir. We do not want to provide a path to a non-existent binary but we still
-            // need to provide *something* so `env!("CARGO_BIN_EXE_...")` macros will compile.
-            let exe_path = build_runner
-                .files()
-                .bin_link_for_target(bin_target, unit.kind, build_runner.bcx)?
-                .map(|path| path.as_os_str().to_os_string())
-                .unwrap_or_else(|| OsString::from(format!("placeholder:{}", bin_target.name())));
-
-            let name = bin_target
-                .binary_filename()
-                .unwrap_or(bin_target.name().to_string());
-            let key = format!("CARGO_BIN_EXE_{}", name);
-            cmd.env(&key, exe_path);
-        }
-    }
     Ok(())
 }
 
@@ -1519,8 +1540,7 @@ fn trim_paths_args(
     }
 
     // feature gate was checked during manifest/config parsing.
-    cmd.arg("-Zunstable-options");
-    cmd.arg(format!("-Zremap-path-scope={trim_paths}"));
+    cmd.arg(format!("--remap-path-scope={trim_paths}"));
 
     // Order of `--remap-path-prefix` flags is important for `-Zbuild-std`.
     // We want to show `/rustc/<hash>/library/std` instead of `std-0.0.0`.
@@ -1700,37 +1720,9 @@ fn build_deps_args(
     unit: &Unit,
 ) -> CargoResult<()> {
     let bcx = build_runner.bcx;
-    if build_runner.bcx.gctx.cli_unstable().build_dir_new_layout {
-        let mut map = BTreeMap::new();
 
-        // Recursively add all dependency args to rustc process
-        add_dep_arg(&mut map, build_runner, unit);
-
-        let paths = map.into_iter().map(|(_, path)| path).sorted_unstable();
-
-        for path in paths {
-            cmd.arg("-L").arg(&{
-                let mut deps = OsString::from("dependency=");
-                deps.push(path);
-                deps
-            });
-        }
-    } else {
-        cmd.arg("-L").arg(&{
-            let mut deps = OsString::from("dependency=");
-            deps.push(build_runner.files().deps_dir(unit));
-            deps
-        });
-    }
-
-    // Be sure that the host path is also listed. This'll ensure that proc macro
-    // dependencies are correctly found (for reexported macros).
-    if !unit.kind.is_host() {
-        cmd.arg("-L").arg(&{
-            let mut deps = OsString::from("dependency=");
-            deps.push(build_runner.files().host_deps(unit));
-            deps
-        });
+    for arg in lib_search_paths(build_runner, unit)? {
+        cmd.arg(arg);
     }
 
     let deps = build_runner.unit_deps(unit);
@@ -1792,7 +1784,7 @@ fn build_deps_args(
         cmd.arg(arg);
     }
 
-    for (var, env) in artifact::get_env(build_runner, deps)? {
+    for (var, env) in artifact::get_env(build_runner, unit, deps)? {
         cmd.env(&var, env);
     }
 
@@ -1845,6 +1837,42 @@ fn add_custom_flags(
     }
 
     Ok(())
+}
+
+/// Generate a list of `-L` arguments
+pub fn lib_search_paths(
+    build_runner: &BuildRunner<'_, '_>,
+    unit: &Unit,
+) -> CargoResult<Vec<OsString>> {
+    let mut lib_search_paths = Vec::new();
+    if build_runner.bcx.gctx.cli_unstable().build_dir_new_layout {
+        let mut map = BTreeMap::new();
+
+        // Recursively add all dependency args to rustc process
+        add_dep_arg(&mut map, build_runner, unit);
+
+        let paths = map.into_iter().map(|(_, path)| path).sorted_unstable();
+
+        for path in paths {
+            let mut deps = OsString::from("dependency=");
+            deps.push(path);
+            lib_search_paths.extend(["-L".into(), deps]);
+        }
+    } else {
+        let mut deps = OsString::from("dependency=");
+        deps.push(build_runner.files().deps_dir(unit));
+        lib_search_paths.extend(["-L".into(), deps]);
+    }
+
+    // Be sure that the host path is also listed. This'll ensure that proc macro
+    // dependencies are correctly found (for reexported macros).
+    if !unit.kind.is_host() {
+        let mut deps = OsString::from("dependency=");
+        deps.push(build_runner.files().host_deps(unit));
+        lib_search_paths.extend(["-L".into(), deps]);
+    }
+
+    Ok(lib_search_paths)
 }
 
 /// Generates a list of `--extern` arguments.
@@ -1990,9 +2018,9 @@ struct ManifestErrorContext {
     /// The path to the manifest.
     path: PathBuf,
     /// The locations of various spans within the manifest.
-    spans: toml::Spanned<toml::de::DeTable<'static>>,
+    spans: Option<toml::Spanned<toml::de::DeTable<'static>>>,
     /// The raw manifest contents.
-    contents: String,
+    contents: Option<String>,
     /// A lookup for all the unambiguous renamings, mapping from the original package
     /// name to the renamed one.
     rename_table: HashMap<InternedString, InternedString>,
@@ -2107,6 +2135,7 @@ fn on_stderr_line_inner(
         static PRIV_DEP_REGEX: LazyLock<Regex> =
             LazyLock::new(|| Regex::new("from private dependency '([A-Za-z0-9-_]+)'").unwrap());
         if let Some(crate_name) = PRIV_DEP_REGEX.captures(diag).and_then(|m| m.get(1))
+            && let Some(ref contents) = manifest.contents
             && let Some(span) = manifest.find_crate_span(crate_name.as_str())
         {
             let rel_path = pathdiff::diff_paths(&manifest.path, &manifest.cwd)
@@ -2118,7 +2147,7 @@ fn on_stderr_line_inner(
                 crate_name.as_str()
             )))
             .element(
-                Snippet::source(&manifest.contents)
+                Snippet::source(contents)
                     .path(rel_path)
                     .annotation(AnnotationKind::Context.span(span)),
             )];
@@ -2356,8 +2385,8 @@ impl ManifestErrorContext {
         let bcx = build_runner.bcx;
         ManifestErrorContext {
             path: unit.pkg.manifest_path().to_owned(),
-            spans: unit.pkg.manifest().document().clone(),
-            contents: unit.pkg.manifest().contents().to_owned(),
+            spans: unit.pkg.manifest().document().cloned(),
+            contents: unit.pkg.manifest().contents().map(String::from),
             requested_kinds: bcx.target_data.requested_kinds().to_owned(),
             host_name: bcx.rustc().host,
             rename_table,
@@ -2398,9 +2427,13 @@ impl ManifestErrorContext {
     /// baz = { path = "../bar", package = "bar" }
     /// ```
     fn find_crate_span(&self, unrenamed: &str) -> Option<Range<usize>> {
+        let Some(ref spans) = self.spans else {
+            return None;
+        };
+
         let orig_name = self.rename_table.get(unrenamed)?.as_str();
 
-        if let Some((k, v)) = get_key_value(&self.spans, &["dependencies", orig_name]) {
+        if let Some((k, v)) = get_key_value(&spans, &["dependencies", orig_name]) {
             // We make some effort to find the unrenamed text: in
             //
             // ```
@@ -2420,8 +2453,7 @@ impl ManifestErrorContext {
         // [target.x86_64-unknown-linux-gnu.dependencies] or
         // [target.'cfg(something)'.dependencies]. We filter out target tables
         // that don't match a requested target or a requested cfg.
-        if let Some(target) = self
-            .spans
+        if let Some(target) = spans
             .as_ref()
             .get("target")
             .and_then(|t| t.as_ref().as_table())

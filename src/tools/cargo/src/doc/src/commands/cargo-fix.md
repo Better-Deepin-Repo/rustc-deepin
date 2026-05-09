@@ -302,21 +302,14 @@ detail.</p>
 </dd>
 
 
-<dt class="option-term" id="option-cargo-fix---timings=fmts"><a class="option-anchor" href="#option-cargo-fix---timings=fmts"><code>--timings=</code><em>fmts</em></a></dt>
+<dt class="option-term" id="option-cargo-fix---timings"><a class="option-anchor" href="#option-cargo-fix---timings"><code>--timings</code></a></dt>
 <dd class="option-desc"><p>Output information how long each compilation takes, and track concurrency
-information over time. Accepts an optional comma-separated list of output
-formats; <code>--timings</code> without an argument will default to <code>--timings=html</code>.
-Specifying an output format (rather than the default) is unstable and requires
-<code>-Zunstable-options</code>. Valid output formats:</p>
-<ul>
-<li><code>html</code> (unstable, requires <code>-Zunstable-options</code>): Write a human-readable file <code>cargo-timing.html</code> to the
-<code>target/cargo-timings</code> directory with a report of the compilation. Also write
-a report to the same directory with a timestamp in the filename if you want
-to look at older runs. HTML output is suitable for human consumption only,
-and does not provide machine-readable timing data.</li>
-<li><code>json</code> (unstable, requires <code>-Zunstable-options</code>): Emit machine-readable JSON
-information about timing information.</li>
-</ul>
+information over time.</p>
+<p>A file <code>cargo-timing.html</code> will be written to the <code>target/cargo-timings</code>
+directory at the end of the build. An additional report with a timestamp
+in its filename is also written if you want to look at a previous run.
+These reports are suitable for human consumption only, and do not provide
+machine-readable timing data.</p>
 </dd>
 
 
@@ -438,18 +431,6 @@ offline.</p>
 <dd class="option-desc"><p>Equivalent to specifying both <code>--locked</code> and <code>--offline</code>.</p>
 </dd>
 
-
-<dt class="option-term" id="option-cargo-fix---lockfile-path"><a class="option-anchor" href="#option-cargo-fix---lockfile-path"><code>--lockfile-path</code> <em>PATH</em></a></dt>
-<dd class="option-desc"><p>Changes the path of the lockfile from the default (<code>&lt;workspace_root&gt;/Cargo.lock</code>) to <em>PATH</em>. <em>PATH</em> must end with
-<code>Cargo.lock</code> (e.g. <code>--lockfile-path /tmp/temporary-lockfile/Cargo.lock</code>). Note that providing
-<code>--lockfile-path</code> will ignore existing lockfile at the default path, and instead will
-either use the lockfile from <em>PATH</em>, or write a new lockfile into the provided <em>PATH</em> if it doesn’t exist.
-This flag can be used to run most commands in read-only directories, writing lockfile into the provided <em>PATH</em>.</p>
-<p>This option is only available on the <a href="https://doc.rust-lang.org/book/appendix-07-nightly-rust.html">nightly
-channel</a> and
-requires the <code>-Z unstable-options</code> flag to enable (see
-<a href="https://github.com/rust-lang/cargo/issues/14421">#14421</a>).</p>
-</dd>
 
 </dl>
 

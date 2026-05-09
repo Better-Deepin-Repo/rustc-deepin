@@ -7,11 +7,12 @@ Files-Excluded:
  src/llvm-project
 # Pre-generated docs
  src/tools/rustfmt/docs
+# unclear license
+ src/doc/rustc-dev-guide/src/debuginfo/CodeView.pdf
 # Fonts already in Debian, covered by d-0003-mdbook-strip-embedded-libs.patch
- vendor/mdbook-*/src/front-end/css/font-awesome.min.css
- vendor/mdbook-*/src/front-end/css/highlight.css
- vendor/mdbook-*/src/front-end/fonts
- vendor/mdbook-*/src/front-end/js/highlight.js
+ vendor/mdbook-*/front-end/css/highlight.css
+ vendor/mdbook-*/front-end/fonts
+ vendor/mdbook-*/front-end/js/highlight.js
 # DOCX versions of TRPL book prepared for No Starch Press
  src/doc/book/nostarch/docx
 # Exclude submodules https://github.com/rust-lang/rust/tree/master/src/tools
@@ -41,12 +42,13 @@ Files-Excluded:
  vendor/libsqlite3-sys-*/sqlcipher
  vendor/libz-sys-*/src/zlib*
  vendor/lzma-sys*/xz-*
- vendor/onig_sys*/oniguruma/*
 # Embedded unused docs
  vendor/salsa-*/book
 # Embedded binary blobs
- vendor/mdbook-*/src/front-end/playground_editor
+ vendor/mdbook-*/front-end/playground_editor
  vendor/psm-*/src/arch/wasm32.o
+# Embedded copy of Fontawesome 6.x
+ vendor/font-awesome-as-a-crate-*/src/fontawesome.rs
 # See https://github.com/bytecodealliance/wit-bindgen/issues/1288
 # See debian/scripts/build-wit-bindgen.sh
  vendor/wit-bindgen-*/src/rt/*.a
@@ -78,7 +80,6 @@ Files-Excluded:
  vendor/analyzeme-12.0.3
  vendor/android_system_properties-0.1.5
  vendor/android-tzdata-0.1.1
- vendor/annotate-snippets-0.12.9
  vendor/ansi-str-0.9.0
  vendor/ansitok-0.3.0
  vendor/anstream-0.6.18
@@ -97,7 +98,6 @@ Files-Excluded:
  vendor/anyhow-1.0.87
  vendor/anyhow-1.0.95
  vendor/anyhow-1.0.98
- vendor/arbitrary-1.4.1
  vendor/arc-swap-1.6.0
  vendor/arrayvec-0.7.2
  vendor/assert_cmd-2.1.1
@@ -139,8 +139,8 @@ Files-Excluded:
  vendor/bytesize-1.3.0
  vendor/camino-1.1.4
  vendor/camino-1.2.0
- vendor/capstone-0.13.0
- vendor/capstone-sys-0.17.0
+ vendor/capstone-0.14.0
+ vendor/capstone-sys-0.18.0
  vendor/cargo-credential-0.4.8
  vendor/cargo-credential-libsecret-0.4.12
  vendor/cargo-credential-macos-keychain-0.4.12
@@ -180,7 +180,6 @@ Files-Excluded:
  vendor/clap_builder-4.5.51
  vendor/clap_complete-4.5.37
  vendor/clap_complete-4.5.44
- vendor/clap_complete-4.5.60
  vendor/clap_derive-4.1.14
  vendor/clap_derive-4.5.18
  vendor/clap_lex-0.4.1
@@ -200,22 +199,22 @@ Files-Excluded:
  vendor/cpufeatures-0.2.15
  vendor/cpufeatures-0.2.5
  vendor/crabgrind-0.1.10
- vendor/cranelift-assembler-x64-0.125.1
- vendor/cranelift-assembler-x64-meta-0.125.1
- vendor/cranelift-bforest-0.125.1
- vendor/cranelift-bitset-0.125.1
- vendor/cranelift-codegen-0.125.1
- vendor/cranelift-codegen-meta-0.125.1
- vendor/cranelift-codegen-shared-0.125.1
- vendor/cranelift-control-0.125.1
- vendor/cranelift-entity-0.125.1
- vendor/cranelift-frontend-0.125.1
- vendor/cranelift-isle-0.125.1
- vendor/cranelift-jit-0.125.1
- vendor/cranelift-module-0.125.1
- vendor/cranelift-native-0.125.1
- vendor/cranelift-object-0.125.1
- vendor/cranelift-srcgen-0.125.1
+ vendor/cranelift-assembler-x64-0.127.0
+ vendor/cranelift-assembler-x64-meta-0.127.0
+ vendor/cranelift-bforest-0.127.0
+ vendor/cranelift-bitset-0.127.0
+ vendor/cranelift-codegen-0.127.0
+ vendor/cranelift-codegen-meta-0.127.0
+ vendor/cranelift-codegen-shared-0.127.0
+ vendor/cranelift-control-0.127.0
+ vendor/cranelift-entity-0.127.0
+ vendor/cranelift-frontend-0.127.0
+ vendor/cranelift-isle-0.127.0
+ vendor/cranelift-jit-0.127.0
+ vendor/cranelift-module-0.127.0
+ vendor/cranelift-native-0.127.0
+ vendor/cranelift-object-0.127.0
+ vendor/cranelift-srcgen-0.127.0
  vendor/crates-io-0.40.9
  vendor/crc32fast-1.3.2
  vendor/crc32fast-1.4.2
@@ -229,13 +228,14 @@ Files-Excluded:
  vendor/crossterm_winapi-0.9.1
  vendor/crypto-common-0.1.6
  vendor/cssparser-0.31.2
+ vendor/cssparser-macros-0.6.1
  vendor/csv-1.2.1
  vendor/csv-core-0.1.10
  vendor/ct-codecs-1.1.3
  vendor/ctrlc-3.5.0
  vendor/curl-0.4.47
  vendor/curl-sys-0.4.79+curl-8.12.0
- vendor/curl-sys-0.4.83+curl-8.15.0
+ vendor/curl-sys-0.4.84+curl-8.17.0
  vendor/cxx-1.0.188
  vendor/cxxbridge-cmd-1.0.188
  vendor/cxxbridge-flags-1.0.188
@@ -260,6 +260,7 @@ Files-Excluded:
  vendor/dotenvy-0.15.7
  vendor/dsl_auto_type-0.1.3
  vendor/dtoa-1.0.9
+ vendor/dtoa-short-0.3.5
  vendor/ed25519-compact-2.1.1
  vendor/ego-tree-0.6.3
  vendor/either-1.13.0
@@ -309,8 +310,8 @@ Files-Excluded:
  vendor/getrandom-0.3.1
  vendor/getrandom-0.3.2
  vendor/gimli-0.28.1
- vendor/gimli-0.32.0
  vendor/git2-0.20.0
+ vendor/git2-0.20.2
  vendor/gix-0.70.0
  vendor/gix-actor-0.33.2
  vendor/gix-attributes-0.24.0
@@ -373,6 +374,7 @@ Files-Excluded:
  vendor/h2-0.3.26
  vendor/h2-0.4.7
  vendor/h2-0.4.9
+ vendor/handlebars-6.3.2
  vendor/hashbrown-0.15.1
  vendor/hashbrown-0.15.2
  vendor/hashbrown-0.15.3
@@ -426,9 +428,11 @@ Files-Excluded:
  vendor/icu_normalizer_data-2.0.0
  vendor/icu_properties-1.5.1
  vendor/icu_properties-2.0.1
+ vendor/icu_properties-2.1.1
  vendor/icu_properties_data-1.5.0
  vendor/icu_properties_data-1.5.1
  vendor/icu_properties_data-2.0.1
+ vendor/icu_properties_data-2.1.1
  vendor/icu_provider-1.5.0
  vendor/icu_provider-2.0.0
  vendor/icu_provider_macros-1.5.0
@@ -469,6 +473,8 @@ Files-Excluded:
  vendor/jemalloc-sys-0.5.3+5.3.0-patched
  vendor/jemalloc-sys-0.5.4+5.3.0-patched
  vendor/jiff-0.1.29
+ vendor/jiff-0.2.16
+ vendor/jiff-static-0.2.16
  vendor/jiff-tzdb-0.1.2
  vendor/jiff-tzdb-0.1.4
  vendor/jiff-tzdb-platform-0.1.2
@@ -492,13 +498,13 @@ Files-Excluded:
  vendor/libc-0.2.172
  vendor/libc-0.2.174
  vendor/libc-0.2.175
+ vendor/libc-0.2.177
  vendor/libdbus-sys-0.2.5
- vendor/libffi-5.0.0
- vendor/libffi-sys-4.0.0
+ vendor/libffi-5.1.0
+ vendor/libffi-sys-4.1.0
  vendor/libgit2-sys-0.18.0+1.9.0
+ vendor/libgit2-sys-0.18.2+1.9.1
  vendor/libloading-0.8.6
- vendor/libloading-0.8.8
- vendor/libloading-0.9.0
  vendor/libm-0.2.12
  vendor/libm-0.2.6
  vendor/libmimalloc-sys-0.1.44
@@ -523,6 +529,7 @@ Files-Excluded:
  vendor/log-0.4.22
  vendor/log-0.4.25
  vendor/log-0.4.27
+ vendor/log-0.4.28
  vendor/lru-0.12.0
  vendor/mach2-0.4.3
  vendor/markup5ever-0.12.1
@@ -546,6 +553,7 @@ Files-Excluded:
  vendor/mio-1.0.2
  vendor/mio-1.0.3
  vendor/mio-1.0.4
+ vendor/mio-1.1.0
  vendor/miow-0.3.7
  vendor/miow-0.6.0
  vendor/miow-0.6.1
@@ -693,7 +701,7 @@ Files-Excluded:
  vendor/ref-cast-1.0.24
  vendor/ref-cast-impl-1.0.24
  vendor/r-efi-5.2.0
- vendor/regalloc2-0.13.2
+ vendor/regalloc2-0.13.3
  vendor/regex-1.11.1
  vendor/regex-1.7.1
  vendor/regex-1.8.4
@@ -728,6 +736,7 @@ Files-Excluded:
  vendor/rustix-0.38.44
  vendor/rustix-1.0.5
  vendor/rustix-1.0.7
+ vendor/rustix-1.1.2
  vendor/rustls-0.23.13
  vendor/rustls-0.23.26
  vendor/rustls-pemfile-1.0.4
@@ -744,9 +753,12 @@ Files-Excluded:
  vendor/ryu-1.0.13
  vendor/ryu-1.0.18
  vendor/ryu-1.0.19
+ vendor/ryu-1.0.20
  vendor/schannel-0.1.27
  vendor/schannel-0.1.28
  vendor/scheduled-thread-pool-0.2.7
+ vendor/schemars-1.1.0
+ vendor/schemars_derive-1.1.0
  vendor/scopeguard-1.1.0
  vendor/scraper-0.20.0
  vendor/scratch-1.0.9
@@ -779,9 +791,12 @@ Files-Excluded:
  vendor/serde_json-1.0.133
  vendor/serde_json-1.0.138
  vendor/serde_json-1.0.140
+ vendor/serde_json-1.0.145
  vendor/serde_spanned-0.6.5
  vendor/serde_spanned-0.6.8
+ vendor/serde_spanned-1.0.3
  vendor/serde-untagged-0.1.6
+ vendor/serde_urlencoded-0.7.1
  vendor/servo_arc-0.3.0
  vendor/sha1-0.10.5
  vendor/sha1_smol-1.0.1
@@ -805,6 +820,7 @@ Files-Excluded:
  vendor/socket2-0.5.8
  vendor/socket2-0.5.9
  vendor/spmc-0.3.0
+ vendor/sqlite-wasm-rs-0.5.1
  vendor/stable_deref_trait-1.2.0
  vendor/string_cache-0.8.7
  vendor/string_cache_codegen-0.5.2
@@ -814,6 +830,7 @@ Files-Excluded:
  vendor/strum-0.26.3
  vendor/strum_macros-0.26.4
  vendor/subtle-2.4.1
+ vendor/supports-hyperlinks-3.1.0
  vendor/syn-2.0.100
  vendor/syn-2.0.101
  vendor/syn-2.0.104
@@ -837,12 +854,14 @@ Files-Excluded:
  vendor/tabled_derive-0.11.0
  vendor/tar-0.4.38
  vendor/tar-0.4.43
- vendor/target-lexicon-0.13.2
+ vendor/tar-0.4.44
+ vendor/target-lexicon-0.13.3
  vendor/tempfile-3.14.0
  vendor/tempfile-3.16.0
  vendor/tempfile-3.19.1
  vendor/tempfile-3.20.0
  vendor/tempfile-3.21.0
+ vendor/tempfile-3.23.0
  vendor/tera-1.19.1
  vendor/termcolor-1.2.0
  vendor/terminal_size-0.4.1
@@ -895,22 +914,28 @@ Files-Excluded:
  vendor/tokio-util-0.7.7
  vendor/toml-0.8.20
  vendor/toml-0.8.22
+ vendor/toml-0.9.8
  vendor/toml_datetime-0.6.5
  vendor/toml_datetime-0.6.8
  vendor/toml_datetime-0.6.9
+ vendor/toml_datetime-0.7.3
  vendor/toml_edit-0.22.23
  vendor/toml_edit-0.22.26
+ vendor/toml_parser-1.0.4
+ vendor/toml_writer-1.0.4
  vendor/tower-0.4.13
  vendor/tower-service-0.3.2
  vendor/tracing-0.1.37
  vendor/tracing-0.1.40
  vendor/tracing-0.1.41
+ vendor/tracing-0.1.43
  vendor/tracing-attributes-0.1.28
  vendor/tracing-attributes-0.1.30
  vendor/tracing-core-0.1.30
  vendor/tracing-core-0.1.32
  vendor/tracing-core-0.1.33
  vendor/tracing-core-0.1.34
+ vendor/tracing-core-0.1.35
  vendor/tracing-subscriber-0.3.19
  vendor/tracing-subscriber-0.3.20
  vendor/try-lock-0.2.4
@@ -932,6 +957,7 @@ Files-Excluded:
  vendor/unicode-normalization-0.1.22
  vendor/unicode-normalization-0.1.23
  vendor/unicode-normalization-0.1.24
+ vendor/unicode-properties-0.1.3
  vendor/unicode-truncate-1.1.0
  vendor/unicode-width-0.1.10
  vendor/unicode-width-0.1.13
@@ -975,8 +1001,8 @@ Files-Excluded:
  vendor/wasm-bindgen-shared-0.2.105
  vendor/wasm-bindgen-shared-0.2.84
  vendor/wasm-bindgen-shared-0.2.93
- vendor/wasmtime-internal-jit-icache-coherence-38.0.1
- vendor/wasmtime-internal-math-38.0.1
+ vendor/wasmtime-internal-jit-icache-coherence-40.0.0
+ vendor/wasmtime-internal-math-40.0.0
  vendor/webpki-roots-0.26.3
  vendor/web-sys-0.3.61
  vendor/web-sys-0.3.70
@@ -1022,11 +1048,9 @@ Files-Excluded:
  vendor/windows-interface-0.59.3
  vendor/windows-link-0.1.1
  vendor/windows-link-0.2.0
- vendor/windows-link-0.2.1
  vendor/windows-numerics-0.2.0
  vendor/windows-registry-0.2.0
  vendor/windows-registry-0.4.0
- vendor/windows-registry-0.6.1
  vendor/windows-result-0.2.0
  vendor/windows-result-0.3.2
  vendor/windows-result-0.3.4
@@ -1195,6 +1219,12 @@ License: SIL-OPEN-FONT
 Files: src/librustdoc/html/static/fonts/SourceSerif4*
 Copyright: 2014-2021 Adobe Systems Incorporated
 License: SIL-OPEN-FONT
+
+Files: vendor/alloca-0.4.0/*
+Copyright: 2021-2023 Adel Prokurov <adel.prokurov@gmail.com>
+           2021-2023 StackOverflowExcept1on
+License: MIT
+Comment: see https://github.com/playXE/alloca-rs
 
 Files: vendor/anes-*/*
 Copyright: 2019-2023 Robert Vojta <rvojta@me.com>
@@ -1392,11 +1422,6 @@ Copyright: 2023-2024 Zakarum <zaq.dev@icloud.com>
 License: MIT OR Apache-2.0
 Comment: see https://github.com/zakarumych/allocator-api2
 
-Files: vendor/ammonia-*/*
-Copyright: 2015-2018 Michael Howell <michael@notriddle.com>
-License: MIT  or  Apache-2.0
-Comment: see https://github.com/notriddle/ammonia
-
 Files: vendor/annotate-snippets-*/*
 Copyright: 2018-2020 Zibi Braniecki <gandalf@mozilla.com>
 License: Apache-2.0 or MIT
@@ -1424,8 +1449,9 @@ Comment: see https://github.com/droundy/arrayref
 Files:
  vendor/askama-0.*/*
  vendor/askama_derive-0.*/*
+ vendor/askama_macros-0.*/*
  vendor/askama_parser-0.*/*
-Copyright: 2017-2020 Dirkjan Ochtman
+Copyright: 2017-2026 Dirkjan Ochtman
 License: MIT OR Apache-2.0
 Comment: see https://github.com/askama-rs/askama
 
@@ -1729,13 +1755,6 @@ Copyright: 2015-2025 The Crossbeam Project Developers
 License: MIT or Apache-2.0
 Comment: see https://github.com/crossbeam-rs
 
-Files:
- vendor/cssparser-0.*/*
- vendor/cssparser-macros-0.*/*
-Copyright: 2013-2025 Simon Sapin <simon.sapin@exyr.org>
-License: MPL-2.0
-Comment: see https://github.com/servo/rust-cssparser
-
 Files: vendor/ct-codecs-*/*
 Copyright: 2020-2022 Frank Denis <github@pureftpd.org>
 License: MIT
@@ -1831,7 +1850,6 @@ Comment: see https://github.com/madsmtm/objc2
 Files:
  vendor/anyhow-*/*
  vendor/dissimilar-*/*
- vendor/dtoa-*/*
  vendor/itoa-*/*
  vendor/itoa-0.*/*
  vendor/quote-*/*
@@ -1843,23 +1861,16 @@ License: MIT or Apache-2.0
 Comment:
  see https://github.com/dtolnay/anyhow
  see https://github.com/dtolnay/dissimilar
- see https://github.com/dtolnay/dtoa
  see https://github.com/dtolnay/itoa
  see https://github.com/dtolnay/quote
  see https://github.com/dtolnay/syn
  see https://github.com/dtolnay/unicode-ident
-
-Files: vendor/dtoa-short-0.*/*
-Copyright: 2017-2024 Xidorn Quan <me@upsuper.org>
-License: MPL-2.0
-Comment: see https://github.com/upsuper/dtoa-short
 
 Files:
  vendor/arrayvec-*/*
  vendor/either-*/*
  vendor/itertools-*/*
  vendor/itertools-0.*/*
- vendor/maplit-*/*
  vendor/scopeguard-*/*
 Copyright: 2014-2020 bluss
 License: MIT or Apache-2.0
@@ -1868,7 +1879,6 @@ Comment:
  see https://github.com/bluss/either
  see https://github.com/bluss/arrayvec
  see https://github.com/bluss/fixedbitset
- see https://github.com/bluss/maplit
  see https://github.com/bluss/scopeguard
 
 Files:
@@ -1923,6 +1933,12 @@ Files: vendor/ed25519-compact-*/*
 Copyright: 2020-2024 Frank Denis <github@pureftpd.org>
 License: MIT
 Comment: see https://github.com/jedisct1/rust-ed25519-compact
+
+Files: vendor/ego-tree-*/*
+Copyright: 2016-2026 June McEnroe <june@causal.agency>
+           2016-2026 Carlo Federico Vescovo <vescovocarlofederico@gmail.com>
+License: ISC
+Comment: see https://github.com/rust-scraper/ego-tree
 
 Files: vendor/elasticlunr-rs-*/*
 Copyright: 2017-2018 Matt Ickstadt <mattico8@gmail.com>
@@ -1990,6 +2006,13 @@ Copyright: 2016-2018 Steven Fackler <sfackler@gmail.com>
 License: MIT or Apache-2.0
 Comment: see https://github.com/sfackler/fallible-streaming-iterator
 
+Files: vendor/fancy-regex-*/*
+Copyright: 2016-2026 Raph Levien <raph@google.com>
+           2016-2026 Robin Stocker <robin@nibor.org>
+           2016-2026 Keith Hall <keith.hall@available.systems>
+License: MIT
+Comment: see https://github.com/fancy-regex/fancy-regex
+
 Files: vendor/faster-hex-*/*
 Copyright: 2018-2023 zhangsoledad <787953403@qq.com>
 License: MIT
@@ -2035,6 +2058,16 @@ Files: vendor/foldhash-0.*/*
 Copyright: 2024-2024 Orson Peters <orsonpeters@gmail.com>
 License: Zlib
 Comment: see https://github.com/orlp/foldhash
+
+Files: vendor/font-awesome-as-a-crate-*/*
+Copyright: 2022 Fonticons, Inc. (https://fontawesome.com)
+License: CC-BY AND MIT
+Comment:
+ see https://github.com/rust-lang/docs.rs
+ .
+ This crate is pruned and patched to not bundle FontAwesome 6.x, but rebuild it
+ from the packaged version. The icon data is licensed under CC-BY (4.0), the
+ code itself under MIT. The icon SVG data contains the required attributions.
 
 Files:
  vendor/foreign-types-*/*
@@ -2131,7 +2164,6 @@ Files:
  vendor/gix-odb-*/*
  vendor/gix-pack-*/*
  vendor/gix-packetline-*/*
- vendor/gix-packetline-blocking-*/*
  vendor/gix-path-*/*
  vendor/gix-pathspec-*/*
  vendor/gix-prompt-*/*
@@ -2718,9 +2750,7 @@ Copyright: 2014-2020 Benjamin Sago <ogham@bsago.me>
 License: MIT
 Comment: see https://github.com/ogham/rust-number-prefix
 
-Files:
- vendor/objc2-*/*
- vendor/obj2c-encode-*/*
+Files: vendor/objc2-*/*
 Copyright: 2014-2026 Mads Marquart <mads@marquart.dk>
 License: MIT
 Comment: see https://github.com/madsmtm/objc2
@@ -2743,14 +2773,6 @@ Files: vendor/once_cell-*/*
 Copyright: 2018-2019 Aleksey Kladov <aleksey.kladov@gmail.com>
 License: MIT OR Apache-2.0
 Comment: see https://github.com/matklad/once_cell
-
-Files:
- vendor/onig-*/*
- vendor/onig_sys-*/*
-Copyright: 2015-2023 Will Speak <will@willspeak.me>
-           2015-2023 Ivan Ivashchenko <defuz@me.com>
-License: MIT
-Comment: see http://github.com/iwillspeak/rust-onig
 
 Files: vendor/oorandom-*/*
 Copyright: 2019-2021 Simon Heath <icefox@dreamquest.io>
@@ -2825,6 +2847,11 @@ Comment:
  see https://github.com/Amanieu/thread_local-rs
  see https://github.com/Amanieu/parking_lot
 
+Files: vendor/page_size-*/*
+Copyright: 2017-2023 Philip Woods <elzairthesorcerer@gmail.com>
+License: MIT or Apache-2.0
+Comment: see https://github.com/Elzair/page_size_rs
+
 Files: vendor/papergrid-*/*
 Copyright: 2020-2024 Maxim Zhiburt <zhiburt@gmail.com>
 License: MIT
@@ -2882,7 +2909,6 @@ Files:
  vendor/phf-*/*
  vendor/phf_codegen-*/*
  vendor/phf_generator-*/*
- vendor/phf_macros-*/*
  vendor/phf_shared-*/*
 Copyright: 2014-2025 Steven Fackler <sfackler@gmail.com>
 License: MIT
@@ -3139,11 +3165,6 @@ Copyright: 2019-2024 Moritz Borcherding <moritz.borcherding@web.de>
 License: MIT
 Comment: see https://github.com/KillingSpark/zstd-rs
 
-Files: vendor/ryu-*/*
-Copyright: 2018-2018 David Tolnay <dtolnay@gmail.com>
-License: Apache-2.0 or BSL-1.0
-Comment: see https://github.com/dtolnay/ryu
-
 Files: 
  vendor/salsa-0.*/*
  vendor/salsa-macro-rules-0.*/*
@@ -3223,11 +3244,6 @@ Files: vendor/serde-untagged-*/*
 Copyright: 2023-2024 David Tolnay <dtolnay@gmail.com>
 License: MIT OR Apache-2.0
 Comment: see https://github.com/dtolnay/serde-untagged
-
-Files: vendor/serde_urlencoded-0.*/*
-Copyright: 2016-2024 Anthony Ramine <n.oxyde@gmail.com>
-License: MIT or Apache-2.0
-Comment: see https://github.com/nox/serde_urlencoded
 
 Files: vendor/serde-value-*/*
 Copyright: 2016-2020 arcnmx
@@ -3987,6 +4003,11 @@ Copyright:
  1995-2016 International Business Machines Corporation and others.
 License: Unicode-Data-Files-and-Software-License
 Comment: See https://github.com/unicode-org/icu4x , parts adapted from ICU4C and/or ICU4J
+
+Files: vendor/zmij-*/*
+Copyright: 2025-2026 David Tolnay <dtolnay@gmail.com>
+License: MIT
+Comment: see https://github.com/dtolnay/zmij
 
 Files: debian/*
 Copyright: 2013-2018 Debian Rust Maintainers <pkg-rust-maintainers@alioth-lists.debian.net>

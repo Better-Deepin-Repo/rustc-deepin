@@ -130,9 +130,14 @@ use tracing::{debug, trace};
 pub use self::job::Freshness::{self, Dirty, Fresh};
 pub use self::job::{Job, Work};
 pub use self::job_state::JobState;
+use super::BuildContext;
+use super::BuildRunner;
+use super::CompileMode;
+use super::Unit;
+use super::UnitIndex;
 use super::custom_build::Severity;
-use super::timings::{SectionTiming, Timings};
-use super::{BuildContext, BuildRunner, CompileMode, Unit};
+use super::timings::SectionTiming;
+use super::timings::Timings;
 use crate::core::compiler::descriptive_pkg_name;
 use crate::core::compiler::future_incompat::{
     self, FutureBreakageItem, FutureIncompatReportPackage,
@@ -181,6 +186,9 @@ struct DrainState<'gctx> {
     progress: Progress<'gctx>,
     next_id: u32,
     timings: Timings<'gctx>,
+
+    /// Map from unit index to unit, for looking up dependency information.
+    index_to_unit: HashMap<UnitIndex, Unit>,
 
     /// Tokens that are currently owned by this Cargo, and may be "associated"
     /// with a rustc process. They may also be unused, though if so will be
@@ -495,6 +503,12 @@ impl<'gctx> JobQueue<'gctx> {
             progress,
             next_id: 0,
             timings: self.timings,
+            index_to_unit: build_runner
+                .bcx
+                .unit_to_index
+                .iter()
+                .map(|(unit, &index)| (index, unit.clone()))
+                .collect(),
             tokens: Vec::new(),
             pending_queue: Vec::new(),
             print: DiagnosticPrinter::new(
@@ -887,11 +901,6 @@ impl<'gctx> DrainState<'gctx> {
         // Record some timing information if `--timings` is enabled, and
         // this'll end up being a noop if we're not recording this
         // information.
-        self.timings.mark_concurrency(
-            self.active.len(),
-            self.pending_queue.len(),
-            self.queue.len(),
-        );
         self.timings.record_cpu();
 
         let active_names = self
@@ -956,9 +965,10 @@ impl<'gctx> DrainState<'gctx> {
         let messages = self.messages.clone();
         let is_fresh = job.freshness().is_fresh();
         let rmeta_required = build_runner.rmeta_required(unit);
+        let lock_manager = build_runner.lock_manager.clone();
 
         let doit = move |diag_dedupe| {
-            let state = JobState::new(id, messages, diag_dedupe, rmeta_required);
+            let state = JobState::new(id, messages, diag_dedupe, rmeta_required, lock_manager);
             state.run_to_finish(job);
         };
 
@@ -1163,8 +1173,9 @@ impl<'gctx> DrainState<'gctx> {
             // being a compiled package.
             Dirty(dirty_reason) => {
                 if !dirty_reason.is_fresh_build() {
-                    gctx.shell()
-                        .verbose(|shell| dirty_reason.present_to(shell, unit, ws_root))?;
+                    gctx.shell().verbose(|shell| {
+                        dirty_reason.present_to(shell, unit, ws_root, &self.index_to_unit)
+                    })?;
                 }
 
                 if unit.mode.is_doc() {

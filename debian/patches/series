@@ -36,7 +36,6 @@ behaviour/d-rustc-windows-ssp.patch
 behaviour/d-rustdoc-disable-embedded-fonts.patch
 ubuntu/ubuntu-disable-ppc64el-asm-tests.patch
 ubuntu/ubuntu-ignore-arm-doctest.patch
-vendor/onig_sys-use-system-lib.patch
 build/ignore-broken-debuginfo-tests.patch
 vendor/blake3-skip-embedded-C-code-use-pure-implementation.patch
 build/bootstrap-don-t-attempt-to-download-rustc-in-tests.patch
@@ -46,6 +45,7 @@ build/bootstrap-ignore-x.py-shell-completion-diff.patch
 build/bootstrap-disarm-llvm-config-test-that-requires-git.patch
 build/disable-bootstrap-tests-that-don-t-work-from-tarball-sour.patch
 behaviour/x32-set-panic-strategy-to-aborting.patch
-upstream/Enable-file-locking-support-for-Hurd.patch
-vendor/tar-CVE-2026-33056.patch
-vendor/tar-CVE-2026-33055.patch
+prune/d-0024-remove-sqlite-wasm-rs.patch
+prune/d-0025-remove-reference-to-CodeView.pdf.patch
+prune/d-0026-font-awesome-as-a-crate-generate-SVG-data-from-pac.patch
+build/tests-skip-rust-analyzer-on-most-targets.patch

@@ -1,0 +1,32 @@
+From: =?utf-8?q?Fabian_Gr=C3=BCnbichler?= <debian@fabian.gruenbichler.email>
+Date: Mon, 13 Apr 2026 14:22:57 +0200
+Subject: tests: skip rust-analyzer on most targets
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+upstream only tests (a subset of) 64-bit, but bootstrap has no filtering
+for target width for now.. these two platforms probably cover where
+rust-analyzer is used in practice.
+
+Forwaded: not-needed
+
+Signed-off-by: Fabian Grünbichler <debian@fabian.gruenbichler.email>
+---
+ src/bootstrap/src/core/build_steps/test.rs | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/bootstrap/src/core/build_steps/test.rs b/src/bootstrap/src/core/build_steps/test.rs
+index f52ab9a..db775e7 100644
+--- a/src/bootstrap/src/core/build_steps/test.rs
++++ b/src/bootstrap/src/core/build_steps/test.rs
+@@ -477,7 +477,8 @@ impl Step for RustAnalyzer {
+ 
+         // FIXME: eventually, we should probably reduce the amount of target tuple substring
+         // matching in bootstrap.
+-        if target.starts_with("i686") {
++        // Debian: invert and only test these two, instead of skipping only 32-bit x86
++        if (!target.starts_with("x86_64") && !target.starts_with("aarch64")) || target.contains("hurd") {
+             return;
+         }
+ 

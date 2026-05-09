@@ -126,7 +126,7 @@ fn clean_multiple_packages_in_glob_char_path() {
     let foo_path = &p.build_dir().join("debug").join("build");
 
     #[cfg(not(target_env = "msvc"))]
-    let file_glob = "foo/*/deps/foo-*";
+    let file_glob = "foo/*/deps/foo*";
 
     #[cfg(target_env = "msvc")]
     let file_glob = "foo/*/deps/foo.pdb";
@@ -401,7 +401,7 @@ fn build_script() {
         .with_stderr_data(str![[r#"
 [COMPILING] foo v0.0.1 ([ROOT]/foo)
 [RUNNING] `rustc [..] build.rs [..]`
-[RUNNING] `[ROOT]/foo/target/debug/build/foo/[HASH]/build-script/build-script-build`
+[RUNNING] `[ROOT]/foo/target/debug/build/foo/[HASH]/deps/build-script-build`
 [RUNNING] `rustc [..] src/main.rs [..]`
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 

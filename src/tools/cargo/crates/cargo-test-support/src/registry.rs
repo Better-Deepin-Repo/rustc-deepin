@@ -607,6 +607,7 @@ pub struct Dependency {
 enum EntryData {
     Regular(String),
     Symlink(PathBuf),
+    Directory,
 }
 
 /// A file to be created in a package.
@@ -1331,6 +1332,17 @@ impl Package {
         self
     }
 
+    /// Adds an empty directory at the given path.
+    pub fn directory(&mut self, path: &str) -> &mut Package {
+        self.files.push(PackageFile {
+            path: path.to_string(),
+            contents: EntryData::Directory,
+            mode: DEFAULT_MODE,
+            extra: false,
+        });
+        self
+    }
+
     /// Adds an "extra" file that is not rooted within the package.
     ///
     /// Normal files are automatically placed within a directory named
@@ -1735,6 +1747,10 @@ impl Package {
         mode: u32,
         contents: &EntryData,
     ) {
+        // Unfortunately we cannot use GNU headers with dynamic extensions for
+        // long paths because that would cause package checksums to change
+        // based on whether or not the tests are running in a long directory
+        // name.
         let mut header = Header::new_ustar();
         let contents = match contents {
             EntryData::Regular(contents) => contents.as_str(),
@@ -1742,6 +1758,10 @@ impl Package {
                 header.set_entry_type(tar::EntryType::Symlink);
                 t!(header.set_link_name(src));
                 "" // Symlink has no contents.
+            }
+            EntryData::Directory => {
+                header.set_entry_type(tar::EntryType::Directory);
+                ""
             }
         };
         header.set_size(contents.len() as u64);

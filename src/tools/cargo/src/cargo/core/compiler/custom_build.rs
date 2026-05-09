@@ -377,7 +377,7 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         .inherit_jobserver(&build_runner.jobserver);
 
     // Find all artifact dependencies and make their file and containing directory discoverable using environment variables.
-    for (var, value) in artifact::get_env(build_runner, dependencies)? {
+    for (var, value) in artifact::get_env(build_runner, unit, dependencies)? {
         cmd.env(&var, value);
     }
 
@@ -451,6 +451,8 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         cmd.display_env_vars();
     }
 
+    let any_build_script_metadata = bcx.gctx.cli_unstable().any_build_script_metadata;
+
     // Gather the set of native dependencies that this package has along with
     // some other variables to close over.
     //
@@ -461,8 +463,16 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         .filter_map(|dep| {
             if dep.unit.mode.is_run_custom_build() {
                 let dep_metadata = build_runner.get_run_build_script_metadata(&dep.unit);
+
+                let dep_name = dep.dep_name.unwrap_or(dep.unit.pkg.name());
+
                 Some((
-                    dep.unit.pkg.manifest().links().unwrap().to_string(),
+                    dep_name,
+                    dep.unit
+                        .pkg
+                        .manifest()
+                        .links()
+                        .map(|links| links.to_string()),
                     dep.unit.pkg.package_id(),
                     dep_metadata,
                 ))
@@ -531,7 +541,7 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         // native dynamic libraries.
         {
             let build_script_outputs = build_script_outputs.lock().unwrap();
-            for (name, dep_id, dep_metadata) in lib_deps {
+            for (name, links, dep_id, dep_metadata) in lib_deps {
                 let script_output = build_script_outputs.get(dep_metadata).ok_or_else(|| {
                     internal(format!(
                         "failed to locate build state for env vars: {}/{}",
@@ -540,10 +550,18 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
                 })?;
                 let data = &script_output.metadata;
                 for (key, value) in data.iter() {
-                    cmd.env(
-                        &format!("DEP_{}_{}", super::envify(&name), super::envify(key)),
-                        value,
-                    );
+                    if let Some(ref links) = links {
+                        cmd.env(
+                            &format!("DEP_{}_{}", super::envify(&links), super::envify(key)),
+                            value,
+                        );
+                    }
+                    if any_build_script_metadata {
+                        cmd.env(
+                            &format!("CARGO_DEP_{}_{}", super::envify(&name), super::envify(key)),
+                            value,
+                        );
+                    }
                 }
             }
             if let Some(build_scripts) = build_scripts
@@ -596,10 +614,7 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
                 // If we're opting into backtraces, mention that build dependencies' backtraces can
                 // be improved by requesting debuginfo to be built, if we're not building with
                 // debuginfo already.
-                //
-                // ALLOWED: Other tools like `rustc` might read it directly
-                // through `std::env`. We should make their behavior consistent.
-                #[allow(clippy::disallowed_methods)]
+                #[expect(clippy::disallowed_methods, reason = "consistency with rustc")]
                 if let Ok(show_backtraces) = std::env::var("RUST_BACKTRACE") {
                     if !built_with_debuginfo && show_backtraces != "0" {
                         build_error_context.push_str(&format!(
@@ -1049,10 +1064,10 @@ impl BuildOutput {
                                 None => return false,
                                 Some(n) => n,
                             };
-                            // ALLOWED: the process of rustc bootstrapping reads this through
-                            // `std::env`. We should make the behavior consistent. Also, we
-                            // don't advertise this for bypassing nightly.
-                            #[allow(clippy::disallowed_methods)]
+                            #[expect(
+                                clippy::disallowed_methods,
+                                reason = "consistency with rustc, not specified behavior"
+                            )]
                             std::env::var("RUSTC_BOOTSTRAP")
                                 .map_or(false, |var| var.split(',').any(|s| s == name))
                         };

@@ -511,8 +511,8 @@ fn prepare_for_vendor(
     let mut warnings = Default::default();
     let mut errors = Default::default();
     let manifest = crate::util::toml::to_real_manifest(
-        contents.to_owned(),
-        document.clone(),
+        contents.map(|c| c.to_owned()),
+        document.cloned(),
         original_toml,
         normalized_toml,
         features,
@@ -638,17 +638,29 @@ fn copy_and_checksum<T: Read>(
 /// Filters files we want to vendor.
 ///
 /// `relative` is a path relative to the package root.
+
 fn vendor_this(relative: &Path) -> bool {
+    // Skip git config files as they're not relevant to builds most of
+    // the time and if we respect them (e.g. in git) then it'll
+    // probably mess with the checksums when a vendor dir is checked
+    // into someone else's source control
+    for component in relative.components() {
+        if let Some(name) = component.as_os_str().to_str() {
+            if name == ".git" {
+                return false;
+            }
+        }
+    }
+
+    if let Some(file_name) = relative.file_name().and_then(|s| s.to_str()) {
+        if matches!(file_name, ".gitattributes" | ".gitignore") {
+            return false;
+        }
+    }
+
+    // Temporary Cargo files
     match relative.to_str() {
-        // Skip git config files as they're not relevant to builds most of
-        // the time and if we respect them (e.g.  in git) then it'll
-        // probably mess with the checksums when a vendor dir is checked
-        // into someone else's source control
-        Some(".gitattributes" | ".gitignore" | ".git") => false,
-
-        // Temporary Cargo files
         Some(".cargo-ok") => false,
-
         _ => true,
     }
 }
