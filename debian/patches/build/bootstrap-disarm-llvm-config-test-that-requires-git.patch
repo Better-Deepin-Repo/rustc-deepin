@@ -8,15 +8,15 @@ Content-Transfer-Encoding: 8bit
 Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
 ---
  src/bootstrap/src/core/builder/tests.rs  | 3 +++
- src/bootstrap/src/core/config/tests.rs   | 6 ++++++
- src/bootstrap/src/utils/helpers/tests.rs | 3 +++
- 3 files changed, 12 insertions(+)
+ src/bootstrap/src/core/config/tests.rs   | 5 +++++
+ src/bootstrap/src/utils/helpers/tests.rs | 2 ++
+ 3 files changed, 10 insertions(+)
 
 diff --git a/src/bootstrap/src/core/builder/tests.rs b/src/bootstrap/src/core/builder/tests.rs
-index 89a0ab7..2d568f8 100644
+index e0eb38d..c6f0748 100644
 --- a/src/bootstrap/src/core/builder/tests.rs
 +++ b/src/bootstrap/src/core/builder/tests.rs
-@@ -443,6 +443,9 @@ fn test_prebuilt_llvm_config_path_resolution() {
+@@ -430,6 +430,9 @@ fn test_prebuilt_llvm_config_path_resolution() {
          .join(exe("llvm-config", builder.config.host_target));
      assert_eq!(expected, actual);
  
@@ -27,19 +27,19 @@ index 89a0ab7..2d568f8 100644
          r#"
              [llvm]
 diff --git a/src/bootstrap/src/core/config/tests.rs b/src/bootstrap/src/core/config/tests.rs
-index 802a232..23c2937 100644
+index e19604d..0bca66f 100644
 --- a/src/bootstrap/src/core/config/tests.rs
 +++ b/src/bootstrap/src/core/config/tests.rs
-@@ -53,6 +53,8 @@ fn download_ci_llvm() {
-     let config = parse("llvm.download-ci-llvm = false");
+@@ -37,6 +37,8 @@ fn download_ci_llvm() {
+     let config = TestCtx::new().config("check").create_config();
      assert!(!config.llvm_from_ci);
  
 +    // Debian: if-unchanged doesn't work in non-git context
 +    return;
-     let if_unchanged_config = parse("llvm.download-ci-llvm = \"if-unchanged\"");
-     if if_unchanged_config.llvm_from_ci && if_unchanged_config.is_running_on_ci {
-         let has_changes = if_unchanged_config.has_changes_from_upstream(LLVM_INVALIDATION_PATHS);
-@@ -474,6 +476,7 @@ fn check_rustc_if_unchanged_paths() {
+     // this doesn't make sense, as we are overriding it later.
+     let if_unchanged_config = TestCtx::new()
+         .config("check")
+@@ -422,6 +424,7 @@ fn check_rustc_if_unchanged_paths() {
          .collect();
  
      for p in normalised_allowed_paths {
@@ -47,27 +47,25 @@ index 802a232..23c2937 100644
          assert!(config.src.join(p).exists(), "{p} doesn't exist.");
      }
  }
-@@ -556,6 +559,9 @@ fn test_exclude() {
+@@ -490,6 +493,8 @@ fn test_exclude() {
  
  #[test]
  fn test_ci_flag() {
 +    // Debian: if-unchanged doesn't work in non-git context
 +    return;
-+
-     let config = Config::parse_inner(Flags::parse(&["check".into(), "--ci=false".into()]), |&_| {
-         toml::from_str("")
-     });
+     let config = TestCtx::new().config("check").arg("--ci").arg("false").create_config();
+     assert!(!config.is_running_on_ci);
+ 
 diff --git a/src/bootstrap/src/utils/helpers/tests.rs b/src/bootstrap/src/utils/helpers/tests.rs
-index 9030ca2..4a29a94 100644
+index 676fe6c..a463fe1 100644
 --- a/src/bootstrap/src/utils/helpers/tests.rs
 +++ b/src/bootstrap/src/utils/helpers/tests.rs
-@@ -102,6 +102,9 @@ fn test_set_file_times_sanity_check() {
+@@ -101,6 +101,8 @@ fn test_set_file_times_sanity_check() {
  
  #[test]
  fn test_submodule_path_of() {
 +    // Debian: doesn't work in non-git context
 +    return;
-+
-     let config = Config::parse_inner(Flags::parse(&["build".into(), "--dry-run".into()]), |&_| {
-         Ok(Default::default())
-     });
+     let config = TestCtx::new().config("build").create_config();
+ 
+     let build = crate::Build::new(config.clone());

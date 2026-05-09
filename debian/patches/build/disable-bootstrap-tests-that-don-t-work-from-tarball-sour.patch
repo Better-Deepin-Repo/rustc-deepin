@@ -13,10 +13,10 @@ Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
  1 file changed, 8 insertions(+), 5 deletions(-)
 
 diff --git a/src/bootstrap/src/core/builder/tests.rs b/src/bootstrap/src/core/builder/tests.rs
-index 2d568f8..8a2824b 100644
+index c6f0748..1d782c2 100644
 --- a/src/bootstrap/src/core/builder/tests.rs
 +++ b/src/bootstrap/src/core/builder/tests.rs
-@@ -168,7 +168,8 @@ fn check_missing_paths_for_x_test_tests() {
+@@ -162,7 +162,8 @@ fn check_missing_paths_for_x_test_tests() {
      }
  }
  
@@ -26,7 +26,7 @@ index 2d568f8..8a2824b 100644
  fn ci_rustc_if_unchanged_invalidate_on_compiler_changes() {
      git_test(|ctx| {
          prepare_rustc_checkout(ctx);
-@@ -181,7 +182,8 @@ fn ci_rustc_if_unchanged_invalidate_on_compiler_changes() {
+@@ -175,7 +176,8 @@ fn ci_rustc_if_unchanged_invalidate_on_compiler_changes() {
      });
  }
  
@@ -36,7 +36,7 @@ index 2d568f8..8a2824b 100644
  fn ci_rustc_if_unchanged_do_not_invalidate_on_library_changes_outside_ci() {
      git_test(|ctx| {
          prepare_rustc_checkout(ctx);
-@@ -194,7 +196,8 @@ fn ci_rustc_if_unchanged_do_not_invalidate_on_library_changes_outside_ci() {
+@@ -188,7 +190,8 @@ fn ci_rustc_if_unchanged_do_not_invalidate_on_library_changes_outside_ci() {
      });
  }
  
@@ -46,7 +46,7 @@ index 2d568f8..8a2824b 100644
  fn ci_rustc_if_unchanged_do_not_invalidate_on_tool_changes() {
      git_test(|ctx| {
          prepare_rustc_checkout(ctx);
-@@ -1533,7 +1536,7 @@ mod snapshot {
+@@ -1542,7 +1545,7 @@ mod snapshot {
          ");
      }
  
@@ -55,7 +55,7 @@ index 2d568f8..8a2824b 100644
      fn dist_all_cross_extended() {
          let ctx = TestCtx::new();
          insta::assert_snapshot!(
-@@ -1614,7 +1617,7 @@ mod snapshot {
+@@ -1623,7 +1626,7 @@ mod snapshot {
      ///
      /// This is a regression test for <https://github.com/rust-lang/rust/issues/138123>
      /// and <https://github.com/rust-lang/rust/issues/138004>.

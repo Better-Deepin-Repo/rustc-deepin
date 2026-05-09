@@ -14,10 +14,10 @@ Signed-off-by: Fabian Grünbichler <debian@fabian.gruenbichler.email>
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/bootstrap/src/core/config/config.rs b/src/bootstrap/src/core/config/config.rs
-index 678a9b6..bc8fcff 100644
+index 4b7ae6d..af45754 100644
 --- a/src/bootstrap/src/core/config/config.rs
 +++ b/src/bootstrap/src/core/config/config.rs
-@@ -543,7 +543,7 @@ impl Config {
+@@ -561,7 +561,7 @@ impl Config {
              new_symbol_mangling: rust_new_symbol_mangling,
              profile_generate: rust_profile_generate,
              profile_use: rust_profile_use,
@@ -26,10 +26,10 @@ index 678a9b6..bc8fcff 100644
              lto: rust_lto,
              validate_mir_opts: rust_validate_mir_opts,
              frame_pointers: rust_frame_pointers,
-@@ -657,6 +657,7 @@ impl Config {
-             // Cargo in their bootstrap.toml.
-             build_rustc = build_rustc.take().or(std::env::var_os("RUSTC").map(|p| p.into()));
-             build_cargo = build_cargo.take().or(std::env::var_os("CARGO").map(|p| p.into()));
+@@ -699,6 +699,7 @@ impl Config {
+                 );
+                 build_rustc = Some(stage0_rustc);
+             }
 +            rust_download_rustc = Some(StringOrBool::Bool(false));
          }
  

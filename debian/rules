@@ -10,8 +10,6 @@ RUST_LONG_VERSION := $(shell echo '$(DEB_VERSION_UPSTREAM)' | sed -re 's/([^+]+)
 LIBSTD_PKG := libstd-rust-$(RUST_VERSION)
 # Sed expression that matches the "rustc" we have in our Build-Depends field
 SED_RUSTC_BUILDDEP := sed -ne "/^Build-Depends:/,/^[^[:space:]\#]/{/^ *rustc:native .*,/p}" debian/control
-# Version of /usr/bin/rustc
-LOCAL_RUST_VERSION := $(shell rustc --version --verbose | sed -ne 's/^release: //p')
 
 include /usr/share/dpkg/buildflags.mk
 # needed for cross-compilation to avoid passing host CFLAGS to the BUILD
@@ -334,7 +332,9 @@ override_dh_auto_clean:
 	# We removed some checksums that we need to restore here
 	find vendor -name .cargo-checksum.json.orig -execdir mv "{}" ".cargo-checksum.json" \;
 	# undo debian/scripts/build-wit-bindgen.sh
-	rm -f vendor/wit-bindgen-*/src/rt/wit_bindgen_*.{rs,o,c}
+	rm -f vendor/wit-bindgen-*/src/rt/wit_bindgen_*.rs
+	rm -f vendor/wit-bindgen-*/src/rt/wit_bindgen_*.o
+	rm -f vendor/wit-bindgen-*/src/rt/wit_bindgen_*.c
 	rm -f vendor/wit-bindgen-*/src/rt/libwit_bindgen_cabi.a
 
 

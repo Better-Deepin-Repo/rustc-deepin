@@ -1,3 +1,26 @@
+rustc (1.92.0+dfsg1-2) unstable; urgency=high
+
+  * backport tar CVE-2026-33055/CVE-2026-33056 fixes
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Thu, 26 Mar 2026 11:27:54 +0100
+
+rustc (1.92.0+dfsg1-1) unstable; urgency=medium
+
+  * autopkgtests: split download from build test
+  * d/rules: fix clean target (Closes: #1048141)
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Sun, 08 Mar 2026 11:11:47 +0100
+
+rustc (1.92.0+dfsg1-1~exp1) experimental; urgency=medium
+
+  * New upstream release
+  * mark rust-src as M-A:foreign (Closes: #1101952)
+  * debian/rules: remove unused code (Closes: #1122648)
+  * fix cross-build (pending libonig-dev fix)
+  * cargo wrapper: also handle cargo-c commands
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Fri, 23 Jan 2026 17:54:07 +0100
+
 rustc (1.91.1+dfsg1-1) unstable; urgency=medium
 
   * Upload to unstable

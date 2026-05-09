@@ -11,32 +11,41 @@ Forwarded: no
 
 Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
 ---
- src/tools/compiletest/src/directives/directive_names.rs | 1 +
+ src/tools/compiletest/src/directives/directive_names.rs | 6 ++++--
  src/tools/compiletest/src/directives/tests.rs           | 1 +
  tests/crashes/108499.rs                                 | 1 +
  tests/run-make/long-linker-command-lines/foo.rs         | 7 +++++++
  tests/ui/associated-consts/issue-93775.rs               | 1 +
  tests/ui/issues/issue-74564-if-expr-stack-overflow.rs   | 1 +
  tests/ui/threads-sendsync/mpsc_stress.rs                | 1 +
- 7 files changed, 13 insertions(+)
+ 7 files changed, 16 insertions(+), 2 deletions(-)
 
 diff --git a/src/tools/compiletest/src/directives/directive_names.rs b/src/tools/compiletest/src/directives/directive_names.rs
-index 0ef84fb..4a83874 100644
+index 3a46dbc..c50ac5c 100644
 --- a/src/tools/compiletest/src/directives/directive_names.rs
 +++ b/src/tools/compiletest/src/directives/directive_names.rs
-@@ -69,6 +69,7 @@ pub(crate) const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
+@@ -70,6 +70,7 @@ pub(crate) const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
      "ignore-gnu",
      "ignore-haiku",
      "ignore-horizon",
 +    "ignore-hurd",
+     "ignore-i586",
      "ignore-i686-pc-windows-gnu",
      "ignore-i686-pc-windows-msvc",
-     "ignore-illumos",
+@@ -292,5 +293,6 @@ pub(crate) const KNOWN_HTMLDOCCK_DIRECTIVE_NAMES: &[&str] = &[
+     "!snapshot",
+ ];
+ 
+-pub(crate) const KNOWN_JSONDOCCK_DIRECTIVE_NAMES: &[&str] =
+-    &["count", "!count", "has", "!has", "is", "!is", "ismany", "!ismany", "set", "!set"];
++pub(crate) const KNOWN_JSONDOCCK_DIRECTIVE_NAMES: &[&str] = &[
++    "count", "!count", "has", "!has", "is", "!is", "ismany", "!ismany", "set", "!set",
++];
 diff --git a/src/tools/compiletest/src/directives/tests.rs b/src/tools/compiletest/src/directives/tests.rs
-index 33a02eb..54687d3 100644
+index 98249e6..95a8160 100644
 --- a/src/tools/compiletest/src/directives/tests.rs
 +++ b/src/tools/compiletest/src/directives/tests.rs
-@@ -320,6 +320,7 @@ fn ignore_target() {
+@@ -317,6 +317,7 @@ fn ignore_target() {
      assert!(check_ignore(&config, "//@ ignore-x86_64-unknown-linux-gnu"));
      assert!(check_ignore(&config, "//@ ignore-x86_64"));
      assert!(check_ignore(&config, "//@ ignore-linux"));

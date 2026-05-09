@@ -9,10 +9,10 @@ Forwarded: not-needed
  1 file changed, 21 insertions(+), 6 deletions(-)
 
 diff --git a/src/bootstrap/src/core/build_steps/doc.rs b/src/bootstrap/src/core/build_steps/doc.rs
-index 7865b68..73d3e335 100644
+index 70a9bcf..e12e019 100644
 --- a/src/bootstrap/src/core/build_steps/doc.rs
 +++ b/src/bootstrap/src/core/build_steps/doc.rs
-@@ -405,7 +405,27 @@ impl Step for Standalone {
+@@ -409,7 +409,27 @@ impl Step for Standalone {
                  .arg("--index-page")
                  .arg(builder.src.join("src/doc/index.md"))
                  .arg("--markdown-playground-url")
@@ -41,7 +41,7 @@ index 7865b68..73d3e335 100644
                  .arg("-o")
                  .arg(&out)
                  .arg(&path);
-@@ -414,11 +434,6 @@ impl Step for Standalone {
+@@ -418,11 +438,6 @@ impl Step for Standalone {
                  cmd.arg("--disable-minification");
              }
  

@@ -24,9 +24,8 @@ pre-release-replacements = [
 ]
 
 [features]
-default = ["auto", "wincon"]
+default = ["auto"]
 auto = ["dep:anstyle-query"]
-wincon = ["dep:anstyle-wincon"]
 # Enable in `dev-dependencies` to make sure output is captured for tests
 test = []
 

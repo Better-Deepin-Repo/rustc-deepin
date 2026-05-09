@@ -212,7 +212,7 @@ index 892057a..b3fd492 100644
  
  ### The Rustdoc Book
 diff --git a/src/doc/reference/src/conditional-compilation.md b/src/doc/reference/src/conditional-compilation.md
-index 213c508..3caaa60 100644
+index a2deb89..fee79b8 100644
 --- a/src/doc/reference/src/conditional-compilation.md
 +++ b/src/doc/reference/src/conditional-compilation.md
 @@ -477,6 +477,6 @@ println!("I'm running on a {} machine!", machine_kind);
@@ -256,7 +256,7 @@ index 5ce8f6f..6ac1557 100644
  To use this feature locally, you typically will use the `RUSTFLAGS` environment
  variable to specify flags to the compiler through Cargo. For example to compile
 diff --git a/src/doc/reference/src/procedural-macros.md b/src/doc/reference/src/procedural-macros.md
-index a603d5a..53c3607 100644
+index 28c9308..be5a454 100644
 --- a/src/doc/reference/src/procedural-macros.md
 +++ b/src/doc/reference/src/procedural-macros.md
 @@ -382,7 +382,7 @@ Note that neither declarative nor procedural macros support doc comment tokens
@@ -269,7 +269,7 @@ index a603d5a..53c3607 100644
  [Function-like macros]: #function-like-procedural-macros
  [`$crate`]: macro.decl.hygiene.crate
 diff --git a/src/doc/rustc/src/linker-plugin-lto.md b/src/doc/rustc/src/linker-plugin-lto.md
-index ab95aa2..8023f33 100644
+index 32e712a4..e5e0982 100644
 --- a/src/doc/rustc/src/linker-plugin-lto.md
 +++ b/src/doc/rustc/src/linker-plugin-lto.md
 @@ -112,7 +112,7 @@ targeting Windows-like targets
@@ -308,10 +308,10 @@ index e1750e2..f41790a 100644
  <div class="warning">
  
 diff --git a/src/doc/rustc/src/tests/index.md b/src/doc/rustc/src/tests/index.md
-index 7609ed2..2661c8e 100644
+index 7a108a7..2b9c32d 100644
 --- a/src/doc/rustc/src/tests/index.md
 +++ b/src/doc/rustc/src/tests/index.md
-@@ -305,7 +305,7 @@ Experimental support for using custom test harnesses is available on the
+@@ -317,7 +317,7 @@ Experimental support for using custom test harnesses is available on the
  [`--test` option]: ../command-line-arguments.md#option-test
  [`-Z panic-abort-tests`]: https://github.com/rust-lang/rust/issues/67650
  [`available_parallelism`]: ../../std/thread/fn.available_parallelism.html
@@ -320,7 +320,7 @@ index 7609ed2..2661c8e 100644
  [`libtest`]: ../../test/index.html
  [`main` function]: ../../reference/crates-and-source-files.html#main-functions
  [`Result`]: ../../std/result/index.html
-@@ -315,7 +315,7 @@ Experimental support for using custom test harnesses is available on the
+@@ -327,7 +327,7 @@ Experimental support for using custom test harnesses is available on the
  [attribute-should_panic]: ../../reference/attributes/testing.html#the-should_panic-attribute
  [attribute-test]: ../../reference/attributes/testing.html#the-test-attribute
  [bench-docs]: ../../unstable-book/library-features/test.html
@@ -343,10 +343,10 @@ index 39a05cf..7e450ae 100644
  
  ```bash
 diff --git a/src/doc/unstable-book/src/compiler-flags/branch-protection.md b/src/doc/unstable-book/src/compiler-flags/branch-protection.md
-index f0cc44a..bf92669 100644
+index c15567d..bff9806 100644
 --- a/src/doc/unstable-book/src/compiler-flags/branch-protection.md
 +++ b/src/doc/unstable-book/src/compiler-flags/branch-protection.md
-@@ -20,4 +20,4 @@ For example, `-Z branch-protection=bti,pac-ret,leaf` is valid, but
+@@ -21,4 +21,4 @@ For example, `-Z branch-protection=bti,pac-ret,leaf` is valid, but
  
  Rust's standard library does not ship with BTI or pointer authentication enabled by default.
  In Cargo projects the standard library can be recompiled with pointer authentication using the nightly

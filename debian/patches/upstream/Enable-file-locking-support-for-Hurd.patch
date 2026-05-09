@@ -17,7 +17,7 @@ Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
  2 files changed, 14 insertions(+)
 
 diff --git a/library/std/src/fs/tests.rs b/library/std/src/fs/tests.rs
-index c4e56bc..2fa02da 100644
+index 0517760..6e89728 100644
 --- a/library/std/src/fs/tests.rs
 +++ b/library/std/src/fs/tests.rs
 @@ -226,6 +226,7 @@ fn file_test_io_seek_and_write() {
@@ -53,10 +53,10 @@ index c4e56bc..2fa02da 100644
      target_os = "netbsd",
      target_os = "solaris",
 diff --git a/library/std/src/sys/fs/unix.rs b/library/std/src/sys/fs/unix.rs
-index af8b297..84f9971 100644
+index 3efe673..df03fb5 100644
 --- a/library/std/src/sys/fs/unix.rs
 +++ b/library/std/src/sys/fs/unix.rs
-@@ -1282,6 +1282,7 @@ impl File {
+@@ -1288,6 +1288,7 @@ impl File {
      #[cfg(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -64,7 +64,7 @@ index af8b297..84f9971 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1306,6 +1307,7 @@ impl File {
+@@ -1312,6 +1313,7 @@ impl File {
      #[cfg(not(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -72,7 +72,7 @@ index af8b297..84f9971 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1321,6 +1323,7 @@ impl File {
+@@ -1327,6 +1329,7 @@ impl File {
      #[cfg(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -80,7 +80,7 @@ index af8b297..84f9971 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1345,6 +1348,7 @@ impl File {
+@@ -1351,6 +1354,7 @@ impl File {
      #[cfg(not(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -88,7 +88,7 @@ index af8b297..84f9971 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1360,6 +1364,7 @@ impl File {
+@@ -1366,6 +1370,7 @@ impl File {
      #[cfg(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -96,7 +96,7 @@ index af8b297..84f9971 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1400,6 +1405,7 @@ impl File {
+@@ -1406,6 +1411,7 @@ impl File {
      #[cfg(not(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -104,7 +104,7 @@ index af8b297..84f9971 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1418,6 +1424,7 @@ impl File {
+@@ -1424,6 +1430,7 @@ impl File {
      #[cfg(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -112,7 +112,7 @@ index af8b297..84f9971 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1458,6 +1465,7 @@ impl File {
+@@ -1464,6 +1471,7 @@ impl File {
      #[cfg(not(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -120,7 +120,7 @@ index af8b297..84f9971 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1476,6 +1484,7 @@ impl File {
+@@ -1482,6 +1490,7 @@ impl File {
      #[cfg(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -128,7 +128,7 @@ index af8b297..84f9971 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1500,6 +1509,7 @@ impl File {
+@@ -1506,6 +1515,7 @@ impl File {
      #[cfg(not(any(
          target_os = "freebsd",
          target_os = "fuchsia",

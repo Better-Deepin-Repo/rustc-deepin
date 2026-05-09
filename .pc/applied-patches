@@ -8,7 +8,6 @@ upstream/u-ignore-ppc-hangs.patch
 upstream/u-rustc-llvm-cross-flags.patch
 upstream/u-hurd-tests.patch
 upstream/d-ignore-test_arc_condvar_poison-ppc.patch
-upstream/d-disable-download-tests.patch
 prune/d-0000-ignore-removed-submodules.patch
 prune/d-0001-pkg-config-no-special-snowflake.patch
 prune/d-0002-mdbook-strip-embedded-libs.patch
@@ -46,5 +45,7 @@ build/bootstrap-ignore-x.py-shell-completion-diff.patch
 build/bootstrap-disarm-llvm-config-test-that-requires-git.patch
 build/disable-bootstrap-tests-that-don-t-work-from-tarball-sour.patch
 behaviour/x32-set-panic-strategy-to-aborting.patch
-prune/d-0022-prune-ring-dependencies.patch
 upstream/Enable-file-locking-support-for-Hurd.patch
+prune/d-0022-prune-ring-dependencies.patch
+vendor/tar-CVE-2026-33056.patch
+vendor/tar-CVE-2026-33055.patch

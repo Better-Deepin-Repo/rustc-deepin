@@ -74,6 +74,8 @@ vfs-notify.workspace = true
 vfs.workspace = true
 paths.workspace = true
 
+ra-ap-rustc_type_ir.workspace = true
+
 [dev-dependencies]
 expect-test = "1.5.1"
 xshell.workspace = true

@@ -190,6 +190,7 @@ def main(*args):
     # for full details of the messed-up terminology here
     host_rust_type = os.getenv("DEB_HOST_RUST_TYPE", "")
     host_gnu_type = os.getenv("DEB_HOST_GNU_TYPE", "")
+    build_gnu_type = os.getenv("DEB_BUILD_GNU_TYPE", "")
 
     log(f'options = {build_options}, profiles = {build_profiles}, parallel = {parallel}, lto = {lto}')
     log(f'rust_type = {host_rust_type}, gnu_type = {host_gnu_type}')
@@ -214,12 +215,14 @@ def main(*args):
     newargs = []
     subcmd = None
     for a in args:
-        if (subcmd is None) and (a in ("build", "rustc", "doc", "test", "bench", "install")):
+        if (subcmd is None) and (a in ("build", "rustc", "doc", "test", "bench", "install", "cinstall", "cbuild", "ctest")):
             subcmd = a
             newargs.extend(["-Zavoid-dev-deps", a])
             if not terse:
                 newargs.extend(["--verbose", "--verbose"])
-            newargs.extend(parallel + ["--target", host_rust_type])
+            # old cargo-c mishandled explicit --target, so only add it for cross builds for now!
+            if (a not in ("cbuild", "cinstall", "ctest")) or (host_gnu_type != build_gnu_type):
+                newargs.extend(parallel + ["--target", host_rust_type])
             if lto:
                 newargs.append("--config")
                 newargs.append(f"profile.release.lto={lto}")

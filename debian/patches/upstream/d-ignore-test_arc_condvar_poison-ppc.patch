@@ -8,7 +8,7 @@ Forwarded: no
  1 file changed, 1 insertion(+)
 
 diff --git a/library/std/tests/sync/mutex.rs b/library/std/tests/sync/mutex.rs
-index 2445764..a5d010a 100644
+index ff6aef7..e8b738a 100644
 --- a/library/std/tests/sync/mutex.rs
 +++ b/library/std/tests/sync/mutex.rs
 @@ -424,6 +424,7 @@ fn test_replace_poison() {
