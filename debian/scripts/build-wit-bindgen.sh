@@ -52,9 +52,10 @@
 
 set -ex
 
-version=0.45.0
+version=$1
+version_mangled="$(echo $version | sed -e 's/\./_/g')"
 
-realloc=cabi_realloc_wit_bindgen_0_45_0
+realloc=cabi_realloc_wit_bindgen_${version_mangled}
 
 rm -f vendor/wit-bindgen-$version/src/rt/wit_bindgen_*.{rs,o,c}
 rm -f vendor/wit-bindgen-$version/src/rt/libwit_bindgen_cabi.a

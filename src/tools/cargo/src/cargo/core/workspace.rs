@@ -122,6 +122,8 @@ pub struct Workspace<'gctx> {
     resolve_honors_rust_version: bool,
     /// The feature unification mode used when building packages.
     resolve_feature_unification: FeatureUnification,
+    /// Latest publish time allowed for packages
+    resolve_publish_time: Option<jiff::Timestamp>,
     /// Workspace-level custom metadata
     custom_metadata: Option<toml::Value>,
 
@@ -259,6 +261,7 @@ impl<'gctx> Workspace<'gctx> {
             resolve_behavior: ResolveBehavior::V1,
             resolve_honors_rust_version: false,
             resolve_feature_unification: FeatureUnification::Selected,
+            resolve_publish_time: None,
             custom_metadata: None,
             local_overlays: HashMap::new(),
         }
@@ -715,6 +718,14 @@ impl<'gctx> Workspace<'gctx> {
 
     pub fn resolve_feature_unification(&self) -> FeatureUnification {
         self.resolve_feature_unification
+    }
+
+    pub fn set_resolve_publish_time(&mut self, publish_time: jiff::Timestamp) {
+        self.resolve_publish_time = Some(publish_time);
+    }
+
+    pub fn resolve_publish_time(&self) -> Option<jiff::Timestamp> {
+        self.resolve_publish_time
     }
 
     pub fn custom_metadata(&self) -> Option<&toml::Value> {
@@ -1288,10 +1299,8 @@ impl<'gctx> Workspace<'gctx> {
         }
 
         if error_count > 0 {
-            Err(crate::util::errors::AlreadyPrintedError::new(anyhow!(
-                "encountered {error_count} errors(s) while running lints"
-            ))
-            .into())
+            let plural = if error_count == 1 { "" } else { "s" };
+            bail!("encountered {error_count} error{plural} while running lints")
         } else {
             Ok(())
         }
@@ -1327,7 +1336,7 @@ impl<'gctx> Workspace<'gctx> {
 
         // This is a short term hack to allow `blanket_hint_mostly_unused`
         // to run without requiring `-Zcargo-lints`, which should hopefully
-        // improve the testing expierience while we are collecting feedback
+        // improve the testing experience while we are collecting feedback
         if self.gctx.cli_unstable().profile_hint_mostly_unused {
             blanket_hint_mostly_unused(
                 self.root_maybe(),
@@ -1339,10 +1348,8 @@ impl<'gctx> Workspace<'gctx> {
         }
 
         if error_count > 0 {
-            Err(crate::util::errors::AlreadyPrintedError::new(anyhow!(
-                "encountered {error_count} errors(s) while running lints"
-            ))
-            .into())
+            let plural = if error_count == 1 { "" } else { "s" };
+            bail!("encountered {error_count} error{plural} while running lints")
         } else {
             Ok(())
         }

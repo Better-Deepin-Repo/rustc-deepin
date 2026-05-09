@@ -4,7 +4,7 @@ r[lex.token]
 r[lex.token.syntax]
 ```grammar,lexer
 Token ->
-      IDENTIFIER_OR_KEYWORD
+      RESERVED_TOKEN
     | RAW_IDENTIFIER
     | CHAR_LITERAL
     | STRING_LITERAL
@@ -18,7 +18,7 @@ Token ->
     | FLOAT_LITERAL
     | LIFETIME_TOKEN
     | PUNCTUATION
-    | RESERVED_TOKEN
+    | IDENTIFIER_OR_KEYWORD
 ```
 
 r[lex.token.intro]
@@ -116,7 +116,7 @@ A suffix is a sequence of characters following the primary part of a literal (wi
 
 r[lex.token.literal.suffix.syntax]
 ```grammar,lexer
-SUFFIX -> IDENTIFIER_OR_KEYWORD
+SUFFIX -> IDENTIFIER_OR_KEYWORD _except `_`_
 
 SUFFIX_NO_E -> SUFFIX _not beginning with `e` or `E`_
 ```
@@ -762,7 +762,6 @@ r[lex.token.life.syntax]
 ```grammar,lexer
 LIFETIME_TOKEN ->
       `'` IDENTIFIER_OR_KEYWORD _not immediately followed by `'`_
-    | `'_` _not immediately followed by `'`_
     | RAW_LIFETIME
 
 LIFETIME_OR_LABEL ->
@@ -770,9 +769,9 @@ LIFETIME_OR_LABEL ->
     | RAW_LIFETIME
 
 RAW_LIFETIME ->
-    `'r#` IDENTIFIER_OR_KEYWORD _except `crate`, `self`, `super`, `Self` and not immediately followed by `'`_
+    `'r#` IDENTIFIER_OR_KEYWORD _not immediately followed by `'`_
 
-RESERVED_RAW_LIFETIME -> `'r#_` _not immediately followed by `'`_
+RESERVED_RAW_LIFETIME -> `'r#` (`_` | `crate` | `self` | `Self` | `super`) _not immediately followed by `'`_
 ```
 
 r[lex.token.life.intro]
@@ -787,7 +786,7 @@ r[lex.token.life.raw.allowed]
 Unlike a normal lifetime, a raw lifetime may be any strict or reserved keyword except the ones listed above for `RAW_LIFETIME`.
 
 r[lex.token.life.raw.reserved]
-It is an error to use the RESERVED_RAW_LIFETIME token `'r#_` in order to avoid confusion with the [placeholder lifetime].
+It is an error to use the [RESERVED_RAW_LIFETIME] token.
 
 r[lex.token.life.raw.edition2021]
 > [!EDITION-2021]
@@ -795,6 +794,9 @@ r[lex.token.life.raw.edition2021]
 
 r[lex.token.punct]
 ## Punctuation
+
+r[lex.token.punct.intro]
+Punctuation tokens are used as operators, separators, and other parts of the grammar.
 
 r[lex.token.punct.syntax]
 ```grammar,lexer
@@ -845,7 +847,6 @@ PUNCTUATION ->
     | `#`
     | `$`
     | `?`
-    | `_`
     | `{`
     | `}`
     | `[`
@@ -854,59 +855,8 @@ PUNCTUATION ->
     | `)`
 ```
 
-r[lex.token.punct.intro]
-Punctuation symbol tokens are listed here for completeness. Their individual
-usages and meanings are defined in the linked pages.
-
-| Symbol | Name        | Usage |
-|--------|-------------|-------|
-| `+`    | Plus        | [Addition][arith], [Trait Bounds], [Macro Kleene Matcher][macros]
-| `-`    | Minus       | [Subtraction][arith], [Negation]
-| `*`    | Star        | [Multiplication][arith], [Dereference], [Raw Pointers], [Macro Kleene Matcher][macros], [Use wildcards]
-| `/`    | Slash       | [Division][arith]
-| `%`    | Percent     | [Remainder][arith]
-| `^`    | Caret       | [Bitwise and Logical XOR][arith]
-| `!`    | Not         | [Bitwise and Logical NOT][negation], [Macro Calls][macros], [Inner Attributes][attributes], [Never Type], [Negative impls]
-| `&`    | And         | [Bitwise and Logical AND][arith], [Borrow], [References], [Reference patterns]
-| <code>\|</code> | Or | [Bitwise and Logical OR][arith], [Closures], Patterns in [match], [if let], and [while let]
-| `&&`   | AndAnd      | [Lazy AND][lazy-bool], [Borrow], [References], [Reference patterns]
-| <code>\|\|</code> | OrOr | [Lazy OR][lazy-bool], [Closures]
-| `<<`   | Shl         | [Shift Left][arith], [Nested Generics][generics]
-| `>>`   | Shr         | [Shift Right][arith], [Nested Generics][generics]
-| `+=`   | PlusEq      | [Addition assignment][compound]
-| `-=`   | MinusEq     | [Subtraction assignment][compound]
-| `*=`   | StarEq      | [Multiplication assignment][compound]
-| `/=`   | SlashEq     | [Division assignment][compound]
-| `%=`   | PercentEq   | [Remainder assignment][compound]
-| `^=`   | CaretEq     | [Bitwise XOR assignment][compound]
-| `&=`   | AndEq       | [Bitwise And assignment][compound]
-| <code>\|=</code> | OrEq | [Bitwise Or assignment][compound]
-| `<<=`  | ShlEq       | [Shift Left assignment][compound]
-| `>>=`  | ShrEq       | [Shift Right assignment][compound], [Nested Generics][generics]
-| `=`    | Eq          | [Assignment], [Attributes], Various type definitions
-| `==`   | EqEq        | [Equal][comparison]
-| `!=`   | Ne          | [Not Equal][comparison]
-| `>`    | Gt          | [Greater than][comparison], [Generics], [Paths]
-| `<`    | Lt          | [Less than][comparison], [Generics], [Paths]
-| `>=`   | Ge          | [Greater than or equal to][comparison], [Generics]
-| `<=`   | Le          | [Less than or equal to][comparison]
-| `@`    | At          | [Subpattern binding]
-| `_`    | Underscore  | [Wildcard patterns], [Inferred types], Unnamed items in [constants], [extern crates], [use declarations], and [destructuring assignment]
-| `.`    | Dot         | [Field access][field], [Tuple index]
-| `..`   | DotDot      | [Range][range], [Struct expressions], [Patterns], [Range Patterns][rangepat]
-| `...`  | DotDotDot   | [Variadic functions][extern], [Range patterns]
-| `..=`  | DotDotEq    | [Inclusive Range][range], [Range patterns]
-| `,`    | Comma       | Various separators
-| `;`    | Semi        | Terminator for various items and statements, [Array types]
-| `:`    | Colon       | Various separators
-| `::`   | PathSep     | [Path separator][paths]
-| `->`   | RArrow      | [Function return type][functions], [Closure return type][closures], [Function pointer type]
-| `=>`   | FatArrow    | [Match arms][match], [Macros]
-| `<-`   | LArrow      | The left arrow symbol has been unused since before Rust 1.0, but it is still treated as a single token
-| `#`    | Pound       | [Attributes]
-| `$`    | Dollar      | [Macros]
-| `?`    | Question    | [Try propagation expressions][question], [Questionably sized][sized], [Macro Kleene Matcher][macros]
-| `~`    | Tilde       | The tilde operator has been unused since before Rust 1.0, but its token may still be used
+> [!NOTE]
+> See the [syntax index] for links to how punctuation characters are used.
 
 r[lex.token.delim]
 ## Delimiters
@@ -925,7 +875,7 @@ r[lex.token.reserved]
 ## Reserved tokens
 
 r[lex.token.reserved.intro]
-Several token forms are reserved for future use. It is an error for the source input to match one of these forms.
+Several token forms are reserved for future use or to avoid confusion. It is an error for the source input to match one of these forms.
 
 r[lex.token.reserved.syntax]
 ```grammar,lexer
@@ -947,23 +897,23 @@ r[lex.token.reserved-prefix]
 r[lex.token.reserved-prefix.syntax]
 ```grammar,lexer
 RESERVED_TOKEN_DOUBLE_QUOTE ->
-    ( IDENTIFIER_OR_KEYWORD _except `b` or `c` or `r` or `br` or `cr`_ | `_` ) `"`
+    IDENTIFIER_OR_KEYWORD _except `b` or `c` or `r` or `br` or `cr`_ `"`
 
 RESERVED_TOKEN_SINGLE_QUOTE ->
-    ( IDENTIFIER_OR_KEYWORD _except `b`_ | `_` ) `'`
+    IDENTIFIER_OR_KEYWORD _except `b`_ `'`
 
 RESERVED_TOKEN_POUND ->
-    ( IDENTIFIER_OR_KEYWORD _except `r` or `br` or `cr`_ | `_` ) `#`
+    IDENTIFIER_OR_KEYWORD _except `r` or `br` or `cr`_ `#`
 
 RESERVED_TOKEN_LIFETIME ->
-    `'` ( IDENTIFIER_OR_KEYWORD _except `r`_ | `_` ) `#`
+    `'` IDENTIFIER_OR_KEYWORD _except `r`_ `#`
 ```
 
 r[lex.token.reserved-prefix.intro]
 Some lexical forms known as _reserved prefixes_ are reserved for future use.
 
 r[lex.token.reserved-prefix.id]
-Source input which would otherwise be lexically interpreted as a non-raw identifier (or a keyword or `_`) which is immediately followed by a `#`, `'`, or `"` character (without intervening whitespace) is identified as a reserved prefix.
+Source input which would otherwise be lexically interpreted as a non-raw identifier (or a keyword) which is immediately followed by a `#`, `'`, or `"` character (without intervening whitespace) is identified as a reserved prefix.
 
 r[lex.token.reserved-prefix.raw-token]
 Note that raw identifiers, raw string literals, and raw byte string literals may contain a `#` character but are not interpreted as containing a reserved prefix.
@@ -972,7 +922,7 @@ r[lex.token.reserved-prefix.strings]
 Similarly the `r`, `b`, `br`, `c`, and `cr` prefixes used in raw string literals, byte literals, byte string literals, raw byte string literals, C string literals, and raw C string literals are not interpreted as reserved prefixes.
 
 r[lex.token.reserved-prefix.life]
-Source input which would otherwise be lexically interpreted as a non-raw lifetime (or a keyword or `_`) which is immediately followed by a `#` character (without intervening whitespace) is identified as a reserved lifetime prefix.
+Source input which would otherwise be lexically interpreted as a non-raw lifetime (or a keyword) which is immediately followed by a `#` character (without intervening whitespace) is identified as a reserved lifetime prefix.
 
 r[lex.token.reserved-prefix.edition2021]
 > [!EDITION-2021]
@@ -1022,60 +972,15 @@ r[lex.token.reserved-guards.edition2024]
 > [!EDITION-2024]
 > Before the 2024 edition, reserved guards are accepted by the lexer and interpreted as multiple tokens. For example, the `#"foo"#` form is interpreted as three tokens. `##` is interpreted as two tokens.
 
-[Inferred types]: types/inferred.md
-[Range patterns]: patterns.md#range-patterns
-[Reference patterns]: patterns.md#reference-patterns
-[Subpattern binding]: patterns.md#identifier-patterns
-[Wildcard patterns]: patterns.md#wildcard-pattern
-[arith]: expressions/operator-expr.md#arithmetic-and-logical-binary-operators
-[array types]: types/array.md
-[assignment]: expressions/operator-expr.md#assignment-expressions
-[attributes]: attributes.md
-[borrow]: expressions/operator-expr.md#borrow-operators
-[closures]: expressions/closure-expr.md
-[comparison]: expressions/operator-expr.md#comparison-operators
-[compound]: expressions/operator-expr.md#compound-assignment-expressions
-[constants]: items/constant-items.md
-[dereference]: expressions/operator-expr.md#the-dereference-operator
-[destructuring assignment]: expressions/underscore-expr.md
-[extern crates]: items/extern-crates.md
-[extern]: items/external-blocks.md
-[field]: expressions/field-expr.md
 [Floating-point literal expressions]: expressions/literal-expr.md#floating-point-literal-expressions
-[floating-point types]: types/numeric.md#floating-point-types
-[function pointer type]: types/function-pointer.md
-[functions]: items/functions.md
-[generics]: items/generics.md
 [identifier]: identifiers.md
-[if let]: expressions/if-expr.md#if-let-patterns
 [Integer literal expressions]: expressions/literal-expr.md#integer-literal-expressions
 [keywords]: keywords.md
-[lazy-bool]: expressions/operator-expr.md#lazy-boolean-operators
 [literal expressions]: expressions/literal-expr.md
 [loop labels]: expressions/loop-expr.md
 [macros]: macros-by-example.md
-[match]: expressions/match-expr.md
-[negation]: expressions/operator-expr.md#negation-operators
-[negative impls]: items/implementations.md
-[never type]: types/never.md
-[numeric types]: types/numeric.md
-[paths]: paths.md
-[patterns]: patterns.md
-[placeholder lifetime]: lifetime-elision.md
-[question]: expressions/operator-expr.md#the-try-propagation-expression
-[range]: expressions/range-expr.md
-[rangepat]: patterns.md#range-patterns
-[raw pointers]: types/pointer.md#raw-pointers-const-and-mut
-[references]: types/pointer.md
-[sized]: trait-bounds.md#sized
 [String continuation escapes]: expressions/literal-expr.md#string-continuation-escapes
-[struct expressions]: expressions/struct-expr.md
-[trait bounds]: trait-bounds.md
-[tuple index]: expressions/tuple-expr.md#tuple-indexing-expressions
+[syntax index]: syntax-index.md#operators-and-punctuation
 [tuple structs]: items/structs.md
 [tuple enum variants]: items/enumerations.md
 [tuples]: types/tuple.md
-[unary minus operator]: expressions/operator-expr.md#negation-operators
-[use declarations]: items/use-declarations.md
-[use wildcards]: items/use-declarations.md
-[while let]: expressions/loop-expr.md#while-let-patterns

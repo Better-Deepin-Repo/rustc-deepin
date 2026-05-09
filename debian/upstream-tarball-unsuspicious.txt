@@ -139,7 +139,6 @@ src/tools/rust-analyzer/crates/hir-def/src/macro_expansion_tests/builtin_fn_macr
 src/tools/rust-analyzer/crates/hir-ty/src/tests/regression.rs
 src/tools/rust-analyzer/crates/ide-completion/src/completions/env_vars.rs
 src/tools/rust-analyzer/crates/ide/src/view_syntax_tree.rs
-src/tools/rust-analyzer/crates/rust-analyzer/src/diagnostics/to_proto.rs
 src/tools/rust-analyzer/docs/book/src/contributing/setup.md
 src/tools/rust-analyzer/docs/book/src/contributing/testing.md
 src/tools/rustc-perf/LICENSES/Apache-2.0.txt
@@ -220,11 +219,13 @@ vendor/linux-raw-sys-*/src/s390x/ptrace.rs
 vendor/maplit-*/README.rst
 vendor/mdbook-*/CONTRIBUTING.md
 vendor/nu-ansi-term-*/src/style.rs
+vendor/objc2-*/src/topics/alternatives.md
+vendor/objc2-*/src/topics/cross_compiling.md
+vendor/objc2-*/src/topics/interior_mutability.md
 vendor/oorandom-*/tarpaulin-report.html
 vendor/openssl-*/src/dh.rs
 vendor/openssl-sys-*/build/main.rs
 vendor/p384-*/src/arithmetic/hash2curve.rs
-vendor/papaya-*/BENCHMARKS.md
 vendor/pasetors-*/src/token.rs
 vendor/portable-atomic-*/build.rs
 vendor/portable-atomic-*/src/imp/atomic128/README.md
@@ -270,7 +271,6 @@ src/doc/*/*/pagetoc.js
 src/doc/*/pagetoc.js
 src/doc/book/*/ferris.js
 src/doc/book/ferris.js
-src/doc/reference/src/attributes-redirect.html
 src/doc/reference/theme/reference.js
 src/doc/rust-by-example/theme/js/language-picker.js
 src/doc/rustc-dev-guide/mermaid-init.js
@@ -281,7 +281,7 @@ src/librustdoc/html/static/js/rustdoc.d.ts
 src/librustdoc/html/static/js/tsconfig.json
 src/tools/cargo/crates/cargo-util-schemas/index.schema.json
 src/tools/cargo/crates/cargo-util-schemas/lockfile.schema.json
-src/tools/cargo/src/cargo/core/compiler/timings.js
+src/tools/cargo/src/cargo/core/compiler/timings/timings.js
 src/tools/error_index_generator/*.js
 src/tools/rustc-perf/collector/compile-benchmarks/*/perf-config.json
 src/tools/rustc-perf/site/frontend/*.json
@@ -528,13 +528,14 @@ vendor/stringdex-0.*/examples/searcher.js
 vendor/sysinfo-*/examples/simple.c
 
 # Test data
+compiler/rustc_codegen_gcc/tests/cross_lang_lto/add.c
 library/coretests/tests/num/dec2flt/parse.rs
 library/portable-simd/crates/core_simd/tests/mask_ops_impl/*.rs
 library/portable-simd/crates/core_simd/webdriver.json
 library/std/src/sys/path/windows/tests.rs
 library/std_detect/src/detect/test_data/*.auxv
-library/stdarch/crates/stdarch-verify/x86-intel.xml
 library/stdarch/intrinsics_data/arm_intrinsics.json
+library/stdarch/intrinsics_data/x86-intel.xml
 src/ci/citool/tests/jobs.rs
 src/librustdoc/html/render/write_shared/tests.rs
 src/tools/*/tests/*/*.stderr
@@ -550,12 +551,14 @@ src/tools/cargo/tests/testsuite/cargo_add/features_activated_over_limit/out/Carg
 src/tools/cargo/tests/testsuite/cargo_add/features_deactivated_over_limit/out/Cargo.toml
 src/tools/cargo/tests/testsuite/lints/*/*.term.svg
 src/tools/cargo/tests/testsuite/script/rustc_fixtures/*.stdout
+src/tools/cargo/tests/testsuite/script/rustc_fixtures/fence-too-many-dashes.stderr
 src/tools/clippy/tests/ui-toml/*/*.stderr
 src/tools/clippy/tests/ui-toml/large_include_file/too_big.txt
 src/tools/clippy/tests/ui-toml/renamed_function_params/extend/clippy.toml
 src/tools/clippy/tests/ui/wildcard_enum_match_arm.fixed
 src/tools/coverage-dump/src/covfun/tests.rs
 src/tools/rust-analyzer/bench_data/numerous_macro_rules
+src/tools/rust-analyzer/crates/hir-ty/src/tests/regression/new_solver.rs
 src/tools/rust-analyzer/crates/ide/src/syntax_highlighting/test_data/highlight_*.html
 src/tools/rust-analyzer/crates/parser/test_data/lexer/ok/*
 src/tools/rust-analyzer/crates/parser/test_data/parser/inline/err/generic_arg_list_recover*.rs
@@ -620,6 +623,7 @@ tests/ui/error-emitter/multiline-multipart-suggestion.windows.svg
 tests/ui/error-emitter/multiline-removal-suggestion.svg
 tests/ui/error-emitter/unicode-output.svg
 tests/ui/impl-trait/diagnostics/highlight-difference-between-expected-trait-and-found-trait.svg
+tests/ui/include-macros/invalid-utf8-binary-file.bin
 tests/ui/macros/not-utf8.bin
 tests/ui/suggestions/incorrect-variant-literal.svg
 vendor/annotate-snippets-*/tests/fixtures/no-color/strip_line_non_ws.toml
@@ -700,9 +704,6 @@ vendor/regex-automata-*/tests/gen/*/*.dfa
 vendor/rusqlite-*/test.csv
 vendor/rustc-demangle-*/src/lib.rs
 vendor/rustc-demangle-*/src/v0-large-test-symbols/early-recursion-limit
-vendor/rustls-pki-types-1.*/tests/data/*.crt
-vendor/rustls-pki-types-1.*/tests/data/*.pem
-vendor/rustls-pki-types-1.*/tests/keys/*.der
 vendor/ruzstd-0.*/test_fixtures/abc.txt.zst
 vendor/schemars-*/examples/*.schema.json
 vendor/schemars-*/tests/integration/snapshots/schemars/tests/integration/*.json
@@ -715,8 +716,10 @@ vendor/sha1-checked-0.*/tests/data/*.pdf
 vendor/sha2-*/tests/data/*.blb
 vendor/spki-*/tests/examples/*.der
 vendor/spki-*/tests/examples/*.pem
+vendor/stringdex-*/benches/roaring-bitmap-testdata/bitmapwithoutruns.bin
+vendor/stringdex-*/benches/roaring-bitmap-testdata/bitmapwithruns.bin
 vendor/stringdex-0.*/benches/definitions
-vendor/syntect-*/tests/public-api.txt
+vendor/syntect-*/tests/snapshots/public-api.txt
 vendor/tabled-*/tests/core/iter_table.rs
 vendor/tabled-*/tests/settings/colorization.rs
 vendor/tabled-*/tests/settings/padding_test.rs
@@ -759,10 +762,10 @@ vendor/pest_meta-*/src/grammar.rs
 vendor/regex-syntax-*/src/unicode_tables/*.rs
 vendor/rustls-pki-types-1.*/src/data/*.der
 vendor/rustls-webpki-0.*/src/data/*.der
-vendor/syntect-5.2.0/assets/default.themedump
-vendor/syntect-5.2.0/assets/default_metadata.packdump
-vendor/syntect-5.2.0/assets/default_newlines.packdump
-vendor/syntect-5.2.0/assets/default_nonewlines.packdump
+vendor/syntect-*/assets/default.themedump
+vendor/syntect-*/assets/default_metadata.packdump
+vendor/syntect-*/assets/default_newlines.packdump
+vendor/syntect-*/assets/default_nonewlines.packdump
 vendor/ucd-parse-*/src/sentence_break.rs
 vendor/ucd-trie-*/src/general_category.rs
 vendor/unicode-normalization-*/src/tables.rs
@@ -867,6 +870,8 @@ vendor/displaydoc-*/src/expand.rs
 vendor/ecdsa-*/src/der.rs
 vendor/ed25519-compact-*/src/sha512.rs
 vendor/env_logger-*/src/fmt/writer/mod.rs
+vendor/flate2-*/src/ffi/c.rs
+vendor/flate2-*/src/ffi/mod.rs
 vendor/flate2-*/src/mem.rs
 vendor/flate2-*/src/zio.rs
 vendor/fst-*/src/raw/ops.rs
@@ -989,6 +994,8 @@ vendor/sha2-*/src/sha256.rs
 vendor/sha2-*/src/sha512.rs
 vendor/shell-words-*/src/lib.rs
 vendor/shlex-*/src/lib.rs
+vendor/snapbox-*/src/data/format.rs
+vendor/stringdex-*/src/internals/hash/sip.rs
 vendor/syn-*/src/attr.rs
 vendor/syn-*/src/custom_punctuation.rs
 vendor/syn-*/src/data.rs

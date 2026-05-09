@@ -8,13 +8,13 @@ on Debian, we can just use the tzdata information..
 
 Forwarded: not-needed
 ---
- vendor/jiff-0.2.15/Cargo.toml | 13 -------------
+ vendor/jiff-0.2.16/Cargo.toml | 13 -------------
  1 file changed, 13 deletions(-)
 
-diff --git a/vendor/jiff-0.2.15/Cargo.toml b/vendor/jiff-0.2.15/Cargo.toml
-index b628c43..c1b8feb 100644
---- a/vendor/jiff-0.2.15/Cargo.toml
-+++ b/vendor/jiff-0.2.15/Cargo.toml
+diff --git a/vendor/jiff-0.2.16/Cargo.toml b/vendor/jiff-0.2.16/Cargo.toml
+index 257cd2e..2a225ba 100644
+--- a/vendor/jiff-0.2.16/Cargo.toml
++++ b/vendor/jiff-0.2.16/Cargo.toml
 @@ -66,7 +66,6 @@ default = [
      "std",
      "tz-system",

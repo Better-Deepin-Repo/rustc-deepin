@@ -78,6 +78,7 @@ Each new feature described below should explain how to use it.
     * [sbom](#sbom) --- Generates SBOM pre-cursor files for compiled artifacts
     * [update-breaking](#update-breaking) --- Allows upgrading to breaking versions with `update --breaking`
     * [feature-unification](#feature-unification) --- Enable new feature unification modes in workspaces
+    * [lockfile-publish-time] --- Limit resolver to packages older than the specified time
 * Output behavior
     * [artifact-dir](#artifact-dir) --- Adds a directory where artifacts are copied to.
     * [build-dir-new-layout](#build-dir-new-layout) --- Enables the new build-dir filesystem layout
@@ -96,11 +97,13 @@ Each new feature described below should explain how to use it.
     * [gc](#gc) --- Global cache garbage collection.
     * [open-namespaces](#open-namespaces) --- Allow multiple packages to participate in the same API namespace
     * [panic-immediate-abort](#panic-immediate-abort) --- Passes `-Cpanic=immediate-abort` to the compiler.
+    * [compile-time-deps](#compile-time-deps) --- Perma-unstable feature for rust-analyzer
 * rustdoc
     * [rustdoc-map](#rustdoc-map) --- Provides mappings for documentation to link to external sites like [docs.rs](https://docs.rs/).
     * [scrape-examples](#scrape-examples) --- Shows examples within documentation.
     * [output-format](#output-format-for-rustdoc) --- Allows documentation to also be emitted in the experimental [JSON format](https://doc.rust-lang.org/nightly/nightly-rustc/rustdoc_json_types/).
     * [rustdoc-depinfo](#rustdoc-depinfo) --- Use dep-info files in rustdoc rebuild detection.
+    * [rustdoc-mergeable-info](#rustdoc-mergeable-info) --- Use rustdoc mergeable cross-crate-info files.
 * `Cargo.toml` extensions
     * [Profile `rustflags` option](#profile-rustflags-option) --- Passed directly to rustc.
     * [Profile `hint-mostly-unused` option](#profile-hint-mostly-unused-option) --- Hint that a dependency is mostly unused, to optimize compilation time.
@@ -112,10 +115,10 @@ Each new feature described below should explain how to use it.
     * [path bases](#path-bases) --- Named base directories for path dependencies.
     * [`unstable-editions`](#unstable-editions) --- Allows use of editions that are not yet stable.
 * Information and metadata
-    * [Build-plan](#build-plan) --- Emits JSON information on which commands will be run.
     * [unit-graph](#unit-graph) --- Emits JSON for Cargo's internal graph structure.
     * [`cargo rustc --print`](#rustc---print) --- Calls rustc with `--print` to display information from rustc.
     * [Build analysis](#build-analysis) --- Record and persist detailed build metrics across runs, with new commands to query past builds.
+    * [`rustc-unicode`](#rustc-unicode) --- Enables `rustc`'s unicode error format in Cargo's error messages 
 * Configuration
     * [config-include](#config-include) --- Adds the ability for config files to include other files.
     * [`cargo config`](#cargo-config) --- Adds a new subcommand for viewing config files.
@@ -254,25 +257,6 @@ artifact-dir = "out"
 
 The `-Zroot-dir` flag sets the root directory relative to which paths are printed.
 This affects both diagnostics and paths emitted by the `file!()` macro.
-
-## Build-plan
-* Tracking Issue: [#5579](https://github.com/rust-lang/cargo/issues/5579)
-
-<div class="warning">
-
-> The build-plan feature is deprecated and may be removed in a future version.
-> See <https://github.com/rust-lang/cargo/issues/7614>.
-
-</div>
-
-The `--build-plan` argument for the `build` command will output JSON with
-information about which commands would be run without actually executing
-anything. This can be useful when integrating with another build tool.
-Example:
-
-```sh
-cargo +nightly build --build-plan -Z unstable-options
-```
 
 ## Metabuild
 * Tracking Issue: [rust-lang/rust#49803](https://github.com/rust-lang/rust/issues/49803)
@@ -658,28 +642,79 @@ like to stabilize it somehow!
 
 This feature requires the `-Zconfig-include` command-line option.
 
-The `include` key in a config file can be used to load another config file. It
-takes a string for a path to another file relative to the config file, or an
-array of config file paths. Only path ending with `.toml` is accepted.
+The `include` key in a config file can be used to load another config file.
+For example:
 
 ```toml
-# a path ending with `.toml`
-include = "path/to/mordor.toml"
+# .cargo/config.toml
+include = ["other-config.toml"]
 
-# or an array of paths
-include = ["frodo.toml", "samwise.toml"]
+[build]
+jobs = 4
 ```
 
-Unlike other config values, the merge behavior of the `include` key is
-different. When a config file contains an `include` key:
+```toml
+# .cargo/other-config.toml
+[build]
+rustflags = ["-W", "unsafe-code"]
+```
 
-1. The config values are first loaded from the `include` path.
-    * If the value of the `include` key is an array of paths, the config values
-      are loaded and merged from left to right for each path.
-    * Recurse this step if the config values from the `include` path also
-      contain an `include` key.
-2. Then, the config file's own values are merged on top of the config
-   from the `include` path.
+### Documentation updates
+
+> put this after `## Command-line overrides` before `## Config-relative paths`
+> to emphasize its special nature than other config keys.
+
+#### Including extra configuration files
+
+Configuration can include other configuration files using the top-level `include` key.
+This allows sharing configuration across multiple projects
+or splitting complex configurations into multiple files.
+
+##### `include`
+
+* Type: array of strings or tables
+* Default: none
+* Environment: not supported
+
+Loads additional configuration files.
+Paths are relative to the configuration file that includes them.
+Only paths ending with `.toml` are accepted.
+
+Supports the following formats:
+
+```toml
+# array of paths
+include = [
+    "frodo.toml",
+    "samwise.toml",
+]
+
+# inline tables for more control
+include = [
+    { path = "required.toml" },
+    { path = "optional.toml", optional = true },
+]
+```
+
+> **Note:** For better readability and to avoid confusion, it is recommended to:
+> - Place `include` at the top of the configuration file
+> - Put one include per line for clearer version control diffs
+> - Use inline table syntax when optional includes are needed
+
+When using table syntax, the following fields are supported:
+
+* `path` (string, required): Path to the config file to include.
+* `optional` (boolean, default: false): If `true`, missing files are silently
+  skipped instead of causing an error.
+
+The merge behavior of `include` is different from other config values:
+
+1. Config values are first loaded from the `include` paths.
+    * Included files are loaded left to right,
+      with values from later files taking precedence over earlier ones.
+    * This step recurses if included config files also contain `include` keys.
+2. Then, the config file's own values are merged on top of the included config,
+   taking highest precedence.
 
 ## target-applies-to-host
 * Original Pull Request: [#9322](https://github.com/rust-lang/cargo/pull/9322)
@@ -1888,6 +1923,22 @@ Specify which packages participate in [feature unification](../reference/feature
 * `package`: Dependency features are considered on a package-by-package basis,
   preferring duplicate builds of dependencies when different sets of features are activated by the packages.
 
+## pubtime
+
+* Original Issue: [#15491](https://github.com/rust-lang/cargo/issues/15491)
+* Tracking Issue: [#16270](https://github.com/rust-lang/cargo/issues/16270)
+
+Documentation updates:
+- Add `pubtime` field to the Index Summary description
+
+## lockfile-publish-time
+
+* Original Issue: [#5221](https://github.com/rust-lang/cargo/issues/5221)
+* Tracking Issue: [#16271](https://github.com/rust-lang/cargo/issues/16271)
+
+With `cargo generate-lockfile -Zunstable-options --publish-time <time>`,
+package resolution will not consider any package newer than the specified time.
+
 ## Package message format
 
 * Original Issue: [#11666](https://github.com/rust-lang/cargo/issues/11666)
@@ -1989,6 +2040,37 @@ enabled = true
 Enables the new build-dir filesystem layout.
 This layout change unblocks work towards caching and locking improvements.
 
+
+## compile-time-deps
+
+This permanently-unstable flag to only build proc-macros and build scripts (and their required dependencies),
+as well as run the build scripts.
+
+It is intended for use by tools like rust-analyzer and will never be stabilized.
+
+Example:
+
+```console
+cargo +nightly build --compile-time-deps -Z unstable-options
+cargo +nightly check --compile-time-deps --all-targets -Z unstable-options
+```
+
+# `rustc-unicode`
+* Tracking Issue: [rust#148607](https://github.com/rust-lang/rust/issues/148607)
+
+Enable `rustc`'s unicode error format in Cargo's error messages
+
+## rustdoc mergeable info
+
+* Original Pull Request: [#16309](https://github.com/rust-lang/cargo/pull/16309)
+* Tracking issue: [#16306](https://github.com/rust-lang/cargo/issues/16306)
+* Tracking rustc issue: [rust-lang/rust#130676](https://github.com/rust-lang/rust/issues/130676)
+
+The `-Z rustdoc-mergeable-info` leverage rustdoc's mergeable crate info,
+so that `cargo doc` can merge cross-crate information
+(like the search index, source files index, etc.)
+from separate output directories,
+and run `rustdoc` in parallel.
 
 # Stabilized and removed features
 
@@ -2256,22 +2338,12 @@ Doctest cross-compiling is now unconditionally enabled starting in Rust 1.89. Ru
 
 Multi-package publishing has been stabilized in Rust 1.90.0.
 
-## compile-time-deps
-
-This permanently-unstable flag to only build proc-macros and build scripts (and their required dependencies),
-as well as run the build scripts.
-
-It is intended for use by tools like rust-analyzer and will never be stabilized.
-
-Example:
-
-```console
-cargo +nightly build --compile-time-deps -Z unstable-options
-cargo +nightly check --compile-time-deps --all-targets -Z unstable-options
-```
-
 ## build-dir
 
 Support for `build.build-dir` was stabilized in the 1.91 release.
 See the [config documentation](config.md#buildbuild-dir) for information about changing the build-dir
 
+## Build-plan
+
+The `--build-plan` argument for the `build` command has been removed in 1.93.0-nightly.
+See <https://github.com/rust-lang/cargo/issues/7614> for the reason for its removal.

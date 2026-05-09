@@ -448,6 +448,9 @@ pub fn resolve_with_previous<'gctx>(
         }
         version_prefs.rust_versions(rust_versions);
     }
+    if let Some(publish_time) = ws.resolve_publish_time() {
+        version_prefs.publish_time(publish_time);
+    }
 
     let avoid_patch_ids = if register_patches {
         register_patch_entries(registry, ws, previous, &mut version_prefs, keep_previous)?
@@ -540,7 +543,7 @@ pub fn add_overrides<'a>(
         // The path listed next to the string is the config file in which the
         // key was located, so we want to pop off the `.cargo/config` component
         // to get the directory containing the `.cargo` folder.
-        (paths::normalize_path(&def.root(gctx).join(s)), def)
+        (paths::normalize_path(&def.root(gctx.cwd()).join(s)), def)
     });
 
     for (path, definition) in paths {

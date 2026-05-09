@@ -10,10 +10,10 @@ Forwarded: not-needed
  1 file changed, 12 insertions(+)
 
 diff --git a/src/bootstrap/src/core/builder/cargo.rs b/src/bootstrap/src/core/builder/cargo.rs
-index 653fb52..637791a 100644
+index 01f5a1e..28b026d 100644
 --- a/src/bootstrap/src/core/builder/cargo.rs
 +++ b/src/bootstrap/src/core/builder/cargo.rs
-@@ -707,6 +707,18 @@ impl Builder<'_> {
+@@ -744,6 +744,18 @@ impl Builder<'_> {
              hostflags.arg("--cfg=bootstrap");
          }
  

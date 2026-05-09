@@ -11,11 +11,11 @@ Forwarded: not-needed
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/src/etc/rust-lldb b/src/etc/rust-lldb
-index bce72f1..b126e45 100755
+index f8f3190..3190462 100755
 --- a/src/etc/rust-lldb
 +++ b/src/etc/rust-lldb
 @@ -7,10 +7,10 @@ set -e
- host=$(rustc -vV | sed -n -e 's/^host: //p')
+ host=$(rustc --print host-tuple)
  
  # Find out where to look for the pretty printer Python module
 -RUSTC_SYSROOT=$(rustc --print sysroot)

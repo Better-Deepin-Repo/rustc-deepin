@@ -8,7 +8,7 @@ Forwarded: no
  1 file changed, 1 insertion(+)
 
 diff --git a/library/std/tests/sync/mutex.rs b/library/std/tests/sync/mutex.rs
-index ff6aef7..e8b738a 100644
+index 75a6bf6..65019f9 100644
 --- a/library/std/tests/sync/mutex.rs
 +++ b/library/std/tests/sync/mutex.rs
 @@ -424,6 +424,7 @@ fn test_replace_poison() {
@@ -17,5 +17,5 @@ index ff6aef7..e8b738a 100644
  #[test]
 +#[cfg(not(target_arch = "powerpc"))]
  #[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
- fn test_arc_condvar_poison() {
-     struct Packet<T>(Arc<(Mutex<T>, Condvar)>);
+ fn test_mutex_arc_poison() {
+     let arc = Arc::new(Mutex::new(1));

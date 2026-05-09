@@ -798,12 +798,14 @@ where
             | ErrorClass::FetchHead
             | ErrorClass::Ssh
             | ErrorClass::Http => {
-                let mut msg = "network failure seems to have happened\n".to_string();
-                msg.push_str(
-                    "if a proxy or similar is necessary `net.git-fetch-with-cli` may help here\n",
-                );
-                msg.push_str(
-                    "https://doc.rust-lang.org/cargo/reference/config.html#netgit-fetch-with-cli",
+                let msg = format!(
+                    concat!(
+                        "network failure seems to have happened\n",
+                        "if a proxy or similar is necessary `net.git-fetch-with-cli` may help here\n",
+                        "https://doc.rust-lang.org/cargo/reference/config.html#netgit-fetch-with-cli",
+                        "{}"
+                    ),
+                    note_github_pull_request(url).unwrap_or_default()
                 );
                 err = err.context(msg);
             }
@@ -1030,8 +1032,9 @@ pub fn fetch(
         }
     }
 
+    debug!("doing a fetch for {remote_url}");
     let result = if let Some(true) = gctx.net_config()?.git_fetch_with_cli {
-        fetch_with_cli(repo, remote_url, &refspecs, tags, gctx)
+        fetch_with_cli(repo, remote_url, &refspecs, tags, shallow, gctx)
     } else if gctx.cli_unstable().gitoxide.map_or(false, |git| git.fetch) {
         fetch_with_gitoxide(repo, remote_url, refspecs, tags, shallow, gctx)
     } else {
@@ -1075,14 +1078,21 @@ fn fetch_with_cli(
     url: &str,
     refspecs: &[String],
     tags: bool,
+    shallow: gix::remote::fetch::Shallow,
     gctx: &GlobalContext,
 ) -> CargoResult<()> {
+    debug!(target: "git-fetch", backend = "git-cli");
+
     let mut cmd = ProcessBuilder::new("git");
     cmd.arg("fetch");
     if tags {
         cmd.arg("--tags");
     } else {
         cmd.arg("--no-tags");
+    }
+    if let gix::remote::fetch::Shallow::DepthAtRemote(depth) = shallow {
+        let depth = 0i32.saturating_add_unsigned(depth.get());
+        cmd.arg(format!("--depth={depth}"));
     }
     match gctx.shell().verbosity() {
         Verbosity::Normal => {}
@@ -1126,12 +1136,15 @@ fn fetch_with_gitoxide(
     shallow: gix::remote::fetch::Shallow,
     gctx: &GlobalContext,
 ) -> CargoResult<()> {
+    debug!(target: "git-fetch", backend = "gitoxide");
+
     let git2_repo = repo;
     let config_overrides = cargo_config_to_gitoxide_overrides(gctx)?;
     let repo_reinitialized = AtomicBool::default();
     let res = oxide::with_retry_and_progress(
         git2_repo.path(),
         gctx,
+        remote_url,
         &|repo_path,
           should_interrupt,
           mut progress,
@@ -1234,7 +1247,8 @@ fn fetch_with_libgit2(
     shallow: gix::remote::fetch::Shallow,
     gctx: &GlobalContext,
 ) -> CargoResult<()> {
-    debug!("doing a fetch for {remote_url}");
+    debug!(target: "git-fetch", backend = "libgit2");
+
     let git_config = git2::Config::open_default()?;
     with_fetch_options(&git_config, remote_url, gctx, &mut |mut opts| {
         if tags {
@@ -1576,6 +1590,33 @@ fn github_fast_path(
 /// Whether a `url` is one from GitHub.
 fn is_github(url: &Url) -> bool {
     url.host_str() == Some("github.com")
+}
+
+// Give some messages on GitHub PR URL given as is
+pub(crate) fn note_github_pull_request(url: &str) -> Option<String> {
+    if let Ok(url) = url.parse::<Url>()
+        && is_github(&url)
+    {
+        let path_segments = url
+            .path_segments()
+            .map(|p| p.into_iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        if let [owner, repo, "pull", pr_number, ..] = path_segments[..] {
+            let repo_url = format!("https://github.com/{owner}/{repo}.git");
+            let rev = format!("refs/pull/{pr_number}/head");
+            return Some(format!(
+                concat!(
+                    "\n\nnote: GitHub url {} is not a repository. \n",
+                    "help: Replace the dependency with \n",
+                    "       `git = \"{}\" rev = \"{}\"` \n",
+                    "   to specify pull requests as dependencies' revision."
+                ),
+                url, repo_url, rev
+            ));
+        }
+    }
+
+    None
 }
 
 /// Whether a `rev` looks like a commit hash (ASCII hex digits).

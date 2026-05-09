@@ -1,3 +1,24 @@
+rustc (1.93.1+dfsg1-2) unstable; urgency=medium
+
+  * doc: fix cargo book reference
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Wed, 08 Apr 2026 19:02:02 +0200
+
+rustc (1.93.1+dfsg1-1) unstable; urgency=medium
+
+  * build: disable clang-rt on armel
+  * Upload to unstable
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Tue, 07 Apr 2026 13:41:25 +0200
+
+rustc (1.93.1+dfsg1-1~exp1) experimental; urgency=medium
+
+  * New upstream release
+  * build-wit-bindgen: call twice for both versions
+  * d/rules: de-duplicate lists of workspaces (Closes: #1048141)
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Tue, 10 Mar 2026 13:38:51 +0100
+
 rustc (1.92.0+dfsg1-2) unstable; urgency=high
 
   * backport tar CVE-2026-33055/CVE-2026-33056 fixes

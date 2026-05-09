@@ -9,7 +9,6 @@ like Illumos in #148322, Hurd was missed when originally introducing locking
 gates per target OS in #132977. building rustc on Hurd was broken as a result
 since 1.91.
 
-
 Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
 ---
  library/std/src/fs/tests.rs    |  4 ++++
@@ -17,46 +16,46 @@ Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
  2 files changed, 14 insertions(+)
 
 diff --git a/library/std/src/fs/tests.rs b/library/std/src/fs/tests.rs
-index 0517760..6e89728 100644
+index 0a5d115..f15efc7 100644
 --- a/library/std/src/fs/tests.rs
 +++ b/library/std/src/fs/tests.rs
-@@ -226,6 +226,7 @@ fn file_test_io_seek_and_write() {
- #[cfg(any(
-     windows,
-     target_os = "freebsd",
-+    target_is = "hurd",
-     target_os = "linux",
-     target_os = "netbsd",
-     target_os = "solaris",
-@@ -251,6 +252,7 @@ fn file_lock_multiple_shared() {
- #[cfg(any(
-     windows,
-     target_os = "freebsd",
-+    target_is = "hurd",
-     target_os = "linux",
-     target_os = "netbsd",
-     target_os = "solaris",
+@@ -212,6 +212,7 @@ fn file_test_io_seek_and_write() {
+         target_os = "cygwin",
+         target_os = "freebsd",
+         target_os = "fuchsia",
++        target_os = "hurd",
+         target_os = "illumos",
+         target_os = "linux",
+         target_os = "netbsd",
+@@ -244,6 +245,7 @@ fn file_lock_multiple_shared() {
+         target_os = "cygwin",
+         target_os = "freebsd",
+         target_os = "fuchsia",
++        target_os = "hurd",
+         target_os = "illumos",
+         target_os = "linux",
+         target_os = "netbsd",
 @@ -277,6 +279,7 @@ fn file_lock_blocking() {
- #[cfg(any(
-     windows,
-     target_os = "freebsd",
-+    target_is = "hurd",
-     target_os = "linux",
-     target_os = "netbsd",
-     target_os = "solaris",
-@@ -300,6 +303,7 @@ fn file_lock_drop() {
- #[cfg(any(
-     windows,
-     target_os = "freebsd",
-+    target_os = "hurd",
-     target_os = "linux",
-     target_os = "netbsd",
-     target_os = "solaris",
+         target_os = "cygwin",
+         target_os = "freebsd",
+         target_os = "fuchsia",
++        target_os = "hurd",
+         target_os = "illumos",
+         target_os = "linux",
+         target_os = "netbsd",
+@@ -307,6 +310,7 @@ fn file_lock_drop() {
+         target_os = "cygwin",
+         target_os = "freebsd",
+         target_os = "fuchsia",
++        target_os = "hurd",
+         target_os = "illumos",
+         target_os = "linux",
+         target_os = "netbsd",
 diff --git a/library/std/src/sys/fs/unix.rs b/library/std/src/sys/fs/unix.rs
-index 3efe673..df03fb5 100644
+index 47d9ee2..52c8925 100644
 --- a/library/std/src/sys/fs/unix.rs
 +++ b/library/std/src/sys/fs/unix.rs
-@@ -1288,6 +1288,7 @@ impl File {
+@@ -1291,6 +1291,7 @@ impl File {
      #[cfg(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -64,7 +63,7 @@ index 3efe673..df03fb5 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1312,6 +1313,7 @@ impl File {
+@@ -1316,6 +1317,7 @@ impl File {
      #[cfg(not(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -72,7 +71,7 @@ index 3efe673..df03fb5 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1327,6 +1329,7 @@ impl File {
+@@ -1332,6 +1334,7 @@ impl File {
      #[cfg(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -80,7 +79,7 @@ index 3efe673..df03fb5 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1351,6 +1354,7 @@ impl File {
+@@ -1357,6 +1360,7 @@ impl File {
      #[cfg(not(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -88,7 +87,7 @@ index 3efe673..df03fb5 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1366,6 +1370,7 @@ impl File {
+@@ -1373,6 +1377,7 @@ impl File {
      #[cfg(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -96,7 +95,7 @@ index 3efe673..df03fb5 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1406,6 +1411,7 @@ impl File {
+@@ -1414,6 +1419,7 @@ impl File {
      #[cfg(not(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -104,7 +103,7 @@ index 3efe673..df03fb5 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1424,6 +1430,7 @@ impl File {
+@@ -1433,6 +1439,7 @@ impl File {
      #[cfg(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -112,7 +111,7 @@ index 3efe673..df03fb5 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1464,6 +1471,7 @@ impl File {
+@@ -1474,6 +1481,7 @@ impl File {
      #[cfg(not(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -120,7 +119,7 @@ index 3efe673..df03fb5 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1482,6 +1490,7 @@ impl File {
+@@ -1493,6 +1501,7 @@ impl File {
      #[cfg(any(
          target_os = "freebsd",
          target_os = "fuchsia",
@@ -128,7 +127,7 @@ index 3efe673..df03fb5 100644
          target_os = "linux",
          target_os = "netbsd",
          target_os = "openbsd",
-@@ -1506,6 +1515,7 @@ impl File {
+@@ -1518,6 +1527,7 @@ impl File {
      #[cfg(not(any(
          target_os = "freebsd",
          target_os = "fuchsia",

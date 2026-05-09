@@ -14,11 +14,11 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  2 files changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/tests/debuginfo/macro-stepping.rs b/tests/debuginfo/macro-stepping.rs
-index 35bb6de..dec0eff 100644
+index 0dff383..e7ef6dc 100644
 --- a/tests/debuginfo/macro-stepping.rs
 +++ b/tests/debuginfo/macro-stepping.rs
-@@ -2,7 +2,8 @@
- //@ ignore-aarch64
+@@ -6,7 +6,8 @@
+ //@ ignore-android
  //@ min-lldb-version: 1800
  //@ min-gdb-version: 13.0
 -
@@ -28,7 +28,7 @@ index 35bb6de..dec0eff 100644
  
  #![allow(unused)]
 diff --git a/tests/debuginfo/method-on-enum.rs b/tests/debuginfo/method-on-enum.rs
-index f86cf8c..5d87325 100644
+index c7955a7..fefad19 100644
 --- a/tests/debuginfo/method-on-enum.rs
 +++ b/tests/debuginfo/method-on-enum.rs
 @@ -1,5 +1,7 @@

@@ -52,10 +52,10 @@ ifeq (armhf,$(DEB_TARGET_ARCH))
 CLANG_RT_ARCH = armhf
 endif
 
-ifneq (,$(filter $(DEB_TARGET_ARCH),sparc64 mips64el hurd-i386 hurd-amd64 x32))
+ifneq (,$(filter $(DEB_TARGET_ARCH),armel sparc64 mips64el hurd-i386 hurd-amd64 x32))
 # sparc64: see https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1061125
 # mips64el: has profiler, but buggy atm (32-bit overflow in some counter?)
-# x32: has profiler, but no builtins support upstream, so disabled for now
+# armel, x32: has profiler, but no builtins support upstream, so disabled for now
 CLANG_RT_ARCH =
 PROFILER = "false"
 PROFILER_PATH = ""
@@ -93,6 +93,9 @@ RUSTBUILD_TEST_FLAGS =
 # TODO: remove when we update cargo to 1.55 / 0.56
 # upstream bug still exists and is under investigation, but is hidden by newer cargo
 export CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_OPT_LEVEL=0
+
+# keep in sync with d/prune-unused-deps
+RUSTC_WORKSPACES=. src/bootstrap library src/tools/clippy/clippy_test_deps src/tools/rust-analyzer src/tools/cargo src/tools/rustbook
 
 update-version:
 	oldver=$(shell $(SED_RUSTC_BUILDDEP) | sed -ne 's/.*(<= \(.*\)).*/\1/gp' | $(SED_VERSION_SHORT)); \
@@ -294,8 +297,7 @@ debian/dh_auto_configure.stamp: debian/config.toml debian/check-no-old-llvm.stam
 	  debian/ensure-patch -N debian/patches-unused/d-test-host-duplicates.patch; fi
 
 	# allow lock changes during build, but keep originals around in case we need them for rust-src
-	# keep in sync with d/prune-unused-deps
-	for ws in . src/bootstrap library src/tools/clippy/clippy_test_deps src/tools/rust-analyzer src/tools/cargo src/tools/rustbook; do \
+	for ws in ${RUSTC_WORKSPACES}; do \
 	  if [ -f "$$ws/Cargo.lock" ]; then mv "$$ws/Cargo.lock" "$$ws/Cargo.lock.orig"; fi \
 	done
 	# We patched some crates so have to rm the checksums
@@ -326,7 +328,7 @@ override_dh_auto_clean:
 	$(RM) -rf $(TEST_LOG) debian/config.toml debian/*.stamp
 	$(RM) -rf $(SRC_CLEAN) bootstrap.toml
 	# keep in sync with d/prune-unused-deps
-	for ws in . src/bootstrap library src/tools/rust-analyzer src/tools/cargo src/tools/rustbook; do \
+	for ws in ${RUSTC_WORKSPACES}; do \
 	  if [ -f "$$ws/Cargo.lock.orig" ]; then mv "$$ws/Cargo.lock.orig" "$$ws/Cargo.lock"; fi \
 	done
 	# We removed some checksums that we need to restore here
@@ -351,7 +353,8 @@ endif
 
 override_dh_auto_build-indep: debian/dh_auto_build.stamp
 ifeq (true,$(BUILD_WASM))
-	debian/scripts/build-wit-bindgen.sh
+	debian/scripts/build-wit-bindgen.sh 0.45.1
+	debian/scripts/build-wit-bindgen.sh 0.46.0
 	$(RUSTBUILD) build $(RUSTBUILD_FLAGS) \
 	  --host $(DEB_BUILD_RUST_TYPE) \
 	  --target $(WASM_TARGETS) \

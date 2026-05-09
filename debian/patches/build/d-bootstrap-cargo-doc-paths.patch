@@ -256,17 +256,17 @@ index 5ce8f6f..6ac1557 100644
  To use this feature locally, you typically will use the `RUSTFLAGS` environment
  variable to specify flags to the compiler through Cargo. For example to compile
 diff --git a/src/doc/reference/src/procedural-macros.md b/src/doc/reference/src/procedural-macros.md
-index 28c9308..be5a454 100644
+index 4395e3d..20e65de 100644
 --- a/src/doc/reference/src/procedural-macros.md
 +++ b/src/doc/reference/src/procedural-macros.md
-@@ -382,7 +382,7 @@ Note that neither declarative nor procedural macros support doc comment tokens
+@@ -405,7 +405,7 @@ Note that neither declarative nor procedural macros support doc comment tokens
  their equivalent `#[doc = r"str"]` attributes when passed to macros.
  
- [Attribute macros]: #attribute-macros
+ [Attribute macros]: #the-proc_macro_attribute-attribute
 -[Cargo's build scripts]: ../cargo/reference/build-scripts.html
 +[Cargo's build scripts]: ../../../cargo/book/reference/build-scripts.html
  [Derive macros]: macro.proc.derive
- [Function-like macros]: #function-like-procedural-macros
+ [Function-like macros]: #the-proc_macro-attribute
  [`$crate`]: macro.decl.hygiene.crate
 diff --git a/src/doc/rustc/src/linker-plugin-lto.md b/src/doc/rustc/src/linker-plugin-lto.md
 index 32e712a4..e5e0982 100644
@@ -366,10 +366,10 @@ index e7414aa..ebd0dd4 100644
  For example:
  ```cmd
 diff --git a/src/doc/unstable-book/src/compiler-flags/sanitizer.md b/src/doc/unstable-book/src/compiler-flags/sanitizer.md
-index 493256d..30fd001 100644
+index 1771d13..13a8843 100644
 --- a/src/doc/unstable-book/src/compiler-flags/sanitizer.md
 +++ b/src/doc/unstable-book/src/compiler-flags/sanitizer.md
-@@ -877,7 +877,7 @@ It is strongly recommended to combine sanitizers with recompiled and
+@@ -943,7 +943,7 @@ It is strongly recommended to combine sanitizers with recompiled and
  instrumented standard library, for example using [cargo `-Zbuild-std`
  functionality][build-std].
  

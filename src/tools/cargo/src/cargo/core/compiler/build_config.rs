@@ -27,8 +27,6 @@ pub struct BuildConfig {
     pub message_format: MessageFormat,
     /// Force Cargo to do a full rebuild and treat each target as changed.
     pub force_rebuild: bool,
-    /// Output a build plan to stdout instead of actually compiling.
-    pub build_plan: bool,
     /// Output the unit graph to stdout instead of actually compiling.
     pub unit_graph: bool,
     /// `true` to avoid really compiling.
@@ -115,18 +113,6 @@ impl BuildConfig {
             (None, _) => false,
         };
 
-        let timing_outputs = match (cfg.analysis.as_ref(), gctx.cli_unstable().build_analysis) {
-            // Enable HTML output to pretend we are persisting timing data for now.
-            (Some(analysis), true) if analysis.enabled => vec![TimingOutput::Html],
-            (Some(_), false) => {
-                gctx.shell().warn(
-                    "ignoring 'build.analysis' config, pass `-Zbuild-analysis` to enable it",
-                )?;
-                Vec::new()
-            }
-            _ => Vec::new(),
-        };
-
         Ok(BuildConfig {
             requested_kinds,
             jobs,
@@ -135,14 +121,13 @@ impl BuildConfig {
             intent,
             message_format: MessageFormat::Human,
             force_rebuild: false,
-            build_plan: false,
             unit_graph: false,
             dry_run: false,
             primary_unit_rustc: None,
             rustfix_diagnostic_server: Rc::new(RefCell::new(None)),
             export_dir: None,
             future_incompat_report: false,
-            timing_outputs,
+            timing_outputs: Vec::new(),
             sbom,
             compile_time_deps_only: false,
         })

@@ -103,6 +103,7 @@
 
 use crate::core::Workspace;
 use crate::core::compiler::CompileTarget;
+use crate::util::flock::is_on_nfs_mount;
 use crate::util::{CargoResult, FileLock};
 use cargo_util::paths;
 use std::path::{Path, PathBuf};
@@ -111,7 +112,7 @@ use std::path::{Path, PathBuf};
 ///
 /// See module docs for more information.
 pub struct Layout {
-    artifact_dir: ArtifactDirLayout,
+    artifact_dir: Option<ArtifactDirLayout>,
     build_dir: BuildDirLayout,
 }
 
@@ -126,6 +127,7 @@ impl Layout {
         ws: &Workspace<'_>,
         target: Option<CompileTarget>,
         dest: &str,
+        must_take_artifact_dir_lock: bool,
     ) -> CargoResult<Layout> {
         let is_new_layout = ws.gctx().cli_unstable().build_dir_new_layout;
         let mut root = ws.target_dir();
@@ -149,36 +151,53 @@ impl Layout {
         // actual destination (sub)subdirectory.
         paths::create_dir_all(dest.as_path_unlocked())?;
 
-        // For now we don't do any more finer-grained locking on the artifact
-        // directory, so just lock the entire thing for the duration of this
-        // compile.
-        let artifact_dir_lock =
-            dest.open_rw_exclusive_create(".cargo-lock", ws.gctx(), "build directory")?;
-
-        let build_dir_lock = if root != build_root {
+        // We always need to take the build-dir lock but if the build-dir == artifact-dir then we
+        // only take the artifact-dir. (locking both as they are the same dir)
+        // However we need to take into account that for some builds like `cargo check` we avoid
+        // locking the artifact-dir. We still need to lock the build-dir to avoid file corruption.
+        let build_dir_lock = if (must_take_artifact_dir_lock && root == build_root)
+            || is_on_nfs_mount(build_root.as_path_unlocked())
+        {
+            None
+        } else {
             Some(build_dest.open_rw_exclusive_create(
                 ".cargo-lock",
                 ws.gctx(),
                 "build directory",
             )?)
-        } else {
-            None
         };
-        let root = root.into_path_unlocked();
         let build_root = build_root.into_path_unlocked();
-        let dest = dest.into_path_unlocked();
         let build_dest = build_dest.as_path_unlocked();
         let deps = build_dest.join("deps");
         let artifact = deps.join("artifact");
 
-        Ok(Layout {
-            artifact_dir: ArtifactDirLayout {
+        let artifact_dir = if must_take_artifact_dir_lock {
+            // For now we don't do any more finer-grained locking on the artifact
+            // directory, so just lock the entire thing for the duration of this
+            // compile.
+            let artifact_dir_lock = if is_on_nfs_mount(root.as_path_unlocked()) {
+                None
+            } else {
+                Some(dest.open_rw_exclusive_create(
+                    ".cargo-lock",
+                    ws.gctx(),
+                    "artifact directory",
+                )?)
+            };
+            let root = root.into_path_unlocked();
+            let dest = dest.into_path_unlocked();
+            Some(ArtifactDirLayout {
                 dest: dest.clone(),
                 examples: dest.join("examples"),
                 doc: root.join("doc"),
                 timings: root.join("cargo-timings"),
                 _lock: artifact_dir_lock,
-            },
+            })
+        } else {
+            None
+        };
+        Ok(Layout {
+            artifact_dir,
             build_dir: BuildDirLayout {
                 root: build_root.clone(),
                 deps,
@@ -196,14 +215,16 @@ impl Layout {
 
     /// Makes sure all directories stored in the Layout exist on the filesystem.
     pub fn prepare(&mut self) -> CargoResult<()> {
-        self.artifact_dir.prepare()?;
+        if let Some(ref mut artifact_dir) = self.artifact_dir {
+            artifact_dir.prepare()?;
+        }
         self.build_dir.prepare()?;
 
         Ok(())
     }
 
-    pub fn artifact_dir(&self) -> &ArtifactDirLayout {
-        &self.artifact_dir
+    pub fn artifact_dir(&self) -> Option<&ArtifactDirLayout> {
+        self.artifact_dir.as_ref()
     }
 
     pub fn build_dir(&self) -> &BuildDirLayout {
@@ -222,7 +243,7 @@ pub struct ArtifactDirLayout {
     timings: PathBuf,
     /// The lockfile for a build (`.cargo-lock`). Will be unlocked when this
     /// struct is `drop`ped.
-    _lock: FileLock,
+    _lock: Option<FileLock>,
 }
 
 impl ArtifactDirLayout {
@@ -293,10 +314,16 @@ impl BuildDirLayout {
     /// Fetch the deps path.
     pub fn deps(&self, pkg_dir: &str) -> PathBuf {
         if self.is_new_layout {
-            self.build_unit(pkg_dir).join("deps")
+            self.deps_new_layout(pkg_dir)
         } else {
             self.legacy_deps().to_path_buf()
         }
+    }
+    /// Fetch the deps path. (new layout)
+    ///
+    /// New features should consider using this so we can avoid their migrations.
+    pub fn deps_new_layout(&self, pkg_dir: &str) -> PathBuf {
+        self.build_unit(pkg_dir).join("deps")
     }
     /// Fetch the deps path. (old layout)
     pub fn legacy_deps(&self) -> &Path {

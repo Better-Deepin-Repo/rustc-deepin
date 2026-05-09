@@ -35,7 +35,6 @@ use super::{BuildRunner, Job, Unit, Work, fingerprint, get_dynamic_search_path};
 use crate::core::compiler::CompileMode;
 use crate::core::compiler::artifact;
 use crate::core::compiler::build_runner::UnitHash;
-use crate::core::compiler::fingerprint::DirtyReason;
 use crate::core::compiler::job_queue::JobState;
 use crate::core::{PackageId, Target, profiles::ProfileRoot};
 use crate::util::errors::CargoResult;
@@ -340,8 +339,6 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
     let script_dir = build_runner.files().build_script_dir(build_script_unit);
     let script_out_dir = build_runner.files().build_script_out_dir(unit);
     let script_run_dir = build_runner.files().build_script_run_dir(unit);
-    let build_plan = bcx.build_config.build_plan;
-    let invocation_name = unit.buildkey();
 
     if let Some(deps) = unit.pkg.manifest().metabuild() {
         prepare_metabuild(build_runner, build_script_unit, deps)?;
@@ -407,9 +404,19 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         "feature",
         unit.features.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
     );
+    // Manually inject debug_assertions based on the profile setting.
+    // The cfg query from rustc doesn't include profile settings and would always be true,
+    // so we override it with the actual profile setting.
+    if unit.profile.debug_assertions {
+        cfg_map.insert("debug_assertions", Vec::new());
+    }
     for cfg in bcx.target_data.cfg(unit.kind) {
         match *cfg {
             Cfg::Name(ref n) => {
+                // Skip debug_assertions from rustc query; we use the profile setting instead
+                if n.as_str() == "debug_assertions" {
+                    continue;
+                }
                 cfg_map.insert(n.as_str(), Vec::new());
             }
             Cfg::KeyPair(ref k, ref v) => {
@@ -419,11 +426,6 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         }
     }
     for (k, v) in cfg_map {
-        if k == "debug_assertions" {
-            // This cfg is always true and misleading, so avoid setting it.
-            // That is because Cargo queries rustc without any profile settings.
-            continue;
-        }
         // FIXME: We should handle raw-idents somehow instead of predenting they
         // don't exist here
         let k = format!("CARGO_CFG_{}", super::envify(k));
@@ -476,7 +478,7 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
     let output_file = script_run_dir.join("output");
     let err_file = script_run_dir.join("stderr");
     let root_output_file = script_run_dir.join("root-output");
-    let host_target_root = build_runner.files().host_dest().to_path_buf();
+    let host_target_root = build_runner.files().host_dest().map(|v| v.to_path_buf());
     let all = (
         id,
         library_name.clone(),
@@ -527,7 +529,7 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         // along to this custom build command. We're also careful to augment our
         // dynamic library search path in case the build script depended on any
         // native dynamic libraries.
-        if !build_plan {
+        {
             let build_script_outputs = build_script_outputs.lock().unwrap();
             for (name, dep_id, dep_metadata) in lib_deps {
                 let script_output = build_script_outputs.get(dep_metadata).ok_or_else(|| {
@@ -544,19 +546,16 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
                     );
                 }
             }
-            if let Some(build_scripts) = build_scripts {
+            if let Some(build_scripts) = build_scripts
+                && let Some(ref host_target_root) = host_target_root
+            {
                 super::add_plugin_deps(
                     &mut cmd,
                     &build_script_outputs,
                     &build_scripts,
-                    &host_target_root,
+                    host_target_root,
                 )?;
             }
-        }
-
-        if build_plan {
-            state.build_plan(invocation_name, cmd.clone(), Arc::new(Vec::new()));
-            return Ok(());
         }
 
         // And now finally, run the build command itself!
@@ -706,11 +705,7 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         Ok(())
     });
 
-    let mut job = if build_runner.bcx.build_config.build_plan {
-        Job::new_dirty(Work::noop(), DirtyReason::FreshBuild)
-    } else {
-        fingerprint::prepare_target(build_runner, unit, false)?
-    };
+    let mut job = fingerprint::prepare_target(build_runner, unit, false)?;
     if job.freshness().is_dirty() {
         job.before(dirty);
     } else {

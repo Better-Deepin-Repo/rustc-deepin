@@ -12,17 +12,17 @@ Forwarded: not-needed
  3 files changed, 12 deletions(-)
 
 diff --git a/compiler/rustc/Cargo.toml b/compiler/rustc/Cargo.toml
-index 9ef8fa7..e2c8190 100644
+index 8cef9e0..8e1e936c 100644
 --- a/compiler/rustc/Cargo.toml
 +++ b/compiler/rustc/Cargo.toml
-@@ -20,15 +20,9 @@ rustc_public = { path = "../rustc_public" }
- rustc_public_bridge = { path = "../rustc_public_bridge" }
- # tidy-alphabetical-end
+@@ -27,15 +27,9 @@ getrandom = "=0.3.3"
+ wasi = "=0.14.2"
+ 
  
 -[dependencies.tikv-jemalloc-sys]
--version = "0.6.0"
+-version = "0.6.1"
 -optional = true
--features = ['unprefixed_malloc_on_supported_platforms']
+-features = ['override_allocator_on_supported_platforms']
 -
  [features]
  # tidy-alphabetical-start
@@ -30,7 +30,7 @@ index 9ef8fa7..e2c8190 100644
 -jemalloc = ['dep:tikv-jemalloc-sys']
  llvm = ['rustc_driver_impl/llvm']
  llvm_enzyme = ['rustc_driver_impl/llvm_enzyme']
- max_level_info = ['rustc_driver_impl/max_level_info']
+ llvm_offload = ['rustc_driver_impl/llvm_offload']
 diff --git a/src/tools/rust-analyzer/crates/profile/Cargo.toml b/src/tools/rust-analyzer/crates/profile/Cargo.toml
 index 4828419..f60282f 100644
 --- a/src/tools/rust-analyzer/crates/profile/Cargo.toml
@@ -52,7 +52,7 @@ index 4828419..f60282f 100644
  # Uncomment to enable for the whole crate graph
  # default = [ "cpu_profiler" ]
 diff --git a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-index c746f84..3851ed2 100644
+index 2e48c5a..acee8c0 100644
 --- a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
 @@ -83,9 +83,6 @@ windows-sys = { version = "0.60", features = [

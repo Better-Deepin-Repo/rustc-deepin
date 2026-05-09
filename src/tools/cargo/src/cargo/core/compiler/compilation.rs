@@ -9,6 +9,7 @@ use cargo_util::{ProcessBuilder, paths};
 
 use crate::core::Package;
 use crate::core::compiler::BuildContext;
+use crate::core::compiler::RustdocFingerprint;
 use crate::core::compiler::apply_env_config;
 use crate::core::compiler::{CompileKind, Unit, UnitHash};
 use crate::util::{CargoResult, GlobalContext, context};
@@ -106,6 +107,11 @@ pub struct Compilation<'gctx> {
     /// Libraries to test with rustdoc.
     pub to_doc_test: Vec<Doctest>,
 
+    /// Rustdoc fingerprint files to determine whether we need to run `rustdoc --merge=finalize`.
+    ///
+    /// See `-Zrustdoc-mergeable-info` for more.
+    pub rustdoc_fingerprints: Option<HashMap<CompileKind, RustdocFingerprint>>,
+
     /// The target host triple.
     pub host: String,
 
@@ -123,8 +129,8 @@ pub struct Compilation<'gctx> {
     /// The linker to use for each host or target.
     target_linkers: HashMap<CompileKind, Option<PathBuf>>,
 
-    /// The total number of warnings emitted by the compilation.
-    pub warning_count: usize,
+    /// The total number of lint warnings emitted by the compilation.
+    pub lint_warning_count: usize,
 }
 
 impl<'gctx> Compilation<'gctx> {
@@ -143,6 +149,7 @@ impl<'gctx> Compilation<'gctx> {
             root_crate_names: Vec::new(),
             extra_env: HashMap::new(),
             to_doc_test: Vec::new(),
+            rustdoc_fingerprints: None,
             gctx: bcx.gctx,
             host: bcx.host_triple().to_string(),
             rustc_process,
@@ -162,7 +169,7 @@ impl<'gctx> Compilation<'gctx> {
                 .chain(Some(&CompileKind::Host))
                 .map(|kind| Ok((*kind, target_linker(bcx, *kind)?)))
                 .collect::<CargoResult<HashMap<_, _>>>()?,
-            warning_count: 0,
+            lint_warning_count: 0,
         })
     }
 
@@ -305,12 +312,14 @@ impl<'gctx> Compilation<'gctx> {
             }
             search_path.push(self.deps_output[&CompileKind::Host].clone());
         } else {
-            search_path.extend(super::filter_dynamic_search_path(
-                self.native_dirs.iter(),
-                &self.root_output[&kind],
-            ));
+            if let Some(path) = self.root_output.get(&kind) {
+                search_path.extend(super::filter_dynamic_search_path(
+                    self.native_dirs.iter(),
+                    path,
+                ));
+                search_path.push(path.clone());
+            }
             search_path.push(self.deps_output[&kind].clone());
-            search_path.push(self.root_output[&kind].clone());
             // For build-std, we don't want to accidentally pull in any shared
             // libs from the sysroot that ships with rustc. This may not be
             // required (at least I cannot craft a situation where it

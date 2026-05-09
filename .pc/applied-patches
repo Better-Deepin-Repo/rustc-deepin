@@ -18,6 +18,8 @@ prune/d-0010-cargo-remove-vendored-c-crates.patch
 prune/d-0011-cargo-remove-nghttp2.patch
 prune/d-0020-remove-windows-dependencies.patch
 prune/d-0021-vendor-remove-windows-dependencies.patch
+prune/d-0022-prune-ring-dependencies.patch
+prune/d-0023-prune-wit-bindgen-blobs.patch
 vendor/d-0003-cc-psm-rebuild-wasm32.patch
 build/d-bootstrap-rustflags.patch
 build/d-bootstrap-install-symlinks.patch
@@ -35,7 +37,6 @@ behaviour/d-rustdoc-disable-embedded-fonts.patch
 ubuntu/ubuntu-disable-ppc64el-asm-tests.patch
 ubuntu/ubuntu-ignore-arm-doctest.patch
 vendor/onig_sys-use-system-lib.patch
-vendor/libz-sys-allow-cross-building.patch
 build/ignore-broken-debuginfo-tests.patch
 vendor/blake3-skip-embedded-C-code-use-pure-implementation.patch
 build/bootstrap-don-t-attempt-to-download-rustc-in-tests.patch
@@ -46,6 +47,5 @@ build/bootstrap-disarm-llvm-config-test-that-requires-git.patch
 build/disable-bootstrap-tests-that-don-t-work-from-tarball-sour.patch
 behaviour/x32-set-panic-strategy-to-aborting.patch
 upstream/Enable-file-locking-support-for-Hurd.patch
-prune/d-0022-prune-ring-dependencies.patch
 vendor/tar-CVE-2026-33056.patch
 vendor/tar-CVE-2026-33055.patch

@@ -53,11 +53,14 @@ use crate::core::{PackageId, PackageSet, SourceId, TargetKind, Workspace};
 use crate::drop_println;
 use crate::ops;
 use crate::ops::resolve::{SpecsAndResolvedFeatures, WorkspaceResolve};
+use crate::util::BuildLogger;
 use crate::util::context::{GlobalContext, WarningHandling};
 use crate::util::interning::InternedString;
+use crate::util::log_message::LogMessage;
 use crate::util::{CargoResult, StableHasher};
 
 mod compile_filter;
+use annotate_snippets::Level;
 pub use compile_filter::{CompileFilter, FilterRule, LibRule};
 
 pub(super) mod unit_generator;
@@ -140,7 +143,8 @@ pub fn compile_with_exec<'a>(
 ) -> CargoResult<Compilation<'a>> {
     ws.emit_warnings()?;
     let compilation = compile_ws(ws, options, exec)?;
-    if ws.gctx().warning_handling()? == WarningHandling::Deny && compilation.warning_count > 0 {
+    if ws.gctx().warning_handling()? == WarningHandling::Deny && compilation.lint_warning_count > 0
+    {
         anyhow::bail!("warnings are denied by `build.warnings` configuration")
     }
     Ok(compilation)
@@ -154,7 +158,24 @@ pub fn compile_ws<'a>(
     exec: &Arc<dyn Executor>,
 ) -> CargoResult<Compilation<'a>> {
     let interner = UnitInterner::new();
-    let bcx = create_bcx(ws, options, &interner)?;
+    let logger = BuildLogger::maybe_new(ws)?;
+
+    if let Some(ref logger) = logger {
+        let rustc = ws.gctx().load_global_rustc(Some(ws))?;
+        logger.log(LogMessage::BuildStarted {
+            cwd: ws.gctx().cwd().to_path_buf(),
+            host: rustc.host.to_string(),
+            jobs: options.build_config.jobs,
+            profile: options.build_config.requested_profile.to_string(),
+            rustc_version: rustc.version.to_string(),
+            rustc_version_verbose: rustc.verbose_version.clone(),
+            target_dir: ws.target_dir().as_path_unlocked().to_path_buf(),
+            workspace_root: ws.root().to_path_buf(),
+        });
+    }
+
+    let bcx = create_bcx(ws, options, &interner, logger.as_ref())?;
+
     if options.build_config.unit_graph {
         unit_graph::emit_serialized_unit_graph(&bcx.roots, &bcx.unit_graph, ws.gctx())?;
         return Compilation::new(&bcx);
@@ -212,6 +233,7 @@ pub fn create_bcx<'a, 'gctx>(
     ws: &'a Workspace<'gctx>,
     options: &'a CompileOptions,
     interner: &'a UnitInterner,
+    logger: Option<&'a BuildLogger>,
 ) -> CargoResult<BuildContext<'a, 'gctx>> {
     let CompileOptions {
         ref build_config,
@@ -230,17 +252,24 @@ pub fn create_bcx<'a, 'gctx>(
     match build_config.intent {
         UserIntent::Test | UserIntent::Build | UserIntent::Check { .. } | UserIntent::Bench => {
             if ws.gctx().get_env("RUST_FLAGS").is_ok() {
-                gctx.shell()
-                    .warn("ignoring environment variable `RUST_FLAGS`")?;
-                gctx.shell().note("rust flags are passed via `RUSTFLAGS`")?;
+                gctx.shell().print_report(
+                    &[Level::WARNING
+                        .secondary_title("ignoring environment variable `RUST_FLAGS`")
+                        .element(Level::HELP.message("rust flags are passed via `RUSTFLAGS`"))],
+                    false,
+                )?;
             }
         }
         UserIntent::Doc { .. } | UserIntent::Doctest => {
             if ws.gctx().get_env("RUSTDOC_FLAGS").is_ok() {
-                gctx.shell()
-                    .warn("ignoring environment variable `RUSTDOC_FLAGS`")?;
-                gctx.shell()
-                    .note("rustdoc flags are passed via `RUSTDOCFLAGS`")?;
+                gctx.shell().print_report(
+                    &[Level::WARNING
+                        .secondary_title("ignoring environment variable `RUSTDOC_FLAGS`")
+                        .element(
+                            Level::HELP.message("rustdoc flags are passed via `RUSTDOCFLAGS`"),
+                        )],
+                    false,
+                )?;
             }
         }
     }
@@ -559,6 +588,7 @@ where `<compatible-ver>` is the latest version supporting rustc {rustc_version}"
 
     let bcx = BuildContext::new(
         ws,
+        logger,
         pkg_set,
         build_config,
         profiles,

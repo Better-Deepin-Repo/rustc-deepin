@@ -83,6 +83,7 @@ test_dummy_unstable = { level = "forbid", priority = -1 }
   | ^^^^^^^^^^^^^^^^^^
   |
   = [NOTE] `cargo::im_a_teapot` is set to `forbid` in `[lints]`
+[ERROR] encountered 1 error while running lints
 
 "#]])
         .run();
@@ -125,6 +126,7 @@ workspace = true
    | ^^^^^^^^^^^^^^^^^^
    |
    = [NOTE] `cargo::im_a_teapot` is set to `forbid` in `[lints]`
+[ERROR] encountered 1 error while running lints
 
 "#]])
         .run();
@@ -319,6 +321,45 @@ workspace = true
 9 | workspace = true
   | ----------------
 [ERROR] encountered 2 errors(s) while verifying lints
+
+"#]])
+        .run();
+}
+
+#[cargo_test(nightly, reason = "-Zrustc-unicode is unstable")]
+fn unicode_report() {
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+cargo-features = ["test-dummy-unstable"]
+
+[package]
+name = "foo"
+version = "0.0.1"
+edition = "2015"
+authors = []
+im-a-teapot = true
+
+[lints.cargo]
+im_a_teapot = { level = "warn", priority = 10 }
+"#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+
+    p.cargo("check -Zcargo-lints -Zrustc-unicode")
+        .masquerade_as_nightly_cargo(&["cargo-lints", "rustc-unicode", "test-dummy-unstable"])
+        .with_stderr_data(str![[r#"
+[WARNING] `im_a_teapot` is specified
+  ╭▸ Cargo.toml:9:1
+  │
+9 │ im-a-teapot = true
+  │ ━━━━━━━━━━━━━━━━━━
+  │
+  ╰ [NOTE] `cargo::im_a_teapot` is set to `warn` in `[lints]`
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
         .run();

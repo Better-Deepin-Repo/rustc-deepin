@@ -13,7 +13,7 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  1 file changed, 4 deletions(-)
 
 diff --git a/src/bootstrap/src/core/build_steps/tool.rs b/src/bootstrap/src/core/build_steps/tool.rs
-index 79df9d3..39c77ac 100644
+index a90687c..9220168 100644
 --- a/src/bootstrap/src/core/build_steps/tool.rs
 +++ b/src/bootstrap/src/core/build_steps/tool.rs
 @@ -224,10 +224,6 @@ pub fn prepare_tool_cargo(
@@ -24,6 +24,6 @@ index 79df9d3..39c77ac 100644
 -    // own copy
 -    cargo.env("LZMA_API_STATIC", "1");
 -
-     // Note that `miri` always uses jemalloc. As such, there is no checking of the jemalloc build flag.
      // See also the "JEMALLOC_SYS_WITH_LG_PAGE" setting in the compile build step.
-     if env::var_os("JEMALLOC_SYS_WITH_LG_PAGE").is_none() {
+     if builder.config.jemalloc(target) && env::var_os("JEMALLOC_SYS_WITH_LG_PAGE").is_none() {
+         // Build jemalloc on AArch64 with support for page sizes up to 64K

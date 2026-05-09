@@ -11,9 +11,9 @@ Forwarded: not-needed
  src/bootstrap/bootstrap.py                   |  4 ----
  src/bootstrap/src/core/build_steps/vendor.rs |  5 -----
  src/bootstrap/src/core/builder/cargo.rs      |  5 +----
- src/bootstrap/src/core/builder/mod.rs        | 20 --------------------
+ src/bootstrap/src/core/builder/mod.rs        | 21 ---------------------
  src/build_helper/src/util.rs                 |  2 ++
- 6 files changed, 3 insertions(+), 38 deletions(-)
+ 6 files changed, 3 insertions(+), 39 deletions(-)
 
 diff --git a/Cargo.toml b/Cargo.toml
 index 67c7a9d..e273c4b 100644
@@ -56,7 +56,7 @@ index 4dd465e..b101e77 100644
              args.append("--features")
              args.append("build-metrics")
 diff --git a/src/bootstrap/src/core/build_steps/vendor.rs b/src/bootstrap/src/core/build_steps/vendor.rs
-index 72250a2..4f38948 100644
+index 36a740c..4684c2d 100644
 --- a/src/bootstrap/src/core/build_steps/vendor.rs
 +++ b/src/bootstrap/src/core/build_steps/vendor.rs
 @@ -21,14 +21,9 @@ pub fn default_paths_to_vendor(builder: &Builder<'_>) -> Vec<(PathBuf, Vec<&'sta
@@ -75,10 +75,10 @@ index 72250a2..4f38948 100644
      .into_iter()
      .map(|(path, submodules)| (builder.src.join(path), submodules))
 diff --git a/src/bootstrap/src/core/builder/cargo.rs b/src/bootstrap/src/core/builder/cargo.rs
-index c2029f9..653fb52 100644
+index 093a754..01f5a1e 100644
 --- a/src/bootstrap/src/core/builder/cargo.rs
 +++ b/src/bootstrap/src/core/builder/cargo.rs
-@@ -1292,10 +1292,7 @@ impl Builder<'_> {
+@@ -1319,10 +1319,7 @@ impl Builder<'_> {
              }
          }
  
@@ -91,10 +91,10 @@ index c2029f9..653fb52 100644
          }
  
 diff --git a/src/bootstrap/src/core/builder/mod.rs b/src/bootstrap/src/core/builder/mod.rs
-index b5d0f11..e9ccc90 100644
+index 961d0cd..7a72691 100644
 --- a/src/bootstrap/src/core/builder/mod.rs
 +++ b/src/bootstrap/src/core/builder/mod.rs
-@@ -999,8 +999,6 @@ impl<'a> Builder<'a> {
+@@ -779,8 +779,6 @@ impl<'a> Builder<'a> {
                  tool::Linkchecker,
                  tool::CargoTest,
                  tool::Compiletest,
@@ -103,7 +103,7 @@ index b5d0f11..e9ccc90 100644
                  tool::RustInstaller,
                  tool::FeaturesStatusDump,
                  tool::Cargo,
-@@ -1009,17 +1007,8 @@ impl<'a> Builder<'a> {
+@@ -789,17 +787,8 @@ impl<'a> Builder<'a> {
                  tool::Rustdoc,
                  tool::Clippy,
                  tool::CargoClippy,
@@ -121,7 +121,7 @@ index b5d0f11..e9ccc90 100644
                  tool::OptimizedDist,
                  tool::CoverageDump,
                  tool::LlvmBitcodeLinker,
-@@ -1062,9 +1051,6 @@ impl<'a> Builder<'a> {
+@@ -842,9 +831,6 @@ impl<'a> Builder<'a> {
                  check::CraneliftCodegenBackend,
                  check::GccCodegenBackend,
                  check::Clippy,
@@ -131,7 +131,15 @@ index b5d0f11..e9ccc90 100644
                  check::Rustfmt,
                  check::RustAnalyzer,
                  check::TestFloatParse,
-@@ -1127,8 +1113,6 @@ impl<'a> Builder<'a> {
+@@ -890,7 +876,6 @@ impl<'a> Builder<'a> {
+                 test::CrateRustdoc,
+                 test::CrateRustdocJsonTypes,
+                 test::CrateBootstrap,
+-                test::RemoteTestClientTests,
+                 test::Linkcheck,
+                 test::TierCheck,
+                 test::Cargotest,
+@@ -909,8 +894,6 @@ impl<'a> Builder<'a> {
                  test::EmbeddedBook,
                  test::EditionGuide,
                  test::Rustfmt,
@@ -140,7 +148,7 @@ index b5d0f11..e9ccc90 100644
                  test::Clippy,
                  test::CompiletestTest,
                  test::CrateRunMakeSupport,
-@@ -1167,7 +1151,6 @@ impl<'a> Builder<'a> {
+@@ -949,7 +932,6 @@ impl<'a> Builder<'a> {
                  doc::CargoBook,
                  doc::Clippy,
                  doc::ClippyBook,
@@ -148,7 +156,7 @@ index b5d0f11..e9ccc90 100644
                  doc::EmbeddedBook,
                  doc::EditionGuide,
                  doc::StyleGuide,
-@@ -1193,7 +1176,6 @@ impl<'a> Builder<'a> {
+@@ -975,7 +957,6 @@ impl<'a> Builder<'a> {
                  dist::RustAnalyzer,
                  dist::Rustfmt,
                  dist::Clippy,
@@ -156,7 +164,7 @@ index b5d0f11..e9ccc90 100644
                  dist::LlvmTools,
                  dist::LlvmBitcodeLinker,
                  dist::RustDev,
-@@ -1220,7 +1202,6 @@ impl<'a> Builder<'a> {
+@@ -1002,7 +983,6 @@ impl<'a> Builder<'a> {
                  install::RustAnalyzer,
                  install::Rustfmt,
                  install::Clippy,
@@ -164,7 +172,7 @@ index b5d0f11..e9ccc90 100644
                  install::LlvmTools,
                  install::Src,
                  install::RustcCodegenCranelift,
-@@ -1230,7 +1211,6 @@ impl<'a> Builder<'a> {
+@@ -1012,7 +992,6 @@ impl<'a> Builder<'a> {
                  run::BuildManifest,
                  run::BumpStage0,
                  run::ReplaceVersionPlaceholder,
