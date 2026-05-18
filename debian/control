@@ -54,8 +54,7 @@ Build-Depends:
 # Needed to recreate font-awesome-as-a-crate data
  node-fortawesome-fontawesome-free,
 Build-Depends-Indep:
- wasi-libc (>= 0.0~git20260129.ec0effd~) <!nowasm>,
- wasi-libc (<= 0.0~git20260129.ec0effd++) <!nowasm>,
+ wasi-libc,
  clang-21:native,
  lld-21:native,
 # see #1057780, gdb now Conflicts gdb-minimal
