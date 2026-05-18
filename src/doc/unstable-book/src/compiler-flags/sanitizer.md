@@ -943,7 +943,7 @@ It is strongly recommended to combine sanitizers with recompiled and
 instrumented standard library, for example using [cargo `-Zbuild-std`
 functionality][build-std].
 
-[build-std]: ../../../../cargo/book/reference/unstable.html#build-std
+[build-std]: ../../cargo/reference/unstable.html#build-std
 
 # Working with other languages
 

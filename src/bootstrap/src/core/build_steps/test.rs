@@ -477,8 +477,7 @@ impl Step for RustAnalyzer {
 
         // FIXME: eventually, we should probably reduce the amount of target tuple substring
         // matching in bootstrap.
-        // Debian: invert and only test these two, instead of skipping only 32-bit x86
-        if (!target.starts_with("x86_64") && !target.starts_with("aarch64")) || target.contains("hurd") {
+        if target.starts_with("i686") {
             return;
         }
 
@@ -509,6 +508,13 @@ impl Step for RustAnalyzer {
         // specify `--workspace`.
         cargo.arg("--workspace");
         cargo.arg("--exclude=xtask");
+
+        if build_compiler.stage == 0 {
+            // This builds a proc macro against the bootstrap libproc_macro, which is not ABI
+            // compatible with the ABI proc-macro-srv expects to load.
+            cargo.arg("--exclude=proc-macro-srv");
+            cargo.arg("--exclude=proc-macro-srv-cli");
+        }
 
         let mut skip_tests = vec![];
 
@@ -928,8 +934,9 @@ impl Step for Clippy {
 
         cargo.env("RUSTC_TEST_SUITE", builder.rustc(build_compiler));
         cargo.env("RUSTC_LIB_PATH", builder.rustc_libdir(build_compiler));
-        let host_libs =
-            builder.stage_out(build_compiler, Mode::ToolRustcPrivate).join(builder.cargo_dir());
+        let host_libs = builder
+            .stage_out(build_compiler, Mode::ToolRustcPrivate)
+            .join(builder.cargo_dir(Mode::ToolRustcPrivate));
         cargo.env("HOST_LIBS", host_libs);
 
         // Build the standard library that the tests can use.
@@ -1293,19 +1300,19 @@ impl Step for Tidy {
     /// for the `dev` or `nightly` channels.
     fn run(self, builder: &Builder<'_>) {
         let mut cmd = builder.tool_cmd(Tool::Tidy);
-        cmd.arg(&builder.src);
-        cmd.arg(&builder.initial_cargo);
-        cmd.arg(&builder.out);
+        cmd.arg(format!("--root-path={}", &builder.src.display()));
+        cmd.arg(format!("--cargo-path={}", &builder.initial_cargo.display()));
+        cmd.arg(format!("--output-dir={}", &builder.out.display()));
         // Tidy is heavily IO constrained. Still respect `-j`, but use a higher limit if `jobs` hasn't been configured.
         let jobs = builder.config.jobs.unwrap_or_else(|| {
             8 * std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get) as u32
         });
-        cmd.arg(jobs.to_string());
+        cmd.arg(format!("--concurrency={jobs}"));
         // pass the path to the yarn command used for installing js deps.
         if let Some(yarn) = &builder.config.yarn {
-            cmd.arg(yarn);
+            cmd.arg(format!("--npm-path={}", yarn.display()));
         } else {
-            cmd.arg("yarn");
+            cmd.arg("--npm-path=yarn");
         }
         if builder.is_verbose() {
             cmd.arg("--verbose");
@@ -1368,8 +1375,7 @@ HELP: to skip test's attempt to check tidiness, pass `--skip src/tools/tidy` to 
             eprintln!(
                 "x.py completions were changed; run `x.py run generate-completions` to update them"
             );
-            // Debian: we don't care about this
-            //crate::exit!(1);
+            crate::exit!(1);
         }
 
         builder.info("x.py help check");
@@ -1626,6 +1632,12 @@ test!(RunMakeCargo {
     mode: CompiletestMode::RunMake,
     suite: "run-make-cargo",
     default: true
+});
+test!(BuildStd {
+    path: "tests/build-std",
+    mode: CompiletestMode::RunMake,
+    suite: "build-std",
+    default: false
 });
 
 test!(AssemblyLlvm {
@@ -1950,7 +1962,7 @@ NOTE: if you're sure you want to do this, please open an issue as to why. In the
             let stage0_rustc_path = builder.compiler(0, test_compiler.host);
             cmd.arg("--stage0-rustc-path").arg(builder.rustc(stage0_rustc_path));
 
-            if suite == "run-make-cargo" {
+            if matches!(suite, "run-make-cargo" | "build-std") {
                 let cargo_path = if test_compiler.stage == 0 {
                     // If we're using `--stage 0`, we should provide the bootstrap cargo.
                     builder.initial_cargo.clone()
@@ -2171,6 +2183,9 @@ Please disable assertions with `rust.debug-assertions = false`.
         }
         for flag in targetflags {
             cmd.arg("--target-rustcflags").arg(flag);
+        }
+        if target.is_synthetic() {
+            cmd.arg("--target-rustcflags").arg("-Zunstable-options");
         }
 
         cmd.arg("--python").arg(
@@ -3144,7 +3159,7 @@ impl Step for CrateRustdoc {
     const IS_HOST: bool = true;
 
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
-        run.paths(&["src/librustdoc", "src/tools/rustdoc"])
+        run.path("src/librustdoc").path("src/tools/rustdoc")
     }
 
     fn is_default_step(_builder: &Builder<'_>) -> bool {
@@ -3401,6 +3416,8 @@ fn distcheck_plain_source_tarball(builder: &Builder<'_>, plain_src_dir: &Path) {
     command("./configure")
         .arg("--set")
         .arg("rust.omit-git-hash=false")
+        .arg("--set")
+        .arg("rust.remap-debuginfo=false")
         .args(&configure_args)
         .arg("--enable-vendor")
         .current_dir(plain_src_dir)
@@ -3485,7 +3502,7 @@ impl Step for BootstrapPy {
         // Bootstrap tests might not be perfectly self-contained and can depend
         // on the environment, so only run them by default in CI, not locally.
         // See `test::Bootstrap::should_run`.
-        builder.config.is_running_on_ci
+        builder.config.is_running_on_ci()
     }
 
     fn make_run(run: RunConfig<'_>) {
@@ -3524,7 +3541,7 @@ impl Step for Bootstrap {
         // Bootstrap tests might not be perfectly self-contained and can depend on the external
         // environment, submodules that are checked out, etc.
         // Therefore we only run them by default on CI.
-        builder.config.is_running_on_ci
+        builder.config.is_running_on_ci()
     }
 
     /// Tests the build system itself.
@@ -3805,7 +3822,7 @@ impl Step for CodegenCranelift {
     const IS_HOST: bool = true;
 
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
-        run.paths(&["compiler/rustc_codegen_cranelift"])
+        run.path("compiler/rustc_codegen_cranelift")
     }
 
     fn is_default_step(_builder: &Builder<'_>) -> bool {
@@ -3926,7 +3943,7 @@ impl Step for CodegenGCC {
     const IS_HOST: bool = true;
 
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
-        run.paths(&["compiler/rustc_codegen_gcc"])
+        run.path("compiler/rustc_codegen_gcc")
     }
 
     fn is_default_step(_builder: &Builder<'_>) -> bool {

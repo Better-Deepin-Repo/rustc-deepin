@@ -37,14 +37,12 @@ fn download_ci_llvm() {
     let config = TestCtx::new().config("check").create_config();
     assert!(!config.llvm_from_ci);
 
-    // Debian: if-unchanged doesn't work in non-git context
-    return;
     // this doesn't make sense, as we are overriding it later.
     let if_unchanged_config = TestCtx::new()
         .config("check")
         .with_default_toml_config("llvm.download-ci-llvm = \"if-unchanged\"")
         .create_config();
-    if if_unchanged_config.llvm_from_ci && if_unchanged_config.is_running_on_ci {
+    if if_unchanged_config.llvm_from_ci && if_unchanged_config.is_running_on_ci() {
         let has_changes = if_unchanged_config.has_changes_from_upstream(LLVM_INVALIDATION_PATHS);
 
         assert!(
@@ -424,7 +422,6 @@ fn check_rustc_if_unchanged_paths() {
         .collect();
 
     for p in normalised_allowed_paths {
-        if p == "triagebot.toml" { continue };
         assert!(config.src.join(p).exists(), "{p} doesn't exist.");
     }
 }
@@ -493,16 +490,15 @@ fn test_exclude() {
 
 #[test]
 fn test_ci_flag() {
-    // Debian: if-unchanged doesn't work in non-git context
-    return;
     let config = TestCtx::new().config("check").arg("--ci").arg("false").create_config();
-    assert!(!config.is_running_on_ci);
+    assert!(!config.is_running_on_ci());
 
     let config = TestCtx::new().config("check").arg("--ci").arg("true").create_config();
-    assert!(config.is_running_on_ci);
+    assert!(config.is_running_on_ci());
 
+    // If --ci flag is not added, is_running_on_ci() relies on if it is run on actual CI or not.
     let config = TestCtx::new().config("check").create_config();
-    assert_eq!(config.is_running_on_ci, CiEnv::is_ci());
+    assert_eq!(config.is_running_on_ci(), CiEnv::is_ci());
 }
 
 #[test]

@@ -2394,7 +2394,8 @@ fn cargo_metadata_no_deps_path_to_cargo_toml_parent_relative() {
         .cwd(p.root().parent().unwrap())
         .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] the manifest-path must be a path to a Cargo.toml file: `[ROOT]/foo`
+[ERROR] manifest path `foo` is a directory but expected a file
+[HELP] [ROOT]/foo/Cargo.toml exists
 
 "#]])
         .run();
@@ -2412,7 +2413,8 @@ fn cargo_metadata_no_deps_path_to_cargo_toml_parent_absolute() {
         .cwd(p.root().parent().unwrap())
         .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] the manifest-path must be a path to a Cargo.toml file: `[ROOT]/foo`
+[ERROR] manifest path `[ROOT]/foo` is a directory but expected a file
+[HELP] [ROOT]/foo/Cargo.toml exists
 
 "#]])
         .run();
@@ -4358,7 +4360,7 @@ fn build_dir() {
 // Creating non-utf8 path is an OS-specific pain, so let's run this only on
 // linux, where arbitrary bytes work.
 #[cfg(target_os = "linux")]
-#[allow(dead_code)]
+#[cargo_test]
 fn cargo_metadata_non_utf8() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;

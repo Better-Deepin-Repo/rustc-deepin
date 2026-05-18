@@ -97,3 +97,9 @@ version = "0.3.0"
 optional = true
 default-features = false
 
+[target."cfg(windows)".dependencies.windows-sys]
+version = ">=0.52, <0.62"
+features = [
+    "Win32_Storage_FileSystem",
+    "Win32_Foundation",
+]

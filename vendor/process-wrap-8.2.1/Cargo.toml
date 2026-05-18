@@ -44,6 +44,8 @@ all-features = true
 
 [features]
 creation-flags = [
+    "dep:windows",
+    "windows/Win32_System_Threading",
 ]
 default = [
     "creation-flags",
@@ -55,6 +57,12 @@ default = [
 ]
 downcasting = []
 job-object = [
+    "dep:windows",
+    "windows/Win32_Security",
+    "windows/Win32_System_Diagnostics_ToolHelp",
+    "windows/Win32_System_IO",
+    "windows/Win32_System_JobObjects",
+    "windows/Win32_System_Threading",
 ]
 kill-on-drop = []
 process-group = []
@@ -136,3 +144,7 @@ features = [
 ]
 optional = true
 default-features = false
+
+[target."cfg(windows)".dependencies.windows]
+version = "0.61.1"
+optional = true

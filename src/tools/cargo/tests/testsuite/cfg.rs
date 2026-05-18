@@ -280,7 +280,7 @@ fn any_ok() {
 
 // https://github.com/rust-lang/cargo/issues/5313
 #[cargo_test]
-#[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu", target_pointer_width = "64"))]
+#[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
 fn cfg_looks_at_rustflags_for_target() {
     let p = project()
         .file(

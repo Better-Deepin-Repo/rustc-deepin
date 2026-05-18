@@ -4,10 +4,10 @@
 //! and we can match on them for testing purposes.
 
 //@ ignore-android
-//@ min-lldb-version: 1800
+// LLDB 1800+ tests were not tested in CI, broke, and now are disabled
+//@ ignore-lldb
 //@ min-gdb-version: 13.0
-//Debian: broken, see https://github.com/rust-lang/rust/issues/130896
-//@ ignore-gdb
+
 //@ aux-build:macro-stepping.rs
 
 #![allow(unused)]

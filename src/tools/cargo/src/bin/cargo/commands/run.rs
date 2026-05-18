@@ -38,7 +38,6 @@ pub fn cli() -> Command {
         .arg_target_triple("Build for the target triple")
         .arg_target_dir()
         .arg_manifest_path()
-        .arg_lockfile_path()
         .arg_ignore_rust_version()
         .arg_unit_graph()
         .arg_timings()
@@ -178,8 +177,12 @@ pub fn exec_manifest_command(gctx: &mut GlobalContext, cmd: &str, args: &[OsStri
 
     let manifest_path = root_manifest(Some(manifest_path), gctx)?;
 
-    // Reload to cargo home.
-    gctx.reload_rooted_at(gctx.home().clone().into_path_unlocked())?;
+    // Treat `cargo foo.rs` like `cargo install --path foo` and re-evaluate the config based on the
+    // location where the script resides, rather than the environment from where it's being run.
+    let parent_path = manifest_path
+        .parent()
+        .expect("a file should always have a parent");
+    gctx.reload_rooted_at(parent_path)?;
 
     let mut ws = Workspace::new(&manifest_path, gctx)?;
     if gctx.cli_unstable().avoid_dev_deps {

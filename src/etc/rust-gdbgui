@@ -40,7 +40,7 @@ else
 fi
 
 # Find out where the pretty printer Python module is
-RUSTC_SYSROOT="$(if type "$RUSTC" >/dev/null 2>&1; then "$RUSTC" --print=sysroot; else echo /usr; fi)"
+RUSTC_SYSROOT="$("$RUSTC" --print=sysroot)"
 GDB_PYTHON_MODULE_DIRECTORY="$RUSTC_SYSROOT/lib/rustlib/etc"
 # Get the commit hash for path remapping
 RUSTC_COMMIT_HASH="$("$RUSTC" -vV | sed -n 's/commit-hash: \([a-zA-Z0-9_]*\)/\1/p')"

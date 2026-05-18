@@ -49,7 +49,7 @@ use crate::core::compiler::{CrateType, TargetInfo, apply_env_config, standard_li
 use crate::core::compiler::{DefaultExecutor, Executor, UnitInterner};
 use crate::core::profiles::Profiles;
 use crate::core::resolver::features::{self, CliFeatures, FeaturesFor};
-use crate::core::resolver::{HasDevUnits, Resolve};
+use crate::core::resolver::{ForceAllTargets, HasDevUnits, Resolve};
 use crate::core::{PackageId, PackageSet, SourceId, TargetKind, Workspace};
 use crate::drop_println;
 use crate::ops;
@@ -160,7 +160,7 @@ pub fn compile_ws<'a>(
     exec: &Arc<dyn Executor>,
 ) -> CargoResult<Compilation<'a>> {
     let interner = UnitInterner::new();
-    let logger = BuildLogger::maybe_new(ws)?;
+    let logger = BuildLogger::maybe_new(ws, &options.build_config)?;
 
     if let Some(ref logger) = logger {
         let rustc = ws.gctx().load_global_rustc(Some(ws))?;
@@ -168,6 +168,9 @@ pub fn compile_ws<'a>(
             .ok()
             .map(|x| x.get() as u64);
         logger.log(LogMessage::BuildStarted {
+            command: std::env::args_os()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect(),
             cwd: ws.gctx().cwd().to_path_buf(),
             host: rustc.host.to_string(),
             jobs: options.build_config.jobs,
@@ -221,9 +224,7 @@ pub fn print<'a>(
         if let Some(args) = target_rustc_args {
             process.args(args);
         }
-        if let CompileKind::Target(t) = kind {
-            process.arg("--target").arg(t.rustc_target());
-        }
+        kind.add_target_arg(&mut process);
         process.arg("--print").arg(print_opt_value);
         process.exec()?;
     }
@@ -311,6 +312,7 @@ pub fn create_bcx<'a, 'gctx>(
         let elapsed = ws.gctx().creation_time().elapsed().as_secs_f64();
         logger.log(LogMessage::ResolutionStarted { elapsed });
     }
+
     let resolve = ops::resolve_ws_with_opts(
         ws,
         &mut target_data,
@@ -318,7 +320,7 @@ pub fn create_bcx<'a, 'gctx>(
         cli_features,
         &specs,
         has_dev_units,
-        crate::core::resolver::features::ForceAllTargets::No,
+        ForceAllTargets::No,
         dry_run,
     )?;
     let WorkspaceResolve {
@@ -399,7 +401,10 @@ pub fn create_bcx<'a, 'gctx>(
     // If `--target` has not been specified, then the unit graph is built
     // assuming `--target $HOST` was specified. See
     // `rebuild_unit_graph_shared` for more on why this is done.
-    let explicit_host_kind = CompileKind::Target(CompileTarget::new(&target_data.rustc.host)?);
+    let explicit_host_kind = CompileKind::Target(CompileTarget::new(
+        &target_data.rustc.host,
+        gctx.cli_unstable().json_target_spec,
+    )?);
     let explicit_host_kinds: Vec<_> = build_config
         .requested_kinds
         .iter()
@@ -530,6 +535,7 @@ pub fn create_bcx<'a, 'gctx>(
         .enumerate()
         .map(|(i, &unit)| (unit.clone(), UnitIndex(i as u64)))
         .collect();
+
     if let Some(logger) = logger {
         let root_unit_indexes: HashSet<_> =
             root_units.iter().map(|unit| unit_to_index[&unit]).collect();
@@ -1187,6 +1193,10 @@ pub fn resolve_all_features(
     resolved_features: &features::ResolvedFeatures,
     package_set: &PackageSet<'_>,
     package_id: PackageId,
+    has_dev_units: HasDevUnits,
+    requested_kinds: &[CompileKind],
+    target_data: &RustcTargetData<'_>,
+    force_all_targets: ForceAllTargets,
 ) -> HashSet<String> {
     let mut features: HashSet<String> = resolved_features
         .activated_features(package_id, FeaturesFor::NormalOrDev)
@@ -1196,7 +1206,15 @@ pub fn resolve_all_features(
 
     // Include features enabled for use by dependencies so targets can also use them with the
     // required-features field when deciding whether to be built or skipped.
-    for (dep_id, deps) in resolve_with_overrides.deps(package_id) {
+    let filtered_deps = PackageSet::filter_deps(
+        package_id,
+        resolve_with_overrides,
+        has_dev_units,
+        requested_kinds,
+        target_data,
+        force_all_targets,
+    );
+    for (dep_id, deps) in filtered_deps {
         let is_proc_macro = package_set
             .get_one(dep_id)
             .expect("packages downloaded")

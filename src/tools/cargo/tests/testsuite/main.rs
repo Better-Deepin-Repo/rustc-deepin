@@ -52,6 +52,7 @@ mod cargo_publish;
 mod cargo_read_manifest;
 mod cargo_remove;
 mod cargo_report;
+mod cargo_report_future_incompat;
 mod cargo_report_rebuilds;
 mod cargo_report_sessions;
 mod cargo_report_timings;
@@ -83,7 +84,6 @@ mod corrupt_git;
 mod credential_process;
 mod cross_compile;
 mod cross_publish;
-#[cfg(false)] // Disabling custom target tests, not backporting support to 1.94.
 mod custom_target;
 mod death;
 mod dep_info;

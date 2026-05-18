@@ -103,3 +103,7 @@ version = "0.2.6"
 
 [dev-dependencies.tempfile]
 version = "3"
+
+[target."cfg(windows)".dependencies.windows-sys]
+version = "0.59.0"
+features = ["Win32_Networking_WinSock"]

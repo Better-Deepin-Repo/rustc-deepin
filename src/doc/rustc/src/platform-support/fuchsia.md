@@ -927,7 +927,7 @@ attach and load any relevant debug symbols.
 [Fuchsia]: https://fuchsia.dev/
 [source tree]: https://fuchsia.dev/fuchsia-src/get-started/learn/build
 [rustup]: https://rustup.rs/
-[cargo]: ../../../../cargo/book/index.html
+[cargo]: ../../cargo/index.html
 [Fuchsia SDK]: https://chrome-infra-packages.appspot.com/p/fuchsia/sdk/core
 [overview of CML]: https://fuchsia.dev/fuchsia-src/concepts/components/v2/component_manifests
 [reference for the file format]: https://fuchsia.dev/reference/cml

@@ -24,7 +24,18 @@ use crate::core::{EitherManifest, Package, SourceId, VirtualManifest};
 use crate::lints::analyze_cargo_lints_table;
 use crate::lints::rules::blanket_hint_mostly_unused;
 use crate::lints::rules::check_im_a_teapot;
-use crate::lints::rules::implicit_minimum_version_req;
+use crate::lints::rules::implicit_minimum_version_req_pkg;
+use crate::lints::rules::implicit_minimum_version_req_ws;
+use crate::lints::rules::missing_lints_inheritance;
+use crate::lints::rules::non_kebab_case_bins;
+use crate::lints::rules::non_kebab_case_features;
+use crate::lints::rules::non_kebab_case_packages;
+use crate::lints::rules::non_snake_case_features;
+use crate::lints::rules::non_snake_case_packages;
+use crate::lints::rules::redundant_homepage;
+use crate::lints::rules::redundant_readme;
+use crate::lints::rules::unused_workspace_dependencies;
+use crate::lints::rules::unused_workspace_package_fields;
 use crate::ops;
 use crate::ops::lockfile::LOCKFILE_NAME;
 use crate::sources::{CRATES_IO_INDEX, CRATES_IO_REGISTRY, PathSource, SourceConfigMap};
@@ -43,7 +54,7 @@ use cargo_util::paths;
 use cargo_util::paths::normalize_path;
 use cargo_util_schemas::manifest;
 use cargo_util_schemas::manifest::RustVersion;
-use cargo_util_schemas::manifest::{TomlDependency, TomlProfiles};
+use cargo_util_schemas::manifest::{TomlDependency, TomlManifest, TomlProfiles};
 use pathdiff::diff_paths;
 
 /// The core abstraction in Cargo for working with a workspace of crates.
@@ -729,7 +740,13 @@ impl<'gctx> Workspace<'gctx> {
 
     fn default_lock_root(&self) -> Filesystem {
         if self.root_maybe().is_embedded() {
-            self.build_dir()
+            // Include a workspace hash in case the user requests a shared build-dir so that
+            // scripts don't fight over the `Cargo.lock` content
+            let workspace_manifest_path = self.root_manifest();
+            let real_path = std::fs::canonicalize(workspace_manifest_path)
+                .unwrap_or_else(|_err| workspace_manifest_path.to_owned());
+            let hash = crate::util::hex::short_hash(&real_path);
+            self.build_dir().join(hash)
         } else {
             Filesystem::new(self.root().to_owned())
         }
@@ -1112,16 +1129,22 @@ impl<'gctx> Workspace<'gctx> {
         let current_dir = self.current_manifest.parent().unwrap();
         let root_pkg = self.packages.get(root);
 
-        // FIXME: Make this more generic by using a relative path resolver between member and root.
-        let members_msg = match current_dir.strip_prefix(root_dir) {
-            Ok(rel) => format!(
+        // Use pathdiff to handle finding the relative path between the current package
+        // and the workspace root. This usually does a good job of handling `..` and
+        // other weird things.
+        // Normalize paths first to ensure `../` components are resolved if possible,
+        // which helps `diff_paths` find the most direct relative path.
+        let current_dir = paths::normalize_path(current_dir);
+        let root_dir = paths::normalize_path(root_dir);
+        let members_msg = match pathdiff::diff_paths(&current_dir, &root_dir) {
+            Some(rel) => format!(
                 "this may be fixable by adding `{}` to the \
                      `workspace.members` array of the manifest \
                      located at: {}",
                 rel.display(),
                 root.display()
             ),
-            Err(_) => format!(
+            None => format!(
                 "this may be fixable by adding a member to \
                      the `workspace.members` array of the \
                      manifest located at: {}",
@@ -1347,8 +1370,30 @@ impl<'gctx> Workspace<'gctx> {
             let mut run_error_count = 0;
 
             check_im_a_teapot(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
-            implicit_minimum_version_req(
-                pkg.into(),
+            implicit_minimum_version_req_pkg(
+                pkg,
+                &path,
+                &cargo_lints,
+                &mut run_error_count,
+                self.gctx,
+            )?;
+            non_kebab_case_packages(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
+            non_snake_case_packages(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
+            non_kebab_case_bins(
+                self,
+                pkg,
+                &path,
+                &cargo_lints,
+                &mut run_error_count,
+                self.gctx,
+            )?;
+            non_kebab_case_features(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
+            non_snake_case_features(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
+            redundant_readme(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
+            redundant_homepage(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
+            missing_lints_inheritance(
+                self,
+                pkg,
                 &path,
                 &cargo_lints,
                 &mut run_error_count,
@@ -1392,7 +1437,7 @@ impl<'gctx> Workspace<'gctx> {
             let mut verify_error_count = 0;
 
             analyze_cargo_lints_table(
-                self.root_maybe().into(),
+                (self, self.root_maybe()).into(),
                 self.root_manifest(),
                 &cargo_lints,
                 &mut verify_error_count,
@@ -1404,8 +1449,25 @@ impl<'gctx> Workspace<'gctx> {
                 bail!("encountered {verify_error_count} error{plural} while verifying lints")
             }
 
-            implicit_minimum_version_req(
-                self.root_maybe().into(),
+            unused_workspace_package_fields(
+                self,
+                self.root_maybe(),
+                self.root_manifest(),
+                &cargo_lints,
+                &mut run_error_count,
+                self.gctx,
+            )?;
+            unused_workspace_dependencies(
+                self,
+                self.root_maybe(),
+                self.root_manifest(),
+                &cargo_lints,
+                &mut run_error_count,
+                self.gctx,
+            )?;
+            implicit_minimum_version_req_ws(
+                self,
+                self.root_maybe(),
                 self.root_manifest(),
                 &cargo_lints,
                 &mut run_error_count,
@@ -1418,6 +1480,7 @@ impl<'gctx> Workspace<'gctx> {
         // improve the testing experience while we are collecting feedback
         if self.gctx.cli_unstable().profile_hint_mostly_unused {
             blanket_hint_mostly_unused(
+                self,
                 self.root_maybe(),
                 self.root_manifest(),
                 &cargo_lints,
@@ -2042,6 +2105,20 @@ impl MaybePackage {
         match self {
             MaybePackage::Package(p) => p.manifest().document(),
             MaybePackage::Virtual(v) => v.document(),
+        }
+    }
+
+    pub fn original_toml(&self) -> Option<&TomlManifest> {
+        match self {
+            MaybePackage::Package(p) => p.manifest().original_toml(),
+            MaybePackage::Virtual(v) => v.original_toml(),
+        }
+    }
+
+    pub fn normalized_toml(&self) -> &TomlManifest {
+        match self {
+            MaybePackage::Package(p) => p.manifest().normalized_toml(),
+            MaybePackage::Virtual(v) => v.normalized_toml(),
         }
     }
 

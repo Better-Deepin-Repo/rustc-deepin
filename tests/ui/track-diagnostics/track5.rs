@@ -5,7 +5,6 @@
 // updating everytime someone adds or removes a line.
 //@ normalize-stderr: ".rs:\d+:\d+" -> ".rs:LL:CC"
 //@ normalize-stderr: "/rustc(?:-dev)?/[a-z0-9.]+/" -> ""
-//@ normalize-stderr: "/usr/src/rustc-(?:[^/]*)?/" -> ""
 
 }
 //~^ ERROR unexpected closing delimiter: `}`

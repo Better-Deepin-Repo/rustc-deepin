@@ -1,3 +1,12 @@
+rustc (1.95.0+dfsg1-1) experimental; urgency=medium
+
+  * New upstream release.
+  * New wasi-libc version (20260129.ec0effd)
+  * rust-src: install std/core/alloc vendored dependencies
+  * add autopkgtest for -Zbuild-std
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Thu, 14 May 2026 19:13:56 +0200
+
 rustc (1.94.1+dfsg1-1) unstable; urgency=medium
 
   * upload to unstable

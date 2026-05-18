@@ -70,6 +70,8 @@ pub(super) fn create_files(
             .as_bytes(),
         );
         static_files.add_builtin("searcher.js", searcher::JS);
+        static_files.add_builtin("mark.min.js", searcher::MARK_JS);
+        static_files.add_builtin("elasticlunr.min.js", searcher::ELASTICLUNR_JS);
         debug!("Copying search files ✓");
     }
 

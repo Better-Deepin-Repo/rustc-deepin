@@ -55,6 +55,7 @@ rustdoc-args = [
 ]
 
 [package.metadata.playground]
+features = ["bundled-full"]
 all-features = false
 
 [badges.appveyor]
@@ -72,7 +73,25 @@ backup = []
 blob = []
 buildtime_bindgen = [
     "libsqlite3-sys/buildtime_bindgen",
+    "sqlite-wasm-rs/bindgen",
 ]
+bundled = [
+    "libsqlite3-sys/bundled",
+    "modern_sqlite",
+]
+bundled-full = [
+    "modern-full",
+    "bundled",
+]
+bundled-sqlcipher = [
+    "libsqlite3-sys/bundled-sqlcipher",
+    "bundled",
+]
+bundled-sqlcipher-vendored-openssl = [
+    "libsqlite3-sys/bundled-sqlcipher-vendored-openssl",
+    "bundled-sqlcipher",
+]
+bundled-windows = ["libsqlite3-sys/bundled-windows"]
 cache = ["hashlink"]
 collation = []
 column_decltype = []
@@ -144,6 +163,16 @@ with-asan = ["libsqlite3-sys/with-asan"]
 [lib]
 name = "rusqlite"
 path = "src/lib.rs"
+
+[[example]]
+name = "load_extension"
+path = "examples/load_extension.rs"
+required-features = [
+    "load_extension",
+    "bundled",
+    "functions",
+    "trace",
+]
 
 [[example]]
 name = "loadable_extension"
@@ -283,6 +312,10 @@ default-features = false
 version = "0.2"
 features = ["js"]
 optional = true
+default-features = false
+
+[target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies.sqlite-wasm-rs]
+version = "0.5.1"
 default-features = false
 
 [target.'cfg(all(target_family = "wasm", target_os = "unknown"))'.dependencies.time]

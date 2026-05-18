@@ -49,10 +49,7 @@ use self::targets::to_targets;
 /// See also `bin/cargo/commands/run.rs`s `is_manifest_command`
 pub fn is_embedded(path: &Path) -> bool {
     let ext = path.extension();
-    (ext == Some(OsStr::new("rs")) ||
-        // Provide better errors by not considering directories to be embedded manifests
-        ext.is_none())
-        && path.is_file()
+    ext == Some(OsStr::new("rs")) || ext.is_none()
 }
 
 /// Loads a `Cargo.toml` from a file on disk.
@@ -845,7 +842,7 @@ fn normalize_package_readme(
     }
 }
 
-const DEFAULT_README_FILES: [&str; 3] = ["README.md", "README.txt", "README"];
+pub const DEFAULT_README_FILES: [&str; 3] = ["README.md", "README.txt", "README"];
 
 /// Checks if a file with any of the default README file names exists in the package root.
 /// If so, returns a `String` representing that name.
@@ -1312,7 +1309,7 @@ pub fn to_real_manifest(
         if let Some(pkg_msrv) = &rust_version {
             if let Some(edition_msrv) = edition.first_version() {
                 let edition_msrv = RustVersion::try_from(edition_msrv).unwrap();
-                if !edition_msrv.is_compatible_with(pkg_msrv.as_partial()) {
+                if !edition_msrv.is_compatible_with(&pkg_msrv.to_partial()) {
                     bail!(
                         "rust-version {} is incompatible with the version ({}) required by \
                             the specified edition ({})",
@@ -1332,7 +1329,7 @@ pub fn to_real_manifest(
                     e.first_version()
                         .map(|e| {
                             let e = RustVersion::try_from(e).unwrap();
-                            e.is_compatible_with(pkg_msrv.as_partial())
+                            e.is_compatible_with(&pkg_msrv.to_partial())
                         })
                         .unwrap_or_default()
                 })
@@ -1792,13 +1789,13 @@ note: only a feature named `default` will be enabled by default"
     let default_kind = normalized_package
         .default_target
         .as_ref()
-        .map(|t| CompileTarget::new(&*t))
+        .map(|t| CompileTarget::new(&*t, gctx.cli_unstable().json_target_spec))
         .transpose()?
         .map(CompileKind::Target);
     let forced_kind = normalized_package
         .forced_target
         .as_ref()
-        .map(|t| CompileTarget::new(&*t))
+        .map(|t| CompileTarget::new(&*t, gctx.cli_unstable().json_target_spec))
         .transpose()?
         .map(CompileKind::Target);
     let include = normalized_package
@@ -2311,7 +2308,12 @@ fn dep_to_dependency<P: ResolveToPath + Clone>(
         orig.target.as_deref(),
     ) {
         if manifest_ctx.gctx.cli_unstable().bindeps {
-            let artifact = Artifact::parse(&artifact.0, is_lib, target)?;
+            let artifact = Artifact::parse(
+                &artifact.0,
+                is_lib,
+                target,
+                manifest_ctx.gctx.cli_unstable().json_target_spec,
+            )?;
             if dep.kind() != DepKind::Build
                 && artifact.target() == Some(ArtifactTarget::BuildDependencyAssumeTarget)
             {

@@ -6,7 +6,7 @@ use crate::spec::{
 
 pub(crate) fn target() -> Target {
     let mut base = base::linux_gnu::opts();
-    base.cpu = "pwr4".into();
+    base.cpu = "ppc64".into();
     base.add_pre_link_args(LinkerFlavor::Gnu(Cc::Yes, Lld::No), &["-m64"]);
     base.max_atomic_width = Some(64);
     base.stack_probes = StackProbeType::Inline;

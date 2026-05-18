@@ -107,6 +107,8 @@ static_files! {
     source_code_pro_semibold => "static/fonts/SourceCodePro-Semibold.ttf.woff2",
     source_code_pro_italic => "static/fonts/SourceCodePro-It.ttf.woff2",
     source_code_pro_license => "static/fonts/SourceCodePro-LICENSE.txt",
+    nanum_barun_gothic_regular => "static/fonts/NanumBarunGothic.ttf.woff2",
+    nanum_barun_gothic_license => "static/fonts/NanumBarunGothic-LICENSE.txt",
 }
 
 pub(crate) static SCRAPE_EXAMPLES_HELP_MD: &str = include_str!("static/scrape-examples-help.md");

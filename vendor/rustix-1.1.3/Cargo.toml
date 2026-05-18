@@ -235,6 +235,21 @@ version = "0.3.10"
 default-features = false
 package = "errno"
 
+[target."cfg(windows)".dependencies.libc_errno]
+version = "0.3.10"
+default-features = false
+package = "errno"
+
+[target."cfg(windows)".dependencies.windows-sys]
+version = ">=0.52, <0.62"
+features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinSock",
+]
+
+[target."cfg(windows)".dev-dependencies.once_cell]
+version = "1.20.3"
+
 [lints.rust.unexpected_cfgs]
 level = "warn"
 priority = 0

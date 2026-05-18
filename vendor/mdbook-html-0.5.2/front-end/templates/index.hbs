@@ -33,7 +33,7 @@
         {{/if}}
 
         <!-- Fonts -->
-        <link rel="stylesheet" href="{{ path_to_root }}css/font-awesome.min.css">
+        <link rel="stylesheet" href="{{ resource "fonts/fonts.css" }}">
 
         <!-- Highlight.js Stylesheets -->
         <link rel="stylesheet" id="mdbook-highlight-css" href="{{ resource "highlight.css" }}">
@@ -47,7 +47,7 @@
 
         {{#if mathjax_support}}
         <!-- MathJax -->
-        <script async src="MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+        <script async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
         {{/if}}
 
         <!-- Provide site root and default themes to javascript -->
@@ -294,7 +294,29 @@
         </script>
         {{/if}}
 
+        {{#if playground_line_numbers}}
+        <script>
+            window.playground_line_numbers = true;
+        </script>
+        {{/if}}
+
+        {{#if playground_copyable}}
+        <script>
+            window.playground_copyable = true;
+        </script>
+        {{/if}}
+
+        {{#if playground_js}}
+        <script src="{{ resource "ace.js" }}"></script>
+        <script src="{{ resource "mode-rust.js" }}"></script>
+        <script src="{{ resource "editor.js" }}"></script>
+        <script src="{{ resource "theme-dawn.js" }}"></script>
+        <script src="{{ resource "theme-tomorrow_night.js" }}"></script>
+        {{/if}}
+
         {{#if search_js}}
+        <script src="{{ resource "elasticlunr.min.js" }}"></script>
+        <script src="{{ resource "mark.min.js" }}"></script>
         <script src="{{ resource "searcher.js" }}"></script>
         {{/if}}
 

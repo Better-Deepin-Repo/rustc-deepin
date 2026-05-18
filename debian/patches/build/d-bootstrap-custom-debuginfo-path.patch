@@ -32,10 +32,10 @@ Forwarded: not-needed
  24 files changed, 37 insertions(+), 37 deletions(-)
 
 diff --git a/src/bootstrap/src/lib.rs b/src/bootstrap/src/lib.rs
-index 857c053..8abe0e7 100644
+index b9a914f..954e228 100644
 --- a/src/bootstrap/src/lib.rs
 +++ b/src/bootstrap/src/lib.rs
-@@ -1223,27 +1223,9 @@ impl Build {
+@@ -1218,27 +1218,9 @@ impl Build {
  
          match which {
              GitRepo::Rustc => {
@@ -152,7 +152,7 @@ index 047ceaa..d1f742a 100644
  
  #![feature(custom_mir, core_intrinsics)]
 diff --git a/tests/ui/mir/lint/storage-live.stderr b/tests/ui/mir/lint/storage-live.stderr
-index ef0d253..651b8e2 100644
+index c8d0731..ea93e75 100644
 --- a/tests/ui/mir/lint/storage-live.stderr
 +++ b/tests/ui/mir/lint/storage-live.stderr
 @@ -1,12 +1,12 @@

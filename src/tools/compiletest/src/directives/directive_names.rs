@@ -79,7 +79,6 @@ pub(crate) const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
     "ignore-gnu",
     "ignore-haiku",
     "ignore-horizon",
-    "ignore-hurd",
     "ignore-i586",
     "ignore-i686-pc-windows-gnu",
     "ignore-i686-pc-windows-msvc",
@@ -211,6 +210,7 @@ pub(crate) const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
     "only-apple",
     "only-arm",
     "only-arm64ec",
+    "only-armv7-unknown-linux-gnueabihf",
     "only-avr",
     "only-beta",
     "only-bpf",
@@ -250,6 +250,7 @@ pub(crate) const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
     "only-unix",
     "only-visionos",
     "only-wasm32",
+    "only-wasm32-unknown-emscripten",
     "only-wasm32-unknown-unknown",
     "only-wasm32-wasip1",
     "only-watchos",
@@ -310,6 +311,5 @@ pub(crate) const KNOWN_HTMLDOCCK_DIRECTIVE_NAMES: &[&str] = &[
     "!snapshot",
 ];
 
-pub(crate) const KNOWN_JSONDOCCK_DIRECTIVE_NAMES: &[&str] = &[
-    "count", "!count", "has", "!has", "is", "!is", "ismany", "!ismany", "set", "!set",
-];
+pub(crate) const KNOWN_JSONDOCCK_DIRECTIVE_NAMES: &[&str] =
+    &["count", "!count", "has", "!has", "is", "!is", "ismany", "!ismany", "set", "!set"];

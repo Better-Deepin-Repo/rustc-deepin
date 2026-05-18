@@ -128,7 +128,7 @@ historical editions.
 
 ### The Cargo Book
 
-[The Cargo Book](../../cargo/book/index.html) is a guide to Cargo, Rust's build tool and
+[The Cargo Book](cargo/index.html) is a guide to Cargo, Rust's build tool and
 dependency manager.
 
 ### The Rustdoc Book
@@ -194,9 +194,8 @@ resources maintained by the [Embedded Working Group] useful.
 
 #### The Embedded Rust Book
 
-[The Embedded Rust Book] is targeted at developers familiar with embedded
-development and familiar with Rust, but have not used Rust for embedded
-development.
+[The Embedded Rust Book] is targeted at developers who are familiar with embedded
+development and Rust, but who have not used Rust for embedded development.
 
 [The Embedded Rust Book]: embedded-book/index.html
 [Rust project]: https://www.rust-lang.org

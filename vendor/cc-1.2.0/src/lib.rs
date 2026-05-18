@@ -2623,7 +2623,7 @@ impl Build {
         let (env, msvc, gnu, traditional, clang) = if self.cpp {
             ("CXX", "cl.exe", "g++", "c++", "clang++")
         } else {
-            ("CC", "cl.exe", "gcc", "cc", "rust-clang")
+            ("CC", "cl.exe", "gcc", "cc", "clang")
         };
 
         // On historical Solaris systems, "cc" may have been Sun Studio, which

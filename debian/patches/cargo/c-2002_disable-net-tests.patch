@@ -87,7 +87,7 @@ index cd223b5..53719d0 100644
      // Error when credential process does not output the expected format for a token.
      let cred_proj = project()
 diff --git a/src/tools/cargo/tests/testsuite/git_auth.rs b/src/tools/cargo/tests/testsuite/git_auth.rs
-index c99ae79..f7ec848 100644
+index a87d35b..00f2ad6 100644
 --- a/src/tools/cargo/tests/testsuite/git_auth.rs
 +++ b/src/tools/cargo/tests/testsuite/git_auth.rs
 @@ -105,7 +105,7 @@ fn setup_failed_auth_test() -> (SocketAddr, JoinHandle<()>, Arc<AtomicUsize>) {

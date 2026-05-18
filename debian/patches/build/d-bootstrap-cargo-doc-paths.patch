@@ -199,7 +199,7 @@ index 5f6653d..99332c3 100644
 -[`cargo tree`]: ../../cargo/commands/cargo-tree.html
 +[`cargo tree`]: ../../../../cargo/book/commands/cargo-tree.html
 diff --git a/src/doc/index.md b/src/doc/index.md
-index 892057a..b3fd492 100644
+index 4189393..c21bb34 100644
 --- a/src/doc/index.md
 +++ b/src/doc/index.md
 @@ -128,7 +128,7 @@ historical editions.
@@ -212,16 +212,17 @@ index 892057a..b3fd492 100644
  
  ### The Rustdoc Book
 diff --git a/src/doc/reference/src/conditional-compilation.md b/src/doc/reference/src/conditional-compilation.md
-index f033620..41a5462 100644
+index c035161..a75d084 100644
 --- a/src/doc/reference/src/conditional-compilation.md
 +++ b/src/doc/reference/src/conditional-compilation.md
-@@ -477,6 +477,6 @@ println!("I'm running on a {} machine!", machine_kind);
+@@ -505,7 +505,7 @@ Each right-hand side must be a syntactically valid expansion for the position in
  [`target_feature` attribute]: attributes/codegen.md#the-target_feature-attribute
  [attribute]: attributes.md
  [attributes]: attributes.md
 -[cargo-feature]: ../cargo/reference/features.html
 +[cargo-feature]: ../../../cargo/book/reference/features.html
  [crate type]: linkage.md
+ [macros]: macros.md
  [static C runtime]: linkage.md#static-and-dynamic-c-runtimes
 diff --git a/src/doc/reference/src/introduction.md b/src/doc/reference/src/introduction.md
 index d5eb488..446576a 100644
@@ -243,7 +244,7 @@ index d5eb488..446576a 100644
  [expressions chapter]: expressions.html
  [file an issue]: https://github.com/rust-lang/reference/issues
 diff --git a/src/doc/reference/src/linkage.md b/src/doc/reference/src/linkage.md
-index 5ce8f6f..6ac1557 100644
+index 0b275d7..eb0647c 100644
 --- a/src/doc/reference/src/linkage.md
 +++ b/src/doc/reference/src/linkage.md
 @@ -240,7 +240,7 @@ fn main() {
@@ -256,11 +257,11 @@ index 5ce8f6f..6ac1557 100644
  To use this feature locally, you typically will use the `RUSTFLAGS` environment
  variable to specify flags to the compiler through Cargo. For example to compile
 diff --git a/src/doc/reference/src/procedural-macros.md b/src/doc/reference/src/procedural-macros.md
-index 369e1b9..730ec65 100644
+index 00fd21c..cffd1ff 100644
 --- a/src/doc/reference/src/procedural-macros.md
 +++ b/src/doc/reference/src/procedural-macros.md
-@@ -423,7 +423,7 @@ Note that neither declarative nor procedural macros support doc comment tokens
- their equivalent `#[doc = r"str"]` attributes when passed to macros.
+@@ -371,7 +371,7 @@ r[macro.proc.token.doc-comment]
+ Note that neither declarative nor procedural macros support doc comment tokens (e.g. `/// Doc`), so they are always converted to token streams representing their equivalent `#[doc = r"str"]` attributes when passed to macros.
  
  [Attribute macros]: #the-proc_macro_attribute-attribute
 -[Cargo's build scripts]: ../cargo/reference/build-scripts.html
@@ -269,10 +270,10 @@ index 369e1b9..730ec65 100644
  [Function-like macros]: #the-proc_macro-attribute
  [`$crate`]: macro.decl.hygiene.crate
 diff --git a/src/doc/rustc/src/linker-plugin-lto.md b/src/doc/rustc/src/linker-plugin-lto.md
-index 32e712a4..e5e0982 100644
+index 1502e69..64bb322 100644
 --- a/src/doc/rustc/src/linker-plugin-lto.md
 +++ b/src/doc/rustc/src/linker-plugin-lto.md
-@@ -112,7 +112,7 @@ targeting Windows-like targets
+@@ -162,7 +162,7 @@ targeting Windows-like targets
  This is fixed if you explicitly set the target, for example
  `cargo build --target x86_64-pc-windows-msvc`
  Without an explicit --target the flags will be passed to all compiler invocations (including build

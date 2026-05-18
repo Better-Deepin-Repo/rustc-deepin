@@ -61,8 +61,6 @@ pub fn try_run(cmd: &mut Command, print_cmd_on_fail: bool) -> Result<(), ()> {
 
 /// Returns the submodule paths from the `.gitmodules` file in the given directory.
 pub fn parse_gitmodules(target_dir: &Path) -> Vec<String> {
-    return vec![];
-
     let gitmodules = target_dir.join(".gitmodules");
     assert!(gitmodules.exists(), "'{}' file is missing.", gitmodules.display());
 

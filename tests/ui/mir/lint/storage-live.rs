@@ -5,7 +5,6 @@
 //@ normalize-stderr: "storage_live\[....\]" -> "storage_live[HASH]"
 //@ normalize-stderr: "(delayed at [^:]+):\d+:\d+ - " -> "$1:LL:CC - "
 //@ normalize-stderr: "/rustc(?:-dev)?/[a-z0-9.]+/" -> ""
-//@ normalize-stderr: "/usr/src/rustc-(?:[^/]*)?/" -> ""
 //@ rustc-env:RUST_BACKTRACE=0
 
 #![feature(custom_mir, core_intrinsics)]

@@ -91,7 +91,6 @@ const SHARED_ITER_MAX: u16 = 100;
 
 fn assert_trusted_len<I: TrustedLen>(_: &I) {}
 
-#[cfg(not(any(target_arch = "powerpc", target_arch = "powerpc64")))]
 #[test]
 fn shared_from_iter_normal() {
     // Exercise the base implementation for non-`TrustedLen` iterators.

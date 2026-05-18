@@ -63,6 +63,7 @@ Due to its proprietary nature, it is very difficult to find information about PD
 of the sources were made at vastly different times and contain incomplete or somewhat contradictory
 information. As such this page will aim to collect as many sources as possible.
 
+* [CodeView 1.0 specification](./CodeView.pdf)
 * LLVM
     * [CodeView Overview](https://llvm.org/docs/SourceLevelDebugging.html#codeview-debug-info-format)
     * [PDB Overview and technical details](https://llvm.org/docs/PDB/index.html)

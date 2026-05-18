@@ -120,6 +120,9 @@ optional = true
 [dev-dependencies.libloading]
 version = "0.8"
 
+[target.'cfg(any(windows, target_os = "cygwin"))'.dependencies.windows-targets]
+version = "0.52.6"
+
 [target.'cfg(not(all(windows, target_env = "msvc", not(target_vendor = "uwp"))))'.dependencies.addr2line]
 version = "0.24.0"
 default-features = false

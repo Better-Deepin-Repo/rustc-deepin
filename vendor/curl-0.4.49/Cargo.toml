@@ -49,6 +49,10 @@ ssl = [
 static-curl = ["curl-sys/static-curl"]
 static-ssl = ["curl-sys/static-ssl"]
 upkeep_7_62_0 = ["curl-sys/upkeep_7_62_0"]
+windows-static-ssl = [
+    "static-curl",
+    "curl-sys/windows-static-ssl",
+]
 zlib-ng-compat = [
     "curl-sys/zlib-ng-compat",
     "static-curl",
@@ -141,3 +145,14 @@ optional = true
 [target."cfg(all(unix))".dependencies.openssl-sys]
 version = "0.9.64"
 optional = true
+
+[target.'cfg(target_env = "msvc")'.dependencies.schannel]
+version = "0.1.13"
+
+[target.'cfg(target_env = "msvc")'.dependencies.windows-sys]
+version = "0.59"
+features = [
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_Security_Cryptography",
+]

@@ -40,6 +40,7 @@ serde.workspace = true
 serde_derive.workspace = true
 tenthash = "1.1.0"
 num_cpus = "1.17.0"
+mimalloc = { version = "0.1.46", default-features = false, optional = true }
 lsp-server.workspace = true
 smallvec.workspace = true
 tracing.workspace = true
@@ -76,6 +77,15 @@ paths.workspace = true
 
 ra-ap-rustc_type_ir.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+  "Win32_System_Diagnostics_Debug",
+  "Win32_System_Threading",
+] }
+
+[target.'cfg(not(target_env = "msvc"))'.dependencies]
+jemallocator = { version = "0.5.4", package = "tikv-jemallocator", optional = true }
+
 [dev-dependencies]
 expect-test = "1.5.1"
 xshell.workspace = true
@@ -85,6 +95,7 @@ test-fixture.workspace = true
 syntax-bridge.workspace = true
 
 [features]
+jemalloc = ["jemallocator", "profile/jemalloc"]
 force-always-assert = ["stdx/force-always-assert"]
 in-rust-tree = [
   "cfg/in-rust-tree",

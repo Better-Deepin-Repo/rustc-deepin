@@ -3,12 +3,10 @@
 
 //@ only-linux
 //@ ignore-cross-compile
+
 use run_make_support::{cmd, run_in_tmpdir, rustc};
 
 fn main() {
-    // Debian: we patch rustc to intentionally insert the soname
-    return;
-
     let check = |ty: &str| {
         rustc().crate_name("foo").crate_type(ty).input("foo.rs").run();
         cmd("readelf").arg("-d").arg("libfoo.so").run()

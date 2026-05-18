@@ -133,7 +133,7 @@ impl Step for ToolBuild {
                 RustcLto::ThinLocal => None,
             };
             if let Some(lto) = lto {
-                cargo.env(cargo_profile_var("LTO", &builder.config), lto);
+                cargo.env(cargo_profile_var("LTO", &builder.config, self.mode), lto);
             }
         }
 
@@ -223,6 +223,10 @@ pub fn prepare_tool_cargo(
     // clippy tests need to know about the stage sysroot. Set them consistently while building to
     // avoid rebuilding when running tests.
     cargo.env("SYSROOT", builder.sysroot(compiler));
+
+    // if tools are using lzma we want to force the build script to build its
+    // own copy
+    cargo.env("LZMA_API_STATIC", "1");
 
     // See also the "JEMALLOC_SYS_WITH_LG_PAGE" setting in the compile build step.
     if builder.config.jemalloc(target) && env::var_os("JEMALLOC_SYS_WITH_LG_PAGE").is_none() {

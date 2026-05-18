@@ -5,7 +5,7 @@ language, provided by the project itself. Compilers take your source code and
 produce binary code, either as a library or executable.
 
 Most Rust programmers don't invoke `rustc` directly, but instead do it through
-[Cargo](../../../cargo/book/index.html). It's all in service of `rustc` though! If you
+[Cargo](../cargo/index.html). It's all in service of `rustc` though! If you
 want to see how Cargo calls `rustc`, you can
 
 ```bash

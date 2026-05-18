@@ -73,6 +73,8 @@ client-proxy = [
     "dep:percent-encoding",
 ]
 client-proxy-system = [
+    "dep:system-configuration",
+    "dep:windows-registry",
 ]
 default = []
 full = [
@@ -250,3 +252,11 @@ version = "0.4"
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dev-dependencies.pnet_datalink]
 version = "0.35.0"
+
+[target.'cfg(target_os = "macos")'.dependencies.system-configuration]
+version = ">=0.5, <0.7"
+optional = true
+
+[target."cfg(windows)".dependencies.windows-registry]
+version = ">=0.3, <0.7"
+optional = true

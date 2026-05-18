@@ -16,12 +16,12 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  tests/crashes/108499.rs                                 | 1 +
  tests/run-make/long-linker-command-lines/foo.rs         | 7 +++++++
  tests/ui/associated-consts/issue-93775.rs               | 1 +
- tests/ui/issues/issue-74564-if-expr-stack-overflow.rs   | 1 +
+ tests/ui/expr/if/expr-stack-overflow.rs                 | 1 +
  tests/ui/threads-sendsync/mpsc_stress.rs                | 1 +
  7 files changed, 16 insertions(+), 2 deletions(-)
 
 diff --git a/src/tools/compiletest/src/directives/directive_names.rs b/src/tools/compiletest/src/directives/directive_names.rs
-index 9813ac7..4abfa5c 100644
+index fa8c343..70bf790 100644
 --- a/src/tools/compiletest/src/directives/directive_names.rs
 +++ b/src/tools/compiletest/src/directives/directive_names.rs
 @@ -79,6 +79,7 @@ pub(crate) const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
@@ -32,7 +32,7 @@ index 9813ac7..4abfa5c 100644
      "ignore-i586",
      "ignore-i686-pc-windows-gnu",
      "ignore-i686-pc-windows-msvc",
-@@ -309,5 +310,6 @@ pub(crate) const KNOWN_HTMLDOCCK_DIRECTIVE_NAMES: &[&str] = &[
+@@ -311,5 +312,6 @@ pub(crate) const KNOWN_HTMLDOCCK_DIRECTIVE_NAMES: &[&str] = &[
      "!snapshot",
  ];
  
@@ -42,10 +42,10 @@ index 9813ac7..4abfa5c 100644
 +    "count", "!count", "has", "!has", "is", "!is", "ismany", "!ismany", "set", "!set",
 +];
 diff --git a/src/tools/compiletest/src/directives/tests.rs b/src/tools/compiletest/src/directives/tests.rs
-index 21d1940..2590187 100644
+index 4cd75fc..c0dceed 100644
 --- a/src/tools/compiletest/src/directives/tests.rs
 +++ b/src/tools/compiletest/src/directives/tests.rs
-@@ -357,6 +357,7 @@ fn ignore_target() {
+@@ -364,6 +364,7 @@ fn ignore_target() {
      assert!(check_ignore(&config, "//@ ignore-x86_64-unknown-linux-gnu"));
      assert!(check_ignore(&config, "//@ ignore-x86_64"));
      assert!(check_ignore(&config, "//@ ignore-linux"));
@@ -93,11 +93,12 @@ index a9b8d10..ac41a60 100644
  //@[next] compile-flags: -Znext-solver
  
  #![recursion_limit = "1001"]
-diff --git a/tests/ui/issues/issue-74564-if-expr-stack-overflow.rs b/tests/ui/issues/issue-74564-if-expr-stack-overflow.rs
-index c0ffed2..1e97353 100644
---- a/tests/ui/issues/issue-74564-if-expr-stack-overflow.rs
-+++ b/tests/ui/issues/issue-74564-if-expr-stack-overflow.rs
-@@ -1,5 +1,6 @@
+diff --git a/tests/ui/expr/if/expr-stack-overflow.rs b/tests/ui/expr/if/expr-stack-overflow.rs
+index 6fa0934..57b7202 100644
+--- a/tests/ui/expr/if/expr-stack-overflow.rs
++++ b/tests/ui/expr/if/expr-stack-overflow.rs
+@@ -1,6 +1,7 @@
+ //! regression test for <https://github.com/rust-lang/rust/issues/74564>
  //@ build-pass
  // ignore-tidy-filelength
 +//@ ignore-hurd

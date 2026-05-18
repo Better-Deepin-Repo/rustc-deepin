@@ -10,7 +10,7 @@ statically and dynamically. This section will explore the various methods to
 link crates together, and more information about native libraries can be
 found in the [FFI section of the book][ffi].
 
-[ffi]: ../book/ch19-01-unsafe-rust.html#using-extern-functions-to-call-external-code
+[ffi]: ../book/ch20-01-unsafe-rust.html#using-extern-functions-to-call-external-code
 
 r[link.type]
 In one session of compilation, the compiler can generate multiple artifacts
@@ -240,7 +240,7 @@ fn main() {
 }
 ```
 
-[cargo]: ../../../cargo/book/reference/environment-variables.html#environment-variables-cargo-sets-for-build-scripts
+[cargo]: ../cargo/reference/environment-variables.html#environment-variables-cargo-sets-for-build-scripts
 
 To use this feature locally, you typically will use the `RUSTFLAGS` environment
 variable to specify flags to the compiler through Cargo. For example to compile

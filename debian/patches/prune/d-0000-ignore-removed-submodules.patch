@@ -42,10 +42,10 @@ index 67c7a9d..e273c4b 100644
    "src/tools/run-make-support",
    "src/tools/rust-installer",
 diff --git a/src/bootstrap/bootstrap.py b/src/bootstrap/bootstrap.py
-index 2e16f2c..824911e 100644
+index db7c7b6..89f04dc 100644
 --- a/src/bootstrap/bootstrap.py
 +++ b/src/bootstrap/bootstrap.py
-@@ -1156,10 +1156,6 @@ class RustBuild(object):
+@@ -1157,10 +1157,6 @@ class RustBuild(object):
          if "BOOTSTRAP_TRACING" in env:
              args.append("--features=tracing")
  
@@ -76,10 +76,10 @@ index 36a740c..4684c2d 100644
      .into_iter()
      .map(|(path, submodules)| (builder.src.join(path), submodules))
 diff --git a/src/bootstrap/src/core/builder/cargo.rs b/src/bootstrap/src/core/builder/cargo.rs
-index dda0b40..e8002c1 100644
+index 16065cb..4e36af0 100644
 --- a/src/bootstrap/src/core/builder/cargo.rs
 +++ b/src/bootstrap/src/core/builder/cargo.rs
-@@ -1351,10 +1351,7 @@ impl Builder<'_> {
+@@ -1326,10 +1326,7 @@ impl Builder<'_> {
              }
          }
  
@@ -92,10 +92,10 @@ index dda0b40..e8002c1 100644
          }
  
 diff --git a/src/bootstrap/src/core/builder/mod.rs b/src/bootstrap/src/core/builder/mod.rs
-index f63b8e0..141588e 100644
+index ae91b20..53af7f3 100644
 --- a/src/bootstrap/src/core/builder/mod.rs
 +++ b/src/bootstrap/src/core/builder/mod.rs
-@@ -779,8 +779,6 @@ impl<'a> Builder<'a> {
+@@ -760,8 +760,6 @@ impl<'a> Builder<'a> {
                  tool::Linkchecker,
                  tool::CargoTest,
                  tool::Compiletest,
@@ -104,7 +104,7 @@ index f63b8e0..141588e 100644
                  tool::RustInstaller,
                  tool::FeaturesStatusDump,
                  tool::Cargo,
-@@ -789,17 +787,8 @@ impl<'a> Builder<'a> {
+@@ -770,17 +768,8 @@ impl<'a> Builder<'a> {
                  tool::Rustdoc,
                  tool::Clippy,
                  tool::CargoClippy,
@@ -122,7 +122,7 @@ index f63b8e0..141588e 100644
                  tool::OptimizedDist,
                  tool::CoverageDump,
                  tool::LlvmBitcodeLinker,
-@@ -842,9 +831,6 @@ impl<'a> Builder<'a> {
+@@ -823,9 +812,6 @@ impl<'a> Builder<'a> {
                  check::CraneliftCodegenBackend,
                  check::GccCodegenBackend,
                  check::Clippy,
@@ -132,7 +132,7 @@ index f63b8e0..141588e 100644
                  check::Rustfmt,
                  check::RustAnalyzer,
                  check::TestFloatParse,
-@@ -890,7 +876,6 @@ impl<'a> Builder<'a> {
+@@ -871,7 +857,6 @@ impl<'a> Builder<'a> {
                  test::CrateRustdoc,
                  test::CrateRustdocJsonTypes,
                  test::CrateBootstrap,
@@ -140,7 +140,7 @@ index f63b8e0..141588e 100644
                  test::Linkcheck,
                  test::TierCheck,
                  test::Cargotest,
-@@ -909,8 +894,6 @@ impl<'a> Builder<'a> {
+@@ -890,8 +875,6 @@ impl<'a> Builder<'a> {
                  test::EmbeddedBook,
                  test::EditionGuide,
                  test::Rustfmt,
@@ -149,7 +149,7 @@ index f63b8e0..141588e 100644
                  test::Clippy,
                  test::CompiletestTest,
                  test::CrateRunMakeSupport,
-@@ -949,7 +932,6 @@ impl<'a> Builder<'a> {
+@@ -931,7 +914,6 @@ impl<'a> Builder<'a> {
                  doc::CargoBook,
                  doc::Clippy,
                  doc::ClippyBook,
@@ -157,7 +157,7 @@ index f63b8e0..141588e 100644
                  doc::EmbeddedBook,
                  doc::EditionGuide,
                  doc::StyleGuide,
-@@ -976,7 +958,6 @@ impl<'a> Builder<'a> {
+@@ -958,7 +940,6 @@ impl<'a> Builder<'a> {
                  dist::RustAnalyzer,
                  dist::Rustfmt,
                  dist::Clippy,
@@ -165,7 +165,7 @@ index f63b8e0..141588e 100644
                  dist::LlvmTools,
                  dist::LlvmBitcodeLinker,
                  dist::RustDev,
-@@ -1006,7 +987,6 @@ impl<'a> Builder<'a> {
+@@ -989,7 +970,6 @@ impl<'a> Builder<'a> {
                  install::RustAnalyzer,
                  install::Rustfmt,
                  install::Clippy,
@@ -173,7 +173,7 @@ index f63b8e0..141588e 100644
                  install::LlvmTools,
                  install::Src,
                  install::RustcCodegenCranelift,
-@@ -1016,7 +996,6 @@ impl<'a> Builder<'a> {
+@@ -999,7 +979,6 @@ impl<'a> Builder<'a> {
                  run::BuildManifest,
                  run::BumpStage0,
                  run::ReplaceVersionPlaceholder,
@@ -195,10 +195,10 @@ index 1bdbb75..861cd9c 100644
      assert!(gitmodules.exists(), "'{}' file is missing.", gitmodules.display());
  
 diff --git a/src/tools/rust-analyzer/crates/rust-analyzer/src/config.rs b/src/tools/rust-analyzer/crates/rust-analyzer/src/config.rs
-index e39569e..52ac97b 100644
+index 0dda7f3..68c91b7 100644
 --- a/src/tools/rust-analyzer/crates/rust-analyzer/src/config.rs
 +++ b/src/tools/rust-analyzer/crates/rust-analyzer/src/config.rs
-@@ -4040,7 +4040,8 @@ mod tests {
+@@ -4118,7 +4118,8 @@ mod tests {
  
      use super::*;
  

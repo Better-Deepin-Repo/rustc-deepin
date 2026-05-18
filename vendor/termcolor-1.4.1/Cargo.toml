@@ -35,3 +35,6 @@ name = "termcolor"
 bench = false
 
 [dev-dependencies]
+
+[target."cfg(windows)".dependencies.winapi-util]
+version = "0.1.3"

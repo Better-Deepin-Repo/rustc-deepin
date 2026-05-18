@@ -564,6 +564,10 @@ fn credential_action(
             }
             "cargo:paseto" => bail!("cargo:paseto requires -Zasymmetric-token"),
             "cargo:token-from-stdout" => Box::new(BasicProcessCredential {}),
+            #[cfg(windows)]
+            "cargo:wincred" => Box::new(cargo_credential_wincred::WindowsCredential {}),
+            #[cfg(target_os = "macos")]
+            "cargo:macos-keychain" => Box::new(cargo_credential_macos_keychain::MacKeychain {}),
             #[cfg(target_os = "linux")]
             "cargo:libsecret" => Box::new(get_credential_libsecret()?),
             name if BUILT_IN_PROVIDERS.contains(&name) => {

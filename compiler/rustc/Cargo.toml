@@ -24,12 +24,18 @@ rustc_public_bridge = { path = "../rustc_public_bridge" }
 # <https://github.com/rust-lang/rust/pull/136395#issuecomment-2692769062>
 [target.'cfg(target_os = "wasi")'.dependencies]
 getrandom = "=0.3.3"
-wasi = "=0.14.4"
+wasi = "=0.14.2"
 
+
+[dependencies.tikv-jemalloc-sys]
+version = "0.6.1"
+optional = true
+features = ['override_allocator_on_supported_platforms']
 
 [features]
 # tidy-alphabetical-start
 check_only = ['rustc_driver_impl/check_only']
+jemalloc = ['dep:tikv-jemalloc-sys']
 llvm = ['rustc_driver_impl/llvm']
 llvm_enzyme = ['rustc_driver_impl/llvm_enzyme']
 llvm_offload = ['rustc_driver_impl/llvm_offload']

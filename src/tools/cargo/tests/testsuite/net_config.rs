@@ -4,7 +4,7 @@ use crate::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::str;
 
-#[allow(dead_code)]
+#[cargo_test]
 fn net_retry_loads_from_config() {
     let p = project()
         .file(
@@ -41,7 +41,7 @@ fn net_retry_loads_from_config() {
         .run();
 }
 
-#[allow(dead_code)]
+#[cargo_test]
 fn net_retry_git_outputs_warning() {
     let p = project()
         .file(

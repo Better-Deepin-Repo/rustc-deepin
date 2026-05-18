@@ -90,6 +90,9 @@ default-features = false
 version = "1.0"
 features = ["os-ext"]
 
+[target."cfg(target_os = \"windows\")".dev-dependencies.trash]
+version = "5.2.2"
+
 [target."cfg(target_os=\"macos\")".dependencies.bitflags]
 version = "2.7.0"
 
@@ -105,3 +108,14 @@ optional = true
 version = "1.0"
 features = ["os-ext"]
 optional = true
+
+[target."cfg(windows)".dependencies.windows-sys]
+version = "0.60.1"
+features = [
+    "Win32_System_Threading",
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_System_WindowsProgramming",
+    "Win32_System_IO",
+]

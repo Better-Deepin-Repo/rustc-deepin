@@ -13,7 +13,7 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  1 file changed, 4 deletions(-)
 
 diff --git a/src/bootstrap/src/core/build_steps/tool.rs b/src/bootstrap/src/core/build_steps/tool.rs
-index a90687c..9220168 100644
+index d86159d..4482674 100644
 --- a/src/bootstrap/src/core/build_steps/tool.rs
 +++ b/src/bootstrap/src/core/build_steps/tool.rs
 @@ -224,10 +224,6 @@ pub fn prepare_tool_cargo(

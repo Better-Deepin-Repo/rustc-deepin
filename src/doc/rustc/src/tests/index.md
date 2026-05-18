@@ -317,7 +317,7 @@ Experimental support for using custom test harnesses is available on the
 [`--test` option]: ../command-line-arguments.md#option-test
 [`-Z panic-abort-tests`]: https://github.com/rust-lang/rust/issues/67650
 [`available_parallelism`]: ../../std/thread/fn.available_parallelism.html
-[`cargo test`]: ../../../../cargo/book/commands/cargo-test.html
+[`cargo test`]: ../../cargo/commands/cargo-test.html
 [`libtest`]: ../../test/index.html
 [`main` function]: ../../reference/crates-and-source-files.html#main-functions
 [`Result`]: ../../std/result/index.html
@@ -327,7 +327,7 @@ Experimental support for using custom test harnesses is available on the
 [attribute-should_panic]: ../../reference/attributes/testing.html#the-should_panic-attribute
 [attribute-test]: ../../reference/attributes/testing.html#the-test-attribute
 [bench-docs]: ../../unstable-book/library-features/test.html
-[Cargo]: ../../../../cargo/book/index.html
+[Cargo]: ../../cargo/index.html
 [crate type]: ../../reference/linkage.html
 [custom_test_frameworks documentation]: ../../unstable-book/language-features/custom-test-frameworks.html
 [nightly channel]: ../../book/appendix-07-nightly-rust.html

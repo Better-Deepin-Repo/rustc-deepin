@@ -58,6 +58,7 @@ features = ["serde"]
 __internal_bench = []
 alloc = []
 clock = [
+    "winapi",
     "iana-time-zone",
     "now",
 ]
@@ -94,6 +95,7 @@ wasmbind = [
     "wasm-bindgen",
     "js-sys",
 ]
+winapi = ["windows-link"]
 
 [lib]
 name = "chrono"
@@ -162,3 +164,10 @@ version = "0.3"
 version = "0.1.45"
 features = ["fallback"]
 optional = true
+
+[target."cfg(windows)".dependencies.windows-link]
+version = "0.2"
+optional = true
+
+[target."cfg(windows)".dev-dependencies.windows-bindgen]
+version = "0.63"

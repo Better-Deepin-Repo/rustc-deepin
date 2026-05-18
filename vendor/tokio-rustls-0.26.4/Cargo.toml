@@ -49,6 +49,7 @@ default = [
 early-data = []
 fips = ["rustls/fips"]
 logging = ["rustls/logging"]
+ring = ["rustls/ring"]
 tls12 = ["rustls/tls12"]
 zlib = ["rustls/zlib"]
 

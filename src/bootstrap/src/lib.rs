@@ -340,13 +340,6 @@ pub enum Mode {
 }
 
 impl Mode {
-    pub fn is_tool(&self) -> bool {
-        match self {
-            Mode::ToolBootstrap | Mode::ToolRustcPrivate | Mode::ToolStd | Mode::ToolTarget => true,
-            Mode::Std | Mode::Codegen | Mode::Rustc => false,
-        }
-    }
-
     pub fn must_support_dlopen(&self) -> bool {
         match self {
             Mode::Std | Mode::Codegen => true,
@@ -542,9 +535,7 @@ impl Build {
             initial_lld,
             initial_relative_libdir,
             initial_rustc: config.initial_rustc.clone(),
-            initial_rustdoc: config
-                .initial_rustc
-                .with_file_name(exe("rustdoc", config.host_target)),
+            initial_rustdoc: config.initial_rustdoc.clone(),
             initial_cargo: config.initial_cargo.clone(),
             initial_sysroot: config.initial_sysroot.clone(),
             local_rebuild: config.local_rebuild,
@@ -898,8 +889,12 @@ impl Build {
 
     /// Component directory that Cargo will produce output into (e.g.
     /// release/debug)
-    fn cargo_dir(&self) -> &'static str {
-        if self.config.rust_optimize.is_release() { "release" } else { "debug" }
+    fn cargo_dir(&self, mode: Mode) -> &'static str {
+        match (mode, self.config.rust_optimize.is_release()) {
+            (Mode::Std, _) => "dist",
+            (_, true) => "release",
+            (_, false) => "debug",
+        }
     }
 
     fn tools_dir(&self, build_compiler: Compiler) -> PathBuf {
@@ -956,7 +951,7 @@ impl Build {
     /// running a particular compiler, whether or not we're building the
     /// standard library, and targeting the specified architecture.
     fn cargo_out(&self, build_compiler: Compiler, mode: Mode, target: TargetSelection) -> PathBuf {
-        self.stage_out(build_compiler, mode).join(target).join(self.cargo_dir())
+        self.stage_out(build_compiler, mode).join(target).join(self.cargo_dir(mode))
     }
 
     /// Root output directory of LLVM for `target`
@@ -1223,9 +1218,27 @@ impl Build {
 
         match which {
             GitRepo::Rustc => {
-                Some(format!("/usr/src/rustc-{}", &self.version))
+                let sha = self.rust_sha().unwrap_or(&self.version);
+
+                match remap_scheme {
+                    RemapScheme::Compiler => {
+                        // For compiler sources, remap via `/rustc-dev/{sha}` to allow
+                        // distinguishing between compiler sources vs library sources, since
+                        // `rustc-dev` dist component places them under
+                        // `$sysroot/lib/rustlib/rustc-src/rust` as opposed to `rust-src`'s
+                        // `$sysroot/lib/rustlib/src/rust`.
+                        //
+                        // Keep this scheme in sync with `rustc_metadata::rmeta::decoder`'s
+                        // `try_to_translate_virtual_to_real`.
+                        Some(format!("/rustc-dev/{sha}"))
+                    }
+                    RemapScheme::NonCompiler => {
+                        // For non-compiler sources, use `/rustc/{sha}` remapping scheme.
+                        Some(format!("/rustc/{sha}"))
+                    }
+                }
             }
-            GitRepo::Llvm => panic!("GitRepo::Llvm unsupported on Debian"),
+            GitRepo::Llvm => Some(String::from("/rustc/llvm")),
         }
     }
 

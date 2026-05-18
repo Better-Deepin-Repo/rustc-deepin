@@ -48,6 +48,6 @@ fn main() {
     llvm_dwarfdump()
         .input("libstd.rlib")
         .run()
-        .assert_stdout_contains_regex("/usr/src/rustc-[^/]+/")
+        .assert_stdout_contains("/rustc/")
         .assert_stdout_not_contains(source_root().to_string_lossy());
 }

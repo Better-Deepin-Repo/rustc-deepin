@@ -9,14 +9,14 @@ Forwarded: not-needed
 
 Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
 ---
- vendor/blake3-1.8.2/Cargo.toml |  2 +-
- vendor/blake3-1.8.2/build.rs   | 12 +++++++-----
+ vendor/blake3-1.8.3/Cargo.toml |  2 +-
+ vendor/blake3-1.8.3/build.rs   | 12 +++++++-----
  2 files changed, 8 insertions(+), 6 deletions(-)
 
-diff --git a/vendor/blake3-1.8.2/Cargo.toml b/vendor/blake3-1.8.2/Cargo.toml
-index a57d459..ac0895e 100644
---- a/vendor/blake3-1.8.2/Cargo.toml
-+++ b/vendor/blake3-1.8.2/Cargo.toml
+diff --git a/vendor/blake3-1.8.3/Cargo.toml b/vendor/blake3-1.8.3/Cargo.toml
+index bc0f3ea..3d70739 100644
+--- a/vendor/blake3-1.8.3/Cargo.toml
++++ b/vendor/blake3-1.8.3/Cargo.toml
 @@ -38,7 +38,7 @@ features = [
  ]
  
@@ -26,10 +26,10 @@ index a57d459..ac0895e 100644
  digest = ["dep:digest"]
  mmap = [
      "std",
-diff --git a/vendor/blake3-1.8.2/build.rs b/vendor/blake3-1.8.2/build.rs
+diff --git a/vendor/blake3-1.8.3/build.rs b/vendor/blake3-1.8.3/build.rs
 index 01b692f..f38e0c2 100644
---- a/vendor/blake3-1.8.2/build.rs
-+++ b/vendor/blake3-1.8.2/build.rs
+--- a/vendor/blake3-1.8.3/build.rs
++++ b/vendor/blake3-1.8.3/build.rs
 @@ -369,11 +369,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
      println!("cargo:rerun-if-env-changed=CFLAGS");
  

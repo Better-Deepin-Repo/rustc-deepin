@@ -13,7 +13,7 @@ Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
  1 file changed, 8 insertions(+), 5 deletions(-)
 
 diff --git a/src/bootstrap/src/core/builder/tests.rs b/src/bootstrap/src/core/builder/tests.rs
-index 2771ed1..ef0682f 100644
+index b73aa5e..cfab212 100644
 --- a/src/bootstrap/src/core/builder/tests.rs
 +++ b/src/bootstrap/src/core/builder/tests.rs
 @@ -163,7 +163,8 @@ fn check_missing_paths_for_x_test_tests() {

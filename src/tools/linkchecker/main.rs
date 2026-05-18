@@ -241,17 +241,7 @@ impl Checker {
         for entry in t!(dir.read_dir()).map(|e| t!(e)) {
             let path = entry.path();
             // Goes through symlinks
-            let metadata = fs::metadata(&path);
-            if let Err(err) = metadata {
-                if let Ok(target) = fs::read_link(&path) {
-                    if target.starts_with("/usr/share") {
-                        // broken symlink to /usr/share, ok for our Debian build
-                        return;
-                    }
-                }
-                panic!("error at file {:?} while walking - {:?}", path, err)
-            }
-            let metadata = t!(metadata);
+            let metadata = t!(fs::metadata(&path));
             if metadata.is_dir() {
                 self.walk(&path, report);
             } else {
@@ -264,15 +254,7 @@ impl Checker {
     fn check(&mut self, file: &Path, report: &mut Report) {
         let (pretty_path, entry) = self.load_file(file, report);
         let source = match entry {
-            FileEntry::Missing => {
-                if let Ok(target) = fs::read_link(&file) {
-                    if target.starts_with("/usr/share") {
-                        // broken symlink to /usr/share, ok for our Debian build
-                        return;
-                    }
-                }
-                panic!("missing file {:?} while walking", file)
-            }
+            FileEntry::Missing => panic!("missing file {:?} while walking", file),
             FileEntry::Dir => unreachable!("never with `check` path"),
             FileEntry::OtherFile => return,
             FileEntry::Redirect { .. } => return,
@@ -361,16 +343,6 @@ impl Checker {
         let (target_pretty_path, target_entry) = self.load_file(&path, report);
         let (target_source, target_ids) = match target_entry {
             FileEntry::Missing => {
-                if let Ok(target) = fs::read_link(&path) {
-                    if target.starts_with("/usr/share") {
-                        // broken symlink to /usr/share, ok for our Debian build
-                        return;
-                    }
-                }
-                if url.contains("../../cargo/book/") {
-                    // link to related cargo-doc, ok for our Debian build
-                    return;
-                }
                 if is_exception(file, &target_pretty_path) {
                     report.links_ignored_exception += 1;
                 } else {

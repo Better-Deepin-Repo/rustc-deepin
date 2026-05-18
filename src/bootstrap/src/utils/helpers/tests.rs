@@ -101,8 +101,6 @@ fn test_set_file_times_sanity_check() {
 
 #[test]
 fn test_submodule_path_of() {
-    // Debian: doesn't work in non-git context
-    return;
     let config = TestCtx::new().config("build").create_config();
 
     let build = crate::Build::new(config.clone());

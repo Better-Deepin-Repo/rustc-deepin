@@ -300,7 +300,7 @@ fn rustc(
     let name = unit.pkg.name();
 
     let outputs = build_runner.outputs(unit)?;
-    let root = build_runner.files().out_dir(unit);
+    let root = build_runner.files().output_dir(unit);
 
     // Prepare the native lib state (extra `-L` and `-l` flags).
     let build_script_outputs = Arc::clone(&build_runner.build_script_outputs);
@@ -866,10 +866,8 @@ fn prepare_rustdoc(build_runner: &BuildRunner<'_, '_>, unit: &Unit) -> CargoResu
     add_path_args(bcx.ws, unit, &mut rustdoc);
     add_cap_lints(bcx, unit, &mut rustdoc);
 
-    if let CompileKind::Target(target) = unit.kind {
-        rustdoc.arg("--target").arg(target.rustc_target());
-    }
-    let doc_dir = build_runner.files().out_dir(unit);
+    unit.kind.add_target_arg(&mut rustdoc);
+    let doc_dir = build_runner.files().output_dir(unit);
     rustdoc.arg("-o").arg(&doc_dir);
     rustdoc.args(&features_args(unit));
     rustdoc.args(&check_cfg_args(unit));
@@ -906,7 +904,7 @@ fn prepare_rustdoc(build_runner: &BuildRunner<'_, '_>, unit: &Unit) -> CargoResu
         rustdoc.arg("--merge=none");
         let mut arg = OsString::from("--parts-out-dir=");
         // `-Zrustdoc-mergeable-info` always uses the new layout.
-        arg.push(build_runner.files().deps_dir_new_layout(unit));
+        arg.push(build_runner.files().out_dir_new_layout(unit));
         rustdoc.arg(arg);
     }
 
@@ -973,7 +971,7 @@ fn rustdoc(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResult<W
     let mut rustdoc = prepare_rustdoc(build_runner, unit)?;
 
     let crate_name = unit.target.crate_name();
-    let doc_dir = build_runner.files().out_dir(unit);
+    let doc_dir = build_runner.files().output_dir(unit);
     // Create the documentation directory ahead of time as rustdoc currently has
     // a bug where concurrent invocations will race to create this directory if
     // it doesn't already exist.
@@ -1175,8 +1173,8 @@ fn add_allow_features(build_runner: &BuildRunner<'_, '_>, cmd: &mut ProcessBuild
 ///
 /// [`--error-format`]: https://doc.rust-lang.org/nightly/rustc/command-line-arguments.html#--error-format-control-how-errors-are-produced
 fn add_error_format_and_color(build_runner: &BuildRunner<'_, '_>, cmd: &mut ProcessBuilder) {
-    let enable_timings = build_runner.bcx.gctx.cli_unstable().section_timings
-        && (build_runner.bcx.build_config.timing_report || build_runner.bcx.logger.is_some());
+    let enable_timings =
+        build_runner.bcx.gctx.cli_unstable().section_timings && build_runner.bcx.logger.is_some();
     if enable_timings {
         cmd.arg("-Zunstable-options");
     }
@@ -1406,33 +1404,14 @@ fn build_base_args(
     }
 
     cmd.arg("--out-dir")
-        .arg(&build_runner.files().out_dir(unit));
+        .arg(&build_runner.files().output_dir(unit));
 
-    fn opt(cmd: &mut ProcessBuilder, key: &str, prefix: &str, val: Option<&OsStr>) {
-        if let Some(val) = val {
-            let mut joined = OsString::from(prefix);
-            joined.push(val);
-            cmd.arg(key).arg(joined);
-        }
-    }
+    unit.kind.add_target_arg(cmd);
 
-    if let CompileKind::Target(n) = unit.kind {
-        cmd.arg("--target").arg(n.rustc_target());
-    }
+    add_codegen_linker(cmd, build_runner, unit, bcx.gctx.target_applies_to_host()?);
 
-    opt(
-        cmd,
-        "-C",
-        "linker=",
-        build_runner
-            .compilation
-            .target_linker(unit.kind)
-            .as_ref()
-            .map(|s| s.as_ref()),
-    );
     if incremental {
-        let dir = build_runner.files().incremental_dir(&unit);
-        opt(cmd, "-C", "incremental=", Some(dir.as_os_str()));
+        add_codegen_incremental(cmd, build_runner, unit)
     }
 
     let pkg_hint_mostly_unused = match hints.mostly_unused {
@@ -1755,7 +1734,11 @@ fn build_deps_args(
     // Add `OUT_DIR` environment variables for build scripts
     let first_custom_build_dep = deps.iter().find(|dep| dep.unit.mode.is_run_custom_build());
     if let Some(dep) = first_custom_build_dep {
-        let out_dir = &build_runner.files().build_script_out_dir(&dep.unit);
+        let out_dir = if bcx.gctx.cli_unstable().build_dir_new_layout {
+            build_runner.files().out_dir_new_layout(&dep.unit)
+        } else {
+            build_runner.files().build_script_out_dir(&dep.unit)
+        };
         cmd.env("OUT_DIR", &out_dir);
     }
 
@@ -1770,7 +1753,11 @@ fn build_deps_args(
     if is_multiple_build_scripts_enabled {
         for dep in deps {
             if dep.unit.mode.is_run_custom_build() {
-                let out_dir = &build_runner.files().build_script_out_dir(&dep.unit);
+                let out_dir = if bcx.gctx.cli_unstable().build_dir_new_layout {
+                    build_runner.files().out_dir_new_layout(&dep.unit)
+                } else {
+                    build_runner.files().build_script_out_dir(&dep.unit)
+                };
                 let target_name = dep.unit.target.name();
                 let out_dir_prefix = target_name
                     .strip_prefix("build-script-")
@@ -1958,6 +1945,44 @@ pub fn extern_args(
     }
 
     Ok(result)
+}
+
+/// Adds `-C linker=<path>` if specified.
+fn add_codegen_linker(
+    cmd: &mut ProcessBuilder,
+    build_runner: &BuildRunner<'_, '_>,
+    unit: &Unit,
+    target_applies_to_host: bool,
+) {
+    let linker = if unit.target.for_host() && !target_applies_to_host {
+        build_runner
+            .compilation
+            .host_linker()
+            .map(|s| s.as_os_str())
+    } else {
+        build_runner
+            .compilation
+            .target_linker(unit.kind)
+            .map(|s| s.as_os_str())
+    };
+
+    if let Some(linker) = linker {
+        let mut arg = OsString::from("linker=");
+        arg.push(linker);
+        cmd.arg("-C").arg(arg);
+    }
+}
+
+/// Adds `-C incremental=<path>`.
+fn add_codegen_incremental(
+    cmd: &mut ProcessBuilder,
+    build_runner: &BuildRunner<'_, '_>,
+    unit: &Unit,
+) {
+    let dir = build_runner.files().incremental_dir(&unit);
+    let mut arg = OsString::from("incremental=");
+    arg.push(dir.as_os_str());
+    cmd.arg("-C").arg(arg);
 }
 
 fn envify(s: &str) -> String {

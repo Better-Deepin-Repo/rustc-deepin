@@ -10,10 +10,10 @@ Forwarded: not-needed
  2 files changed, 10 deletions(-)
 
 diff --git a/src/librustdoc/html/static/css/rustdoc.css b/src/librustdoc/html/static/css/rustdoc.css
-index b770a0e..9a89314 100644
+index 9e47f80..613b4c6 100644
 --- a/src/librustdoc/html/static/css/rustdoc.css
 +++ b/src/librustdoc/html/static/css/rustdoc.css
-@@ -178,14 +178,6 @@ xmlns="http://www.w3.org/2000/svg" fill="black" height="18px">\
+@@ -179,14 +179,6 @@ xmlns="http://www.w3.org/2000/svg" fill="black" height="18px">\
  	font-display: swap;
  }
  

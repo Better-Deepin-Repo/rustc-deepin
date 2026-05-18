@@ -356,7 +356,7 @@ fn main() {
             if let Some(stripped) = lib.strip_prefix("-LIBPATH:") {
                 println!("cargo:rustc-link-search=native={}", stripped.replace(&host, &target));
             } else if let Some(stripped) = lib.strip_prefix("-L") {
-                if stripped.contains(&host) { println!("cargo:rustc-link-search=native={}", stripped.replace(&host, &target)); }
+                println!("cargo:rustc-link-search=native={}", stripped.replace(&host, &target));
             }
         } else if let Some(stripped) = lib.strip_prefix("-LIBPATH:") {
             println!("cargo:rustc-link-search=native={stripped}");

@@ -17,7 +17,7 @@ Signed-off-by: Fabian Grünbichler <debian@fabian.gruenbichler.email>
  1 file changed, 2 insertions(+), 1 deletion(-)
 
 diff --git a/src/bootstrap/src/core/build_steps/test.rs b/src/bootstrap/src/core/build_steps/test.rs
-index f52ab9a..db775e7 100644
+index 33cc4d5..72359b6 100644
 --- a/src/bootstrap/src/core/build_steps/test.rs
 +++ b/src/bootstrap/src/core/build_steps/test.rs
 @@ -477,7 +477,8 @@ impl Step for RustAnalyzer {

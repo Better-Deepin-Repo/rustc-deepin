@@ -354,7 +354,7 @@ endif
 override_dh_auto_build-indep: debian/dh_auto_build.stamp
 ifeq (true,$(BUILD_WASM))
 	debian/scripts/build-wit-bindgen.sh 0.45.1
-	debian/scripts/build-wit-bindgen.sh 0.46.0
+	debian/scripts/build-wit-bindgen.sh 0.51.0
 	$(RUSTBUILD) build $(RUSTBUILD_FLAGS) \
 	  --host $(DEB_BUILD_RUST_TYPE) \
 	  --target $(WASM_TARGETS) \

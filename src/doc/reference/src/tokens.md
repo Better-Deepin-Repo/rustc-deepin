@@ -115,7 +115,7 @@ r[lex.token.literal.suffix.syntax]
 ```grammar,lexer
 SUFFIX -> IDENTIFIER_OR_KEYWORD _except `_`_
 
-SUFFIX_NO_E -> SUFFIX _not beginning with `e` or `E`_
+SUFFIX_NO_E -> ![`e` `E`] SUFFIX
 ```
 
 r[lex.token.literal.suffix.validity]
@@ -157,7 +157,7 @@ ASCII_ESCAPE ->
     | `\n` | `\r` | `\t` | `\\` | `\0`
 
 UNICODE_ESCAPE ->
-    `\u{` ( HEX_DIGIT `_`* ){1..6} _valid hex char value_ `}`[^valid-hex-char]
+    `\u{` ( HEX_DIGIT `_`* ){1..=6} _valid hex char value_ `}`[^valid-hex-char]
 ```
 
 [^valid-hex-char]: See [lex.token.literal.char-escape.unicode].
@@ -214,11 +214,13 @@ r[lex.token.literal.str-raw]
 
 r[lex.token.literal.str-raw.syntax]
 ```grammar,lexer
-RAW_STRING_LITERAL -> `r` RAW_STRING_CONTENT SUFFIX?
+RAW_STRING_LITERAL ->
+      `r` `"` ^ RAW_STRING_CONTENT `"` SUFFIX?
+    | `r` `#`{n:1..=255} ^ `"` RAW_STRING_CONTENT_HASHED `"` `#`{n} SUFFIX?
 
-RAW_STRING_CONTENT ->
-      `"` ( ~CR )*? `"`
-    | `#` RAW_STRING_CONTENT `#`
+RAW_STRING_CONTENT -> (!`"` ~CR )*
+
+RAW_STRING_CONTENT_HASHED -> (!(`"` `#`{n}) ~CR )*
 ```
 
 r[lex.token.literal.str-raw.intro]
@@ -251,10 +253,9 @@ r[lex.token.byte]
 r[lex.token.byte.syntax]
 ```grammar,lexer
 BYTE_LITERAL ->
-    `b'` ( ASCII_FOR_CHAR | BYTE_ESCAPE )  `'` SUFFIX?
+    `b'` ^ ( ASCII_FOR_CHAR | BYTE_ESCAPE )  `'` SUFFIX?
 
-ASCII_FOR_CHAR ->
-    <any ASCII (i.e. 0x00 to 0x7F) except `'`, `\`, LF, CR, or TAB>
+ASCII_FOR_CHAR -> ![`'` `\` LF CR TAB] ASCII
 
 BYTE_ESCAPE ->
       `\x` HEX_DIGIT HEX_DIGIT
@@ -270,10 +271,9 @@ r[lex.token.str-byte]
 r[lex.token.str-byte.syntax]
 ```grammar,lexer
 BYTE_STRING_LITERAL ->
-    `b"` ( ASCII_FOR_STRING | BYTE_ESCAPE | STRING_CONTINUE )* `"` SUFFIX?
+    `b"` ^ ( ASCII_FOR_STRING | BYTE_ESCAPE | STRING_CONTINUE )* `"` SUFFIX?
 
-ASCII_FOR_STRING ->
-    <any ASCII (i.e 0x00 to 0x7F) except `"`, `\`, or CR>
+ASCII_FOR_STRING -> ![`"` `\` CR] ASCII
 ```
 
 r[lex.token.str-byte.intro]
@@ -303,14 +303,14 @@ r[lex.token.str-byte-raw]
 r[lex.token.str-byte-raw.syntax]
 ```grammar,lexer
 RAW_BYTE_STRING_LITERAL ->
-    `br` RAW_BYTE_STRING_CONTENT SUFFIX?
+      `br` `"` ^ RAW_BYTE_STRING_CONTENT `"` SUFFIX?
+    | `br` `#`{n:1..=255} ^ `"` RAW_BYTE_STRING_CONTENT_HASHED `"` `#`{n} SUFFIX?
 
-RAW_BYTE_STRING_CONTENT ->
-      `"` ASCII_FOR_RAW*? `"`
-    | `#` RAW_BYTE_STRING_CONTENT `#`
+RAW_BYTE_STRING_CONTENT -> (!`"` ASCII_FOR_RAW )*
 
-ASCII_FOR_RAW ->
-    <any ASCII (i.e. 0x00 to 0x7F) except CR>
+RAW_BYTE_STRING_CONTENT_HASHED -> (!(`"` `#`{n}) ASCII_FOR_RAW )*
+
+ASCII_FOR_RAW -> !CR ASCII
 ```
 
 r[lex.token.str-byte-raw.intro]
@@ -343,13 +343,12 @@ r[lex.token.str-c]
 r[lex.token.str-c.syntax]
 ```grammar,lexer
 C_STRING_LITERAL ->
-    `c"` (
+    `c"` ^ (
         ~[`"` `\` CR NUL]
       | BYTE_ESCAPE _except `\0` or `\x00`_
       | UNICODE_ESCAPE _except `\u{0}`, `\u{00}`, …, `\u{000000}`_
       | STRING_CONTINUE
     )* `"` SUFFIX?
-
 ```
 
 r[lex.token.str-c.intro]
@@ -399,11 +398,12 @@ r[lex.token.str-c-raw]
 r[lex.token.str-c-raw.syntax]
 ```grammar,lexer
 RAW_C_STRING_LITERAL ->
-    `cr` RAW_C_STRING_CONTENT SUFFIX?
+      `cr` `"` ^ RAW_C_STRING_CONTENT `"` SUFFIX?
+    | `cr` `#`{n:1..=255} ^ `"` RAW_C_STRING_CONTENT_HASHED `"` `#`{n} SUFFIX?
 
-RAW_C_STRING_CONTENT ->
-      `"` ( ~[CR NUL] )*? `"`
-    | `#` RAW_C_STRING_CONTENT `#`
+RAW_C_STRING_CONTENT -> (!`"` ~[CR NUL] )*
+
+RAW_C_STRING_CONTENT_HASHED -> (!(`"` `#`{n}) ~[CR NUL] )*
 ```
 
 r[lex.token.str-c-raw.intro]
@@ -560,10 +560,10 @@ r[lex.token.literal.float.syntax]
 FLOAT_LITERAL ->
       DEC_LITERAL (`.` DEC_LITERAL)? FLOAT_EXPONENT SUFFIX?
     | DEC_LITERAL `.` DEC_LITERAL SUFFIX_NO_E?
-    | DEC_LITERAL `.` _not immediately followed by `.`, `_` or an XID_Start character_
+    | DEC_LITERAL `.` !(`.` | `_` | XID_Start)
 
 FLOAT_EXPONENT ->
-    (`e`|`E`) (`+`|`-`)? `_`* DEC_DIGIT (DEC_DIGIT|`_`)*
+    (`e`|`E`) ^ (`+`|`-`)? `_`* DEC_DIGIT (DEC_DIGIT|`_`)*
 ```
 
 r[lex.token.literal.float.form]
@@ -609,13 +609,11 @@ r[lex.token.literal.reserved.syntax]
 RESERVED_NUMBER ->
       BIN_LITERAL [`2`-`9`]
     | OCT_LITERAL [`8`-`9`]
-    | ( BIN_LITERAL | OCT_LITERAL | HEX_LITERAL ) `.` _not immediately followed by `.`, `_` or an XID_Start character_
+    | ( BIN_LITERAL | OCT_LITERAL | HEX_LITERAL ) `.` !(`.` | `_` | XID_Start)
     | ( BIN_LITERAL | OCT_LITERAL ) (`e`|`E`)
-    | `0b` `_`* <end of input or not BIN_DIGIT>
-    | `0o` `_`* <end of input or not OCT_DIGIT>
-    | `0x` `_`* <end of input or not HEX_DIGIT>
-    | DEC_LITERAL ( `.` DEC_LITERAL )? (`e` | `E`) (`+` | `-`)? <end of input or not DEC_DIGIT>
-
+    | `0b` `_`* !BIN_DIGIT
+    | `0o` `_`* !OCT_DIGIT
+    | `0x` `_`* !HEX_DIGIT
 ```
 
 r[lex.token.literal.reserved.intro]
@@ -658,16 +656,16 @@ r[lex.token.life.syntax]
 ```grammar,lexer
 LIFETIME_TOKEN ->
       RAW_LIFETIME
-    | `'` IDENTIFIER_OR_KEYWORD _not immediately followed by `'`_
+    | `'` IDENTIFIER_OR_KEYWORD !`'`
 
 LIFETIME_OR_LABEL ->
       RAW_LIFETIME
-    | `'` NON_KEYWORD_IDENTIFIER _not immediately followed by `'`_
+    | `'` NON_KEYWORD_IDENTIFIER !`'`
 
 RAW_LIFETIME ->
-    `'r#` IDENTIFIER_OR_KEYWORD _not immediately followed by `'`_
+    `'r#` ^ IDENTIFIER_OR_KEYWORD !`'`
 
-RESERVED_RAW_LIFETIME -> `'r#` (`_` | `crate` | `self` | `Self` | `super`) _not immediately followed by `'`_
+RESERVED_RAW_LIFETIME -> `'r#` (`_` | `crate` | `self` | `Self` | `super`) !(`'` | XID_Continue)
 ```
 
 r[lex.token.life.intro]
@@ -717,7 +715,6 @@ PUNCTUATION ->
     | `=>`
     | `>=`
     | `>>`
-    | `>`
     | `^=`
     | `|=`
     | `||`
@@ -738,6 +735,7 @@ PUNCTUATION ->
     | `;`
     | `<`
     | `=`
+    | `>`
     | `?`
     | `@`
     | `[`
@@ -869,7 +867,7 @@ r[lex.token.reserved-guards.edition2024]
 [Integer literal expressions]: expressions/literal-expr.md#integer-literal-expressions
 [keywords]: keywords.md
 [literal expressions]: expressions/literal-expr.md
-[loop labels]: expressions/loop-expr.md
+[loop labels]: expressions/loop-expr.md#loop-labels
 [macros]: macros-by-example.md
 [String continuation escapes]: expressions/literal-expr.md#string-continuation-escapes
 [syntax index]: syntax-index.md#operators-and-punctuation

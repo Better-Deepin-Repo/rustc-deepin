@@ -92,3 +92,15 @@ default-features = false
 
 [dev-dependencies.regex]
 version = "1.4.2"
+
+[target."cfg(windows)".dependencies.encode_unicode]
+version = "1"
+
+[target."cfg(windows)".dependencies.windows-sys]
+version = "0.59"
+features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_Input_KeyboardAndMouse",
+]

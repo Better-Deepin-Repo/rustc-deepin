@@ -57,7 +57,7 @@ walkdir = "2.4"
 xz2 = "0.1"
 
 # Dependencies needed by the build-metrics feature
-sysinfo = { version = "0.37.0", default-features = false, optional = true, features = ["system"] }
+sysinfo = { version = "0.38.2", default-features = false, optional = true, features = ["system"] }
 
 # Dependencies needed by the `tracing` feature
 chrono = { version = "0.4", default-features = false, optional = true, features = ["now", "std"] }
@@ -65,6 +65,21 @@ tracing = { version = "0.1", optional = true, features = ["attributes"] }
 tracing-chrome = { version = "0.7", optional = true }
 tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter", "fmt", "registry", "std"] }
 tempfile = { version = "3.15.0", optional = true }
+
+[target.'cfg(windows)'.dependencies.junction]
+version = "1.3.0"
+
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.61"
+features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_JobObjects",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Threading",
+    "Win32_System_Time",
+]
 
 [dev-dependencies]
 pretty_assertions = "1.4"

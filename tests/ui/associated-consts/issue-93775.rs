@@ -7,7 +7,6 @@
 //@ build-pass
 //@ revisions: current next
 //@ ignore-compare-mode-next-solver (explicit revisions)
-//@ ignore-hurd
 //@[next] compile-flags: -Znext-solver
 
 #![recursion_limit = "1001"]

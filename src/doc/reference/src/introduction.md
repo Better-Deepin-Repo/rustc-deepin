@@ -130,10 +130,10 @@ And of course, if you see anything that is wrong or is non-normative but not spe
 [book]: ../book/index.html
 [github issues]: https://github.com/rust-lang/reference/issues
 [standard library]: std
-[the Rust Reference repository]: ../reference/index.html
-[Unstable Book]: ../unstable-book/index.html
-[cargo book]: ../../../cargo/book/index.html
-[cargo reference]: ../../../cargo/book/reference/index.html
+[the Rust Reference repository]: https://github.com/rust-lang/reference/
+[Unstable Book]: https://doc.rust-lang.org/nightly/unstable-book/
+[cargo book]: ../cargo/index.html
+[cargo reference]: ../cargo/reference/index.html
 [example rule]: example.rule.label
 [expressions chapter]: expressions.html
 [file an issue]: https://github.com/rust-lang/reference/issues

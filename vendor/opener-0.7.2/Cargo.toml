@@ -48,6 +48,7 @@ default = ["dbus-vendored"]
 reveal = [
     "dep:url",
     "dep:dbus",
+    "windows-sys/Win32_System_Com",
 ]
 
 [target.'cfg(target_os = "linux")'.dependencies.bstr]
@@ -60,6 +61,17 @@ optional = true
 [target.'cfg(target_os = "linux")'.dependencies.url]
 version = "2"
 optional = true
+
+[target."cfg(windows)".dependencies.normpath]
+version = "1"
+
+[target."cfg(windows)".dependencies.windows-sys]
+version = "0.59"
+features = [
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+]
 
 [badges.maintenance]
 status = "passively-maintained"

@@ -1,14 +1,13 @@
 //! Support for writing static files.
 
 use super::helpers::resources::ResourceHelper;
-use crate::theme::{self, Theme};
+use crate::theme::{self, Theme, playground_editor};
 use anyhow::{Context, Result};
 use mdbook_core::config::HtmlConfig;
 use mdbook_core::static_regex;
 use mdbook_core::utils::fs;
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
@@ -57,8 +56,43 @@ impl StaticFiles {
         if let Some(contents) = &theme.favicon_svg {
             this.add_builtin("favicon.svg", contents);
         }
+        this.add_builtin("highlight.css", &theme.highlight_css);
         this.add_builtin("tomorrow-night.css", &theme.tomorrow_night_css);
         this.add_builtin("ayu-highlight.css", &theme.ayu_highlight_css);
+        this.add_builtin("highlight.js", &theme.highlight_js);
+        this.add_builtin("clipboard.min.js", &theme.clipboard_js);
+        if theme.fonts_css.is_none() {
+            this.add_builtin("fonts/fonts.css", theme::fonts::CSS);
+            for (file_name, contents) in theme::fonts::LICENSES.iter() {
+                this.add_builtin(file_name, contents);
+            }
+            for (file_name, contents) in theme::fonts::OPEN_SANS.iter() {
+                this.add_builtin(file_name, contents);
+            }
+            this.add_builtin(
+                theme::fonts::SOURCE_CODE_PRO.0,
+                theme::fonts::SOURCE_CODE_PRO.1,
+            );
+        } else if let Some(fonts_css) = &theme.fonts_css {
+            if !fonts_css.is_empty() {
+                this.add_builtin("fonts/fonts.css", fonts_css);
+            }
+        }
+
+        let playground_config = &html_config.playground;
+
+        // Ace is a very large dependency, so only load it when requested
+        if playground_config.editable && playground_config.copy_js {
+            // Load the editor
+            this.add_builtin("editor.js", playground_editor::JS);
+            this.add_builtin("ace.js", playground_editor::ACE_JS);
+            this.add_builtin("mode-rust.js", playground_editor::MODE_RUST_JS);
+            this.add_builtin("theme-dawn.js", playground_editor::THEME_DAWN_JS);
+            this.add_builtin(
+                "theme-tomorrow_night.js",
+                playground_editor::THEME_TOMORROW_NIGHT_JS,
+            );
+        }
 
         let custom_files = html_config
             .additional_css
@@ -222,23 +256,6 @@ impl StaticFiles {
                 }
             }
         }
-        symlink(
-            "/usr/share/javascript/highlight.js/styles/atelier-dune-light.css",
-            destination.join("highlight.css"),
-        )?;
-        symlink(
-            "/usr/share/fonts-font-awesome/css/font-awesome.min.css",
-            destination.join("css/font-awesome.min.css"),
-        )?;
-        symlink(
-            "/usr/share/fonts-font-awesome/fonts",
-            destination.join("fonts"),
-        )?;
-
-        symlink(
-            "/usr/share/javascript/mathjax/MathJax.js",
-            destination.join("MathJax.js"),
-        )?;
         let hash_map = self.hash_map;
         Ok(ResourceHelper { hash_map })
     }

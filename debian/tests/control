@@ -6,6 +6,10 @@ Tests: create-and-build-crate
 Restrictions: rw-build-tree, allow-stderr
 Depends: cargo, librust-anyhow-dev
 
+Tests: create-and-build-crate-with-build-std
+Restrictions: rw-build-tree, allow-stderr
+Depends: cargo, librust-anyhow-dev, rust-src
+
 Tests: create-and-build-wasm-wasip1-crate
 Restrictions: rw-build-tree, allow-stderr
 Depends: cargo, libstd-rust-dev-wasm32, rust-llvm, librust-anyhow-dev

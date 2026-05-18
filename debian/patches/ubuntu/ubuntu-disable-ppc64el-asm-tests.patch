@@ -8,10 +8,10 @@ Forwarded: not-needed
  1 file changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/compiler/rustc_lint/src/builtin.rs b/compiler/rustc_lint/src/builtin.rs
-index e2a061c..b86da03 100644
+index e7b821a..2650772 100644
 --- a/compiler/rustc_lint/src/builtin.rs
 +++ b/compiler/rustc_lint/src/builtin.rs
-@@ -2782,7 +2782,10 @@ declare_lint! {
+@@ -2778,7 +2778,10 @@ declare_lint! {
      /// ### Example
      ///
      /// ```rust,compile_fail

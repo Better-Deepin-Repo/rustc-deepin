@@ -13,7 +13,7 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  3 files changed, 10 insertions(+)
 
 diff --git a/src/bootstrap/src/core/builder/tests.rs b/src/bootstrap/src/core/builder/tests.rs
-index 66614cc..2771ed1 100644
+index 9c7b66a..b73aa5e 100644
 --- a/src/bootstrap/src/core/builder/tests.rs
 +++ b/src/bootstrap/src/core/builder/tests.rs
 @@ -431,6 +431,9 @@ fn test_prebuilt_llvm_config_path_resolution() {
@@ -27,7 +27,7 @@ index 66614cc..2771ed1 100644
          r#"
              [llvm]
 diff --git a/src/bootstrap/src/core/config/tests.rs b/src/bootstrap/src/core/config/tests.rs
-index e19604d..0bca66f 100644
+index 277ede8..bbcb0d7 100644
 --- a/src/bootstrap/src/core/config/tests.rs
 +++ b/src/bootstrap/src/core/config/tests.rs
 @@ -37,6 +37,8 @@ fn download_ci_llvm() {
@@ -54,7 +54,7 @@ index e19604d..0bca66f 100644
 +    // Debian: if-unchanged doesn't work in non-git context
 +    return;
      let config = TestCtx::new().config("check").arg("--ci").arg("false").create_config();
-     assert!(!config.is_running_on_ci);
+     assert!(!config.is_running_on_ci());
  
 diff --git a/src/bootstrap/src/utils/helpers/tests.rs b/src/bootstrap/src/utils/helpers/tests.rs
 index 676fe6c..a463fe1 100644

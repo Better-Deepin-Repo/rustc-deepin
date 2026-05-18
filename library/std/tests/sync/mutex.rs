@@ -424,7 +424,6 @@ fn test_replace_poison() {
 }
 
 #[test]
-#[cfg(not(target_arch = "powerpc"))]
 #[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
 fn test_mutex_arc_poison() {
     let arc = Arc::new(Mutex::new(1));

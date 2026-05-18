@@ -14,3 +14,29 @@ src             usr/src/rustc-${env:RUST_LONG_VERSION}
 library         usr/src/rustc-${env:RUST_LONG_VERSION}
 compiler        usr/src/rustc-${env:RUST_LONG_VERSION}
 Cargo.lock        usr/src/rustc-${env:RUST_LONG_VERSION}
+
+# needed for -Zbuild-std
+vendor/addr2line-0.25.1 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/adler2-2.0.1 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/cfg-if-1.0.4 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/dlmalloc-0.2.11 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/foldhash-0.2.0 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/fortanix-sgx-abi-0.6.1 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/getopts-0.2.24 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/gimli-0.32.3 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/hashbrown-0.16.1 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/hermit-abi-0.5.2 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/libc-0.2.178 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/memchr-2.7.6 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/miniz_oxide-0.8.9 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/moto-rt-0.16.0 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/object-0.37.3 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/r-efi-5.3.0 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/r-efi-alloc-2.1.0 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/rustc-demangle-0.1.27 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/rustc-literal-escaper-0.0.7 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/unwinding-0.2.8 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/vex-sdk-0.27.1 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/wasi-0.11.1+wasi-snapshot-preview1 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/wasi-0.14.4+wasi-0.2.4 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor
+vendor/wit-bindgen-0.45.1 usr/src/rustc-${env:RUST_LONG_VERSION}/library/vendor

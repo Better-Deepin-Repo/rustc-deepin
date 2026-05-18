@@ -12,8 +12,8 @@ Forwarded: not-needed
 Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
 ---
  vendor/hyper-rustls-0.27.7/Cargo.toml   | 1 -
- vendor/rustls-0.23.35/Cargo.toml        | 8 --------
- vendor/rustls-webpki-0.103.8/Cargo.toml | 7 -------
+ vendor/rustls-0.23.36/Cargo.toml        | 8 --------
+ vendor/rustls-webpki-0.103.9/Cargo.toml | 7 -------
  vendor/tokio-rustls-0.26.4/Cargo.toml   | 1 -
  4 files changed, 17 deletions(-)
 
@@ -29,10 +29,10 @@ index 96b44cd..2b122b7 100644
  tls12 = [
      "tokio-rustls/tls12",
      "rustls/tls12",
-diff --git a/vendor/rustls-0.23.35/Cargo.toml b/vendor/rustls-0.23.35/Cargo.toml
-index 4614365..4299e2b 100644
---- a/vendor/rustls-0.23.35/Cargo.toml
-+++ b/vendor/rustls-0.23.35/Cargo.toml
+diff --git a/vendor/rustls-0.23.36/Cargo.toml b/vendor/rustls-0.23.36/Cargo.toml
+index a25bca8..4de7f0c 100644
+--- a/vendor/rustls-0.23.36/Cargo.toml
++++ b/vendor/rustls-0.23.36/Cargo.toml
 @@ -85,10 +85,6 @@ read_buf = [
      "rustversion",
      "std",
@@ -55,11 +55,11 @@ index 4614365..4299e2b 100644
  [dependencies.subtle]
  version = "2.5.0"
  default-features = false
-diff --git a/vendor/rustls-webpki-0.103.8/Cargo.toml b/vendor/rustls-webpki-0.103.8/Cargo.toml
-index 611a4b3..3cee9e0 100644
---- a/vendor/rustls-webpki-0.103.8/Cargo.toml
-+++ b/vendor/rustls-webpki-0.103.8/Cargo.toml
-@@ -77,7 +77,6 @@ rustdoc-args = [
+diff --git a/vendor/rustls-webpki-0.103.9/Cargo.toml b/vendor/rustls-webpki-0.103.9/Cargo.toml
+index 5dfa3ac0..179f6dd 100644
+--- a/vendor/rustls-webpki-0.103.9/Cargo.toml
++++ b/vendor/rustls-webpki-0.103.9/Cargo.toml
+@@ -77,7 +77,6 @@ enum_variant_marked_deprecated = "warn"
  
  [features]
  alloc = [

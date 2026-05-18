@@ -20,62 +20,61 @@ Forwarded: not-needed
 
 Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
 ---
- vendor/anstream-0.6.21/Cargo.toml             |  6 --
+ vendor/anstream-0.6.21/Cargo.toml             |  6 ---
  vendor/anstream-0.6.21/Cargo.toml.orig        |  3 +-
  vendor/anstyle-query-1.1.5/Cargo.toml         |  7 ---
- vendor/backtrace-0.3.75/Cargo.toml            |  3 -
- vendor/chrono-0.4.42/Cargo.toml               |  9 ---
+ vendor/backtrace-0.3.75/Cargo.toml            |  3 --
+ vendor/chrono-0.4.42/Cargo.toml               |  9 ----
  vendor/colored-2.2.0/Cargo.toml               |  7 ---
  vendor/colored-3.0.0/Cargo.toml               |  7 ---
- vendor/console-0.15.11/Cargo.toml             | 12 ----
- vendor/ctrlc-3.5.1/Cargo.toml                 | 18 ------
- vendor/curl-0.4.49/Cargo.toml                 | 15 -----
- vendor/curl-sys-0.4.83+curl-8.15.0/Cargo.toml |  6 --
+ vendor/console-0.15.11/Cargo.toml             | 12 -----
+ vendor/ctrlc-3.5.1/Cargo.toml                 | 18 -------
+ vendor/curl-0.4.49/Cargo.toml                 | 15 ------
+ vendor/curl-sys-0.4.83+curl-8.15.0/Cargo.toml |  6 ---
  vendor/dbus-0.9.9/Cargo.toml                  |  4 --
- vendor/dirs-sys-0.5.0/Cargo.toml              |  9 ---
- vendor/dirs-sys-next-0.1.2/Cargo.toml         |  3 -
- vendor/dlmalloc-0.2.11/Cargo.toml             |  9 ---
+ vendor/dirs-sys-0.5.0/Cargo.toml              |  9 ----
+ vendor/dlmalloc-0.2.11/Cargo.toml             |  9 ----
  vendor/env_logger-0.11.8/Cargo.toml           |  2 +-
  vendor/errno-0.3.14/Cargo.toml                |  7 ---
- vendor/filetime-0.2.26/Cargo.toml             |  7 ---
- vendor/gix-discover-0.45.0/Cargo.toml         |  3 -
- vendor/gix-path-0.10.22/Cargo.toml            | 10 ---
- vendor/gix-sec-0.12.2/Cargo.toml              | 13 ----
+ vendor/gix-discover-0.47.0/Cargo.toml         |  3 --
+ vendor/gix-path-0.11.1/Cargo.toml             | 11 ----
+ vendor/gix-sec-0.13.1/Cargo.toml              | 12 -----
  vendor/home-0.5.12/Cargo.toml                 |  8 ---
- vendor/hyper-util-0.1.19/Cargo.toml           | 10 ---
- vendor/iana-time-zone-0.1.64/Cargo.toml       | 12 ----
- vendor/ignore-0.4.25/Cargo.toml               |  3 -
- vendor/is_executable-1.0.5/Cargo.toml         |  3 -
- vendor/jiff-0.2.17/Cargo.toml                 | 10 ---
+ vendor/hyper-util-0.1.19/Cargo.toml           | 10 ----
+ vendor/iana-time-zone-0.1.64/Cargo.toml       | 12 -----
+ vendor/ignore-0.4.25/Cargo.toml               |  3 --
+ vendor/is_executable-1.0.5/Cargo.toml         |  3 --
+ vendor/jiff-0.2.18/Cargo.toml                 | 10 ----
+ vendor/jobserver-0.1.34/Cargo.toml            |  3 --
  vendor/libloading-0.8.9/Cargo.toml            |  7 ---
+ vendor/libloading-0.9.0/Cargo.toml            |  7 ---
  vendor/libssh2-sys-0.3.1/Cargo.toml           |  8 ---
- vendor/mio-1.1.1/Cargo.toml                   | 16 -----
+ vendor/mio-1.1.1/Cargo.toml                   | 16 ------
  vendor/notify-8.2.0/Cargo.toml                | 14 -----
- vendor/nu-ansi-term-0.50.3/Cargo.toml         | 10 ---
- vendor/opener-0.7.2/Cargo.toml                | 12 ----
- vendor/opener-0.8.3/Cargo.toml                | 12 ----
- vendor/os_info-3.14.0/Cargo.toml              | 34 -----------
+ vendor/nu-ansi-term-0.50.3/Cargo.toml         | 10 ----
+ vendor/opener-0.7.2/Cargo.toml                | 12 -----
+ vendor/opener-0.8.4/Cargo.toml                | 11 ----
+ vendor/os_info-3.14.0/Cargo.toml              | 34 ------------
  vendor/page_size-0.6.0/Cargo.toml             |  4 --
  vendor/parking_lot_core-0.9.12/Cargo.toml     |  2 -
- vendor/portable-atomic-1.11.1/Cargo.toml      |  7 ---
- vendor/process-wrap-8.2.1/Cargo.toml          | 12 ----
- vendor/rusqlite-0.38.0/Cargo.toml             | 28 ---------
- vendor/rustix-1.1.3/Cargo.toml                | 15 -----
+ vendor/portable-atomic-1.13.1/Cargo.toml      |  6 ---
+ vendor/process-wrap-8.2.1/Cargo.toml          | 12 -----
+ vendor/rusqlite-0.38.0/Cargo.toml             | 28 ----------
+ vendor/rustix-1.1.3/Cargo.toml                | 15 ------
  vendor/same-file-1.0.6/Cargo.toml             |  2 -
- vendor/snapbox-0.6.23/Cargo.toml              |  6 --
- vendor/socket2-0.6.1/Cargo.toml               |  9 ---
+ vendor/snapbox-0.6.24/Cargo.toml              |  6 ---
+ vendor/socket2-0.6.2/Cargo.toml               | 12 -----
  vendor/stacker-0.1.21/Cargo.toml              |  7 ---
- vendor/sysinfo-0.37.2/Cargo.toml              | 87 +--------------------------
- vendor/tempfile-3.24.0/Cargo.toml             |  6 --
- vendor/term-0.7.0/Cargo.toml                  |  6 --
- vendor/termcolor-1.4.1/Cargo.toml             |  3 -
+ vendor/sysinfo-0.38.2/Cargo.toml              | 75 ---------------------------
+ vendor/tempfile-3.24.0/Cargo.toml             |  6 ---
+ vendor/term-1.2.1/Cargo.toml                  |  9 ----
+ vendor/termcolor-1.4.1/Cargo.toml             |  3 --
  vendor/terminal_size-0.4.3/Cargo.toml         |  7 ---
  vendor/termize-0.2.1/Cargo.toml               |  7 ---
- vendor/tokio-1.48.0/Cargo.toml                | 21 -------
- vendor/walkdir-2.5.0/Cargo.toml               |  3 -
- vendor/wasm-component-ld-0.5.20/Cargo.toml    |  7 ---
- vendor/yansi-term-0.1.2/Cargo.toml            |  3 -
- 55 files changed, 3 insertions(+), 558 deletions(-)
+ vendor/tokio-1.49.0/Cargo.toml                | 20 -------
+ vendor/walkdir-2.5.0/Cargo.toml               |  3 --
+ vendor/wasm-component-ld-0.5.21/Cargo.toml    |  7 ---
+ 54 files changed, 2 insertions(+), 547 deletions(-)
 
 diff --git a/vendor/anstream-0.6.21/Cargo.toml b/vendor/anstream-0.6.21/Cargo.toml
 index 7c4249d..82d233f 100644
@@ -330,19 +329,6 @@ index 7b64137..ffea536 100644
 -    "Win32_Globalization",
 -    "Win32_System_Com",
 -]
-diff --git a/vendor/dirs-sys-next-0.1.2/Cargo.toml b/vendor/dirs-sys-next-0.1.2/Cargo.toml
-index e9d8d0c..acb2eb7 100644
---- a/vendor/dirs-sys-next-0.1.2/Cargo.toml
-+++ b/vendor/dirs-sys-next-0.1.2/Cargo.toml
-@@ -25,8 +25,5 @@ version = "0.4.0"
- default-features = false
- [target."cfg(unix)".dependencies.libc]
- version = "0.2"
--[target."cfg(windows)".dependencies.winapi]
--version = "0.3"
--features = ["knownfolders", "objbase", "shlobj", "winbase", "winerror"]
- [badges.maintenance]
- status = "as-is"
 diff --git a/vendor/dlmalloc-0.2.11/Cargo.toml b/vendor/dlmalloc-0.2.11/Cargo.toml
 index b9babb4..849de6f 100644
 --- a/vendor/dlmalloc-0.2.11/Cargo.toml
@@ -393,26 +379,11 @@ index ff3dfa9..81a2125 100644
  [lints.rust.unexpected_cfgs]
  level = "warn"
  priority = 0
-diff --git a/vendor/filetime-0.2.26/Cargo.toml b/vendor/filetime-0.2.26/Cargo.toml
-index d6ebc24..3731c50 100644
---- a/vendor/filetime-0.2.26/Cargo.toml
-+++ b/vendor/filetime-0.2.26/Cargo.toml
-@@ -48,10 +48,3 @@ version = "0.1.0"
- 
- [target."cfg(unix)".dependencies.libc]
- version = "0.2.27"
--
--[target."cfg(windows)".dependencies.windows-sys]
--version = "0.60.0"
--features = [
--    "Win32_Foundation",
--    "Win32_Storage_FileSystem",
--]
-diff --git a/vendor/gix-discover-0.45.0/Cargo.toml b/vendor/gix-discover-0.45.0/Cargo.toml
-index 4636baa..2f6bc69 100644
---- a/vendor/gix-discover-0.45.0/Cargo.toml
-+++ b/vendor/gix-discover-0.45.0/Cargo.toml
-@@ -74,9 +74,6 @@ version = "3.23.0"
+diff --git a/vendor/gix-discover-0.47.0/Cargo.toml b/vendor/gix-discover-0.47.0/Cargo.toml
+index 859ce0d..b1b3816 100644
+--- a/vendor/gix-discover-0.47.0/Cargo.toml
++++ b/vendor/gix-discover-0.47.0/Cargo.toml
+@@ -71,9 +71,6 @@ version = "3.24.0"
  [target.'cfg(target_os = "macos")'.dev-dependencies.defer]
  version = "0.2.1"
  
@@ -422,12 +393,12 @@ index 4636baa..2f6bc69 100644
  [lints.clippy]
  bool_to_int_with_if = "allow"
  borrow_as_ptr = "allow"
-diff --git a/vendor/gix-path-0.10.22/Cargo.toml b/vendor/gix-path-0.10.22/Cargo.toml
-index 7f6ce20..87fb33f 100644
---- a/vendor/gix-path-0.10.22/Cargo.toml
-+++ b/vendor/gix-path-0.10.22/Cargo.toml
-@@ -53,16 +53,6 @@ version = "2.0.17"
- version = "3.1.0"
+diff --git a/vendor/gix-path-0.11.1/Cargo.toml b/vendor/gix-path-0.11.1/Cargo.toml
+index c00a579..bf82815 100644
+--- a/vendor/gix-path-0.11.1/Cargo.toml
++++ b/vendor/gix-path-0.11.1/Cargo.toml
+@@ -53,17 +53,6 @@ version = "2.0.18"
+ version = "3.3.1"
  default-features = false
  
 -[target."cfg(windows)".dev-dependencies.windows]
@@ -440,19 +411,20 @@ index 7f6ce20..87fb33f 100644
 -
 -[target."cfg(windows)".dev-dependencies.winreg]
 -version = "0.55.0"
- 
+-
  [lints.clippy]
  bool_to_int_with_if = "allow"
-diff --git a/vendor/gix-sec-0.12.2/Cargo.toml b/vendor/gix-sec-0.12.2/Cargo.toml
-index 119bc1b..074c2a7 100644
---- a/vendor/gix-sec-0.12.2/Cargo.toml
-+++ b/vendor/gix-sec-0.12.2/Cargo.toml
-@@ -67,19 +67,6 @@ version = "3.23.0"
+ borrow_as_ptr = "allow"
+diff --git a/vendor/gix-sec-0.13.1/Cargo.toml b/vendor/gix-sec-0.13.1/Cargo.toml
+index d41ccbe..ce2cbb8 100644
+--- a/vendor/gix-sec-0.13.1/Cargo.toml
++++ b/vendor/gix-sec-0.13.1/Cargo.toml
+@@ -67,18 +67,6 @@ version = "3.24.0"
  [target."cfg(not(windows))".dependencies.libc]
- version = "0.2.176"
+ version = "0.2.180"
  
 -[target."cfg(windows)".dependencies.gix-path]
--version = "^0.10.21"
+-version = "^0.11.1"
 -
 -[target."cfg(windows)".dependencies.windows-sys]
 -version = "0.61.1"
@@ -463,10 +435,9 @@ index 119bc1b..074c2a7 100644
 -    "Win32_System_Memory",
 -    "Win32_System_Threading",
 -]
--
+ 
  [lints.clippy]
  bool_to_int_with_if = "allow"
- borrow_as_ptr = "allow"
 diff --git a/vendor/home-0.5.12/Cargo.toml b/vendor/home-0.5.12/Cargo.toml
 index 3361c27..7f15d06 100644
 --- a/vendor/home-0.5.12/Cargo.toml
@@ -553,10 +524,10 @@ index 098c6a8..dd2509a 100644
 -[target.'cfg(target_os = "windows")'.dependencies.windows-sys]
 -version = "0.60"
 -features = ["Win32_Storage_FileSystem"]
-diff --git a/vendor/jiff-0.2.17/Cargo.toml b/vendor/jiff-0.2.17/Cargo.toml
-index b0d88ef..8ff16e3 100644
---- a/vendor/jiff-0.2.17/Cargo.toml
-+++ b/vendor/jiff-0.2.17/Cargo.toml
+diff --git a/vendor/jiff-0.2.18/Cargo.toml b/vendor/jiff-0.2.18/Cargo.toml
+index bf754e5..d9d50664a 100644
+--- a/vendor/jiff-0.2.18/Cargo.toml
++++ b/vendor/jiff-0.2.18/Cargo.toml
 @@ -90,7 +90,6 @@ std = [
  tz-fat = ["jiff-static?/tz-fat"]
  tz-system = [
@@ -581,11 +552,40 @@ index b0d88ef..8ff16e3 100644
  [lints.rust.unexpected_cfgs]
  level = "allow"
  priority = 0
+diff --git a/vendor/jobserver-0.1.34/Cargo.toml b/vendor/jobserver-0.1.34/Cargo.toml
+index 5c41c76..408ffee 100644
+--- a/vendor/jobserver-0.1.34/Cargo.toml
++++ b/vendor/jobserver-0.1.34/Cargo.toml
+@@ -67,6 +67,3 @@ version = "0.2.171"
+ version = "0.28.0"
+ features = ["fs"]
+ 
+-[target."cfg(windows)".dependencies.getrandom]
+-version = "0.3.2"
+-features = ["std"]
 diff --git a/vendor/libloading-0.8.9/Cargo.toml b/vendor/libloading-0.8.9/Cargo.toml
 index 2c8eb67..ff74d06 100644
 --- a/vendor/libloading-0.8.9/Cargo.toml
 +++ b/vendor/libloading-0.8.9/Cargo.toml
 @@ -74,13 +74,6 @@ version = "1.1"
+ [target."cfg(unix)".dependencies.cfg-if]
+ version = "1"
+ 
+-[target."cfg(windows)".dependencies.windows-link]
+-version = "0.2"
+-
+-[target."cfg(windows)".dev-dependencies.windows-sys]
+-version = "0.61"
+-features = ["Win32_Foundation"]
+-
+ [lints.rust.unexpected_cfgs]
+ level = "warn"
+ priority = 0
+diff --git a/vendor/libloading-0.9.0/Cargo.toml b/vendor/libloading-0.9.0/Cargo.toml
+index 6099e85..b590654 100644
+--- a/vendor/libloading-0.9.0/Cargo.toml
++++ b/vendor/libloading-0.9.0/Cargo.toml
+@@ -78,13 +78,6 @@ version = "1.1"
  [target."cfg(unix)".dependencies.cfg-if]
  version = "1"
  
@@ -730,10 +730,10 @@ index 5639d3d..eff5c32 100644
 -
  [badges.maintenance]
  status = "passively-maintained"
-diff --git a/vendor/opener-0.8.3/Cargo.toml b/vendor/opener-0.8.3/Cargo.toml
-index 9e01879..d849141 100644
---- a/vendor/opener-0.8.3/Cargo.toml
-+++ b/vendor/opener-0.8.3/Cargo.toml
+diff --git a/vendor/opener-0.8.4/Cargo.toml b/vendor/opener-0.8.4/Cargo.toml
+index b2cce4f..12642cd 100644
+--- a/vendor/opener-0.8.4/Cargo.toml
++++ b/vendor/opener-0.8.4/Cargo.toml
 @@ -46,8 +46,6 @@ status = "passively-maintained"
  reveal = [
      "dep:url",
@@ -743,16 +743,15 @@ index 9e01879..d849141 100644
  ]
  
  [lib]
-@@ -65,13 +63,3 @@ optional = true
- version = "5"
+@@ -66,12 +64,3 @@ version = "5"
  features = ["url"]
  optional = true
--
+ 
 -[target."cfg(windows)".dependencies.normpath]
 -version = "1"
 -
 -[target."cfg(windows)".dependencies.windows-sys]
--version = "0.60"
+-version = "0.61"
 -features = [
 -    "Win32_UI_Shell",
 -    "Win32_UI_WindowsAndMessaging",
@@ -824,24 +823,23 @@ index ecd9178..475e0e1 100644
  
 -[target."cfg(windows)".dependencies.windows-link]
 -version = "0.2.0"
-diff --git a/vendor/portable-atomic-1.11.1/Cargo.toml b/vendor/portable-atomic-1.11.1/Cargo.toml
-index b337812..c4f08f9 100644
---- a/vendor/portable-atomic-1.11.1/Cargo.toml
-+++ b/vendor/portable-atomic-1.11.1/Cargo.toml
-@@ -109,13 +109,6 @@ version = "1"
- [target."cfg(unix)".dev-dependencies.libc]
- version = "=0.2.163"
+diff --git a/vendor/portable-atomic-1.13.1/Cargo.toml b/vendor/portable-atomic-1.13.1/Cargo.toml
+index 4aaa0f4..3168734 100644
+--- a/vendor/portable-atomic-1.13.1/Cargo.toml
++++ b/vendor/portable-atomic-1.13.1/Cargo.toml
+@@ -118,12 +118,6 @@ version = "=0.2.163"
+ [target."cfg(valgrind)".dev-dependencies.crabgrind]
+ version = "0.1"
  
 -[target."cfg(windows)".dev-dependencies.windows-sys]
--version = "0.59"
+-version = "0.61"
 -features = [
 -    "Win32_Foundation",
 -    "Win32_System_Threading",
 -]
--
+ 
  [lints.clippy]
  all = "warn"
- as_ptr_cast_mut = "warn"
 diff --git a/vendor/process-wrap-8.2.1/Cargo.toml b/vendor/process-wrap-8.2.1/Cargo.toml
 index 43c7d65..a2151d1 100644
 --- a/vendor/process-wrap-8.2.1/Cargo.toml
@@ -965,10 +963,10 @@ index 4f66820..11ef472 100644
  version = "0.3"
 -[target."cfg(windows)".dependencies.winapi-util]
 -version = "0.1.1"
-diff --git a/vendor/snapbox-0.6.23/Cargo.toml b/vendor/snapbox-0.6.23/Cargo.toml
-index 4c64f0f..cdbda12 100644
---- a/vendor/snapbox-0.6.23/Cargo.toml
-+++ b/vendor/snapbox-0.6.23/Cargo.toml
+diff --git a/vendor/snapbox-0.6.24/Cargo.toml b/vendor/snapbox-0.6.24/Cargo.toml
+index 48d3ede..f1f6afb 100644
+--- a/vendor/snapbox-0.6.24/Cargo.toml
++++ b/vendor/snapbox-0.6.24/Cargo.toml
 @@ -84,7 +84,6 @@ cmd = [
      "dep:os_pipe",
      "dep:wait-timeout",
@@ -989,14 +987,24 @@ index 4c64f0f..cdbda12 100644
  [lints.clippy]
  bool_assert_comparison = "allow"
  branches_sharing_code = "allow"
-diff --git a/vendor/socket2-0.6.1/Cargo.toml b/vendor/socket2-0.6.1/Cargo.toml
-index a1bacfd..db61e61 100644
---- a/vendor/socket2-0.6.1/Cargo.toml
-+++ b/vendor/socket2-0.6.1/Cargo.toml
-@@ -93,12 +93,3 @@ path = "src/lib.rs"
+diff --git a/vendor/socket2-0.6.2/Cargo.toml b/vendor/socket2-0.6.2/Cargo.toml
+index 5fd68df..e764a54 100644
+--- a/vendor/socket2-0.6.2/Cargo.toml
++++ b/vendor/socket2-0.6.2/Cargo.toml
+@@ -79,8 +79,6 @@ allowed_external_types = [
+     "libc::*::socklen_t",
+     "libc::sa_family_t",
+     "libc::*::sa_family_t",
+-    "windows_sys::Win32::Networking::WinSock::socklen_t",
+-    "windows_sys::Win32::Networking::WinSock::ADDRESS_FAMILY",
+ ]
+ 
+ [features]
+@@ -92,13 +90,3 @@ path = "src/lib.rs"
+ 
  [target."cfg(unix)".dependencies.libc]
  version = "0.2.172"
- 
+-
 -[target."cfg(windows)".dependencies.windows-sys]
 -version = "0.60"
 -features = [
@@ -1021,16 +1029,11 @@ index 14caa1a..08bfe2d 100644
 -    "Win32_System_Threading",
 -    "Win32_Foundation",
 -]
-diff --git a/vendor/sysinfo-0.37.2/Cargo.toml b/vendor/sysinfo-0.37.2/Cargo.toml
-index 2a586de..56404c7 100644
---- a/vendor/sysinfo-0.37.2/Cargo.toml
-+++ b/vendor/sysinfo-0.37.2/Cargo.toml
-@@ -48,24 +48,10 @@ cargo-args = ["-Zbuild-std"]
- rustdoc-args = ["--generate-link-to-definition"]
- 
- [features]
--apple-app-store = ["apple-sandbox"]
-+apple-app-store = []
+diff --git a/vendor/sysinfo-0.38.2/Cargo.toml b/vendor/sysinfo-0.38.2/Cargo.toml
+index 6f343c7..fb74744 100644
+--- a/vendor/sysinfo-0.38.2/Cargo.toml
++++ b/vendor/sysinfo-0.38.2/Cargo.toml
+@@ -52,20 +52,6 @@ apple-app-store = ["apple-sandbox"]
  apple-sandbox = []
  c-interface = ["default"]
  component = [
@@ -1117,34 +1120,29 @@ index 2a586de..56404c7 100644
  ]
  
  [lib]
-@@ -212,28 +150,5 @@ version = "1.0"
+@@ -212,12 +150,6 @@ version = "1.0"
  [dev-dependencies.tempfile]
  version = "3.9"
  
 -[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2-core-foundation]
--version = "0.3.1"
+-version = "=0.3.1"
 -features = ["std"]
 -optional = true
 -default-features = false
 -
--[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2-io-kit]
--version = "0.3.1"
--features = [
--    "std",
--    "libc",
--]
--optional = true
--default-features = false
--
+ [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2-io-kit]
+ version = "=0.3.1"
+ features = [
+@@ -230,10 +162,3 @@ default-features = false
  [target.'cfg(not(any(target_os = "unknown", target_arch = "wasm32")))'.dependencies.libc]
  version = "^0.2.173"
--
+ 
 -[target."cfg(windows)".dependencies.ntapi]
 -version = "0.4"
 -optional = true
 -
 -[target."cfg(windows)".dependencies.windows]
--version = ">=0.59, <0.62"
+-version = ">=0.62, <0.63"
 -optional = true
 diff --git a/vendor/tempfile-3.24.0/Cargo.toml b/vendor/tempfile-3.24.0/Cargo.toml
 index 0db1820..f790185 100644
@@ -1160,23 +1158,23 @@ index 0db1820..f790185 100644
 -    "Win32_Storage_FileSystem",
 -    "Win32_Foundation",
 -]
-diff --git a/vendor/term-0.7.0/Cargo.toml b/vendor/term-0.7.0/Cargo.toml
-index e89261e..ad5d62b 100644
---- a/vendor/term-0.7.0/Cargo.toml
-+++ b/vendor/term-0.7.0/Cargo.toml
-@@ -28,12 +28,6 @@ version = "2"
+diff --git a/vendor/term-1.2.1/Cargo.toml b/vendor/term-1.2.1/Cargo.toml
+index bffee82..4677b3a 100644
+--- a/vendor/term-1.2.1/Cargo.toml
++++ b/vendor/term-1.2.1/Cargo.toml
+@@ -45,12 +45,3 @@ path = "src/lib.rs"
+ name = "terminfo"
+ path = "tests/terminfo.rs"
  
- [features]
- default = []
--[target."cfg(windows)".dependencies.rustversion]
--version = "1"
--
--[target."cfg(windows)".dependencies.winapi]
--version = "0.3"
--features = ["consoleapi", "wincon", "handleapi", "fileapi"]
- [badges.appveyor]
- repository = "Stebalien/term"
- 
+-[target."cfg(windows)".dependencies.windows-sys]
+-version = ">=0.59, <0.62"
+-features = [
+-    "Win32_Storage",
+-    "Win32_Foundation",
+-    "Win32_System_Console",
+-    "Win32_Storage_FileSystem",
+-    "Win32_Security",
+-]
 diff --git a/vendor/termcolor-1.4.1/Cargo.toml b/vendor/termcolor-1.4.1/Cargo.toml
 index f90eaca..d32db67 100644
 --- a/vendor/termcolor-1.4.1/Cargo.toml
@@ -1221,11 +1219,11 @@ index 275d661..7938768 100644
  [profile.dev]
  opt-level = 0
  lto = false
-diff --git a/vendor/tokio-1.48.0/Cargo.toml b/vendor/tokio-1.48.0/Cargo.toml
-index 05e6bcb..a4c8d12 100644
---- a/vendor/tokio-1.48.0/Cargo.toml
-+++ b/vendor/tokio-1.48.0/Cargo.toml
-@@ -99,11 +99,6 @@ net = [
+diff --git a/vendor/tokio-1.49.0/Cargo.toml b/vendor/tokio-1.49.0/Cargo.toml
+index 53c9f4e..9b8439a 100644
+--- a/vendor/tokio-1.49.0/Cargo.toml
++++ b/vendor/tokio-1.49.0/Cargo.toml
+@@ -784,11 +784,6 @@ net = [
      "mio/os-ext",
      "mio/net",
      "socket2",
@@ -1237,7 +1235,7 @@ index 05e6bcb..a4c8d12 100644
  ]
  process = [
      "bytes",
-@@ -112,9 +107,6 @@ process = [
+@@ -797,9 +792,6 @@ process = [
      "mio/os-ext",
      "mio/net",
      "signal-hook-registry",
@@ -1247,7 +1245,7 @@ index 05e6bcb..a4c8d12 100644
  ]
  rt = []
  rt-multi-thread = ["rt"]
-@@ -124,8 +116,6 @@ signal = [
+@@ -809,8 +801,6 @@ signal = [
      "mio/net",
      "mio/os-ext",
      "signal-hook-registry",
@@ -1256,7 +1254,7 @@ index 05e6bcb..a4c8d12 100644
  ]
  sync = []
  taskdump = ["dep:backtrace"]
-@@ -897,17 +887,6 @@ features = [
+@@ -907,16 +897,6 @@ features = [
  ]
  default-features = false
  
@@ -1270,10 +1268,9 @@ index 05e6bcb..a4c8d12 100644
 -    "Win32_Foundation",
 -    "Win32_Security_Authorization",
 -]
--
+ 
  [lints.rust.unexpected_cfgs]
  level = "warn"
- priority = 0
 diff --git a/vendor/walkdir-2.5.0/Cargo.toml b/vendor/walkdir-2.5.0/Cargo.toml
 index 4fda2f4..1741677 100644
 --- a/vendor/walkdir-2.5.0/Cargo.toml
@@ -1288,11 +1285,11 @@ index 4fda2f4..1741677 100644
  [badges.appveyor]
  repository = "BurntSushi/walkdir"
  
-diff --git a/vendor/wasm-component-ld-0.5.20/Cargo.toml b/vendor/wasm-component-ld-0.5.20/Cargo.toml
-index 1d783e3..c32b1f3 100644
---- a/vendor/wasm-component-ld-0.5.20/Cargo.toml
-+++ b/vendor/wasm-component-ld-0.5.20/Cargo.toml
-@@ -89,10 +89,3 @@ version = "0.243.0"
+diff --git a/vendor/wasm-component-ld-0.5.21/Cargo.toml b/vendor/wasm-component-ld-0.5.21/Cargo.toml
+index cffaee9..0411c77 100644
+--- a/vendor/wasm-component-ld-0.5.21/Cargo.toml
++++ b/vendor/wasm-component-ld-0.5.21/Cargo.toml
+@@ -89,10 +89,3 @@ version = "0.245.1"
  
  [target."cfg(unix)".dependencies.libc]
  version = "0.2"
@@ -1303,17 +1300,3 @@ index 1d783e3..c32b1f3 100644
 -
 -[target."cfg(windows)".dependencies.winsplit]
 -version = "0.1"
-diff --git a/vendor/yansi-term-0.1.2/Cargo.toml b/vendor/yansi-term-0.1.2/Cargo.toml
-index 0317866..88ce8ef 100644
---- a/vendor/yansi-term-0.1.2/Cargo.toml
-+++ b/vendor/yansi-term-0.1.2/Cargo.toml
-@@ -36,9 +36,6 @@ version = "1.0"
- 
- [features]
- derive_serde_style = ["serde"]
--[target."cfg(target_os=\"windows\")".dependencies.winapi]
--version = "0.3.4"
--features = ["consoleapi", "errhandlingapi", "fileapi", "handleapi", "processenv"]
- [badges.maintenance]
- status = "actively-developed"
- 

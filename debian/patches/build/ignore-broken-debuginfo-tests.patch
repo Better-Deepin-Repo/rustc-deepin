@@ -14,12 +14,12 @@ Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
  2 files changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/tests/debuginfo/macro-stepping.rs b/tests/debuginfo/macro-stepping.rs
-index ba3a445..84235e1 100644
+index 3f57eb9..f95005d 100644
 --- a/tests/debuginfo/macro-stepping.rs
 +++ b/tests/debuginfo/macro-stepping.rs
-@@ -6,7 +6,8 @@
- //@ ignore-android
- //@ min-lldb-version: 1800
+@@ -7,7 +7,8 @@
+ // LLDB 1800+ tests were not tested in CI, broke, and now are disabled
+ //@ ignore-lldb
  //@ min-gdb-version: 13.0
 -
 +//Debian: broken, see https://github.com/rust-lang/rust/issues/130896
@@ -28,11 +28,12 @@ index ba3a445..84235e1 100644
  
  #![allow(unused)]
 diff --git a/tests/debuginfo/method-on-enum.rs b/tests/debuginfo/method-on-enum.rs
-index c7955a7..fefad19 100644
+index 6c72462..6fa7fce 100644
 --- a/tests/debuginfo/method-on-enum.rs
 +++ b/tests/debuginfo/method-on-enum.rs
-@@ -1,5 +1,7 @@
- //@ min-lldb-version: 1800
+@@ -1,6 +1,8 @@
+ // LLDB 1800+ tests were not tested in CI, broke, and now are disabled
+ //@ ignore-lldb
  //@ min-gdb-version: 13.0
 +//Debian: broken, see https://github.com/rust-lang/rust/issues/129662#issuecomment-2313102689
 +//@ ignore-gdb

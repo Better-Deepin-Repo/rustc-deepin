@@ -95,3 +95,6 @@ default-features = false
 
 [dev-dependencies.crossbeam-channel]
 version = "0.5.15"
+
+[target."cfg(windows)".dependencies.winapi-util]
+version = "0.1.2"
