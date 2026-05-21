@@ -1,9 +1,11 @@
+//@ error-pattern:import
+
 mod a {
-    pub use crate::b::x;
+    pub use b::x;
 }
 
 mod b {
-    pub use crate::a::x; //~ ERROR unresolved import `crate::a::x`
+    pub use a::x;
 
     fn main() { let y = x; }
 }

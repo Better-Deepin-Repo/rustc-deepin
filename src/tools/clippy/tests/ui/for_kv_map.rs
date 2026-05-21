@@ -7,15 +7,14 @@ use std::rc::Rc;
 fn main() {
     let m: HashMap<u64, u64> = HashMap::new();
     for (_, v) in &m {
-        //~^ for_kv_map
-
+        //~^ ERROR: you seem to want to iterate on a map's values
+        //~| NOTE: `-D clippy::for-kv-map` implied by `-D warnings`
         let _v = v;
     }
 
     let m: Rc<HashMap<u64, u64>> = Rc::new(HashMap::new());
     for (_, v) in &*m {
-        //~^ for_kv_map
-
+        //~^ ERROR: you seem to want to iterate on a map's values
         let _v = v;
         // Here the `*` is not actually necessary, but the test tests that we don't
         // suggest
@@ -24,31 +23,27 @@ fn main() {
 
     let mut m: HashMap<u64, u64> = HashMap::new();
     for (_, v) in &mut m {
-        //~^ for_kv_map
-
+        //~^ ERROR: you seem to want to iterate on a map's values
         let _v = v;
     }
 
     let m: &mut HashMap<u64, u64> = &mut HashMap::new();
     for (_, v) in &mut *m {
-        //~^ for_kv_map
-
+        //~^ ERROR: you seem to want to iterate on a map's values
         let _v = v;
     }
 
     let m: HashMap<u64, u64> = HashMap::new();
     let rm = &m;
     for (k, _value) in rm {
-        //~^ for_kv_map
-
+        //~^ ERROR: you seem to want to iterate on a map's keys
         let _k = k;
     }
 
     let m: HashMap<u64, u64> = HashMap::new();
     let rm = &m;
     'label: for (k, _value) in rm {
-        //~^ for_kv_map
-
+        //~^ ERROR: you seem to want to iterate on a map's keys
         let _k = k;
         if *k == 0u64 {
             break 'label;
@@ -66,23 +61,6 @@ fn main() {
 
     let m: HashMap<u64, String> = Default::default();
     for (_, v) in m {
-        let _v = v;
-    }
-}
-
-fn wrongly_unmangled_macros() {
-    use std::collections::HashMap;
-
-    macro_rules! test_map {
-        ($val:expr) => {
-            &*$val
-        };
-    }
-
-    let m: HashMap<u64, u64> = HashMap::new();
-    let wrapped = Rc::new(m);
-    for (_, v) in test_map!(wrapped) {
-        //~^ for_kv_map
         let _v = v;
     }
 }

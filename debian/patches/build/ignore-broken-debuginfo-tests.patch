@@ -9,17 +9,31 @@ Forwarded: yes
 
 Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
 ---
- tests/debuginfo/macro-stepping.rs | 3 ++-
- tests/debuginfo/method-on-enum.rs | 2 ++
- 2 files changed, 4 insertions(+), 1 deletion(-)
+ tests/debuginfo/by-value-non-immediate-argument.rs | 2 ++
+ tests/debuginfo/macro-stepping.rs                  | 3 ++-
+ tests/debuginfo/method-on-enum.rs                  | 2 ++
+ 3 files changed, 6 insertions(+), 1 deletion(-)
 
+diff --git a/tests/debuginfo/by-value-non-immediate-argument.rs b/tests/debuginfo/by-value-non-immediate-argument.rs
+index f0a39a4..f6e0ea0 100644
+--- a/tests/debuginfo/by-value-non-immediate-argument.rs
++++ b/tests/debuginfo/by-value-non-immediate-argument.rs
+@@ -1,6 +1,8 @@
+ //@ min-lldb-version: 1800
+ //@ min-gdb-version: 13.0
+ //@ compile-flags:-g
++//Debian: broken, see https://github.com/rust-lang/rust/issues/129662#issuecomment-2313102689
++//@ ignore-gdb
+ 
+ // === GDB TESTS ===================================================================================
+ 
 diff --git a/tests/debuginfo/macro-stepping.rs b/tests/debuginfo/macro-stepping.rs
-index 3f57eb9..f95005d 100644
+index 35bb6de..dec0eff 100644
 --- a/tests/debuginfo/macro-stepping.rs
 +++ b/tests/debuginfo/macro-stepping.rs
-@@ -7,7 +7,8 @@
- // LLDB 1800+ tests were not tested in CI, broke, and now are disabled
- //@ ignore-lldb
+@@ -2,7 +2,8 @@
+ //@ ignore-aarch64
+ //@ min-lldb-version: 1800
  //@ min-gdb-version: 13.0
 -
 +//Debian: broken, see https://github.com/rust-lang/rust/issues/130896
@@ -28,15 +42,14 @@ index 3f57eb9..f95005d 100644
  
  #![allow(unused)]
 diff --git a/tests/debuginfo/method-on-enum.rs b/tests/debuginfo/method-on-enum.rs
-index 6c72462..6fa7fce 100644
+index a570144..68a82a5 100644
 --- a/tests/debuginfo/method-on-enum.rs
 +++ b/tests/debuginfo/method-on-enum.rs
-@@ -1,6 +1,8 @@
- // LLDB 1800+ tests were not tested in CI, broke, and now are disabled
- //@ ignore-lldb
+@@ -1,5 +1,7 @@
+ //@ min-lldb-version: 1800
  //@ min-gdb-version: 13.0
 +//Debian: broken, see https://github.com/rust-lang/rust/issues/129662#issuecomment-2313102689
 +//@ ignore-gdb
  
  //@ compile-flags:-g
- //@ disable-gdb-pretty-printers
+ 

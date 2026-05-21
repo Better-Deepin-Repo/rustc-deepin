@@ -1,5 +1,3 @@
-//@ check-pass
-
 #![allow(clippy::explicit_counter_loop)]
 
 fn main() {

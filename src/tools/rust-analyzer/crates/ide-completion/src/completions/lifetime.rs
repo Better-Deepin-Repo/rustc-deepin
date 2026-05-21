@@ -7,7 +7,8 @@
 //! there is no value in lifting these out into the outline module test since they will either not
 //! show up for normal completions, or they won't show completions other than lifetimes depending
 //! on the fixture input.
-use hir::{Name, ScopeDef, sym};
+use hir::{sym, Name, ScopeDef};
+use syntax::{ast, ToSmolStr, TokenText};
 
 use crate::{
     completions::Completions,
@@ -20,24 +21,33 @@ pub(crate) fn complete_lifetime(
     ctx: &CompletionContext<'_>,
     lifetime_ctx: &LifetimeContext,
 ) {
-    let &LifetimeContext { kind: LifetimeKind::Lifetime { in_lifetime_param_bound, def }, .. } =
-        lifetime_ctx
-    else {
-        return;
+    let (lp, lifetime) = match lifetime_ctx {
+        LifetimeContext { kind: LifetimeKind::Lifetime, lifetime } => (None, lifetime),
+        LifetimeContext {
+            kind: LifetimeKind::LifetimeParam { is_decl: false, param },
+            lifetime,
+        } => (Some(param), lifetime),
+        _ => return,
     };
+    let param_lifetime = match (lifetime, lp.and_then(|lp| lp.lifetime())) {
+        (Some(lt), Some(lp)) if lp == lt.clone() => return,
+        (Some(_), Some(lp)) => Some(lp),
+        _ => None,
+    };
+    let param_lifetime = param_lifetime.as_ref().map(ast::Lifetime::text);
+    let param_lifetime = param_lifetime.as_ref().map(TokenText::as_str);
 
     ctx.process_all_names_raw(&mut |name, res| {
-        if matches!(res, ScopeDef::GenericParam(hir::GenericParam::LifetimeParam(_))) {
+        if matches!(
+            res,
+            ScopeDef::GenericParam(hir::GenericParam::LifetimeParam(_))
+                 if param_lifetime != Some(&*name.display_no_db(ctx.edition).to_smolstr())
+        ) {
             acc.add_lifetime(ctx, name);
         }
     });
-    acc.add_lifetime(ctx, Name::new_symbol_root(sym::tick_static));
-    if !in_lifetime_param_bound
-        && def.is_some_and(|def| {
-            !matches!(def, hir::GenericDef::Function(_) | hir::GenericDef::Impl(_))
-        })
-    {
-        acc.add_lifetime(ctx, Name::new_symbol_root(sym::tick_underscore));
+    if param_lifetime.is_none() {
+        acc.add_lifetime(ctx, Name::new_symbol_root(sym::tick_static.clone()));
     }
 }
 
@@ -59,9 +69,14 @@ pub(crate) fn complete_label(
 
 #[cfg(test)]
 mod tests {
-    use expect_test::expect;
+    use expect_test::{expect, Expect};
 
-    use crate::tests::{check, check_edit};
+    use crate::tests::{check_edit, completion_list};
+
+    fn check(ra_fixture: &str, expect: Expect) {
+        let actual = completion_list(ra_fixture);
+        expect.assert_eq(&actual);
+    }
 
     #[test]
     fn check_lifetime_edit() {
@@ -116,13 +131,13 @@ fn foo<'lifetime>(foo: &'a$0) {}
         check(
             r#"
 struct Foo;
-impl<'r#impl> Foo {
+impl<'impl> Foo {
     fn foo<'func>(&'a$0 self) {}
 }
 "#,
             expect![[r#"
                 lt 'func
-                lt 'r#impl
+                lt 'impl
                 lt 'static
             "#]],
         );
@@ -207,8 +222,6 @@ fn foo<'footime, 'lifetime: 'a$0>() {}
 "#,
             expect![[r#"
                 lt 'footime
-                lt 'lifetime
-                lt 'static
             "#]],
         );
     }

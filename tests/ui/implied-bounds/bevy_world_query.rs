@@ -1,8 +1,4 @@
 //@ check-pass
-//@ revisions: current next
-//@ ignore-compare-mode-next-solver (explicit revisions)
-//@[next] compile-flags: -Znext-solver
-#![crate_name = "bevy_ecs"]
 
 // We currently special case bevy from erroring on incorrect implied bounds
 // from normalization (issue #109628).

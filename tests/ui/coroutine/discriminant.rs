@@ -124,14 +124,12 @@ fn main() {
     };
 
     assert_eq!(size_of_val(&gen_u8_tiny_niche()), 1);
-    // FIXME(#63818): niches in coroutines are disabled.
-    // assert_eq!(size_of_val(&Some(gen_u8_tiny_niche())), 1); // uses niche
+    assert_eq!(size_of_val(&Some(gen_u8_tiny_niche())), 1); // uses niche
     assert_eq!(size_of_val(&Some(Some(gen_u8_tiny_niche()))), 2); // cannot use niche anymore
     assert_eq!(size_of_val(&gen_u8_full()), 1);
     assert_eq!(size_of_val(&Some(gen_u8_full())), 2); // cannot use niche
     assert_eq!(size_of_val(&gen_u16()), 2);
-    // FIXME(#63818): niches in coroutines are disabled.
-    // assert_eq!(size_of_val(&Some(gen_u16())), 2); // uses niche
+    assert_eq!(size_of_val(&Some(gen_u16())), 2); // uses niche
 
     cycle(gen_u8_tiny_niche(), 254);
     cycle(gen_u8_full(), 255);

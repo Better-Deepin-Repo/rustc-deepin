@@ -21,15 +21,15 @@ mod poll_fn;
 mod ready;
 
 #[unstable(feature = "async_drop", issue = "126482")]
-pub use async_drop::{AsyncDrop, async_drop_in_place};
+pub use async_drop::{async_drop, async_drop_in_place, AsyncDrop, AsyncDropInPlace};
 #[stable(feature = "into_future", since = "1.64.0")]
 pub use into_future::IntoFuture;
 #[stable(feature = "future_readiness_fns", since = "1.48.0")]
-pub use pending::{Pending, pending};
+pub use pending::{pending, Pending};
 #[stable(feature = "future_poll_fn", since = "1.64.0")]
-pub use poll_fn::{PollFn, poll_fn};
+pub use poll_fn::{poll_fn, PollFn};
 #[stable(feature = "future_readiness_fns", since = "1.48.0")]
-pub use ready::{Ready, ready};
+pub use ready::{ready, Ready};
 
 #[stable(feature = "futures_api", since = "1.36.0")]
 pub use self::future::Future;
@@ -46,19 +46,19 @@ pub use self::join::join;
 /// It also simplifies the HIR lowering of `.await`.
 #[lang = "ResumeTy"]
 #[doc(hidden)]
-#[unstable(feature = "gen_future", issue = "none")]
+#[unstable(feature = "gen_future", issue = "50547")]
 #[derive(Debug, Copy, Clone)]
 pub struct ResumeTy(NonNull<Context<'static>>);
 
-#[unstable(feature = "gen_future", issue = "none")]
+#[unstable(feature = "gen_future", issue = "50547")]
 unsafe impl Send for ResumeTy {}
 
-#[unstable(feature = "gen_future", issue = "none")]
+#[unstable(feature = "gen_future", issue = "50547")]
 unsafe impl Sync for ResumeTy {}
 
 #[lang = "get_context"]
 #[doc(hidden)]
-#[unstable(feature = "gen_future", issue = "none")]
+#[unstable(feature = "gen_future", issue = "50547")]
 #[must_use]
 #[inline]
 pub unsafe fn get_context<'a, 'b>(cx: ResumeTy) -> &'a mut Context<'b> {

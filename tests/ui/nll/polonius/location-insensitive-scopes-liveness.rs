@@ -5,11 +5,9 @@
 // than `liveness::trace`, on some specific CFGs shapes: a variable was dead during tracing but its
 // regions were marked live later, and live loans were not recomputed at this point.
 
-//@ ignore-compare-mode-polonius (explicit revisions)
-//@ revisions: polonius_next polonius
 //@ check-pass
-//@ [polonius_next] compile-flags: -Z polonius=next
-//@ [polonius] compile-flags: -Z polonius
+//@ revisions: nll polonius
+//@ [polonius] compile-flags: -Zpolonius=next
 
 // minimized from wavefc-cli-3.0.0
 fn repro1() {

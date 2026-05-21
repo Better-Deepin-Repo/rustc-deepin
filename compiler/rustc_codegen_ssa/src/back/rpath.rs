@@ -6,34 +6,46 @@ use rustc_data_structures::fx::FxHashSet;
 use rustc_fs_util::try_canonicalize;
 use tracing::debug;
 
-pub(super) struct RPathConfig<'a> {
+pub struct RPathConfig<'a> {
     pub libs: &'a [&'a Path],
     pub out_filename: PathBuf,
-    pub is_like_darwin: bool,
+    pub is_like_osx: bool,
     pub linker_is_gnu: bool,
 }
 
-pub(super) fn get_rpath_linker_args(config: &RPathConfig<'_>) -> Vec<OsString> {
+pub fn get_rpath_flags(config: &RPathConfig<'_>) -> Vec<OsString> {
     debug!("preparing the RPATH!");
 
     let rpaths = get_rpaths(config);
-    let mut args = Vec::with_capacity(rpaths.len() * 2); // the minimum needed capacity
-
-    for rpath in rpaths {
-        args.push("-rpath".into());
-        args.push(rpath);
-    }
+    let mut flags = rpaths_to_flags(rpaths);
 
     if config.linker_is_gnu {
         // Use DT_RUNPATH instead of DT_RPATH if available
-        args.push("--enable-new-dtags".into());
+        flags.push("-Wl,--enable-new-dtags".into());
 
         // Set DF_ORIGIN for substitute $ORIGIN
-        args.push("-z".into());
-        args.push("origin".into());
+        flags.push("-Wl,-z,origin".into());
     }
 
-    args
+    flags
+}
+
+fn rpaths_to_flags(rpaths: Vec<OsString>) -> Vec<OsString> {
+    let mut ret = Vec::with_capacity(rpaths.len()); // the minimum needed capacity
+
+    for rpath in rpaths {
+        if rpath.to_string_lossy().contains(',') {
+            ret.push("-Wl,-rpath".into());
+            ret.push("-Xlinker".into());
+            ret.push(rpath);
+        } else {
+            let mut single_arg = OsString::from("-Wl,-rpath,");
+            single_arg.push(rpath);
+            ret.push(single_arg);
+        }
+    }
+
+    ret
 }
 
 fn get_rpaths(config: &RPathConfig<'_>) -> Vec<OsString> {
@@ -63,7 +75,7 @@ fn get_rpaths_relative_to_output(config: &RPathConfig<'_>) -> Vec<OsString> {
 
 fn get_rpath_relative_to_output(config: &RPathConfig<'_>, lib: &Path) -> OsString {
     // Mac doesn't appear to support $ORIGIN
-    let prefix = if config.is_like_darwin { "@loader_path" } else { "$ORIGIN" };
+    let prefix = if config.is_like_osx { "@loader_path" } else { "$ORIGIN" };
 
     // Strip filenames
     let lib = lib.parent().unwrap();

@@ -26,7 +26,6 @@ impl SpecTrait<u32> for () {
     fn f() {}
 }
 
-#[define_opaque(Opaque)]
 fn foo() -> Opaque {}
 
 fn main() {}

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use anyhow::{Context as _, bail};
+use anyhow::{bail, Context as _};
 
 use crate::core::PackageId;
 use crate::core::PackageIdSpec;
@@ -30,8 +30,7 @@ impl PackageIdSpecQuery for PackageIdSpec {
     {
         let i: Vec<_> = i.into_iter().collect();
         let spec = PackageIdSpec::parse(spec).with_context(|| {
-            let suggestion =
-                edit_distance::closest_msg(spec, i.iter(), |id| id.name().as_str(), "package");
+            let suggestion = edit_distance::closest_msg(spec, i.iter(), |id| id.name().as_str());
             format!("invalid package ID specification: `{}`{}", spec, suggestion)
         })?;
         spec.query(i)
@@ -78,7 +77,7 @@ impl PackageIdSpecQuery for PackageIdSpec {
                     .filter(|&id| spec.matches(id))
                     .collect();
                 if !try_matches.is_empty() {
-                    suggestion.push_str("\nhelp: there are similar package ID specifications:\n");
+                    suggestion.push_str("\nDid you mean one of these?\n");
                     minimize(suggestion, &try_matches, self);
                 }
             };
@@ -99,7 +98,6 @@ impl PackageIdSpecQuery for PackageIdSpec {
                     self.name(),
                     all_ids.iter(),
                     |id| id.name().as_str(),
-                    "package",
                 ));
             }
 
@@ -112,8 +110,14 @@ impl PackageIdSpecQuery for PackageIdSpec {
         return match ids.next() {
             Some(other) => {
                 let mut msg = format!(
-                    "specificationm `{self}` is ambiguous
-help: re-run this command with one of the following specifications",
+                    "There are multiple `{}` packages in \
+                     your project, and the specification \
+                     `{}` is ambiguous.\n\
+                     Please re-run this command \
+                     with one of the following \
+                     specifications:",
+                    self.name(),
+                    self
                 );
                 let mut vec = vec![ret, other];
                 vec.extend(ids);
@@ -159,77 +163,53 @@ mod tests {
         assert!(PackageIdSpec::parse("foo@1.2.3").unwrap().matches(foo));
         assert!(!PackageIdSpec::parse("foo@1.2.2").unwrap().matches(foo));
         assert!(PackageIdSpec::parse("foo@1.2").unwrap().matches(foo));
-        assert!(
-            PackageIdSpec::parse("https://example.com#foo@1.2")
-                .unwrap()
-                .matches(foo)
-        );
-        assert!(
-            !PackageIdSpec::parse("https://bob.com#foo@1.2")
-                .unwrap()
-                .matches(foo)
-        );
-        assert!(
-            PackageIdSpec::parse("registry+https://example.com#foo@1.2")
-                .unwrap()
-                .matches(foo)
-        );
-        assert!(
-            !PackageIdSpec::parse("git+https://example.com#foo@1.2")
-                .unwrap()
-                .matches(foo)
-        );
+        assert!(PackageIdSpec::parse("https://example.com#foo@1.2")
+            .unwrap()
+            .matches(foo));
+        assert!(!PackageIdSpec::parse("https://bob.com#foo@1.2")
+            .unwrap()
+            .matches(foo));
+        assert!(PackageIdSpec::parse("registry+https://example.com#foo@1.2")
+            .unwrap()
+            .matches(foo));
+        assert!(!PackageIdSpec::parse("git+https://example.com#foo@1.2")
+            .unwrap()
+            .matches(foo));
 
         let meta = PackageId::try_new("meta", "1.2.3+hello", sid).unwrap();
         assert!(PackageIdSpec::parse("meta").unwrap().matches(meta));
         assert!(PackageIdSpec::parse("meta@1").unwrap().matches(meta));
         assert!(PackageIdSpec::parse("meta@1.2").unwrap().matches(meta));
         assert!(PackageIdSpec::parse("meta@1.2.3").unwrap().matches(meta));
-        assert!(
-            !PackageIdSpec::parse("meta@1.2.3-alpha.0")
-                .unwrap()
-                .matches(meta)
-        );
-        assert!(
-            PackageIdSpec::parse("meta@1.2.3+hello")
-                .unwrap()
-                .matches(meta)
-        );
-        assert!(
-            !PackageIdSpec::parse("meta@1.2.3+bye")
-                .unwrap()
-                .matches(meta)
-        );
+        assert!(!PackageIdSpec::parse("meta@1.2.3-alpha.0")
+            .unwrap()
+            .matches(meta));
+        assert!(PackageIdSpec::parse("meta@1.2.3+hello")
+            .unwrap()
+            .matches(meta));
+        assert!(!PackageIdSpec::parse("meta@1.2.3+bye")
+            .unwrap()
+            .matches(meta));
 
         let pre = PackageId::try_new("pre", "1.2.3-alpha.0", sid).unwrap();
         assert!(PackageIdSpec::parse("pre").unwrap().matches(pre));
         assert!(!PackageIdSpec::parse("pre@1").unwrap().matches(pre));
         assert!(!PackageIdSpec::parse("pre@1.2").unwrap().matches(pre));
         assert!(!PackageIdSpec::parse("pre@1.2.3").unwrap().matches(pre));
-        assert!(
-            PackageIdSpec::parse("pre@1.2.3-alpha.0")
-                .unwrap()
-                .matches(pre)
-        );
-        assert!(
-            !PackageIdSpec::parse("pre@1.2.3-alpha.1")
-                .unwrap()
-                .matches(pre)
-        );
-        assert!(
-            !PackageIdSpec::parse("pre@1.2.3-beta.0")
-                .unwrap()
-                .matches(pre)
-        );
-        assert!(
-            !PackageIdSpec::parse("pre@1.2.3+hello")
-                .unwrap()
-                .matches(pre)
-        );
-        assert!(
-            !PackageIdSpec::parse("pre@1.2.3-alpha.0+hello")
-                .unwrap()
-                .matches(pre)
-        );
+        assert!(PackageIdSpec::parse("pre@1.2.3-alpha.0")
+            .unwrap()
+            .matches(pre));
+        assert!(!PackageIdSpec::parse("pre@1.2.3-alpha.1")
+            .unwrap()
+            .matches(pre));
+        assert!(!PackageIdSpec::parse("pre@1.2.3-beta.0")
+            .unwrap()
+            .matches(pre));
+        assert!(!PackageIdSpec::parse("pre@1.2.3+hello")
+            .unwrap()
+            .matches(pre));
+        assert!(!PackageIdSpec::parse("pre@1.2.3-alpha.0+hello")
+            .unwrap()
+            .matches(pre));
     }
 }

@@ -6,21 +6,18 @@
 #![feature(rustc_private)]
 
 #[allow(dead_code)]
-//~^ useless_attribute
 #[cfg_attr(clippy, allow(dead_code))]
-//~^ useless_attribute
 #[rustfmt::skip]
 #[allow(unused_imports)]
 #[allow(unused_extern_crates)]
 #[macro_use]
-extern crate regex as regex_crate;
+extern crate rustc_middle;
 
 #[macro_use]
 extern crate proc_macro_derive;
 
 fn test_indented_attr() {
     #[allow(clippy::almost_swapped)]
-    //~^ useless_attribute
     use std::collections::HashSet;
 
     let _ = HashSet::<u32>::default();
@@ -41,10 +38,6 @@ mod foo {
 }
 #[allow(deprecated)]
 pub use foo::Bar;
-
-// don't lint on exported_private_dependencies for `use` items
-#[allow(exported_private_dependencies)]
-use {};
 
 // This should not trigger the lint. There's lint level definitions inside the external derive
 // that would trigger the useless_attribute lint.
@@ -96,7 +89,9 @@ mod module {
 #[allow(unused_braces)]
 use module::{Struct};
 
-fn main() {}
+fn main() {
+    test_indented_attr();
+}
 
 // Regression test for https://github.com/rust-lang/rust-clippy/issues/4467
 #[allow(dead_code)]
@@ -138,35 +133,4 @@ pub mod ambiguous_glob_exports {
     #[allow(ambiguous_glob_reexports)]
     pub use my_prelude::*;
     pub use my_type::*;
-}
-
-// Regression test for https://github.com/rust-lang/rust-clippy/issues/13764
-pub mod unknown_namespace {
-    pub mod some_module {
-        pub struct SomeType;
-    }
-    #[allow(rustc::non_glob_import_of_type_ir_inherent)]
-    use some_module::SomeType;
-}
-
-// Regression test for https://github.com/rust-lang/rust-clippy/issues/15316
-pub mod redundant_imports_issue {
-    macro_rules! empty {
-        () => {};
-    }
-
-    #[expect(unused_imports)]
-    pub(crate) use empty;
-
-    empty!();
-}
-
-pub mod issue15636 {
-    pub mod f {
-        #[deprecated(since = "TBD")]
-        pub mod deprec {}
-    }
-
-    #[allow(deprecated_in_future)]
-    pub use f::deprec;
 }

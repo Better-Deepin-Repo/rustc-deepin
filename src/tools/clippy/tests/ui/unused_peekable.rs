@@ -3,22 +3,25 @@
 
 use std::iter::{Empty, Peekable};
 
-fn main() {}
+fn main() {
+    invalid();
+    valid();
+}
 
 #[allow(clippy::unused_unit)]
 fn invalid() {
     let peekable = std::iter::empty::<u32>().peekable();
-    //~^ unused_peekable
+    //~^ ERROR: `peek` never called on `Peekable` iterator
 
     // Only lint `new_local`
     let old_local = std::iter::empty::<u32>().peekable();
     let new_local = old_local;
-    //~^ unused_peekable
+    //~^ ERROR: `peek` never called on `Peekable` iterator
 
     // Behind mut ref
     let mut by_mut_ref_test = std::iter::empty::<u32>().peekable();
     let by_mut_ref = &mut by_mut_ref_test;
-    //~^ unused_peekable
+    //~^ ERROR: `peek` never called on `Peekable` iterator
 
     // Explicitly returns `Peekable`
     fn returns_peekable() -> Peekable<Empty<u32>> {
@@ -26,29 +29,26 @@ fn invalid() {
     }
 
     let peekable_from_fn = returns_peekable();
-    //~^ unused_peekable
+    //~^ ERROR: `peek` never called on `Peekable` iterator
 
     // Using a method not exclusive to `Peekable`
     let mut peekable_using_iterator_method = std::iter::empty::<u32>().peekable();
-    //~^ unused_peekable
-
+    //~^ ERROR: `peek` never called on `Peekable` iterator
     peekable_using_iterator_method.next();
 
     // Passed by ref to another function
     fn takes_ref(_peek: &Peekable<Empty<u32>>) {}
     let passed_along_ref = std::iter::empty::<u32>().peekable();
-    //~^ unused_peekable
-
+    //~^ ERROR: `peek` never called on `Peekable` iterator
     takes_ref(&passed_along_ref);
 
     // `by_ref` without `peek`
     let mut by_ref_test = std::iter::empty::<u32>().peekable();
     let _by_ref = by_ref_test.by_ref();
-    //~^ unused_peekable
+    //~^ ERROR: `peek` never called on `Peekable` iterator
 
     let mut peekable_in_for_loop = std::iter::empty::<u32>().peekable();
-    //~^ unused_peekable
-
+    //~^ ERROR: `peek` never called on `Peekable` iterator
     for x in peekable_in_for_loop {}
 }
 

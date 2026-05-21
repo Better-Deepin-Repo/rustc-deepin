@@ -5,7 +5,7 @@
 
 fn main() {}
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn free() {
     fn f(self) {}
     fn f(mut self) {}
@@ -17,7 +17,7 @@ fn free() {
     fn f(mut self: u8) {}
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 extern "C" {
     fn f(self);
     fn f(mut self);
@@ -29,7 +29,7 @@ extern "C" {
     fn f(mut self: u8);
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 trait X {
     fn f(self) {}
     fn f(mut self) {}
@@ -41,7 +41,7 @@ trait X {
     fn f(mut self: u8) {}
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 impl X for Y {
     fn f(self) {}
     fn f(mut self) {}
@@ -53,7 +53,7 @@ impl X for Y {
     fn f(mut self: u8) {}
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 impl X for Y {
     type X = fn(self);
     type X = fn(mut self);

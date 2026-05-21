@@ -1,8 +1,7 @@
-//@ edition:2015..2021
-fn main() { //~ NOTE expected `()` because of default return type
+fn main() {
     &panic!()
     //~^ ERROR mismatched types
-    //~| NOTE expected unit type `()`
-    //~| NOTE found reference `&_`
-    //~| NOTE expected `()`, found `&_`
+    //~| expected unit type `()`
+    //~| found reference `&_`
+    //~| expected `()`, found `&_`
 }

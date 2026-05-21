@@ -1,6 +1,7 @@
 //@ run-pass
 
 #![feature(core_intrinsics)]
+#![feature(const_intrinsic_raw_eq)]
 
 pub fn main() {
     use std::intrinsics::raw_eq;

@@ -52,7 +52,7 @@ impl<'a, W: ?Sized + Write> LineWriterShim<'a, W> {
 }
 
 impl<'a, W: ?Sized + Write> Write for LineWriterShim<'a, W> {
-    /// Writes some data into this BufWriter with line buffering.
+    /// Writes some data into this BufReader with line buffering.
     ///
     /// This means that, if any newlines are present in the data, the data up to
     /// the last newline is sent directly to the underlying writer, and data
@@ -119,14 +119,7 @@ impl<'a, W: ?Sized + Write> Write for LineWriterShim<'a, W> {
         //   the buffer?
         // - If not, scan for the last newline that *does* fit in the buffer
         let tail = if flushed >= newline_idx {
-            let tail = &buf[flushed..];
-            // Avoid unnecessary short writes by not splitting the remaining
-            // bytes if they're larger than the buffer.
-            // They can be written in full by the next call to write.
-            if tail.len() >= self.buffer.capacity() {
-                return Ok(flushed);
-            }
-            tail
+            &buf[flushed..]
         } else if newline_idx - flushed <= self.buffer.capacity() {
             &buf[flushed..newline_idx]
         } else {
@@ -146,7 +139,7 @@ impl<'a, W: ?Sized + Write> Write for LineWriterShim<'a, W> {
         self.buffer.flush()
     }
 
-    /// Writes some vectored data into this BufWriter with line buffering.
+    /// Writes some vectored data into this BufReader with line buffering.
     ///
     /// This means that, if any newlines are present in the data, the data up to
     /// and including the buffer containing the last newline is sent directly to
@@ -256,7 +249,7 @@ impl<'a, W: ?Sized + Write> Write for LineWriterShim<'a, W> {
         self.inner().is_write_vectored()
     }
 
-    /// Writes some data into this BufWriter with line buffering.
+    /// Writes some data into this BufReader with line buffering.
     ///
     /// This means that, if any newlines are present in the data, the data up to
     /// the last newline is sent directly to the underlying writer, and data

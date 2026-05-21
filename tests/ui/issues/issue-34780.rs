@@ -1,4 +1,6 @@
 //@ check-pass
+#![allow(stable_features)]
+#![feature(associated_consts)]
 
 use std::marker::PhantomData;
 

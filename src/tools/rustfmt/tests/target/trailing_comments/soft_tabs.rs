@@ -1,4 +1,4 @@
-// rustfmt-style_edition: 2024
+// rustfmt-version: Two
 // rustfmt-wrap_comments: true
 
 pub const IFF_MULTICAST: ::c_int = 0x0000000800; // Supports multicast

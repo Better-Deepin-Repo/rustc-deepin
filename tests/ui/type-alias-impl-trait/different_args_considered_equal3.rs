@@ -5,12 +5,14 @@
 
 #![feature(type_alias_impl_trait)]
 
-pub type Opaque<'a> = impl Sized;
+mod defining_scope {
+    pub type Opaque<'a> = impl Sized;
 
-#[define_opaque(Opaque)]
-fn get_one<'a>(a: *mut &'a str) -> Opaque<'a> {
-    a
+    fn get_one<'a>(a: *mut &'a str) -> Opaque<'a> {
+        a
+    }
 }
+use defining_scope::Opaque;
 
 fn get_iter<'a>() -> impl IntoIterator<Item = Opaque<'a>> {
     None::<Opaque<'static>>

@@ -1,7 +1,7 @@
-#![feature(linkage)]
+#![feature(naked_functions, asm_const, linkage)]
 #![crate_type = "dylib"]
 
-use std::arch::naked_asm;
+use std::arch::asm;
 
 pub trait TraitWithConst {
     const COUNT: u32;
@@ -26,9 +26,9 @@ extern "C" fn private_vanilla() -> u32 {
     42
 }
 
-#[unsafe(naked)]
+#[naked]
 extern "C" fn private_naked() -> u32 {
-    naked_asm!("mov rax, 42", "ret")
+    unsafe { asm!("mov rax, 42", "ret", options(noreturn)) }
 }
 
 #[no_mangle]
@@ -36,19 +36,19 @@ pub extern "C" fn public_vanilla() -> u32 {
     42
 }
 
-#[unsafe(naked)]
+#[naked]
 #[no_mangle]
-pub extern "C" fn public_naked_nongeneric() -> u32 {
-    naked_asm!("mov rax, 42", "ret")
+pub extern "C" fn public_naked() -> u32 {
+    unsafe { asm!("mov rax, 42", "ret", options(noreturn)) }
 }
 
 pub extern "C" fn public_vanilla_generic<T: TraitWithConst>() -> u32 {
     T::COUNT
 }
 
-#[unsafe(naked)]
+#[naked]
 pub extern "C" fn public_naked_generic<T: TraitWithConst>() -> u32 {
-    naked_asm!("mov rax, {}", "ret", const T::COUNT)
+    unsafe { asm!("mov rax, {}", "ret", const T::COUNT, options(noreturn)) }
 }
 
 #[linkage = "external"]
@@ -56,10 +56,10 @@ extern "C" fn vanilla_external_linkage() -> u32 {
     42
 }
 
-#[unsafe(naked)]
+#[naked]
 #[linkage = "external"]
 extern "C" fn naked_external_linkage() -> u32 {
-    naked_asm!("mov rax, 42", "ret")
+    unsafe { asm!("mov rax, 42", "ret", options(noreturn)) }
 }
 
 #[cfg(not(windows))]
@@ -68,11 +68,11 @@ extern "C" fn vanilla_weak_linkage() -> u32 {
     42
 }
 
-#[unsafe(naked)]
+#[naked]
 #[cfg(not(windows))]
 #[linkage = "weak"]
 extern "C" fn naked_weak_linkage() -> u32 {
-    naked_asm!("mov rax, 42", "ret")
+    unsafe { asm!("mov rax, 42", "ret", options(noreturn)) }
 }
 
 // functions that are declared in an `extern "C"` block are currently not exported

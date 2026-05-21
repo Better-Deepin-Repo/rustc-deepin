@@ -1,7 +1,6 @@
 # `thumbv6m-none-eabi`
 
-* **Tier: 2**
-* **Library Support:** core and alloc (bare-metal, `#![no_std]`)
+**Tier: 2**
 
 Bare-metal target for CPUs in the [Armv6-M] architecture family, supporting a
 subset of the [T32 ISA][t32-isa].
@@ -27,7 +26,8 @@ only option because there is no FPU support in [Armv6-M].
 
 ## Target maintainers
 
-[Rust Embedded Devices Working Group Arm Team](https://github.com/rust-embedded/wg?tab=readme-ov-file#the-arm-team)
+* [Rust Embedded Devices Working Group Cortex-M
+  Team](https://github.com/rust-embedded), `cortex-m@teams.rust-embedded.org`
 
 ## Target CPU and Target Feature options
 

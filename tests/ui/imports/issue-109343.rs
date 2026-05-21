@@ -1,4 +1,3 @@
-//@ edition:2015
 #![crate_type = "lib"]
 
 pub mod f {}

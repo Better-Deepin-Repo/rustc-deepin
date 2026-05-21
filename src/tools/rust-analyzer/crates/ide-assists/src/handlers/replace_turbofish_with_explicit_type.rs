@@ -1,12 +1,12 @@
 use hir::HirDisplay;
 use syntax::{
-    AstNode, TextRange,
     ast::{Expr, GenericArg, GenericArgList, HasGenericArgs, LetStmt, Type::InferType},
+    AstNode, TextRange,
 };
 
 use crate::{
-    AssistId,
     assist_context::{AssistContext, Assists},
+    AssistId, AssistKind,
 };
 
 // Assist: replace_turbofish_with_explicit_type
@@ -74,7 +74,7 @@ pub(crate) fn replace_turbofish_with_explicit_type(
         let ident_range = let_stmt.pat()?.syntax().text_range();
 
         return acc.add(
-            AssistId::refactor_rewrite("replace_turbofish_with_explicit_type"),
+            AssistId("replace_turbofish_with_explicit_type", AssistKind::RefactorRewrite),
             "Replace turbofish with explicit type",
             TextRange::new(initializer_start, turbofish_range.end()),
             |builder| {
@@ -89,7 +89,7 @@ pub(crate) fn replace_turbofish_with_explicit_type(
         let underscore_range = t.syntax().text_range();
 
         return acc.add(
-            AssistId::refactor_rewrite("replace_turbofish_with_explicit_type"),
+            AssistId("replace_turbofish_with_explicit_type", AssistKind::RefactorRewrite),
             "Replace `_` with turbofish type",
             turbofish_range,
             |builder| {
@@ -339,7 +339,7 @@ fn main() {
         check_assist(
             replace_turbofish_with_explicit_type,
             r#"
-//- minicore: option, future, try
+//- minicore: option, future
 struct Fut<T>(T);
 impl<T> core::future::Future for Fut<T> {
     type Output = Option<T>;

@@ -113,88 +113,62 @@ fn main() {
     let s = get_struct();
 
     0;
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     Tuple(0);
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     Struct { field: 0 };
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     Struct { ..s };
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     Union { a: 0 };
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     Enum::Tuple(0);
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     Enum::Struct { field: 0 };
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     5 + 6;
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     *&42;
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     &6;
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     (5, 6, 7);
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     ..;
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     5..;
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     ..5;
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     5..6;
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     5..=6;
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     [42, 55];
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     [42, 55][1];
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     (42, 55).1;
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     [42; 55];
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     [42; 55][13];
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     let mut x = 0;
     || x += 5;
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     let s: String = "foo".into();
     FooString { s: s };
-    //~^ no_effect
-
+    //~^ ERROR: statement with no effect
     let _unused = 1;
-    //~^ no_effect_underscore_binding
-
+    //~^ ERROR: binding to `_` prefixed variable with no side-effect
+    //~| NOTE: `-D clippy::no-effect-underscore-binding` implied by `-D warnings`
     let _penguin = || println!("Some helpful closure");
-    //~^ no_effect_underscore_binding
-
+    //~^ ERROR: binding to `_` prefixed variable with no side-effect
     let _duck = Struct { field: 0 };
-    //~^ no_effect_underscore_binding
-
+    //~^ ERROR: binding to `_` prefixed variable with no side-effect
     let _cat = [2, 4, 6, 8][2];
-    //~^ no_effect_underscore_binding
-
+    //~^ ERROR: binding to `_` prefixed variable with no side-effect
     let _issue_12166 = 42;
     let underscore_variable_above_can_be_used_dont_lint = _issue_12166;
 
@@ -220,57 +194,4 @@ fn main() {
 
     Cout << 142;
     -Cout;
-}
-
-fn issue14592() {
-    struct MyStruct {
-        _inner: MyInner,
-    }
-    struct MyInner {}
-
-    impl Drop for MyInner {
-        fn drop(&mut self) {
-            println!("dropping");
-        }
-    }
-
-    let x = MyStruct { _inner: MyInner {} };
-
-    let closure = || {
-        // Do not lint: dropping the assignment or assigning to `_` would
-        // change the output.
-        let _x = x;
-    };
-
-    println!("1");
-    closure();
-    println!("2");
-
-    struct Innocuous {
-        a: i32,
-    }
-
-    // Do not lint: one of the fields has a side effect.
-    let x = MyInner {};
-    let closure = || {
-        let _x = Innocuous {
-            a: {
-                x;
-                10
-            },
-        };
-    };
-
-    // Do not lint: the base has a side effect.
-    let x = MyInner {};
-    let closure = || {
-        let _x = Innocuous {
-            ..Innocuous {
-                a: {
-                    x;
-                    10
-                },
-            }
-        };
-    };
 }

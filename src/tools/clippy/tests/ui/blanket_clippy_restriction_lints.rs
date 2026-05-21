@@ -1,14 +1,13 @@
 //@compile-flags: -W clippy::restriction
-//@error-in-other-file: restriction
 
 #![warn(clippy::blanket_clippy_restriction_lints)]
 
-//! Test that the whole restriction group is not enabled.
+//! Test that the whole restriction group is not enabled
 #![warn(clippy::restriction)]
-//~^ blanket_clippy_restriction_lints
+//~^ ERROR: `clippy::restriction` is not meant to be enabled as a group
 #![deny(clippy::restriction)]
-//~^ blanket_clippy_restriction_lints
+//~^ ERROR: `clippy::restriction` is not meant to be enabled as a group
 #![forbid(clippy::restriction)]
-//~^ blanket_clippy_restriction_lints
+//~^ ERROR: `clippy::restriction` is not meant to be enabled as a group
 
 fn main() {}

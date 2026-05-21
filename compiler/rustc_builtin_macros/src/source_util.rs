@@ -1,24 +1,23 @@
-//! The implementation of built-in macros which relate to the file system.
-
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use rustc_ast as ast;
+use rustc_ast::ptr::P;
+use rustc_ast::token;
 use rustc_ast::tokenstream::TokenStream;
-use rustc_ast::{join_path_idents, token};
 use rustc_ast_pretty::pprust;
+use rustc_data_structures::sync::Lrc;
 use rustc_expand::base::{
-    DummyResult, ExpandResult, ExtCtxt, MacEager, MacResult, MacroExpanderResult, resolve_path,
+    resolve_path, DummyResult, ExpandResult, ExtCtxt, MacEager, MacResult, MacroExpanderResult,
 };
 use rustc_expand::module::DirOwnership;
-use rustc_parse::lexer::StripTokens;
-use rustc_parse::parser::{AllowConstBlockItems, ForceCollect};
-use rustc_parse::{new_parser_from_file, unwrap_or_emit_fatal, utf8_error};
+use rustc_lint_defs::BuiltinLintDiag;
+use rustc_parse::parser::{ForceCollect, Parser};
+use rustc_parse::{new_parser_from_file, unwrap_or_emit_fatal};
 use rustc_session::lint::builtin::INCOMPLETE_INCLUDE;
-use rustc_session::parse::ParseSess;
 use rustc_span::source_map::SourceMap;
-use rustc_span::{ByteSymbol, Pos, Span, Symbol};
+use rustc_span::symbol::Symbol;
+use rustc_span::{Pos, Span};
 use smallvec::SmallVec;
 
 use crate::errors;
@@ -26,7 +25,11 @@ use crate::util::{
     check_zero_tts, get_single_str_from_tts, get_single_str_spanned_from_tts, parse_expr,
 };
 
-/// Expand `line!()` to the current line number.
+// These macros all relate to the file system; they either return
+// the column/row/filename of the expression, or they include
+// a given file into the current one.
+
+/// line!(): expands to the current line number
 pub(crate) fn expand_line(
     cx: &mut ExtCtxt<'_>,
     sp: Span,
@@ -41,7 +44,7 @@ pub(crate) fn expand_line(
     ExpandResult::Ready(MacEager::expr(cx.expr_u32(topmost, loc.line as u32)))
 }
 
-/// Expand `column!()` to the current column number.
+/* column!(): expands to the current column number */
 pub(crate) fn expand_column(
     cx: &mut ExtCtxt<'_>,
     sp: Span,
@@ -56,7 +59,9 @@ pub(crate) fn expand_column(
     ExpandResult::Ready(MacEager::expr(cx.expr_u32(topmost, loc.col.to_usize() as u32 + 1)))
 }
 
-/// Expand `file!()` to the current filename.
+/// file!(): expands to the current filename */
+/// The source_file (`loc.file`) contains a bunch more information we could spit
+/// out if we wanted.
 pub(crate) fn expand_file(
     cx: &mut ExtCtxt<'_>,
     sp: Span,
@@ -68,14 +73,16 @@ pub(crate) fn expand_file(
     let topmost = cx.expansion_cause().unwrap_or(sp);
     let loc = cx.source_map().lookup_char_pos(topmost.lo());
 
-    use rustc_span::RemapPathScopeComponents;
+    use rustc_session::config::RemapPathScopeComponents;
+    use rustc_session::RemapFileNameExt;
     ExpandResult::Ready(MacEager::expr(cx.expr_str(
         topmost,
-        Symbol::intern(&loc.file.name.display(RemapPathScopeComponents::MACRO).to_string_lossy()),
+        Symbol::intern(
+            &loc.file.name.for_scope(cx.sess, RemapPathScopeComponents::MACRO).to_string_lossy(),
+        ),
     )))
 }
 
-/// Expand `stringify!($input)`.
 pub(crate) fn expand_stringify(
     cx: &mut ExtCtxt<'_>,
     sp: Span,
@@ -86,7 +93,6 @@ pub(crate) fn expand_stringify(
     ExpandResult::Ready(MacEager::expr(cx.expr_str(sp, Symbol::intern(&s))))
 }
 
-/// Expand `module_path!()` to (a textual representation of) the current module path.
 pub(crate) fn expand_mod(
     cx: &mut ExtCtxt<'_>,
     sp: Span,
@@ -95,14 +101,14 @@ pub(crate) fn expand_mod(
     let sp = cx.with_def_site_ctxt(sp);
     check_zero_tts(cx, sp, tts, "module_path!");
     let mod_path = &cx.current_expansion.module.mod_path;
-    let string = join_path_idents(mod_path);
+    let string = mod_path.iter().map(|x| x.to_string()).collect::<Vec<String>>().join("::");
 
     ExpandResult::Ready(MacEager::expr(cx.expr_str(sp, Symbol::intern(&string))))
 }
 
-/// Expand `include!($input)`.
-///
-/// This works in item and expression position. Notably, it doesn't work in pattern position.
+/// include! : parse the given file as an expr
+/// This is generally a bad idea because it's going to behave
+/// unhygienically.
 pub(crate) fn expand_include<'cx>(
     cx: &'cx mut ExtCtxt<'_>,
     sp: Span,
@@ -112,74 +118,64 @@ pub(crate) fn expand_include<'cx>(
     let ExpandResult::Ready(mac) = get_single_str_from_tts(cx, sp, tts, "include!") else {
         return ExpandResult::Retry(());
     };
-    let path = match mac {
-        Ok(path) => path,
+    let file = match mac {
+        Ok(file) => file,
         Err(guar) => return ExpandResult::Ready(DummyResult::any(sp, guar)),
     };
     // The file will be added to the code map by the parser
-    let path = match resolve_path(&cx.sess, path.as_str(), sp) {
-        Ok(path) => path,
+    let file = match resolve_path(&cx.sess, file.as_str(), sp) {
+        Ok(f) => f,
         Err(err) => {
             let guar = err.emit();
             return ExpandResult::Ready(DummyResult::any(sp, guar));
         }
     };
+    let p = unwrap_or_emit_fatal(new_parser_from_file(cx.psess(), &file, Some(sp)));
 
     // If in the included file we have e.g., `mod bar;`,
-    // then the path of `bar.rs` should be relative to the directory of `path`.
+    // then the path of `bar.rs` should be relative to the directory of `file`.
     // See https://github.com/rust-lang/rust/pull/69838/files#r395217057 for a discussion.
     // `MacroExpander::fully_expand_fragment` later restores, so "stack discipline" is maintained.
-    let dir_path = path.parent().unwrap_or(&path).to_owned();
+    let dir_path = file.parent().unwrap_or(&file).to_owned();
     cx.current_expansion.module = Rc::new(cx.current_expansion.module.with_dir_path(dir_path));
     cx.current_expansion.dir_ownership = DirOwnership::Owned { relative: None };
 
     struct ExpandInclude<'a> {
-        psess: &'a ParseSess,
-        path: PathBuf,
+        p: Parser<'a>,
         node_id: ast::NodeId,
-        span: Span,
     }
     impl<'a> MacResult for ExpandInclude<'a> {
-        fn make_expr(self: Box<ExpandInclude<'a>>) -> Option<Box<ast::Expr>> {
-            let mut p = unwrap_or_emit_fatal(new_parser_from_file(
-                self.psess,
-                &self.path,
-                StripTokens::Nothing,
-                Some(self.span),
-            ));
-            let expr = parse_expr(&mut p).ok()?;
-            if p.token != token::Eof {
-                p.psess.buffer_lint(
+        fn make_expr(mut self: Box<ExpandInclude<'a>>) -> Option<P<ast::Expr>> {
+            let expr = parse_expr(&mut self.p).ok()?;
+            if self.p.token != token::Eof {
+                self.p.psess.buffer_lint(
                     INCOMPLETE_INCLUDE,
-                    p.token.span,
+                    self.p.token.span,
                     self.node_id,
-                    errors::IncompleteInclude,
+                    BuiltinLintDiag::IncompleteInclude,
                 );
             }
             Some(expr)
         }
 
-        fn make_items(self: Box<ExpandInclude<'a>>) -> Option<SmallVec<[Box<ast::Item>; 1]>> {
-            let mut p = unwrap_or_emit_fatal(new_parser_from_file(
-                self.psess,
-                &self.path,
-                StripTokens::ShebangAndFrontmatter,
-                Some(self.span),
-            ));
+        fn make_items(mut self: Box<ExpandInclude<'a>>) -> Option<SmallVec<[P<ast::Item>; 1]>> {
             let mut ret = SmallVec::new();
             loop {
-                match p.parse_item(ForceCollect::No, AllowConstBlockItems::Yes) {
+                match self.p.parse_item(ForceCollect::No) {
                     Err(err) => {
                         err.emit();
                         break;
                     }
                     Ok(Some(item)) => ret.push(item),
                     Ok(None) => {
-                        if p.token != token::Eof {
-                            p.dcx().emit_err(errors::ExpectedItem {
-                                span: p.token.span,
-                                token: &pprust::token_to_string(&p.token),
-                            });
+                        if self.p.token != token::Eof {
+                            self.p
+                                .dcx()
+                                .create_err(errors::ExpectedItem {
+                                    span: self.p.token.span,
+                                    token: &pprust::token_to_string(&self.p.token),
+                                })
+                                .emit();
                         }
 
                         break;
@@ -190,17 +186,10 @@ pub(crate) fn expand_include<'cx>(
         }
     }
 
-    ExpandResult::Ready(Box::new(ExpandInclude {
-        psess: cx.psess(),
-        path,
-        node_id: cx.current_expansion.lint_node_id,
-        span: sp,
-    }))
+    ExpandResult::Ready(Box::new(ExpandInclude { p, node_id: cx.current_expansion.lint_node_id }))
 }
 
-/// Expand `include_str!($input)` to the content of the UTF-8-encoded file given by path `$input` as a string literal.
-///
-/// This works in expression, pattern and statement position.
+/// `include_str!`: read the given file, insert it as a literal string expr
 pub(crate) fn expand_include_str(
     cx: &mut ExtCtxt<'_>,
     sp: Span,
@@ -219,22 +208,17 @@ pub(crate) fn expand_include_str(
         Ok((bytes, bsp)) => match std::str::from_utf8(&bytes) {
             Ok(src) => {
                 let interned_src = Symbol::intern(src);
-                // MacEager converts the expr into a pat if need be.
                 MacEager::expr(cx.expr_str(cx.with_def_site_ctxt(bsp), interned_src))
             }
-            Err(utf8err) => {
-                let mut err = cx.dcx().struct_span_err(sp, format!("`{path}` wasn't a utf-8 file"));
-                utf8_error(cx.source_map(), path.as_str(), None, &mut err, utf8err, &bytes[..]);
-                DummyResult::any(sp, err.emit())
+            Err(_) => {
+                let guar = cx.dcx().span_err(sp, format!("`{path}` wasn't a utf-8 file"));
+                DummyResult::any(sp, guar)
             }
         },
         Err(dummy) => dummy,
     })
 }
 
-/// Expand `include_bytes!($input)` to the content of the file given by path `$input`.
-///
-/// This works in expression, pattern and statement position.
 pub(crate) fn expand_include_bytes(
     cx: &mut ExtCtxt<'_>,
     sp: Span,
@@ -253,8 +237,7 @@ pub(crate) fn expand_include_bytes(
         Ok((bytes, _bsp)) => {
             // Don't care about getting the span for the raw bytes,
             // because the console can't really show them anyway.
-            let expr = cx.expr(sp, ast::ExprKind::IncludedBytes(ByteSymbol::intern(&bytes)));
-            // MacEager converts the expr into a pat if need be.
+            let expr = cx.expr(sp, ast::ExprKind::IncludedBytes(bytes));
             MacEager::expr(expr)
         }
         Err(dummy) => dummy,
@@ -266,7 +249,7 @@ fn load_binary_file(
     original_path: &Path,
     macro_span: Span,
     path_span: Span,
-) -> Result<(Arc<[u8]>, Span), Box<dyn MacResult>> {
+) -> Result<(Lrc<[u8]>, Span), Box<dyn MacResult>> {
     let resolved_path = match resolve_path(&cx.sess, original_path, macro_span) {
         Ok(path) => path,
         Err(err) => {
@@ -275,15 +258,7 @@ fn load_binary_file(
         }
     };
     match cx.source_map().load_binary_file(&resolved_path) {
-        Ok(data) => {
-            cx.sess
-                .psess
-                .file_depinfo
-                .borrow_mut()
-                .insert(Symbol::intern(&resolved_path.to_string_lossy()));
-
-            Ok(data)
-        }
+        Ok(data) => Ok(data),
         Err(io_err) => {
             let mut err = cx.dcx().struct_span_err(
                 macro_span,
@@ -299,7 +274,7 @@ fn load_binary_file(
                     .and_then(|path| path.into_os_string().into_string().ok());
 
                 if let Some(new_path) = new_path {
-                    err.span_suggestion_verbose(
+                    err.span_suggestion(
                         path_span,
                         "there is a file with the same name in a different directory",
                         format!("\"{}\"", new_path.replace('\\', "/").escape_debug()),

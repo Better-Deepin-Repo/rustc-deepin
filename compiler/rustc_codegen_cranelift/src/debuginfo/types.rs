@@ -6,7 +6,7 @@ use rustc_data_structures::fx::FxHashMap;
 use rustc_middle::ty::layout::LayoutOf;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 
-use crate::{DebugContext, FullyMonomorphizedLayoutCx};
+use crate::{has_ptr_meta, DebugContext, RevealAllLayoutCx};
 
 #[derive(Default)]
 pub(crate) struct TypeDebugContext<'tcx> {
@@ -44,7 +44,7 @@ impl DebugContext {
                 type_dbg,
                 ty,
                 *elem_ty,
-                len.try_to_target_usize(tcx).expect("expected monomorphic const in codegen"),
+                len.eval_target_usize(tcx, ty::ParamEnv::reveal_all()),
             ),
             // ty::Slice(_) | ty::Str
             // ty::Dynamic
@@ -56,7 +56,7 @@ impl DebugContext {
             // ty::FnDef(..) | ty::FnPtr(..)
             // ty::Closure(..)
             // ty::Adt(def, ..)
-            ty::Tuple(components) => self.tuple_type(tcx, type_dbg, ty, components),
+            ty::Tuple(components) => self.tuple_type(tcx, type_dbg, ty, *components),
             // ty::Param(_)
             // FIXME implement remaining types and add unreachable!() to the fallback branch
             _ => self.placeholder_for_type(tcx, type_dbg, ty),
@@ -85,7 +85,7 @@ impl DebugContext {
         type_entry.set(gimli::DW_AT_encoding, AttributeValue::Encoding(encoding));
         type_entry.set(
             gimli::DW_AT_byte_size,
-            AttributeValue::Udata(FullyMonomorphizedLayoutCx(tcx).layout_of(ty).size.bytes()),
+            AttributeValue::Udata(RevealAllLayoutCx(tcx).layout_of(ty).size.bytes()),
         );
 
         type_id
@@ -109,8 +109,7 @@ impl DebugContext {
 
         let subrange_id = self.dwarf.unit.add(array_type_id, gimli::DW_TAG_subrange_type);
         let subrange_entry = self.dwarf.unit.get_mut(subrange_id);
-        subrange_entry
-            .set(gimli::DW_AT_type, AttributeValue::UnitRef(self.array_size_type.unwrap()));
+        subrange_entry.set(gimli::DW_AT_type, AttributeValue::UnitRef(self.array_size_type));
         subrange_entry.set(gimli::DW_AT_lower_bound, AttributeValue::Udata(0));
         subrange_entry.set(gimli::DW_AT_count, AttributeValue::Udata(len));
 
@@ -130,7 +129,7 @@ impl DebugContext {
 
         let name = type_names::compute_debuginfo_type_name(tcx, ptr_type, true);
 
-        if !tcx.type_has_metadata(ptr_type, ty::TypingEnv::fully_monomorphized()) {
+        if !has_ptr_meta(tcx, ptr_type) {
             let pointer_type_id =
                 self.dwarf.unit.add(self.dwarf.unit.root(), gimli::DW_TAG_pointer_type);
             let pointer_entry = self.dwarf.unit.get_mut(pointer_type_id);
@@ -140,7 +139,7 @@ impl DebugContext {
 
             pointer_type_id
         } else {
-            // FIXME implement debuginfo for wide pointers
+            // FIXME implement debuginfo for fat pointers
             self.placeholder_for_type(tcx, type_dbg, ptr_type)
         }
     }
@@ -153,21 +152,21 @@ impl DebugContext {
         components: &'tcx [Ty<'tcx>],
     ) -> UnitEntryId {
         let components = components
-            .iter()
+            .into_iter()
             .map(|&ty| (ty, self.debug_type(tcx, type_dbg, ty)))
             .collect::<Vec<_>>();
 
         return_if_type_created_in_meantime!(type_dbg, tuple_type);
 
         let name = type_names::compute_debuginfo_type_name(tcx, tuple_type, false);
-        let layout = FullyMonomorphizedLayoutCx(tcx).layout_of(tuple_type);
+        let layout = RevealAllLayoutCx(tcx).layout_of(tuple_type);
 
         let tuple_type_id =
             self.dwarf.unit.add(self.dwarf.unit.root(), gimli::DW_TAG_structure_type);
         let tuple_entry = self.dwarf.unit.get_mut(tuple_type_id);
         tuple_entry.set(gimli::DW_AT_name, AttributeValue::StringRef(self.dwarf.strings.add(name)));
         tuple_entry.set(gimli::DW_AT_byte_size, AttributeValue::Udata(layout.size.bytes()));
-        tuple_entry.set(gimli::DW_AT_alignment, AttributeValue::Udata(layout.align.bytes()));
+        tuple_entry.set(gimli::DW_AT_alignment, AttributeValue::Udata(layout.align.pref.bytes()));
 
         for (i, (ty, dw_ty)) in components.into_iter().enumerate() {
             let member_id = self.dwarf.unit.add(tuple_type_id, gimli::DW_TAG_member);
@@ -179,7 +178,7 @@ impl DebugContext {
             member_entry.set(gimli::DW_AT_type, AttributeValue::UnitRef(dw_ty));
             member_entry.set(
                 gimli::DW_AT_alignment,
-                AttributeValue::Udata(FullyMonomorphizedLayoutCx(tcx).layout_of(ty).align.bytes()),
+                AttributeValue::Udata(RevealAllLayoutCx(tcx).layout_of(ty).align.pref.bytes()),
             );
             member_entry.set(
                 gimli::DW_AT_data_member_location,
@@ -199,11 +198,7 @@ impl DebugContext {
         self.debug_type(
             tcx,
             type_dbg,
-            Ty::new_array(
-                tcx,
-                tcx.types.u8,
-                FullyMonomorphizedLayoutCx(tcx).layout_of(ty).size.bytes(),
-            ),
+            Ty::new_array(tcx, tcx.types.u8, RevealAllLayoutCx(tcx).layout_of(ty).size.bytes()),
         )
     }
 }

@@ -8,7 +8,6 @@ fn main() {}
 // Make sure we catch executing inline assembly.
 static TEST_BAD: () = {
     unsafe { asm!("nop"); }
-    //~^ ERROR inline assembly is not supported
+    //~^ ERROR could not evaluate static initializer
+    //~| NOTE inline assembly is not supported
 };
-
-//~? WARN skipping const checks

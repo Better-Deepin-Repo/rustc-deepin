@@ -1,9 +1,9 @@
-use crate::spec::{Arch, FloatAbi, PanicStrategy, Target, TargetMetadata, TargetOptions, base};
+use crate::spec::{base, PanicStrategy, Target, TargetOptions};
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     Target {
         llvm_target: "thumbv7a-pc-windows-msvc".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: None,
             tier: Some(3),
             host_tools: Some(false),
@@ -11,9 +11,8 @@ pub(crate) fn target() -> Target {
         },
         pointer_width: 32,
         data_layout: "e-m:w-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64".into(),
-        arch: Arch::Arm,
+        arch: "arm".into(),
         options: TargetOptions {
-            llvm_floatabi: Some(FloatAbi::Hard),
             features: "+vfp3,+neon".into(),
             max_atomic_width: Some(64),
             // FIXME(jordanrh): use PanicStrategy::Unwind when SEH is

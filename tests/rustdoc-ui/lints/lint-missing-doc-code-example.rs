@@ -17,7 +17,7 @@ pub fn test() {
 }
 
 #[allow(missing_docs)]
-pub mod module1 {
+pub mod module1 { //~ ERROR
 }
 
 #[allow(rustdoc::missing_doc_code_examples)]

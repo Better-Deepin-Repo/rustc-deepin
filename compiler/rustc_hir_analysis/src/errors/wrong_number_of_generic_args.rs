@@ -1,12 +1,12 @@
 use std::iter;
 
-use GenericArgsInfo::*;
 use rustc_errors::codes::*;
-use rustc_errors::{Applicability, Diag, Diagnostic, EmissionGuarantee, MultiSpan, pluralize};
+use rustc_errors::{pluralize, Applicability, Diag, Diagnostic, EmissionGuarantee, MultiSpan};
 use rustc_hir as hir;
-use rustc_middle::ty::{self as ty, AssocItems, TyCtxt};
+use rustc_middle::ty::{self as ty, AssocItems, AssocKind, TyCtxt};
 use rustc_span::def_id::DefId;
 use tracing::debug;
+use GenericArgsInfo::*;
 
 /// Handles the `wrong number of type / lifetime / ... arguments` family of error messages.
 pub(crate) struct WrongNumberOfGenericArgs<'a, 'tcx> {
@@ -134,9 +134,9 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
             // is from the 'of_trait' field of the enclosing impl
 
             let parent = self.tcx.parent_hir_node(self.path_segment.hir_id);
-            let parent_item = self
-                .tcx
-                .hir_node_by_def_id(self.tcx.hir_get_parent_item(self.path_segment.hir_id).def_id);
+            let parent_item = self.tcx.hir_node_by_def_id(
+                self.tcx.hir().get_parent_item(self.path_segment.hir_id).def_id,
+            );
 
             // Get the HIR id of the trait ref
             let hir::Node::TraitRef(hir::TraitRef { hir_ref_id: trait_ref_id, .. }) = parent else {
@@ -147,11 +147,7 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
             let hir::Node::Item(hir::Item {
                 kind:
                     hir::ItemKind::Impl(hir::Impl {
-                        of_trait:
-                            Some(hir::TraitImplHeader {
-                                trait_ref: hir::TraitRef { hir_ref_id: id_in_of_trait, .. },
-                                ..
-                            }),
+                        of_trait: Some(hir::TraitRef { hir_ref_id: id_in_of_trait, .. }),
                         ..
                     }),
                 ..
@@ -339,14 +335,15 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
             hir::GenericArg::Lifetime(lt) => Some(lt),
             _ => None,
         }) {
-            return std::iter::repeat_n(lt.to_string(), num_params_to_take)
+            return std::iter::repeat(lt.to_string())
+                .take(num_params_to_take)
                 .collect::<Vec<_>>()
                 .join(", ");
         }
 
         let mut ret = Vec::new();
         let mut ty_id = None;
-        for (id, node) in self.tcx.hir_parent_iter(path_hir_id) {
+        for (id, node) in self.tcx.hir().parent_iter(path_hir_id) {
             debug!(?id);
             if let hir::Node::Ty(_) = node {
                 ty_id = Some(id);
@@ -361,7 +358,8 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
                     matches!(fn_decl.output, hir::FnRetTy::Return(ty) if ty.hir_id == ty_id);
 
                 if in_arg || (in_ret && fn_decl.lifetime_elision_allowed) {
-                    return std::iter::repeat_n("'_".to_owned(), num_params_to_take)
+                    return std::iter::repeat("'_".to_owned())
+                        .take(num_params_to_take)
                         .collect::<Vec<_>>()
                         .join(", ");
                 }
@@ -386,20 +384,18 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
             })
             | hir::Node::AnonConst(..) = node
             {
-                return std::iter::repeat_n(
-                    "'static".to_owned(),
-                    num_params_to_take.saturating_sub(ret.len()),
-                )
-                .collect::<Vec<_>>()
-                .join(", ");
+                return std::iter::repeat("'static".to_owned())
+                    .take(num_params_to_take.saturating_sub(ret.len()))
+                    .collect::<Vec<_>>()
+                    .join(", ");
             }
 
             let params = if let Some(generics) = node.generics() {
                 generics.params
             } else if let hir::Node::Ty(ty) = node
-                && let hir::TyKind::FnPtr(fn_ptr) = ty.kind
+                && let hir::TyKind::BareFn(bare_fn) = ty.kind
             {
-                fn_ptr.generic_params
+                bare_fn.generic_params
             } else {
                 &[]
             };
@@ -441,7 +437,8 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
     ) -> String {
         let is_in_a_method_call = self
             .tcx
-            .hir_parent_iter(self.path_segment.hir_id)
+            .hir()
+            .parent_iter(self.path_segment.hir_id)
             .skip(1)
             .find_map(|(_, node)| match node {
                 hir::Node::Expr(expr) => Some(expr),
@@ -454,7 +451,7 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
                 )
             });
 
-        let fn_sig = self.tcx.hir_get_if_local(self.def_id).and_then(hir::Node::fn_sig);
+        let fn_sig = self.tcx.hir().get_if_local(self.def_id).and_then(hir::Node::fn_sig);
         let is_used_in_input = |def_id| {
             fn_sig.is_some_and(|fn_sig| {
                 fn_sig.decl.inputs.iter().any(|ty| match ty.kind {
@@ -490,16 +487,15 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
             let items: &AssocItems = self.tcx.associated_items(self.def_id);
             items
                 .in_definition_order()
+                .filter(|item| item.kind == AssocKind::Type)
                 .filter(|item| {
-                    item.is_type()
-                        && !item.is_impl_trait_in_trait()
-                        && !self
-                            .gen_args
-                            .constraints
-                            .iter()
-                            .any(|constraint| constraint.ident.name == item.name())
+                    !self
+                        .gen_args
+                        .constraints
+                        .iter()
+                        .any(|constraint| constraint.ident.name == item.name)
                 })
-                .map(|item| self.tcx.item_ident(item.def_id).to_string())
+                .map(|item| item.name.to_ident_string())
                 .collect()
         } else {
             Vec::default()
@@ -639,7 +635,7 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
                 self.suggest_adding_type_and_const_args(err);
             }
             ExcessTypesOrConsts { .. } => {
-                // this can happen with `[const] T` where T isn't a `const trait`.
+                // this can happen with `~const T` where T isn't a const_trait.
             }
             _ => unreachable!(),
         }
@@ -763,8 +759,9 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
         &self,
         err: &mut Diag<'_, impl EmissionGuarantee>,
     ) {
-        let Some(trait_) = self.tcx.trait_of_assoc(self.def_id) else {
-            return;
+        let trait_ = match self.tcx.trait_of_item(self.def_id) {
+            Some(def_id) => def_id,
+            None => return,
         };
 
         // Skip suggestion when the associated function is itself generic, it is unclear
@@ -830,18 +827,20 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
 
             if num_generic_args_supplied_to_trait + num_assoc_fn_excess_args
                 == num_trait_generics_except_self
-                && let Some(span) = self.gen_args.span_ext()
-                && let Ok(snippet) = self.tcx.sess.source_map().span_to_snippet(span)
             {
-                let sugg = vec![
-                    (
-                        self.path_segment.ident.span,
-                        format!("{}::{}", snippet, self.path_segment.ident),
-                    ),
-                    (span.with_lo(self.path_segment.ident.span.hi()), "".to_owned()),
-                ];
+                if let Some(span) = self.gen_args.span_ext()
+                    && let Ok(snippet) = self.tcx.sess.source_map().span_to_snippet(span)
+                {
+                    let sugg = vec![
+                        (
+                            self.path_segment.ident.span,
+                            format!("{}::{}", snippet, self.path_segment.ident),
+                        ),
+                        (span.with_lo(self.path_segment.ident.span.hi()), "".to_owned()),
+                    ];
 
-                err.multipart_suggestion(msg, sugg, Applicability::MaybeIncorrect);
+                    err.multipart_suggestion(msg, sugg, Applicability::MaybeIncorrect);
+                }
             }
         }
     }
@@ -988,9 +987,6 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
                     gen_arg_spans[self.num_expected_type_or_const_args() - 1]
                 };
             let span_hi_redundant_type_or_const_args = gen_arg_spans[gen_arg_spans.len() - 1];
-            if !span_lo_redundant_type_or_const_args.eq_ctxt(span_hi_redundant_type_or_const_args) {
-                return;
-            }
             let span_redundant_type_or_const_args = span_lo_redundant_type_or_const_args
                 .shrink_to_hi()
                 .to(span_hi_redundant_type_or_const_args);
@@ -1026,7 +1022,7 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
                     .collect::<Vec<_>>();
 
                 if !suggestions.is_empty() {
-                    err.multipart_suggestion(
+                    err.multipart_suggestion_verbose(
                         format!(
                             "replace the generic bound{s} with the associated type{s}",
                             s = pluralize!(unbound_types.len())
@@ -1054,18 +1050,7 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
                 },
             );
 
-            if span.is_empty() {
-                // HACK: Avoid ICE when types with the same name with `derive`s are in the same scope:
-                //     struct NotSM;
-                //     #[derive(PartialEq, Eq)]
-                //     struct NotSM<T>(T);
-                // With the above code, the suggestion would be to remove the generics of the first
-                // `NotSM`, which doesn't *have* generics, so we would suggest to remove no code with
-                // no code, which would trigger an `assert!` later. Ideally, we would do something a
-                // bit more principled. See closed PR #109082.
-            } else {
-                err.span_suggestion(span, msg, "", Applicability::MaybeIncorrect);
-            }
+            err.span_suggestion(span, msg, "", Applicability::MaybeIncorrect);
         } else if redundant_lifetime_args && redundant_type_or_const_args {
             remove_lifetime_args(err);
             remove_type_or_const_args(err);
@@ -1079,11 +1064,15 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
 
     /// Builds the `type defined here` message.
     fn show_definition(&self, err: &mut Diag<'_, impl EmissionGuarantee>) {
-        let Some(def_span) = self.tcx.def_ident_span(self.def_id) else { return };
-        if !self.tcx.sess.source_map().is_span_accessible(def_span) {
+        let mut spans: MultiSpan = if let Some(def_span) = self.tcx.def_ident_span(self.def_id) {
+            if self.tcx.sess.source_map().is_span_accessible(def_span) {
+                def_span.into()
+            } else {
+                return;
+            }
+        } else {
             return;
         };
-        let mut spans: MultiSpan = def_span.into();
 
         let msg = {
             let def_kind = self.tcx.def_descr(self.def_id);

@@ -1,5 +1,6 @@
 //@ run-pass
 #![allow(unused_variables)]
+#![allow(stable_features)]
 
 use std::cell::RefCell;
 use std::rc::Rc;

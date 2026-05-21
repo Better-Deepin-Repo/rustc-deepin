@@ -3,15 +3,13 @@
 //! for i in 0../* < */10 {}
 //! if let ../* < */100 = 50 {}
 //! ```
-use ide_db::famous_defs::FamousDefs;
-use syntax::{SyntaxToken, T, ast};
+use syntax::{ast, SyntaxToken, T};
 
 use crate::{InlayHint, InlayHintsConfig};
 
 pub(super) fn hints(
     acc: &mut Vec<InlayHint>,
-    FamousDefs(_sema, _): &FamousDefs<'_, '_>,
-    config: &InlayHintsConfig<'_>,
+    config: &InlayHintsConfig,
     range: impl ast::RangeItem,
 ) -> Option<()> {
     (config.range_exclusive_hints && range.end().is_some())
@@ -32,15 +30,14 @@ fn inlay_hint(token: SyntaxToken) -> InlayHint {
         kind: crate::InlayKind::RangeExclusive,
         label: crate::InlayHintLabel::from("<"),
         text_edit: None,
-        resolve_parent: None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
+        inlay_hints::tests::{check_with_config, DISABLED_CONFIG},
         InlayHintsConfig,
-        inlay_hints::tests::{DISABLED_CONFIG, check_with_config},
     };
 
     #[test]

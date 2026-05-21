@@ -1,12 +1,12 @@
 //@ build-fail
 //@ compile-flags: -C symbol-mangling-version=v0 --crate-name=c
 
-//@ normalize-stderr: "c\[[0-9a-f]+\]" -> "c[HASH]"
+//@ normalize-stderr-test: "c\[[0-9a-f]+\]" -> "c[HASH]"
 
 #![feature(adt_const_params, unsized_const_params, decl_macro, rustc_attrs)]
 #![allow(incomplete_features)]
 
-use std::marker::ConstParamTy;
+use std::marker::UnsizedConstParamTy;
 
 pub struct RefByte<const RB: &'static u8>;
 
@@ -42,7 +42,7 @@ pub struct TupleByteBool<const TBB: (u8, bool)>;
 //~| ERROR demangling-alt(<c::TupleByteBool<{(1, false)}>>)
 impl TupleByteBool<{ (1, false) }> {}
 
-#[derive(PartialEq, Eq, ConstParamTy)]
+#[derive(PartialEq, Eq, UnsizedConstParamTy)]
 pub enum MyOption<T> {
     Some(T),
     None,
@@ -66,7 +66,7 @@ impl OptionUsize<{ MyOption::None }> {}
 //~| ERROR demangling-alt(<c::OptionUsize<{c::MyOption::<usize>::Some(0)}>>)
 impl OptionUsize<{ MyOption::Some(0) }> {}
 
-#[derive(PartialEq, Eq, ConstParamTy)]
+#[derive(PartialEq, Eq, UnsizedConstParamTy)]
 pub struct Foo {
     s: &'static str,
     ch: char,
@@ -83,7 +83,7 @@ impl Foo_<{ Foo { s: "abc", ch: 'x', slice: &[1, 2, 3] } }> {}
 // NOTE(eddyb) this tests specifically the use of disambiguators in field names,
 // using macros 2.0 hygiene to create a `struct` with conflicting field names.
 macro duplicate_field_name_test($x:ident) {
-    #[derive(PartialEq, Eq, ConstParamTy)]
+    #[derive(PartialEq, Eq, UnsizedConstParamTy)]
     pub struct Bar {
         $x: u8,
         x: u16,

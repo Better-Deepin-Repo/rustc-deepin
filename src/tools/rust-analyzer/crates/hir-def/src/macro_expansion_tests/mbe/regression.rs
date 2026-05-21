@@ -109,42 +109,6 @@ fn main() {
 }
 
 #[test]
-fn ty_fragment_followed_by_expr() {
-    check(
-        r#"
-macro_rules! a {
-    ($t:tt) => {};
-}
-
-macro_rules! b {
-    ($t:ty) => {
-        a!($t);
-    };
-}
-
-fn main() {
-    b!(&'static str);
-}
-"#,
-        expect![[r#"
-macro_rules! a {
-    ($t:tt) => {};
-}
-
-macro_rules! b {
-    ($t:ty) => {
-        a!($t);
-    };
-}
-
-fn main() {
-    a!(&'static str);;
-}
-"#]],
-    );
-}
-
-#[test]
 fn test_winapi_struct() {
     // from https://github.com/retep998/winapi-rs/blob/a7ef2bca086aae76cf6c4ce4c2552988ed9798ad/src/macros.rs#L366
 
@@ -175,7 +139,7 @@ STRUCT!{struct D3DVSHADERCAPS2_0 {Caps: u8,}}
 
 STRUCT!{#[cfg_attr(target_arch = "x86", repr(packed))] struct D3DCONTENTPROTECTIONCAPS {Caps : u8 ,}}
 "#,
-        expect![[r#"
+        expect![[r##"
 macro_rules! STRUCT {
     ($(#[$attrs:meta])* struct $name:ident {
         $($field:ident: $ftype:ty,)+
@@ -230,7 +194,7 @@ impl Clone for D3DCONTENTPROTECTIONCAPS {
         }
     }
 }
-"#]],
+"##]],
     );
 }
 
@@ -250,7 +214,7 @@ macro_rules! int_base {
 }
 int_base!{Binary for isize as usize -> Binary}
 "#,
-        expect![[r#"
+        expect![[r##"
 macro_rules! int_base {
     ($Trait:ident for $T:ident as $U:ident -> $Radix:ident) => {
         #[stable(feature = "rust1", since = "1.0.0")]
@@ -266,7 +230,7 @@ macro_rules! int_base {
         Binary.fmt_int(*self as usize, f)
     }
 }
-"#]],
+"##]],
     );
 }
 
@@ -354,7 +318,7 @@ impl_fn_for_zst !   {
 }
 
 "#,
-        expect![[r#"
+        expect![[r##"
 macro_rules! impl_fn_for_zst  {
     {$( $( #[$attr: meta] )*
     struct $Name: ident impl$( <$( $lifetime : lifetime ),+> )? Fn =
@@ -446,7 +410,7 @@ impl FnOnce<(char, )> for CharEscapeDefault {
     }
 }
 
-"#]],
+"##]],
     );
 }
 
@@ -547,7 +511,7 @@ cfg_if! {
     @__apply cfg(all(not(any(not(any(target_os = "solaris", target_os = "illumos")))))),
 }
 "#,
-        expect![[r#"
+        expect![[r##"
 macro_rules! cfg_if {
     ($(if #[cfg($($meta:meta),*)] { $($it:item)* } )else* else { $($it2:item)* })
     => {
@@ -570,7 +534,7 @@ __cfg_if_items! {
 }
 
 
-"#]],
+"##]],
     );
 }
 
@@ -618,8 +582,8 @@ macro_rules! arbitrary {
 }
 
 impl <A: Arbitrary> $crate::arbitrary::Arbitrary for Vec<A> {
-    type Parameters = RangedParams1<A::Parameters> ;
-    type Strategy = VecStrategy<A::Strategy> ;
+    type Parameters = RangedParams1<A::Parameters>;
+    type Strategy = VecStrategy<A::Strategy>;
     fn arbitrary_with(args: Self::Parameters) -> Self::Strategy { {
             let product_unpack![range, a] = args;
             vec(any_with::<A>(a), range)
@@ -654,7 +618,7 @@ RIDL!{interface ID3D11Asynchronous(ID3D11AsynchronousVtbl): ID3D11DeviceChild(ID
     fn GetDataSize(&mut self) -> UINT
 }}
 "#,
-        expect![[r#"
+        expect![[r##"
 #[macro_export]
 macro_rules! RIDL {
     (interface $interface:ident ($vtbl:ident) : $pinterface:ident ($pvtbl:ident)
@@ -675,7 +639,7 @@ impl ID3D11Asynchronous {
         ((*self .lpVtbl).GetDataSize)(self )
     }
 }
-"#]],
+"##]],
     );
 }
 
@@ -712,7 +676,7 @@ quick_error ! (
 );
 
 "#,
-        expect![[r#"
+        expect![[r##"
 macro_rules! quick_error {
     (SORT [enum $name:ident $( #[$meta:meta] )*]
         items [$($( #[$imeta:meta] )*
@@ -733,7 +697,7 @@ macro_rules! quick_error {
 }
 quick_error!(ENUMINITION[enum Wrapped#[derive(Debug)]]body[]queue[ = > One: UNIT[] = > Two: TUPLE[s: String]]);
 
-"#]],
+"##]],
     )
 }
 
@@ -782,7 +746,7 @@ delegate_impl ! {
     [G, &'a mut G, deref] pub trait Data: GraphBase {@section type type NodeWeight;}
 }
 "#,
-        expect![[r#"
+        expect![[r##"
 macro_rules! delegate_impl {
     ([$self_type:ident, $self_wrap:ty, $self_map:ident]
      pub trait $name:ident $(: $sup:ident)* $(+ $more_sup:ident)* {
@@ -820,8 +784,8 @@ macro_rules! delegate_impl {
         }
     }
 }
-impl <> Data for &'a mut G where G: Data {}
-"#]],
+impl <> Data for &'amut G where G: Data {}
+"##]],
     );
 }
 
@@ -967,12 +931,11 @@ pub fn new() {
 //                             PATH_TYPE@23..26
 //                               PATH@23..26
 //                                 PATH_SEGMENT@23..26
-//                                   TYPE_ANCHOR@23..26
-//                                     L_ANGLE@23..24 "<"
-//                                     PAREN_TYPE@24..26
-//                                       L_PAREN@24..25 "("
-//                                       ERROR@25..26
-//                                         INT_NUMBER@25..26 "8"
+//                                   L_ANGLE@23..24 "<"
+//                                   PAREN_TYPE@24..26
+//                                     L_PAREN@24..25 "("
+//                                     ERROR@25..26
+//                                       INT_NUMBER@25..26 "8"
 //                           PLUS@26..27 "+"
 //                     CONST_ARG@27..28
 //                       LITERAL@27..28
@@ -996,14 +959,14 @@ macro_rules! with_std {
 
 with_std! {mod m;mod f;}
 "#,
-        expect![[r#"
+        expect![[r##"
 macro_rules! with_std {
     ($($i:item)*) => ($(#[cfg(feature = "std")]$i)*)
 }
 
 #[cfg(feature = "std")] mod m;
 #[cfg(feature = "std")] mod f;
-"#]],
+"##]],
     )
 }
 
@@ -1177,30 +1140,6 @@ mod any {
     /* error: unexpected token in input */$crate::any::nameable! {
         struct $name[$a]a
     }
-}
-"#]],
-    );
-}
-
-#[test]
-fn regression_18148() {
-    check(
-        r#"
-macro_rules! m {
-    ( $e:expr ) => {};
-}
-
-fn foo() {
-    m!(r#const);
-}
-"#,
-        expect![[r#"
-macro_rules! m {
-    ( $e:expr ) => {};
-}
-
-fn foo() {
-    ;
 }
 "#]],
     );

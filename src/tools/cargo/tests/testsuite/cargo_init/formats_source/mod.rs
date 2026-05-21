@@ -1,9 +1,9 @@
-use crate::prelude::*;
 use cargo_test_support::compare::assert_ui;
 use cargo_test_support::current_dir;
 use cargo_test_support::file;
+use cargo_test_support::prelude::*;
 use cargo_test_support::str;
-use cargo_test_support::{Project, process};
+use cargo_test_support::{process, Project};
 
 #[cargo_test]
 fn case() {

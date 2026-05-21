@@ -6,11 +6,6 @@ fn make_result<T>(t: T) -> Result<T, ()> {
     Ok(t)
 }
 
-// The return type should behave as `T` as the `Err` variant is uninhabited
-fn make_result_uninhabited_err<T>(t: T) -> Result<T, std::convert::Infallible> {
-    Ok(t)
-}
-
 #[must_use]
 fn must_use<T>(t: T) -> T {
     t
@@ -25,8 +20,7 @@ fn main() {
     struct Foo;
     // Lint
     drop(Foo);
-    //~^ drop_non_drop
-
+    //~^ ERROR: call to `std::mem::drop` with a value that does not implement `Drop`. Drop
     // Don't lint
     drop(make_result(Foo));
     // Don't lint
@@ -42,12 +36,7 @@ fn main() {
     struct Baz<T>(T);
     // Lint
     drop(Baz(Foo));
-    //~^ drop_non_drop
-
+    //~^ ERROR: call to `std::mem::drop` with a value that does not implement `Drop`. Drop
     // Don't lint
     drop(Baz(Bar));
-
-    // Lint
-    drop(make_result_uninhabited_err(Foo));
-    //~^ drop_non_drop
 }

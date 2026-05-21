@@ -1,7 +1,6 @@
 // Test the AST pretty printer correctly handles default values for const generics
 //@ check-pass
 //@ compile-flags: -Z unpretty=expanded
-//@ edition: 2015
 
 #![crate_type = "lib"]
 

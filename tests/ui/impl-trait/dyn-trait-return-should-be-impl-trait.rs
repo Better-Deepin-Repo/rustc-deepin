@@ -1,6 +1,3 @@
-//@revisions: edition2015 edition2021
-//@[edition2015] edition:2015
-//@[edition2021] edition:2021
 #![allow(bare_trait_objects)]
 struct Struct;
 trait Trait {}
@@ -8,17 +5,13 @@ impl Trait for Struct {}
 impl Trait for u32 {}
 
 fn fuz() -> (usize, Trait) { (42, Struct) }
-//[edition2015]~^ ERROR E0277
-//[edition2015]~| ERROR E0277
-//[edition2015]~| ERROR E0308
-//[edition2021]~^^^^ ERROR expected a type, found a trait
+//~^ ERROR E0277
+//~| ERROR E0308
 fn bar() -> (usize, dyn Trait) { (42, Struct) }
 //~^ ERROR E0277
-//~| ERROR E0277
 //~| ERROR E0308
 fn bap() -> Trait { Struct }
-//[edition2015]~^ ERROR E0746
-//[edition2021]~^^ ERROR expected a type, found a trait
+//~^ ERROR E0746
 fn ban() -> dyn Trait { Struct }
 //~^ ERROR E0746
 fn bak() -> dyn Trait { unimplemented!() } //~ ERROR E0746

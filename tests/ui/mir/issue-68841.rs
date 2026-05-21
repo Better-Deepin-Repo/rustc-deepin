@@ -2,6 +2,8 @@
 //@ edition:2018
 //@ build-pass
 
+#![feature(async_closure)]
+
 use std::future::Future;
 
 fn async_closure() -> impl Future<Output = u8> {

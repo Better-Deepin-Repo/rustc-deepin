@@ -29,127 +29,36 @@ fn main() {
 
     // these should throw warnings
     write!(v, "Hello {}", "world");
-    //~^ write_literal
-
+    //~^ ERROR: literal with an empty format string
+    //~| NOTE: `-D clippy::write-literal` implied by `-D warnings`
     writeln!(v, "Hello {} {}", world, "world");
-    //~^ write_literal
-
+    //~^ ERROR: literal with an empty format string
     writeln!(v, "Hello {}", "world");
-    //~^ write_literal
-
+    //~^ ERROR: literal with an empty format string
     writeln!(v, "{} {:.4}", "a literal", 5);
-    //~^ write_literal
+    //~^ ERROR: literal with an empty format string
 
     // positional args don't change the fact
     // that we're using a literal -- this should
     // throw a warning
     writeln!(v, "{0} {1}", "hello", "world");
-    //~^ write_literal
-
+    //~^ ERROR: literal with an empty format string
     writeln!(v, "{1} {0}", "hello", "world");
-    //~^ write_literal
+    //~^ ERROR: literal with an empty format string
 
     // named args shouldn't change anything either
     writeln!(v, "{foo} {bar}", foo = "hello", bar = "world");
-    //~^ write_literal
-
+    //~^ ERROR: literal with an empty format string
     writeln!(v, "{bar} {foo}", foo = "hello", bar = "world");
-    //~^ write_literal
+    //~^ ERROR: literal with an empty format string
 
     // #10128
     writeln!(v, "{0} {1} {2}", "hello", 2, "world");
-    //~^ write_literal
-
+    //~^ ERROR: literal with an empty format string
     writeln!(v, "{2} {1} {0}", "hello", 2, "world");
-    //~^ write_literal
-
+    //~^ ERROR: literal with an empty format string
     writeln!(v, "{0} {1} {2}, {bar}", "hello", 2, 3, bar = 4);
-    //~^ write_literal
-
+    //~^ ERROR: literal with an empty format string
     writeln!(v, "{0} {1} {2}, {3} {4}", "hello", 2, 3, "world", 4);
-    //~^ write_literal
-}
-
-fn escaping() {
-    let mut v = Vec::new();
-
-    writeln!(v, "{}", "{hello}");
-    //~^ write_literal
-
-    writeln!(v, r"{}", r"{hello}");
-    //~^ write_literal
-
-    writeln!(v, "{}", '\'');
-    //~^ write_literal
-
-    writeln!(v, "{}", '"');
-    //~^ write_literal
-
-    writeln!(v, r"{}", '\'');
-    //~^ write_literal
-
-    writeln!(
-        v,
-        "some {}",
-        "hello \
-        //~^ write_literal
-        world!",
-    );
-    writeln!(
-        v,
-        "some {}\
-        {} \\ {}",
-        "1",
-        "2",
-        "3",
-        //~^^^ write_literal
-    );
-    writeln!(v, "{}", "\\");
-    //~^ write_literal
-
-    writeln!(v, r"{}", "\\");
-    //~^ write_literal
-
-    writeln!(v, r#"{}"#, "\\");
-    //~^ write_literal
-
-    writeln!(v, "{}", r"\");
-    //~^ write_literal
-
-    writeln!(v, "{}", "\r");
-    //~^ write_literal
-
-    // should not lint
-    writeln!(v, r"{}", "\r");
-}
-
-fn issue_13959() {
-    let mut v = Vec::new();
-    writeln!(v, "{}", r#"""#);
-    //~^ write_literal
-    writeln!(
-        v,
-        "{}",
-        r#"
-        //~^ write_literal
-        foo
-        \
-        \\
-        "
-        \"
-        bar
-"#
-    );
-}
-
-fn issue_14930() {
-    let mut v = Vec::new();
-    writeln!(v, "Hello {3} is {0:2$.1$}", 0.01, 2, 3, "x");
-    //~^ write_literal
-    writeln!(v, "Hello {2} is {0:3$.1$}", 0.01, 2, "x", 3);
-    //~^ write_literal
-    writeln!(v, "Hello {1} is {0:3$.2$}", 0.01, "x", 2, 3);
-    //~^ write_literal
-    writeln!(v, "Hello {0} is {1:3$.2$}", "x", 0.01, 2, 3);
-    //~^ write_literal
+    //~^ ERROR: literal with an empty format string
 }

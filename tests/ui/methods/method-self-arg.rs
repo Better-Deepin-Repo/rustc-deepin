@@ -1,9 +1,6 @@
 //@ run-pass
 // Test method calls with self as an argument
 
-// FIXME(static_mut_refs): Do not allow `static_mut_refs` lint
-#![allow(static_mut_refs)]
-
 static mut COUNT: usize = 1;
 
 #[derive(Copy, Clone)]

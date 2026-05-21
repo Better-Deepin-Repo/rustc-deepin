@@ -1,22 +1,16 @@
-use clippy_config::Conf;
-use clippy_config::types::InherentImplLintScope;
 use clippy_utils::diagnostics::span_lint_and_then;
-use clippy_utils::{fulfill_or_allowed, is_cfg_test, is_in_cfg_test};
+use clippy_utils::is_lint_allowed;
 use rustc_data_structures::fx::FxHashMap;
-use rustc_hir::def_id::{LocalDefId, LocalModDefId};
+use rustc_hir::def_id::LocalDefId;
 use rustc_hir::{Item, ItemKind, Node};
 use rustc_lint::{LateContext, LateLintPass};
-use rustc_session::impl_lint_pass;
-use rustc_span::{FileName, Span};
+use rustc_session::declare_lint_pass;
+use rustc_span::Span;
 use std::collections::hash_map::Entry;
 
 declare_clippy_lint! {
     /// ### What it does
     /// Checks for multiple inherent implementations of a struct
-    ///
-    /// The config option controls the scope in which multiple inherent `impl` blocks for the same
-    /// struct are linted, allowing values of `module` (only within the same module), `file`
-    /// (within the same file), or `crate` (anywhere in the crate, default).
     ///
     /// ### Why restrict this?
     /// Splitting the implementation of a type makes the code harder to navigate.
@@ -47,26 +41,7 @@ declare_clippy_lint! {
     "Multiple inherent impl that could be grouped"
 }
 
-impl_lint_pass!(MultipleInherentImpl => [MULTIPLE_INHERENT_IMPL]);
-
-pub struct MultipleInherentImpl {
-    scope: InherentImplLintScope,
-}
-
-impl MultipleInherentImpl {
-    pub fn new(conf: &'static Conf) -> Self {
-        Self {
-            scope: conf.inherent_impl_lint_scope,
-        }
-    }
-}
-
-#[derive(Hash, Eq, PartialEq, Clone)]
-enum Criterion {
-    Module(LocalModDefId),
-    File(FileName),
-    Crate,
-}
+declare_lint_pass!(MultipleInherentImpl => [MULTIPLE_INHERENT_IMPL]);
 
 impl<'tcx> LateLintPass<'tcx> for MultipleInherentImpl {
     fn check_crate_post(&mut self, cx: &LateContext<'tcx>) {
@@ -76,46 +51,24 @@ impl<'tcx> LateLintPass<'tcx> for MultipleInherentImpl {
         // List of spans to lint. (lint_span, first_span)
         let mut lint_spans = Vec::new();
 
-        let (impls, _) = cx.tcx.crate_inherent_impls(());
+        let Ok(impls) = cx.tcx.crate_inherent_impls(()) else {
+            return;
+        };
 
         for (&id, impl_ids) in &impls.inherent_impls {
             if impl_ids.len() < 2
-            // Check for `#[expect]` or `#[allow]` on the type definition
-            || fulfill_or_allowed(
+            // Check for `#[allow]` on the type definition
+            || is_lint_allowed(
                 cx,
                 MULTIPLE_INHERENT_IMPL,
-                [cx.tcx.local_def_id_to_hir_id(id)],
+                cx.tcx.local_def_id_to_hir_id(id),
             ) {
                 continue;
             }
 
             for impl_id in impl_ids.iter().map(|id| id.expect_local()) {
                 let impl_ty = cx.tcx.type_of(impl_id).instantiate_identity();
-                let hir_id = cx.tcx.local_def_id_to_hir_id(impl_id);
-                let criterion = match self.scope {
-                    InherentImplLintScope::Module => Criterion::Module(cx.tcx.parent_module(hir_id)),
-                    InherentImplLintScope::File => {
-                        let span = cx.tcx.hir_span(hir_id);
-                        Criterion::File(cx.tcx.sess.source_map().lookup_source_file(span.lo()).name.clone())
-                    },
-                    InherentImplLintScope::Crate => Criterion::Crate,
-                };
-                let is_test = is_cfg_test(cx.tcx, hir_id) || is_in_cfg_test(cx.tcx, hir_id);
-                let predicates = {
-                    // Gets the predicates (bounds) for the given impl block,
-                    // sorted for consistent comparison to allow distinguishing between impl blocks
-                    // with different generic bounds.
-                    let mut predicates = cx
-                        .tcx
-                        .predicates_of(impl_id)
-                        .predicates
-                        .iter()
-                        .map(|(clause, _)| *clause)
-                        .collect::<Vec<_>>();
-                    predicates.sort_by_key(|c| format!("{c:?}"));
-                    predicates
-                };
-                match type_map.entry((impl_ty, predicates, criterion, is_test)) {
+                match type_map.entry(impl_ty) {
                     Entry::Vacant(e) => {
                         // Store the id for the first impl block of this type. The span is retrieved lazily.
                         e.insert(IdOrSpan::Id(impl_id));
@@ -146,6 +99,7 @@ impl<'tcx> LateLintPass<'tcx> for MultipleInherentImpl {
             // Switching to the next type definition, no need to keep the current entries around.
             type_map.clear();
         }
+
         // `TyCtxt::crate_inherent_impls` doesn't have a defined order. Sort the lint output first.
         lint_spans.sort_by_key(|x| x.0.lo());
         for (span, first_span) in lint_spans {
@@ -166,12 +120,15 @@ impl<'tcx> LateLintPass<'tcx> for MultipleInherentImpl {
 fn get_impl_span(cx: &LateContext<'_>, id: LocalDefId) -> Option<Span> {
     let id = cx.tcx.local_def_id_to_hir_id(id);
     if let Node::Item(&Item {
-        kind: ItemKind::Impl(_),
+        kind: ItemKind::Impl(impl_item),
         span,
         ..
     }) = cx.tcx.hir_node(id)
     {
-        (!span.from_expansion() && !fulfill_or_allowed(cx, MULTIPLE_INHERENT_IMPL, [id])).then_some(span)
+        (!span.from_expansion()
+            && impl_item.generics.params.is_empty()
+            && !is_lint_allowed(cx, MULTIPLE_INHERENT_IMPL, id))
+        .then_some(span)
     } else {
         None
     }

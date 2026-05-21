@@ -5,7 +5,6 @@
 
 type Foo = Vec<impl Send>;
 
-#[define_opaque(Foo)]
 fn make_foo() -> Foo {
     vec![true, false]
 }

@@ -1,6 +1,5 @@
 //@ run-pass
 #![feature(coerce_unsized, unsize)]
-#![allow(function_casts_as_integer)]
 
 use std::ops::CoerceUnsized;
 use std::marker::Unsize;

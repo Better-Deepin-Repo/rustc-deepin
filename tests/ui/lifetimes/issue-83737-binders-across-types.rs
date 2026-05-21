@@ -1,5 +1,5 @@
 //@ build-pass
-//@ edition: 2018
+//@ compile-flags: --edition 2018
 //@ compile-flags: --crate-type rlib
 
 use std::future::Future;

@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 //@ run-pass
 // Test old and new syntax for inclusive range patterns.
 

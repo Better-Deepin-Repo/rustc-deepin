@@ -1,5 +1,6 @@
 #![feature(pattern_types, rustc_attrs)]
-#![feature(pattern_type_macro)]
+#![feature(core_pattern_type)]
+#![feature(core_pattern_types)]
 #![allow(incomplete_features)]
 
 //! check that pattern types can have traits implemented for them if

@@ -2,6 +2,7 @@
 //@ check-pass
 
 #![feature(return_type_notation)]
+//~^ WARN the feature `return_type_notation` is incomplete
 
 use std::future::Future;
 

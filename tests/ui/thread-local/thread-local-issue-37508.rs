@@ -4,9 +4,6 @@
 //
 // Regression test for issue #37508
 
-// FIXME(static_mut_refs): Do not allow `static_mut_refs` lint
-#![allow(static_mut_refs)]
-
 #![no_main]
 #![no_std]
 #![feature(thread_local, lang_items)]

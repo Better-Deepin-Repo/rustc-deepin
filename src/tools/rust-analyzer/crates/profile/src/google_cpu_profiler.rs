@@ -9,7 +9,7 @@ use std::{
 
 #[link(name = "profiler")]
 #[allow(non_snake_case)]
-unsafe extern "C" {
+extern "C" {
     fn ProfilerStart(fname: *const c_char) -> i32;
     fn ProfilerStop();
 }

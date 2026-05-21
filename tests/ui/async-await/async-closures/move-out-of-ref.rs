@@ -1,6 +1,8 @@
 //@ compile-flags: -Zvalidate-mir
 //@ edition: 2021
 
+#![feature(async_closure)]
+
 // NOT copy.
 struct Ty;
 

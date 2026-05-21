@@ -1,8 +1,8 @@
 use hir::InFile;
 use itertools::Itertools;
-use syntax::{AstNode, ast};
+use syntax::{ast, AstNode};
 
-use crate::{Diagnostic, DiagnosticCode, DiagnosticsContext, adjusted_display_range};
+use crate::{adjusted_display_range, Diagnostic, DiagnosticCode, DiagnosticsContext};
 
 // Diagnostic: trait-impl-missing-assoc_item
 //
@@ -29,7 +29,6 @@ pub(crate) fn trait_impl_missing_assoc_item(
             &|impl_| impl_.trait_().map(|t| t.syntax().text_range()),
         ),
     )
-    .stable()
 }
 
 #[cfg(test)]
@@ -126,52 +125,5 @@ trait Trait {
 impl !Trait for () {}
 "#,
         )
-    }
-
-    #[test]
-    fn impl_sized_for_unsized() {
-        check_diagnostics(
-            r#"
-//- minicore: sized
-trait Trait {
-    type Item
-    where
-        Self: Sized;
-
-    fn item()
-    where
-        Self: Sized;
-}
-
-trait OtherTrait {}
-
-impl Trait for () {
-    type Item = ();
-    fn item() {}
-}
-
-// Items with Self: Sized bound not required to be implemented for unsized types.
-impl Trait for str {}
-impl Trait for dyn OtherTrait {}
- "#,
-        )
-    }
-
-    #[test]
-    fn no_false_positive_on_specialization() {
-        check_diagnostics(
-            r#"
-#![feature(specialization)]
-
-pub trait Foo {
-    fn foo();
-}
-
-impl<T> Foo for T {
-    default fn foo() {}
-}
-impl Foo for bool {}
-"#,
-        );
     }
 }

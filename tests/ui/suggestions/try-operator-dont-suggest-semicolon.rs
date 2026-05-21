@@ -3,6 +3,7 @@
 
 fn main() -> Result<(), ()> {
     a(|| {
+        //~^ HELP: try adding a return type
         b()
         //~^ ERROR: mismatched types [E0308]
         //~| NOTE: expected `()`, found `i32`
@@ -12,7 +13,7 @@ fn main() -> Result<(), ()> {
     // Here, we do want to suggest a semicolon:
     let x = Ok(42);
     if true {
-    //~^ NOTE: `if` expressions without `else` arms expect their inner expression to be `()`
+    //~^ NOTE: expected this to be `()`
         x?
         //~^ ERROR: mismatched types [E0308]
         //~| NOTE: expected `()`, found integer

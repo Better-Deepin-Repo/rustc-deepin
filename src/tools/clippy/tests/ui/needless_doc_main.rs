@@ -5,32 +5,33 @@
 /// This should lint
 /// ```
 /// fn main() {
-//~^ needless_doctest_main
+//~^ ERROR: needless `fn main` in doctest
+//~| NOTE: `-D clippy::needless-doctest-main` implied by `-D warnings`
 ///     unimplemented!();
 /// }
 /// ```
-/// 
+///
 /// With an explicit return type it should lint too
 /// ```edition2015
 /// fn main() -> () {
-//~^ needless_doctest_main
+//~^ ERROR: needless `fn main` in doctest
 ///     unimplemented!();
 /// }
 /// ```
-/// 
+///
 /// This should, too.
 /// ```rust
 /// fn main() {
-//~^ needless_doctest_main
+//~^ ERROR: needless `fn main` in doctest
 ///     unimplemented!();
 /// }
 /// ```
-/// 
+///
 /// This one too.
 /// ```no_run
 /// // the fn is not always the first line
+//~^ ERROR: needless `fn main` in doctest
 /// fn main() {
-//~^ needless_doctest_main
 ///     unimplemented!();
 /// }
 /// ```
@@ -38,7 +39,12 @@ fn bad_doctests() {}
 
 /// # Examples
 ///
-/// This shouldn't lint because main is async:
+/// This shouldn't lint, because the `main` is empty:
+/// ```
+/// fn main(){}
+/// ```
+///
+/// This shouldn't lint either, because main is async:
 /// ```edition2018
 /// async fn main() {
 ///     assert_eq!(42, ANSWER);
@@ -134,4 +140,7 @@ fn no_false_positives() {}
 /// ```
 fn issue_6022() {}
 
-fn main() {}
+fn main() {
+    bad_doctests();
+    no_false_positives();
+}

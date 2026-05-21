@@ -1,3 +1,3 @@
-//@ ignore-auxiliary (used by `../issue-69838-mods-relative-to-included-path.rs`)
+//@ ignore-test -- this is an auxiliary file as part of another test.
 
 pub fn i_am_in_bar() {}

@@ -42,7 +42,7 @@ old implementation structurally relates the aliases instead. This enables the
 new solver to stall equality until it is able to normalize the related aliases.
 
 The behavior of the old solver is incomplete and relies on eager normalization
-which replaces ambiguous aliases with inference variables. As this is
+which replaces ambiguous aliases with inference variables. As this is not
 not possible for aliases containing bound variables, the old implementation does
 not handle aliases inside of binders correctly, e.g. [#102048]. See the chapter on
 [normalization] for more details.
@@ -60,7 +60,7 @@ As the new implementation has to be able to eagerly handle nested goals for
 candidate selection, always doing so reduces complexity. It may also enable
 us to merge more candidates in the future.
 
-[eval-nested]: https://github.com/rust-lang/rust/blob/HEAD/compiler/rustc_trait_selection/src/traits/select/mod.rs#L1271-L1277
+[eval-nested]: https://github.com/rust-lang/rust/blob/master/compiler/rustc_trait_selection/src/traits/select/mod.rs#L1271-L1277
 [fulfill-nested]: https://github.com/rust-lang/rust/blob/df8ac8f1d74cffb96a93ae702d16e224f5b9ee8c/compiler/rustc_trait_selection/src/traits/fulfill.rs#L708-L712
 
 ### Nested goals are evaluated until reaching a fixpoint
@@ -106,4 +106,4 @@ their ambiguous nested goals are returned to the caller which then evaluates the
 See [#122687] for more details.
 
 [#122687]: https://github.com/rust-lang/rust/pull/122687
-[normalization]: ../normalization.md
+[normalization]: ./normalization.md

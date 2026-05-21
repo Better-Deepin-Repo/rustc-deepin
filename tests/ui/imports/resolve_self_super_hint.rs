@@ -1,4 +1,3 @@
-//@ edition:2015
 mod a {
     extern crate alloc;
     use alloc::HashMap;

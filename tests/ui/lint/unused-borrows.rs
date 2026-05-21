@@ -4,24 +4,24 @@ fn foo(_: i32) -> bool { todo!() }
 
 fn bar() -> &'static i32 {
     &42;
-    //~^ ERROR unused
+    //~^ unused
 
     &mut foo(42);
-    //~^ ERROR unused
+    //~^ unused
 
     &&42;
-    //~^ ERROR unused
+    //~^ unused
 
     &&mut 42;
-    //~^ ERROR unused
+    //~^ unused
 
     &mut &42;
-    //~^ ERROR unused
+    //~^ unused
 
     let _result = foo(4)
         && foo(2); // Misplaced semi-colon (perhaps due to reordering of lines)
     && foo(42);
-    //~^ ERROR unused
+    //~^ unused
 
     let _ = &42; // ok
 

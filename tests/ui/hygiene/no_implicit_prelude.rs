@@ -1,4 +1,3 @@
-//@ edition:2015
 #![feature(decl_macro)]
 
 mod foo {
@@ -9,7 +8,7 @@ mod foo {
 #[no_implicit_prelude]
 mod bar {
     pub macro m() {
-        Vec::new(); //~ ERROR cannot find
+        Vec::new(); //~ ERROR failed to resolve
         ().clone() //~ ERROR no method named `clone` found
     }
     fn f() {

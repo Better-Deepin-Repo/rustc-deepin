@@ -7,11 +7,11 @@ struct NotParam;
 #[derive(PartialEq, Eq)]
 struct CantParam(NotParam);
 
-impl std::marker::ConstParamTy_ for CantParam {}
-//~^ ERROR: the trait `ConstParamTy_` cannot be implemented for this type
+impl std::marker::UnsizedConstParamTy for CantParam {}
+//~^ error: the trait `ConstParamTy_` cannot be implemented for this type
 
-#[derive(std::marker::ConstParamTy, Eq, PartialEq)]
+#[derive(std::marker::UnsizedConstParamTy, Eq, PartialEq)]
+//~^ error: the trait `ConstParamTy_` cannot be implemented for this type
 struct CantParamDerive(NotParam);
-//~^ ERROR: the trait `ConstParamTy_` cannot be implemented for this type
 
 fn main() {}

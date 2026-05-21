@@ -4,7 +4,6 @@
 use core;
 
 use regex;
-//~^ single_component_path_imports
 
 use serde as edres;
 
@@ -31,7 +30,6 @@ fn main() {
 
 mod hello_mod {
     use regex;
-    //~^ single_component_path_imports
     #[allow(dead_code)]
     fn hello_mod() {}
 }

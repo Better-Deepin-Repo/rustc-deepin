@@ -1,8 +1,7 @@
-//@ edition:2015
 use foo::bar;
 //~^ ERROR unresolved import `foo` [E0432]
-//~| NOTE use of unresolved module or unlinked crate `foo`
-//~| HELP you might be missing a crate named `foo`
+//~| NOTE you might be missing crate `foo`
+//~| HELP consider importing the `foo` crate
 //~| SUGGESTION extern crate foo;
 
 use bar::Baz as x;
@@ -32,8 +31,6 @@ mod food {
 
     mod zug {
         pub mod baz {
-        //~^ NOTE module `food::zug::baz` exists but is inaccessible
-        //~| NOTE not accessible
             pub struct Foobar;
         }
     }

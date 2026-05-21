@@ -6,11 +6,13 @@ LL |     let a: u8 @ b = 0;
    |          |
    |          while parsing the type for `a`
 
-error: expected one of `)`, `,`, `@`, `if`, or `|`, found `:`
+error: expected one of `)`, `,`, `@`, or `|`, found `:`
   --> $DIR/nested-type-ascription-syntactically-invalid.rs:24:15
    |
 LL |     let a @ (b: u8);
-   |               ^ expected one of `)`, `,`, `@`, `if`, or `|`
+   |               ^ expected one of `)`, `,`, `@`, or `|`
+   |
+   = note: type ascription syntax has been removed, see issue #101728 <https://github.com/rust-lang/rust/issues/101728>
 
 error: expected one of `!`, `(`, `+`, `::`, `;`, `<`, or `=`, found `@`
   --> $DIR/nested-type-ascription-syntactically-invalid.rs:30:15

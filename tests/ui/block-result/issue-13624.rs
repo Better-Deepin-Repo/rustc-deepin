@@ -1,6 +1,3 @@
-//@ edition:2015
-//@ dont-require-annotations: NOTE
-
 mod a {
   pub enum Enum {
     EnumStructVariant { x: u8, y: u8, z: u8 }
@@ -9,7 +6,7 @@ mod a {
   pub fn get_enum_struct_variant() -> () {
     Enum::EnumStructVariant { x: 1, y: 2, z: 3 }
     //~^ ERROR mismatched types
-    //~| NOTE expected `()`, found `Enum`
+    //~| expected `()`, found `Enum`
   }
 }
 
@@ -22,7 +19,7 @@ mod b {
       match enum_struct_variant {
         a::Enum::EnumStructVariant { x, y, z } => {
         //~^ ERROR mismatched types
-        //~| NOTE expected `()`, found `Enum`
+        //~| expected `()`, found `Enum`
         }
       }
     }

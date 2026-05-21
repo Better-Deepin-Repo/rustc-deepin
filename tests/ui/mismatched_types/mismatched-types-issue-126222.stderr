@@ -4,6 +4,7 @@ error[E0308]: mismatched types
 LL |             x => dbg!(x),
    |                  ^^^^^^^ expected `()`, found integer
    |
+   = note: this error originates in the macro `dbg` (in Nightly builds, run with -Z macro-backtrace for more info)
 help: you might have meant to return this value
    |
 LL |             x => return dbg!(x),
@@ -15,6 +16,7 @@ error[E0308]: mismatched types
 LL |                 dbg!(x)
    |                 ^^^^^^^ expected `()`, found integer
    |
+   = note: this error originates in the macro `dbg` (in Nightly builds, run with -Z macro-backtrace for more info)
 help: you might have meant to return this value
    |
 LL |                 return dbg!(x)
@@ -26,6 +28,7 @@ error[E0308]: mismatched types
 LL |             _ => dbg!(1)
    |                  ^^^^^^^ expected `()`, found integer
    |
+   = note: this error originates in the macro `dbg` (in Nightly builds, run with -Z macro-backtrace for more info)
 help: you might have meant to return this value
    |
 LL |             _ => return dbg!(1)
@@ -37,6 +40,7 @@ error[E0308]: mismatched types
 LL |             _ => {dbg!(1)}
    |                   ^^^^^^^ expected `()`, found integer
    |
+   = note: this error originates in the macro `dbg` (in Nightly builds, run with -Z macro-backtrace for more info)
 help: you might have meant to return this value
    |
 LL |             _ => {return dbg!(1)}

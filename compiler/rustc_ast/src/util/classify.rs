@@ -108,7 +108,6 @@ pub fn leading_labeled_expr(mut expr: &ast::Expr) -> bool {
             Assign(e, _, _)
             | AssignOp(_, e, _)
             | Await(e, _)
-            | Use(e, _)
             | Binary(_, e, _)
             | Call(e, _)
             | Cast(e, _)
@@ -153,7 +152,6 @@ pub fn leading_labeled_expr(mut expr: &ast::Expr) -> bool {
             | Underscore
             | Yeet(..)
             | Yield(..)
-            | UnsafeBinderCast(..)
             | Err(..)
             | Dummy => return false,
         }
@@ -182,14 +180,11 @@ pub fn expr_trailing_brace(mut expr: &ast::Expr) -> Option<TrailingBrace<'_>> {
             | Range(_, Some(e), _)
             | Ret(Some(e))
             | Unary(_, e)
+            | Yield(Some(e))
             | Yeet(Some(e))
             | Become(e) => {
                 expr = e;
             }
-            Yield(kind) => match kind.expr() {
-                Some(e) => expr = e,
-                None => break None,
-            },
             Closure(closure) => {
                 expr = &closure.body;
             }
@@ -220,6 +215,7 @@ pub fn expr_trailing_brace(mut expr: &ast::Expr) -> Option<TrailingBrace<'_>> {
             Break(_, None)
             | Range(_, None, _)
             | Ret(None)
+            | Yield(None)
             | Array(_)
             | Call(_, _)
             | MethodCall(_)
@@ -227,7 +223,6 @@ pub fn expr_trailing_brace(mut expr: &ast::Expr) -> Option<TrailingBrace<'_>> {
             | Lit(_)
             | Type(_, _)
             | Await(_, _)
-            | Use(_, _)
             | Field(_, _)
             | Index(_, _, _)
             | Underscore
@@ -237,11 +232,8 @@ pub fn expr_trailing_brace(mut expr: &ast::Expr) -> Option<TrailingBrace<'_>> {
             | Paren(_)
             | Try(_)
             | Yeet(None)
-            | UnsafeBinderCast(..)
             | Err(_)
-            | Dummy => {
-                break None;
-            }
+            | Dummy => break None,
         }
     }
 }
@@ -255,17 +247,11 @@ fn type_trailing_braced_mac_call(mut ty: &ast::Ty) -> Option<&ast::MacCall> {
                 break (mac.args.delim == Delimiter::Brace).then_some(mac);
             }
 
-            ast::TyKind::Ptr(mut_ty)
-            | ast::TyKind::Ref(_, mut_ty)
-            | ast::TyKind::PinnedRef(_, mut_ty) => {
+            ast::TyKind::Ptr(mut_ty) | ast::TyKind::Ref(_, mut_ty) => {
                 ty = &mut_ty.ty;
             }
 
-            ast::TyKind::UnsafeBinder(binder) => {
-                ty = &binder.inner_ty;
-            }
-
-            ast::TyKind::FnPtr(fn_ty) => match &fn_ty.decl.output {
+            ast::TyKind::BareFn(fn_ty) => match &fn_ty.decl.output {
                 ast::FnRetTy::Default(_) => break None,
                 ast::FnRetTy::Ty(ret) => ty = ret,
             },
@@ -277,7 +263,7 @@ fn type_trailing_braced_mac_call(mut ty: &ast::Ty) -> Option<&ast::MacCall> {
 
             ast::TyKind::TraitObject(bounds, _) | ast::TyKind::ImplTrait(_, bounds) => {
                 match bounds.last() {
-                    Some(ast::GenericBound::Trait(bound)) => {
+                    Some(ast::GenericBound::Trait(bound, _)) => {
                         match path_return_type(&bound.trait_ref.path) {
                             Some(trailing_ty) => ty = trailing_ty,
                             None => break None,
@@ -294,12 +280,19 @@ fn type_trailing_braced_mac_call(mut ty: &ast::Ty) -> Option<&ast::MacCall> {
             | ast::TyKind::Never
             | ast::TyKind::Tup(..)
             | ast::TyKind::Paren(..)
+            | ast::TyKind::Typeof(..)
             | ast::TyKind::Infer
             | ast::TyKind::ImplicitSelf
             | ast::TyKind::CVarArgs
             | ast::TyKind::Pat(..)
             | ast::TyKind::Dummy
             | ast::TyKind::Err(..) => break None,
+
+            // These end in brace, but cannot occur in a let-else statement.
+            // They are only parsed as fields of a data structure. For the
+            // purpose of denying trailing braces in the expression of a
+            // let-else, we can disregard these.
+            ast::TyKind::AnonStruct(..) | ast::TyKind::AnonUnion(..) => break None,
         }
     }
 }

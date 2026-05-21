@@ -4,10 +4,10 @@ use std::io::Write;
 use measureme::{StringComponent, StringId};
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::profiling::SelfProfiler;
-use rustc_hir::def_id::{CrateNum, DefId, DefIndex, LOCAL_CRATE, LocalDefId};
+use rustc_hir::def_id::{CrateNum, DefId, DefIndex, LocalDefId, LOCAL_CRATE};
 use rustc_hir::definitions::DefPathData;
-use rustc_middle::query::QueryCache;
 use rustc_middle::ty::TyCtxt;
+use rustc_query_system::query::QueryCache;
 
 pub(crate) struct QueryKeyStringCache {
     def_id_cache: FxHashMap<DefId, StringId>,
@@ -19,18 +19,18 @@ impl QueryKeyStringCache {
     }
 }
 
-struct QueryKeyStringBuilder<'a, 'tcx> {
-    profiler: &'a SelfProfiler,
+struct QueryKeyStringBuilder<'p, 'tcx> {
+    profiler: &'p SelfProfiler,
     tcx: TyCtxt<'tcx>,
-    string_cache: &'a mut QueryKeyStringCache,
+    string_cache: &'p mut QueryKeyStringCache,
 }
 
-impl<'a, 'tcx> QueryKeyStringBuilder<'a, 'tcx> {
+impl<'p, 'tcx> QueryKeyStringBuilder<'p, 'tcx> {
     fn new(
-        profiler: &'a SelfProfiler,
+        profiler: &'p SelfProfiler,
         tcx: TyCtxt<'tcx>,
-        string_cache: &'a mut QueryKeyStringCache,
-    ) -> QueryKeyStringBuilder<'a, 'tcx> {
+        string_cache: &'p mut QueryKeyStringCache,
+    ) -> QueryKeyStringBuilder<'p, 'tcx> {
         QueryKeyStringBuilder { profiler, tcx, string_cache }
     }
 
@@ -252,12 +252,9 @@ pub fn alloc_self_profile_query_strings(tcx: TyCtxt<'_>) {
         return;
     }
 
-    let _prof_timer = tcx.sess.prof.generic_activity("self_profile_alloc_query_strings");
-
     let mut string_cache = QueryKeyStringCache::new();
 
     for alloc in super::ALLOC_SELF_PROFILE_QUERY_STRINGS.iter() {
         alloc(tcx, &mut string_cache)
     }
-    tcx.sess.prof.store_query_cache_hits();
 }

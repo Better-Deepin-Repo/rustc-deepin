@@ -2,7 +2,7 @@ use rustc_index::IndexSlice;
 use rustc_infer::infer::NllRegionVariableOrigin;
 use rustc_middle::mir::visit::{MutVisitor, TyContext};
 use rustc_middle::mir::{Body, ConstOperand, Location, Promoted};
-use rustc_middle::ty::{self, GenericArgsRef, Ty, TyCtxt, TypeFoldable, fold_regions};
+use rustc_middle::ty::{self, GenericArgsRef, Ty, TyCtxt, TypeFoldable};
 use rustc_span::Symbol;
 use tracing::{debug, instrument};
 
@@ -11,7 +11,7 @@ use crate::BorrowckInferCtxt;
 /// Replaces all free regions appearing in the MIR with fresh
 /// inference variables, returning the number of variables created.
 #[instrument(skip(infcx, body, promoted), level = "debug")]
-pub(crate) fn renumber_mir<'tcx>(
+pub fn renumber_mir<'tcx>(
     infcx: &BorrowckInferCtxt<'tcx>,
     body: &mut Body<'tcx>,
     promoted: &mut IndexSlice<Promoted, Body<'tcx>>,
@@ -21,10 +21,10 @@ pub(crate) fn renumber_mir<'tcx>(
     let mut renumberer = RegionRenumberer { infcx };
 
     for body in promoted.iter_mut() {
-        renumberer.visit_body_preserves_cfg(body);
+        renumberer.visit_body(body);
     }
 
-    renumberer.visit_body_preserves_cfg(body);
+    renumberer.visit_body(body);
 }
 
 // The fields are used only for debugging output in `sccs_info`.
@@ -33,6 +33,7 @@ pub(crate) enum RegionCtxt {
     Location(Location),
     TyContext(TyContext),
     Free(Symbol),
+    Bound(Symbol),
     LateBound(Symbol),
     Existential(Option<Symbol>),
     Placeholder(Symbol),
@@ -66,8 +67,8 @@ impl<'a, 'tcx> RegionRenumberer<'a, 'tcx> {
         T: TypeFoldable<TyCtxt<'tcx>>,
         F: Fn() -> RegionCtxt,
     {
-        let origin = NllRegionVariableOrigin::Existential { name: None };
-        fold_regions(self.infcx.tcx, value, |_region, _depth| {
+        let origin = NllRegionVariableOrigin::Existential { from_forall: false };
+        self.infcx.tcx.fold_regions(value, |_region, _depth| {
             self.infcx.next_nll_region_var(origin, || region_ctxt_fn())
         })
     }

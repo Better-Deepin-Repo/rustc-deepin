@@ -12,6 +12,7 @@ use crate::traits;
 
 #[derive(Copy, Clone, Debug)]
 pub enum FutureCompatOverlapErrorKind {
+    OrderDepTraitObjects,
     LeakCheck,
 }
 
@@ -38,9 +39,9 @@ enum Inserted<'tcx> {
 impl<'tcx> Children {
     /// Insert an impl into this set of children without comparing to any existing impls.
     fn insert_blindly(&mut self, tcx: TyCtxt<'tcx>, impl_def_id: DefId) {
-        let trait_ref = tcx.impl_trait_ref(impl_def_id).skip_binder();
+        let trait_ref = tcx.impl_trait_ref(impl_def_id).unwrap().skip_binder();
         if let Some(st) =
-            fast_reject::simplify_type(tcx, trait_ref.self_ty(), TreatParams::InstantiateWithInfer)
+            fast_reject::simplify_type(tcx, trait_ref.self_ty(), TreatParams::AsCandidateKey)
         {
             debug!("insert_blindly: impl_def_id={:?} st={:?}", impl_def_id, st);
             self.non_blanket_impls.entry(st).or_default().push(impl_def_id)
@@ -54,10 +55,10 @@ impl<'tcx> Children {
     /// an impl with a parent. The impl must be present in the list of
     /// children already.
     fn remove_existing(&mut self, tcx: TyCtxt<'tcx>, impl_def_id: DefId) {
-        let trait_ref = tcx.impl_trait_ref(impl_def_id).skip_binder();
+        let trait_ref = tcx.impl_trait_ref(impl_def_id).unwrap().skip_binder();
         let vec: &mut Vec<DefId>;
         if let Some(st) =
-            fast_reject::simplify_type(tcx, trait_ref.self_ty(), TreatParams::InstantiateWithInfer)
+            fast_reject::simplify_type(tcx, trait_ref.self_ty(), TreatParams::AsCandidateKey)
         {
             debug!("remove_existing: impl_def_id={:?} st={:?}", impl_def_id, st);
             vec = self.non_blanket_impls.get_mut(&st).unwrap();
@@ -113,7 +114,7 @@ impl<'tcx> Children {
                 // Found overlap, but no specialization; error out or report future-compat warning.
 
                 // Do we *still* get overlap if we disable the future-incompatible modes?
-                let should_err = traits::overlapping_trait_impls(
+                let should_err = traits::overlapping_impls(
                     tcx,
                     possible_sibling,
                     impl_def_id,
@@ -137,7 +138,7 @@ impl<'tcx> Children {
             };
 
             let last_lint_mut = &mut last_lint;
-            let (le, ge) = traits::overlapping_trait_impls(
+            let (le, ge) = traits::overlapping_impls(
                 tcx,
                 possible_sibling,
                 impl_def_id,
@@ -150,6 +151,12 @@ impl<'tcx> Children {
                 {
                     match overlap_kind {
                         ty::ImplOverlapKind::Permitted { marker: _ } => {}
+                        ty::ImplOverlapKind::FutureCompatOrderDepTraitObjects => {
+                            *last_lint_mut = Some(FutureCompatOverlapError {
+                                error: create_overlap_error(overlap),
+                                kind: FutureCompatOverlapErrorKind::OrderDepTraitObjects,
+                            });
+                        }
                     }
 
                     return Ok((false, false));
@@ -164,7 +171,7 @@ impl<'tcx> Children {
             if le && !ge {
                 debug!(
                     "descending as child of TraitRef {:?}",
-                    tcx.impl_trait_ref(possible_sibling).instantiate_identity()
+                    tcx.impl_trait_ref(possible_sibling).unwrap().instantiate_identity()
                 );
 
                 // The impl specializes `possible_sibling`.
@@ -172,7 +179,7 @@ impl<'tcx> Children {
             } else if ge && !le {
                 debug!(
                     "placing as parent of TraitRef {:?}",
-                    tcx.impl_trait_ref(possible_sibling).instantiate_identity()
+                    tcx.impl_trait_ref(possible_sibling).unwrap().instantiate_identity()
                 );
 
                 replace_children.push(possible_sibling);
@@ -193,12 +200,15 @@ impl<'tcx> Children {
     }
 }
 
-fn iter_children(children: &Children) -> impl Iterator<Item = DefId> {
+fn iter_children(children: &Children) -> impl Iterator<Item = DefId> + '_ {
     let nonblanket = children.non_blanket_impls.iter().flat_map(|(_, v)| v.iter());
     children.blanket_impls.iter().chain(nonblanket).cloned()
 }
 
-fn filtered_children(children: &mut Children, st: SimplifiedType) -> impl Iterator<Item = DefId> {
+fn filtered_children(
+    children: &mut Children,
+    st: SimplifiedType,
+) -> impl Iterator<Item = DefId> + '_ {
     let nonblanket = children.non_blanket_impls.entry(st).or_default().iter();
     children.blanket_impls.iter().chain(nonblanket).cloned()
 }
@@ -242,7 +252,7 @@ impl<'tcx> Graph {
         assert!(impl_def_id.is_local());
 
         // FIXME: use `EarlyBinder` in `self.children`
-        let trait_ref = tcx.impl_trait_ref(impl_def_id).skip_binder();
+        let trait_ref = tcx.impl_trait_ref(impl_def_id).unwrap().skip_binder();
         let trait_def_id = trait_ref.def_id;
 
         debug!(
@@ -269,10 +279,12 @@ impl<'tcx> Graph {
         let mut parent = trait_def_id;
         let mut last_lint = None;
         let simplified =
-            fast_reject::simplify_type(tcx, trait_ref.self_ty(), TreatParams::InstantiateWithInfer);
+            fast_reject::simplify_type(tcx, trait_ref.self_ty(), TreatParams::AsCandidateKey);
 
         // Descend the specialization tree, where `parent` is the current parent node.
         loop {
+            use self::Inserted::*;
+
             let insert_result = self.children.entry(parent).or_default().insert(
                 tcx,
                 impl_def_id,
@@ -281,11 +293,11 @@ impl<'tcx> Graph {
             )?;
 
             match insert_result {
-                Inserted::BecameNewSibling(opt_lint) => {
+                BecameNewSibling(opt_lint) => {
                     last_lint = opt_lint;
                     break;
                 }
-                Inserted::ReplaceChildren(grand_children_to_be) => {
+                ReplaceChildren(grand_children_to_be) => {
                     // We currently have
                     //
                     //     P
@@ -324,7 +336,7 @@ impl<'tcx> Graph {
                     }
                     break;
                 }
-                Inserted::ShouldRecurseOn(new_parent) => {
+                ShouldRecurseOn(new_parent) => {
                     parent = new_parent;
                 }
             }
@@ -354,7 +366,7 @@ pub(crate) fn assoc_def(
     impl_def_id: DefId,
     assoc_def_id: DefId,
 ) -> Result<LeafDef, ErrorGuaranteed> {
-    let trait_def_id = tcx.impl_trait_id(impl_def_id);
+    let trait_def_id = tcx.trait_id_of_impl(impl_def_id).unwrap();
     let trait_def = tcx.trait_def(trait_def_id);
 
     // This function may be called while we are still building the
@@ -364,12 +376,6 @@ pub(crate) fn assoc_def(
     // If there is no such item in that impl, this function will fail with a
     // cycle error if the specialization graph is currently being built.
     if let Some(&impl_item_id) = tcx.impl_item_implementor_ids(impl_def_id).get(&assoc_def_id) {
-        // Ensure that the impl is constrained, otherwise projection may give us
-        // bad unconstrained infer vars.
-        if let Some(impl_def_id) = impl_def_id.as_local() {
-            tcx.ensure_ok().enforce_impl_non_lifetime_params_are_constrained(impl_def_id)?;
-        }
-
         let item = tcx.associated_item(impl_item_id);
         let impl_node = Node::Impl(impl_def_id);
         return Ok(LeafDef {
@@ -385,14 +391,6 @@ pub(crate) fn assoc_def(
 
     let ancestors = trait_def.ancestors(tcx, impl_def_id)?;
     if let Some(assoc_item) = ancestors.leaf_def(tcx, assoc_def_id) {
-        // Ensure that the impl is constrained, otherwise projection may give us
-        // bad unconstrained infer vars.
-        if let ty::AssocContainer::TraitImpl(_) = assoc_item.item.container
-            && let Some(impl_def_id) = assoc_item.item.container_id(tcx).as_local()
-        {
-            tcx.ensure_ok().enforce_impl_non_lifetime_params_are_constrained(impl_def_id)?;
-        }
-
         Ok(assoc_item)
     } else {
         // This is saying that neither the trait nor

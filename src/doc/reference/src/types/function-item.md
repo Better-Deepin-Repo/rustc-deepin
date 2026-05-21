@@ -1,16 +1,20 @@
-r[type.fn-item]
 # Function item types
 
-r[type.fn-item.intro]
-When referred to, a function item, or the constructor of a tuple-like struct or enum variant, yields a zero-sized value of its _function item type_.
+When referred to, a function item, or the constructor of a tuple-like struct or
+enum variant, yields a zero-sized value of its _function item type_. That type
+explicitly identifies the function - its name, its type arguments, and its
+early-bound lifetime arguments (but not its late-bound lifetime arguments,
+which are only assigned when the function is called) - so the value does not
+need to contain an actual function pointer, and no indirection is needed when
+the function is called.
 
-r[type.fn-item.unique]
-That type explicitly identifies the function - its name, its type arguments, and its early-bound lifetime arguments (but not its late-bound lifetime arguments, which are only assigned when the function is called) - so the value does not need to contain an actual function pointer, and no indirection is needed when the function is called.
+There is no syntax that directly refers to a function item type, but the
+compiler will display the type as something like `fn(u32) -> i32 {fn_name}` in
+error messages.
 
-r[type.fn-item.name]
-There is no syntax that directly refers to a function item type, but the compiler will display the type as something like `fn(u32) -> i32 {fn_name}` in error messages.
-
-Because the function item type explicitly identifies the function, the item types of different functions - different items, or the same item with different generics - are distinct, and mixing them will create a type error:
+Because the function item type explicitly identifies the function, the item
+types of different functions - different items, or the same item with different
+generics - are distinct, and mixing them will create a type error:
 
 ```rust,compile_fail,E0308
 fn foo<T>() { }
@@ -18,8 +22,11 @@ let x = &mut foo::<i32>;
 *x = foo::<u32>; //~ ERROR mismatched types
 ```
 
-r[type.fn-item.coercion]
-However, there is a [coercion] from function items to [function pointers] with the same signature, which is triggered not only when a function item is used when a function pointer is directly expected, but also when different function item types with the same signature meet in different arms of the same `if` or `match`:
+However, there is a [coercion] from function items to [function pointers] with
+the same signature, which is triggered not only when a function item is used
+when a function pointer is directly expected, but also when different function
+item types with the same signature meet in different arms of the same `if` or
+`match`:
 
 ```rust
 # let want_i32 = false;
@@ -36,14 +43,8 @@ let foo_ptr_2 = if want_i32 {
 };
 ```
 
-r[type.fn-item.traits]
-All function items implement [`Copy`], [`Clone`], [`Send`], and [`Sync`].
-
-[`Fn`], [`FnMut`], and [`FnOnce`] are implemented unless the function has any of the following:
-
-- an [`unsafe`][unsafe.fn] qualifier
-- a [`target_feature` attribute][attributes.codegen.target_feature]
-- an [ABI][items.fn.extern] other than `"Rust"`
+All function items implement [`Fn`], [`FnMut`], [`FnOnce`], [`Copy`],
+[`Clone`], [`Send`], and [`Sync`].
 
 [`Clone`]: ../special-types-and-traits.md#clone
 [`Copy`]: ../special-types-and-traits.md#copy

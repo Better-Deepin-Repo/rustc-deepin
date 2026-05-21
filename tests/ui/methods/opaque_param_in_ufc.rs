@@ -11,13 +11,11 @@ impl Foo<u32> {
 
 type Bar = impl Sized;
 
-#[define_opaque(Bar)]
 fn bar() -> Bar {
     42_u32
 }
 
 impl Foo<Bar> {
-    #[define_opaque(Bar)]
     fn foo() -> Bar {
         Self::method();
         Foo::<Bar>::method();

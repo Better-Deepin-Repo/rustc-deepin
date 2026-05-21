@@ -1,4 +1,4 @@
-//@ proc-macro: issue-91763-aux.rs
+//@ aux-build:issue-91763-aux.rs
 
 #![deny(elided_lifetimes_in_paths)]
 

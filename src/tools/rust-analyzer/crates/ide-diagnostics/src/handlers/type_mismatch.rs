@@ -1,26 +1,23 @@
 use either::Either;
-use hir::{CallableKind, ClosureStyle, HirDisplay, InFile, db::ExpandDatabase};
-use ide_db::{
-    famous_defs::FamousDefs,
-    source_change::{SourceChange, SourceChangeBuilder},
-    text_edit::TextEdit,
-};
+use hir::{db::ExpandDatabase, ClosureStyle, HirDisplay, HirFileIdExt, InFile, Type};
+use ide_db::{famous_defs::FamousDefs, source_change::SourceChange};
 use syntax::{
-    AstNode, AstPtr, TextSize,
     ast::{
-        self, BlockExpr, Expr, ExprStmt, HasArgList,
+        self,
         edit::{AstNodeEdit, IndentLevel},
-        syntax_factory::SyntaxFactory,
+        BlockExpr, Expr, ExprStmt,
     },
+    AstNode, AstPtr, TextSize,
 };
+use text_edit::TextEdit;
 
-use crate::{Assist, Diagnostic, DiagnosticCode, DiagnosticsContext, adjusted_display_range, fix};
+use crate::{adjusted_display_range, fix, Assist, Diagnostic, DiagnosticCode, DiagnosticsContext};
 
 // Diagnostic: type-mismatch
 //
 // This diagnostic is triggered when the type of an expression or pattern does not match
 // the expected type.
-pub(crate) fn type_mismatch(ctx: &DiagnosticsContext<'_>, d: &hir::TypeMismatch<'_>) -> Diagnostic {
+pub(crate) fn type_mismatch(ctx: &DiagnosticsContext<'_>, d: &hir::TypeMismatch) -> Diagnostic {
     let display_range = adjusted_display_range(ctx, d.expr_or_pat, &|node| {
         let Either::Left(expr) = node else { return None };
         let salient_token_range = match expr {
@@ -39,48 +36,54 @@ pub(crate) fn type_mismatch(ctx: &DiagnosticsContext<'_>, d: &hir::TypeMismatch<
         cov_mark::hit!(type_mismatch_range_adjustment);
         Some(salient_token_range)
     });
-    Diagnostic::new(
+    let mut diag = Diagnostic::new(
         DiagnosticCode::RustcHardError("E0308"),
         format!(
             "expected {}, found {}",
             d.expected
-                .display(ctx.sema.db, ctx.display_target)
+                .display(ctx.sema.db, ctx.edition)
                 .with_closure_style(ClosureStyle::ClosureWithId),
             d.actual
-                .display(ctx.sema.db, ctx.display_target)
+                .display(ctx.sema.db, ctx.edition)
                 .with_closure_style(ClosureStyle::ClosureWithId),
         ),
         display_range,
     )
-    .stable()
-    .with_fixes(fixes(ctx, d))
+    .with_fixes(fixes(ctx, d));
+    if diag.fixes.is_none() {
+        diag.experimental = true;
+    }
+    diag
 }
 
-fn fixes(ctx: &DiagnosticsContext<'_>, d: &hir::TypeMismatch<'_>) -> Option<Vec<Assist>> {
+fn fixes(ctx: &DiagnosticsContext<'_>, d: &hir::TypeMismatch) -> Option<Vec<Assist>> {
     let mut fixes = Vec::new();
 
     if let Some(expr_ptr) = d.expr_or_pat.value.cast::<ast::Expr>() {
         let expr_ptr = &InFile { file_id: d.expr_or_pat.file_id, value: expr_ptr };
         add_reference(ctx, d, expr_ptr, &mut fixes);
         add_missing_ok_or_some(ctx, d, expr_ptr, &mut fixes);
-        remove_unnecessary_wrapper(ctx, d, expr_ptr, &mut fixes);
         remove_semicolon(ctx, d, expr_ptr, &mut fixes);
         str_ref_to_owned(ctx, d, expr_ptr, &mut fixes);
     }
 
-    if fixes.is_empty() { None } else { Some(fixes) }
+    if fixes.is_empty() {
+        None
+    } else {
+        Some(fixes)
+    }
 }
 
 fn add_reference(
     ctx: &DiagnosticsContext<'_>,
-    d: &hir::TypeMismatch<'_>,
+    d: &hir::TypeMismatch,
     expr_ptr: &InFile<AstPtr<ast::Expr>>,
     acc: &mut Vec<Assist>,
 ) -> Option<()> {
     let range = ctx.sema.diagnostics_display_range((*expr_ptr).map(|it| it.into()));
 
     let (_, mutability) = d.expected.as_reference()?;
-    let actual_with_ref = d.actual.add_reference(mutability);
+    let actual_with_ref = Type::reference(&d.actual, mutability);
     if !actual_with_ref.could_coerce_to(ctx.sema.db, &d.expected) {
         return None;
     }
@@ -95,7 +98,7 @@ fn add_reference(
 
 fn add_missing_ok_or_some(
     ctx: &DiagnosticsContext<'_>,
-    d: &hir::TypeMismatch<'_>,
+    d: &hir::TypeMismatch,
     expr_ptr: &InFile<AstPtr<ast::Expr>>,
     acc: &mut Vec<Assist>,
 ) -> Option<()> {
@@ -127,7 +130,6 @@ fn add_missing_ok_or_some(
     if d.actual.is_unit() {
         if let Expr::BlockExpr(block) = &expr {
             if block.tail_expr().is_none() {
-                // Fix for forms like `fn foo() -> Result<(), String> {}`
                 let mut builder = TextEdit::builder();
                 let block_indent = block.indent_level();
 
@@ -147,24 +149,10 @@ fn add_missing_ok_or_some(
                 }
 
                 let source_change = SourceChange::from_text_edit(
-                    expr_ptr.file_id.original_file(ctx.sema.db).file_id(ctx.sema.db),
+                    expr_ptr.file_id.original_file(ctx.sema.db),
                     builder.finish(),
                 );
                 let name = format!("Insert {variant_name}(()) as the tail of this block");
-                acc.push(fix("insert_wrapped_unit", &name, source_change, expr_range));
-            }
-            return Some(());
-        } else if let Expr::ReturnExpr(ret_expr) = &expr {
-            // Fix for forms like `fn foo() -> Result<(), String> { return; }`
-            if ret_expr.expr().is_none() {
-                let mut builder = TextEdit::builder();
-                builder
-                    .insert(ret_expr.syntax().text_range().end(), format!(" {variant_name}(())"));
-                let source_change = SourceChange::from_text_edit(
-                    expr_ptr.file_id.original_file(ctx.sema.db).file_id(ctx.sema.db),
-                    builder.finish(),
-                );
-                let name = format!("Insert {variant_name}(()) as the return value");
                 acc.push(fix("insert_wrapped_unit", &name, source_change, expr_range));
             }
             return Some(());
@@ -174,101 +162,16 @@ fn add_missing_ok_or_some(
     let mut builder = TextEdit::builder();
     builder.insert(expr.syntax().text_range().start(), format!("{variant_name}("));
     builder.insert(expr.syntax().text_range().end(), ")".to_owned());
-    let source_change = SourceChange::from_text_edit(
-        expr_ptr.file_id.original_file(ctx.sema.db).file_id(ctx.sema.db),
-        builder.finish(),
-    );
+    let source_change =
+        SourceChange::from_text_edit(expr_ptr.file_id.original_file(ctx.sema.db), builder.finish());
     let name = format!("Wrap in {variant_name}");
     acc.push(fix("wrap_in_constructor", &name, source_change, expr_range));
     Some(())
 }
 
-fn remove_unnecessary_wrapper(
-    ctx: &DiagnosticsContext<'_>,
-    d: &hir::TypeMismatch<'_>,
-    expr_ptr: &InFile<AstPtr<ast::Expr>>,
-    acc: &mut Vec<Assist>,
-) -> Option<()> {
-    let db = ctx.sema.db;
-    let root = db.parse_or_expand(expr_ptr.file_id);
-    let expr = expr_ptr.value.to_node(&root);
-    let expr = ctx.sema.original_ast_node(expr)?;
-
-    let Expr::CallExpr(call_expr) = expr else {
-        return None;
-    };
-
-    let callable = ctx.sema.resolve_expr_as_callable(&call_expr.expr()?)?;
-    let CallableKind::TupleEnumVariant(variant) = callable.kind() else {
-        return None;
-    };
-
-    let actual_enum = d.actual.as_adt()?.as_enum()?;
-    let famous_defs = FamousDefs(&ctx.sema, ctx.sema.scope(call_expr.syntax())?.krate());
-    let core_option = famous_defs.core_option_Option();
-    let core_result = famous_defs.core_result_Result();
-    if Some(actual_enum) != core_option && Some(actual_enum) != core_result {
-        return None;
-    }
-
-    let inner_type = variant.fields(db).first()?.ty_with_args(db, d.actual.type_arguments());
-    if !d.expected.could_unify_with(db, &inner_type) {
-        return None;
-    }
-
-    let inner_arg = call_expr.arg_list()?.args().next()?;
-
-    let file_id = expr_ptr.file_id.original_file(db);
-    let mut builder = SourceChangeBuilder::new(file_id.file_id(ctx.sema.db));
-    let mut editor;
-    match inner_arg {
-        // We're returning `()`
-        Expr::TupleExpr(tup) if tup.fields().next().is_none() => {
-            let parent = call_expr
-                .syntax()
-                .parent()
-                .and_then(Either::<ast::ReturnExpr, ast::StmtList>::cast)?;
-
-            editor = builder.make_editor(parent.syntax());
-            let make = SyntaxFactory::with_mappings();
-
-            match parent {
-                Either::Left(ret_expr) => {
-                    editor.replace(ret_expr.syntax(), make.expr_return(None).syntax());
-                }
-                Either::Right(stmt_list) => {
-                    let new_block = if stmt_list.statements().next().is_none() {
-                        make.expr_empty_block()
-                    } else {
-                        make.block_expr(stmt_list.statements(), None)
-                    };
-
-                    editor.replace(stmt_list.syntax().parent()?, new_block.syntax());
-                }
-            }
-
-            editor.add_mappings(make.finish_with_mappings());
-        }
-        _ => {
-            editor = builder.make_editor(call_expr.syntax());
-            editor.replace(call_expr.syntax(), inner_arg.syntax());
-        }
-    }
-
-    builder.add_file_edits(file_id.file_id(ctx.sema.db), editor);
-    let name = format!("Remove unnecessary {}() wrapper", variant.name(db).as_str());
-    acc.push(fix(
-        "remove_unnecessary_wrapper",
-        &name,
-        builder.finish(),
-        call_expr.syntax().text_range(),
-    ));
-    Some(())
-}
-
 fn remove_semicolon(
     ctx: &DiagnosticsContext<'_>,
-    d: &hir::TypeMismatch<'_>,
+    d: &hir::TypeMismatch,
     expr_ptr: &InFile<AstPtr<ast::Expr>>,
     acc: &mut Vec<Assist>,
 ) -> Option<()> {
@@ -287,10 +190,8 @@ fn remove_semicolon(
     let semicolon_range = expr_before_semi.semicolon_token()?.text_range();
 
     let edit = TextEdit::delete(semicolon_range);
-    let source_change = SourceChange::from_text_edit(
-        expr_ptr.file_id.original_file(ctx.sema.db).file_id(ctx.sema.db),
-        edit,
-    );
+    let source_change =
+        SourceChange::from_text_edit(expr_ptr.file_id.original_file(ctx.sema.db), edit);
 
     acc.push(fix("remove_semicolon", "Remove this semicolon", source_change, semicolon_range));
     Some(())
@@ -298,14 +199,15 @@ fn remove_semicolon(
 
 fn str_ref_to_owned(
     ctx: &DiagnosticsContext<'_>,
-    d: &hir::TypeMismatch<'_>,
+    d: &hir::TypeMismatch,
     expr_ptr: &InFile<AstPtr<ast::Expr>>,
     acc: &mut Vec<Assist>,
 ) -> Option<()> {
-    let expected = d.expected.display(ctx.sema.db, ctx.display_target);
+    let expected = d.expected.display(ctx.sema.db, ctx.edition);
+    let actual = d.actual.display(ctx.sema.db, ctx.edition);
+
     // FIXME do this properly
-    let is_applicable = d.actual.strip_reference().is_str() && expected.to_string() == "String";
-    if !is_applicable {
+    if expected.to_string() != "String" || actual.to_string() != "&str" {
         return None;
     }
 
@@ -316,10 +218,8 @@ fn str_ref_to_owned(
     let to_owned = ".to_owned()".to_owned();
 
     let edit = TextEdit::insert(expr.syntax().text_range().end(), to_owned);
-    let source_change = SourceChange::from_text_edit(
-        expr_ptr.file_id.original_file(ctx.sema.db).file_id(ctx.sema.db),
-        edit,
-    );
+    let source_change =
+        SourceChange::from_text_edit(expr_ptr.file_id.original_file(ctx.sema.db), edit);
     acc.push(fix("str_ref_to_owned", "Add .to_owned() here", source_change, expr_range));
 
     Some(())
@@ -328,7 +228,7 @@ fn str_ref_to_owned(
 #[cfg(test)]
 mod tests {
     use crate::tests::{
-        check_diagnostics, check_diagnostics_with_disabled, check_fix, check_has_fix, check_no_fix,
+        check_diagnostics, check_diagnostics_with_disabled, check_fix, check_no_fix,
     };
 
     #[test]
@@ -345,7 +245,7 @@ fn test(_arg: &i32) {}
     }
 
     #[test]
-    fn add_reference_to_int() {
+    fn test_add_reference_to_int() {
         check_fix(
             r#"
 fn main() {
@@ -363,7 +263,7 @@ fn test(_arg: &i32) {}
     }
 
     #[test]
-    fn add_mutable_reference_to_int() {
+    fn test_add_mutable_reference_to_int() {
         check_fix(
             r#"
 fn main() {
@@ -381,7 +281,7 @@ fn test(_arg: &mut i32) {}
     }
 
     #[test]
-    fn add_reference_to_array() {
+    fn test_add_reference_to_array() {
         check_fix(
             r#"
 //- minicore: coerce_unsized
@@ -400,7 +300,7 @@ fn test(_arg: &[i32]) {}
     }
 
     #[test]
-    fn add_reference_with_autoderef() {
+    fn test_add_reference_with_autoderef() {
         check_fix(
             r#"
 //- minicore: coerce_unsized, deref
@@ -433,7 +333,7 @@ fn test(_arg: &Bar) {}
     }
 
     #[test]
-    fn add_reference_to_method_call() {
+    fn test_add_reference_to_method_call() {
         check_fix(
             r#"
 fn main() {
@@ -457,7 +357,7 @@ impl Test {
     }
 
     #[test]
-    fn add_reference_to_let_stmt() {
+    fn test_add_reference_to_let_stmt() {
         check_fix(
             r#"
 fn main() {
@@ -473,7 +373,7 @@ fn main() {
     }
 
     #[test]
-    fn add_reference_to_macro_call() {
+    fn test_add_reference_to_macro_call() {
         check_fix(
             r#"
 macro_rules! thousand {
@@ -501,7 +401,7 @@ fn main() {
     }
 
     #[test]
-    fn add_mutable_reference_to_let_stmt() {
+    fn test_add_mutable_reference_to_let_stmt() {
         check_fix(
             r#"
 fn main() {
@@ -517,61 +417,7 @@ fn main() {
     }
 
     #[test]
-    fn const_generic_type_mismatch() {
-        check_diagnostics(
-            r#"
-            pub struct Rate<const N: u32>;
-            fn f<const N: u64>() -> Rate<N> { // FIXME: add some error
-                loop {}
-            }
-            fn run(_t: Rate<5>) {
-            }
-            fn main() {
-                run(f())
-            }
-"#,
-        );
-    }
-
-    #[test]
-    fn const_generic_unknown() {
-        check_diagnostics(
-            r#"
-            pub struct Rate<T, const NOM: u32, const DENOM: u32>(T);
-            fn run(_t: Rate<u32, 1, 1>) {
-            }
-            fn main() {
-                run(Rate::<_, _, _>(5));
-            }
-"#,
-        );
-    }
-
-    #[test]
-    fn wrap_return_type() {
-        check_fix(
-            r#"
-//- minicore: option, result
-fn div(x: i32, y: i32) -> Result<i32, ()> {
-    if y == 0 {
-        return Err(());
-    }
-    x / y$0
-}
-"#,
-            r#"
-fn div(x: i32, y: i32) -> Result<i32, ()> {
-    if y == 0 {
-        return Err(());
-    }
-    Ok(x / y)
-}
-"#,
-        );
-    }
-
-    #[test]
-    fn wrap_return_type_option() {
+    fn test_wrap_return_type_option() {
         check_fix(
             r#"
 //- minicore: option, result
@@ -594,7 +440,39 @@ fn div(x: i32, y: i32) -> Option<i32> {
     }
 
     #[test]
-    fn wrap_return_type_option_tails() {
+    fn const_generic_type_mismatch() {
+        check_diagnostics(
+            r#"
+            pub struct Rate<const N: u32>;
+            fn f<const N: u64>() -> Rate<N> { // FIXME: add some error
+                loop {}
+            }
+            fn run(_t: Rate<5>) {
+            }
+            fn main() {
+                run(f()) // FIXME: remove this error
+                  //^^^ error: expected Rate<5>, found Rate<_>
+            }
+"#,
+        );
+    }
+
+    #[test]
+    fn const_generic_unknown() {
+        check_diagnostics(
+            r#"
+            pub struct Rate<T, const NOM: u32, const DENOM: u32>(T);
+            fn run(_t: Rate<u32, 1, 1>) {
+            }
+            fn main() {
+                run(Rate::<_, _, _>(5));
+            }
+"#,
+        );
+    }
+
+    #[test]
+    fn test_wrap_return_type_option_tails() {
         check_fix(
             r#"
 //- minicore: option, result
@@ -623,7 +501,30 @@ fn div(x: i32, y: i32) -> Option<i32> {
     }
 
     #[test]
-    fn wrap_return_type_handles_generic_functions() {
+    fn test_wrap_return_type() {
+        check_fix(
+            r#"
+//- minicore: option, result
+fn div(x: i32, y: i32) -> Result<i32, ()> {
+    if y == 0 {
+        return Err(());
+    }
+    x / y$0
+}
+"#,
+            r#"
+fn div(x: i32, y: i32) -> Result<i32, ()> {
+    if y == 0 {
+        return Err(());
+    }
+    Ok(x / y)
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn test_wrap_return_type_handles_generic_functions() {
         check_fix(
             r#"
 //- minicore: option, result
@@ -646,7 +547,7 @@ fn div<T>(x: T) -> Result<T, i32> {
     }
 
     #[test]
-    fn wrap_return_type_handles_type_aliases() {
+    fn test_wrap_return_type_handles_type_aliases() {
         check_fix(
             r#"
 //- minicore: option, result
@@ -673,7 +574,7 @@ fn div(x: i32, y: i32) -> MyResult<i32> {
     }
 
     #[test]
-    fn wrapped_unit_as_block_tail_expr() {
+    fn test_wrapped_unit_as_block_tail_expr() {
         check_fix(
             r#"
 //- minicore: result
@@ -703,30 +604,7 @@ fn foo() -> Result<(), ()> {
     }
 
     #[test]
-    fn wrapped_unit_as_return_expr() {
-        check_fix(
-            r#"
-//- minicore: result
-fn foo(b: bool) -> Result<(), String> {
-    if b {
-        return$0;
-    }
-
-    Err("oh dear".to_owned())
-}"#,
-            r#"
-fn foo(b: bool) -> Result<(), String> {
-    if b {
-        return Ok(());
-    }
-
-    Err("oh dear".to_owned())
-}"#,
-        );
-    }
-
-    #[test]
-    fn wrap_in_const_and_static() {
+    fn test_in_const_and_static() {
         check_fix(
             r#"
 //- minicore: option, result
@@ -748,7 +626,7 @@ const _: Option<()> = {Some(())};
     }
 
     #[test]
-    fn wrap_return_type_not_applicable_when_expr_type_does_not_match_ok_type() {
+    fn test_wrap_return_type_not_applicable_when_expr_type_does_not_match_ok_type() {
         check_no_fix(
             r#"
 //- minicore: option, result
@@ -758,261 +636,13 @@ fn foo() -> Result<(), i32> { 0$0 }
     }
 
     #[test]
-    fn wrap_return_type_not_applicable_when_return_type_is_not_result_or_option() {
+    fn test_wrap_return_type_not_applicable_when_return_type_is_not_result_or_option() {
         check_no_fix(
             r#"
 //- minicore: option, result
 enum SomeOtherEnum { Ok(i32), Err(String) }
 
 fn foo() -> SomeOtherEnum { 0$0 }
-"#,
-        );
-    }
-
-    #[test]
-    fn unwrap_return_type() {
-        check_fix(
-            r#"
-//- minicore: option, result
-fn div(x: i32, y: i32) -> i32 {
-    if y == 0 {
-        panic!();
-    }
-    Ok(x / y)$0
-}
-"#,
-            r#"
-fn div(x: i32, y: i32) -> i32 {
-    if y == 0 {
-        panic!();
-    }
-    x / y
-}
-"#,
-        );
-    }
-
-    #[test]
-    fn unwrap_return_type_option() {
-        check_fix(
-            r#"
-//- minicore: option, result
-fn div(x: i32, y: i32) -> i32 {
-    if y == 0 {
-        panic!();
-    }
-    Some(x / y)$0
-}
-"#,
-            r#"
-fn div(x: i32, y: i32) -> i32 {
-    if y == 0 {
-        panic!();
-    }
-    x / y
-}
-"#,
-        );
-    }
-
-    #[test]
-    fn unwrap_return_type_option_tails() {
-        check_fix(
-            r#"
-//- minicore: option, result
-fn div(x: i32, y: i32) -> i32 {
-    if y == 0 {
-        42
-    } else if true {
-        Some(100)$0
-    } else {
-        0
-    }
-}
-"#,
-            r#"
-fn div(x: i32, y: i32) -> i32 {
-    if y == 0 {
-        42
-    } else if true {
-        100
-    } else {
-        0
-    }
-}
-"#,
-        );
-    }
-
-    #[test]
-    fn unwrap_return_type_option_tail_unit() {
-        check_fix(
-            r#"
-//- minicore: option, result
-fn div(x: i32, y: i32) {
-    if y == 0 {
-        panic!();
-    }
-
-    Ok(())$0
-}
-"#,
-            r#"
-fn div(x: i32, y: i32) {
-    if y == 0 {
-        panic!();
-    }
-}
-"#,
-        );
-    }
-
-    #[test]
-    fn unwrap_return_type_handles_generic_functions() {
-        check_fix(
-            r#"
-//- minicore: option, result
-fn div<T>(x: T) -> T {
-    if x == 0 {
-        panic!();
-    }
-    $0Ok(x)
-}
-"#,
-            r#"
-fn div<T>(x: T) -> T {
-    if x == 0 {
-        panic!();
-    }
-    x
-}
-"#,
-        );
-    }
-
-    #[test]
-    fn unwrap_return_type_handles_type_aliases() {
-        check_fix(
-            r#"
-//- minicore: option, result
-type MyResult<T> = T;
-
-fn div(x: i32, y: i32) -> MyResult<i32> {
-    if y == 0 {
-        panic!();
-    }
-    Ok(x $0/ y)
-}
-"#,
-            r#"
-type MyResult<T> = T;
-
-fn div(x: i32, y: i32) -> MyResult<i32> {
-    if y == 0 {
-        panic!();
-    }
-    x / y
-}
-"#,
-        );
-    }
-
-    #[test]
-    fn unwrap_tail_expr() {
-        check_fix(
-            r#"
-//- minicore: result
-fn foo() -> () {
-    println!("Hello, world!");
-    Ok(())$0
-}
-            "#,
-            r#"
-fn foo() -> () {
-    println!("Hello, world!");
-}
-            "#,
-        );
-    }
-
-    #[test]
-    fn unwrap_to_empty_block() {
-        check_fix(
-            r#"
-//- minicore: result
-fn foo() -> () {
-    Ok(())$0
-}
-            "#,
-            r#"
-fn foo() -> () {}
-            "#,
-        );
-    }
-
-    #[test]
-    fn unwrap_to_return_expr() {
-        check_has_fix(
-            r#"
-//- minicore: result
-fn foo(b: bool) -> () {
-    if b {
-        return $0Ok(());
-    }
-
-    panic!("oh dear");
-}"#,
-            r#"
-fn foo(b: bool) -> () {
-    if b {
-        return;
-    }
-
-    panic!("oh dear");
-}"#,
-        );
-    }
-
-    #[test]
-    fn unwrap_in_const_and_static() {
-        check_fix(
-            r#"
-//- minicore: option, result
-static A: () = {Some(($0))};
-            "#,
-            r#"
-static A: () = {};
-            "#,
-        );
-        check_fix(
-            r#"
-//- minicore: option, result
-const _: () = {Some(($0))};
-            "#,
-            r#"
-const _: () = {};
-            "#,
-        );
-    }
-
-    #[test]
-    fn unwrap_return_type_not_applicable_when_inner_type_does_not_match_return_type() {
-        check_no_fix(
-            r#"
-//- minicore: result
-fn foo() -> i32 { $0Ok(()) }
-"#,
-        );
-    }
-
-    #[test]
-    fn unwrap_return_type_not_applicable_when_wrapper_type_is_not_result_or_option() {
-        check_no_fix(
-            r#"
-//- minicore: option, result
-enum SomeOtherEnum { Ok(i32), Err(String) }
-
-fn foo() -> i32 { SomeOtherEnum::Ok($042) }
 "#,
         );
     }
@@ -1037,6 +667,19 @@ struct String;
 
 fn test() -> String {
     "a".to_owned()
+}
+            "#,
+        );
+    }
+
+    #[test]
+    fn closure_mismatch_show_different_type() {
+        check_diagnostics(
+            r#"
+fn f() {
+    let mut x = (|| 1, 2);
+    x = (|| 3, 4);
+       //^^^^ error: expected {closure#0}, found {closure#1}
 }
             "#,
         );
@@ -1147,37 +790,6 @@ struct Bar {
     }
 
     #[test]
-    fn trait_upcast_ok() {
-        check_diagnostics(
-            r#"
-//- minicore: coerce_unsized
-trait A: B {}
-trait B {}
-
-fn test(a: &dyn A) -> &dyn B {
-    a
-}
-"#,
-        );
-    }
-
-    #[test]
-    fn trait_upcast_err() {
-        check_diagnostics(
-            r#"
-//- minicore: coerce_unsized
-trait A {} // `A` does not have `B` as a supertrait, so no upcast :c
-trait B {}
-
-fn test(a: &dyn A) -> &dyn B {
-    a
-  //^ error: expected &(dyn B + 'static), found &(dyn A + 'static)
-}
-"#,
-        );
-    }
-
-    #[test]
     fn return_no_value() {
         check_diagnostics_with_disabled(
             r#"
@@ -1214,41 +826,6 @@ fn f() {
 fn f() {
     let (_, _, _, ..) = (true, 42);
      // ^^^^^^^^^^^^^ error: expected (bool, i32), found (bool, i32, {unknown})
-}
-"#,
-        );
-    }
-
-    #[test]
-    fn complex_enum_variant_non_ref_pat() {
-        check_diagnostics(
-            r#"
-enum Enum { Variant }
-
-trait Trait {
-    type Assoc;
-}
-impl Trait for () {
-    type Assoc = Enum;
-}
-
-fn foo(v: &Enum) {
-    let <Enum>::Variant = v;
-    let <() as Trait>::Assoc::Variant = v;
-}
-    "#,
-        );
-    }
-
-    #[test]
-    fn regression_19844() {
-        check_diagnostics(
-            r#"
-fn main() {
-    struct S {}
-    enum E { V() }
-    let E::V() = &S {};
-     // ^^^^^^ error: expected S, found E
 }
 "#,
         );

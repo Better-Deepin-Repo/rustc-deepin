@@ -1,9 +1,9 @@
 //! Cargo-like environment variables injection.
 use base_db::Env;
-use paths::Utf8Path;
 use rustc_hash::FxHashMap;
+use toolchain::Tool;
 
-use crate::{PackageData, TargetKind, cargo_config_file::CargoConfigFile};
+use crate::{utf8_stdout, CargoWorkspace, ManifestPath, PackageData, Sysroot, TargetKind};
 
 /// Recreates the compile-time environment variables that Cargo sets.
 ///
@@ -17,7 +17,6 @@ pub(crate) fn inject_cargo_package_env(env: &mut Env, package: &PackageData) {
 
     let manifest_dir = package.manifest.parent();
     env.set("CARGO_MANIFEST_DIR", manifest_dir.as_str());
-    env.set("CARGO_MANIFEST_PATH", package.manifest.as_str());
 
     env.set("CARGO_PKG_VERSION", package.version.to_string());
     env.set("CARGO_PKG_VERSION_MAJOR", package.version.major.to_string());
@@ -25,7 +24,7 @@ pub(crate) fn inject_cargo_package_env(env: &mut Env, package: &PackageData) {
     env.set("CARGO_PKG_VERSION_PATCH", package.version.patch.to_string());
     env.set("CARGO_PKG_VERSION_PRE", package.version.pre.to_string());
 
-    env.set("CARGO_PKG_AUTHORS", package.authors.join(":"));
+    env.set("CARGO_PKG_AUTHORS", package.authors.join(":").clone());
 
     env.set("CARGO_PKG_NAME", package.name.clone());
     env.set("CARGO_PKG_DESCRIPTION", package.description.as_deref().unwrap_or_default());
@@ -47,115 +46,68 @@ pub(crate) fn inject_cargo_package_env(env: &mut Env, package: &PackageData) {
     );
 }
 
-pub(crate) fn inject_cargo_env(env: &mut Env, cargo_path: &Utf8Path) {
-    env.set("CARGO", cargo_path.as_str());
+pub(crate) fn inject_cargo_env(env: &mut Env) {
+    env.set("CARGO", Tool::Cargo.path().to_string());
 }
 
-pub(crate) fn inject_rustc_tool_env(env: &mut Env, cargo_name: &str, kind: TargetKind) {
+pub(crate) fn inject_rustc_tool_env(
+    env: &mut Env,
+    cargo: &CargoWorkspace,
+    cargo_name: &str,
+    kind: TargetKind,
+) {
     _ = kind;
     // FIXME
     // if kind.is_executable() {
     //     env.set("CARGO_BIN_NAME", cargo_name);
     // }
     env.set("CARGO_CRATE_NAME", cargo_name.replace('-', "_"));
+    // NOTE: Technically we should set this for all crates, but that will worsen the deduplication
+    // logic so for now just keeping it proc-macros ought to be fine.
+    if kind.is_proc_macro() {
+        env.set("CARGO_RUSTC_CURRENT_DIR", cargo.manifest_path().parent().to_string());
+    }
 }
 
 pub(crate) fn cargo_config_env(
-    config: &Option<CargoConfigFile>,
-    extra_env: &FxHashMap<String, Option<String>>,
-) -> Env {
-    use toml::de::*;
-
-    let mut env = Env::default();
-    env.extend(extra_env.iter().filter_map(|(k, v)| v.as_ref().map(|v| (k.clone(), v.clone()))));
-
-    let Some(config_reader) = config.as_ref().and_then(|c| c.read()) else {
-        return env;
-    };
-    let Some(env_toml) = config_reader.get(["env"]).and_then(|it| it.as_table()) else {
-        return env;
-    };
-
-    for (key, entry) in env_toml {
-        let key = key.as_ref().as_ref();
-        let value = match entry.as_ref() {
-            DeValue::String(s) => String::from(s.clone()),
-            DeValue::Table(entry) => {
-                // Each entry MUST have a `value` key.
-                let Some(map) = entry.get("value").and_then(|v| v.as_ref().as_str()) else {
-                    continue;
-                };
-                // If the entry already exists in the environment AND the `force` key is not set to
-                // true, then don't overwrite the value.
-                if extra_env.get(key).is_some_and(Option::is_some)
-                    && !entry.get("force").and_then(|v| v.as_ref().as_bool()).unwrap_or(false)
-                {
-                    continue;
-                }
-
-                if let Some(base) = entry.get("relative").and_then(|v| {
-                    if v.as_ref().as_bool().is_some_and(std::convert::identity) {
-                        config_reader.get_origin_root(v)
-                    } else {
-                        None
-                    }
-                }) {
-                    base.join(map).to_string()
-                } else {
-                    map.to_owned()
-                }
-            }
-            _ => continue,
-        };
-
-        env.insert(key, value);
+    manifest: &ManifestPath,
+    extra_env: &FxHashMap<String, String>,
+    sysroot: &Sysroot,
+) -> FxHashMap<String, String> {
+    let mut cargo_config = sysroot.tool(Tool::Cargo);
+    cargo_config.envs(extra_env);
+    cargo_config
+        .current_dir(manifest.parent())
+        .args(["-Z", "unstable-options", "config", "get", "env"])
+        .env("RUSTC_BOOTSTRAP", "1");
+    if manifest.is_rust_manifest() {
+        cargo_config.arg("-Zscript");
     }
-
-    env
+    // if successful we receive `env.key.value = "value" per entry
+    tracing::debug!("Discovering cargo config env by {:?}", cargo_config);
+    utf8_stdout(cargo_config)
+        .map(parse_output_cargo_config_env)
+        .inspect(|env| {
+            tracing::debug!("Discovered cargo config env: {:?}", env);
+        })
+        .inspect_err(|err| {
+            tracing::debug!("Failed to discover cargo config env: {:?}", err);
+        })
+        .unwrap_or_default()
 }
 
-#[test]
-fn parse_output_cargo_config_env_works() {
-    use itertools::Itertools;
-
-    let cwd = paths::AbsPathBuf::try_from(
-        paths::Utf8PathBuf::try_from(std::env::current_dir().unwrap()).unwrap(),
-    )
-    .unwrap();
-    let config_path = cwd.join(".cargo").join("config.toml");
-    let raw = r#"
-env.CARGO_WORKSPACE_DIR.relative = true
-env.CARGO_WORKSPACE_DIR.value = ""
-env.INVALID.relative = "invalidbool"
-env.INVALID.value = "../relative"
-env.RELATIVE.relative = true
-env.RELATIVE.value = "../relative"
-env.TEST.value = "test"
-env.FORCED.value = "test"
-env.FORCED.force = true
-env.UNFORCED.value = "test"
-env.UNFORCED.forced = false
-env.OVERWRITTEN.value = "test"
-env.NOT_AN_OBJECT = "value"
-"#;
-    let raw = raw.lines().map(|l| format!("{l} # {config_path}")).join("\n");
-    let config = CargoConfigFile::from_string_for_test(raw);
-    let extra_env = [
-        ("FORCED", Some("ignored")),
-        ("UNFORCED", Some("newvalue")),
-        ("OVERWRITTEN", Some("newvalue")),
-        ("TEST", None),
-    ]
-    .iter()
-    .map(|(k, v)| (k.to_string(), v.map(ToString::to_string)))
-    .collect();
-    let env = cargo_config_env(&Some(config), &extra_env);
-    assert_eq!(env.get("CARGO_WORKSPACE_DIR").as_deref(), Some(cwd.join("").as_str()));
-    assert_eq!(env.get("RELATIVE").as_deref(), Some(cwd.join("../relative").as_str()));
-    assert_eq!(env.get("INVALID").as_deref(), Some("../relative"));
-    assert_eq!(env.get("TEST").as_deref(), Some("test"));
-    assert_eq!(env.get("FORCED").as_deref(), Some("test"));
-    assert_eq!(env.get("UNFORCED").as_deref(), Some("newvalue"));
-    assert_eq!(env.get("OVERWRITTEN").as_deref(), Some("newvalue"));
-    assert_eq!(env.get("NOT_AN_OBJECT").as_deref(), Some("value"));
+fn parse_output_cargo_config_env(stdout: String) -> FxHashMap<String, String> {
+    stdout
+        .lines()
+        .filter_map(|l| l.strip_prefix("env."))
+        .filter_map(|l| l.split_once(" = "))
+        .filter_map(|(k, v)| {
+            if k.contains('.') {
+                k.strip_suffix(".value").zip(Some(v))
+            } else {
+                Some((k, v))
+            }
+        })
+        .map(|(key, value)| (key.to_owned(), value.trim_matches('"').to_owned()))
+        .collect()
 }

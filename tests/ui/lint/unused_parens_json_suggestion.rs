@@ -1,4 +1,5 @@
 //@ compile-flags: --error-format json
+//@ error-pattern:unnecessary parentheses
 //@ run-rustfix
 
 // The output for humans should just highlight the whole span without showing
@@ -8,13 +9,12 @@
 // test of the JSON error format.
 
 #![deny(unused_parens)]
-#![allow(unreachable_code, unused_braces)]
+#![allow(unreachable_code)]
 
 fn main() {
     // We want to suggest the properly-balanced expression `1 / (2 + 3)`, not
     // the malformed `1 / (2 + 3`
     let _a = (1 / (2 + 3));
-    //~^ ERROR unnecessary parentheses around assigned value
     f();
 }
 

@@ -34,7 +34,7 @@
 /// be mindful of side effects.
 ///
 /// [`Vec`]: crate::vec::Vec
-#[cfg(not(no_global_oom_handling))]
+#[cfg(all(not(no_global_oom_handling), not(test)))]
 #[macro_export]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_diagnostic_item = "vec_macro"]
@@ -47,18 +47,32 @@ macro_rules! vec {
         $crate::vec::from_elem($elem, $n)
     );
     ($($x:expr),+ $(,)?) => (
-        // Using `write_box_via_move` produces a dramatic improvement in stack usage for unoptimized
-        // programs using this code path to construct large Vecs. We can't use `write_via_move`
-        // because this entire invocation has to remain a call chain without `let` bindings, or else
-        // inference and temporary lifetimes change and things break (see `vec-macro-rvalue-scope`,
-        // `vec-macro-coercions`, and `autoderef-vec-box-fn-36786` tests).
-        //
-        // `box_assume_init_into_vec_unsafe` isn't actually safe but the way we use it here is. We
-        // can't use an unsafe block as that would also wrap `$x`.
-        $crate::boxed::box_assume_init_into_vec_unsafe(
-            $crate::intrinsics::write_box_via_move($crate::boxed::Box::new_uninit(), [$($x),+])
+        <[_]>::into_vec(
+            // This rustc_box is not required, but it produces a dramatic improvement in compile
+            // time when constructing arrays with many elements.
+            #[rustc_box]
+            $crate::boxed::Box::new([$($x),+])
         )
     );
+}
+
+// HACK(japaric): with cfg(test) the inherent `[T]::into_vec` method, which is
+// required for this macro definition, is not available. Instead use the
+// `slice::into_vec`  function which is only available with cfg(test)
+// NB see the slice::hack module in slice.rs for more information
+#[cfg(all(not(no_global_oom_handling), test))]
+#[allow(unused_macro_rules)]
+macro_rules! vec {
+    () => (
+        $crate::vec::Vec::new()
+    );
+    ($elem:expr; $n:expr) => (
+        $crate::vec::from_elem($elem, $n)
+    );
+    ($($x:expr),*) => (
+        $crate::slice::into_vec($crate::boxed::Box::new([$($x),*]))
+    );
+    ($($x:expr,)*) => (vec![$($x),*])
 }
 
 /// Creates a `String` using interpolation of runtime expressions.
@@ -107,11 +121,12 @@ macro_rules! vec {
 #[macro_export]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[allow_internal_unstable(hint_must_use, liballoc_internals)]
-#[rustc_diagnostic_item = "format_macro"]
+#[cfg_attr(not(test), rustc_diagnostic_item = "format_macro")]
 macro_rules! format {
     ($($arg:tt)*) => {
         $crate::__export::must_use({
-            $crate::fmt::format($crate::__export::format_args!($($arg)*))
+            let res = $crate::fmt::format($crate::__export::format_args!($($arg)*));
+            res
         })
     }
 }

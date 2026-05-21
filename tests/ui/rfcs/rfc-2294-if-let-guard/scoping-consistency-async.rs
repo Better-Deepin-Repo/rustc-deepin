@@ -1,12 +1,11 @@
 // Check that temporaries in if-let guards are correctly scoped.
 // Regression test for #116079.
 
-//@ check-pass
-//@revisions: edition2021 edition2024 edition2018
-//@[edition2021] edition:2021
-//@[edition2024] edition:2024
-//@[edition2018] edition:2018
-//@ compile-flags: -Zvalidate-mir
+//@ build-pass
+//@ edition:2018
+// -Zvalidate-mir
+
+#![feature(if_let_guard)]
 
 static mut A: [i32; 5] = [1, 2, 3, 4, 5];
 

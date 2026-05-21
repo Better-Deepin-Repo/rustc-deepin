@@ -1,8 +1,8 @@
 pub mod inner {
-    #[cfg(false)]
+    #[cfg(FALSE)]
     pub fn uwu() {}
 
-    #[cfg(false)]
+    #[cfg(FALSE)]
     pub mod doesnt_exist {
         pub fn hello() {}
     }

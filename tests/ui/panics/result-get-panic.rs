@@ -1,6 +1,6 @@
 //@ run-fail
 //@ error-pattern:called `Result::unwrap()` on an `Err` value
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 use std::result::Result::Err;
 

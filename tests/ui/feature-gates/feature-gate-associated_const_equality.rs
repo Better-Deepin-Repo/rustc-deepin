@@ -8,7 +8,7 @@ impl TraitWAssocConst for Demo {
 }
 
 fn foo<A: TraitWAssocConst<A=32>>() {}
-//~^ ERROR associated const equality is incomplete
+//~^ ERROR associated const equality
 
 fn main() {
   foo::<Demo>();

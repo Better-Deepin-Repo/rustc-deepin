@@ -8,7 +8,7 @@
 
 fn main() {}
 
-#[cfg(false)]
+#[cfg(FALSE)]
 impl Foo for Bar {
     default async fn baz() {}
 }

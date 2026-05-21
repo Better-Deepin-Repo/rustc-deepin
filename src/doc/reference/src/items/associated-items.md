@@ -1,54 +1,50 @@
-r[items.associated]
-# Associated items
+# Associated Items
 
-r[items.associated.syntax]
-```grammar,items
-AssociatedItem ->
-    OuterAttribute* (
-        MacroInvocationSemi
-      | ( Visibility? ( TypeAlias | ConstantItem | Function ) )
-    )
-```
+> **<sup>Syntax</sup>**\
+> _AssociatedItem_ :\
+> &nbsp;&nbsp; [_OuterAttribute_]<sup>\*</sup> (\
+> &nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp; [_MacroInvocationSemi_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | ( [_Visibility_]<sup>?</sup> ( [_TypeAlias_] | [_ConstantItem_] | [_Function_] ) )\
+> &nbsp;&nbsp; )
 
-r[items.associated.intro]
-*Associated Items* are the items declared in [traits] or defined in [implementations]. They are called this because they are defined on an associate type &mdash; the type in the implementation.
-
-r[items.associated.kinds]
-They are a subset of the kinds of items you can declare in a module. Specifically, there are [associated functions] (including methods), [associated types], and [associated constants].
+*Associated Items* are the items declared in [traits] or defined in
+[implementations]. They are called this because they are defined on an associate
+type &mdash; the type in the implementation. They are a subset of the kinds of
+items you can declare in a module. Specifically, there are [associated
+functions] (including methods), [associated types], and [associated constants].
 
 [associated functions]: #associated-functions-and-methods
 [associated types]: #associated-types
 [associated constants]: #associated-constants
 
-r[items.associated.related]
-Associated items are useful when the associated item is logically related to the associating item. For example, the `is_some` method on `Option` is intrinsically related to Options, so should be associated.
+Associated items are useful when the associated item logically is related to the
+associating item. For example, the `is_some` method on `Option` is intrinsically
+related to Options, so should be associated.
 
-r[items.associated.decl-def]
-Every associated item kind comes in two varieties: definitions that contain the actual implementation and declarations that declare signatures for definitions.
+Every associated item kind comes in two varieties: definitions that contain the
+actual implementation and declarations that declare signatures for
+definitions.
 
-r[items.associated.trait-items]
-It is the declarations that make up the contract of traits and what is available on generic types.
+It is the declarations that make up the contract of traits and what is available
+on generic types.
 
-r[items.associated.fn]
 ## Associated functions and methods
 
-r[items.associated.fn.intro]
 *Associated functions* are [functions] associated with a type.
 
-r[items.associated.fn.decl]
-An *associated function declaration* declares a signature for an associated function definition. It is written as a function item, except the function body is replaced with a `;`.
+An *associated function declaration* declares a signature for an associated
+function definition. It is written as a function item, except the
+function body is replaced with a `;`.
 
-r[items.associated.name]
-The identifier is the name of the function.
+The identifier is the name of the function. The generics, parameter list,
+return type, and where clause of the associated function must be the same as the
+associated function declarations's.
 
-r[items.associated.same-signature]
-The generics, parameter list, return type, and where clause of the associated function must be the same as the associated function declarations's.
+An *associated function definition* defines a function associated with another
+type. It is written the same as a [function item].
 
-r[items.associated.fn.def]
-An *associated function definition* defines a function associated with another type. It is written the same as a [function item].
-
-> [!NOTE]
-> A common example is an associated function named `new` that returns a value of the type with which it is associated.
+An example of a common associated function is a `new` function that returns
+a value of the type the associated function is associated with.
 
 ```rust
 struct Struct {
@@ -68,8 +64,9 @@ fn main () {
 }
 ```
 
-r[items.associated.fn.qualified-self]
-When the associated function is declared on a trait, the function can also be called with a [path] that is a path to the trait appended by the name of the trait. When this happens, it is substituted for `<_ as Trait>::function_name`.
+When the associated function is declared on a trait, the function can also be
+called with a [path] that is a path to the trait appended by the name of the
+trait. When this happens, it is substituted for `<_ as Trait>::function_name`.
 
 ```rust
 trait Num {
@@ -87,21 +84,24 @@ let _: f64 = <f64 as Num>::from_i32(42);
 let _: f64 = f64::from_i32(42);
 ```
 
-r[items.associated.fn.method]
 ### Methods
 
-r[items.associated.fn.method.intro]
-Associated functions whose first parameter is named `self` are called *methods* and may be invoked using the [method call operator], for example, `x.foo()`, as well as the usual function call notation.
+Associated functions whose first parameter is named `self` are called *methods*
+and may be invoked using the [method call operator], for example, `x.foo()`, as
+well as the usual function call notation.
 
-r[items.associated.fn.method.self-ty]
-If the type of the `self` parameter is specified, it is limited to types resolving to one generated by the following grammar (where `'lt` denotes some arbitrary lifetime):
+If the type of the `self` parameter is specified, it is limited to types resolving
+to one generated by the following grammar (where `'lt` denotes some arbitrary
+lifetime):
 
 ```text
 P = &'lt S | &'lt mut S | Box<S> | Rc<S> | Arc<S> | Pin<P>
 S = Self | P
 ```
 
-The `Self` terminal in this grammar denotes a type resolving to the implementing type. This can also include the contextual type alias `Self`, other type aliases, or associated type projections resolving to the implementing type.
+The `Self` terminal in this grammar denotes a type resolving to the implementing type.
+This can also include the contextual type alias `Self`, other type aliases,
+or associated type projections resolving to the implementing type.
 
 ```rust
 # use std::rc::Rc;
@@ -127,8 +127,8 @@ impl Example {
 }
 ```
 
-r[associated.fn.method.self-pat-shorthands]
-Shorthand syntax can be used without specifying a type, which have the following equivalents:
+Shorthand syntax can be used without specifying a type, which have the
+following equivalents:
 
 Shorthand             | Equivalent
 ----------------------|-----------
@@ -136,11 +136,10 @@ Shorthand             | Equivalent
 `&'lifetime self`     | `self: &'lifetime Self`
 `&'lifetime mut self` | `self: &'lifetime mut Self`
 
-> [!NOTE]
-> Lifetimes can be, and usually are, elided with this shorthand.
+> **Note**: Lifetimes can be, and usually are, elided with this shorthand.
 
-r[associated.fn.method.self-pat-mut]
-If the `self` parameter is prefixed with `mut`, it becomes a mutable variable, similar to regular parameters using a `mut` [identifier pattern]. For example:
+If the `self` parameter is prefixed with `mut`, it becomes a mutable variable,
+similar to regular parameters using a `mut` [identifier pattern]. For example:
 
 ```rust
 trait Changer: Sized {
@@ -160,7 +159,9 @@ trait Shape {
 }
 ```
 
-This defines a trait with two methods. All values that have [implementations] of this trait while the trait is in scope can have their `draw` and `bounding_box` methods called.
+This defines a trait with two methods. All values that have [implementations]
+of this trait while the trait is in scope can have their `draw` and
+`bounding_box` methods called.
 
 ```rust
 # type Surface = i32;
@@ -188,26 +189,27 @@ let circle_shape = Circle::new();
 let bounding_box = circle_shape.bounding_box();
 ```
 
-r[items.associated.fn.params.edition2018]
-> [!EDITION-2018]
-> In the 2015 edition, it is possible to declare trait methods with anonymous parameters (e.g. `fn foo(u8)`). This is deprecated and an error as of the 2018 edition. All parameters must have an argument name.
+> **Edition differences**: In the 2015 edition, it is possible to declare trait
+> methods with anonymous parameters (e.g. `fn foo(u8)`). This is deprecated and
+> an error as of the 2018 edition. All parameters must have an argument name.
 
-r[items.associated.fn.param-attributes]
 #### Attributes on method parameters
 
-Attributes on method parameters follow the same rules and restrictions as [regular function parameters].
+Attributes on method parameters follow the same rules and restrictions as
+[regular function parameters].
 
-r[items.associated.type]
-## Associated types
+## Associated Types
 
-r[items.associated.type.intro]
-*Associated types* are [type aliases] associated with another type.
+*Associated types* are [type aliases] associated with another type. Associated
+types cannot be defined in [inherent implementations] nor can they be given a
+default implementation in traits.
 
-r[items.associated.type.restrictions]
-Associated types cannot be defined in [inherent implementations] nor can they be given a default implementation in traits.
-
-r[items.associated.type.decl]
-An *associated type declaration* declares a signature for associated type definitions. It is written in one of the following forms, where `Assoc` is the name of the associated type, `Params` is a comma-separated list of type, lifetime or const parameters, `Bounds` is a plus-separated list of trait bounds that the associated type must meet, and `WhereBounds` is a comma-separated list of bounds that the parameters must meet:
+An *associated type declaration* declares a signature for associated type
+definitions. It is written in one of the following forms, where `Assoc` is the
+name of the associated type, `Params` is a comma-separated list of type,
+lifetime or const parameters, `Bounds` is a plus-separated list of trait bounds
+that the associated type must meet, and `WhereBounds` is a comma-separated list
+of bounds that the parameters must meet:
 
 <!-- ignore: illustrative example forms -->
 ```rust,ignore
@@ -219,20 +221,13 @@ type Assoc<Params> where WhereBounds;
 type Assoc<Params>: Bounds where WhereBounds;
 ```
 
-r[items.associated.type.name]
-The identifier is the name of the declared type alias.
-
-r[items.associated.type.impl-fulfillment]
-The optional trait bounds must be fulfilled by the implementations of the type alias.
-
-r[items.associated.type.sized]
+The identifier is the name of the declared type alias. The optional trait bounds
+must be fulfilled by the implementations of the type alias.
 There is an implicit [`Sized`] bound on associated types that can be relaxed using the special `?Sized` bound.
 
-r[items.associated.type.def]
-An *associated type definition* defines a type alias for the implementation of a trait on a type.
-
-r[items.associated.type.def.restriction]
-They are written similarly to an *associated type declaration*, but cannot contain `Bounds`, but instead must contain a `Type`:
+An *associated type definition* defines a type alias for the implementation
+of a trait on a type. They are written similarly to an *associated type declaration*,
+but cannot contain `Bounds`, but instead must contain a `Type`:
 
 <!-- ignore: illustrative example forms -->
 ```rust,ignore
@@ -242,14 +237,17 @@ type Assoc<Params> = Type where WhereBounds;
 type Assoc<Params> where WhereBounds = Type; // deprecated, prefer the form above
 ```
 
-r[items.associated.type.alias]
-If a type `Item` has an associated type `Assoc` from a trait `Trait`, then `<Item as Trait>::Assoc` is a type that is an alias of the type specified in the associated type definition.
+If a type `Item` has an associated type `Assoc` from a trait `Trait`, then
+`<Item as Trait>::Assoc` is a type that is an alias of the type specified in the
+associated type definition. Furthermore, if `Item` is a type parameter, then
+`Item::Assoc` can be used in type parameters.
 
-r[items.associated.type.param]
-Furthermore, if `Item` is a type parameter, then `Item::Assoc` can be used in type parameters.
-
-r[items.associated.type.generic]
-Associated types may include [generic parameters] and [where clauses]; these are often referred to as *generic associated types*, or *GATs*. If the type `Thing` has an associated type `Item` from a trait `Trait` with the generics `<'a>` , the type can be named like `<Thing as Trait>::Item<'x>`, where `'x` is some lifetime in scope. In this case, `'x` will be used wherever `'a` appears in the associated type definitions on impls.
+Associated types may include [generic parameters] and [where clauses]; these are
+often referred to as *generic associated types*, or *GATs*. If the type `Thing`
+has an associated type `Item` from a trait `Trait` with the generics `<'a>` , the
+type can be named like `<Thing as Trait>::Item<'x>`, where `'x` is some lifetime
+in scope. In this case, `'x` will be used wherever `'a` appears in the associated
+type definitions on impls.
 
 ```rust
 trait AssociatedType {
@@ -302,15 +300,17 @@ fn borrow<'a, T: Lend>(array: &'a mut T) -> <T as Lend>::Lender<'a> {
     array.lend()
 }
 
+
 fn main() {
     let mut array = [0usize; 16];
     let lender = borrow(&mut array);
 }
 ```
 
-### Associated types container example
+### Associated Types Container Example
 
-Consider the following example of a `Container` trait. Notice that the type is available for use in the method signatures:
+Consider the following example of a `Container` trait. Notice that the type is
+available for use in the method signatures:
 
 ```rust
 trait Container {
@@ -320,7 +320,9 @@ trait Container {
 }
 ```
 
-In order for a type to implement this trait, it must not only provide implementations for every method, but it must specify the type `E`. Here's an implementation of `Container` for the standard library type `Vec`:
+In order for a type to implement this trait, it must not only provide
+implementations for every method, but it must specify the type `E`. Here's an
+implementation of `Container` for the standard library type `Vec`:
 
 ```rust
 # trait Container {
@@ -348,14 +350,17 @@ trait Example {
 
 Given a reference to the associated type like `<X as Example>::Output<Y>`, the associated type itself must be `Ord`, and the type `Y` must be `Debug`.
 
-r[items.associated.type.generic-where-clause]
 ### Required where clauses on generic associated types
 
-r[items.associated.type.generic-where-clause.intro]
-Generic associated type declarations on traits currently may require a list of where clauses, dependent on functions in the trait and how the GAT is used. These rules may be loosened in the future; updates can be found [on the generic associated types initiative repository](https://rust-lang.github.io/generic-associated-types-initiative/explainer/required_bounds.html).
+Generic associated type declarations on traits currently may require a list of
+where clauses, dependent on functions in the trait and how the GAT is used. These
+rules may be loosened in the future; updates can be found [on the generic
+associated types initiative repository](https://rust-lang.github.io/generic-associated-types-initiative/explainer/required_bounds.html).
 
-r[items.associated.type.generic-where-clause.valid-fn]
-In a few words, these where clauses are required in order to maximize the allowed definitions of the associated type in impls. To do this, any clauses that *can be proven to hold* on functions (using the parameters of the function or trait) where a GAT appears as an input or output must also be written on the GAT itself.
+In a few words, these where clauses are required in order to maximize the allowed
+definitions of the associated type in impls. To do this, any clauses that *can be
+proven to hold* on functions (using the parameters of the function or trait)
+where a GAT appears as an input or output must also be written on the GAT itself.
 
 ```rust
 trait LendingIterator {
@@ -364,10 +369,13 @@ trait LendingIterator {
 }
 ```
 
-In the above, on the `next` function, we can prove that `Self: 'a`, because of the implied bounds from `&'a mut self`; therefore, we must write the equivalent bound on the GAT itself: `where Self: 'x`.
+In the above, on the `next` function, we can prove that `Self: 'a`, because of
+the implied bounds from `&'a mut self`; therefore, we must write the equivalent
+bound on the GAT itself: `where Self: 'x`.
 
-r[items.associated.type.generic-where-clause.intersection]
-When there are multiple functions in a trait that use the GAT, then the *intersection* of the bounds from the different functions are used, rather than the union.
+When there are multiple functions in a trait that use the GAT, then the
+*intersection* of the bounds from the different functions are used, rather than
+the union.
 
 ```rust
 trait Check<T> {
@@ -377,9 +385,11 @@ trait Check<T> {
 }
 ```
 
-In this example, no bounds are required on the `type Checker<'a>;`. While we know that `T: 'a` on `create_checker`, we do not know that on `do_check`. However, if `do_check` was commented out, then the `where T: 'x` bound would be required on `Checker`.
+In this example, no bounds are required on the `type Checker<'a>;`. While we
+know that `T: 'a` on `create_checker`, we do not know that on `do_check`. However,
+if `do_check` was commented out, then the `where T: 'x` bound would be required
+on `Checker`.
 
-r[items.associated.type.generic-where-clause.forward]
 The bounds on associated types also propagate required where clauses.
 
 ```rust
@@ -390,10 +400,12 @@ trait Iterable {
 }
 ```
 
-Here, `where Self: 'a` is required on `Item` because of `iter`. However, `Item` is used in the bounds of `Iterator`, the `where Self: 'a` clause is also required there.
+Here, `where Self: 'a` is required on `Item` because of `iter`. However, `Item`
+is used in the bounds of `Iterator`, the `where Self: 'a` clause is also required
+there.
 
-r[items.associated.type.generic-where-clause.static]
-Finally, any explicit uses of `'static` on GATs in the trait do not count towards the required bounds.
+Finally, any explicit uses of `'static` on GATs in the trait do not count towards
+the required bounds.
 
 ```rust
 trait StaticReturn {
@@ -402,23 +414,23 @@ trait StaticReturn {
 }
 ```
 
-r[items.associated.const]
-## Associated constants
+## Associated Constants
 
-r[items.associated.const.intro]
 *Associated constants* are [constants] associated with a type.
 
-r[items.associated.const.decl]
-An *associated constant declaration* declares a signature for associated constant definitions. It is written as `const`, then an identifier, then `:`, then a type, finished by a `;`.
+An *associated constant declaration* declares a signature for associated
+constant definitions. It is written as `const`, then an identifier,
+then `:`, then a type, finished by a `;`.
 
-r[items.associated.const.name]
-The identifier is the name of the constant used in the path. The type is the type that the definition has to implement.
+The identifier is the name of the constant used in the path. The type is the
+type that the definition has to implement.
 
-r[items.associated.const.def]
-An *associated constant definition* defines a constant associated with a type. It is written the same as a [constant item].
+An *associated constant definition* defines a constant associated with a
+type. It is written the same as a [constant item].
 
-r[items.associated.const.eval]
-Associated constant definitions undergo [constant evaluation] only when referenced. Further, definitions that include [generic parameters] are evaluated after monomorphization.
+Associated constant definitions undergo [constant evaluation] only when
+referenced. Further, definitions that include [generic parameters] are
+evaluated after monomorphization.
 
 ```rust,compile_fail
 struct Struct;
@@ -448,7 +460,7 @@ fn main() {
 }
 ```
 
-### Associated constants examples
+### Associated Constants Examples
 
 A basic example:
 
@@ -490,6 +502,12 @@ fn main() {
 }
 ```
 
+[_ConstantItem_]: constant-items.md
+[_Function_]: functions.md
+[_MacroInvocationSemi_]: ../macros.md#macro-invocation
+[_OuterAttribute_]: ../attributes.md
+[_TypeAlias_]: type-aliases.md
+[_Visibility_]: ../visibility-and-privacy.md
 [`Arc<Self>`]: ../special-types-and-traits.md#arct
 [`Box<Self>`]: ../special-types-and-traits.md#boxt
 [`Pin<P>`]: ../special-types-and-traits.md#pinp

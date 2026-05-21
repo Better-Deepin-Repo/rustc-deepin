@@ -18,11 +18,10 @@ unsafe extern "system" fn vectored_handler(ExceptionInfo: *mut c::EXCEPTION_POIN
         let code = rec.ExceptionCode;
 
         if code == c::EXCEPTION_STACK_OVERFLOW {
-            thread::with_current_name(|name| {
-                let name = name.unwrap_or("<unknown>");
-                let tid = thread::current_os_id();
-                rtprintpanic!("\nthread '{name}' ({tid}) has overflowed its stack\n");
-            });
+            rtprintpanic!(
+                "\nthread '{}' has overflowed its stack\n",
+                thread::current().name().unwrap_or("<unknown>")
+            );
         }
         c::EXCEPTION_CONTINUE_SEARCH
     }

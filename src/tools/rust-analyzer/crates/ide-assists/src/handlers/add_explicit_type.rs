@@ -1,9 +1,8 @@
-use either::Either;
 use hir::HirDisplay;
 use ide_db::syntax_helpers::node_ext::walk_ty;
 use syntax::ast::{self, AstNode, LetStmt, Param};
 
-use crate::{AssistContext, AssistId, Assists};
+use crate::{AssistContext, AssistId, AssistKind, Assists};
 
 // Assist: add_explicit_type
 //
@@ -21,8 +20,7 @@ use crate::{AssistContext, AssistId, Assists};
 // }
 // ```
 pub(crate) fn add_explicit_type(acc: &mut Assists, ctx: &AssistContext<'_>) -> Option<()> {
-    let syntax_node = ctx.find_node_at_offset::<Either<LetStmt, Param>>()?;
-    let (ascribed_ty, expr, pat) = if let Either::Left(let_stmt) = syntax_node {
+    let (ascribed_ty, expr, pat) = if let Some(let_stmt) = ctx.find_node_at_offset::<LetStmt>() {
         let cursor_in_range = {
             let eq_range = let_stmt.eq_token()?.text_range();
             ctx.offset() < eq_range.start()
@@ -33,7 +31,7 @@ pub(crate) fn add_explicit_type(acc: &mut Assists, ctx: &AssistContext<'_>) -> O
         }
 
         (let_stmt.ty(), let_stmt.initializer(), let_stmt.pat()?)
-    } else if let Either::Right(param) = syntax_node {
+    } else if let Some(param) = ctx.find_node_at_offset::<Param>() {
         if param.syntax().ancestors().nth(2).and_then(ast::ClosureExpr::cast).is_none() {
             cov_mark::hit!(add_explicit_type_not_applicable_in_fn_param);
             return None;
@@ -73,7 +71,7 @@ pub(crate) fn add_explicit_type(acc: &mut Assists, ctx: &AssistContext<'_>) -> O
 
     let inferred_type = ty.display_source_code(ctx.db(), module.into(), false).ok()?;
     acc.add(
-        AssistId::refactor_rewrite("add_explicit_type"),
+        AssistId("add_explicit_type", AssistKind::RefactorRewrite),
         format!("Insert explicit type `{inferred_type}`"),
         pat_range,
         |builder| match ascribed_ty {
@@ -299,20 +297,6 @@ fn f() {
     |y: i32| {
         let x: i32 = y;
     };
-}
-"#,
-        );
-
-        check_assist(
-            add_explicit_type,
-            r#"
-fn f() {
-    let f: fn(i32) = |y$0| {};
-}
-"#,
-            r#"
-fn f() {
-    let f: fn(i32) = |y: i32| {};
 }
 "#,
         );

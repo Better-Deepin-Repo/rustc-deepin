@@ -3,7 +3,7 @@ pub struct SendPacket<T> {
 }
 
 mod pingpong {
-    use crate::SendPacket;
+    use SendPacket;
     pub type Ping = SendPacket<Pong>;
     pub struct Pong(SendPacket<Ping>);
     //~^ ERROR recursive type `Pong` has infinite size

@@ -1,48 +1,44 @@
-r[items.static]
 # Static items
 
-r[items.static.syntax]
-```grammar,items
-StaticItem ->
-    ItemSafety?[^extern-safety] `static` `mut`? IDENTIFIER `:` Type ( `=` Expression )? `;`
-```
+> **<sup>Syntax</sup>**\
+> _StaticItem_ :\
+> &nbsp;&nbsp; [_ItemSafety_]<sup>?</sup>[^extern-safety] `static` `mut`<sup>?</sup> [IDENTIFIER] `:` [_Type_]
+>              ( `=` [_Expression_] )<sup>?</sup> `;`
+>
+> [^extern-safety]: The `safe` and `unsafe` function qualifiers are only
+>   allowed semantically within `extern` blocks.
 
-[^extern-safety]: The `safe` and `unsafe` function qualifiers are only allowed semantically within `extern` blocks.
+A *static item* is similar to a [constant], except that it represents a precise
+memory location in the program. All references to the static refer to the same
+memory location. Static items have the `static` lifetime, which outlives all
+other lifetimes in a Rust program. Static items do not call [`drop`] at the
+end of the program.
 
-r[items.static.intro]
-A *static item* is similar to a [constant], except that it represents an allocation in the program that is initialized with the initializer expression. All references and raw pointers to the static refer to the same allocation.
-
-r[items.static.lifetime]
-Static items have the `static` lifetime, which outlives all other lifetimes in a Rust program. Static items do not call [`drop`] at the end of the program.
-
-r[items.static.storage-disjointness]
-If the `static` has a size of at least 1 byte, this allocation is disjoint from all other such `static` allocations as well as heap allocations and stack-allocated variables. However, the storage of immutable `static` items can overlap with allocations that do not themselves have a unique address, such as [promoteds] and [`const` items][constant].
-
-r[items.static.namespace]
 The static declaration defines a static value in the [value namespace] of the module or block where it is located.
 
-r[items.static.init]
-The static initializer is a [constant expression] evaluated at compile time. Static initializers may refer to and read from other statics. When reading from mutable statics, they read the initial value of that static.
+The static initializer is a [constant expression] evaluated at compile time.
+Static initializers may refer to other statics.
 
-r[items.static.read-only]
-Non-`mut` static items that contain a type that is not [interior mutable] may be placed in read-only memory.
+Non-`mut` static items that contain a type that is not [interior mutable] may
+be placed in read-only memory.
 
-r[items.static.safety]
-All access to a static is safe, but there are a number of restrictions on statics:
+All access to a static is safe, but there are a number of restrictions on
+statics:
 
-r[items.static.sync]
-* The type must have the [`Sync`](std::marker::Sync) trait bound to allow thread-safe access.
+* The type must have the `Sync` trait bound to allow thread-safe access.
+* Constants cannot refer to statics.
 
-r[items.static.init.omission]
-The initializer expression must be omitted in an [external block], and must be provided for free static items.
+The initializer expression must be omitted in an [external block], and must be
+provided for free static items.
 
-r[items.static.safety-qualifiers]
 The `safe` and `unsafe` qualifiers are semantically only allowed when used in an [external block].
 
-r[items.static.generics]
 ## Statics & generics
 
-A static item defined in a generic scope (for example in a blanket or default implementation) will result in exactly one static item being defined, as if the static definition was pulled out of the current scope into the module. There will *not* be one item per monomorphization.
+A static item defined in a generic scope (for example in a blanket or default
+implementation) will result in exactly one static item being defined, as if
+the static definition was pulled out of the current scope into the module.
+There will *not* be one item per monomorphization.
 
 This code:
 
@@ -85,17 +81,18 @@ blanket_impl: counter was 0
 blanket_impl: counter was 1
 ```
 
-r[items.static.mut]
 ## Mutable statics
 
-r[items.static.mut.intro]
-If a static item is declared with the `mut` keyword, then it is allowed to be modified by the program. One of Rust's goals is to make concurrency bugs hard to run into, and this is obviously a very large source of race conditions or other bugs.
+If a static item is declared with the `mut` keyword, then it is allowed to be
+modified by the program. One of Rust's goals is to make concurrency bugs hard
+to run into, and this is obviously a very large source of race conditions or
+other bugs. For this reason, an `unsafe` block is required when either reading
+or writing a mutable static variable. Care should be taken to ensure that
+modifications to a mutable static are safe with respect to other threads
+running in the same process.
 
-r[items.static.mut.safety]
-For this reason, an `unsafe` block is required when either reading or writing a mutable static variable. Care should be taken to ensure that modifications to a mutable static are safe with respect to other threads running in the same process.
-
-r[items.static.mut.extern]
-Mutable statics are still very useful, however. They can be used with C libraries and can also be bound from C libraries in an `extern` block.
+Mutable statics are still very useful, however. They can be used with C
+libraries and can also be bound from C libraries in an `extern` block.
 
 ```rust
 # fn atomic_add(_: *mut u32, _: u32) -> u32 { 2 }
@@ -125,15 +122,16 @@ fn bump_levels_safe() -> u32 {
 }
 ```
 
-r[items.static.mut.sync]
-Mutable statics have the same restrictions as normal statics, except that the type does not have to implement the `Sync` trait.
+Mutable statics have the same restrictions as normal statics, except that the
+type does not have to implement the `Sync` trait.
 
-r[items.static.alternate]
-## Using statics or consts
+## Using Statics or Consts
 
-It can be confusing whether or not you should use a constant item or a static item. Constants should, in general, be preferred over statics unless one of the following are true:
+It can be confusing whether or not you should use a constant item or a static
+item. Constants should, in general, be preferred over statics unless one of the
+following are true:
 
-* Large amounts of data are being stored.
+* Large amounts of data are being stored
 * The single-address property of statics is required.
 * Interior mutability is required.
 
@@ -142,5 +140,8 @@ It can be confusing whether or not you should use a constant item or a static it
 [constant expression]: ../const_eval.md#constant-expressions
 [external block]: external-blocks.md
 [interior mutable]: ../interior-mutability.md
+[IDENTIFIER]: ../identifiers.md
+[_Type_]: ../types.md#type-expressions
+[_Expression_]: ../expressions.md
 [value namespace]: ../names/namespaces.md
-[promoteds]: ../destructors.md#constant-promotion
+[_ItemSafety_]: functions.md

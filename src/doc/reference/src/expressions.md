@@ -1,104 +1,93 @@
-r[expr]
 # Expressions
 
-r[expr.syntax]
-```grammar,expressions
-Expression ->
-      ExpressionWithoutBlock
-    | ExpressionWithBlock
+> **<sup>Syntax</sup>**\
+> _Expression_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; _ExpressionWithoutBlock_\
+> &nbsp;&nbsp; | _ExpressionWithBlock_
+>
+> _ExpressionWithoutBlock_ :\
+> &nbsp;&nbsp; [_OuterAttribute_]<sup>\*</sup>[†](#expression-attributes)\
+> &nbsp;&nbsp; (\
+> &nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp; [_LiteralExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_PathExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_OperatorExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_GroupedExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_ArrayExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_AwaitExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_IndexExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_TupleExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_TupleIndexingExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_StructExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_CallExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_MethodCallExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_FieldExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_ClosureExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_AsyncBlockExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_ContinueExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_BreakExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_RangeExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_ReturnExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_UnderscoreExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_MacroInvocation_]\
+> &nbsp;&nbsp; )
+>
+> _ExpressionWithBlock_ :\
+> &nbsp;&nbsp; [_OuterAttribute_]<sup>\*</sup>[†](#expression-attributes)\
+> &nbsp;&nbsp; (\
+> &nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp; [_BlockExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_ConstBlockExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_UnsafeBlockExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_LoopExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_IfExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_IfLetExpression_]\
+> &nbsp;&nbsp; &nbsp;&nbsp; | [_MatchExpression_]\
+> &nbsp;&nbsp; )
 
-ExpressionWithoutBlock ->
-    OuterAttribute* ExpressionWithoutBlockNoAttrs
-
-ExpressionWithoutBlockNoAttrs ->
-      LiteralExpression
-    | PathExpression
-    | OperatorExpression
-    | GroupedExpression
-    | ArrayExpression
-    | AwaitExpression
-    | IndexExpression
-    | TupleExpression
-    | TupleIndexingExpression
-    | StructExpression
-    | CallExpression
-    | MethodCallExpression
-    | FieldExpression
-    | ClosureExpression
-    | AsyncBlockExpression
-    | ContinueExpression
-    | BreakExpression
-    | RangeExpression
-    | ReturnExpression
-    | UnderscoreExpression
-    | MacroInvocation
-
-ExpressionWithBlock ->
-    OuterAttribute* ExpressionWithBlockNoAttrs
-
-ExpressionWithBlockNoAttrs ->
-      BlockExpression
-    | ConstBlockExpression
-    | UnsafeBlockExpression
-    | LoopExpression
-    | IfExpression
-    | MatchExpression
-```
-
-r[expr.intro]
 An expression may have two roles: it always produces a *value*, and it may have *effects* (otherwise known as "side effects").
-
-r[expr.evaluation]
 An expression *evaluates to* a value, and has effects during *evaluation*.
-
-r[expr.operands]
 Many expressions contain sub-expressions, called the *operands* of the expression.
-
-r[expr.behavior]
 The meaning of each kind of expression dictates several things:
 
 * Whether or not to evaluate the operands when evaluating the expression
 * The order in which to evaluate the operands
 * How to combine the operands' values to obtain the value of the expression
 
-r[expr.structure]
-In this way, the structure of expressions dictates the structure of execution. Blocks are just another kind of expression, so blocks, statements, expressions, and blocks again can recursively nest inside each other to an arbitrary depth.
+In this way, the structure of expressions dictates the structure of execution.
+Blocks are just another kind of expression, so blocks, statements, expressions, and blocks again can recursively nest inside each other to an arbitrary depth.
 
-> [!NOTE]
-> We give names to the operands of expressions so that we may discuss them, but these names are not stable and may be changed.
+> **Note**: We give names to the operands of expressions so that we may discuss them, but these names are not stable and may be changed.
 
-r[expr.precedence]
 ## Expression precedence
 
-The precedence of Rust operators and expressions is ordered as follows, going from strong to weak. Binary Operators at the same precedence level are grouped in the order given by their associativity.
+The precedence of Rust operators and expressions is ordered as follows, going from strong to weak.
+Binary Operators at the same precedence level are grouped in the order given by their associativity.
 
 | Operator/Expression         | Associativity       |
 |-----------------------------|---------------------|
-| [Paths][expr.path]          |                     |
-| [Method calls][expr.method] |                     |
-| [Field expressions][expr.field] | left to right   |
-| [Function calls][expr.call], [array indexing][expr.array.index] | |
-| [`?`][expr.try]             |                     |
-| Unary [`-`][expr.negate] [`!`][expr.negate] [`*`][expr.deref] [borrow][expr.operator.borrow] | |
-| [`as`][expr.as]             | left to right       |
-| [`*`][expr.arith-logic] [`/`][expr.arith-logic] [`%`][expr.arith-logic] | left to right       |
-| [`+`][expr.arith-logic] [`-`][expr.arith-logic] | left to right       |
-| [`<<`][expr.arith-logic] [`>>`][expr.arith-logic] | left to right     |
-| [`&`][expr.arith-logic]     | left to right       |
-| [`^`][expr.arith-logic]     | left to right       |
-| [<code>&#124;</code>][expr.arith-logic] | left to right       |
-| [`==`][expr.cmp] [`!=`][expr.cmp] [`<`][expr.cmp] [`>`][expr.cmp] [`<=`][expr.cmp] [`>=`][expr.cmp] | Require parentheses |
-| [`&&`][expr.bool-logic]     | left to right       |
-| [<code>&#124;&#124;</code>][expr.bool-logic] | left to right       |
-| [`..`][expr.range] [`..=`][expr.range] | Require parentheses |
-| [`=`][expr.assign] [`+=`][expr.compound-assign] [`-=`][expr.compound-assign] [`*=`][expr.compound-assign] [`/=`][expr.compound-assign] [`%=`][expr.compound-assign] <br> [`&=`][expr.compound-assign] [<code>&#124;=</code>][expr.compound-assign] [`^=`][expr.compound-assign] [`<<=`][expr.compound-assign] [`>>=`][expr.compound-assign] | right to left |
-| [`return`][expr.return] [`break`][expr.loop.break] [closures][expr.closure]  | |
+| Paths                       |                     |
+| Method calls                |                     |
+| Field expressions           | left to right       |
+| Function calls, array indexing |                  |
+| `?`                         |                     |
+| Unary `-` `*` `!` `&` `&mut` |                    |
+| `as`                        | left to right       |
+| `*` `/` `%`                 | left to right       |
+| `+` `-`                     | left to right       |
+| `<<` `>>`                   | left to right       |
+| `&`                         | left to right       |
+| `^`                         | left to right       |
+| <code>&#124;</code>         | left to right       |
+| `==` `!=` `<` `>` `<=` `>=` | Require parentheses |
+| `&&`                        | left to right       |
+| <code>&#124;&#124;</code>   | left to right       |
+| `..` `..=`                  | Require parentheses |
+| `=` `+=` `-=` `*=` `/=` `%=` <br> `&=` <code>&#124;=</code> `^=` `<<=` `>>=` | right to left |
+| `return` `break` closures   |                     |
 
-r[expr.operand-order]
 ## Evaluation order of operands
 
-r[expr.operand-order.default]
-The following list of expressions all evaluate their operands the same way, as described after the list. Other expressions either don't take operands or evaluate them conditionally as described on their respective pages.
+The following list of expressions all evaluate their operands the same way, as described after the list.
+Other expressions either don't take operands or evaluate them conditionally as described on their respective pages.
 
 * Dereference expression
 * Error propagation expression
@@ -120,11 +109,11 @@ The following list of expressions all evaluate their operands the same way, as d
 * Range expression
 * Return expression
 
-r[expr.operand-order.operands-before-primary]
-The operands of these expressions are evaluated prior to applying the effects of the expression. Expressions taking multiple operands are evaluated left to right as written in the source code.
+The operands of these expressions are evaluated prior to applying the effects of the expression.
+Expressions taking multiple operands are evaluated left to right as written in the source code.
 
-> [!NOTE]
-> Which subexpressions are the operands of an expression is determined by expression precedence as per the previous section.
+> **Note**: Which subexpressions are the operands of an expression is
+> determined by expression precedence as per the previous section.
 
 For example, the two `next` method calls will always be called in the same order:
 
@@ -139,28 +128,21 @@ assert_eq!(
 );
 ```
 
-> [!NOTE]
-> Since this is applied recursively, these expressions are also evaluated from innermost to outermost, ignoring siblings until there are no inner subexpressions.
+> **Note**: Since this is applied recursively, these expressions are also evaluated from innermost to outermost, ignoring siblings until there are no inner subexpressions.
 
-r[expr.place-value]
-## Place expressions and value expressions
+## Place Expressions and Value Expressions
 
-r[expr.place-value.intro]
-Expressions are divided into two main categories: place expressions and value expressions; there is also a third, minor category of expressions called assignee expressions. Within each expression, operands may likewise occur in either place context or value context. The evaluation of an expression depends both on its own category and the context it occurs within.
+Expressions are divided into two main categories: place expressions and value expressions;
+there is also a third, minor category of expressions called assignee expressions.
+Within each expression, operands may likewise occur in either place context or value context.
+The evaluation of an expression depends both on its own category and the context it occurs within.
 
-r[expr.place-value.place-memory-location]
 A *place expression* is an expression that represents a memory location.
-
-r[expr.place-value.place-expr-kinds]
 These expressions are [paths] which refer to local variables, [static variables], [dereferences][deref] (`*expr`), [array indexing] expressions (`expr[expr]`), [field] references (`expr.f`) and parenthesized place expressions.
-
-r[expr.place-value.value-expr-kinds]
 All other expressions are value expressions.
 
-r[expr.place-value.value-result]
 A *value expression* is an expression that represents an actual value.
 
-r[expr.place-value.place-context]
 The following contexts are *place expression* contexts:
 
 * The left operand of a [compound assignment] expression.
@@ -169,39 +151,31 @@ The following contexts are *place expression* contexts:
 * The indexed operand of an array indexing expression.
 * The operand of any [implicit borrow].
 * The initializer of a [let statement].
-* The [scrutinee] of an [`if let`], [`match`][match], or [`while let`] expression.
+* The [scrutinee] of an [`if let`], [`match`][match], or [`while let`]
+  expression.
 * The base of a [functional update] struct expression.
 
-> [!NOTE]
-> Historically, place expressions were called *lvalues* and value expressions were called *rvalues*.
+> Note: Historically, place expressions were called *lvalues* and value expressions were called *rvalues*.
 
-r[expr.place-value.assignee]
-An *assignee expression* is an expression that appears in the left operand of an [assignment][assign] expression. Explicitly, the assignee expressions are:
+An *assignee expression* is an expression that appears in the left operand of an [assignment][assign] expression.
+Explicitly, the assignee expressions are:
 
 - Place expressions.
-- [Underscores].
-- [Tuples] of assignee expressions.
-- [Slices][expr.array.index] of assignee expressions.
-- [Tuple structs] of assignee expressions.
-- [Structs] of assignee expressions (with optionally named fields).
-- [Unit structs]
+- [Underscores][_UnderscoreExpression_].
+- [Tuples][_TupleExpression_] of assignee expressions.
+- [Slices][_ArrayExpression_] of assignee expressions.
+- [Tuple structs][_StructExpression_] of assignee expressions.
+- [Structs][_StructExpression_] of assignee expressions (with optionally named
+  fields).
+- [Unit structs][_StructExpression_].
 
-r[expr.place-value.parenthesis]
 Arbitrary parenthesisation is permitted inside assignee expressions.
 
-r[expr.move]
 ### Moved and copied types
 
-r[expr.move.intro]
 When a place expression is evaluated in a value expression context, or is bound by value in a pattern, it denotes the value held _in_ that memory location.
-
-r[expr.move.copy]
 If the type of that value implements [`Copy`], then the value will be copied.
-
-r[expr.move.requires-sized]
 In the remaining situations, if that type is [`Sized`], then it may be possible to move the value.
-
-r[expr.move.movable-place]
 Only the following place expressions may be moved out of:
 
 * [Variables] which are not currently borrowed.
@@ -209,19 +183,15 @@ Only the following place expressions may be moved out of:
 * [Fields][field] of a place expression which can be moved out of and don't implement [`Drop`].
 * The result of [dereferencing][deref] an expression with type [`Box<T>`] and that can also be moved out of.
 
-r[expr.move.deinitialization]
 After moving out of a place expression that evaluates to a local variable, the location is deinitialized and cannot be read from again until it is reinitialized.
-
-r[expr.move.place-invalid]
 In all other cases, trying to use a place expression in a value expression context is an error.
 
-r[expr.mut]
 ### Mutability
 
-r[expr.mut.intro]
-For a place expression to be [assigned][assign] to, mutably [borrowed][borrow], [implicitly mutably borrowed], or bound to a pattern containing `ref mut`, it must be _mutable_. We call these *mutable place expressions*. In contrast, other place expressions are called *immutable place expressions*.
+For a place expression to be [assigned][assign] to, mutably [borrowed][borrow], [implicitly mutably borrowed], or bound to a pattern containing `ref mut`, it must be _mutable_.
+We call these *mutable place expressions*.
+In contrast, other place expressions are called *immutable place expressions*.
 
-r[expr.mut.valid-places]
 The following expressions can be mutable place expression contexts:
 
 * Mutable [variables] which are not currently borrowed.
@@ -229,98 +199,23 @@ The following expressions can be mutable place expression contexts:
 * [Temporary values].
 * [Fields][field]: this evaluates the subexpression in a mutable place expression context.
 * [Dereferences][deref] of a `*mut T` pointer.
-* Dereference of a variable, or field of a variable, with type `&mut T`. Note: This is an exception to the requirement of the next rule.
-* Dereferences of a type that implements `DerefMut`: this then requires that the value being dereferenced is evaluated in a mutable place expression context.
-* [Array indexing] of a type that implements `IndexMut`: this then evaluates the value being indexed, but not the index, in mutable place expression context.
+* Dereference of a variable, or field of a variable, with type `&mut T`.
+  Note: This is an exception to the requirement of the next rule.
+* Dereferences of a type that implements `DerefMut`:
+  this then requires that the value being dereferenced is evaluated in a mutable place expression context.
+* [Array indexing] of a type that implements `IndexMut`:
+  this then evaluates the value being indexed, but not the index, in mutable place expression context.
 
-r[expr.temporary]
 ### Temporaries
 
-When using a value expression in most place expression contexts, a temporary unnamed memory location is created and initialized to that value. The expression evaluates to that location instead, except if [promoted] to a `static`. The [drop scope] of the temporary is usually the end of the enclosing statement.
+When using a value expression in most place expression contexts, a temporary unnamed memory location is created and initialized to that value.
+The expression evaluates to that location instead, except if [promoted] to a `static`.
+The [drop scope] of the temporary is usually the end of the enclosing statement.
 
-r[expr.super-macros]
-### Super macros
+### Implicit Borrows
 
-r[expr.super-macros.intro]
-Certain built-in macros may create [temporaries] whose [scopes][temporary scopes] may be [extended]. These temporaries are *super temporaries* and these macros are *super macros*. [Invocations][macro invocations] of these macros are *super macro call expressions*. Arguments to these macros may be *super operands*.
-
-> [!NOTE]
-> When a super macro call expression is an [extending expression], its super operands are [extending expressions] and the [scopes][temporary scopes] of the super temporaries are [extended]. See [destructors.scope.lifetime-extension.exprs].
-
-r[expr.super-macros.format_args]
-#### `format_args!`
-
-r[expr.super-macros.format_args.super-operands]
-Except for the format string argument, all arguments passed to [`format_args!`] are *super operands*.
-
-```rust,edition2024
-# fn temp() -> String { String::from("") }
-// Due to the call being an extending expression and the argument
-// being a super operand, the inner block is an extending expression,
-// so the scope of the temporary created in its trailing expression
-// is extended.
-let _ = format_args!("{}", { &temp() }); // OK
-```
-
-r[expr.super-macros.format_args.super-temporaries]
-The super operands of [`format_args!`] are [implicitly borrowed] and are therefore [place expression contexts]. When a [value expression] is passed as an argument, it creates a *super temporary*.
-
-```rust
-# fn temp() -> String { String::from("") }
-let x = format_args!("{}", temp());
-x; // <-- The temporary is extended, allowing use here.
-```
-
-The expansion of a call to [`format_args!`] sometimes creates other internal *super temporaries*.
-
-```rust,compile_fail,E0716
-let x = {
-    // This call creates an internal temporary.
-    let x = format_args!("{:?}", 0);
-    x // <-- The temporary is extended, allowing its use here.
-}; // <-- The temporary is dropped here.
-x; // ERROR
-```
-
-```rust
-// This call doesn't create an internal temporary.
-let x = { let x = format_args!("{}", 0); x };
-x; // OK
-```
-
-> [!NOTE]
-> The details of when [`format_args!`] does or does not create internal temporaries are currently unspecified.
-
-r[expr.super-macros.pin]
-#### `pin!`
-
-r[expr.super-macros.pin.super-operands]
-The argument to [`pin!`] is a *super operand*.
-
-```rust,edition2024
-# use core::pin::pin;
-# fn temp() {}
-// As above for `format_args!`.
-let _ = pin!({ &temp() }); // OK
-```
-
-r[expr.super-macros.pin.super-temporaries]
-The argument to [`pin!`] is a [value expression context] and creates a *super temporary*.
-
-```rust
-# use core::pin::pin;
-# fn temp() {}
-// The argument is evaluated into a super temporary.
-let x = pin!(temp());
-// The temporary is extended, allowing its use here.
-x; // OK
-```
-
-r[expr.implicit-borrow]
-### Implicit borrows
-
-r[expr.implicit-borrow-intro]
-Certain expressions will treat an expression as a place expression by implicitly borrowing it. For example, it is possible to compare two unsized [slices][slice] for equality directly, because the `==` operator implicitly borrows its operands:
+Certain expressions will treat an expression as a place expression by implicitly borrowing it.
+For example, it is possible to compare two unsized [slices][slice] for equality directly, because the `==` operator implicitly borrows its operands:
 
 ```rust
 # let c = [1, 2, 3];
@@ -335,7 +230,6 @@ let b: &[i32];
 ::std::cmp::PartialEq::eq(&*a, &*b);
 ```
 
-r[expr.implicit-borrow.application]
 Implicit borrows may be taken in the following expressions:
 
 * Left operand in [method-call] expressions.
@@ -345,81 +239,99 @@ Implicit borrows may be taken in the following expressions:
 * Operand of the [dereference operator][deref] (`*`).
 * Operands of [comparison].
 * Left operands of the [compound assignment].
-* Arguments to [`format_args!`] except the format string.
 
-r[expr.overload]
-## Overloading traits
+## Overloading Traits
 
-Many of the following operators and expressions can also be overloaded for other types using traits in `std::ops` or `std::cmp`. These traits also exist in `core::ops` and `core::cmp` with the same names.
+Many of the following operators and expressions can also be overloaded for other types using traits in `std::ops` or `std::cmp`.
+These traits also exist in `core::ops` and `core::cmp` with the same names.
 
-r[expr.attr]
-## Expression attributes
+## Expression Attributes
 
-r[expr.attr.restriction]
-[Outer attributes] before an expression are allowed only in a few specific cases:
+[Outer attributes][_OuterAttribute_] before an expression are allowed only in a few specific cases:
 
 * Before an expression used as a [statement].
 * Elements of [array expressions], [tuple expressions], [call expressions], and tuple-style [struct] expressions.
 * The tail expression of [block expressions].
 <!-- Keep list in sync with block-expr.md -->
 
-r[expr.attr.never-before]
 They are never allowed before:
-* [Range] expressions.
-* Binary operator expressions ([ArithmeticOrLogicalExpression], [ComparisonExpression], [LazyBooleanExpression], [TypeCastExpression], [AssignmentExpression], [CompoundAssignmentExpression]).
+* [Range][_RangeExpression_] expressions.
+* Binary operator expressions ([_ArithmeticOrLogicalExpression_], [_ComparisonExpression_], [_LazyBooleanExpression_], [_TypeCastExpression_], [_AssignmentExpression_], [_CompoundAssignmentExpression_]).
 
-[`Copy`]:               special-types-and-traits.md#copy
-[`Drop`]:               special-types-and-traits.md#drop
-[`if let`]:             expressions/if-expr.md#if-let-patterns
-[`format_args!`]:       core::format_args
-[`pin!`]:               core::pin::pin
-[`Sized`]:              special-types-and-traits.md#sized
-[`while let`]:          expressions/loop-expr.md#while-let-patterns
+
+[block expressions]:    expressions/block-expr.md
+[call expressions]:     expressions/call-expr.md
+[field]:                expressions/field-expr.md
+[functional update]:    expressions/struct-expr.md#functional-update-syntax
+[`if let`]:             expressions/if-expr.md#if-let-expressions
+[match]:                expressions/match-expr.md
+[method-call]:          expressions/method-call-expr.md
+[paths]:                expressions/path-expr.md
+[struct]:               expressions/struct-expr.md
+[tuple expressions]:    expressions/tuple-expr.md
+[`while let`]:          expressions/loop-expr.md#predicate-pattern-loops
+
 [array expressions]:    expressions/array-expr.md
 [array indexing]:       expressions/array-expr.md#array-and-slice-indexing-expressions
+
 [assign]:               expressions/operator-expr.md#assignment-expressions
-[block expressions]:    expressions/block-expr.md
 [borrow]:               expressions/operator-expr.md#borrow-operators
-[call expressions]:     expressions/call-expr.md
 [comparison]:           expressions/operator-expr.md#comparison-operators
 [compound assignment]:  expressions/operator-expr.md#compound-assignment-expressions
 [deref]:                expressions/operator-expr.md#the-dereference-operator
+
 [destructors]:          destructors.md
 [drop scope]:           destructors.md#drop-scopes
-[extended]:             destructors.scope.lifetime-extension
-[extending expression]: destructors.scope.lifetime-extension.exprs
-[extending expressions]: destructors.scope.lifetime-extension.exprs
-[field]:                expressions/field-expr.md
-[functional update]:    expressions/struct-expr.md#functional-update-syntax
+
+[`Copy`]:               special-types-and-traits.md#copy
+[`Drop`]:               special-types-and-traits.md#drop
+[`Sized`]:              special-types-and-traits.md#sized
 [implicit borrow]:      #implicit-borrows
-[implicitly borrowed]:  expr.implicit-borrow
 [implicitly mutably borrowed]: #implicit-borrows
 [interior mutability]:  interior-mutability.md
 [let statement]:        statements.md#let-statements
-[macro invocations]:    macro.invocation
-[match]:                expressions/match-expr.md
-[method-call]:          expressions/method-call-expr.md
 [Mutable `static` items]: items/static-items.md#mutable-statics
-[Outer attributes]:     attributes.md
-[paths]:                expressions/path-expr.md
-[place expression contexts]: expr.place-value
-[promoted]:             destructors.md#constant-promotion
-[Range]:                expressions/range-expr.md
-[raw borrow]:           expressions/operator-expr.md#raw-borrow-operators
 [scrutinee]:            glossary.md#scrutinee
+[promoted]:             destructors.md#constant-promotion
+[raw borrow]:           expressions/operator-expr.md#raw-borrow-operators
 [slice]:                types/slice.md
 [statement]:            statements.md
 [static variables]:     items/static-items.md
-[struct]:               expressions/struct-expr.md
-[Structs]:              expr.struct
-[temporaries]:          expr.temporary
-[temporary scopes]:     destructors.scope.temporary
 [Temporary values]:     #temporaries
-[tuple expressions]:    expressions/tuple-expr.md
-[Tuple structs]:        items.struct.tuple
-[Tuples]:               expressions/tuple-expr.md
-[Underscores]:          expressions/underscore-expr.md
-[Unit structs]:         items.struct.unit
-[value expression context]: expr.place-value
-[value expression]:     expr.place-value
 [Variables]:            variables.md
+
+[_ArithmeticOrLogicalExpression_]: expressions/operator-expr.md#arithmetic-and-logical-binary-operators
+[_ArrayExpression_]:              expressions/array-expr.md
+[_AsyncBlockExpression_]:         expressions/block-expr.md#async-blocks
+[_AwaitExpression_]:              expressions/await-expr.md
+[_AssignmentExpression_]:         expressions/operator-expr.md#assignment-expressions
+[_BlockExpression_]:              expressions/block-expr.md
+[_BreakExpression_]:              expressions/loop-expr.md#break-expressions
+[_CallExpression_]:               expressions/call-expr.md
+[_ClosureExpression_]:            expressions/closure-expr.md
+[_ComparisonExpression_]:         expressions/operator-expr.md#comparison-operators
+[_CompoundAssignmentExpression_]: expressions/operator-expr.md#compound-assignment-expressions
+[_ConstBlockExpression_]:         expressions/block-expr.md#const-blocks
+[_ContinueExpression_]:           expressions/loop-expr.md#continue-expressions
+[_FieldExpression_]:              expressions/field-expr.md
+[_GroupedExpression_]:            expressions/grouped-expr.md
+[_IfExpression_]:                 expressions/if-expr.md#if-expressions
+[_IfLetExpression_]:              expressions/if-expr.md#if-let-expressions
+[_IndexExpression_]:              expressions/array-expr.md#array-and-slice-indexing-expressions
+[_LazyBooleanExpression_]:        expressions/operator-expr.md#lazy-boolean-operators
+[_LiteralExpression_]:            expressions/literal-expr.md
+[_LoopExpression_]:               expressions/loop-expr.md
+[_MacroInvocation_]:              macros.md#macro-invocation
+[_MatchExpression_]:              expressions/match-expr.md
+[_MethodCallExpression_]:         expressions/method-call-expr.md
+[_OperatorExpression_]:           expressions/operator-expr.md
+[_OuterAttribute_]:               attributes.md
+[_PathExpression_]:               expressions/path-expr.md
+[_RangeExpression_]:              expressions/range-expr.md
+[_ReturnExpression_]:             expressions/return-expr.md
+[_StructExpression_]:             expressions/struct-expr.md
+[_TupleExpression_]:              expressions/tuple-expr.md
+[_TupleIndexingExpression_]:      expressions/tuple-expr.md#tuple-indexing-expressions
+[_TypeCastExpression_]:           expressions/operator-expr.md#type-cast-expressions
+[_UnderscoreExpression_]:         expressions/underscore-expr.md
+[_UnsafeBlockExpression_]:        expressions/block-expr.md#unsafe-blocks

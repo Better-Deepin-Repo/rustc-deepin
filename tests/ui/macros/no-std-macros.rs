@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ compile-flags: --crate-type=lib
 //@ check-pass
 // issue #55482

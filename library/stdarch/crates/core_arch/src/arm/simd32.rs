@@ -65,27 +65,16 @@
 #[cfg(test)]
 use stdarch_test::assert_instr;
 
-use crate::mem::transmute;
+use crate::{core_arch::arm::dsp::int16x2_t, mem::transmute};
 
-/// ARM-specific vector of four packed `i8` packed into a 32-bit integer.
-#[allow(non_camel_case_types)]
-#[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub type int8x4_t = i32;
+types! {
+    #![unstable(feature = "stdarch_arm_dsp", issue = "117237")]
 
-/// ARM-specific vector of four packed `u8` packed into a 32-bit integer.
-#[allow(non_camel_case_types)]
-#[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub type uint8x4_t = u32;
-
-/// ARM-specific vector of two packed `i16` packed into a 32-bit integer.
-#[allow(non_camel_case_types)]
-#[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub type int16x2_t = i32;
-
-/// ARM-specific vector of two packed `u16` packed into a 32-bit integer.
-#[allow(non_camel_case_types)]
-#[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub type uint16x2_t = u32;
+    /// ARM-specific 32-bit wide vector of four packed `i8`.
+    pub struct int8x4_t(4 x i8);
+    /// ARM-specific 32-bit wide vector of four packed `u8`.
+    pub struct uint8x4_t(4 x u8);
+}
 
 macro_rules! dsp_call {
     ($name:expr, $a:expr, $b:expr) => {
@@ -93,7 +82,7 @@ macro_rules! dsp_call {
     };
 }
 
-unsafe extern "unadjusted" {
+extern "unadjusted" {
     #[link_name = "llvm.arm.qadd8"]
     fn arm_qadd8(a: i32, b: i32) -> i32;
 
@@ -500,7 +489,7 @@ pub unsafe fn __usada8(a: int8x4_t, b: int8x4_t, c: u32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use crate::core_arch::simd::{i8x4, i16x2, u8x4};
+    use crate::core_arch::simd::{i16x2, i8x4, u8x4};
     use std::mem::transmute;
     use stdarch_test::simd_test;
 

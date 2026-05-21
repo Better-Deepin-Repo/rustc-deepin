@@ -3,7 +3,7 @@
 
 //@ run-fail
 //@ error-pattern:explicit panic
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 struct Parser<'i: 't, 't>(&'i u8, &'t u8);
 

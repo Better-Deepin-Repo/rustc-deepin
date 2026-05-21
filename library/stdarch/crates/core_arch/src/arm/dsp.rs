@@ -23,7 +23,18 @@
 #[cfg(test)]
 use stdarch_test::assert_instr;
 
-unsafe extern "unadjusted" {
+use crate::mem::transmute;
+
+types! {
+    #![unstable(feature = "stdarch_arm_dsp", issue = "117237")]
+
+    /// ARM-specific 32-bit wide vector of two packed `i16`.
+    pub struct int16x2_t(2 x i16);
+    /// ARM-specific 32-bit wide vector of two packed `u16`.
+    pub struct uint16x2_t(2 x u16);
+}
+
+extern "unadjusted" {
     #[link_name = "llvm.arm.smulbb"]
     fn arm_smulbb(a: i32, b: i32) -> i32;
 
@@ -74,8 +85,8 @@ unsafe extern "unadjusted" {
 #[inline]
 #[cfg_attr(test, assert_instr(smulbb))]
 #[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub unsafe fn __smulbb(a: i32, b: i32) -> i32 {
-    arm_smulbb(a, b)
+pub unsafe fn __smulbb(a: int16x2_t, b: int16x2_t) -> i32 {
+    arm_smulbb(transmute(a), transmute(b))
 }
 
 /// Insert a SMULTB instruction
@@ -85,8 +96,8 @@ pub unsafe fn __smulbb(a: i32, b: i32) -> i32 {
 #[inline]
 #[cfg_attr(test, assert_instr(smultb))]
 #[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub unsafe fn __smultb(a: i32, b: i32) -> i32 {
-    arm_smultb(a, b)
+pub unsafe fn __smultb(a: int16x2_t, b: int16x2_t) -> i32 {
+    arm_smultb(transmute(a), transmute(b))
 }
 
 /// Insert a SMULTB instruction
@@ -96,8 +107,8 @@ pub unsafe fn __smultb(a: i32, b: i32) -> i32 {
 #[inline]
 #[cfg_attr(test, assert_instr(smulbt))]
 #[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub unsafe fn __smulbt(a: i32, b: i32) -> i32 {
-    arm_smulbt(a, b)
+pub unsafe fn __smulbt(a: int16x2_t, b: int16x2_t) -> i32 {
+    arm_smulbt(transmute(a), transmute(b))
 }
 
 /// Insert a SMULTT instruction
@@ -107,8 +118,8 @@ pub unsafe fn __smulbt(a: i32, b: i32) -> i32 {
 #[inline]
 #[cfg_attr(test, assert_instr(smultt))]
 #[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub unsafe fn __smultt(a: i32, b: i32) -> i32 {
-    arm_smultt(a, b)
+pub unsafe fn __smultt(a: int16x2_t, b: int16x2_t) -> i32 {
+    arm_smultt(transmute(a), transmute(b))
 }
 
 /// Insert a SMULWB instruction
@@ -119,8 +130,8 @@ pub unsafe fn __smultt(a: i32, b: i32) -> i32 {
 #[inline]
 #[cfg_attr(test, assert_instr(smulwb))]
 #[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub unsafe fn __smulwb(a: i32, b: i32) -> i32 {
-    arm_smulwb(a, b)
+pub unsafe fn __smulwb(a: int16x2_t, b: i32) -> i32 {
+    arm_smulwb(transmute(a), b)
 }
 
 /// Insert a SMULWT instruction
@@ -131,8 +142,8 @@ pub unsafe fn __smulwb(a: i32, b: i32) -> i32 {
 #[inline]
 #[cfg_attr(test, assert_instr(smulwt))]
 #[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub unsafe fn __smulwt(a: i32, b: i32) -> i32 {
-    arm_smulwt(a, b)
+pub unsafe fn __smulwt(a: int16x2_t, b: i32) -> i32 {
+    arm_smulwt(transmute(a), b)
 }
 
 /// Signed saturating addition
@@ -176,8 +187,8 @@ pub unsafe fn __qdbl(a: i32) -> i32 {
 #[inline]
 #[cfg_attr(test, assert_instr(smlabb))]
 #[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub unsafe fn __smlabb(a: i32, b: i32, c: i32) -> i32 {
-    arm_smlabb(a, b, c)
+pub unsafe fn __smlabb(a: int16x2_t, b: int16x2_t, c: i32) -> i32 {
+    arm_smlabb(transmute(a), transmute(b), c)
 }
 
 /// Insert a SMLABT instruction
@@ -188,8 +199,8 @@ pub unsafe fn __smlabb(a: i32, b: i32, c: i32) -> i32 {
 #[inline]
 #[cfg_attr(test, assert_instr(smlabt))]
 #[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub unsafe fn __smlabt(a: i32, b: i32, c: i32) -> i32 {
-    arm_smlabt(a, b, c)
+pub unsafe fn __smlabt(a: int16x2_t, b: int16x2_t, c: i32) -> i32 {
+    arm_smlabt(transmute(a), transmute(b), c)
 }
 
 /// Insert a SMLATB instruction
@@ -200,8 +211,8 @@ pub unsafe fn __smlabt(a: i32, b: i32, c: i32) -> i32 {
 #[inline]
 #[cfg_attr(test, assert_instr(smlatb))]
 #[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub unsafe fn __smlatb(a: i32, b: i32, c: i32) -> i32 {
-    arm_smlatb(a, b, c)
+pub unsafe fn __smlatb(a: int16x2_t, b: int16x2_t, c: i32) -> i32 {
+    arm_smlatb(transmute(a), transmute(b), c)
 }
 
 /// Insert a SMLATT instruction
@@ -212,8 +223,8 @@ pub unsafe fn __smlatb(a: i32, b: i32, c: i32) -> i32 {
 #[inline]
 #[cfg_attr(test, assert_instr(smlatt))]
 #[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub unsafe fn __smlatt(a: i32, b: i32, c: i32) -> i32 {
-    arm_smlatt(a, b, c)
+pub unsafe fn __smlatt(a: int16x2_t, b: int16x2_t, c: i32) -> i32 {
+    arm_smlatt(transmute(a), transmute(b), c)
 }
 
 /// Insert a SMLAWB instruction
@@ -224,8 +235,8 @@ pub unsafe fn __smlatt(a: i32, b: i32, c: i32) -> i32 {
 #[inline]
 #[cfg_attr(test, assert_instr(smlawb))]
 #[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub unsafe fn __smlawb(a: i32, b: i32, c: i32) -> i32 {
-    arm_smlawb(a, b, c)
+pub unsafe fn __smlawb(a: i32, b: int16x2_t, c: i32) -> i32 {
+    arm_smlawb(a, transmute(b), c)
 }
 
 /// Insert a SMLAWT instruction
@@ -236,15 +247,15 @@ pub unsafe fn __smlawb(a: i32, b: i32, c: i32) -> i32 {
 #[inline]
 #[cfg_attr(test, assert_instr(smlawt))]
 #[unstable(feature = "stdarch_arm_dsp", issue = "117237")]
-pub unsafe fn __smlawt(a: i32, b: i32, c: i32) -> i32 {
-    arm_smlawt(a, b, c)
+pub unsafe fn __smlawt(a: i32, b: int16x2_t, c: i32) -> i32 {
+    arm_smlawt(a, transmute(b), c)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::core_arch::{
         arm::*,
-        simd::{i8x4, i16x2, u8x4},
+        simd::{i16x2, i8x4, u8x4},
     };
     use std::mem::transmute;
     use stdarch_test::simd_test;

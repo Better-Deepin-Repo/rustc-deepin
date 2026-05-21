@@ -1,8 +1,8 @@
-use crate::spec::{Os, RelroLevel, TargetOptions, cvs};
+use crate::spec::{cvs, RelroLevel, TargetOptions};
 
-pub(crate) fn opts() -> TargetOptions {
+pub fn opts() -> TargetOptions {
     TargetOptions {
-        os: Os::Dragonfly,
+        os: "dragonfly".into(),
         dynamic_linking: true,
         families: cvs!["unix"],
         has_rpath: true,

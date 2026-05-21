@@ -1,4 +1,3 @@
-//@ edition:2015
 #![feature(decl_macro)]
 
 mod foo {

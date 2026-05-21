@@ -6,9 +6,8 @@ LL |     println!("{}", 1 <> 2);
    |
 help: `<>` is not a valid comparison operator, use `!=`
    |
-LL -     println!("{}", 1 <> 2);
-LL +     println!("{}", 1 != 2);
-   |
+LL |     println!("{}", 1 != 2);
+   |                      ~~
 
 error: aborting due to 1 previous error
 

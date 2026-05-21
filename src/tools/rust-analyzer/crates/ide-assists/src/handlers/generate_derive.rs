@@ -1,11 +1,9 @@
 use syntax::{
-    SyntaxKind::{ATTR, COMMENT, WHITESPACE},
+    ast::{self, edit_in_place::AttrsOwnerEdit, make, AstNode, HasAttrs},
     T,
-    ast::{self, AstNode, HasAttrs, edit::IndentLevel, make},
-    syntax_editor::{Element, Position},
 };
 
-use crate::{AssistContext, AssistId, Assists};
+use crate::{AssistContext, AssistId, AssistKind, Assists};
 
 // Assist: generate_derive
 //
@@ -41,7 +39,7 @@ pub(crate) fn generate_derive(acc: &mut Assists, ctx: &AssistContext<'_>) -> Opt
         Some(tt) => Some(tt.right_delimiter_token()?),
     };
 
-    acc.add(AssistId::generate("generate_derive"), "Add `#[derive]`", target, |edit| {
+    acc.add(AssistId("generate_derive", AssistKind::Generate), "Add `#[derive]`", target, |edit| {
         match derive_attr {
             None => {
                 let derive = make::attr_outer(make::meta_token_tree(
@@ -50,20 +48,8 @@ pub(crate) fn generate_derive(acc: &mut Assists, ctx: &AssistContext<'_>) -> Opt
                 ))
                 .clone_for_update();
 
-                let mut editor = edit.make_editor(nominal.syntax());
-                let indent = IndentLevel::from_node(nominal.syntax());
-                let after_attrs_and_comments = nominal
-                    .syntax()
-                    .children_with_tokens()
-                    .find(|it| !matches!(it.kind(), WHITESPACE | COMMENT | ATTR))
-                    .map_or(Position::first_child_of(nominal.syntax()), Position::before);
-                editor.insert_all(
-                    after_attrs_and_comments,
-                    vec![
-                        derive.syntax().syntax_element(),
-                        make::tokens::whitespace(&format!("\n{indent}")).syntax_element(),
-                    ],
-                );
+                let nominal = edit.make_mut(nominal);
+                nominal.add_attr(derive.clone());
 
                 let delimiter = derive
                     .meta()
@@ -72,9 +58,8 @@ pub(crate) fn generate_derive(acc: &mut Assists, ctx: &AssistContext<'_>) -> Opt
                     .expect("failed to get token tree out of Meta")
                     .r_paren_token()
                     .expect("make::attr_outer was expected to have a R_PAREN");
-                let tabstop_before = edit.make_tabstop_before(cap);
-                editor.add_annotation(delimiter, tabstop_before);
-                edit.add_file_edits(ctx.vfs_file_id(), editor);
+
+                edit.add_tabstop_before_token(cap, delimiter);
             }
             Some(_) => {
                 // Just move the cursor.

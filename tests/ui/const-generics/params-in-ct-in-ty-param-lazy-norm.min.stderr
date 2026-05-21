@@ -13,11 +13,11 @@ LL | struct Foo<T, U = [u8; std::mem::size_of::<T>()]>(T, U);
    = note: type parameters may not be used in const expressions
    = help: add `#![feature(generic_const_exprs)]` to allow generic const expressions
 
-error[E0128]: generic parameter defaults cannot reference parameters before they are declared
+error[E0128]: generic parameters with a default cannot use forward declared identifiers
   --> $DIR/params-in-ct-in-ty-param-lazy-norm.rs:8:21
    |
 LL | struct Bar<T = [u8; N], const N: usize>(T);
-   |                     ^ cannot reference `N` before it is declared
+   |                     ^ defaulted generic parameters cannot be forward declared
 
 error: aborting due to 3 previous errors
 

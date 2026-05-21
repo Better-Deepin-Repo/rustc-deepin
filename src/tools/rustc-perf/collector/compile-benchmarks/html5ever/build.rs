@@ -7,8 +7,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-extern crate phf_codegen;
+#![allow(soft_unstable)]
 
+extern crate phf_codegen;
+extern crate rustc_serialize;
+
+use rustc_serialize::json::{Json, Decoder};
+use rustc_serialize::Decodable;
 use std::collections::HashMap;
 use std::env;
 use std::fs::File;
@@ -94,13 +99,14 @@ fn check_hash(from: &Path, to: &Path) -> Result<(), String> {
 
 fn named_entities_to_phf(from: &Path, to: &Path) {
     // A struct matching the entries in entities.json.
-    #[derive(serde::Deserialize)]
+    #[derive(RustcDecodable)]
     struct CharRef {
         codepoints: Vec<u32>,
         //characters: String,  // Present in the file but we don't need it
     }
 
-    let entities: HashMap<String, CharRef> = serde_json::from_reader(&mut File::open(from).unwrap()).unwrap();
+    let json = Json::from_reader(&mut File::open(from).unwrap()).unwrap();
+    let entities: HashMap<String, CharRef> = Decodable::decode(&mut Decoder::new(json)).unwrap();
     let mut entities: HashMap<&str, (u32, u32)> = entities.iter().map(|(name, char_ref)| {
         assert!(name.starts_with("&"));
         assert!(char_ref.codepoints.len() <= 2);
@@ -109,7 +115,7 @@ fn named_entities_to_phf(from: &Path, to: &Path) {
 
     // Add every missing prefix of those keys, mapping to NULL characters.
     for key in entities.keys().cloned().collect::<Vec<_>>() {
-        for n in 1..key.len() {
+        for n in 1 .. key.len() {
             entities.entry(&key[..n]).or_insert((0, 0));
         }
     }

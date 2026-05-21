@@ -35,9 +35,9 @@
   </Type>
 
   <Type Name="core::mem::manually_drop::ManuallyDrop&lt;*&gt;">
-    <DisplayString>{value.__0}</DisplayString>
+    <DisplayString>{value}</DisplayString>
     <Expand>
-      <ExpandedItem>value.__0</ExpandedItem>
+      <ExpandedItem>value</ExpandedItem>
     </Expand>
   </Type>
 
@@ -69,9 +69,9 @@
   </Type>
 
   <Type Name="core::pin::Pin&lt;*&gt;">
-    <DisplayString>Pin({(void*)pointer}: {pointer})</DisplayString>
+    <DisplayString>Pin({(void*)__pointer}: {__pointer})</DisplayString>
     <Expand>
-      <ExpandedItem>pointer</ExpandedItem>
+      <ExpandedItem>__pointer</ExpandedItem>
     </Expand>
   </Type>
 

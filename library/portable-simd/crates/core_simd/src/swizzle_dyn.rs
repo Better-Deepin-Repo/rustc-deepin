@@ -1,7 +1,10 @@
-use crate::simd::Simd;
+use crate::simd::{LaneCount, Simd, SupportedLaneCount};
 use core::mem;
 
-impl<const N: usize> Simd<u8, N> {
+impl<const N: usize> Simd<u8, N>
+where
+    LaneCount<N>: SupportedLaneCount,
+{
     /// Swizzle a vector of bytes according to the index vector.
     /// Indices within range select the appropriate byte.
     /// Indices "out of bounds" instead select 0.
@@ -56,40 +59,15 @@ impl<const N: usize> Simd<u8, N> {
                     target_endian = "little"
                 ))]
                 16 => transize(vqtbl1q_u8, self, idxs),
-                #[cfg(all(
-                    target_arch = "arm",
-                    target_feature = "v7",
-                    target_feature = "neon",
-                    target_endian = "little"
-                ))]
-                16 => transize(armv7_neon_swizzle_u8x16, self, idxs),
                 #[cfg(all(target_feature = "avx2", not(target_feature = "avx512vbmi")))]
                 32 => transize(avx2_pshufb, self, idxs),
                 #[cfg(all(target_feature = "avx512vl", target_feature = "avx512vbmi"))]
-                32 => {
-                    // Unlike vpshufb, vpermb doesn't zero out values in the result based on the index high bit
-                    let swizzler = |bytes, idxs| {
-                        let mask = x86::_mm256_cmp_epu8_mask::<{ x86::_MM_CMPINT_LT }>(
-                            idxs,
-                            Simd::<u8, 32>::splat(N as u8).into(),
-                        );
-                        x86::_mm256_maskz_permutexvar_epi8(mask, idxs, bytes)
-                    };
-                    transize(swizzler, self, idxs)
-                }
-                // Notable absence: avx512bw pshufb shuffle
-                #[cfg(all(target_feature = "avx512vl", target_feature = "avx512vbmi"))]
-                64 => {
-                    // Unlike vpshufb, vpermb doesn't zero out values in the result based on the index high bit
-                    let swizzler = |bytes, idxs| {
-                        let mask = x86::_mm512_cmp_epu8_mask::<{ x86::_MM_CMPINT_LT }>(
-                            idxs,
-                            Simd::<u8, 64>::splat(N as u8).into(),
-                        );
-                        x86::_mm512_maskz_permutexvar_epi8(mask, idxs, bytes)
-                    };
-                    transize(swizzler, self, idxs)
-                }
+                32 => transize(x86::_mm256_permutexvar_epi8, zeroing_idxs(idxs), self),
+                // Notable absence: avx512bw shuffle
+                // If avx512bw is available, odds of avx512vbmi are good
+                // FIXME: initial AVX512VBMI variant didn't actually pass muster
+                // #[cfg(target_feature = "avx512vbmi")]
+                // 64 => transize(x86::_mm512_permutexvar_epi8, self, idxs),
                 _ => {
                     let mut array = [0; N];
                     for (i, k) in idxs.to_array().into_iter().enumerate() {
@@ -104,28 +82,6 @@ impl<const N: usize> Simd<u8, N> {
     }
 }
 
-/// armv7 neon supports swizzling `u8x16` by swizzling two u8x8 blocks
-/// with a u8x8x2 lookup table.
-///
-/// # Safety
-/// This requires armv7 neon to work
-#[cfg(all(
-    target_arch = "arm",
-    target_feature = "v7",
-    target_feature = "neon",
-    target_endian = "little"
-))]
-unsafe fn armv7_neon_swizzle_u8x16(bytes: Simd<u8, 16>, idxs: Simd<u8, 16>) -> Simd<u8, 16> {
-    use core::arch::arm::{uint8x8x2_t, vcombine_u8, vget_high_u8, vget_low_u8, vtbl2_u8};
-    // SAFETY: Caller promised arm neon support
-    unsafe {
-        let bytes = uint8x8x2_t(vget_low_u8(bytes.into()), vget_high_u8(bytes.into()));
-        let lo = vtbl2_u8(bytes, vget_low_u8(idxs.into()));
-        let hi = vtbl2_u8(bytes, vget_high_u8(idxs.into()));
-        vcombine_u8(lo, hi).into()
-    }
-}
-
 /// "vpshufb like it was meant to be" on AVX2
 ///
 /// # Safety
@@ -136,7 +92,7 @@ unsafe fn armv7_neon_swizzle_u8x16(bytes: Simd<u8, 16>, idxs: Simd<u8, 16>) -> S
 #[inline]
 #[allow(clippy::let_and_return)]
 unsafe fn avx2_pshufb(bytes: Simd<u8, 32>, idxs: Simd<u8, 32>) -> Simd<u8, 32> {
-    use crate::simd::{Select, cmp::SimdPartialOrd};
+    use crate::simd::cmp::SimdPartialOrd;
     #[cfg(target_arch = "x86")]
     use core::arch::x86;
     #[cfg(target_arch = "x86_64")]
@@ -181,7 +137,10 @@ unsafe fn transize<T, const N: usize>(
     f: unsafe fn(T, T) -> T,
     a: Simd<u8, N>,
     b: Simd<u8, N>,
-) -> Simd<u8, N> {
+) -> Simd<u8, N>
+where
+    LaneCount<N>: SupportedLaneCount,
+{
     // SAFETY: Same obligation to use this function as to use mem::transmute_copy.
     unsafe { mem::transmute_copy(&f(mem::transmute_copy(&a), mem::transmute_copy(&b))) }
 }
@@ -190,8 +149,11 @@ unsafe fn transize<T, const N: usize>(
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[allow(unused)]
 #[inline(always)]
-fn zeroing_idxs<const N: usize>(idxs: Simd<u8, N>) -> Simd<u8, N> {
-    use crate::simd::{Select, cmp::SimdPartialOrd};
+fn zeroing_idxs<const N: usize>(idxs: Simd<u8, N>) -> Simd<u8, N>
+where
+    LaneCount<N>: SupportedLaneCount,
+{
+    use crate::simd::cmp::SimdPartialOrd;
     idxs.simd_lt(Simd::splat(N as u8))
         .select(idxs, Simd::splat(u8::MAX))
 }

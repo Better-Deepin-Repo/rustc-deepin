@@ -8,14 +8,10 @@ struct TestType<T>(::std::marker::PhantomData<T>);
 
 unsafe impl<T: MyTrait + 'static> Send for TestType<T> {}
 
-impl<T: MyTrait> !Send for TestType<T> {}
-//~^ ERROR found both positive and negative implementation
-//~| ERROR `!Send` impl requires `T: MyTrait` but the struct it is implemented for does not
+impl<T: MyTrait> !Send for TestType<T> {} //~ ERROR found both positive and negative implementation
 
-unsafe impl<T: 'static> Send for TestType<T> {}
-//~^ ERROR conflicting implementations
+unsafe impl<T: 'static> Send for TestType<T> {} //~ ERROR conflicting implementations
 
 impl !Send for TestType<i32> {}
-//~^ ERROR `!Send` impls cannot be specialized
 
 fn main() {}

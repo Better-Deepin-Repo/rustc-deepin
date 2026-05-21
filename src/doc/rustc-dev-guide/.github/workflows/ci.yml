@@ -3,26 +3,26 @@ name: CI
 on:
   push:
     branches:
-      - main
+      - master
   pull_request:
   schedule:
-    # Run multiple times a day as the successfull cached links are not checked every time.
-    - cron: "0 */8 * * *"
+    # Run at 18:00 UTC every day
+    - cron: '0 18 * * *'
 
 jobs:
   ci:
     if: github.repository == 'rust-lang/rustc-dev-guide'
     runs-on: ubuntu-latest
     env:
-      MDBOOK_VERSION: 0.5.2
-      MDBOOK_LINKCHECK2_VERSION: 0.11.0
-      MDBOOK_MERMAID_VERSION: 0.17.0
-      MDBOOK_OUTPUT__LINKCHECK__FOLLOW_WEB_LINKS: ${{ github.event_name != 'pull_request' }}
+      MDBOOK_VERSION: 0.4.21
+      MDBOOK_LINKCHECK_VERSION: 0.7.6
+      MDBOOK_MERMAID_VERSION: 0.12.6
+      MDBOOK_TOC_VERSION: 0.11.2
       DEPLOY_DIR: book/html
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
         with:
           # linkcheck needs the base commit.
           fetch-depth: 0
@@ -33,17 +33,14 @@ jobs:
         with:
           path: |
             ~/.cargo/bin
-          key: ${{ runner.os }}-${{ env.MDBOOK_VERSION }}--${{ env.MDBOOK_LINKCHECK2_VERSION }}--${{ env.MDBOOK_MERMAID_VERSION }}
+          key: ${{ runner.os }}-${{ env.MDBOOK_VERSION }}--${{ env.MDBOOK_LINKCHECK_VERSION }}--${{ env.MDBOOK_TOC_VERSION }}--${{ env.MDBOOK_MERMAID_VERSION }}
 
-      - name: Restore cached Linkcheck
-        if: github.event_name == 'schedule'
-        id: cache-linkcheck-restore
-        uses: actions/cache/restore@v4
+      - name: Cache linkcheck
+        uses: actions/cache@v4
         with:
-          path: book/linkcheck/cache.json
-          key: linkcheck--${{ env.MDBOOK_LINKCHECK2_VERSION }}--${{ github.run_id }}
-          restore-keys: |
-            linkcheck--${{ env.MDBOOK_LINKCHECK2_VERSION }}--
+          path: |
+            ~/book/linkcheck
+          key: ${{ runner.os }}-${{ hashFiles('./book/linkcheck') }}
 
       - name: Install latest nightly Rust toolchain
         if: steps.mdbook-cache.outputs.cache-hit != 'true'
@@ -55,19 +52,12 @@ jobs:
         if: steps.mdbook-cache.outputs.cache-hit != 'true'
         run: |
           cargo install mdbook --version ${{ env.MDBOOK_VERSION }}
-          cargo install mdbook-linkcheck2 --version ${{ env.MDBOOK_LINKCHECK2_VERSION }}
+          cargo install mdbook-linkcheck --version ${{ env.MDBOOK_LINKCHECK_VERSION }}
+          cargo install mdbook-toc --version ${{ env.MDBOOK_TOC_VERSION }}
           cargo install mdbook-mermaid --version ${{ env.MDBOOK_MERMAID_VERSION }}
 
       - name: Check build
-        run: ENABLE_LINKCHECK=1 mdbook build
-
-      - name: Save cached Linkcheck
-        id: cache-linkcheck-save
-        if: ${{ !cancelled() && github.event_name == 'schedule' }}
-        uses: actions/cache/save@v4
-        with:
-          path: book/linkcheck/cache.json
-          key: linkcheck--${{ env.MDBOOK_LINKCHECK2_VERSION }}--${{ github.run_id }}
+        run: mdbook build
 
       - name: Deploy to gh-pages
         if: github.event_name == 'push'
@@ -82,9 +72,3 @@ jobs:
           git add .
           git commit -m "Deploy ${GITHUB_SHA} to gh-pages"
           git push --quiet -f "https://x-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}" HEAD:gh-pages
-
-      - name: Check if files comply with semantic line breaks
-        continue-on-error: true
-        run: |
-          # using split_inclusive that uses regex feature that uses an unstable feature
-          RUSTC_BOOTSTRAP=1 cargo run --release --manifest-path ci/sembr/Cargo.toml src

@@ -1,128 +1,29 @@
-use base_db::{
-    CrateDisplayName, CrateGraphBuilder, CrateName, CrateOrigin, CrateWorkspaceData,
-    DependencyBuilder, Env, RootQueryDb, SourceDatabase,
-};
-use expect_test::{Expect, expect};
-use intern::Symbol;
-use span::Edition;
+use base_db::{SourceDatabase, SourceDatabaseFileInputExt as _};
 use test_fixture::WithFixture;
-use triomphe::Arc;
 
-use crate::{
-    db::DefDatabase,
-    nameres::{crate_def_map, tests::TestDB},
-};
+use crate::{db::DefDatabase, nameres::tests::TestDB, AdtId, ModuleDefId};
 
-fn check_def_map_is_not_recomputed(
-    #[rust_analyzer::rust_fixture] ra_fixture_initial: &str,
-    #[rust_analyzer::rust_fixture] ra_fixture_change: &str,
-    expecta: Expect,
-    expectb: Expect,
-) {
+fn check_def_map_is_not_recomputed(ra_fixture_initial: &str, ra_fixture_change: &str) {
     let (mut db, pos) = TestDB::with_position(ra_fixture_initial);
-    let krate = db.fetch_test_crate();
-    execute_assert_events(
-        &db,
-        || {
-            crate_def_map(&db, krate);
-        },
-        &[],
-        expecta,
-    );
-    db.set_file_text(pos.file_id.file_id(&db), ra_fixture_change);
-
-    execute_assert_events(
-        &db,
-        || {
-            crate_def_map(&db, krate);
-        },
-        &[("crate_local_def_map", 0)],
-        expectb,
-    );
-}
-
-#[test]
-fn crate_metadata_changes_should_not_invalidate_unrelated_def_maps() {
-    let (mut db, files) = TestDB::with_many_files(
-        r#"
-//- /a.rs crate:a
-pub fn foo() {}
-
-//- /b.rs crate:b
-pub struct Bar;
-
-//- /c.rs crate:c deps:b
-pub const BAZ: u32 = 0;
-    "#,
-    );
-
-    for &krate in db.all_crates().iter() {
-        crate_def_map(&db, krate);
+    let krate = {
+        let crate_graph = db.crate_graph();
+        // Some of these tests use minicore/proc-macros which will be injected as the first crate
+        crate_graph.iter().last().unwrap()
+    };
+    {
+        let events = db.log_executed(|| {
+            db.crate_def_map(krate);
+        });
+        assert!(format!("{events:?}").contains("crate_def_map"), "{events:#?}")
     }
-
-    let all_crates_before = db.all_crates();
+    db.set_file_text(pos.file_id.file_id(), ra_fixture_change);
 
     {
-        // Add dependencies: c -> b, b -> a.
-        let mut new_crate_graph = CrateGraphBuilder::default();
-
-        let mut add_crate = |crate_name, root_file_idx: usize| {
-            new_crate_graph.add_crate_root(
-                files[root_file_idx].file_id(&db),
-                Edition::CURRENT,
-                Some(CrateDisplayName::from_canonical_name(crate_name)),
-                None,
-                Default::default(),
-                None,
-                Env::default(),
-                CrateOrigin::Local { repo: None, name: Some(Symbol::intern(crate_name)) },
-                Vec::new(),
-                false,
-                Arc::new(
-                    // FIXME: This is less than ideal
-                    TryFrom::try_from(
-                        &*std::env::current_dir().unwrap().as_path().to_string_lossy(),
-                    )
-                    .unwrap(),
-                ),
-                Arc::new(CrateWorkspaceData { target: Err("".into()), toolchain: None }),
-            )
-        };
-        let a = add_crate("a", 0);
-        let b = add_crate("b", 1);
-        let c = add_crate("c", 2);
-        new_crate_graph
-            .add_dep(c, DependencyBuilder::new(CrateName::new("b").unwrap(), b))
-            .unwrap();
-        new_crate_graph
-            .add_dep(b, DependencyBuilder::new(CrateName::new("a").unwrap(), a))
-            .unwrap();
-        new_crate_graph.set_in_db(&mut db);
+        let events = db.log_executed(|| {
+            db.crate_def_map(krate);
+        });
+        assert!(!format!("{events:?}").contains("crate_def_map"), "{events:#?}")
     }
-
-    let all_crates_after = db.all_crates();
-    assert!(
-        Arc::ptr_eq(&all_crates_before, &all_crates_after),
-        "the all_crates list should not have been invalidated"
-    );
-    execute_assert_events(
-        &db,
-        || {
-            for &krate in db.all_crates().iter() {
-                crate_def_map(&db, krate);
-            }
-        },
-        // `c` gets invalidated as its dependency `b` changed
-        // `b` gets invalidated due to its new dependency edge to `a`
-        &[("crate_local_def_map", 2)],
-        expect![[r#"
-            [
-                "crate_local_def_map",
-                "file_item_tree_query",
-                "crate_local_def_map",
-            ]
-        "#]],
-    );
 }
 
 #[test]
@@ -162,33 +63,6 @@ fn foo() -> i32 { 92 }
 #[cfg(never)]
 fn no() {}
 ",
-        expect![[r#"
-            [
-                "crate_local_def_map",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "EnumVariants::of_",
-            ]
-        "#]],
-        expect![[r#"
-            [
-                "parse_shim",
-                "ast_id_map_shim",
-                "file_item_tree_query",
-                "real_span_map_shim",
-                "EnumVariants::of_",
-            ]
-        "#]],
     );
 }
 
@@ -220,41 +94,6 @@ m!(Y);
 
 pub struct S {}
 ",
-        expect![[r#"
-            [
-                "crate_local_def_map",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "decl_macro_expander_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "macro_def_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_macro_expansion_shim",
-                "macro_arg_shim",
-            ]
-        "#]],
-        expect![[r#"
-            [
-                "parse_shim",
-                "ast_id_map_shim",
-                "file_item_tree_query",
-                "real_span_map_shim",
-                "macro_arg_shim",
-                "parse_macro_expansion_shim",
-                "ast_id_map_shim",
-                "file_item_tree_query",
-            ]
-        "#]],
     );
 }
 
@@ -278,77 +117,31 @@ fn f() {}
 #[proc_macros::identity]
 fn f() { foo }
 ",
-        expect![[r#"
-            [
-                "crate_local_def_map",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "crate_local_def_map",
-                "proc_macros_for_crate_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "macro_def_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_macro_expansion_shim",
-                "expand_proc_macro_shim",
-                "macro_arg_shim",
-                "proc_macro_span_shim",
-            ]
-        "#]],
-        expect![[r#"
-            [
-                "parse_shim",
-                "ast_id_map_shim",
-                "file_item_tree_query",
-                "real_span_map_shim",
-                "macro_arg_shim",
-                "expand_proc_macro_shim",
-                "parse_macro_expansion_shim",
-                "ast_id_map_shim",
-                "file_item_tree_query",
-            ]
-        "#]],
     );
 }
 
-// Would be nice if this was the case, but as attribute inputs are stored in the item tree, this is
-// not currently the case.
-// #[test]
-// fn typing_inside_an_attribute_arg_should_not_invalidate_def_map() {
-//     check_def_map_is_not_recomputed(
-//         r"
-// //- proc_macros: identity
-// //- /lib.rs
-// mod foo;
+#[test]
+fn typing_inside_an_attribute_arg_should_not_invalidate_def_map() {
+    check_def_map_is_not_recomputed(
+        r"
+//- proc_macros: identity
+//- /lib.rs
+mod foo;
 
-// //- /foo/mod.rs
-// pub mod bar;
+//- /foo/mod.rs
+pub mod bar;
 
-// //- /foo/bar.rs
-// $0
-// #[proc_macros::identity]
-// fn f() {}
-// ",
-//         r"
-// #[proc_macros::identity(foo)]
-// fn f() {}
-// ",
-//     );
-// }
-
+//- /foo/bar.rs
+$0
+#[proc_macros::identity]
+fn f() {}
+",
+        r"
+#[proc_macros::identity(foo)]
+fn f() {}
+",
+    );
+}
 #[test]
 fn typing_inside_macro_heavy_file_should_not_invalidate_def_map() {
     check_def_map_is_not_recomputed(
@@ -402,90 +195,34 @@ m2!(X);
 #[derive(proc_macros::DeriveIdentity)]
 pub struct S {}
 ",
-        expect![[r#"
-            [
-                "crate_local_def_map",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "crate_local_def_map",
-                "proc_macros_for_crate_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "decl_macro_expander_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "macro_def_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_macro_expansion_shim",
-                "macro_arg_shim",
-                "decl_macro_expander_shim",
-                "macro_def_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_macro_expansion_shim",
-                "macro_arg_shim",
-                "macro_def_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_macro_expansion_shim",
-                "expand_proc_macro_shim",
-                "macro_arg_shim",
-                "proc_macro_span_shim",
-            ]
-        "#]],
-        expect![[r#"
-            [
-                "parse_shim",
-                "ast_id_map_shim",
-                "file_item_tree_query",
-                "real_span_map_shim",
-                "macro_arg_shim",
-                "decl_macro_expander_shim",
-                "macro_arg_shim",
-                "macro_arg_shim",
-            ]
-        "#]],
     );
 }
 
-// Would be nice if this was the case, but as attribute inputs are stored in the item tree, this is
-// not currently the case.
-// #[test]
-// fn typing_inside_a_derive_should_not_invalidate_def_map() {
-//     check_def_map_is_not_recomputed(
-//         r"
-// //- proc_macros: derive_identity
-// //- minicore:derive
-// //- /lib.rs
-// mod foo;
+#[test]
+fn typing_inside_a_derive_should_not_invalidate_def_map() {
+    check_def_map_is_not_recomputed(
+        r"
+//- proc_macros: derive_identity
+//- minicore:derive
+//- /lib.rs
+mod foo;
 
-// //- /foo/mod.rs
-// pub mod bar;
+//- /foo/mod.rs
+pub mod bar;
 
-// //- /foo/bar.rs
-// $0
-// #[derive(proc_macros::DeriveIdentity)]
-// #[allow()]
-// struct S;
-// ",
-//         r"
-// #[derive(proc_macros::DeriveIdentity)]
-// #[allow(dead_code)]
-// struct S;
-// ",
-//     );
-// }
+//- /foo/bar.rs
+$0
+#[derive(proc_macros::DeriveIdentity)]
+#[allow()]
+struct S;
+",
+        r"
+#[derive(proc_macros::DeriveIdentity)]
+#[allow(dead_code)]
+struct S;
+",
+    );
+}
 
 #[test]
 fn typing_inside_a_function_should_not_invalidate_item_expansions() {
@@ -510,47 +247,18 @@ m!(Z);
 "#,
     );
     let krate = db.test_crate();
-    execute_assert_events(
-        &db,
-        || {
-            let crate_def_map = crate_def_map(&db, krate);
-            let module_data = &crate_def_map
-                [crate_def_map.modules_for_file(&db, pos.file_id.file_id(&db)).next().unwrap()];
+    {
+        let events = db.log_executed(|| {
+            let crate_def_map = db.crate_def_map(krate);
+            let (_, module_data) = crate_def_map.modules.iter().last().unwrap();
             assert_eq!(module_data.scope.resolutions().count(), 4);
-        },
-        &[("file_item_tree_query", 6), ("parse_macro_expansion_shim", 3)],
-        expect![[r#"
-            [
-                "crate_local_def_map",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "decl_macro_expander_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-                "macro_def_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_macro_expansion_shim",
-                "macro_arg_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_macro_expansion_shim",
-                "macro_arg_shim",
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_macro_expansion_shim",
-                "macro_arg_shim",
-            ]
-        "#]],
-    );
+        });
+        let n_recalculated_item_trees = events.iter().filter(|it| it.contains("item_tree")).count();
+        assert_eq!(n_recalculated_item_trees, 6);
+        let n_reparsed_macros =
+            events.iter().filter(|it| it.contains("parse_macro_expansion(")).count();
+        assert_eq!(n_reparsed_macros, 3);
+    }
 
     let new_text = r#"
 m!(X);
@@ -558,34 +266,29 @@ fn quux() { 92 }
 m!(Y);
 m!(Z);
 "#;
-    db.set_file_text(pos.file_id.file_id(&db), new_text);
+    db.set_file_text(pos.file_id.file_id(), new_text);
 
-    execute_assert_events(
-        &db,
-        || {
-            let crate_def_map = crate_def_map(&db, krate);
-            let module_data = &crate_def_map
-                [crate_def_map.modules_for_file(&db, pos.file_id.file_id(&db)).next().unwrap()];
+    {
+        let events = db.log_executed(|| {
+            let crate_def_map = db.crate_def_map(krate);
+            let (_, module_data) = crate_def_map.modules.iter().last().unwrap();
             assert_eq!(module_data.scope.resolutions().count(), 4);
-        },
-        &[("file_item_tree_query", 1), ("parse_macro_expansion_shim", 0)],
-        expect![[r#"
-            [
-                "parse_shim",
-                "ast_id_map_shim",
-                "file_item_tree_query",
-                "real_span_map_shim",
-                "macro_arg_shim",
-                "macro_arg_shim",
-                "macro_arg_shim",
-            ]
-        "#]],
-    );
+        });
+        let n_recalculated_item_trees = events.iter().filter(|it| it.contains("item_tree")).count();
+        assert_eq!(n_recalculated_item_trees, 1);
+        let n_reparsed_macros =
+            events.iter().filter(|it| it.contains("parse_macro_expansion(")).count();
+        assert_eq!(n_reparsed_macros, 0);
+    }
 }
 
 #[test]
 fn item_tree_prevents_reparsing() {
-    let (mut db, pos) = TestDB::with_position(
+    // The `ItemTree` is used by both name resolution and the various queries in `adt.rs` and
+    // `data.rs`. After computing the `ItemTree` and deleting the parse tree, we should be able to
+    // run those other queries without triggering a reparse.
+
+    let (db, pos) = TestDB::with_position(
         r#"
 pub struct S;
 pub union U {}
@@ -600,54 +303,52 @@ pub static ST: u8 = 0;
 pub type Ty = ();
 "#,
     );
-
-    execute_assert_events(
-        &db,
-        || {
+    let krate = db.test_crate();
+    {
+        let events = db.log_executed(|| {
             db.file_item_tree(pos.file_id.into());
-        },
-        &[("file_item_tree_query", 1), ("parse", 1)],
-        expect![[r#"
-            [
-                "file_item_tree_query",
-                "ast_id_map_shim",
-                "parse_shim",
-                "real_span_map_shim",
-            ]
-        "#]],
-    );
-
-    let file_id = pos.file_id.file_id(&db);
-    let file_text = db.file_text(file_id).text(&db);
-    db.set_file_text(file_id, &format!("{file_text}\n"));
-
-    execute_assert_events(
-        &db,
-        || {
-            db.file_item_tree(pos.file_id.into());
-        },
-        &[("file_item_tree_query", 1), ("parse", 1)],
-        expect![[r#"
-            [
-                "parse_shim",
-                "ast_id_map_shim",
-                "file_item_tree_query",
-                "real_span_map_shim",
-            ]
-        "#]],
-    );
-}
-
-fn execute_assert_events(
-    db: &TestDB,
-    f: impl FnOnce(),
-    required: &[(&str, usize)],
-    expect: Expect,
-) {
-    let events = db.log_executed(f);
-    for (event, count) in required {
-        let n = events.iter().filter(|it| it.contains(event)).count();
-        assert_eq!(n, *count, "Expected {event} to be executed {count} times, but only got {n}");
+        });
+        let n_calculated_item_trees = events.iter().filter(|it| it.contains("item_tree")).count();
+        assert_eq!(n_calculated_item_trees, 1);
+        let n_parsed_files = events.iter().filter(|it| it.contains("parse(")).count();
+        assert_eq!(n_parsed_files, 1);
     }
-    expect.assert_debug_eq(&events);
+
+    // Delete the parse tree.
+    base_db::ParseQuery.in_db(&db).purge();
+
+    {
+        let events = db.log_executed(|| {
+            let crate_def_map = db.crate_def_map(krate);
+            let (_, module_data) = crate_def_map.modules.iter().last().unwrap();
+            assert_eq!(module_data.scope.resolutions().count(), 8);
+            assert_eq!(module_data.scope.impls().count(), 1);
+
+            for imp in module_data.scope.impls() {
+                db.impl_data(imp);
+            }
+
+            for (_, res) in module_data.scope.resolutions() {
+                match res.values.map(|(a, _, _)| a).or(res.types.map(|(a, _, _)| a)).unwrap() {
+                    ModuleDefId::FunctionId(f) => _ = db.function_data(f),
+                    ModuleDefId::AdtId(adt) => match adt {
+                        AdtId::StructId(it) => _ = db.struct_data(it),
+                        AdtId::UnionId(it) => _ = db.union_data(it),
+                        AdtId::EnumId(it) => _ = db.enum_data(it),
+                    },
+                    ModuleDefId::ConstId(it) => _ = db.const_data(it),
+                    ModuleDefId::StaticId(it) => _ = db.static_data(it),
+                    ModuleDefId::TraitId(it) => _ = db.trait_data(it),
+                    ModuleDefId::TraitAliasId(it) => _ = db.trait_alias_data(it),
+                    ModuleDefId::TypeAliasId(it) => _ = db.type_alias_data(it),
+                    ModuleDefId::EnumVariantId(_)
+                    | ModuleDefId::ModuleId(_)
+                    | ModuleDefId::MacroId(_)
+                    | ModuleDefId::BuiltinType(_) => unreachable!(),
+                }
+            }
+        });
+        let n_reparsed_files = events.iter().filter(|it| it.contains("parse(")).count();
+        assert_eq!(n_reparsed_files, 0);
+    }
 }

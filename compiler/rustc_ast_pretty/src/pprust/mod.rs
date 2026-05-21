@@ -5,11 +5,13 @@ pub mod state;
 use std::borrow::Cow;
 
 use rustc_ast as ast;
-use rustc_ast::token::{Token, TokenKind};
+use rustc_ast::token::{Nonterminal, Token, TokenKind};
 use rustc_ast::tokenstream::{TokenStream, TokenTree};
-pub use state::{
-    AnnNode, Comments, PpAnn, PrintState, State, print_crate, print_crate_as_interface,
-};
+pub use state::{print_crate, AnnNode, Comments, PpAnn, PrintState, State};
+
+pub fn nonterminal_to_string(nt: &Nonterminal) -> String {
+    State::new().nonterminal_to_string(nt)
+}
 
 /// Print the token kind precisely, without converting `$crate` into its respective crate name.
 pub fn token_kind_to_string(tok: &TokenKind) -> Cow<'static, str> {
@@ -33,9 +35,6 @@ pub fn where_bound_predicate_to_string(where_bound_predicate: &ast::WhereBoundPr
     State::new().where_bound_predicate_to_string(where_bound_predicate)
 }
 
-/// # Panics
-///
-/// Panics if `pat.kind` is `PatKind::Missing`.
 pub fn pat_to_string(pat: &ast::Pat) -> String {
     State::new().pat_to_string(pat)
 }
@@ -56,18 +55,6 @@ pub fn item_to_string(i: &ast::Item) -> String {
     State::new().item_to_string(i)
 }
 
-pub fn assoc_item_to_string(i: &ast::AssocItem) -> String {
-    State::new().assoc_item_to_string(i)
-}
-
-pub fn foreign_item_to_string(i: &ast::ForeignItem) -> String {
-    State::new().foreign_item_to_string(i)
-}
-
-pub fn stmt_to_string(s: &ast::Stmt) -> String {
-    State::new().stmt_to_string(s)
-}
-
 pub fn path_to_string(p: &ast::Path) -> String {
     State::new().path_to_string(p)
 }
@@ -80,7 +67,7 @@ pub fn vis_to_string(v: &ast::Visibility) -> String {
     State::new().vis_to_string(v)
 }
 
-pub fn meta_list_item_to_string(li: &ast::MetaItemInner) -> String {
+pub fn meta_list_item_to_string(li: &ast::NestedMetaItem) -> String {
     State::new().meta_list_item_to_string(li)
 }
 

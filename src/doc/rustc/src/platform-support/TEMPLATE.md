@@ -6,8 +6,7 @@ One-sentence description of the target (e.g. CPU, OS)
 
 ## Target maintainers
 
-[@Ghost](https://github.com/Ghost)
-[@octocat](https://github.com/octocat)
+- Some Person, https://github.com/...
 
 ## Requirements
 
@@ -29,7 +28,7 @@ What format do binaries use by default? ELF, PE, something else?
 ## Building the target
 
 If Rust doesn't build the target by default, how can users build it? Can users
-just add it to the `target` list in `bootstrap.toml`?
+just add it to the `target` list in `config.toml`?
 
 ## Building Rust programs
 

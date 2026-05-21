@@ -1,4 +1,4 @@
-//@ edition: 2024
+#![feature(let_chains)]
 trait Demo {}
 
 impl dyn Demo {

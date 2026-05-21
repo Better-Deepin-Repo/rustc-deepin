@@ -1,8 +1,9 @@
 use std::fmt::Write;
 
-use rustc_hir::def_id::LocalDefId;
-use rustc_hir::find_attr;
+use rustc_hir::def::DefKind;
+use rustc_hir::def_id::{LocalDefId, CRATE_DEF_ID};
 use rustc_middle::ty::{GenericArgs, TyCtxt};
+use rustc_span::symbol::sym;
 
 fn format_variances(tcx: TyCtxt<'_>, def_id: LocalDefId) -> String {
     let variances = tcx.variances_of(def_id);
@@ -23,19 +24,19 @@ fn format_variances(tcx: TyCtxt<'_>, def_id: LocalDefId) -> String {
 }
 
 pub(crate) fn variances(tcx: TyCtxt<'_>) {
-    let crate_items = tcx.hir_crate_items(());
+    if tcx.has_attr(CRATE_DEF_ID, sym::rustc_variance_of_opaques) {
+        for id in tcx.hir().items() {
+            let DefKind::OpaqueTy = tcx.def_kind(id.owner_id) else { continue };
 
-    if find_attr!(tcx, crate, RustcVarianceOfOpaques) {
-        for id in crate_items.opaques() {
             tcx.dcx().emit_err(crate::errors::VariancesOf {
-                span: tcx.def_span(id),
-                variances: format_variances(tcx, id),
+                span: tcx.def_span(id.owner_id),
+                variances: format_variances(tcx, id.owner_id.def_id),
             });
         }
     }
 
-    for id in crate_items.free_items() {
-        if !find_attr!(tcx, id.owner_id, RustcVariance) {
+    for id in tcx.hir().items() {
+        if !tcx.has_attr(id.owner_id, sym::rustc_variance) {
             continue;
         }
 

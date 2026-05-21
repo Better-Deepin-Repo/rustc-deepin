@@ -1,24 +1,28 @@
 //@run-pass
+// SEGFAULTS on LLVM 17. This should be merged into `simd-bitmask` once we require LLVM 18.
+//@ min-llvm-version: 18
 // FIXME: broken codegen on big-endian (https://github.com/rust-lang/rust/issues/127205)
-// This should be merged into `simd-bitmask` once that's fixed.
 //@ ignore-endian-big
-//@ ignore-backends: gcc
-//@ compile-flags: --cfg minisimd_const
+#![feature(repr_simd, intrinsics)]
 
-#![feature(repr_simd, core_intrinsics, const_trait_impl, const_cmp, const_index)]
+extern "rust-intrinsic" {
+    fn simd_bitmask<T, U>(v: T) -> U;
+    fn simd_select_bitmask<T, U>(m: T, a: U, b: U) -> U;
+}
 
-#[path = "../../auxiliary/minisimd.rs"]
-mod minisimd;
-use minisimd::*;
-
-use std::intrinsics::simd::{simd_bitmask, simd_select_bitmask};
-
-const fn bitmask() {
+fn main() {
     // Non-power-of-2 multi-byte mask.
+    #[repr(simd, packed)]
     #[allow(non_camel_case_types)]
-    type i32x10 = PackedSimd<i32, 10>;
+    #[derive(Copy, Clone, Debug, PartialEq)]
+    struct i32x10([i32; 10]);
+    impl i32x10 {
+        fn splat(x: i32) -> Self {
+            Self([x; 10])
+        }
+    }
     unsafe {
-        let mask = i32x10::from_array([!0, !0, 0, !0, 0, 0, !0, 0, !0, 0]);
+        let mask = i32x10([!0, !0, 0, !0, 0, 0, !0, 0, !0, 0]);
         let mask_bits = if cfg!(target_endian = "little") { 0b0101001011 } else { 0b1101001010 };
         let mask_bytes =
             if cfg!(target_endian = "little") { [0b01001011, 0b01] } else { [0b11, 0b01001010] };
@@ -43,15 +47,17 @@ const fn bitmask() {
     }
 
     // Test for a mask where the next multiple of 8 is not a power of two.
+    #[repr(simd, packed)]
     #[allow(non_camel_case_types)]
-    type i32x20 = PackedSimd<i32, 20>;
+    #[derive(Copy, Clone, Debug, PartialEq)]
+    struct i32x20([i32; 20]);
+    impl i32x20 {
+        fn splat(x: i32) -> Self {
+            Self([x; 20])
+        }
+    }
     unsafe {
-        let mask = i32x20::from_array([
-            !0, !0,  0, !0,  0,
-             0, !0,  0, !0,  0,
-             0,  0,  0, !0, !0,
-            !0, !0, !0, !0, !0,
-        ]);
+        let mask = i32x20([!0, !0, 0, !0, 0, 0, !0, 0, !0, 0, 0, 0, 0, !0, !0, !0, !0, !0, !0, !0]);
         let mask_bits = if cfg!(target_endian = "little") {
             0b11111110000101001011
         } else {
@@ -81,9 +87,4 @@ const fn bitmask() {
         assert_eq!(selected1, mask);
         assert_eq!(selected2, mask);
     }
-}
-
-fn main() {
-    const { bitmask() };
-    bitmask();
 }

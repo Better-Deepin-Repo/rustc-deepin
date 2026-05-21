@@ -4,16 +4,15 @@
 //@ compile-flags: -Cpanic=abort
 //@ no-prefer-dynamic so panic=abort works
 
-#![feature(rustc_private)]
-#![no_main]
+#![feature(start, rustc_private)]
 
 extern crate libc;
 
-// Use no_main so we don't have a runtime that messes with SIGPIPE.
-#[no_mangle]
-extern "C" fn main(argc: core::ffi::c_int, argv: *const *const u8) -> core::ffi::c_int {
+// Use #[start] so we don't have a runtime that messes with SIGPIPE.
+#[start]
+fn start(argc: isize, argv: *const *const u8) -> isize {
     assert_eq!(argc, 2, "Must pass SIG_IGN or SIG_DFL as first arg");
-    let arg1 = unsafe { core::ffi::CStr::from_ptr(*argv.offset(1) as *const libc::c_char) }
+    let arg1 = unsafe { std::ffi::CStr::from_ptr(*argv.offset(1) as *const libc::c_char) }
         .to_str()
         .unwrap();
 
@@ -24,8 +23,8 @@ extern "C" fn main(argc: core::ffi::c_int, argv: *const *const u8) -> core::ffi:
     };
 
     let actual = unsafe {
-        let mut actual: libc::sigaction = core::mem::zeroed();
-        libc::sigaction(libc::SIGPIPE, core::ptr::null(), &mut actual);
+        let mut actual: libc::sigaction = std::mem::zeroed();
+        libc::sigaction(libc::SIGPIPE, std::ptr::null(), &mut actual);
         actual.sa_sigaction
     };
 

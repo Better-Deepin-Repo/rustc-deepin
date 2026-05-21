@@ -1,5 +1,5 @@
-use crate::debuggers::{extract_gdb_version, extract_lldb_version};
-use crate::is_test;
+use super::header::extract_llvm_version;
+use super::*;
 
 #[test]
 fn test_extract_gdb_version() {
@@ -58,32 +58,21 @@ fn test_extract_lldb_version() {
 
 #[test]
 fn is_test_test() {
-    assert!(is_test("a_test.rs"));
-    assert!(!is_test(".a_test.rs"));
-    assert!(!is_test("a_cat.gif"));
-    assert!(!is_test("#a_dog_gif"));
-    assert!(!is_test("~a_temp_file"));
+    assert!(is_test(&OsString::from("a_test.rs")));
+    assert!(!is_test(&OsString::from(".a_test.rs")));
+    assert!(!is_test(&OsString::from("a_cat.gif")));
+    assert!(!is_test(&OsString::from("#a_dog_gif")));
+    assert!(!is_test(&OsString::from("~a_temp_file")));
 }
 
 #[test]
-fn string_enums() {
-    crate::util::string_enum! {
-        #[derive(Clone, Copy, Debug, PartialEq)]
-        enum Animal {
-            Cat => "meow",
-            Dog => "woof",
-        }
-    }
-
-    // General assertions, mostly to silence the dead code warnings
-    assert_eq!(Animal::VARIANTS.len(), 2);
-    assert_eq!(Animal::STR_VARIANTS.len(), 2);
-
-    // Correct string conversions
-    assert_eq!(Animal::Cat, "meow".parse().unwrap());
-    assert_eq!(Animal::Dog, "woof".parse().unwrap());
-
-    // Invalid conversions
-    let animal = "nya".parse::<Animal>();
-    assert_eq!("unknown `Animal` variant: `nya`", animal.unwrap_err());
+fn test_extract_llvm_version() {
+    assert_eq!(extract_llvm_version("8.1.2-rust"), Some(80102));
+    assert_eq!(extract_llvm_version("9.0.1-rust-1.43.0-dev"), Some(90001));
+    assert_eq!(extract_llvm_version("9.3.1-rust-1.43.0-dev"), Some(90301));
+    assert_eq!(extract_llvm_version("10.0.0-rust"), Some(100000));
+    assert_eq!(extract_llvm_version("11.1.0"), Some(110100));
+    assert_eq!(extract_llvm_version("12.0.0libcxx"), Some(120000));
+    assert_eq!(extract_llvm_version("12.0.0-rc3"), Some(120000));
+    assert_eq!(extract_llvm_version("13.0.0git"), Some(130000));
 }

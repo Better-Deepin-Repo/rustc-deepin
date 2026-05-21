@@ -3,9 +3,9 @@
 #![feature(coroutines)]
 
 #[coroutine]
-//~^ ERROR: attribute cannot be used on
+//~^ ERROR: attribute should be applied to closures
 struct Foo;
 
 #[coroutine]
-//~^ ERROR: attribute cannot be used on
+//~^ ERROR: attribute should be applied to closures
 fn main() {}

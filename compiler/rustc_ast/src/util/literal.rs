@@ -2,10 +2,11 @@
 
 use std::{ascii, fmt, str};
 
-use rustc_literal_escaper::{
-    MixedUnit, unescape_byte, unescape_byte_str, unescape_c_str, unescape_char, unescape_str,
+use rustc_lexer::unescape::{
+    byte_from_char, unescape_byte, unescape_char, unescape_mixed, unescape_unicode, MixedUnit, Mode,
 };
-use rustc_span::{ByteSymbol, Span, Symbol, kw, sym};
+use rustc_span::symbol::{kw, sym, Symbol};
+use rustc_span::Span;
 use tracing::debug;
 
 use crate::ast::{self, LitKind, MetaItemLit, StrStyle};
@@ -87,10 +88,11 @@ impl LitKind {
                     // Force-inlining here is aggressive but the closure is
                     // called on every char in the string, so it can be hot in
                     // programs with many long strings containing escapes.
-                    unescape_str(
+                    unescape_unicode(
                         s,
-                        #[inline(always)]
-                        |_, res| match res {
+                        Mode::Str,
+                        &mut #[inline(always)]
+                        |_, c| match c {
                             Ok(c) => buf.push(c),
                             Err(err) => {
                                 assert!(!err.is_fatal(), "failed to unescape string literal")
@@ -110,41 +112,42 @@ impl LitKind {
             token::ByteStr => {
                 let s = symbol.as_str();
                 let mut buf = Vec::with_capacity(s.len());
-                unescape_byte_str(s, |_, res| match res {
-                    Ok(b) => buf.push(b),
+                unescape_unicode(s, Mode::ByteStr, &mut |_, c| match c {
+                    Ok(c) => buf.push(byte_from_char(c)),
                     Err(err) => {
                         assert!(!err.is_fatal(), "failed to unescape string literal")
                     }
                 });
-                LitKind::ByteStr(ByteSymbol::intern(&buf), StrStyle::Cooked)
+                LitKind::ByteStr(buf.into(), StrStyle::Cooked)
             }
             token::ByteStrRaw(n) => {
-                // Raw byte strings have no escapes so no work is needed here.
+                // Raw strings have no escapes so we can convert the symbol
+                // directly to a `Lrc<u8>`.
                 let buf = symbol.as_str().to_owned().into_bytes();
-                LitKind::ByteStr(ByteSymbol::intern(&buf), StrStyle::Raw(n))
+                LitKind::ByteStr(buf.into(), StrStyle::Raw(n))
             }
             token::CStr => {
                 let s = symbol.as_str();
                 let mut buf = Vec::with_capacity(s.len());
-                unescape_c_str(s, |_span, res| match res {
+                unescape_mixed(s, Mode::CStr, &mut |_span, c| match c {
                     Ok(MixedUnit::Char(c)) => {
-                        buf.extend_from_slice(c.get().encode_utf8(&mut [0; 4]).as_bytes())
+                        buf.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes())
                     }
-                    Ok(MixedUnit::HighByte(b)) => buf.push(b.get()),
+                    Ok(MixedUnit::HighByte(b)) => buf.push(b),
                     Err(err) => {
                         assert!(!err.is_fatal(), "failed to unescape C string literal")
                     }
                 });
                 buf.push(0);
-                LitKind::CStr(ByteSymbol::intern(&buf), StrStyle::Cooked)
+                LitKind::CStr(buf.into(), StrStyle::Cooked)
             }
             token::CStrRaw(n) => {
                 // Raw strings have no escapes so we can convert the symbol
-                // directly to a `Arc<u8>` after appending the terminating NUL
+                // directly to a `Lrc<u8>` after appending the terminating NUL
                 // char.
                 let mut buf = symbol.as_str().to_owned().into_bytes();
                 buf.push(0);
-                LitKind::CStr(ByteSymbol::intern(&buf), StrStyle::Raw(n))
+                LitKind::CStr(buf.into(), StrStyle::Raw(n))
             }
             token::Err(guar) => LitKind::Err(guar),
         })
@@ -166,12 +169,12 @@ impl fmt::Display for LitKind {
                 delim = "#".repeat(n as usize),
                 string = sym
             )?,
-            LitKind::ByteStr(ref byte_sym, StrStyle::Cooked) => {
-                write!(f, "b\"{}\"", escape_byte_str_symbol(byte_sym.as_byte_str()))?
+            LitKind::ByteStr(ref bytes, StrStyle::Cooked) => {
+                write!(f, "b\"{}\"", escape_byte_str_symbol(bytes))?
             }
-            LitKind::ByteStr(ref byte_sym, StrStyle::Raw(n)) => {
+            LitKind::ByteStr(ref bytes, StrStyle::Raw(n)) => {
                 // Unwrap because raw byte string literals can only contain ASCII.
-                let symbol = str::from_utf8(byte_sym.as_byte_str()).unwrap();
+                let symbol = str::from_utf8(bytes).unwrap();
                 write!(
                     f,
                     "br{delim}\"{string}\"{delim}",
@@ -180,25 +183,25 @@ impl fmt::Display for LitKind {
                 )?;
             }
             LitKind::CStr(ref bytes, StrStyle::Cooked) => {
-                write!(f, "c\"{}\"", escape_byte_str_symbol(bytes.as_byte_str()))?
+                write!(f, "c\"{}\"", escape_byte_str_symbol(bytes))?
             }
             LitKind::CStr(ref bytes, StrStyle::Raw(n)) => {
                 // This can only be valid UTF-8.
-                let symbol = str::from_utf8(bytes.as_byte_str()).unwrap();
+                let symbol = str::from_utf8(bytes).unwrap();
                 write!(f, "cr{delim}\"{symbol}\"{delim}", delim = "#".repeat(n as usize),)?;
             }
             LitKind::Int(n, ty) => {
                 write!(f, "{n}")?;
                 match ty {
-                    ast::LitIntType::Unsigned(ty) => write!(f, "{}", ty.name_str())?,
-                    ast::LitIntType::Signed(ty) => write!(f, "{}", ty.name_str())?,
+                    ast::LitIntType::Unsigned(ty) => write!(f, "{}", ty.name())?,
+                    ast::LitIntType::Signed(ty) => write!(f, "{}", ty.name())?,
                     ast::LitIntType::Unsuffixed => {}
                 }
             }
             LitKind::Float(symbol, ty) => {
                 write!(f, "{symbol}")?;
                 match ty {
-                    ast::LitFloatType::Suffixed(ty) => write!(f, "{}", ty.name_str())?,
+                    ast::LitFloatType::Suffixed(ty) => write!(f, "{}", ty.name())?,
                     ast::LitFloatType::Unsuffixed => {}
                 }
             }

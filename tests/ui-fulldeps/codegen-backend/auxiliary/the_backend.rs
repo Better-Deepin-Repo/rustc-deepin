@@ -15,28 +15,35 @@ extern crate rustc_span;
 extern crate rustc_symbol_mangling;
 extern crate rustc_target;
 
-use std::any::Any;
-
 use rustc_codegen_ssa::traits::CodegenBackend;
 use rustc_codegen_ssa::{CodegenResults, CrateInfo};
 use rustc_data_structures::fx::FxIndexMap;
+use rustc_errors::ErrorGuaranteed;
 use rustc_metadata::EncodedMetadata;
 use rustc_middle::dep_graph::{WorkProduct, WorkProductId};
 use rustc_middle::ty::TyCtxt;
-use rustc_session::Session;
 use rustc_session::config::OutputFilenames;
+use rustc_session::Session;
+use std::any::Any;
 
 struct TheBackend;
 
 impl CodegenBackend for TheBackend {
-    fn name(&self) -> &'static str {
-        "the-backend"
+    fn locale_resource(&self) -> &'static str {
+        ""
     }
 
-    fn codegen_crate(&self, tcx: TyCtxt<'_>) -> Box<dyn Any> {
+    fn codegen_crate<'a, 'tcx>(
+        &self,
+        tcx: TyCtxt<'tcx>,
+        metadata: EncodedMetadata,
+        _need_metadata_module: bool,
+    ) -> Box<dyn Any> {
         Box::new(CodegenResults {
             modules: vec![],
             allocator_module: None,
+            metadata_module: None,
+            metadata,
             crate_info: CrateInfo::new(tcx, "fake_target_cpu".to_string()),
         })
     }
@@ -57,14 +64,13 @@ impl CodegenBackend for TheBackend {
         &self,
         sess: &Session,
         codegen_results: CodegenResults,
-        _metadata: EncodedMetadata,
         outputs: &OutputFilenames,
-    ) {
+    ) -> Result<(), ErrorGuaranteed> {
+        use rustc_session::{
+            config::{CrateType, OutFileName},
+            output::out_filename,
+        };
         use std::io::Write;
-
-        use rustc_session::config::{CrateType, OutFileName};
-        use rustc_session::output::out_filename;
-
         let crate_name = codegen_results.crate_info.local_crate_name;
         for &crate_type in sess.opts.crate_types.iter() {
             if crate_type != CrateType::Rlib {
@@ -82,6 +88,7 @@ impl CodegenBackend for TheBackend {
                 }
             }
         }
+        Ok(())
     }
 }
 

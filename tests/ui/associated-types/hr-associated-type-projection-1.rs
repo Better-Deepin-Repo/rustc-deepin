@@ -12,10 +12,10 @@ where
 
 impl<T: Copy + std::ops::Deref> UnsafeCopy<'_, T> for T {
     type Item = T;
-    //~^ ERROR type mismatch resolving `<T as Deref>::Target == T`
+    //~^ type mismatch resolving `<T as Deref>::Target == T`
 }
 
 pub fn main() {
     <&'static str>::bug(&"");
-    //~^ ERROR type mismatch resolving `<&str as Deref>::Target == &str`
+    //~^ type mismatch resolving `<&str as Deref>::Target == &str`
 }

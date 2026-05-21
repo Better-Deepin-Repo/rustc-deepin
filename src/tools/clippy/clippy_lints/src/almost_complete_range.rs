@@ -1,10 +1,11 @@
+use clippy_config::msrvs::{self, Msrv};
 use clippy_config::Conf;
 use clippy_utils::diagnostics::span_lint_and_then;
-use clippy_utils::msrvs::{self, MsrvStack};
 use clippy_utils::source::{trim_span, walk_span_to_context};
 use rustc_ast::ast::{Expr, ExprKind, LitKind, Pat, PatKind, RangeEnd, RangeLimits};
 use rustc_errors::Applicability;
 use rustc_lint::{EarlyContext, EarlyLintPass, LintContext};
+use rustc_middle::lint::in_external_macro;
 use rustc_session::impl_lint_pass;
 
 declare_clippy_lint! {
@@ -31,12 +32,12 @@ declare_clippy_lint! {
 impl_lint_pass!(AlmostCompleteRange => [ALMOST_COMPLETE_RANGE]);
 
 pub struct AlmostCompleteRange {
-    msrv: MsrvStack,
+    msrv: Msrv,
 }
 impl AlmostCompleteRange {
     pub fn new(conf: &'static Conf) -> Self {
         Self {
-            msrv: MsrvStack::new(conf.msrv),
+            msrv: conf.msrv.clone(),
         }
     }
 }
@@ -44,7 +45,7 @@ impl EarlyLintPass for AlmostCompleteRange {
     fn check_expr(&mut self, cx: &EarlyContext<'_>, e: &Expr) {
         if let ExprKind::Range(Some(start), Some(end), RangeLimits::HalfOpen) = &e.kind
             && is_incomplete_range(start, end)
-            && !e.span.in_external_macro(cx.sess().source_map())
+            && !in_external_macro(cx.sess(), e.span)
         {
             span_lint_and_then(
                 cx,
@@ -73,7 +74,7 @@ impl EarlyLintPass for AlmostCompleteRange {
         if let PatKind::Range(Some(start), Some(end), kind) = &p.kind
             && matches!(kind.node, RangeEnd::Excluded)
             && is_incomplete_range(start, end)
-            && !p.span.in_external_macro(cx.sess().source_map())
+            && !in_external_macro(cx.sess(), p.span)
         {
             span_lint_and_then(
                 cx,
@@ -96,7 +97,7 @@ impl EarlyLintPass for AlmostCompleteRange {
         }
     }
 
-    extract_msrv_attr!();
+    extract_msrv_attr!(EarlyContext);
 }
 
 fn is_incomplete_range(start: &Expr, end: &Expr) -> bool {

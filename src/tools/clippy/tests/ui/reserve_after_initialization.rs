@@ -8,7 +8,6 @@ use proc_macros::{external, with_span};
 // Should lint
 fn standard() {
     let mut v1: Vec<usize> = vec![];
-    //~^ reserve_after_initialization
     v1.reserve(10);
 }
 
@@ -16,7 +15,6 @@ fn standard() {
 fn capacity_as_expr() {
     let capacity = 10;
     let mut v2: Vec<usize> = vec![];
-    //~^ reserve_after_initialization
     v2.reserve(capacity);
 }
 
@@ -35,7 +33,6 @@ fn called_with_capacity() {
 fn assign_expression() {
     let mut v5: Vec<usize> = Vec::new();
     v5 = Vec::new();
-    //~^ reserve_after_initialization
     v5.reserve(10);
 }
 

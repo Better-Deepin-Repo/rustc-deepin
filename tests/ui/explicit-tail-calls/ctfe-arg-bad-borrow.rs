@@ -1,4 +1,4 @@
-#![expect(incomplete_features)]
+#![allow(incomplete_features)]
 #![feature(explicit_tail_calls)]
 
 pub const fn test(_: &Type) {

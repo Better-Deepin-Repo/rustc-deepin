@@ -1,4 +1,3 @@
-//@ check-pass
 //@compile-flags: --test
 #![allow(unused)]
 #![warn(clippy::items_after_test_module)]

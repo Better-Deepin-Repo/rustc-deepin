@@ -13,10 +13,10 @@ SOURCE_FILE
           PATH_SEGMENT
             NAME_REF
               IDENT "Start"
-            PARENTHESIZED_ARG_LIST
-              COLON2 "::"
+            COLON2 "::"
+            PARAM_LIST
               L_PAREN "("
-              TYPE_ARG
+              PARAM
                 PATH_TYPE
                   PATH
                     PATH_SEGMENT
@@ -63,9 +63,9 @@ SOURCE_FILE
                     PATH_SEGMENT
                       NAME_REF
                         IDENT "Start"
-                      PARENTHESIZED_ARG_LIST
+                      PARAM_LIST
                         L_PAREN "("
-                        TYPE_ARG
+                        PARAM
                           PATH_TYPE
                             PATH
                               PATH_SEGMENT

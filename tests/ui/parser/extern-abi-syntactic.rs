@@ -5,13 +5,13 @@
 
 fn main() {}
 
-#[cfg(false)]
+#[cfg(FALSE)]
 extern "some_abi_that_we_are_sure_does_not_exist_semantically" fn foo() {}
 
-#[cfg(false)]
+#[cfg(FALSE)]
 extern "some_abi_that_we_are_sure_does_not_exist_semantically" {
     fn foo();
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 type T = extern "some_abi_that_we_are_sure_does_not_exist_semantically" fn();

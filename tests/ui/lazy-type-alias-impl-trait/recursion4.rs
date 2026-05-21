@@ -2,7 +2,6 @@
 
 type Foo = impl std::fmt::Debug;
 
-#[define_opaque(Foo)]
 fn foo(b: bool) -> Foo {
     if b {
         return vec![];

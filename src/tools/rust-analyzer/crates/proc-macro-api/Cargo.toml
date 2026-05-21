@@ -14,7 +14,6 @@ doctest = false
 
 [dependencies]
 serde.workspace = true
-serde_derive.workspace = true
 serde_json = { workspace = true, features = ["unbounded_depth"] }
 tracing.workspace = true
 rustc-hash.workspace = true
@@ -24,19 +23,12 @@ indexmap.workspace = true
 paths = { workspace = true, features = ["serde1"] }
 tt.workspace = true
 stdx.workspace = true
-proc-macro-srv = {workspace = true, optional = true}
-# span = {workspace = true, default-features = false} does not work
-span = { path = "../span", version = "0.0.0", default-features = false}
-
+# Ideally this crate would not depend on salsa things, but we need span information here which wraps
+# InternIds for the syntax context
+span.workspace = true
+# only here due to the `Env` newtype :/
+base-db.workspace = true
 intern.workspace = true
-postcard.workspace = true
-semver.workspace = true
-rayon.workspace = true
-
-[features]
-sysroot-abi = ["proc-macro-srv", "proc-macro-srv/sysroot-abi"]
-default = []
-in-rust-tree = []
 
 [lints]
 workspace = true

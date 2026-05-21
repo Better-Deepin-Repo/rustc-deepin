@@ -1,13 +1,12 @@
 use rustc_ast::token::{self, Delimiter, IdentIsRaw, Lit, Token, TokenKind};
-use rustc_ast::tokenstream::{TokenStream, TokenStreamIter, TokenTree};
+use rustc_ast::tokenstream::{RefTokenTreeCursor, TokenStream, TokenTree};
 use rustc_ast::{LitIntType, LitKind};
 use rustc_ast_pretty::pprust;
 use rustc_errors::{Applicability, PResult};
 use rustc_macros::{Decodable, Encodable};
 use rustc_session::parse::ParseSess;
-use rustc_span::{Ident, Span, Symbol, sym};
-
-use crate::errors;
+use rustc_span::symbol::Ident;
+use rustc_span::{Span, Symbol};
 
 pub(crate) const RAW_IDENT_ERR: &str = "`${concat(..)}` currently does not support raw identifiers";
 pub(crate) const UNSUPPORTED_CONCAT_ELEM_ERR: &str = "expected identifier or string literal";
@@ -24,11 +23,11 @@ pub(crate) enum MetaVarExpr {
     /// Ignore a meta-variable for repetition without expansion.
     Ignore(Ident),
 
-    /// The index of the repetition at a particular depth, where 0 is the innermost
+    /// The index of the repetition at a particular depth, where 0 is the inner-most
     /// repetition. The `usize` is the depth.
     Index(usize),
 
-    /// The length of the repetition at a particular depth, where 0 is the innermost
+    /// The length of the repetition at a particular depth, where 0 is the inner-most
     /// repetition. The `usize` is the depth.
     Len(usize),
 }
@@ -40,53 +39,75 @@ impl MetaVarExpr {
         outer_span: Span,
         psess: &'psess ParseSess,
     ) -> PResult<'psess, MetaVarExpr> {
-        let mut iter = input.iter();
-        let ident = parse_ident(&mut iter, psess, outer_span)?;
-        let next = iter.next();
-        let Some(TokenTree::Delimited(.., Delimiter::Parenthesis, args)) = next else {
-            // No `()`; wrong or no delimiters. Point at a problematic span or a place to
-            // add parens if it makes sense.
-            let (unexpected_span, insert_span) = match next {
-                Some(TokenTree::Delimited(..)) => (None, None),
-                Some(tt) => (Some(tt.span()), None),
-                None => (None, Some(ident.span.shrink_to_hi())),
-            };
-            let err =
-                errors::MveMissingParen { ident_span: ident.span, unexpected_span, insert_span };
-            return Err(psess.dcx().create_err(err));
+        let mut tts = input.trees();
+        let ident = parse_ident(&mut tts, psess, outer_span)?;
+        let Some(TokenTree::Delimited(.., Delimiter::Parenthesis, args)) = tts.next() else {
+            let msg = "meta-variable expression parameter must be wrapped in parentheses";
+            return Err(psess.dcx().struct_span_err(ident.span, msg));
         };
-
-        // Ensure there are no trailing tokens in the braces, e.g. `${foo() extra}`
-        if iter.peek().is_some() {
-            let span = iter_span(&iter).expect("checked is_some above");
-            let err = errors::MveExtraTokens {
-                span,
-                ident_span: ident.span,
-                extra_count: iter.count(),
-                ..Default::default()
-            };
-            return Err(psess.dcx().create_err(err));
-        }
-
-        let mut iter = args.iter();
-        let rslt = match ident.name {
-            sym::concat => parse_concat(&mut iter, psess, outer_span, ident.span)?,
-            sym::count => parse_count(&mut iter, psess, ident.span)?,
-            sym::ignore => {
+        check_trailing_token(&mut tts, psess)?;
+        let mut iter = args.trees();
+        let rslt = match ident.as_str() {
+            "concat" => {
+                let mut result = Vec::new();
+                loop {
+                    let is_var = try_eat_dollar(&mut iter);
+                    let token = parse_token(&mut iter, psess, outer_span)?;
+                    let element = if is_var {
+                        MetaVarExprConcatElem::Var(parse_ident_from_token(psess, token)?)
+                    } else if let TokenKind::Literal(Lit {
+                        kind: token::LitKind::Str,
+                        symbol,
+                        suffix: None,
+                    }) = token.kind
+                    {
+                        MetaVarExprConcatElem::Literal(symbol)
+                    } else {
+                        match parse_ident_from_token(psess, token) {
+                            Err(err) => {
+                                err.cancel();
+                                return Err(psess
+                                    .dcx()
+                                    .struct_span_err(token.span, UNSUPPORTED_CONCAT_ELEM_ERR));
+                            }
+                            Ok(elem) => MetaVarExprConcatElem::Ident(elem),
+                        }
+                    };
+                    result.push(element);
+                    if iter.look_ahead(0).is_none() {
+                        break;
+                    }
+                    if !try_eat_comma(&mut iter) {
+                        return Err(psess.dcx().struct_span_err(outer_span, "expected comma"));
+                    }
+                }
+                if result.len() < 2 {
+                    return Err(psess
+                        .dcx()
+                        .struct_span_err(ident.span, "`concat` must have at least two elements"));
+                }
+                MetaVarExpr::Concat(result.into())
+            }
+            "count" => parse_count(&mut iter, psess, ident.span)?,
+            "ignore" => {
                 eat_dollar(&mut iter, psess, ident.span)?;
                 MetaVarExpr::Ignore(parse_ident(&mut iter, psess, ident.span)?)
             }
-            sym::index => MetaVarExpr::Index(parse_depth(&mut iter, psess, ident.span)?),
-            sym::len => MetaVarExpr::Len(parse_depth(&mut iter, psess, ident.span)?),
+            "index" => MetaVarExpr::Index(parse_depth(&mut iter, psess, ident.span)?),
+            "len" => MetaVarExpr::Len(parse_depth(&mut iter, psess, ident.span)?),
             _ => {
-                let err = errors::MveUnrecognizedExpr {
-                    span: ident.span,
-                    valid_expr_list: "`count`, `ignore`, `index`, `len`, and `concat`",
-                };
-                return Err(psess.dcx().create_err(err));
+                let err_msg = "unrecognized meta-variable expression";
+                let mut err = psess.dcx().struct_span_err(ident.span, err_msg);
+                err.span_suggestion(
+                    ident.span,
+                    "supported expressions are count, ignore, index and len",
+                    "",
+                    Applicability::MachineApplicable,
+                );
+                return Err(err);
             }
         };
-        check_trailing_tokens(&mut iter, psess, ident)?;
+        check_trailing_token(&mut iter, psess)?;
         Ok(rslt)
     }
 
@@ -106,52 +127,6 @@ impl MetaVarExpr {
     }
 }
 
-/// Checks if there are any remaining tokens (for example, `${ignore($valid, extra)}`) and create
-/// a diag with the correct arg count if so.
-fn check_trailing_tokens<'psess>(
-    iter: &mut TokenStreamIter<'_>,
-    psess: &'psess ParseSess,
-    ident: Ident,
-) -> PResult<'psess, ()> {
-    if iter.peek().is_none() {
-        // All tokens consumed, as expected
-        return Ok(());
-    }
-
-    // `None` for max indicates the arg count must be exact, `Some` indicates a range is accepted.
-    let (min_or_exact_args, max_args) = match ident.name {
-        sym::concat => panic!("concat takes unlimited tokens but didn't eat them all"),
-        sym::ignore => (1, None),
-        // 1 or 2 args
-        sym::count => (1, Some(2)),
-        // 0 or 1 arg
-        sym::index | sym::len => (0, Some(1)),
-        other => unreachable!("unknown MVEs should be rejected earlier (got `{other}`)"),
-    };
-
-    let err = errors::MveExtraTokens {
-        span: iter_span(iter).expect("checked is_none above"),
-        ident_span: ident.span,
-        extra_count: iter.count(),
-
-        exact_args_note: if max_args.is_some() { None } else { Some(()) },
-        range_args_note: if max_args.is_some() { Some(()) } else { None },
-        min_or_exact_args,
-        max_args: max_args.unwrap_or_default(),
-        name: ident.to_string(),
-    };
-    Err(psess.dcx().create_err(err))
-}
-
-/// Returns a span encompassing all tokens in the iterator if there is at least one item.
-fn iter_span(iter: &TokenStreamIter<'_>) -> Option<Span> {
-    let mut iter = iter.clone(); // cloning is cheap
-    let first_sp = iter.next()?.span();
-    let last_sp = iter.last().map(TokenTree::span).unwrap_or(first_sp);
-    let span = first_sp.with_hi(last_sp.hi());
-    Some(span)
-}
-
 /// Indicates what is placed in a `concat` parameter. For example, literals
 /// (`${concat("foo", "bar")}`) or adhoc identifiers (`${concat(foo, bar)}`).
 #[derive(Debug, Decodable, Encodable, PartialEq)]
@@ -166,60 +141,32 @@ pub(crate) enum MetaVarExprConcatElem {
     Var(Ident),
 }
 
-/// Parse a meta-variable `concat` expression: `concat($metavar, ident, ...)`.
-fn parse_concat<'psess>(
-    iter: &mut TokenStreamIter<'_>,
+// Checks if there are any remaining tokens. For example, `${ignore(ident ... a b c ...)}`
+fn check_trailing_token<'psess>(
+    iter: &mut RefTokenTreeCursor<'_>,
     psess: &'psess ParseSess,
-    outer_span: Span,
-    expr_ident_span: Span,
-) -> PResult<'psess, MetaVarExpr> {
-    let mut result = Vec::new();
-    loop {
-        let is_var = try_eat_dollar(iter);
-        let token = parse_token(iter, psess, outer_span)?;
-        let element = if is_var {
-            MetaVarExprConcatElem::Var(parse_ident_from_token(psess, token)?)
-        } else if let TokenKind::Literal(Lit { kind: token::LitKind::Str, symbol, suffix: None }) =
-            token.kind
-        {
-            MetaVarExprConcatElem::Literal(symbol)
-        } else {
-            match parse_ident_from_token(psess, token) {
-                Err(err) => {
-                    err.cancel();
-                    return Err(psess
-                        .dcx()
-                        .struct_span_err(token.span, UNSUPPORTED_CONCAT_ELEM_ERR));
-                }
-                Ok(elem) => MetaVarExprConcatElem::Ident(elem),
-            }
-        };
-        result.push(element);
-        if iter.peek().is_none() {
-            break;
-        }
-        if !try_eat_comma(iter) {
-            return Err(psess.dcx().struct_span_err(outer_span, "expected comma"));
-        }
-    }
-    if result.len() < 2 {
-        return Err(psess
+) -> PResult<'psess, ()> {
+    if let Some(tt) = iter.next() {
+        let mut diag = psess
             .dcx()
-            .struct_span_err(expr_ident_span, "`concat` must have at least two elements"));
+            .struct_span_err(tt.span(), format!("unexpected token: {}", pprust::tt_to_string(tt)));
+        diag.span_note(tt.span(), "meta-variable expression must not have trailing tokens");
+        Err(diag)
+    } else {
+        Ok(())
     }
-    Ok(MetaVarExpr::Concat(result.into()))
 }
 
 /// Parse a meta-variable `count` expression: `count(ident[, depth])`
 fn parse_count<'psess>(
-    iter: &mut TokenStreamIter<'_>,
+    iter: &mut RefTokenTreeCursor<'_>,
     psess: &'psess ParseSess,
     span: Span,
 ) -> PResult<'psess, MetaVarExpr> {
     eat_dollar(iter, psess, span)?;
     let ident = parse_ident(iter, psess, span)?;
     let depth = if try_eat_comma(iter) {
-        if iter.peek().is_none() {
+        if iter.look_ahead(0).is_none() {
             return Err(psess.dcx().struct_span_err(
                 span,
                 "`count` followed by a comma must have an associated index indicating its depth",
@@ -234,7 +181,7 @@ fn parse_count<'psess>(
 
 /// Parses the depth used by index(depth) and len(depth).
 fn parse_depth<'psess>(
-    iter: &mut TokenStreamIter<'_>,
+    iter: &mut RefTokenTreeCursor<'_>,
     psess: &'psess ParseSess,
     span: Span,
 ) -> PResult<'psess, usize> {
@@ -257,7 +204,7 @@ fn parse_depth<'psess>(
 
 /// Parses an generic ident
 fn parse_ident<'psess>(
-    iter: &mut TokenStreamIter<'_>,
+    iter: &mut RefTokenTreeCursor<'_>,
     psess: &'psess ParseSess,
     fallback_span: Span,
 ) -> PResult<'psess, Ident> {
@@ -289,7 +236,7 @@ fn parse_ident_from_token<'psess>(
 }
 
 fn parse_token<'psess, 't>(
-    iter: &mut TokenStreamIter<'t>,
+    iter: &mut RefTokenTreeCursor<'t>,
     psess: &'psess ParseSess,
     fallback_span: Span,
 ) -> PResult<'psess, &'t Token> {
@@ -304,8 +251,8 @@ fn parse_token<'psess, 't>(
 
 /// Tries to move the iterator forward returning `true` if there is a comma. If not, then the
 /// iterator is not modified and the result is `false`.
-fn try_eat_comma(iter: &mut TokenStreamIter<'_>) -> bool {
-    if let Some(TokenTree::Token(Token { kind: token::Comma, .. }, _)) = iter.peek() {
+fn try_eat_comma(iter: &mut RefTokenTreeCursor<'_>) -> bool {
+    if let Some(TokenTree::Token(Token { kind: token::Comma, .. }, _)) = iter.look_ahead(0) {
         let _ = iter.next();
         return true;
     }
@@ -314,8 +261,8 @@ fn try_eat_comma(iter: &mut TokenStreamIter<'_>) -> bool {
 
 /// Tries to move the iterator forward returning `true` if there is a dollar sign. If not, then the
 /// iterator is not modified and the result is `false`.
-fn try_eat_dollar(iter: &mut TokenStreamIter<'_>) -> bool {
-    if let Some(TokenTree::Token(Token { kind: token::Dollar, .. }, _)) = iter.peek() {
+fn try_eat_dollar(iter: &mut RefTokenTreeCursor<'_>) -> bool {
+    if let Some(TokenTree::Token(Token { kind: token::Dollar, .. }, _)) = iter.look_ahead(0) {
         let _ = iter.next();
         return true;
     }
@@ -324,11 +271,12 @@ fn try_eat_dollar(iter: &mut TokenStreamIter<'_>) -> bool {
 
 /// Expects that the next item is a dollar sign.
 fn eat_dollar<'psess>(
-    iter: &mut TokenStreamIter<'_>,
+    iter: &mut RefTokenTreeCursor<'_>,
     psess: &'psess ParseSess,
     span: Span,
 ) -> PResult<'psess, ()> {
-    if try_eat_dollar(iter) {
+    if let Some(TokenTree::Token(Token { kind: token::Dollar, .. }, _)) = iter.look_ahead(0) {
+        let _ = iter.next();
         return Ok(());
     }
     Err(psess.dcx().struct_span_err(

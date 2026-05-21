@@ -1,6 +1,6 @@
 //@ run-fail
-//@ regex-error-pattern: thread 'main' \(\d+\) panicked at
-//@ needs-subprocess
+//@ error-pattern:thread 'main' panicked at
+//@ ignore-emscripten no processes
 
 fn main() {
     panic!()

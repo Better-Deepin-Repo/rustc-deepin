@@ -15,20 +15,11 @@ use crate::{Edition, LexedStr, TopEntryPoint};
 #[path = "../test_data/generated/runner.rs"]
 mod runner;
 
-fn infer_edition(file_path: &Path) -> Edition {
-    let file_content = std::fs::read_to_string(file_path).unwrap();
-    if let Some(edition) = file_content.strip_prefix("//@ edition: ") {
-        edition[..4].parse().expect("invalid edition directive")
-    } else {
-        Edition::CURRENT
-    }
-}
-
 #[test]
 fn lex_ok() {
     for case in TestCase::list("lexer/ok") {
         let _guard = stdx::panic_context::enter(format!("{:?}", case.rs));
-        let actual = lex(&case.text, infer_edition(&case.rs));
+        let actual = lex(&case.text);
         expect_file![case.rast].assert_eq(&actual)
     }
 }
@@ -37,13 +28,13 @@ fn lex_ok() {
 fn lex_err() {
     for case in TestCase::list("lexer/err") {
         let _guard = stdx::panic_context::enter(format!("{:?}", case.rs));
-        let actual = lex(&case.text, infer_edition(&case.rs));
+        let actual = lex(&case.text);
         expect_file![case.rast].assert_eq(&actual)
     }
 }
 
-fn lex(text: &str, edition: Edition) -> String {
-    let lexed = LexedStr::new(edition, text);
+fn lex(text: &str) -> String {
+    let lexed = LexedStr::new(Edition::CURRENT, text);
 
     let mut res = String::new();
     for i in 0..lexed.len() {
@@ -80,7 +71,7 @@ fn parse_err() {
 fn parse(entry: TopEntryPoint, text: &str, edition: Edition) -> (String, bool) {
     let lexed = LexedStr::new(edition, text);
     let input = lexed.to_input(edition);
-    let output = entry.parse(&input);
+    let output = entry.parse(&input, edition);
 
     let mut buf = String::new();
     let mut errors = Vec::new();

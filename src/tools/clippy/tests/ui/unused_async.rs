@@ -10,8 +10,7 @@ mod issue10800 {
     use std::future::ready;
 
     async fn async_block_await() {
-        //~^ unused_async
-
+        //~^ ERROR: unused `async` for function with no await statements
         async {
             ready(()).await;
         };
@@ -44,7 +43,7 @@ mod issue9695 {
     async fn f() {}
     async fn f2() {}
     async fn f3() {}
-    //~^ unused_async
+    //~^ ERROR: unused `async` for function with no await statements
 
     fn needs_async_fn<F: Future<Output = ()>>(_: fn() -> F) {}
 
@@ -56,25 +55,8 @@ mod issue9695 {
     }
 }
 
-mod issue13466 {
-    use std::future::Future;
-
-    struct Wrap<F>(F);
-    impl<F> From<F> for Wrap<F> {
-        fn from(f: F) -> Self {
-            Self(f)
-        }
-    }
-    fn takes_fut<F: Fn() -> Fut, Fut: Future>(_: Wrap<F>) {}
-    async fn unused_async() {}
-    fn fp() {
-        takes_fut(unused_async.into());
-    }
-}
-
 async fn foo() -> i32 {
-    //~^ unused_async
-
+    //~^ ERROR: unused `async` for function with no await statements
     4
 }
 
@@ -86,8 +68,7 @@ struct S;
 
 impl S {
     async fn unused(&self) -> i32 {
-        //~^ unused_async
-
+        //~^ ERROR: unused `async` for function with no await statements
         1
     }
 
@@ -115,22 +96,7 @@ macro_rules! async_trait_impl {
 }
 async_trait_impl!();
 
-fn main() {}
-
-mod issue14704 {
-    use std::sync::Arc;
-
-    trait Action {
-        async fn cancel(self: Arc<Self>) {}
-    }
-}
-
-mod issue15305 {
-    async fn todo_task() -> Result<(), String> {
-        todo!("Implement task");
-    }
-
-    async fn unimplemented_task() -> Result<(), String> {
-        unimplemented!("Implement task");
-    }
+fn main() {
+    foo();
+    bar();
 }

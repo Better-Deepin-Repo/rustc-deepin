@@ -1,24 +1,22 @@
-use crate::spec::{
-    Arch, Env, Os, PanicStrategy, RelocModel, Target, TargetMetadata, TargetOptions, cvs,
-};
+use crate::spec::{cvs, PanicStrategy, RelocModel, Target, TargetOptions};
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     Target {
         data_layout: "e-m:e-p:32:32-i64:64-n32-S128".into(),
         llvm_target: "riscv32".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: Some("RISC-V ESP-IDF".into()),
             tier: Some(3),
             host_tools: Some(false),
             std: Some(true),
         },
         pointer_width: 32,
-        arch: Arch::RiscV32,
+        arch: "riscv32".into(),
 
         options: TargetOptions {
             families: cvs!["unix"],
-            os: Os::EspIdf,
-            env: Env::Newlib,
+            os: "espidf".into(),
+            env: "newlib".into(),
             vendor: "espressif".into(),
             linker: Some("riscv32-esp-elf-gcc".into()),
             cpu: "generic-rv32".into(),
@@ -32,7 +30,6 @@ pub(crate) fn target() -> Target {
             atomic_cas: true,
 
             features: "+m,+c".into(),
-            llvm_abiname: "ilp32".into(),
             panic_strategy: PanicStrategy::Abort,
             relocation_model: RelocModel::Static,
             emit_debug_gdb_scripts: false,

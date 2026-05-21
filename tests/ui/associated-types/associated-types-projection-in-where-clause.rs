@@ -3,6 +3,7 @@
 #![allow(unused_variables)]
 // Test a where clause that uses a non-normalized projection type.
 
+//@ pretty-expanded FIXME #23616
 
 trait Int
 {

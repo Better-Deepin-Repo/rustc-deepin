@@ -1,5 +1,5 @@
 #![feature(staged_api)]
-#![feature(arbitrary_self_types_pointers)]
+#![feature(arbitrary_self_types)]
 
 #![stable(feature = "ipu_iterator", since = "1.0.0")]
 

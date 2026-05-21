@@ -37,16 +37,10 @@ MDBOOK_OUTPUT='{"xgettext": {"pot-file": "messages.pot"}}' \
 msginit -i po/messages.pot -l xx -o po/xx.po
 ```
 
-#### Updating the existing translation resource
+#### Updating the exising translation resource
 
 ```bash
 msgmerge --update po/xx.po po/messages.pot
-```
-
-#### Tracking translation progress
-
-```bash
-msgfmt --statistics po/xx.po
 ```
 
 ### Editing translation resources
@@ -61,7 +55,7 @@ MDBOOK_BOOK__LANGUAGE=xx mdbook serve
 
 ### Add a language entry
 
-Please add a language entry in `.github/workflows/rbe.yml`, `theme/head.hbs`, and `src/bootstrap/src/core/build_steps/doc.rs` in [rust-lang/rust](https://github.com/rust-lang/rust) like below:
+Please add a language entry in `.github/workflows/rbe.yml`, `theme/index.hbs`, and `src/bootstrap/src/core/build_steps/doc.rs` in [rust-lang/rust](https://github.com/rust-lang/rust) like below:
 
 * `rbe.yml`
 
@@ -71,7 +65,7 @@ env:
   LANGUAGES: xx yy zz
 ```
 
-* `head.hbs`
+* `index.hbs`
 
 ```html
 <ul id="language-list" class="theme-popup" aria-label="Languages" role="menu">

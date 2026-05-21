@@ -1,10 +1,8 @@
+// We specify incremental here because we want to test the partitioning for incremental compilation
 //@ incremental
-//@ compile-flags: -Copt-level=0
+//@ compile-flags:-Zprint-mono-items=lazy
 
 #![crate_type = "rlib"]
-
-// This test ensures that statics are assigned to the correct module when they are defined inside
-// of a function.
 
 //~ MONO_ITEM static FOO @@ statics[Internal]
 static FOO: u32 = 0;

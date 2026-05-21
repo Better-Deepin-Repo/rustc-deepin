@@ -1,17 +1,15 @@
 //! There are many AstNodes, but only a few tokens, so we hand-write them here.
 
-use std::ops::Range;
 use std::{borrow::Cow, num::ParseIntError};
 
-use rustc_literal_escaper::{
-    EscapeError, MixedUnit, unescape_byte, unescape_byte_str, unescape_c_str, unescape_char,
-    unescape_str,
+use rustc_lexer::unescape::{
+    unescape_byte, unescape_char, unescape_mixed, unescape_unicode, EscapeError, MixedUnit, Mode,
 };
 use stdx::always;
 
 use crate::{
-    TextRange, TextSize,
     ast::{self, AstToken},
+    TextRange, TextSize,
 };
 
 impl ast::Comment {
@@ -40,8 +38,8 @@ impl ast::Comment {
     }
 
     /// Returns the textual content of a doc comment node as a single string with prefix and suffix
-    /// removed, plus the offset of the returned string from the beginning of the comment.
-    pub fn doc_comment(&self) -> Option<(&str, TextSize)> {
+    /// removed.
+    pub fn doc_comment(&self) -> Option<&str> {
         let kind = self.kind();
         match kind {
             CommentKind { shape, doc: Some(_) } => {
@@ -52,7 +50,7 @@ impl ast::Comment {
                 } else {
                     text
                 };
-                Some((text, TextSize::of(prefix)))
+                Some(text)
             }
             _ => None,
         }
@@ -118,7 +116,7 @@ impl CommentKind {
 impl ast::Whitespace {
     pub fn spans_multiple_lines(&self) -> bool {
         let text = self.text();
-        text.find('\n').is_some_and(|idx| text[idx + 1..].contains('\n'))
+        text.find('\n').map_or(false, |idx| text[idx + 1..].contains('\n'))
     }
 }
 
@@ -151,10 +149,10 @@ impl QuoteOffsets {
 }
 
 pub trait IsString: AstToken {
-    fn raw_prefix(&self) -> &'static str;
-    fn unescape(&self, s: &str, callback: impl FnMut(Range<usize>, Result<char, EscapeError>));
+    const RAW_PREFIX: &'static str;
+    const MODE: Mode;
     fn is_raw(&self) -> bool {
-        self.text().starts_with(self.raw_prefix())
+        self.text().starts_with(Self::RAW_PREFIX)
     }
     fn quote_offsets(&self) -> Option<QuoteOffsets> {
         let text = self.text();
@@ -187,7 +185,7 @@ pub trait IsString: AstToken {
         let text = &self.text()[text_range_no_quotes - start];
         let offset = text_range_no_quotes.start() - start;
 
-        self.unescape(text, &mut |range: Range<usize>, unescaped_char| {
+        unescape_unicode(text, Self::MODE, &mut |range, unescaped_char| {
             if let Some((s, e)) = range.start.try_into().ok().zip(range.end.try_into().ok()) {
                 cb(TextRange::new(s, e) + offset, unescaped_char);
             }
@@ -201,19 +199,11 @@ pub trait IsString: AstToken {
             None
         }
     }
-    fn map_offset_down(&self, offset: TextSize) -> Option<TextSize> {
-        let contents_range = self.text_range_between_quotes()?;
-        offset.checked_sub(contents_range.start())
-    }
 }
 
 impl IsString for ast::String {
-    fn raw_prefix(&self) -> &'static str {
-        "r"
-    }
-    fn unescape(&self, s: &str, cb: impl FnMut(Range<usize>, Result<char, EscapeError>)) {
-        unescape_str(s, cb)
-    }
+    const RAW_PREFIX: &'static str = "r";
+    const MODE: Mode = Mode::Str;
 }
 
 impl ast::String {
@@ -228,19 +218,20 @@ impl ast::String {
         let mut buf = String::new();
         let mut prev_end = 0;
         let mut has_error = None;
-        unescape_str(text, |char_range, unescaped_char| {
-            match (unescaped_char, buf.capacity() == 0) {
-                (Ok(c), false) => buf.push(c),
-                (Ok(_), true) if char_range.len() == 1 && char_range.start == prev_end => {
-                    prev_end = char_range.end
-                }
-                (Ok(c), true) => {
-                    buf.reserve_exact(text.len());
-                    buf.push_str(&text[..prev_end]);
-                    buf.push(c);
-                }
-                (Err(e), _) => has_error = Some(e),
+        unescape_unicode(text, Self::MODE, &mut |char_range, unescaped_char| match (
+            unescaped_char,
+            buf.capacity() == 0,
+        ) {
+            (Ok(c), false) => buf.push(c),
+            (Ok(_), true) if char_range.len() == 1 && char_range.start == prev_end => {
+                prev_end = char_range.end
             }
+            (Ok(c), true) => {
+                buf.reserve_exact(text.len());
+                buf.push_str(&text[..prev_end]);
+                buf.push(c);
+            }
+            (Err(e), _) => has_error = Some(e),
         });
 
         match (has_error, buf.capacity() == 0) {
@@ -252,12 +243,8 @@ impl ast::String {
 }
 
 impl IsString for ast::ByteString {
-    fn raw_prefix(&self) -> &'static str {
-        "br"
-    }
-    fn unescape(&self, s: &str, mut callback: impl FnMut(Range<usize>, Result<char, EscapeError>)) {
-        unescape_byte_str(s, |range, res| callback(range, res.map(char::from)))
-    }
+    const RAW_PREFIX: &'static str = "br";
+    const MODE: Mode = Mode::ByteStr;
 }
 
 impl ast::ByteString {
@@ -272,19 +259,20 @@ impl ast::ByteString {
         let mut buf: Vec<u8> = Vec::new();
         let mut prev_end = 0;
         let mut has_error = None;
-        unescape_byte_str(text, |char_range, unescaped_byte| {
-            match (unescaped_byte, buf.capacity() == 0) {
-                (Ok(b), false) => buf.push(b),
-                (Ok(_), true) if char_range.len() == 1 && char_range.start == prev_end => {
-                    prev_end = char_range.end
-                }
-                (Ok(b), true) => {
-                    buf.reserve_exact(text.len());
-                    buf.extend_from_slice(&text.as_bytes()[..prev_end]);
-                    buf.push(b);
-                }
-                (Err(e), _) => has_error = Some(e),
+        unescape_unicode(text, Self::MODE, &mut |char_range, unescaped_char| match (
+            unescaped_char,
+            buf.capacity() == 0,
+        ) {
+            (Ok(c), false) => buf.push(c as u8),
+            (Ok(_), true) if char_range.len() == 1 && char_range.start == prev_end => {
+                prev_end = char_range.end
             }
+            (Ok(c), true) => {
+                buf.reserve_exact(text.len());
+                buf.extend_from_slice(text[..prev_end].as_bytes());
+                buf.push(c as u8);
+            }
+            (Err(e), _) => has_error = Some(e),
         });
 
         match (has_error, buf.capacity() == 0) {
@@ -296,13 +284,26 @@ impl ast::ByteString {
 }
 
 impl IsString for ast::CString {
-    fn raw_prefix(&self) -> &'static str {
-        "cr"
-    }
-    // NOTE: This method should only be used for highlighting ranges. The unescaped
-    // char/byte is not used. For simplicity, we return an arbitrary placeholder char.
-    fn unescape(&self, s: &str, mut callback: impl FnMut(Range<usize>, Result<char, EscapeError>)) {
-        unescape_c_str(s, |range, _res| callback(range, Ok('_')))
+    const RAW_PREFIX: &'static str = "cr";
+    const MODE: Mode = Mode::CStr;
+
+    fn escaped_char_ranges(&self, cb: &mut dyn FnMut(TextRange, Result<char, EscapeError>)) {
+        let text_range_no_quotes = match self.text_range_between_quotes() {
+            Some(it) => it,
+            None => return,
+        };
+
+        let start = self.syntax().text_range().start();
+        let text = &self.text()[text_range_no_quotes - start];
+        let offset = text_range_no_quotes.start() - start;
+
+        unescape_mixed(text, Self::MODE, &mut |range, unescaped_char| {
+            let text_range =
+                TextRange::new(range.start.try_into().unwrap(), range.end.try_into().unwrap());
+            // XXX: This method should only be used for highlighting ranges. The unescaped
+            // char/byte is not used. For simplicity, we return an arbitrary placeholder char.
+            cb(text_range + offset, unescaped_char.map(|_| ' '));
+        });
     }
 }
 
@@ -322,14 +323,17 @@ impl ast::CString {
             MixedUnit::Char(c) => buf.extend(c.encode_utf8(&mut [0; 4]).as_bytes()),
             MixedUnit::HighByte(b) => buf.push(b),
         };
-        unescape_c_str(text, |char_range, unescaped| match (unescaped, buf.capacity() == 0) {
+        unescape_mixed(text, Self::MODE, &mut |char_range, unescaped| match (
+            unescaped,
+            buf.capacity() == 0,
+        ) {
             (Ok(u), false) => extend_unit(&mut buf, u),
             (Ok(_), true) if char_range.len() == 1 && char_range.start == prev_end => {
                 prev_end = char_range.end
             }
             (Ok(u), true) => {
                 buf.reserve_exact(text.len());
-                buf.extend(&text.as_bytes()[..prev_end]);
+                buf.extend(text[..prev_end].as_bytes());
                 extend_unit(&mut buf, u);
             }
             (Err(e), _) => has_error = Some(e),
@@ -379,7 +383,11 @@ impl ast::IntNumber {
 
     pub fn suffix(&self) -> Option<&str> {
         let (_, _, suffix) = self.split_into_parts();
-        if suffix.is_empty() { None } else { Some(suffix) }
+        if suffix.is_empty() {
+            None
+        } else {
+            Some(suffix)
+        }
     }
 
     pub fn value_string(&self) -> String {
@@ -414,7 +422,11 @@ impl ast::FloatNumber {
 
     pub fn suffix(&self) -> Option<&str> {
         let (_, suffix) = self.split_into_parts();
-        if suffix.is_empty() { None } else { Some(suffix) }
+        if suffix.is_empty() {
+            None
+        } else {
+            Some(suffix)
+        }
     }
 
     pub fn value_string(&self) -> String {
@@ -475,79 +487,11 @@ impl ast::Byte {
     }
 }
 
-pub enum AnyString {
-    ByteString(ast::ByteString),
-    CString(ast::CString),
-    String(ast::String),
-}
-
-impl AnyString {
-    pub fn value(&self) -> Result<Cow<'_, str>, EscapeError> {
-        fn from_utf8(s: Cow<'_, [u8]>) -> Result<Cow<'_, str>, EscapeError> {
-            match s {
-                Cow::Borrowed(s) => str::from_utf8(s)
-                    .map_err(|_| EscapeError::NonAsciiCharInByte)
-                    .map(Cow::Borrowed),
-                Cow::Owned(s) => String::from_utf8(s)
-                    .map_err(|_| EscapeError::NonAsciiCharInByte)
-                    .map(Cow::Owned),
-            }
-        }
-
-        match self {
-            AnyString::String(s) => s.value(),
-            AnyString::ByteString(s) => s.value().and_then(from_utf8),
-            AnyString::CString(s) => s.value().and_then(from_utf8),
-        }
-    }
-}
-
-impl ast::AstToken for AnyString {
-    fn can_cast(kind: crate::SyntaxKind) -> bool {
-        ast::String::can_cast(kind)
-            || ast::ByteString::can_cast(kind)
-            || ast::CString::can_cast(kind)
-    }
-
-    fn cast(syntax: crate::SyntaxToken) -> Option<Self> {
-        ast::String::cast(syntax.clone())
-            .map(Self::String)
-            .or_else(|| ast::ByteString::cast(syntax.clone()).map(Self::ByteString))
-            .or_else(|| ast::CString::cast(syntax).map(Self::CString))
-    }
-
-    fn syntax(&self) -> &crate::SyntaxToken {
-        match self {
-            Self::ByteString(it) => it.syntax(),
-            Self::CString(it) => it.syntax(),
-            Self::String(it) => it.syntax(),
-        }
-    }
-}
-
-impl IsString for AnyString {
-    fn raw_prefix(&self) -> &'static str {
-        match self {
-            AnyString::ByteString(s) => s.raw_prefix(),
-            AnyString::CString(s) => s.raw_prefix(),
-            AnyString::String(s) => s.raw_prefix(),
-        }
-    }
-
-    fn unescape(&self, s: &str, callback: impl FnMut(Range<usize>, Result<char, EscapeError>)) {
-        match self {
-            AnyString::ByteString(it) => it.unescape(s, callback),
-            AnyString::CString(it) => it.unescape(s, callback),
-            AnyString::String(it) => it.unescape(s, callback),
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use rustc_apfloat::ieee::Quad as f128;
 
-    use crate::ast::{self, FloatNumber, IntNumber, make};
+    use crate::ast::{self, make, FloatNumber, IntNumber};
 
     fn check_float_suffix<'a>(lit: &str, expected: impl Into<Option<&'a str>>) {
         assert_eq!(FloatNumber { syntax: make::tokens::literal(lit) }.suffix(), expected.into());

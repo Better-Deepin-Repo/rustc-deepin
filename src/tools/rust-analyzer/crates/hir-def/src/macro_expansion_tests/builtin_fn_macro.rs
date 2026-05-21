@@ -28,19 +28,6 @@ fn test_asm_expand() {
         r#"
 #[rustc_builtin_macro]
 macro_rules! asm {() => {}}
-#[rustc_builtin_macro]
-macro_rules! global_asm {() => {}}
-#[rustc_builtin_macro]
-macro_rules! naked_asm {() => {}}
-
-global_asm! {
-    ""
-}
-
-#[unsafe(naked)]
-extern "C" fn foo() {
-    naked_asm!("");
-}
 
 fn main() {
     let i: u64 = 3;
@@ -58,23 +45,16 @@ fn main() {
         expect![[r##"
 #[rustc_builtin_macro]
 macro_rules! asm {() => {}}
-#[rustc_builtin_macro]
-macro_rules! global_asm {() => {}}
-#[rustc_builtin_macro]
-macro_rules! naked_asm {() => {}}
-
-builtin #global_asm ("")
-
-#[unsafe(naked)]
-extern "C" fn foo() {
-    builtin #naked_asm ("");
-}
 
 fn main() {
     let i: u64 = 3;
     let o: u64;
     unsafe {
-        builtin #asm ("mov {0}, {1}", "add {0}, 5", out (reg)o, in (reg)i, );
+        builtin #asm ( {
+            $crate::format_args!("mov {0}, {1}");
+            $crate::format_args!("add {0}, 5");
+        }
+        );
     }
 }
 "##]],
@@ -309,6 +289,8 @@ fn main() {
     /* parse error: expected expression */
 builtin #format_args (x = );
     /* parse error: expected expression */
+/* parse error: expected R_PAREN */
+/* parse error: expected expression, item or let statement */
 builtin #format_args (x = , x = 2);
     /* parse error: expected expression */
 builtin #format_args ("{}", x = );
@@ -478,13 +460,13 @@ fn test_concat_expand() {
 #[rustc_builtin_macro]
 macro_rules! concat {}
 
-fn main() { concat!("fo", "o", 0, r#""bar""#, "\n", false, '"', -4, - 4, '\0'); }
+fn main() { concat!("fo", "o", 0, r#""bar""#, "\n", false, '"', '\0'); }
 "##,
         expect![[r##"
 #[rustc_builtin_macro]
 macro_rules! concat {}
 
-fn main() { "foo0\"bar\"\nfalse\"-4-4\u{0}"; }
+fn main() { "foo0\"bar\"\nfalse\"\u{0}"; }
 "##]],
     );
 }
@@ -534,67 +516,19 @@ fn main() { "s"; }
 }
 
 #[test]
-fn test_quote_string() {
+fn test_concat_idents_expand() {
     check(
         r##"
 #[rustc_builtin_macro]
-macro_rules! stringify {}
+macro_rules! concat_idents {}
 
-fn main() { stringify!("hello"); }
+fn main() { concat_idents!(foo, bar); }
 "##,
         expect![[r##"
 #[rustc_builtin_macro]
-macro_rules! stringify {}
+macro_rules! concat_idents {}
 
-fn main() { "\"hello\""; }
+fn main() { foobar; }
 "##]],
-    );
-}
-
-#[test]
-fn cfg_select() {
-    check(
-        r#"
-#[rustc_builtin_macro]
-pub macro cfg_select($($tt:tt)*) {}
-
-cfg_select! {
-    false => { fn false_1() {} }
-    any(false, true) => { fn true_1() {} }
-}
-
-cfg_select! {
-    false => { fn false_2() {} }
-    _ => { fn true_2() {} }
-}
-
-cfg_select! {
-    false => { fn false_3() {} }
-}
-
-cfg_select! {
-    false
-}
-
-cfg_select! {
-    false =>
-}
-
-    "#,
-        expect![[r#"
-#[rustc_builtin_macro]
-pub macro cfg_select($($tt:tt)*) {}
-
-fn true_1() {}
-
-fn true_2() {}
-
-/* error: none of the predicates in this `cfg_select` evaluated to true */
-
-/* error: expected `=>` after cfg expression */
-
-/* error: expected a token tree after `=>` */
-
-    "#]],
     );
 }

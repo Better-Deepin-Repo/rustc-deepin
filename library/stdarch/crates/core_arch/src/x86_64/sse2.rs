@@ -1,12 +1,12 @@
 //! `x86_64`'s Streaming SIMD Extensions 2 (SSE2)
 
-use crate::core_arch::x86::*;
+use crate::{core_arch::x86::*, intrinsics::simd::*};
 
 #[cfg(test)]
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.sse2.cvtsd2si64"]
     fn cvtsd2si64(a: __m128d) -> i64;
     #[link_name = "llvm.x86.sse2.cvttsd2si64"]
@@ -21,8 +21,8 @@ unsafe extern "C" {
 #[target_feature(enable = "sse2")]
 #[cfg_attr(test, assert_instr(cvtsd2si))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cvtsd_si64(a: __m128d) -> i64 {
-    unsafe { cvtsd2si64(a) }
+pub unsafe fn _mm_cvtsd_si64(a: __m128d) -> i64 {
+    cvtsd2si64(a)
 }
 
 /// Alias for `_mm_cvtsd_si64`
@@ -32,7 +32,7 @@ pub fn _mm_cvtsd_si64(a: __m128d) -> i64 {
 #[target_feature(enable = "sse2")]
 #[cfg_attr(test, assert_instr(cvtsd2si))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cvtsd_si64x(a: __m128d) -> i64 {
+pub unsafe fn _mm_cvtsd_si64x(a: __m128d) -> i64 {
     _mm_cvtsd_si64(a)
 }
 
@@ -44,8 +44,8 @@ pub fn _mm_cvtsd_si64x(a: __m128d) -> i64 {
 #[target_feature(enable = "sse2")]
 #[cfg_attr(test, assert_instr(cvttsd2si))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cvttsd_si64(a: __m128d) -> i64 {
-    unsafe { cvttsd2si64(a) }
+pub unsafe fn _mm_cvttsd_si64(a: __m128d) -> i64 {
+    cvttsd2si64(a)
 }
 
 /// Alias for `_mm_cvttsd_si64`
@@ -55,7 +55,7 @@ pub fn _mm_cvttsd_si64(a: __m128d) -> i64 {
 #[target_feature(enable = "sse2")]
 #[cfg_attr(test, assert_instr(cvttsd2si))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cvttsd_si64x(a: __m128d) -> i64 {
+pub unsafe fn _mm_cvttsd_si64x(a: __m128d) -> i64 {
     _mm_cvttsd_si64(a)
 }
 
@@ -78,7 +78,6 @@ pub fn _mm_cvttsd_si64x(a: __m128d) -> i64 {
 #[cfg_attr(test, assert_instr(movnti))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
 pub unsafe fn _mm_stream_si64(mem_addr: *mut i64, a: i64) {
-    // see #1541, we should use inline asm to be sure, because LangRef isn't clear enough
     crate::arch::asm!(
         vps!("movnti", ",{a}"),
         p = in(reg) mem_addr,
@@ -93,10 +92,9 @@ pub unsafe fn _mm_stream_si64(mem_addr: *mut i64, a: i64) {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_cvtsi64_si128)
 #[inline]
 #[target_feature(enable = "sse2")]
-#[cfg_attr(test, assert_instr(movq))]
+#[cfg_attr(all(test, not(target_env = "msvc")), assert_instr(movq))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_cvtsi64_si128(a: i64) -> __m128i {
+pub unsafe fn _mm_cvtsi64_si128(a: i64) -> __m128i {
     _mm_set_epi64x(0, a)
 }
 
@@ -106,10 +104,9 @@ pub const fn _mm_cvtsi64_si128(a: i64) -> __m128i {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_cvtsi64x_si128)
 #[inline]
 #[target_feature(enable = "sse2")]
-#[cfg_attr(test, assert_instr(movq))]
+#[cfg_attr(all(test, not(target_env = "msvc")), assert_instr(movq))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_cvtsi64x_si128(a: i64) -> __m128i {
+pub unsafe fn _mm_cvtsi64x_si128(a: i64) -> __m128i {
     _mm_cvtsi64_si128(a)
 }
 
@@ -118,11 +115,10 @@ pub const fn _mm_cvtsi64x_si128(a: i64) -> __m128i {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_cvtsi128_si64)
 #[inline]
 #[target_feature(enable = "sse2")]
-#[cfg_attr(test, assert_instr(movq))]
+#[cfg_attr(all(test, not(target_env = "msvc")), assert_instr(movq))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_cvtsi128_si64(a: __m128i) -> i64 {
-    unsafe { simd_extract!(a.as_i64x2(), 0) }
+pub unsafe fn _mm_cvtsi128_si64(a: __m128i) -> i64 {
+    simd_extract!(a.as_i64x2(), 0)
 }
 
 /// Returns the lowest element of `a`.
@@ -130,10 +126,9 @@ pub const fn _mm_cvtsi128_si64(a: __m128i) -> i64 {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_cvtsi128_si64x)
 #[inline]
 #[target_feature(enable = "sse2")]
-#[cfg_attr(test, assert_instr(movq))]
+#[cfg_attr(all(test, not(target_env = "msvc")), assert_instr(movq))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_cvtsi128_si64x(a: __m128i) -> i64 {
+pub unsafe fn _mm_cvtsi128_si64x(a: __m128i) -> i64 {
     _mm_cvtsi128_si64(a)
 }
 
@@ -145,9 +140,8 @@ pub const fn _mm_cvtsi128_si64x(a: __m128i) -> i64 {
 #[target_feature(enable = "sse2")]
 #[cfg_attr(test, assert_instr(cvtsi2sd))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_cvtsi64_sd(a: __m128d, b: i64) -> __m128d {
-    unsafe { simd_insert!(a, 0, b as f64) }
+pub unsafe fn _mm_cvtsi64_sd(a: __m128d, b: i64) -> __m128d {
+    simd_insert!(a, 0, b as f64)
 }
 
 /// Returns `a` with its lower element replaced by `b` after converting it to
@@ -158,21 +152,19 @@ pub const fn _mm_cvtsi64_sd(a: __m128d, b: i64) -> __m128d {
 #[target_feature(enable = "sse2")]
 #[cfg_attr(test, assert_instr(cvtsi2sd))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_cvtsi64x_sd(a: __m128d, b: i64) -> __m128d {
+pub unsafe fn _mm_cvtsi64x_sd(a: __m128d, b: i64) -> __m128d {
     _mm_cvtsi64_sd(a, b)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::core_arch::arch::x86_64::*;
-    use crate::core_arch::assert_eq_const as assert_eq;
     use std::boxed;
     use std::ptr;
     use stdarch_test::simd_test;
 
     #[simd_test(enable = "sse2")]
-    fn test_mm_cvtsd_si64() {
+    unsafe fn test_mm_cvtsd_si64() {
         let r = _mm_cvtsd_si64(_mm_setr_pd(-2.0, 5.0));
         assert_eq!(r, -2_i64);
 
@@ -181,20 +173,20 @@ mod tests {
     }
 
     #[simd_test(enable = "sse2")]
-    fn test_mm_cvtsd_si64x() {
+    unsafe fn test_mm_cvtsd_si64x() {
         let r = _mm_cvtsd_si64x(_mm_setr_pd(f64::NAN, f64::NAN));
         assert_eq!(r, i64::MIN);
     }
 
     #[simd_test(enable = "sse2")]
-    fn test_mm_cvttsd_si64() {
+    unsafe fn test_mm_cvttsd_si64() {
         let a = _mm_setr_pd(-1.1, 2.2);
         let r = _mm_cvttsd_si64(a);
         assert_eq!(r, -1_i64);
     }
 
     #[simd_test(enable = "sse2")]
-    fn test_mm_cvttsd_si64x() {
+    unsafe fn test_mm_cvttsd_si64x() {
         let a = _mm_setr_pd(f64::NEG_INFINITY, f64::NAN);
         let r = _mm_cvttsd_si64x(a);
         assert_eq!(r, i64::MIN);
@@ -204,30 +196,27 @@ mod tests {
     // Miri cannot support this until it is clear how it fits in the Rust memory model
     // (non-temporal store)
     #[cfg_attr(miri, ignore)]
-    fn test_mm_stream_si64() {
+    unsafe fn test_mm_stream_si64() {
         let a: i64 = 7;
         let mut mem = boxed::Box::<i64>::new(-1);
-        unsafe {
-            _mm_stream_si64(ptr::addr_of_mut!(*mem), a);
-        }
-        _mm_sfence();
+        _mm_stream_si64(ptr::addr_of_mut!(*mem), a);
         assert_eq!(a, *mem);
     }
 
     #[simd_test(enable = "sse2")]
-    const fn test_mm_cvtsi64_si128() {
+    unsafe fn test_mm_cvtsi64_si128() {
         let r = _mm_cvtsi64_si128(5);
         assert_eq_m128i(r, _mm_setr_epi64x(5, 0));
     }
 
     #[simd_test(enable = "sse2")]
-    const fn test_mm_cvtsi128_si64() {
+    unsafe fn test_mm_cvtsi128_si64() {
         let r = _mm_cvtsi128_si64(_mm_setr_epi64x(5, 0));
         assert_eq!(r, 5);
     }
 
     #[simd_test(enable = "sse2")]
-    const fn test_mm_cvtsi64_sd() {
+    unsafe fn test_mm_cvtsi64_sd() {
         let a = _mm_set1_pd(3.5);
         let r = _mm_cvtsi64_sd(a, 5);
         assert_eq_m128d(r, _mm_setr_pd(5.0, 3.5));

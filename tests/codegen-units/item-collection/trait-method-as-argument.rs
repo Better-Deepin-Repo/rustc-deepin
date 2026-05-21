@@ -1,7 +1,7 @@
-//@ compile-flags:-Clink-dead-code -Zinline-mir=no
+//@ compile-flags:-Zprint-mono-items=eager -Zinline-mir=no
 
 #![deny(dead_code)]
-#![crate_type = "lib"]
+#![feature(start)]
 
 trait Trait: Sized {
     fn foo(self) -> Self {
@@ -30,8 +30,8 @@ fn take_foo_mut<T, F: FnMut(T) -> T>(mut f: F, arg: T) -> T {
 }
 
 //~ MONO_ITEM fn start
-#[no_mangle]
-pub fn start(_: isize, _: *const *const u8) -> isize {
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
     //~ MONO_ITEM fn take_foo_once::<u32, fn(u32) -> u32 {<u32 as Trait>::foo}>
     //~ MONO_ITEM fn <u32 as Trait>::foo
     //~ MONO_ITEM fn <fn(u32) -> u32 {<u32 as Trait>::foo} as std::ops::FnOnce<(u32,)>>::call_once - shim(fn(u32) -> u32 {<u32 as Trait>::foo})

@@ -1,4 +1,3 @@
-//@ edition:2015
 // Make sure that the spans of import errors are correct.
 
 use abc::one_el;

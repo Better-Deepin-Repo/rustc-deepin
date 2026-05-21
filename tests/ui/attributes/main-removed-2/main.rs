@@ -1,8 +1,7 @@
 //@ run-pass
-//@ proc-macro: tokyo.rs
+//@ aux-build:tokyo.rs
 //@ compile-flags:--extern tokyo
 //@ edition:2021
-//@ ignore-backends: gcc
 
 use tokyo::main;
 

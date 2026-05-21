@@ -1,4 +1,3 @@
-use crate::config::ShouldMerge;
 use crate::html::render::ordered_json::{EscapedJson, OrderedJson};
 use crate::html::render::sorted_template::{Html, SortedTemplate};
 use crate::html::render::write_shared::*;
@@ -22,11 +21,31 @@ fn but_last_line(s: &str) -> &str {
 #[test]
 fn sources_template() {
     let mut template = SourcesPart::blank();
-    assert_eq!(but_last_line(&template.to_string()), r"createSrcSidebar('[]');");
+    assert_eq!(
+        but_last_line(&template.to_string()),
+        r"var srcIndex = new Map(JSON.parse('[]'));
+createSrcSidebar();"
+    );
     template.append(EscapedJson::from(OrderedJson::serialize("u").unwrap()).to_string());
-    assert_eq!(but_last_line(&template.to_string()), r#"createSrcSidebar('["u"]');"#);
+    assert_eq!(
+        but_last_line(&template.to_string()),
+        r#"var srcIndex = new Map(JSON.parse('["u"]'));
+createSrcSidebar();"#
+    );
     template.append(EscapedJson::from(OrderedJson::serialize("v").unwrap()).to_string());
-    assert_eq!(but_last_line(&template.to_string()), r#"createSrcSidebar('["u","v"]');"#);
+    assert_eq!(
+        but_last_line(&template.to_string()),
+        r#"var srcIndex = new Map(JSON.parse('["u","v"]'));
+createSrcSidebar();"#
+    );
+}
+
+#[test]
+fn sources_parts() {
+    let parts =
+        SearchIndexPart::get(OrderedJson::serialize(["foo", "bar"]).unwrap(), "suffix").unwrap();
+    assert_eq!(&parts.parts[0].0, Path::new("search-indexsuffix.js"));
+    assert_eq!(&parts.parts[0].1.to_string(), r#"["foo","bar"]"#);
 }
 
 #[test]
@@ -44,6 +63,31 @@ fn all_crates_parts() {
     let parts = AllCratesPart::get(OrderedJson::serialize("crate").unwrap(), "").unwrap();
     assert_eq!(&parts.parts[0].0, Path::new("crates.js"));
     assert_eq!(&parts.parts[0].1.to_string(), r#""crate""#);
+}
+
+#[test]
+fn search_index_template() {
+    let mut template = SearchIndexPart::blank();
+    assert_eq!(
+        but_last_line(&template.to_string()),
+        r"var searchIndex = new Map(JSON.parse('[]'));
+if (typeof exports !== 'undefined') exports.searchIndex = searchIndex;
+else if (window.initSearch) window.initSearch(searchIndex);"
+    );
+    template.append(EscapedJson::from(OrderedJson::serialize([1, 2]).unwrap()).to_string());
+    assert_eq!(
+        but_last_line(&template.to_string()),
+        r"var searchIndex = new Map(JSON.parse('[[1,2]]'));
+if (typeof exports !== 'undefined') exports.searchIndex = searchIndex;
+else if (window.initSearch) window.initSearch(searchIndex);"
+    );
+    template.append(EscapedJson::from(OrderedJson::serialize([4, 3]).unwrap()).to_string());
+    assert_eq!(
+        but_last_line(&template.to_string()),
+        r"var searchIndex = new Map(JSON.parse('[[1,2],[4,3]]'));
+if (typeof exports !== 'undefined') exports.searchIndex = searchIndex;
+else if (window.initSearch) window.initSearch(searchIndex);"
+    );
 }
 
 #[test]
@@ -68,7 +112,7 @@ fn trait_alias_template() {
     assert_eq!(
         but_last_line(&template.to_string()),
         r#"(function() {
-    const implementors = Object.fromEntries([]);
+    var implementors = Object.fromEntries([]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {
@@ -80,7 +124,7 @@ fn trait_alias_template() {
     assert_eq!(
         but_last_line(&template.to_string()),
         r#"(function() {
-    const implementors = Object.fromEntries([["a"]]);
+    var implementors = Object.fromEntries([["a"]]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {
@@ -92,7 +136,7 @@ fn trait_alias_template() {
     assert_eq!(
         but_last_line(&template.to_string()),
         r#"(function() {
-    const implementors = Object.fromEntries([["a"],["b"]]);
+    var implementors = Object.fromEntries([["a"],["b"]]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
     } else {
@@ -148,17 +192,16 @@ fn read_template_test() {
     let path = path.path().join("file.html");
     let make_blank = || SortedTemplate::<Html>::from_before_after("<div>", "</div>");
 
-    let should_merge = ShouldMerge { read_rendered_cci: true, write_rendered_cci: true };
-    let template = read_template_or_blank(make_blank, &path, &should_merge).unwrap();
+    let template = read_template_or_blank(make_blank, &path).unwrap();
     assert_eq!(but_last_line(&template.to_string()), "<div></div>");
     fs::write(&path, template.to_string()).unwrap();
-    let mut template = read_template_or_blank(make_blank, &path, &should_merge).unwrap();
+    let mut template = read_template_or_blank(make_blank, &path).unwrap();
     template.append("<img/>".to_string());
     fs::write(&path, template.to_string()).unwrap();
-    let mut template = read_template_or_blank(make_blank, &path, &should_merge).unwrap();
+    let mut template = read_template_or_blank(make_blank, &path).unwrap();
     template.append("<br/>".to_string());
     fs::write(&path, template.to_string()).unwrap();
-    let template = read_template_or_blank(make_blank, &path, &should_merge).unwrap();
+    let template = read_template_or_blank(make_blank, &path).unwrap();
 
     assert_eq!(but_last_line(&template.to_string()), "<div><br/><img/></div>");
 }

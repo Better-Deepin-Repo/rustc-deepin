@@ -1,5 +1,5 @@
 //@ run-fail
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 //@ revisions: edition_2015 edition_2021
 //@ [edition_2015]edition:2015

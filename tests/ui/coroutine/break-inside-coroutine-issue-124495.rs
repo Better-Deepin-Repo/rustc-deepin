@@ -1,6 +1,8 @@
 //@ edition: 2024
+//@ compile-flags: -Z unstable-options
 
 #![feature(gen_blocks)]
+#![feature(async_closure)]
 
 async fn async_fn() {
     break; //~ ERROR `break` inside `async` function

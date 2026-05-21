@@ -5,7 +5,7 @@
 macro a() {}
 //~^ ERROR: `macro` is experimental
 
-#[cfg(false)]
+#[cfg(FALSE)]
 macro b() {}
 
 macro_rules! identity {
@@ -17,13 +17,13 @@ identity! {
     //~^ ERROR: `macro` is experimental
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 identity! {
     macro d() {} // No error
 }
 
 identity! {
-    #[cfg(false)]
+    #[cfg(FALSE)]
     macro e() {}
 }
 

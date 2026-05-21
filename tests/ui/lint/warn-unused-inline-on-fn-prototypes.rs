@@ -1,14 +1,12 @@
 #![deny(unused_attributes)]
 
 trait Trait {
-    #[inline] //~ ERROR attribute cannot be used on
-    //~^ WARN previously accepted
+    #[inline] //~ ERROR `#[inline]` is ignored on function prototypes
     fn foo();
 }
 
 extern "C" {
-    #[inline] //~ ERROR attribute cannot be used on
-    //~^ WARN previously accepted
+    #[inline] //~ ERROR `#[inline]` is ignored on function prototypes
     fn foo();
 }
 

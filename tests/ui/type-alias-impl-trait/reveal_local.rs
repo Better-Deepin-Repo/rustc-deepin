@@ -7,13 +7,12 @@ type Foo = impl Debug;
 fn is_send<T: Send>() {}
 
 fn not_good() {
-    // This function does not define `Foo`,
-    // so it can actually check auto traits on the hidden type without
-    // risking cycle errors.
+    // Error: this function does not constrain `Foo` to any particular
+    // hidden type, so it cannot rely on `Send` being true.
     is_send::<Foo>();
+    //~^ ERROR: cannot check whether the hidden type of `reveal_local[9507]::Foo::{opaque#0}` satisfies auto traits
 }
 
-#[define_opaque(Foo)]
 fn not_gooder() -> Foo {
     // Constrain `Foo = u32`
     let x: Foo = 22_u32;

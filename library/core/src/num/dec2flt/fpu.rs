@@ -1,7 +1,7 @@
 //! Platform-specific, assembly instructions to avoid
 //! intermediate rounding on architectures with FPUs.
 
-pub(super) use fpu_precision::set_precision;
+pub use fpu_precision::set_precision;
 
 // On x86, the x87 FPU is used for float operations if the SSE/SSE2 extensions are not available.
 // The x87 FPU operates with 80 bits of precision by default, which means that operations will
@@ -22,6 +22,7 @@ pub(super) use fpu_precision::set_precision;
 #[cfg(all(target_arch = "x86", not(target_feature = "sse2")))]
 mod fpu_precision {
     use core::arch::asm;
+    use core::mem::size_of;
 
     /// A structure used to preserve the original value of the FPU control word, so that it can be
     /// restored when the structure is dropped.
@@ -41,7 +42,7 @@ mod fpu_precision {
     ///  - 0b10, double precision i.e., 64-bits
     ///  - 0b11, double extended precision i.e., 80-bits (default state)
     /// The 0b01 value is reserved and should not be used.
-    pub(crate) struct FPUControlWord(u16);
+    pub struct FPUControlWord(u16);
 
     fn set_cw(cw: u16) {
         // SAFETY: the `fldcw` instruction has been audited to be able to work correctly with
@@ -56,7 +57,7 @@ mod fpu_precision {
     }
 
     /// Sets the precision field of the FPU to `T` and returns a `FPUControlWord`.
-    pub(crate) fn set_precision<T>() -> FPUControlWord {
+    pub fn set_precision<T>() -> FPUControlWord {
         let mut cw = 0_u16;
 
         // Compute the value for the Precision Control field that is appropriate for `T`.
@@ -96,5 +97,5 @@ mod fpu_precision {
 // precision of the computation is determined on a per-operation basis.
 #[cfg(any(not(target_arch = "x86"), target_feature = "sse2"))]
 mod fpu_precision {
-    pub(crate) fn set_precision<T>() {}
+    pub fn set_precision<T>() {}
 }

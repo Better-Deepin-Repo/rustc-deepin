@@ -1,189 +1,105 @@
 [
     (
         Module {
-            id: ModuleIdLt {
-                [salsa id]: Id(3800),
+            id: ModuleId {
+                krate: Idx::<CrateData>(0),
+                block: None,
+                local_id: Idx::<ModuleData>(0),
             },
         },
         [
-            FileSymbol {
-                name: "A",
-                def: Variant(
-                    Variant {
-                        id: EnumVariantId(
-                            7c00,
-                        ),
-                    },
-                ),
-                loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
-                        ),
-                    ),
-                    ptr: SyntaxNodePtr {
-                        kind: VARIANT,
-                        range: 201..202,
-                    },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 201..202,
-                            },
-                        ),
-                    ),
-                },
-                container_name: Some(
-                    "Enum",
-                ),
-                is_alias: false,
-                is_assoc: true,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
-            },
             FileSymbol {
                 name: "Alias",
                 def: TypeAlias(
                     TypeAlias {
                         id: TypeAliasId(
-                            7000,
+                            0,
                         ),
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: TYPE_ALIAS,
                         range: 470..490,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 475..480,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 475..480,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
-            },
-            FileSymbol {
-                name: "B",
-                def: Variant(
-                    Variant {
-                        id: EnumVariantId(
-                            7c01,
-                        ),
-                    },
-                ),
-                loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
-                        ),
-                    ),
-                    ptr: SyntaxNodePtr {
-                        kind: VARIANT,
-                        range: 204..205,
-                    },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 204..205,
-                            },
-                        ),
-                    ),
-                },
-                container_name: Some(
-                    "Enum",
-                ),
-                is_alias: false,
-                is_assoc: true,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "CONST",
                 def: Const(
                     Const {
                         id: ConstId(
-                            6800,
+                            0,
                         ),
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: CONST,
                         range: 413..434,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 419..424,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 419..424,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "CONST_WITH_INNER",
                 def: Const(
                     Const {
                         id: ConstId(
-                            6802,
+                            2,
                         ),
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: CONST,
                         range: 593..665,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 599..615,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 599..615,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "Enum",
@@ -191,36 +107,32 @@
                     Enum(
                         Enum {
                             id: EnumId(
-                                5400,
+                                0,
                             ),
                         },
                     ),
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: ENUM,
                         range: 185..207,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 190..194,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 190..194,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "ItemLikeMacro",
@@ -228,36 +140,32 @@
                     Macro {
                         id: Macro2Id(
                             Macro2Id(
-                                5000,
+                                0,
                             ),
                         ),
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: USE_TREE,
                         range: 727..749,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 736..749,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 736..749,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: true,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "Macro",
@@ -265,71 +173,63 @@
                     Macro {
                         id: Macro2Id(
                             Macro2Id(
-                                5000,
+                                0,
                             ),
                         ),
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: MACRO_DEF,
                         range: 153..168,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 159..164,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 159..164,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "STATIC",
                 def: Static(
                     Static {
                         id: StaticId(
-                            6c00,
+                            0,
                         ),
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: STATIC,
                         range: 435..469,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 442..448,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 442..448,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "Struct",
@@ -337,36 +237,32 @@
                     Struct(
                         Struct {
                             id: StructId(
-                                4c01,
+                                1,
                             ),
                         },
                     ),
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: STRUCT,
                         range: 170..184,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 177..183,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 177..183,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "StructFromMacro",
@@ -374,36 +270,29 @@
                     Struct(
                         Struct {
                             id: StructId(
-                                4c00,
+                                0,
                             ),
                         },
                     ),
                 ),
                 loc: DeclarationLocation {
                     hir_file_id: MacroFile(
-                        MacroCallId(
-                            Id(4400),
-                        ),
+                        0,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: STRUCT,
                         range: 0..22,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 6..21,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 6..21,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "StructInFn",
@@ -411,28 +300,27 @@
                     Struct(
                         Struct {
                             id: StructId(
-                                4c05,
+                                5,
                             ),
                         },
                     ),
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: STRUCT,
                         range: 391..409,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 398..408,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 398..408,
+                        },
                     ),
                 },
                 container_name: Some(
@@ -440,9 +328,6 @@
                 ),
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "StructInNamedConst",
@@ -450,28 +335,27 @@
                     Struct(
                         Struct {
                             id: StructId(
-                                4c06,
+                                6,
                             ),
                         },
                     ),
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: STRUCT,
                         range: 628..654,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 635..653,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 635..653,
+                        },
                     ),
                 },
                 container_name: Some(
@@ -479,9 +363,6 @@
                 ),
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "StructInUnnamedConst",
@@ -489,36 +370,32 @@
                     Struct(
                         Struct {
                             id: StructId(
-                                4c07,
+                                7,
                             ),
                         },
                     ),
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: STRUCT,
                         range: 552..580,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 559..579,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 559..579,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "StructT",
@@ -526,71 +403,63 @@
                     Struct(
                         Struct {
                             id: StructId(
-                                4c02,
+                                2,
                             ),
                         },
                     ),
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: STRUCT,
                         range: 261..279,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 268..275,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 268..275,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "Trait",
                 def: Trait(
                     Trait {
                         id: TraitId(
-                            6000,
+                            0,
                         ),
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: TRAIT,
                         range: 334..373,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 340..345,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 340..345,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "Trait",
@@ -598,36 +467,32 @@
                     Macro {
                         id: Macro2Id(
                             Macro2Id(
-                                5000,
+                                0,
                             ),
                         ),
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: USE_TREE,
                         range: 755..769,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 764..769,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 764..769,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: true,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "Union",
@@ -635,106 +500,98 @@
                     Union(
                         Union {
                             id: UnionId(
-                                5800,
+                                0,
                             ),
                         },
                     ),
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: UNION,
                         range: 208..222,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 214..219,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 214..219,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "a_mod",
                 def: Module(
                     Module {
-                        id: ModuleIdLt {
-                            [salsa id]: Id(3801),
+                        id: ModuleId {
+                            krate: Idx::<CrateData>(0),
+                            block: None,
+                            local_id: Idx::<ModuleData>(1),
                         },
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: MODULE,
                         range: 492..530,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 496..501,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 496..501,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "b_mod",
                 def: Module(
                     Module {
-                        id: ModuleIdLt {
-                            [salsa id]: Id(3802),
+                        id: ModuleId {
+                            krate: Idx::<CrateData>(0),
+                            block: None,
+                            local_id: Idx::<ModuleData>(2),
                         },
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: MODULE,
                         range: 667..677,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 671..676,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 671..676,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "define_struct",
@@ -742,63 +599,58 @@
                     Macro {
                         id: MacroRulesId(
                             MacroRulesId(
-                                4001,
+                                1,
                             ),
                         ),
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: MACRO_RULES,
                         range: 51..131,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 64..77,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 64..77,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "generic_impl_fn",
                 def: Function(
-                    FunctionId(
-                        FunctionId(
-                            6402,
+                    Function {
+                        id: FunctionId(
+                            3,
                         ),
-                    ),
+                    },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: FN,
                         range: 307..330,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 310..325,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 310..325,
+                        },
                     ),
                 },
                 container_name: Some(
@@ -806,36 +658,32 @@
                 ),
                 is_alias: false,
                 is_assoc: true,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "impl_fn",
                 def: Function(
-                    FunctionId(
-                        FunctionId(
-                            6401,
+                    Function {
+                        id: FunctionId(
+                            2,
                         ),
-                    ),
+                    },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: FN,
                         range: 242..257,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 245..252,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 245..252,
+                        },
                     ),
                 },
                 container_name: Some(
@@ -843,9 +691,6 @@
                 ),
                 is_alias: false,
                 is_assoc: true,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "macro_rules_macro",
@@ -853,71 +698,63 @@
                     Macro {
                         id: MacroRulesId(
                             MacroRulesId(
-                                4000,
+                                0,
                             ),
                         ),
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: MACRO_RULES,
                         range: 1..48,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 14..31,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 14..31,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "main",
                 def: Function(
-                    FunctionId(
-                        FunctionId(
-                            6400,
+                    Function {
+                        id: FunctionId(
+                            0,
                         ),
-                    ),
+                    },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: FN,
                         range: 375..411,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 378..382,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 378..382,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "really_define_struct",
@@ -925,63 +762,58 @@
                     Macro {
                         id: MacroRulesId(
                             MacroRulesId(
-                                4001,
+                                1,
                             ),
                         ),
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: USE_TREE,
                         range: 684..721,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 701..721,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 701..721,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: true,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "trait_fn",
                 def: Function(
-                    FunctionId(
-                        FunctionId(
-                            6403,
+                    Function {
+                        id: FunctionId(
+                            1,
                         ),
-                    ),
+                    },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: FN,
                         range: 352..371,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 355..363,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 355..363,
+                        },
                     ),
                 },
                 container_name: Some(
@@ -989,16 +821,15 @@
                 ),
                 is_alias: false,
                 is_assoc: true,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
         ],
     ),
     (
         Module {
-            id: ModuleIdLt {
-                [salsa id]: Id(3801),
+            id: ModuleId {
+                krate: Idx::<CrateData>(0),
+                block: None,
+                local_id: Idx::<ModuleData>(1),
             },
         },
         [
@@ -1008,117 +839,76 @@
                     Struct(
                         Struct {
                             id: StructId(
-                                4c03,
+                                3,
                             ),
                         },
                     ),
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3000),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            0,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: STRUCT,
                         range: 508..528,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 515..527,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 515..527,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
         ],
     ),
     (
         Module {
-            id: ModuleIdLt {
-                [salsa id]: Id(3802),
+            id: ModuleId {
+                krate: Idx::<CrateData>(0),
+                block: None,
+                local_id: Idx::<ModuleData>(2),
             },
         },
         [
-            FileSymbol {
-                name: "IsThisJustATrait",
-                def: Trait(
-                    Trait {
-                        id: TraitId(
-                            6000,
-                        ),
-                    },
-                ),
-                loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3001),
-                        ),
-                    ),
-                    ptr: SyntaxNodePtr {
-                        kind: USE_TREE,
-                        range: 141..173,
-                    },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 157..173,
-                            },
-                        ),
-                    ),
-                },
-                container_name: None,
-                is_alias: false,
-                is_assoc: false,
-                is_import: true,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
-            },
             FileSymbol {
                 name: "IsThisJustATrait",
                 def: Macro(
                     Macro {
                         id: Macro2Id(
                             Macro2Id(
-                                5000,
+                                0,
                             ),
                         ),
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3001),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            1,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: USE_TREE,
-                        range: 141..173,
+                        range: 111..143,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 157..173,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 127..143,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: true,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "StructInModB",
@@ -1126,36 +916,32 @@
                     Struct(
                         Struct {
                             id: StructId(
-                                4c04,
+                                4,
                             ),
                         },
                     ),
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3001),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            1,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: STRUCT,
                         range: 0..20,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 7..19,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 7..19,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: false,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "SuperItemLikeMacro",
@@ -1163,36 +949,32 @@
                     Macro {
                         id: Macro2Id(
                             Macro2Id(
-                                5000,
+                                0,
                             ),
                         ),
                     },
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3001),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            1,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: USE_TREE,
-                        range: 35..69,
+                        range: 25..59,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 51..69,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 41..59,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: true,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
             },
             FileSymbol {
                 name: "ThisStruct",
@@ -1200,36 +982,65 @@
                     Struct(
                         Struct {
                             id: StructId(
-                                4c04,
+                                4,
                             ),
                         },
                     ),
                 ),
                 loc: DeclarationLocation {
-                    hir_file_id: FileId(
-                        EditionedFileId(
-                            Id(3001),
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            1,
                         ),
+                        Edition2021,
                     ),
                     ptr: SyntaxNodePtr {
                         kind: USE_TREE,
-                        range: 85..125,
+                        range: 65..105,
                     },
-                    name_ptr: Some(
-                        AstPtr(
-                            SyntaxNodePtr {
-                                kind: NAME,
-                                range: 115..125,
-                            },
-                        ),
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 95..105,
+                        },
                     ),
                 },
                 container_name: None,
                 is_alias: false,
                 is_assoc: false,
-                is_import: true,
-                do_not_complete: Yes,
-                _marker: PhantomData<&()>,
+            },
+            FileSymbol {
+                name: "ThisStruct",
+                def: Adt(
+                    Struct(
+                        Struct {
+                            id: StructId(
+                                4,
+                            ),
+                        },
+                    ),
+                ),
+                loc: DeclarationLocation {
+                    hir_file_id: EditionedFileId(
+                        FileId(
+                            1,
+                        ),
+                        Edition2021,
+                    ),
+                    ptr: SyntaxNodePtr {
+                        kind: USE_TREE,
+                        range: 65..105,
+                    },
+                    name_ptr: AstPtr(
+                        SyntaxNodePtr {
+                            kind: NAME,
+                            range: 95..105,
+                        },
+                    ),
+                },
+                container_name: None,
+                is_alias: false,
+                is_assoc: false,
             },
         ],
     ),

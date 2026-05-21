@@ -4,11 +4,11 @@
 // they are not `pub`.
 
 pub mod a {
-    use crate::b::*;
+    use b::*;
 }
 
 pub mod b {
-    use crate::a::*;
+    use a::*;
 }
 
 use a::*;

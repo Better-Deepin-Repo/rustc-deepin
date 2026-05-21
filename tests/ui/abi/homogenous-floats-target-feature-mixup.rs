@@ -5,9 +5,10 @@
 // without #[repr(simd)]
 
 //@ run-pass
-//@ needs-subprocess
-//@ ignore-backends: gcc
-//@ ignore-i586 (no SSE2)
+//@ ignore-wasm32 no processes
+//@ ignore-sgx no processes
+
+#![feature(avx512_target_feature)]
 
 #![allow(overflowing_literals)]
 #![allow(unused_variables)]
@@ -18,6 +19,17 @@ use std::env;
 fn main() {
     if let Some(level) = env::args().nth(1) {
         return test::main(&level)
+    }
+
+    match std::env::var("TARGET") {
+        Ok(s) => {
+            // Skip this tests on i586-unknown-linux-gnu where sse2 is disabled
+            // Debian: our i686 doesn't have SSE 2..
+            if s.contains("i586") || s.contains("i686") {
+                return
+            }
+        }
+        Err(_) => return,
     }
 
     let me = env::current_exe().unwrap();
@@ -54,13 +66,13 @@ fn is_sigill(status: ExitStatus) -> bool {
 #[allow(nonstandard_style)]
 mod test {
     #[derive(PartialEq, Debug, Clone, Copy)]
-    struct f32x2([f32; 2]);
+    struct f32x2(f32, f32);
 
     #[derive(PartialEq, Debug, Clone, Copy)]
-    struct f32x4([f32; 4]);
+    struct f32x4(f32, f32, f32, f32);
 
     #[derive(PartialEq, Debug, Clone, Copy)]
-    struct f32x8([f32; 8]);
+    struct f32x8(f32, f32, f32, f32, f32, f32, f32, f32);
 
     pub fn main(level: &str) {
         unsafe {
@@ -86,9 +98,9 @@ mod test {
         )*) => ($(
             $(#[$attr])*
             unsafe fn $main(level: &str) {
-                let m128 = f32x2([1., 2.]);
-                let m256 = f32x4([3., 4., 5., 6.]);
-                let m512 = f32x8([7., 8., 9., 10., 11., 12., 13., 14.]);
+                let m128 = f32x2(1., 2.);
+                let m256 = f32x4(3., 4., 5., 6.);
+                let m512 = f32x8(7., 8., 9., 10., 11., 12., 13., 14.);
                 assert_eq!(id_sse_128(m128), m128);
                 assert_eq!(id_sse_256(m256), m256);
                 assert_eq!(id_sse_512(m512), m512);
@@ -122,55 +134,55 @@ mod test {
 
     #[target_feature(enable = "sse2")]
     unsafe fn id_sse_128(a: f32x2) -> f32x2 {
-        assert_eq!(a, f32x2([1., 2.]));
+        assert_eq!(a, f32x2(1., 2.));
         a.clone()
     }
 
     #[target_feature(enable = "sse2")]
     unsafe fn id_sse_256(a: f32x4) -> f32x4 {
-        assert_eq!(a, f32x4([3., 4., 5., 6.]));
+        assert_eq!(a, f32x4(3., 4., 5., 6.));
         a.clone()
     }
 
     #[target_feature(enable = "sse2")]
     unsafe fn id_sse_512(a: f32x8) -> f32x8 {
-        assert_eq!(a, f32x8([7., 8., 9., 10., 11., 12., 13., 14.]));
+        assert_eq!(a, f32x8(7., 8., 9., 10., 11., 12., 13., 14.));
         a.clone()
     }
 
     #[target_feature(enable = "avx")]
     unsafe fn id_avx_128(a: f32x2) -> f32x2 {
-        assert_eq!(a, f32x2([1., 2.]));
+        assert_eq!(a, f32x2(1., 2.));
         a.clone()
     }
 
     #[target_feature(enable = "avx")]
     unsafe fn id_avx_256(a: f32x4) -> f32x4 {
-        assert_eq!(a, f32x4([3., 4., 5., 6.]));
+        assert_eq!(a, f32x4(3., 4., 5., 6.));
         a.clone()
     }
 
     #[target_feature(enable = "avx")]
     unsafe fn id_avx_512(a: f32x8) -> f32x8 {
-        assert_eq!(a, f32x8([7., 8., 9., 10., 11., 12., 13., 14.]));
+        assert_eq!(a, f32x8(7., 8., 9., 10., 11., 12., 13., 14.));
         a.clone()
     }
 
     #[target_feature(enable = "avx512bw")]
     unsafe fn id_avx512_128(a: f32x2) -> f32x2 {
-        assert_eq!(a, f32x2([1., 2.]));
+        assert_eq!(a, f32x2(1., 2.));
         a.clone()
     }
 
     #[target_feature(enable = "avx512bw")]
     unsafe fn id_avx512_256(a: f32x4) -> f32x4 {
-        assert_eq!(a, f32x4([3., 4., 5., 6.]));
+        assert_eq!(a, f32x4(3., 4., 5., 6.));
         a.clone()
     }
 
     #[target_feature(enable = "avx512bw")]
     unsafe fn id_avx512_512(a: f32x8) -> f32x8 {
-        assert_eq!(a, f32x8([7., 8., 9., 10., 11., 12., 13., 14.]));
+        assert_eq!(a, f32x8(7., 8., 9., 10., 11., 12., 13., 14.));
         a.clone()
     }
 }

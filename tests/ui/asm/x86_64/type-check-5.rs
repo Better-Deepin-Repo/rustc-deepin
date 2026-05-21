@@ -1,8 +1,11 @@
 //@ only-x86_64
 
-#![feature(never_type)]
+#![feature(repr_simd, never_type)]
 
 use std::arch::asm;
+
+#[repr(simd)]
+struct SimdNonCopy(f32, f32, f32, f32);
 
 fn main() {
     unsafe {

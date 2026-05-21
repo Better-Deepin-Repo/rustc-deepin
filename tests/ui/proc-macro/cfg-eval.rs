@@ -1,6 +1,6 @@
 //@ check-pass
 //@ compile-flags: -Z span-debug
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 
 #![feature(cfg_eval)]
 #![feature(proc_macro_hygiene)]
@@ -15,23 +15,23 @@ extern crate test_macros;
 #[cfg_eval]
 #[print_attr]
 struct S1 {
-    #[cfg(false)]
+    #[cfg(FALSE)]
     field_false: u8,
-    #[cfg(true)]
+    #[cfg(all(/*true*/))]
     #[cfg_attr(FALSE, unknown_attr)]
-    #[cfg_attr(true, allow())] //~ WARN unused attribute
+    #[cfg_attr(all(/*true*/), allow())]
     field_true: u8,
 }
 
 #[cfg_eval]
-#[cfg(false)]
+#[cfg(FALSE)]
 struct S2 {}
 
 fn main() {
     // Subtle - we need a trailing comma after the '1' - otherwise, `#[cfg_eval]` will
-    // turn this into `(#[cfg(true)] 1)`, which is a parenthesized expression, not a tuple
+    // turn this into `(#[cfg(all())] 1)`, which is a parenthesized expression, not a tuple
     // expression. `#[cfg]` is not supported inside parenthesized expressions, so this will
     // produce an error when attribute collection runs.
     let _ = #[cfg_eval] #[print_attr] #[cfg_attr(not(FALSE), rustc_dummy)]
-    (#[cfg(false)] 0, #[cfg(true)] 1,);
+    (#[cfg(FALSE)] 0, #[cfg(all(/*true*/))] 1,);
 }

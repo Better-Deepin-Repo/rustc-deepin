@@ -1,8 +1,8 @@
-use crate::spec::{FramePointer, Os, RelroLevel, TargetOptions, TlsModel, cvs};
+use crate::spec::{cvs, FramePointer, RelroLevel, TargetOptions, TlsModel};
 
-pub(crate) fn opts() -> TargetOptions {
+pub fn opts() -> TargetOptions {
     TargetOptions {
-        os: Os::OpenBsd,
+        os: "openbsd".into(),
         dynamic_linking: true,
         families: cvs!["unix"],
         has_rpath: true,

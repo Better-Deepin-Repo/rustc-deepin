@@ -187,7 +187,7 @@ The [`default` features](#the-default-feature) can be disabled using
 
 ```toml
 [dependencies]
-flate2 = { version = "1.0.3", default-features = false, features = ["zlib-rs"] }
+flate2 = { version = "1.0.3", default-features = false, features = ["zlib"] }
 ```
 
 > **Note**: This may not ensure the default features are disabled. If another
@@ -244,11 +244,12 @@ enabled:
   "foo bar"`). If building multiple packages in a [workspace], the
   `package-name/feature-name` syntax can be used to specify features for
   specific workspace members.
-* `--all-features`: Activates all features of all packages selected on the command line.
+
+* `--all-features`: Activates all features of all packages selected on the
+  command-line.
+
 * `--no-default-features`: Does not activate the [`default`
   feature](#the-default-feature) of the selected packages.
-  
-**NOTE**: check the individual subcommand documentation for details. Not all flags are available for all subcommands.
 
 [workspace]: workspaces.md
 
@@ -364,11 +365,11 @@ that unification can be unwanted. The exact situations are described in the
 [resolver chapter][resolver-v2], but in short, it avoids unifying in these
 situations:
 
-* Features enabled on [platform-specific dependencies] for [target architectures][target] not
+* Features enabled on [platform-specific dependencies] for targets not
   currently being built are ignored.
 * [Build-dependencies] and proc-macros do not share features with normal
   dependencies.
-* [Dev-dependencies] do not activate features unless building a [Cargo target][target] that
+* [Dev-dependencies] do not activate features unless building a target that
   needs them (like tests or examples).
 
 Avoiding the unification is necessary for some situations. For example, if a
@@ -391,8 +392,6 @@ features](#inspecting-resolved-features) for more on fetching information on
 the resolved features. For build dependencies, this is not necessary if you
 are cross-compiling with the `--target` flag because build dependencies are
 always built separately from normal dependencies in that scenario.
-
-[target]: ../appendix/glossary.md#target
 
 ### Resolver version 2 command-line flags
 
@@ -495,7 +494,7 @@ control which features are enabled when the documentation is built. See
 
 > **Note**: Rustdoc has experimental support for annotating the documentation
 > to indicate which features are required to use certain APIs. See the
-> `doc_cfg` documentation for more details. An example is the [`syn`
+> [`doc_cfg`] documentation for more details. An example is the [`syn`
 > documentation], where you can see colored boxes which note which features
 > are required to use it.
 
@@ -506,6 +505,7 @@ control which features are enabled when the documentation is built. See
 [regex crate source]: https://github.com/rust-lang/regex/blob/1.4.2/src/lib.rs#L488-L583
 [regex-docs-rs]: https://docs.rs/regex/1.4.2/regex/#crate-features
 [sccache]: https://github.com/mozilla/sccache/blob/0.2.13/README.md#build-requirements
+[`doc_cfg`]: ../../unstable-book/language-features/doc-cfg.html
 [`syn` documentation]: https://docs.rs/syn/1.0.54/syn/#modules
 
 ### Discovering features

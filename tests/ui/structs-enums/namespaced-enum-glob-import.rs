@@ -1,5 +1,6 @@
 //@ run-pass
 #![allow(dead_code)]
+//@ pretty-expanded FIXME #23616
 
 mod m2 {
     pub enum Foo {
@@ -14,7 +15,7 @@ mod m2 {
 }
 
 mod m {
-    pub use crate::m2::Foo::*;
+    pub use m2::Foo::*;
 }
 
 fn _f(f: m2::Foo) {

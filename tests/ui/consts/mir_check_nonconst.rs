@@ -6,6 +6,6 @@ fn bar() -> Foo {
 }
 
 static foo: Foo = bar();
-//~^ ERROR cannot call non-const function
+//~^ ERROR cannot call non-const fn
 
 fn main() {}

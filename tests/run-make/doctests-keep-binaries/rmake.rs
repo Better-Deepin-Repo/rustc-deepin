@@ -1,5 +1,3 @@
-//@ ignore-cross-compile attempts to run the doctests
-
 // Check that valid binaries are persisted by running them, regardless of whether the
 // --run or --no-run option is used.
 

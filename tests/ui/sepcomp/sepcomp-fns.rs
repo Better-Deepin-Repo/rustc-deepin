@@ -13,13 +13,13 @@ fn one() -> usize { 1 }
 
 mod a {
     pub fn two() -> usize {
-        crate::one() + crate::one()
+        ::one() + ::one()
     }
 }
 
 mod b {
     pub fn three() -> usize {
-        crate::one() + crate::a::two()
+        ::one() + ::a::two()
     }
 }
 

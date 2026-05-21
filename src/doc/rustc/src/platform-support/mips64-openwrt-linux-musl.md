@@ -2,8 +2,7 @@
 **Tier: 3**
 
 ## Target maintainers
-
-[@Itus-Shield](https://github.com/Itus-Shield)
+- Donald Hoskins `grommish@gmail.com`, https://github.com/Itus-Shield
 
 ## Requirements
 This target is cross-compiled. There is no support for `std`. There is no

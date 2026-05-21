@@ -1,6 +1,8 @@
 //@ edition:2018
 //@ run-rustfix
 
+#![feature(async_closure)]
+
 fn take_u32(_x: u32) {}
 
 async fn make_u32() -> u32 {

@@ -21,6 +21,15 @@ LL |     for foo in foos { for bar in &bars { if foo == *bar {
 ...
 LL |         continue;
    |         ^^^^^^^^ this `continue` advances the loop at $DIR/nested-loop-moved-value-wrong-continue.rs:6:23: 18:8
+help: consider moving the expression out of the loop so it is only moved once
+   |
+LL ~     for foo in foos { let mut value = baz.push(foo);
+LL ~     for bar in &bars { if foo == *bar {
+LL |
+...
+LL |
+LL ~         value;
+   |
 help: consider cloning the value if the performance cost is acceptable
    |
 LL |         baz.push(foo.clone());
@@ -54,7 +63,16 @@ LL |         for bar in &bars {
    |         ----------------
 ...
 LL |                 continue;
-   |                 ^^^^^^^^ this `continue` advances the loop at line 34
+   |                 ^^^^^^^^ this `continue` advances the loop at line 33
+help: consider moving the expression out of the loop so it is only moved once
+   |
+LL ~         let mut value = baz.push(foo);
+LL ~         for bar in &bars {
+LL |
+...
+LL |             if foo == *bar {
+LL ~                 value;
+   |
 help: consider cloning the value if the performance cost is acceptable
    |
 LL |                 baz.push(foo.clone());

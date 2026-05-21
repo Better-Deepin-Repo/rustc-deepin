@@ -5,7 +5,6 @@
 //@ ignore-windows
 //@ ignore-macos
 //@ ignore-cross-compile
-//@ ignore-aix
 
 //@ compile-flags: -Clink-args=-Wl,-z,text
 //@ run-pass

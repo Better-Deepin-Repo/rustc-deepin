@@ -3,8 +3,6 @@ use rand::Rng;
 use std::cmp::Ordering;
 use std::io;
 
-mod guessing_game;
-
 fn main() {
     println!("Guess the number!");
 

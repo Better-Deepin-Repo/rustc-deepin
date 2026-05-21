@@ -1,7 +1,8 @@
 //@ check-pass
-//@ edition: 2024
 
 // Show that precise captures allow us to skip a lifetime param for outlives
+
+#![feature(lifetime_capture_rules_2024)]
 
 fn hello<'a: 'a, 'b: 'b>() -> impl Sized + use<'a> { }
 

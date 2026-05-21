@@ -1,5 +1,3 @@
-//@ needs-target-std
-//
 // rust should produce artifact notifications about files it was asked to --emit.
 //
 // It should work in incremental mode both on the first pass where files are generated as well

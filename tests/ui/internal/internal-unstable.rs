@@ -7,9 +7,7 @@
 extern crate internal_unstable;
 
 struct Baz {
-    #[allow_internal_unstable] //~ ERROR `allow_internal_unstable` expects a list of feature names
-    //~^ WARN cannot be used on
-    //~| WARN previously accepted
+    #[allow_internal_unstable]
     baz: u8,
 }
 
@@ -58,9 +56,7 @@ fn main() {
     bar!(internal_unstable::unstable()); //~ ERROR use of unstable
 
     match true {
-        #[allow_internal_unstable] //~ ERROR `allow_internal_unstable` expects a list of feature names
-        //~^ WARN cannot be used on
-        //~| WARN previously accepted
+        #[allow_internal_unstable]
         _ => {}
     }
 

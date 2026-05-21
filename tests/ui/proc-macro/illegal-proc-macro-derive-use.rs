@@ -8,7 +8,7 @@ pub fn foo(a: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 // Issue #37590
 #[proc_macro_derive(Foo)]
-//~^ ERROR: attribute cannot be used on
+//~^ ERROR: the `#[proc_macro_derive]` attribute may only be used on bare functions
 pub struct Foo {
 }
 

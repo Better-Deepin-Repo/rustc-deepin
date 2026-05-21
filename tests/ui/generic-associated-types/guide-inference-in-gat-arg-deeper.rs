@@ -1,9 +1,5 @@
-//@ check-pass
-//@ revisions: current next
-//@ ignore-compare-mode-next-solver (explicit revisions)
-//@[next] compile-flags: -Znext-solver
-
 // Fix for <https://github.com/rust-lang/rust/issues/125196>.
+//@ check-pass
 
 trait Tr {
     type Gat<T>;

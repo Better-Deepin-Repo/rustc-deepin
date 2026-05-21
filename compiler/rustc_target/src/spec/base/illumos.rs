@@ -1,6 +1,6 @@
-use crate::spec::{Cc, FramePointer, LinkerFlavor, Os, TargetOptions, cvs};
+use crate::spec::{cvs, Cc, FramePointer, LinkerFlavor, TargetOptions};
 
-pub(crate) fn opts() -> TargetOptions {
+pub fn opts() -> TargetOptions {
     let late_link_args = TargetOptions::link_args(
         LinkerFlavor::Unix(Cc::Yes),
         &[
@@ -25,7 +25,7 @@ pub(crate) fn opts() -> TargetOptions {
     );
 
     TargetOptions {
-        os: Os::Illumos,
+        os: "illumos".into(),
         dynamic_linking: true,
         has_rpath: true,
         families: cvs!["unix"],

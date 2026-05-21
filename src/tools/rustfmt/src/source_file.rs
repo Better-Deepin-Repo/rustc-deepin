@@ -1,12 +1,11 @@
 use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
-use std::sync::Arc;
 
-use crate::NewlineStyle;
 use crate::config::FileName;
 use crate::emitter::{self, Emitter};
 use crate::parse::session::ParseSess;
+use crate::NewlineStyle;
 
 #[cfg(test)]
 use crate::config::Config;
@@ -14,6 +13,8 @@ use crate::config::Config;
 use crate::create_emitter;
 #[cfg(test)]
 use crate::formatting::FileRecord;
+
+use rustc_data_structures::sync::Lrc;
 
 // Append a newline to the end of each file.
 pub(crate) fn append_newline(s: &mut String) {
@@ -65,6 +66,18 @@ where
         }
     }
 
+    #[allow(non_local_definitions)]
+    impl From<&FileName> for rustc_span::FileName {
+        fn from(filename: &FileName) -> rustc_span::FileName {
+            match filename {
+                FileName::Real(path) => {
+                    rustc_span::FileName::Real(rustc_span::RealFileName::LocalPath(path.to_owned()))
+                }
+                FileName::Stdin => rustc_span::FileName::Custom("stdin".to_owned()),
+            }
+        }
+    }
+
     // SourceFile's in the SourceMap will always have Unix-style line endings
     // See: https://github.com/rust-lang/rustfmt/issues/3850
     // So if the user has explicitly overridden the rustfmt `newline_style`
@@ -75,11 +88,11 @@ where
     // source map instead of hitting the file system. This also supports getting
     // original text for `FileName::Stdin`.
     let original_text = if newline_style != NewlineStyle::Auto && *filename != FileName::Stdin {
-        Arc::new(fs::read_to_string(ensure_real_path(filename))?)
+        Lrc::new(fs::read_to_string(ensure_real_path(filename))?)
     } else {
         match psess.and_then(|psess| psess.get_original_snippet(filename)) {
             Some(ori) => ori,
-            None => Arc::new(fs::read_to_string(ensure_real_path(filename))?),
+            None => Lrc::new(fs::read_to_string(ensure_real_path(filename))?),
         }
     };
 

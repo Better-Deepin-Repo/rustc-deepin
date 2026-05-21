@@ -1,6 +1,3 @@
-//@ revisions: current next
-//@ [next] compile-flags: -Znext-solver
-//@ ignore-compare-mode-next-solver (explicit revisions)
 //@ check-pass
 
 pub struct Bar<T> {

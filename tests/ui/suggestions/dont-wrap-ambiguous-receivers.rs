@@ -1,4 +1,3 @@
-//@ edition:2015
 mod banana {
     //~^ HELP the following traits which provide `pick` are implemented but not in scope
     pub struct Chaenomeles;

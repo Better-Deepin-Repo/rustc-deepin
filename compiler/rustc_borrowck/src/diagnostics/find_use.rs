@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
+use std::rc::Rc;
 
 use rustc_data_structures::fx::FxIndexSet;
-use rustc_middle::mir::visit::{PlaceContext, Visitor};
+use rustc_middle::mir::visit::{MirVisitable, PlaceContext, Visitor};
 use rustc_middle::mir::{self, Body, Local, Location};
 use rustc_middle::ty::{RegionVid, TyCtxt};
 
@@ -10,7 +11,7 @@ use crate::region_infer::{Cause, RegionInferenceContext};
 
 pub(crate) fn find<'tcx>(
     body: &Body<'tcx>,
-    regioncx: &RegionInferenceContext<'tcx>,
+    regioncx: &Rc<RegionInferenceContext<'tcx>>,
     tcx: TyCtxt<'tcx>,
     region_vid: RegionVid,
     start_point: Location,
@@ -20,15 +21,15 @@ pub(crate) fn find<'tcx>(
     uf.find()
 }
 
-struct UseFinder<'a, 'tcx> {
-    body: &'a Body<'tcx>,
-    regioncx: &'a RegionInferenceContext<'tcx>,
+struct UseFinder<'cx, 'tcx> {
+    body: &'cx Body<'tcx>,
+    regioncx: &'cx Rc<RegionInferenceContext<'tcx>>,
     tcx: TyCtxt<'tcx>,
     region_vid: RegionVid,
     start_point: Location,
 }
 
-impl<'a, 'tcx> UseFinder<'a, 'tcx> {
+impl<'cx, 'tcx> UseFinder<'cx, 'tcx> {
     fn find(&mut self) -> Option<Cause> {
         let mut queue = VecDeque::new();
         let mut visited = FxIndexSet::default();
@@ -45,22 +46,7 @@ impl<'a, 'tcx> UseFinder<'a, 'tcx> {
 
             let block_data = &self.body[p.block];
 
-            let mut visitor = DefUseVisitor {
-                body: self.body,
-                tcx: self.tcx,
-                region_vid: self.region_vid,
-                def_use_result: None,
-            };
-
-            let is_statement = p.statement_index < block_data.statements.len();
-
-            if is_statement {
-                visitor.visit_statement(&block_data.statements[p.statement_index], p);
-            } else {
-                visitor.visit_terminator(block_data.terminator.as_ref().unwrap(), p);
-            }
-
-            match visitor.def_use_result {
+            match self.def_use(p, block_data.visitable(p.statement_index)) {
                 Some(DefUseResult::Def) => {}
 
                 Some(DefUseResult::UseLive { local }) => {
@@ -72,7 +58,7 @@ impl<'a, 'tcx> UseFinder<'a, 'tcx> {
                 }
 
                 None => {
-                    if is_statement {
+                    if p.statement_index < block_data.statements.len() {
                         queue.push_back(p.successor_within_block());
                     } else {
                         queue.extend(
@@ -92,10 +78,23 @@ impl<'a, 'tcx> UseFinder<'a, 'tcx> {
 
         None
     }
+
+    fn def_use(&self, location: Location, thing: &dyn MirVisitable<'tcx>) -> Option<DefUseResult> {
+        let mut visitor = DefUseVisitor {
+            body: self.body,
+            tcx: self.tcx,
+            region_vid: self.region_vid,
+            def_use_result: None,
+        };
+
+        thing.apply(location, &mut visitor);
+
+        visitor.def_use_result
+    }
 }
 
-struct DefUseVisitor<'a, 'tcx> {
-    body: &'a Body<'tcx>,
+struct DefUseVisitor<'cx, 'tcx> {
+    body: &'cx Body<'tcx>,
     tcx: TyCtxt<'tcx>,
     region_vid: RegionVid,
     def_use_result: Option<DefUseResult>,
@@ -107,7 +106,7 @@ enum DefUseResult {
     UseDrop { local: Local },
 }
 
-impl<'a, 'tcx> Visitor<'tcx> for DefUseVisitor<'a, 'tcx> {
+impl<'cx, 'tcx> Visitor<'tcx> for DefUseVisitor<'cx, 'tcx> {
     fn visit_local(&mut self, local: Local, context: PlaceContext, _: Location) {
         let local_ty = self.body.local_decls[local].ty;
 

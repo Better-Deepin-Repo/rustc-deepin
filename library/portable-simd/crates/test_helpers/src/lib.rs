@@ -12,9 +12,6 @@ pub mod wasm;
 #[macro_use]
 pub mod biteq;
 
-#[macro_use]
-pub mod approxeq;
-
 pub mod subnormals;
 use subnormals::FlushSubnormals;
 
@@ -190,41 +187,6 @@ pub fn test_unary_elementwise<Scalar, ScalarResult, Vector, VectorResult, const 
 
 /// Test a unary vector function against a unary scalar function, applied elementwise.
 ///
-/// Floats are checked approximately.
-pub fn test_unary_elementwise_approx<
-    Scalar,
-    ScalarResult,
-    Vector,
-    VectorResult,
-    const LANES: usize,
->(
-    fv: &dyn Fn(Vector) -> VectorResult,
-    fs: &dyn Fn(Scalar) -> ScalarResult,
-    check: &dyn Fn([Scalar; LANES]) -> bool,
-    ulps: i64,
-) where
-    Scalar: Copy + core::fmt::Debug + DefaultStrategy,
-    ScalarResult: Copy + approxeq::ApproxEq + core::fmt::Debug + DefaultStrategy,
-    Vector: Into<[Scalar; LANES]> + From<[Scalar; LANES]> + Copy,
-    VectorResult: Into<[ScalarResult; LANES]> + From<[ScalarResult; LANES]> + Copy,
-{
-    test_1(&|x: [Scalar; LANES]| {
-        proptest::prop_assume!(check(x));
-        let result_1: [ScalarResult; LANES] = fv(x.into()).into();
-        let result_2: [ScalarResult; LANES] = x
-            .iter()
-            .copied()
-            .map(fs)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-        crate::prop_assert_approxeq!(result_1, result_2, ulps);
-        Ok(())
-    });
-}
-
-/// Test a unary vector function against a unary scalar function, applied elementwise.
-///
 /// Where subnormals are flushed, use approximate equality.
 pub fn test_unary_elementwise_flush_subnormals<
     Scalar,
@@ -324,44 +286,6 @@ pub fn test_binary_elementwise<
             .try_into()
             .unwrap();
         crate::prop_assert_biteq!(result_1, result_2);
-        Ok(())
-    });
-}
-
-/// Test a binary vector function against a binary scalar function, applied elementwise.
-pub fn test_binary_elementwise_approx<
-    Scalar1,
-    Scalar2,
-    ScalarResult,
-    Vector1,
-    Vector2,
-    VectorResult,
-    const LANES: usize,
->(
-    fv: &dyn Fn(Vector1, Vector2) -> VectorResult,
-    fs: &dyn Fn(Scalar1, Scalar2) -> ScalarResult,
-    check: &dyn Fn([Scalar1; LANES], [Scalar2; LANES]) -> bool,
-    ulps: i64,
-) where
-    Scalar1: Copy + core::fmt::Debug + DefaultStrategy,
-    Scalar2: Copy + core::fmt::Debug + DefaultStrategy,
-    ScalarResult: Copy + approxeq::ApproxEq + core::fmt::Debug + DefaultStrategy,
-    Vector1: Into<[Scalar1; LANES]> + From<[Scalar1; LANES]> + Copy,
-    Vector2: Into<[Scalar2; LANES]> + From<[Scalar2; LANES]> + Copy,
-    VectorResult: Into<[ScalarResult; LANES]> + From<[ScalarResult; LANES]> + Copy,
-{
-    test_2(&|x: [Scalar1; LANES], y: [Scalar2; LANES]| {
-        proptest::prop_assume!(check(x, y));
-        let result_1: [ScalarResult; LANES] = fv(x.into(), y.into()).into();
-        let result_2: [ScalarResult; LANES] = x
-            .iter()
-            .copied()
-            .zip(y.iter().copied())
-            .map(|(x, y)| fs(x, y))
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-        crate::prop_assert_approxeq!(result_1, result_2, ulps);
         Ok(())
     });
 }
@@ -604,6 +528,8 @@ macro_rules! test_lanes {
                 use super::*;
 
                 fn implementation<const $lanes: usize>()
+                where
+                    core_simd::simd::LaneCount<$lanes>: core_simd::simd::SupportedLaneCount,
                 $body
 
                 #[cfg(target_arch = "wasm32")]
@@ -613,22 +539,32 @@ macro_rules! test_lanes {
                     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)];
                     lanes_1 1;
                     lanes_2 2;
-                    // Cover an odd and an even non-power-of-2 length in Miri.
-                    // (Even non-power-of-2 vectors have alignment between element
-                    // and vector size, so we want to cover that case as well.)
-                    lanes_3 3;
-
-                    lanes_6 6;
+                    lanes_4 4;
                 );
 
                 #[cfg(not(miri))] // Miri intrinsic implementations are uniform and larger tests are sloooow
                 $crate::test_lanes_helper!(
                     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)];
-                    lanes_4 4;
-                    lanes_5 5;
-
-                    lanes_7 7;
                     lanes_8 8;
+                    lanes_16 16;
+                    lanes_32 32;
+                    lanes_64 64;
+                );
+
+                #[cfg(feature = "all_lane_counts")]
+                $crate::test_lanes_helper!(
+                    // test some odd and even non-power-of-2 lengths on miri
+                    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)];
+                    lanes_3 3;
+                    lanes_5 5;
+                    lanes_6 6;
+                );
+
+                #[cfg(feature = "all_lane_counts")]
+                #[cfg(not(miri))] // Miri intrinsic implementations are uniform and larger tests are sloooow
+                $crate::test_lanes_helper!(
+                    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)];
+                    lanes_7 7;
                     lanes_9 9;
                     lanes_10 10;
                     lanes_11 11;
@@ -636,55 +572,52 @@ macro_rules! test_lanes {
                     lanes_13 13;
                     lanes_14 14;
                     lanes_15 15;
-                    lanes_16 16;
                     lanes_17 17;
-                    //lanes_18 18;
-                    //lanes_19 19;
-                    //lanes_20 20;
-                    //lanes_21 21;
-                    //lanes_22 22;
-                    //lanes_23 23;
+                    lanes_18 18;
+                    lanes_19 19;
+                    lanes_20 20;
+                    lanes_21 21;
+                    lanes_22 22;
+                    lanes_23 23;
                     lanes_24 24;
-                    //lanes_25 25;
-                    //lanes_26 26;
-                    //lanes_27 27;
-                    //lanes_28 28;
-                    //lanes_29 29;
-                    //lanes_30 30;
-                    //lanes_31 31;
-                    lanes_32 32;
-                    //lanes_33 33;
-                    //lanes_34 34;
-                    //lanes_35 35;
-                    //lanes_36 36;
-                    //lanes_37 37;
-                    //lanes_38 38;
-                    //lanes_39 39;
-                    //lanes_40 40;
-                    //lanes_41 41;
-                    //lanes_42 42;
-                    //lanes_43 43;
-                    //lanes_44 44;
-                    //lanes_45 45;
-                    //lanes_46 46;
+                    lanes_25 25;
+                    lanes_26 26;
+                    lanes_27 27;
+                    lanes_28 28;
+                    lanes_29 29;
+                    lanes_30 30;
+                    lanes_31 31;
+                    lanes_33 33;
+                    lanes_34 34;
+                    lanes_35 35;
+                    lanes_36 36;
+                    lanes_37 37;
+                    lanes_38 38;
+                    lanes_39 39;
+                    lanes_40 40;
+                    lanes_41 41;
+                    lanes_42 42;
+                    lanes_43 43;
+                    lanes_44 44;
+                    lanes_45 45;
+                    lanes_46 46;
                     lanes_47 47;
-                    //lanes_48 48;
-                    //lanes_49 49;
-                    //lanes_50 50;
-                    //lanes_51 51;
-                    //lanes_52 52;
-                    //lanes_53 53;
-                    //lanes_54 54;
-                    //lanes_55 55;
+                    lanes_48 48;
+                    lanes_49 49;
+                    lanes_50 50;
+                    lanes_51 51;
+                    lanes_52 52;
+                    lanes_53 53;
+                    lanes_54 54;
+                    lanes_55 55;
                     lanes_56 56;
                     lanes_57 57;
-                    //lanes_58 58;
-                    //lanes_59 59;
-                    //lanes_60 60;
-                    //lanes_61 61;
-                    //lanes_62 62;
+                    lanes_58 58;
+                    lanes_59 59;
+                    lanes_60 60;
+                    lanes_61 61;
+                    lanes_62 62;
                     lanes_63 63;
-                    lanes_64 64;
                 );
             }
         )*
@@ -702,26 +635,40 @@ macro_rules! test_lanes_panic {
                 use super::*;
 
                 fn implementation<const $lanes: usize>()
+                where
+                    core_simd::simd::LaneCount<$lanes>: core_simd::simd::SupportedLaneCount,
                 $body
 
-                // test some odd and even non-power-of-2 lengths on miri
                 $crate::test_lanes_helper!(
                     #[should_panic];
                     lanes_1 1;
                     lanes_2 2;
-                    lanes_3 3;
-
-                    lanes_6 6;
+                    lanes_4 4;
                 );
 
                 #[cfg(not(miri))] // Miri intrinsic implementations are uniform and larger tests are sloooow
                 $crate::test_lanes_helper!(
                     #[should_panic];
-                    lanes_4 4;
-                    lanes_5 5;
-
-                    lanes_7 7;
                     lanes_8 8;
+                    lanes_16 16;
+                    lanes_32 32;
+                    lanes_64 64;
+                );
+
+                #[cfg(feature = "all_lane_counts")]
+                $crate::test_lanes_helper!(
+                    // test some odd and even non-power-of-2 lengths on miri
+                    #[should_panic];
+                    lanes_3 3;
+                    lanes_5 5;
+                    lanes_6 6;
+                );
+
+                #[cfg(feature = "all_lane_counts")]
+                #[cfg(not(miri))] // Miri intrinsic implementations are uniform and larger tests are sloooow
+                $crate::test_lanes_helper!(
+                    #[should_panic];
+                    lanes_7 7;
                     lanes_9 9;
                     lanes_10 10;
                     lanes_11 11;
@@ -729,55 +676,52 @@ macro_rules! test_lanes_panic {
                     lanes_13 13;
                     lanes_14 14;
                     lanes_15 15;
-                    lanes_16 16;
                     lanes_17 17;
-                    //lanes_18 18;
-                    //lanes_19 19;
-                    //lanes_20 20;
-                    //lanes_21 21;
-                    //lanes_22 22;
-                    //lanes_23 23;
+                    lanes_18 18;
+                    lanes_19 19;
+                    lanes_20 20;
+                    lanes_21 21;
+                    lanes_22 22;
+                    lanes_23 23;
                     lanes_24 24;
-                    //lanes_25 25;
-                    //lanes_26 26;
-                    //lanes_27 27;
-                    //lanes_28 28;
-                    //lanes_29 29;
-                    //lanes_30 30;
-                    //lanes_31 31;
-                    lanes_32 32;
-                    //lanes_33 33;
-                    //lanes_34 34;
-                    //lanes_35 35;
-                    //lanes_36 36;
-                    //lanes_37 37;
-                    //lanes_38 38;
-                    //lanes_39 39;
-                    //lanes_40 40;
-                    //lanes_41 41;
-                    //lanes_42 42;
-                    //lanes_43 43;
-                    //lanes_44 44;
-                    //lanes_45 45;
-                    //lanes_46 46;
+                    lanes_25 25;
+                    lanes_26 26;
+                    lanes_27 27;
+                    lanes_28 28;
+                    lanes_29 29;
+                    lanes_30 30;
+                    lanes_31 31;
+                    lanes_33 33;
+                    lanes_34 34;
+                    lanes_35 35;
+                    lanes_36 36;
+                    lanes_37 37;
+                    lanes_38 38;
+                    lanes_39 39;
+                    lanes_40 40;
+                    lanes_41 41;
+                    lanes_42 42;
+                    lanes_43 43;
+                    lanes_44 44;
+                    lanes_45 45;
+                    lanes_46 46;
                     lanes_47 47;
-                    //lanes_48 48;
-                    //lanes_49 49;
-                    //lanes_50 50;
-                    //lanes_51 51;
-                    //lanes_52 52;
-                    //lanes_53 53;
-                    //lanes_54 54;
-                    //lanes_55 55;
+                    lanes_48 48;
+                    lanes_49 49;
+                    lanes_50 50;
+                    lanes_51 51;
+                    lanes_52 52;
+                    lanes_53 53;
+                    lanes_54 54;
+                    lanes_55 55;
                     lanes_56 56;
                     lanes_57 57;
-                    //lanes_58 58;
-                    //lanes_59 59;
-                    //lanes_60 60;
-                    //lanes_61 61;
-                    //lanes_62 62;
+                    lanes_58 58;
+                    lanes_59 59;
+                    lanes_60 60;
+                    lanes_61 61;
+                    lanes_62 62;
                     lanes_63 63;
-                    lanes_64 64;
                 );
             }
         )*

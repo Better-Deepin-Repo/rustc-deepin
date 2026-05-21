@@ -3,9 +3,9 @@
 The same set of rules can be applied to functions: a type `T` becomes
 generic when preceded by `<T>`.
 
-Using generic functions sometimes requires explicitly specifying type
-parameters. This may be the case if the function is called where the return type
-is generic, or if the compiler doesn't have enough information to infer
+Using generic functions sometimes requires explicitly specifying type 
+parameters. This may be the case if the function is called where the return type 
+is generic, or if the compiler doesn't have enough information to infer 
 the necessary type parameters.
 
 A function call with explicitly specified type parameters looks like:
@@ -24,7 +24,7 @@ struct SGen<T>(T); // Generic type `SGen`.
 fn reg_fn(_s: S) {}
 
 // Define a function `gen_spec_t` that takes an argument `_s` of type `SGen<T>`.
-// It has been explicitly given the type parameter `A`, but because `A` has not
+// It has been explicitly given the type parameter `A`, but because `A` has not 
 // been specified as a generic type parameter for `gen_spec_t`, it is not generic.
 fn gen_spec_t(_s: SGen<A>) {}
 

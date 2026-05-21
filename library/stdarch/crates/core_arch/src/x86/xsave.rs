@@ -5,7 +5,7 @@
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.xsave"]
     fn xsave(p: *mut u8, hi: u32, lo: u32);
     #[link_name = "llvm.x86.xrstor"]
@@ -160,90 +160,106 @@ pub unsafe fn _xrstors(mem_addr: *const u8, rs_mask: u64) {
 }
 
 #[cfg(test)]
-pub(crate) use tests::XsaveArea;
-
-#[cfg(test)]
 mod tests {
-    use std::boxed::Box;
+    use std::{fmt, prelude::v1::*};
 
     use crate::core_arch::x86::*;
     use stdarch_test::simd_test;
 
-    #[derive(Debug)]
-    pub(crate) struct XsaveArea {
-        data: Box<[AlignedArray]>,
-    }
-
     #[repr(align(64))]
-    #[derive(Copy, Clone, Debug)]
-    struct AlignedArray([u8; 64]);
+    struct XsaveArea {
+        // max size for 256-bit registers is 800 bytes:
+        // see https://software.intel.com/en-us/node/682996
+        // max size for 512-bit registers is 2560 bytes:
+        // FIXME: add source
+        data: [u8; 2560],
+    }
 
     impl XsaveArea {
-        #[target_feature(enable = "xsave")]
-        pub(crate) fn new() -> XsaveArea {
-            // `CPUID.(EAX=0DH,ECX=0):ECX` contains the size required to hold all supported xsave
-            // components. `EBX` contains the size required to hold all xsave components currently
-            // enabled in `XCR0`. We are using `ECX` to ensure enough space in all scenarios
-            let CpuidResult { ecx, .. } = __cpuid(0x0d);
-
-            XsaveArea {
-                data: vec![AlignedArray([0; 64]); ecx.div_ceil(64) as usize].into_boxed_slice(),
-            }
+        fn new() -> XsaveArea {
+            XsaveArea { data: [0; 2560] }
         }
-        pub(crate) fn ptr(&mut self) -> *mut u8 {
-            self.data.as_mut_ptr().cast()
+        fn ptr(&mut self) -> *mut u8 {
+            self.data.as_mut_ptr()
         }
     }
 
+    impl PartialEq<XsaveArea> for XsaveArea {
+        fn eq(&self, other: &XsaveArea) -> bool {
+            for i in 0..self.data.len() {
+                if self.data[i] != other.data[i] {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+
+    impl fmt::Debug for XsaveArea {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "[")?;
+            for i in 0..self.data.len() {
+                write!(f, "{}", self.data[i])?;
+                if i != self.data.len() - 1 {
+                    write!(f, ", ")?;
+                }
+            }
+            write!(f, "]")
+        }
+    }
+
+    // We cannot test for `_xsave`, `xrstor`, `_xsetbv`, `_xsaveopt`, `_xsaves`, `_xrstors` as they
+    // are privileged instructions and will need access to kernel mode to execute and test them.
+    // see https://github.com/rust-lang/stdarch/issues/209
+
+    #[cfg_attr(stdarch_intel_sde, ignore)]
     #[simd_test(enable = "xsave")]
     #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
-    fn test_xsave() {
+    unsafe fn test_xsave() {
         let m = 0xFFFFFFFFFFFFFFFF_u64; //< all registers
         let mut a = XsaveArea::new();
         let mut b = XsaveArea::new();
 
-        unsafe {
-            _xsave(a.ptr(), m);
-            _xrstor(a.ptr(), m);
-            _xsave(b.ptr(), m);
-        }
+        _xsave(a.ptr(), m);
+        _xrstor(a.ptr(), m);
+        _xsave(b.ptr(), m);
+        assert_eq!(a, b);
     }
 
     #[simd_test(enable = "xsave")]
     #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
-    fn test_xgetbv() {
+    unsafe fn test_xgetbv() {
         let xcr_n: u32 = _XCR_XFEATURE_ENABLED_MASK;
 
-        let xcr: u64 = unsafe { _xgetbv(xcr_n) };
-        let xcr_cpy: u64 = unsafe { _xgetbv(xcr_n) };
+        let xcr: u64 = _xgetbv(xcr_n);
+        let xcr_cpy: u64 = _xgetbv(xcr_n);
         assert_eq!(xcr, xcr_cpy);
     }
 
+    #[cfg_attr(stdarch_intel_sde, ignore)]
     #[simd_test(enable = "xsave,xsaveopt")]
     #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
-    fn test_xsaveopt() {
+    unsafe fn test_xsaveopt() {
         let m = 0xFFFFFFFFFFFFFFFF_u64; //< all registers
         let mut a = XsaveArea::new();
         let mut b = XsaveArea::new();
 
-        unsafe {
-            _xsaveopt(a.ptr(), m);
-            _xrstor(a.ptr(), m);
-            _xsaveopt(b.ptr(), m);
-        }
+        _xsaveopt(a.ptr(), m);
+        _xrstor(a.ptr(), m);
+        _xsaveopt(b.ptr(), m);
+        assert_eq!(a, b);
     }
 
     #[simd_test(enable = "xsave,xsavec")]
     #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
-    fn test_xsavec() {
+    unsafe fn test_xsavec() {
         let m = 0xFFFFFFFFFFFFFFFF_u64; //< all registers
         let mut a = XsaveArea::new();
         let mut b = XsaveArea::new();
 
-        unsafe {
-            _xsavec(a.ptr(), m);
-            _xrstor(a.ptr(), m);
-            _xsavec(b.ptr(), m);
-        }
+        _xsavec(a.ptr(), m);
+        _xrstor(a.ptr(), m);
+        _xsavec(b.ptr(), m);
+        assert_eq!(a, b);
     }
 }

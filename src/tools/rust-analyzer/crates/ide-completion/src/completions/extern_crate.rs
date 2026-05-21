@@ -1,10 +1,10 @@
 //! Completion for extern crates
 
 use hir::Name;
-use ide_db::{SymbolKind, documentation::HasDocs};
+use ide_db::{documentation::HasDocs, SymbolKind};
 use syntax::ToSmolStr;
 
-use crate::{CompletionItem, CompletionItemKind, context::CompletionContext};
+use crate::{context::CompletionContext, CompletionItem, CompletionItemKind};
 
 use super::Completions;
 
@@ -17,7 +17,7 @@ pub(crate) fn complete_extern_crate(acc: &mut Completions, ctx: &CompletionConte
         }
 
         let mut item = CompletionItem::new(
-            CompletionItemKind::SymbolKind(SymbolKind::CrateRoot),
+            CompletionItemKind::SymbolKind(SymbolKind::Module),
             ctx.source_range(),
             name.display_no_db(ctx.edition).to_smolstr(),
             ctx.edition,
@@ -48,7 +48,7 @@ mod other_mod {}
 
         let completion_list = completion_list_no_kw(case);
 
-        assert_eq!("cr other_crate_a\n".to_owned(), completion_list);
+        assert_eq!("md other_crate_a\n".to_owned(), completion_list);
     }
 
     #[test]
@@ -68,6 +68,6 @@ mod other_mod {}
 
         let completion_list = completion_list_no_kw(case);
 
-        assert_eq!("cr other_crate_a\n".to_owned(), completion_list);
+        assert_eq!("md other_crate_a\n".to_owned(), completion_list);
     }
 }

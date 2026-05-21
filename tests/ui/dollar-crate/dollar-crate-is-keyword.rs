@@ -6,8 +6,9 @@ macro_rules! m {
             struct $crate {} //~ ERROR expected identifier, found reserved identifier `$crate`
         }
 
-        use $crate; //~ ERROR imports need to be explicitly named
+        use $crate; //~ ERROR `$crate` may not be imported
         use $crate as $crate; //~ ERROR expected identifier, found reserved identifier `$crate`
+        //~^ ERROR `$crate` may not be imported
     }
 }
 

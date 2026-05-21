@@ -4,10 +4,6 @@
 
 #![feature(trivial_bounds)]
 
-// we use identity instead of drop because the presence of [const] Destruct means that there
-// are additional bounds on the function, which result in additional errors
-use std::convert::identity;
-
 trait Foo {
     type Item: Copy
     where
@@ -25,10 +21,10 @@ impl Foo for () {
 
 fn main() {
     let x = String::from("hello, world");
-    let _ = identity(<() as Foo>::copy_me(&x));
-    //~^ ERROR overflow evaluating the requirement `<() as Foo>::Item well-formed`
+    drop(<() as Foo>::copy_me(&x));
+    //~^ ERROR overflow evaluating the requirement `String <: <() as Foo>::Item`
+    //~| ERROR overflow evaluating the requirement `<() as Foo>::Item well-formed`
     //~| ERROR overflow evaluating the requirement `&<() as Foo>::Item well-formed`
-    //~| ERROR overflow evaluating the requirement `<() as Foo>::Item == String`
     //~| ERROR overflow evaluating the requirement `<() as Foo>::Item == _`
     //~| ERROR overflow evaluating the requirement `<() as Foo>::Item == _`
     //~| ERROR overflow evaluating the requirement `<() as Foo>::Item == _`

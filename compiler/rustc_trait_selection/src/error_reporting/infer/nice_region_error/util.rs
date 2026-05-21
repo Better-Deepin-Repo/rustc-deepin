@@ -2,8 +2,8 @@
 //! anonymous regions.
 
 use rustc_hir as hir;
-use rustc_hir::def_id::{DefId, LocalDefId};
-use rustc_middle::ty::{self, Binder, Region, Ty, TyCtxt, TypeFoldable, fold_regions};
+use rustc_hir::def_id::LocalDefId;
+use rustc_middle::ty::{self, Binder, Region, Ty, TyCtxt, TypeFoldable};
 use rustc_span::Span;
 use tracing::instrument;
 
@@ -16,8 +16,8 @@ pub struct AnonymousParamInfo<'tcx> {
     pub param: &'tcx hir::Param<'tcx>,
     /// The type corresponding to the anonymous region parameter.
     pub param_ty: Ty<'tcx>,
-    /// The `ty::LateParamRegionKind` corresponding to the anonymous region.
-    pub kind: ty::LateParamRegionKind,
+    /// The ty::BoundRegionKind corresponding to the anonymous region.
+    pub bound_region: ty::BoundRegionKind,
     /// The `Span` of the parameter type.
     pub param_ty_span: Span,
     /// Signals that the argument is the first parameter in the declaration.
@@ -42,15 +42,16 @@ pub fn find_param_with_region<'tcx>(
     anon_region: Region<'tcx>,
     replace_region: Region<'tcx>,
 ) -> Option<AnonymousParamInfo<'tcx>> {
-    let (id, kind) = match anon_region.kind() {
-        ty::ReLateParam(late_param) => (late_param.scope, late_param.kind),
+    let (id, bound_region) = match *anon_region {
+        ty::ReLateParam(late_param) => (late_param.scope, late_param.bound_region),
         ty::ReEarlyParam(ebr) => {
             let region_def = tcx.generics_of(generic_param_scope).region_param(ebr, tcx).def_id;
-            (tcx.parent(region_def), ty::LateParamRegionKind::Named(region_def))
+            (tcx.parent(region_def), ty::BoundRegionKind::BrNamed(region_def, ebr.name))
         }
         _ => return None, // not a free region
     };
 
+    let hir = &tcx.hir();
     let def_id = id.as_local()?;
 
     // FIXME: use def_kind
@@ -62,10 +63,10 @@ pub fn find_param_with_region<'tcx>(
         _ => {}
     }
 
-    let body = tcx.hir_maybe_body_owned_by(def_id)?;
+    let body = hir.maybe_body_owned_by(def_id)?;
 
-    let owner_id = tcx.hir_body_owner(body.id());
-    let fn_decl = tcx.hir_fn_decl_by_hir_id(owner_id)?;
+    let owner_id = hir.body_owner(body.id());
+    let fn_decl = hir.fn_decl_by_hir_id(owner_id)?;
     let poly_fn_sig = tcx.fn_sig(id).instantiate_identity();
 
     let fn_sig = tcx.liberate_late_bound_regions(id, poly_fn_sig);
@@ -82,7 +83,7 @@ pub fn find_param_with_region<'tcx>(
             // May return None; sometimes the tables are not yet populated.
             let ty = fn_sig.inputs()[index];
             let mut found_anon_region = false;
-            let new_param_ty = fold_regions(tcx, ty, |r, _| {
+            let new_param_ty = tcx.fold_regions(ty, |r, _| {
                 if r == anon_region {
                     found_anon_region = true;
                     replace_region
@@ -92,9 +93,15 @@ pub fn find_param_with_region<'tcx>(
             });
             found_anon_region.then(|| {
                 let ty_hir_id = fn_decl.inputs[index].hir_id;
-                let param_ty_span = tcx.hir_span(ty_hir_id);
+                let param_ty_span = hir.span(ty_hir_id);
                 let is_first = index == 0;
-                AnonymousParamInfo { param, param_ty: new_param_ty, param_ty_span, kind, is_first }
+                AnonymousParamInfo {
+                    param,
+                    param_ty: new_param_ty,
+                    param_ty_span,
+                    bound_region,
+                    is_first,
+                }
             })
         })
 }
@@ -114,7 +121,7 @@ impl<'a, 'tcx> NiceRegionError<'a, 'tcx> {
     pub(super) fn is_return_type_anon(
         &self,
         scope_def_id: LocalDefId,
-        region_def_id: DefId,
+        br: ty::BoundRegionKind,
         hir_sig: &hir::FnSig<'_>,
     ) -> Option<Span> {
         let fn_ty = self.tcx().type_of(scope_def_id).instantiate_identity();
@@ -127,8 +134,8 @@ impl<'a, 'tcx> NiceRegionError<'a, 'tcx> {
                 None
             };
             return match future_output {
-                Some(output) if self.includes_region(output, region_def_id) => Some(span),
-                None if self.includes_region(ret_ty, region_def_id) => Some(span),
+                Some(output) if self.includes_region(output, br) => Some(span),
+                None if self.includes_region(ret_ty, br) => Some(span),
                 _ => None,
             };
         }
@@ -138,15 +145,12 @@ impl<'a, 'tcx> NiceRegionError<'a, 'tcx> {
     fn includes_region(
         &self,
         ty: Binder<'tcx, impl TypeFoldable<TyCtxt<'tcx>>>,
-        region_def_id: DefId,
+        region: ty::BoundRegionKind,
     ) -> bool {
         let late_bound_regions = self.tcx().collect_referenced_late_bound_regions(ty);
         // We are only checking is any region meets the condition so order doesn't matter
         #[allow(rustc::potential_query_instability)]
-        late_bound_regions.iter().any(|r| match *r {
-            ty::BoundRegionKind::Named(def_id) => def_id == region_def_id,
-            _ => false,
-        })
+        late_bound_regions.iter().any(|r| *r == region)
     }
 
     // Here we check for the case where anonymous region
@@ -158,6 +162,6 @@ impl<'a, 'tcx> NiceRegionError<'a, 'tcx> {
             && self
                 .tcx()
                 .opt_associated_item(scope_def_id.to_def_id())
-                .is_some_and(|i| i.is_method())
+                .is_some_and(|i| i.fn_has_self_parameter)
     }
 }

@@ -5,8 +5,8 @@ use std::path::Path;
 
 use anyhow::Error;
 use handlebars::{
-    Context, Decorator, DirectorySourceOptions, Handlebars, Helper, HelperDef, HelperResult,
-    Output, RenderContext, RenderError, RenderErrorReason, Renderable, handlebars_helper,
+    handlebars_helper, Context, Decorator, DirectorySourceOptions, Handlebars, Helper, HelperDef,
+    HelperResult, Output, RenderContext, RenderError, RenderErrorReason, Renderable,
 };
 
 use crate::format::Formatter;
@@ -24,8 +24,11 @@ pub fn expand(file: &Path, formatter: FormatterRef<'_>) -> Result<String, Error>
     handlebars.register_decorator("set", Box::new(set_decorator));
     handlebars.register_template_file("template", file)?;
     let includes = file.parent().unwrap().join("includes");
-    let mut options = DirectorySourceOptions::default();
-    options.tpl_extension = ".md".to_string();
+    let options = DirectorySourceOptions {
+        tpl_extension: ".md".to_string(),
+        hidden: false,
+        temporary: false,
+    };
     handlebars.register_templates_directory(includes, options)?;
     let man_name = file
         .file_stem()

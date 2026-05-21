@@ -1,13 +1,9 @@
-error: imports need to be explicitly named
+error[E0431]: `self` import can only appear in an import list with a non-empty prefix
   --> $DIR/E0431.rs:1:6
    |
 LL | use {self};
-   |      ^^^^
-   |
-help: try renaming it with a name
-   |
-LL | use {self as name};
-   |           +++++++
+   |      ^^^^ can only appear in an import list with a non-empty prefix
 
 error: aborting due to 1 previous error
 
+For more information about this error, try `rustc --explain E0431`.

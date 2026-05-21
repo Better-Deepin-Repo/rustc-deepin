@@ -5,15 +5,177 @@
 #[cfg(test)]
 mod tests;
 
-use super::api;
-#[cfg(not(target_vendor = "uwp"))]
-use super::api::WinError;
+use super::api::{self, WinError};
+use super::to_u16s;
+use crate::error::Error as StdError;
 use crate::ffi::{OsStr, OsString};
 use crate::os::windows::ffi::EncodeWide;
 use crate::os::windows::prelude::*;
 use crate::path::{self, PathBuf};
-use crate::sys::pal::{c, cvt};
-use crate::{fmt, io, ptr};
+use crate::sys::{c, cvt};
+use crate::{fmt, io, ptr, slice};
+
+pub fn errno() -> i32 {
+    api::get_last_error().code as i32
+}
+
+/// Gets a detailed string description for the given error number.
+pub fn error_string(mut errnum: i32) -> String {
+    let mut buf = [0 as c::WCHAR; 2048];
+
+    unsafe {
+        let mut module = ptr::null_mut();
+        let mut flags = 0;
+
+        // NTSTATUS errors may be encoded as HRESULT, which may returned from
+        // GetLastError. For more information about Windows error codes, see
+        // `[MS-ERREF]`: https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-erref/0642cb2f-2075-4469-918c-4441e69c548a
+        if (errnum & c::FACILITY_NT_BIT as i32) != 0 {
+            // format according to https://support.microsoft.com/en-us/help/259693
+            const NTDLL_DLL: &[u16] = &[
+                'N' as _, 'T' as _, 'D' as _, 'L' as _, 'L' as _, '.' as _, 'D' as _, 'L' as _,
+                'L' as _, 0,
+            ];
+            module = c::GetModuleHandleW(NTDLL_DLL.as_ptr());
+
+            if !module.is_null() {
+                errnum ^= c::FACILITY_NT_BIT as i32;
+                flags = c::FORMAT_MESSAGE_FROM_HMODULE;
+            }
+        }
+
+        let res = c::FormatMessageW(
+            flags | c::FORMAT_MESSAGE_FROM_SYSTEM | c::FORMAT_MESSAGE_IGNORE_INSERTS,
+            module,
+            errnum as u32,
+            0,
+            buf.as_mut_ptr(),
+            buf.len() as u32,
+            ptr::null(),
+        ) as usize;
+        if res == 0 {
+            // Sometimes FormatMessageW can fail e.g., system doesn't like 0 as langId,
+            let fm_err = errno();
+            return format!("OS Error {errnum} (FormatMessageW() returned error {fm_err})");
+        }
+
+        match String::from_utf16(&buf[..res]) {
+            Ok(mut msg) => {
+                // Trim trailing CRLF inserted by FormatMessageW
+                let len = msg.trim_end().len();
+                msg.truncate(len);
+                msg
+            }
+            Err(..) => format!(
+                "OS Error {} (FormatMessageW() returned \
+                 invalid UTF-16)",
+                errnum
+            ),
+        }
+    }
+}
+
+pub struct Env {
+    base: *mut c::WCHAR,
+    iter: EnvIterator,
+}
+
+// FIXME(https://github.com/rust-lang/rust/issues/114583): Remove this when <OsStr as Debug>::fmt matches <str as Debug>::fmt.
+pub struct EnvStrDebug<'a> {
+    iter: &'a EnvIterator,
+}
+
+impl fmt::Debug for EnvStrDebug<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { iter } = self;
+        let iter: EnvIterator = (*iter).clone();
+        let mut list = f.debug_list();
+        for (a, b) in iter {
+            list.entry(&(a.to_str().unwrap(), b.to_str().unwrap()));
+        }
+        list.finish()
+    }
+}
+
+impl Env {
+    pub fn str_debug(&self) -> impl fmt::Debug + '_ {
+        let Self { base: _, iter } = self;
+        EnvStrDebug { iter }
+    }
+}
+
+impl fmt::Debug for Env {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { base: _, iter } = self;
+        f.debug_list().entries(iter.clone()).finish()
+    }
+}
+
+impl Iterator for Env {
+    type Item = (OsString, OsString);
+
+    fn next(&mut self) -> Option<(OsString, OsString)> {
+        let Self { base: _, iter } = self;
+        iter.next()
+    }
+}
+
+#[derive(Clone)]
+struct EnvIterator(*mut c::WCHAR);
+
+impl Iterator for EnvIterator {
+    type Item = (OsString, OsString);
+
+    fn next(&mut self) -> Option<(OsString, OsString)> {
+        let Self(cur) = self;
+        loop {
+            unsafe {
+                if **cur == 0 {
+                    return None;
+                }
+                let p = *cur as *const u16;
+                let mut len = 0;
+                while *p.add(len) != 0 {
+                    len += 1;
+                }
+                let s = slice::from_raw_parts(p, len);
+                *cur = cur.add(len + 1);
+
+                // Windows allows environment variables to start with an equals
+                // symbol (in any other position, this is the separator between
+                // variable name and value). Since`s` has at least length 1 at
+                // this point (because the empty string terminates the array of
+                // environment variables), we can safely slice.
+                let pos = match s[1..].iter().position(|&u| u == b'=' as u16).map(|p| p + 1) {
+                    Some(p) => p,
+                    None => continue,
+                };
+                return Some((
+                    OsStringExt::from_wide(&s[..pos]),
+                    OsStringExt::from_wide(&s[pos + 1..]),
+                ));
+            }
+        }
+    }
+}
+
+impl Drop for Env {
+    fn drop(&mut self) {
+        unsafe {
+            c::FreeEnvironmentStringsW(self.base);
+        }
+    }
+}
+
+pub fn env() -> Env {
+    unsafe {
+        let ch = c::GetEnvironmentStringsW();
+        if ch.is_null() {
+            panic!("failure getting env string from OS: {}", io::Error::last_os_error());
+        }
+        Env { base: ch, iter: EnvIterator(ch) }
+    }
+}
 
 pub struct SplitPaths<'a> {
     data: EncodeWide<'a>,
@@ -101,7 +263,12 @@ impl fmt::Display for JoinPathsError {
     }
 }
 
-impl crate::error::Error for JoinPathsError {}
+impl StdError for JoinPathsError {
+    #[allow(deprecated)]
+    fn description(&self) -> &str {
+        "failed to join paths"
+    }
+}
 
 pub fn current_exe() -> io::Result<PathBuf> {
     super::fill_utf16_buf(
@@ -120,6 +287,33 @@ pub fn chdir(p: &path::Path) -> io::Result<()> {
     p.push(0);
 
     cvt(unsafe { c::SetCurrentDirectoryW(p.as_ptr()) }).map(drop)
+}
+
+pub fn getenv(k: &OsStr) -> Option<OsString> {
+    let k = to_u16s(k).ok()?;
+    super::fill_utf16_buf(
+        |buf, sz| unsafe { c::GetEnvironmentVariableW(k.as_ptr(), buf, sz) },
+        OsStringExt::from_wide,
+    )
+    .ok()
+}
+
+pub unsafe fn setenv(k: &OsStr, v: &OsStr) -> io::Result<()> {
+    // SAFETY: We ensure that k and v are null-terminated wide strings.
+    unsafe {
+        let k = to_u16s(k)?;
+        let v = to_u16s(v)?;
+
+        cvt(c::SetEnvironmentVariableW(k.as_ptr(), v.as_ptr())).map(drop)
+    }
+}
+
+pub unsafe fn unsetenv(n: &OsStr) -> io::Result<()> {
+    // SAFETY: We ensure that v is a null-terminated wide strings.
+    unsafe {
+        let v = to_u16s(n)?;
+        cvt(c::SetEnvironmentVariableW(v.as_ptr(), ptr::null())).map(drop)
+    }
 }
 
 pub fn temp_dir() -> PathBuf {
@@ -183,10 +377,14 @@ fn home_dir_crt() -> Option<PathBuf> {
 }
 
 pub fn home_dir() -> Option<PathBuf> {
-    crate::env::var_os("USERPROFILE")
-        .filter(|s| !s.is_empty())
+    crate::env::var_os("HOME")
+        .or_else(|| crate::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .or_else(home_dir_crt)
+}
+
+pub fn exit(code: i32) -> ! {
+    unsafe { c::ExitProcess(code as u32) }
 }
 
 pub fn getpid() -> u32 {

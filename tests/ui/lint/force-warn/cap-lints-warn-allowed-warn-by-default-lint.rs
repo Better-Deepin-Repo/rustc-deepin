@@ -1,4 +1,3 @@
-//@ edition:2015
 // --force-warn $LINT_GROUP causes $LINT to warn despite $LINT being
 // allowed in module and cap-lints set to warn
 //@ compile-flags: --cap-lints warn  --force-warn rust-2021-compatibility

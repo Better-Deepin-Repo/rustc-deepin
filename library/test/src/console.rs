@@ -20,7 +20,7 @@ use super::types::{NamePadding, TestDesc, TestDescAndFn};
 use super::{filter_tests, run_tests, term};
 
 /// Generic wrapper over stdout.
-pub(crate) enum OutputLocation<T> {
+pub enum OutputLocation<T> {
     Pretty(Box<term::StdoutTerminal>),
     Raw(T),
 }
@@ -41,7 +41,7 @@ impl<T: Write> Write for OutputLocation<T> {
     }
 }
 
-pub(crate) struct ConsoleTestDiscoveryState {
+pub struct ConsoleTestDiscoveryState {
     pub log_out: Option<File>,
     pub tests: usize,
     pub benchmarks: usize,
@@ -49,7 +49,7 @@ pub(crate) struct ConsoleTestDiscoveryState {
 }
 
 impl ConsoleTestDiscoveryState {
-    pub(crate) fn new(opts: &TestOpts) -> io::Result<ConsoleTestDiscoveryState> {
+    pub fn new(opts: &TestOpts) -> io::Result<ConsoleTestDiscoveryState> {
         let log_out = match opts.logfile {
             Some(ref path) => Some(File::create(path)?),
             None => None,
@@ -58,7 +58,7 @@ impl ConsoleTestDiscoveryState {
         Ok(ConsoleTestDiscoveryState { log_out, tests: 0, benchmarks: 0, ignored: 0 })
     }
 
-    pub(crate) fn write_log<F, S>(&mut self, msg: F) -> io::Result<()>
+    pub fn write_log<F, S>(&mut self, msg: F) -> io::Result<()>
     where
         S: AsRef<str>,
         F: FnOnce() -> S,
@@ -74,7 +74,7 @@ impl ConsoleTestDiscoveryState {
     }
 }
 
-pub(crate) struct ConsoleTestState {
+pub struct ConsoleTestState {
     pub log_out: Option<File>,
     pub total: usize,
     pub passed: usize,
@@ -92,7 +92,7 @@ pub(crate) struct ConsoleTestState {
 }
 
 impl ConsoleTestState {
-    pub(crate) fn new(opts: &TestOpts) -> io::Result<ConsoleTestState> {
+    pub fn new(opts: &TestOpts) -> io::Result<ConsoleTestState> {
         let log_out = match opts.logfile {
             Some(ref path) => Some(File::create(path)?),
             None => None,
@@ -116,7 +116,7 @@ impl ConsoleTestState {
         })
     }
 
-    pub(crate) fn write_log<F, S>(&mut self, msg: F) -> io::Result<()>
+    pub fn write_log<F, S>(&mut self, msg: F) -> io::Result<()>
     where
         S: AsRef<str>,
         F: FnOnce() -> S,
@@ -131,7 +131,7 @@ impl ConsoleTestState {
         }
     }
 
-    pub(crate) fn write_log_result(
+    pub fn write_log_result(
         &mut self,
         test: &TestDesc,
         result: &TestResult,
@@ -170,7 +170,7 @@ impl ConsoleTestState {
 }
 
 // List the tests to console, and optionally to logfile. Filters are honored.
-pub(crate) fn list_tests_console(opts: &TestOpts, tests: Vec<TestDescAndFn>) -> io::Result<()> {
+pub fn list_tests_console(opts: &TestOpts, tests: Vec<TestDescAndFn>) -> io::Result<()> {
     let output = match term::stdout() {
         None => OutputLocation::Raw(io::stdout().lock()),
         Some(t) => OutputLocation::Pretty(t),
@@ -281,15 +281,23 @@ fn on_test_event(
     Ok(())
 }
 
-pub(crate) fn get_formatter(opts: &TestOpts, max_name_len: usize) -> Box<dyn OutputFormatter> {
+/// A simple console test runner.
+/// Runs provided tests reporting process and results to the stdout.
+pub fn run_tests_console(opts: &TestOpts, tests: Vec<TestDescAndFn>) -> io::Result<bool> {
     let output = match term::stdout() {
         None => OutputLocation::Raw(io::stdout()),
         Some(t) => OutputLocation::Pretty(t),
     };
 
+    let max_name_len = tests
+        .iter()
+        .max_by_key(|t| len_if_padded(t))
+        .map(|t| t.desc.name.as_slice().len())
+        .unwrap_or(0);
+
     let is_multithreaded = opts.test_threads.unwrap_or_else(get_concurrency) > 1;
 
-    match opts.format {
+    let mut out: Box<dyn OutputFormatter> = match opts.format {
         OutputFormat::Pretty => Box::new(PrettyFormatter::new(
             output,
             opts.use_color(),
@@ -302,26 +310,13 @@ pub(crate) fn get_formatter(opts: &TestOpts, max_name_len: usize) -> Box<dyn Out
         }
         OutputFormat::Json => Box::new(JsonFormatter::new(output)),
         OutputFormat::Junit => Box::new(JunitFormatter::new(output)),
-    }
-}
-
-/// A simple console test runner.
-/// Runs provided tests reporting process and results to the stdout.
-pub fn run_tests_console(opts: &TestOpts, tests: Vec<TestDescAndFn>) -> io::Result<bool> {
-    let max_name_len = tests
-        .iter()
-        .max_by_key(|t| len_if_padded(t))
-        .map(|t| t.desc.name.as_slice().len())
-        .unwrap_or(0);
-
-    let mut out = get_formatter(opts, max_name_len);
+    };
     let mut st = ConsoleTestState::new(opts)?;
 
     // Prevent the usage of `Instant` in some cases:
-    // - It's currently not supported for wasm targets without Emscripten nor WASI.
-    // - It's currently not supported for zkvm targets.
+    // - It's currently not supported for wasm targets.
     let is_instant_unsupported =
-        (cfg!(target_family = "wasm") && cfg!(target_os = "unknown")) || cfg!(target_os = "zkvm");
+        (cfg!(target_family = "wasm") && !cfg!(target_os = "wasi")) || cfg!(target_os = "zkvm");
 
     let start_time = (!is_instant_unsupported).then(Instant::now);
     run_tests(opts, tests, |x| on_test_event(&x, &mut st, &mut *out))?;

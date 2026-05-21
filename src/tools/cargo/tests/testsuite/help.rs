@@ -4,11 +4,10 @@ use std::fs;
 use std::path::Path;
 use std::str::from_utf8;
 
-use crate::prelude::*;
-use crate::utils::cargo_process;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
-use cargo_test_support::{basic_manifest, paths, project};
+use cargo_test_support::{basic_manifest, cargo_exe, cargo_process, paths, process, project};
 
 #[cargo_test]
 fn help() {
@@ -84,9 +83,13 @@ fn help_with_man_and_path(
         .unwrap()
     };
 
-    let output = cargo_process(&format!("help {subcommand}"))
+    let output = process(&cargo_exe())
+        .arg("help")
+        .arg(subcommand)
         .env("PATH", path)
-        .run();
+        .exec_with_output()
+        .unwrap();
+    assert!(output.status.success());
     let stderr = from_utf8(&output.stderr).unwrap();
     if display_command.is_empty() {
         assert_eq!(stderr, "");
@@ -98,9 +101,13 @@ fn help_with_man_and_path(
 }
 
 fn help_with_stdout_and_path(subcommand: &str, path: &Path) -> String {
-    let output = cargo_process(&format!("help {subcommand}"))
+    let output = process(&cargo_exe())
+        .arg("help")
+        .arg(subcommand)
         .env("PATH", path)
-        .run();
+        .exec_with_output()
+        .unwrap();
+    assert!(output.status.success());
     let stderr = from_utf8(&output.stderr).unwrap();
     assert_eq!(stderr, "");
     let stdout = from_utf8(&output.stdout).unwrap();
@@ -143,10 +150,10 @@ fn help_alias() {
         .with_stderr_data(str![[r#"
 [ERROR] no such command: `empty-alias`
 
-[HELP] a command with a similar name exists: `empty-alias`
+	Did you mean `empty-alias`?
 
-[HELP] view all installed commands with `cargo --list`
-[HELP] find a package to install `empty-alias` with `cargo search cargo-empty-alias`
+	View all installed commands with `cargo --list`
+	Find a package to install `empty-alias` with `cargo search cargo-empty-alias`
 
 "#]])
         .run();

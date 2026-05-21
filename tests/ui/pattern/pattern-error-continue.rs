@@ -1,7 +1,5 @@
 // Test that certain pattern-match type errors are non-fatal
 
-//@ dont-require-annotations: NOTE
-
 enum A {
     B(isize, isize),
     C(isize, isize, isize),
@@ -23,15 +21,15 @@ fn main() {
     match 'c' {
         S { .. } => (),
         //~^ ERROR mismatched types
-        //~| NOTE expected `char`, found `S`
+        //~| expected `char`, found `S`
 
         _ => ()
     }
     f(true);
     //~^ ERROR mismatched types
-    //~| NOTE expected `char`, found `bool`
+    //~| expected `char`, found `bool`
 
     match () {
-        E::V => {} //~ ERROR cannot find type `E`
+        E::V => {} //~ ERROR failed to resolve: use of undeclared type `E`
     }
 }

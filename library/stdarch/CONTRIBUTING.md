@@ -16,7 +16,7 @@ The above tests do in fact require nightly rust to be the default on your system
 If any of the above steps don't work, [please let us know][new]!
 
 Next up you can [find an issue][issues] to help out on, we've selected a few
-with the [`help wanted`][help] tag which could
+with the [`help wanted`][help] and [`impl-period`][impl] tags which could
 particularly use some help. You may be most interested in [#40][vendor],
 implementing all vendor intrinsics on x86. That issue's got some good pointers
 about where to get started!
@@ -70,7 +70,7 @@ to improve the documentation of `stdarch`!
 
 # Alternative Testing Instructions
 
-It is generally recommended that you use `ci/run-docker.sh` to run the tests.
+It is generally recommended that you use `ci/run.sh` to run the tests.
 However this might not work for you, e.g. if you are on Windows.
 
 In that case you can fall back to running `cargo +nightly test` and `cargo +nightly test --release -p core_arch` for testing the code generation.
@@ -79,7 +79,7 @@ In particular you need to set the `TARGET` environment variable as you would for
 In addition you need to set `RUSTCFLAGS` (need the `C`) to indicate target features, e.g. `RUSTCFLAGS="-C -target-features=+avx2"`.
 You can also set `-C -target-cpu=native` if you're "just" developing against your current CPU.
 
-Be warned that when you use these alternative instructions, [things may go less smoothly than they would with `ci/run-docker.sh`][ci-run-good], e.g. instruction generation tests may fail because the disassembler named them differently, e.g. it may generate `vaesenc` instead of `aesenc` instructions despite them behaving the same.
+Be warned that when you use these alternative instructions, [things may go less smoothly than they would with `ci/run.sh`][ci-run-good], e.g. instruction generation tests may fail because the disassembler named them differently, e.g. it may generate `vaesenc` instead of `aesenc` instructions despite them behaving the same.
 Also these instructions execute less tests than would normally be done, so don't be surprised that when you eventually pull-request some errors may show up for tests not covered here.
 
 

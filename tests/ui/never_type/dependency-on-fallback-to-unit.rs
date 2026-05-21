@@ -1,11 +1,13 @@
+//@ check-pass
+
 fn main() {
     def();
     _ = question_mark();
 }
 
 fn def() {
-    //~^ error: this function depends on never type fallback being `()`
-    //~| warn: this was previously accepted by the compiler but is being phased out; it will become a hard error in Rust 2024 and in a future release in all editions!
+    //~^ warn: this function depends on never type fallback being `()`
+    //~| warn: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
     match true {
         false => <_>::default(),
         true => return,
@@ -15,8 +17,8 @@ fn def() {
 // <https://github.com/rust-lang/rust/issues/51125>
 // <https://github.com/rust-lang/rust/issues/39216>
 fn question_mark() -> Result<(), ()> {
-    //~^ error: this function depends on never type fallback being `()`
-    //~| warn: this was previously accepted by the compiler but is being phased out; it will become a hard error in Rust 2024 and in a future release in all editions!
+    //~^ warn: this function depends on never type fallback being `()`
+    //~| warn: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
     deserialize()?;
     Ok(())
 }

@@ -4,17 +4,18 @@ use rustc_ast::LitKind;
 use rustc_errors::Applicability;
 use rustc_hir::{Expr, ExprKind};
 use rustc_lint::LateContext;
-use rustc_middle::ty::{self, Ty, UintTy};
+use rustc_middle::ty::{self, UintTy};
 
 use super::CHAR_LIT_AS_U8;
 
-pub(super) fn check(cx: &LateContext<'_>, expr: &Expr<'_>, cast_from_expr: &Expr<'_>, cast_to: Ty<'_>) {
-    if let ExprKind::Lit(l) = &cast_from_expr.kind
+pub(super) fn check(cx: &LateContext<'_>, expr: &Expr<'_>) {
+    if let ExprKind::Cast(e, _) = &expr.kind
+        && let ExprKind::Lit(l) = &e.kind
         && let LitKind::Char(c) = l.node
-        && ty::Uint(UintTy::U8) == *cast_to.kind()
+        && ty::Uint(UintTy::U8) == *cx.typeck_results().expr_ty(expr).kind()
     {
         let mut applicability = Applicability::MachineApplicable;
-        let snippet = snippet_with_applicability(cx, cast_from_expr.span, "'x'", &mut applicability);
+        let snippet = snippet_with_applicability(cx, e.span, "'x'", &mut applicability);
 
         span_lint_and_then(
             cx,

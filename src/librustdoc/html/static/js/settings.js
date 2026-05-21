@@ -1,27 +1,19 @@
 // Local js definitions:
 /* global getSettingValue, updateLocalStorage, updateTheme */
-/* global addClass, removeClass, onEach, onEachLazy */
-/* global MAIN_ID, getVar, nonnull */
+/* global addClass, removeClass, onEach, onEachLazy, blurHandler */
+/* global MAIN_ID, getVar, getSettingsButton */
 
 "use strict";
 
 (function() {
     const isSettingsPage = window.location.pathname.endsWith("/settings.html");
 
-    /**
-     * @overload {"theme"|"preferred-dark-theme"|"preferred-light-theme"}
-     * @param {string} settingName
-     * @param {string} value
-     * @returns
-     * @param {string} settingName
-     * @param {string|boolean} value
-     */
     function changeSetting(settingName, value) {
         if (settingName === "theme") {
             const useSystem = value === "system preference" ? "true" : "false";
             updateLocalStorage("use-system-theme", useSystem);
         }
-        updateLocalStorage(settingName, "" + value);
+        updateLocalStorage(settingName, value);
 
         switch (settingName) {
             case "theme":
@@ -32,28 +24,18 @@
                 break;
             case "line-numbers":
                 if (value === true) {
-                    const f = window.rustdoc_add_line_numbers_to_examples;
-                    if (f !== undefined) {
-                        f();
-                    }
+                    window.rustdoc_add_line_numbers_to_examples();
                 } else {
-                    const f = window.rustdoc_remove_line_numbers_from_examples;
-                    if (f !== undefined) {
-                        f();
-                    }
+                    window.rustdoc_remove_line_numbers_from_examples();
                 }
                 break;
-            case "sans-serif-fonts":
             case "hide-sidebar":
-            case "hide-toc":
-            case "hide-modnav":
-            case "word-wrap-source-code":
-            case "hide-deprecated-items":
                 if (value === true) {
-                    addClass(document.documentElement, settingName);
+                    addClass(document.documentElement, "hide-sidebar");
                 } else {
-                    removeClass(document.documentElement, settingName);
+                    removeClass(document.documentElement, "hide-sidebar");
                 }
+                break;
         }
     }
 
@@ -76,9 +58,6 @@
         }
     }
 
-    /**
-     * @param {HTMLElement} settingsElement
-     */
     function setEvents(settingsElement) {
         updateLightAndDark();
         onEachLazy(settingsElement.querySelectorAll("input[type=\"checkbox\"]"), toggle => {
@@ -91,27 +70,23 @@
                 changeSetting(toggle.id, toggle.checked);
             };
         });
-        onEachLazy(
-            settingsElement.querySelectorAll("input[type=\"radio\"]"),
-            /** @param {HTMLInputElement} elem */
-            elem => {
-                const settingId = elem.name;
-                let settingValue = getSettingValue(settingId);
-                if (settingId === "theme") {
-                    const useSystem = getSettingValue("use-system-theme");
-                    if (useSystem === "true" || settingValue === null) {
-                        // "light" is the default theme
-                        settingValue = useSystem === "false" ? "light" : "system preference";
-                    }
+        onEachLazy(settingsElement.querySelectorAll("input[type=\"radio\"]"), elem => {
+            const settingId = elem.name;
+            let settingValue = getSettingValue(settingId);
+            if (settingId === "theme") {
+                const useSystem = getSettingValue("use-system-theme");
+                if (useSystem === "true" || settingValue === null) {
+                    // "light" is the default theme
+                    settingValue = useSystem === "false" ? "light" : "system preference";
                 }
-                if (settingValue !== null && settingValue !== "null") {
-                    elem.checked = settingValue === elem.value;
-                }
-                elem.addEventListener("change", () => {
-                    changeSetting(elem.name, elem.value);
-                });
-            },
-        );
+            }
+            if (settingValue !== null && settingValue !== "null") {
+                elem.checked = settingValue === elem.value;
+            }
+            elem.addEventListener("change", ev => {
+                changeSetting(ev.target.name, ev.target.value);
+            });
+        });
     }
 
     /**
@@ -119,7 +94,7 @@
      * as argument which describes each setting and how to render it. It returns a string
      * representing the raw HTML.
      *
-     * @param {Array<rustdoc.Setting>} settings
+     * @param {Array<Object>} settings
      *
      * @return {string}
      */
@@ -171,9 +146,7 @@
      * @return {HTMLElement}
      */
     function buildSettingsPage() {
-        const theme_list = getVar("themes");
-        const theme_names = (theme_list === null ? "" : theme_list)
-              .split(",").filter(t => t);
+        const theme_names = getVar("themes").split(",").filter(t => t);
         theme_names.push("light", "dark", "ayu");
 
         const settings = [
@@ -226,33 +199,8 @@
                 "default": false,
             },
             {
-                "name": "Hide table of contents",
-                "js_name": "hide-toc",
-                "default": false,
-            },
-            {
-                "name": "Hide module navigation",
-                "js_name": "hide-modnav",
-                "default": false,
-            },
-            {
                 "name": "Disable keyboard shortcuts",
                 "js_name": "disable-shortcuts",
-                "default": false,
-            },
-            {
-                "name": "Use sans serif fonts",
-                "js_name": "sans-serif-fonts",
-                "default": false,
-            },
-            {
-                "name": "Word wrap source code",
-                "js_name": "word-wrap-source-code",
-                "default": false,
-            },
-            {
-                "name": "Hide deprecated items",
-                "js_name": "hide-deprecated-items",
                 "default": false,
             },
         ];
@@ -268,18 +216,10 @@
         el.innerHTML = innerHTML;
 
         if (isSettingsPage) {
-            const mainElem = document.getElementById(MAIN_ID);
-            if (mainElem !== null) {
-                mainElem.appendChild(el);
-            }
+            document.getElementById(MAIN_ID).appendChild(el);
         } else {
             el.setAttribute("tabindex", "-1");
-            onEachLazy(document.querySelectorAll(".settings-menu"), menu => {
-                if (menu.offsetWidth !== 0) {
-                    menu.appendChild(el);
-                    return true;
-                }
-            });
+            getSettingsButton().appendChild(el);
         }
         return el;
     }
@@ -288,15 +228,6 @@
 
     function displaySettings() {
         settingsMenu.style.display = "";
-        onEachLazy(document.querySelectorAll(".settings-menu"), menu => {
-            if (menu.offsetWidth !== 0) {
-                if (!menu.contains(settingsMenu) && settingsMenu.parentElement) {
-                    settingsMenu.parentElement.removeChild(settingsMenu);
-                    menu.appendChild(settingsMenu);
-                }
-                return true;
-            }
-        });
         onEachLazy(settingsMenu.querySelectorAll("input[type='checkbox']"), el => {
             const val = getSettingValue(el.id);
             const checked = val === "true";
@@ -306,41 +237,33 @@
         });
     }
 
-    /**
-     * @param {FocusEvent} event
-     */
     function settingsBlurHandler(event) {
-        const isInPopover = onEachLazy(
-            document.querySelectorAll(".settings-menu, .help-menu"),
-            menu => {
-                return menu.contains(document.activeElement) || menu.contains(event.relatedTarget);
-            },
-        );
-        if (!isInPopover) {
-            window.hidePopoverMenus();
-        }
+        blurHandler(event, getSettingsButton(), window.hidePopoverMenus);
     }
 
-    if (!isSettingsPage) {
+    if (isSettingsPage) {
+        // We replace the existing "onclick" callback to do nothing if clicked.
+        getSettingsButton().onclick = event => {
+            event.preventDefault();
+        };
+    } else {
         // We replace the existing "onclick" callback.
-        const settingsMenu = nonnull(document.getElementById("settings"));
-        onEachLazy(document.querySelectorAll(".settings-menu"), settingsButton => {
-            /** @param {MouseEvent} event */
-            settingsButton.querySelector("a").onclick = event => {
-                if (!(event.target instanceof Element) || settingsMenu.contains(event.target)) {
-                    return;
-                }
-                event.preventDefault();
-                const shouldDisplaySettings = settingsMenu.style.display === "none";
+        const settingsButton = getSettingsButton();
+        const settingsMenu = document.getElementById("settings");
+        settingsButton.onclick = event => {
+            if (settingsMenu.contains(event.target)) {
+                return;
+            }
+            event.preventDefault();
+            const shouldDisplaySettings = settingsMenu.style.display === "none";
 
-                window.hideAllModals(false);
-                if (shouldDisplaySettings) {
-                    displaySettings();
-                }
-            };
-            settingsButton.onblur = settingsBlurHandler;
-            settingsButton.querySelector("a").onblur = settingsBlurHandler;
-        });
+            window.hideAllModals();
+            if (shouldDisplaySettings) {
+                displaySettings();
+            }
+        };
+        settingsButton.onblur = settingsBlurHandler;
+        settingsButton.querySelector("a").onblur = settingsBlurHandler;
         onEachLazy(settingsMenu.querySelectorAll("input"), el => {
             el.onblur = settingsBlurHandler;
         });
@@ -354,8 +277,6 @@
         if (!isSettingsPage) {
             displaySettings();
         }
-        onEachLazy(document.querySelectorAll(".settings-menu"), settingsButton => {
-            removeClass(settingsButton, "rotate");
-        });
+        removeClass(getSettingsButton(), "rotate");
     }, 0);
 })();

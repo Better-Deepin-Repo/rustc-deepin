@@ -1,8 +1,8 @@
 #![allow(
+    dead_code,
     clippy::missing_safety_doc,
     clippy::extra_unused_lifetimes,
-    clippy::extra_unused_type_parameters,
-    clippy::needless_lifetimes
+    clippy::extra_unused_type_parameters
 )]
 #![warn(clippy::new_without_default)]
 
@@ -10,8 +10,8 @@ pub struct Foo;
 
 impl Foo {
     pub fn new() -> Foo {
-        //~^ new_without_default
-
+        //~^ ERROR: you should consider adding a `Default` implementation for `Foo`
+        //~| NOTE: `-D clippy::new-without-default` implied by `-D warnings`
         Foo
     }
 }
@@ -20,8 +20,7 @@ pub struct Bar;
 
 impl Bar {
     pub fn new() -> Self {
-        //~^ new_without_default
-
+        //~^ ERROR: you should consider adding a `Default` implementation for `Bar`
         Bar
     }
 }
@@ -86,8 +85,7 @@ pub struct LtKo<'a> {
 
 impl<'c> LtKo<'c> {
     pub fn new() -> LtKo<'c> {
-        //~^ new_without_default
-
+        //~^ ERROR: you should consider adding a `Default` implementation for `LtKo<'c>`
         unimplemented!()
     }
 }
@@ -120,7 +118,6 @@ pub struct Const;
 
 impl Const {
     pub const fn new() -> Const {
-        //~^ new_without_default
         Const
     } // While Default is not const, it can still call const functions, so we should lint this
 }
@@ -181,8 +178,7 @@ pub struct NewNotEqualToDerive {
 impl NewNotEqualToDerive {
     // This `new` implementation is not equal to a derived `Default`, so do not suggest deriving.
     pub fn new() -> Self {
-        //~^ new_without_default
-
+        //~^ ERROR: you should consider adding a `Default` implementation for `NewNotEqualToDe
         NewNotEqualToDerive { foo: 1 }
     }
 }
@@ -191,8 +187,7 @@ impl NewNotEqualToDerive {
 pub struct FooGenerics<T>(std::marker::PhantomData<T>);
 impl<T> FooGenerics<T> {
     pub fn new() -> Self {
-        //~^ new_without_default
-
+        //~^ ERROR: you should consider adding a `Default` implementation for `FooGenerics<T>`
         Self(Default::default())
     }
 }
@@ -200,8 +195,7 @@ impl<T> FooGenerics<T> {
 pub struct BarGenerics<T>(std::marker::PhantomData<T>);
 impl<T: Copy> BarGenerics<T> {
     pub fn new() -> Self {
-        //~^ new_without_default
-
+        //~^ ERROR: you should consider adding a `Default` implementation for `BarGenerics<T>`
         Self(Default::default())
     }
 }
@@ -213,8 +207,7 @@ pub mod issue7220 {
 
     impl<T> Foo<T> {
         pub fn new() -> Self {
-            //~^ new_without_default
-
+            //~^ ERROR: you should consider adding a `Default` implementation for `Foo<T>`
             todo!()
         }
     }
@@ -260,103 +253,6 @@ where
     K: std::hash::Hash + Eq + PartialEq,
 {
     pub fn new() -> Self {
-        //~^ new_without_default
         Self { _kv: None }
-    }
-}
-
-// From issue #14552, but with `#[cfg]`s that are actually `true` in the uitest context
-
-pub struct NewWithCfg;
-impl NewWithCfg {
-    #[cfg(not(test))]
-    pub fn new() -> Self {
-        //~^ new_without_default
-        unimplemented!()
-    }
-}
-
-pub struct NewWith2Cfgs;
-impl NewWith2Cfgs {
-    #[cfg(not(test))]
-    #[cfg(panic = "unwind")]
-    pub fn new() -> Self {
-        //~^ new_without_default
-        unimplemented!()
-    }
-}
-
-pub struct NewWithExtraneous;
-impl NewWithExtraneous {
-    #[inline]
-    pub fn new() -> Self {
-        //~^ new_without_default
-        unimplemented!()
-    }
-}
-
-pub struct NewWithCfgAndExtraneous;
-impl NewWithCfgAndExtraneous {
-    #[cfg(not(test))]
-    #[inline]
-    pub fn new() -> Self {
-        //~^ new_without_default
-        unimplemented!()
-    }
-}
-
-mod issue15778 {
-    pub struct Foo(Vec<i32>);
-
-    impl Foo {
-        pub fn new() -> Self {
-            Self(Vec::new())
-        }
-    }
-
-    impl<'a> IntoIterator for &'a Foo {
-        type Item = &'a i32;
-
-        type IntoIter = std::slice::Iter<'a, i32>;
-
-        fn into_iter(self) -> Self::IntoIter {
-            self.0.as_slice().iter()
-        }
-    }
-}
-
-pub mod issue16255 {
-    use std::fmt::Display;
-    use std::marker::PhantomData;
-
-    pub struct Foo<T> {
-        marker: PhantomData<T>,
-    }
-
-    impl<T> Foo<T>
-    where
-        T: Display,
-    {
-        pub fn new() -> Self
-        //~^ new_without_default
-        where
-            T: Clone,
-        {
-            Self { marker: PhantomData }
-        }
-    }
-
-    pub struct Bar<T> {
-        marker: PhantomData<T>,
-    }
-
-    impl<T> Bar<T> {
-        pub fn new() -> Self
-        //~^ new_without_default
-        where
-            T: Clone,
-        {
-            Self { marker: PhantomData }
-        }
     }
 }

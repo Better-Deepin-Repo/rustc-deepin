@@ -2,9 +2,8 @@ use crate::compile::benchmark::codegen_backend::CodegenBackend;
 use crate::compile::benchmark::profile::Profile;
 use anyhow::{anyhow, Context};
 use log::debug;
-use reqwest::StatusCode;
 use std::ffi::OsStr;
-use std::fs;
+use std::fs::{self, File};
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -12,89 +11,39 @@ use std::{fmt, str};
 use tar::Archive;
 use xz2::bufread::XzDecoder;
 
-pub enum SysrootDownloadError {
-    SysrootShaNotFound,
-    IO(anyhow::Error),
-}
-
-impl SysrootDownloadError {
-    pub fn as_anyhow_error(self) -> anyhow::Error {
-        match self {
-            SysrootDownloadError::SysrootShaNotFound => {
-                anyhow::anyhow!("Sysroot was not found on CI")
-            }
-            SysrootDownloadError::IO(error) => error,
-        }
-    }
-}
-
 /// Sysroot downloaded from CI.
 pub struct Sysroot {
-    sha: String,
+    pub sha: String,
     pub components: ToolchainComponents,
-    triple: String,
-    preserve: bool,
+    pub triple: String,
+    pub preserve: bool,
 }
 
 impl Sysroot {
-    pub async fn install(
-        cache_directory: &Path,
+    pub fn install(
         sha: String,
         triple: &str,
-        backends: &[CodegenBackend],
-    ) -> Result<Self, SysrootDownloadError> {
-        // The structure of this directory is load-bearing.
-        // We use the commit SHA as the top-level key, to have a quick way of estimating how many
-        // toolchains have been installed in the cache directory.
-        // We also use a nested directory below the target tuple, because rustc outputs weird things
-        // when we query it with `--print sysroot` and its sysroot is located in a directory that
-        // corresponds to a valid target name.
-        let cache_directory = cache_directory.join(&sha).join(triple).join("toolchain");
-        fs::create_dir_all(&cache_directory).map_err(|e| SysrootDownloadError::IO(e.into()))?;
+        backends: Vec<CodegenBackend>,
+    ) -> anyhow::Result<Self> {
+        let unpack_into = "cache";
+
+        fs::create_dir_all(unpack_into)?;
 
         let download = SysrootDownload {
-            cache_directory: cache_directory.clone(),
-            rust_sha: sha.clone(),
+            directory: unpack_into.into(),
+            rust_sha: sha,
             triple: triple.to_owned(),
         };
 
-        let requires_cranelift = backends.contains(&CodegenBackend::Cranelift);
-
-        let stamp = SysrootStamp::load_from_dir(&cache_directory);
-        match stamp {
-            Ok(stamp) => {
-                log::debug!("Found existing stamp for {sha}/{triple}: {stamp:?}");
-                // We should already have a complete sysroot present on disk, check if we need to
-                // download optional components
-                if requires_cranelift && !stamp.cranelift {
-                    download.get_and_extract(Component::Cranelift).await?;
-                }
-            }
-            Err(_) => {
-                log::debug!(
-                    "No existing stamp found for {sha}/{triple}, downloading a fresh sysroot"
-                );
-
-                // There is no stamp, download everything
-                download.get_and_extract(Component::Rustc).await?;
-                download.get_and_extract(Component::Std).await?;
-                download.get_and_extract(Component::Cargo).await?;
-                download.get_and_extract(Component::RustSrc).await?;
-                if requires_cranelift {
-                    download.get_and_extract(Component::Cranelift).await?;
-                }
-            }
+        download.get_and_extract(Component::Rustc)?;
+        download.get_and_extract(Component::Std)?;
+        download.get_and_extract(Component::Cargo)?;
+        download.get_and_extract(Component::RustSrc)?;
+        if backends.contains(&CodegenBackend::Cranelift) {
+            download.get_and_extract(Component::Cranelift)?;
         }
 
-        // Update the stamp
-        let stamp = SysrootStamp {
-            cranelift: requires_cranelift,
-        };
-        stamp
-            .store_to_dir(&cache_directory)
-            .map_err(SysrootDownloadError::IO)?;
-
-        let sysroot = download.into_sysroot().map_err(SysrootDownloadError::IO)?;
+        let sysroot = download.into_sysroot()?;
 
         Ok(sysroot)
     }
@@ -119,32 +68,9 @@ impl Drop for Sysroot {
     }
 }
 
-const SYSROOT_STAMP_FILENAME: &str = ".sysroot-stamp.json";
-
-/// Stores a proof on disk that we have downloaded a complete sysroot.
-/// It is used to avoid redownloading a sysroot if it already exists on disk.
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-struct SysrootStamp {
-    /// Was Cranelift downloaded as a part of the sysroot?
-    cranelift: bool,
-}
-
-impl SysrootStamp {
-    fn load_from_dir(dir: &Path) -> anyhow::Result<Self> {
-        let data = std::fs::read(dir.join(SYSROOT_STAMP_FILENAME))?;
-        let stamp: SysrootStamp = serde_json::from_slice(&data)?;
-        Ok(stamp)
-    }
-
-    fn store_to_dir(&self, dir: &Path) -> anyhow::Result<()> {
-        let file = std::fs::File::create(dir.join(SYSROOT_STAMP_FILENAME))?;
-        Ok(serde_json::to_writer(file, self)?)
-    }
-}
-
 #[derive(Debug, Clone)]
 struct SysrootDownload {
-    cache_directory: PathBuf,
+    directory: PathBuf,
     rust_sha: String,
     triple: String,
 }
@@ -177,7 +103,7 @@ impl Component {
         let suffix = if *self == Component::RustSrc {
             String::new()
         } else {
-            format!("-{triple}")
+            format!("-{}", triple)
         };
         format!(
             "{base}/{sha}/{module}-{channel}{suffix}.tar.xz",
@@ -192,7 +118,7 @@ impl Component {
 
 impl SysrootDownload {
     fn into_sysroot(self) -> anyhow::Result<Sysroot> {
-        let sysroot_bin_dir = self.cache_directory.join("bin");
+        let sysroot_bin_dir = self.directory.join(&self.rust_sha).join("bin");
         let sysroot_bin = |name| {
             let path = sysroot_bin_dir.join(name);
             path.canonicalize().with_context(|| {
@@ -203,15 +129,12 @@ impl SysrootDownload {
             })
         };
 
-        let host_libdir = self.cache_directory.join("lib");
-        let target_libdir = target_libdir_from_host_libdir(&host_libdir, &self.triple);
         let components = ToolchainComponents::from_binaries_and_libdir(
             sysroot_bin("rustc")?,
             Some(sysroot_bin("rustdoc")?),
-            sysroot_bin("clippy-driver").ok(),
+            sysroot_bin("cargo-clippy").ok(),
             sysroot_bin("cargo")?,
-            &host_libdir,
-            &target_libdir,
+            &self.directory.join(&self.rust_sha).join("lib"),
         )?;
 
         Ok(Sysroot {
@@ -222,7 +145,24 @@ impl SysrootDownload {
         })
     }
 
-    async fn get_and_extract(&self, component: Component) -> Result<(), SysrootDownloadError> {
+    fn get_and_extract(&self, component: Component) -> anyhow::Result<()> {
+        let archive_path = self.directory.join(format!(
+            "{}-{}-{}.tar.xz",
+            self.rust_sha, self.triple, component,
+        ));
+        if archive_path.exists() {
+            let reader = BufReader::new(File::open(&archive_path)?);
+            let decompress = XzDecoder::new(reader);
+            let extract = self.extract(component, decompress);
+            match extract {
+                Ok(()) => return Ok(()),
+                Err(err) => {
+                    log::warn!("extracting {} failed: {:?}", archive_path.display(), err);
+                    fs::remove_file(&archive_path).context("removing archive_path")?;
+                }
+            }
+        }
+
         // We usually have nightlies but we want to avoid breaking down if we
         // accidentally end up with a beta or stable commit.
         let urls = [
@@ -230,50 +170,28 @@ impl SysrootDownload {
             component.url("beta", self, &self.triple),
             component.url("stable", self, &self.triple),
         ];
-
-        // Did we see any other error than 404?
-        let mut found_error_that_is_not_404 = false;
         for url in &urls {
             log::debug!("requesting: {}", url);
-            let resp = reqwest::get(url)
-                .await
-                .map_err(|e| SysrootDownloadError::IO(e.into()))?;
-            log::debug!("response status: {}", resp.status());
-
-            match resp.status() {
-                s if s.is_success() => {
-                    let bytes: Vec<u8> = resp
-                        .bytes()
-                        .await
-                        .map_err(|e| SysrootDownloadError::IO(e.into()))?
-                        .into();
-                    let reader = XzDecoder::new(BufReader::new(bytes.as_slice()));
-                    match self.extract(component, reader) {
-                        Ok(()) => return Ok(()),
-                        Err(err) => {
-                            log::warn!("extracting {url} failed: {err:?}");
-                            found_error_that_is_not_404 = true;
-                        }
+            let resp = reqwest::blocking::get(url)?;
+            log::debug!("{}", resp.status());
+            if resp.status().is_success() {
+                let reader = XzDecoder::new(BufReader::new(resp));
+                match self.extract(component, reader) {
+                    Ok(()) => return Ok(()),
+                    Err(err) => {
+                        log::warn!("extracting {} failed: {:?}", url, err);
                     }
-                }
-                StatusCode::NOT_FOUND => {}
-                _ => {
-                    log::error!("response body: {}", resp.text().await.unwrap_or_default());
-                    found_error_that_is_not_404 = true
                 }
             }
         }
 
-        if !found_error_that_is_not_404 {
-            // The only errors we saw were 404, so we assume that the toolchain is simply not on CI
-            Err(SysrootDownloadError::SysrootShaNotFound)
-        } else {
-            Err(SysrootDownloadError::IO(anyhow!(
-                "unable to download sha {} triple {} module {component} from any of {urls:?}",
-                self.rust_sha,
-                self.triple,
-            )))
-        }
+        Err(anyhow!(
+            "unable to download sha {} triple {} module {} from any of {:?}",
+            self.rust_sha,
+            self.triple,
+            component,
+            urls
+        ))
     }
 
     fn extract<T: Read>(&self, component: Component, reader: T) -> anyhow::Result<()> {
@@ -284,7 +202,7 @@ impl SysrootDownload {
             _ => component.to_string(),
         };
 
-        let unpack_into = &self.cache_directory;
+        let unpack_into = self.directory.join(&self.rust_sha);
 
         for entry in archive.entries()? {
             let mut entry = entry?;
@@ -309,10 +227,6 @@ impl SysrootDownload {
 
         Ok(())
     }
-}
-
-fn target_libdir_from_host_libdir(dir: &Path, target: &str) -> PathBuf {
-    dir.join("rustlib").join(target).join("lib")
 }
 
 /// Representation of a toolchain that can be used to compile Rust programs.
@@ -342,6 +256,7 @@ pub struct ToolchainComponents {
     pub cargo_configs: Vec<String>,
     pub lib_rustc: Option<PathBuf>,
     pub lib_std: Option<PathBuf>,
+    pub lib_test: Option<PathBuf>,
     pub lib_llvm: Option<PathBuf>,
 }
 
@@ -351,8 +266,7 @@ impl ToolchainComponents {
         rustdoc: Option<PathBuf>,
         clippy: Option<PathBuf>,
         cargo: PathBuf,
-        host_libdir: &Path,
-        target_libdir: &Path,
+        libdir: &Path,
     ) -> anyhow::Result<Self> {
         let mut component = ToolchainComponents {
             rustc,
@@ -361,41 +275,36 @@ impl ToolchainComponents {
             cargo,
             ..Default::default()
         };
-        component.fill_libraries(host_libdir, target_libdir)?;
+        component.fill_libraries(libdir)?;
         Ok(component)
     }
 
     /// Finds known library components in the given `dir` and stores them in `self`.
-    fn fill_libraries(&mut self, host_libdir: &Path, target_libdir: &Path) -> anyhow::Result<()> {
-        let load_files = |path: &Path| -> anyhow::Result<Vec<(PathBuf, String)>> {
-            let files = fs::read_dir(path)
-                .with_context(|| {
-                    format!(
-                        "Cannot read lib dir `{}` to find components",
-                        path.display()
-                    )
-                })?
-                .map(|entry| Ok(entry?))
-                .collect::<anyhow::Result<Vec<_>>>()?
-                .into_iter()
-                .filter(|entry| entry.path().is_file())
-                .filter_map(|entry| {
-                    entry
-                        .path()
-                        .file_name()
-                        .and_then(|s| s.to_str())
-                        .map(|s| (entry.path(), s.to_string()))
-                })
-                .collect();
-            Ok(files)
-        };
+    fn fill_libraries(&mut self, dir: &Path) -> anyhow::Result<()> {
+        let files: Vec<(PathBuf, String)> = fs::read_dir(dir)
+            .context("Cannot read lib dir to find components")?
+            .map(|entry| Ok(entry?))
+            .collect::<anyhow::Result<Vec<_>>>()?
+            .into_iter()
+            .filter(|entry| entry.path().is_file())
+            .filter_map(|entry| {
+                entry
+                    .path()
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|s| (entry.path(), s.to_string()))
+            })
+            .collect();
 
-        // Look for librustc_driver.so and libLLVM.so in the *host* libdir
-        let host_files = load_files(host_libdir)?;
-        for (path, filename) in &host_files {
-            if path.extension() == Some(OsStr::new("so")) && filename.starts_with("librustc_driver")
-            {
-                self.lib_rustc = Some(path.clone());
+        for (path, filename) in &files {
+            if path.extension() == Some(OsStr::new("so")) {
+                if filename.starts_with("librustc_driver") {
+                    self.lib_rustc = Some(path.clone());
+                } else if filename.starts_with("libstd") {
+                    self.lib_std = Some(path.clone());
+                } else if filename.starts_with("libtest") {
+                    self.lib_test = Some(path.clone());
+                }
             }
         }
 
@@ -404,21 +313,13 @@ impl ToolchainComponents {
         // libLLVM.so.<version>.
         // So we need to check if we have the new name, and use it.
         // If not, we want to look up the original name.
-        let new_llvm = host_files
+        let new_llvm = files
             .iter()
             .find(|(_, filename)| filename.starts_with("libLLVM.so"));
-        let old_llvm = host_files.iter().find(|(path, filename)| {
+        let old_llvm = files.iter().find(|(path, filename)| {
             path.extension() == Some(OsStr::new("so")) && filename.starts_with("libLLVM")
         });
         self.lib_llvm = new_llvm.or(old_llvm).map(|(path, _)| path.clone());
-
-        // Now find libstd in the *target* libdir
-        let target_files = load_files(target_libdir)?;
-        for (path, filename) in target_files {
-            if path.extension() == Some(OsStr::new("so")) && filename.starts_with("libstd") {
-                self.lib_std = Some(path.clone());
-            }
-        }
 
         Ok(())
     }
@@ -521,10 +422,9 @@ pub fn get_local_toolchain(
             .output()
             .context("failed to run `rustup which rustc`")?;
 
-        anyhow::ensure!(
-            output.status.success(),
-            "did not manage to obtain toolchain {toolchain}"
-        );
+        if !output.status.success() {
+            anyhow::bail!("did not manage to obtain toolchain {}", toolchain);
+        }
 
         let s = String::from_utf8(output.stdout)
             .context("failed to convert `rustup which rustc` output to utf8")?;
@@ -544,7 +444,7 @@ pub fn get_local_toolchain(
     } else {
         let rustc = PathBuf::from(rustc)
             .canonicalize()
-            .with_context(|| format!("failed to canonicalize rustc executable {rustc:?}"))?;
+            .with_context(|| format!("failed to canonicalize rustc executable {:?}", rustc))?;
 
         // When specifying rustc via a path, the suffix is always added to the
         // id.
@@ -561,17 +461,17 @@ pub fn get_local_toolchain(
     let rustdoc =
         if let Some(rustdoc) = &toolchain_config.rustdoc {
             Some(rustdoc.canonicalize().with_context(|| {
-                format!("failed to canonicalize rustdoc executable {rustdoc:?}")
+                format!("failed to canonicalize rustdoc executable {:?}", rustdoc)
             })?)
-        } else if profiles.iter().any(|p| p.is_doc()) {
+        } else if profiles.contains(&Profile::Doc) {
             // We need a `rustdoc`. Look for one next to `rustc`.
             if let Ok(rustdoc) = rustc.with_file_name("rustdoc").canonicalize() {
                 debug!("found rustdoc: {:?}", &rustdoc);
                 Some(rustdoc)
             } else {
                 anyhow::bail!(
-                    "'Doc' or 'DocJson' build specified but '--rustdoc' not specified and no \
-                    'rustdoc' found next to 'rustc'"
+                    "'Doc' build specified but '--rustdoc' not specified and no 'rustdoc' found \
+                    next to 'rustc'"
                 );
             }
         } else {
@@ -581,18 +481,18 @@ pub fn get_local_toolchain(
 
     let clippy = if let Some(clippy) = &toolchain_config.clippy {
         Some(
-            clippy
-                .canonicalize()
-                .with_context(|| format!("failed to canonicalize clippy executable {clippy:?}"))?,
+            clippy.canonicalize().with_context(|| {
+                format!("failed to canonicalize clippy executable {:?}", clippy)
+            })?,
         )
     } else if profiles.contains(&Profile::Clippy) {
         // We need a `clippy`. Look for one next to `rustc`.
-        if let Ok(clippy) = rustc.with_file_name("clippy-driver").canonicalize() {
+        if let Ok(clippy) = rustc.with_file_name("cargo-clippy").canonicalize() {
             debug!("found clippy: {:?}", &clippy);
             Some(clippy)
         } else {
             anyhow::bail!(
-                    "'Clippy' build specified but '--clippy' not specified and no 'clippy-driver' found \
+                    "'Clippy' build specified but '--cargo-clippy' not specified and no 'cargo-clippy' found \
                     next to 'rustc'"
                 );
         }
@@ -603,7 +503,7 @@ pub fn get_local_toolchain(
     let cargo = if let Some(cargo) = &toolchain_config.cargo {
         cargo
             .canonicalize()
-            .with_context(|| format!("failed to canonicalize cargo executable {cargo:?}"))?
+            .with_context(|| format!("failed to canonicalize cargo executable {:?}", cargo))?
     } else {
         // Use the nightly cargo from `rustup`.
         let output = Command::new("rustup")
@@ -624,17 +524,10 @@ pub fn get_local_toolchain(
         debug!("found cargo: {:?}", &cargo);
         cargo
     };
-    let host_lib_dir = get_lib_dir_from_rustc(&rustc).context("Cannot find libdir for rustc")?;
-    let target_lib_dir = target_libdir_from_host_libdir(&host_lib_dir, &target_triple);
+    let lib_dir = get_lib_dir_from_rustc(&rustc).context("Cannot find libdir for rustc")?;
 
-    let mut components = ToolchainComponents::from_binaries_and_libdir(
-        rustc,
-        rustdoc,
-        clippy,
-        cargo,
-        &host_lib_dir,
-        &target_lib_dir,
-    )?;
+    let mut components =
+        ToolchainComponents::from_binaries_and_libdir(rustc, rustdoc, clippy, cargo, &lib_dir)?;
     components.cargo_configs = toolchain_config.cargo_configs.to_vec();
     Ok(Toolchain {
         components,
@@ -682,16 +575,14 @@ pub fn create_toolchain_from_published_version(
     debug!("Found clippy: {}", clippy.display());
     debug!("Found cargo: {}", cargo.display());
 
-    let host_lib_dir = get_lib_dir_from_rustc(&rustc)?;
-    let target_lib_dir = target_libdir_from_host_libdir(&host_lib_dir, target_triple);
+    let lib_dir = get_lib_dir_from_rustc(&rustc)?;
 
     let components = ToolchainComponents::from_binaries_and_libdir(
         rustc,
         Some(rustdoc),
         Some(clippy),
         cargo,
-        &host_lib_dir,
-        &target_lib_dir,
+        &lib_dir,
     )?;
 
     Ok(Toolchain {
@@ -702,52 +593,37 @@ pub fn create_toolchain_from_published_version(
 }
 
 fn get_lib_dir_from_rustc(rustc: &Path) -> anyhow::Result<PathBuf> {
-    let output = Command::new(rustc).arg("--print").arg("sysroot").output()?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "rustc failed to provide sysroot, exit status: {}\nstderr: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    let sysroot_path = String::from_utf8_lossy(&output.stdout);
-    let lib_dir = Path::new(sysroot_path.as_ref().trim()).join("lib");
-    if !lib_dir.exists() {
-        anyhow::bail!(
-            "rustc returned non-existent sysroot: `{}`",
-            lib_dir.display()
-        );
-    }
-    Ok(lib_dir)
+    let sysroot = Command::new(rustc)
+        .arg("--print")
+        .arg("sysroot")
+        .output()?
+        .stdout;
+    let sysroot_path = String::from_utf8_lossy(&sysroot);
+
+    Ok(Path::new(sysroot_path.as_ref().trim()).join("lib"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::File;
 
     #[test]
     fn fill_libraries() {
         let mut components = ToolchainComponents::default();
 
+        // create mock dir and libraries
         let temp_dir: tempfile::TempDir = tempfile::tempdir().unwrap();
-        let host_libdir = temp_dir.path();
-        let target_libdir = target_libdir_from_host_libdir(host_libdir, "foo");
-        std::fs::create_dir_all(&target_libdir).unwrap();
+        let lib_rustc_path = create_temp_lib_path("librustc_driver.so", &temp_dir);
+        let lib_std_path = create_temp_lib_path("libstd.so", &temp_dir);
+        let lib_test_path = create_temp_lib_path("libtest.so", &temp_dir);
+        let lib_new_llvm_path =
+            create_temp_lib_path("libLLVM.so.18.1-rust-1.78.0-nightly", &temp_dir);
 
-        let lib_rustc_path = create_lib(host_libdir, "librustc_driver.so");
-        let lib_std_path = create_lib(
-            &host_libdir.join("rustlib").join("foo").join("lib"),
-            "libstd.so",
-        );
-        let lib_new_llvm_path = create_lib(host_libdir, "libLLVM.so.18.1-rust-1.78.0-nightly");
-
-        components
-            .fill_libraries(host_libdir, &target_libdir)
-            .unwrap();
+        components.fill_libraries(temp_dir.path()).unwrap();
 
         assert_eq!(components.lib_rustc, Some(lib_rustc_path));
         assert_eq!(components.lib_std, Some(lib_std_path));
+        assert_eq!(components.lib_test, Some(lib_test_path));
         assert_eq!(components.lib_llvm, Some(lib_new_llvm_path));
     }
 
@@ -758,25 +634,18 @@ mod tests {
 
         // create mock dir and libraries
         let temp_dir: tempfile::TempDir = tempfile::tempdir().unwrap();
-        let host_libdir = temp_dir.path();
-        let target_libdir = target_libdir_from_host_libdir(host_libdir, "foo");
-        std::fs::create_dir_all(&target_libdir).unwrap();
+        let lib_old_llvm_path = create_temp_lib_path(lib_old_llvm, &temp_dir);
 
-        let lib_old_llvm_path = create_lib(host_libdir, lib_old_llvm);
-
-        components
-            .fill_libraries(
-                host_libdir,
-                &target_libdir_from_host_libdir(temp_dir.path(), "foo"),
-            )
-            .unwrap();
+        components.fill_libraries(temp_dir.path()).unwrap();
 
         assert_eq!(components.lib_llvm, Some(lib_old_llvm_path));
     }
 
-    fn create_lib(path: &Path, lib_name: &str) -> PathBuf {
-        let lib_path = path.join(lib_name);
+    fn create_temp_lib_path(lib_name: &str, temp_dir: &tempfile::TempDir) -> PathBuf {
+        let lib_path = temp_dir.path().join(lib_name);
+        // create mock file
         File::create(&lib_path).unwrap();
+
         lib_path
     }
 }

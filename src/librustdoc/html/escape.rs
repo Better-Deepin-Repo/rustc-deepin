@@ -5,16 +5,39 @@
 
 use std::fmt;
 
-use pulldown_cmark_escape::FmtWriter;
 use unicode_segmentation::UnicodeSegmentation;
 
 /// Wrapper struct which will emit the HTML-escaped version of the contained
 /// string when passed to a format string.
 pub(crate) struct Escape<'a>(pub &'a str);
 
-impl fmt::Display for Escape<'_> {
+impl<'a> fmt::Display for Escape<'a> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        pulldown_cmark_escape::escape_html(FmtWriter(fmt), self.0)
+        // Because the internet is always right, turns out there's not that many
+        // characters to escape: http://stackoverflow.com/questions/7381974
+        let Escape(s) = *self;
+        let pile_o_bits = s;
+        let mut last = 0;
+        for (i, ch) in s.char_indices() {
+            let s = match ch {
+                '>' => "&gt;",
+                '<' => "&lt;",
+                '&' => "&amp;",
+                '\'' => "&#39;",
+                '"' => "&quot;",
+                _ => continue,
+            };
+            fmt.write_str(&pile_o_bits[last..i])?;
+            fmt.write_str(s)?;
+            // NOTE: we only expect single byte characters here - which is fine as long as we
+            // only match single byte characters
+            last = i + 1;
+        }
+
+        if last < s.len() {
+            fmt.write_str(&pile_o_bits[last..])?;
+        }
+        Ok(())
     }
 }
 
@@ -26,9 +49,31 @@ impl fmt::Display for Escape<'_> {
 /// difference, use [`Escape`].
 pub(crate) struct EscapeBodyText<'a>(pub &'a str);
 
-impl fmt::Display for EscapeBodyText<'_> {
+impl<'a> fmt::Display for EscapeBodyText<'a> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
-        pulldown_cmark_escape::escape_html_body_text(FmtWriter(fmt), self.0)
+        // Because the internet is always right, turns out there's not that many
+        // characters to escape: http://stackoverflow.com/questions/7381974
+        let EscapeBodyText(s) = *self;
+        let pile_o_bits = s;
+        let mut last = 0;
+        for (i, ch) in s.char_indices() {
+            let s = match ch {
+                '>' => "&gt;",
+                '<' => "&lt;",
+                '&' => "&amp;",
+                _ => continue,
+            };
+            fmt.write_str(&pile_o_bits[last..i])?;
+            fmt.write_str(s)?;
+            // NOTE: we only expect single byte characters here - which is fine as long as we
+            // only match single byte characters
+            last = i + 1;
+        }
+
+        if last < s.len() {
+            fmt.write_str(&pile_o_bits[last..])?;
+        }
+        Ok(())
     }
 }
 
@@ -41,7 +86,7 @@ impl fmt::Display for EscapeBodyText<'_> {
 /// difference, use [`Escape`].
 pub(crate) struct EscapeBodyTextWithWbr<'a>(pub &'a str);
 
-impl fmt::Display for EscapeBodyTextWithWbr<'_> {
+impl<'a> fmt::Display for EscapeBodyTextWithWbr<'a> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         let EscapeBodyTextWithWbr(text) = *self;
         if text.len() < 8 {
@@ -59,20 +104,11 @@ impl fmt::Display for EscapeBodyTextWithWbr<'_> {
                 continue;
             }
             let is_uppercase = || s.chars().any(|c| c.is_uppercase());
-            let next_is_uppercase = || pk.is_none_or(|(_, t)| t.chars().any(|c| c.is_uppercase()));
-            let next_is_underscore = || pk.is_none_or(|(_, t)| t.contains('_'));
-            let next_is_colon = || pk.is_none_or(|(_, t)| t.contains(':'));
-            // Check for CamelCase.
-            //
-            // `i - last > 3` avoids turning FmRadio into Fm<wbr>Radio, which is technically
-            // correct, but needlessly bloated.
-            //
-            // is_uppercase && !next_is_uppercase checks for camelCase. HTTPSProxy,
-            // for example, should become HTTPS<wbr>Proxy.
-            //
-            // !next_is_underscore avoids turning TEST_RUN into TEST<wbr>_<wbr>RUN, which is also
-            // needlessly bloated.
-            if i - last > 3 && is_uppercase() && !next_is_uppercase() && !next_is_underscore() {
+            let next_is_uppercase =
+                || pk.map_or(true, |(_, t)| t.chars().any(|c| c.is_uppercase()));
+            let next_is_underscore = || pk.map_or(true, |(_, t)| t.contains('_'));
+            let next_is_colon = || pk.map_or(true, |(_, t)| t.contains(':'));
+            if i - last > 3 && is_uppercase() && !next_is_uppercase() {
                 EscapeBodyText(&text[last..i]).fmt(fmt)?;
                 fmt.write_str("<wbr>")?;
                 last = i;

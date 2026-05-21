@@ -9,6 +9,8 @@
 //@ check-pass
 //@ only-x86_64
 
+#![feature(target_feature_11)]
+
 #[target_feature(enable = "sse2")]
 const fn sse2() {}
 

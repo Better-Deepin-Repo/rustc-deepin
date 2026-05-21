@@ -1,4 +1,4 @@
-use crate::marker::ConstParamTy_;
+use crate::marker::{ConstParamTy_, UnsizedConstParamTy};
 
 /// Marks that `Src` is transmutable into `Self`.
 ///
@@ -32,7 +32,7 @@ use crate::marker::ConstParamTy_;
 ///         src: ManuallyDrop::new(src),
 ///     };
 ///
-///     let dst = unsafe { transmute.dst };
+///     let dst = transmute.dst;
 ///
 ///     ManuallyDrop::into_inner(dst)
 /// }
@@ -43,7 +43,8 @@ use crate::marker::ConstParamTy_;
 /// conversions that extend the bits of `Src` with trailing padding to fill
 /// trailing uninitialized bytes of `Self`; e.g.:
 ///
-/// ```rust
+#[cfg_attr(bootstrap, doc = "```rust,ignore not runnable on bootstrap")]
+#[cfg_attr(not(bootstrap), doc = "```rust")]
 /// #![feature(transmutability)]
 ///
 /// use core::mem::{Assume, TransmuteFrom};
@@ -83,10 +84,8 @@ use crate::marker::ConstParamTy_;
 /// Furthermore, stability does not imply portability. For example, the size of
 /// `usize` is stable, but not portable.
 #[unstable(feature = "transmutability", issue = "99571")]
-#[unstable_feature_bound(transmutability)]
 #[lang = "transmute_trait"]
-#[rustc_deny_explicit_impl]
-#[rustc_dyn_incompatible_trait]
+#[rustc_deny_explicit_impl(implement_via_object = false)]
 #[rustc_coinductive]
 pub unsafe trait TransmuteFrom<Src, const ASSUME: Assume = { Assume::NOTHING }>
 where
@@ -150,11 +149,12 @@ where
 #[derive(PartialEq, Eq, Clone, Copy, Debug)]
 pub struct Assume {
     /// When `false`, [`TransmuteFrom`] is not implemented for transmutations
-    /// that might violate the alignment requirements of references; e.g.:
+    /// that might violate the the alignment requirements of references; e.g.:
     ///
-    /// ```compile_fail,E0277
+    #[cfg_attr(bootstrap, doc = "```rust,ignore not runnable on bootstrap")]
+    #[cfg_attr(not(bootstrap), doc = "```compile_fail,E0277")]
     /// #![feature(transmutability)]
-    /// use core::mem::TransmuteFrom;
+    /// use core::mem::{align_of, TransmuteFrom};
     ///
     /// assert_eq!(align_of::<[u8; 2]>(), 1);
     /// assert_eq!(align_of::<u16>(), 2);
@@ -171,9 +171,10 @@ pub struct Assume {
     /// that references in the transmuted value satisfy the alignment
     /// requirements of their referent types; e.g.:
     ///
-    /// ```rust
+    #[cfg_attr(bootstrap, doc = "```rust,ignore not runnable on bootstrap")]
+    #[cfg_attr(not(bootstrap), doc = "```rust")]
     /// #![feature(pointer_is_aligned_to, transmutability)]
-    /// use core::mem::{Assume, TransmuteFrom};
+    /// use core::mem::{align_of, Assume, TransmuteFrom};
     ///
     /// let src: &[u8; 2] = &[0xFF, 0xFF];
     ///
@@ -202,7 +203,8 @@ pub struct Assume {
     /// that might violate the library safety invariants of the destination
     /// type; e.g.:
     ///
-    /// ```compile_fail,E0277
+    #[cfg_attr(bootstrap, doc = "```rust,ignore not runnable on bootstrap")]
+    #[cfg_attr(not(bootstrap), doc = "```compile_fail,E0277")]
     /// #![feature(transmutability)]
     /// use core::mem::TransmuteFrom;
     ///
@@ -223,7 +225,8 @@ pub struct Assume {
     /// that undefined behavior does not arise from using the transmuted value;
     /// e.g.:
     ///
-    /// ```rust
+    #[cfg_attr(bootstrap, doc = "```rust,ignore not runnable on bootstrap")]
+    #[cfg_attr(not(bootstrap), doc = "```rust")]
     /// #![feature(transmutability)]
     /// use core::mem::{Assume, TransmuteFrom};
     ///
@@ -251,7 +254,8 @@ pub struct Assume {
     /// that might violate the language-level bit-validity invariant of the
     /// destination type; e.g.:
     ///
-    /// ```compile_fail,E0277
+    #[cfg_attr(bootstrap, doc = "```rust,ignore not runnable on bootstrap")]
+    #[cfg_attr(not(bootstrap), doc = "```compile_fail,E0277")]
     /// #![feature(transmutability)]
     /// use core::mem::TransmuteFrom;
     ///
@@ -267,7 +271,8 @@ pub struct Assume {
     /// that the value being transmuted is a bit-valid instance of the
     /// transmuted value; e.g.:
     ///
-    /// ```rust
+    #[cfg_attr(bootstrap, doc = "```rust,ignore not runnable on bootstrap")]
+    #[cfg_attr(not(bootstrap), doc = "```rust")]
     /// #![feature(transmutability)]
     /// use core::mem::{Assume, TransmuteFrom};
     ///
@@ -289,8 +294,9 @@ pub struct Assume {
 }
 
 #[unstable(feature = "transmutability", issue = "99571")]
-#[unstable_feature_bound(transmutability)]
 impl ConstParamTy_ for Assume {}
+#[unstable(feature = "transmutability", issue = "99571")]
+impl UnsizedConstParamTy for Assume {}
 
 impl Assume {
     /// With this, [`TransmuteFrom`] does not assume you have ensured any safety
@@ -329,7 +335,9 @@ impl Assume {
     /// This is especially useful for extending [`Assume`] in generic contexts;
     /// e.g.:
     ///
-    /// ```rust
+    #[cfg_attr(bootstrap, doc = "```rust,ignore not runnable on bootstrap")]
+    #[cfg_attr(not(bootstrap), doc = "```rust")]
+    #[unstable(feature = "transmutability", issue = "99571")]
     /// #![feature(
     ///     adt_const_params,
     ///     generic_const_exprs,
@@ -337,7 +345,7 @@ impl Assume {
     ///     transmutability,
     /// )]
     /// #![allow(incomplete_features)]
-    /// use core::mem::{Assume, TransmuteFrom};
+    /// use core::mem::{align_of, Assume, TransmuteFrom};
     ///
     /// /// Attempts to transmute `src` to `&Dst`.
     /// ///
@@ -371,7 +379,6 @@ impl Assume {
     ///     try_transmute_ref::<_, _, { Assume::NOTHING }>(src)
     /// };
     ///```
-    #[unstable(feature = "transmutability", issue = "99571")]
     pub const fn and(self, other_assumptions: Self) -> Self {
         Self {
             alignment: self.alignment || other_assumptions.alignment,
@@ -383,7 +390,8 @@ impl Assume {
 
     /// Remove `other_assumptions` the obligations of `self`; e.g.:
     ///
-    /// ```rust
+    #[cfg_attr(bootstrap, doc = "```rust,ignore not runnable on bootstrap")]
+    #[cfg_attr(not(bootstrap), doc = "```rust")]
     /// #![feature(transmutability)]
     /// use core::mem::Assume;
     ///

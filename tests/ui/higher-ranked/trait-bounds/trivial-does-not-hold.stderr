@@ -4,7 +4,7 @@ error: higher-ranked lifetime error
 LL |     || {};
    |     ^^^^^
    |
-   = note: could not prove `for<'a> &'a (): '_`
+   = note: could not prove `for<'a> &'a (): 'b`
 
 error: aborting due to 1 previous error
 

@@ -15,11 +15,13 @@ trait MyFrom<T>: Sized {
 }
 
 /* MCVE starts here */
-pub trait F {}
-impl F for () {}
-pub type DummyT<T> = impl F;
-#[define_opaque(DummyT)]
-fn _dummy_t<T>() -> DummyT<T> {}
+mod f {
+    pub trait F {}
+    impl F for () {}
+    pub type DummyT<T> = impl F;
+    fn _dummy_t<T>() -> DummyT<T> {}
+}
+use f::DummyT;
 
 struct Phantom1<T>(PhantomData<T>);
 struct Phantom2<T>(PhantomData<T>);

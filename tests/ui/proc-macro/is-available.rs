@@ -2,8 +2,7 @@
 
 extern crate proc_macro;
 
-//@ proc-macro: is-available.rs
-//@ ignore-backends: gcc
+//@ aux-build:is-available.rs
 extern crate is_available;
 
 fn main() {

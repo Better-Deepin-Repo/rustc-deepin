@@ -1,6 +1,6 @@
-//@ check-pass
+#![deny(clippy::all)]
 
-// Test for https://github.com/rust-lang/rust-clippy/issues/700
+/// Test for https://github.com/rust-lang/rust-clippy/issues/700
 
 fn core() {}
 

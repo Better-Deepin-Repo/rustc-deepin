@@ -4,14 +4,9 @@ error[E0277]: the type `[{integer}]` cannot be indexed by `u8`
 LL |     [0][0u8];
    |         ^^^ slice indices are of type `usize` or ranges of `usize`
    |
-   = help: the trait `SliceIndex<[{integer}]>` is not implemented for `u8`
-help: the following other types implement trait `SliceIndex<T>`
-  --> $SRC_DIR/core/src/slice/index.rs:LL:COL
-   |
-   = note: `usize` implements `SliceIndex<[T]>`
-  --> $SRC_DIR/core/src/bstr/traits.rs:LL:COL
-   |
-   = note: `usize` implements `SliceIndex<ByteStr>`
+   = help: the trait `SliceIndex<[{integer}]>` is not implemented for `u8`, which is required by `[{integer}; 1]: Index<_>`
+   = help: the trait `SliceIndex<[{integer}]>` is implemented for `usize`
+   = help: for that trait implementation, expected `usize`, found `u8`
    = note: required for `[{integer}]` to implement `Index<u8>`
    = note: 1 redundant requirement hidden
    = note: required for `[{integer}; 1]` to implement `Index<u8>`

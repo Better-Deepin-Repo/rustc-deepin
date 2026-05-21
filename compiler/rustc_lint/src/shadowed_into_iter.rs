@@ -1,7 +1,8 @@
-use rustc_hir::{self as hir, LangItem};
+use rustc_hir as hir;
 use rustc_middle::ty::{self, Ty};
-use rustc_session::lint::fcw;
+use rustc_session::lint::FutureIncompatibilityReason;
 use rustc_session::{declare_lint, impl_lint_pass};
+use rustc_span::edition::Edition;
 
 use crate::lints::{ShadowedIntoIterDiag, ShadowedIntoIterDiagSub};
 use crate::{LateContext, LateLintPass, LintContext};
@@ -30,7 +31,8 @@ declare_lint! {
     Warn,
     "detects calling `into_iter` on arrays in Rust 2015 and 2018",
     @future_incompatible = FutureIncompatibleInfo {
-        reason: fcw!(EditionSemanticsChange 2021 "IntoIterator-for-arrays"),
+        reason: FutureIncompatibilityReason::EditionSemanticsChange(Edition::Edition2021),
+        reference: "<https://doc.rust-lang.org/nightly/edition-guide/rust-2021/IntoIterator-for-arrays.html>",
     };
 }
 
@@ -58,7 +60,7 @@ declare_lint! {
     Warn,
     "detects calling `into_iter` on boxed slices in Rust 2015, 2018, and 2021",
     @future_incompatible = FutureIncompatibleInfo {
-        reason: fcw!(EditionSemanticsChange 2024 "intoiterator-box-slice"),
+        reason: FutureIncompatibilityReason::EditionSemanticsChange(Edition::Edition2024),
     };
 }
 
@@ -78,7 +80,7 @@ impl<'tcx> LateLintPass<'tcx> for ShadowedIntoIter {
         let Some(method_def_id) = cx.typeck_results().type_dependent_def_id(expr.hir_id) else {
             return;
         };
-        if !cx.tcx.is_lang_item(method_def_id, LangItem::IntoIterIntoIter) {
+        if Some(method_def_id) != cx.tcx.lang_items().into_iter_fn() {
             return;
         }
 
@@ -92,9 +94,12 @@ impl<'tcx> LateLintPass<'tcx> for ShadowedIntoIter {
         fn is_ref_to_array(ty: Ty<'_>) -> bool {
             if let ty::Ref(_, pointee_ty, _) = *ty.kind() { pointee_ty.is_array() } else { false }
         }
+        fn is_boxed_slice(ty: Ty<'_>) -> bool {
+            ty.is_box() && ty.boxed_ty().is_slice()
+        }
         fn is_ref_to_boxed_slice(ty: Ty<'_>) -> bool {
             if let ty::Ref(_, pointee_ty, _) = *ty.kind() {
-                pointee_ty.boxed_ty().is_some_and(Ty::is_slice)
+                is_boxed_slice(pointee_ty)
             } else {
                 false
             }
@@ -114,37 +119,31 @@ impl<'tcx> LateLintPass<'tcx> for ShadowedIntoIter {
                     .iter()
                     .copied()
                     .take_while(|ty| !is_ref_to_boxed_slice(*ty))
-                    .position(|ty| ty.boxed_ty().is_some_and(Ty::is_slice))
+                    .position(|ty| is_boxed_slice(ty))
             {
                 (BOXED_SLICE_INTO_ITER, "Box<[T]>", "2024", idx == 0)
             } else {
                 return;
             };
 
-        // This check needs to avoid ICE from when `receiver_arg` is from macro expansion
-        // Which leads to empty span in span arithmetic below
-        // cc: https://github.com/rust-lang/rust/issues/147408
-        let span = receiver_arg.span.find_ancestor_in_same_ctxt(expr.span);
-
         // If this expression comes from the `IntoIter::into_iter` inside of a for loop,
         // we should just suggest removing the `.into_iter()` or changing it to `.iter()`
         // to disambiguate if we want to iterate by-value or by-ref.
         let sub = if let Some((_, hir::Node::Expr(parent_expr))) =
-            cx.tcx.hir_parent_iter(expr.hir_id).nth(1)
+            cx.tcx.hir().parent_iter(expr.hir_id).nth(1)
             && let hir::ExprKind::Match(arg, [_], hir::MatchSource::ForLoopDesugar) =
                 &parent_expr.kind
             && let hir::ExprKind::Call(path, [_]) = &arg.kind
-            && let hir::ExprKind::Path(qpath) = path.kind
-            && cx.tcx.qpath_is_lang_item(qpath, LangItem::IntoIterIntoIter)
-            && let Some(span) = span
+            && let hir::ExprKind::Path(hir::QPath::LangItem(hir::LangItem::IntoIterIntoIter, ..)) =
+                &path.kind
         {
             Some(ShadowedIntoIterDiagSub::RemoveIntoIter {
-                span: span.shrink_to_hi().to(expr.span.shrink_to_hi()),
+                span: receiver_arg.span.shrink_to_hi().to(expr.span.shrink_to_hi()),
             })
-        } else if can_suggest_ufcs && let Some(span) = span {
+        } else if can_suggest_ufcs {
             Some(ShadowedIntoIterDiagSub::UseExplicitIntoIter {
                 start_span: expr.span.shrink_to_lo(),
-                end_span: span.shrink_to_hi().to(expr.span.shrink_to_hi()),
+                end_span: receiver_arg.span.shrink_to_hi().to(expr.span.shrink_to_hi()),
             })
         } else {
             None

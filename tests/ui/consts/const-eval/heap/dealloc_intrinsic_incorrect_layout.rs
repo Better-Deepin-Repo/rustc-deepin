@@ -6,24 +6,24 @@ use std::intrinsics;
 const _X: () = unsafe {
     let ptr = intrinsics::const_allocate(4, 4);
     intrinsics::const_deallocate(ptr, 4, 2);
-    //~^ error: incorrect layout on deallocation
+    //~^ error: evaluation of constant value failed
 };
 const _Y: () = unsafe {
     let ptr = intrinsics::const_allocate(4, 4);
     intrinsics::const_deallocate(ptr, 2, 4);
-    //~^ error: incorrect layout on deallocation
+    //~^ error: evaluation of constant value failed
 };
 
 const _Z: () = unsafe {
     let ptr = intrinsics::const_allocate(4, 4);
     intrinsics::const_deallocate(ptr, 3, 4);
-    //~^ error: incorrect layout on deallocation
+    //~^ error: evaluation of constant value failed
 };
 
 const _W: () = unsafe {
     let ptr = intrinsics::const_allocate(4, 4);
     intrinsics::const_deallocate(ptr, 4, 3);
-    //~^ error: invalid align
+    //~^ error: evaluation of constant value failed
 };
 
 fn main() {}

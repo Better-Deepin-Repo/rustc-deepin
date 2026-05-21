@@ -2,11 +2,10 @@
 
 use std::fs::File;
 
-use crate::prelude::*;
-use crate::utils::cargo_process;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::{
-    basic_manifest, git, paths, project, publish::validate_crate_contents, str,
+    basic_manifest, cargo_process, git, paths, project, publish::validate_crate_contents, str,
 };
 
 fn pl_manifest(name: &str, version: &str, extra: &str) -> String {
@@ -109,7 +108,7 @@ src/main.rs
         f,
         "foo-0.0.1.crate",
         &["Cargo.toml", "Cargo.toml.orig", "Cargo.lock", "src/main.rs"],
-        (),
+        &[],
     );
 }
 
@@ -151,7 +150,7 @@ src/main.rs
 }
 
 #[cargo_test]
-fn lock_file_with_library() {
+fn no_lock_file_with_library() {
     let p = project()
         .file("Cargo.toml", &pl_manifest("foo", "0.0.1", ""))
         .file("src/lib.rs", "")
@@ -163,8 +162,8 @@ fn lock_file_with_library() {
     validate_crate_contents(
         f,
         "foo-0.0.1.crate",
-        &["Cargo.toml", "Cargo.toml.orig", "src/lib.rs", "Cargo.lock"],
-        (),
+        &["Cargo.toml", "Cargo.toml.orig", "src/lib.rs"],
+        &[],
     );
 }
 
@@ -189,7 +188,7 @@ fn lock_file_and_workspace() {
         f,
         "foo-0.0.1.crate",
         &["Cargo.toml", "Cargo.toml.orig", "src/main.rs", "Cargo.lock"],
-        (),
+        &[],
     );
 }
 
@@ -242,7 +241,7 @@ fn note_resolve_changes() {
 [ARCHIVING] Cargo.toml.orig
 [ARCHIVING] src/main.rs
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
-...
+[WARNING] no (git) Cargo.toml found at `[..]/foo/Cargo.toml` in workdir `[..]`
 
 "#]].unordered())
         .run();
@@ -263,6 +262,8 @@ fn outdated_lock_version_change_does_not_warn() {
 
     p.cargo("package --no-verify")
         .with_stderr_data(str![[r#"
+[LOCKING] 1 package to latest compatible version
+[UPDATING] foo v0.1.0 ([ROOT]/foo) -> v0.2.0
 [PACKAGING] foo v0.2.0 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 
@@ -402,7 +403,7 @@ dependencies = [
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
 [INSTALLING] foo v0.1.0
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.1.1 (registry `dummy-registry`)
 [COMPILING] bar v0.1.1
@@ -547,15 +548,13 @@ fn use_workspace_root_lockfile() {
     // Expect: package `bar` uses `serde v0.2.0` as required by workspace `Cargo.lock`.
     p.cargo("package --workspace")
         .with_stderr_data(str![[r#"
-[WARNING] manifest has no documentation, homepage or repository
-  |
-  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
+[WARNING] manifest has no documentation, homepage or repository.
+See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
 [PACKAGING] bar v0.0.1 ([ROOT]/foo/bar)
 [UPDATING] `dummy-registry` index
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
-[WARNING] manifest has no documentation, homepage or repository
-  |
-  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
+[WARNING] manifest has no documentation, homepage or repository.
+See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [VERIFYING] bar v0.0.1 ([ROOT]/foo/bar)
@@ -565,6 +564,7 @@ fn use_workspace_root_lockfile() {
 [COMPILING] bar v0.0.1 ([ROOT]/foo/target/package/bar-0.0.1)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [VERIFYING] foo v0.0.1 ([ROOT]/foo)
+[COMPILING] serde v0.2.0
 [COMPILING] foo v0.0.1 ([ROOT]/foo/target/package/foo-0.0.1)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -578,7 +578,7 @@ fn use_workspace_root_lockfile() {
         f,
         "foo-0.0.1.crate",
         &["Cargo.lock", "Cargo.toml", "Cargo.toml.orig", "src/main.rs"],
-        (),
+        &[],
     );
 
     let package_path = p.root().join("target/package/bar-0.0.1.crate");
@@ -588,6 +588,6 @@ fn use_workspace_root_lockfile() {
         f,
         "bar-0.0.1.crate",
         &["Cargo.lock", "Cargo.toml", "Cargo.toml.orig", "src/main.rs"],
-        (),
+        &[],
     );
 }

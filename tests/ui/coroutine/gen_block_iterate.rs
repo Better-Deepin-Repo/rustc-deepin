@@ -1,5 +1,5 @@
 //@ revisions: next old
-//@ edition: 2024
+//@compile-flags: --edition 2024 -Zunstable-options
 //@[next] compile-flags: -Znext-solver
 //@ run-pass
 #![feature(gen_blocks)]

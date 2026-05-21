@@ -13,13 +13,7 @@ if "%CFG_RELEASE_CHANNEL%"=="nightly" (
 )
 cargo test || exit /b 1
 
-:: Build and test config_proc_macro
+:: Build and test other crates
 cd config_proc_macro || exit /b 1
-cargo build --locked || exit /b 1
-cargo test || exit /b 1
-
-:: Build and test check_diff
-cd ..
-cd check_diff || exit /b 1
 cargo build --locked || exit /b 1
 cargo test || exit /b 1

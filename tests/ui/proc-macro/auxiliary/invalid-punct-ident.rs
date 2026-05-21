@@ -1,3 +1,7 @@
+//@ force-host
+//@ no-prefer-dynamic
+
+#![crate_type = "proc-macro"]
 #![feature(proc_macro_raw_ident)]
 
 extern crate proc_macro;
@@ -20,9 +24,5 @@ pub fn invalid_raw_ident(_: TokenStream) -> TokenStream {
 
 #[proc_macro]
 pub fn lexer_failure(_: TokenStream) -> TokenStream {
-    assert_eq!(
-        "a b ) c".parse::<TokenStream>().unwrap_err().to_string(),
-        "unexpected closing delimiter: `)`"
-    );
-    TokenStream::new()
+    "a b ) c".parse().expect("parsing failed without panic")
 }

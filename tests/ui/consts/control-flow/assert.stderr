@@ -1,8 +1,10 @@
-error[E0080]: evaluation panicked: assertion failed: false
+error[E0080]: evaluation of constant value failed
   --> $DIR/assert.rs:5:15
    |
 LL | const _: () = assert!(false);
-   |               ^^^^^^^^^^^^^^ evaluation of `_` failed here
+   |               ^^^^^^^^^^^^^^ the evaluated program panicked at 'assertion failed: false', $DIR/assert.rs:5:15
+   |
+   = note: this error originates in the macro `assert` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: aborting due to 1 previous error
 

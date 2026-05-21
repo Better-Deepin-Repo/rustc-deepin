@@ -1,4 +1,5 @@
-fn f() -> isize { } //~ ERROR mismatched types
-                    //~| NOTE implicitly returns `()` as its body has no tail or `return` expression
-                    //~| NOTE expected `isize`, found `()`
+//@ error-pattern: return
+
+fn f() -> isize { }
+
 fn main() { f(); }

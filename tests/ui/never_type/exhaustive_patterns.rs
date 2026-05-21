@@ -1,9 +1,7 @@
-// Check that we don't consider types which aren't publicly uninhabited as
-// uninhabited for purposes of pattern matching.
-//
 //@ check-fail
+//@ known-bug: #104034
 
-#![feature(never_type)]
+#![feature(exhaustive_patterns, never_type)]
 
 mod inner {
     pub struct Wrapper<T>(T);
@@ -19,8 +17,5 @@ fn foo() -> Either<(), !> {
 }
 
 fn main() {
-    // We can't treat this a irrefutable, because `Either::B` could become
-    // inhabited in the future because it's private.
     let Either::A(()) = foo();
-    //~^ error refutable pattern in local binding
 }

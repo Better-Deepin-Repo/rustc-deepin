@@ -55,8 +55,9 @@ fn main() {
 
 ### See also:
 
-[Derive], [struct], and [tuple](../primitives/tuples.html).
+[Derive], [struct], and [TupleStructs]
 
 [Derive]: ../trait/derive.md
 [struct]: ../custom_types/structs.md
+[TupleStructs]: ../custom_types/structs.md
 [std::marker::PhantomData]: https://doc.rust-lang.org/std/marker/struct.PhantomData.html

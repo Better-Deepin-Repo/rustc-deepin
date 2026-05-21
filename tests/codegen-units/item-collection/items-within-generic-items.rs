@@ -1,7 +1,7 @@
-//@ compile-flags:-Clink-dead-code -Copt-level=0
+//@ compile-flags:-Zprint-mono-items=eager -Copt-level=0
 
 #![deny(dead_code)]
-#![crate_type = "lib"]
+#![feature(start)]
 
 fn generic_fn<T>(a: T) -> (T, i32) {
     //~ MONO_ITEM fn generic_fn::nested_fn
@@ -22,8 +22,8 @@ fn generic_fn<T>(a: T) -> (T, i32) {
 }
 
 //~ MONO_ITEM fn start
-#[no_mangle]
-pub fn start(_: isize, _: *const *const u8) -> isize {
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
     //~ MONO_ITEM fn generic_fn::<i64>
     let _ = generic_fn(0i64);
     //~ MONO_ITEM fn generic_fn::<u16>

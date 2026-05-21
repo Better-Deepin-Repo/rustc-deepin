@@ -53,6 +53,7 @@ book](../lints.md).
 > - IDE setup
 > - High level overview on how Clippy works
 > - Triage procedure
+> - Bors and Homu
 
 [ast]: https://rustc-dev-guide.rust-lang.org/syntax-intro.html
 [hir]: https://rustc-dev-guide.rust-lang.org/hir.html

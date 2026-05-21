@@ -2,6 +2,7 @@
 // Test lifetimes are linked properly when we take reference
 // to interior.
 
+//@ pretty-expanded FIXME #23616
 
 struct Foo(isize);
 pub fn main() {

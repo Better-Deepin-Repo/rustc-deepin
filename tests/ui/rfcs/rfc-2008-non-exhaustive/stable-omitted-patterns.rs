@@ -19,7 +19,7 @@ fn main() {
 
     #[deny(non_exhaustive_omitted_patterns)]
     match UnstableEnum::Stable {
-        //~^ ERROR some variants are not matched explicitly
+        //~^ some variants are not matched explicitly
         UnstableEnum::Stable => {}
         _ => {}
     }
@@ -37,7 +37,7 @@ fn main() {
 
     #[warn(non_exhaustive_omitted_patterns)]
     let UnstableStruct { stable, .. } = UnstableStruct::default();
-    //~^ WARN some fields are not explicitly listed
+    //~^ some fields are not explicitly listed
 
     // OK: stable field is matched
     #[warn(non_exhaustive_omitted_patterns)]

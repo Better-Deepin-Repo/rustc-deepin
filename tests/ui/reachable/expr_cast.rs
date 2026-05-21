@@ -1,21 +1,13 @@
-//@ check-pass
-//@ edition: 2024
-//
-// Check that we don't warn on `as` casts of never to any as unreachable.
-// While they *are* unreachable, sometimes they are required to appeal typeck.
+#![allow(unused_variables)]
+#![allow(unused_assignments)]
+#![allow(dead_code)]
 #![deny(unreachable_code)]
+#![feature(never_type, type_ascription)]
 
 fn a() {
-    _ = {return} as u32;
+    // the cast is unreachable:
+    let x = {return} as !; //~ ERROR unreachable
+    //~| ERROR non-primitive cast
 }
 
-fn b() {
-    (return) as u32;
-}
-
-// example that needs an explicit never-to-any `as` cast
-fn example() -> impl Iterator<Item = u8> {
-    todo!() as std::iter::Empty<_>
-}
-
-fn main() {}
+fn main() { }

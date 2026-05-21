@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 //@ run-rustfix
 
 #![deny(rust_2021_incompatible_closure_captures)]

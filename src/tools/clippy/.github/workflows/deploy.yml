@@ -8,10 +8,6 @@ on:
     tags:
       - rust-1.**
 
-concurrency:
-  group: ${{ github.workflow }}
-  cancel-in-progress: false
-
 env:
   TARGET_BRANCH: 'gh-pages'
   SHA: '${{ github.sha }}'
@@ -25,28 +21,20 @@ jobs:
     steps:
     # Setup
     - name: Checkout
-      uses: actions/checkout@v6
-      with:
-        # Unsetting this would make so that any malicious package could get our Github Token
-        persist-credentials: false
+      uses: actions/checkout@v4
 
     - name: Checkout
-      uses: actions/checkout@v6
+      uses: actions/checkout@v4
       with:
         ref: ${{ env.TARGET_BRANCH }}
         path: 'out'
-        # Unsetting this would make so that any malicious package could get our Github Token
-        persist-credentials: false
 
     # Run
     - name: Set tag name
       if: startswith(github.ref, 'refs/tags/')
       run: |
-        TAG=$(basename "${TAGNAME}")
+        TAG=$(basename ${{ github.ref }})
         echo "TAG_NAME=$TAG" >> $GITHUB_ENV
-      env:
-        # Make sure that the reference gets expanded before injecting it
-        TAGNAME: ${{ github.ref }}
     - name: Set beta to true
       if: github.ref == 'refs/heads/beta'
       run: echo "BETA=true" >> $GITHUB_ENV
@@ -64,7 +52,7 @@ jobs:
       run: cargo generate-lockfile
 
     - name: Cache
-      uses: Swatinem/rust-cache@v2
+      uses: Swatinem/rust-cache@v2.7.0
       with:
         save-if: ${{ github.ref == 'refs/heads/master' }}
 

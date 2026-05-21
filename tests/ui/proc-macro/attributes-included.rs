@@ -1,5 +1,4 @@
-//@ edition:2015
-//@ proc-macro: attributes-included.rs
+//@ aux-build:attributes-included.rs
 //@ check-pass
 
 #![warn(unused)]

@@ -2,6 +2,7 @@
 #![allow(dead_code)]
 //@ aux-build:xcrate-trait-lifetime-param.rs
 
+//@ pretty-expanded FIXME #23616
 
 extern crate xcrate_trait_lifetime_param as other;
 

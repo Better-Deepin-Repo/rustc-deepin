@@ -4,15 +4,15 @@ Subject: u-ignore-ppc-hangs
 
 Bug: https://github.com/rust-lang/rust/issues/89607
 ---
- library/alloctests/tests/arc.rs | 1 +
- library/alloctests/tests/rc.rs  | 1 +
+ library/alloc/tests/arc.rs | 1 +
+ library/alloc/tests/rc.rs  | 1 +
  2 files changed, 2 insertions(+)
 
-diff --git a/library/alloctests/tests/arc.rs b/library/alloctests/tests/arc.rs
-index 00bdf52..65fc1b8 100644
---- a/library/alloctests/tests/arc.rs
-+++ b/library/alloctests/tests/arc.rs
-@@ -94,6 +94,7 @@ const SHARED_ITER_MAX: u16 = 100;
+diff --git a/library/alloc/tests/arc.rs b/library/alloc/tests/arc.rs
+index dc27c57..79c0670 100644
+--- a/library/alloc/tests/arc.rs
++++ b/library/alloc/tests/arc.rs
+@@ -95,6 +95,7 @@ const SHARED_ITER_MAX: u16 = 100;
  
  fn assert_trusted_len<I: TrustedLen>(_: &I) {}
  
@@ -20,10 +20,10 @@ index 00bdf52..65fc1b8 100644
  #[test]
  fn shared_from_iter_normal() {
      // Exercise the base implementation for non-`TrustedLen` iterators.
-diff --git a/library/alloctests/tests/rc.rs b/library/alloctests/tests/rc.rs
-index bb68eb4..90bf2b9 100644
---- a/library/alloctests/tests/rc.rs
-+++ b/library/alloctests/tests/rc.rs
+diff --git a/library/alloc/tests/rc.rs b/library/alloc/tests/rc.rs
+index 29dbdcf..bebc0a0 100644
+--- a/library/alloc/tests/rc.rs
++++ b/library/alloc/tests/rc.rs
 @@ -91,6 +91,7 @@ const SHARED_ITER_MAX: u16 = 100;
  
  fn assert_trusted_len<I: TrustedLen>(_: &I) {}

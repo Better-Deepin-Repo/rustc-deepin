@@ -1,9 +1,10 @@
 //@ run-pass
+#![allow(unused_variables)]
 //@ compile-flags:-C panic=abort
 //@ aux-build:exit-success-if-unwind.rs
 //@ no-prefer-dynamic
-//@ needs-subprocess
-//@ ignore-backends: gcc
+//@ ignore-wasm32 no processes
+//@ ignore-sgx no processes
 
 extern crate exit_success_if_unwind;
 
@@ -12,7 +13,7 @@ use std::process::Command;
 
 fn main() {
     let mut args = env::args_os();
-    let _ = args.next().unwrap();
+    let me = args.next().unwrap();
 
     if let Some(s) = args.next() {
         if &*s == "foo" {

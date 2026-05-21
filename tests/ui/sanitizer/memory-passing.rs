@@ -1,8 +1,6 @@
 //@ needs-sanitizer-support
 //@ needs-sanitizer-memory
 //
-//@ compile-flags: -C unsafe-allow-abi-mismatch=sanitizer
-//
 //@ revisions: unoptimized optimized
 //
 //@ [optimized]compile-flags: -Z sanitizer=memory -Zsanitizer-memory-track-origins -O
@@ -14,8 +12,8 @@
 // since it will be linked with an uninstrumented version of it.
 
 #![feature(core_intrinsics)]
+#![feature(start)]
 #![allow(invalid_value)]
-#![no_main]
 
 use std::hint::black_box;
 
@@ -27,8 +25,8 @@ fn calling_black_box_on_zst_ok() {
     black_box(zst);
 }
 
-#[no_mangle]
-extern "C" fn main(_argc: std::ffi::c_int, _argv: *const *const u8) -> std::ffi::c_int {
+#[start]
+fn main(_: isize, _: *const *const u8) -> isize {
     calling_black_box_on_zst_ok();
     0
 }

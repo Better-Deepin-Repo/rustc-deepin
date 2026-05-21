@@ -1,10 +1,10 @@
 #![allow(dead_code)]
 
-#[inline(please,no)] //~ ERROR malformed `inline` attribute
+#[inline(please,no)] //~ ERROR expected one argument
 fn a() {
 }
 
-#[inline()] //~ ERROR malformed `inline` attribute
+#[inline()] //~ ERROR expected one argument
 fn b() {
 }
 

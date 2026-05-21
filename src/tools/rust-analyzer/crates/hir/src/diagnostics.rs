@@ -3,49 +3,30 @@
 //!
 //! This probably isn't the best way to do this -- ideally, diagnostics should
 //! be expressed in terms of hir types themselves.
+pub use hir_ty::diagnostics::{CaseType, IncorrectCase};
+use hir_ty::{db::HirDatabase, diagnostics::BodyValidationDiagnostic, InferenceDiagnostic};
+
 use cfg::{CfgExpr, CfgOptions};
 use either::Either;
-use hir_def::{
-    DefWithBodyId, GenericParamId, SyntheticSyntax,
-    expr_store::{
-        ExprOrPatPtr, ExpressionStoreSourceMap, hir_assoc_type_binding_to_ast,
-        hir_generic_arg_to_ast, hir_segment_to_ast_segment,
-    },
-    hir::ExprOrPatId,
-};
-use hir_expand::{HirFileId, InFile, mod_path::ModPath, name::Name};
-use hir_ty::{
-    CastError, InferenceDiagnostic, InferenceTyDiagnosticSource, PathGenericsSource,
-    PathLoweringDiagnostic, TyLoweringDiagnostic, TyLoweringDiagnosticKind,
-    db::HirDatabase,
-    diagnostics::{BodyValidationDiagnostic, UnsafetyReason},
-};
-use syntax::{
-    AstNode, AstPtr, SyntaxError, SyntaxNodePtr, TextRange,
-    ast::{self, HasGenericArgs},
-    match_ast,
-};
+pub use hir_def::VariantId;
+use hir_def::{body::SyntheticSyntax, hir::ExprOrPatId, path::ModPath, AssocItemId, DefWithBodyId};
+use hir_expand::{name::Name, HirFileId, InFile};
+use syntax::{ast, AstPtr, SyntaxError, SyntaxNodePtr, TextRange};
 use triomphe::Arc;
 
-use crate::{AssocItem, Field, Function, GenericDef, Local, Trait, Type};
-
-pub use hir_def::VariantId;
-pub use hir_ty::{
-    GenericArgsProhibitedReason, IncorrectGenericsLenKind,
-    diagnostics::{CaseType, IncorrectCase},
-};
+use crate::{AssocItem, Field, Local, Trait, Type};
 
 macro_rules! diagnostics {
-    ($AnyDiagnostic:ident <$db:lifetime> -> $($diag:ident $(<$lt:lifetime>)?,)*) => {
+    ($($diag:ident,)*) => {
         #[derive(Debug)]
-        pub enum $AnyDiagnostic<$db> {$(
-            $diag(Box<$diag $(<$lt>)?>),
+        pub enum AnyDiagnostic {$(
+            $diag(Box<$diag>),
         )*}
 
         $(
-            impl<$db> From<$diag $(<$lt>)?> for $AnyDiagnostic<$db> {
-                fn from(d: $diag $(<$lt>)?) -> $AnyDiagnostic<$db> {
-                    $AnyDiagnostic::$diag(Box::new(d))
+            impl From<$diag> for AnyDiagnostic {
+                fn from(d: $diag) -> AnyDiagnostic {
+                    AnyDiagnostic::$diag(Box::new(d))
                 }
             }
         )*
@@ -66,15 +47,13 @@ macro_rules! diagnostics {
 // }, ...
 // ]
 
-diagnostics![AnyDiagnostic<'db> ->
+diagnostics![
     AwaitOutsideOfAsync,
     BreakOutsideOfLoop,
-    CastToUnsized<'db>,
-    ExpectedFunction<'db>,
+    ExpectedFunction,
     InactiveCode,
     IncoherentImpl,
     IncorrectCase,
-    InvalidCast<'db>,
     InvalidDeriveTarget,
     MacroDefError,
     MacroError,
@@ -85,7 +64,7 @@ diagnostics![AnyDiagnostic<'db> ->
     MissingFields,
     MissingMatchArms,
     MissingUnsafe,
-    MovedOutOfRef<'db>,
+    MovedOutOfRef,
     NeedMut,
     NonExhaustiveLet,
     NoSuchField,
@@ -98,41 +77,34 @@ diagnostics![AnyDiagnostic<'db> ->
     TraitImplMissingAssocItems,
     TraitImplOrphan,
     TraitImplRedundantAssocItems,
-    TypedHole<'db>,
-    TypeMismatch<'db>,
+    TypedHole,
+    TypeMismatch,
     UndeclaredLabel,
     UnimplementedBuiltinMacro,
     UnreachableLabel,
     UnresolvedAssocItem,
     UnresolvedExternCrate,
-    UnresolvedField<'db>,
+    UnresolvedField,
     UnresolvedImport,
     UnresolvedMacroCall,
-    UnresolvedMethodCall<'db>,
+    UnresolvedMethodCall,
     UnresolvedModule,
     UnresolvedIdent,
     UnusedMut,
     UnusedVariable,
-    GenericArgsProhibited,
-    ParenthesizedGenericArgsWithoutFnTrait,
-    BadRtn,
-    IncorrectGenericsLen,
-    IncorrectGenericsOrder,
-    MissingLifetime,
-    ElidedLifetimesInPath,
 ];
 
 #[derive(Debug)]
 pub struct BreakOutsideOfLoop {
-    pub expr: InFile<ExprOrPatPtr>,
+    pub expr: InFile<AstPtr<ast::Expr>>,
     pub is_break: bool,
     pub bad_value_break: bool,
 }
 
 #[derive(Debug)]
-pub struct TypedHole<'db> {
-    pub expr: InFile<ExprOrPatPtr>,
-    pub expected: Type<'db>,
+pub struct TypedHole {
+    pub expr: InFile<AstPtr<ast::Expr>>,
+    pub expected: Type,
 }
 
 #[derive(Debug)]
@@ -153,7 +125,8 @@ pub struct UnresolvedImport {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct UnresolvedMacroCall {
-    pub range: InFile<TextRange>,
+    pub macro_call: InFile<SyntaxNodePtr>,
+    pub precise_location: Option<TextRange>,
     pub path: ModPath,
     pub is_bang: bool,
 }
@@ -184,15 +157,16 @@ pub struct InactiveCode {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MacroError {
-    pub range: InFile<TextRange>,
+    pub node: InFile<SyntaxNodePtr>,
+    pub precise_location: Option<TextRange>,
     pub message: String,
     pub error: bool,
-    pub kind: &'static str,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct MacroExpansionParseError {
-    pub range: InFile<TextRange>,
+    pub node: InFile<SyntaxNodePtr>,
+    pub precise_location: Option<TextRange>,
     pub errors: Arc<[SyntaxError]>,
 }
 
@@ -210,85 +184,76 @@ pub struct UnimplementedBuiltinMacro {
 
 #[derive(Debug)]
 pub struct InvalidDeriveTarget {
-    pub range: InFile<TextRange>,
+    pub node: InFile<SyntaxNodePtr>,
 }
 
 #[derive(Debug)]
 pub struct MalformedDerive {
-    pub range: InFile<TextRange>,
+    pub node: InFile<SyntaxNodePtr>,
 }
 
 #[derive(Debug)]
 pub struct NoSuchField {
     pub field: InFile<AstPtr<Either<ast::RecordExprField, ast::RecordPatField>>>,
-    pub private: Option<Field>,
+    pub private: bool,
     pub variant: VariantId,
 }
 
 #[derive(Debug)]
 pub struct PrivateAssocItem {
-    pub expr_or_pat: InFile<ExprOrPatPtr>,
+    pub expr_or_pat: InFile<AstPtr<Either<ast::Expr, ast::Pat>>>,
     pub item: AssocItem,
 }
 
 #[derive(Debug)]
 pub struct MismatchedTupleStructPatArgCount {
-    pub expr_or_pat: InFile<ExprOrPatPtr>,
+    pub expr_or_pat: InFile<AstPtr<Either<ast::Expr, ast::Pat>>>,
     pub expected: usize,
     pub found: usize,
 }
 
 #[derive(Debug)]
-pub struct ExpectedFunction<'db> {
-    pub call: InFile<ExprOrPatPtr>,
-    pub found: Type<'db>,
+pub struct ExpectedFunction {
+    pub call: InFile<AstPtr<ast::Expr>>,
+    pub found: Type,
 }
 
 #[derive(Debug)]
-pub struct UnresolvedField<'db> {
-    pub expr: InFile<ExprOrPatPtr>,
-    pub receiver: Type<'db>,
+pub struct UnresolvedField {
+    pub expr: InFile<AstPtr<ast::Expr>>,
+    pub receiver: Type,
     pub name: Name,
     pub method_with_same_name_exists: bool,
 }
 
 #[derive(Debug)]
-pub struct UnresolvedMethodCall<'db> {
-    pub expr: InFile<ExprOrPatPtr>,
-    pub receiver: Type<'db>,
+pub struct UnresolvedMethodCall {
+    pub expr: InFile<AstPtr<ast::Expr>>,
+    pub receiver: Type,
     pub name: Name,
-    pub field_with_same_name: Option<Type<'db>>,
-    pub assoc_func_with_same_name: Option<Function>,
+    pub field_with_same_name: Option<Type>,
+    pub assoc_func_with_same_name: Option<AssocItemId>,
 }
 
 #[derive(Debug)]
 pub struct UnresolvedAssocItem {
-    pub expr_or_pat: InFile<ExprOrPatPtr>,
+    pub expr_or_pat: InFile<AstPtr<Either<ast::Expr, ast::Pat>>>,
 }
 
 #[derive(Debug)]
 pub struct UnresolvedIdent {
-    pub node: InFile<(ExprOrPatPtr, Option<TextRange>)>,
+    pub expr: InFile<AstPtr<ast::Expr>>,
 }
 
 #[derive(Debug)]
 pub struct PrivateField {
-    pub expr: InFile<ExprOrPatPtr>,
+    pub expr: InFile<AstPtr<ast::Expr>>,
     pub field: Field,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum UnsafeLint {
-    HardError,
-    UnsafeOpInUnsafeFn,
-    DeprecatedSafe2024,
 }
 
 #[derive(Debug)]
 pub struct MissingUnsafe {
-    pub node: InFile<ExprOrPatPtr>,
-    pub lint: UnsafeLint,
-    pub reason: UnsafetyReason,
+    pub expr: InFile<AstPtr<ast::Expr>>,
 }
 
 #[derive(Debug)]
@@ -308,7 +273,7 @@ pub struct ReplaceFilterMapNextWithFindMap {
 
 #[derive(Debug)]
 pub struct MismatchedArgCount {
-    pub call_expr: InFile<ExprOrPatPtr>,
+    pub call_expr: InFile<AstPtr<ast::Expr>>,
     pub expected: usize,
     pub found: usize,
 }
@@ -326,10 +291,10 @@ pub struct NonExhaustiveLet {
 }
 
 #[derive(Debug)]
-pub struct TypeMismatch<'db> {
-    pub expr_or_pat: InFile<ExprOrPatPtr>,
-    pub expected: Type<'db>,
-    pub actual: Type<'db>,
+pub struct TypeMismatch {
+    pub expr_or_pat: InFile<AstPtr<Either<ast::Expr, ast::Pat>>>,
+    pub expected: Type,
+    pub actual: Type,
 }
 
 #[derive(Debug)]
@@ -349,8 +314,8 @@ pub struct UnusedVariable {
 }
 
 #[derive(Debug)]
-pub struct MovedOutOfRef<'db> {
-    pub ty: Type<'db>,
+pub struct MovedOutOfRef {
+    pub ty: Type,
     pub span: InFile<SyntaxNodePtr>,
 }
 
@@ -399,138 +364,70 @@ pub struct RemoveUnnecessaryElse {
     pub if_expr: InFile<AstPtr<ast::IfExpr>>,
 }
 
-#[derive(Debug)]
-pub struct CastToUnsized<'db> {
-    pub expr: InFile<ExprOrPatPtr>,
-    pub cast_ty: Type<'db>,
-}
-
-#[derive(Debug)]
-pub struct InvalidCast<'db> {
-    pub expr: InFile<ExprOrPatPtr>,
-    pub error: CastError,
-    pub expr_ty: Type<'db>,
-    pub cast_ty: Type<'db>,
-}
-
-#[derive(Debug)]
-pub struct GenericArgsProhibited {
-    pub args: InFile<AstPtr<Either<ast::GenericArgList, ast::ParenthesizedArgList>>>,
-    pub reason: GenericArgsProhibitedReason,
-}
-
-#[derive(Debug)]
-pub struct ParenthesizedGenericArgsWithoutFnTrait {
-    pub args: InFile<AstPtr<ast::ParenthesizedArgList>>,
-}
-
-#[derive(Debug)]
-pub struct BadRtn {
-    pub rtn: InFile<AstPtr<ast::ReturnTypeSyntax>>,
-}
-
-#[derive(Debug)]
-pub struct IncorrectGenericsLen {
-    /// Points at the name if there are no generics.
-    pub generics_or_segment: InFile<AstPtr<Either<ast::GenericArgList, ast::NameRef>>>,
-    pub kind: IncorrectGenericsLenKind,
-    pub provided: u32,
-    pub expected: u32,
-    pub def: GenericDef,
-}
-
-#[derive(Debug)]
-pub struct MissingLifetime {
-    /// Points at the name if there are no generics.
-    pub generics_or_segment: InFile<AstPtr<Either<ast::GenericArgList, ast::NameRef>>>,
-    pub expected: u32,
-    pub def: GenericDef,
-}
-
-#[derive(Debug)]
-pub struct ElidedLifetimesInPath {
-    /// Points at the name if there are no generics.
-    pub generics_or_segment: InFile<AstPtr<Either<ast::GenericArgList, ast::NameRef>>>,
-    pub expected: u32,
-    pub def: GenericDef,
-    pub hard_error: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GenericArgKind {
-    Lifetime,
-    Type,
-    Const,
-}
-
-impl GenericArgKind {
-    fn from_id(id: GenericParamId) -> Self {
-        match id {
-            GenericParamId::TypeParamId(_) => GenericArgKind::Type,
-            GenericParamId::ConstParamId(_) => GenericArgKind::Const,
-            GenericParamId::LifetimeParamId(_) => GenericArgKind::Lifetime,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct IncorrectGenericsOrder {
-    pub provided_arg: InFile<AstPtr<ast::GenericArg>>,
-    pub expected_kind: GenericArgKind,
-}
-
-impl<'db> AnyDiagnostic<'db> {
+impl AnyDiagnostic {
     pub(crate) fn body_validation_diagnostic(
-        db: &'db dyn HirDatabase,
+        db: &dyn HirDatabase,
         diagnostic: BodyValidationDiagnostic,
-        source_map: &hir_def::expr_store::BodySourceMap,
-    ) -> Option<AnyDiagnostic<'db>> {
+        source_map: &hir_def::body::BodySourceMap,
+    ) -> Option<AnyDiagnostic> {
         match diagnostic {
             BodyValidationDiagnostic::RecordMissingFields { record, variant, missed_fields } => {
-                let variant_data = variant.fields(db);
+                let variant_data = variant.variant_data(db.upcast());
                 let missed_fields = missed_fields
                     .into_iter()
                     .map(|idx| variant_data.fields()[idx].name.clone())
                     .collect();
 
-                let record = match record {
-                    Either::Left(record_expr) => source_map.expr_syntax(record_expr).ok()?,
-                    Either::Right(record_pat) => source_map.pat_syntax(record_pat).ok()?,
-                };
-                let file = record.file_id;
-                let root = record.file_syntax(db);
-                match record.value.to_node(&root) {
-                    Either::Left(ast::Expr::RecordExpr(record_expr)) => {
-                        if record_expr.record_expr_field_list().is_some() {
-                            let field_list_parent_path =
-                                record_expr.path().map(|path| AstPtr::new(&path));
-                            return Some(
-                                MissingFields {
-                                    file,
-                                    field_list_parent: AstPtr::new(&Either::Left(record_expr)),
-                                    field_list_parent_path,
-                                    missed_fields,
+                match record {
+                    Either::Left(record_expr) => match source_map.expr_syntax(record_expr) {
+                        Ok(source_ptr) => {
+                            let root = source_ptr.file_syntax(db.upcast());
+                            if let ast::Expr::RecordExpr(record_expr) =
+                                source_ptr.value.to_node(&root)
+                            {
+                                if record_expr.record_expr_field_list().is_some() {
+                                    let field_list_parent_path =
+                                        record_expr.path().map(|path| AstPtr::new(&path));
+                                    return Some(
+                                        MissingFields {
+                                            file: source_ptr.file_id,
+                                            field_list_parent: AstPtr::new(&Either::Left(
+                                                record_expr,
+                                            )),
+                                            field_list_parent_path,
+                                            missed_fields,
+                                        }
+                                        .into(),
+                                    );
                                 }
-                                .into(),
-                            );
+                            }
                         }
-                    }
-                    Either::Right(ast::Pat::RecordPat(record_pat)) => {
-                        if record_pat.record_pat_field_list().is_some() {
-                            let field_list_parent_path =
-                                record_pat.path().map(|path| AstPtr::new(&path));
-                            return Some(
-                                MissingFields {
-                                    file,
-                                    field_list_parent: AstPtr::new(&Either::Right(record_pat)),
-                                    field_list_parent_path,
-                                    missed_fields,
+                        Err(SyntheticSyntax) => (),
+                    },
+                    Either::Right(record_pat) => match source_map.pat_syntax(record_pat) {
+                        Ok(source_ptr) => {
+                            if let Some(ptr) = source_ptr.value.cast::<ast::RecordPat>() {
+                                let root = source_ptr.file_syntax(db.upcast());
+                                let record_pat = ptr.to_node(&root);
+                                if record_pat.record_pat_field_list().is_some() {
+                                    let field_list_parent_path =
+                                        record_pat.path().map(|path| AstPtr::new(&path));
+                                    return Some(
+                                        MissingFields {
+                                            file: source_ptr.file_id,
+                                            field_list_parent: AstPtr::new(&Either::Right(
+                                                record_pat,
+                                            )),
+                                            field_list_parent_path,
+                                            missed_fields,
+                                        }
+                                        .into(),
+                                    );
                                 }
-                                .into(),
-                            );
+                            }
                         }
-                    }
-                    _ => {}
+                        Err(SyntheticSyntax) => (),
+                    },
                 }
             }
             BodyValidationDiagnostic::ReplaceFilterMapNextWithFindMap { method_call_expr } => {
@@ -538,7 +435,7 @@ impl<'db> AnyDiagnostic<'db> {
                     return Some(
                         ReplaceFilterMapNextWithFindMap {
                             file: next_source_ptr.file_id,
-                            next_expr: next_source_ptr.value.cast()?,
+                            next_expr: next_source_ptr.value,
                         }
                         .into(),
                     );
@@ -547,10 +444,8 @@ impl<'db> AnyDiagnostic<'db> {
             BodyValidationDiagnostic::MissingMatchArms { match_expr, uncovered_patterns } => {
                 match source_map.expr_syntax(match_expr) {
                     Ok(source_ptr) => {
-                        let root = source_ptr.file_syntax(db);
-                        if let Either::Left(ast::Expr::MatchExpr(match_expr)) =
-                            &source_ptr.value.to_node(&root)
-                        {
+                        let root = source_ptr.file_syntax(db.upcast());
+                        if let ast::Expr::MatchExpr(match_expr) = &source_ptr.value.to_node(&root) {
                             match match_expr.expr() {
                                 Some(scrut_expr) if match_expr.match_arm_list().is_some() => {
                                     return Some(
@@ -601,13 +496,13 @@ impl<'db> AnyDiagnostic<'db> {
                 }
             }
             BodyValidationDiagnostic::RemoveUnnecessaryElse { if_expr } => {
-                if let Ok(source_ptr) = source_map.expr_syntax(if_expr)
-                    && let Some(ptr) = source_ptr.value.cast::<ast::IfExpr>()
-                {
-                    return Some(
-                        RemoveUnnecessaryElse { if_expr: InFile::new(source_ptr.file_id, ptr) }
-                            .into(),
-                    );
+                if let Ok(source_ptr) = source_map.expr_syntax(if_expr) {
+                    if let Some(ptr) = source_ptr.value.cast::<ast::IfExpr>() {
+                        return Some(
+                            RemoveUnnecessaryElse { if_expr: InFile::new(source_ptr.file_id, ptr) }
+                                .into(),
+                        );
+                    }
                 }
             }
         }
@@ -615,27 +510,16 @@ impl<'db> AnyDiagnostic<'db> {
     }
 
     pub(crate) fn inference_diagnostic(
-        db: &'db dyn HirDatabase,
+        db: &dyn HirDatabase,
         def: DefWithBodyId,
         d: &InferenceDiagnostic,
-        source_map: &hir_def::expr_store::BodySourceMap,
-        sig_map: &hir_def::expr_store::ExpressionStoreSourceMap,
-    ) -> Option<AnyDiagnostic<'db>> {
+        source_map: &hir_def::body::BodySourceMap,
+    ) -> Option<AnyDiagnostic> {
         let expr_syntax = |expr| {
-            source_map
-                .expr_syntax(expr)
-                .inspect_err(|_| stdx::never!("inference diagnostic in desugared expr"))
-                .ok()
+            source_map.expr_syntax(expr).inspect_err(|_| tracing::error!("synthetic syntax")).ok()
         };
         let pat_syntax = |pat| {
-            source_map
-                .pat_syntax(pat)
-                .inspect_err(|_| stdx::never!("inference diagnostic in desugared pattern"))
-                .ok()
-        };
-        let expr_or_pat_syntax = |id| match id {
-            ExprOrPatId::ExprId(expr) => expr_syntax(expr),
-            ExprOrPatId::PatId(pat) => pat_syntax(pat),
+            source_map.pat_syntax(pat).inspect_err(|_| tracing::error!("synthetic syntax")).ok()
         };
         Some(match d {
             &InferenceDiagnostic::NoSuchField { field: expr, private, variant } => {
@@ -643,9 +527,10 @@ impl<'db> AnyDiagnostic<'db> {
                     ExprOrPatId::ExprId(expr) => {
                         source_map.field_syntax(expr).map(AstPtr::wrap_left)
                     }
-                    ExprOrPatId::PatId(pat) => source_map.pat_field_syntax(pat),
+                    ExprOrPatId::PatId(pat) => {
+                        source_map.pat_field_syntax(pat).map(AstPtr::wrap_right)
+                    }
                 };
-                let private = private.map(|id| Field { id, parent: variant.into() });
                 NoSuchField { field: expr_or_pat, private, variant }.into()
             }
             &InferenceDiagnostic::MismatchedArgCount { call_expr, expected, found } => {
@@ -657,13 +542,16 @@ impl<'db> AnyDiagnostic<'db> {
                 PrivateField { expr, field }.into()
             }
             &InferenceDiagnostic::PrivateAssocItem { id, item } => {
-                let expr_or_pat = expr_or_pat_syntax(id)?;
+                let expr_or_pat = match id {
+                    ExprOrPatId::ExprId(expr) => expr_syntax(expr)?.map(AstPtr::wrap_left),
+                    ExprOrPatId::PatId(pat) => pat_syntax(pat)?.map(AstPtr::wrap_right),
+                };
                 let item = item.into();
                 PrivateAssocItem { expr_or_pat, item }.into()
             }
             InferenceDiagnostic::ExpectedFunction { call_expr, found } => {
                 let call_expr = expr_syntax(*call_expr)?;
-                ExpectedFunction { call: call_expr, found: Type::new(db, def, found.as_ref()) }
+                ExpectedFunction { call: call_expr, found: Type::new(db, def, found.clone()) }
                     .into()
             }
             InferenceDiagnostic::UnresolvedField {
@@ -676,7 +564,7 @@ impl<'db> AnyDiagnostic<'db> {
                 UnresolvedField {
                     expr,
                     name: name.clone(),
-                    receiver: Type::new(db, def, receiver.as_ref()),
+                    receiver: Type::new(db, def, receiver.clone()),
                     method_with_same_name_exists: *method_with_same_name_exists,
                 }
                 .into()
@@ -692,29 +580,24 @@ impl<'db> AnyDiagnostic<'db> {
                 UnresolvedMethodCall {
                     expr,
                     name: name.clone(),
-                    receiver: Type::new(db, def, receiver.as_ref()),
+                    receiver: Type::new(db, def, receiver.clone()),
                     field_with_same_name: field_with_same_name
-                        .as_ref()
-                        .map(|ty| Type::new(db, def, ty.as_ref())),
-                    assoc_func_with_same_name: assoc_func_with_same_name.map(Into::into),
+                        .clone()
+                        .map(|ty| Type::new(db, def, ty)),
+                    assoc_func_with_same_name: *assoc_func_with_same_name,
                 }
                 .into()
             }
             &InferenceDiagnostic::UnresolvedAssocItem { id } => {
-                let expr_or_pat = expr_or_pat_syntax(id)?;
+                let expr_or_pat = match id {
+                    ExprOrPatId::ExprId(expr) => expr_syntax(expr)?.map(AstPtr::wrap_left),
+                    ExprOrPatId::PatId(pat) => pat_syntax(pat)?.map(AstPtr::wrap_right),
+                };
                 UnresolvedAssocItem { expr_or_pat }.into()
             }
-            &InferenceDiagnostic::UnresolvedIdent { id } => {
-                let node = match id {
-                    ExprOrPatId::ExprId(id) => match source_map.expr_syntax(id) {
-                        Ok(syntax) => syntax.map(|it| (it, None)),
-                        Err(SyntheticSyntax) => source_map
-                            .format_args_implicit_capture(id)?
-                            .map(|(node, range)| (node.wrap_left(), Some(range))),
-                    },
-                    ExprOrPatId::PatId(id) => pat_syntax(id)?.map(|it| (it, None)),
-                };
-                UnresolvedIdent { node }.into()
+            &InferenceDiagnostic::UnresolvedIdent { expr } => {
+                let expr = expr_syntax(expr)?;
+                UnresolvedIdent { expr }.into()
             }
             &InferenceDiagnostic::BreakOutsideOfLoop { expr, is_break, bad_value_break } => {
                 let expr = expr_syntax(expr)?;
@@ -722,11 +605,11 @@ impl<'db> AnyDiagnostic<'db> {
             }
             InferenceDiagnostic::TypedHole { expr, expected } => {
                 let expr = expr_syntax(*expr)?;
-                TypedHole { expr, expected: Type::new(db, def, expected.as_ref()) }.into()
+                TypedHole { expr, expected: Type::new(db, def, expected.clone()) }.into()
             }
             &InferenceDiagnostic::MismatchedTupleStructPatArgCount { pat, expected, found } => {
                 let expr_or_pat = match pat {
-                    ExprOrPatId::ExprId(expr) => expr_syntax(expr)?,
+                    ExprOrPatId::ExprId(expr) => expr_syntax(expr)?.map(AstPtr::wrap_left),
                     ExprOrPatId::PatId(pat) => {
                         let InFile { file_id, value } = pat_syntax(pat)?;
 
@@ -737,214 +620,6 @@ impl<'db> AnyDiagnostic<'db> {
                 };
                 MismatchedTupleStructPatArgCount { expr_or_pat, expected, found }.into()
             }
-            InferenceDiagnostic::CastToUnsized { expr, cast_ty } => {
-                let expr = expr_syntax(*expr)?;
-                CastToUnsized { expr, cast_ty: Type::new(db, def, cast_ty.as_ref()) }.into()
-            }
-            InferenceDiagnostic::InvalidCast { expr, error, expr_ty, cast_ty } => {
-                let expr = expr_syntax(*expr)?;
-                let expr_ty = Type::new(db, def, expr_ty.as_ref());
-                let cast_ty = Type::new(db, def, cast_ty.as_ref());
-                InvalidCast { expr, error: *error, expr_ty, cast_ty }.into()
-            }
-            InferenceDiagnostic::TyDiagnostic { source, diag } => {
-                let source_map = match source {
-                    InferenceTyDiagnosticSource::Body => source_map,
-                    InferenceTyDiagnosticSource::Signature => sig_map,
-                };
-                Self::ty_diagnostic(diag, source_map, db)?
-            }
-            InferenceDiagnostic::PathDiagnostic { node, diag } => {
-                let source = expr_or_pat_syntax(*node)?;
-                let syntax = source.value.to_node(&db.parse_or_expand(source.file_id));
-                let path = match_ast! {
-                    match (syntax.syntax()) {
-                        ast::RecordExpr(it) => it.path()?,
-                        ast::RecordPat(it) => it.path()?,
-                        ast::TupleStructPat(it) => it.path()?,
-                        ast::PathExpr(it) => it.path()?,
-                        ast::PathPat(it) => it.path()?,
-                        _ => return None,
-                    }
-                };
-                Self::path_diagnostic(diag, source.with_value(path))?
-            }
-            &InferenceDiagnostic::MethodCallIncorrectGenericsLen {
-                expr,
-                provided_count,
-                expected_count,
-                kind,
-                def,
-            } => {
-                let syntax = expr_syntax(expr)?;
-                let file_id = syntax.file_id;
-                let syntax =
-                    syntax.with_value(syntax.value.cast::<ast::MethodCallExpr>()?).to_node(db);
-                let generics_or_name = syntax
-                    .generic_arg_list()
-                    .map(Either::Left)
-                    .or_else(|| syntax.name_ref().map(Either::Right))?;
-                let generics_or_name = InFile::new(file_id, AstPtr::new(&generics_or_name));
-                IncorrectGenericsLen {
-                    generics_or_segment: generics_or_name,
-                    kind,
-                    provided: provided_count,
-                    expected: expected_count,
-                    def: def.into(),
-                }
-                .into()
-            }
-            &InferenceDiagnostic::MethodCallIncorrectGenericsOrder {
-                expr,
-                param_id,
-                arg_idx,
-                has_self_arg,
-            } => {
-                let syntax = expr_syntax(expr)?;
-                let file_id = syntax.file_id;
-                let syntax =
-                    syntax.with_value(syntax.value.cast::<ast::MethodCallExpr>()?).to_node(db);
-                let generic_args = syntax.generic_arg_list()?;
-                let provided_arg = hir_generic_arg_to_ast(&generic_args, arg_idx, has_self_arg)?;
-                let provided_arg = InFile::new(file_id, AstPtr::new(&provided_arg));
-                let expected_kind = GenericArgKind::from_id(param_id);
-                IncorrectGenericsOrder { provided_arg, expected_kind }.into()
-            }
         })
     }
-
-    fn path_diagnostic(
-        diag: &PathLoweringDiagnostic,
-        path: InFile<ast::Path>,
-    ) -> Option<AnyDiagnostic<'db>> {
-        Some(match *diag {
-            PathLoweringDiagnostic::GenericArgsProhibited { segment, reason } => {
-                let segment = hir_segment_to_ast_segment(&path.value, segment)?;
-
-                if let Some(rtn) = segment.return_type_syntax() {
-                    // RTN errors are emitted as `GenericArgsProhibited` or `ParenthesizedGenericArgsWithoutFnTrait`.
-                    return Some(BadRtn { rtn: path.with_value(AstPtr::new(&rtn)) }.into());
-                }
-
-                let args = if let Some(generics) = segment.generic_arg_list() {
-                    AstPtr::new(&generics).wrap_left()
-                } else {
-                    AstPtr::new(&segment.parenthesized_arg_list()?).wrap_right()
-                };
-                let args = path.with_value(args);
-                GenericArgsProhibited { args, reason }.into()
-            }
-            PathLoweringDiagnostic::ParenthesizedGenericArgsWithoutFnTrait { segment } => {
-                let segment = hir_segment_to_ast_segment(&path.value, segment)?;
-
-                if let Some(rtn) = segment.return_type_syntax() {
-                    // RTN errors are emitted as `GenericArgsProhibited` or `ParenthesizedGenericArgsWithoutFnTrait`.
-                    return Some(BadRtn { rtn: path.with_value(AstPtr::new(&rtn)) }.into());
-                }
-
-                let args = AstPtr::new(&segment.parenthesized_arg_list()?);
-                let args = path.with_value(args);
-                ParenthesizedGenericArgsWithoutFnTrait { args }.into()
-            }
-            PathLoweringDiagnostic::IncorrectGenericsLen {
-                generics_source,
-                provided_count,
-                expected_count,
-                kind,
-                def,
-            } => {
-                let generics_or_segment =
-                    path_generics_source_to_ast(&path.value, generics_source)?;
-                let generics_or_segment = path.with_value(AstPtr::new(&generics_or_segment));
-                IncorrectGenericsLen {
-                    generics_or_segment,
-                    kind,
-                    provided: provided_count,
-                    expected: expected_count,
-                    def: def.into(),
-                }
-                .into()
-            }
-            PathLoweringDiagnostic::IncorrectGenericsOrder {
-                generics_source,
-                param_id,
-                arg_idx,
-                has_self_arg,
-            } => {
-                let generic_args =
-                    path_generics_source_to_ast(&path.value, generics_source)?.left()?;
-                let provided_arg = hir_generic_arg_to_ast(&generic_args, arg_idx, has_self_arg)?;
-                let provided_arg = path.with_value(AstPtr::new(&provided_arg));
-                let expected_kind = GenericArgKind::from_id(param_id);
-                IncorrectGenericsOrder { provided_arg, expected_kind }.into()
-            }
-            PathLoweringDiagnostic::MissingLifetime { generics_source, expected_count, def }
-            | PathLoweringDiagnostic::ElisionFailure { generics_source, expected_count, def } => {
-                let generics_or_segment =
-                    path_generics_source_to_ast(&path.value, generics_source)?;
-                let generics_or_segment = path.with_value(AstPtr::new(&generics_or_segment));
-                MissingLifetime { generics_or_segment, expected: expected_count, def: def.into() }
-                    .into()
-            }
-            PathLoweringDiagnostic::ElidedLifetimesInPath {
-                generics_source,
-                expected_count,
-                def,
-                hard_error,
-            } => {
-                let generics_or_segment =
-                    path_generics_source_to_ast(&path.value, generics_source)?;
-                let generics_or_segment = path.with_value(AstPtr::new(&generics_or_segment));
-                ElidedLifetimesInPath {
-                    generics_or_segment,
-                    expected: expected_count,
-                    def: def.into(),
-                    hard_error,
-                }
-                .into()
-            }
-        })
-    }
-
-    pub(crate) fn ty_diagnostic(
-        diag: &TyLoweringDiagnostic,
-        source_map: &ExpressionStoreSourceMap,
-        db: &'db dyn HirDatabase,
-    ) -> Option<AnyDiagnostic<'db>> {
-        let Ok(source) = source_map.type_syntax(diag.source) else {
-            stdx::never!("error on synthetic type syntax");
-            return None;
-        };
-        let syntax = || source.value.to_node(&db.parse_or_expand(source.file_id));
-        Some(match &diag.kind {
-            TyLoweringDiagnosticKind::PathDiagnostic(diag) => {
-                let ast::Type::PathType(syntax) = syntax() else { return None };
-                Self::path_diagnostic(diag, source.with_value(syntax.path()?))?
-            }
-        })
-    }
-}
-
-fn path_generics_source_to_ast(
-    path: &ast::Path,
-    generics_source: PathGenericsSource,
-) -> Option<Either<ast::GenericArgList, ast::NameRef>> {
-    Some(match generics_source {
-        PathGenericsSource::Segment(segment) => {
-            let segment = hir_segment_to_ast_segment(path, segment)?;
-            segment
-                .generic_arg_list()
-                .map(Either::Left)
-                .or_else(|| segment.name_ref().map(Either::Right))?
-        }
-        PathGenericsSource::AssocType { segment, assoc_type } => {
-            let segment = hir_segment_to_ast_segment(path, segment)?;
-            let segment_args = segment.generic_arg_list()?;
-            let assoc = hir_assoc_type_binding_to_ast(&segment_args, assoc_type)?;
-            assoc
-                .generic_arg_list()
-                .map(Either::Left)
-                .or_else(|| assoc.name_ref().map(Either::Right))?
-        }
-    })
 }

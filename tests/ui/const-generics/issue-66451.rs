@@ -1,15 +1,15 @@
 #![feature(adt_const_params, unsized_const_params)]
 #![allow(incomplete_features)]
 
-use std::marker::ConstParamTy;
+use std::marker::UnsizedConstParamTy;
 
-#[derive(Debug, PartialEq, Eq, ConstParamTy)]
+#[derive(Debug, PartialEq, Eq, UnsizedConstParamTy)]
 struct Foo {
     value: i32,
     nested: &'static Bar<i32>,
 }
 
-#[derive(Debug, PartialEq, Eq, ConstParamTy)]
+#[derive(Debug, PartialEq, Eq, UnsizedConstParamTy)]
 struct Bar<T>(T);
 
 struct Test<const F: Foo>;

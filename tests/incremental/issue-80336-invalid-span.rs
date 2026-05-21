@@ -4,7 +4,6 @@
 
 //@ revisions:rpass1 rpass2
 //@ only-x86_64
-//@ ignore-backends: gcc
 
 pub fn main() {
     let _ = is_x86_feature_detected!("avx2");

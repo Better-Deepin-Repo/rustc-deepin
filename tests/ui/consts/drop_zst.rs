@@ -11,7 +11,7 @@ impl Drop for S {
 }
 
 const fn foo() {
-    let s = S; //~ ERROR destructor
+    let s = S; //~ destructor
 }
 
 fn main() {}

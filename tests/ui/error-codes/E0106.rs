@@ -1,5 +1,3 @@
-//@ dont-require-annotations: NOTE
-
 struct Foo {
     x: &bool,
     //~^ ERROR E0106
@@ -18,10 +16,10 @@ struct Buzz<'a, 'b>(&'a str, &'b str);
 struct Quux {
     baz: Baz,
     //~^ ERROR E0106
-    //~| NOTE expected named lifetime parameter
+    //~| expected named lifetime parameter
     buzz: Buzz,
     //~^ ERROR E0106
-    //~| NOTE expected 2 lifetime parameters
+    //~| expected 2 lifetime parameters
 }
 
 fn main() {

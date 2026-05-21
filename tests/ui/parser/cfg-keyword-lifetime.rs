@@ -1,6 +1,6 @@
 // Disallow `'keyword` even in cfg'd code.
 
-#[cfg(false)]
+#[cfg(any())]
 fn hello() -> &'ref () {}
 //~^ ERROR lifetimes cannot use keyword names
 

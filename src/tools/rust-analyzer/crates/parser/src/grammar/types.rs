@@ -20,15 +20,10 @@ pub(super) const TYPE_FIRST: TokenSet = paths::PATH_FIRST.union(TokenSet::new(&[
 
 pub(super) const TYPE_RECOVERY_SET: TokenSet = TokenSet::new(&[
     T![')'],
-    // test_err type_in_array_recover
-    // const _: [&];
-    T![']'],
-    T!['}'],
     T![>],
     T![,],
     // test_err struct_field_recover
     // struct S { f pub g: () }
-    // struct S { f: pub g: () }
     T![pub],
 ]);
 
@@ -54,10 +49,8 @@ fn type_with_bounds_cond(p: &mut Parser<'_>, allow_bounds: bool) {
         T![dyn] => dyn_trait_type(p),
         // Some path types are not allowed to have bounds (no plus)
         T![<] => path_type_bounds(p, allow_bounds),
-        T![ident] if !p.current_edition().at_least_2018() && is_dyn_weak(p) => {
-            dyn_trait_type_weak(p)
-        }
-        _ if paths::is_path_start(p) => path_or_macro_type(p, allow_bounds),
+        T![ident] if !p.edition().at_least_2018() && is_dyn_weak(p) => dyn_trait_type_weak(p),
+        _ if paths::is_path_start(p) => path_or_macro_type_(p, allow_bounds),
         LIFETIME_IDENT if p.nth_at(1, T![+]) => bare_dyn_trait_type(p),
         _ => {
             p.err_recover("expected type", TYPE_RECOVERY_SET);
@@ -65,7 +58,7 @@ fn type_with_bounds_cond(p: &mut Parser<'_>, allow_bounds: bool) {
     }
 }
 
-pub(crate) fn is_dyn_weak(p: &Parser<'_>) -> bool {
+fn is_dyn_weak(p: &Parser<'_>) -> bool {
     const WEAK_DYN_PATH_FIRST: TokenSet = TokenSet::new(&[
         IDENT,
         T![self],
@@ -251,14 +244,13 @@ fn fn_ptr_type(p: &mut Parser<'_>) {
 }
 
 pub(super) fn for_binder(p: &mut Parser<'_>) {
-    let m = p.start();
+    assert!(p.at(T![for]));
     p.bump(T![for]);
     if p.at(T![<]) {
-        generic_params::generic_param_list(p);
+        generic_params::opt_generic_param_list(p);
     } else {
         p.error("expected `<`");
     }
-    m.complete(p, FOR_BINDER);
 }
 
 // test for_type
@@ -333,10 +325,19 @@ fn bare_dyn_trait_type(p: &mut Parser<'_>) {
     m.complete(p, DYN_TRAIT_TYPE);
 }
 
+// test path_type
+// type A = Foo;
+// type B = ::Foo;
+// type C = self::Foo;
+// type D = super::Foo;
+pub(super) fn path_type(p: &mut Parser<'_>) {
+    path_type_bounds(p, true);
+}
+
 // test macro_call_type
 // type A = foo!();
 // type B = crate::foo!();
-fn path_or_macro_type(p: &mut Parser<'_>, allow_bounds: bool) {
+fn path_or_macro_type_(p: &mut Parser<'_>, allow_bounds: bool) {
     assert!(paths::is_path_start(p));
     let r = p.start();
     let m = p.start();
@@ -359,11 +360,6 @@ fn path_or_macro_type(p: &mut Parser<'_>, allow_bounds: bool) {
     }
 }
 
-// test path_type
-// type A = Foo;
-// type B = ::Foo;
-// type C = self::Foo;
-// type D = super::Foo;
 pub(super) fn path_type_bounds(p: &mut Parser<'_>, allow_bounds: bool) {
     assert!(paths::is_path_start(p));
     let m = p.start();

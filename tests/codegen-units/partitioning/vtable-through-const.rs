@@ -1,11 +1,12 @@
+// We specify incremental here because we want to test the partitioning for incremental compilation
 //@ incremental
-// Need to disable optimizations to ensure consistent output across all CI runners.
-//@ compile-flags: -Copt-level=0
+//@ compile-flags:-Zprint-mono-items=lazy
+//@ compile-flags:-Zinline-in-all-cgus
 
-#![crate_type = "rlib"]
+// This test case makes sure, that references made through constants are
+// recorded properly in the InliningMap.
 
-// This test case makes sure that references made through constants cause trait associated methods
-// to be monomorphized when required.
+#![feature(start)]
 
 mod mod1 {
     struct NeedsDrop;
@@ -35,11 +36,12 @@ mod mod1 {
         }
     }
 
+    //~ MONO_ITEM fn mod1::id::<i64> @@ vtable_through_const-mod1.volatile[Internal]
     fn id<T>(x: T) -> T {
         x
     }
 
-    // These are referenced, so they produce mono-items (see main)
+    // These are referenced, so they produce mono-items (see start())
     pub const TRAIT1_REF: &'static Trait1 = &NeedsDrop as &Trait1;
     pub const TRAIT1_GEN_REF: &'static Trait1Gen<u8> = &NeedsDrop as &Trait1Gen<u8>;
     pub const ID_CHAR: fn(char) -> char = id::<char>;
@@ -49,6 +51,8 @@ mod mod1 {
         fn do_something_else(&self) {}
     }
 
+    //~ MONO_ITEM fn <mod1::NeedsDrop as mod1::Trait2>::do_something @@ vtable_through_const-mod1.volatile[Internal]
+    //~ MONO_ITEM fn <mod1::NeedsDrop as mod1::Trait2>::do_something_else @@ vtable_through_const-mod1.volatile[Internal]
     impl Trait2 for NeedsDrop {}
 
     pub trait Trait2Gen<T> {
@@ -71,9 +75,10 @@ mod mod1 {
     pub const ID_I64: fn(i64) -> i64 = id::<i64>;
 }
 
-//~ MONO_ITEM fn main @@ vtable_through_const[External]
-pub fn main() {
-    //~ MONO_ITEM fn <mod1::NeedsDrop as std::ops::Drop>::drop @@ vtable_through_const-fallback.cgu[External]
+//~ MONO_ITEM fn start
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
+    //~ MONO_ITEM fn <mod1::NeedsDrop as std::ops::Drop>::drop @@ vtable_through_const-fallback.cgu[Internal]
     //~ MONO_ITEM fn std::ptr::drop_in_place::<mod1::NeedsDrop> - shim(Some(mod1::NeedsDrop)) @@ vtable_through_const-fallback.cgu[External]
 
     // Since Trait1::do_something() is instantiated via its default implementation,
@@ -90,8 +95,12 @@ pub fn main() {
     // Same as above
     //~ MONO_ITEM fn <mod1::NeedsDrop as mod1::Trait1Gen<u8>>::do_something @@ vtable_through_const-mod1.volatile[External]
     //~ MONO_ITEM fn <mod1::NeedsDrop as mod1::Trait1Gen<u8>>::do_something_else @@ vtable_through_const-mod1.volatile[External]
+    //~ MONO_ITEM fn <mod1::NeedsDrop as mod1::Trait2Gen<u8>>::do_something @@ vtable_through_const-mod1.volatile[Internal]
+    //~ MONO_ITEM fn <mod1::NeedsDrop as mod1::Trait2Gen<u8>>::do_something_else @@ vtable_through_const-mod1.volatile[Internal]
     mod1::TRAIT1_GEN_REF.do_something(0u8);
 
     //~ MONO_ITEM fn mod1::id::<char> @@ vtable_through_const-mod1.volatile[External]
     mod1::ID_CHAR('x');
+
+    0
 }

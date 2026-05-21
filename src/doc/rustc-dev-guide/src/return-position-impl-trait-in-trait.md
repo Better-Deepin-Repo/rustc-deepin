@@ -356,7 +356,7 @@ trait Foo {
 
 Failing because a down-stream impl could theoretically provide an
 implementation for `RPITIT` without providing an implementation of
-`bar`:
+`foo`:
 
 ```text
 error[E0308]: mismatched types

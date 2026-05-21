@@ -3,7 +3,7 @@
 
 //@ run-fail
 //@ needs-unwind
-//@ regex-error-pattern: thread 'main'.*panicked
+//@ error-pattern: thread 'main' panicked
 //@ error-pattern: `async fn` resumed after panicking
 //@ edition:2018
 

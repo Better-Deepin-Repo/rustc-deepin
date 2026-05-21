@@ -4,8 +4,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use annotate_snippets::Level;
-use anyhow::{Context as _, anyhow, bail};
+use anyhow::{anyhow, bail, Context as _};
 use glob::glob;
 use itertools::Itertools;
 use tracing::debug;
@@ -14,47 +13,30 @@ use url::Url;
 use crate::core::compiler::Unit;
 use crate::core::features::Features;
 use crate::core::registry::PackageRegistry;
-use crate::core::resolver::ResolveBehavior;
 use crate::core::resolver::features::CliFeatures;
+use crate::core::resolver::ResolveBehavior;
 use crate::core::{
-    Dependency, Edition, FeatureValue, PackageId, PackageIdSpec, PackageIdSpecQuery, Patch,
-    PatchLocation,
+    Dependency, Edition, FeatureValue, PackageId, PackageIdSpec, PackageIdSpecQuery,
 };
 use crate::core::{EitherManifest, Package, SourceId, VirtualManifest};
-use crate::lints::analyze_cargo_lints_table;
-use crate::lints::rules::blanket_hint_mostly_unused;
-use crate::lints::rules::check_im_a_teapot;
-use crate::lints::rules::implicit_minimum_version_req_pkg;
-use crate::lints::rules::implicit_minimum_version_req_ws;
-use crate::lints::rules::missing_lints_inheritance;
-use crate::lints::rules::non_kebab_case_bins;
-use crate::lints::rules::non_kebab_case_features;
-use crate::lints::rules::non_kebab_case_packages;
-use crate::lints::rules::non_snake_case_features;
-use crate::lints::rules::non_snake_case_packages;
-use crate::lints::rules::redundant_homepage;
-use crate::lints::rules::redundant_readme;
-use crate::lints::rules::unused_workspace_dependencies;
-use crate::lints::rules::unused_workspace_package_fields;
 use crate::ops;
-use crate::ops::lockfile::LOCKFILE_NAME;
-use crate::sources::{CRATES_IO_INDEX, CRATES_IO_REGISTRY, PathSource, SourceConfigMap};
-use crate::util::context;
-use crate::util::context::{FeatureUnification, Value};
+use crate::sources::{PathSource, SourceConfigMap, CRATES_IO_INDEX, CRATES_IO_REGISTRY};
 use crate::util::edit_distance;
 use crate::util::errors::{CargoResult, ManifestError};
 use crate::util::interning::InternedString;
-use crate::util::toml::{InheritableFields, read_manifest};
-use crate::util::{
-    Filesystem, GlobalContext, IntoUrl, context::CargoResolverConfig, context::ConfigRelativePath,
-    context::IncompatibleRustVersions,
+use crate::util::lints::{
+    analyze_cargo_lints_table, check_im_a_teapot, check_implicit_features, unused_dependencies,
 };
-
+use crate::util::toml::{read_manifest, InheritableFields};
+use crate::util::{
+    context::CargoResolverConfig, context::ConfigRelativePath, context::IncompatibleRustVersions,
+    Filesystem, GlobalContext, IntoUrl,
+};
 use cargo_util::paths;
 use cargo_util::paths::normalize_path;
 use cargo_util_schemas::manifest;
 use cargo_util_schemas::manifest::RustVersion;
-use cargo_util_schemas::manifest::{TomlDependency, TomlManifest, TomlProfiles};
+use cargo_util_schemas::manifest::{TomlDependency, TomlProfiles};
 use pathdiff::diff_paths;
 
 /// The core abstraction in Cargo for working with a workspace of crates.
@@ -85,10 +67,6 @@ pub struct Workspace<'gctx> {
     /// Shared target directory for all the packages of this workspace.
     /// `None` if the default path of `root/target` should be used.
     target_dir: Option<Filesystem>,
-
-    /// Shared build directory for intermediate build artifacts.
-    /// This directory may be shared between multiple workspaces.
-    build_dir: Option<Filesystem>,
 
     /// List of members in this workspace with a listing of all their manifest
     /// paths. The packages themselves can be looked up through the `packages`
@@ -136,10 +114,7 @@ pub struct Workspace<'gctx> {
     /// and other places that use rust version.
     /// This is set based on the resolver version, config settings, and CLI flags.
     resolve_honors_rust_version: bool,
-    /// The feature unification mode used when building packages.
-    resolve_feature_unification: FeatureUnification,
-    /// Latest publish time allowed for packages
-    resolve_publish_time: Option<jiff::Timestamp>,
+
     /// Workspace-level custom metadata
     custom_metadata: Option<toml::Value>,
 
@@ -233,6 +208,7 @@ impl<'gctx> Workspace<'gctx> {
     /// before returning it, so `Ok` is only returned for valid workspaces.
     pub fn new(manifest_path: &Path, gctx: &'gctx GlobalContext) -> CargoResult<Workspace<'gctx>> {
         let mut ws = Workspace::new_default(manifest_path.to_path_buf(), gctx);
+        ws.target_dir = gctx.target_dir()?;
 
         if manifest_path.is_relative() {
             bail!(
@@ -242,9 +218,6 @@ impl<'gctx> Workspace<'gctx> {
         } else {
             ws.root_manifest = ws.find_root(manifest_path)?;
         }
-
-        ws.target_dir = gctx.target_dir()?;
-        ws.build_dir = gctx.build_dir(ws.root_manifest())?;
 
         ws.custom_metadata = ws
             .load_workspace_config()?
@@ -265,7 +238,6 @@ impl<'gctx> Workspace<'gctx> {
             },
             root_manifest: None,
             target_dir: None,
-            build_dir: None,
             members: Vec::new(),
             member_ids: HashSet::new(),
             default_members: Vec::new(),
@@ -276,8 +248,6 @@ impl<'gctx> Workspace<'gctx> {
             requested_lockfile_path: None,
             resolve_behavior: ResolveBehavior::V1,
             resolve_honors_rust_version: false,
-            resolve_feature_unification: FeatureUnification::Selected,
-            resolve_publish_time: None,
             custom_metadata: None,
             local_overlays: HashMap::new(),
         }
@@ -301,33 +271,19 @@ impl<'gctx> Workspace<'gctx> {
         let mut ws = Workspace::new_default(package.manifest_path().to_path_buf(), gctx);
         ws.is_ephemeral = true;
         ws.require_optional_deps = require_optional_deps;
+        let key = ws.current_manifest.parent().unwrap();
         let id = package.package_id();
         let package = MaybePackage::Package(package);
-        ws.packages
-            .packages
-            .insert(ws.current_manifest.clone(), package);
+        ws.packages.packages.insert(key.to_path_buf(), package);
         ws.target_dir = if let Some(dir) = target_dir {
             Some(dir)
         } else {
             ws.gctx.target_dir()?
         };
-        ws.build_dir = ws.target_dir.clone();
         ws.members.push(ws.current_manifest.clone());
         ws.member_ids.insert(id);
         ws.default_members.push(ws.current_manifest.clone());
         ws.set_resolve_behavior()?;
-        Ok(ws)
-    }
-
-    /// Reloads the workspace.
-    ///
-    /// This is useful if the workspace has been updated, such as with `cargo
-    /// fix` modifying the `Cargo.toml` file.
-    pub fn reload(&self, gctx: &'gctx GlobalContext) -> CargoResult<Workspace<'gctx>> {
-        let mut ws = Workspace::new(&self.current_manifest, gctx)?;
-        ws.set_resolve_honors_rust_version(Some(self.resolve_honors_rust_version));
-        ws.set_resolve_feature_unification(self.resolve_feature_unification);
-        ws.set_requested_lockfile_path(self.requested_lockfile_path.clone());
         Ok(ws)
     }
 
@@ -352,61 +308,30 @@ impl<'gctx> Workspace<'gctx> {
                 }
             }
         }
-        let config = self.gctx().get::<CargoResolverConfig>("resolver")?;
-        if let Some(incompatible_rust_versions) = config.incompatible_rust_versions {
-            self.resolve_honors_rust_version =
-                incompatible_rust_versions == IncompatibleRustVersions::Fallback;
-        }
-        if self.gctx().cli_unstable().feature_unification {
-            self.resolve_feature_unification = config
-                .feature_unification
-                .unwrap_or(FeatureUnification::Selected);
-        } else if config.feature_unification.is_some() {
-            self.gctx()
-                .shell()
-                .warn("ignoring `resolver.feature-unification` without `-Zfeature-unification`")?;
-        };
-
-        if let Some(lockfile_path) = config.lockfile_path {
-            if self.gctx().cli_unstable().lockfile_path {
-                // Reserve the ability to add templates in the future.
-                let replacements: [(&str, &str); 0] = [];
-                let path = lockfile_path
-                    .resolve_templated_path(self.gctx(), replacements)
-                    .map_err(|e| match e {
-                        context::ResolveTemplateError::UnexpectedVariable {
-                            variable,
-                            raw_template,
-                        } => {
-                            anyhow!(
-                                "unexpected variable `{variable}` in resolver.lockfile-path `{raw_template}`"
-                            )
-                        }
-                        context::ResolveTemplateError::UnexpectedBracket { bracket_type, raw_template } => {
-                            let (btype, literal) = match bracket_type {
-                                context::BracketType::Opening => ("opening", "{"),
-                                context::BracketType::Closing => ("closing", "}"),
-                            };
-
-                            anyhow!(
-                                "unexpected {btype} bracket `{literal}` in build.build-dir path `{raw_template}`"
-                            )
-                        }
-                    })?;
-                if !path.ends_with(LOCKFILE_NAME) {
-                    bail!("the `resolver.lockfile-path` must be a path to a {LOCKFILE_NAME} file");
+        match self.gctx().get::<CargoResolverConfig>("resolver") {
+            Ok(CargoResolverConfig {
+                incompatible_rust_versions: Some(incompatible_rust_versions),
+            }) => {
+                if self.gctx().cli_unstable().msrv_policy {
+                    self.resolve_honors_rust_version =
+                        incompatible_rust_versions == IncompatibleRustVersions::Fallback;
+                } else {
+                    self.gctx()
+                        .shell()
+                        .warn("ignoring `resolver` config table without `-Zmsrv-policy`")?;
                 }
-                if path.is_dir() {
-                    bail!(
-                        "`resolver.lockfile-path` `{}` is a directory but expected a file",
-                        path.display()
-                    );
+            }
+            Ok(CargoResolverConfig {
+                incompatible_rust_versions: None,
+            }) => {}
+            Err(err) => {
+                if self.gctx().cli_unstable().msrv_policy {
+                    return Err(err);
+                } else {
+                    self.gctx()
+                        .shell()
+                        .warn("ignoring `resolver` config table without `-Zmsrv-policy`")?;
                 }
-                self.requested_lockfile_path = Some(path);
-            } else {
-                self.gctx().shell().warn(
-                    "ignoring `resolver.lockfile-path`, pass `-Zlockfile-path` to enable it",
-                )?;
             }
         }
 
@@ -470,7 +395,10 @@ impl<'gctx> Workspace<'gctx> {
     }
 
     pub fn profiles(&self) -> Option<&TomlProfiles> {
-        self.root_maybe().profiles()
+        match self.root_maybe() {
+            MaybePackage::Package(p) => p.manifest().profiles(),
+            MaybePackage::Virtual(vm) => vm.profiles(),
+        }
     }
 
     /// Returns the root path of this workspace.
@@ -489,7 +417,7 @@ impl<'gctx> Workspace<'gctx> {
             .unwrap_or(&self.current_manifest)
     }
 
-    /// Returns the root Package or `VirtualManifest`.
+    /// Returns the root Package or VirtualManifest.
     pub fn root_maybe(&self) -> &MaybePackage {
         self.packages.get(self.root_manifest())
     }
@@ -500,33 +428,17 @@ impl<'gctx> Workspace<'gctx> {
             .unwrap_or_else(|| self.default_target_dir())
     }
 
-    pub fn build_dir(&self) -> Filesystem {
-        self.build_dir
-            .clone()
-            .or_else(|| self.target_dir.clone())
-            .unwrap_or_else(|| self.default_build_dir())
-    }
-
     fn default_target_dir(&self) -> Filesystem {
         if self.root_maybe().is_embedded() {
-            self.build_dir().join("target")
+            let hash = crate::util::hex::short_hash(&self.root_manifest().to_string_lossy());
+            let mut rel_path = PathBuf::new();
+            rel_path.push("target");
+            rel_path.push(&hash[0..2]);
+            rel_path.push(&hash[2..]);
+
+            self.gctx().home().join(rel_path)
         } else {
             Filesystem::new(self.root().join("target"))
-        }
-    }
-
-    fn default_build_dir(&self) -> Filesystem {
-        if self.root_maybe().is_embedded() {
-            let default = ConfigRelativePath::new(
-                "{cargo-cache-home}/build/{workspace-path-hash}"
-                    .to_owned()
-                    .into(),
-            );
-            self.gctx()
-                .custom_build_dir(&default, self.root_manifest())
-                .expect("template is correct")
-        } else {
-            self.default_target_dir()
         }
     }
 
@@ -540,12 +452,12 @@ impl<'gctx> Workspace<'gctx> {
         }
     }
 
-    fn config_patch(&self) -> CargoResult<HashMap<Url, Vec<Patch>>> {
+    fn config_patch(&self) -> CargoResult<HashMap<Url, Vec<Dependency>>> {
         let config_patch: Option<
-            BTreeMap<String, BTreeMap<String, Value<TomlDependency<ConfigRelativePath>>>>,
+            BTreeMap<String, BTreeMap<String, TomlDependency<ConfigRelativePath>>>,
         > = self.gctx.get("patch")?;
 
-        let source = SourceId::for_manifest_path(self.root_manifest())?;
+        let source = SourceId::for_path(self.root())?;
 
         let mut warnings = Vec::new();
 
@@ -564,18 +476,19 @@ impl<'gctx> Workspace<'gctx> {
             patch.insert(
                 url,
                 deps.iter()
-                    .map(|(name, dependency_cv)| {
-                        crate::util::toml::config_patch_to_dependency(
-                            &dependency_cv.val,
+                    .map(|(name, dep)| {
+                        crate::util::toml::to_dependency(
+                            dep,
                             name,
                             source,
                             self.gctx,
                             &mut warnings,
+                            /* platform */ None,
+                            // NOTE: Since we use ConfigRelativePath, this root isn't used as
+                            // any relative paths are resolved before they'd be joined with root.
+                            Path::new("unused-relative-path"),
+                            /* kind */ None,
                         )
-                        .map(|dep| Patch {
-                            dep,
-                            loc: PatchLocation::Config(dependency_cv.definition.clone()),
-                        })
                     })
                     .collect::<CargoResult<Vec<_>>>()?,
             );
@@ -593,7 +506,7 @@ impl<'gctx> Workspace<'gctx> {
     /// Returns the root `[patch]` section of this workspace.
     ///
     /// This may be from a virtual crate or an actual crate.
-    pub fn root_patch(&self) -> CargoResult<HashMap<Url, Vec<Patch>>> {
+    pub fn root_patch(&self) -> CargoResult<HashMap<Url, Vec<Dependency>>> {
         let from_manifest = match self.root_maybe() {
             MaybePackage::Package(p) => p.manifest().patch(),
             MaybePackage::Virtual(vm) => vm.patch(),
@@ -618,7 +531,7 @@ impl<'gctx> Workspace<'gctx> {
                 for dep_from_config in &mut *deps_from_config {
                     if let Some(i) = from_manifest_pruned.iter().position(|dep_from_manifest| {
                         // XXX: should this also take into account version numbers?
-                        dep_from_config.dep.name_in_toml() == dep_from_manifest.dep.name_in_toml()
+                        dep_from_config.name_in_toml() == dep_from_manifest.name_in_toml()
                     }) {
                         from_manifest_pruned.swap_remove(i);
                     }
@@ -646,11 +559,15 @@ impl<'gctx> Workspace<'gctx> {
     /// Returns a mutable iterator over all packages in this workspace
     pub fn members_mut(&mut self) -> impl Iterator<Item = &mut Package> {
         let packages = &mut self.packages.packages;
-        let members: HashSet<_> = self.members.iter().map(|path| path).collect();
+        let members: HashSet<_> = self
+            .members
+            .iter()
+            .map(|path| path.parent().unwrap().to_owned())
+            .collect();
 
         packages.iter_mut().filter_map(move |(path, package)| {
             if members.contains(path) {
-                if let MaybePackage::Package(p) = package {
+                if let MaybePackage::Package(ref mut p) = package {
                     return Some(p);
                 }
             }
@@ -660,7 +577,7 @@ impl<'gctx> Workspace<'gctx> {
     }
 
     /// Returns an iterator over default packages in this workspace
-    pub fn default_members<'a>(&'a self) -> impl Iterator<Item = &'a Package> {
+    pub fn default_members<'a>(&'a self) -> impl Iterator<Item = &Package> {
         let packages = &self.packages;
         self.default_members
             .iter()
@@ -681,7 +598,7 @@ impl<'gctx> Workspace<'gctx> {
 
         packages.iter_mut().filter_map(move |(path, package)| {
             if members.contains(path) {
-                if let MaybePackage::Package(p) = package {
+                if let MaybePackage::Package(ref mut p) = package {
                     return Some(p);
                 }
             }
@@ -693,11 +610,6 @@ impl<'gctx> Workspace<'gctx> {
     /// Returns true if the package is a member of the workspace.
     pub fn is_member(&self, pkg: &Package) -> bool {
         self.member_ids.contains(&pkg.package_id())
-    }
-
-    /// Returns true if the given package_id is a member of the workspace.
-    pub fn is_member_id(&self, package_id: PackageId) -> bool {
-        self.member_ids.contains(&package_id)
     }
 
     pub fn is_ephemeral(&self) -> bool {
@@ -740,30 +652,19 @@ impl<'gctx> Workspace<'gctx> {
 
     fn default_lock_root(&self) -> Filesystem {
         if self.root_maybe().is_embedded() {
-            // Include a workspace hash in case the user requests a shared build-dir so that
-            // scripts don't fight over the `Cargo.lock` content
-            let workspace_manifest_path = self.root_manifest();
-            let real_path = std::fs::canonicalize(workspace_manifest_path)
-                .unwrap_or_else(|_err| workspace_manifest_path.to_owned());
-            let hash = crate::util::hex::short_hash(&real_path);
-            self.build_dir().join(hash)
+            self.target_dir()
         } else {
             Filesystem::new(self.root().to_owned())
         }
     }
 
-    // NOTE: may be removed once the deprecated `--lockfile-path` CLI flag is removed
     pub fn set_requested_lockfile_path(&mut self, path: Option<PathBuf>) {
         self.requested_lockfile_path = path;
     }
 
-    pub fn requested_lockfile_path(&self) -> Option<&Path> {
-        self.requested_lockfile_path.as_deref()
-    }
-
     /// Get the lowest-common denominator `package.rust-version` within the workspace, if specified
     /// anywhere
-    pub fn lowest_rust_version(&self) -> Option<&RustVersion> {
+    pub fn rust_version(&self) -> Option<&RustVersion> {
         self.members().filter_map(|pkg| pkg.rust_version()).min()
     }
 
@@ -777,22 +678,6 @@ impl<'gctx> Workspace<'gctx> {
         self.resolve_honors_rust_version
     }
 
-    pub fn set_resolve_feature_unification(&mut self, feature_unification: FeatureUnification) {
-        self.resolve_feature_unification = feature_unification;
-    }
-
-    pub fn resolve_feature_unification(&self) -> FeatureUnification {
-        self.resolve_feature_unification
-    }
-
-    pub fn set_resolve_publish_time(&mut self, publish_time: jiff::Timestamp) {
-        self.resolve_publish_time = Some(publish_time);
-    }
-
-    pub fn resolve_publish_time(&self) -> Option<jiff::Timestamp> {
-        self.resolve_publish_time
-    }
-
     pub fn custom_metadata(&self) -> Option<&toml::Value> {
         self.custom_metadata.as_ref()
     }
@@ -803,7 +688,7 @@ impl<'gctx> Workspace<'gctx> {
         if let Some(root_path) = &self.root_manifest {
             let root_package = self.packages.load(root_path)?;
             match root_package.workspace_config() {
-                WorkspaceConfig::Root(root_config) => {
+                WorkspaceConfig::Root(ref root_config) => {
                     return Ok(Some(root_config.clone()));
                 }
 
@@ -869,8 +754,8 @@ impl<'gctx> Workspace<'gctx> {
         // self.root_manifest must be Some to have retrieved workspace_config
         let root_manifest_path = self.root_manifest.clone().unwrap();
 
-        let members_paths = workspace_config
-            .members_paths(workspace_config.members.as_deref().unwrap_or_default())?;
+        let members_paths =
+            workspace_config.members_paths(workspace_config.members.as_ref().unwrap_or(&vec![]))?;
         let default_members_paths = if root_manifest_path == self.current_manifest {
             if let Some(ref default) = workspace_config.default_members {
                 Some(workspace_config.members_paths(default)?)
@@ -881,15 +766,14 @@ impl<'gctx> Workspace<'gctx> {
             None
         };
 
-        for (path, glob) in &members_paths {
+        for path in &members_paths {
             self.find_path_deps(&path.join("Cargo.toml"), &root_manifest_path, false)
                 .with_context(|| {
                     format!(
                         "failed to load manifest for workspace member `{}`\n\
-                        referenced{} by workspace at `{}`",
+                        referenced by workspace at `{}`",
                         path.display(),
-                        glob.map(|g| format!(" via `{g}`")).unwrap_or_default(),
-                        root_manifest_path.display(),
+                        root_manifest_path.display()
                     )
                 })?;
         }
@@ -897,7 +781,7 @@ impl<'gctx> Workspace<'gctx> {
         self.find_path_deps(&root_manifest_path, &root_manifest_path, false)?;
 
         if let Some(default) = default_members_paths {
-            for (path, default_member_glob) in default {
+            for path in default {
                 let normalized_path = paths::normalize_path(&path);
                 let manifest_path = normalized_path.join("Cargo.toml");
                 if !self.members.contains(&manifest_path) {
@@ -907,19 +791,16 @@ impl<'gctx> Workspace<'gctx> {
                     // manifest path, both because `members_paths` doesn't
                     // include `/Cargo.toml`, and because excluded paths may not
                     // be crates.
-                    let exclude = members_paths.iter().any(|(m, _)| *m == normalized_path)
+                    let exclude = members_paths.contains(&normalized_path)
                         && workspace_config.is_excluded(&normalized_path);
                     if exclude {
                         continue;
                     }
                     bail!(
-                        "package `{}` is listed in default-members{} but is not a member\n\
-                        for workspace at `{}`.",
+                        "package `{}` is listed in default-members but is not a member\n\
+                        for workspace at {}.",
                         path.display(),
-                        default_member_glob
-                            .map(|g| format!(" via `{g}`"))
-                            .unwrap_or_default(),
-                        root_manifest_path.display(),
+                        root_manifest_path.display()
                     )
                 }
                 self.default_members.push(manifest_path)
@@ -991,7 +872,10 @@ impl<'gctx> Workspace<'gctx> {
 
     /// Returns the unstable nightly-only features enabled via `cargo-features` in the manifest.
     pub fn unstable_features(&self) -> &Features {
-        self.root_maybe().unstable_features()
+        match self.root_maybe() {
+            MaybePackage::Package(p) => p.manifest().unstable_features(),
+            MaybePackage::Virtual(vm) => vm.unstable_features(),
+        }
     }
 
     pub fn resolve_behavior(&self) -> ResolveBehavior {
@@ -1129,22 +1013,16 @@ impl<'gctx> Workspace<'gctx> {
         let current_dir = self.current_manifest.parent().unwrap();
         let root_pkg = self.packages.get(root);
 
-        // Use pathdiff to handle finding the relative path between the current package
-        // and the workspace root. This usually does a good job of handling `..` and
-        // other weird things.
-        // Normalize paths first to ensure `../` components are resolved if possible,
-        // which helps `diff_paths` find the most direct relative path.
-        let current_dir = paths::normalize_path(current_dir);
-        let root_dir = paths::normalize_path(root_dir);
-        let members_msg = match pathdiff::diff_paths(&current_dir, &root_dir) {
-            Some(rel) => format!(
+        // FIXME: Make this more generic by using a relative path resolver between member and root.
+        let members_msg = match current_dir.strip_prefix(root_dir) {
+            Ok(rel) => format!(
                 "this may be fixable by adding `{}` to the \
                      `workspace.members` array of the manifest \
                      located at: {}",
                 rel.display(),
                 root.display()
             ),
-            None => format!(
+            Err(_) => format!(
                 "this may be fixable by adding a member to \
                      the `workspace.members` array of the \
                      manifest located at: {}",
@@ -1229,18 +1107,18 @@ impl<'gctx> Workspace<'gctx> {
                         .max()
                     {
                         let resolver = edition.default_resolve_behavior().to_manifest();
-                        let report = &[Level::WARNING
-                            .primary_title(format!(
-                                "virtual workspace defaulting to `resolver = \"1\"` despite one or more workspace members being on edition {edition} which implies `resolver = \"{resolver}\"`"
-                            ))
-                            .elements([
-                                Level::NOTE.message("to keep the current resolver, specify `workspace.resolver = \"1\"` in the workspace root's manifest"),
-                                Level::NOTE.message(
-                                    format!("to use the edition {edition} resolver, specify `workspace.resolver = \"{resolver}\"` in the workspace root's manifest"),
-                                ),
-                                Level::NOTE.message("for more details see https://doc.rust-lang.org/cargo/reference/resolver.html#resolver-versions"),
-                            ])];
-                        self.gctx.shell().print_report(report, false)?;
+                        self.gctx.shell().warn(format_args!(
+                            "virtual workspace defaulting to `resolver = \"1\"` despite one or more workspace members being on edition {edition} which implies `resolver = \"{resolver}\"`"
+                        ))?;
+                        self.gctx.shell().note(
+                            "to keep the current resolver, specify `workspace.resolver = \"1\"` in the workspace root's manifest",
+                        )?;
+                        self.gctx.shell().note(format_args!(
+                            "to use the edition {edition} resolver, specify `workspace.resolver = \"{resolver}\"` in the workspace root's manifest"
+                        ))?;
+                        self.gctx.shell().note(
+                            "for more details see https://doc.rust-lang.org/cargo/reference/resolver.html#resolver-versions",
+                        )?;
                     }
                 }
             }
@@ -1259,7 +1137,7 @@ impl<'gctx> Workspace<'gctx> {
         if let Some(p) = loaded.get(manifest_path).cloned() {
             return Ok(p);
         }
-        let source_id = SourceId::for_manifest_path(manifest_path)?;
+        let source_id = SourceId::for_path(manifest_path.parent().unwrap())?;
         let package = ops::read_package(manifest_path, source_id, self.gctx)?;
         loaded.insert(manifest_path.to_path_buf(), package.clone());
         Ok(package)
@@ -1292,18 +1170,11 @@ impl<'gctx> Workspace<'gctx> {
     }
 
     pub fn emit_warnings(&self) -> CargoResult<()> {
-        let mut first_emitted_error = None;
-
-        if let Err(e) = self.emit_ws_lints() {
-            first_emitted_error = Some(e);
-        }
-
         for (path, maybe_pkg) in &self.packages.packages {
+            let path = path.join("Cargo.toml");
             if let MaybePackage::Package(pkg) = maybe_pkg {
-                if let Err(e) = self.emit_pkg_lints(pkg, &path)
-                    && first_emitted_error.is_none()
-                {
-                    first_emitted_error = Some(e);
+                if self.gctx.cli_unstable().cargo_lints {
+                    self.emit_lints(pkg, &path)?
                 }
             }
             let warnings = match maybe_pkg {
@@ -1315,9 +1186,7 @@ impl<'gctx> Workspace<'gctx> {
                     let err = anyhow::format_err!("{}", warning.message);
                     let cx =
                         anyhow::format_err!("failed to parse manifest at `{}`", path.display());
-                    if first_emitted_error.is_none() {
-                        first_emitted_error = Some(err.context(cx));
-                    }
+                    return Err(err.context(cx));
                 } else {
                     let msg = if self.root_manifest.is_none() {
                         warning.message.to_string()
@@ -1330,15 +1199,11 @@ impl<'gctx> Workspace<'gctx> {
                 }
             }
         }
-
-        if let Some(error) = first_emitted_error {
-            Err(error)
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
-    pub fn emit_pkg_lints(&self, pkg: &Package, path: &Path) -> CargoResult<()> {
+    pub fn emit_lints(&self, pkg: &Package, path: &Path) -> CargoResult<()> {
+        let mut error_count = 0;
         let toml_lints = pkg
             .manifest()
             .normalized_toml()
@@ -1351,147 +1216,33 @@ impl<'gctx> Workspace<'gctx> {
             .cloned()
             .unwrap_or(manifest::TomlToolLints::default());
 
-        if self.gctx.cli_unstable().cargo_lints {
-            let mut verify_error_count = 0;
+        let ws_contents = match self.root_maybe() {
+            MaybePackage::Package(pkg) => pkg.manifest().contents(),
+            MaybePackage::Virtual(v) => v.contents(),
+        };
 
-            analyze_cargo_lints_table(
-                pkg.into(),
-                &path,
-                &cargo_lints,
-                &mut verify_error_count,
-                self.gctx,
-            )?;
+        let ws_document = match self.root_maybe() {
+            MaybePackage::Package(pkg) => pkg.manifest().document(),
+            MaybePackage::Virtual(v) => v.document(),
+        };
 
-            if verify_error_count > 0 {
-                let plural = if verify_error_count == 1 { "" } else { "s" };
-                bail!("encountered {verify_error_count} error{plural} while verifying lints")
-            }
-
-            let mut run_error_count = 0;
-
-            check_im_a_teapot(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
-            implicit_minimum_version_req_pkg(
-                pkg,
-                &path,
-                &cargo_lints,
-                &mut run_error_count,
-                self.gctx,
-            )?;
-            non_kebab_case_packages(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
-            non_snake_case_packages(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
-            non_kebab_case_bins(
-                self,
-                pkg,
-                &path,
-                &cargo_lints,
-                &mut run_error_count,
-                self.gctx,
-            )?;
-            non_kebab_case_features(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
-            non_snake_case_features(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
-            redundant_readme(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
-            redundant_homepage(pkg, &path, &cargo_lints, &mut run_error_count, self.gctx)?;
-            missing_lints_inheritance(
-                self,
-                pkg,
-                &path,
-                &cargo_lints,
-                &mut run_error_count,
-                self.gctx,
-            )?;
-
-            if run_error_count > 0 {
-                let plural = if run_error_count == 1 { "" } else { "s" };
-                bail!("encountered {run_error_count} error{plural} while running lints")
-            }
-        }
-
-        Ok(())
-    }
-
-    pub fn emit_ws_lints(&self) -> CargoResult<()> {
-        let mut run_error_count = 0;
-
-        let cargo_lints = match self.root_maybe() {
-            MaybePackage::Package(pkg) => {
-                let toml = pkg.manifest().normalized_toml();
-                if let Some(ws) = &toml.workspace {
-                    ws.lints.as_ref()
-                } else {
-                    toml.lints.as_ref().map(|l| &l.lints)
-                }
-            }
-            MaybePackage::Virtual(vm) => vm
-                .normalized_toml()
-                .workspace
-                .as_ref()
-                .unwrap()
-                .lints
-                .as_ref(),
-        }
-        .and_then(|t| t.get("cargo"))
-        .cloned()
-        .unwrap_or(manifest::TomlToolLints::default());
-
-        if self.gctx.cli_unstable().cargo_lints {
-            let mut verify_error_count = 0;
-
-            analyze_cargo_lints_table(
-                (self, self.root_maybe()).into(),
-                self.root_manifest(),
-                &cargo_lints,
-                &mut verify_error_count,
-                self.gctx,
-            )?;
-
-            if verify_error_count > 0 {
-                let plural = if verify_error_count == 1 { "" } else { "s" };
-                bail!("encountered {verify_error_count} error{plural} while verifying lints")
-            }
-
-            unused_workspace_package_fields(
-                self,
-                self.root_maybe(),
-                self.root_manifest(),
-                &cargo_lints,
-                &mut run_error_count,
-                self.gctx,
-            )?;
-            unused_workspace_dependencies(
-                self,
-                self.root_maybe(),
-                self.root_manifest(),
-                &cargo_lints,
-                &mut run_error_count,
-                self.gctx,
-            )?;
-            implicit_minimum_version_req_ws(
-                self,
-                self.root_maybe(),
-                self.root_manifest(),
-                &cargo_lints,
-                &mut run_error_count,
-                self.gctx,
-            )?;
-        }
-
-        // This is a short term hack to allow `blanket_hint_mostly_unused`
-        // to run without requiring `-Zcargo-lints`, which should hopefully
-        // improve the testing experience while we are collecting feedback
-        if self.gctx.cli_unstable().profile_hint_mostly_unused {
-            blanket_hint_mostly_unused(
-                self,
-                self.root_maybe(),
-                self.root_manifest(),
-                &cargo_lints,
-                &mut run_error_count,
-                self.gctx,
-            )?;
-        }
-
-        if run_error_count > 0 {
-            let plural = if run_error_count == 1 { "" } else { "s" };
-            bail!("encountered {run_error_count} error{plural} while running lints")
+        analyze_cargo_lints_table(
+            pkg,
+            &path,
+            &cargo_lints,
+            ws_contents,
+            ws_document,
+            self.root_manifest(),
+            self.gctx,
+        )?;
+        check_im_a_teapot(pkg, &path, &cargo_lints, &mut error_count, self.gctx)?;
+        check_implicit_features(pkg, &path, &cargo_lints, &mut error_count, self.gctx)?;
+        unused_dependencies(pkg, &path, &cargo_lints, &mut error_count, self.gctx)?;
+        if error_count > 0 {
+            Err(crate::util::errors::AlreadyPrintedError::new(anyhow!(
+                "encountered {error_count} errors(s) while running lints"
+            ))
+            .into())
         } else {
             Ok(())
         }
@@ -1501,7 +1252,7 @@ impl<'gctx> Workspace<'gctx> {
         self.target_dir = Some(target_dir);
     }
 
-    /// Returns a Vec of `(&Package, CliFeatures)` tuples that
+    /// Returns a Vec of `(&Package, RequestedFeatures)` tuples that
     /// represent the workspace members that were requested on the command-line.
     ///
     /// `specs` may be empty, which indicates it should return all workspace
@@ -1612,12 +1363,12 @@ impl<'gctx> Workspace<'gctx> {
         }
     }
 
-    fn missing_feature_spelling_suggestions(
+    fn report_unknown_features_error(
         &self,
-        selected_members: &[&Package],
+        specs: &[PackageIdSpec],
         cli_features: &CliFeatures,
         found_features: &BTreeSet<FeatureValue>,
-    ) -> Vec<String> {
+    ) -> CargoResult<()> {
         // Keeps track of which features were contained in summary of `member` to suggest similar features in errors
         let mut summary_features: Vec<InternedString> = Default::default();
 
@@ -1636,7 +1387,10 @@ impl<'gctx> Workspace<'gctx> {
         let mut optional_dependency_names_per_member: BTreeMap<&Package, BTreeSet<InternedString>> =
             Default::default();
 
-        for &member in selected_members {
+        for member in self
+            .members()
+            .filter(|m| specs.iter().any(|spec| spec.matches(m.package_id())))
+        {
             // Only include features this member defines.
             let summary = member.summary();
 
@@ -1674,7 +1428,7 @@ impl<'gctx> Workspace<'gctx> {
             edit_distance(a.as_str(), b.as_str(), 3).is_some()
         };
 
-        cli_features
+        let suggestions: Vec<_> = cli_features
             .features
             .difference(found_features)
             .map(|feature| match feature {
@@ -1763,20 +1517,13 @@ impl<'gctx> Workspace<'gctx> {
             .flatten()
             .unique()
             .filter(|element| {
-                let feature = FeatureValue::new(element.into());
+                let feature = FeatureValue::new(InternedString::new(element));
                 !cli_features.features.contains(&feature) && !found_features.contains(&feature)
             })
             .sorted()
             .take(5)
-            .collect()
-    }
+            .collect();
 
-    fn report_unknown_features_error(
-        &self,
-        specs: &[PackageIdSpec],
-        cli_features: &CliFeatures,
-        found_features: &BTreeSet<FeatureValue>,
-    ) -> CargoResult<()> {
         let unknown: Vec<_> = cli_features
             .features
             .difference(found_features)
@@ -1784,73 +1531,18 @@ impl<'gctx> Workspace<'gctx> {
             .sorted()
             .collect();
 
-        let (selected_members, unselected_members): (Vec<_>, Vec<_>) = self
-            .members()
-            .partition(|member| specs.iter().any(|spec| spec.matches(member.package_id())));
-
-        let missing_packages_with_the_features = unselected_members
-            .into_iter()
-            .filter(|member| {
-                unknown
-                    .iter()
-                    .any(|feature| member.summary().features().contains_key(&**feature))
-            })
-            .map(|m| m.name())
-            .collect_vec();
-
-        let these_features = if unknown.len() == 1 {
-            "this feature"
-        } else {
-            "these features"
-        };
-        let mut msg = if let [singular] = &selected_members[..] {
-            format!(
-                "the package '{}' does not contain {these_features}: {}",
-                singular.name(),
+        if suggestions.is_empty() {
+            bail!(
+                "none of the selected packages contains these features: {}",
                 unknown.join(", ")
-            )
-        } else {
-            let names = selected_members.iter().map(|m| m.name()).join(", ");
-            format!(
-                "none of the selected packages contains {these_features}: {}\nselected packages: {names}",
-                unknown.join(", ")
-            )
-        };
-
-        use std::fmt::Write;
-        if !missing_packages_with_the_features.is_empty() {
-            write!(
-                &mut msg,
-                "\nhelp: package{} with the missing feature{}: {}",
-                if missing_packages_with_the_features.len() != 1 {
-                    "s"
-                } else {
-                    ""
-                },
-                if unknown.len() != 1 { "s" } else { "" },
-                missing_packages_with_the_features.join(", ")
-            )?;
-        } else {
-            let suggestions = self.missing_feature_spelling_suggestions(
-                &selected_members,
-                cli_features,
-                found_features,
             );
-            if !suggestions.is_empty() {
-                write!(
-                    &mut msg,
-                    "\nhelp: there {}: {}",
-                    if suggestions.len() == 1 {
-                        "is a similarly named feature"
-                    } else {
-                        "are similarly named features"
-                    },
-                    suggestions.join(", ")
-                )?;
-            }
+        } else {
+            bail!(
+                "none of the selected packages contains these features: {}, did you mean: {}?",
+                unknown.join(", "),
+                suggestions.join(", ")
+            );
         }
-
-        bail!("{msg}")
     }
 
     /// New command-line feature selection behavior with resolver = "2" or the
@@ -2054,18 +1746,19 @@ impl<'gctx> Packages<'gctx> {
     }
 
     fn maybe_get(&self, manifest_path: &Path) -> Option<&MaybePackage> {
-        self.packages.get(manifest_path)
+        self.packages.get(manifest_path.parent().unwrap())
     }
 
     fn maybe_get_mut(&mut self, manifest_path: &Path) -> Option<&mut MaybePackage> {
-        self.packages.get_mut(manifest_path)
+        self.packages.get_mut(manifest_path.parent().unwrap())
     }
 
     fn load(&mut self, manifest_path: &Path) -> CargoResult<&MaybePackage> {
-        match self.packages.entry(manifest_path.to_path_buf()) {
+        let key = manifest_path.parent().unwrap();
+        match self.packages.entry(key.to_path_buf()) {
             Entry::Occupied(e) => Ok(e.into_mut()),
             Entry::Vacant(v) => {
-                let source_id = SourceId::for_manifest_path(manifest_path)?;
+                let source_id = SourceId::for_path(key)?;
                 let manifest = read_manifest(manifest_path, source_id, self.gctx)?;
                 Ok(v.insert(match manifest {
                     EitherManifest::Real(manifest) => {
@@ -2091,55 +1784,6 @@ impl MaybePackage {
         match self {
             MaybePackage::Package(p) => p.manifest().is_embedded(),
             MaybePackage::Virtual(_) => false,
-        }
-    }
-
-    pub fn contents(&self) -> Option<&str> {
-        match self {
-            MaybePackage::Package(p) => p.manifest().contents(),
-            MaybePackage::Virtual(v) => v.contents(),
-        }
-    }
-
-    pub fn document(&self) -> Option<&toml::Spanned<toml::de::DeTable<'static>>> {
-        match self {
-            MaybePackage::Package(p) => p.manifest().document(),
-            MaybePackage::Virtual(v) => v.document(),
-        }
-    }
-
-    pub fn original_toml(&self) -> Option<&TomlManifest> {
-        match self {
-            MaybePackage::Package(p) => p.manifest().original_toml(),
-            MaybePackage::Virtual(v) => v.original_toml(),
-        }
-    }
-
-    pub fn normalized_toml(&self) -> &TomlManifest {
-        match self {
-            MaybePackage::Package(p) => p.manifest().normalized_toml(),
-            MaybePackage::Virtual(v) => v.normalized_toml(),
-        }
-    }
-
-    pub fn edition(&self) -> Edition {
-        match self {
-            MaybePackage::Package(p) => p.manifest().edition(),
-            MaybePackage::Virtual(_) => Edition::default(),
-        }
-    }
-
-    pub fn profiles(&self) -> Option<&TomlProfiles> {
-        match self {
-            MaybePackage::Package(p) => p.manifest().profiles(),
-            MaybePackage::Virtual(v) => v.profiles(),
-        }
-    }
-
-    pub fn unstable_features(&self) -> &Features {
-        match self {
-            MaybePackage::Package(p) => p.manifest().unstable_features(),
-            MaybePackage::Virtual(vm) => vm.unstable_features(),
         }
     }
 }
@@ -2182,57 +1826,12 @@ impl WorkspaceRootConfig {
         !explicit_member && excluded
     }
 
-    /// Checks if the path is explicitly listed as a workspace member.
-    ///
-    /// Returns `true` ONLY if:
-    /// - The path is the workspace root manifest itself, or
-    /// - The path matches one of the explicit `members` patterns
-    ///
-    /// NOTE: This does NOT check for implicit path dependency membership.
-    /// A `false` return does NOT mean the package is definitely not a member -
-    /// it could still be a member via path dependencies. Callers should fallback
-    /// to full workspace loading when this returns `false`.
-    fn is_explicitly_listed_member(&self, manifest_path: &Path) -> bool {
-        let root_manifest = self.root_dir.join("Cargo.toml");
-        if manifest_path == root_manifest {
-            return true;
-        }
-        match self.members {
-            Some(ref members) => {
-                // Use members_paths to properly expand glob patterns
-                let Ok(expanded_members) = self.members_paths(members) else {
-                    return false;
-                };
-                // Normalize the manifest path for comparison
-                let normalized_manifest = paths::normalize_path(manifest_path);
-                expanded_members.iter().any(|(member_path, _)| {
-                    // Normalize the member path as glob expansion may leave ".." components
-                    let normalized_member = paths::normalize_path(member_path);
-                    // Compare the manifest's parent directory with the member path exactly
-                    // instead of using starts_with to avoid matching nested directories
-                    normalized_manifest.parent() == Some(normalized_member.as_path())
-                })
-            }
-            None => false,
-        }
-    }
-
     fn has_members_list(&self) -> bool {
         self.members.is_some()
     }
 
-    /// Returns true if this workspace config has default-members defined.
-    fn has_default_members(&self) -> bool {
-        self.default_members.is_some()
-    }
-
-    /// Returns expanded paths along with the glob that they were expanded from.
-    /// The glob is `None` if the path matched exactly.
     #[tracing::instrument(skip_all)]
-    fn members_paths<'g>(
-        &self,
-        globs: &'g [String],
-    ) -> CargoResult<Vec<(PathBuf, Option<&'g str>)>> {
+    fn members_paths(&self, globs: &[String]) -> CargoResult<Vec<PathBuf>> {
         let mut expanded_list = Vec::new();
 
         for glob in globs {
@@ -2242,11 +1841,8 @@ impl WorkspaceRootConfig {
             // If glob does not find any valid paths, then put the original
             // path in the expanded list to maintain backwards compatibility.
             if expanded_paths.is_empty() {
-                expanded_list.push((pathbuf, None));
+                expanded_list.push(pathbuf);
             } else {
-                let used_glob_pattern = expanded_paths.len() > 1 || expanded_paths[0] != pathbuf;
-                let glob = used_glob_pattern.then_some(glob.as_str());
-
                 // Some OS can create system support files anywhere.
                 // (e.g. macOS creates `.DS_Store` file if you visit a directory using Finder.)
                 // Such files can be reported as a member path unexpectedly.
@@ -2254,7 +1850,7 @@ impl WorkspaceRootConfig {
                 // as a member.
                 for expanded_path in expanded_paths {
                     if expanded_path.is_dir() {
-                        expanded_list.push((expanded_path, glob));
+                        expanded_list.push(expanded_path);
                     }
                 }
             }
@@ -2312,72 +1908,13 @@ pub fn find_workspace_root(
     gctx: &GlobalContext,
 ) -> CargoResult<Option<PathBuf>> {
     find_workspace_root_with_loader(manifest_path, gctx, |self_path| {
-        let source_id = SourceId::for_manifest_path(self_path)?;
+        let key = self_path.parent().unwrap();
+        let source_id = SourceId::for_path(key)?;
         let manifest = read_manifest(self_path, source_id, gctx)?;
         Ok(manifest
             .workspace_config()
             .get_ws_root(self_path, manifest_path))
     })
-}
-
-/// Finds the workspace root for a manifest, with minimal verification.
-///
-/// This is similar to `find_workspace_root`, but additionally verifies that the
-/// package and workspace agree on each other:
-/// - If the package has an explicit `package.workspace` pointer, it is trusted
-/// - Otherwise, the workspace must include the package in its `members` list
-pub fn find_workspace_root_with_membership_check(
-    manifest_path: &Path,
-    gctx: &GlobalContext,
-) -> CargoResult<Option<PathBuf>> {
-    let source_id = SourceId::for_manifest_path(manifest_path)?;
-    let current_manifest = read_manifest(manifest_path, source_id, gctx)?;
-
-    match current_manifest.workspace_config() {
-        WorkspaceConfig::Root(root_config) => {
-            // This manifest is a workspace root itself
-            // If default-members are defined, fall back to full loading for proper validation
-            if root_config.has_default_members() {
-                Ok(None)
-            } else {
-                Ok(Some(manifest_path.to_path_buf()))
-            }
-        }
-        WorkspaceConfig::Member {
-            root: Some(path_to_root),
-        } => {
-            // Has explicit `package.workspace` pointer - verify the workspace agrees
-            let ws_manifest_path = read_root_pointer(manifest_path, path_to_root);
-            let ws_source_id = SourceId::for_manifest_path(&ws_manifest_path)?;
-            let ws_manifest = read_manifest(&ws_manifest_path, ws_source_id, gctx)?;
-
-            // Verify the workspace includes this package in its members
-            if let WorkspaceConfig::Root(ref root_config) = *ws_manifest.workspace_config() {
-                if root_config.is_explicitly_listed_member(manifest_path)
-                    && !root_config.is_excluded(manifest_path)
-                {
-                    return Ok(Some(ws_manifest_path));
-                }
-            }
-            // Workspace doesn't agree with the pointer - not a valid workspace root
-            Ok(None)
-        }
-        WorkspaceConfig::Member { root: None } => {
-            // No explicit pointer, walk up with membership validation
-            find_workspace_root_with_loader(manifest_path, gctx, |candidate_manifest_path| {
-                let source_id = SourceId::for_manifest_path(candidate_manifest_path)?;
-                let manifest = read_manifest(candidate_manifest_path, source_id, gctx)?;
-                if let WorkspaceConfig::Root(ref root_config) = *manifest.workspace_config() {
-                    if root_config.is_explicitly_listed_member(manifest_path)
-                        && !root_config.is_excluded(manifest_path)
-                    {
-                        return Ok(Some(candidate_manifest_path.to_path_buf()));
-                    }
-                }
-                Ok(None)
-            })
-        }
-    }
 }
 
 /// Finds the path of the root of the workspace.
@@ -2391,7 +1928,7 @@ fn find_workspace_root_with_loader(
 ) -> CargoResult<Option<PathBuf>> {
     // Check if there are any workspace roots that have already been found that would work
     {
-        let roots = gctx.ws_roots();
+        let roots = gctx.ws_roots.borrow();
         // Iterate through the manifests parent directories until we find a workspace
         // root. Note we skip the first item since that is just the path itself
         for current in manifest_path.ancestors().skip(1) {

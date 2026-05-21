@@ -1,10 +1,9 @@
-//@ edition:2015
 #![allow(warnings)]
 
 mod foo {
     pub mod bar {
         pub struct S {
-            pub(in crate::foo) x: i32,
+            pub(in foo) x: i32,
         }
     }
 
@@ -15,6 +14,6 @@ mod foo {
 }
 
 fn main() {
-    use crate::foo::bar::S;
+    use foo::bar::S;
     S { x: 0 }; //~ ERROR private
 }

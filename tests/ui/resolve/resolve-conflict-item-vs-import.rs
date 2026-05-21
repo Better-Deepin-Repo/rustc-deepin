@@ -1,8 +1,8 @@
-use std::mem::transmute; //~ NOTE previous import of the value `transmute` here
+use std::mem::transmute;
 
 fn transmute() {}
 //~^ ERROR the name `transmute` is defined multiple times
-//~| NOTE `transmute` redefined here
-//~| NOTE `transmute` must be defined only once in the value namespace of this module
+//~| `transmute` redefined here
+//~| `transmute` must be defined only once in the value namespace of this module
 fn main() {
 }

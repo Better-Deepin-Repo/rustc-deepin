@@ -1,6 +1,5 @@
 //@ revisions: rpass1 rpass2
 //@ edition:2021
-//@ ignore-backends: gcc
 
 // See https://github.com/rust-lang/rust/issues/98890
 

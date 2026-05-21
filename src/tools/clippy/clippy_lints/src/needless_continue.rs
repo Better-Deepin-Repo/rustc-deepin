@@ -1,12 +1,9 @@
-use clippy_utils::diagnostics::span_lint_hir_and_then;
-use clippy_utils::higher;
-use clippy_utils::source::{indent_of, snippet_block, snippet_with_context};
-use rustc_ast::Label;
-use rustc_errors::Applicability;
-use rustc_hir::{Block, Expr, ExprKind, HirId, LoopSource, StmtKind};
-use rustc_lint::{LateContext, LateLintPass, LintContext};
+use clippy_utils::diagnostics::span_lint_and_help;
+use clippy_utils::source::{indent_of, snippet, snippet_block};
+use rustc_ast::ast;
+use rustc_lint::{EarlyContext, EarlyLintPass, LintContext};
 use rustc_session::declare_lint_pass;
-use rustc_span::{ExpnKind, Span};
+use rustc_span::Span;
 
 declare_clippy_lint! {
     /// ### What it does
@@ -14,7 +11,6 @@ declare_clippy_lint! {
     /// that contain a `continue` statement in either their main blocks or their
     /// `else`-blocks, when omitting the `else`-block possibly with some
     /// rearrangement of code can make the code easier to understand.
-    /// The lint also checks if the last statement in the loop is a `continue`
     ///
     /// ### Why is this bad?
     /// Having explicit `else` blocks for `if` statements
@@ -79,49 +75,6 @@ declare_clippy_lint! {
     ///     # break;
     /// }
     /// ```
-    ///
-    /// ```rust
-    /// # use std::io::ErrorKind;
-    ///
-    /// fn foo() -> ErrorKind { ErrorKind::NotFound }
-    /// for _ in 0..10 {
-    ///     match foo() {
-    ///         ErrorKind::NotFound => {
-    ///             eprintln!("not found");
-    ///             continue
-    ///         }
-    ///         ErrorKind::TimedOut => {
-    ///             eprintln!("timeout");
-    ///             continue
-    ///         }
-    ///         _ => {
-    ///             eprintln!("other error");
-    ///             continue
-    ///         }
-    ///     }
-    /// }
-    /// ```
-    /// Could be rewritten as
-    ///
-    ///
-    /// ```rust
-    /// # use std::io::ErrorKind;
-    ///
-    /// fn foo() -> ErrorKind { ErrorKind::NotFound }
-    /// for _ in 0..10 {
-    ///     match foo() {
-    ///         ErrorKind::NotFound => {
-    ///             eprintln!("not found");
-    ///         }
-    ///         ErrorKind::TimedOut => {
-    ///             eprintln!("timeout");
-    ///         }
-    ///         _ => {
-    ///             eprintln!("other error");
-    ///         }
-    ///     }
-    /// }
-    /// ```
     #[clippy::version = "pre 1.29.0"]
     pub NEEDLESS_CONTINUE,
     pedantic,
@@ -130,11 +83,9 @@ declare_clippy_lint! {
 
 declare_lint_pass!(NeedlessContinue => [NEEDLESS_CONTINUE]);
 
-impl<'tcx> LateLintPass<'tcx> for NeedlessContinue {
-    fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
-        // We cannot use `from_expansion` because for loops, while loops and while let loops are desugared
-        // into `loop` expressions.
-        if !matches!(expr.span.ctxt().outer_expn_data().kind, ExpnKind::Macro(..)) {
+impl EarlyLintPass for NeedlessContinue {
+    fn check_expr(&mut self, cx: &EarlyContext<'_>, expr: &ast::Expr) {
+        if !expr.span.from_expansion() {
             check_and_warn(cx, expr);
         }
     }
@@ -193,19 +144,19 @@ impl<'tcx> LateLintPass<'tcx> for NeedlessContinue {
 ///
 /// - The expression is a `continue` node.
 /// - The expression node is a block with the first statement being a `continue`.
-fn needless_continue_in_else(else_expr: &Expr<'_>, label: Option<&Label>) -> bool {
+fn needless_continue_in_else(else_expr: &ast::Expr, label: Option<&ast::Label>) -> bool {
     match else_expr.kind {
-        ExprKind::Block(else_block, _) => is_first_block_stmt_continue(else_block, label),
-        ExprKind::Continue(l) => compare_labels(label, l.label.as_ref()),
+        ast::ExprKind::Block(ref else_block, _) => is_first_block_stmt_continue(else_block, label),
+        ast::ExprKind::Continue(l) => compare_labels(label, l.as_ref()),
         _ => false,
     }
 }
 
-fn is_first_block_stmt_continue(block: &Block<'_>, label: Option<&Label>) -> bool {
-    block.stmts.first().is_some_and(|stmt| match stmt.kind {
-        StmtKind::Semi(e) | StmtKind::Expr(e) => {
-            if let ExprKind::Continue(l) = e.kind {
-                compare_labels(label, l.label.as_ref())
+fn is_first_block_stmt_continue(block: &ast::Block, label: Option<&ast::Label>) -> bool {
+    block.stmts.first().map_or(false, |stmt| match stmt.kind {
+        ast::StmtKind::Semi(ref e) | ast::StmtKind::Expr(ref e) => {
+            if let ast::ExprKind::Continue(ref l) = e.kind {
+                compare_labels(label, l.as_ref())
             } else {
                 false
             }
@@ -215,7 +166,7 @@ fn is_first_block_stmt_continue(block: &Block<'_>, label: Option<&Label>) -> boo
 }
 
 /// If the `continue` has a label, check it matches the label of the loop.
-fn compare_labels(loop_label: Option<&Label>, continue_label: Option<&Label>) -> bool {
+fn compare_labels(loop_label: Option<&ast::Label>, continue_label: Option<&ast::Label>) -> bool {
     match (loop_label, continue_label) {
         // `loop { continue; }` or `'a loop { continue; }`
         (_, None) => true,
@@ -227,34 +178,20 @@ fn compare_labels(loop_label: Option<&Label>, continue_label: Option<&Label>) ->
 }
 
 /// If `expr` is a loop expression (while/while let/for/loop), calls `func` with
-/// the HIR object representing the loop block of `expr`.
-fn with_loop_block<F>(expr: &Expr<'_>, mut func: F)
+/// the AST object representing the loop block of `expr`.
+fn with_loop_block<F>(expr: &ast::Expr, mut func: F)
 where
-    F: FnMut(&Block<'_>, Option<&Label>),
+    F: FnMut(&ast::Block, Option<&ast::Label>),
 {
-    if let Some(higher::ForLoop { body, label, .. }) = higher::ForLoop::hir(expr)
-        && let ExprKind::Block(block, _) = &body.kind
-    {
-        func(block, label.as_ref());
-        return;
+    if let ast::ExprKind::While(_, loop_block, label)
+    | ast::ExprKind::ForLoop {
+        body: loop_block,
+        label,
+        ..
     }
-
-    if let Some(higher::While { body, label, .. }) = higher::While::hir(expr)
-        && let ExprKind::Block(block, _) = &body.kind
+    | ast::ExprKind::Loop(loop_block, label, ..) = &expr.kind
     {
-        func(block, label.as_ref());
-        return;
-    }
-
-    if let Some(higher::WhileLet { if_then, label, .. }) = higher::WhileLet::hir(expr)
-        && let ExprKind::Block(block, _) = &if_then.kind
-    {
-        func(block, label.as_ref());
-        return;
-    }
-
-    if let ExprKind::Loop(block, label, LoopSource::Loop, ..) = expr.kind {
-        func(block, label.as_ref());
+        func(loop_block, label.as_ref());
     }
 }
 
@@ -266,18 +203,17 @@ where
 /// - The `if` condition expression,
 /// - The `then` block, and
 /// - The `else` expression.
-fn with_if_expr<F>(expr: &Expr<'_>, mut func: F)
+fn with_if_expr<F>(stmt: &ast::Stmt, mut func: F)
 where
-    F: FnMut(&Expr<'_>, &Expr<'_>, &Block<'_>, &Expr<'_>),
+    F: FnMut(&ast::Expr, &ast::Expr, &ast::Block, &ast::Expr),
 {
-    if let Some(higher::If {
-        cond,
-        then,
-        r#else: Some(r#else),
-    }) = higher::If::hir(expr)
-        && let ExprKind::Block(then, _) = then.kind
-    {
-        func(expr, cond, then, r#else);
+    match stmt.kind {
+        ast::StmtKind::Semi(ref e) | ast::StmtKind::Expr(ref e) => {
+            if let ast::ExprKind::If(ref cond, ref if_block, Some(ref else_expr)) = e.kind {
+                func(e, cond, if_block, else_expr);
+            }
+        },
+        _ => {},
     }
 }
 
@@ -289,21 +225,20 @@ enum LintType {
 }
 
 /// Data we pass around for construction of help messages.
-#[derive(Debug)]
-struct LintData<'hir> {
+struct LintData<'a> {
     /// The `if` expression encountered in the above loop.
-    if_expr: &'hir Expr<'hir>,
+    if_expr: &'a ast::Expr,
     /// The condition expression for the above `if`.
-    if_cond: &'hir Expr<'hir>,
+    if_cond: &'a ast::Expr,
     /// The `then` block of the `if` statement.
-    if_block: &'hir Block<'hir>,
+    if_block: &'a ast::Block,
     /// The `else` block of the `if` statement.
     /// Note that we only work with `if` exprs that have an `else` branch.
-    else_expr: &'hir Expr<'hir>,
+    else_expr: &'a ast::Expr,
     /// The 0-based index of the `if` statement in the containing loop block.
-    stmt_idx: Option<usize>,
+    stmt_idx: usize,
     /// The statements of the loop block.
-    loop_block: &'hir Block<'hir>,
+    loop_block: &'a ast::Block,
 }
 
 const MSG_REDUNDANT_CONTINUE_EXPRESSION: &str = "this `continue` expression is redundant";
@@ -320,7 +255,7 @@ const DROP_ELSE_BLOCK_MSG: &str = "consider dropping the `else` clause";
 
 const DROP_CONTINUE_EXPRESSION_MSG: &str = "consider dropping the `continue` expression";
 
-fn emit_warning(cx: &LateContext<'_>, data: &LintData<'_>, header: &str, typ: LintType) {
+fn emit_warning(cx: &EarlyContext<'_>, data: &LintData<'_>, header: &str, typ: LintType) {
     // snip    is the whole *help* message that appears after the warning.
     // message is the warning message.
     // expr    is the expression which the lint warning message refers to.
@@ -336,20 +271,18 @@ fn emit_warning(cx: &LateContext<'_>, data: &LintData<'_>, header: &str, typ: Li
             data.if_expr,
         ),
     };
-    span_lint_hir_and_then(cx, NEEDLESS_CONTINUE, expr.hir_id, expr.span, message, |diag| {
-        diag.help(format!("{header}\n{snip}"));
-    });
+    span_lint_and_help(
+        cx,
+        NEEDLESS_CONTINUE,
+        expr.span,
+        message,
+        None,
+        format!("{header}\n{snip}"),
+    );
 }
 
-fn suggestion_snippet_for_continue_inside_if(cx: &LateContext<'_>, data: &LintData<'_>) -> String {
-    let mut applicability = Applicability::MachineApplicable;
-    let (cond_code, _) = snippet_with_context(
-        cx,
-        data.if_cond.span,
-        data.if_expr.span.ctxt(),
-        "..",
-        &mut applicability,
-    );
+fn suggestion_snippet_for_continue_inside_if(cx: &EarlyContext<'_>, data: &LintData<'_>) -> String {
+    let cond_code = snippet(cx, data.if_cond.span, "..");
 
     let continue_code = snippet_block(cx, data.if_block.span, "..", Some(data.if_expr.span));
 
@@ -362,15 +295,8 @@ fn suggestion_snippet_for_continue_inside_if(cx: &LateContext<'_>, data: &LintDa
     )
 }
 
-fn suggestion_snippet_for_continue_inside_else(cx: &LateContext<'_>, data: &LintData<'_>) -> String {
-    let mut applicability = Applicability::MachineApplicable;
-    let (cond_code, _) = snippet_with_context(
-        cx,
-        data.if_cond.span,
-        data.if_expr.span.ctxt(),
-        "..",
-        &mut applicability,
-    );
+fn suggestion_snippet_for_continue_inside_else(cx: &EarlyContext<'_>, data: &LintData<'_>) -> String {
+    let cond_code = snippet(cx, data.if_cond.span, "..");
 
     // Region B
     let block_code = erode_from_back(&snippet_block(cx, data.if_block.span, "..", Some(data.if_expr.span)));
@@ -382,32 +308,18 @@ fn suggestion_snippet_for_continue_inside_else(cx: &LateContext<'_>, data: &Lint
     let indent = span_of_first_expr_in_block(data.if_block)
         .and_then(|span| indent_of(cx, span))
         .unwrap_or(0);
-    let to_annex = if let Some(stmt_idx) = data.stmt_idx {
-        let mut lines = data.loop_block.stmts[stmt_idx + 1..]
-            .iter()
-            .map(|stmt| {
-                let span = cx.sess().source_map().stmt_span(stmt.span, data.loop_block.span);
-                let snip = snippet_block(cx, span, "..", None);
-                snip.lines()
-                    .map(|line| format!("{}{line}", " ".repeat(indent)))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })
-            .collect::<Vec<_>>();
-        if let Some(expr) = data.loop_block.expr {
-            let span = expr.span;
-            let snip = snippet_block(cx, span, "..", None);
-            let expr_lines = snip
-                .lines()
+    let to_annex = data.loop_block.stmts[data.stmt_idx + 1..]
+        .iter()
+        .map(|stmt| {
+            let span = cx.sess().source_map().stmt_span(stmt.span, data.loop_block.span);
+            let snip = snippet_block(cx, span, "..", None).into_owned();
+            snip.lines()
                 .map(|line| format!("{}{line}", " ".repeat(indent)))
                 .collect::<Vec<_>>()
-                .join("\n");
-            lines.push(expr_lines);
-        }
-        lines.join("\n")
-    } else {
-        String::new()
-    };
+                .join("\n")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
 
     let indent_if = indent_of(cx, data.if_expr.span).unwrap_or(0);
     format!(
@@ -417,118 +329,32 @@ fn suggestion_snippet_for_continue_inside_else(cx: &LateContext<'_>, data: &Lint
     )
 }
 
-fn check_last_stmt_in_expr<F>(cx: &LateContext<'_>, inner_expr: &Expr<'_>, func: &F)
-where
-    F: Fn(HirId, Option<&Label>, Span),
-{
-    match inner_expr.kind {
-        ExprKind::Continue(continue_label) => {
-            func(inner_expr.hir_id, continue_label.label.as_ref(), inner_expr.span);
-        },
-        ExprKind::If(_, then_block, else_block) if let ExprKind::Block(then_block, _) = then_block.kind => {
-            check_last_stmt_in_block(cx, then_block, func);
-            if let Some(else_block) = else_block {
-                check_last_stmt_in_expr(cx, else_block, func);
-            }
-        },
-        ExprKind::Match(_, arms, _) => {
-            let match_ty = cx.typeck_results().expr_ty(inner_expr);
-            if !match_ty.is_unit() && !match_ty.is_never() {
-                return;
-            }
-            for arm in arms {
-                check_last_stmt_in_expr(cx, arm.body, func);
-            }
-        },
-        ExprKind::Block(b, _) => {
-            check_last_stmt_in_block(cx, b, func);
-        },
-        _ => {},
-    }
-}
-
-fn check_last_stmt_in_block<F>(cx: &LateContext<'_>, b: &Block<'_>, func: &F)
-where
-    F: Fn(HirId, Option<&Label>, Span),
-{
-    if let Some(expr) = b.expr {
-        check_last_stmt_in_expr(cx, expr, func);
-        return;
-    }
-
-    if let Some(last_stmt) = b.stmts.last()
-        && let StmtKind::Expr(inner_expr) | StmtKind::Semi(inner_expr) = last_stmt.kind
+fn check_and_warn(cx: &EarlyContext<'_>, expr: &ast::Expr) {
+    if let ast::ExprKind::Loop(loop_block, ..) = &expr.kind
+        && let Some(last_stmt) = loop_block.stmts.last()
+        && let ast::StmtKind::Expr(inner_expr) | ast::StmtKind::Semi(inner_expr) = &last_stmt.kind
+        && let ast::ExprKind::Continue(_) = inner_expr.kind
     {
-        check_last_stmt_in_expr(cx, inner_expr, func);
+        span_lint_and_help(
+            cx,
+            NEEDLESS_CONTINUE,
+            last_stmt.span,
+            MSG_REDUNDANT_CONTINUE_EXPRESSION,
+            None,
+            DROP_CONTINUE_EXPRESSION_MSG,
+        );
     }
-}
-
-fn check_and_warn(cx: &LateContext<'_>, expr: &Expr<'_>) {
     with_loop_block(expr, |loop_block, label| {
-        let p = |continue_hir_id, continue_label: Option<&Label>, span: Span| {
-            if compare_labels(label, continue_label) {
-                span_lint_hir_and_then(
-                    cx,
-                    NEEDLESS_CONTINUE,
-                    continue_hir_id,
-                    span,
-                    MSG_REDUNDANT_CONTINUE_EXPRESSION,
-                    |diag| {
-                        diag.help(DROP_CONTINUE_EXPRESSION_MSG);
-                    },
-                );
-            }
-        };
-
-        let stmts = loop_block.stmts;
-        for (i, stmt) in stmts.iter().enumerate() {
-            let mut maybe_emitted_in_if = false;
-            if let StmtKind::Expr(expr) | StmtKind::Semi(expr) = stmt.kind {
-                with_if_expr(expr, |if_expr, cond, then_block, else_expr| {
-                    let data = &LintData {
-                        if_expr,
-                        if_cond: cond,
-                        if_block: then_block,
-                        else_expr,
-                        stmt_idx: Some(i),
-                        loop_block,
-                    };
-
-                    maybe_emitted_in_if = true;
-                    if needless_continue_in_else(else_expr, label) {
-                        emit_warning(
-                            cx,
-                            data,
-                            DROP_ELSE_BLOCK_AND_MERGE_MSG,
-                            LintType::ContinueInsideElseBlock,
-                        );
-                    } else if is_first_block_stmt_continue(then_block, label) {
-                        emit_warning(cx, data, DROP_ELSE_BLOCK_MSG, LintType::ContinueInsideThenBlock);
-                    } else {
-                        maybe_emitted_in_if = false;
-                    }
-                });
-            }
-
-            if i == stmts.len() - 1 && loop_block.expr.is_none() && !maybe_emitted_in_if {
-                check_last_stmt_in_block(cx, loop_block, &p);
-            }
-        }
-
-        if let Some(expr) = loop_block.expr {
-            let mut maybe_emitted_in_if = false;
-
-            with_if_expr(expr, |if_expr, cond, then_block, else_expr| {
+        for (i, stmt) in loop_block.stmts.iter().enumerate() {
+            with_if_expr(stmt, |if_expr, cond, then_block, else_expr| {
                 let data = &LintData {
+                    stmt_idx: i,
                     if_expr,
                     if_cond: cond,
                     if_block: then_block,
                     else_expr,
-                    stmt_idx: None,
                     loop_block,
                 };
-
-                maybe_emitted_in_if = true;
                 if needless_continue_in_else(else_expr, label) {
                     emit_warning(
                         cx,
@@ -538,14 +364,8 @@ fn check_and_warn(cx: &LateContext<'_>, expr: &Expr<'_>) {
                     );
                 } else if is_first_block_stmt_continue(then_block, label) {
                     emit_warning(cx, data, DROP_ELSE_BLOCK_MSG, LintType::ContinueInsideThenBlock);
-                } else {
-                    maybe_emitted_in_if = false;
                 }
             });
-
-            if !maybe_emitted_in_if {
-                check_last_stmt_in_block(cx, loop_block, &p);
-            }
         }
     });
 }
@@ -569,7 +389,7 @@ fn check_and_warn(cx: &LateContext<'_>, expr: &Expr<'_>) {
 #[must_use]
 fn erode_from_back(s: &str) -> String {
     let mut ret = s.to_string();
-    while ret.pop().is_some_and(|c| c != '}') {}
+    while ret.pop().map_or(false, |c| c != '}') {}
     while let Some(c) = ret.pop() {
         if !c.is_whitespace() {
             ret.push(c);
@@ -579,12 +399,8 @@ fn erode_from_back(s: &str) -> String {
     if ret.is_empty() { s.to_string() } else { ret }
 }
 
-fn span_of_first_expr_in_block(block: &Block<'_>) -> Option<Span> {
-    block
-        .stmts
-        .first()
-        .map(|stmt| stmt.span)
-        .or(block.expr.map(|expr| expr.span))
+fn span_of_first_expr_in_block(block: &ast::Block) -> Option<Span> {
+    block.stmts.first().map(|stmt| stmt.span)
 }
 
 #[cfg(test)]

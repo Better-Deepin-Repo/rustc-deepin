@@ -11,13 +11,10 @@ mod bad_manifest_path;
 mod bench;
 mod binary_name;
 mod build;
-mod build_analysis;
-mod build_dir;
-mod build_dir_legacy;
+mod build_plan;
 mod build_script;
 mod build_script_env;
 mod build_script_extra_link_arg;
-mod build_scripts_multiple;
 mod cache_lock;
 mod cache_messages;
 mod cargo;
@@ -52,10 +49,6 @@ mod cargo_publish;
 mod cargo_read_manifest;
 mod cargo_remove;
 mod cargo_report;
-mod cargo_report_future_incompat;
-mod cargo_report_rebuilds;
-mod cargo_report_sessions;
-mod cargo_report_timings;
 mod cargo_run;
 mod cargo_rustc;
 mod cargo_rustdoc;
@@ -73,9 +66,7 @@ mod cfg;
 mod check;
 mod check_cfg;
 mod clean;
-mod clean_new_layout;
 mod collisions;
-mod compile_time_deps;
 mod concurrent;
 mod config;
 mod config_cli;
@@ -94,7 +85,6 @@ mod doc;
 mod docscrape;
 mod edition;
 mod error;
-mod feature_unification;
 mod features;
 mod features2;
 mod features_namespaced;
@@ -102,7 +92,6 @@ mod fetch;
 mod fix;
 mod fix_n_times;
 mod freshness;
-mod freshness_checksum;
 mod future_incompat_report;
 mod generate_lockfile;
 mod git;
@@ -112,7 +101,6 @@ mod git_shallow;
 mod glob_targets;
 mod global_cache_tracker;
 mod help;
-mod hints;
 mod https;
 mod inheritable_workspace_fields;
 mod install;
@@ -144,18 +132,15 @@ mod open_namespaces;
 mod owner;
 mod package;
 mod package_features;
-mod package_message_format;
 mod patch;
 mod path;
 mod paths;
-mod pgo;
 mod pkgid;
 mod precise_pre_release;
 mod proc_macro;
 mod profile_config;
 mod profile_custom;
 mod profile_overrides;
-mod profile_panic_immediate_abort;
 mod profile_targets;
 mod profile_trim_paths;
 mod profiles;
@@ -179,7 +164,6 @@ mod rustdoc_extern_html;
 mod rustdocflags;
 mod rustflags;
 mod rustup;
-mod sbom;
 mod script;
 mod search;
 mod shell_quoting;
@@ -189,77 +173,22 @@ mod standard_lib;
 mod test;
 mod timings;
 mod tool_paths;
+mod tree;
+mod tree_graph_features;
 mod unit_graph;
 mod update;
-mod utils;
 mod vendor;
 mod verify_project;
 mod version;
 mod warn_on_failure;
-mod warning_override;
 mod weak_dep_features;
 mod workspaces;
 mod yank;
 
-use crate::prelude::*;
-
-pub mod prelude {
-    pub use crate::utils::ext::CargoCommandExt;
-    pub use crate::utils::ext::CargoProjectExt;
-    pub use cargo_test_support::prelude::*;
-}
+use cargo_test_support::prelude::*;
 
 #[cargo_test]
 fn aaa_trigger_cross_compile_disabled_check() {
     // This triggers the cross compile disabled check to run ASAP, see #5141
-    crate::utils::cross_compile::disabled();
-}
-
-// This is placed here as running tests in `cargo-test-support` would rebuild it
-#[cargo_test]
-#[cfg(not(windows))]
-fn check_test_dir() {
-    let tests = vec![
-        (
-            "tests/testsuite/workspaces.rs",
-            "workspace_in_git",
-            "testsuite/workspaces/workspace_in_git",
-        ),
-        (
-            "tests/testsuite/cargo_remove/invalid_arg/mod.rs",
-            "case",
-            "testsuite/cargo_remove/invalid_arg/case",
-        ),
-        (
-            "tests/build-std/main.rs",
-            "cross_custom",
-            "build-std/main/cross_custom",
-        ),
-        (
-            "src/tools/cargo/tests/testsuite/build.rs",
-            "cargo_compile_simple",
-            "src/tools/cargo/testsuite/build/cargo_compile_simple",
-        ),
-        (
-            "src/tools/cargo/tests/testsuite/cargo_add/add_basic/mod.rs",
-            "case",
-            "src/tools/cargo/testsuite/cargo_add/add_basic/case",
-        ),
-        (
-            "src/tools/cargo/tests/build-std/main.rs",
-            "cross_custom",
-            "src/tools/cargo/build-std/main/cross_custom",
-        ),
-        (
-            "workspace/more/src/tools/cargo/tests/testsuite/build.rs",
-            "cargo_compile_simple",
-            "src/tools/cargo/testsuite/build/cargo_compile_simple",
-        ),
-    ];
-    for (path, name, expected) in tests {
-        assert_eq!(
-            cargo_test_support::paths::test_dir(path, name),
-            std::path::PathBuf::from(expected)
-        );
-    }
+    cargo_test_support::cross_compile::disabled();
 }

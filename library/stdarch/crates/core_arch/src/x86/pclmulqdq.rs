@@ -3,7 +3,7 @@
 //! The reference is [Intel 64 and IA-32 Architectures Software Developer's
 //! Manual Volume 2: Instruction Set Reference, A-Z][intel64_ref] (p. 4-241).
 //!
-//! [intel64_ref]: https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-instruction-set-reference-manual-325383.pdf
+//! [intel64_ref]: http://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-instruction-set-reference-manual-325383.pdf
 
 use crate::core_arch::x86::__m128i;
 
@@ -11,7 +11,7 @@ use crate::core_arch::x86::__m128i;
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.pclmulqdq"]
     fn pclmulqdq(a: __m128i, round_key: __m128i, imm8: u8) -> __m128i;
 }
@@ -28,9 +28,9 @@ unsafe extern "C" {
 #[cfg_attr(test, assert_instr(pclmul, IMM8 = 0))]
 #[rustc_legacy_const_generics(2)]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_clmulepi64_si128<const IMM8: i32>(a: __m128i, b: __m128i) -> __m128i {
+pub unsafe fn _mm_clmulepi64_si128<const IMM8: i32>(a: __m128i, b: __m128i) -> __m128i {
     static_assert_uimm_bits!(IMM8, 8);
-    unsafe { pclmulqdq(a, b, IMM8 as u8) }
+    pclmulqdq(a, b, IMM8 as u8)
 }
 
 #[cfg(test)]
@@ -45,7 +45,7 @@ mod tests {
     use crate::core_arch::x86::*;
 
     #[simd_test(enable = "pclmulqdq")]
-    fn test_mm_clmulepi64_si128() {
+    unsafe fn test_mm_clmulepi64_si128() {
         // Constants taken from https://software.intel.com/sites/default/files/managed/72/cc/clmul-wp-rev-2.02-2014-04-20.pdf
         let a = _mm_set_epi64x(0x7b5b546573745665, 0x63746f725d53475d);
         let b = _mm_set_epi64x(0x4869285368617929, 0x5b477565726f6e5d);

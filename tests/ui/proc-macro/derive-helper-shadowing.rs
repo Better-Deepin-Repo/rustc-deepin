@@ -1,9 +1,6 @@
-//@revisions: edition2015 edition2018
-//@[edition2015] edition:2015
-//@[edition2018] edition:2018
-//@ proc-macro: test-macros.rs
-//@ proc-macro: derive-helper-shadowing.rs
-//@ ignore-backends: gcc
+//@ edition:2018
+//@ aux-build:test-macros.rs
+//@ aux-build:derive-helper-shadowing.rs
 
 #[macro_use]
 extern crate test_macros;
@@ -20,7 +17,7 @@ macro_rules! gen_helper_use {
 }
 
 #[empty_helper] //~ ERROR `empty_helper` is ambiguous
-                //~| ERROR derive helper attribute is used before it is introduced
+                //~| WARN derive helper attribute is used before it is introduced
                 //~| WARN this was previously accepted
 #[derive(Empty)]
 struct S {
@@ -42,7 +39,7 @@ struct S {
             struct Owo;
 
             use empty_helper as renamed;
-            #[renamed] //[edition2018]~ ERROR cannot use a derive helper attribute through an import
+            #[renamed] //~ ERROR cannot use a derive helper attribute through an import
             struct Wow;
         }
 

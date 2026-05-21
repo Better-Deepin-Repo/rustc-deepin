@@ -1,13 +1,9 @@
-# `armv8r-none-eabihf` and `thumbv8r-none-eabihf`
+# `armv8r-none-eabihf`
 
-* **Tier: 2**: `armv8r-none-eabihf`
-* **Tier: 3**: `thumbv8r-none-eabihf`
-* **Library Support:** core and alloc (bare-metal, `#![no_std]`)
+**Tier: 3**
 
-Bare-metal target for CPUs in the Armv8-R architecture family, supporting dual
-ARM/Thumb mode. The `armv8r-none-eabihf` target uses Arm mode by default and
-the `thumbv8r-none-eabihf` target uses Thumb mode by default. Both targets
-use a hard-float ABI and require an FPU.
+Bare-metal target for CPUs in the Armv8-R architecture family, supporting
+dual ARM/Thumb mode, with ARM mode as the default.
 
 Processors in this family include the Arm [Cortex-R52][cortex-r52]
 and [Cortex-R52+][cortex-r52-plus].
@@ -15,21 +11,12 @@ and [Cortex-R52+][cortex-r52-plus].
 See [`arm-none-eabi`](arm-none-eabi.md) for information applicable to all
 `arm-none-eabi` targets.
 
-For Armv8-R CPUs running in AArch64 mode (such as the Arm Cortex-R82), see
-[`aarch64v8r-unknown-none`](aarch64v8r-unknown-none.md) instead.
-
 [cortex-r52]: https://www.arm.com/products/silicon-ip-cpu/cortex-r/cortex-r52
 [cortex-r52-plus]: https://www.arm.com/products/silicon-ip-cpu/cortex-r/cortex-r52-plus
 
 ## Target maintainers
 
-- [@chrisnc](https://github.com/chrisnc)
-- [Rust Embedded Devices Working Group Arm Team]
-- [@rust-lang/arm-maintainers][arm_maintainers] ([rust@arm.com][arm_email])
-
-[Rust Embedded Devices Working Group Arm Team]: https://github.com/rust-embedded/wg?tab=readme-ov-file#the-arm-team
-[arm_maintainers]: https://github.com/rust-lang/team/blob/master/teams/arm-maintainers.toml
-[arm_email]: mailto:rust@arm.com
+- [Chris Copeland](https://github.com/chrisnc), `chris@chrisnc.net`
 
 ## Requirements
 
@@ -47,14 +34,7 @@ Technical Reference Manual for more details.
 
 [fpu]: https://developer.arm.com/documentation/100026/0104/Advanced-SIMD-and-floating-point-support/About-the-Advanced-SIMD-and-floating-point-support
 
-### Table of supported CPUs for `armv8r-none-eabihf`
+## Cross-compilation toolchains and C code
 
-| CPU         | FPU | Neon | Target CPU       | Target Features    |
-|:----------- | --- |:---- |:---------------- |:------------------ |
-| Any         | SP  | No   | None             | None               |
-| Cortex-R52  | SP  | No   | `cortex-r52`     | `-fp64,-d32,-neon` |
-| Cortex-R52  | DP  | No   | `cortex-r52`     | `-neon`            |
-| Cortex-R52  | DP  | Yes  | `cortex-r52`     | None               |
-| Cortex-R52+ | SP  | No   | `cortex-r52plus` | `-fp64,-d32,-neon` |
-| Cortex-R52+ | DP  | No   | `cortex-r52plus` | `-neon`            |
-| Cortex-R52+ | DP  | Yes  | `cortex-r52plus` | None               |
+This target supports C code compiled with the `arm-none-eabi` target triple and
+`-march=armv8-r` or a suitable `-mcpu` flag.

@@ -3,9 +3,6 @@
 
 //@ aux-build:traitimpl.rs
 
-// FIXME(static_mut_refs): this could use an atomic
-#![allow(static_mut_refs)]
-
 extern crate traitimpl;
 use traitimpl::Bar;
 

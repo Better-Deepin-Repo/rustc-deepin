@@ -2,7 +2,7 @@
 #[inline(never)]
 fn noop() {}
 
-// EMIT_MIR simplify_if.main.SimplifyConstCondition-after-inst-simplify.diff
+// EMIT_MIR simplify_if.main.SimplifyConstCondition-after-const-prop.diff
 fn main() {
     // CHECK-LABEL: fn main(
 

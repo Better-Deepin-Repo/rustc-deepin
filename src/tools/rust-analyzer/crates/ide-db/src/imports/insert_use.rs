@@ -6,21 +6,20 @@ use std::cmp::Ordering;
 
 use hir::Semantics;
 use syntax::{
-    Direction, NodeOrToken, SyntaxKind, SyntaxNode, algo,
+    algo,
     ast::{
-        self, AstNode, HasAttrs, HasModuleItem, HasVisibility, PathSegmentKind,
-        edit_in_place::Removable, make, syntax_factory::SyntaxFactory,
+        self, edit_in_place::Removable, make, AstNode, HasAttrs, HasModuleItem, HasVisibility,
+        PathSegmentKind,
     },
-    syntax_editor::{Position, SyntaxEditor},
-    ted,
+    ted, Direction, NodeOrToken, SyntaxKind, SyntaxNode,
 };
 
 use crate::{
-    RootDatabase,
     imports::merge_imports::{
-        MergeBehavior, NormalizationStyle, common_prefix, eq_attrs, eq_visibility,
-        try_merge_imports, use_tree_cmp,
+        common_prefix, eq_attrs, eq_visibility, try_merge_imports, use_tree_cmp, MergeBehavior,
+        NormalizationStyle,
     },
+    RootDatabase,
 };
 
 pub use hir::PrefixKind;
@@ -28,6 +27,9 @@ pub use hir::PrefixKind;
 /// How imports should be grouped into use statements.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum ImportGranularity {
+    /// Do not change the granularity of any imports and preserve the original structure written
+    /// by the developer.
+    Preserve,
     /// Merge imports from the same crate into a single use statement.
     Crate,
     /// Merge imports from the same module into a single use statement.
@@ -58,109 +60,111 @@ pub struct InsertUseConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct ImportScope {
-    pub kind: ImportScopeKind,
-    pub required_cfgs: Vec<ast::Attr>,
-}
-
-#[derive(Debug, Clone)]
-pub enum ImportScopeKind {
+pub enum ImportScope {
     File(ast::SourceFile),
     Module(ast::ItemList),
     Block(ast::StmtList),
 }
 
 impl ImportScope {
+    // FIXME: Remove this?
+    #[cfg(test)]
+    fn from(syntax: SyntaxNode) -> Option<Self> {
+        use syntax::match_ast;
+        fn contains_cfg_attr(attrs: &dyn HasAttrs) -> bool {
+            attrs
+                .attrs()
+                .any(|attr| attr.as_simple_call().map_or(false, |(ident, _)| ident == "cfg"))
+        }
+        match_ast! {
+            match syntax {
+                ast::Module(module) => module.item_list().map(ImportScope::Module),
+                ast::SourceFile(file) => Some(ImportScope::File(file)),
+                ast::Fn(func) => contains_cfg_attr(&func).then(|| func.body().and_then(|it| it.stmt_list().map(ImportScope::Block))).flatten(),
+                ast::Const(konst) => contains_cfg_attr(&konst).then(|| match konst.body()? {
+                    ast::Expr::BlockExpr(block) => Some(block),
+                    _ => None,
+                }).flatten().and_then(|it| it.stmt_list().map(ImportScope::Block)),
+                ast::Static(statik) => contains_cfg_attr(&statik).then(|| match statik.body()? {
+                    ast::Expr::BlockExpr(block) => Some(block),
+                    _ => None,
+                }).flatten().and_then(|it| it.stmt_list().map(ImportScope::Block)),
+                _ => None,
+
+            }
+        }
+    }
+
     /// Determines the containing syntax node in which to insert a `use` statement affecting `position`.
     /// Returns the original source node inside attributes.
     pub fn find_insert_use_container(
         position: &SyntaxNode,
         sema: &Semantics<'_, RootDatabase>,
     ) -> Option<Self> {
-        // The closest block expression ancestor
-        let mut block = None;
-        let mut required_cfgs = Vec::new();
+        fn contains_cfg_attr(attrs: &dyn HasAttrs) -> bool {
+            attrs
+                .attrs()
+                .any(|attr| attr.as_simple_call().map_or(false, |(ident, _)| ident == "cfg"))
+        }
+
         // Walk up the ancestor tree searching for a suitable node to do insertions on
         // with special handling on cfg-gated items, in which case we want to insert imports locally
         // or FIXME: annotate inserted imports with the same cfg
         for syntax in sema.ancestors_with_macros(position.clone()) {
             if let Some(file) = ast::SourceFile::cast(syntax.clone()) {
-                return Some(ImportScope { kind: ImportScopeKind::File(file), required_cfgs });
-            } else if let Some(module) = ast::Module::cast(syntax.clone()) {
-                // early return is important here, if we can't find the original module
-                // in the input there is no way for us to insert an import anywhere.
-                return sema
-                    .original_ast_node(module)?
-                    .item_list()
-                    .map(ImportScopeKind::Module)
-                    .map(|kind| ImportScope { kind, required_cfgs });
-            } else if let Some(has_attrs) = ast::AnyHasAttrs::cast(syntax.clone()) {
-                if block.is_none()
-                    && let Some(b) = ast::BlockExpr::cast(has_attrs.syntax().clone())
-                    && let Some(b) = sema.original_ast_node(b)
-                {
-                    block = b.stmt_list();
-                }
-                if has_attrs
-                    .attrs()
-                    .any(|attr| attr.as_simple_call().is_some_and(|(ident, _)| ident == "cfg"))
-                {
-                    if let Some(b) = block.clone() {
-                        let current_cfgs = has_attrs.attrs().filter(|attr| {
-                            attr.as_simple_call().is_some_and(|(ident, _)| ident == "cfg")
-                        });
-
-                        let total_cfgs: Vec<_> =
-                            required_cfgs.iter().cloned().chain(current_cfgs).collect();
-
-                        let parent = syntax.parent();
-                        let mut can_merge = false;
-                        if let Some(parent) = parent {
-                            can_merge = parent.children().filter_map(ast::Use::cast).any(|u| {
-                                let u_attrs = u.attrs().filter(|attr| {
-                                    attr.as_simple_call().is_some_and(|(ident, _)| ident == "cfg")
-                                });
-                                crate::imports::merge_imports::eq_attrs(
-                                    u_attrs,
-                                    total_cfgs.iter().cloned(),
-                                )
-                            });
+                return Some(ImportScope::File(file));
+            } else if let Some(item) = ast::Item::cast(syntax) {
+                return match item {
+                    ast::Item::Const(konst) if contains_cfg_attr(&konst) => {
+                        // FIXME: Instead of bailing out with None, we should note down that
+                        // this import needs an attribute added
+                        match sema.original_ast_node(konst)?.body()? {
+                            ast::Expr::BlockExpr(block) => block,
+                            _ => return None,
                         }
-
-                        if !can_merge {
-                            return Some(ImportScope {
-                                kind: ImportScopeKind::Block(b),
-                                required_cfgs,
-                            });
-                        }
+                        .stmt_list()
+                        .map(ImportScope::Block)
                     }
-                    required_cfgs.extend(has_attrs.attrs().filter(|attr| {
-                        attr.as_simple_call().is_some_and(|(ident, _)| ident == "cfg")
-                    }));
-                }
+                    ast::Item::Fn(func) if contains_cfg_attr(&func) => {
+                        // FIXME: Instead of bailing out with None, we should note down that
+                        // this import needs an attribute added
+                        sema.original_ast_node(func)?.body()?.stmt_list().map(ImportScope::Block)
+                    }
+                    ast::Item::Static(statik) if contains_cfg_attr(&statik) => {
+                        // FIXME: Instead of bailing out with None, we should note down that
+                        // this import needs an attribute added
+                        match sema.original_ast_node(statik)?.body()? {
+                            ast::Expr::BlockExpr(block) => block,
+                            _ => return None,
+                        }
+                        .stmt_list()
+                        .map(ImportScope::Block)
+                    }
+                    ast::Item::Module(module) => {
+                        // early return is important here, if we can't find the original module
+                        // in the input there is no way for us to insert an import anywhere.
+                        sema.original_ast_node(module)?.item_list().map(ImportScope::Module)
+                    }
+                    _ => continue,
+                };
             }
         }
         None
     }
 
     pub fn as_syntax_node(&self) -> &SyntaxNode {
-        match &self.kind {
-            ImportScopeKind::File(file) => file.syntax(),
-            ImportScopeKind::Module(item_list) => item_list.syntax(),
-            ImportScopeKind::Block(block) => block.syntax(),
+        match self {
+            ImportScope::File(file) => file.syntax(),
+            ImportScope::Module(item_list) => item_list.syntax(),
+            ImportScope::Block(block) => block.syntax(),
         }
     }
 
     pub fn clone_for_update(&self) -> Self {
-        Self {
-            kind: match &self.kind {
-                ImportScopeKind::File(file) => ImportScopeKind::File(file.clone_for_update()),
-                ImportScopeKind::Module(item_list) => {
-                    ImportScopeKind::Module(item_list.clone_for_update())
-                }
-                ImportScopeKind::Block(block) => ImportScopeKind::Block(block.clone_for_update()),
-            },
-            required_cfgs: self.required_cfgs.iter().map(|attr| attr.clone_for_update()).collect(),
+        match self {
+            ImportScope::File(file) => ImportScope::File(file.clone_for_update()),
+            ImportScope::Module(item_list) => ImportScope::Module(item_list.clone_for_update()),
+            ImportScope::Block(block) => ImportScope::Block(block.clone_for_update()),
         }
     }
 }
@@ -170,25 +174,9 @@ pub fn insert_use(scope: &ImportScope, path: ast::Path, cfg: &InsertUseConfig) {
     insert_use_with_alias_option(scope, path, cfg, None);
 }
 
-/// Insert an import path into the given file/node. A `merge` value of none indicates that no import merging is allowed to occur.
-pub fn insert_use_with_editor(
-    scope: &ImportScope,
-    path: ast::Path,
-    cfg: &InsertUseConfig,
-    syntax_editor: &mut SyntaxEditor,
-    syntax_factory: &SyntaxFactory,
-) {
-    insert_use_with_alias_option_with_editor(scope, path, cfg, None, syntax_editor, syntax_factory);
-}
-
-pub fn insert_use_as_alias(
-    scope: &ImportScope,
-    path: ast::Path,
-    cfg: &InsertUseConfig,
-    edition: span::Edition,
-) {
+pub fn insert_use_as_alias(scope: &ImportScope, path: ast::Path, cfg: &InsertUseConfig) {
     let text: &str = "use foo as _";
-    let parse = syntax::SourceFile::parse(text, edition);
+    let parse = syntax::SourceFile::parse(text, span::Edition::CURRENT_FIXME);
     let node = parse
         .tree()
         .syntax()
@@ -211,7 +199,7 @@ fn insert_use_with_alias_option(
         ImportGranularity::Crate => Some(MergeBehavior::Crate),
         ImportGranularity::Module => Some(MergeBehavior::Module),
         ImportGranularity::One => Some(MergeBehavior::One),
-        ImportGranularity::Item => None,
+        ImportGranularity::Item | ImportGranularity::Preserve => None,
     };
     if !cfg.enforce_granularity {
         let file_granularity = guess_granularity_from_scope(scope);
@@ -219,18 +207,9 @@ fn insert_use_with_alias_option(
             ImportGranularityGuess::Unknown => mb,
             ImportGranularityGuess::Item => None,
             ImportGranularityGuess::Module => Some(MergeBehavior::Module),
-            // We use the user's setting to infer if this is module or item.
-            ImportGranularityGuess::ModuleOrItem => match mb {
-                Some(MergeBehavior::Module) | None => mb,
-                // There isn't really a way to decide between module or item here, so we just pick one.
-                // FIXME: Maybe it is possible to infer based on semantic analysis?
-                Some(MergeBehavior::One | MergeBehavior::Crate) => Some(MergeBehavior::Module),
-            },
+            ImportGranularityGuess::ModuleOrItem => mb.and(Some(MergeBehavior::Module)),
             ImportGranularityGuess::Crate => Some(MergeBehavior::Crate),
-            ImportGranularityGuess::CrateOrModule => match mb {
-                Some(MergeBehavior::Crate | MergeBehavior::Module) => mb,
-                Some(MergeBehavior::One) | None => Some(MergeBehavior::Crate),
-            },
+            ImportGranularityGuess::CrateOrModule => mb.or(Some(MergeBehavior::Crate)),
             ImportGranularityGuess::One => Some(MergeBehavior::One),
         };
     }
@@ -240,12 +219,7 @@ fn insert_use_with_alias_option(
         use_tree = use_tree.clone_for_update();
         use_tree.wrap_in_tree_list();
     }
-    let use_item = make::use_(None, None, use_tree).clone_for_update();
-    for attr in
-        scope.required_cfgs.iter().map(|attr| attr.syntax().clone_subtree().clone_for_update())
-    {
-        ted::insert(ted::Position::first_child_of(use_item.syntax()), attr);
-    }
+    let use_item = make::use_(None, use_tree).clone_for_update();
 
     // merge into existing imports if possible
     if let Some(mb) = mb {
@@ -259,74 +233,10 @@ fn insert_use_with_alias_option(
             }
         }
     }
+
     // either we weren't allowed to merge or there is no import that fits the merge conditions
     // so look for the place we have to insert to
     insert_use_(scope, use_item, cfg.group);
-}
-
-fn insert_use_with_alias_option_with_editor(
-    scope: &ImportScope,
-    path: ast::Path,
-    cfg: &InsertUseConfig,
-    alias: Option<ast::Rename>,
-    syntax_editor: &mut SyntaxEditor,
-    syntax_factory: &SyntaxFactory,
-) {
-    let _p = tracing::info_span!("insert_use_with_alias_option").entered();
-    let mut mb = match cfg.granularity {
-        ImportGranularity::Crate => Some(MergeBehavior::Crate),
-        ImportGranularity::Module => Some(MergeBehavior::Module),
-        ImportGranularity::One => Some(MergeBehavior::One),
-        ImportGranularity::Item => None,
-    };
-    if !cfg.enforce_granularity {
-        let file_granularity = guess_granularity_from_scope(scope);
-        mb = match file_granularity {
-            ImportGranularityGuess::Unknown => mb,
-            ImportGranularityGuess::Item => None,
-            ImportGranularityGuess::Module => Some(MergeBehavior::Module),
-            // We use the user's setting to infer if this is module or item.
-            ImportGranularityGuess::ModuleOrItem => match mb {
-                Some(MergeBehavior::Module) | None => mb,
-                // There isn't really a way to decide between module or item here, so we just pick one.
-                // FIXME: Maybe it is possible to infer based on semantic analysis?
-                Some(MergeBehavior::One | MergeBehavior::Crate) => Some(MergeBehavior::Module),
-            },
-            ImportGranularityGuess::Crate => Some(MergeBehavior::Crate),
-            ImportGranularityGuess::CrateOrModule => match mb {
-                Some(MergeBehavior::Crate | MergeBehavior::Module) => mb,
-                Some(MergeBehavior::One) | None => Some(MergeBehavior::Crate),
-            },
-            ImportGranularityGuess::One => Some(MergeBehavior::One),
-        };
-    }
-
-    let use_tree = syntax_factory.use_tree(path, None, alias, false);
-    if mb == Some(MergeBehavior::One) && use_tree.path().is_some() {
-        use_tree.wrap_in_tree_list();
-    }
-    let use_item = make::use_(None, None, use_tree).clone_for_update();
-    for attr in
-        scope.required_cfgs.iter().map(|attr| attr.syntax().clone_subtree().clone_for_update())
-    {
-        syntax_editor.insert(Position::first_child_of(use_item.syntax()), attr);
-    }
-
-    // merge into existing imports if possible
-    if let Some(mb) = mb {
-        let filter = |it: &_| !(cfg.skip_glob_imports && ast::Use::is_simple_glob(it));
-        for existing_use in
-            scope.as_syntax_node().children().filter_map(ast::Use::cast).filter(filter)
-        {
-            if let Some(merged) = try_merge_imports(&existing_use, &use_item, mb) {
-                syntax_editor.replace(existing_use.syntax(), merged.syntax());
-                return;
-            }
-        }
-    }
-    // either we weren't allowed to merge or there is no import that fits the merge conditions
-    // so look for the place we have to insert to
-    insert_use_with_editor_(scope, use_item, cfg.group, syntax_editor, syntax_factory);
 }
 
 pub fn ast_to_remove_for_path_in_use_stmt(path: &ast::Path) -> Option<Box<dyn Removable>> {
@@ -410,10 +320,10 @@ fn guess_granularity_from_scope(scope: &ImportScope) -> ImportGranularityGuess {
         }
         _ => None,
     };
-    let mut use_stmts = match &scope.kind {
-        ImportScopeKind::File(f) => f.items(),
-        ImportScopeKind::Module(m) => m.items(),
-        ImportScopeKind::Block(b) => b.items(),
+    let mut use_stmts = match scope {
+        ImportScope::File(f) => f.items(),
+        ImportScope::Module(m) => m.items(),
+        ImportScope::Block(b) => b.items(),
     }
     .filter_map(use_stmt);
     let mut res = ImportGranularityGuess::Unknown;
@@ -459,24 +369,26 @@ fn guess_granularity_from_scope(scope: &ImportScope) -> ImportGranularityGuess {
             seen_one_style_groups.push((curr_vis.clone(), curr_attrs.clone()));
         } else if eq_visibility(prev_vis, curr_vis.clone())
             && eq_attrs(prev_attrs, curr_attrs.clone())
-            && let Some((prev_path, curr_path)) = prev.path().zip(curr.path())
-            && let Some((prev_prefix, _)) = common_prefix(&prev_path, &curr_path)
         {
-            if prev.use_tree_list().is_none() && curr.use_tree_list().is_none() {
-                let prefix_c = prev_prefix.qualifiers().count();
-                let curr_c = curr_path.qualifiers().count() - prefix_c;
-                let prev_c = prev_path.qualifiers().count() - prefix_c;
-                if curr_c == 1 && prev_c == 1 {
-                    // Same prefix, only differing in the last segment and no use tree lists so this has to be of item style.
-                    break ImportGranularityGuess::Item;
-                } else {
-                    // Same prefix and no use tree list but differs in more than one segment at the end. This might be module style still.
-                    res = ImportGranularityGuess::ModuleOrItem;
+            if let Some((prev_path, curr_path)) = prev.path().zip(curr.path()) {
+                if let Some((prev_prefix, _)) = common_prefix(&prev_path, &curr_path) {
+                    if prev.use_tree_list().is_none() && curr.use_tree_list().is_none() {
+                        let prefix_c = prev_prefix.qualifiers().count();
+                        let curr_c = curr_path.qualifiers().count() - prefix_c;
+                        let prev_c = prev_path.qualifiers().count() - prefix_c;
+                        if curr_c == 1 && prev_c == 1 {
+                            // Same prefix, only differing in the last segment and no use tree lists so this has to be of item style.
+                            break ImportGranularityGuess::Item;
+                        } else {
+                            // Same prefix and no use tree list but differs in more than one segment at the end. This might be module style still.
+                            res = ImportGranularityGuess::ModuleOrItem;
+                        }
+                    } else {
+                        // Same prefix with item tree lists, has to be module style as it
+                        // can't be crate style since the trees wouldn't share a prefix then.
+                        break ImportGranularityGuess::Module;
+                    }
                 }
-            } else {
-                // Same prefix with item tree lists, has to be module style as it
-                // can't be crate style since the trees wouldn't share a prefix then.
-                break ImportGranularityGuess::Module;
             }
         }
         prev = curr;
@@ -555,12 +467,12 @@ fn insert_use_(scope: &ImportScope, use_item: ast::Use, group_imports: bool) {
         }
     }
 
-    let l_curly = match &scope.kind {
-        ImportScopeKind::File(_) => None,
+    let l_curly = match scope {
+        ImportScope::File(_) => None,
         // don't insert the imports before the item list/block expr's opening curly brace
-        ImportScopeKind::Module(item_list) => item_list.l_curly_token(),
+        ImportScope::Module(item_list) => item_list.l_curly_token(),
         // don't insert the imports before the item list's opening curly brace
-        ImportScopeKind::Block(block) => block.l_curly_token(),
+        ImportScope::Block(block) => block.l_curly_token(),
     };
     // there are no imports in this file at all
     // so put the import after all inner module attributes and possible license header comments
@@ -569,15 +481,13 @@ fn insert_use_(scope: &ImportScope, use_item: ast::Use, group_imports: bool) {
         // skip the curly brace
         .skip(l_curly.is_some() as usize)
         .take_while(|child| match child {
-            NodeOrToken::Node(node) => {
-                is_inner_attribute(node.clone()) && ast::Item::cast(node.clone()).is_none()
-            }
+            NodeOrToken::Node(node) => is_inner_attribute(node.clone()),
             NodeOrToken::Token(token) => {
                 [SyntaxKind::WHITESPACE, SyntaxKind::COMMENT, SyntaxKind::SHEBANG]
                     .contains(&token.kind())
             }
         })
-        .filter(|child| child.as_token().is_none_or(|t| t.kind() != SyntaxKind::WHITESPACE))
+        .filter(|child| child.as_token().map_or(true, |t| t.kind() != SyntaxKind::WHITESPACE))
         .last()
     {
         cov_mark::hit!(insert_empty_inner_attr);
@@ -597,129 +507,6 @@ fn insert_use_(scope: &ImportScope, use_item: ast::Use, group_imports: bool) {
                     make::tokens::blank_line(),
                 );
                 ted::insert(ted::Position::first_child_of(scope_syntax), use_item.syntax());
-            }
-        }
-    }
-}
-
-fn insert_use_with_editor_(
-    scope: &ImportScope,
-    use_item: ast::Use,
-    group_imports: bool,
-    syntax_editor: &mut SyntaxEditor,
-    syntax_factory: &SyntaxFactory,
-) {
-    let scope_syntax = scope.as_syntax_node();
-    let insert_use_tree =
-        use_item.use_tree().expect("`use_item` should have a use tree for `insert_path`");
-    let group = ImportGroup::new(&insert_use_tree);
-    let path_node_iter = scope_syntax
-        .children()
-        .filter_map(|node| ast::Use::cast(node.clone()).zip(Some(node)))
-        .flat_map(|(use_, node)| {
-            let tree = use_.use_tree()?;
-            Some((tree, node))
-        });
-
-    if group_imports {
-        // Iterator that discards anything that's not in the required grouping
-        // This implementation allows the user to rearrange their import groups as this only takes the first group that fits
-        let group_iter = path_node_iter
-            .clone()
-            .skip_while(|(use_tree, ..)| ImportGroup::new(use_tree) != group)
-            .take_while(|(use_tree, ..)| ImportGroup::new(use_tree) == group);
-
-        // track the last element we iterated over, if this is still None after the iteration then that means we never iterated in the first place
-        let mut last = None;
-        // find the element that would come directly after our new import
-        let post_insert: Option<(_, SyntaxNode)> = group_iter
-            .inspect(|(.., node)| last = Some(node.clone()))
-            .find(|(use_tree, _)| use_tree_cmp(&insert_use_tree, use_tree) != Ordering::Greater);
-
-        if let Some((.., node)) = post_insert {
-            cov_mark::hit!(insert_group);
-            // insert our import before that element
-            return syntax_editor.insert(Position::before(node), use_item.syntax());
-        }
-        if let Some(node) = last {
-            cov_mark::hit!(insert_group_last);
-            // there is no element after our new import, so append it to the end of the group
-            return syntax_editor.insert(Position::after(node), use_item.syntax());
-        }
-
-        // the group we were looking for actually doesn't exist, so insert
-
-        let mut last = None;
-        // find the group that comes after where we want to insert
-        let post_group = path_node_iter
-            .inspect(|(.., node)| last = Some(node.clone()))
-            .find(|(use_tree, ..)| ImportGroup::new(use_tree) > group);
-        if let Some((.., node)) = post_group {
-            cov_mark::hit!(insert_group_new_group);
-            syntax_editor.insert(Position::before(&node), use_item.syntax());
-            if let Some(node) = algo::non_trivia_sibling(node.into(), Direction::Prev) {
-                syntax_editor.insert(Position::after(node), syntax_factory.whitespace("\n"));
-            }
-            return;
-        }
-        // there is no such group, so append after the last one
-        if let Some(node) = last {
-            cov_mark::hit!(insert_group_no_group);
-            syntax_editor.insert(Position::after(&node), use_item.syntax());
-            syntax_editor.insert(Position::after(node), syntax_factory.whitespace("\n"));
-            return;
-        }
-    } else {
-        // There exists a group, so append to the end of it
-        if let Some((_, node)) = path_node_iter.last() {
-            cov_mark::hit!(insert_no_grouping_last);
-            syntax_editor.insert(Position::after(node), use_item.syntax());
-            return;
-        }
-    }
-
-    let l_curly = match &scope.kind {
-        ImportScopeKind::File(_) => None,
-        // don't insert the imports before the item list/block expr's opening curly brace
-        ImportScopeKind::Module(item_list) => item_list.l_curly_token(),
-        // don't insert the imports before the item list's opening curly brace
-        ImportScopeKind::Block(block) => block.l_curly_token(),
-    };
-    // there are no imports in this file at all
-    // so put the import after all inner module attributes and possible license header comments
-    if let Some(last_inner_element) = scope_syntax
-        .children_with_tokens()
-        // skip the curly brace
-        .skip(l_curly.is_some() as usize)
-        .take_while(|child| match child {
-            NodeOrToken::Node(node) => {
-                is_inner_attribute(node.clone()) && ast::Item::cast(node.clone()).is_none()
-            }
-            NodeOrToken::Token(token) => {
-                [SyntaxKind::WHITESPACE, SyntaxKind::COMMENT, SyntaxKind::SHEBANG]
-                    .contains(&token.kind())
-            }
-        })
-        .filter(|child| child.as_token().is_none_or(|t| t.kind() != SyntaxKind::WHITESPACE))
-        .last()
-    {
-        cov_mark::hit!(insert_empty_inner_attr);
-        syntax_editor.insert(Position::after(&last_inner_element), use_item.syntax());
-        syntax_editor.insert(Position::after(last_inner_element), syntax_factory.whitespace("\n"));
-    } else {
-        match l_curly {
-            Some(b) => {
-                cov_mark::hit!(insert_empty_module);
-                syntax_editor.insert(Position::after(&b), syntax_factory.whitespace("\n"));
-                syntax_editor.insert(Position::after(&b), use_item.syntax());
-            }
-            None => {
-                cov_mark::hit!(insert_empty_file);
-                syntax_editor.insert(
-                    Position::first_child_of(scope_syntax),
-                    syntax_factory.whitespace("\n\n"),
-                );
-                syntax_editor.insert(Position::first_child_of(scope_syntax), use_item.syntax());
             }
         }
     }

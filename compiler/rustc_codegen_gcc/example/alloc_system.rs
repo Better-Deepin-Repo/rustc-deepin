@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// SPDX-FileCopyrightText: The Rust Project Developers (see https://thanks.rust-lang.org)
+
 #![no_std]
 #![feature(allocator_api, rustc_private)]
 
@@ -5,7 +8,6 @@
 // add fast paths for low alignment values.
 #[cfg(any(target_arch = "x86",
               target_arch = "arm",
-              target_arch = "loongarch32",
               target_arch = "m68k",
               target_arch = "mips",
               target_arch = "mips32r6",

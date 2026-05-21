@@ -1,34 +1,33 @@
 #![allow(rustc::bad_opt_access)]
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZero;
-use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use rustc_abi::Align;
 use rustc_data_structures::profiling::TimePassesFormat;
-use rustc_errors::ColorConfig;
 use rustc_errors::emitter::HumanReadableErrorType;
-use rustc_hir::attrs::{CollapseMacroDebuginfo, NativeLibKind};
+use rustc_errors::{registry, ColorConfig};
 use rustc_session::config::{
-    AnnotateMoves, AutoDiff, BranchProtection, CFGuard, Cfg, CoverageLevel, CoverageOptions,
-    DebugInfo, DumpMonoStatsFormat, ErrorOutputType, ExternEntry, ExternLocation, Externs,
-    FmtDebug, FunctionReturn, InliningThreshold, Input, InstrumentCoverage, InstrumentXRay,
-    LinkSelfContained, LinkerPluginLto, LocationDetail, LtoCli, MirIncludeSpans, NextSolverConfig,
-    Offload, Options, OutFileName, OutputType, OutputTypes, PAuthKey, PacRet, Passes,
+    build_configuration, build_session_options, rustc_optgroups, BranchProtection, CFGuard, Cfg,
+    CollapseMacroDebuginfo, CoverageLevel, CoverageOptions, DebugInfo, DumpMonoStatsFormat,
+    ErrorOutputType, ExternEntry, ExternLocation, Externs, FmtDebug, FunctionReturn,
+    InliningThreshold, Input, InstrumentCoverage, InstrumentXRay, LinkSelfContained,
+    LinkerPluginLto, LocationDetail, LtoCli, MirIncludeSpans, NextSolverConfig, OomStrategy,
+    Options, OutFileName, OutputType, OutputTypes, PAuthKey, PacRet, Passes,
     PatchableFunctionEntry, Polonius, ProcMacroExecutionStrategy, Strip, SwitchWithOptPath,
-    SymbolManglingVersion, WasiExecModel, build_configuration, build_session_options,
-    rustc_optgroups,
+    SymbolManglingVersion, WasiExecModel,
 };
 use rustc_session::lint::Level;
 use rustc_session::search_paths::SearchPath;
-use rustc_session::utils::{CanonicalizedPath, NativeLib};
-use rustc_session::{CompilerIO, EarlyDiagCtxt, Session, build_session, getopts};
-use rustc_span::edition::{DEFAULT_EDITION, Edition};
+use rustc_session::utils::{CanonicalizedPath, NativeLib, NativeLibKind};
+use rustc_session::{build_session, filesearch, getopts, CompilerIO, EarlyDiagCtxt, Session};
+use rustc_span::edition::{Edition, DEFAULT_EDITION};
 use rustc_span::source_map::{RealFileLoader, SourceMapInputs};
-use rustc_span::{FileName, SourceFileHashAlgorithm, sym};
+use rustc_span::symbol::sym;
+use rustc_span::{FileName, SourceFileHashAlgorithm};
 use rustc_target::spec::{
     CodeModel, FramePointer, LinkerFlavorCli, MergeFunctions, OnBrokenPipe, PanicStrategy,
-    RelocModel, RelroLevel, SanitizerSet, SplitDebuginfo, StackProtector, TlsModel,
+    RelocModel, RelroLevel, SanitizerSet, SplitDebuginfo, StackProtector, TlsModel, WasmCAbi,
 };
 
 use crate::interface::{initialize_checked_jobserver, parse_cfg};
@@ -42,22 +41,16 @@ where
 
     let matches = optgroups().parse(args).unwrap();
     let sessopts = build_session_options(&mut early_dcx, &matches);
-    let target = rustc_session::config::build_target_config(
-        &early_dcx,
-        &sessopts.target_triple,
-        sessopts.sysroot.path(),
-        sessopts.unstable_opts.unstable_options,
-    );
+    let sysroot = filesearch::materialize_sysroot(sessopts.maybe_sysroot.clone());
+    let target = rustc_session::config::build_target_config(&early_dcx, &sessopts, &sysroot);
     let hash_kind = sessopts.unstable_opts.src_hash_algorithm(&target);
-    let checksum_hash_kind = sessopts.unstable_opts.checksum_hash_algorithm();
     let sm_inputs = Some(SourceMapInputs {
         file_loader: Box::new(RealFileLoader) as _,
         path_mapping: sessopts.file_path_mapping(),
         hash_kind,
-        checksum_hash_kind,
     });
 
-    rustc_span::create_session_globals_then(DEFAULT_EDITION, &[], sm_inputs, || {
+    rustc_span::create_session_globals_then(DEFAULT_EDITION, sm_inputs, || {
         let temps_dir = sessopts.unstable_opts.temps_dir.as_deref().map(PathBuf::from);
         let io = CompilerIO {
             input: Input::Str { name: FileName::Custom(String::new()), input: String::new() },
@@ -66,16 +59,20 @@ where
             temps_dir,
         };
 
-        static USING_INTERNAL_FEATURES: AtomicBool = AtomicBool::new(false);
-
         let sess = build_session(
+            early_dcx,
             sessopts,
             io,
+            None,
+            registry::Registry::new(&[]),
+            vec![],
             Default::default(),
             target,
+            sysroot,
             "",
             None,
-            &USING_INTERNAL_FEATURES,
+            Arc::default(),
+            Default::default(),
         );
         let cfg = parse_cfg(sess.dcx(), matches.opt_strs("cfg"));
         let cfg = build_configuration(&sess, cfg);
@@ -88,8 +85,8 @@ where
     S: Into<String>,
     I: IntoIterator<Item = S>,
 {
-    let locations =
-        locations.into_iter().map(|s| CanonicalizedPath::new(PathBuf::from(s.into()))).collect();
+    let locations: BTreeSet<CanonicalizedPath> =
+        locations.into_iter().map(|s| CanonicalizedPath::new(Path::new(&s.into()))).collect();
 
     ExternEntry {
         location: ExternLocation::ExactPaths(locations),
@@ -103,7 +100,7 @@ where
 fn optgroups() -> getopts::Options {
     let mut opts = getopts::Options::new();
     for group in rustc_optgroups() {
-        group.apply(&mut opts);
+        (group.apply)(&mut opts);
     }
     return opts;
 }
@@ -319,7 +316,7 @@ fn test_search_paths_tracking_hash_different_order() {
     let early_dcx = EarlyDiagCtxt::new(JSON);
     const JSON: ErrorOutputType = ErrorOutputType::Json {
         pretty: false,
-        json_rendered: HumanReadableErrorType { short: false, unicode: false },
+        json_rendered: HumanReadableErrorType::Default,
         color_config: ColorConfig::Never,
     };
 
@@ -376,7 +373,7 @@ fn test_native_libs_tracking_hash_different_values() {
         NativeLib {
             name: String::from("a"),
             new_name: None,
-            kind: NativeLibKind::Static { bundle: None, whole_archive: None, export_symbols: None },
+            kind: NativeLibKind::Static { bundle: None, whole_archive: None },
             verbatim: None,
         },
         NativeLib {
@@ -398,7 +395,7 @@ fn test_native_libs_tracking_hash_different_values() {
         NativeLib {
             name: String::from("a"),
             new_name: None,
-            kind: NativeLibKind::Static { bundle: None, whole_archive: None, export_symbols: None },
+            kind: NativeLibKind::Static { bundle: None, whole_archive: None },
             verbatim: None,
         },
         NativeLib {
@@ -420,13 +417,13 @@ fn test_native_libs_tracking_hash_different_values() {
         NativeLib {
             name: String::from("a"),
             new_name: None,
-            kind: NativeLibKind::Static { bundle: None, whole_archive: None, export_symbols: None },
+            kind: NativeLibKind::Static { bundle: None, whole_archive: None },
             verbatim: None,
         },
         NativeLib {
             name: String::from("b"),
             new_name: None,
-            kind: NativeLibKind::Static { bundle: None, whole_archive: None, export_symbols: None },
+            kind: NativeLibKind::Static { bundle: None, whole_archive: None },
             verbatim: None,
         },
         NativeLib {
@@ -442,7 +439,7 @@ fn test_native_libs_tracking_hash_different_values() {
         NativeLib {
             name: String::from("a"),
             new_name: None,
-            kind: NativeLibKind::Static { bundle: None, whole_archive: None, export_symbols: None },
+            kind: NativeLibKind::Static { bundle: None, whole_archive: None },
             verbatim: None,
         },
         NativeLib {
@@ -464,7 +461,7 @@ fn test_native_libs_tracking_hash_different_values() {
         NativeLib {
             name: String::from("a"),
             new_name: None,
-            kind: NativeLibKind::Static { bundle: None, whole_archive: None, export_symbols: None },
+            kind: NativeLibKind::Static { bundle: None, whole_archive: None },
             verbatim: None,
         },
         NativeLib {
@@ -498,7 +495,7 @@ fn test_native_libs_tracking_hash_different_order() {
         NativeLib {
             name: String::from("a"),
             new_name: None,
-            kind: NativeLibKind::Static { bundle: None, whole_archive: None, export_symbols: None },
+            kind: NativeLibKind::Static { bundle: None, whole_archive: None },
             verbatim: None,
         },
         NativeLib {
@@ -525,7 +522,7 @@ fn test_native_libs_tracking_hash_different_order() {
         NativeLib {
             name: String::from("a"),
             new_name: None,
-            kind: NativeLibKind::Static { bundle: None, whole_archive: None, export_symbols: None },
+            kind: NativeLibKind::Static { bundle: None, whole_archive: None },
             verbatim: None,
         },
         NativeLib {
@@ -546,7 +543,7 @@ fn test_native_libs_tracking_hash_different_order() {
         NativeLib {
             name: String::from("a"),
             new_name: None,
-            kind: NativeLibKind::Static { bundle: None, whole_archive: None, export_symbols: None },
+            kind: NativeLibKind::Static { bundle: None, whole_archive: None },
             verbatim: None,
         },
         NativeLib {
@@ -584,7 +581,6 @@ fn test_codegen_options_tracking_hash() {
     untracked!(dlltool, Some(PathBuf::from("custom_dlltool.exe")));
     untracked!(extra_filename, String::from("extra-filename"));
     untracked!(incremental, Some(String::from("abc")));
-    untracked!(inline_threshold, Some(0xf007ba11));
     // `link_arg` is omitted because it just forwards to `link_args`.
     untracked!(link_args, vec![String::from("abc"), String::from("def")]);
     untracked!(link_self_contained, LinkSelfContained::on());
@@ -613,12 +609,11 @@ fn test_codegen_options_tracking_hash() {
     tracked!(control_flow_guard, CFGuard::Checks);
     tracked!(debug_assertions, Some(true));
     tracked!(debuginfo, DebugInfo::Limited);
-    tracked!(dwarf_version, Some(5));
     tracked!(embed_bitcode, false);
     tracked!(force_frame_pointers, FramePointer::Always);
     tracked!(force_unwind_tables, Some(true));
+    tracked!(inline_threshold, Some(0xf007ba11));
     tracked!(instrument_coverage, InstrumentCoverage::Yes);
-    tracked!(jump_tables, false);
     tracked!(link_dead_code, Some(true));
     tracked!(linker_plugin_lto, LinkerPluginLto::LinkerPluginAuto);
     tracked!(llvm_args, vec![String::from("1"), String::from("2")]);
@@ -688,7 +683,6 @@ fn test_unstable_options_tracking_hash() {
     // Make sure that changing an [UNTRACKED] option leaves the hash unchanged.
     // tidy-alphabetical-start
     untracked!(assert_incr_state, Some(String::from("loaded")));
-    untracked!(codegen_source_order, true);
     untracked!(deduplicate_diagnostics, false);
     untracked!(dump_dep_graph, true);
     untracked!(dump_mir, Some(String::from("abc")));
@@ -702,6 +696,7 @@ fn test_unstable_options_tracking_hash() {
     untracked!(dylib_lto, true);
     untracked!(emit_stack_sizes, true);
     untracked!(future_incompat_test, true);
+    untracked!(hir_stats, true);
     untracked!(identify_regions, true);
     untracked!(incremental_info, true);
     untracked!(incremental_verify_ich, true);
@@ -710,20 +705,18 @@ fn test_unstable_options_tracking_hash() {
     untracked!(llvm_time_trace, true);
     untracked!(ls, vec!["all".to_owned()]);
     untracked!(macro_backtrace, true);
-    untracked!(macro_stats, true);
     untracked!(meta_stats, true);
     untracked!(mir_include_spans, MirIncludeSpans::On);
     untracked!(nll_facts, true);
     untracked!(no_analysis, true);
     untracked!(no_leak_check, true);
     untracked!(no_parallel_backend, true);
-    untracked!(no_steal_thir, true);
-    untracked!(parse_crate_root_only, true);
+    untracked!(parse_only, true);
     // `pre_link_arg` is omitted because it just forwards to `pre_link_args`.
     untracked!(pre_link_args, vec![String::from("abc"), String::from("def")]);
     untracked!(print_codegen_stats, true);
     untracked!(print_llvm_passes, true);
-    untracked!(print_mono_items, true);
+    untracked!(print_mono_items, Some(String::from("abc")));
     untracked!(print_type_sizes, true);
     untracked!(proc_macro_backtrace, true);
     untracked!(proc_macro_execution_strategy, ProcMacroExecutionStrategy::CrossThread);
@@ -762,52 +755,40 @@ fn test_unstable_options_tracking_hash() {
     // tidy-alphabetical-start
     tracked!(allow_features, Some(vec![String::from("lang_items")]));
     tracked!(always_encode_mir, true);
-    tracked!(annotate_moves, AnnotateMoves::Enabled(Some(1234)));
     tracked!(assume_incomplete_release, true);
-    tracked!(autodiff, vec![AutoDiff::Enable, AutoDiff::NoTT]);
     tracked!(binary_dep_depinfo, true);
     tracked!(box_noalias, false);
     tracked!(
         branch_protection,
         Some(BranchProtection {
             bti: true,
-            pac_ret: Some(PacRet { leaf: true, pc: true, key: PAuthKey::B }),
-            gcs: true,
+            pac_ret: Some(PacRet { leaf: true, key: PAuthKey::B })
         })
     );
     tracked!(codegen_backend, Some("abc".to_string()));
-    tracked!(
-        coverage_options,
-        CoverageOptions {
-            level: CoverageLevel::Branch,
-            // (don't collapse test-only options onto the same line)
-            discard_all_spans_in_codegen: true,
-        }
-    );
+    tracked!(coverage_options, CoverageOptions { level: CoverageLevel::Mcdc, no_mir_spans: true });
     tracked!(crate_attr, vec!["abc".to_string()]);
     tracked!(cross_crate_inline_threshold, InliningThreshold::Always);
     tracked!(debug_info_for_profiling, true);
-    tracked!(debug_info_type_line_numbers, true);
-    tracked!(default_visibility, Some(rustc_target::spec::SymbolVisibility::Hidden));
+    tracked!(default_hidden_visibility, Some(true));
     tracked!(dep_info_omit_d_target, true);
     tracked!(direct_access_external_data, Some(true));
     tracked!(dual_proc_macros, true);
     tracked!(dwarf_version, Some(5));
-    tracked!(embed_metadata, false);
     tracked!(embed_source, true);
-    tracked!(emscripten_wasm_eh, false);
+    tracked!(emit_thin_lto, false);
     tracked!(export_executable_symbols, true);
     tracked!(fewer_names, Some(true));
     tracked!(fixed_x18, true);
     tracked!(flatten_format_args, false);
     tracked!(fmt_debug, FmtDebug::Shallow);
     tracked!(force_unstable_if_unmarked, true);
+    tracked!(fuel, Some(("abc".to_string(), 99)));
     tracked!(function_return, FunctionReturn::ThunkExtern);
     tracked!(function_sections, Some(false));
-    tracked!(hint_mostly_unused, true);
     tracked!(human_readable_cgu_names, true);
     tracked!(incremental_ignore_spans, true);
-    tracked!(indirect_branch_cs_prefix, true);
+    tracked!(inline_in_all_cgus, Some(true));
     tracked!(inline_mir, Some(true));
     tracked!(inline_mir_hint_threshold, Some(123));
     tracked!(inline_mir_threshold, Some(123));
@@ -821,21 +802,21 @@ fn test_unstable_options_tracking_hash() {
     tracked!(location_detail, LocationDetail { file: true, line: false, column: false });
     tracked!(maximal_hir_to_mir_coverage, true);
     tracked!(merge_functions, Some(MergeFunctions::Disabled));
-    tracked!(min_function_alignment, Some(Align::EIGHT));
     tracked!(mir_emit_retag, true);
     tracked!(mir_enable_passes, vec![("DestProp".to_string(), false)]);
+    tracked!(mir_keep_place_mention, true);
     tracked!(mir_opt_level, Some(4));
-    tracked!(mir_preserve_ub, true);
     tracked!(move_size_limit, Some(4096));
     tracked!(mutable_noalias, false);
-    tracked!(next_solver, NextSolverConfig { coherence: true, globally: true });
+    tracked!(next_solver, Some(NextSolverConfig { coherence: true, globally: false }));
     tracked!(no_generate_arange_section, true);
+    tracked!(no_jump_tables, true);
     tracked!(no_link, true);
     tracked!(no_profiler_runtime, true);
     tracked!(no_trait_vptr, true);
     tracked!(no_unique_section_names, true);
-    tracked!(offload, vec![Offload::Device]);
     tracked!(on_broken_pipe, OnBrokenPipe::Kill);
+    tracked!(oom, OomStrategy::Panic);
     tracked!(osx_rpath_install_name, true);
     tracked!(packed_bundled_libs, true);
     tracked!(panic_abort_tests, true);
@@ -848,10 +829,11 @@ fn test_unstable_options_tracking_hash() {
     tracked!(plt, Some(true));
     tracked!(polonius, Polonius::Legacy);
     tracked!(precise_enum_drop_elaboration, false);
+    tracked!(print_fuel, Some("abc".to_string()));
+    tracked!(profile, true);
+    tracked!(profile_emit, Some(PathBuf::from("abc")));
     tracked!(profile_sample_use, Some(PathBuf::from("abc")));
     tracked!(profiler_runtime, "abc".to_string());
-    tracked!(reg_struct_return, true);
-    tracked!(regparm, Some(3));
     tracked!(relax_elf_relocations, Some(true));
     tracked!(remap_cwd_prefix, Some(PathBuf::from("abc")));
     tracked!(sanitizer, SanitizerSet::ADDRESS);
@@ -859,13 +841,12 @@ fn test_unstable_options_tracking_hash() {
     tracked!(sanitizer_cfi_generalize_pointers, Some(true));
     tracked!(sanitizer_cfi_normalize_integers, Some(true));
     tracked!(sanitizer_dataflow_abilist, vec![String::from("/rustc/abc")]);
-    tracked!(sanitizer_kcfi_arity, Some(true));
     tracked!(sanitizer_memory_track_origins, 2);
     tracked!(sanitizer_recover, SanitizerSet::ADDRESS);
     tracked!(saturating_float_casts, Some(true));
     tracked!(share_generics, Some(true));
+    tracked!(show_span, Some(String::from("abc")));
     tracked!(simulate_remapped_rust_src_base, Some(PathBuf::from("/rustc/abc")));
-    tracked!(small_data_threshold, Some(16));
     tracked!(split_lto_unit, Some(true));
     tracked!(src_hash_algorithm, Some(SourceFileHashAlgorithm::Sha1));
     tracked!(stack_protector, StackProtector::All);
@@ -885,6 +866,7 @@ fn test_unstable_options_tracking_hash() {
     tracked!(verify_llvm_ir, true);
     tracked!(virtual_function_elimination, true);
     tracked!(wasi_exec_model, Some(WasiExecModel::Reactor));
+    tracked!(wasm_c_abi, WasmCAbi::Spec);
     // tidy-alphabetical-end
 
     macro_rules! tracked_no_crate_hash {

@@ -8,17 +8,13 @@ use crate::num::NonZero;
 /// Infinite iterators like `repeat()` are often used with adapters like
 /// [`Iterator::take()`], in order to make them finite.
 ///
-/// If you know the number of repetitions in advance, consider using [`repeat_n()`]
-/// instead, as it is more efficient and conveys the intent more clearly.
-///
 /// Use [`str::repeat()`] instead of this function if you just want to repeat
-/// a char/string `n` times.
+/// a char/string `n`th times.
 ///
 /// If the element type of the iterator you need does not implement `Clone`,
 /// or if you do not want to keep the repeated element in memory, you can
 /// instead use the [`repeat_with()`] function.
 ///
-/// [`repeat_n()`]: crate::iter::repeat_n
 /// [`repeat_with()`]: crate::iter::repeat_with
 /// [`str::repeat()`]: ../../std/primitive.str.html#method.repeat
 ///
@@ -60,7 +56,7 @@ use crate::num::NonZero;
 /// ```
 #[inline]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_diagnostic_item = "iter_repeat"]
+#[cfg_attr(not(test), rustc_diagnostic_item = "iter_repeat")]
 pub fn repeat<T: Clone>(elt: T) -> Repeat<T> {
     Repeat { element: elt }
 }
@@ -101,14 +97,12 @@ impl<A: Clone> Iterator for Repeat<A> {
         Some(self.element.clone())
     }
 
-    #[track_caller]
     fn last(self) -> Option<A> {
-        panic!("iterator is infinite");
+        loop {}
     }
 
-    #[track_caller]
     fn count(self) -> usize {
-        panic!("iterator is infinite");
+        loop {}
     }
 }
 

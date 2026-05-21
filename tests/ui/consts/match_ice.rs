@@ -8,7 +8,8 @@ struct T;
 fn main() {
     const C: &S = &S;
     match C {
-        C => {} //~ ERROR constant of non-structural type `S` in a pattern
+        C => {}
+        //~^ ERROR must be annotated with `#[derive(PartialEq)]`
     }
     const K: &T = &T;
     match K {

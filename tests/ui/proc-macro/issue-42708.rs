@@ -1,5 +1,5 @@
 //@ run-pass
-//@ proc-macro: issue-42708.rs
+//@ aux-build:issue-42708.rs
 
 #![feature(decl_macro)]
 #![allow(unused)]

@@ -1,8 +1,9 @@
-//@ compile-flags:-Clink-dead-code
-//@ compile-flags: -O
+//
+//@ compile-flags:-Zprint-mono-items=eager
+//@ compile-flags:-Zinline-in-all-cgus
 
 #![deny(dead_code)]
-#![crate_type = "lib"]
+#![feature(start)]
 
 //~ MONO_ITEM fn std::ptr::drop_in_place::<StructWithDrop> - shim(Some(StructWithDrop)) @@ non_generic_drop_glue-cgu.0[Internal]
 struct StructWithDrop {
@@ -33,8 +34,8 @@ enum EnumNoDrop {
 }
 
 //~ MONO_ITEM fn start
-#[no_mangle]
-pub fn start(_: isize, _: *const *const u8) -> isize {
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
     let _ = StructWithDrop { x: 0 }.x;
     let _ = StructNoDrop { x: 0 }.x;
     let _ = match EnumWithDrop::A(0) {

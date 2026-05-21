@@ -1,5 +1,6 @@
 #[test]
 fn test_niche_optimizations_socket() {
+    use crate::mem::size_of;
     use crate::os::windows::io::{
         BorrowedSocket, FromRawSocket, IntoRawSocket, OwnedSocket, RawSocket,
     };

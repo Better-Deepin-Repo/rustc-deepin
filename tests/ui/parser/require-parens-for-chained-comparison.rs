@@ -24,14 +24,14 @@ fn main() {
     //~| HELP use `::<...>` instead of `<...>` to specify lifetime, type, or const arguments
     //~| ERROR expected
     //~| HELP add `'` to close the char literal
-    //~| ERROR labels cannot use keyword names
+    //~| ERROR invalid label name
 
     f<'_>();
-    //~^ ERROR comparison operators cannot be chained
+    //~^ comparison operators cannot be chained
     //~| HELP use `::<...>` instead of `<...>` to specify lifetime, type, or const arguments
     //~| ERROR expected
     //~| HELP add `'` to close the char literal
-    //~| ERROR labels cannot use keyword names
+    //~| ERROR invalid label name
 
     let _ = f<u8>;
     //~^ ERROR comparison operators cannot be chained

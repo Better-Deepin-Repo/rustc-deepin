@@ -12,4 +12,5 @@ fn main() {
 
     <fn(&u8) as Foo>::ASSOC;
     //~^ ERROR implementation of `Foo` is not general enough
+    //~| ERROR implementation of `Foo` is not general enough
 }

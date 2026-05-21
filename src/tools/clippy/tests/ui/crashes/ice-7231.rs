@@ -1,5 +1,3 @@
-//@ check-pass
-
 #![allow(clippy::never_loop)]
 
 async fn f() {

@@ -37,7 +37,7 @@ impl LateLintPass<'_> for MyStructLint {
         // Get type of `expr`
         let ty = cx.typeck_results().expr_ty(expr);
         // Match its kind to enter its type
-        match ty.kind() {
+        match ty.kind {
             ty::Adt(adt_def, _) if adt_def.is_struct() => println!("Our `expr` is a struct!"),
             _ => ()
         }
@@ -68,7 +68,7 @@ impl<'tcx> LateLintPass<'tcx> for MyStructLint {
         // Check our expr is calling a method
         if let hir::ExprKind::MethodCall(path, _, _self_arg, ..) = &expr.kind
             // Check the name of this method is `some_method`
-            && path.ident.name == sym::some_method
+            && path.ident.name == sym!(some_method)
             // Optionally, check the type of the self argument.
             // - See "Checking for a specific type"
         {
@@ -85,8 +85,9 @@ to check for. All of these methods only check for the base type, generic
 arguments have to be checked separately.
 
 ```rust
-use clippy_utils::{paths, sym};
-use clippy_utils::res::MaybeDef;
+use clippy_utils::ty::{is_type_diagnostic_item, is_type_lang_item};
+use clippy_utils::{paths, match_def_path};
+use rustc_span::symbol::sym;
 use rustc_hir::LangItem;
 
 impl LateLintPass<'_> for MyStructLint {
@@ -96,18 +97,18 @@ impl LateLintPass<'_> for MyStructLint {
 
         // 1. Using diagnostic items
         // The last argument is the diagnostic item to check for
-        if ty.is_diag_item(cx, sym::Option) {
+        if is_type_diagnostic_item(cx, ty, sym::Option) {
             // The type is an `Option`
         }
 
         // 2. Using lang items
-        if ty.is_lang_item(cx, LangItem::RangeFull) {
+        if is_type_lang_item(cx, ty, LangItem::RangeFull) {
             // The type is a full range like `.drain(..)`
         }
 
         // 3. Using the type path
         // This method should be avoided if possible
-        if paths::RESULT.matches_ty(cx, ty) {
+        if match_def_path(cx, def_id, &paths::RESULT) {
             // The type is a `core::result::Result`
         }
     }
@@ -122,29 +123,27 @@ There are three ways to do this, depending on if the target trait has a
 diagnostic item, lang item or neither.
 
 ```rust
-use clippy_utils::sym;
 use clippy_utils::ty::implements_trait;
+use clippy_utils::is_trait_method;
+use rustc_span::symbol::sym;
 
 impl LateLintPass<'_> for MyStructLint {
     fn check_expr(&mut self, cx: &LateContext<'_>, expr: &Expr<'_>) {
+        // 1. Using diagnostic items with the expression
+        // we use `is_trait_method` function from Clippy's utils
+        if is_trait_method(cx, expr, sym::Iterator) {
+            // method call in `expr` belongs to `Iterator` trait
+        }
 
-        // 1. Get the `DefId` of the trait.
-        // via lang items
-        let trait_id = cx.tcx.lang_items().drop_trait();
-        // via diagnostic items
-        let trait_id = cx.tcx.get_diagnostic_item(sym::Eq);
-
-        // 2. Check for the trait implementation via the `implements_trait` util.
+        // 2. Using lang items with the expression type
         let ty = cx.typeck_results().expr_ty(expr);
-        if trait_id.is_some_and(|id| implements_trait(cx, ty, id, &[])) {
-            // `ty` implements the trait.
-        }
-
-        // 3. If the trait requires additional generic arguments
-        let trait_id = cx.tcx.lang_items().eq_trait();
-        if trait_id.is_some_and(|id| implements_trait(cx, ty, id, &[ty])) {
-            // `ty` implements `PartialEq<Self>`
-        }
+        if cx.tcx.lang_items()
+            // we are looking for the `DefId` of `Drop` trait in lang items
+            .drop_trait()
+            // then we use it with our type `ty` by calling `implements_trait` from Clippy's utils
+            .map_or(false, |id| implements_trait(cx, ty, id, &[])) {
+                // `expr` implements `Drop` trait
+            }
     }
 }
 ```
@@ -160,21 +159,19 @@ paths for Clippy can be found in [paths.rs][paths]
 To check if our type defines a method called `some_method`:
 
 ```rust
-use clippy_utils::ty::is_type_lang_item;
-use clippy_utils::{sym, return_ty};
+use clippy_utils::ty::is_type_diagnostic_item;
+use clippy_utils::return_ty;
 
 impl<'tcx> LateLintPass<'tcx> for MyTypeImpl {
     fn check_impl_item(&mut self, cx: &LateContext<'tcx>, impl_item: &'tcx ImplItem<'_>) {
         // Check if item is a method/function
         if let ImplItemKind::Fn(ref signature, _) = impl_item.kind
             // Check the method is named `some_method`
-            //
-            // Add `some_method` to `clippy_utils::sym` if it's not already there
-            && impl_item.ident.name == sym::some_method
+            && impl_item.ident.name == sym!(some_method)
             // We can also check it has a parameter `self`
             && signature.decl.implicit_self.has_implicit_self()
             // We can go further and even check if its return type is `String`
-            && return_ty(cx, impl_item.hir_id).is_lang_item(cx, LangItem::String)
+            && is_type_diagnostic_item(cx, return_ty(cx, impl_item.hir_id), sym!(string_type))
         {
             // ...
         }
@@ -221,7 +218,7 @@ functions to deal with macros:
   > context. And so just using `span.from_expansion()` is often good enough.
 
 
-- `span.in_external_macro(sm)`: detect if the given span is from a macro defined in
+- `in_external_macro(span)`: detect if the given span is from a macro defined in
   a foreign crate. If you want the lint to work with macro-generated code, this
   is the next line of defense to avoid macros not defined in the current crate.
   It doesn't make sense to lint code that the coder can't change.
@@ -230,13 +227,15 @@ functions to deal with macros:
   crates
 
   ```rust
+  use rustc_middle::lint::in_external_macro;
+
   use a_crate_with_macros::foo;
 
   // `foo` is defined in `a_crate_with_macros`
   foo!("bar");
 
   // if we lint the `match` of `foo` call and test its span
-  assert_eq!(match_span.in_external_macro(cx.sess().source_map()), true);
+  assert_eq!(in_external_macro(cx.sess(), match_span), true);
   ```
 
 - `span.ctxt()`: the span's context represents whether it is from expansion, and
@@ -266,10 +265,10 @@ functions to deal with macros:
    ```
 
 [Ty]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.Ty.html
-[TyKind]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_type_ir/ty_kind/enum.TyKind.html
+[TyKind]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/enum.TyKind.html
 [TypeckResults]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.TypeckResults.html
 [expr_ty]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.TypeckResults.html#method.expr_ty
 [LateContext]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_lint/struct.LateContext.html
 [TyCtxt]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html
-[pat_ty]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/struct.TypeckResults.html#method.pat_ty
+[pat_ty]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TypeckResults.html#method.pat_ty
 [paths]: https://doc.rust-lang.org/nightly/nightly-rustc/clippy_utils/paths/index.html

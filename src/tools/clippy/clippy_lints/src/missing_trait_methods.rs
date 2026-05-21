@@ -1,7 +1,6 @@
 use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::is_lint_allowed;
 use clippy_utils::macros::span_is_local;
-use clippy_utils::source::snippet_opt;
 use rustc_hir::def_id::DefIdSet;
 use rustc_hir::{Impl, Item, ItemKind};
 use rustc_lint::{LateContext, LateLintPass};
@@ -62,16 +61,15 @@ impl<'tcx> LateLintPass<'tcx> for MissingTraitMethods {
         if !is_lint_allowed(cx, MISSING_TRAIT_METHODS, item.hir_id())
             && span_is_local(item.span)
             && let ItemKind::Impl(Impl {
-                of_trait: Some(of_trait),
+                items,
+                of_trait: Some(trait_ref),
                 ..
             }) = item.kind
-            && let Some(trait_id) = of_trait.trait_ref.trait_def_id()
+            && let Some(trait_id) = trait_ref.trait_def_id()
         {
-            let trait_item_ids: DefIdSet = cx
-                .tcx
-                .associated_items(item.owner_id)
-                .in_definition_order()
-                .filter_map(|assoc_item| assoc_item.expect_trait_impl().ok())
+            let trait_item_ids: DefIdSet = items
+                .iter()
+                .filter_map(|impl_item| impl_item.trait_item_def_id)
                 .collect();
 
             for assoc in cx
@@ -83,16 +81,9 @@ impl<'tcx> LateLintPass<'tcx> for MissingTraitMethods {
                     cx,
                     MISSING_TRAIT_METHODS,
                     cx.tcx.def_span(item.owner_id),
-                    format!("missing trait method provided by default: `{}`", assoc.name()),
+                    format!("missing trait method provided by default: `{}`", assoc.name),
                     |diag| {
-                        if assoc.def_id.is_local() {
-                            diag.span_help(cx.tcx.def_span(assoc.def_id), "implement the method");
-                        } else if let Some(snippet) = snippet_opt(cx, of_trait.trait_ref.path.span) {
-                            diag.help(format!(
-                                "implement the missing `{}` method of the `{snippet}` trait",
-                                assoc.name(),
-                            ));
-                        }
+                        diag.span_help(cx.tcx.def_span(assoc.def_id), "implement the method");
                     },
                 );
             }

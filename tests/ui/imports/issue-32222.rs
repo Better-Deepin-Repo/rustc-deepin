@@ -16,7 +16,7 @@ mod a {
 }
 
 mod b {
-    pub use crate::a::bar;
+    pub use a::bar;
 }
 
 fn main() {}

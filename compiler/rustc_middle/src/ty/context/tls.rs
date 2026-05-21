@@ -1,10 +1,14 @@
+#[cfg(not(parallel_compiler))]
+use std::cell::Cell;
 use std::{mem, ptr};
 
-use rustc_data_structures::sync;
+use rustc_data_structures::sync::{self, Lock};
+use rustc_errors::DiagInner;
+use thin_vec::ThinVec;
 
 use super::{GlobalCtxt, TyCtxt};
 use crate::dep_graph::TaskDepsRef;
-use crate::query::QueryJobId;
+use crate::query::plumbing::QueryJobId;
 
 /// This is the implicit state of rustc. It contains the current
 /// `TyCtxt` and query. It is updated when creating a local interner or
@@ -16,8 +20,13 @@ pub struct ImplicitCtxt<'a, 'tcx> {
     /// The current `TyCtxt`.
     pub tcx: TyCtxt<'tcx>,
 
-    /// The current query job, if any.
+    /// The current query job, if any. This is updated by `JobOwner::start` in
+    /// `ty::query::plumbing` when executing a query.
     pub query: Option<QueryJobId>,
+
+    /// Where to store diagnostics for the current query job, if any.
+    /// This is updated by `JobOwner::start` in `ty::query::plumbing` when executing a query.
+    pub diagnostics: Option<&'a Lock<ThinVec<DiagInner>>>,
 
     /// Used to prevent queries from calling too deeply.
     pub query_depth: usize,
@@ -30,12 +39,26 @@ pub struct ImplicitCtxt<'a, 'tcx> {
 impl<'a, 'tcx> ImplicitCtxt<'a, 'tcx> {
     pub fn new(gcx: &'tcx GlobalCtxt<'tcx>) -> Self {
         let tcx = TyCtxt { gcx };
-        ImplicitCtxt { tcx, query: None, query_depth: 0, task_deps: TaskDepsRef::Ignore }
+        ImplicitCtxt {
+            tcx,
+            query: None,
+            diagnostics: None,
+            query_depth: 0,
+            task_deps: TaskDepsRef::Ignore,
+        }
     }
 }
 
 // Import the thread-local variable from Rayon, which is preserved for Rayon jobs.
-use rustc_thread_pool::tlv::TLV;
+#[cfg(parallel_compiler)]
+use rayon_core::tlv::TLV;
+
+// Otherwise define our own
+#[cfg(not(parallel_compiler))]
+thread_local! {
+    /// A thread local variable that stores a pointer to the current `ImplicitCtxt`.
+    static TLV: Cell<*const ()> = const { Cell::new(ptr::null()) };
+}
 
 #[inline]
 fn erase(context: &ImplicitCtxt<'_, '_>) -> *const () {

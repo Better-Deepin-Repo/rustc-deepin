@@ -4,7 +4,7 @@ use std::iter::once;
 use std::ops::Range;
 
 use rustc_errors::{Applicability, DiagCtxtHandle, ErrorGuaranteed};
-use rustc_literal_escaper::{EscapeError, Mode};
+use rustc_lexer::unescape::{EscapeError, Mode};
 use rustc_span::{BytePos, Span};
 use tracing::debug;
 
@@ -40,8 +40,8 @@ pub(crate) fn emit_unescape_error(
             dcx.emit_err(UnescapeError::InvalidUnicodeEscape { span: err_span, surrogate: false })
         }
         EscapeError::MoreThanOneChar => {
-            use unicode_normalization::UnicodeNormalization;
             use unicode_normalization::char::is_combining_mark;
+            use unicode_normalization::UnicodeNormalization;
             let mut sugg = None;
             let mut note = None;
 
@@ -226,24 +226,7 @@ pub(crate) fn emit_unescape_error(
             err.emit()
         }
         EscapeError::OutOfRangeHexEscape => {
-            let mut err = dcx.struct_span_err(err_span, "out of range hex escape");
-            err.span_label(err_span, "must be a character in the range [\\x00-\\x7f]");
-
-            let escape_str = &lit[range];
-            if lit.len() <= 4
-                && escape_str.len() == 4
-                && escape_str.starts_with("\\x")
-                && let Ok(value) = u8::from_str_radix(&escape_str[2..4], 16)
-                && matches!(mode, Mode::Char | Mode::Str)
-            {
-                err.help(format!("if you want to write a byte literal, use `b'{}'`", escape_str));
-                err.help(format!(
-                    "if you want to write a Unicode character, use `'\\u{{{:X}}}'`",
-                    value
-                ));
-            }
-
-            err.emit()
+            dcx.emit_err(UnescapeError::OutOfRangeHexEscape(err_span))
         }
         EscapeError::LeadingUnderscoreUnicodeEscape => {
             let (c, span) = last_char();

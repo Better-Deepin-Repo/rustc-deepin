@@ -13,7 +13,6 @@ pub trait Trait {}
 
 pub type TAIT<T> = impl Trait;
 
-#[define_opaque(TAIT)]
 async fn foo<T>() -> TAIT<T> {
     Foo
 }

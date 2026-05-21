@@ -3,6 +3,7 @@
 //@[e2018] edition:2018
 //@[e2021] edition:2021
 
+#![feature(if_let_guard)]
 #![allow(irrefutable_let_patterns)]
 
 fn if_let_ref_mut(mut value: Box<E>) {

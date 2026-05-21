@@ -2,7 +2,7 @@
 
 fn main() {}
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn syntax() {
     let _ = #[attr] [];
     let _ = #[attr] [0];

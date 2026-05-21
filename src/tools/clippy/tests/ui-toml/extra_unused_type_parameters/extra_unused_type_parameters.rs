@@ -1,4 +1,3 @@
-//@check-pass
 pub struct S;
 
 impl S {

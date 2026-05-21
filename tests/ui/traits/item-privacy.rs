@@ -1,4 +1,3 @@
-//@ edition:2015
 #![feature(associated_type_defaults)]
 
 struct S;
@@ -16,9 +15,9 @@ mod method {
         fn c(&self) { }
     }
 
-    impl A for crate::S {}
-    impl B for crate::S {}
-    impl C for crate::S {}
+    impl A for ::S {}
+    impl B for ::S {}
+    impl C for ::S {}
 }
 
 mod assoc_const {
@@ -34,9 +33,9 @@ mod assoc_const {
         const C: u8 = 0;
     }
 
-    impl A for crate::S {}
-    impl B for crate::S {}
-    impl C for crate::S {}
+    impl A for ::S {}
+    impl B for ::S {}
+    impl C for ::S {}
 }
 
 mod assoc_ty {
@@ -52,9 +51,9 @@ mod assoc_ty {
         type C = u8;
     }
 
-    impl A for crate::S {}
-    impl B for crate::S {}
-    impl C for crate::S {}
+    impl A for ::S {}
+    impl B for ::S {}
+    impl C for ::S {}
 }
 
 fn check_method() {
@@ -99,10 +98,9 @@ fn check_assoc_const() {
     S::B; //~ ERROR no associated item named `B` found
     S::C; // OK
     // A, B, C are resolved as inherent items, their traits don't need to be in scope
-    <dyn C>::A;
-    //~^ ERROR the trait `assoc_const::C` is not dyn compatible
-    <dyn C>::B;
-    //~^ ERROR the trait `assoc_const::C` is not dyn compatible
+    <dyn C>::A; //~ ERROR associated constant `A` is private
+                //~^ ERROR the trait `assoc_const::C` cannot be made into an object
+    <dyn C>::B; // ERROR the trait `assoc_const::C` cannot be made into an object
     C::C; // OK
 }
 

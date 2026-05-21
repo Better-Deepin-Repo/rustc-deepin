@@ -10,10 +10,10 @@ pub(crate) fn collect(
     reuse_exe: &Path,
     interner: &mut LicensesInterner,
 ) -> Result<Vec<(PathBuf, LicenseId)>, Error> {
-    println!("gathering license information from REUSE (this might take a minute...)");
+    eprintln!("gathering license information from REUSE");
     let start = Instant::now();
     let raw = &obtain_spdx_document(reuse_exe)?;
-    println!("finished gathering the license information from REUSE in {:.2?}", start.elapsed());
+    eprintln!("finished gathering the license information from REUSE in {:.2?}", start.elapsed());
 
     let document = spdx_rs::parsers::spdx_from_tag_value(&raw)?;
 

@@ -8,14 +8,13 @@ pub(crate) fn invalid_derive_target(
     ctx: &DiagnosticsContext<'_>,
     d: &hir::InvalidDeriveTarget,
 ) -> Diagnostic {
-    let display_range = ctx.sema.diagnostics_display_range_for_range(d.range);
+    let display_range = ctx.sema.diagnostics_display_range(d.node);
 
     Diagnostic::new(
         DiagnosticCode::RustcHardError("E0774"),
         "`derive` may only be applied to `struct`s, `enum`s and `union`s",
         display_range,
     )
-    .stable()
 }
 
 #[cfg(test)]
@@ -29,7 +28,7 @@ mod tests {
 //- minicore:derive
 mod __ {
     #[derive()]
-   // ^^^^^^ error: `derive` may only be applied to `struct`s, `enum`s and `union`s
+  //^^^^^^^^^^^ error: `derive` may only be applied to `struct`s, `enum`s and `union`s
     fn main() {}
 }
             "#,

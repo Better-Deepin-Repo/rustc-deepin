@@ -1,4 +1,3 @@
-//@ edition:2015
 // Test that enum variants are not actually types.
 
 enum Foo {

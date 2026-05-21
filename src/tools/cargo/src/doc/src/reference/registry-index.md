@@ -139,28 +139,27 @@ explaining the format of the entry.
             // https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html.
             "req": "^0.6",
             // Array of features (as strings) enabled for this dependency.
-            // Since Cargo 1.84, defaults to `[]` if not specified.
             "features": ["i128_support"],
             // Boolean of whether or not this is an optional dependency.
-            // Since Cargo 1.84, defaults to `false` if not specified.
             "optional": false,
             // Boolean of whether or not default features are enabled.
-            // Since Cargo 1.84, defaults to `true` if not specified.
             "default_features": true,
             // The target platform for the dependency.
-            // If not specified or `null`, it is not a target dependency.
+            // null if not a target dependency.
             // Otherwise, a string such as "cfg(windows)".
             "target": null,
             // The dependency kind.
             // "dev", "build", or "normal".
-            // If not specified or `null`, it defaults to "normal".
+            // Note: this is a required field, but a small number of entries
+            // exist in the crates.io index with either a missing or null
+            // `kind` field due to implementation bugs.
             "kind": "normal",
             // The URL of the index of the registry where this dependency is
-            // from as a string. If not specified or `null`, it is assumed the
+            // from as a string. If not specified or null, it is assumed the
             // dependency is in the current registry.
             "registry": null,
             // If the dependency is renamed, this is a string of the actual
-            // package name. If not specified or `null`, this dependency is not
+            // package name. If not specified or null, this dependency is not
             // renamed.
             "package": null,
         }
@@ -169,7 +168,6 @@ explaining the format of the entry.
     "cksum": "d867001db0e2b6e0496f9fac96930e2d42233ecd3ca0413e0753d4c7695d289c",
     // Set of features defined for the package.
     // Each feature maps to an array of features or dependencies it enables.
-    // Since Cargo 1.84, defaults to `{}` if not specified.
     "features": {
         "extras": ["rand/simd_support"]
     },
@@ -218,20 +216,7 @@ explaining the format of the entry.
     }
     // The minimal supported Rust version (optional)
     // This must be a valid version requirement without an operator (e.g. no `=`)
-    "rust_version": "1.60",
-    // The publish time of this package version (optional).
-    //
-    // The format is a subset of ISO8601:
-    // - `yyyy-mm-ddThh:mm:ssZ`
-    // - no fractional seconds
-    // - always `Z` for UTC timezone, no timezone offsets supported
-    // - fields are 0-padded
-    //
-    // Example: 2025-11-12T19:30:12Z
-    //
-    // This should be the original publish time and not changed on any status changes,
-    // like `yanked`.
-    "pubtime": "2025-11-12T19:30:12Z"
+    "rust_version": "1.60"
 }
 ```
 

@@ -2,7 +2,7 @@
 #![allow(unused)]
 #![allow(clippy::assertions_on_constants, clippy::eq_op, clippy::uninlined_format_args)]
 
-use std::io::{Error, Write, stdout};
+use std::io::{stdout, Error, ErrorKind, Write};
 use std::ops::Deref;
 use std::panic::Location;
 
@@ -20,68 +20,53 @@ macro_rules! my_other_macro {
 }
 
 fn main() {
-    let error = Error::other("bad thing");
+    let error = Error::new(ErrorKind::Other, "bad thing");
     let x = 'x';
 
     println!("error: {}", format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `println!` args
     println!("{}: {}", error, format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `println!` args
     println!("{:?}: {}", error, format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `println!` args
     println!("{{}}: {}", format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `println!` args
     println!(r#"error: "{}""#, format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `println!` args
     println!("error: {}", format!(r#"something failed at "{}""#, Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `println!` args
     println!("error: {}", format!("something failed at {} {0}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `println!` args
     let _ = format!("error: {}", format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `format!` args
     let _ = write!(
-        //~^ format_in_format_args
+        //~^ ERROR: `format!` in `write!` args
         stdout(),
         "error: {}",
         format!("something failed at {}", Location::caller())
     );
     let _ = writeln!(
-        //~^ format_in_format_args
+        //~^ ERROR: `format!` in `writeln!` args
         stdout(),
         "error: {}",
         format!("something failed at {}", Location::caller())
     );
     print!("error: {}", format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `print!` args
     eprint!("error: {}", format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `eprint!` args
     eprintln!("error: {}", format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `eprintln!` args
     let _ = format_args!("error: {}", format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `format_args!` args
     assert!(true, "error: {}", format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `assert!` args
     assert_eq!(0, 0, "error: {}", format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `assert_eq!` args
     assert_ne!(0, 0, "error: {}", format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
-
+    //~^ ERROR: `format!` in `assert_ne!` args
     panic!("error: {}", format!("something failed at {}", Location::caller()));
-    //~^ format_in_format_args
+    //~^ ERROR: `format!` in `panic!` args
 
     // negative tests
     println!("error: {}", format_args!("something failed at {}", Location::caller()));
@@ -115,7 +100,7 @@ macro_rules! my_println2_args {
 }
 
 fn test2() {
-    let error = Error::other("bad thing");
+    let error = Error::new(ErrorKind::Other, "bad thing");
 
     // None of these should be linted without the config change
     my_println2!(true, "error: {}", format!("something failed at {}", Location::caller()));
@@ -133,39 +118,4 @@ fn test2() {
         error,
         format!("something failed at {}", Location::caller())
     );
-}
-
-#[clippy::format_args]
-macro_rules! usr_println {
-    ($target:expr, $($args:tt)*) => {{
-        if $target {
-            println!($($args)*)
-        }
-    }};
-}
-
-fn user_format() {
-    let error = Error::other("bad thing");
-    let x = 'x';
-
-    usr_println!(true, "error: {}", format!("boom at {}", Location::caller()));
-    //~^ format_in_format_args
-
-    usr_println!(true, "{}: {}", error, format!("boom at {}", Location::caller()));
-    //~^ format_in_format_args
-
-    usr_println!(true, "{:?}: {}", error, format!("boom at {}", Location::caller()));
-    //~^ format_in_format_args
-
-    usr_println!(true, "{{}}: {}", format!("boom at {}", Location::caller()));
-    //~^ format_in_format_args
-
-    usr_println!(true, r#"error: "{}""#, format!("boom at {}", Location::caller()));
-    //~^ format_in_format_args
-
-    usr_println!(true, "error: {}", format!(r#"boom at "{}""#, Location::caller()));
-    //~^ format_in_format_args
-
-    usr_println!(true, "error: {}", format!("boom at {} {0}", Location::caller()));
-    //~^ format_in_format_args
 }

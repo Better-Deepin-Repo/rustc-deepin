@@ -1,10 +1,10 @@
 //@ run-pass
-//@ proc-macro: derive-b-rpass.rs
+//@ aux-build:derive-b-rpass.rs
 
 extern crate derive_b_rpass as derive_b;
 
 #[derive(Debug, PartialEq, derive_b::B, Eq, Copy, Clone)]
-#[cfg_attr(true, B[arbitrary tokens])]
+#[cfg_attr(all(), B[arbitrary tokens])]
 struct B {
     #[C]
     a: u64

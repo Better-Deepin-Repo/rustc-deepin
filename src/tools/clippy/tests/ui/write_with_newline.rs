@@ -10,19 +10,16 @@ fn main() {
 
     // These should fail
     write!(v, "Hello\n");
-    //~^ write_with_newline
-
+    //~^ ERROR: using `write!()` with a format string that ends in a single newline
+    //~| NOTE: `-D clippy::write-with-newline` implied by `-D warnings`
     write!(v, "Hello {}\n", "world");
-    //~^ write_with_newline
-
+    //~^ ERROR: using `write!()` with a format string that ends in a single newline
     write!(v, "Hello {} {}\n", "world", "#2");
-    //~^ write_with_newline
-
+    //~^ ERROR: using `write!()` with a format string that ends in a single newline
     write!(v, "{}\n", 1265);
-    //~^ write_with_newline
-
+    //~^ ERROR: using `write!()` with a format string that ends in a single newline
     write!(v, "\n");
-    //~^ write_with_newline
+    //~^ ERROR: using `write!()` with a format string that ends in a single newline
 
     // These should be fine
     write!(v, "");
@@ -45,8 +42,7 @@ fn main() {
     // #3514
     write!(v, "\\n");
     write!(v, "\\\n");
-    //~^ write_with_newline
-
+    //~^ ERROR: using `write!()` with a format string that ends in a single newline
     write!(v, "\\\\n");
 
     // Raw strings
@@ -55,13 +51,13 @@ fn main() {
 
     // Literal newlines should also fail
     write!(
-        //~^ write_with_newline
+        //~^ ERROR: using `write!()` with a format string that ends in a single newline
         v,
         "
 "
     );
     write!(
-        //~^ write_with_newline
+        //~^ ERROR: using `write!()` with a format string that ends in a single newline
         v,
         r"
 "
@@ -71,8 +67,7 @@ fn main() {
     write!(v, "\r\n");
     write!(v, "foo\r\n");
     write!(v, "\\r\n");
-    //~^ write_with_newline
-
+    //~^ ERROR: using `write!()` with a format string that ends in a single newline
     write!(v, "foo\rbar\n");
 
     // Ignore expanded format strings

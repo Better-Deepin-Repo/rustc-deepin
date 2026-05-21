@@ -5,7 +5,7 @@
 
 extern "C" {
     fn f() {
-    //~^ ERROR incorrect function inside `extern` block
+    //~^ incorrect function inside `extern` block
         fn g() {}
     }
 }

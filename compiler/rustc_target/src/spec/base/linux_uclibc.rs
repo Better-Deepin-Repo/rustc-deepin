@@ -1,5 +1,5 @@
-use crate::spec::{Env, TargetOptions, base};
+use crate::spec::{base, TargetOptions};
 
-pub(crate) fn opts() -> TargetOptions {
-    TargetOptions { env: Env::Uclibc, ..base::linux::opts() }
+pub fn opts() -> TargetOptions {
+    TargetOptions { env: "uclibc".into(), ..base::linux::opts() }
 }

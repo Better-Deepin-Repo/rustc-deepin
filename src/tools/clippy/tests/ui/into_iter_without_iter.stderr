@@ -6,6 +6,7 @@ LL | |
 LL | |     type IntoIter = std::slice::Iter<'a, u8>;
 LL | |     type Item = &'a u8;
 ...  |
+LL | |     }
 LL | | }
    | |_^
    |
@@ -29,6 +30,7 @@ LL | |
 LL | |     type IntoIter = std::slice::IterMut<'a, u8>;
 LL | |     type Item = &'a mut u8;
 ...  |
+LL | |     }
 LL | | }
    | |_^
    |
@@ -50,6 +52,7 @@ LL | |
 LL | |     type IntoIter = std::slice::Iter<'a, T>;
 LL | |     type Item = &'a T;
 ...  |
+LL | |     }
 LL | | }
    | |_^
    |
@@ -71,6 +74,7 @@ LL | |
 LL | |     type IntoIter = std::slice::IterMut<'a, T>;
 LL | |     type Item = &'a mut T;
 ...  |
+LL | |     }
 LL | | }
    | |_^
    |
@@ -92,6 +96,7 @@ LL | |
 LL | |     type IntoIter = std::slice::IterMut<'a, T>;
 LL | |     type Item = &'a mut T;
 ...  |
+LL | |     }
 LL | | }
    | |_^
    |
@@ -109,10 +114,11 @@ error: `IntoIterator` implemented for a reference type without an `iter` method
   --> tests/ui/into_iter_without_iter.rs:120:9
    |
 LL | /         impl<'a> IntoIterator for &'a Issue12037 {
-LL | |
 LL | |             type IntoIter = std::slice::Iter<'a, u8>;
 LL | |             type Item = &'a u8;
-...  |
+LL | |             fn into_iter(self) -> Self::IntoIter {
+LL | |                 todo!()
+LL | |             }
 LL | |         }
    | |_________^
 ...

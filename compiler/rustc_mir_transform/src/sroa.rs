@@ -1,20 +1,19 @@
-use rustc_abi::FieldIdx;
 use rustc_data_structures::flat_map_in_place::FlatMapInPlace;
 use rustc_hir::LangItem;
+use rustc_index::bit_set::{BitSet, GrowableBitSet};
 use rustc_index::IndexVec;
-use rustc_index::bit_set::{DenseBitSet, GrowableBitSet};
 use rustc_middle::bug;
+use rustc_middle::mir::patch::MirPatch;
 use rustc_middle::mir::visit::*;
 use rustc_middle::mir::*;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_mir_dataflow::value_analysis::{excluded_locals, iter_fields};
+use rustc_target::abi::{FieldIdx, FIRST_VARIANT};
 use tracing::{debug, instrument};
 
-use crate::patch::MirPatch;
+pub struct ScalarReplacementOfAggregates;
 
-pub(super) struct ScalarReplacementOfAggregates;
-
-impl<'tcx> crate::MirPass<'tcx> for ScalarReplacementOfAggregates {
+impl<'tcx> MirPass<'tcx> for ScalarReplacementOfAggregates {
     fn is_enabled(&self, sess: &rustc_session::Session) -> bool {
         sess.mir_opt_level() >= 2
     }
@@ -29,12 +28,12 @@ impl<'tcx> crate::MirPass<'tcx> for ScalarReplacementOfAggregates {
         }
 
         let mut excluded = excluded_locals(body);
-        let typing_env = body.typing_env(tcx);
+        let param_env = tcx.param_env_reveal_all_normalized(body.source.def_id());
         loop {
             debug!(?excluded);
-            let escaping = escaping_locals(tcx, &excluded, body);
+            let escaping = escaping_locals(tcx, param_env, &excluded, body);
             debug!(?escaping);
-            let replacements = compute_flattening(tcx, typing_env, body, escaping);
+            let replacements = compute_flattening(tcx, param_env, body, escaping);
             debug!(?replacements);
             let all_dead_locals = replace_flattened_locals(tcx, body, replacements);
             if !all_dead_locals.is_empty() {
@@ -49,10 +48,6 @@ impl<'tcx> crate::MirPass<'tcx> for ScalarReplacementOfAggregates {
             }
         }
     }
-
-    fn is_required(&self) -> bool {
-        false
-    }
 }
 
 /// Identify all locals that are not eligible for SROA.
@@ -64,29 +59,45 @@ impl<'tcx> crate::MirPass<'tcx> for ScalarReplacementOfAggregates {
 ///   client code.
 fn escaping_locals<'tcx>(
     tcx: TyCtxt<'tcx>,
-    excluded: &DenseBitSet<Local>,
+    param_env: ty::ParamEnv<'tcx>,
+    excluded: &BitSet<Local>,
     body: &Body<'tcx>,
-) -> DenseBitSet<Local> {
+) -> BitSet<Local> {
     let is_excluded_ty = |ty: Ty<'tcx>| {
         if ty.is_union() || ty.is_enum() {
             return true;
         }
-        if let ty::Adt(def, _args) = ty.kind()
-            && (def.repr().simd() || tcx.is_lang_item(def.did(), LangItem::DynMetadata))
-        {
-            // Exclude #[repr(simd)] types so that they are not de-optimized into an array
-            // (MCP#838 banned projections into SIMD types, but if the value is unused
-            // this pass sees "all the uses are of the fields" and expands it.)
-
-            // codegen wants to see the `DynMetadata<T>`,
-            // not the inner reference-to-opaque-type.
-            return true;
+        if let ty::Adt(def, _args) = ty.kind() {
+            if def.repr().simd() {
+                // Exclude #[repr(simd)] types so that they are not de-optimized into an array
+                return true;
+            }
+            if tcx.is_lang_item(def.did(), LangItem::DynMetadata) {
+                // codegen wants to see the `DynMetadata<T>`,
+                // not the inner reference-to-opaque-type.
+                return true;
+            }
+            // We already excluded unions and enums, so this ADT must have one variant
+            let variant = def.variant(FIRST_VARIANT);
+            if variant.fields.len() > 1 {
+                // If this has more than one field, it cannot be a wrapper that only provides a
+                // niche, so we do not want to automatically exclude it.
+                return false;
+            }
+            let Ok(layout) = tcx.layout_of(param_env.and(ty)) else {
+                // We can't get the layout
+                return true;
+            };
+            if layout.layout.largest_niche().is_some() {
+                // This type has a niche
+                return true;
+            }
         }
         // Default for non-ADTs
         false
     };
 
-    let mut set = DenseBitSet::new_empty(body.local_decls.len());
+    let mut set = BitSet::new_empty(body.local_decls.len());
     set.insert_range(RETURN_PLACE..=Local::from_usize(body.arg_count));
     for (local, decl) in body.local_decls().iter_enumerated() {
         if excluded.contains(local) || is_excluded_ty(decl.ty) {
@@ -98,7 +109,7 @@ fn escaping_locals<'tcx>(
     return visitor.set;
 
     struct EscapeVisitor {
-        set: DenseBitSet<Local>,
+        set: BitSet<Local>,
     }
 
     impl<'tcx> Visitor<'tcx> for EscapeVisitor {
@@ -136,7 +147,9 @@ fn escaping_locals<'tcx>(
         fn visit_statement(&mut self, statement: &Statement<'tcx>, location: Location) {
             match statement.kind {
                 // Storage statements are expanded in run_pass.
-                StatementKind::StorageLive(..) | StatementKind::StorageDead(..) => return,
+                StatementKind::StorageLive(..)
+                | StatementKind::StorageDead(..)
+                | StatementKind::Deinit(..) => return,
                 _ => self.super_statement(statement, location),
             }
         }
@@ -167,7 +180,7 @@ impl<'tcx> ReplacementMap<'tcx> {
     fn place_fragments(
         &self,
         place: Place<'tcx>,
-    ) -> Option<impl Iterator<Item = (FieldIdx, Ty<'tcx>, Local)>> {
+    ) -> Option<impl Iterator<Item = (FieldIdx, Ty<'tcx>, Local)> + '_> {
         let local = place.as_local()?;
         let fields = self.fragments[local].as_ref()?;
         Some(fields.iter_enumerated().filter_map(|(field, &opt_ty_local)| {
@@ -183,9 +196,9 @@ impl<'tcx> ReplacementMap<'tcx> {
 /// The replacement will be done later in `ReplacementVisitor`.
 fn compute_flattening<'tcx>(
     tcx: TyCtxt<'tcx>,
-    typing_env: ty::TypingEnv<'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
     body: &mut Body<'tcx>,
-    escaping: DenseBitSet<Local>,
+    escaping: BitSet<Local>,
 ) -> ReplacementMap<'tcx> {
     let mut fragments = IndexVec::from_elem(None, &body.local_decls);
 
@@ -195,7 +208,7 @@ fn compute_flattening<'tcx>(
         }
         let decl = body.local_decls[local].clone();
         let ty = decl.ty;
-        iter_fields(ty, tcx, typing_env, |variant, field, field_ty| {
+        iter_fields(ty, tcx, param_env, |variant, field, field_ty| {
             if variant.is_some() {
                 // Downcasts are currently not supported.
                 return;
@@ -213,8 +226,8 @@ fn replace_flattened_locals<'tcx>(
     tcx: TyCtxt<'tcx>,
     body: &mut Body<'tcx>,
     replacements: ReplacementMap<'tcx>,
-) -> DenseBitSet<Local> {
-    let mut all_dead_locals = DenseBitSet::new_empty(replacements.fragments.len());
+) -> BitSet<Local> {
+    let mut all_dead_locals = BitSet::new_empty(replacements.fragments.len());
     for (local, replacements) in replacements.fragments.iter_enumerated() {
         if replacements.is_some() {
             all_dead_locals.insert(local);
@@ -254,7 +267,7 @@ struct ReplacementVisitor<'tcx, 'll> {
     /// Work to do.
     replacements: &'ll ReplacementMap<'tcx>,
     /// This is used to check that we are not leaving references to replaced locals behind.
-    all_dead_locals: DenseBitSet<Local>,
+    all_dead_locals: BitSet<Local>,
     patch: MirPatch<'tcx>,
 }
 
@@ -316,7 +329,7 @@ impl<'tcx, 'll> MutVisitor<'tcx> for ReplacementVisitor<'tcx, 'll> {
                     for (_, _, fl) in final_locals {
                         self.patch.add_statement(location, StatementKind::StorageLive(fl));
                     }
-                    statement.make_nop(true);
+                    statement.make_nop();
                 }
                 return;
             }
@@ -325,9 +338,19 @@ impl<'tcx, 'll> MutVisitor<'tcx> for ReplacementVisitor<'tcx, 'll> {
                     for (_, _, fl) in final_locals {
                         self.patch.add_statement(location, StatementKind::StorageDead(fl));
                     }
-                    statement.make_nop(true);
+                    statement.make_nop();
                 }
                 return;
+            }
+            StatementKind::Deinit(box place) => {
+                if let Some(final_locals) = self.replacements.place_fragments(place) {
+                    for (_, _, fl) in final_locals {
+                        self.patch
+                            .add_statement(location, StatementKind::Deinit(Box::new(fl.into())));
+                    }
+                    statement.make_nop();
+                    return;
+                }
             }
 
             // We have `a = Struct { 0: x, 1: y, .. }`.
@@ -355,7 +378,7 @@ impl<'tcx, 'll> MutVisitor<'tcx> for ReplacementVisitor<'tcx, 'll> {
                             );
                         }
                     }
-                    statement.make_nop(true);
+                    statement.make_nop();
                     return;
                 }
             }
@@ -392,14 +415,11 @@ impl<'tcx, 'll> MutVisitor<'tcx> for ReplacementVisitor<'tcx, 'll> {
             // a_1 = move? place.1
             // ...
             // ```
-            StatementKind::Assign(box (
-                lhs,
-                Rvalue::Use(ref op @ (Operand::Copy(rplace) | Operand::Move(rplace))),
-            )) => {
-                let copy = match *op {
-                    Operand::Copy(_) => true,
-                    Operand::Move(_) => false,
-                    Operand::Constant(_) | Operand::RuntimeChecks(_) => bug!(),
+            StatementKind::Assign(box (lhs, Rvalue::Use(ref op))) => {
+                let (rplace, copy) = match *op {
+                    Operand::Copy(rplace) => (rplace, true),
+                    Operand::Move(rplace) => (rplace, false),
+                    Operand::Constant(_) => bug!(),
                 };
                 if let Some(final_locals) = self.replacements.place_fragments(lhs) {
                     for (field, ty, new_local) in final_locals {
@@ -420,7 +440,7 @@ impl<'tcx, 'll> MutVisitor<'tcx> for ReplacementVisitor<'tcx, 'll> {
                             StatementKind::Assign(Box::new((new_local.into(), rvalue))),
                         );
                     }
-                    statement.make_nop(true);
+                    statement.make_nop();
                     return;
                 }
             }

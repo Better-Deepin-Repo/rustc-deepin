@@ -1,4 +1,3 @@
-//@ edition:2015
 pub const ITEM: Item = Item;
 
 pub struct Item;

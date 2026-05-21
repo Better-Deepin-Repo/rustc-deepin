@@ -17,12 +17,10 @@ pub struct Foo {
 type Tait = impl Iterator<Item = ()>;
 
 impl Foo {
-    #[define_opaque(Tait)]
     pub fn new() -> Foo {
         Foo { bar: std::iter::empty() }
     }
 
-    #[define_opaque(Tait)]
     fn foo(&mut self) {
         //[current]~^ ERROR: item does not constrain
         self.bar.next().unwrap();

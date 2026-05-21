@@ -1,4 +1,3 @@
-//@ edition:2015
 // Check we do the correct privacy checks when we import a name and there is an
 // item with that name in both the value and type namespaces.
 

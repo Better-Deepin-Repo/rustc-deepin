@@ -2,7 +2,6 @@
 // does not prevent crates without a panic_impl from compiling.
 // See rust-lang/rust#109996
 
-//@ add-minicore
 //@ build-pass
 //@ compile-flags: -Cdebug-assertions=yes
 
@@ -12,7 +11,7 @@
 #![feature(no_core)]
 #![no_core]
 
-extern crate minicore;
-use minicore::*;
+#[lang = "sized"]
+trait Foo {}
 
 pub unsafe fn foo(x: *const i32) -> &'static i32 { unsafe { &*x } }

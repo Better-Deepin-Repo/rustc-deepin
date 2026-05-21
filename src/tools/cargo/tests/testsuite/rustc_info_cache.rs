@@ -2,14 +2,15 @@
 
 use std::env;
 
-use crate::prelude::*;
 use cargo_test_support::basic_bin_manifest;
+use cargo_test_support::prelude::*;
 use cargo_test_support::{basic_manifest, project};
 
 const MISS: &str = "[..] rustc info cache miss[..]";
 const HIT: &str = "[..]rustc info cache hit[..]";
 const UPDATE: &str = "[..]updated rustc info cache[..]";
 
+#[allow(deprecated)]
 #[cargo_test]
 fn rustc_info_cache() {
     let p = project()
@@ -105,6 +106,7 @@ fn rustc_info_cache() {
         .run();
 }
 
+#[allow(deprecated)]
 #[cargo_test]
 fn rustc_info_cache_with_wrappers() {
     let wrapper_project = project()

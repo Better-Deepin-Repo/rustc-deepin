@@ -8,56 +8,82 @@
 
 use std::mem;
 
-use rustc_data_structures::fx::FxHashMap;
+use rustc_data_structures::fx::FxHashSet;
 use rustc_hir as hir;
-use rustc_hir::def::{CtorKind, DefKind, Res};
 use rustc_hir::def_id::DefId;
 use rustc_hir::intravisit::{self, Visitor};
 use rustc_hir::{Arm, Block, Expr, LetStmt, Pat, PatKind, Stmt};
 use rustc_index::Idx;
+use rustc_middle::bug;
 use rustc_middle::middle::region::*;
 use rustc_middle::ty::TyCtxt;
-use rustc_session::lint;
 use rustc_span::source_map;
 use tracing::debug;
 
+use super::errs::{maybe_expr_static_mut, maybe_stmt_static_mut};
+
 #[derive(Debug, Copy, Clone)]
 struct Context {
-    /// The scope that contains any new variables declared.
-    var_parent: Option<Scope>,
+    /// The scope that contains any new variables declared, plus its depth in
+    /// the scope tree.
+    var_parent: Option<(Scope, ScopeDepth)>,
 
-    /// Region parent of expressions, etc.
-    parent: Option<Scope>,
+    /// Region parent of expressions, etc., plus its depth in the scope tree.
+    parent: Option<(Scope, ScopeDepth)>,
 }
 
-struct ScopeResolutionVisitor<'tcx> {
+struct RegionResolutionVisitor<'tcx> {
     tcx: TyCtxt<'tcx>,
 
+    // The number of expressions and patterns visited in the current body.
+    expr_and_pat_count: usize,
+    // When this is `true`, we record the `Scopes` we encounter
+    // when processing a Yield expression. This allows us to fix
+    // up their indices.
+    pessimistic_yield: bool,
+    // Stores scopes when `pessimistic_yield` is `true`.
+    fixup_scopes: Vec<Scope>,
     // The generated scope tree.
     scope_tree: ScopeTree,
 
     cx: Context,
 
-    extended_super_lets: FxHashMap<hir::ItemLocalId, Option<Scope>>,
+    /// `terminating_scopes` is a set containing the ids of each
+    /// statement, or conditional/repeating expression. These scopes
+    /// are calling "terminating scopes" because, when attempting to
+    /// find the scope of a temporary, by default we search up the
+    /// enclosing scopes until we encounter the terminating scope. A
+    /// conditional/repeating expression is one which is not
+    /// guaranteed to execute exactly once upon entering the parent
+    /// scope. This could be because the expression only executes
+    /// conditionally, such as the expression `b` in `a && b`, or
+    /// because the expression may execute many times, such as a loop
+    /// body. The reason that we distinguish such expressions is that,
+    /// upon exiting the parent scope, we cannot statically know how
+    /// many times the expression executed, and thus if the expression
+    /// creates temporaries we cannot know statically how many such
+    /// temporaries we would have to cleanup. Therefore, we ensure that
+    /// the temporaries never outlast the conditional/repeating
+    /// expression, preventing the need for dynamic checks and/or
+    /// arbitrary amounts of stack space. Terminating scopes end
+    /// up being contained in a DestructionScope that contains the
+    /// destructor's execution.
+    terminating_scopes: FxHashSet<hir::ItemLocalId>,
 }
 
 /// Records the lifetime of a local variable as `cx.var_parent`
-fn record_var_lifetime(visitor: &mut ScopeResolutionVisitor<'_>, var_id: hir::ItemLocalId) {
+fn record_var_lifetime(visitor: &mut RegionResolutionVisitor<'_>, var_id: hir::ItemLocalId) {
     match visitor.cx.var_parent {
         None => {
             // this can happen in extern fn declarations like
             //
             // extern fn isalnum(c: c_int) -> c_int
         }
-        Some(parent_scope) => visitor.scope_tree.record_var_scope(var_id, parent_scope),
+        Some((parent_scope, _)) => visitor.scope_tree.record_var_scope(var_id, parent_scope),
     }
 }
 
-fn resolve_block<'tcx>(
-    visitor: &mut ScopeResolutionVisitor<'tcx>,
-    blk: &'tcx hir::Block<'tcx>,
-    terminating: bool,
-) {
+fn resolve_block<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, blk: &'tcx hir::Block<'tcx>) {
     debug!("resolve_block(blk.hir_id={:?})", blk.hir_id);
 
     let prev_cx = visitor.cx;
@@ -87,7 +113,7 @@ fn resolve_block<'tcx>(
     // `other_argument()` has run and also the call to `quux(..)`
     // itself has returned.
 
-    visitor.enter_node_scope_with_dtor(blk.hir_id.local_id, terminating);
+    visitor.enter_node_scope_with_dtor(blk.hir_id.local_id);
     visitor.cx.var_parent = visitor.cx.parent;
 
     {
@@ -99,12 +125,12 @@ fn resolve_block<'tcx>(
         for (i, statement) in blk.stmts.iter().enumerate() {
             match statement.kind {
                 hir::StmtKind::Let(LetStmt { els: Some(els), .. }) => {
-                    // let-else has a special lexical structure for variables.
+                    // Let-else has a special lexical structure for variables.
                     // First we take a checkpoint of the current scope context here.
                     let mut prev_cx = visitor.cx;
 
                     visitor.enter_scope(Scope {
-                        local_id: blk.hir_id.local_id,
+                        id: blk.hir_id.local_id,
                         data: ScopeData::Remainder(FirstStatementIndex::new(i)),
                     });
                     visitor.cx.var_parent = visitor.cx.parent;
@@ -116,7 +142,8 @@ fn resolve_block<'tcx>(
                     // the sequence of visits agree with the order in the default
                     // `hir::intravisit` visitor.
                     mem::swap(&mut prev_cx, &mut visitor.cx);
-                    resolve_block(visitor, els, true);
+                    visitor.terminating_scopes.insert(els.hir_id.local_id);
+                    visitor.visit_block(els);
                     // From now on, we continue normally.
                     visitor.cx = prev_cx;
                 }
@@ -128,7 +155,7 @@ fn resolve_block<'tcx>(
                     // the first such subscope, which has the block itself as a
                     // parent.
                     visitor.enter_scope(Scope {
-                        local_id: blk.hir_id.local_id,
+                        id: blk.hir_id.local_id,
                         data: ScopeData::Remainder(FirstStatementIndex::new(i)),
                     });
                     visitor.cx.var_parent = visitor.cx.parent;
@@ -142,274 +169,380 @@ fn resolve_block<'tcx>(
             }
         }
         if let Some(tail_expr) = blk.expr {
-            let local_id = tail_expr.hir_id.local_id;
-            let edition = blk.span.edition();
-            let terminating = edition.at_least_rust_2024();
-            if !terminating
-                && !visitor
-                    .tcx
-                    .lints_that_dont_need_to_run(())
-                    .contains(&lint::LintId::of(lint::builtin::TAIL_EXPR_DROP_ORDER))
+            if visitor.tcx.features().shorter_tail_lifetimes
+                && blk.span.edition().at_least_rust_2024()
             {
-                // If this temporary scope will be changing once the codebase adopts Rust 2024,
-                // and we are linting about possible semantic changes that would result,
-                // then record this node-id in the field `backwards_incompatible_scope`
-                // for future reference.
-                visitor
-                    .scope_tree
-                    .backwards_incompatible_scope
-                    .insert(local_id, Scope { local_id, data: ScopeData::Node });
+                visitor.terminating_scopes.insert(tail_expr.hir_id.local_id);
             }
-            resolve_expr(visitor, tail_expr, terminating);
+            visitor.visit_expr(tail_expr);
         }
     }
 
     visitor.cx = prev_cx;
 }
 
-/// Resolve a condition from an `if` expression or match guard so that it is a terminating scope
-/// if it doesn't contain `let` expressions.
-fn resolve_cond<'tcx>(visitor: &mut ScopeResolutionVisitor<'tcx>, cond: &'tcx hir::Expr<'tcx>) {
-    let terminate = match cond.kind {
-        // Temporaries for `let` expressions must live into the success branch.
-        hir::ExprKind::Let(_) => false,
-        // Logical operator chains are handled in `resolve_expr`. Since logical operator chains in
-        // conditions are lowered to control-flow rather than boolean temporaries, there's no
-        // temporary to drop for logical operators themselves. `resolve_expr` will also recursively
-        // wrap any operands in terminating scopes, other than `let` expressions (which we shouldn't
-        // terminate) and other logical operators (which don't need a terminating scope, since their
-        // operands will be terminated). Any temporaries that would need to be dropped will be
-        // dropped before we leave this operator's scope; terminating them here would be redundant.
-        hir::ExprKind::Binary(
-            source_map::Spanned { node: hir::BinOpKind::And | hir::BinOpKind::Or, .. },
-            _,
-            _,
-        ) => false,
-        // Otherwise, conditions should always drop their temporaries.
-        _ => true,
-    };
-    resolve_expr(visitor, cond, terminate);
-}
+fn resolve_arm<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, arm: &'tcx hir::Arm<'tcx>) {
+    fn has_let_expr(expr: &Expr<'_>) -> bool {
+        match &expr.kind {
+            hir::ExprKind::Binary(_, lhs, rhs) => has_let_expr(lhs) || has_let_expr(rhs),
+            hir::ExprKind::Let(..) => true,
+            _ => false,
+        }
+    }
 
-fn resolve_arm<'tcx>(visitor: &mut ScopeResolutionVisitor<'tcx>, arm: &'tcx hir::Arm<'tcx>) {
     let prev_cx = visitor.cx;
 
-    visitor.enter_node_scope_with_dtor(arm.hir_id.local_id, true);
+    visitor.terminating_scopes.insert(arm.hir_id.local_id);
+
+    visitor.enter_node_scope_with_dtor(arm.hir_id.local_id);
     visitor.cx.var_parent = visitor.cx.parent;
 
-    resolve_pat(visitor, arm.pat);
-    if let Some(guard) = arm.guard {
-        // We introduce a new scope to contain bindings and temporaries from `if let` guards, to
-        // ensure they're dropped before the arm's pattern's bindings. This extends to the end of
-        // the arm body and is the scope of its locals as well.
-        visitor.enter_scope(Scope { local_id: arm.hir_id.local_id, data: ScopeData::MatchGuard });
-        visitor.cx.var_parent = visitor.cx.parent;
-        resolve_cond(visitor, guard);
+    if let Some(expr) = arm.guard
+        && !has_let_expr(expr)
+    {
+        visitor.terminating_scopes.insert(expr.hir_id.local_id);
     }
-    resolve_expr(visitor, arm.body, false);
+
+    intravisit::walk_arm(visitor, arm);
 
     visitor.cx = prev_cx;
 }
 
-#[tracing::instrument(level = "debug", skip(visitor))]
-fn resolve_pat<'tcx>(visitor: &mut ScopeResolutionVisitor<'tcx>, pat: &'tcx hir::Pat<'tcx>) {
+fn resolve_pat<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, pat: &'tcx hir::Pat<'tcx>) {
+    visitor.record_child_scope(Scope { id: pat.hir_id.local_id, data: ScopeData::Node });
+
     // If this is a binding then record the lifetime of that binding.
     if let PatKind::Binding(..) = pat.kind {
         record_var_lifetime(visitor, pat.hir_id.local_id);
     }
 
+    debug!("resolve_pat - pre-increment {} pat = {:?}", visitor.expr_and_pat_count, pat);
+
     intravisit::walk_pat(visitor, pat);
+
+    visitor.expr_and_pat_count += 1;
+
+    debug!("resolve_pat - post-increment {} pat = {:?}", visitor.expr_and_pat_count, pat);
 }
 
-fn resolve_stmt<'tcx>(visitor: &mut ScopeResolutionVisitor<'tcx>, stmt: &'tcx hir::Stmt<'tcx>) {
+fn resolve_stmt<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, stmt: &'tcx hir::Stmt<'tcx>) {
     let stmt_id = stmt.hir_id.local_id;
     debug!("resolve_stmt(stmt.id={:?})", stmt_id);
 
-    if let hir::StmtKind::Let(LetStmt { super_: Some(_), .. }) = stmt.kind {
-        // `super let` statement does not start a new scope, such that
-        //
-        //     { super let x = identity(&temp()); &x }.method();
-        //
-        // behaves exactly as
-        //
-        //     (&identity(&temp()).method();
-        intravisit::walk_stmt(visitor, stmt);
-    } else {
-        // Every statement will clean up the temporaries created during
-        // execution of that statement. Therefore each statement has an
-        // associated destruction scope that represents the scope of the
-        // statement plus its destructors, and thus the scope for which
-        // regions referenced by the destructors need to survive.
+    maybe_stmt_static_mut(visitor.tcx, *stmt);
 
-        let prev_parent = visitor.cx.parent;
-        visitor.enter_node_scope_with_dtor(stmt_id, true);
+    // Every statement will clean up the temporaries created during
+    // execution of that statement. Therefore each statement has an
+    // associated destruction scope that represents the scope of the
+    // statement plus its destructors, and thus the scope for which
+    // regions referenced by the destructors need to survive.
+    visitor.terminating_scopes.insert(stmt_id);
 
-        intravisit::walk_stmt(visitor, stmt);
+    let prev_parent = visitor.cx.parent;
+    visitor.enter_node_scope_with_dtor(stmt_id);
 
-        visitor.cx.parent = prev_parent;
-    }
+    intravisit::walk_stmt(visitor, stmt);
+
+    visitor.cx.parent = prev_parent;
 }
 
-#[tracing::instrument(level = "debug", skip(visitor))]
-fn resolve_expr<'tcx>(
-    visitor: &mut ScopeResolutionVisitor<'tcx>,
-    expr: &'tcx hir::Expr<'tcx>,
-    terminating: bool,
-) {
+fn resolve_expr<'tcx>(visitor: &mut RegionResolutionVisitor<'tcx>, expr: &'tcx hir::Expr<'tcx>) {
+    debug!("resolve_expr - pre-increment {} expr = {:?}", visitor.expr_and_pat_count, expr);
+
+    maybe_expr_static_mut(visitor.tcx, *expr);
+
     let prev_cx = visitor.cx;
-    visitor.enter_node_scope_with_dtor(expr.hir_id.local_id, terminating);
+    visitor.enter_node_scope_with_dtor(expr.hir_id.local_id);
+
+    {
+        let terminating_scopes = &mut visitor.terminating_scopes;
+        let mut terminating = |id: hir::ItemLocalId| {
+            terminating_scopes.insert(id);
+        };
+        match expr.kind {
+            // Conditional or repeating scopes are always terminating
+            // scopes, meaning that temporaries cannot outlive them.
+            // This ensures fixed size stacks.
+            hir::ExprKind::Binary(
+                source_map::Spanned { node: hir::BinOpKind::And | hir::BinOpKind::Or, .. },
+                l,
+                r,
+            ) => {
+                // expr is a short circuiting operator (|| or &&). As its
+                // functionality can't be overridden by traits, it always
+                // processes bool sub-expressions. bools are Copy and thus we
+                // can drop any temporaries in evaluation (read) order
+                // (with the exception of potentially failing let expressions).
+                // We achieve this by enclosing the operands in a terminating
+                // scope, both the LHS and the RHS.
+
+                // We optimize this a little in the presence of chains.
+                // Chains like a && b && c get lowered to AND(AND(a, b), c).
+                // In here, b and c are RHS, while a is the only LHS operand in
+                // that chain. This holds true for longer chains as well: the
+                // leading operand is always the only LHS operand that is not a
+                // binop itself. Putting a binop like AND(a, b) into a
+                // terminating scope is not useful, thus we only put the LHS
+                // into a terminating scope if it is not a binop.
+
+                let terminate_lhs = match l.kind {
+                    // let expressions can create temporaries that live on
+                    hir::ExprKind::Let(_) => false,
+                    // binops already drop their temporaries, so there is no
+                    // need to put them into a terminating scope.
+                    // This is purely an optimization to reduce the number of
+                    // terminating scopes.
+                    hir::ExprKind::Binary(
+                        source_map::Spanned {
+                            node: hir::BinOpKind::And | hir::BinOpKind::Or, ..
+                        },
+                        ..,
+                    ) => false,
+                    // otherwise: mark it as terminating
+                    _ => true,
+                };
+                if terminate_lhs {
+                    terminating(l.hir_id.local_id);
+                }
+
+                // `Let` expressions (in a let-chain) shouldn't be terminating, as their temporaries
+                // should live beyond the immediate expression
+                if !matches!(r.kind, hir::ExprKind::Let(_)) {
+                    terminating(r.hir_id.local_id);
+                }
+            }
+            hir::ExprKind::If(_, then, Some(otherwise)) => {
+                terminating(then.hir_id.local_id);
+                terminating(otherwise.hir_id.local_id);
+            }
+
+            hir::ExprKind::If(_, then, None) => {
+                terminating(then.hir_id.local_id);
+            }
+
+            hir::ExprKind::Loop(body, _, _, _) => {
+                terminating(body.hir_id.local_id);
+            }
+
+            hir::ExprKind::DropTemps(expr) => {
+                // `DropTemps(expr)` does not denote a conditional scope.
+                // Rather, we want to achieve the same behavior as `{ let _t = expr; _t }`.
+                terminating(expr.hir_id.local_id);
+            }
+
+            hir::ExprKind::AssignOp(..)
+            | hir::ExprKind::Index(..)
+            | hir::ExprKind::Unary(..)
+            | hir::ExprKind::Call(..)
+            | hir::ExprKind::MethodCall(..) => {
+                // FIXME(https://github.com/rust-lang/rfcs/issues/811) Nested method calls
+                //
+                // The lifetimes for a call or method call look as follows:
+                //
+                // call.id
+                // - arg0.id
+                // - ...
+                // - argN.id
+                // - call.callee_id
+                //
+                // The idea is that call.callee_id represents *the time when
+                // the invoked function is actually running* and call.id
+                // represents *the time to prepare the arguments and make the
+                // call*. See the section "Borrows in Calls" borrowck/README.md
+                // for an extended explanation of why this distinction is
+                // important.
+                //
+                // record_superlifetime(new_cx, expr.callee_id);
+            }
+
+            _ => {}
+        }
+    }
+
+    let prev_pessimistic = visitor.pessimistic_yield;
+
+    // Ordinarily, we can rely on the visit order of HIR intravisit
+    // to correspond to the actual execution order of statements.
+    // However, there's a weird corner case with compound assignment
+    // operators (e.g. `a += b`). The evaluation order depends on whether
+    // or not the operator is overloaded (e.g. whether or not a trait
+    // like AddAssign is implemented).
+
+    // For primitive types (which, despite having a trait impl, don't actually
+    // end up calling it), the evaluation order is right-to-left. For example,
+    // the following code snippet:
+    //
+    //    let y = &mut 0;
+    //    *{println!("LHS!"); y} += {println!("RHS!"); 1};
+    //
+    // will print:
+    //
+    // RHS!
+    // LHS!
+    //
+    // However, if the operator is used on a non-primitive type,
+    // the evaluation order will be left-to-right, since the operator
+    // actually get desugared to a method call. For example, this
+    // nearly identical code snippet:
+    //
+    //     let y = &mut String::new();
+    //    *{println!("LHS String"); y} += {println!("RHS String"); "hi"};
+    //
+    // will print:
+    // LHS String
+    // RHS String
+    //
+    // To determine the actual execution order, we need to perform
+    // trait resolution. Unfortunately, we need to be able to compute
+    // yield_in_scope before type checking is even done, as it gets
+    // used by AST borrowcheck.
+    //
+    // Fortunately, we don't need to know the actual execution order.
+    // It suffices to know the 'worst case' order with respect to yields.
+    // Specifically, we need to know the highest 'expr_and_pat_count'
+    // that we could assign to the yield expression. To do this,
+    // we pick the greater of the two values from the left-hand
+    // and right-hand expressions. This makes us overly conservative
+    // about what types could possibly live across yield points,
+    // but we will never fail to detect that a type does actually
+    // live across a yield point. The latter part is critical -
+    // we're already overly conservative about what types will live
+    // across yield points, as the generated MIR will determine
+    // when things are actually live. However, for typecheck to work
+    // properly, we can't miss any types.
 
     match expr.kind {
-        // Conditional or repeating scopes are always terminating
-        // scopes, meaning that temporaries cannot outlive them.
-        // This ensures fixed size stacks.
-        hir::ExprKind::Binary(
-            source_map::Spanned { node: hir::BinOpKind::And | hir::BinOpKind::Or, .. },
-            left,
-            right,
-        ) => {
-            // expr is a short circuiting operator (|| or &&). As its
-            // functionality can't be overridden by traits, it always
-            // processes bool sub-expressions. bools are Copy and thus we
-            // can drop any temporaries in evaluation (read) order
-            // (with the exception of potentially failing let expressions).
-            // We achieve this by enclosing the operands in a terminating
-            // scope, both the LHS and the RHS.
-
-            // We optimize this a little in the presence of chains.
-            // Chains like a && b && c get lowered to AND(AND(a, b), c).
-            // In here, b and c are RHS, while a is the only LHS operand in
-            // that chain. This holds true for longer chains as well: the
-            // leading operand is always the only LHS operand that is not a
-            // binop itself. Putting a binop like AND(a, b) into a
-            // terminating scope is not useful, thus we only put the LHS
-            // into a terminating scope if it is not a binop.
-
-            let terminate_lhs = match left.kind {
-                // let expressions can create temporaries that live on
-                hir::ExprKind::Let(_) => false,
-                // binops already drop their temporaries, so there is no
-                // need to put them into a terminating scope.
-                // This is purely an optimization to reduce the number of
-                // terminating scopes.
-                hir::ExprKind::Binary(
-                    source_map::Spanned { node: hir::BinOpKind::And | hir::BinOpKind::Or, .. },
-                    ..,
-                ) => false,
-                // otherwise: mark it as terminating
-                _ => true,
-            };
-
-            // `Let` expressions (in a let-chain) shouldn't be terminating, as their temporaries
-            // should live beyond the immediate expression
-            let terminate_rhs = !matches!(right.kind, hir::ExprKind::Let(_));
-
-            resolve_expr(visitor, left, terminate_lhs);
-            resolve_expr(visitor, right, terminate_rhs);
-        }
-        // Manually recurse over closures, because they are nested bodies
-        // that share the parent environment. We handle const blocks in
-        // `visit_inline_const`.
-        hir::ExprKind::Closure(&hir::Closure { body, .. }) => {
-            let body = visitor.tcx.hir_body(body);
+        // Manually recurse over closures and inline consts, because they are the only
+        // case of nested bodies that share the parent environment.
+        hir::ExprKind::Closure(&hir::Closure { body, .. })
+        | hir::ExprKind::ConstBlock(hir::ConstBlock { body, .. }) => {
+            let body = visitor.tcx.hir().body(body);
             visitor.visit_body(body);
         }
-        // Ordinarily, we can rely on the visit order of HIR intravisit
-        // to correspond to the actual execution order of statements.
-        // However, there's a weird corner case with compound assignment
-        // operators (e.g. `a += b`). The evaluation order depends on whether
-        // or not the operator is overloaded (e.g. whether or not a trait
-        // like AddAssign is implemented).
-        //
-        // For primitive types (which, despite having a trait impl, don't actually
-        // end up calling it), the evaluation order is right-to-left. For example,
-        // the following code snippet:
-        //
-        //    let y = &mut 0;
-        //    *{println!("LHS!"); y} += {println!("RHS!"); 1};
-        //
-        // will print:
-        //
-        // RHS!
-        // LHS!
-        //
-        // However, if the operator is used on a non-primitive type,
-        // the evaluation order will be left-to-right, since the operator
-        // actually get desugared to a method call. For example, this
-        // nearly identical code snippet:
-        //
-        //     let y = &mut String::new();
-        //    *{println!("LHS String"); y} += {println!("RHS String"); "hi"};
-        //
-        // will print:
-        // LHS String
-        // RHS String
-        //
-        // To determine the actual execution order, we need to perform
-        // trait resolution. Fortunately, we don't need to know the actual execution order.
         hir::ExprKind::AssignOp(_, left_expr, right_expr) => {
+            debug!(
+                "resolve_expr - enabling pessimistic_yield, was previously {}",
+                prev_pessimistic
+            );
+
+            let start_point = visitor.fixup_scopes.len();
+            visitor.pessimistic_yield = true;
+
+            // If the actual execution order turns out to be right-to-left,
+            // then we're fine. However, if the actual execution order is left-to-right,
+            // then we'll assign too low a count to any `yield` expressions
+            // we encounter in 'right_expression' - they should really occur after all of the
+            // expressions in 'left_expression'.
             visitor.visit_expr(right_expr);
+            visitor.pessimistic_yield = prev_pessimistic;
+
+            debug!("resolve_expr - restoring pessimistic_yield to {}", prev_pessimistic);
             visitor.visit_expr(left_expr);
+            debug!("resolve_expr - fixing up counts to {}", visitor.expr_and_pat_count);
+
+            // Remove and process any scopes pushed by the visitor
+            let target_scopes = visitor.fixup_scopes.drain(start_point..);
+
+            for scope in target_scopes {
+                let yield_data =
+                    visitor.scope_tree.yield_in_scope.get_mut(&scope).unwrap().last_mut().unwrap();
+                let count = yield_data.expr_and_pat_count;
+                let span = yield_data.span;
+
+                // expr_and_pat_count never decreases. Since we recorded counts in yield_in_scope
+                // before walking the left-hand side, it should be impossible for the recorded
+                // count to be greater than the left-hand side count.
+                if count > visitor.expr_and_pat_count {
+                    bug!(
+                        "Encountered greater count {} at span {:?} - expected no greater than {}",
+                        count,
+                        span,
+                        visitor.expr_and_pat_count
+                    );
+                }
+                let new_count = visitor.expr_and_pat_count;
+                debug!(
+                    "resolve_expr - increasing count for scope {:?} from {} to {} at span {:?}",
+                    scope, count, new_count, span
+                );
+
+                yield_data.expr_and_pat_count = new_count;
+            }
         }
 
         hir::ExprKind::If(cond, then, Some(otherwise)) => {
             let expr_cx = visitor.cx;
-            let data = if expr.span.at_least_rust_2024() {
-                ScopeData::IfThenRescope
-            } else {
-                ScopeData::IfThen
-            };
-            visitor.enter_scope(Scope { local_id: then.hir_id.local_id, data });
+            visitor.enter_scope(Scope { id: then.hir_id.local_id, data: ScopeData::IfThen });
             visitor.cx.var_parent = visitor.cx.parent;
-            resolve_cond(visitor, cond);
-            resolve_expr(visitor, then, true);
+            visitor.visit_expr(cond);
+            visitor.visit_expr(then);
             visitor.cx = expr_cx;
-            resolve_expr(visitor, otherwise, true);
+            visitor.visit_expr(otherwise);
         }
 
         hir::ExprKind::If(cond, then, None) => {
             let expr_cx = visitor.cx;
-            let data = if expr.span.at_least_rust_2024() {
-                ScopeData::IfThenRescope
-            } else {
-                ScopeData::IfThen
-            };
-            visitor.enter_scope(Scope { local_id: then.hir_id.local_id, data });
+            visitor.enter_scope(Scope { id: then.hir_id.local_id, data: ScopeData::IfThen });
             visitor.cx.var_parent = visitor.cx.parent;
-            resolve_cond(visitor, cond);
-            resolve_expr(visitor, then, true);
+            visitor.visit_expr(cond);
+            visitor.visit_expr(then);
             visitor.cx = expr_cx;
-        }
-
-        hir::ExprKind::Loop(body, _, _, _) => {
-            resolve_block(visitor, body, true);
-        }
-
-        hir::ExprKind::DropTemps(expr) => {
-            // `DropTemps(expr)` does not denote a conditional scope.
-            // Rather, we want to achieve the same behavior as `{ let _t = expr; _t }`.
-            resolve_expr(visitor, expr, true);
         }
 
         _ => intravisit::walk_expr(visitor, expr),
     }
 
+    visitor.expr_and_pat_count += 1;
+
+    debug!("resolve_expr post-increment {}, expr = {:?}", visitor.expr_and_pat_count, expr);
+
+    if let hir::ExprKind::Yield(_, source) = &expr.kind {
+        // Mark this expr's scope and all parent scopes as containing `yield`.
+        let mut scope = Scope { id: expr.hir_id.local_id, data: ScopeData::Node };
+        loop {
+            let span = match expr.kind {
+                hir::ExprKind::Yield(expr, hir::YieldSource::Await { .. }) => {
+                    expr.span.shrink_to_hi().to(expr.span)
+                }
+                _ => expr.span,
+            };
+            let data =
+                YieldData { span, expr_and_pat_count: visitor.expr_and_pat_count, source: *source };
+            match visitor.scope_tree.yield_in_scope.get_mut(&scope) {
+                Some(yields) => yields.push(data),
+                None => {
+                    visitor.scope_tree.yield_in_scope.insert(scope, vec![data]);
+                }
+            }
+
+            if visitor.pessimistic_yield {
+                debug!("resolve_expr in pessimistic_yield - marking scope {:?} for fixup", scope);
+                visitor.fixup_scopes.push(scope);
+            }
+
+            // Keep traversing up while we can.
+            match visitor.scope_tree.parent_map.get(&scope) {
+                // Don't cross from closure bodies to their parent.
+                Some(&(superscope, _)) => match superscope.data {
+                    ScopeData::CallSite => break,
+                    _ => scope = superscope,
+                },
+                None => break,
+            }
+        }
+    }
+
     visitor.cx = prev_cx;
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-enum LetKind {
-    Regular,
-    Super,
-}
-
 fn resolve_local<'tcx>(
-    visitor: &mut ScopeResolutionVisitor<'tcx>,
+    visitor: &mut RegionResolutionVisitor<'tcx>,
     pat: Option<&'tcx hir::Pat<'tcx>>,
     init: Option<&'tcx hir::Expr<'tcx>>,
-    let_kind: LetKind,
 ) {
-    debug!("resolve_local(pat={:?}, init={:?}, let_kind={:?})", pat, init, let_kind);
+    debug!("resolve_local(pat={:?}, init={:?})", pat, init);
+
+    let blk_scope = visitor.cx.var_parent.map(|(p, _)| p);
 
     // As an exception to the normal rules governing temporary
     // lifetimes, initializers in a let have a temporary lifetime
@@ -467,71 +600,28 @@ fn resolve_local<'tcx>(
     // A, but the inner rvalues `a()` and `b()` have an extended lifetime
     // due to rule C.
 
-    let extend_initializer = match let_kind {
-        LetKind::Regular => true,
-        LetKind::Super
-            if let Some(scope) =
-                visitor.extended_super_lets.remove(&pat.unwrap().hir_id.local_id) =>
-        {
-            // This expression was lifetime-extended by a parent let binding. E.g.
-            //
-            //     let a = {
-            //         super let b = temp();
-            //         &b
-            //     };
-            //
-            // (Which needs to behave exactly as: let a = &temp();)
-            //
-            // Processing of `let a` will have already decided to extend the lifetime of this
-            // `super let` to its own var_scope. We use that scope.
-            visitor.cx.var_parent = scope;
-            // Extend temporaries to live in the same scope as the parent `let`'s bindings.
-            true
-        }
-        LetKind::Super => {
-            // This `super let` is not subject to lifetime extension from a parent let binding. E.g.
-            //
-            //     identity({ super let x = temp(); &x }).method();
-            //
-            // (Which needs to behave exactly as: identity(&temp()).method();)
-            //
-            // Iterate up to the enclosing destruction scope to find the same scope that will also
-            // be used for the result of the block itself.
-            if let Some(inner_scope) = visitor.cx.var_parent {
-                visitor.cx.var_parent =
-                    Some(visitor.scope_tree.default_temporary_scope(inner_scope).0)
-            }
-            // Don't lifetime-extend child `super let`s or block tail expressions' temporaries in
-            // the initializer when this `super let` is not itself extended by a parent `let`
-            // (#145784). Block tail expressions are temporary drop scopes in Editions 2024 and
-            // later, their temps shouldn't outlive the block in e.g. `f(pin!({ &temp() }))`.
-            false
-        }
-    };
-
-    if let Some(expr) = init
-        && extend_initializer
-    {
-        record_rvalue_scope_if_borrow_expr(visitor, expr, visitor.cx.var_parent);
+    if let Some(expr) = init {
+        record_rvalue_scope_if_borrow_expr(visitor, expr, blk_scope);
 
         if let Some(pat) = pat {
             if is_binding_pat(pat) {
-                record_subexpr_extended_temp_scopes(
-                    &mut visitor.scope_tree,
-                    expr,
-                    visitor.cx.var_parent,
+                visitor.scope_tree.record_rvalue_candidate(
+                    expr.hir_id,
+                    RvalueCandidateType::Pattern {
+                        target: expr.hir_id.local_id,
+                        lifetime: blk_scope,
+                    },
                 );
             }
         }
     }
 
-    // Make sure we visit the initializer first.
-    // The correct order, as shared between drop_ranges and intravisitor,
+    // Make sure we visit the initializer first, so expr_and_pat_count remains correct.
+    // The correct order, as shared between coroutine_interior, drop_ranges and intravisitor,
     // is to walk initializer, followed by pattern bindings, finally followed by the `else` block.
     if let Some(expr) = init {
         visitor.visit_expr(expr);
     }
-
     if let Some(pat) = pat {
         visitor.visit_pat(pat);
     }
@@ -546,7 +636,6 @@ fn resolve_local<'tcx>(
     ///        | ( ..., P&, ... )
     ///        | ... "|" P& "|" ...
     ///        | box P&
-    ///        | P& if ...
     /// ```
     fn is_binding_pat(pat: &hir::Pat<'_>) -> bool {
         // Note that the code below looks for *explicit* refs only, that is, it won't
@@ -573,7 +662,7 @@ fn resolve_local<'tcx>(
         // & expression, and its lifetime would be extended to the end of the block (due
         // to a different rule, not the below code).
         match pat.kind {
-            PatKind::Binding(hir::BindingMode(hir::ByRef::Yes(..), _), ..) => true,
+            PatKind::Binding(hir::BindingMode(hir::ByRef::Yes(_), _), ..) => true,
 
             PatKind::Struct(_, field_pats, _) => field_pats.iter().any(|fp| is_binding_pat(fp.pat)),
 
@@ -587,22 +676,20 @@ fn resolve_local<'tcx>(
             | PatKind::TupleStruct(_, subpats, _)
             | PatKind::Tuple(subpats, _) => subpats.iter().any(|p| is_binding_pat(p)),
 
-            PatKind::Box(subpat) | PatKind::Deref(subpat) | PatKind::Guard(subpat, _) => {
-                is_binding_pat(subpat)
-            }
+            PatKind::Box(subpat) | PatKind::Deref(subpat) => is_binding_pat(subpat),
 
-            PatKind::Ref(_, _, _)
+            PatKind::Ref(_, _)
             | PatKind::Binding(hir::BindingMode(hir::ByRef::No, _), ..)
-            | PatKind::Missing
             | PatKind::Wild
             | PatKind::Never
-            | PatKind::Expr(_)
+            | PatKind::Path(_)
+            | PatKind::Lit(_)
             | PatKind::Range(_, _, _)
             | PatKind::Err(_) => false,
         }
     }
 
-    /// If `expr` matches the `E&` grammar, then records an extended temporary scope as appropriate:
+    /// If `expr` matches the `E&` grammar, then records an extended rvalue scope as appropriate:
     ///
     /// ```text
     ///     E& = & ET
@@ -610,7 +697,6 @@ fn resolve_local<'tcx>(
     ///        | [ ..., E&, ... ]
     ///        | ( ..., E&, ... )
     ///        | {...; E&}
-    ///        | { super let ... = E&; ... }
     ///        | if _ { ...; E& } else { ...; E& }
     ///        | match _ { ..., _ => E&, ... }
     ///        | box E&
@@ -618,14 +704,20 @@ fn resolve_local<'tcx>(
     ///        | ( E& )
     /// ```
     fn record_rvalue_scope_if_borrow_expr<'tcx>(
-        visitor: &mut ScopeResolutionVisitor<'tcx>,
+        visitor: &mut RegionResolutionVisitor<'tcx>,
         expr: &hir::Expr<'_>,
         blk_id: Option<Scope>,
     ) {
         match expr.kind {
             hir::ExprKind::AddrOf(_, _, subexpr) => {
                 record_rvalue_scope_if_borrow_expr(visitor, subexpr, blk_id);
-                record_subexpr_extended_temp_scopes(&mut visitor.scope_tree, subexpr, blk_id);
+                visitor.scope_tree.record_rvalue_candidate(
+                    subexpr.hir_id,
+                    RvalueCandidateType::Borrow {
+                        target: subexpr.hir_id.local_id,
+                        lifetime: blk_id,
+                    },
+                );
             }
             hir::ExprKind::Struct(_, fields, _) => {
                 for field in fields {
@@ -644,13 +736,6 @@ fn resolve_local<'tcx>(
                 if let Some(subexpr) = block.expr {
                     record_rvalue_scope_if_borrow_expr(visitor, subexpr, blk_id);
                 }
-                for stmt in block.stmts {
-                    if let hir::StmtKind::Let(local) = stmt.kind
-                        && let Some(_) = local.super_
-                    {
-                        visitor.extended_super_lets.insert(local.pat.hir_id.local_id, blk_id);
-                    }
-                }
             }
             hir::ExprKind::If(_, then_block, else_block) => {
                 record_rvalue_scope_if_borrow_expr(visitor, then_block, blk_id);
@@ -663,112 +748,83 @@ fn resolve_local<'tcx>(
                     record_rvalue_scope_if_borrow_expr(visitor, arm.body, blk_id);
                 }
             }
-            hir::ExprKind::Call(func, args) => {
-                // Recurse into tuple constructors, such as `Some(&temp())`.
-                //
-                // That way, there is no difference between `Some(..)` and `Some { 0: .. }`,
-                // even though the former is syntactically a function call.
-                if let hir::ExprKind::Path(path) = &func.kind
-                    && let hir::QPath::Resolved(None, path) = path
-                    && let Res::SelfCtor(_) | Res::Def(DefKind::Ctor(_, CtorKind::Fn), _) = path.res
-                {
-                    for arg in args {
-                        record_rvalue_scope_if_borrow_expr(visitor, arg, blk_id);
-                    }
-                }
+            hir::ExprKind::Call(..) | hir::ExprKind::MethodCall(..) => {
+                // FIXME(@dingxiangfei2009): choose call arguments here
+                // for candidacy for extended parameter rule application
+            }
+            hir::ExprKind::Index(..) => {
+                // FIXME(@dingxiangfei2009): select the indices
+                // as candidate for rvalue scope rules
             }
             _ => {}
         }
     }
 }
 
-/// Applied to an expression `expr` if `expr` -- or something owned or partially owned by
-/// `expr` -- is going to be indirectly referenced by a variable in a let statement. In that
-/// case, the "temporary lifetime" of `expr` is extended to be the block enclosing the `let`
-/// statement.
-///
-/// More formally, if `expr` matches the grammar `ET`, record the temporary scope of the matching
-/// `<rvalue>` as `lifetime`:
-///
-/// ```text
-///     ET = *ET
-///        | ET[...]
-///        | ET.f
-///        | (ET)
-///        | <rvalue>
-/// ```
-///
-/// Note: ET is intended to match "rvalues or places based on rvalues".
-fn record_subexpr_extended_temp_scopes(
-    scope_tree: &mut ScopeTree,
-    expr: &hir::Expr<'_>,
-    lifetime: Option<Scope>,
-) {
-    // Note: give all the expressions matching `ET` with the
-    // extended temporary lifetime, not just the innermost rvalue,
-    // because in MIR building if we must compile e.g., `*rvalue()`
-    // into a temporary, we request the temporary scope of the
-    // outer expression.
-
-    scope_tree.record_extended_temp_scope(expr.hir_id.local_id, lifetime);
-
-    match expr.kind {
-        hir::ExprKind::AddrOf(_, _, subexpr)
-        | hir::ExprKind::Unary(hir::UnOp::Deref, subexpr)
-        | hir::ExprKind::Field(subexpr, _)
-        | hir::ExprKind::Index(subexpr, _, _) => {
-            record_subexpr_extended_temp_scopes(scope_tree, subexpr, lifetime);
-        }
-        _ => {}
-    }
-}
-
-impl<'tcx> ScopeResolutionVisitor<'tcx> {
+impl<'tcx> RegionResolutionVisitor<'tcx> {
     /// Records the current parent (if any) as the parent of `child_scope`.
-    fn record_child_scope(&mut self, child_scope: Scope) {
+    /// Returns the depth of `child_scope`.
+    fn record_child_scope(&mut self, child_scope: Scope) -> ScopeDepth {
         let parent = self.cx.parent;
         self.scope_tree.record_scope_parent(child_scope, parent);
+        // If `child_scope` has no parent, it must be the root node, and so has
+        // a depth of 1. Otherwise, its depth is one more than its parent's.
+        parent.map_or(1, |(_p, d)| d + 1)
     }
 
     /// Records the current parent (if any) as the parent of `child_scope`,
     /// and sets `child_scope` as the new current parent.
     fn enter_scope(&mut self, child_scope: Scope) {
-        self.record_child_scope(child_scope);
-        self.cx.parent = Some(child_scope);
+        let child_depth = self.record_child_scope(child_scope);
+        self.cx.parent = Some((child_scope, child_depth));
     }
 
-    fn enter_node_scope_with_dtor(&mut self, id: hir::ItemLocalId, terminating: bool) {
+    fn enter_node_scope_with_dtor(&mut self, id: hir::ItemLocalId) {
         // If node was previously marked as a terminating scope during the
         // recursive visit of its parent node in the HIR, then we need to
         // account for the destruction scope representing the scope of
         // the destructors that run immediately after it completes.
-        if terminating {
-            self.enter_scope(Scope { local_id: id, data: ScopeData::Destruction });
+        if self.terminating_scopes.contains(&id) {
+            self.enter_scope(Scope { id, data: ScopeData::Destruction });
         }
-        self.enter_scope(Scope { local_id: id, data: ScopeData::Node });
+        self.enter_scope(Scope { id, data: ScopeData::Node });
     }
 
     fn enter_body(&mut self, hir_id: hir::HirId, f: impl FnOnce(&mut Self)) {
+        // Save all state that is specific to the outer function
+        // body. These will be restored once down below, once we've
+        // visited the body.
+        let outer_ec = mem::replace(&mut self.expr_and_pat_count, 0);
         let outer_cx = self.cx;
+        let outer_ts = mem::take(&mut self.terminating_scopes);
+        // The 'pessimistic yield' flag is set to true when we are
+        // processing a `+=` statement and have to make pessimistic
+        // control flow assumptions. This doesn't apply to nested
+        // bodies within the `+=` statements. See #69307.
+        let outer_pessimistic_yield = mem::replace(&mut self.pessimistic_yield, false);
+        self.terminating_scopes.insert(hir_id.local_id);
 
-        self.enter_scope(Scope { local_id: hir_id.local_id, data: ScopeData::CallSite });
-        self.enter_scope(Scope { local_id: hir_id.local_id, data: ScopeData::Arguments });
+        self.enter_scope(Scope { id: hir_id.local_id, data: ScopeData::CallSite });
+        self.enter_scope(Scope { id: hir_id.local_id, data: ScopeData::Arguments });
 
         f(self);
 
         // Restore context we had at the start.
+        self.expr_and_pat_count = outer_ec;
         self.cx = outer_cx;
+        self.terminating_scopes = outer_ts;
+        self.pessimistic_yield = outer_pessimistic_yield;
     }
 }
 
-impl<'tcx> Visitor<'tcx> for ScopeResolutionVisitor<'tcx> {
+impl<'tcx> Visitor<'tcx> for RegionResolutionVisitor<'tcx> {
     fn visit_block(&mut self, b: &'tcx Block<'tcx>) {
-        resolve_block(self, b, false);
+        resolve_block(self, b);
     }
 
     fn visit_body(&mut self, body: &hir::Body<'tcx>) {
         let body_id = body.id();
-        let owner_id = self.tcx.hir_body_owner_def_id(body_id);
+        let owner_id = self.tcx.hir().body_owner_def_id(body_id);
 
         debug!(
             "visit_body(id={:?}, span={:?}, body.id={:?}, cx.parent={:?})",
@@ -779,20 +835,21 @@ impl<'tcx> Visitor<'tcx> for ScopeResolutionVisitor<'tcx> {
         );
 
         self.enter_body(body.value.hir_id, |this| {
-            if this.tcx.hir_body_owner_kind(owner_id).is_fn_or_closure() {
+            if this.tcx.hir().body_owner_kind(owner_id).is_fn_or_closure() {
                 // The arguments and `self` are parented to the fn.
-                this.cx.var_parent = this.cx.parent;
+                this.cx.var_parent = this.cx.parent.take();
                 for param in body.params {
                     this.visit_pat(param.pat);
                 }
 
                 // The body of the every fn is a root scope.
-                resolve_expr(this, body.value, true);
+                this.cx.parent = this.cx.var_parent;
+                this.visit_expr(body.value)
             } else {
-                // All bodies have an outer temporary drop scope, but temporaries
-                // and `super let` bindings in constant initializers may be extended
-                // to have 'static lifetimes, using the same syntactical rules used
-                // for `let` initializers.
+                // Only functions have an outer terminating (drop) scope, while
+                // temporaries in constant initializers may be 'static, but only
+                // according to rvalue lifetime semantics, using the same
+                // syntactical rules used for let initializers.
                 //
                 // e.g., in `let x = &f();`, the temporary holding the result from
                 // the `f()` call lives for the entirety of the surrounding block.
@@ -808,11 +865,7 @@ impl<'tcx> Visitor<'tcx> for ScopeResolutionVisitor<'tcx> {
                 // (i.e., `'static`), which means that after `g` returns, it drops,
                 // and all the associated destruction scope rules apply.
                 this.cx.var_parent = None;
-                this.enter_scope(Scope {
-                    local_id: body.value.hir_id.local_id,
-                    data: ScopeData::Destruction,
-                });
-                resolve_local(this, None, Some(body.value), LetKind::Regular);
+                resolve_local(this, None, Some(body.value));
             }
         })
     }
@@ -827,18 +880,10 @@ impl<'tcx> Visitor<'tcx> for ScopeResolutionVisitor<'tcx> {
         resolve_stmt(self, s);
     }
     fn visit_expr(&mut self, ex: &'tcx Expr<'tcx>) {
-        resolve_expr(self, ex, false);
+        resolve_expr(self, ex);
     }
     fn visit_local(&mut self, l: &'tcx LetStmt<'tcx>) {
-        let let_kind = match l.super_ {
-            Some(_) => LetKind::Super,
-            None => LetKind::Regular,
-        };
-        resolve_local(self, Some(l.pat), l.init, let_kind);
-    }
-    fn visit_inline_const(&mut self, c: &'tcx hir::ConstBlock) {
-        let body = self.tcx.hir_body(c.body);
-        self.visit_body(body);
+        resolve_local(self, Some(l.pat), l.init)
     }
 }
 
@@ -855,12 +900,15 @@ pub(crate) fn region_scope_tree(tcx: TyCtxt<'_>, def_id: DefId) -> &ScopeTree {
         return tcx.region_scope_tree(typeck_root_def_id);
     }
 
-    let scope_tree = if let Some(body) = tcx.hir_maybe_body_owned_by(def_id.expect_local()) {
-        let mut visitor = ScopeResolutionVisitor {
+    let scope_tree = if let Some(body) = tcx.hir().maybe_body_owned_by(def_id.expect_local()) {
+        let mut visitor = RegionResolutionVisitor {
             tcx,
             scope_tree: ScopeTree::default(),
+            expr_and_pat_count: 0,
             cx: Context { parent: None, var_parent: None },
-            extended_super_lets: Default::default(),
+            terminating_scopes: Default::default(),
+            pessimistic_yield: false,
+            fixup_scopes: vec![],
         };
 
         visitor.scope_tree.root_body = Some(body.value.hir_id);

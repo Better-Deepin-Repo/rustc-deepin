@@ -1,14 +1,14 @@
-//@ aux-build:dyn-incompatible.rs
+//@ aux-build:not-object-safe.rs
 
-extern crate dyn_incompatible;
+extern crate not_object_safe;
 
 pub trait B where
-    Self: dyn_incompatible::A,
+    Self: not_object_safe::A,
 {
     fn f2(&self);
 }
 
 struct S(Box<dyn B>);
-//~^ ERROR the trait `B` is not dyn compatible
+//~^ ERROR the trait `B` cannot be made into an object
 
 fn main() {}

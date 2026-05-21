@@ -1,3 +1,5 @@
+#![feature(if_let_guard)]
+
 fn foo(_:String) {}
 
 fn main()

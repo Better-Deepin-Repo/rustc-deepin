@@ -3,11 +3,7 @@ rust-src binary: executable-not-elf-or-script [usr/src/rustc-*/*]
 rust-src binary: package-contains-eslint-config-file usr/src/rustc-*/src/librustdoc/html/static/.eslintrc.js
 rust-src binary: breakout-link usr/lib/rustlib/src/rust -> usr/src/rustc-*
 rust-src binary: embedded-javascript-library * [usr/src/rustc-*/*]
-rust-src binary: national-encoding [usr/src/rustc-*/*]  
-
-# these are built for wasm32-wasip2, not any Debian architecture
-rust-src binary: arch-independent-package-contains-binary-or-object [usr/src/rustc-*/library/vendor/wit-bindgen-0.45.1/src/rt/libwit_bindgen_cabi.a]
-rust-src binary: no-code-sections [usr/src/rustc-1.*/library/vendor/wit-bindgen-*/src/rt/libwit_bindgen_cabi.a]
+rust-src binary: national-encoding [usr/src/rustc-*/*]
 
 rust-src binary: duplicate-font-file * [usr/src/rustc-1.*.*/src/tools/rustc-perf/collector/compile-benchmarks/webrender-2022/wrench/reftests/text/FreeSans.ttf]
 rust-src binary: duplicate-font-file * [usr/src/rustc-1.*.*/src/tools/rustc-perf/collector/compile-benchmarks/webrender-2022/wrench/reftests/text/VeraBd.ttf]
@@ -17,6 +13,4 @@ rust-src binary: package-contains-vcs-control-file [usr/src/rustc-1.*.*/src/tool
 rust-src binary: package-contains-vcs-control-file [usr/src/rustc-1.*.*/src/tools/cargo/tests/testsuite/cargo_init/simple_hg/out/.hgignore]
 rust-src binary: package-contains-vcs-control-file [usr/src/rustc-1.*.*/src/tools/cargo/tests/testsuite/cargo_init/simple_hg_ignore_exists/in/.hgignore]
 rust-src binary: package-contains-vcs-control-file [usr/src/rustc-1.*.*/src/tools/cargo/tests/testsuite/cargo_init/simple_hg_ignore_exists/out/.hgignore]
-rust-src binary: package-contains-vcs-control-file [usr/src/rustc-1.*.*/library/vendor/*/.gitmodules]
 rust-src binary: truetype-font-prohibits-installable-embedding (preview/print only) [usr/src/rustc-1.*.*/src/tools/rustc-perf/collector/compile-benchmarks/webrender-2022/wrench/reftests/text/VeraBd.ttf]
-rust-src binary: privacy-breach-uses-embedded-file You may use the libjs-jquery package. * [usr/src/rustc-1.*/src/tools/rustc-perf/collector/compile-benchmarks/cargo/src/doc/html-headers.html]

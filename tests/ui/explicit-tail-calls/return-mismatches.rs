@@ -1,4 +1,4 @@
-#![expect(incomplete_features)]
+#![allow(incomplete_features)]
 #![feature(explicit_tail_calls)]
 
 fn _f0<'a>() -> &'static [u8] {

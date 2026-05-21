@@ -1,5 +1,5 @@
 use rustc_hir as hir;
-use rustc_macros::{Diagnostic, Subdiagnostic};
+use rustc_macros::{LintDiagnostic, Subdiagnostic};
 use rustc_session::{declare_lint, declare_lint_pass};
 use rustc_span::Span;
 
@@ -39,6 +39,8 @@ declare_lint! {
     /// But it does work with async closures:
     ///
     /// ```rust
+    /// #![feature(async_closure)]
+    ///
     /// async fn callback(x: &str) {}
     ///
     /// let captured_str = String::new();
@@ -49,6 +51,7 @@ declare_lint! {
     pub CLOSURE_RETURNING_ASYNC_BLOCK,
     Allow,
     "closure that returns `async {}` could be rewritten as an async closure",
+    @feature_gate = async_closure;
 }
 
 declare_lint_pass!(
@@ -68,7 +71,7 @@ impl<'tcx> LateLintPass<'tcx> for AsyncClosureUsage {
             return;
         };
 
-        let mut body = cx.tcx.hir_body(body).value;
+        let mut body = cx.tcx.hir().body(body).value;
 
         // Only peel blocks that have no expressions.
         while let hir::ExprKind::Block(&hir::Block { stmts: [], expr: Some(tail), .. }, None) =
@@ -107,19 +110,17 @@ impl<'tcx> LateLintPass<'tcx> for AsyncClosureUsage {
     }
 }
 
-#[derive(Diagnostic)]
-#[diag("closure returning async block can be made into an async closure")]
+#[derive(LintDiagnostic)]
+#[diag(lint_closure_returning_async_block)]
 struct ClosureReturningAsyncBlock {
-    #[label(
-        "this async block can be removed, and the closure can be turned into an async closure"
-    )]
+    #[label]
     async_decl_span: Span,
     #[subdiagnostic]
     sugg: AsyncClosureSugg,
 }
 
 #[derive(Subdiagnostic)]
-#[multipart_suggestion("turn this into an async closure", applicability = "maybe-incorrect")]
+#[multipart_suggestion(lint_suggestion, applicability = "maybe-incorrect")]
 struct AsyncClosureSugg {
     #[suggestion_part(code = "")]
     deletion_span: Span,

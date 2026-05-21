@@ -1,5 +1,5 @@
 //@ run-pass
-//@ proc-macro: negative-token.rs
+//@ aux-build:negative-token.rs
 
 extern crate negative_token;
 

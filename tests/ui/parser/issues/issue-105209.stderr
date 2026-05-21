@@ -7,15 +7,16 @@ LL | #![c={#![c[)x
    |           unclosed delimiter
 
 error: this file contains an unclosed delimiter
-  --> $DIR/issue-105209.rs:3:56
+  --> $DIR/issue-105209.rs:3:68
    |
 LL | #![c={#![c[)x
-   |   -  -  - unclosed delimiter
-   |   |  |
+   |   -  -  -  - missing open `(` for this delimiter
+   |   |  |  |
+   |   |  |  unclosed delimiter
    |   |  unclosed delimiter
    |   unclosed delimiter
 LL |
-   |                                                       ^
+   |                                                                   ^
 
 error: aborting due to 2 previous errors
 

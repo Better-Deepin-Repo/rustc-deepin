@@ -63,12 +63,6 @@ Specific commit to use when adding from git.
 [Filesystem path](../reference/specifying-dependencies.html#specifying-path-dependencies) to local crate to add.
 {{/option}}
 
-{{#option "`--base` _base_" }}
-The [path base](../reference/unstable.html#path-bases) to use when adding a local crate.
-
-[Unstable (nightly-only)](../reference/unstable.html#path-bases)
-{{/option}}
-
 {{> options-registry }}
 
 {{/options}}
@@ -167,6 +161,7 @@ Add dependencies to only the specified package.
 
 {{> options-locked }}
 
+{{> options-lockfile-path }}
 {{/options}}
 
 {{> section-options-common }}

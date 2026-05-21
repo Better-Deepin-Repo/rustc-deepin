@@ -3,12 +3,12 @@
 
 // Regression test for #119299
 
-use std::marker::ConstParamTy_;
+use std::marker::UnsizedConstParamTy;
 
 #[derive(Eq, PartialEq)]
 struct ConstStrU(*const u8, usize);
 
-impl ConstParamTy_ for &'static ConstStrU {}
+impl UnsizedConstParamTy for &'static ConstStrU {}
 //~^ ERROR: the trait `ConstParamTy_` cannot be implemented for this type
 
 impl ConstStrU {

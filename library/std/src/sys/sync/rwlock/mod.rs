@@ -1,5 +1,5 @@
-cfg_select! {
-    any(
+cfg_if::cfg_if! {
+    if #[cfg(any(
         all(target_os = "windows", not(target_vendor = "win7")),
         target_os = "linux",
         target_os = "android",
@@ -9,26 +9,24 @@ cfg_select! {
         target_os = "fuchsia",
         all(target_family = "wasm", target_feature = "atomics"),
         target_os = "hermit",
-       target_os = "motor",
-    ) => {
+    ))] {
         mod futex;
         pub use futex::RwLock;
-    }
-    any(
+    } else if #[cfg(any(
         target_family = "unix",
         all(target_os = "windows", target_vendor = "win7"),
         all(target_vendor = "fortanix", target_env = "sgx"),
         target_os = "xous",
-        target_os = "teeos",
-    ) => {
+    ))] {
         mod queue;
         pub use queue::RwLock;
-    }
-    target_os = "solid_asp3" => {
+    } else if #[cfg(target_os = "solid_asp3")] {
         mod solid;
         pub use solid::RwLock;
-    }
-    _ => {
+    } else if #[cfg(target_os = "teeos")] {
+        mod teeos;
+        pub use teeos::RwLock;
+    } else {
         mod no_threads;
         pub use no_threads::RwLock;
     }

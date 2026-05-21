@@ -1,8 +1,9 @@
-//@ compile-flags:-Clink-dead-code
-//@ compile-flags: -O
+//
+//@ compile-flags:-Zprint-mono-items=eager
+//@ compile-flags:-Zinline-in-all-cgus
 
 #![deny(dead_code)]
-#![crate_type = "lib"]
+#![feature(start)]
 
 struct StructWithDrop<T1, T2> {
     x: T1,
@@ -43,8 +44,8 @@ impl Drop for NonGenericWithDrop {
 }
 
 //~ MONO_ITEM fn start
-#[no_mangle]
-pub fn start(_: isize, _: *const *const u8) -> isize {
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
     //~ MONO_ITEM fn std::ptr::drop_in_place::<StructWithDrop<i8, char>> - shim(Some(StructWithDrop<i8, char>)) @@ generic_drop_glue-cgu.0[Internal]
     //~ MONO_ITEM fn <StructWithDrop<i8, char> as std::ops::Drop>::drop
     let _ = StructWithDrop { x: 0i8, y: 'a' }.x;

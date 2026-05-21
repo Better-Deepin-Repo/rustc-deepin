@@ -15,12 +15,12 @@ where
     D: SolverDelegate<Interner = I>,
     I: Interner,
 {
-    pub(super) fn normalize_inherent_associated_term(
+    pub(super) fn normalize_inherent_associated_type(
         &mut self,
         goal: Goal<I, ty::NormalizesTo<I>>,
     ) -> QueryResult<I> {
         let cx = self.cx();
-        let inherent = goal.predicate.alias;
+        let inherent = goal.predicate.alias.expect_ty(cx);
 
         let impl_def_id = cx.parent(inherent.def_id);
         let impl_args = self.fresh_args_for_item(impl_def_id);
@@ -39,11 +39,8 @@ where
         //
         // FIXME(-Znext-solver=coinductive): I think this should be split
         // and we tag the impl bounds with `GoalSource::ImplWhereBound`?
-        // Right now this includes both the impl and the assoc item where bounds,
+        // Right not this includes both the impl and the assoc item where bounds,
         // and I don't think the assoc item where-bounds are allowed to be coinductive.
-        //
-        // Projecting to the IAT also "steps out the impl constructor", so we would have
-        // to be very careful when changing the impl where-clauses to be productive.
         self.add_goals(
             GoalSource::Misc,
             cx.predicates_of(inherent.def_id)
@@ -51,12 +48,8 @@ where
                 .map(|pred| goal.with(cx, pred)),
         );
 
-        let normalized = if inherent.kind(cx).is_type() {
-            cx.type_of(inherent.def_id).instantiate(cx, inherent_args).into()
-        } else {
-            cx.const_of_item(inherent.def_id).instantiate(cx, inherent_args).into()
-        };
-        self.instantiate_normalizes_to_term(goal, normalized);
+        let normalized = cx.type_of(inherent.def_id).instantiate(cx, inherent_args);
+        self.instantiate_normalizes_to_term(goal, normalized.into());
         self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
     }
 }

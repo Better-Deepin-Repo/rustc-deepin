@@ -1,4 +1,3 @@
-//@needs-deterministic-layouts
 // Verify that we do not ICE when printing an invalid constant.
 // EMIT_MIR_FOR_EACH_BIT_WIDTH
 // EMIT_MIR_FOR_EACH_PANIC_STRATEGY

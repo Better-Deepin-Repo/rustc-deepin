@@ -11,7 +11,6 @@ trait Trait {
 
     fn f(&self) -> Self::F;
 
-    #[define_opaque(G)]
     fn g<'a>(&'a self) -> G<'a, Self>
     where
         Self: Sized,

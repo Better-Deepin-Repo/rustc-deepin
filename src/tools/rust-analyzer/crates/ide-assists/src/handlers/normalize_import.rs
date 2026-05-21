@@ -1,9 +1,9 @@
 use ide_db::imports::merge_imports::try_normalize_import;
-use syntax::{AstNode, ast};
+use syntax::{ast, AstNode};
 
 use crate::{
-    AssistId,
     assist_context::{AssistContext, Assists},
+    AssistId, AssistKind,
 };
 
 // Assist: normalize_import
@@ -28,9 +28,14 @@ pub(crate) fn normalize_import(acc: &mut Assists, ctx: &AssistContext<'_>) -> Op
     let normalized_use_item =
         try_normalize_import(&use_item, ctx.config.insert_use.granularity.into())?;
 
-    acc.add(AssistId::refactor_rewrite("normalize_import"), "Normalize import", target, |builder| {
-        builder.replace_ast(use_item, normalized_use_item);
-    })
+    acc.add(
+        AssistId("normalize_import", AssistKind::RefactorRewrite),
+        "Normalize import",
+        target,
+        |builder| {
+            builder.replace_ast(use_item, normalized_use_item);
+        },
+    )
 }
 
 #[cfg(test)]
@@ -109,8 +114,8 @@ mod tests {
     #[test]
     fn test_order() {
         check_assist_variations!(
-            "foo::{*, Qux, bar::{Quux, Bar}, baz, FOO_BAZ, self, Baz, v10, v9, r#aaa}",
-            "foo::{self, Baz, FOO_BAZ, Qux, r#aaa, bar::{Bar, Quux}, baz, v9, v10, *}"
+            "foo::{*, Qux, bar::{Quux, Bar}, baz, FOO_BAZ, self, Baz}",
+            "foo::{self, bar::{Bar, Quux}, baz, Baz, Qux, FOO_BAZ, *}"
         );
     }
 
@@ -145,17 +150,17 @@ fn main() {
 
     #[test]
     fn test_redundant_braces() {
-        check_assist_variations!("foo::{bar::{baz, Qux}}", "foo::bar::{Qux, baz}");
+        check_assist_variations!("foo::{bar::{baz, Qux}}", "foo::bar::{baz, Qux}");
         check_assist_variations!("foo::{bar::{self}}", "foo::bar::{self}");
         check_assist_variations!("foo::{bar::{*}}", "foo::bar::*");
         check_assist_variations!("foo::{bar::{Qux as Quux}}", "foo::bar::Qux as Quux");
         check_assist_variations!(
             "foo::bar::{{FOO_BAZ, Qux, self}, {*, baz}}",
-            "foo::bar::{self, FOO_BAZ, Qux, baz, *}"
+            "foo::bar::{self, baz, Qux, FOO_BAZ, *}"
         );
         check_assist_variations!(
             "foo::bar::{{{FOO_BAZ}, {{Qux}, {self}}}, {{*}, {baz}}}",
-            "foo::bar::{self, FOO_BAZ, Qux, baz, *}"
+            "foo::bar::{self, baz, Qux, FOO_BAZ, *}"
         );
     }
 
@@ -163,11 +168,11 @@ fn main() {
     fn test_merge() {
         check_assist_variations!(
             "foo::{*, bar, {FOO_BAZ, qux}, bar::{*, baz}, {Quux}}",
-            "foo::{FOO_BAZ, Quux, bar::{self, baz, *}, qux, *}"
+            "foo::{bar::{self, baz, *}, qux, Quux, FOO_BAZ, *}"
         );
         check_assist_variations!(
             "foo::{*, bar, {FOO_BAZ, qux}, bar::{*, baz}, {Quux, bar::{baz::Foo}}}",
-            "foo::{FOO_BAZ, Quux, bar::{self, baz::{self, Foo}, *}, qux, *}"
+            "foo::{bar::{self, baz::{self, Foo}, *}, qux, Quux, FOO_BAZ, *}"
         );
     }
 
@@ -229,15 +234,15 @@ use {
         check_assist_not_applicable_variations!("foo::bar");
         check_assist_not_applicable_variations!("foo::bar::*");
         check_assist_not_applicable_variations!("foo::bar::Qux as Quux");
-        check_assist_not_applicable_variations!("foo::bar::{self, FOO_BAZ, Qux, baz, *}");
+        check_assist_not_applicable_variations!("foo::bar::{self, baz, Qux, FOO_BAZ, *}");
         check_assist_not_applicable_variations!(
-            "foo::{self, Baz, FOO_BAZ, Qux, bar::{Bar, Quux}, baz, *}"
+            "foo::{self, bar::{Bar, Quux}, baz, Baz, Qux, FOO_BAZ, *}"
         );
         check_assist_not_applicable_variations!(
-            "foo::{FOO_BAZ, Quux, bar::{self, baz, *}, qux, *}"
+            "foo::{bar::{self, baz, *}, qux, Quux, FOO_BAZ, *}"
         );
         check_assist_not_applicable_variations!(
-            "foo::{bar::{self, FOO_BAZ, Quux, baz::{self, Foo}, *}, qux, *}"
+            "foo::{bar::{self, baz::{self, Foo}, *}, qux, Quux, FOO_BAZ, *}"
         );
     }
 }

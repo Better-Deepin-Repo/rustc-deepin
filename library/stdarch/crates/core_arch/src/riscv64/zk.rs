@@ -1,9 +1,7 @@
 #[cfg(test)]
 use stdarch_test::assert_instr;
 
-use crate::arch::asm;
-
-unsafe extern "unadjusted" {
+extern "unadjusted" {
     #[link_name = "llvm.riscv.aes64es"]
     fn _aes64es(rs1: i64, rs2: i64) -> i64;
 
@@ -15,6 +13,12 @@ unsafe extern "unadjusted" {
 
     #[link_name = "llvm.riscv.aes64dsm"]
     fn _aes64dsm(rs1: i64, rs2: i64) -> i64;
+
+    #[link_name = "llvm.riscv.aes64ks1i"]
+    fn _aes64ks1i(rs1: i64, rnum: i32) -> i64;
+
+    #[link_name = "llvm.riscv.aes64ks2"]
+    fn _aes64ks2(rs1: i64, rs2: i64) -> i64;
 
     #[link_name = "llvm.riscv.aes64im"]
     fn _aes64im(rs1: i64) -> i64;
@@ -44,12 +48,16 @@ unsafe extern "unadjusted" {
 /// Version: v1.0.1
 ///
 /// Section: 3.7
+///
+/// # Safety
+///
+/// This function is safe to use if the `zkne` target feature is present.
 #[target_feature(enable = "zkne")]
 #[cfg_attr(test, assert_instr(aes64es))]
 #[inline]
 #[unstable(feature = "riscv_ext_intrinsics", issue = "114544")]
-pub fn aes64es(rs1: u64, rs2: u64) -> u64 {
-    unsafe { _aes64es(rs1 as i64, rs2 as i64) as u64 }
+pub unsafe fn aes64es(rs1: u64, rs2: u64) -> u64 {
+    _aes64es(rs1 as i64, rs2 as i64) as u64
 }
 
 /// AES middle round encryption instruction for RV64.
@@ -64,12 +72,16 @@ pub fn aes64es(rs1: u64, rs2: u64) -> u64 {
 /// Version: v1.0.1
 ///
 /// Section: 3.8
+///
+/// # Safety
+///
+/// This function is safe to use if the `zkne` target feature is present.
 #[target_feature(enable = "zkne")]
 #[cfg_attr(test, assert_instr(aes64esm))]
 #[inline]
 #[unstable(feature = "riscv_ext_intrinsics", issue = "114544")]
-pub fn aes64esm(rs1: u64, rs2: u64) -> u64 {
-    unsafe { _aes64esm(rs1 as i64, rs2 as i64) as u64 }
+pub unsafe fn aes64esm(rs1: u64, rs2: u64) -> u64 {
+    _aes64esm(rs1 as i64, rs2 as i64) as u64
 }
 
 /// AES final round decryption instruction for RV64.
@@ -84,12 +96,16 @@ pub fn aes64esm(rs1: u64, rs2: u64) -> u64 {
 /// Version: v1.0.1
 ///
 /// Section: 3.5
+///
+/// # Safety
+///
+/// This function is safe to use if the `zknd` target feature is present.
 #[target_feature(enable = "zknd")]
 #[cfg_attr(test, assert_instr(aes64ds))]
 #[inline]
 #[unstable(feature = "riscv_ext_intrinsics", issue = "114544")]
-pub fn aes64ds(rs1: u64, rs2: u64) -> u64 {
-    unsafe { _aes64ds(rs1 as i64, rs2 as i64) as u64 }
+pub unsafe fn aes64ds(rs1: u64, rs2: u64) -> u64 {
+    _aes64ds(rs1 as i64, rs2 as i64) as u64
 }
 
 /// AES middle round decryption instruction for RV64.
@@ -104,12 +120,16 @@ pub fn aes64ds(rs1: u64, rs2: u64) -> u64 {
 /// Version: v1.0.1
 ///
 /// Section: 3.6
+///
+/// # Safety
+///
+/// This function is safe to use if the `zknd` target feature is present.
 #[target_feature(enable = "zknd")]
 #[cfg_attr(test, assert_instr(aes64dsm))]
 #[inline]
 #[unstable(feature = "riscv_ext_intrinsics", issue = "114544")]
-pub fn aes64dsm(rs1: u64, rs2: u64) -> u64 {
-    unsafe { _aes64dsm(rs1 as i64, rs2 as i64) as u64 }
+pub unsafe fn aes64dsm(rs1: u64, rs2: u64) -> u64 {
+    _aes64dsm(rs1 as i64, rs2 as i64) as u64
 }
 
 /// This instruction implements part of the KeySchedule operation for the AES Block cipher
@@ -129,26 +149,19 @@ pub fn aes64dsm(rs1: u64, rs2: u64) -> u64 {
 /// # Note
 ///
 /// The `RNUM` parameter is expected to be a constant value inside the range of `0..=10`.
-#[target_feature(enable = "zkne_or_zknd")]
+///
+/// # Safety
+///
+/// This function is safe to use if the `zkne` or `zknd` target feature is present.
+#[target_feature(enable = "zkne", enable = "zknd")]
 #[rustc_legacy_const_generics(1)]
+#[cfg_attr(test, assert_instr(aes64ks1i, RNUM = 0))]
 #[inline]
 #[unstable(feature = "riscv_ext_intrinsics", issue = "114544")]
-pub fn aes64ks1i<const RNUM: u8>(rs1: u64) -> u64 {
+pub unsafe fn aes64ks1i<const RNUM: u8>(rs1: u64) -> u64 {
     static_assert!(RNUM <= 10);
-    unsafe {
-        let rd: u64;
-        asm!(
-            ".option push",
-            ".option arch, +zkne",
-            "aes64ks1i {}, {}, {}",
-            ".option pop",
-            lateout(reg) rd,
-            in(reg) rs1,
-            const RNUM,
-            options(pure, nomem, nostack, preserves_flags)
-        );
-        rd
-    }
+
+    _aes64ks1i(rs1 as i64, RNUM as i32) as u64
 }
 
 /// This instruction implements part of the KeySchedule operation for the AES Block cipher.
@@ -162,24 +175,16 @@ pub fn aes64ks1i<const RNUM: u8>(rs1: u64) -> u64 {
 /// Version: v1.0.1
 ///
 /// Section: 3.11
-#[target_feature(enable = "zkne_or_zknd")]
+///
+/// # Safety
+///
+/// This function is safe to use if the `zkne` or `zknd` target feature is present.
+#[target_feature(enable = "zkne", enable = "zknd")]
+#[cfg_attr(test, assert_instr(aes64ks2))]
 #[inline]
 #[unstable(feature = "riscv_ext_intrinsics", issue = "114544")]
-pub fn aes64ks2(rs1: u64, rs2: u64) -> u64 {
-    unsafe {
-        let rd: u64;
-        asm!(
-            ".option push",
-            ".option arch, +zkne",
-            "aes64ks2 {}, {}, {}",
-            ".option pop",
-            lateout(reg) rd,
-            in(reg) rs1,
-            in(reg) rs2,
-            options(pure, nomem, nostack, preserves_flags)
-        );
-        rd
-    }
+pub unsafe fn aes64ks2(rs1: u64, rs2: u64) -> u64 {
+    _aes64ks2(rs1 as i64, rs2 as i64) as u64
 }
 
 /// This instruction accelerates the inverse MixColumns step of the AES Block Cipher, and is used to aid creation of
@@ -195,12 +200,16 @@ pub fn aes64ks2(rs1: u64, rs2: u64) -> u64 {
 /// Version: v1.0.1
 ///
 /// Section: 3.9
-#[target_feature(enable = "zknd")]
+///
+/// # Safety
+///
+/// This function is safe to use if the `zkne` or `zknd` target feature is present.
+#[target_feature(enable = "zkne", enable = "zknd")]
 #[cfg_attr(test, assert_instr(aes64im))]
 #[inline]
 #[unstable(feature = "riscv_ext_intrinsics", issue = "114544")]
-pub fn aes64im(rs1: u64) -> u64 {
-    unsafe { _aes64im(rs1 as i64) as u64 }
+pub unsafe fn aes64im(rs1: u64) -> u64 {
+    _aes64im(rs1 as i64) as u64
 }
 
 /// Implements the Sigma0 transformation function as used in the SHA2-512 hash function \[49\]
@@ -215,12 +224,16 @@ pub fn aes64im(rs1: u64) -> u64 {
 /// Version: v1.0.1
 ///
 /// Section: 3.37
+///
+/// # Safety
+///
+/// This function is safe to use if the `zknh` target feature is present.
 #[target_feature(enable = "zknh")]
 #[cfg_attr(test, assert_instr(sha512sig0))]
 #[inline]
 #[unstable(feature = "riscv_ext_intrinsics", issue = "114544")]
-pub fn sha512sig0(rs1: u64) -> u64 {
-    unsafe { _sha512sig0(rs1 as i64) as u64 }
+pub unsafe fn sha512sig0(rs1: u64) -> u64 {
+    _sha512sig0(rs1 as i64) as u64
 }
 
 /// Implements the Sigma1 transformation function as used in the SHA2-512 hash function \[49\]
@@ -235,12 +248,16 @@ pub fn sha512sig0(rs1: u64) -> u64 {
 /// Version: v1.0.1
 ///
 /// Section: 3.38
+///
+/// # Safety
+///
+/// This function is safe to use if the `zknh` target feature is present.
 #[target_feature(enable = "zknh")]
 #[cfg_attr(test, assert_instr(sha512sig1))]
 #[inline]
 #[unstable(feature = "riscv_ext_intrinsics", issue = "114544")]
-pub fn sha512sig1(rs1: u64) -> u64 {
-    unsafe { _sha512sig1(rs1 as i64) as u64 }
+pub unsafe fn sha512sig1(rs1: u64) -> u64 {
+    _sha512sig1(rs1 as i64) as u64
 }
 
 /// Implements the Sum0 transformation function as used in the SHA2-512 hash function \[49\]
@@ -255,12 +272,16 @@ pub fn sha512sig1(rs1: u64) -> u64 {
 /// Version: v1.0.1
 ///
 /// Section: 3.39
+///
+/// # Safety
+///
+/// This function is safe to use if the `zknh` target feature is present.
 #[target_feature(enable = "zknh")]
 #[cfg_attr(test, assert_instr(sha512sum0))]
 #[inline]
 #[unstable(feature = "riscv_ext_intrinsics", issue = "114544")]
-pub fn sha512sum0(rs1: u64) -> u64 {
-    unsafe { _sha512sum0(rs1 as i64) as u64 }
+pub unsafe fn sha512sum0(rs1: u64) -> u64 {
+    _sha512sum0(rs1 as i64) as u64
 }
 
 /// Implements the Sum1 transformation function as used in the SHA2-512 hash function \[49\]
@@ -275,10 +296,14 @@ pub fn sha512sum0(rs1: u64) -> u64 {
 /// Version: v1.0.1
 ///
 /// Section: 3.40
+///
+/// # Safety
+///
+/// This function is safe to use if the `zknh` target feature is present.
 #[target_feature(enable = "zknh")]
 #[cfg_attr(test, assert_instr(sha512sum1))]
 #[inline]
 #[unstable(feature = "riscv_ext_intrinsics", issue = "114544")]
-pub fn sha512sum1(rs1: u64) -> u64 {
-    unsafe { _sha512sum1(rs1 as i64) as u64 }
+pub unsafe fn sha512sum1(rs1: u64) -> u64 {
+    _sha512sum1(rs1 as i64) as u64
 }

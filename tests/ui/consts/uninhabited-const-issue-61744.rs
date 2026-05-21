@@ -1,21 +1,19 @@
 //@ build-fail
-//@ dont-require-annotations: NOTE
 
 pub const unsafe fn fake_type<T>() -> T {
-    hint_unreachable() //~ NOTE inside
+    hint_unreachable() //~ ERROR evaluation of `<i32 as Const>::CONSTANT` failed
 }
 
 pub const unsafe fn hint_unreachable() -> ! {
-    fake_type() //~ NOTE inside
+    fake_type()
 }
 
 trait Const {
-    const CONSTANT: i32 = unsafe { fake_type() }; //~ ERROR reached the configured maximum number of stack frames
-    //~^ NOTE evaluation of `<i32 as Const>::CONSTANT` failed inside this call
+    const CONSTANT: i32 = unsafe { fake_type() };
 }
 
 impl<T> Const for T {}
 
 pub fn main() -> () {
-    dbg!(i32::CONSTANT);
+    dbg!(i32::CONSTANT); //~ constant
 }

@@ -1,14 +1,14 @@
 use crate::core::{Edition, Shell, Workspace};
 use crate::util::errors::CargoResult;
 use crate::util::important_paths::find_root_manifest_for_wd;
-use crate::util::{FossilRepo, GitRepo, HgRepo, PijulRepo, existing_vcs_repo};
-use crate::util::{GlobalContext, restricted_names};
-use anyhow::{Context as _, anyhow};
+use crate::util::toml_mut::is_sorted;
+use crate::util::{existing_vcs_repo, FossilRepo, GitRepo, HgRepo, PijulRepo};
+use crate::util::{restricted_names, GlobalContext};
+use anyhow::{anyhow, Context as _};
 use cargo_util::paths::{self, write_atomic};
 use cargo_util_schemas::manifest::PackageName;
-use home::home_dir;
-use serde::Deserialize;
 use serde::de;
+use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::io::{BufRead, BufReader, ErrorKind};
@@ -134,11 +134,11 @@ impl NewOptions {
 #[serde(rename_all = "kebab-case")]
 struct CargoNewConfig {
     #[deprecated = "cargo-new no longer supports adding the authors field"]
-    #[expect(dead_code, reason = "deprecated")]
+    #[allow(dead_code)]
     name: Option<String>,
 
     #[deprecated = "cargo-new no longer supports adding the authors field"]
-    #[expect(dead_code, reason = "deprecated")]
+    #[allow(dead_code)]
     email: Option<String>,
 
     #[serde(rename = "vcs")]
@@ -175,18 +175,16 @@ fn check_name(
     // If --name is already used to override, no point in suggesting it
     // again as a fix.
     let name_help = if show_name_help {
-        "\nnote: the directory name is used as the package name\
-        \nhelp: to override the package name, pass `--name <pkgname>`"
+        "\nIf you need a package name to not match the directory name, consider using --name flag."
     } else {
         ""
     };
     let bin_help = || {
         let mut help = String::from(name_help);
-        // Only suggest `bin.name` for valid crate names because it is used for `--crate`
-        if has_bin && validate_crate_name(name) {
+        if has_bin && !name.is_empty() {
             help.push_str(&format!(
                 "\n\
-                help: to name the binary \"{name}\", use a valid package \
+                If you need a binary with the name \"{name}\", use a valid package \
                 name, and set the binary name to be different from the package. \
                 This can be done by setting the binary filename to `src/bin/{name}.rs` \
                 or change the name in Cargo.toml with:\n\
@@ -207,7 +205,7 @@ fn check_name(
 
     if restricted_names::is_keyword(name) {
         anyhow::bail!(
-            "invalid package name `{}`: it is a Rust keyword{}",
+            "the name `{}` cannot be used as a package name, it is a Rust keyword{}",
             name,
             bin_help()
         );
@@ -215,14 +213,14 @@ fn check_name(
     if restricted_names::is_conflicting_artifact_name(name) {
         if has_bin {
             anyhow::bail!(
-                "invalid package name `{}`: \
+                "the name `{}` cannot be used as a package name, \
                 it conflicts with cargo's build directory names{}",
                 name,
                 name_help
             );
         } else {
             shell.warn(format!(
-                "package `{}` will not support binary \
+                "the name `{}` will not support binary \
                 executables with that name, \
                 it conflicts with cargo's build directory names",
                 name
@@ -231,14 +229,14 @@ fn check_name(
     }
     if name == "test" {
         anyhow::bail!(
-            "invalid package name `test`: \
+            "the name `test` cannot be used as a package name, \
             it conflicts with Rust's built-in test library{}",
             bin_help()
         );
     }
     if ["core", "std", "alloc", "proc_macro", "proc-macro"].contains(&name) {
         shell.warn(format!(
-            "package name `{}` may be confused with the package with that name in Rust's standard library\n\
+            "the name `{}` is part of Rust's standard library\n\
             It is recommended to use a different name to avoid problems.{}",
             name,
             bin_help()
@@ -247,13 +245,13 @@ fn check_name(
     if restricted_names::is_windows_reserved(name) {
         if cfg!(windows) {
             anyhow::bail!(
-                "invalid package name `{}`: it is a reserved Windows filename{}",
+                "cannot use name `{}`, it is a reserved Windows filename{}",
                 name,
                 name_help
             );
         } else {
             shell.warn(format!(
-                "package name `{}` is a reserved Windows filename\n\
+                "the name `{}` is a reserved Windows filename\n\
                 This package will not work on Windows platforms.",
                 name
             ))?;
@@ -261,7 +259,7 @@ fn check_name(
     }
     if restricted_names::is_non_ascii_name(name) {
         shell.warn(format!(
-            "invalid package name `{}`: contains non-ASCII characters\n\
+            "the name `{}` contains non-ASCII characters\n\
             Non-ASCII crate names are not supported by Rust.",
             name
         ))?;
@@ -269,28 +267,11 @@ fn check_name(
     let name_in_lowercase = name.to_lowercase();
     if name != name_in_lowercase {
         shell.warn(format!(
-            "package name `{name}` is not snake_case or kebab-case which is recommended for package names, consider `{name_in_lowercase}`"
+            "the name `{name}` is not snake_case or kebab-case which is recommended for package names, consider `{name_in_lowercase}`"
         ))?;
     }
 
     Ok(())
-}
-
-// Taken from <https://github.com/rust-lang/rust/blob/693f365667a97b24cb40173bc2801eb66ea53020/compiler/rustc_session/src/output.rs#L49-L79>
-fn validate_crate_name(name: &str) -> bool {
-    if name.is_empty() {
-        return false;
-    }
-
-    for c in name.chars() {
-        if c.is_alphanumeric() || c == '-' || c == '_' {
-            continue;
-        } else {
-            return false;
-        }
-    }
-
-    true
 }
 
 /// Checks if the path contains any invalid PATH env characters.
@@ -481,7 +462,7 @@ pub fn new(opts: &NewOptions, gctx: &GlobalContext) -> CargoResult<()> {
 
     mk(gctx, &mkopts).with_context(|| {
         format!(
-            "failed to create package `{}` at `{}`",
+            "Failed to create package `{}` at `{}`",
             name,
             path.display()
         )
@@ -496,15 +477,6 @@ pub fn init(opts: &NewOptions, gctx: &GlobalContext) -> CargoResult<NewProjectKi
     }
 
     let path = &opts.path;
-
-    if let Some(home) = home_dir() {
-        if path == &home {
-            anyhow::bail!(
-                "cannot create package in the home directory\n\n\
-                 help: use `cargo init <path>` to create a package in a different directory"
-            )
-        }
-    }
     let name = get_name(path, opts)?;
     let mut src_paths_types = vec![];
     detect_source_paths_and_types(path, name, &mut src_paths_types)?;
@@ -513,10 +485,7 @@ pub fn init(opts: &NewOptions, gctx: &GlobalContext) -> CargoResult<NewProjectKi
         .status("Creating", format!("{} package", opts.kind))?;
 
     if path.join("Cargo.toml").exists() {
-        anyhow::bail!(
-            "`cargo init` cannot be run on existing Cargo packages\n\
-             help: use `cargo new` to create a package in a new subdirectory"
-        )
+        anyhow::bail!("`cargo init` cannot be run on existing Cargo packages")
     }
     check_path(path, &mut gctx.shell())?;
 
@@ -596,7 +565,7 @@ pub fn init(opts: &NewOptions, gctx: &GlobalContext) -> CargoResult<NewProjectKi
 
     mk(gctx, &mkopts).with_context(|| {
         format!(
-            "failed to create package `{}` at `{}`",
+            "Failed to create package `{}` at `{}`",
             name,
             path.display()
         )
@@ -604,7 +573,7 @@ pub fn init(opts: &NewOptions, gctx: &GlobalContext) -> CargoResult<NewProjectKi
     Ok(kind)
 }
 
-/// `IgnoreList`
+/// IgnoreList
 struct IgnoreList {
     /// git like formatted entries
     ignore: Vec<String>,
@@ -645,7 +614,7 @@ impl IgnoreList {
         ignore_items.join("\n") + "\n"
     }
 
-    /// `format_existing` is used to format the `IgnoreList` when the ignore file
+    /// format_existing is used to format the IgnoreList when the ignore file
     /// already exists. It reads the contents of the given `BufRead` and
     /// checks if the contents of the ignore list are already existing in the
     /// file.
@@ -659,7 +628,7 @@ impl IgnoreList {
                         return Err(anyhow!(
                             "Character at line {} is invalid. Cargo only supports UTF-8.",
                             i
-                        ));
+                        ))
                     }
                     _ => return Err(anyhow!(err)),
                 },
@@ -833,7 +802,7 @@ fn mk(gctx: &GlobalContext, opts: &MkOptions<'_>) -> CargoResult<()> {
         }
     }
 
-    let manifest_path = paths::normalize_path(&path.join("Cargo.toml"));
+    let manifest_path = path.join("Cargo.toml");
     if let Ok(root_manifest_path) = find_root_manifest_for_wd(&manifest_path) {
         let root_manifest = paths::read(&root_manifest_path)?;
         // Sometimes the root manifest is not a valid manifest, so we only try to parse it if it is.
@@ -937,7 +906,7 @@ mod tests {
         }
     }
 
-    if let Err(e) = Workspace::new(&manifest_path, gctx) {
+    if let Err(e) = Workspace::new(&path.join("Cargo.toml"), gctx) {
         crate::display_warning_with_error(
             "compiling this new package may not work due to invalid \
              workspace configuration",
@@ -1026,7 +995,7 @@ fn update_manifest_with_new_member(
             }
         }
 
-        let was_sorted = members.iter().map(Value::as_str).is_sorted();
+        let was_sorted = is_sorted(members.iter().map(Value::as_str));
         members.push(display_path);
         if was_sorted {
             members.sort_by(|lhs, rhs| lhs.as_str().cmp(&rhs.as_str()));

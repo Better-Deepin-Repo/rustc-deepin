@@ -16,7 +16,7 @@ fn main() {
     //
     // Requirements:
     // p.x -> MutBoorrow
-    // p   -> Immutable
+    // p   -> ImmBorrow
     //
     // Requirements met when p is captured via MutBorrow
     //
@@ -28,11 +28,11 @@ fn main() {
     //~^ ERROR: First Pass analysis includes:
     //~| ERROR: Min Capture analysis includes:
         p.x += 10;
-        //~^ NOTE: Capturing p[(0, 0)] -> Mutable
-        //~| NOTE: p[] captured as Mutable here
+        //~^ NOTE: Capturing p[(0, 0)] -> MutBorrow
+        //~| NOTE: p[] captured as MutBorrow here
         println!("{:?}", p);
-        //~^ NOTE: Capturing p[] -> Immutable
-        //~| NOTE: Min Capture p[] -> Mutable
+        //~^ NOTE: Capturing p[] -> ImmBorrow
+        //~| NOTE: Min Capture p[] -> MutBorrow
         //~| NOTE: p[] used here
     };
 

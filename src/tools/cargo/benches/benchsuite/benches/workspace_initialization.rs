@@ -1,6 +1,6 @@
 use benchsuite::fixtures;
 use cargo::core::Workspace;
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 
 fn workspace_initialization(c: &mut Criterion) {
     let fixtures = fixtures!();

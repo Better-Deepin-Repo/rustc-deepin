@@ -1,14 +1,14 @@
-error[E0080]: attempt to divide `1_isize` by zero
+error[E0080]: evaluation of constant value failed
   --> $DIR/eval-enum.rs:2:15
    |
-LL |     DivZero = 1 / 0,
-   |               ^^^^^ evaluation of `Test::DivZero::{constant#0}` failed here
+LL |     DivZero = 1/0,
+   |               ^^^ attempt to divide `1_isize` by zero
 
-error[E0080]: attempt to calculate the remainder of `1_isize` with a divisor of zero
-  --> $DIR/eval-enum.rs:4:15
+error[E0080]: evaluation of constant value failed
+  --> $DIR/eval-enum.rs:5:15
    |
-LL |     RemZero = 1 % 0,
-   |               ^^^^^ evaluation of `Test::RemZero::{constant#0}` failed here
+LL |     RemZero = 1%0,
+   |               ^^^ attempt to calculate the remainder of `1_isize` with a divisor of zero
 
 error: aborting due to 2 previous errors
 

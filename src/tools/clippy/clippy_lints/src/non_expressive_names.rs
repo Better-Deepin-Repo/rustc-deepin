@@ -3,11 +3,12 @@ use clippy_utils::diagnostics::{span_lint, span_lint_and_then};
 use rustc_ast::ast::{
     self, Arm, AssocItem, AssocItemKind, Attribute, Block, FnDecl, Item, ItemKind, Local, Pat, PatKind,
 };
-use rustc_ast::visit::{Visitor, walk_block, walk_expr, walk_pat};
+use rustc_ast::visit::{walk_block, walk_expr, walk_pat, Visitor};
 use rustc_lint::{EarlyContext, EarlyLintPass, LintContext};
+use rustc_middle::lint::in_external_macro;
 use rustc_session::impl_lint_pass;
 use rustc_span::symbol::{Ident, Symbol};
-use rustc_span::{Span, sym};
+use rustc_span::{sym, Span};
 use std::cmp::Ordering;
 
 declare_clippy_lint! {
@@ -103,7 +104,7 @@ struct SimilarNamesLocalVisitor<'a, 'tcx> {
     single_char_names: Vec<Vec<Ident>>,
 }
 
-impl SimilarNamesLocalVisitor<'_, '_> {
+impl<'a, 'tcx> SimilarNamesLocalVisitor<'a, 'tcx> {
     fn check_single_char_names(&self) {
         if self.single_char_names.last().map(Vec::len) == Some(0) {
             return;
@@ -151,7 +152,7 @@ fn chars_are_similar(a: char, b: char) -> bool {
 
 struct SimilarNamesNameVisitor<'a, 'tcx, 'b>(&'b mut SimilarNamesLocalVisitor<'a, 'tcx>);
 
-impl<'tcx> Visitor<'tcx> for SimilarNamesNameVisitor<'_, 'tcx, '_> {
+impl<'a, 'tcx, 'b> Visitor<'tcx> for SimilarNamesNameVisitor<'a, 'tcx, 'b> {
     fn visit_pat(&mut self, pat: &'tcx Pat) {
         match pat.kind {
             PatKind::Ident(_, ident, _) => {
@@ -188,7 +189,7 @@ fn allowed_to_be_similar(interned_name: &str, list: &[&str]) -> bool {
         .any(|&name| interned_name.starts_with(name) || interned_name.ends_with(name))
 }
 
-impl SimilarNamesNameVisitor<'_, '_, '_> {
+impl<'a, 'tcx, 'b> SimilarNamesNameVisitor<'a, 'tcx, 'b> {
     fn check_short_ident(&mut self, ident: Ident) {
         // Ignore shadowing
         if self
@@ -208,8 +209,7 @@ impl SimilarNamesNameVisitor<'_, '_, '_> {
 
     fn check_ident(&mut self, ident: Ident) {
         let interned_name = ident.name.as_str();
-        // name can be empty if it comes from recovery
-        if interned_name.chars().any(char::is_uppercase) || interned_name.is_empty() {
+        if interned_name.chars().any(char::is_uppercase) {
             return;
         }
         if interned_name.chars().all(|c| c.is_ascii_digit() || c == '_') {
@@ -248,11 +248,6 @@ impl SimilarNamesNameVisitor<'_, '_, '_> {
                 continue;
             }
 
-            // Skip similarity check if both names are exactly 3 characters
-            if count == 3 && existing_name.len == 3 {
-                continue;
-            }
-
             let dissimilar = match existing_name.len.cmp(&count) {
                 Ordering::Greater => existing_name.len - count != 1 || levenstein_not_1(interned_name, existing_str),
                 Ordering::Less => count - existing_name.len != 1 || levenstein_not_1(existing_str, interned_name),
@@ -275,10 +270,10 @@ impl SimilarNamesNameVisitor<'_, '_, '_> {
             return;
         }
         self.0.names.push(ExistingName {
+            exemptions: get_exemptions(interned_name).unwrap_or(&[]),
             interned: ident.name,
             span: ident.span,
             len: count,
-            exemptions: get_exemptions(interned_name).unwrap_or(&[]),
         });
     }
 
@@ -334,7 +329,7 @@ impl SimilarNamesNameVisitor<'_, '_, '_> {
     }
 }
 
-impl SimilarNamesLocalVisitor<'_, '_> {
+impl<'a, 'b> SimilarNamesLocalVisitor<'a, 'b> {
     /// ensure scoping rules work
     fn apply<F: for<'c> Fn(&'c mut Self)>(&mut self, f: F) {
         let n = self.names.len();
@@ -345,7 +340,7 @@ impl SimilarNamesLocalVisitor<'_, '_> {
     }
 }
 
-impl<'tcx> Visitor<'tcx> for SimilarNamesLocalVisitor<'_, 'tcx> {
+impl<'a, 'tcx> Visitor<'tcx> for SimilarNamesLocalVisitor<'a, 'tcx> {
     fn visit_local(&mut self, local: &'tcx Local) {
         if let Some((init, els)) = &local.kind.init_else_opt() {
             self.apply(|this| walk_expr(this, init));
@@ -386,7 +381,7 @@ impl<'tcx> Visitor<'tcx> for SimilarNamesLocalVisitor<'_, 'tcx> {
 
 impl EarlyLintPass for NonExpressiveNames {
     fn check_item(&mut self, cx: &EarlyContext<'_>, item: &Item) {
-        if item.span.in_external_macro(cx.sess().source_map()) {
+        if in_external_macro(cx.sess(), item.span) {
             return;
         }
 
@@ -401,7 +396,7 @@ impl EarlyLintPass for NonExpressiveNames {
     }
 
     fn check_impl_item(&mut self, cx: &EarlyContext<'_>, item: &AssocItem) {
-        if item.span.in_external_macro(cx.sess().source_map()) {
+        if in_external_macro(cx.sess(), item.span) {
             return;
         }
 

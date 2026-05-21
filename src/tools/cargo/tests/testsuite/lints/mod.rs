@@ -1,23 +1,13 @@
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
 
-mod blanket_hint_mostly_unused;
 mod error;
-mod implicit_minimum_version_req;
+mod implicit_features;
 mod inherited;
-mod missing_lints_inheritance;
-mod non_kebab_case_bins;
-mod non_kebab_case_features;
-mod non_kebab_case_packages;
-mod non_snake_case_features;
-mod non_snake_case_packages;
-mod redundant_homepage;
-mod redundant_readme;
 mod unknown_lints;
-mod unused_workspace_dependencies;
-mod unused_workspace_package_fields;
+mod unused_optional_dependencies;
 mod warning;
 
 #[cargo_test]
@@ -94,7 +84,6 @@ test_dummy_unstable = { level = "forbid", priority = -1 }
   | ^^^^^^^^^^^^^^^^^^
   |
   = [NOTE] `cargo::im_a_teapot` is set to `forbid` in `[lints]`
-[ERROR] encountered 1 error while running lints
 
 "#]])
         .run();
@@ -137,7 +126,6 @@ workspace = true
    | ^^^^^^^^^^^^^^^^^^
    |
    = [NOTE] `cargo::im_a_teapot` is set to `forbid` in `[lints]`
-[ERROR] encountered 1 error while running lints
 
 "#]])
         .run();
@@ -149,8 +137,6 @@ fn dont_always_inherit_workspace_lints() {
         .file(
             "Cargo.toml",
             r#"
-cargo-features = ["test-dummy-unstable"]
-
 [workspace]
 members = ["foo"]
 
@@ -177,20 +163,6 @@ im-a-teapot = true
     p.cargo("check -Zcargo-lints")
         .masquerade_as_nightly_cargo(&["cargo-lints"])
         .with_stderr_data(str![[r#"
-[WARNING] missing `[lints]` to inherit `[workspace.lints]`
-  --> foo/Cargo.toml
-   = [NOTE] `cargo::missing_lints_inheritance` is set to `warn` by default
-[HELP] to inherit `workspace.lints, add:
-   |
- 9 ~ im-a-teapot = true
-10 + [lints]
-11 + workspace = true
-   |
-[HELP] to clarify your intent to not inherit, add:
-   |
- 9 ~ im-a-teapot = true
-10 + [lints]
-   |
 [CHECKING] foo v0.0.1 ([ROOT]/foo/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -205,19 +177,16 @@ fn cap_lints() {
         .file(
             "Cargo.toml",
             r#"
-cargo-features = ["test-dummy-unstable"]
-
 [package]
 name = "bar"
 version = "0.1.0"
 edition = "2021"
-im-a-teapot = true
 
 [dependencies]
 baz = { version = "0.1.0", optional = true }
 
 [lints.cargo]
-im_a_teapot = "warn"
+implicit_features = "warn"
 "#,
         )
         .file("src/lib.rs", "")
@@ -233,6 +202,9 @@ edition = "2021"
 
 [dependencies]
 bar = "0.1.0"
+
+[lints.cargo]
+implicit_features = "warn"
 "#,
         )
         .file("src/lib.rs", "")
@@ -242,7 +214,7 @@ bar = "0.1.0"
         .masquerade_as_nightly_cargo(&["cargo-lints"])
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.1.0 (registry `dummy-registry`)
 [CHECKING] bar v0.1.0
@@ -283,7 +255,7 @@ im_a_teapot = "warn"
   | ^^^^^^^^^^^ this is behind `test-dummy-unstable`, which is not enabled
   |
   = [HELP] consider adding `cargo-features = ["test-dummy-unstable"]` to the top of the manifest
-[ERROR] encountered 1 error while verifying lints
+[ERROR] encountered 1 errors(s) while verifying lints
 
 "#]])
         .run();
@@ -329,56 +301,11 @@ workspace = true
 6 | im_a_teapot = { level = "warn", priority = 10 }
   | ^^^^^^^^^^^ this is behind `test-dummy-unstable`, which is not enabled
   |
-  = [HELP] consider adding `cargo-features = ["test-dummy-unstable"]` to the top of the manifest
-[ERROR] use of unstable lint `test_dummy_unstable`
- --> Cargo.toml:7:1
+[NOTE] `cargo::im_a_teapot` was inherited
+ --> foo/Cargo.toml:9:1
   |
-7 | test_dummy_unstable = { level = "forbid", priority = -1 }
-  | ^^^^^^^^^^^^^^^^^^^ this is behind `test-dummy-unstable`, which is not enabled
-  |
-  = [HELP] consider adding `cargo-features = ["test-dummy-unstable"]` to the top of the manifest
-[ERROR] encountered 2 errors while verifying lints
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn check_feature_gated_workspace_not_inherited() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-[workspace]
-members = ["foo"]
-
-[workspace.lints.cargo]
-im_a_teapot = { level = "warn", priority = 10 }
-test_dummy_unstable = { level = "forbid", priority = -1 }
-            "#,
-        )
-        .file(
-            "foo/Cargo.toml",
-            r#"
-[package]
-name = "foo"
-version = "0.0.1"
-edition = "2015"
-authors = []
-            "#,
-        )
-        .file("foo/src/lib.rs", "")
-        .build();
-
-    p.cargo("check -Zcargo-lints")
-        .masquerade_as_nightly_cargo(&["cargo-lints"])
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] use of unstable lint `im_a_teapot`
- --> Cargo.toml:6:1
-  |
-6 | im_a_teapot = { level = "warn", priority = 10 }
-  | ^^^^^^^^^^^ this is behind `test-dummy-unstable`, which is not enabled
+9 | workspace = true
+  | ----------------
   |
   = [HELP] consider adding `cargo-features = ["test-dummy-unstable"]` to the top of the manifest
 [ERROR] use of unstable lint `test_dummy_unstable`
@@ -387,61 +314,14 @@ authors = []
 7 | test_dummy_unstable = { level = "forbid", priority = -1 }
   | ^^^^^^^^^^^^^^^^^^^ this is behind `test-dummy-unstable`, which is not enabled
   |
+[NOTE] `cargo::test_dummy_unstable` was inherited
+ --> foo/Cargo.toml:9:1
+  |
+9 | workspace = true
+  | ----------------
+  |
   = [HELP] consider adding `cargo-features = ["test-dummy-unstable"]` to the top of the manifest
-[WARNING] missing `[lints]` to inherit `[workspace.lints]`
- --> foo/Cargo.toml
-  = [NOTE] `cargo::missing_lints_inheritance` is set to `warn` by default
-[HELP] to inherit `workspace.lints, add:
-  |
-7 ~             
-8 + [lints]
-9 + workspace = true
-  |
-[HELP] to clarify your intent to not inherit, add:
-  |
-7 ~             
-8 + [lints]
-  |
-[ERROR] encountered 2 errors while verifying lints
-
-"#]])
-        .run();
-}
-
-#[cargo_test(nightly, reason = "-Zrustc-unicode is unstable")]
-fn unicode_report() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-cargo-features = ["test-dummy-unstable"]
-
-[package]
-name = "foo"
-version = "0.0.1"
-edition = "2015"
-authors = []
-im-a-teapot = true
-
-[lints.cargo]
-im_a_teapot = { level = "warn", priority = 10 }
-"#,
-        )
-        .file("src/lib.rs", "")
-        .build();
-
-    p.cargo("check -Zcargo-lints -Zrustc-unicode")
-        .masquerade_as_nightly_cargo(&["cargo-lints", "rustc-unicode", "test-dummy-unstable"])
-        .with_stderr_data(str![[r#"
-[WARNING] `im_a_teapot` is specified
-  ╭▸ Cargo.toml:9:1
-  │
-9 │ im-a-teapot = true
-  │ ━━━━━━━━━━━━━━━━━━
-  │
-  ╰ [NOTE] `cargo::im_a_teapot` is set to `warn` in `[lints]`
-[CHECKING] foo v0.0.1 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+[ERROR] encountered 2 errors(s) while verifying lints
 
 "#]])
         .run();

@@ -30,7 +30,7 @@ fn integration_test() {
 
     let repo_dir = tempfile::tempdir()
         .expect("couldn't create temp dir")
-        .keep()
+        .into_path()
         .join(crate_name);
 
     let st = Command::new("git")

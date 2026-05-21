@@ -1,4 +1,4 @@
 type Alias = Self::Target;
-//~^ ERROR cannot find `Self`
+//~^ ERROR failed to resolve: `Self`
 
 fn main() {}

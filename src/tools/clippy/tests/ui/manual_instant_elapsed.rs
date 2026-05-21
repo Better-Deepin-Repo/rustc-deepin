@@ -1,6 +1,6 @@
 #![warn(clippy::manual_instant_elapsed)]
 #![allow(clippy::unnecessary_operation)]
-#![allow(clippy::unchecked_time_subtraction)]
+#![allow(clippy::unchecked_duration_subtraction)]
 #![allow(unused_variables)]
 #![allow(unused_must_use)]
 
@@ -15,7 +15,6 @@ fn main() {
     }
 
     let duration = Instant::now() - prev_instant;
-    //~^ manual_instant_elapsed
 
     // don't catch
     let duration = prev_instant.elapsed();
@@ -25,22 +24,4 @@ fn main() {
     let ref_to_instant = &Instant::now();
 
     Instant::now() - *ref_to_instant; // to ensure parens are added correctly
-    //
-    //~^^ manual_instant_elapsed
-}
-
-fn issue16236() {
-    use std::ops::Sub as _;
-    macro_rules! deref {
-        ($e:expr) => {
-            *$e
-        };
-    }
-
-    let start = &Instant::now();
-    let _ = Instant::now().sub(deref!(start));
-    //~^ manual_instant_elapsed
-
-    Instant::now() - deref!(start);
-    //~^ manual_instant_elapsed
 }

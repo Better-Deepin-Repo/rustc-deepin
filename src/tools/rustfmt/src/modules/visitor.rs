@@ -1,11 +1,10 @@
 use rustc_ast::ast;
 use rustc_ast::visit::Visitor;
-use rustc_span::{Symbol, sym};
+use rustc_span::Symbol;
 use tracing::debug;
 
 use crate::attr::MetaVisitor;
 use crate::parse::macros::cfg_if::parse_cfg_if;
-use crate::parse::macros::cfg_match::parse_cfg_match;
 use crate::parse::session::ParseSess;
 
 pub(crate) struct ModItem {
@@ -72,65 +71,6 @@ impl<'a, 'ast: 'a> CfgIfVisitor<'a> {
     }
 }
 
-/// Traverse `cfg_match!` macro and fetch modules.
-pub(crate) struct CfgMatchVisitor<'a> {
-    psess: &'a ParseSess,
-    mods: Vec<ModItem>,
-}
-
-impl<'a> CfgMatchVisitor<'a> {
-    pub(crate) fn new(psess: &'a ParseSess) -> CfgMatchVisitor<'a> {
-        CfgMatchVisitor {
-            mods: vec![],
-            psess,
-        }
-    }
-
-    pub(crate) fn mods(self) -> Vec<ModItem> {
-        self.mods
-    }
-}
-
-impl<'a, 'ast: 'a> Visitor<'ast> for CfgMatchVisitor<'a> {
-    fn visit_mac_call(&mut self, mac: &'ast ast::MacCall) {
-        match self.visit_mac_inner(mac) {
-            Ok(()) => (),
-            Err(e) => debug!("{}", e),
-        }
-    }
-}
-
-impl<'a, 'ast: 'a> CfgMatchVisitor<'a> {
-    fn visit_mac_inner(&mut self, mac: &'ast ast::MacCall) -> Result<(), &'static str> {
-        // Support both:
-        // ```
-        // std::cfg_match! {..}
-        // core::cfg_match! {..}
-        // ```
-        // And:
-        // ```
-        // use std::cfg_match;
-        // cfg_match! {..}
-        // ```
-        match mac.path.segments.last() {
-            Some(last_segment) => {
-                if last_segment.ident.name != Symbol::intern("cfg_match") {
-                    return Err("Expected cfg_match");
-                }
-            }
-            None => {
-                return Err("Expected cfg_match");
-            }
-        };
-
-        let items = parse_cfg_match(self.psess, mac)?;
-        self.mods
-            .append(&mut items.into_iter().map(|item| ModItem { item }).collect());
-
-        Ok(())
-    }
-}
-
 /// Extracts `path = "foo.rs"` from attributes.
 #[derive(Default)]
 pub(crate) struct PathVisitor {
@@ -150,7 +90,7 @@ impl<'ast> MetaVisitor<'ast> for PathVisitor {
         meta_item: &'ast ast::MetaItem,
         lit: &'ast ast::MetaItemLit,
     ) {
-        if meta_item.has_name(sym::path) && lit.kind.is_str() {
+        if meta_item.has_name(Symbol::intern("path")) && lit.kind.is_str() {
             self.paths.push(meta_item_lit_to_str(lit));
         }
     }

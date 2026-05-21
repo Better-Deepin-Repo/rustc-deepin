@@ -1,7 +1,5 @@
 use expect_test::expect;
 
-use crate::tests::check_infer_with_mismatches;
-
 use super::{check, check_infer, check_no_mismatches, check_types};
 
 #[test]
@@ -64,37 +62,20 @@ fn type_alias_in_struct_lit() {
 
 #[test]
 fn infer_ranges() {
-    check_no_mismatches(
+    check_types(
         r#"
-//- minicore: range, new_range
-
+//- minicore: range
 fn test() {
-    let _: core::ops::RangeFull = ..;
-    let _: core::ops::RangeFrom<i32> = 1..;
-    let _: core::ops::RangeTo<u32> = ..2u32;
-    let _: core::ops::Range<usize> = 1..2usize;
-    let _: core::ops::RangeToInclusive<i32> = ..=10;
-    let _: core::ops::RangeInclusive<char> = 'a'..='z';
-}
-"#,
-    );
-}
+    let a = ..;
+    let b = 1..;
+    let c = ..2u32;
+    let d = 1..2usize;
+    let e = ..=10;
+    let f = 'a'..='z';
 
-#[test]
-fn infer_ranges_new_range() {
-    check_no_mismatches(
-        r#"
-//- minicore: range, new_range
-#![feature(new_range)]
-
-fn test() {
-    let _: core::ops::RangeFull = ..;
-    let _: core::range::RangeFrom<i32> = 1..;
-    let _: core::ops::RangeTo<u32> = ..2u32;
-    let _: core::range::Range<usize> = 1..2usize;
-    let _: core::range::RangeToInclusive<i32> = ..=10;
-    let _: core::range::RangeInclusive<char> = 'a'..='z';
-}
+    let t = (a, b, c, d, e, f);
+    t;
+} //^ (RangeFull, RangeFrom<i32>, RangeTo<u32>, Range<usize>, RangeToInclusive<i32>, RangeInclusive<char>)
 "#,
     );
 }
@@ -255,14 +236,14 @@ fn test() {
         expect![[r#"
             71..153 '{     ...a.c; }': ()
             81..82 'c': C
-            85..86 'C': fn C(usize) -> C
+            85..86 'C': extern "rust-call" C(usize) -> C
             85..89 'C(1)': C
             87..88 '1': usize
             95..96 'B': B
             106..107 'a': A
             113..132 'A { b:...C(1) }': A
             120..121 'B': B
-            126..127 'C': fn C(usize) -> C
+            126..127 'C': extern "rust-call" C(usize) -> C
             126..130 'C(1)': C
             128..129 '1': usize
             138..139 'a': A
@@ -458,11 +439,11 @@ h";
             256..260 'true': bool
             274..370 'r#"   ...    "#': &'static str
             384..394 'br#"yolo"#': &'static [u8; 4]
-            412..413 'a': &'? [u8; 4]
+            412..413 'a': &'static [u8; 4]
             416..440 'b"a\x2...    c"': &'static [u8; 4]
-            458..459 'b': &'? [u8; 4]
+            458..459 'b': &'static [u8; 4]
             462..470 'br"g\ h"': &'static [u8; 4]
-            488..489 'c': &'? [u8; 6]
+            488..489 'c': &'static [u8; 6]
             492..504 'br#"x"\"yb"#': &'static [u8; 6]
         "##]],
     );
@@ -648,12 +629,12 @@ impl E {
             86..107 '{     ...     }': ()
             96..100 'Self': S1
             134..158 '{     ...     }': ()
-            144..148 'Self': fn S2(isize) -> S2
+            144..148 'Self': extern "rust-call" S2(isize) -> S2
             144..151 'Self(1)': S2
             149..150 '1': isize
             184..230 '{     ...     }': ()
             194..202 'Self::V1': E
-            212..220 'Self::V2': fn V2(u32) -> E
+            212..220 'Self::V2': extern "rust-call" V2(u32) -> E
             212..223 'Self::V2(1)': E
             221..222 '1': u32
         "#]],
@@ -664,12 +645,9 @@ impl E {
 fn infer_binary_op() {
     check_infer(
         r#"
-//- minicore: add, builtin_impls
 fn f(x: bool) -> i32 {
     0i32
 }
-
-const CONST_2: isize = 0;
 
 fn test() -> bool {
     let x = a && b;
@@ -680,9 +658,8 @@ fn test() -> bool {
     let h = minus_forty <= CONST_2;
     let c = f(z || y) + 5;
     let d = b;
-    let g = minus_forty += i;
+    let g = minus_forty ^= i;
     let ten: usize = 10;
-    let some_num = 0usize;
     let ten_is_eleven = ten == some_num;
 
     ten < 3
@@ -692,56 +669,53 @@ fn test() -> bool {
             5..6 'x': bool
             21..33 '{     0i32 }': i32
             27..31 '0i32': i32
-            58..59 '0': isize
-            80..423 '{     ... < 3 }': bool
-            90..91 'x': bool
-            94..95 'a': bool
-            94..100 'a && b': bool
-            99..100 'b': bool
-            110..111 'y': bool
-            114..118 'true': bool
-            114..127 'true || false': bool
-            122..127 'false': bool
-            137..138 'z': bool
-            141..142 'x': bool
-            141..147 'x == y': bool
-            146..147 'y': bool
-            157..158 't': bool
-            161..162 'x': bool
-            161..167 'x != y': bool
-            166..167 'y': bool
-            177..188 'minus_forty': isize
-            198..206 '-40isize': isize
-            199..206 '40isize': isize
-            216..217 'h': bool
-            220..231 'minus_forty': isize
-            220..242 'minus_...ONST_2': bool
-            235..242 'CONST_2': isize
-            252..253 'c': i32
-            256..257 'f': fn f(bool) -> i32
-            256..265 'f(z || y)': i32
-            256..269 'f(z || y) + 5': i32
-            258..259 'z': bool
-            258..264 'z || y': bool
-            263..264 'y': bool
-            268..269 '5': i32
-            279..280 'd': {unknown}
-            283..284 'b': {unknown}
-            294..295 'g': ()
-            298..309 'minus_forty': isize
-            298..314 'minus_...y += i': ()
-            313..314 'i': isize
-            324..327 'ten': usize
-            337..339 '10': usize
-            349..357 'some_num': usize
-            360..366 '0usize': usize
-            376..389 'ten_is_eleven': bool
-            392..395 'ten': usize
-            392..407 'ten == some_num': bool
-            399..407 'some_num': usize
-            414..417 'ten': usize
-            414..421 'ten < 3': bool
-            420..421 '3': usize
+            53..369 '{     ... < 3 }': bool
+            63..64 'x': bool
+            67..68 'a': bool
+            67..73 'a && b': bool
+            72..73 'b': bool
+            83..84 'y': bool
+            87..91 'true': bool
+            87..100 'true || false': bool
+            95..100 'false': bool
+            110..111 'z': bool
+            114..115 'x': bool
+            114..120 'x == y': bool
+            119..120 'y': bool
+            130..131 't': bool
+            134..135 'x': bool
+            134..140 'x != y': bool
+            139..140 'y': bool
+            150..161 'minus_forty': isize
+            171..179 '-40isize': isize
+            172..179 '40isize': isize
+            189..190 'h': bool
+            193..204 'minus_forty': isize
+            193..215 'minus_...ONST_2': bool
+            208..215 'CONST_2': isize
+            225..226 'c': i32
+            229..230 'f': fn f(bool) -> i32
+            229..238 'f(z || y)': i32
+            229..242 'f(z || y) + 5': i32
+            231..232 'z': bool
+            231..237 'z || y': bool
+            236..237 'y': bool
+            241..242 '5': i32
+            252..253 'd': {unknown}
+            256..257 'b': {unknown}
+            267..268 'g': ()
+            271..282 'minus_forty': isize
+            271..287 'minus_...y ^= i': ()
+            286..287 'i': isize
+            297..300 'ten': usize
+            310..312 '10': usize
+            322..335 'ten_is_eleven': bool
+            338..341 'ten': usize
+            338..353 'ten == some_num': bool
+            345..353 'some_num': usize
+            360..363 'ten': usize
+            360..367 'ten < 3': bool
+            366..367 '3': usize
         "#]],
     );
 }
@@ -886,11 +860,11 @@ fn test() {
             256..277 'A::foo...42))))': &'? i32
             263..276 '&&B(B(A(42)))': &'? &'? B<B<A<i32>>>
             264..276 '&B(B(A(42)))': &'? B<B<A<i32>>>
-            265..266 'B': fn B<B<A<i32>>>(B<A<i32>>) -> B<B<A<i32>>>
+            265..266 'B': extern "rust-call" B<B<A<i32>>>(B<A<i32>>) -> B<B<A<i32>>>
             265..276 'B(B(A(42)))': B<B<A<i32>>>
-            267..268 'B': fn B<A<i32>>(A<i32>) -> B<A<i32>>
+            267..268 'B': extern "rust-call" B<A<i32>>(A<i32>) -> B<A<i32>>
             267..275 'B(A(42))': B<A<i32>>
-            269..270 'A': fn A<i32>(i32) -> A<i32>
+            269..270 'A': extern "rust-call" A<i32>(i32) -> A<i32>
             269..274 'A(42)': A<i32>
             271..273 '42': i32
         "#]],
@@ -940,16 +914,16 @@ fn test(a: A<i32>) {
             253..254 'a': A<i32>
             264..310 '{     ...))); }': ()
             274..275 't': &'? i32
-            278..279 'A': fn A<i32>(*mut i32) -> A<i32>
+            278..279 'A': extern "rust-call" A<i32>(*mut i32) -> A<i32>
             278..292 'A(0 as *mut _)': A<i32>
             278..307 'A(0 as...B(a)))': &'? i32
-            280..281 '0': usize
+            280..281 '0': i32
             280..291 '0 as *mut _': *mut i32
             297..306 '&&B(B(a))': &'? &'? B<B<A<i32>>>
             298..306 '&B(B(a))': &'? B<B<A<i32>>>
-            299..300 'B': fn B<B<A<i32>>>(B<A<i32>>) -> B<B<A<i32>>>
+            299..300 'B': extern "rust-call" B<B<A<i32>>>(B<A<i32>>) -> B<B<A<i32>>>
             299..306 'B(B(a))': B<B<A<i32>>>
-            301..302 'B': fn B<A<i32>>(A<i32>) -> B<A<i32>>
+            301..302 'B': extern "rust-call" B<A<i32>>(A<i32>) -> B<A<i32>>
             301..305 'B(a)': B<A<i32>>
             303..304 'a': A<i32>
         "#]],
@@ -1097,7 +1071,6 @@ fn infer_inherent_method() {
 fn infer_inherent_method_str() {
     check_infer(
         r#"
-//- /core.rs crate:core
 #![rustc_coherence_is_core]
 #[lang = "str"]
 impl str {
@@ -1151,13 +1124,13 @@ fn infer_tuple() {
             116..122 '(c, x)': ((isize, &'? str), &'? str)
             117..118 'c': (isize, &'? str)
             120..121 'x': &'? str
-            132..133 'e': (i32, &'? str)
-            136..144 '(1, "e")': (i32, &'? str)
+            132..133 'e': (i32, &'static str)
+            136..144 '(1, "e")': (i32, &'static str)
             137..138 '1': i32
             140..143 '"e"': &'static str
-            154..155 'f': ((i32, &'? str), &'? str)
-            158..166 '(e, "d")': ((i32, &'? str), &'? str)
-            159..160 'e': (i32, &'? str)
+            154..155 'f': ((i32, &'static str), &'static str)
+            158..166 '(e, "d")': ((i32, &'static str), &'static str)
+            159..160 'e': (i32, &'static str)
             162..165 '"d"': &'static str
         "#]],
     );
@@ -1228,8 +1201,8 @@ fn infer_array() {
             209..215 '[1, 2]': [i32; 2]
             210..211 '1': i32
             213..214 '2': i32
-            225..226 'i': [&'? str; 2]
-            229..239 '["a", "b"]': [&'? str; 2]
+            225..226 'i': [&'static str; 2]
+            229..239 '["a", "b"]': [&'static str; 2]
             230..233 '"a"': &'static str
             235..238 '"b"': &'static str
             250..251 'b': [[&'? str; 1]; 2]
@@ -1304,17 +1277,17 @@ fn infer_tuple_struct_generics() {
         "#,
         expect![[r#"
             75..183 '{     ...one; }': ()
-            81..82 'A': fn A<i32>(i32) -> A<i32>
+            81..82 'A': extern "rust-call" A<i32>(i32) -> A<i32>
             81..86 'A(42)': A<i32>
             83..85 '42': i32
-            92..93 'A': fn A<u128>(u128) -> A<u128>
+            92..93 'A': extern "rust-call" A<u128>(u128) -> A<u128>
             92..101 'A(42u128)': A<u128>
             94..100 '42u128': u128
-            107..111 'Some': fn Some<&'? str>(&'? str) -> Option<&'? str>
-            107..116 'Some("x")': Option<&'? str>
+            107..111 'Some': extern "rust-call" Some<&'static str>(&'static str) -> Option<&'static str>
+            107..116 'Some("x")': Option<&'static str>
             112..115 '"x"': &'static str
-            122..134 'Option::Some': fn Some<&'? str>(&'? str) -> Option<&'? str>
-            122..139 'Option...e("x")': Option<&'? str>
+            122..134 'Option::Some': extern "rust-call" Some<&'static str>(&'static str) -> Option<&'static str>
+            122..139 'Option...e("x")': Option<&'static str>
             135..138 '"x"': &'static str
             145..149 'None': Option<{unknown}>
             159..160 'x': Option<i64>
@@ -1599,7 +1572,7 @@ fn infer_type_alias() {
             204..207 'z.y': i8
             298..362 '{     ... &e; }': ()
             308..309 'e': Enum
-            312..325 'm::Alias::Foo': fn Foo(u8) -> Enum
+            312..325 'm::Alias::Foo': extern "rust-call" Foo(u8) -> Enum
             312..328 'm::Ali...Foo(0)': Enum
             326..327 '0': u8
             338..354 'm::Ali...Foo(x)': Enum
@@ -1811,8 +1784,6 @@ impl Foo for u8 {
 }
 
 #[test]
-// FIXME
-#[should_panic]
 fn const_eval_in_function_signature() {
     check_types(
         r#"
@@ -1973,16 +1944,14 @@ fn closure_return_inferred() {
         "#,
         expect![[r#"
             16..46 '{     ..." }; }': u32
-            26..27 'x': impl Fn() -> &'? str
-            30..43 '|| { "test" }': impl Fn() -> &'? str
-            33..43 '{ "test" }': &'? str
+            26..27 'x': impl Fn() -> &'static str
+            30..43 '|| { "test" }': impl Fn() -> &'static str
+            33..43 '{ "test" }': &'static str
             35..41 '"test"': &'static str
         "#]],
     );
 }
 
-// FIXME(next-solver): `&'? str` in 231..262 seems suspicious.
-// Should revisit this once we fully migrated into next-solver without chalk-ir.
 #[test]
 fn coroutine_types_inferred() {
     check_infer(
@@ -2010,10 +1979,10 @@ fn test() {
             70..71 'v': i64
             78..80 '{}': ()
             91..362 '{     ...   } }': ()
-            101..106 'mut g': |usize| yields i64 -> &'? str
-            109..218 '|r| { ...     }': |usize| yields i64 -> &'? str
+            101..106 'mut g': |usize| yields i64 -> &'static str
+            109..218 '|r| { ...     }': |usize| yields i64 -> &'static str
             110..111 'r': usize
-            113..218 '{     ...     }': &'? str
+            113..218 '{     ...     }': &'static str
             127..128 'a': usize
             131..138 'yield 0': usize
             137..138 '0': i64
@@ -2025,20 +1994,20 @@ fn test() {
             187..188 '2': i64
             198..212 '"return value"': &'static str
             225..360 'match ...     }': ()
-            231..239 'Pin::new': fn new<&'? mut |usize| yields i64 -> &'? str>(&'? mut |usize| yields i64 -> &'? str) -> Pin<&'? mut |usize| yields i64 -> &'? str>
-            231..247 'Pin::n...mut g)': Pin<&'? mut |usize| yields i64 -> &'? str>
-            231..262 'Pin::n...usize)': CoroutineState<i64, &'? str>
-            240..246 '&mut g': &'? mut |usize| yields i64 -> &'? str
-            245..246 'g': |usize| yields i64 -> &'? str
+            231..239 'Pin::new': fn new<&'? mut |usize| yields i64 -> &'static str>(&'? mut |usize| yields i64 -> &'static str) -> Pin<&'? mut |usize| yields i64 -> &'static str>
+            231..247 'Pin::n...mut g)': Pin<&'? mut |usize| yields i64 -> &'static str>
+            231..262 'Pin::n...usize)': CoroutineState<i64, &'static str>
+            240..246 '&mut g': &'? mut |usize| yields i64 -> &'static str
+            245..246 'g': |usize| yields i64 -> &'static str
             255..261 '0usize': usize
-            273..299 'Corout...ded(y)': CoroutineState<i64, &'? str>
+            273..299 'Corout...ded(y)': CoroutineState<i64, &'static str>
             297..298 'y': i64
             303..312 '{ f(y); }': ()
             305..306 'f': fn f(i64)
             305..309 'f(y)': ()
             307..308 'y': i64
-            321..348 'Corout...ete(r)': CoroutineState<i64, &'? str>
-            346..347 'r': &'? str
+            321..348 'Corout...ete(r)': CoroutineState<i64, &'static str>
+            346..347 'r': &'static str
             352..354 '{}': ()
         "#]],
     );
@@ -2152,11 +2121,11 @@ async fn main() {
     let z: core::ops::ControlFlow<(), _> = try { () };
     let w = const { 92 };
     let t = 'a: { 92 };
-    let u = try bikeshed core::ops::ControlFlow<(), _> { () };
 }
         "#,
         expect![[r#"
-            16..256 '{     ...) }; }': ()
+            16..193 '{     ...2 }; }': ()
+            16..193 '{     ...2 }; }': impl Future<Output = ()>
             26..27 'x': i32
             30..43 'unsafe { 92 }': i32
             39..41 '92': i32
@@ -2177,13 +2146,6 @@ async fn main() {
             176..177 't': i32
             180..190 ''a: { 92 }': i32
             186..188 '92': i32
-            200..201 'u': ControlFlow<(), ()>
-            204..253 'try bi...{ () }': ControlFlow<(), ()>
-            204..253 'try bi...{ () }': fn from_output<ControlFlow<(), ()>>(<ControlFlow<(), ()> as Try>::Output) -> ControlFlow<(), ()>
-            204..253 'try bi...{ () }': ControlFlow<(), ()>
-            204..253 'try bi...{ () }': ControlFlow<(), ()>
-            204..253 'try bi...{ () }': ControlFlow<(), ()>
-            249..251 '()': ()
         "#]],
     )
 }
@@ -2229,10 +2191,10 @@ fn main() {
             103..231 '{     ... }); }': ()
             109..161 'async ...     }': impl Future<Output = Result<(), ()>>
             125..139 'return Err(())': !
-            132..135 'Err': fn Err<(), ()>(()) -> Result<(), ()>
+            132..135 'Err': extern "rust-call" Err<(), ()>(()) -> Result<(), ()>
             132..139 'Err(())': Result<(), ()>
             136..138 '()': ()
-            149..151 'Ok': fn Ok<(), ()>(()) -> Result<(), ()>
+            149..151 'Ok': extern "rust-call" Ok<(), ()>(()) -> Result<(), ()>
             149..155 'Ok(())': Result<(), ()>
             152..154 '()': ()
             167..171 'test': fn test<(), (), impl FnMut() -> impl Future<Output = Result<(), ()>>, impl Future<Output = Result<(), ()>>>(impl FnMut() -> impl Future<Output = Result<(), ()>>)
@@ -2240,10 +2202,10 @@ fn main() {
             172..227 '|| asy...     }': impl FnMut() -> impl Future<Output = Result<(), ()>>
             175..227 'async ...     }': impl Future<Output = Result<(), ()>>
             191..205 'return Err(())': !
-            198..201 'Err': fn Err<(), ()>(()) -> Result<(), ()>
+            198..201 'Err': extern "rust-call" Err<(), ()>(()) -> Result<(), ()>
             198..205 'Err(())': Result<(), ()>
             202..204 '()': ()
-            215..217 'Ok': fn Ok<(), ()>(()) -> Result<(), ()>
+            215..217 'Ok': extern "rust-call" Ok<(), ()>(()) -> Result<(), ()>
             215..221 'Ok(())': Result<(), ()>
             218..220 '()': ()
         "#]],
@@ -2272,7 +2234,7 @@ fn infer_generic_from_later_assignment() {
             94..127 '{     ...     }': ()
             104..107 'end': Option<bool>
             104..120 'end = ...(true)': ()
-            110..114 'Some': fn Some<bool>(bool) -> Option<bool>
+            110..114 'Some': extern "rust-call" Some<bool>(bool) -> Option<bool>
             110..120 'Some(true)': Option<bool>
             115..119 'true': bool
         "#]],
@@ -2307,7 +2269,7 @@ fn infer_loop_break_with_val() {
             111..121 'break None': !
             117..121 'None': Option<bool>
             142..158 'break ...(true)': !
-            148..152 'Some': fn Some<bool>(bool) -> Option<bool>
+            148..152 'Some': extern "rust-call" Some<bool>(bool) -> Option<bool>
             148..158 'Some(true)': Option<bool>
             153..157 'true': bool
         "#]],
@@ -2554,7 +2516,7 @@ fn generic_default_in_struct_literal() {
             254..281 'OtherT...1i32 }': OtherThing<i32>
             275..279 '1i32': i32
             291..292 'b': OtherThing<i32>
-            295..310 'OtherThing::Two': fn Two<i32>(i32) -> OtherThing<i32>
+            295..310 'OtherThing::Two': extern "rust-call" Two<i32>(i32) -> OtherThing<i32>
             295..316 'OtherT...(1i32)': OtherThing<i32>
             311..315 '1i32': i32
         "#]],
@@ -2725,9 +2687,6 @@ fn inner_use_enum_rename() {
 fn box_into_vec() {
     check_infer(
         r#"
-//- /core.rs crate:core
-#![feature(lang_items)]
-
 #[lang = "sized"]
 pub trait Sized {}
 
@@ -2744,11 +2703,11 @@ unsafe impl Allocator for Global {}
 
 #[lang = "owned_box"]
 #[fundamental]
-pub struct Box<T: ?Sized, A: Allocator = Global>(T, A);
+pub struct Box<T: ?Sized, A: Allocator = Global>;
 
 impl<T: ?Sized + Unsize<U>, U: ?Sized, A: Allocator> CoerceUnsized<Box<U, A>> for Box<T, A> {}
 
-pub struct Vec<T, A: Allocator = Global>(T, A);
+pub struct Vec<T, A: Allocator = Global> {}
 
 #[lang = "slice"]
 impl<T> [T] {}
@@ -2771,22 +2730,22 @@ struct Astruct;
 impl B for Astruct {}
 "#,
         expect![[r#"
-            639..643 'self': Box<[T], A>
-            672..704 '{     ...     }': Vec<T, A>
-            718..888 '{     ...])); }': ()
-            728..731 'vec': Vec<i32, Global>
-            734..749 '<[_]>::into_vec': fn into_vec<i32, Global>(Box<[i32], Global>) -> Vec<i32, Global>
-            734..780 '<[_]>:...i32]))': Vec<i32, Global>
-            750..779 '#[rust...1i32])': Box<[i32; 1], Global>
-            772..778 '[1i32]': [i32; 1]
-            773..777 '1i32': i32
-            790..791 'v': Vec<Box<dyn B + 'static, Global>, Global>
-            811..828 '<[_]> ...to_vec': fn into_vec<Box<dyn B + '?, Global>, Global>(Box<[Box<dyn B + '?, Global>], Global>) -> Vec<Box<dyn B + '?, Global>, Global>
-            811..885 '<[_]> ...ct)]))': Vec<Box<dyn B + '?, Global>, Global>
-            829..884 '#[rust...uct)])': Box<[Box<dyn B + '?, Global>; 1], Global>
-            851..883 '[#[rus...ruct)]': [Box<dyn B + '?, Global>; 1]
-            852..882 '#[rust...truct)': Box<Astruct, Global>
-            874..881 'Astruct': Astruct
+            604..608 'self': Box<[T], A>
+            637..669 '{     ...     }': Vec<T, A>
+            683..853 '{     ...])); }': ()
+            693..696 'vec': Vec<i32, Global>
+            699..714 '<[_]>::into_vec': fn into_vec<i32, Global>(Box<[i32], Global>) -> Vec<i32, Global>
+            699..745 '<[_]>:...i32]))': Vec<i32, Global>
+            715..744 '#[rust...1i32])': Box<[i32; 1], Global>
+            737..743 '[1i32]': [i32; 1]
+            738..742 '1i32': i32
+            755..756 'v': Vec<Box<dyn B, Global>, Global>
+            776..793 '<[_]> ...to_vec': fn into_vec<Box<dyn B, Global>, Global>(Box<[Box<dyn B, Global>], Global>) -> Vec<Box<dyn B, Global>, Global>
+            776..850 '<[_]> ...ct)]))': Vec<Box<dyn B, Global>, Global>
+            794..849 '#[rust...uct)])': Box<[Box<dyn B, Global>; 1], Global>
+            816..848 '[#[rus...ruct)]': [Box<dyn B, Global>; 1]
+            817..847 '#[rust...truct)': Box<Astruct, Global>
+            839..846 'Astruct': Astruct
         "#]],
     )
 }
@@ -2962,7 +2921,7 @@ fn test {
      // ^^ impl Fn()
 
     let c4 = f1();
-     // ^^ impl FnOnce()
+     // ^^ impl FnOnce() + ?Sized
 
     f2(|| { 0 });
     // ^^^^^^^^ impl FnOnce() -> i32
@@ -3069,7 +3028,7 @@ fn f() {
         expect![[r#"
             72..166 '{     ...   } }': ()
             78..164 'match ...     }': ()
-            84..92 'Foo::Bar': fn Bar(i32) -> Foo
+            84..92 'Foo::Bar': extern "rust-call" Bar(i32) -> Foo
             84..95 'Foo::Bar(3)': Foo
             93..94 '3': i32
             106..119 'Qux::Bar(bar)': Foo
@@ -3128,9 +3087,9 @@ fn main() {
             322..324 '{}': Foo<T>
             338..559 '{     ...r(); }': ()
             348..353 'boxed': Box<Foo<i32>>
-            356..359 'Box': fn Box<Foo<i32>>(Foo<i32>) -> Box<Foo<i32>>
+            356..359 'Box': extern "rust-call" Box<Foo<i32>>(Foo<i32>) -> Box<Foo<i32>>
             356..371 'Box(Foo(0_i32))': Box<Foo<i32>>
-            360..363 'Foo': fn Foo<i32>(i32) -> Foo<i32>
+            360..363 'Foo': extern "rust-call" Foo<i32>(i32) -> Foo<i32>
             360..370 'Foo(0_i32)': Foo<i32>
             364..369 '0_i32': i32
             382..386 'bad1': &'? i32
@@ -3459,11 +3418,11 @@ struct TS(usize);
 fn main() {
     let x;
     [x,] = &[1,];
-  //^^^^expected &'? [i32; 1], got [{unknown}]
+  //^^^^expected &'? [i32; 1], got [{unknown}; _]
 
     let x;
     [(x,),] = &[(1,),];
-  //^^^^^^^expected &'? [(i32,); 1], got [{unknown}]
+  //^^^^^^^expected &'? [(i32,); 1], got [{unknown}; _]
 
     let x;
     ((x,),) = &((1,),);
@@ -3613,7 +3572,6 @@ fn f<T>(t: Ark<T>) {
 fn ref_to_array_to_ptr_cast() {
     check_types(
         r#"
-//- minicore: sized
 fn default<T>() -> T { loop {} }
 fn foo() {
     let arr = [default()];
@@ -3673,8 +3631,6 @@ fn main() {
 fn cstring_literals() {
     check_types(
         r#"
-#![feature(lang_items)]
-
 #[lang = "CStr"]
 pub struct CStr;
 
@@ -3732,380 +3688,34 @@ fn main() {
 }
 
 #[test]
-fn macro_semiopaque_hygiene() {
-    check_types(
-        r#"
-macro_rules! m {
-    () => { let bar: i32; };
-}
-fn foo() {
-    let bar: bool;
-    m!();
-    bar;
- // ^^^ bool
-}
-        "#,
-    );
-}
-
-#[test]
-fn macro_expansion_can_refer_variables_defined_before_macro_definition() {
-    check_types(
-        r#"
-fn foo() {
-    let v: i32 = 0;
-    macro_rules! m {
-        () => { v };
-    }
-    let v: bool = true;
-    m!();
- // ^^ i32
-}
-        "#,
-    );
-}
-
-#[test]
-fn macro_rules_shadowing_works_with_hygiene() {
-    check_types(
-        r#"
-fn foo() {
-    let v: bool;
-    macro_rules! m { () => { v } }
-    m!();
- // ^^ bool
-
-    let v: char;
-    macro_rules! m { () => { v } }
-    m!();
- // ^^ char
-
-    {
-        let v: u8;
-        macro_rules! m { () => { v } }
-        m!();
-     // ^^ u8
-
-        let v: i8;
-        macro_rules! m { () => { v } }
-        m!();
-     // ^^ i8
-
-        let v: i16;
-        macro_rules! m { () => { v } }
-        m!();
-     // ^^ i16
-
-        {
-            let v: u32;
-            macro_rules! m { () => { v } }
-            m!();
-         // ^^ u32
-
-            let v: u64;
-            macro_rules! m { () => { v } }
-            m!();
-         // ^^ u64
-        }
-    }
-}
-        "#,
-    );
-}
-
-#[test]
-fn tool_attr_skip() {
-    check_no_mismatches(
-        r#"
-#[rust_analyzer::skip]
-async fn foo(a: (), b: i32) -> u32 {
-    0 + 1 + b()
-}
-        "#,
-    );
-}
-
-#[test]
-fn irrefutable_slices() {
+fn infer_bad_lang_item() {
     check_infer(
         r#"
-//- minicore: from
-struct A;
+#[lang="eq"]
+pub trait Eq {
+    fn eq(&self, ) -> bool;
 
-impl From<A> for [u8; 2] {
-    fn from(a: A) -> Self {
-        [0; 2]
-    }
-}
-impl From<A> for [u8; 3] {
-    fn from(a: A) -> Self {
-        [0; 3]
-    }
 }
 
+#[lang="shr"]
+pub trait Shr<RHS,Result> {
+    fn shr(&self, rhs: &RHS) -> Result;
+}
 
-fn main() {
-    let a = A;
-    let [b, c] = a.into();
+fn test() -> bool {
+    1 >> 1;
+    1 == 1;
 }
 "#,
         expect![[r#"
-            50..51 'a': A
-            64..86 '{     ...     }': [u8; 2]
-            74..80 '[0; 2]': [u8; 2]
-            75..76 '0': u8
-            78..79 '2': usize
-            128..129 'a': A
-            142..164 '{     ...     }': [u8; 3]
-            152..158 '[0; 3]': [u8; 3]
-            153..154 '0': u8
-            156..157 '3': usize
-            179..224 '{     ...o(); }': ()
-            189..190 'a': A
-            193..194 'A': A
-            204..210 '[b, c]': [u8; 2]
-            205..206 'b': u8
-            208..209 'c': u8
-            213..214 'a': A
-            213..221 'a.into()': [u8; 2]
+            39..43 'self': &'? Self
+            114..118 'self': &'? Self
+            120..123 'rhs': &'? RHS
+            163..190 '{     ...= 1; }': bool
+            169..170 '1': i32
+            169..175 '1 >> 1': {unknown}
+            181..182 '1': i32
+            181..187 '1 == 1': {unknown}
         "#]],
-    );
-}
-
-#[test]
-fn regression_19196() {
-    check_infer(
-        r#"
-//- minicore: async_fn
-fn async_closure<F: AsyncFnOnce(i32)>(f: F) {}
-fn closure<F: FnOnce(i32)>(f: F) {}
-
-fn main() {
-    async_closure(async |arg| {
-        arg;
-    });
-    closure(|arg| {
-        arg;
-    });
-}
-"#,
-        expect![[r#"
-            38..39 'f': F
-            44..46 '{}': ()
-            74..75 'f': F
-            80..82 '{}': ()
-            94..191 '{     ... }); }': ()
-            100..113 'async_closure': fn async_closure<impl AsyncFnOnce(i32)>(impl AsyncFnOnce(i32))
-            100..147 'async_...    })': ()
-            114..146 'async ...     }': impl AsyncFnOnce(i32)
-            121..124 'arg': i32
-            126..146 '{     ...     }': ()
-            136..139 'arg': i32
-            153..160 'closure': fn closure<impl FnOnce(i32)>(impl FnOnce(i32))
-            153..188 'closur...    })': ()
-            161..187 '|arg| ...     }': impl FnOnce(i32)
-            162..165 'arg': i32
-            167..187 '{     ...     }': ()
-            177..180 'arg': i32
-        "#]],
-    );
-}
-
-#[test]
-fn regression_19734() {
-    check_infer(
-        r#"
-trait Foo {
-    type Gat<'o>;
-}
-
-trait Bar {
-    fn baz() -> <Self::Xyz as Foo::Gat<'_>>;
-}
-
-fn foo<T: Bar>() {
-    T::baz();
-}
-    "#,
-        expect![[r#"
-            110..127 '{     ...z(); }': ()
-            116..122 'T::baz': fn baz<T>() -> <{unknown} as Foo>::Gat<'?>
-            116..124 'T::baz()': <{unknown} as Foo>::Gat<'?>
-        "#]],
-    );
-}
-
-#[test]
-fn asm_const_label() {
-    check_infer(
-        r#"
-//- minicore: asm
-const fn bar() -> i32 { 123 }
-fn baz(s: &str) {}
-
-fn foo() {
-    unsafe {
-        core::arch::asm!(
-            "mov eax, {}",
-            "jmp {}",
-            const bar(),
-            label {
-                baz("hello");
-            },
-        );
-    }
-}
-    "#,
-        expect![[r#"
-            22..29 '{ 123 }': i32
-            24..27 '123': i32
-            37..38 's': &'? str
-            46..48 '{}': ()
-            !0..68 'builti...");},)': ()
-            !40..43 'bar': fn bar() -> i32
-            !40..45 'bar()': i32
-            !51..66 '{baz("hello");}': ()
-            !52..55 'baz': fn baz(&'? str)
-            !52..64 'baz("hello")': ()
-            !56..63 '"hello"': &'static str
-            59..257 '{     ...   } }': ()
-            65..255 'unsafe...     }': ()
-        "#]],
-    );
-}
-
-#[test]
-fn infer_array_size() {
-    check_no_mismatches(
-        r#"
-fn foo(a: [u8; 3]) {}
-
-fn bar() {
-    foo([0; _]);
-}
-    "#,
-    );
-}
-
-#[test]
-fn cannot_coerce_capturing_closure_to_fn_ptr() {
-    check_infer_with_mismatches(
-        r#"
-fn foo() {
-    let a = 1;
-    let _: fn() -> i32 = || a;
-}
-    "#,
-        expect![[r#"
-            9..58 '{     ...| a; }': ()
-            19..20 'a': i32
-            23..24 '1': i32
-            34..35 '_': fn() -> i32
-            51..55 '|| a': impl Fn() -> i32
-            54..55 'a': i32
-            51..55: expected fn() -> i32, got impl Fn() -> i32
-        "#]],
-    );
-}
-
-#[test]
-fn naked_asm_returns_never() {
-    check_no_mismatches(
-        r#"
-//- minicore: asm
-
-#[unsafe(naked)]
-extern "C" fn foo() -> ! {
-    core::arch::naked_asm!("");
-}
-    "#,
-    );
-}
-
-#[test]
-fn regression_21478() {
-    check_infer(
-        r#"
-//- minicore: unsize, coerce_unsized
-struct LazyLock<T>(T);
-
-impl<T> LazyLock<T> {
-    const fn new() -> Self {
-        loop {}
-    }
-
-    fn force(this: &Self) -> &T {
-        loop {}
-    }
-}
-
-static VALUES_LAZY_LOCK: LazyLock<[u32; { 0 }]> = LazyLock::new();
-
-fn foo() {
-    let _ = LazyLock::force(&VALUES_LAZY_LOCK);
-}
-    "#,
-        expect![[r#"
-            73..96 '{     ...     }': LazyLock<T>
-            83..90 'loop {}': !
-            88..90 '{}': ()
-            111..115 'this': &'? LazyLock<T>
-            130..153 '{     ...     }': &'? T
-            140..147 'loop {}': !
-            145..147 '{}': ()
-            207..220 'LazyLock::new': fn new<[u32; _]>() -> LazyLock<[u32; _]>
-            207..222 'LazyLock::new()': LazyLock<[u32; _]>
-            234..285 '{     ...CK); }': ()
-            244..245 '_': &'? [u32; _]
-            248..263 'LazyLock::force': fn force<[u32; _]>(&'? LazyLock<[u32; _]>) -> &'? [u32; _]
-            248..282 'LazyLo..._LOCK)': &'? [u32; _]
-            264..281 '&VALUE...Y_LOCK': &'? LazyLock<[u32; _]>
-            265..281 'VALUES...Y_LOCK': LazyLock<[u32; _]>
-        "#]],
-    );
-}
-
-#[test]
-fn include_bytes_len_mismatch() {
-    check_no_mismatches(
-        r#"
-//- minicore: include_bytes
-static S: &[u8; 158] = include_bytes!("/foo/bar/baz.txt");
-    "#,
-    );
-}
-
-#[test]
-fn proc_macros_are_functions_inside_defining_crate_and_macros_outside() {
-    check_types(
-        r#"
-//- /pm.rs crate:pm
-#![crate_type = "proc-macro"]
-
-#[proc_macro_attribute]
-pub fn proc_macro() {}
-
-fn foo() {
-    proc_macro;
- // ^^^^^^^^^^ fn proc_macro()
-}
-
-mod bar {
-    use super::proc_macro;
-
-    fn baz() {
-        super::proc_macro;
-     // ^^^^^^^^^^^^^^^^^ fn proc_macro()
-        proc_macro;
-     // ^^^^^^^^^^ fn proc_macro()
-    }
-}
-
-//- /lib.rs crate:lib deps:pm
-fn foo() {
-    pm::proc_macro;
- // ^^^^^^^^^^^^^^ {unknown}
-}
-    "#,
     );
 }

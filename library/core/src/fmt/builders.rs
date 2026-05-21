@@ -366,6 +366,8 @@ impl<'a, 'b: 'a> DebugTuple<'a, 'b> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(debug_more_non_exhaustive)]
+    ///
     /// use std::fmt;
     ///
     /// struct Foo(i32, String);
@@ -383,7 +385,7 @@ impl<'a, 'b: 'a> DebugTuple<'a, 'b> {
     ///     "Foo(10, ..)",
     /// );
     /// ```
-    #[stable(feature = "debug_more_non_exhaustive", since = "1.83.0")]
+    #[unstable(feature = "debug_more_non_exhaustive", issue = "127942")]
     pub fn finish_non_exhaustive(&mut self) -> fmt::Result {
         self.result = self.result.and_then(|_| {
             if self.fields > 0 {
@@ -604,6 +606,8 @@ impl<'a, 'b: 'a> DebugSet<'a, 'b> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(debug_more_non_exhaustive)]
+    ///
     /// use std::fmt;
     ///
     /// struct Foo(Vec<i32>);
@@ -626,7 +630,7 @@ impl<'a, 'b: 'a> DebugSet<'a, 'b> {
     ///     "{1, 2, ..}",
     /// );
     /// ```
-    #[stable(feature = "debug_more_non_exhaustive", since = "1.83.0")]
+    #[unstable(feature = "debug_more_non_exhaustive", issue = "127942")]
     pub fn finish_non_exhaustive(&mut self) -> fmt::Result {
         self.inner.result = self.inner.result.and_then(|_| {
             if self.inner.has_fields {
@@ -796,6 +800,8 @@ impl<'a, 'b: 'a> DebugList<'a, 'b> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(debug_more_non_exhaustive)]
+    ///
     /// use std::fmt;
     ///
     /// struct Foo(Vec<i32>);
@@ -818,7 +824,7 @@ impl<'a, 'b: 'a> DebugList<'a, 'b> {
     ///     "[1, 2, ..]",
     /// );
     /// ```
-    #[stable(feature = "debug_more_non_exhaustive", since = "1.83.0")]
+    #[unstable(feature = "debug_more_non_exhaustive", issue = "127942")]
     pub fn finish_non_exhaustive(&mut self) -> fmt::Result {
         self.inner.result.and_then(|_| {
             if self.inner.has_fields {
@@ -1120,6 +1126,8 @@ impl<'a, 'b: 'a> DebugMap<'a, 'b> {
     /// # Examples
     ///
     /// ```
+    /// #![feature(debug_more_non_exhaustive)]
+    ///
     /// use std::fmt;
     ///
     /// struct Foo(Vec<(String, i32)>);
@@ -1146,7 +1154,7 @@ impl<'a, 'b: 'a> DebugMap<'a, 'b> {
     ///     r#"{"A": 10, "B": 11, ..}"#,
     /// );
     /// ```
-    #[stable(feature = "debug_more_non_exhaustive", since = "1.83.0")]
+    #[unstable(feature = "debug_more_non_exhaustive", issue = "127942")]
     pub fn finish_non_exhaustive(&mut self) -> fmt::Result {
         self.result = self.result.and_then(|_| {
             assert!(!self.has_key, "attempted to finish a map with a partial entry");
@@ -1210,12 +1218,13 @@ impl<'a, 'b: 'a> DebugMap<'a, 'b> {
     }
 }
 
-/// Creates a type whose [`fmt::Debug`] and [`fmt::Display`] impls are
-/// forwarded to the provided closure.
+/// Creates a type whose [`fmt::Debug`] and [`fmt::Display`] impls are provided with the function
+/// `f`.
 ///
 /// # Examples
 ///
 /// ```
+/// #![feature(debug_closure_helpers)]
 /// use std::fmt;
 ///
 /// let value = 'a';
@@ -1226,20 +1235,20 @@ impl<'a, 'b: 'a> DebugMap<'a, 'b> {
 /// assert_eq!(format!("{}", wrapped), "'a'");
 /// assert_eq!(format!("{:?}", wrapped), "'a'");
 /// ```
-#[stable(feature = "fmt_from_fn", since = "1.93.0")]
-#[rustc_const_stable(feature = "const_fmt_from_fn", since = "1.95.0")]
-#[must_use = "returns a type implementing Debug and Display, which do not have any effects unless they are used"]
-pub const fn from_fn<F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result>(f: F) -> FromFn<F> {
+#[unstable(feature = "debug_closure_helpers", issue = "117729")]
+pub fn from_fn<F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result>(f: F) -> FromFn<F> {
     FromFn(f)
 }
 
-/// Implements [`fmt::Debug`] and [`fmt::Display`] via the provided closure.
+/// Implements [`fmt::Debug`] and [`fmt::Display`] using a function.
 ///
 /// Created with [`from_fn`].
-#[stable(feature = "fmt_from_fn", since = "1.93.0")]
-pub struct FromFn<F>(F);
+#[unstable(feature = "debug_closure_helpers", issue = "117729")]
+pub struct FromFn<F>(F)
+where
+    F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result;
 
-#[stable(feature = "fmt_from_fn", since = "1.93.0")]
+#[unstable(feature = "debug_closure_helpers", issue = "117729")]
 impl<F> fmt::Debug for FromFn<F>
 where
     F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result,
@@ -1249,7 +1258,7 @@ where
     }
 }
 
-#[stable(feature = "fmt_from_fn", since = "1.93.0")]
+#[unstable(feature = "debug_closure_helpers", issue = "117729")]
 impl<F> fmt::Display for FromFn<F>
 where
     F: Fn(&mut fmt::Formatter<'_>) -> fmt::Result,

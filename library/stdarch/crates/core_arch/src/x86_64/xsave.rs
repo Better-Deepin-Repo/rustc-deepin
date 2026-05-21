@@ -6,7 +6,7 @@
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.xsave64"]
     fn xsave64(p: *mut u8, hi: u32, lo: u32);
     #[link_name = "llvm.x86.xrstor64"]
@@ -126,49 +126,94 @@ pub unsafe fn _xrstors64(mem_addr: *const u8, rs_mask: u64) {
 
 #[cfg(test)]
 mod tests {
-    use crate::core_arch::x86::*;
-    use crate::core_arch::x86_64::*;
+    use crate::core_arch::x86_64::xsave;
+    use std::fmt;
     use stdarch_test::simd_test;
 
-    #[simd_test(enable = "xsave")]
-    #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
-    fn test_xsave64() {
-        let m = 0xFFFFFFFFFFFFFFFF_u64; //< all registers
-        let mut a = XsaveArea::new();
-        let mut b = XsaveArea::new();
+    #[repr(align(64))]
+    struct XsaveArea {
+        // max size for 256-bit registers is 800 bytes:
+        // see https://software.intel.com/en-us/node/682996
+        // max size for 512-bit registers is 2560 bytes:
+        // FIXME: add source
+        data: [u8; 2560],
+    }
 
-        unsafe {
-            _xsave64(a.ptr(), m);
-            _xrstor64(a.ptr(), m);
-            _xsave64(b.ptr(), m);
+    impl XsaveArea {
+        fn new() -> XsaveArea {
+            XsaveArea { data: [0; 2560] }
+        }
+        fn ptr(&mut self) -> *mut u8 {
+            &mut self.data[0] as *mut _ as *mut u8
         }
     }
 
-    #[simd_test(enable = "xsave,xsaveopt")]
+    impl PartialEq<XsaveArea> for XsaveArea {
+        fn eq(&self, other: &XsaveArea) -> bool {
+            for i in 0..self.data.len() {
+                if self.data[i] != other.data[i] {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+
+    impl fmt::Debug for XsaveArea {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "[")?;
+            for i in 0..self.data.len() {
+                write!(f, "{}", self.data[i])?;
+                if i != self.data.len() - 1 {
+                    write!(f, ", ")?;
+                }
+            }
+            write!(f, "]")
+        }
+    }
+
+    // We cannot test `_xsave64`, `_xrstor64`, `_xsaveopt64`, `_xsaves64` and `_xrstors64` directly
+    // as they are privileged instructions and will need access to the kernel to run and test them.
+    // See https://github.com/rust-lang/stdarch/issues/209
+
+    #[cfg_attr(stdarch_intel_sde, ignore)]
+    #[simd_test(enable = "xsave")]
     #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
-    fn test_xsaveopt64() {
+    unsafe fn test_xsave64() {
         let m = 0xFFFFFFFFFFFFFFFF_u64; //< all registers
         let mut a = XsaveArea::new();
         let mut b = XsaveArea::new();
 
-        unsafe {
-            _xsaveopt64(a.ptr(), m);
-            _xrstor64(a.ptr(), m);
-            _xsaveopt64(b.ptr(), m);
-        }
+        xsave::_xsave64(a.ptr(), m);
+        xsave::_xrstor64(a.ptr(), m);
+        xsave::_xsave64(b.ptr(), m);
+        assert_eq!(a, b);
+    }
+
+    #[cfg_attr(stdarch_intel_sde, ignore)]
+    #[simd_test(enable = "xsave,xsaveopt")]
+    #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
+    unsafe fn test_xsaveopt64() {
+        let m = 0xFFFFFFFFFFFFFFFF_u64; //< all registers
+        let mut a = XsaveArea::new();
+        let mut b = XsaveArea::new();
+
+        xsave::_xsaveopt64(a.ptr(), m);
+        xsave::_xrstor64(a.ptr(), m);
+        xsave::_xsaveopt64(b.ptr(), m);
+        assert_eq!(a, b);
     }
 
     #[simd_test(enable = "xsave,xsavec")]
     #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
-    fn test_xsavec64() {
+    unsafe fn test_xsavec64() {
         let m = 0xFFFFFFFFFFFFFFFF_u64; //< all registers
         let mut a = XsaveArea::new();
         let mut b = XsaveArea::new();
 
-        unsafe {
-            _xsavec64(a.ptr(), m);
-            _xrstor64(a.ptr(), m);
-            _xsavec64(b.ptr(), m);
-        }
+        xsave::_xsavec64(a.ptr(), m);
+        xsave::_xrstor64(a.ptr(), m);
+        xsave::_xsavec64(b.ptr(), m);
+        assert_eq!(a, b);
     }
 }

@@ -1,7 +1,6 @@
 //@aux-build:proc_macro_derive.rs
 
 #![warn(clippy::nonstandard_macro_braces)]
-#![allow(clippy::println_empty_string)]
 
 extern crate proc_macro_derive;
 extern crate quote;
@@ -17,7 +16,6 @@ proc_macro_derive::foo_bar!();
 macro_rules! test {
     () => {
         vec!{0, 0, 0}
-        //~^ nonstandard_macro_braces
     };
 }
 
@@ -43,15 +41,10 @@ macro_rules! printlnfoo {
 #[rustfmt::skip]
 fn main() {
     let _ = vec! {1, 2, 3};
-    //~^ nonstandard_macro_braces
     let _ = format!["ugh {} stop being such a good compiler", "hello"];
-    //~^ nonstandard_macro_braces
     let _ = matches!{{}, ()};
-    //~^ nonstandard_macro_braces
     let _ = quote!(let x = 1;);
-    //~^ nonstandard_macro_braces
     let _ = quote::quote!(match match match);
-    //~^ nonstandard_macro_braces
     let _ = test!(); // trigger when macro def is inside our own crate
     let _ = vec![1,2,3];
 
@@ -61,31 +54,8 @@ fn main() {
     let _ = test2!["{}{}{}", 1, 2, 3];
 
     let _: type_pos!(usize) = vec![];
-    //~^ nonstandard_macro_braces
 
     eprint!("test if user config overrides defaults");
-    //~^ nonstandard_macro_braces
 
     printlnfoo!["test if printlnfoo is triggered by println"];
-}
-
-#[rustfmt::skip]
-#[expect(clippy::no_effect)]
-fn issue9913() {
-    println! {"hello world"}
-    [0]; // separate statement, not indexing into the result of println.
-    //~^^ nonstandard_macro_braces
-}
-
-fn issue15594() {
-    println!();
-    println!("");
-    println![];
-    //~^ nonstandard_macro_braces
-    println![""];
-    //~^ nonstandard_macro_braces
-    println! {};
-    //~^ nonstandard_macro_braces
-    println! {""};
-    //~^ nonstandard_macro_braces
 }

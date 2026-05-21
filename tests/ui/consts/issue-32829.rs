@@ -1,5 +1,5 @@
 static S : u64 = { { panic!("foo"); 0 } };
-//~^ ERROR evaluation panicked: foo
+//~^ ERROR could not evaluate static initializer
 
 fn main() {
     println!("{:?}", S);

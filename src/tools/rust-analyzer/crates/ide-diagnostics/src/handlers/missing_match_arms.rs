@@ -13,21 +13,20 @@ pub(crate) fn missing_match_arms(
         format!("missing match arm: {}", d.uncovered_patterns),
         d.scrutinee_expr.map(Into::into),
     )
-    .stable()
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        DiagnosticsConfig,
         tests::{
             check_diagnostics, check_diagnostics_with_config, check_diagnostics_with_disabled,
         },
+        DiagnosticsConfig,
     };
     use test_utils::skip_slow_tests;
 
     #[track_caller]
-    fn check_diagnostics_no_bails(#[rust_analyzer::rust_fixture] ra_fixture: &str) {
+    fn check_diagnostics_no_bails(ra_fixture: &str) {
         cov_mark::check_count!(validate_match_bailed_out, 0);
         crate::tests::check_diagnostics(ra_fixture)
     }
@@ -390,6 +389,7 @@ fn main() {
 
     #[test]
     fn expr_diverges() {
+        cov_mark::check_count!(validate_match_bailed_out, 2);
         check_diagnostics(
             r#"
 enum Either { A, B }
@@ -400,7 +400,6 @@ fn main() {
         Either::B => (),
     }
     match loop {} {
-       // ^^^^^^^ error: missing match arm: `B` not covered
         Either::A => (),
     }
     match loop { break Either::A } {
@@ -1113,25 +1112,6 @@ fn test(x: Option<lib::PrivatelyUninhabited>) {
 }",
             );
         }
-    }
-
-    #[test]
-    fn non_exhaustive_may_be_empty() {
-        check_diagnostics_no_bails(
-            r"
-//- /main.rs crate:main deps:dep
-// In a different crate
-fn empty_match_on_empty_struct<T>(x: dep::UninhabitedStruct) -> T {
-    match x {}
-}
-//- /dep.rs crate:dep
-#[non_exhaustive]
-pub struct UninhabitedStruct {
-    pub never: !,
-    // other fields
-}
-",
-        );
     }
 
     mod false_negatives {

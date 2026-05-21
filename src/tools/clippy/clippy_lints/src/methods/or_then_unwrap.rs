@@ -1,11 +1,12 @@
 use clippy_utils::diagnostics::span_lint_and_sugg;
-use clippy_utils::res::{MaybeDef, MaybeQPath};
 use clippy_utils::source::snippet_with_applicability;
+use clippy_utils::ty::is_type_diagnostic_item;
+use clippy_utils::{is_res_lang_ctor, path_res};
 use rustc_errors::Applicability;
 use rustc_hir::lang_items::LangItem;
 use rustc_hir::{Expr, ExprKind};
 use rustc_lint::LateContext;
-use rustc_span::{Span, sym};
+use rustc_span::{sym, Span};
 
 use super::OR_THEN_UNWRAP;
 
@@ -20,28 +21,24 @@ pub(super) fn check<'tcx>(
     let title;
     let or_arg_content: Span;
 
-    match ty.opt_diag_name(cx) {
-        Some(sym::Option) => {
-            title = "found `.or(Some(…)).unwrap()`";
-            if let Some(content) = get_content_if_ctor_matches(cx, or_arg, LangItem::OptionSome) {
-                or_arg_content = content;
-            } else {
-                return;
-            }
-        },
-        Some(sym::Result) => {
-            title = "found `.or(Ok(…)).unwrap()`";
-            if let Some(content) = get_content_if_ctor_matches(cx, or_arg, LangItem::ResultOk) {
-                or_arg_content = content;
-            } else {
-                return;
-            }
-        },
-        _ => {
-            // Someone has implemented a struct with .or(...).unwrap() chaining,
-            // but it's not an Option or a Result, so bail
+    if is_type_diagnostic_item(cx, ty, sym::Option) {
+        title = "found `.or(Some(…)).unwrap()`";
+        if let Some(content) = get_content_if_ctor_matches(cx, or_arg, LangItem::OptionSome) {
+            or_arg_content = content;
+        } else {
             return;
-        },
+        }
+    } else if is_type_diagnostic_item(cx, ty, sym::Result) {
+        title = "found `.or(Ok(…)).unwrap()`";
+        if let Some(content) = get_content_if_ctor_matches(cx, or_arg, LangItem::ResultOk) {
+            or_arg_content = content;
+        } else {
+            return;
+        }
+    } else {
+        // Someone has implemented a struct with .or(...).unwrap() chaining,
+        // but it's not an Option or a Result, so bail
+        return;
     }
 
     let mut applicability = Applicability::MachineApplicable;
@@ -63,9 +60,9 @@ pub(super) fn check<'tcx>(
 
 fn get_content_if_ctor_matches(cx: &LateContext<'_>, expr: &Expr<'_>, item: LangItem) -> Option<Span> {
     if let ExprKind::Call(some_expr, [arg]) = expr.kind
-        && some_expr.res(cx).ctor_parent(cx).is_lang_item(cx, item)
+        && is_res_lang_ctor(cx, path_res(cx, some_expr), item)
     {
-        Some(arg.span.source_callsite())
+        Some(arg.span)
     } else {
         None
     }

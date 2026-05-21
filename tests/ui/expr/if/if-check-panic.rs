@@ -1,6 +1,6 @@
 //@ run-fail
 //@ error-pattern:Number is odd
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 fn even(x: usize) -> bool {
     if x < 2 {

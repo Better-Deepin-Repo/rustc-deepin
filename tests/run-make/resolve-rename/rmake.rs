@@ -1,5 +1,3 @@
-//@ needs-target-std
-//
 // If a library is compiled with -C extra-filename, the rust compiler
 // will take this into account when searching for libraries. However,
 // if that library is then renamed, the rust compiler should fall back

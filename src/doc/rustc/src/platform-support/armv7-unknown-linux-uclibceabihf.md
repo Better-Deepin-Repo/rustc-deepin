@@ -4,12 +4,9 @@
 
 This tier supports the Armv7-A processor running a Linux kernel and uClibc-ng standard library.  It provides full support for rust and the rust standard library.
 
-See [`arm-linux`](arm-linux.md) for information applicable to all Arm Linux
-targets.
+## Designated Developers
 
-## Target Maintainers
-
-[@skrap](https://github.com/skrap)
+* [@skrap](https://github.com/skrap)
 
 ## Requirements
 
@@ -21,16 +18,16 @@ This target is cross compiled, and requires a cross toolchain.  You can find sui
 
 Compiling rust for this target has been tested on `x86_64` linux hosts.  Other host types have not been tested, but may work, if you can find a suitable cross compilation toolchain for them.
 
-If you don't already have a suitable toolchain, download one [here](https://toolchains.bootlin.com/downloads/releases/toolchains/armv7-eabihf/tarballs/armv7-eabihf--uclibc--bleeding-edge-2025.08-1.tar.xz), and unpack it into a directory.
+If you don't already have a suitable toolchain, download one [here](https://toolchains.bootlin.com/downloads/releases/toolchains/armv7-eabihf/tarballs/armv7-eabihf--uclibc--bleeding-edge-2021.11-1.tar.bz2), and unpack it into a directory.
 
 ### Configure rust
 
-The target can be built by enabling it for a `rustc` build, by placing the following in `bootstrap.toml`:
+The target can be built by enabling it for a `rustc` build, by placing the following in `config.toml`:
 
 ```toml
 [build]
 target = ["armv7-unknown-linux-uclibceabihf"]
-build-stage = 2
+stage = 2
 
 [target.armv7-unknown-linux-uclibceabihf]
 # ADJUST THIS PATH TO POINT AT YOUR TOOLCHAIN

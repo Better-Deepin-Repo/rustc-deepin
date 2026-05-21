@@ -2,7 +2,7 @@
 
 //@ run-fail
 //@ error-pattern:index out of bounds
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 #[allow(unconditional_panic)]
 fn main() {

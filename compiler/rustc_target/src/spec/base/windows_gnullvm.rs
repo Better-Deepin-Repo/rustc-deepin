@@ -1,12 +1,8 @@
 use std::borrow::Cow;
 
-use crate::spec::crt_objects::pre_mingw_self_contained;
-use crate::spec::{
-    Abi, BinaryFormat, Cc, DebuginfoKind, Env, LinkSelfContainedDefault, LinkerFlavor, Lld, Os,
-    SplitDebuginfo, TargetOptions, add_link_args, cvs,
-};
+use crate::spec::{cvs, Cc, DebuginfoKind, LinkerFlavor, Lld, SplitDebuginfo, TargetOptions};
 
-pub(crate) fn opts() -> TargetOptions {
+pub fn opts() -> TargetOptions {
     // We cannot use `-nodefaultlibs` because compiler-rt has to be passed
     // as a path since it's not added to linker search path by the default.
     // There were attempts to make it behave like libgcc (so one can just use -l<name>)
@@ -16,17 +12,16 @@ pub(crate) fn opts() -> TargetOptions {
         &["-nolibc", "--unwindlib=none"],
     );
     // Order of `late_link_args*` does not matter with LLD.
-    let mingw_libs = &["-lmingw32", "-lmingwex", "-lmsvcrt", "-lkernel32", "-luser32"];
-
-    let mut late_link_args =
-        TargetOptions::link_args(LinkerFlavor::Gnu(Cc::No, Lld::No), mingw_libs);
-    add_link_args(&mut late_link_args, LinkerFlavor::Gnu(Cc::Yes, Lld::No), mingw_libs);
+    let late_link_args = TargetOptions::link_args(
+        LinkerFlavor::Gnu(Cc::Yes, Lld::No),
+        &["-lmingw32", "-lmingwex", "-lmsvcrt", "-lkernel32", "-luser32"],
+    );
 
     TargetOptions {
-        os: Os::Windows,
-        env: Env::Gnu,
+        os: "windows".into(),
+        env: "gnu".into(),
         vendor: "pc".into(),
-        abi: Abi::Llvm,
+        abi: "llvm".into(),
         linker: Some("clang".into()),
         dynamic_linking: true,
         dll_tls_export: false,
@@ -35,11 +30,8 @@ pub(crate) fn opts() -> TargetOptions {
         exe_suffix: ".exe".into(),
         families: cvs!["windows"],
         is_like_windows: true,
-        binary_format: BinaryFormat::Coff,
         allows_weak_linkage: false,
         pre_link_args,
-        pre_link_objects_self_contained: pre_mingw_self_contained(),
-        link_self_contained: LinkSelfContainedDefault::InferredForMingw,
         late_link_args,
         abi_return_struct_as_int: true,
         emit_debug_gdb_scripts: false,
@@ -47,11 +39,9 @@ pub(crate) fn opts() -> TargetOptions {
         eh_frame_header: false,
         no_default_libraries: false,
         has_thread_local: true,
-        crt_static_allows_dylibs: true,
-        crt_static_respected: true,
-        debuginfo_kind: DebuginfoKind::Dwarf,
         // FIXME(davidtwco): Support Split DWARF on Windows GNU - may require LLVM changes to
         // output DWO, despite using DWARF, doesn't use ELF..
+        debuginfo_kind: DebuginfoKind::Pdb,
         supported_split_debuginfo: Cow::Borrowed(&[SplitDebuginfo::Off]),
         ..Default::default()
     }

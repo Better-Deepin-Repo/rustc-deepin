@@ -1,22 +1,24 @@
-//! Generates `features_generated.md` documentation.
+//! Generates `assists.md` documentation.
 
 use std::{fmt, fs, io, path::PathBuf};
 
 use crate::{
-    codegen::{CommentBlock, Location, add_preamble},
+    codegen::{CommentBlock, Location},
     project_root,
     util::list_rust_files,
 };
 
-pub(crate) fn generate(check: bool) {
+pub(crate) fn generate(_check: bool) {
     let features = Feature::collect().unwrap();
-    // Do not generate docs when run with `--check`
-    if check {
-        return;
-    }
     let contents = features.into_iter().map(|it| it.to_string()).collect::<Vec<_>>().join("\n\n");
-    let contents = add_preamble(crate::flags::CodegenType::FeatureDocs, contents);
-    let dst = project_root().join("docs/book/src/features_generated.md");
+    let contents = format!(
+        "
+// Generated file, do not edit by hand, see `sourcegen_feature_docs`.
+{}
+",
+        contents.trim()
+    );
+    let dst = project_root().join("docs/user/generated_features.adoc");
     fs::write(dst, contents).unwrap();
 }
 
@@ -78,6 +80,6 @@ fn is_valid_feature_name(feature: &str) -> Result<(), String> {
 
 impl fmt::Display for Feature {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "### {}\n**Source:** {}\n{}", self.id, self.location, self.doc)
+        writeln!(f, "=== {}\n**Source:** {}\n{}", self.id, self.location, self.doc)
     }
 }

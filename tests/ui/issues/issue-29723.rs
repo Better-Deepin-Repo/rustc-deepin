@@ -1,5 +1,7 @@
 // test for https://github.com/rust-lang/rust/issues/29723
 
+#![feature(if_let_guard)]
+
 fn main() {
     let s = String::new();
     let _s = match 0 {

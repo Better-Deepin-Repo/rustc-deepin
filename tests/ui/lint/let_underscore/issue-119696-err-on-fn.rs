@@ -2,7 +2,7 @@
 
 #![deny(let_underscore_drop)]
 fn main() {
-    let _ = foo(); //~ ERROR non-binding let on a type that has a destructor
+    let _ = foo(); //~ ERROR non-binding let on a type that implements `Drop`
 }
 
 async fn from_config(_: Config) {}

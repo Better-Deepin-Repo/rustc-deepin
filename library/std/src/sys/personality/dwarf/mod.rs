@@ -12,6 +12,8 @@ mod tests;
 
 pub mod eh;
 
+use core::mem;
+
 pub struct DwarfReader {
     pub ptr: *const u8,
 }
@@ -27,7 +29,7 @@ impl DwarfReader {
     pub unsafe fn read<T: Copy>(&mut self) -> T {
         unsafe {
             let result = self.ptr.cast::<T>().read_unaligned();
-            self.ptr = self.ptr.byte_add(size_of::<T>());
+            self.ptr = self.ptr.byte_add(mem::size_of::<T>());
             result
         }
     }

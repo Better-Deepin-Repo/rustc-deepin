@@ -1,6 +1,6 @@
 //@ run-pass
 //@ aux-build:nested-macro-rules.rs
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 //@ compile-flags: -Z span-debug -Z macro-backtrace
 //@ edition:2018
 

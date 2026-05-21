@@ -1,39 +1,28 @@
 use std::fmt::Write;
 
-use rustc_abi::Primitive::{Float, Int, Pointer};
-use rustc_abi::{Align, BackendRepr, FieldsShape, Scalar, Size, Variants};
 use rustc_codegen_ssa::traits::*;
 use rustc_middle::bug;
 use rustc_middle::ty::layout::{LayoutOf, TyAndLayout};
 use rustc_middle::ty::print::{with_no_trimmed_paths, with_no_visible_paths};
 use rustc_middle::ty::{self, CoroutineArgsExt, Ty, TypeVisitableExt};
-use rustc_span::{DUMMY_SP, Span};
+use rustc_target::abi::{Abi, Align, FieldsShape, Float, Int, Pointer, Scalar, Size, Variants};
 use tracing::debug;
 
 use crate::common::*;
-use crate::llvm::Type;
+use crate::type_::Type;
 
 fn uncached_llvm_type<'a, 'tcx>(
     cx: &CodegenCx<'a, 'tcx>,
     layout: TyAndLayout<'tcx>,
     defer: &mut Option<(&'a Type, TyAndLayout<'tcx>)>,
 ) -> &'a Type {
-    match layout.backend_repr {
-        BackendRepr::Scalar(_) => bug!("handled elsewhere"),
-        BackendRepr::SimdVector { element, count } => {
+    match layout.abi {
+        Abi::Scalar(_) => bug!("handled elsewhere"),
+        Abi::Vector { element, count } => {
             let element = layout.scalar_llvm_type_at(cx, element);
             return cx.type_vector(element, count);
         }
-        BackendRepr::ScalableVector { ref element, count } => {
-            let element = if element.is_bool() {
-                cx.type_i1()
-            } else {
-                layout.scalar_llvm_type_at(cx, *element)
-            };
-
-            return cx.type_scalable_vector(element, count);
-        }
-        BackendRepr::Memory { .. } | BackendRepr::ScalarPair(..) => {}
+        Abi::Uninhabited | Abi::Aggregate { .. } | Abi::ScalarPair(..) => {}
     }
 
     let name = match layout.ty.kind() {
@@ -48,7 +37,7 @@ fn uncached_llvm_type<'a, 'tcx>(
             if let (&ty::Adt(def, _), &Variants::Single { index }) =
                 (layout.ty.kind(), &layout.variants)
             {
-                if def.is_enum() {
+                if def.is_enum() && !def.variants().is_empty() {
                     write!(&mut name, "::{}", def.variant(index).name).unwrap();
                 }
             }
@@ -159,11 +148,7 @@ impl<'a, 'tcx> CodegenCx<'a, 'tcx> {
     }
 
     pub(crate) fn size_and_align_of(&self, ty: Ty<'tcx>) -> (Size, Align) {
-        self.spanned_size_and_align_of(ty, DUMMY_SP)
-    }
-
-    pub(crate) fn spanned_size_and_align_of(&self, ty: Ty<'tcx>, span: Span) -> (Size, Align) {
-        let layout = self.spanned_layout_of(ty, span);
+        let layout = self.layout_of(ty);
         (layout.size, layout.align.abi)
     }
 }
@@ -184,21 +169,16 @@ pub(crate) trait LayoutLlvmExt<'tcx> {
 
 impl<'tcx> LayoutLlvmExt<'tcx> for TyAndLayout<'tcx> {
     fn is_llvm_immediate(&self) -> bool {
-        match self.backend_repr {
-            BackendRepr::Scalar(_)
-            | BackendRepr::SimdVector { .. }
-            | BackendRepr::ScalableVector { .. } => true,
-            BackendRepr::ScalarPair(..) | BackendRepr::Memory { .. } => false,
+        match self.abi {
+            Abi::Scalar(_) | Abi::Vector { .. } => true,
+            Abi::ScalarPair(..) | Abi::Uninhabited | Abi::Aggregate { .. } => false,
         }
     }
 
     fn is_llvm_scalar_pair(&self) -> bool {
-        match self.backend_repr {
-            BackendRepr::ScalarPair(..) => true,
-            BackendRepr::Scalar(_)
-            | BackendRepr::SimdVector { .. }
-            | BackendRepr::ScalableVector { .. }
-            | BackendRepr::Memory { .. } => false,
+        match self.abi {
+            Abi::ScalarPair(..) => true,
+            Abi::Uninhabited | Abi::Scalar(_) | Abi::Vector { .. } | Abi::Aggregate { .. } => false,
         }
     }
 
@@ -210,16 +190,16 @@ impl<'tcx> LayoutLlvmExt<'tcx> for TyAndLayout<'tcx> {
     /// `[T]` becomes `T`, while `str` and `Trait` turn into `i8` - this
     /// is useful for indexing slices, as `&[T]`'s data pointer is `T*`.
     /// If the type is an unsized struct, the regular layout is generated,
-    /// with the innermost trailing unsized field using the "minimal unit"
+    /// with the inner-most trailing unsized field using the "minimal unit"
     /// of that field's type - this is useful for taking the address of
     /// that field and ensuring the struct has the right alignment.
     fn llvm_type<'a>(&self, cx: &CodegenCx<'a, 'tcx>) -> &'a Type {
         // This must produce the same result for `repr(transparent)` wrappers as for the inner type!
         // In other words, this should generally not look at the type at all, but only at the
         // layout.
-        if let BackendRepr::Scalar(scalar) = self.backend_repr {
+        if let Abi::Scalar(scalar) = self.abi {
             // Use a different cache for scalars because pointers to DSTs
-            // can be either wide or thin (data pointers of wide pointers).
+            // can be either fat or thin (data pointers of fat pointers).
             if let Some(&llty) = cx.scalar_lltypes.borrow().get(&self.ty) {
                 return llty;
             }
@@ -243,7 +223,7 @@ impl<'tcx> LayoutLlvmExt<'tcx> for TyAndLayout<'tcx> {
 
         // Make sure lifetimes are erased, to avoid generating distinct LLVM
         // types for Rust types that only differ in the choice of lifetimes.
-        let normal_ty = cx.tcx.erase_and_anonymize_regions(self.ty);
+        let normal_ty = cx.tcx.erase_regions(self.ty);
 
         let mut defer = None;
         let llty = if self.ty != normal_ty {
@@ -267,13 +247,13 @@ impl<'tcx> LayoutLlvmExt<'tcx> for TyAndLayout<'tcx> {
     }
 
     fn immediate_llvm_type<'a>(&self, cx: &CodegenCx<'a, 'tcx>) -> &'a Type {
-        match self.backend_repr {
-            BackendRepr::Scalar(scalar) => {
+        match self.abi {
+            Abi::Scalar(scalar) => {
                 if scalar.is_bool() {
                     return cx.type_i1();
                 }
             }
-            BackendRepr::ScalarPair(..) => {
+            Abi::ScalarPair(..) => {
                 // An immediate pair always contains just the two elements, without any padding
                 // filler, as it should never be stored to memory.
                 return cx.type_struct(
@@ -306,7 +286,7 @@ impl<'tcx> LayoutLlvmExt<'tcx> for TyAndLayout<'tcx> {
         // This must produce the same result for `repr(transparent)` wrappers as for the inner type!
         // In other words, this should generally not look at the type at all, but only at the
         // layout.
-        let BackendRepr::ScalarPair(a, b) = self.backend_repr else {
+        let Abi::ScalarPair(a, b) = self.abi else {
             bug!("TyAndLayout::scalar_pair_element_llty({:?}): not applicable", self);
         };
         let scalar = [a, b][index];

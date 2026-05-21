@@ -2,9 +2,9 @@
 
 There are many ways to contribute to Rustfmt. This document lays out what they
 are and has information on how to get started. If you have any questions about
-contributing or need help with anything, please ask in the Rustfmt team [Zulip
-channel `#t-rustfmt`][rustfmt-zulip]. Feel free to also ask questions on issues,
-or file new issues specifically to get help.
+contributing or need help with anything, please ask in the WG-Rustfmt channel
+on [Discord](https://discordapp.com/invite/rust-lang). Feel free to also ask questions
+on issues, or file new issues specifically to get help.
 
 All contributors are expected to follow our [Code of
 Conduct](CODE_OF_CONDUCT.md).
@@ -109,17 +109,17 @@ If you want to test modified `cargo-fmt`, or run `rustfmt` on the whole project 
 RUSTFMT="./target/debug/rustfmt" cargo run --bin cargo-fmt -- --manifest-path path/to/project/you/want2test/Cargo.toml
 ```
 
-### Gate formatting changes
+### Version-gate formatting changes
 
-A change that introduces a different code-formatting must be gated on the
-`style_edition` configuration. This is to ensure rustfmt upholds its formatting
-stability guarantees and adheres to the Style Edition process set in [RFC 3338]
+A change that introduces a different code-formatting should be gated on the
+`version` configuration. This is to ensure the formatting of the current major
+release is preserved, while allowing fixes to be implemented for the next
+release.
 
-This can be done by conditionally guarding the formatting change, e.g.:
+This is done by conditionally guarding the change like so:
 
 ```rust
-// if the current stable Style Edition is Edition 2024
-if config.style_edition() <= StyleEdition::Edition2024 {
+if config.version() == Version::One { // if the current major release is 1.x
     // current formatting
 } else {
     // new formatting
@@ -129,13 +129,12 @@ if config.style_edition() <= StyleEdition::Edition2024 {
 This allows the user to apply the next formatting explicitly via the
 configuration, while being stable by default.
 
-This can then be enhanced as needed if and when there are
-new Style Editions with differing formatting prescriptions.
+When the next major release is done, the code block of the previous formatting
+can be deleted, e.g., the first block in the example above when going from `1.x`
+to `2.x`.
 
 | Note: Only formatting changes with default options need to be gated. |
 | --- |
-
-[RFC 3338]: https://rust-lang.github.io/rfcs/3338-style-evolution.html
 
 ### A quick tour of Rustfmt
 
@@ -157,7 +156,7 @@ format.
 
 There are different nodes for every kind of item and expression in Rust. For
 more details see the source code in the compiler -
-[ast.rs](https://github.com/rust-lang/rust/blob/HEAD/compiler/rustc_ast/src/ast.rs) - and/or the
+[ast.rs](https://github.com/rust-lang/rust/blob/master/compiler/rustc_ast/src/ast.rs) - and/or the
 [docs](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/ast/index.html).
 
 Many nodes in the AST (but not all, annoyingly) have a `Span`. A `Span` is a
@@ -268,11 +267,3 @@ the config struct and parse a config file, etc. Checking an option is done by
 accessing the correct field on the config struct, e.g., `config.max_width()`. Most
 functions have a `Config`, or one can be accessed via a visitor or context of
 some kind.
-
-## Subtree syncs
-
-Refer to [*Subtree sync procedure*](./Subtree%20sync%20procedure.md).
-
-
-[rustfmt-zulip]:
-    https://rust-lang.zulipchat.com/#narrow/channel/357797-t-rustfmt

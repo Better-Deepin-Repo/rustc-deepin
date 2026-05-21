@@ -2,6 +2,8 @@
 //@ edition:2021
 //@ build-pass
 
+#![feature(async_closure)]
+
 extern crate block_on;
 
 fn main() {

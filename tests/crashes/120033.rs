@@ -1,10 +1,8 @@
 //@ known-bug: #120033
 #![feature(non_lifetime_binders)]
-#![allow(sized_hierarchy_migration)]
-#![feature(sized_hierarchy)] // added to keep parameters unconstrained
 
-pub trait Foo<T: std::marker::PointeeSized> {
-    type Bar<K: std::marker::PointeeSized>;
+pub trait Foo<T: ?Sized> {
+    type Bar<K: ?Sized>;
 }
 
 pub struct Bar<T: ?AutoTrait> {}

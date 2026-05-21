@@ -1,5 +1,10 @@
 #![deny(clippy::index_refutable_slice)]
 
+//@no-rustfix: need to change the suggestion to a multipart suggestion
+
+extern crate if_chain;
+use if_chain::if_chain;
+
 macro_rules! if_let_slice_macro {
     () => {
         // This would normally be linted
@@ -15,9 +20,12 @@ fn main() {
     if_let_slice_macro!();
 
     // Do lint this
-    let slice: Option<&[u32]> = Some(&[1, 2, 3]);
-    if let Some(slice) = slice {
+    if_chain! {
+        let slice: Option<&[u32]> = Some(&[1, 2, 3]);
+        if let Some(slice) = slice;
         //~^ ERROR: this binding can be a slice pattern to avoid indexing
-        println!("{}", slice[0]);
+        then {
+            println!("{}", slice[0]);
+        }
     }
 }

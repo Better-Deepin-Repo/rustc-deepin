@@ -4,6 +4,7 @@
 
 // Passing enums by value
 
+//@ pretty-expanded FIXME #23616
 
 pub enum void {}
 

@@ -1,11 +1,8 @@
 #![feature(type_alias_impl_trait)]
 
 type T = impl Copy;
+//~^ ERROR cannot resolve opaque type
 
-#[define_opaque(T)]
-fn foo() -> T {
-    //~^ ERROR cannot resolve opaque type
-    None::<&'static T>
-}
+static STATIC: T = None::<&'static T>;
 
 fn main() {}

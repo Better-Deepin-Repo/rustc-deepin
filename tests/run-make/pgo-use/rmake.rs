@@ -5,7 +5,7 @@
 // be marked as cold.
 // See https://github.com/rust-lang/rust/pull/60262
 
-//@ needs-profiler-runtime
+//@ needs-profiler-support
 //@ ignore-cross-compile
 
 use run_make_support::{
@@ -22,7 +22,6 @@ fn main() {
         .opt_level("2")
         .codegen_units(1)
         .arg("-Cllvm-args=-disable-preinline")
-        .codegen_source_order()
         .profile_generate(cwd())
         .input("main.rs")
         .run();
@@ -41,7 +40,6 @@ fn main() {
         .arg("-Cllvm-args=-disable-preinline")
         .profile_use("merged.profdata")
         .emit("llvm-ir")
-        .codegen_source_order()
         .input("main.rs")
         .run();
     // Check that the generate IR contains some things that we expect.
@@ -53,5 +51,5 @@ fn main() {
     let lines: Vec<_> = ir.lines().rev().collect();
     let mut reversed_ir = lines.join("\n");
     reversed_ir.push('\n');
-    llvm_filecheck().patterns("filecheck-patterns.txt").stdin_buf(reversed_ir.as_bytes()).run();
+    llvm_filecheck().patterns("filecheck-patterns.txt").stdin(reversed_ir.as_bytes()).run();
 }

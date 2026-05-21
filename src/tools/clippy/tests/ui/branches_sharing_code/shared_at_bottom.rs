@@ -33,8 +33,8 @@ fn simple_examples() {
 
         // The rest is self contained and moveable => Only lint the rest
         let result = false;
-        //~^ branches_sharing_code
-
+        //~^ ERROR: all if blocks contain the same code at the end
+        //~| NOTE: the end suggestion probably needs some adjustments to use the expressio
         println!("Block end!");
         result
     };
@@ -53,7 +53,7 @@ fn simple_examples() {
     } else {
         println!("This is also eq with the else block");
         println!("Same end of block");
-        //~^ branches_sharing_code
+        //~^ ERROR: all if blocks contain the same code at the end
     }
 
     // Use of outer scope value
@@ -71,7 +71,7 @@ fn simple_examples() {
         println!("I'm a local because I use the value `z`: `{}`", z);
 
         println!(
-            //~^ branches_sharing_code
+            //~^ ERROR: all if blocks contain the same code at the end
             "I'm moveable because I know: `outer_scope_value`: '{}'",
             outer_scope_value
         );
@@ -84,7 +84,7 @@ fn simple_examples() {
             println!("Hello World");
         } else {
             println!("Hello World");
-            //~^ branches_sharing_code
+            //~^ ERROR: all if blocks contain the same code at the end
         }
     }
 }
@@ -101,8 +101,7 @@ fn simple_but_suggestion_is_invalid() {
         println!("{}", later_used_value);
     } else {
         let later_used_value = "A string value";
-        //~^ branches_sharing_code
-
+        //~^ ERROR: all if blocks contain the same code at the end
         println!("{}", later_used_value);
         // I'm expecting a note about this
     }
@@ -116,8 +115,7 @@ fn simple_but_suggestion_is_invalid() {
         println!("Separator print statement");
 
         let simple_examples = "I now identify as a &str :)";
-        //~^ branches_sharing_code
-
+        //~^ ERROR: all if blocks contain the same code at the end
         println!("This is the new simple_example: {}", simple_examples);
     }
     simple_examples();
@@ -183,7 +181,8 @@ fn added_note_for_expression_use() -> u32 {
     } else {
         let _ = 6;
         x << 2
-        //~^ branches_sharing_code
+        //~^ ERROR: all if blocks contain the same code at the end
+        //~| NOTE: the end suggestion probably needs some adjustments to use the expressio
     };
 
     if x == 9 {
@@ -191,7 +190,8 @@ fn added_note_for_expression_use() -> u32 {
     } else {
         let _ = 17;
         x * 4
-        //~^ branches_sharing_code
+        //~^ ERROR: all if blocks contain the same code at the end
+        //~| NOTE: the end suggestion probably needs some adjustments to use the expressio
     }
 }
 
@@ -204,8 +204,7 @@ fn test_suggestion_with_weird_formatting() {
     // The error message still looks weird tbh but this is the best I can do
     // for weird formatting
     if x == 17 { b = 1; a = 0x99; } else { a = 0x99; }
-    //~^ branches_sharing_code
-
+    //~^ ERROR: all if blocks contain the same code at the end
 }
 
 fn fp_test() {
@@ -239,126 +238,3 @@ fn fp_if_let_issue7054() {
 }
 
 fn main() {}
-
-mod issue14873 {
-    fn foo() -> i32 {
-        todo!()
-    }
-
-    macro_rules! qux {
-        ($a:ident, $b:ident, $condition:expr) => {
-            if $condition {
-                "."
-            } else {
-                ""
-            };
-            $a = foo();
-            $b = foo();
-        };
-    }
-
-    fn share_on_bottom() {
-        let mut a = 0;
-        let mut b = 0;
-        if false {
-            qux!(a, b, a == b);
-        } else {
-            qux!(a, b, a != b);
-        };
-
-        if false {
-            qux!(a, b, a == b);
-            let y = 1;
-        } else {
-            qux!(a, b, a != b);
-            let y = 1;
-            //~^ branches_sharing_code
-        }
-    }
-}
-
-fn issue15004() {
-    let a = 12u32;
-    let b = 13u32;
-    let mut c = 8u32;
-
-    let mut result = if b > a {
-        c += 1;
-        0
-    } else {
-        c += 2;
-        0
-        //~^ branches_sharing_code
-    };
-
-    result = if b > a {
-        c += 1;
-        1
-    } else {
-        c += 2;
-        1
-        //~^ branches_sharing_code
-    };
-}
-
-pub fn issue15347<T>() -> isize {
-    if false {
-        static A: isize = 4;
-        return A;
-    } else {
-        static A: isize = 5;
-        return A;
-    }
-
-    if false {
-        //~^ branches_sharing_code
-        type ISize = isize;
-        return ISize::MAX;
-    } else {
-        type ISize = isize;
-        return ISize::MAX;
-    }
-
-    if false {
-        //~^ branches_sharing_code
-        fn foo() -> isize {
-            4
-        }
-        return foo();
-    } else {
-        fn foo() -> isize {
-            4
-        }
-        return foo();
-    }
-
-    if false {
-        //~^ branches_sharing_code
-        use std::num::NonZeroIsize;
-        return NonZeroIsize::new(4).unwrap().get();
-    } else {
-        use std::num::NonZeroIsize;
-        return NonZeroIsize::new(4).unwrap().get();
-    }
-
-    if false {
-        //~^ branches_sharing_code
-        const B: isize = 5;
-        return B;
-    } else {
-        const B: isize = 5;
-        return B;
-    }
-
-    // Should not lint!
-    const A: isize = 1;
-    if false {
-        const B: isize = A;
-        return B;
-    } else {
-        const C: isize = A;
-        return C;
-    }
-
-    todo!()
-}

@@ -8,26 +8,25 @@
 //
 // To opt into double precision hardware support, use the `-C target-feature=+fp64` flag.
 
-use crate::spec::{Abi, Arch, FloatAbi, Os, Target, TargetMetadata, TargetOptions, base, cvs};
+use crate::spec::{base, cvs, Target, TargetOptions};
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     Target {
         llvm_target: "thumbv7em-none-eabihf".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: None,
-            tier: Some(3),
+            tier: None,
             host_tools: None,
-            std: Some(true),
+            std: None,
         },
         pointer_width: 32,
         data_layout: "e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64".into(),
-        arch: Arch::Arm,
+        arch: "arm".into(),
 
         options: TargetOptions {
             families: cvs!["unix"],
-            os: Os::NuttX,
-            abi: Abi::EabiHf,
-            llvm_floatabi: Some(FloatAbi::Hard),
+            os: "nuttx".into(),
+            abi: "eabihf".into(),
             // vfp4 is the lowest common denominator between the Cortex-M4F (vfp4) and the
             // Cortex-M7 (vfp5).
             // Both the Cortex-M4 and the Cortex-M7 only have 16 double-precision registers
@@ -38,7 +37,7 @@ pub(crate) fn target() -> Target {
             // ARMv7-M Architecture Reference Manual - A2.5 The optional floating-point extension
             features: "+vfp4d16sp".into(),
             max_atomic_width: Some(32),
-            ..base::arm_none::opts()
+            ..base::thumb::opts()
         },
     }
 }

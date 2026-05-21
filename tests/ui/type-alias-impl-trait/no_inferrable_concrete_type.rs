@@ -3,18 +3,19 @@
 
 #![feature(type_alias_impl_trait)]
 
-pub type Foo = impl Copy;
+mod foo {
+    pub type Foo = impl Copy;
+    //~^ ERROR unconstrained opaque type
 
-// make compiler happy about using 'Foo'
-#[define_opaque(Foo)]
-pub fn bar(x: Foo) -> Foo {
-    //~^ ERROR: item does not constrain `Foo::{opaque#0}`
-    x
+    // make compiler happy about using 'Foo'
+    pub fn bar(x: Foo) -> Foo {
+        //~^ ERROR: item does not constrain `Foo::{opaque#0}`
+        x
+    }
 }
 
 fn main() {
     unsafe {
-        let _: Foo = std::mem::transmute(0u8);
-        //~^ ERROR: cannot transmute between types of different sizes, or dependently-sized types
+        let _: foo::Foo = std::mem::transmute(0u8);
     }
 }

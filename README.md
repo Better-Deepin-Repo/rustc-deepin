@@ -21,7 +21,7 @@ standard library, and documentation.
 
 ## Why Rust?
 
-- **Performance:** Fast and memory-efficient, suitable for critical services, embedded devices, and easily integrated with other languages.
+- **Performance:** Fast and memory-efficient, suitable for critical services, embedded devices, and easily integrate with other languages.
 
 - **Reliability:** Our rich type system and ownership model ensure memory and thread safety, reducing bugs at compile-time.
 
@@ -52,8 +52,6 @@ See https://www.rust-lang.org/community for a list of chat platforms and forums.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-For a detailed explanation of the compiler's architecture and how to begin contributing, see the [rustc-dev-guide](https://rustc-dev-guide.rust-lang.org/).
-
 ## License
 
 Rust is primarily distributed under the terms of both the MIT license and the
@@ -69,11 +67,11 @@ See [LICENSE-APACHE](LICENSE-APACHE), [LICENSE-MIT](LICENSE-MIT), and
 trademarks and logos (the "Rust Trademarks").
 
 If you want to use these names or brands, please read the
-[Rust language trademark policy][trademark-policy].
+[media guide][media-guide].
 
 Third-party logos may be subject to third-party copyrights and trademarks. See
 [Licenses][policies-licenses] for details.
 
-[rust-foundation]: https://rustfoundation.org/
-[trademark-policy]: https://rustfoundation.org/policy/rust-trademark-policy/
+[rust-foundation]: https://foundation.rust-lang.org/
+[media-guide]: https://foundation.rust-lang.org/policies/logo-policy-and-media-guide/
 [policies-licenses]: https://www.rust-lang.org/policies/licenses

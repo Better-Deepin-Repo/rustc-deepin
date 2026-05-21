@@ -7,9 +7,10 @@
 
 // Modified to not use export since it's going away. --pcw
 
+//@ pretty-expanded FIXME #23616
 
 mod foo {
-    use crate::foo::bar::*;
+    use foo::bar::*;
     pub mod bar {
         pub static a : isize = 10;
     }

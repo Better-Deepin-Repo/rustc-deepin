@@ -2,13 +2,6 @@
 
 const EXPECTED = [
     {
-        'query': '! ->',
-        'others': [
-            { 'path': 'never_search', 'name': 'impossible' },
-            { 'path': 'never_search', 'name': 'box_impossible' },
-        ],
-    },
-    {
         'query': '-> !',
         'others': [
             { 'path': 'never_search', 'name': 'loops' },

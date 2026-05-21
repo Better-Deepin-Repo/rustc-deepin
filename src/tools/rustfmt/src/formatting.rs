@@ -17,7 +17,7 @@ use crate::parse::parser::{DirectoryOwnership, Parser, ParserError};
 use crate::parse::session::ParseSess;
 use crate::utils::{contains_skip, count_newlines};
 use crate::visitor::FmtVisitor;
-use crate::{ErrorKind, FormatReport, Input, Session, modules, source_file};
+use crate::{modules, source_file, ErrorKind, FormatReport, Input, Session};
 
 mod generated;
 mod newline_style;

@@ -91,8 +91,8 @@ use super::FileLock;
 use crate::CargoResult;
 use crate::GlobalContext;
 use anyhow::Context as _;
+use std::cell::RefCell;
 use std::io;
-use std::sync::Mutex;
 
 /// The style of lock to acquire.
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -408,10 +408,7 @@ impl CacheState {
                     .lock_exclusive(gctx, DOWNLOAD_EXCLUSIVE_DESCR, blocking)
                 {
                     Ok(LockAcquired) => {}
-                    Ok(WouldBlock) => {
-                        self.mutate_lock.decrement();
-                        return Ok(WouldBlock);
-                    }
+                    Ok(WouldBlock) => return Ok(WouldBlock),
                     Err(e) => {
                         self.mutate_lock.decrement();
                         return Err(e);
@@ -435,11 +432,7 @@ pub struct CacheLock<'lock> {
 impl Drop for CacheLock<'_> {
     fn drop(&mut self) {
         use CacheLockMode::*;
-        let mut state = match self.locker.state.lock() {
-            Ok(result) => result,
-            // we should release the cache even if a thread panicked while holding a lock
-            Err(poison) => poison.into_inner(),
-        };
+        let mut state = self.locker.state.borrow_mut();
         match self.mode {
             Shared => {
                 state.mutate_lock.decrement();
@@ -476,25 +469,24 @@ pub struct CacheLocker {
     ///
     /// [`CacheLocker`] uses interior mutability because it is stuffed inside
     /// [`GlobalContext`], which does not allow mutation.
-    state: Mutex<CacheState>,
+    state: RefCell<CacheState>,
 }
 
 impl CacheLocker {
     /// Creates a new `CacheLocker`.
     pub fn new() -> CacheLocker {
         CacheLocker {
-            state: CacheState {
+            state: RefCell::new(CacheState {
                 cache_lock: RecursiveLock::new(CACHE_LOCK_NAME),
                 mutate_lock: RecursiveLock::new(MUTATE_NAME),
-            }
-            .into(),
+            }),
         }
     }
 
     /// Acquires a lock with the given mode, possibly blocking if another
     /// cargo is holding the lock.
     pub fn lock(&self, gctx: &GlobalContext, mode: CacheLockMode) -> CargoResult<CacheLock<'_>> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.borrow_mut();
         let _ = state.lock(gctx, mode, Blocking)?;
         Ok(CacheLock { mode, locker: self })
     }
@@ -506,7 +498,7 @@ impl CacheLocker {
         gctx: &GlobalContext,
         mode: CacheLockMode,
     ) -> CargoResult<Option<CacheLock<'_>>> {
-        let mut state = self.state.lock().unwrap();
+        let mut state = self.state.borrow_mut();
         if state.lock(gctx, mode, NonBlocking)? == LockAcquired {
             Ok(Some(CacheLock { mode, locker: self }))
         } else {
@@ -524,7 +516,7 @@ impl CacheLocker {
     /// `DownloadExclusive` will return true if a `MutateExclusive` lock is
     /// held since they overlap.
     pub fn is_locked(&self, mode: CacheLockMode) -> bool {
-        let state = self.state.lock().unwrap();
+        let state = self.state.borrow();
         match (
             mode,
             state.cache_lock.count,

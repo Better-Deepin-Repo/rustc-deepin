@@ -1,45 +1,33 @@
-//@ ignore-backends: gcc
-//@ compile-flags: --cfg minisimd_const
 //@ run-pass
-#![feature(repr_simd, core_intrinsics, const_trait_impl, const_cmp, const_index)]
+#![feature(repr_simd, intrinsics)]
 
-#[path = "../../auxiliary/minisimd.rs"]
-mod minisimd;
-use minisimd::*;
+extern "rust-intrinsic" {
+    fn simd_masked_load<M, P, T>(mask: M, pointer: P, values: T) -> T;
+    fn simd_masked_store<M, P, T>(mask: M, pointer: P, values: T) -> ();
+}
 
-use std::intrinsics::simd::{SimdAlign, simd_masked_load, simd_masked_store};
+#[derive(Copy, Clone)]
+#[repr(simd)]
+struct Simd<T, const N: usize>([T; N]);
 
-const fn masked_load_store() {
+fn main() {
     unsafe {
         let a = Simd::<u8, 4>([0, 1, 2, 3]);
         let b_src = [4u8, 5, 6, 7];
         let b_default = Simd::<u8, 4>([9; 4]);
-        let b: Simd<u8, 4> = simd_masked_load::<_, _, _, { SimdAlign::Element }>(
+        let b: Simd::<u8, 4> = simd_masked_load(
             Simd::<i8, 4>([-1, 0, -1, -1]),
             b_src.as_ptr(),
-            b_default,
+            b_default
         );
 
-        assert_eq!(b.as_array(), &[4, 9, 6, 7]);
+        assert_eq!(&b.0, &[4, 9, 6, 7]);
 
         let mut output = [u8::MAX; 5];
 
-        simd_masked_store::<_, _, _, { SimdAlign::Element }>(
-            Simd::<i8, 4>([-1, -1, -1, 0]),
-            output.as_mut_ptr(),
-            a,
-        );
+        simd_masked_store(Simd::<i8, 4>([-1, -1, -1, 0]), output.as_mut_ptr(), a);
         assert_eq!(&output, &[0, 1, 2, u8::MAX, u8::MAX]);
-        simd_masked_store::<_, _, _, { SimdAlign::Element }>(
-            Simd::<i8, 4>([0, -1, -1, 0]),
-            output[1..].as_mut_ptr(),
-            b,
-        );
+        simd_masked_store(Simd::<i8, 4>([0, -1, -1, 0]), output[1..].as_mut_ptr(), b);
         assert_eq!(&output, &[0, 1, 9, 6, u8::MAX]);
     }
-}
-
-fn main() {
-    const { masked_load_store() };
-    masked_load_store();
 }

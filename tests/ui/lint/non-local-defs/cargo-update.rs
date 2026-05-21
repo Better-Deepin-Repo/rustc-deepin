@@ -8,7 +8,9 @@
 //
 // and since we specifically want to check the presence
 // of the `cargo update` suggestion we assert it here.
-//@ dont-require-annotations: NOTE
+//@ error-pattern: `cargo update -p non_local_macro`
+
+#![warn(non_local_definitions)]
 
 extern crate non_local_macro;
 
@@ -16,6 +18,5 @@ struct LocalStruct;
 
 non_local_macro::non_local_impl!(LocalStruct);
 //~^ WARN non-local `impl` definition
-//~| NOTE `cargo update -p non_local_macro`
 
 fn main() {}

@@ -1,7 +1,7 @@
 //@ run-pass
 
 #![allow(dead_code)]
-//@ proc-macro: derive-nothing.rs
+//@ aux-build:derive-nothing.rs
 
 #[macro_use]
 extern crate derive_nothing;

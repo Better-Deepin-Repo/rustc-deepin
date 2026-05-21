@@ -6,11 +6,13 @@ use crate::core_arch::x86::*;
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.sse.cvtss2si64"]
     fn cvtss2si64(a: __m128) -> i64;
     #[link_name = "llvm.x86.sse.cvttss2si64"]
     fn cvttss2si64(a: __m128) -> i64;
+    #[link_name = "llvm.x86.sse.cvtsi642ss"]
+    fn cvtsi642ss(a: __m128, b: i64) -> __m128;
 }
 
 /// Converts the lowest 32 bit float in the input vector to a 64 bit integer.
@@ -28,8 +30,8 @@ unsafe extern "C" {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cvtss2si))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cvtss_si64(a: __m128) -> i64 {
-    unsafe { cvtss2si64(a) }
+pub unsafe fn _mm_cvtss_si64(a: __m128) -> i64 {
+    cvtss2si64(a)
 }
 
 /// Converts the lowest 32 bit float in the input vector to a 64 bit integer
@@ -47,8 +49,8 @@ pub fn _mm_cvtss_si64(a: __m128) -> i64 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cvttss2si))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cvttss_si64(a: __m128) -> i64 {
-    unsafe { cvttss2si64(a) }
+pub unsafe fn _mm_cvttss_si64(a: __m128) -> i64 {
+    cvttss2si64(a)
 }
 
 /// Converts a 64 bit integer to a 32 bit float. The result vector is the input
@@ -62,19 +64,17 @@ pub fn _mm_cvttss_si64(a: __m128) -> i64 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cvtsi2ss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_cvtsi64_ss(a: __m128, b: i64) -> __m128 {
-    unsafe { simd_insert!(a, 0, b as f32) }
+pub unsafe fn _mm_cvtsi64_ss(a: __m128, b: i64) -> __m128 {
+    cvtsi642ss(a, b)
 }
 
 #[cfg(test)]
 mod tests {
     use crate::core_arch::arch::x86_64::*;
-    use crate::core_arch::assert_eq_const as assert_eq;
     use stdarch_test::simd_test;
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cvtss_si64() {
+    unsafe fn test_mm_cvtss_si64() {
         let inputs = &[
             (42.0f32, 42i64),
             (-31.4, -31),
@@ -98,7 +98,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cvttss_si64() {
+    unsafe fn test_mm_cvttss_si64() {
         let inputs = &[
             (42.0f32, 42i64),
             (-31.4, -31),
@@ -125,31 +125,21 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_cvtsi64_ss() {
-        let a = _mm_setr_ps(5.0, 6.0, 7.0, 8.0);
+    unsafe fn test_mm_cvtsi64_ss() {
+        let inputs = &[
+            (4555i64, 4555.0f32),
+            (322223333, 322223330.0),
+            (-432, -432.0),
+            (-322223333, -322223330.0),
+            (9223372036854775807, 9.223372e18),
+            (-9223372036854775808, -9.223372e18),
+        ];
 
-        let r = _mm_cvtsi64_ss(a, 4555);
-        let e = _mm_setr_ps(4555.0, 6.0, 7.0, 8.0);
-        assert_eq_m128(e, r);
-
-        let r = _mm_cvtsi64_ss(a, 322223333);
-        let e = _mm_setr_ps(322223333.0, 6.0, 7.0, 8.0);
-        assert_eq_m128(e, r);
-
-        let r = _mm_cvtsi64_ss(a, -432);
-        let e = _mm_setr_ps(-432.0, 6.0, 7.0, 8.0);
-        assert_eq_m128(e, r);
-
-        let r = _mm_cvtsi64_ss(a, -322223333);
-        let e = _mm_setr_ps(-322223333.0, 6.0, 7.0, 8.0);
-        assert_eq_m128(e, r);
-
-        let r = _mm_cvtsi64_ss(a, 9223372036854775807);
-        let e = _mm_setr_ps(9.223372e18, 6.0, 7.0, 8.0);
-        assert_eq_m128(e, r);
-
-        let r = _mm_cvtsi64_ss(a, -9223372036854775808);
-        let e = _mm_setr_ps(-9.223372e18, 6.0, 7.0, 8.0);
-        assert_eq_m128(e, r);
+        for &(x, f) in inputs {
+            let a = _mm_setr_ps(5.0, 6.0, 7.0, 8.0);
+            let r = _mm_cvtsi64_ss(a, x);
+            let e = _mm_setr_ps(f, 6.0, 7.0, 8.0);
+            assert_eq_m128(e, r);
+        }
     }
 }

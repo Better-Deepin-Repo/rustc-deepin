@@ -1,3 +1,4 @@
+#![allow(unused)]
 #![warn(clippy::items_after_test_module)]
 
 fn main() {}
@@ -9,7 +10,6 @@ fn should_not_lint() {}
 #[allow(clippy::allow_attributes)]
 #[cfg(test)]
 mod tests {
-    //~^ items_after_test_module
     #[test]
     fn hi() {}
 }

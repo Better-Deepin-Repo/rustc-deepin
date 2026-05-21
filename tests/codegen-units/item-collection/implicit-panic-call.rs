@@ -1,6 +1,7 @@
+//@ compile-flags:-Zprint-mono-items=lazy
+
 // rust-lang/rust#90405
 // Ensure implicit panic calls are collected
-//@ compile-flags: -Zcross-crate-inline-threshold=never
 
 #![feature(lang_items)]
 #![feature(no_core)]
@@ -29,14 +30,8 @@ fn panic_div_overflow() -> ! {
     loop {}
 }
 
-#[lang = "pointee_sized"]
-pub trait PointeeSized {}
-
-#[lang = "meta_sized"]
-pub trait MetaSized: PointeeSized {}
-
 #[lang = "sized"]
-pub trait Sized: MetaSized {}
+trait Sized {}
 
 #[lang = "copy"]
 trait Copy {}

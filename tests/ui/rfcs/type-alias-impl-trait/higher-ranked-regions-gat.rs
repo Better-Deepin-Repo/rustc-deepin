@@ -14,10 +14,7 @@ impl Trait for Struct {
     type Assoc<'a> = &'a u32;
 }
 
-#[define_opaque(Foo)]
-fn foo() -> Foo {
-    Struct
-    //~^ ERROR: expected generic lifetime parameter, found `'a`
-}
+const FOO: Foo = Struct;
+//~^ ERROR: expected generic lifetime parameter, found `'a`
 
 fn main() {}

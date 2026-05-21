@@ -1,24 +1,23 @@
 // Suggest not mutably borrowing a mutable reference
-//@ run-rustfix
 #![crate_type = "rlib"]
 
 pub fn f(b: &mut i32) {
-    //~^ ERROR: cannot borrow
-    //~| NOTE: not mutable
-    //~| NOTE: the binding is already a mutable borrow
-    //~| HELP: consider making the binding mutable if you need to reborrow multiple times
+    //~^ ERROR cannot borrow
+    //~| NOTE not mutable
+    //~| NOTE the binding is already a mutable borrow
     h(&mut b);
-    //~^ NOTE: cannot borrow as mutable
-    //~| HELP: if there is only one mutable reborrow, remove the `&mut`
+    //~^ NOTE cannot borrow as mutable
+    //~| HELP try removing `&mut` here
     g(&mut &mut b);
-    //~^ NOTE: cannot borrow as mutable
+    //~^ NOTE cannot borrow as mutable
+    //~| HELP try removing `&mut` here
 }
 
-pub fn g(b: &mut i32) { //~ NOTE: the binding is already a mutable borrow
-    //~^ HELP: consider making the binding mutable if you need to reborrow multiple times
+pub fn g(b: &mut i32) { //~ NOTE the binding is already a mutable borrow
     h(&mut &mut b);
-    //~^ ERROR: cannot borrow
-    //~| NOTE: cannot borrow as mutable
+    //~^ ERROR cannot borrow
+    //~| NOTE cannot borrow as mutable
+    //~| HELP try removing `&mut` here
 }
 
 pub fn h(_: &mut i32) {}

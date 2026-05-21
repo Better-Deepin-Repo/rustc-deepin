@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::format_err;
-use xshell::{Shell, cmd};
+use xshell::{cmd, Shell};
 
 use crate::flags::{self, MeasurementType};
 
@@ -16,16 +16,13 @@ type Unit = String;
 impl flags::Metrics {
     pub(crate) fn run(self, sh: &Shell) -> anyhow::Result<()> {
         let mut metrics = Metrics::new(sh)?;
-        if !Path::new("./target/metrics/rustc-perf").exists() {
-            sh.create_dir("./target/metrics/rustc-perf")?;
-            cmd!(
-                sh,
-                "git clone https://github.com/rust-lang/rustc-perf.git ./target/metrics/rustc-perf"
-            )
-            .run()?;
+        if !Path::new("./target/rustc-perf").exists() {
+            sh.create_dir("./target/rustc-perf")?;
+            cmd!(sh, "git clone https://github.com/rust-lang/rustc-perf.git ./target/rustc-perf")
+                .run()?;
         }
         {
-            let _d = sh.push_dir("./target/metrics/rustc-perf");
+            let _d = sh.push_dir("./target/rustc-perf");
             let revision = &metrics.perf_revision;
             cmd!(sh, "git reset --hard {revision}").run()?;
         }
@@ -91,12 +88,11 @@ impl Metrics {
 
         cmd!(
             sh,
-            "git clone --depth=1 --branch 1.76.0 https://github.com/rust-lang/rust.git --single-branch ./target/metrics/rust"
+            "git clone --depth=1 --branch 1.76.0 https://github.com/rust-lang/rust.git --single-branch"
         )
         .run()?;
 
-        let output =
-            cmd!(sh, "./target/release/rust-analyzer rustc-tests ./target/metrics/rust").read()?;
+        let output = cmd!(sh, "./target/release/rust-analyzer rustc-tests ./rust").read()?;
         for (metric, value, unit) in parse_metrics(&output) {
             self.report(metric, value, unit.into());
         }
@@ -110,7 +106,7 @@ impl Metrics {
         self.measure_analysis_stats_path(
             sh,
             bench,
-            &format!("./target/metrics/rustc-perf/collector/compile-benchmarks/{bench}"),
+            &format!("./target/rustc-perf/collector/compile-benchmarks/{bench}"),
         )
     }
     fn measure_analysis_stats_path(
@@ -160,7 +156,7 @@ struct Host {
 
 impl Metrics {
     fn new(sh: &Shell) -> anyhow::Result<Metrics> {
-        let host = Host::new(sh).unwrap_or_else(|_| Host::unknown());
+        let host = Host::new(sh)?;
         let timestamp = SystemTime::now();
         let revision = cmd!(sh, "git rev-parse HEAD").read()?;
         let perf_revision = "a584462e145a0c04760fd9391daefb4f6bd13a99".into();
@@ -191,13 +187,9 @@ impl Metrics {
 }
 
 impl Host {
-    fn unknown() -> Host {
-        Host { os: "unknown".into(), cpu: "unknown".into(), mem: "unknown".into() }
-    }
-
     fn new(sh: &Shell) -> anyhow::Result<Host> {
         if cfg!(not(target_os = "linux")) {
-            return Ok(Host::unknown());
+            return Ok(Host { os: "unknown".into(), cpu: "unknown".into(), mem: "unknown".into() });
         }
 
         let os = read_field(sh, "/etc/os-release", "PRETTY_NAME=")?.trim_matches('"').to_owned();

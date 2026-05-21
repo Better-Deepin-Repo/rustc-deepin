@@ -1,26 +1,27 @@
 use std::collections::hash_map::Entry;
 use std::fmt::Write;
 
+use rustc_ast::ptr::P;
 use rustc_ast::*;
 use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexMap};
-use rustc_errors::msg;
 use rustc_hir as hir;
 use rustc_hir::def::{DefKind, Res};
 use rustc_session::parse::feature_err;
-use rustc_span::{Span, sym};
+use rustc_span::symbol::kw;
+use rustc_span::{sym, Span};
 use rustc_target::asm;
 
-use super::LoweringContext;
 use super::errors::{
     AbiSpecifiedMultipleTimes, AttSyntaxOnlyX86, ClobberAbiNotSupported,
     InlineAsmUnsupportedTarget, InvalidAbiClobberAbi, InvalidAsmTemplateModifierConst,
     InvalidAsmTemplateModifierLabel, InvalidAsmTemplateModifierRegClass,
     InvalidAsmTemplateModifierRegClassSub, InvalidAsmTemplateModifierSym, InvalidRegister,
-    InvalidRegisterClass, RegisterClassOnlyClobber, RegisterClassOnlyClobberStable,
-    RegisterConflict,
+    InvalidRegisterClass, RegisterClassOnlyClobber, RegisterConflict,
 };
+use super::LoweringContext;
 use crate::{
-    AllowReturnTypeNotation, ImplTraitContext, ImplTraitPosition, ParamMode, ResolverAstLoweringExt,
+    fluent_generated as fluent, ImplTraitContext, ImplTraitPosition, ParamMode,
+    ResolverAstLoweringExt,
 };
 
 impl<'a, 'hir> LoweringContext<'a, 'hir> {
@@ -38,53 +39,38 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         }
         if let Some(asm_arch) = asm_arch {
             // Inline assembly is currently only stable for these architectures.
-            // (See also compiletest's `has_asm_support`.)
             let is_stable = matches!(
                 asm_arch,
                 asm::InlineAsmArch::X86
                     | asm::InlineAsmArch::X86_64
                     | asm::InlineAsmArch::Arm
                     | asm::InlineAsmArch::AArch64
-                    | asm::InlineAsmArch::Arm64EC
                     | asm::InlineAsmArch::RiscV32
                     | asm::InlineAsmArch::RiscV64
-                    | asm::InlineAsmArch::LoongArch32
                     | asm::InlineAsmArch::LoongArch64
-                    | asm::InlineAsmArch::S390x
-                    | asm::InlineAsmArch::PowerPC
-                    | asm::InlineAsmArch::PowerPC64
             );
-            if !is_stable
-                && !self.tcx.features().asm_experimental_arch()
-                && sp
-                    .ctxt()
-                    .outer_expn_data()
-                    .allow_internal_unstable
-                    .filter(|features| features.contains(&sym::asm_experimental_arch))
-                    .is_none()
-            {
+            if !is_stable && !self.tcx.features().asm_experimental_arch {
                 feature_err(
                     &self.tcx.sess,
                     sym::asm_experimental_arch,
                     sp,
-                    msg!("inline assembly is not stable yet on this architecture"),
+                    fluent::ast_lowering_unstable_inline_assembly,
                 )
                 .emit();
             }
         }
-        let allow_experimental_reg = self.tcx.features().asm_experimental_reg();
         if asm.options.contains(InlineAsmOptions::ATT_SYNTAX)
             && !matches!(asm_arch, Some(asm::InlineAsmArch::X86 | asm::InlineAsmArch::X86_64))
             && !self.tcx.sess.opts.actually_rustdoc
         {
             self.dcx().emit_err(AttSyntaxOnlyX86 { span: sp });
         }
-        if asm.options.contains(InlineAsmOptions::MAY_UNWIND) && !self.tcx.features().asm_unwind() {
+        if asm.options.contains(InlineAsmOptions::MAY_UNWIND) && !self.tcx.features().asm_unwind {
             feature_err(
                 &self.tcx.sess,
                 sym::asm_unwind,
                 sp,
-                msg!("the `may_unwind` option is unstable"),
+                fluent::ast_lowering_unstable_may_unwind,
             )
             .emit();
         }
@@ -92,12 +78,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         let mut clobber_abis = FxIndexMap::default();
         if let Some(asm_arch) = asm_arch {
             for (abi_name, abi_span) in &asm.clobber_abis {
-                match asm::InlineAsmClobberAbi::parse(
-                    asm_arch,
-                    &self.tcx.sess.target,
-                    &self.tcx.sess.unstable_target_features,
-                    *abi_name,
-                ) {
+                match asm::InlineAsmClobberAbi::parse(asm_arch, &self.tcx.sess.target, *abi_name) {
                     Ok(abi) => {
                         // If the abi was already in the list, emit an error
                         match clobber_abis.get(&abi) {
@@ -163,16 +144,11 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                     InlineAsmRegOrRegClass::RegClass(reg_class) => {
                         asm::InlineAsmRegOrRegClass::RegClass(if let Some(asm_arch) = asm_arch {
                             asm::InlineAsmRegClass::parse(asm_arch, reg_class).unwrap_or_else(
-                                |supported_register_classes| {
-                                    let mut register_classes =
-                                        format!("`{}`", supported_register_classes[0]);
-                                    for m in &supported_register_classes[1..] {
-                                        let _ = write!(register_classes, ", `{m}`");
-                                    }
+                                |error| {
                                     self.dcx().emit_err(InvalidRegisterClass {
                                         op_span: *op_sp,
                                         reg_class,
-                                        supported_register_classes: register_classes,
+                                        error,
                                     });
                                     asm::InlineAsmRegClass::Err
                                 },
@@ -207,7 +183,7 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                         }
                     }
                     InlineAsmOperand::Const { anon_const } => hir::InlineAsmOperand::Const {
-                        anon_const: self.lower_const_block(anon_const),
+                        anon_const: self.lower_anon_const_to_anon_const(anon_const),
                     },
                     InlineAsmOperand::Sym { sym } => {
                         let static_def_id = self
@@ -225,7 +201,6 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                                 &sym.qself,
                                 &sym.path,
                                 ParamMode::Optional,
-                                AllowReturnTypeNotation::No,
                                 ImplTraitContext::Disallowed(ImplTraitPosition::Path),
                                 None,
                             );
@@ -241,10 +216,37 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                                 tokens: None,
                             };
 
-                            hir::InlineAsmOperand::SymFn { expr: self.lower_expr(&expr) }
+                            // Wrap the expression in an AnonConst.
+                            let parent_def_id = self.current_def_id_parent;
+                            let node_id = self.next_node_id();
+                            // HACK(min_generic_const_args): see lower_anon_const
+                            if !self.tcx.features().const_arg_path
+                                || !expr.is_potential_trivial_const_arg()
+                            {
+                                self.create_def(
+                                    parent_def_id,
+                                    node_id,
+                                    kw::Empty,
+                                    DefKind::AnonConst,
+                                    *op_sp,
+                                );
+                            }
+                            let anon_const = AnonConst { id: node_id, value: P(expr) };
+                            hir::InlineAsmOperand::SymFn {
+                                anon_const: self.lower_anon_const_to_anon_const(&anon_const),
+                            }
                         }
                     }
                     InlineAsmOperand::Label { block } => {
+                        if !self.tcx.features().asm_goto {
+                            feature_err(
+                                sess,
+                                sym::asm_goto,
+                                *op_sp,
+                                fluent::ast_lowering_unstable_inline_assembly_label_operands,
+                            )
+                            .emit();
+                        }
                         hir::InlineAsmOperand::Label { block: self.lower_block(block, false) }
                     }
                 };
@@ -330,29 +332,11 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
                 // means that we disallow passing a value in/out of the asm and
                 // require that the operand name an explicit register, not a
                 // register class.
-                if reg_class.is_clobber_only(asm_arch.unwrap(), allow_experimental_reg)
-                    && !op.is_clobber()
-                {
-                    if allow_experimental_reg || reg_class.is_clobber_only(asm_arch.unwrap(), true)
-                    {
-                        // always clobber-only
-                        self.dcx().emit_err(RegisterClassOnlyClobber {
-                            op_span: op_sp,
-                            reg_class_name: reg_class.name(),
-                        });
-                    } else {
-                        // clobber-only in stable
-                        self.tcx
-                            .sess
-                            .create_feature_err(
-                                RegisterClassOnlyClobberStable {
-                                    op_span: op_sp,
-                                    reg_class_name: reg_class.name(),
-                                },
-                                sym::asm_experimental_reg,
-                            )
-                            .emit();
-                    }
+                if reg_class.is_clobber_only(asm_arch.unwrap()) && !op.is_clobber() {
+                    self.dcx().emit_err(RegisterClassOnlyClobber {
+                        op_span: op_sp,
+                        reg_class_name: reg_class.name(),
+                    });
                     continue;
                 }
 
@@ -481,30 +465,6 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
             }
         }
 
-        // Feature gate checking for `asm_goto_with_outputs`.
-        if let Some((_, op_sp)) =
-            operands.iter().find(|(op, _)| matches!(op, hir::InlineAsmOperand::Label { .. }))
-        {
-            // Check if an output operand is used.
-            let output_operand_used = operands.iter().any(|(op, _)| {
-                matches!(
-                    op,
-                    hir::InlineAsmOperand::Out { expr: Some(_), .. }
-                        | hir::InlineAsmOperand::InOut { .. }
-                        | hir::InlineAsmOperand::SplitInOut { out_expr: Some(_), .. }
-                )
-            });
-            if output_operand_used && !self.tcx.features().asm_goto_with_outputs() {
-                feature_err(
-                    sess,
-                    sym::asm_goto_with_outputs,
-                    *op_sp,
-                    msg!("using both label and output operands for inline assembly is unstable"),
-                )
-                .emit();
-            }
-        }
-
         let operands = self.arena.alloc_from_iter(operands);
         let template = self.arena.alloc_from_iter(asm.template.iter().cloned());
         let template_strs = self.arena.alloc_from_iter(
@@ -514,14 +474,8 @@ impl<'a, 'hir> LoweringContext<'a, 'hir> {
         );
         let line_spans =
             self.arena.alloc_from_iter(asm.line_spans.iter().map(|span| self.lower_span(*span)));
-        let hir_asm = hir::InlineAsm {
-            asm_macro: asm.asm_macro,
-            template,
-            template_strs,
-            operands,
-            options: asm.options,
-            line_spans,
-        };
+        let hir_asm =
+            hir::InlineAsm { template, template_strs, operands, options: asm.options, line_spans };
         self.arena.alloc(hir_asm)
     }
 }

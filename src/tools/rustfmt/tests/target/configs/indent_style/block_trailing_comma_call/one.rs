@@ -1,4 +1,4 @@
-// rustfmt-style_edition: 2015
+// rustfmt-version: One
 // rustfmt-error_on_line_overflow: false
 // rustfmt-indent_style: Block
 

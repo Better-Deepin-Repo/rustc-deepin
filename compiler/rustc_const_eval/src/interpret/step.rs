@@ -2,25 +2,21 @@
 //!
 //! The main entry point is the `step` method.
 
-use std::iter;
-
 use either::Either;
-use rustc_abi::{FIRST_VARIANT, FieldIdx};
-use rustc_data_structures::fx::FxHashSet;
 use rustc_index::IndexSlice;
+use rustc_middle::ty::layout::FnAbiOf;
 use rustc_middle::ty::{self, Instance, Ty};
 use rustc_middle::{bug, mir, span_bug};
 use rustc_span::source_map::Spanned;
-use rustc_target::callconv::FnAbi;
-use tracing::field::Empty;
+use rustc_target::abi::call::FnAbi;
+use rustc_target::abi::{FieldIdx, FIRST_VARIANT};
 use tracing::{info, instrument, trace};
 
 use super::{
-    FnArg, FnVal, ImmTy, Immediate, InterpCx, InterpResult, Machine, MemPlaceMeta, PlaceTy,
-    Projectable, interp_ok, throw_ub, throw_unsup_format,
+    throw_ub, FnArg, FnVal, ImmTy, Immediate, InterpCx, InterpResult, Machine, MemPlaceMeta,
+    PlaceTy, Projectable, Scalar,
 };
-use crate::interpret::EnteredTraceSpan;
-use crate::{enter_trace_span, util};
+use crate::util;
 
 struct EvaluatedCalleeAndArgs<'tcx, M: Machine<'tcx>> {
     callee: FnVal<'tcx, M::ExtraFnVal>,
@@ -40,7 +36,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
     #[inline(always)]
     pub fn step(&mut self) -> InterpResult<'tcx, bool> {
         if self.stack().is_empty() {
-            return interp_ok(false);
+            return Ok(false);
         }
 
         let Either::Left(loc) = self.frame().loc else {
@@ -48,7 +44,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
             // Just go on unwinding.
             trace!("unwinding: skipping frame");
             self.return_from_current_stack_frame(/* unwinding */ true)?;
-            return interp_ok(true);
+            return Ok(true);
         };
         let basic_block = &self.body().basic_blocks[loc.block];
 
@@ -59,7 +55,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
             assert_eq!(old_frames, self.frame_idx());
             // Advance the program counter.
             self.frame_mut().loc.as_mut().left().unwrap().statement_index += 1;
-            return interp_ok(true);
+            return Ok(true);
         }
 
         M::before_terminator(self)?;
@@ -71,7 +67,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 info!("// executing {:?}", loc.block);
             }
         }
-        interp_ok(true)
+        Ok(true)
     }
 
     /// Runs the interpretation logic for the given `mir::Statement` at the current frame and
@@ -79,14 +75,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
     ///
     /// This does NOT move the statement counter forward, the caller has to do that!
     pub fn eval_statement(&mut self, stmt: &mir::Statement<'tcx>) -> InterpResult<'tcx> {
-        let _trace = enter_trace_span!(
-            M,
-            step::eval_statement,
-            stmt = ?stmt.kind,
-            span = ?stmt.source_info.span,
-            tracing_separate_thread = Empty,
-        )
-        .or_if_tracing_disabled(|| info!("{:?}", stmt.kind));
+        info!("{:?}", stmt);
 
         use rustc_middle::mir::StatementKind::*;
 
@@ -96,6 +85,11 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
             SetDiscriminant { place, variant_index } => {
                 let dest = self.eval_place(**place)?;
                 self.write_discriminant(*variant_index, &dest)?;
+            }
+
+            Deinit(place) => {
+                let dest = self.eval_place(**place)?;
+                self.write_uninit(&dest)?;
             }
 
             // Mark locals as alive
@@ -149,12 +143,9 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
             // Defined to do nothing. These are added by optimization passes, to avoid changing the
             // size of MIR constantly.
             Nop => {}
-
-            // Only used for temporary lifetime lints
-            BackwardIncompatibleDropHint { .. } => {}
         }
 
-        interp_ok(())
+        Ok(())
     }
 
     /// Evaluate an assignment statement.
@@ -183,7 +174,10 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 self.copy_op(&op, &dest)?;
             }
 
-            CopyForDeref(_) => bug!("`CopyForDeref` in runtime MIR"),
+            CopyForDeref(place) => {
+                let op = self.eval_place_to_op(place, Some(dest.layout))?;
+                self.copy_op(&op, &dest)?;
+            }
 
             BinaryOp(bin_op, box (ref left, ref right)) => {
                 let layout = util::binop_left_homogeneous(bin_op).then_some(dest.layout);
@@ -203,12 +197,24 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 self.write_immediate(*result, &dest)?;
             }
 
+            NullaryOp(null_op, ty) => {
+                let ty = self.instantiate_from_current_frame_and_normalize_erasing_regions(ty)?;
+                let val = self.nullary_op(null_op, ty)?;
+                self.write_immediate(*val, &dest)?;
+            }
+
             Aggregate(box ref kind, ref operands) => {
                 self.write_aggregate(kind, operands, &dest)?;
             }
 
             Repeat(ref operand, _) => {
                 self.write_repeat(operand, &dest)?;
+            }
+
+            Len(place) => {
+                let src = self.eval_place(place)?;
+                let len = src.len(self)?;
+                self.write_scalar(Scalar::from_target_usize(len, self), &dest)?;
             }
 
             Ref(_, borrow_kind, place) => {
@@ -218,7 +224,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 // A fresh reference was created, make sure it gets retagged.
                 let val = M::retag_ptr_value(
                     self,
-                    if borrow_kind.is_two_phase_borrow() {
+                    if borrow_kind.allows_two_phase_borrow() {
                         mir::RetagKind::TwoPhase
                     } else {
                         mir::RetagKind::Default
@@ -228,11 +234,11 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 self.write_immediate(*val, &dest)?;
             }
 
-            RawPtr(kind, place) => {
+            RawPtr(_, place) => {
                 // Figure out whether this is an addr_of of an already raw place.
                 let place_base_raw = if place.is_indirect_first_projection() {
                     let ty = self.frame().body.local_decls[place.local].ty;
-                    ty.is_raw_ptr()
+                    ty.is_unsafe_ptr()
                 } else {
                     // Not a deref, and thus not raw.
                     false
@@ -241,12 +247,17 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 let src = self.eval_place(place)?;
                 let place = self.force_allocation(&src)?;
                 let mut val = ImmTy::from_immediate(place.to_ref(self), dest.layout);
-                if !place_base_raw && !kind.is_fake() {
-                    // If this was not already raw, it needs retagging -- except for "fake"
-                    // raw borrows whose defining property is that they do not get retagged.
+                if !place_base_raw {
+                    // If this was not already raw, it needs retagging.
                     val = M::retag_ptr_value(self, mir::RetagKind::Raw, &val)?;
                 }
                 self.write_immediate(*val, &dest)?;
+            }
+
+            ShallowInitBox(ref operand, _) => {
+                let src = self.eval_operand(operand, None)?;
+                let v = self.read_immediate(&src)?;
+                self.write_immediate(*v, &dest)?;
             }
 
             Cast(cast_kind, ref operand, cast_ty) => {
@@ -262,18 +273,11 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 let discr = self.discriminant_for_variant(op.layout.ty, variant)?;
                 self.write_immediate(*discr, &dest)?;
             }
-
-            WrapUnsafeBinder(ref op, _ty) => {
-                // Constructing an unsafe binder acts like a transmute
-                // since the operand's layout does not change.
-                let op = self.eval_operand(op, None)?;
-                self.copy_op_allow_transmute(&op, &dest)?;
-            }
         }
 
         trace!("{:?}", self.dump_place(&dest));
 
-        interp_ok(())
+        Ok(())
     }
 
     /// Writes the aggregate to the destination.
@@ -284,6 +288,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         operands: &IndexSlice<FieldIdx, mir::Operand<'tcx>>,
         dest: &PlaceTy<'tcx, M::Provenance>,
     ) -> InterpResult<'tcx> {
+        self.write_uninit(dest)?; // make sure all the padding ends up as uninit
         let (variant_index, variant_dest, active_field_index) = match *kind {
             mir::AggregateKind::Adt(_, variant_index, _, _, active_field_index) => {
                 let variant_dest = self.project_downcast(dest, variant_index)?;
@@ -308,7 +313,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 let ptr_imm = Immediate::new_pointer_with_meta(data, meta, self);
                 let ptr = ImmTy::from_immediate(ptr_imm, dest.layout);
                 self.copy_op(&ptr, dest)?;
-                return interp_ok(());
+                return Ok(());
             }
             _ => (FIRST_VARIANT, dest.clone(), None),
         };
@@ -317,22 +322,11 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         }
         for (field_index, operand) in operands.iter_enumerated() {
             let field_index = active_field_index.unwrap_or(field_index);
-            let field_dest = self.project_field(&variant_dest, field_index)?;
+            let field_dest = self.project_field(&variant_dest, field_index.as_usize())?;
             let op = self.eval_operand(operand, Some(field_dest.layout))?;
-            // We validate manually below so we don't have to do it here.
-            self.copy_op_no_validate(&op, &field_dest, /*allow_transmute*/ false)?;
+            self.copy_op(&op, &field_dest)?;
         }
-        self.write_discriminant(variant_index, dest)?;
-        // Validate that the entire thing is valid, and reset padding that might be in between the
-        // fields.
-        if M::enforce_validity(self, dest.layout()) {
-            self.validate_operand(
-                dest,
-                M::enforce_validity_recursively(self, dest.layout()),
-                /*reset_provenance_and_padding*/ true,
-            )?;
-        }
-        interp_ok(())
+        self.write_discriminant(variant_index, dest)
     }
 
     /// Repeats `operand` into the destination. `dest` must have array type, and that type
@@ -371,35 +365,39 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
             )?;
         }
 
-        interp_ok(())
+        Ok(())
     }
 
     /// Evaluate the arguments of a function call
     fn eval_fn_call_argument(
-        &mut self,
+        &self,
         op: &mir::Operand<'tcx>,
-        move_definitely_disjoint: bool,
     ) -> InterpResult<'tcx, FnArg<'tcx, M::Provenance>> {
-        interp_ok(match op {
-            mir::Operand::Copy(_) | mir::Operand::Constant(_) | mir::Operand::RuntimeChecks(_) => {
+        Ok(match op {
+            mir::Operand::Copy(_) | mir::Operand::Constant(_) => {
                 // Make a regular copy.
                 let op = self.eval_operand(op, None)?;
                 FnArg::Copy(op)
             }
             mir::Operand::Move(place) => {
+                // If this place lives in memory, preserve its location.
+                // We call `place_to_op` which will be an `MPlaceTy` whenever there exists
+                // an mplace for this place. (This is in contrast to `PlaceTy::as_mplace_or_local`
+                // which can return a local even if that has an mplace.)
                 let place = self.eval_place(*place)?;
-                if move_definitely_disjoint {
-                    // We still have to ensure that no *other* pointers are used to access this place,
-                    // so *if* it is in memory then we have to treat it as `InPlace`.
-                    // Use `place_to_op` to guarantee that we notice it being in memory.
-                    let op = self.place_to_op(&place)?;
-                    match op.as_mplace_or_imm() {
-                        Either::Left(mplace) => FnArg::InPlace(mplace),
-                        Either::Right(_imm) => FnArg::Copy(op),
+                let op = self.place_to_op(&place)?;
+
+                match op.as_mplace_or_imm() {
+                    Either::Left(mplace) => FnArg::InPlace(mplace),
+                    Either::Right(_imm) => {
+                        // This argument doesn't live in memory, so there's no place
+                        // to make inaccessible during the call.
+                        // We rely on there not being any stray `PlaceTy` that would let the
+                        // caller directly access this local!
+                        // This is also crucial for tail calls, where we want the `FnArg` to
+                        // stay valid when the old stack frame gets popped.
+                        FnArg::Copy(op)
                     }
-                } else {
-                    // We have to force this into memory to detect aliasing among `Move` arguments.
-                    FnArg::InPlace(self.force_allocation(&place)?)
                 }
             }
         })
@@ -408,54 +406,19 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
     /// Shared part of `Call` and `TailCall` implementation — finding and evaluating all the
     /// necessary information about callee and arguments to make a call.
     fn eval_callee_and_args(
-        &mut self,
+        &self,
         terminator: &mir::Terminator<'tcx>,
         func: &mir::Operand<'tcx>,
         args: &[Spanned<mir::Operand<'tcx>>],
-        dest: &mir::Place<'tcx>,
     ) -> InterpResult<'tcx, EvaluatedCalleeAndArgs<'tcx, M>> {
         let func = self.eval_operand(func, None)?;
-
-        // Evaluating function call arguments. The tricky part here is dealing with `Move`
-        // arguments: we have to ensure no two such arguments alias. This would be most easily done
-        // by just forcing them all into memory and then doing the usual in-place argument
-        // protection, but then we'd force *a lot* of arguments into memory. So we do some syntactic
-        // pre-processing here where if all `move` arguments are syntactically distinct local
-        // variables (and none is indirect), we can skip the in-memory forcing.
-        // We have to include `dest` in that list so that we can detect aliasing of an in-place
-        // argument with the return place.
-        let move_definitely_disjoint = 'move_definitely_disjoint: {
-            let mut previous_locals = FxHashSet::<mir::Local>::default();
-            for place in args
-                .iter()
-                .filter_map(|a| {
-                    // We only have to care about `Move` arguments.
-                    if let mir::Operand::Move(place) = &a.node { Some(place) } else { None }
-                })
-                .chain(iter::once(dest))
-            {
-                if place.is_indirect_first_projection() {
-                    // An indirect in-place argument could alias with anything else...
-                    break 'move_definitely_disjoint false;
-                }
-                if !previous_locals.insert(place.local) {
-                    // This local is the base for two arguments! They might overlap.
-                    break 'move_definitely_disjoint false;
-                }
-            }
-            // We found no violation so they are all definitely disjoint.
-            true
-        };
         let args = args
             .iter()
-            .map(|arg| self.eval_fn_call_argument(&arg.node, move_definitely_disjoint))
+            .map(|arg| self.eval_fn_call_argument(&arg.node))
             .collect::<InterpResult<'tcx, Vec<_>>>()?;
 
-        let fn_sig_binder = {
-            let _trace = enter_trace_span!(M, "fn_sig", ty = ?func.layout.ty.kind());
-            func.layout.ty.fn_sig(*self.tcx)
-        };
-        let fn_sig = self.tcx.normalize_erasing_late_bound_regions(self.typing_env, fn_sig_binder);
+        let fn_sig_binder = func.layout.ty.fn_sig(*self.tcx);
+        let fn_sig = self.tcx.normalize_erasing_late_bound_regions(self.param_env, fn_sig_binder);
         let extra_args = &args[fn_sig.inputs().len()..];
         let extra_args =
             self.tcx.mk_type_list_from_iter(extra_args.iter().map(|arg| arg.layout().ty));
@@ -479,18 +442,11 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
             }
         };
 
-        interp_ok(EvaluatedCalleeAndArgs { callee, args, fn_sig, fn_abi, with_caller_location })
+        Ok(EvaluatedCalleeAndArgs { callee, args, fn_sig, fn_abi, with_caller_location })
     }
 
     fn eval_terminator(&mut self, terminator: &mir::Terminator<'tcx>) -> InterpResult<'tcx> {
-        let _trace = enter_trace_span!(
-            M,
-            step::eval_terminator,
-            terminator = ?terminator.kind,
-            span = ?terminator.source_info.span,
-            tracing_separate_thread = Empty,
-        )
-        .or_if_tracing_disabled(|| info!("{:?}", terminator.kind));
+        info!("{:?}", terminator.kind);
 
         use rustc_middle::mir::TerminatorKind::*;
         match terminator.kind {
@@ -537,9 +493,9 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 let old_loc = self.frame().loc;
 
                 let EvaluatedCalleeAndArgs { callee, args, fn_sig, fn_abi, with_caller_location } =
-                    self.eval_callee_and_args(terminator, func, args, &destination)?;
+                    self.eval_callee_and_args(terminator, func, args)?;
 
-                let destination = self.eval_place(destination)?;
+                let destination = self.force_allocation(&self.eval_place(destination)?)?;
                 self.init_fn_call(
                     callee,
                     (fn_sig.abi, fn_abi),
@@ -550,11 +506,8 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                     if fn_abi.can_unwind { unwind } else { mir::UnwindAction::Unreachable },
                 )?;
                 // Sanity-check that `eval_fn_call` either pushed a new frame or
-                // did a jump to another block. We disable the sanity check for functions that
-                // can't return, since Miri sometimes does have to keep the location the same
-                // for those (which is fine since execution will continue on a different thread).
-                if target.is_some() && self.frame_idx() == old_stack && self.frame().loc == old_loc
-                {
+                // did a jump to another block.
+                if self.frame_idx() == old_stack && self.frame().loc == old_loc {
                     span_bug!(terminator.source_info.span, "evaluating this call made no progress");
                 }
             }
@@ -563,7 +516,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 let old_frame_idx = self.frame_idx();
 
                 let EvaluatedCalleeAndArgs { callee, args, fn_sig, fn_abi, with_caller_location } =
-                    self.eval_callee_and_args(terminator, func, args, &mir::Place::return_place())?;
+                    self.eval_callee_and_args(terminator, func, args)?;
 
                 self.init_fn_tail_call(callee, (fn_sig.abi, fn_abi), &args, with_caller_location)?;
 
@@ -575,24 +528,16 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 }
             }
 
-            Drop { place, target, unwind, replace: _, drop, async_fut } => {
-                assert!(
-                    async_fut.is_none() && drop.is_none(),
-                    "Async Drop must be expanded or reset to sync in runtime MIR"
-                );
+            Drop { place, target, unwind, replace: _ } => {
                 let place = self.eval_place(place)?;
-                let instance = {
-                    let _trace =
-                        enter_trace_span!(M, resolve::resolve_drop_in_place, ty = ?place.layout.ty);
-                    Instance::resolve_drop_in_place(*self.tcx, place.layout.ty)
-                };
+                let instance = Instance::resolve_drop_in_place(*self.tcx, place.layout.ty);
                 if let ty::InstanceKind::DropGlue(_, None) = instance.def {
                     // This is the branch we enter if and only if the dropped type has no drop glue
                     // whatsoever. This can happen as a result of monomorphizing a drop of a
                     // generic. In order to make sure that generic and non-generic code behaves
                     // roughly the same (and in keeping with Mir semantics) we do nothing here.
                     self.go_to_block(target);
-                    return interp_ok(());
+                    return Ok(());
                 }
                 trace!("TerminatorKind::drop: {:?}, type {}", place, place.layout.ty);
                 self.init_drop_in_place_call(&place, instance, target, unwind)?;
@@ -621,7 +566,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 // By definition, a Resume terminator means
                 // that we're unwinding
                 self.return_from_current_stack_frame(/* unwinding */ true)?;
-                return interp_ok(());
+                return Ok(());
             }
 
             // It is UB to ever encounter this.
@@ -634,11 +579,11 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 terminator.kind
             ),
 
-            InlineAsm { .. } => {
-                throw_unsup_format!("inline assembly is not supported");
+            InlineAsm { template, ref operands, options, ref targets, .. } => {
+                M::eval_inline_asm(self, template, operands, options, targets)?;
             }
         }
 
-        interp_ok(())
+        Ok(())
     }
 }

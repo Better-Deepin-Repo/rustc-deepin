@@ -1,7 +1,8 @@
 //@ run-pass
 //@ ignore-android FIXME #17520
-//@ needs-subprocess
+//@ ignore-wasm32 spawning processes is not supported
 //@ ignore-openbsd no support for libbacktrace without filename
+//@ ignore-sgx no processes
 //@ ignore-msvc see #62897 and `backtrace-debuginfo.rs` test
 //@ ignore-fuchsia Backtraces not symbolized
 //@ compile-flags:-g

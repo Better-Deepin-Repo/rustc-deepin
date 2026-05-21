@@ -3,9 +3,10 @@ use rustc_hir::intravisit::FnKind;
 use rustc_hir::{Body, Expr, ExprKind, FnDecl, FnRetTy, TyKind, UnOp};
 use rustc_hir_analysis::lower_ty;
 use rustc_lint::{LateContext, LateLintPass};
+use rustc_middle::lint::in_external_macro;
 use rustc_session::declare_lint_pass;
-use rustc_span::Span;
 use rustc_span::def_id::LocalDefId;
+use rustc_span::Span;
 
 declare_clippy_lint! {
     /// ### What it does
@@ -39,13 +40,13 @@ declare_lint_pass!(UninhabitedReferences => [UNINHABITED_REFERENCES]);
 
 impl LateLintPass<'_> for UninhabitedReferences {
     fn check_expr(&mut self, cx: &LateContext<'_>, expr: &'_ Expr<'_>) {
-        if expr.span.in_external_macro(cx.tcx.sess.source_map()) {
+        if in_external_macro(cx.tcx.sess, expr.span) {
             return;
         }
 
         if let ExprKind::Unary(UnOp::Deref, _) = expr.kind {
             let ty = cx.typeck_results().expr_ty_adjusted(expr);
-            if ty.is_privately_uninhabited(cx.tcx, cx.typing_env()) {
+            if ty.is_privately_uninhabited(cx.tcx, cx.param_env) {
                 span_lint(
                     cx,
                     UNINHABITED_REFERENCES,
@@ -65,12 +66,12 @@ impl LateLintPass<'_> for UninhabitedReferences {
         span: Span,
         _: LocalDefId,
     ) {
-        if span.in_external_macro(cx.tcx.sess.source_map()) || matches!(kind, FnKind::Closure) {
+        if in_external_macro(cx.tcx.sess, span) || matches!(kind, FnKind::Closure) {
             return;
         }
         if let FnRetTy::Return(hir_ty) = fndecl.output
             && let TyKind::Ref(_, mut_ty) = hir_ty.kind
-            && lower_ty(cx.tcx, mut_ty.ty).is_privately_uninhabited(cx.tcx, cx.typing_env())
+            && lower_ty(cx.tcx, mut_ty.ty).is_privately_uninhabited(cx.tcx, cx.param_env)
         {
             span_lint(
                 cx,

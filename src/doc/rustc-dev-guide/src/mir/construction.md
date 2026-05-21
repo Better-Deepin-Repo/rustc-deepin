@@ -1,5 +1,7 @@
 # MIR construction
 
+<!-- toc -->
+
 The lowering of [HIR] to [MIR] occurs for the following (probably incomplete)
 list of items:
 
@@ -117,7 +119,7 @@ In [MIR] there is no difference between method calls and function calls anymore.
 
 ## Conditions
 
-`if` conditions and `match` statements for `enum`s with variants that have no fields are
+`if` conditions and `match` statements for `enum`s without variants with fields are
 lowered to `TerminatorKind::SwitchInt`. Each possible value (so `0` and `1` for `if`
 conditions) has a corresponding `BasicBlock` to which the code continues.
 The argument being branched on is (again) an `Operand` representing the value of

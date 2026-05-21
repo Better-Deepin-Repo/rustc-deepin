@@ -40,7 +40,7 @@ impl Trait for S {
 }
 
 mod prefix {}
-reuse unresolved_prefix::{a, b, c}; //~ ERROR cannot find module or crate `unresolved_prefix`
+reuse unresolved_prefix::{a, b, c}; //~ ERROR use of undeclared crate or module `unresolved_prefix`
 reuse prefix::{self, super, crate}; //~ ERROR `crate` in paths can only be used in start position
 
 fn main() {}

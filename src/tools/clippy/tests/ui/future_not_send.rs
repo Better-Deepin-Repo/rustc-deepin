@@ -1,19 +1,16 @@
 #![warn(clippy::future_not_send)]
 
 use std::cell::Cell;
-use std::future::Future;
 use std::rc::Rc;
 use std::sync::Arc;
 
 async fn private_future(rc: Rc<[u8]>, cell: &Cell<usize>) -> bool {
-    //~^ future_not_send
-
+    //~^ ERROR: future cannot be sent between threads safely
     async { true }.await
 }
 
 pub async fn public_future(rc: Rc<[u8]>) {
-    //~^ future_not_send
-
+    //~^ ERROR: future cannot be sent between threads safely
     async { true }.await;
 }
 
@@ -22,13 +19,12 @@ pub async fn public_send(arc: Arc<[u8]>) -> bool {
 }
 
 async fn private_future2(rc: Rc<[u8]>, cell: &Cell<usize>) -> bool {
-    //~^ future_not_send
-
+    //~^ ERROR: future cannot be sent between threads safely
     true
 }
 
 pub async fn public_future2(rc: Rc<[u8]>) {}
-//~^ future_not_send
+//~^ ERROR: future cannot be sent between threads safely
 
 pub async fn public_send2(arc: Arc<[u8]>) -> bool {
     false
@@ -40,15 +36,13 @@ struct Dummy {
 
 impl Dummy {
     async fn private_future(&self) -> usize {
-        //~^ future_not_send
-
+        //~^ ERROR: future cannot be sent between threads safely
         async { true }.await;
         self.rc.len()
     }
 
     pub async fn public_future(&self) {
-        //~^ future_not_send
-
+        //~^ ERROR: future cannot be sent between threads safely
         self.private_future().await;
     }
 
@@ -59,7 +53,7 @@ impl Dummy {
 }
 
 async fn generic_future<T>(t: T) -> T
-//~^ future_not_send
+//~^ ERROR: future cannot be sent between threads safely
 where
     T: Send,
 {
@@ -67,23 +61,6 @@ where
     async { true }.await;
     let _ = rt;
     t
-}
-
-async fn maybe_send_generic_future<T>(t: T) -> T {
-    async { true }.await;
-    t
-}
-
-async fn maybe_send_generic_future2<F: Fn() -> Fut, Fut: Future>(f: F) {
-    async { true }.await;
-    let res = f();
-    async { true }.await;
-}
-
-async fn generic_future_always_unsend<T>(_: Rc<T>) {
-    //~^ future_not_send
-
-    async { true }.await;
 }
 
 async fn generic_future_send<T>(t: T)
@@ -94,6 +71,7 @@ where
 }
 
 async fn unclear_future<T>(t: T) {}
+//~^ ERROR: future cannot be sent between threads safely
 
 fn main() {
     let rc = Rc::new([1, 2, 3]);

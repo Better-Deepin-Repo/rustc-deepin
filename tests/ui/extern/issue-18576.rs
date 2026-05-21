@@ -1,6 +1,6 @@
 //@ run-fail
 //@ error-pattern:stop
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 // #18576
 // Make sure that calling an extern function pointer in an unreachable

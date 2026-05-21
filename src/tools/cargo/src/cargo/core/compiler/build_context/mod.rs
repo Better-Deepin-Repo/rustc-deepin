@@ -1,25 +1,20 @@
 //! [`BuildContext`] is a (mostly) static information about a build task.
 
+use crate::core::compiler::unit_graph::UnitGraph;
+use crate::core::compiler::{BuildConfig, CompileKind, Unit};
+use crate::core::profiles::Profiles;
 use crate::core::PackageSet;
 use crate::core::Workspace;
-use crate::core::compiler::BuildConfig;
-use crate::core::compiler::CompileKind;
-use crate::core::compiler::Unit;
-use crate::core::compiler::UnitIndex;
-use crate::core::compiler::unit_graph::UnitGraph;
-use crate::core::profiles::Profiles;
-use crate::util::Rustc;
 use crate::util::context::GlobalContext;
 use crate::util::errors::CargoResult;
 use crate::util::interning::InternedString;
-use crate::util::logger::BuildLogger;
+use crate::util::Rustc;
 use std::collections::{HashMap, HashSet};
 
 mod target_info;
-pub use self::target_info::FileFlavor;
-pub use self::target_info::FileType;
-pub use self::target_info::RustcTargetData;
-pub use self::target_info::TargetInfo;
+pub use self::target_info::{
+    FileFlavor, FileType, RustDocFingerprint, RustcTargetData, TargetInfo,
+};
 
 /// The build context, containing complete information needed for a build task
 /// before it gets started.
@@ -55,9 +50,6 @@ pub struct BuildContext<'a, 'gctx> {
     /// The cargo context.
     pub gctx: &'gctx GlobalContext,
 
-    /// Build logger for `-Zbuild-analysis`.
-    pub logger: Option<&'a BuildLogger>,
-
     /// This contains a collection of compiler flags presets.
     pub profiles: Profiles,
 
@@ -81,9 +73,6 @@ pub struct BuildContext<'a, 'gctx> {
     /// The dependency graph of units to compile.
     pub unit_graph: UnitGraph,
 
-    /// A map from unit to index.
-    pub unit_to_index: HashMap<Unit, UnitIndex>,
-
     /// Reverse-dependencies of documented units, used by the `rustdoc --scrape-examples` flag.
     pub scrape_units: Vec<Unit>,
 
@@ -94,7 +83,6 @@ pub struct BuildContext<'a, 'gctx> {
 impl<'a, 'gctx> BuildContext<'a, 'gctx> {
     pub fn new(
         ws: &'a Workspace<'gctx>,
-        logger: Option<&'a BuildLogger>,
         packages: PackageSet<'gctx>,
         build_config: &'a BuildConfig,
         profiles: Profiles,
@@ -102,7 +90,6 @@ impl<'a, 'gctx> BuildContext<'a, 'gctx> {
         target_data: RustcTargetData<'gctx>,
         roots: Vec<Unit>,
         unit_graph: UnitGraph,
-        unit_to_index: HashMap<Unit, UnitIndex>,
         scrape_units: Vec<Unit>,
     ) -> CargoResult<BuildContext<'a, 'gctx>> {
         let all_kinds = unit_graph
@@ -115,7 +102,6 @@ impl<'a, 'gctx> BuildContext<'a, 'gctx> {
         Ok(BuildContext {
             ws,
             gctx: ws.gctx(),
-            logger,
             packages,
             build_config,
             profiles,
@@ -123,7 +109,6 @@ impl<'a, 'gctx> BuildContext<'a, 'gctx> {
             target_data,
             roots,
             unit_graph,
-            unit_to_index,
             scrape_units,
             all_kinds,
         })
@@ -136,10 +121,10 @@ impl<'a, 'gctx> BuildContext<'a, 'gctx> {
 
     /// Gets the host architecture triple.
     ///
-    /// For example, `x86_64-unknown-linux-gnu`, would be
-    /// - machine: `x86_64`,
-    /// - hardware-platform: `unknown`,
-    /// - operating system: `linux-gnu`.
+    /// For example, x86_64-unknown-linux-gnu, would be
+    /// - machine: x86_64,
+    /// - hardware-platform: unknown,
+    /// - operating system: linux-gnu.
     pub fn host_triple(&self) -> InternedString {
         self.target_data.rustc.host
     }

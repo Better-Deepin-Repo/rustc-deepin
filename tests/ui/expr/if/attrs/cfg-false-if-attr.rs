@@ -1,12 +1,12 @@
 //@ check-pass
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn simple_attr() {
     #[attr] if true {}
     #[allow_warnings] if true {}
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn if_else_chain() {
     #[first_attr] if true {
     } else if false {
@@ -14,20 +14,20 @@ fn if_else_chain() {
     }
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn if_let() {
     #[attr] if let Some(_) = Some(true) {}
 }
 
 fn bar() {
-    #[cfg(false)]
+    #[cfg(FALSE)]
     if true {
-        let x: () = true; // Should not error due to the #[cfg(false)]
+        let x: () = true; // Should not error due to the #[cfg(FALSE)]
     }
 
-    #[cfg_attr(not(FALSE), cfg(false))]
+    #[cfg_attr(not(FALSE), cfg(FALSE))]
     if true {
-        let a: () = true; // Should not error due to the applied #[cfg(false)]
+        let a: () = true; // Should not error due to the applied #[cfg(FALSE)]
     }
 }
 

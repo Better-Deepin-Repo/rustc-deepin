@@ -1,328 +1,218 @@
 //! HirDisplay implementations for various hir types.
-
 use either::Either;
 use hir_def::{
-    AdtId, BuiltinDeriveImplId, FunctionId, GenericDefId, ImplId, ItemContainerId,
-    builtin_derive::BuiltinDeriveImplMethod,
-    expr_store::ExpressionStore,
-    hir::generics::{GenericParams, TypeOrConstParamData, TypeParamProvenance, WherePredicate},
-    item_tree::FieldsShape,
-    signatures::{StaticFlags, TraitFlags},
-    type_ref::{TypeBound, TypeRef, TypeRefId},
-};
-use hir_expand::name::Name;
-use hir_ty::{
-    GenericPredicates,
-    db::HirDatabase,
-    display::{
-        HirDisplay, HirDisplayWithExpressionStore, HirFormatter, Result, SizedByDefault,
-        hir_display_with_store, write_bounds_like_dyn_trait_with_prefix, write_params_bounds,
-        write_visibility,
+    data::adt::{StructKind, VariantData},
+    generics::{
+        GenericParams, TypeOrConstParamData, TypeParamProvenance, WherePredicate,
+        WherePredicateTypeTarget,
     },
-    next_solver::ClauseKind,
+    lang_item::LangItem,
+    type_ref::{TypeBound, TypeRef},
+    AdtId, GenericDefId,
 };
+use hir_ty::{
+    display::{
+        write_bounds_like_dyn_trait_with_prefix, write_visibility, HirDisplay, HirDisplayError,
+        HirFormatter, SizedByDefault,
+    },
+    AliasEq, AliasTy, Interner, ProjectionTyExt, TraitRefExt, TyKind, WhereClause,
+};
+use intern::Interned;
 use itertools::Itertools;
-use rustc_type_ir::inherent::IntoKind;
 
 use crate::{
-    Adt, AnyFunctionId, AsAssocItem, AssocItem, AssocItemContainer, Const, ConstParam, Crate, Enum,
-    ExternCrateDecl, Field, Function, GenericParam, HasCrate, HasVisibility, Impl, LifetimeParam,
-    Macro, Module, SelfParam, Static, Struct, StructKind, Trait, TraitRef, TupleField, Type,
-    TypeAlias, TypeNs, TypeOrConstParam, TypeParam, Union, Variant,
+    Adt, AsAssocItem, AssocItem, AssocItemContainer, Const, ConstParam, Enum, ExternCrateDecl,
+    Field, Function, GenericParam, HasCrate, HasVisibility, Impl, LifetimeParam, Macro, Module,
+    SelfParam, Static, Struct, Trait, TraitAlias, TupleField, TyBuilder, Type, TypeAlias,
+    TypeOrConstParam, TypeParam, Union, Variant,
 };
 
-fn write_builtin_derive_impl_method<'db>(
-    f: &mut HirFormatter<'_, 'db>,
-    impl_: BuiltinDeriveImplId,
-    method: BuiltinDeriveImplMethod,
-) -> Result {
-    let db = f.db;
-    let loc = impl_.loc(db);
-    let (adt_params, _adt_params_store) = db.generic_params_and_store(loc.adt.into());
-
-    if f.show_container_bounds() && !adt_params.is_empty() {
-        f.write_str("impl")?;
-        write_generic_params(loc.adt.into(), f)?;
-        f.write_char(' ')?;
-        let trait_id = loc.trait_.get_id(f.lang_items());
-        if let Some(trait_id) = trait_id {
-            f.start_location_link(trait_id.into());
-        }
-        write!(f, "{}", Name::new_symbol_root(loc.trait_.name()).display(db, f.edition()))?;
-        if trait_id.is_some() {
-            f.end_location_link();
-        }
-        f.write_str(" for ")?;
-        f.start_location_link(loc.adt.into());
-        write!(f, "{}", Adt::from(loc.adt).name(db).display(db, f.edition()))?;
-        f.end_location_link();
-        write_generic_args(loc.adt.into(), f)?;
-        f.write_char('\n')?;
-    }
-
-    let Some(trait_method) = method.trait_method(db, impl_) else {
-        return write!(f, "fn {}(…)", method.name());
-    };
-    let has_written_where = write_function(f, trait_method)?;
-
-    if f.show_container_bounds() && !adt_params.is_empty() {
-        if !has_written_where {
-            f.write_str("\nwhere")?
-        }
-        write!(f, "\n    // Bounds from impl:")?;
-
-        let predicates =
-            hir_ty::builtin_derive::predicates(db, impl_).explicit_predicates().skip_binder();
-        write_params_bounds(f, predicates)?;
-    }
-
-    Ok(())
-}
-
-impl<'db> HirDisplay<'db> for Function {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
-        let id = match self.id {
-            AnyFunctionId::FunctionId(id) => id,
-            AnyFunctionId::BuiltinDeriveImplMethod { method, impl_ } => {
-                return write_builtin_derive_impl_method(f, impl_, method);
-            }
-        };
-
+impl HirDisplay for Function {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         let db = f.db;
-        let container = id.loc(db).container;
+        let data = db.function_data(self.id);
+        let container = self.as_assoc_item(db).map(|it| it.container(db));
+        let mut module = self.module(db);
 
         // Write container (trait or impl)
         let container_params = match container {
-            ItemContainerId::TraitId(trait_) => {
-                let (params, params_store) = f.db.generic_params_and_store(trait_.into());
+            Some(AssocItemContainer::Trait(trait_)) => {
+                let params = f.db.generic_params(trait_.id.into());
                 if f.show_container_bounds() && !params.is_empty() {
-                    write_trait_header(trait_.into(), f)?;
+                    write_trait_header(&trait_, f)?;
                     f.write_char('\n')?;
-                    has_disaplayable_predicates(f.db, &params, &params_store)
-                        .then_some((params, params_store))
+                    has_disaplayable_predicates(&params).then_some(params)
                 } else {
                     None
                 }
             }
-            ItemContainerId::ImplId(impl_) => {
-                let (params, params_store) = f.db.generic_params_and_store(impl_.into());
+            Some(AssocItemContainer::Impl(impl_)) => {
+                let params = f.db.generic_params(impl_.id.into());
                 if f.show_container_bounds() && !params.is_empty() {
-                    write_impl_header(impl_, f)?;
+                    write_impl_header(&impl_, f)?;
                     f.write_char('\n')?;
-                    has_disaplayable_predicates(f.db, &params, &params_store)
-                        .then_some((params, params_store))
+                    has_disaplayable_predicates(&params).then_some(params)
                 } else {
                     None
                 }
             }
-            _ => None,
+            None => None,
         };
 
         // Write signature of the function
 
-        let has_written_where = write_function(f, id)?;
-        if let Some((container_params, container_params_store)) = container_params {
+        // Block-local impls are "hoisted" to the nearest (non-block) module.
+        if let Some(AssocItemContainer::Impl(_)) = container {
+            module = module.nearest_non_block_module(db);
+        }
+        let module_id = module.id;
+
+        write_visibility(module_id, self.visibility(db), f)?;
+
+        if data.is_default() {
+            f.write_str("default ")?;
+        }
+        if data.is_const() {
+            f.write_str("const ")?;
+        }
+        if data.is_async() {
+            f.write_str("async ")?;
+        }
+        if self.is_unsafe_to_call(db) {
+            f.write_str("unsafe ")?;
+        }
+        if let Some(abi) = &data.abi {
+            write!(f, "extern \"{}\" ", abi.as_str())?;
+        }
+        write!(f, "fn {}", data.name.display(f.db.upcast(), f.edition()))?;
+
+        write_generic_params(GenericDefId::FunctionId(self.id), f)?;
+
+        f.write_char('(')?;
+
+        let mut first = true;
+        let mut skip_self = 0;
+        if let Some(self_param) = self.self_param(db) {
+            self_param.hir_fmt(f)?;
+            first = false;
+            skip_self = 1;
+        }
+
+        // FIXME: Use resolved `param.ty` once we no longer discard lifetimes
+        for (type_ref, param) in data.params.iter().zip(self.assoc_fn_params(db)).skip(skip_self) {
+            let local = param.as_local(db).map(|it| it.name(db));
+            if !first {
+                f.write_str(", ")?;
+            } else {
+                first = false;
+            }
+            match local {
+                Some(name) => write!(f, "{}: ", name.display(f.db.upcast(), f.edition()))?,
+                None => f.write_str("_: ")?,
+            }
+            type_ref.hir_fmt(f)?;
+        }
+
+        if data.is_varargs() {
+            if !first {
+                f.write_str(", ")?;
+            }
+            f.write_str("...")?;
+        }
+
+        f.write_char(')')?;
+
+        // `FunctionData::ret_type` will be `::core::future::Future<Output = ...>` for async fns.
+        // Use ugly pattern match to strip the Future trait.
+        // Better way?
+        let ret_type = if !data.is_async() {
+            &data.ret_type
+        } else {
+            match &*data.ret_type {
+                TypeRef::ImplTrait(bounds) => match bounds[0].as_ref() {
+                    TypeBound::Path(path, _) => {
+                        path.segments().iter().last().unwrap().args_and_bindings.unwrap().bindings
+                            [0]
+                        .type_ref
+                        .as_ref()
+                        .unwrap()
+                    }
+                    _ => &TypeRef::Error,
+                },
+                _ => &TypeRef::Error,
+            }
+        };
+
+        match ret_type {
+            TypeRef::Tuple(tup) if tup.is_empty() => {}
+            ty => {
+                f.write_str(" -> ")?;
+                ty.hir_fmt(f)?;
+            }
+        }
+
+        // Write where clauses
+        let has_written_where = write_where_clause(GenericDefId::FunctionId(self.id), f)?;
+        if let Some(container_params) = container_params {
             if !has_written_where {
                 f.write_str("\nwhere")?;
             }
-            let container_name = match container {
-                ItemContainerId::TraitId(_) => "trait",
-                ItemContainerId::ImplId(_) => "impl",
-                _ => unreachable!(),
+            let container_name = match container.unwrap() {
+                AssocItemContainer::Trait(_) => "trait",
+                AssocItemContainer::Impl(_) => "impl",
             };
             write!(f, "\n    // Bounds from {container_name}:",)?;
-            write_where_predicates(&container_params, &container_params_store, f)?;
+            write_where_predicates(&container_params, f)?;
         }
         Ok(())
     }
 }
 
-fn write_function<'db>(f: &mut HirFormatter<'_, 'db>, func_id: FunctionId) -> Result<bool> {
-    let db = f.db;
-    let func = Function::from(func_id);
-    let data = db.function_signature(func_id);
-
-    let mut module = func.module(db);
-    // Block-local impls are "hoisted" to the nearest (non-block) module.
-    if let ItemContainerId::ImplId(_) = func_id.loc(db).container {
-        module = module.nearest_non_block_module(db);
-    }
-    let module_id = module.id;
-
-    write_visibility(module_id, func.visibility(db), f)?;
-
-    if data.is_default() {
-        f.write_str("default ")?;
-    }
-    if data.is_const() {
-        f.write_str("const ")?;
-    }
-    if data.is_async() {
-        f.write_str("async ")?;
-    }
-    // FIXME: This will show `unsafe` for functions that are `#[target_feature]` but not unsafe
-    // (they are conditionally unsafe to call). We probably should show something else.
-    if func.is_unsafe_to_call(db, None, f.edition()) {
-        f.write_str("unsafe ")?;
-    }
-    if let Some(abi) = &data.abi {
-        write!(f, "extern \"{}\" ", abi.as_str())?;
-    }
-    write!(f, "fn {}", data.name.display(f.db, f.edition()))?;
-
-    write_generic_params(GenericDefId::FunctionId(func_id), f)?;
-
-    let too_long_param = data.params.len() > 4;
-    f.write_char('(')?;
-
-    if too_long_param {
-        f.write_str("\n    ")?;
-    }
-
-    let mut first = true;
-    let mut skip_self = 0;
-    if let Some(self_param) = func.self_param(db) {
-        self_param.hir_fmt(f)?;
-        first = false;
-        skip_self = 1;
-    }
-
-    let comma = if too_long_param { ",\n    " } else { ", " };
-    // FIXME: Use resolved `param.ty` once we no longer discard lifetimes
-    let body = db.body(func_id.into());
-    for (type_ref, param) in data.params.iter().zip(func.assoc_fn_params(db)).skip(skip_self) {
-        if !first {
-            f.write_str(comma)?;
-        } else {
-            first = false;
-        }
-
-        let pat_id = body.params[param.idx - body.self_param.is_some() as usize];
-        let pat_str = body.pretty_print_pat(db, func_id.into(), pat_id, true, f.edition());
-        f.write_str(&pat_str)?;
-
-        f.write_str(": ")?;
-        type_ref.hir_fmt(f, &data.store)?;
-    }
-
-    if data.is_varargs() {
-        if !first {
-            f.write_str(comma)?;
-        }
-        f.write_str("...")?;
-    }
-
-    if too_long_param {
-        f.write_char('\n')?;
-    }
-    f.write_char(')')?;
-
-    // `FunctionData::ret_type` will be `::core::future::Future<Output = ...>` for async fns.
-    // Use ugly pattern match to strip the Future trait.
-    // Better way?
-    let ret_type = if !data.is_async() {
-        data.ret_type
-    } else if let Some(ret_type) = data.ret_type {
-        match &data.store[ret_type] {
-            TypeRef::ImplTrait(bounds) => match &bounds[0] {
-                &TypeBound::Path(path, _) => Some(
-                    *data.store[path]
-                        .segments()
-                        .iter()
-                        .last()
-                        .unwrap()
-                        .args_and_bindings
-                        .unwrap()
-                        .bindings[0]
-                        .type_ref
-                        .as_ref()
-                        .unwrap(),
-                ),
-                _ => None,
-            },
-            _ => None,
-        }
-    } else {
-        None
-    };
-
-    if let Some(ret_type) = ret_type {
-        match &data.store[ret_type] {
-            TypeRef::Tuple(tup) if tup.is_empty() => {}
-            _ => {
-                f.write_str(" -> ")?;
-                ret_type.hir_fmt(f, &data.store)?;
-            }
-        }
-    }
-
-    // Write where clauses
-    let has_written_where = write_where_clause(GenericDefId::FunctionId(func_id), f)?;
-    Ok(has_written_where)
-}
-
-fn write_impl_header<'db>(impl_: ImplId, f: &mut HirFormatter<'_, 'db>) -> Result {
+fn write_impl_header(impl_: &Impl, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
     let db = f.db;
 
     f.write_str("impl")?;
-    let def_id = GenericDefId::ImplId(impl_);
+    let def_id = GenericDefId::ImplId(impl_.id);
     write_generic_params(def_id, f)?;
 
-    let impl_data = db.impl_signature(impl_);
-    if let Some(target_trait) = &impl_data.target_trait {
-        f.write_char(' ')?;
-        hir_display_with_store(&impl_data.store[target_trait.path], &impl_data.store).hir_fmt(f)?;
-        f.write_str(" for")?;
+    if let Some(trait_) = impl_.trait_(db) {
+        let trait_data = db.trait_data(trait_.id);
+        write!(f, " {} for", trait_data.name.display(db.upcast(), f.edition()))?;
     }
 
     f.write_char(' ')?;
-    Impl::from(impl_).self_ty(db).hir_fmt(f)?;
+    impl_.self_ty(db).hir_fmt(f)?;
 
     Ok(())
 }
 
-impl<'db> HirDisplay<'db> for SelfParam {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
-        let func = match self.func.id {
-            AnyFunctionId::FunctionId(id) => id,
-            AnyFunctionId::BuiltinDeriveImplMethod { method, .. } => match method {
-                BuiltinDeriveImplMethod::clone
-                | BuiltinDeriveImplMethod::fmt
-                | BuiltinDeriveImplMethod::hash
-                | BuiltinDeriveImplMethod::cmp
-                | BuiltinDeriveImplMethod::partial_cmp
-                | BuiltinDeriveImplMethod::eq => return f.write_str("&self"),
-                BuiltinDeriveImplMethod::default => {
-                    unreachable!("this trait method does not have a self param")
-                }
-            },
-        };
-        let data = f.db.function_signature(func);
-        let param = *data.params.first().unwrap();
-        match &data.store[param] {
+impl HirDisplay for SelfParam {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
+        let data = f.db.function_data(self.func);
+        let param = data.params.first().unwrap();
+        match &**param {
             TypeRef::Path(p) if p.is_self_type() => f.write_str("self"),
-            TypeRef::Reference(ref_) if matches!(&data.store[ref_.ty], TypeRef::Path(p) if p.is_self_type()) =>
+            TypeRef::Reference(inner, lifetime, mut_) if matches!(&**inner, TypeRef::Path(p) if p.is_self_type()) =>
             {
                 f.write_char('&')?;
-                if let Some(lifetime) = &ref_.lifetime {
-                    lifetime.hir_fmt(f, &data.store)?;
-                    f.write_char(' ')?;
+                if let Some(lifetime) = lifetime {
+                    write!(f, "{} ", lifetime.name.display(f.db.upcast(), f.edition()))?;
                 }
-                if let hir_def::type_ref::Mutability::Mut = ref_.mutability {
+                if let hir_def::type_ref::Mutability::Mut = mut_ {
                     f.write_str("mut ")?;
                 }
                 f.write_str("self")
             }
-            _ => {
+            ty => {
                 f.write_str("self: ")?;
-                param.hir_fmt(f, &data.store)
+                ty.hir_fmt(f)
             }
         }
     }
 }
 
-impl<'db> HirDisplay<'db> for Adt {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for Adt {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         match self {
             Adt::Struct(it) => it.hir_fmt(f),
             Adt::Union(it) => it.hir_fmt(f),
@@ -331,18 +221,18 @@ impl<'db> HirDisplay<'db> for Adt {
     }
 }
 
-impl<'db> HirDisplay<'db> for Struct {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for Struct {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         let module_id = self.module(f.db).id;
         // FIXME: Render repr if its set explicitly?
         write_visibility(module_id, self.visibility(f.db), f)?;
         f.write_str("struct ")?;
-        write!(f, "{}", self.name(f.db).display(f.db, f.edition()))?;
+        write!(f, "{}", self.name(f.db).display(f.db.upcast(), f.edition()))?;
         let def_id = GenericDefId::AdtId(AdtId::StructId(self.id));
         write_generic_params(def_id, f)?;
 
-        let variant_data = self.variant_fields(f.db);
-        match self.kind(f.db) {
+        let variant_data = self.variant_data(f.db);
+        match variant_data.kind() {
             StructKind::Tuple => {
                 f.write_char('(')?;
                 let mut it = variant_data.fields().iter().peekable();
@@ -372,11 +262,11 @@ impl<'db> HirDisplay<'db> for Struct {
     }
 }
 
-impl<'db> HirDisplay<'db> for Enum {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for Enum {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         write_visibility(self.module(f.db).id, self.visibility(f.db), f)?;
         f.write_str("enum ")?;
-        write!(f, "{}", self.name(f.db).display(f.db, f.edition()))?;
+        write!(f, "{}", self.name(f.db).display(f.db.upcast(), f.edition()))?;
         let def_id = GenericDefId::AdtId(AdtId::EnumId(self.id));
         write_generic_params(def_id, f)?;
 
@@ -389,11 +279,11 @@ impl<'db> HirDisplay<'db> for Enum {
     }
 }
 
-impl<'db> HirDisplay<'db> for Union {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for Union {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         write_visibility(self.module(f.db).id, self.visibility(f.db), f)?;
         f.write_str("union ")?;
-        write!(f, "{}", self.name(f.db).display(f.db, f.edition()))?;
+        write!(f, "{}", self.name(f.db).display(f.db.upcast(), f.edition()))?;
         let def_id = GenericDefId::AdtId(AdtId::UnionId(self.id));
         write_generic_params(def_id, f)?;
 
@@ -405,13 +295,13 @@ impl<'db> HirDisplay<'db> for Union {
     }
 }
 
-fn write_fields<'db>(
+fn write_fields(
     fields: &[Field],
     has_where_clause: bool,
     limit: usize,
     in_line: bool,
-    f: &mut HirFormatter<'_, 'db>,
-) -> Result {
+    f: &mut HirFormatter<'_>,
+) -> Result<(), HirDisplayError> {
     let count = fields.len().min(limit);
     let (indent, separator) = if in_line { ("", ' ') } else { ("    ", '\n') };
     f.write_char(if !has_where_clause { ' ' } else { separator })?;
@@ -439,12 +329,12 @@ fn write_fields<'db>(
     Ok(())
 }
 
-fn write_variants<'db>(
+fn write_variants(
     variants: &[Variant],
     has_where_clause: bool,
     limit: usize,
-    f: &mut HirFormatter<'_, 'db>,
-) -> Result {
+    f: &mut HirFormatter<'_>,
+) -> Result<(), HirDisplayError> {
     let count = variants.len().min(limit);
     f.write_char(if !has_where_clause { ' ' } else { '\n' })?;
     if count == 0 {
@@ -453,7 +343,7 @@ fn write_variants<'db>(
     } else {
         f.write_str("{\n")?;
         for variant in &variants[..count] {
-            write!(f, "    {}", variant.name(f.db).display(f.db, f.edition()))?;
+            write!(f, "    {}", variant.name(f.db).display(f.db.upcast(), f.edition()))?;
             match variant.kind(f.db) {
                 StructKind::Tuple => {
                     let fields_str =
@@ -479,42 +369,42 @@ fn write_variants<'db>(
     Ok(())
 }
 
-impl<'db> HirDisplay<'db> for Field {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for Field {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         write_visibility(self.parent.module(f.db).id, self.visibility(f.db), f)?;
-        write!(f, "{}: ", self.name(f.db).display(f.db, f.edition()))?;
+        write!(f, "{}: ", self.name(f.db).display(f.db.upcast(), f.edition()))?;
         self.ty(f.db).hir_fmt(f)
     }
 }
 
-impl<'db> HirDisplay<'db> for TupleField {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
-        write!(f, "pub {}: ", self.name().display(f.db, f.edition()))?;
+impl HirDisplay for TupleField {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
+        write!(f, "pub {}: ", self.name().display(f.db.upcast(), f.edition()))?;
         self.ty(f.db).hir_fmt(f)
     }
 }
 
-impl<'db> HirDisplay<'db> for Variant {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
-        write!(f, "{}", self.name(f.db).display(f.db, f.edition()))?;
-        let data = self.id.fields(f.db);
-        match data.shape {
-            FieldsShape::Unit => {}
-            FieldsShape::Tuple => {
+impl HirDisplay for Variant {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
+        write!(f, "{}", self.name(f.db).display(f.db.upcast(), f.edition()))?;
+        let data = self.variant_data(f.db);
+        match &*data {
+            VariantData::Unit => {}
+            VariantData::Tuple(fields) => {
                 f.write_char('(')?;
                 let mut first = true;
-                for (_, field) in data.fields().iter() {
+                for (_, field) in fields.iter() {
                     if first {
                         first = false;
                     } else {
                         f.write_str(", ")?;
                     }
                     // Enum variant fields must be pub.
-                    field.type_ref.hir_fmt(f, &data.store)?;
+                    field.type_ref.hir_fmt(f)?;
                 }
                 f.write_char(')')?;
             }
-            FieldsShape::Record => {
+            VariantData::Record(_) => {
                 if let Some(limit) = f.entity_limit {
                     write_fields(&self.fields(f.db), false, limit, true, f)?;
                 }
@@ -524,23 +414,17 @@ impl<'db> HirDisplay<'db> for Variant {
     }
 }
 
-impl<'db> HirDisplay<'db> for Type<'db> {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for Type {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         self.ty.hir_fmt(f)
     }
 }
 
-impl<'db> HirDisplay<'db> for TypeNs<'db> {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
-        self.ty.hir_fmt(f)
-    }
-}
-
-impl<'db> HirDisplay<'db> for ExternCrateDecl {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for ExternCrateDecl {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         write_visibility(self.module(f.db).id, self.visibility(f.db), f)?;
         f.write_str("extern crate ")?;
-        write!(f, "{}", self.name(f.db).display(f.db, f.edition()))?;
+        write!(f, "{}", self.name(f.db).display(f.db.upcast(), f.edition()))?;
         if let Some(alias) = self.alias(f.db) {
             write!(f, " as {}", alias.display(f.edition()))?;
         }
@@ -548,8 +432,8 @@ impl<'db> HirDisplay<'db> for ExternCrateDecl {
     }
 }
 
-impl<'db> HirDisplay<'db> for GenericParam {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for GenericParam {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         match self {
             GenericParam::TypeParam(it) => it.hir_fmt(f),
             GenericParam::ConstParam(it) => it.hir_fmt(f),
@@ -558,8 +442,8 @@ impl<'db> HirDisplay<'db> for GenericParam {
     }
 }
 
-impl<'db> HirDisplay<'db> for TypeOrConstParam {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for TypeOrConstParam {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         match self.split(f.db) {
             either::Either::Left(it) => it.hir_fmt(f),
             either::Either::Right(it) => it.hir_fmt(f),
@@ -567,41 +451,47 @@ impl<'db> HirDisplay<'db> for TypeOrConstParam {
     }
 }
 
-impl<'db> HirDisplay<'db> for TypeParam {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for TypeParam {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         let params = f.db.generic_params(self.id.parent());
         let param_data = &params[self.id.local_id()];
+        let substs = TyBuilder::placeholder_subst(f.db, self.id.parent());
         let krate = self.id.parent().krate(f.db).id;
-        let ty = self.ty(f.db).ty;
-        let predicates = GenericPredicates::query_all(f.db, self.id.parent());
+        let ty =
+            TyKind::Placeholder(hir_ty::to_placeholder_idx(f.db, self.id.into())).intern(Interner);
+        let predicates = f.db.generic_predicates(self.id.parent());
         let predicates = predicates
-            .iter_identity_copied()
-            .filter(|wc| match wc.kind().skip_binder() {
-                ClauseKind::Trait(tr) => tr.self_ty() == ty,
-                ClauseKind::Projection(proj) => proj.self_ty() == ty,
-                ClauseKind::TypeOutlives(to) => to.0 == ty,
-                _ => false,
+            .iter()
+            .cloned()
+            .map(|pred| pred.substitute(Interner, &substs))
+            .filter(|wc| match wc.skip_binders() {
+                WhereClause::Implemented(tr) => tr.self_type_parameter(Interner) == ty,
+                WhereClause::AliasEq(AliasEq { alias: AliasTy::Projection(proj), ty: _ }) => {
+                    proj.self_type_parameter(f.db) == ty
+                }
+                WhereClause::AliasEq(_) => false,
+                WhereClause::TypeOutlives(to) => to.ty == ty,
+                WhereClause::LifetimeOutlives(_) => false,
             })
             .collect::<Vec<_>>();
 
         match param_data {
             TypeOrConstParamData::TypeParamData(p) => match p.provenance {
                 TypeParamProvenance::TypeParamList | TypeParamProvenance::TraitSelf => {
-                    write!(f, "{}", p.name.clone().unwrap().display(f.db, f.edition()))?
+                    write!(f, "{}", p.name.clone().unwrap().display(f.db.upcast(), f.edition()))?
                 }
                 TypeParamProvenance::ArgumentImplTrait => {
                     return write_bounds_like_dyn_trait_with_prefix(
                         f,
                         "impl",
-                        Either::Left(ty),
+                        Either::Left(&ty),
                         &predicates,
                         SizedByDefault::Sized { anchor: krate },
-                        false,
                     );
                 }
             },
             TypeOrConstParamData::ConstParamData(p) => {
-                write!(f, "{}", p.name.display(f.db, f.edition()))?;
+                write!(f, "{}", p.name.display(f.db.upcast(), f.edition()))?;
             }
         }
 
@@ -609,55 +499,48 @@ impl<'db> HirDisplay<'db> for TypeParam {
             return Ok(());
         }
 
-        let sized_trait = f.lang_items().Sized;
-        let has_only_sized_bound =
-            predicates.iter().all(move |pred| match pred.kind().skip_binder() {
-                ClauseKind::Trait(it) => Some(it.def_id().0) == sized_trait,
-                _ => false,
-            });
+        let sized_trait =
+            f.db.lang_item(krate, LangItem::Sized).and_then(|lang_item| lang_item.as_trait());
+        let has_only_sized_bound = predicates.iter().all(move |pred| match pred.skip_binders() {
+            WhereClause::Implemented(it) => Some(it.hir_trait_id()) == sized_trait,
+            _ => false,
+        });
         let has_only_not_sized_bound = predicates.is_empty();
         if !has_only_sized_bound || has_only_not_sized_bound {
             let default_sized = SizedByDefault::Sized { anchor: krate };
             write_bounds_like_dyn_trait_with_prefix(
                 f,
                 ":",
-                Either::Left(ty),
+                Either::Left(
+                    &hir_ty::TyKind::Placeholder(hir_ty::to_placeholder_idx(f.db, self.id.into()))
+                        .intern(Interner),
+                ),
                 &predicates,
                 default_sized,
-                false,
             )?;
         }
         Ok(())
     }
 }
 
-impl<'db> HirDisplay<'db> for LifetimeParam {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
-        write!(f, "{}", self.name(f.db).display(f.db, f.edition()))
+impl HirDisplay for LifetimeParam {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
+        write!(f, "{}", self.name(f.db).display(f.db.upcast(), f.edition()))
     }
 }
 
-impl<'db> HirDisplay<'db> for ConstParam {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
-        write!(f, "const {}: ", self.name(f.db).display(f.db, f.edition()))?;
+impl HirDisplay for ConstParam {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
+        write!(f, "const {}: ", self.name(f.db).display(f.db.upcast(), f.edition()))?;
         self.ty(f.db).hir_fmt(f)
     }
 }
 
-fn write_generic_params<'db>(def: GenericDefId, f: &mut HirFormatter<'_, 'db>) -> Result {
-    write_generic_params_or_args(def, f, true)
-}
-
-fn write_generic_args<'db>(def: GenericDefId, f: &mut HirFormatter<'_, 'db>) -> Result {
-    write_generic_params_or_args(def, f, false)
-}
-
-fn write_generic_params_or_args<'db>(
+fn write_generic_params(
     def: GenericDefId,
-    f: &mut HirFormatter<'_, 'db>,
-    include_defaults: bool,
-) -> Result {
-    let (params, store) = f.db.generic_params_and_store(def);
+    f: &mut HirFormatter<'_>,
+) -> Result<(), HirDisplayError> {
+    let params = f.db.generic_params(def);
     if params.iter_lt().next().is_none()
         && params.iter_type_or_consts().all(|it| it.1.const_param().is_none())
         && params
@@ -670,7 +553,7 @@ fn write_generic_params_or_args<'db>(
     f.write_char('<')?;
 
     let mut first = true;
-    let mut delim = |f: &mut HirFormatter<'_, 'db>| {
+    let mut delim = |f: &mut HirFormatter<'_>| {
         if first {
             first = false;
             Ok(())
@@ -680,7 +563,7 @@ fn write_generic_params_or_args<'db>(
     };
     for (_, lifetime) in params.iter_lt() {
         delim(f)?;
-        write!(f, "{}", lifetime.name.display(f.db, f.edition()))?;
+        write!(f, "{}", lifetime.name.display(f.db.upcast(), f.edition()))?;
     }
     for (_, ty) in params.iter_type_or_consts() {
         if let Some(name) = &ty.name() {
@@ -690,20 +573,20 @@ fn write_generic_params_or_args<'db>(
                         continue;
                     }
                     delim(f)?;
-                    write!(f, "{}", name.display(f.db, f.edition()))?;
-                    if include_defaults && let Some(default) = &ty.default {
+                    write!(f, "{}", name.display(f.db.upcast(), f.edition()))?;
+                    if let Some(default) = &ty.default {
                         f.write_str(" = ")?;
-                        default.hir_fmt(f, &store)?;
+                        default.hir_fmt(f)?;
                     }
                 }
                 TypeOrConstParamData::ConstParamData(c) => {
                     delim(f)?;
-                    write!(f, "const {}: ", name.display(f.db, f.edition()))?;
-                    c.ty.hir_fmt(f, &store)?;
+                    write!(f, "const {}: ", name.display(f.db.upcast(), f.edition()))?;
+                    c.ty.hir_fmt(f)?;
 
-                    if include_defaults && let Some(default) = &c.default {
+                    if let Some(default) = &c.default {
                         f.write_str(" = ")?;
-                        default.hir_fmt(f, &store)?;
+                        write!(f, "{}", default.display(f.db.upcast(), f.edition()))?;
                     }
                 }
             }
@@ -714,46 +597,51 @@ fn write_generic_params_or_args<'db>(
     Ok(())
 }
 
-fn write_where_clause<'db>(def: GenericDefId, f: &mut HirFormatter<'_, 'db>) -> Result<bool> {
-    let (params, store) = f.db.generic_params_and_store(def);
-    if !has_disaplayable_predicates(f.db, &params, &store) {
+fn write_where_clause(
+    def: GenericDefId,
+    f: &mut HirFormatter<'_>,
+) -> Result<bool, HirDisplayError> {
+    let params = f.db.generic_params(def);
+    if !has_disaplayable_predicates(&params) {
         return Ok(false);
     }
 
     f.write_str("\nwhere")?;
-    write_where_predicates(&params, &store, f)?;
+    write_where_predicates(&params, f)?;
 
     Ok(true)
 }
 
-fn has_disaplayable_predicates(
-    db: &dyn HirDatabase,
-    params: &GenericParams,
-    store: &ExpressionStore,
-) -> bool {
-    params.where_predicates().iter().any(|pred| {
+fn has_disaplayable_predicates(params: &Interned<GenericParams>) -> bool {
+    params.where_predicates().any(|pred| {
         !matches!(
             pred,
-            WherePredicate::TypeBound { target, .. }
-            if  matches!(store[*target],
-                TypeRef::TypeParam(id) if db.generic_params(id.parent())[id.local_id()].name().is_none()
-            )
+            WherePredicate::TypeBound { target: WherePredicateTypeTarget::TypeOrConstParam(id), .. }
+            if params[*id].name().is_none()
         )
     })
 }
 
-fn write_where_predicates<'db>(
-    params: &GenericParams,
-    store: &ExpressionStore,
-    f: &mut HirFormatter<'_, 'db>,
-) -> Result {
+fn write_where_predicates(
+    params: &Interned<GenericParams>,
+    f: &mut HirFormatter<'_>,
+) -> Result<(), HirDisplayError> {
     use WherePredicate::*;
 
     // unnamed type targets are displayed inline with the argument itself, e.g. `f: impl Y`.
-    let is_unnamed_type_target = |target: TypeRefId| {
-        matches!(store[target],
-            TypeRef::TypeParam(id) if f.db.generic_params(id.parent())[id.local_id()].name().is_none()
-        )
+    let is_unnamed_type_target =
+        |params: &Interned<GenericParams>, target: &WherePredicateTypeTarget| {
+            matches!(target,
+                WherePredicateTypeTarget::TypeOrConstParam(id) if params[*id].name().is_none()
+            )
+        };
+
+    let write_target = |target: &WherePredicateTypeTarget, f: &mut HirFormatter<'_>| match target {
+        WherePredicateTypeTarget::TypeRef(ty) => ty.hir_fmt(f),
+        WherePredicateTypeTarget::TypeOrConstParam(id) => match params[*id].name() {
+            Some(name) => write!(f, "{}", name.display(f.db.upcast(), f.edition())),
+            None => f.write_str("{unnamed}"),
+        },
     };
 
     let check_same_target = |pred1: &WherePredicate, pred2: &WherePredicate| match (pred1, pred2) {
@@ -766,38 +654,41 @@ fn write_where_predicates<'db>(
         _ => false,
     };
 
-    let mut iter = params.where_predicates().iter().peekable();
+    let mut iter = params.where_predicates().peekable();
     while let Some(pred) = iter.next() {
-        if matches!(pred, TypeBound { target, .. } if is_unnamed_type_target(*target)) {
+        if matches!(pred, TypeBound { target, .. } if is_unnamed_type_target(params, target)) {
             continue;
         }
 
         f.write_str("\n    ")?;
         match pred {
             TypeBound { target, bound } => {
-                target.hir_fmt(f, store)?;
+                write_target(target, f)?;
                 f.write_str(": ")?;
-                bound.hir_fmt(f, store)?;
+                bound.hir_fmt(f)?;
             }
             Lifetime { target, bound } => {
-                target.hir_fmt(f, store)?;
-                write!(f, ": ")?;
-                bound.hir_fmt(f, store)?;
+                let target = target.name.display(f.db.upcast(), f.edition());
+                let bound = bound.name.display(f.db.upcast(), f.edition());
+                write!(f, "{target}: {bound}")?;
             }
             ForLifetime { lifetimes, target, bound } => {
-                let lifetimes = lifetimes.iter().map(|it| it.display(f.db, f.edition())).join(", ");
+                let lifetimes =
+                    lifetimes.iter().map(|it| it.display(f.db.upcast(), f.edition())).join(", ");
                 write!(f, "for<{lifetimes}> ")?;
-                target.hir_fmt(f, store)?;
+                write_target(target, f)?;
                 f.write_str(": ")?;
-                bound.hir_fmt(f, store)?;
+                bound.hir_fmt(f)?;
             }
         }
 
         while let Some(nxt) = iter.next_if(|nxt| check_same_target(pred, nxt)) {
             f.write_str(" + ")?;
             match nxt {
-                TypeBound { bound, .. } | ForLifetime { bound, .. } => bound.hir_fmt(f, store)?,
-                Lifetime { bound, .. } => bound.hir_fmt(f, store)?,
+                TypeBound { bound, .. } | ForLifetime { bound, .. } => bound.hir_fmt(f)?,
+                Lifetime { bound, .. } => {
+                    write!(f, "{}", bound.name.display(f.db.upcast(), f.edition()))?
+                }
             }
         }
         f.write_str(",")?;
@@ -806,8 +697,8 @@ fn write_where_predicates<'db>(
     Ok(())
 }
 
-impl<'db> HirDisplay<'db> for Const {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for Const {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         let db = f.db;
         let container = self.as_assoc_item(db).map(|it| it.container(db));
         let mut module = self.module(db);
@@ -816,41 +707,34 @@ impl<'db> HirDisplay<'db> for Const {
             module = module.nearest_non_block_module(db);
         }
         write_visibility(module.id, self.visibility(db), f)?;
-        let data = db.const_signature(self.id);
+        let data = db.const_data(self.id);
         f.write_str("const ")?;
         match &data.name {
-            Some(name) => write!(f, "{}: ", name.display(f.db, f.edition()))?,
+            Some(name) => write!(f, "{}: ", name.display(f.db.upcast(), f.edition()))?,
             None => f.write_str("_: ")?,
         }
-        data.type_ref.hir_fmt(f, &data.store)?;
+        data.type_ref.hir_fmt(f)?;
         Ok(())
     }
 }
 
-impl<'db> HirDisplay<'db> for Static {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for Static {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         write_visibility(self.module(f.db).id, self.visibility(f.db), f)?;
-        let data = f.db.static_signature(self.id);
+        let data = f.db.static_data(self.id);
         f.write_str("static ")?;
-        if data.flags.contains(StaticFlags::MUTABLE) {
+        if data.mutable {
             f.write_str("mut ")?;
         }
-        write!(f, "{}: ", data.name.display(f.db, f.edition()))?;
-        data.type_ref.hir_fmt(f, &data.store)?;
+        write!(f, "{}: ", data.name.display(f.db.upcast(), f.edition()))?;
+        data.type_ref.hir_fmt(f)?;
         Ok(())
     }
 }
 
-impl<'db> HirDisplay<'db> for TraitRef<'db> {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
-        self.trait_ref.hir_fmt(f)
-    }
-}
-
-impl<'db> HirDisplay<'db> for Trait {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
-        // FIXME(trait-alias) needs special handling to print the equal sign
-        write_trait_header(*self, f)?;
+impl HirDisplay for Trait {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
+        write_trait_header(self, f)?;
         let def_id = GenericDefId::TraitId(self.id);
         let has_where_clause = write_where_clause(def_id, f)?;
 
@@ -887,77 +771,77 @@ impl<'db> HirDisplay<'db> for Trait {
     }
 }
 
-fn write_trait_header<'db>(trait_: Trait, f: &mut HirFormatter<'_, 'db>) -> Result {
+fn write_trait_header(trait_: &Trait, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
     write_visibility(trait_.module(f.db).id, trait_.visibility(f.db), f)?;
-    let data = f.db.trait_signature(trait_.id);
-    if data.flags.contains(TraitFlags::UNSAFE) {
+    let data = f.db.trait_data(trait_.id);
+    if data.is_unsafe {
         f.write_str("unsafe ")?;
     }
-    if data.flags.contains(TraitFlags::AUTO) {
+    if data.is_auto {
         f.write_str("auto ")?;
     }
-    write!(f, "trait {}", data.name.display(f.db, f.edition()))?;
+    write!(f, "trait {}", data.name.display(f.db.upcast(), f.edition()))?;
     write_generic_params(GenericDefId::TraitId(trait_.id), f)?;
     Ok(())
 }
 
-impl<'db> HirDisplay<'db> for TypeAlias {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for TraitAlias {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         write_visibility(self.module(f.db).id, self.visibility(f.db), f)?;
-        let data = f.db.type_alias_signature(self.id);
-        write!(f, "type {}", data.name.display(f.db, f.edition()))?;
+        let data = f.db.trait_alias_data(self.id);
+        write!(f, "trait {}", data.name.display(f.db.upcast(), f.edition()))?;
+        let def_id = GenericDefId::TraitAliasId(self.id);
+        write_generic_params(def_id, f)?;
+        f.write_str(" = ")?;
+        // FIXME: Currently we lower every bounds in a trait alias as a trait bound on `Self` i.e.
+        // `trait Foo = Bar` is stored and displayed as `trait Foo = where Self: Bar`, which might
+        // be less readable.
+        write_where_clause(def_id, f)?;
+        Ok(())
+    }
+}
+
+impl HirDisplay for TypeAlias {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
+        write_visibility(self.module(f.db).id, self.visibility(f.db), f)?;
+        let data = f.db.type_alias_data(self.id);
+        write!(f, "type {}", data.name.display(f.db.upcast(), f.edition()))?;
         let def_id = GenericDefId::TypeAliasId(self.id);
         write_generic_params(def_id, f)?;
         if !data.bounds.is_empty() {
             f.write_str(": ")?;
-            f.write_joined(
-                data.bounds.iter().map(|bound| hir_display_with_store(bound, &data.store)),
-                " + ",
-            )?;
+            f.write_joined(data.bounds.iter(), " + ")?;
         }
-        if let Some(ty) = data.ty {
+        if let Some(ty) = &data.type_ref {
             f.write_str(" = ")?;
-            ty.hir_fmt(f, &data.store)?;
+            ty.hir_fmt(f)?;
         }
         write_where_clause(def_id, f)?;
         Ok(())
     }
 }
 
-impl<'db> HirDisplay<'db> for Module {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
-        match self.parent(f.db) {
-            Some(m) => write_visibility(m.id, self.visibility(f.db), f)?,
-            None => {
-                return match self.krate(f.db).display_name(f.db) {
-                    Some(name) => write!(f, "extern crate {name}"),
-                    None => f.write_str("extern crate {unknown}"),
-                };
-            }
-        }
+impl HirDisplay for Module {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
+        // FIXME: Module doesn't have visibility saved in data.
         match self.name(f.db) {
-            Some(name) => write!(f, "mod {}", name.display(f.db, f.edition())),
-            None => f.write_str("mod {unknown}"),
+            Some(name) => write!(f, "mod {}", name.display(f.db.upcast(), f.edition())),
+            None if self.is_crate_root() => match self.krate(f.db).display_name(f.db) {
+                Some(name) => write!(f, "extern crate {name}"),
+                None => f.write_str("extern crate {unknown}"),
+            },
+            None => f.write_str("mod {unnamed}"),
         }
     }
 }
 
-impl<'db> HirDisplay<'db> for Crate {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
-        match self.display_name(f.db) {
-            Some(name) => write!(f, "extern crate {name}"),
-            None => f.write_str("extern crate {unknown}"),
-        }
-    }
-}
-
-impl<'db> HirDisplay<'db> for Macro {
-    fn hir_fmt(&self, f: &mut HirFormatter<'_, 'db>) -> Result {
+impl HirDisplay for Macro {
+    fn hir_fmt(&self, f: &mut HirFormatter<'_>) -> Result<(), HirDisplayError> {
         match self.id {
             hir_def::MacroId::Macro2Id(_) => f.write_str("macro"),
             hir_def::MacroId::MacroRulesId(_) => f.write_str("macro_rules!"),
             hir_def::MacroId::ProcMacroId(_) => f.write_str("proc_macro"),
         }?;
-        write!(f, " {}", self.name(f.db).display(f.db, f.edition()))
+        write!(f, " {}", self.name(f.db).display(f.db.upcast(), f.edition()))
     }
 }

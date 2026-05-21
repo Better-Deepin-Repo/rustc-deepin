@@ -11,7 +11,6 @@ fn foo<T>(t: T) -> T {
 
 type F = impl Sized;
 
-#[define_opaque(F)]
 fn f(a: F) {
     let mut x = foo::<F>;
     x = foo::<()>;
@@ -21,7 +20,6 @@ fn f(a: F) {
 
 type G = impl Sized;
 
-#[define_opaque(G)]
 fn g(a: G) {
     let x = foo::<()>;
     let _: () = x(a);
@@ -29,7 +27,6 @@ fn g(a: G) {
 
 type H = impl Sized;
 
-#[define_opaque(H)]
 fn h(a: H) {
     let x = foo::<H>;
     let _: H = x(());
@@ -37,7 +34,6 @@ fn h(a: H) {
 
 type I = impl Sized;
 
-#[define_opaque(I)]
 fn i(a: I) {
     let mut x = foo::<()>;
     x = foo::<I>;
@@ -47,7 +43,6 @@ fn i(a: I) {
 
 type J = impl Sized;
 
-#[define_opaque(J)]
 fn j(a: J) {
     let x = match true {
         true => foo::<J>,

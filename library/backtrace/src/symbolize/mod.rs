@@ -10,7 +10,7 @@ cfg_if::cfg_if! {
 use super::backtrace::Frame;
 use super::types::BytesOrWideString;
 use core::ffi::c_void;
-use rustc_demangle::{Demangle, try_demangle};
+use rustc_demangle::{try_demangle, Demangle};
 
 /// Resolve an address to a symbol, passing the symbol to the specified
 /// closure.
@@ -63,7 +63,7 @@ pub fn resolve<F: FnMut(&Symbol)>(addr: *mut c_void, cb: F) {
     unsafe { resolve_unsynchronized(addr, cb) }
 }
 
-/// Resolve a previously captured frame to a symbol, passing the symbol to the
+/// Resolve a previously capture frame to a symbol, passing the symbol to the
 /// specified closure.
 ///
 /// This function performs the same function as `resolve` except that it takes a
@@ -159,7 +159,7 @@ pub unsafe fn resolve_unsynchronized<F>(addr: *mut c_void, mut cb: F)
 where
     F: FnMut(&Symbol),
 {
-    unsafe { imp::resolve(ResolveWhat::Address(addr), &mut cb) }
+    imp::resolve(ResolveWhat::Address(addr), &mut cb)
 }
 
 /// Same as `resolve_frame`, only unsafe as it's unsynchronized.
@@ -175,7 +175,7 @@ pub unsafe fn resolve_frame_unsynchronized<F>(frame: &Frame, mut cb: F)
 where
     F: FnMut(&Symbol),
 {
-    unsafe { imp::resolve(ResolveWhat::Frame(frame), &mut cb) }
+    imp::resolve(ResolveWhat::Frame(frame), &mut cb)
 }
 
 /// A trait representing the resolution of a symbol in a file.
@@ -373,13 +373,8 @@ impl<'a> fmt::Display for SymbolName<'a> {
 
         #[cfg(feature = "cpp_demangle")]
         {
-            // This may fail to print if the demangled symbol isn't actually
-            // valid, so handle the error here gracefully by not propagating
-            // it outwards.
             if let Some(ref cpp) = self.cpp_demangled.0 {
-                if let Ok(s) = cpp.demangle() {
-                    return s.fmt(f);
-                }
+                return cpp.fmt(f);
             }
         }
 
@@ -395,11 +390,14 @@ impl<'a> fmt::Debug for SymbolName<'a> {
 
         #[cfg(all(feature = "std", feature = "cpp_demangle"))]
         {
-            // This may fail to print if the demangled symbol isn't actually
+            use std::fmt::Write;
+
+            // This may to print if the demangled symbol isn't actually
             // valid, so handle the error here gracefully by not propagating
             // it outwards.
             if let Some(ref cpp) = self.cpp_demangled.0 {
-                if let Ok(s) = cpp.demangle() {
+                let mut s = String::new();
+                if write!(s, "{cpp}").is_ok() {
                     return s.fmt(f);
                 }
             }

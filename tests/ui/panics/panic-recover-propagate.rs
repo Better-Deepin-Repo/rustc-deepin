@@ -1,7 +1,6 @@
 //@ run-pass
 //@ needs-unwind
-//@ needs-threads
-//@ ignore-backends: gcc
+//@ ignore-emscripten no threads support
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::panic;

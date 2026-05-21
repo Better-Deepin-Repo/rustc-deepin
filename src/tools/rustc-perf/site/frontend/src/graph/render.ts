@@ -400,8 +400,6 @@ function normalizeData(data: CompileGraphData) {
 export type GraphRenderOpts = {
   // Width of the graph
   width: number;
-  // Height of the graph
-  height: number;
   // Render a title above the graph
   renderTitle?: boolean;
   // Function that can be used to hook into the rendering process
@@ -418,7 +416,7 @@ export function renderPlots(
 ) {
   const renderTitle = opts.renderTitle ?? true;
   const hooks = opts.hooks ?? {};
-  const {width, height} = opts;
+  const width = opts.width;
 
   normalizeData(data);
 
@@ -506,7 +504,7 @@ export function renderPlots(
 
       let plotOpts = genPlotOpts({
         width,
-        height,
+        height: 300,
         yAxisLabel,
         series: seriesOpts,
         commits: data.commits,
@@ -536,7 +534,7 @@ export function renderRuntimePlots(
 ) {
   const renderTitle = opts.renderTitle ?? true;
   const hooks = opts.hooks ?? {};
-  const {width, height} = opts;
+  const width = opts.width;
 
   const benchNames = Object.keys(data.benchmarks).sort();
 
@@ -612,7 +610,7 @@ export function renderRuntimePlots(
 
     let plotOpts = genPlotOpts({
       width,
-      height,
+      height: 300,
       yAxisLabel,
       series: seriesOpts,
       commits: data.commits,

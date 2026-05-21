@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use smallvec::{SmallVec, smallvec};
+use smallvec::{smallvec, SmallVec};
 
 use self::Constructor::*;
 use crate::constructor::{Constructor, Slice, SliceKind};
@@ -174,7 +174,10 @@ pub(crate) enum PatOrWild<'p, Cx: PatCx> {
 
 impl<'p, Cx: PatCx> Clone for PatOrWild<'p, Cx> {
     fn clone(&self) -> Self {
-        *self
+        match self {
+            PatOrWild::Wild => PatOrWild::Wild,
+            PatOrWild::Pat(pat) => PatOrWild::Pat(pat),
+        }
     }
 }
 

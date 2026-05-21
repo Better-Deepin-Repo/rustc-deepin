@@ -3,7 +3,7 @@
 
 //@ run-fail
 //@ error-pattern:oops
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 fn bigpanic() {
     while (panic!("oops")) {

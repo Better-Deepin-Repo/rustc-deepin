@@ -28,46 +28,18 @@ fn main() -> Result<(), Box<dyn Error>> {
         let chapter = chapter?;
         let chapter_path = chapter.path();
 
-        if !chapter_path.is_dir() {
-            eprintln!(
-                "'{}' is not a directory, skipping",
-                chapter_path.display()
-            );
-            continue;
-        }
-
         let chapter_name = chapter_path
             .file_name()
             .expect("Chapter should've had a name");
 
         // Create a corresponding chapter dir in `tmp/listings`
         let output_chapter_path = out_dir.join(chapter_name);
-        fs::create_dir(&output_chapter_path).map_err(|e| {
-            format!(
-                "could not create dir at '{}': {e}",
-                output_chapter_path.display()
-            )
-        })?;
+        fs::create_dir(&output_chapter_path)?;
 
         // For each listing in the chapter directory,
-        for listing in fs::read_dir(&chapter_path).map_err(|e| {
-            format!("Could not read '{}': {e}", chapter_path.display())
-        })? {
-            let listing = listing.map_err(|e| {
-                format!(
-                    "bad dir entry listing in {}: {e}",
-                    chapter_path.display()
-                )
-            })?;
+        for listing in fs::read_dir(chapter_path)? {
+            let listing = listing?;
             let listing_path = listing.path();
-
-            if !listing_path.is_dir() {
-                eprintln!(
-                    "'{}' is not a directory, skipping",
-                    listing_path.display(),
-                );
-                continue;
-            }
 
             let listing_name = listing_path
                 .file_name()
@@ -75,12 +47,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             // Create a corresponding listing dir in the tmp chapter dir
             let output_listing_dir = output_chapter_path.join(listing_name);
-            fs::create_dir(&output_listing_dir).map_err(|e| {
-                format!(
-                    "could not create dir '{}': {e}",
-                    output_listing_dir.display()
-                )
-            })?;
+            fs::create_dir(&output_listing_dir)?;
 
             // Copy all the cleaned files in the listing to the tmp directory
             copy_cleaned_listing_files(listing_path, output_listing_dir)?;
@@ -112,12 +79,8 @@ fn copy_cleaned_listing_files(
     from: PathBuf,
     to: PathBuf,
 ) -> Result<(), Box<dyn Error>> {
-    for item in fs::read_dir(&from).map_err(|e| {
-        format!("Could not read_dir on '{}': {e}", from.display())
-    })? {
-        let item = item.map_err(|e| {
-            format!("invalid dir entry in {}: {e}", from.display())
-        })?;
+    for item in fs::read_dir(from)? {
+        let item = item?;
         let item_path = item.path();
 
         let item_name =
@@ -127,12 +90,7 @@ fn copy_cleaned_listing_files(
         if item_path.is_dir() {
             // Don't copy `target` directories
             if item_name != "target" {
-                fs::create_dir(&output_item).map_err(|e| {
-                    format!(
-                        "Could not create output directory '{}': {e}",
-                        output_item.display()
-                    )
-                })?;
+                fs::create_dir(&output_item)?;
                 copy_cleaned_listing_files(item_path, output_item)?;
             }
         } else {
@@ -147,13 +105,7 @@ fn copy_cleaned_listing_files(
                     )?;
                 } else {
                     // Copy any non-Rust files without modification
-                    fs::copy(&item_path, &output_item).map_err(|e| {
-                        format!(
-                            "Could not copy from '{}' to '{}': {e}",
-                            item_path.display(),
-                            output_item.display()
-                        )
-                    })?;
+                    fs::copy(item_path, output_item)?;
                 }
             }
         }

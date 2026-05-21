@@ -7,7 +7,7 @@ use crate::serialize::Decoder;
 /// Returns the length of the longest LEB128 encoding for `T`, assuming `T` is an integer type
 pub const fn max_leb128_len<T>() -> usize {
     // The longest LEB128 encoding for an integer uses 7 bits per byte.
-    (size_of::<T>() * 8).div_ceil(7)
+    (std::mem::size_of::<T>() * 8 + 6) / 7
 }
 
 /// Returns the length of the longest LEB128 encoding of all supported integer types.
@@ -155,6 +155,3 @@ impl_read_signed_leb128!(read_i32_leb128, i32);
 impl_read_signed_leb128!(read_i64_leb128, i64);
 impl_read_signed_leb128!(read_i128_leb128, i128);
 impl_read_signed_leb128!(read_isize_leb128, isize);
-
-#[cfg(test)]
-mod tests;

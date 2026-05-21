@@ -4,7 +4,7 @@ autoload -U regexp-replace
 
 _cargo() {
     local curcontext="$curcontext" ret=1
-    local -a command_scope_spec common jobs parallel features manifest msgfmt triple target registry
+    local -a command_scope_spec common parallel features msgfmt triple target registry
     local -a state line state_descr # These are set by _arguments
     typeset -A opt_args
 
@@ -12,7 +12,6 @@ _cargo() {
         '(-q --quiet)*'{-v,--verbose}'[use verbose output]'
         '(-q --quiet -v --verbose)'{-q,--quiet}'[no output printed to stdout]'
         '-Z+[pass unstable (nightly-only) flags to cargo]: :_cargo_unstable_flags'
-        '--offline[run without accessing the network]'
         '--frozen[require that Cargo.lock and cache are up-to-date]'
         '--locked[require that Cargo.lock is up-to-date]'
         '--color=[specify colorization option]:coloring:(auto always never)'
@@ -111,6 +110,7 @@ _cargo() {
                         "${command_scope_spec[@]}" \
                         '(-p --package)'{-p+,--package=}'[specify package to build]:package:_cargo_package_names' \
                         '--release[build in release mode]' \
+                        '--build-plan[output the build plan in JSON]' \
                         '--ignore-rust-version[Ignore rust-version specification in packages]'
                         ;;
 
@@ -250,7 +250,12 @@ _cargo() {
                         '--index=[specify registry index]:index' \
                         '--allow-dirty[allow dirty working directories to be packaged]' \
                         "--no-verify[don't verify the contents by building them]" \
+                        '--token=[specify token to use when uploading]:token' \
                         '--dry-run[perform all checks without uploading]'
+                        ;;
+
+                read-manifest)
+                    _arguments -s -S $common $manifest
                         ;;
 
                 remove | rm)
@@ -349,6 +354,10 @@ _cargo() {
                         '(-p --package)'{-p+,--package=}'[specify package to update]:package:_cargo_package_names' \
                         '--precise=[update single dependency to precise release]:release' \
                         '*:package:_cargo_package_names'
+                        ;;
+
+                verify-project)
+                    _arguments -s -S $common $manifest
                         ;;
 
                 version)

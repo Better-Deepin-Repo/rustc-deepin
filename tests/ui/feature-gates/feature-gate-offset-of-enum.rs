@@ -1,4 +1,3 @@
-//@ edition:2015
 use std::mem::offset_of;
 
 enum Alpha {

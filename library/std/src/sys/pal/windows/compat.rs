@@ -19,7 +19,7 @@
 //! function is called. In the worst case, multiple threads may all end up
 //! importing the same function unnecessarily.
 
-use crate::ffi::{CStr, c_void};
+use crate::ffi::{c_void, CStr};
 use crate::ptr::NonNull;
 use crate::sys::c;
 
@@ -39,7 +39,7 @@ use crate::sys::c;
 // See https://docs.microsoft.com/en-us/cpp/c-runtime-library/crt-initialization?view=msvc-170
 #[cfg(target_vendor = "win7")]
 #[used]
-#[unsafe(link_section = ".CRT$XCT")]
+#[link_section = ".CRT$XCT"]
 static INIT_TABLE_ENTRY: unsafe extern "C" fn() = init;
 
 /// Preload some imported functions.
@@ -145,7 +145,7 @@ macro_rules! compat_fn_with_fallback {
             use super::*;
             use crate::mem;
             use crate::ffi::CStr;
-            use crate::sync::atomic::{Atomic, AtomicPtr, Ordering};
+            use crate::sync::atomic::{AtomicPtr, Ordering};
             use crate::sys::compat::Module;
 
             type F = unsafe extern "system" fn($($argtype),*) -> $rettype;
@@ -155,7 +155,7 @@ macro_rules! compat_fn_with_fallback {
             /// When that is called it attempts to load the requested symbol.
             /// If it succeeds, `PTR` is set to the address of that symbol.
             /// If it fails, then `PTR` is set to `fallback`.
-            static PTR: Atomic<*mut c_void> = AtomicPtr::new(load as unsafe extern "system" fn($($argname: $argtype),*) -> $rettype as *mut _);
+            static PTR: AtomicPtr<c_void> = AtomicPtr::new(load as *mut _);
 
             unsafe extern "system" fn load($($argname: $argtype),*) -> $rettype {
                 unsafe {
@@ -171,7 +171,7 @@ macro_rules! compat_fn_with_fallback {
                         PTR.store(f.as_ptr(), Ordering::Relaxed);
                         mem::transmute(f)
                     } else {
-                        PTR.store(fallback as unsafe extern "system" fn($($argname: $argtype),*) -> $rettype as *mut _, Ordering::Relaxed);
+                        PTR.store(fallback as *mut _, Ordering::Relaxed);
                         fallback
                     }
                 }
@@ -198,10 +198,11 @@ macro_rules! compat_fn_with_fallback {
 
 /// Optionally loaded functions.
 ///
-/// Relies on the functions being pre-loaded elsewhere.
+/// Actual loading of the function defers to $load_functions.
 #[cfg(target_vendor = "win7")]
 macro_rules! compat_fn_optional {
-    ($(
+    ($load_functions:expr;
+    $(
         $(#[$meta:meta])*
         $vis:vis fn $symbol:ident($($argname:ident: $argtype:ty),*) $(-> $rettype:ty)?;
     )+) => (
@@ -212,14 +213,17 @@ macro_rules! compat_fn_optional {
                 use crate::ffi::c_void;
                 use crate::mem;
                 use crate::ptr::{self, NonNull};
-                use crate::sync::atomic::{Atomic, AtomicPtr, Ordering};
+                use crate::sync::atomic::{AtomicPtr, Ordering};
 
-                pub(in crate::sys) static PTR: Atomic<*mut c_void> = AtomicPtr::new(ptr::null_mut());
+                pub(in crate::sys) static PTR: AtomicPtr<c_void> = AtomicPtr::new(ptr::null_mut());
 
                 type F = unsafe extern "system" fn($($argtype),*) $(-> $rettype)?;
 
                 #[inline(always)]
                 pub fn option() -> Option<F> {
+                    // Miri does not understand the way we do preloading
+                    // therefore load the function here instead.
+                    #[cfg(miri)] $load_functions;
                     NonNull::new(PTR.load(Ordering::Relaxed)).map(|f| unsafe { mem::transmute(f) })
                 }
             }

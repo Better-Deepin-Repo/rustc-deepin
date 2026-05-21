@@ -10,10 +10,10 @@ DESCRIPTION
        Output JSON to stdout containing information about the workspace members
        and resolved dependencies of the current package.
 
-       The output format is subject to change in future versions of Cargo. It
-       is recommended to include the --format-version flag to future-proof your
-       code and ensure the output is in the format you are expecting. For more
-       on the expectations, see “Compatibility”.
+       The format of the output is subject to change in futures versions of
+       Cargo. It is recommended to include the --format-version flag to
+       future-proof your code to ensure the output is in the format you are
+       expecting. For more on the expectations, see “Compatibility”.
 
        See the cargo_metadata crate <https://crates.io/crates/cargo_metadata>
        for a Rust API for reading the metadata.
@@ -119,12 +119,7 @@ OUTPUT FORMAT
                                   If not specified or null, the dependency is from the default
                                   registry (crates.io).
                                */
-                               "registry": null,
-                               /* (unstable) Boolean flag of whether or not this is a pulbic
-                                  dependency. This field is only present when
-                                  `-Zpublic-dependency` is enabled.
-                               */
-                               "public": false
+                               "registry": null
                            }
                        ],
                        /* Array of Cargo targets. */
@@ -308,16 +303,14 @@ OUTPUT FORMAT
                            ]
                        }
                    ],
-                   /* The package in the current working directory (if --manifest-path is not given).
-                      This is null if there is a virtual workspace. Otherwise it is
-                      the Package ID of the package.
+                   /* The root package of the workspace.
+                      This is null if this is a virtual workspace. Otherwise it is
+                      the Package ID of the root package.
                    */
                    "root": "file:///path/to/my-package#0.1.0",
                },
-               /* The absolute path to the target directory where Cargo places its output. */
+               /* The absolute path to the build directory where Cargo places its output. */
                "target_directory": "/path/to/my-package/target",
-               /* The absolute path to the build directory where Cargo places intermediate build artifacts. (unstable) */
-               "build_directory": "/path/to/my-package/build-dir",
                /* The version of the schema for this metadata structure.
                   This will be changed if incompatible changes are ever made.
                */
@@ -354,10 +347,8 @@ OPTIONS
        --filter-platform triple
            This filters the resolve output to only include dependencies for the
            given target triple
-           <https://doc.rust-lang.org/cargo/appendix/glossary.html#target>. A
-           literal "host-tuple" can be used, which will internally be
-           substituted by the host’s target. Without this flag, the resolve
-           includes all targets.
+           <https://doc.rust-lang.org/cargo/appendix/glossary.html#target>.
+           Without this flag, the resolve includes all targets.
 
            Note that the dependencies listed in the “packages” array still
            includes all dependencies. Each package definition is intended to be
@@ -446,6 +437,21 @@ OPTIONS
 
        --frozen
            Equivalent to specifying both --locked and --offline.
+
+       --lockfile-path PATH
+           Changes the path of the lockfile from the default
+           (<workspace_root>/Cargo.lock) to PATH. PATH must end with Cargo.lock
+           (e.g. --lockfile-path /tmp/temporary-lockfile/Cargo.lock). Note that
+           providing --lockfile-path will ignore existing lockfile at the
+           default path, and instead will either use the lockfile from PATH, or
+           write a new lockfile into the provided PATH if it doesn’t exist.
+           This flag can be used to run most commands in read-only directories,
+           writing lockfile into the provided PATH.
+
+           This option is only available on the nightly channel
+           <https://doc.rust-lang.org/book/appendix-07-nightly-rust.html> and
+           requires the -Z unstable-options flag to enable (see #14421
+           <https://github.com/rust-lang/cargo/issues/14421>).
 
    Common Options
        +toolchain

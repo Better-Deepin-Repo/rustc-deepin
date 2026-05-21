@@ -60,6 +60,7 @@ fn method() -> Option<i32> {
         Receiver.generic();
         //~^ ERROR type annotations needed
         //~| HELP consider specifying the generic argument
+        //~| HELP you might have meant to return this to infer its type parameters
     }
 
     None

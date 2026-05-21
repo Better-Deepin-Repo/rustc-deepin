@@ -1,6 +1,6 @@
 //! Tests for proc-macros.
 
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::str;
 
@@ -553,6 +553,7 @@ fn proc_macro_built_once() {
     p.cargo("build --verbose")
         .with_stderr_data(
             str![[r#"
+[LOCKING] 3 packages to latest compatible versions
 [COMPILING] the-macro v0.1.0 ([ROOT]/foo/the-macro)
 [RUNNING] `rustc --crate-name the_macro [..]`
 [COMPILING] b v0.1.0 ([ROOT]/foo/b)

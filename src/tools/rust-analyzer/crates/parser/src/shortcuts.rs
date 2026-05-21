@@ -5,7 +5,7 @@
 //! abstract token parsing, and string tokenization as completely separate
 //! layers.
 //!
-//! However, often you do parse text into syntax trees and the glue code for
+//! However, often you do pares text into syntax trees and the glue code for
 //! that needs to live somewhere. Rather than putting it to lexer or parser, we
 //! use a separate shortcuts module for that.
 
@@ -27,7 +27,7 @@ pub enum StrStep<'a> {
 impl LexedStr<'_> {
     pub fn to_input(&self, edition: Edition) -> crate::Input {
         let _p = tracing::info_span!("LexedStr::to_input").entered();
-        let mut res = crate::Input::with_capacity(self.len());
+        let mut res = crate::Input::default();
         let mut was_joint = false;
         for i in 0..self.len() {
             let kind = self.kind(i);
@@ -38,13 +38,12 @@ impl LexedStr<'_> {
                 res.push_ident(
                     SyntaxKind::from_contextual_keyword(token_text, edition)
                         .unwrap_or(SyntaxKind::IDENT),
-                    edition,
                 )
             } else {
                 if was_joint {
                     res.was_joint();
                 }
-                res.push(kind, edition);
+                res.push(kind);
                 // Tag the token as joint if it is float with a fractional part
                 // we use this jointness to inform the parser about what token split
                 // event to emit when we encounter a float literal in a field access
@@ -253,10 +252,10 @@ fn n_attached_trivias<'a>(
                     WHITESPACE if text.contains("\n\n") => {
                         // we check whether the next token is a doc-comment
                         // and skip the whitespace in this case
-                        if let Some((COMMENT, peek_text)) = trivias.peek().map(|(_, pair)| pair)
-                            && is_outer(peek_text)
-                        {
-                            continue;
+                        if let Some((COMMENT, peek_text)) = trivias.peek().map(|(_, pair)| pair) {
+                            if is_outer(peek_text) {
+                                continue;
+                            }
                         }
                         break;
                     }

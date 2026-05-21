@@ -1,18 +1,17 @@
+use clippy_config::msrvs::{self, Msrv};
 use clippy_config::Conf;
 use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::eager_or_lazy::switch_to_eager_eval;
-use clippy_utils::msrvs::{self, Msrv};
-use clippy_utils::source::{snippet_with_applicability, snippet_with_context, walk_span_to_context};
+use clippy_utils::source::snippet_with_context;
 use clippy_utils::sugg::Sugg;
-use clippy_utils::visitors::for_each_expr_without_closures;
 use clippy_utils::{
-    as_some_expr, expr_adjustment_requires_coercion, higher, is_else_clause, is_in_const_context, is_none_expr,
-    peel_blocks, sym,
+    contains_return, higher, is_else_clause, is_in_const_context, is_res_lang_ctor, path_res, peel_blocks,
 };
-use core::ops::ControlFlow;
 use rustc_errors::Applicability;
+use rustc_hir::LangItem::{OptionNone, OptionSome};
 use rustc_hir::{Expr, ExprKind};
-use rustc_lint::{LateContext, LateLintPass};
+use rustc_lint::{LateContext, LateLintPass, LintContext};
+use rustc_middle::lint::in_external_macro;
 use rustc_session::impl_lint_pass;
 
 declare_clippy_lint! {
@@ -56,7 +55,9 @@ pub struct IfThenSomeElseNone {
 
 impl IfThenSomeElseNone {
     pub fn new(conf: &'static Conf) -> Self {
-        Self { msrv: conf.msrv }
+        Self {
+            msrv: conf.msrv.clone(),
+        }
     }
 }
 
@@ -71,28 +72,22 @@ impl<'tcx> LateLintPass<'tcx> for IfThenSomeElseNone {
         }) = higher::If::hir(expr)
             && let ExprKind::Block(then_block, _) = then.kind
             && let Some(then_expr) = then_block.expr
-            && let Some(then_arg) = as_some_expr(cx, then_expr)
-            && !expr.span.from_expansion()
-            && !then_expr.span.from_expansion()
-            && is_none_expr(cx, peel_blocks(els))
+            && let ExprKind::Call(then_call, [then_arg]) = then_expr.kind
+            && let ctxt = expr.span.ctxt()
+            && then_expr.span.ctxt() == ctxt
+            && is_res_lang_ctor(cx, path_res(cx, then_call), OptionSome)
+            && is_res_lang_ctor(cx, path_res(cx, peel_blocks(els)), OptionNone)
             && !is_else_clause(cx.tcx, expr)
             && !is_in_const_context(cx)
-            && self.msrv.meets(cx, msrvs::BOOL_THEN)
-            && for_each_expr_without_closures(then_block, |e| {
-                if matches!(e.kind, ExprKind::Ret(..) | ExprKind::Yield(..)) {
-                    ControlFlow::Break(())
-                } else {
-                    ControlFlow::Continue(())
-                }
-            })
-            .is_none()
+            && !in_external_macro(cx.sess(), expr.span)
+            && self.msrv.meets(msrvs::BOOL_THEN)
+            && !contains_return(then_block.stmts)
         {
-            let method_name = if switch_to_eager_eval(cx, expr) && self.msrv.meets(cx, msrvs::BOOL_THEN_SOME) {
-                sym::then_some
+            let method_name = if switch_to_eager_eval(cx, expr) && self.msrv.meets(msrvs::BOOL_THEN_SOME) {
+                "then_some"
             } else {
-                sym::then
+                "then"
             };
-            let ctxt = expr.span.ctxt();
 
             span_lint_and_then(
                 cx,
@@ -100,30 +95,16 @@ impl<'tcx> LateLintPass<'tcx> for IfThenSomeElseNone {
                 expr.span,
                 format!("this could be simplified with `bool::{method_name}`"),
                 |diag| {
-                    if expr_adjustment_requires_coercion(cx, then_arg) {
-                        return;
-                    }
-
-                    let mut app = Applicability::MachineApplicable;
-                    let cond_snip = Sugg::hir_with_context(cx, cond, ctxt, "[condition]", &mut app)
-                        .maybe_paren()
+                    let mut app = Applicability::Unspecified;
+                    let cond_snip = Sugg::hir_with_context(cx, cond, expr.span.ctxt(), "[condition]", &mut app)
+                        .maybe_par()
                         .to_string();
                     let arg_snip = snippet_with_context(cx, then_arg.span, ctxt, "[body]", &mut app).0;
-                    let method_body = if let Some(_) = then_block.stmts.first()
-                        && let Some(then_span) = walk_span_to_context(then.span, ctxt)
-                    {
-                        let block_before_snippet =
-                            snippet_with_applicability(cx, then_span.until(then_expr.span), "..", &mut app);
-                        let block_after_snippet = snippet_with_applicability(
-                            cx,
-                            then_expr.span.shrink_to_hi().until(then_span.shrink_to_hi()),
-                            "..",
-                            &mut app,
-                        );
-                        let closure = if method_name == sym::then { "|| " } else { "" };
-                        format!("{closure}{block_before_snippet}{arg_snip}{block_after_snippet}")
-                    } else if method_name == sym::then {
-                        (std::borrow::Cow::Borrowed("|| ") + arg_snip).into_owned()
+                    let method_body = if let Some(first_stmt) = then_block.stmts.first() {
+                        let (block_snippet, _) =
+                            snippet_with_context(cx, first_stmt.span.until(then_arg.span), ctxt, "..", &mut app);
+                        let closure = if method_name == "then" { "|| " } else { "" };
+                        format!("{closure} {{ {block_snippet}; {arg_snip} }}")
                     } else {
                         arg_snip.into_owned()
                     };
@@ -138,4 +119,6 @@ impl<'tcx> LateLintPass<'tcx> for IfThenSomeElseNone {
             );
         }
     }
+
+    extract_msrv_attr!(LateContext);
 }

@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 #![allow(bare_trait_objects)]
 trait Item {
     type Core;
@@ -6,6 +5,7 @@ trait Item {
 pub struct Flatten<I> {
     inner: <IntoIterator<Item: IntoIterator<Item: >>::IntoIterator as Item>::Core,
     //~^ ERROR E0191
+    //~| ERROR E0223
 }
 
 fn main() {}

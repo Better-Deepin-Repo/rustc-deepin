@@ -1,7 +1,6 @@
-//@ compile-flags: -g -Copt-level=0 -Z verify-llvm-ir
+//@ compile-flags: -g -Copt-level=0
 //@ known-bug: #34127
-//@ only-64bit
-//@ ignore-backends: gcc
+//@ only-x86_64
 
 pub fn main() {
 let _a = [(); 1 << 63];

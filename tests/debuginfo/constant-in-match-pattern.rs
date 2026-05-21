@@ -1,7 +1,8 @@
 //@ compile-flags:-g
-//@ disable-gdb-pretty-printers
 
 #![allow(dead_code, unused_variables)]
+#![feature(omit_gdb_pretty_printer_section)]
+#![omit_gdb_pretty_printer_section]
 
 // This test makes sure that the compiler doesn't crash when trying to assign
 // debug locations to 'constant' patterns in match expressions.

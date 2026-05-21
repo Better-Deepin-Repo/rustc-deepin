@@ -2,18 +2,18 @@
 
 use hir::ScopeDef;
 use ide_db::{FxHashSet, SymbolKind};
-use syntax::{AstNode, ast, format_smolstr};
+use syntax::{ast, format_smolstr, AstNode};
 
 use crate::{
-    CompletionItem, CompletionItemKind, CompletionRelevance, Completions,
     context::{CompletionContext, PathCompletionCtx, Qualified},
     item::Builder,
+    CompletionItem, CompletionItemKind, CompletionRelevance, Completions,
 };
 
 pub(crate) fn complete_use_path(
     acc: &mut Completions,
     ctx: &CompletionContext<'_>,
-    path_ctx @ PathCompletionCtx { qualified, use_tree_parent, .. }: &PathCompletionCtx<'_>,
+    path_ctx @ PathCompletionCtx { qualified, use_tree_parent, .. }: &PathCompletionCtx,
     name_ref: &Option<ast::NameRef>,
 ) {
     match qualified {
@@ -52,11 +52,7 @@ pub(crate) fn complete_use_path(
                         )
                     };
                     for (name, def) in module_scope {
-                        if let (Some(attrs), Some(defining_crate)) =
-                            (def.attrs(ctx.db), def.krate(ctx.db))
-                            && (!ctx.check_stability(Some(&attrs))
-                                || ctx.is_doc_hidden(&attrs, defining_crate))
-                        {
+                        if !ctx.check_stability(def.attrs(ctx.db).as_deref()) {
                             continue;
                         }
                         let is_name_already_imported =
@@ -105,7 +101,7 @@ pub(crate) fn complete_use_path(
                     ScopeDef::ModuleDef(hir::ModuleDef::Adt(hir::Adt::Enum(e))) => {
                         // exclude prelude enum
                         let is_builtin =
-                            res.krate(ctx.db).is_some_and(|krate| krate.is_builtin(ctx.db));
+                            res.krate(ctx.db).map_or(false, |krate| krate.is_builtin(ctx.db));
 
                         if !is_builtin {
                             let item = CompletionItem::new(

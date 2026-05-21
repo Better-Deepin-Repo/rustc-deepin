@@ -8,24 +8,19 @@ use std::iter;
 use hir_def::{DefWithBodyId, HasModule};
 use la_arena::ArenaMap;
 use rustc_hash::FxHashMap;
-use rustc_type_ir::inherent::GenericArgs as _;
 use stdx::never;
 use triomphe::Arc;
 
 use crate::{
-    InferenceResult,
-    db::{HirDatabase, InternedClosure, InternedClosureId},
-    display::DisplayTarget,
-    mir::OperandKind,
-    next_solver::{
-        DbInterner, GenericArgs, ParamEnv, StoredTy, Ty, TypingMode,
-        infer::{DbInternerInferExt, InferCtxt},
-    },
+    db::{HirDatabase, InternedClosure},
+    mir::Operand,
+    utils::ClosureSubst,
+    ClosureId, Interner, Substitution, Ty, TyExt, TypeFlags,
 };
 
 use super::{
-    BasicBlockId, BorrowKind, LocalId, MirBody, MirLowerError, MirSpan, MutBorrowKind, Operand,
-    Place, ProjectionElem, Rvalue, StatementKind, TerminatorKind,
+    BasicBlockId, BorrowKind, LocalId, MirBody, MirLowerError, MirSpan, MutBorrowKind, Place,
+    ProjectionElem, Rvalue, StatementKind, TerminatorKind,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,13 +33,13 @@ pub enum MutabilityReason {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MovedOutOfRef {
-    pub ty: StoredTy,
+    pub ty: Ty,
     pub span: MirSpan,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartiallyMoved {
-    pub ty: StoredTy,
+    pub ty: Ty,
     pub span: MirSpan,
     pub local: LocalId,
 }
@@ -72,7 +67,7 @@ fn all_mir_bodies(
 ) -> Result<(), MirLowerError> {
     fn for_closure(
         db: &dyn HirDatabase,
-        c: InternedClosureId,
+        c: ClosureId,
         cb: &mut impl FnMut(Arc<MirBody>),
     ) -> Result<(), MirLowerError> {
         match db.mir_body_for_closure(c) {
@@ -97,19 +92,12 @@ pub fn borrowck_query(
     def: DefWithBodyId,
 ) -> Result<Arc<[BorrowckResult]>, MirLowerError> {
     let _p = tracing::info_span!("borrowck_query").entered();
-    let module = def.module(db);
-    let interner = DbInterner::new_with(db, module.krate(db));
-    let env = db.trait_environment_for_body(def);
     let mut res = vec![];
-    // This calculates opaques defining scope which is a bit costly therefore is put outside `all_mir_bodies()`.
-    let typing_mode = TypingMode::borrowck(interner, def.into());
     all_mir_bodies(db, def, |body| {
-        // FIXME(next-solver): Opaques.
-        let infcx = interner.infer_ctxt().build(typing_mode);
         res.push(BorrowckResult {
-            mutability_of_locals: mutability_of_locals(&infcx, env, &body),
-            moved_out_of_ref: moved_out_of_ref(&infcx, env, &body),
-            partially_moved: partially_moved(&infcx, env, &body),
+            mutability_of_locals: mutability_of_locals(db, &body),
+            moved_out_of_ref: moved_out_of_ref(db, &body),
+            partially_moved: partially_moved(db, &body),
             borrow_regions: borrow_regions(db, &body),
             mir_body: body,
         });
@@ -117,53 +105,46 @@ pub fn borrowck_query(
     Ok(res.into())
 }
 
-fn make_fetch_closure_field<'db>(
-    db: &'db dyn HirDatabase,
-) -> impl FnOnce(InternedClosureId, GenericArgs<'db>, usize) -> Ty<'db> + use<'db> {
-    |c: InternedClosureId, subst: GenericArgs<'db>, f: usize| {
-        let InternedClosure(def, _) = db.lookup_intern_closure(c);
-        let infer = InferenceResult::for_body(db, def);
-        let (captures, _) = infer.closure_info(c);
-        let parent_subst = subst.as_closure().parent_args();
-        let interner = DbInterner::new_no_crate(db);
-        captures.get(f).expect("broken closure field").ty.get().instantiate(interner, parent_subst)
+fn make_fetch_closure_field(
+    db: &dyn HirDatabase,
+) -> impl FnOnce(ClosureId, &Substitution, usize) -> Ty + '_ {
+    |c: ClosureId, subst: &Substitution, f: usize| {
+        let InternedClosure(def, _) = db.lookup_intern_closure(c.into());
+        let infer = db.infer(def);
+        let (captures, _) = infer.closure_info(&c);
+        let parent_subst = ClosureSubst(subst).parent_subst();
+        captures.get(f).expect("broken closure field").ty.clone().substitute(Interner, parent_subst)
     }
 }
 
-fn moved_out_of_ref<'db>(
-    infcx: &InferCtxt<'db>,
-    env: ParamEnv<'db>,
-    body: &MirBody,
-) -> Vec<MovedOutOfRef> {
-    let db = infcx.interner.db;
+fn moved_out_of_ref(db: &dyn HirDatabase, body: &MirBody) -> Vec<MovedOutOfRef> {
     let mut result = vec![];
-    let mut for_operand = |op: &Operand, span: MirSpan| match op.kind {
-        OperandKind::Copy(p) | OperandKind::Move(p) => {
-            let mut ty: Ty<'db> = body.locals[p.local].ty.as_ref();
+    let mut for_operand = |op: &Operand, span: MirSpan| match op {
+        Operand::Copy(p) | Operand::Move(p) => {
+            let mut ty: Ty = body.locals[p.local].ty.clone();
             let mut is_dereference_of_ref = false;
             for proj in p.projection.lookup(&body.projection_store) {
                 if *proj == ProjectionElem::Deref && ty.as_reference().is_some() {
                     is_dereference_of_ref = true;
                 }
                 ty = proj.projected_ty(
-                    infcx,
-                    env,
                     ty,
+                    db,
                     make_fetch_closure_field(db),
-                    body.owner.module(db).krate(db),
+                    body.owner.module(db.upcast()).krate(),
                 );
             }
             if is_dereference_of_ref
-                && !infcx.type_is_copy_modulo_regions(env, ty)
-                && !ty.references_non_lt_error()
+                && !ty.clone().is_copy(db, body.owner)
+                && !ty.data(Interner).flags.intersects(TypeFlags::HAS_ERROR)
             {
-                result.push(MovedOutOfRef { span: op.span.unwrap_or(span), ty: ty.store() });
+                result.push(MovedOutOfRef { span, ty });
             }
         }
-        OperandKind::Constant { .. } | OperandKind::Static(_) => (),
+        Operand::Constant(_) | Operand::Static(_) => (),
     };
     for (_, block) in body.basic_blocks.iter() {
-        db.unwind_if_revision_cancelled();
+        db.unwind_if_cancelled();
         for statement in &block.statements {
             match &statement.kind {
                 StatementKind::Assign(_, r) => match r {
@@ -186,10 +167,6 @@ fn moved_out_of_ref<'db>(
                             for_operand(op, statement.span);
                         }
                     }
-                    Rvalue::ThreadLocalRef(n)
-                    | Rvalue::AddressOf(n)
-                    | Rvalue::BinaryOp(n)
-                    | Rvalue::NullaryOp(n) => match *n {},
                 },
                 StatementKind::FakeRead(_)
                 | StatementKind::Deinit(_)
@@ -231,33 +208,29 @@ fn moved_out_of_ref<'db>(
     result
 }
 
-fn partially_moved<'db>(
-    infcx: &InferCtxt<'db>,
-    env: ParamEnv<'db>,
-    body: &MirBody,
-) -> Vec<PartiallyMoved> {
-    let db = infcx.interner.db;
+fn partially_moved(db: &dyn HirDatabase, body: &MirBody) -> Vec<PartiallyMoved> {
     let mut result = vec![];
-    let mut for_operand = |op: &Operand, span: MirSpan| match op.kind {
-        OperandKind::Copy(p) | OperandKind::Move(p) => {
-            let mut ty: Ty<'db> = body.locals[p.local].ty.as_ref();
+    let mut for_operand = |op: &Operand, span: MirSpan| match op {
+        Operand::Copy(p) | Operand::Move(p) => {
+            let mut ty: Ty = body.locals[p.local].ty.clone();
             for proj in p.projection.lookup(&body.projection_store) {
                 ty = proj.projected_ty(
-                    infcx,
-                    env,
                     ty,
+                    db,
                     make_fetch_closure_field(db),
-                    body.owner.module(db).krate(db),
+                    body.owner.module(db.upcast()).krate(),
                 );
             }
-            if !infcx.type_is_copy_modulo_regions(env, ty) && !ty.references_non_lt_error() {
-                result.push(PartiallyMoved { span, ty: ty.store(), local: p.local });
+            if !ty.clone().is_copy(db, body.owner)
+                && !ty.data(Interner).flags.intersects(TypeFlags::HAS_ERROR)
+            {
+                result.push(PartiallyMoved { span, ty, local: p.local });
             }
         }
-        OperandKind::Constant { .. } | OperandKind::Static(_) => (),
+        Operand::Constant(_) | Operand::Static(_) => (),
     };
     for (_, block) in body.basic_blocks.iter() {
-        db.unwind_if_revision_cancelled();
+        db.unwind_if_cancelled();
         for statement in &block.statements {
             match &statement.kind {
                 StatementKind::Assign(_, r) => match r {
@@ -280,10 +253,6 @@ fn partially_moved<'db>(
                             for_operand(op, statement.span);
                         }
                     }
-                    Rvalue::ThreadLocalRef(n)
-                    | Rvalue::AddressOf(n)
-                    | Rvalue::BinaryOp(n)
-                    | Rvalue::NullaryOp(n) => match *n {},
                 },
                 StatementKind::FakeRead(_)
                 | StatementKind::Deinit(_)
@@ -328,7 +297,7 @@ fn partially_moved<'db>(
 fn borrow_regions(db: &dyn HirDatabase, body: &MirBody) -> Vec<BorrowRegion> {
     let mut borrows = FxHashMap::default();
     for (_, block) in body.basic_blocks.iter() {
-        db.unwind_if_revision_cancelled();
+        db.unwind_if_cancelled();
         for statement in &block.statements {
             if let StatementKind::Assign(_, Rvalue::Ref(kind, p)) = &statement.kind {
                 borrows
@@ -375,15 +344,9 @@ enum ProjectionCase {
     Indirect,
 }
 
-fn place_case<'db>(
-    infcx: &InferCtxt<'db>,
-    env: ParamEnv<'db>,
-    body: &MirBody,
-    lvalue: &Place,
-) -> ProjectionCase {
-    let db = infcx.interner.db;
+fn place_case(db: &dyn HirDatabase, body: &MirBody, lvalue: &Place) -> ProjectionCase {
     let mut is_part_of = false;
-    let mut ty = body.locals[lvalue.local].ty.as_ref();
+    let mut ty = body.locals[lvalue.local].ty.clone();
     for proj in lvalue.projection.lookup(&body.projection_store).iter() {
         match proj {
             ProjectionElem::Deref if ty.as_adt().is_none() => return ProjectionCase::Indirect, // It's indirect in case of reference and raw
@@ -398,14 +361,17 @@ fn place_case<'db>(
             ProjectionElem::OpaqueCast(_) => (),
         }
         ty = proj.projected_ty(
-            infcx,
-            env,
             ty,
+            db,
             make_fetch_closure_field(db),
-            body.owner.module(db).krate(db),
+            body.owner.module(db.upcast()).krate(),
         );
     }
-    if is_part_of { ProjectionCase::DirectPart } else { ProjectionCase::Direct }
+    if is_part_of {
+        ProjectionCase::DirectPart
+    } else {
+        ProjectionCase::Direct
+    }
 }
 
 /// Returns a map from basic blocks to the set of locals that might be ever initialized before
@@ -420,91 +386,82 @@ fn ever_initialized_map(
     fn dfs(
         db: &dyn HirDatabase,
         body: &MirBody,
+        b: BasicBlockId,
         l: LocalId,
-        stack: &mut Vec<BasicBlockId>,
         result: &mut ArenaMap<BasicBlockId, ArenaMap<LocalId, bool>>,
     ) {
-        while let Some(b) = stack.pop() {
-            let mut is_ever_initialized = result[b][l]; // It must be filled, as we use it as mark for dfs
-            let block = &body.basic_blocks[b];
-            for statement in &block.statements {
-                match &statement.kind {
-                    StatementKind::Assign(p, _) => {
-                        if p.projection.lookup(&body.projection_store).is_empty() && p.local == l {
-                            is_ever_initialized = true;
-                        }
-                    }
-                    StatementKind::StorageDead(p) => {
-                        if *p == l {
-                            is_ever_initialized = false;
-                        }
-                    }
-                    StatementKind::Deinit(_)
-                    | StatementKind::FakeRead(_)
-                    | StatementKind::Nop
-                    | StatementKind::StorageLive(_) => (),
-                }
-            }
-            let Some(terminator) = &block.terminator else {
-                never!(
-                    "Terminator should be none only in construction.\nThe body:\n{}",
-                    body.pretty_print(db, DisplayTarget::from_crate(db, body.owner.krate(db)))
-                );
-                return;
-            };
-            let mut process = |target, is_ever_initialized| {
-                if !result[target].contains_idx(l) || !result[target][l] && is_ever_initialized {
-                    result[target].insert(l, is_ever_initialized);
-                    stack.push(target);
-                }
-            };
-            match &terminator.kind {
-                TerminatorKind::Goto { target } => process(*target, is_ever_initialized),
-                TerminatorKind::SwitchInt { targets, .. } => {
-                    targets.all_targets().iter().for_each(|&it| process(it, is_ever_initialized));
-                }
-                TerminatorKind::UnwindResume
-                | TerminatorKind::Abort
-                | TerminatorKind::Return
-                | TerminatorKind::Unreachable => (),
-                TerminatorKind::Call { target, cleanup, destination, .. } => {
-                    if destination.projection.lookup(&body.projection_store).is_empty()
-                        && destination.local == l
-                    {
+        let mut is_ever_initialized = result[b][l]; // It must be filled, as we use it as mark for dfs
+        let block = &body.basic_blocks[b];
+        for statement in &block.statements {
+            match &statement.kind {
+                StatementKind::Assign(p, _) => {
+                    if p.projection.lookup(&body.projection_store).is_empty() && p.local == l {
                         is_ever_initialized = true;
                     }
-                    target.iter().chain(cleanup).for_each(|&it| process(it, is_ever_initialized));
                 }
-                TerminatorKind::Drop { target, unwind, place: _ } => {
-                    iter::once(target)
-                        .chain(unwind)
-                        .for_each(|&it| process(it, is_ever_initialized));
+                StatementKind::StorageDead(p) => {
+                    if *p == l {
+                        is_ever_initialized = false;
+                    }
                 }
-                TerminatorKind::DropAndReplace { .. }
-                | TerminatorKind::Assert { .. }
-                | TerminatorKind::Yield { .. }
-                | TerminatorKind::CoroutineDrop
-                | TerminatorKind::FalseEdge { .. }
-                | TerminatorKind::FalseUnwind { .. } => {
-                    never!("We don't emit these MIR terminators yet");
+                StatementKind::Deinit(_)
+                | StatementKind::FakeRead(_)
+                | StatementKind::Nop
+                | StatementKind::StorageLive(_) => (),
+            }
+        }
+        let Some(terminator) = &block.terminator else {
+            never!(
+                "Terminator should be none only in construction.\nThe body:\n{}",
+                body.pretty_print(db)
+            );
+            return;
+        };
+        let mut process = |target, is_ever_initialized| {
+            if !result[target].contains_idx(l) || !result[target][l] && is_ever_initialized {
+                result[target].insert(l, is_ever_initialized);
+                dfs(db, body, target, l, result);
+            }
+        };
+        match &terminator.kind {
+            TerminatorKind::Goto { target } => process(*target, is_ever_initialized),
+            TerminatorKind::SwitchInt { targets, .. } => {
+                targets.all_targets().iter().for_each(|&it| process(it, is_ever_initialized));
+            }
+            TerminatorKind::UnwindResume
+            | TerminatorKind::Abort
+            | TerminatorKind::Return
+            | TerminatorKind::Unreachable => (),
+            TerminatorKind::Call { target, cleanup, destination, .. } => {
+                if destination.projection.lookup(&body.projection_store).is_empty()
+                    && destination.local == l
+                {
+                    is_ever_initialized = true;
                 }
+                target.iter().chain(cleanup).for_each(|&it| process(it, is_ever_initialized));
+            }
+            TerminatorKind::Drop { target, unwind, place: _ } => {
+                iter::once(target).chain(unwind).for_each(|&it| process(it, is_ever_initialized));
+            }
+            TerminatorKind::DropAndReplace { .. }
+            | TerminatorKind::Assert { .. }
+            | TerminatorKind::Yield { .. }
+            | TerminatorKind::CoroutineDrop
+            | TerminatorKind::FalseEdge { .. }
+            | TerminatorKind::FalseUnwind { .. } => {
+                never!("We don't emit these MIR terminators yet");
             }
         }
     }
-    let mut stack = Vec::new();
     for &l in &body.param_locals {
         result[body.start_block].insert(l, true);
-        stack.clear();
-        stack.push(body.start_block);
-        dfs(db, body, l, &mut stack, &mut result);
+        dfs(db, body, body.start_block, l, &mut result);
     }
     for l in body.locals.iter().map(|it| it.0) {
-        db.unwind_if_revision_cancelled();
+        db.unwind_if_cancelled();
         if !result[body.start_block].contains_idx(l) {
             result[body.start_block].insert(l, false);
-            stack.clear();
-            stack.push(body.start_block);
-            dfs(db, body, l, &mut stack, &mut result);
+            dfs(db, body, body.start_block, l, &mut result);
         }
     }
     result
@@ -526,17 +483,15 @@ fn record_usage(local: LocalId, result: &mut ArenaMap<LocalId, MutabilityReason>
 }
 
 fn record_usage_for_operand(arg: &Operand, result: &mut ArenaMap<LocalId, MutabilityReason>) {
-    if let OperandKind::Copy(p) | OperandKind::Move(p) = arg.kind {
+    if let Operand::Copy(p) | Operand::Move(p) = arg {
         record_usage(p.local, result);
     }
 }
 
-fn mutability_of_locals<'db>(
-    infcx: &InferCtxt<'db>,
-    env: ParamEnv<'db>,
+fn mutability_of_locals(
+    db: &dyn HirDatabase,
     body: &MirBody,
 ) -> ArenaMap<LocalId, MutabilityReason> {
-    let db = infcx.interner.db;
     let mut result: ArenaMap<LocalId, MutabilityReason> =
         body.locals.iter().map(|it| (it.0, MutabilityReason::Unused)).collect();
 
@@ -546,7 +501,7 @@ fn mutability_of_locals<'db>(
         for statement in &block.statements {
             match &statement.kind {
                 StatementKind::Assign(place, value) => {
-                    match place_case(infcx, env, body, place) {
+                    match place_case(db, body, place) {
                         ProjectionCase::Direct => {
                             if ever_init_map.get(place.local).copied().unwrap_or_default() {
                                 push_mut_span(place.local, statement.span, &mut result);
@@ -584,10 +539,6 @@ fn mutability_of_locals<'db>(
                             }
                         }
                         Rvalue::ShallowInitBox(_, _) | Rvalue::ShallowInitBoxWithAlloc(_) => (),
-                        Rvalue::ThreadLocalRef(n)
-                        | Rvalue::AddressOf(n)
-                        | Rvalue::BinaryOp(n)
-                        | Rvalue::NullaryOp(n) => match *n {},
                     }
                     if let Rvalue::Ref(
                         BorrowKind::Mut {
@@ -595,9 +546,10 @@ fn mutability_of_locals<'db>(
                         },
                         p,
                     ) = value
-                        && place_case(infcx, env, body, p) != ProjectionCase::Indirect
                     {
-                        push_mut_span(p.local, statement.span, &mut result);
+                        if place_case(db, body, p) != ProjectionCase::Indirect {
+                            push_mut_span(p.local, statement.span, &mut result);
+                        }
                     }
                 }
                 StatementKind::FakeRead(p) => {

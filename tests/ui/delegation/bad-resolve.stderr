@@ -44,7 +44,9 @@ error[E0575]: expected method or associated constant, found associated type `Tra
   --> $DIR/bad-resolve.rs:27:11
    |
 LL |     reuse <F as Trait>::Type;
-   |           ^^^^^^^^^^^^^^^^^^ not a method or associated constant
+   |           ^^^^^^^^^^^^^^^^^^
+   |
+   = note: can't use a type alias as a constructor
 
 error[E0576]: cannot find method or associated constant `baz` in trait `Trait`
   --> $DIR/bad-resolve.rs:30:25
@@ -53,13 +55,7 @@ LL |     fn bar() {}
    |     -------- similarly named associated function `bar` defined here
 ...
 LL |     reuse <F as Trait>::baz;
-   |                         ^^^
-   |
-help: an associated function with a similar name exists
-   |
-LL -     reuse <F as Trait>::baz;
-LL +     reuse <F as Trait>::bar;
-   |
+   |                         ^^^ help: an associated function with a similar name exists: `bar`
 
 error[E0425]: cannot find function `foo` in this scope
   --> $DIR/bad-resolve.rs:35:11
@@ -74,13 +70,7 @@ LL |     fn foo(&self, x: i32) -> i32 { x }
    |     ---------------------------- similarly named associated function `foo` defined here
 ...
 LL |     reuse Trait::foo2 { self.0 }
-   |                  ^^^^
-   |
-help: an associated function with a similar name exists
-   |
-LL -     reuse Trait::foo2 { self.0 }
-LL +     reuse Trait::foo { self.0 }
-   |
+   |                  ^^^^ help: an associated function with a similar name exists: `foo`
 
 error[E0046]: not all trait items implemented, missing: `Type`
   --> $DIR/bad-resolve.rs:22:1
@@ -91,19 +81,17 @@ LL |     type Type;
 LL | impl Trait for S {
    | ^^^^^^^^^^^^^^^^ missing `Type` in implementation
 
-error[E0433]: cannot find module or crate `unresolved_prefix` in this scope
+error[E0433]: failed to resolve: use of undeclared crate or module `unresolved_prefix`
   --> $DIR/bad-resolve.rs:43:7
    |
 LL | reuse unresolved_prefix::{a, b, c};
-   |       ^^^^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `unresolved_prefix`
-   |
-   = help: you might be missing a crate named `unresolved_prefix`
+   |       ^^^^^^^^^^^^^^^^^ use of undeclared crate or module `unresolved_prefix`
 
-error[E0433]: `crate` in paths can only be used in start position
+error[E0433]: failed to resolve: `crate` in paths can only be used in start position
   --> $DIR/bad-resolve.rs:44:29
    |
 LL | reuse prefix::{self, super, crate};
-   |                             ^^^^^ can only be used in path start position
+   |                             ^^^^^ `crate` in paths can only be used in start position
 
 error: aborting due to 12 previous errors
 

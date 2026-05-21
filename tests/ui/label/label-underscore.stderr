@@ -1,10 +1,10 @@
-error: labels cannot use keyword names
+error: invalid label name `'_`
   --> $DIR/label-underscore.rs:2:5
    |
 LL |     '_: loop {
    |     ^^
 
-error: labels cannot use keyword names
+error: invalid label name `'_`
   --> $DIR/label-underscore.rs:3:15
    |
 LL |         break '_

@@ -1,6 +1,6 @@
 //! Tests for `[lints]`
 
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
@@ -44,7 +44,7 @@ fn dependency_warning_ignored() {
 
     foo.cargo("check")
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [CHECKING] bar v0.0.1 ([ROOT]/bar)
 [CHECKING] foo v0.0.1 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -79,6 +79,7 @@ fn malformed_on_stable() {
   |
 2 |                 lints = 20
   |                         ^^
+  |
 
 "#]])
         .run();
@@ -138,6 +139,7 @@ fn invalid_type_in_lint_value() {
   |
 8 |                 rust-2018-idioms = -1
   |                                    ^^
+  |
 
 "#]])
         .run();
@@ -340,6 +342,7 @@ pub fn foo(num: i32) -> u32 {
   |
 9 |                 workspace = false
   |                             ^^^^^
+  |
 
 "#]])
         .run();
@@ -829,7 +832,7 @@ im_a_teapot = "warn"
  --> Cargo.toml:9:1
   |
 9 | im-a-teapot = true
-  | ^^^^^^^^^^^^^^^^^^
+  | ------------------
   |
   = [NOTE] `cargo::im_a_teapot` is set to `warn` in `[lints]`
 [CHECKING] foo v0.0.1 ([ROOT]/foo)

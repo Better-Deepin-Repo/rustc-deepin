@@ -11,10 +11,8 @@ use rustc_macros::{HashStable, TyDecodable, TyEncodable};
 use tracing::{debug, instrument};
 
 use crate::traits::query::NoSolution;
-use crate::ty::{
-    self, EarlyBinder, FallibleTypeFolder, GenericArgsRef, Ty, TyCtxt, TypeFoldable, TypeFolder,
-    TypeVisitableExt,
-};
+use crate::ty::fold::{FallibleTypeFolder, TypeFoldable, TypeFolder};
+use crate::ty::{self, EarlyBinder, GenericArgsRef, Ty, TyCtxt, TypeVisitableExt};
 
 #[derive(Debug, Copy, Clone, HashStable, TyEncodable, TyDecodable)]
 pub enum NormalizationError<'tcx> {
@@ -37,27 +35,27 @@ impl<'tcx> TyCtxt<'tcx> {
     ///
     /// This should only be used outside of type inference. For example,
     /// it assumes that normalization will succeed.
-    #[tracing::instrument(level = "debug", skip(self, typing_env), ret)]
-    pub fn normalize_erasing_regions<T>(self, typing_env: ty::TypingEnv<'tcx>, value: T) -> T
+    #[tracing::instrument(level = "debug", skip(self, param_env), ret)]
+    pub fn normalize_erasing_regions<T>(self, param_env: ty::ParamEnv<'tcx>, value: T) -> T
     where
         T: TypeFoldable<TyCtxt<'tcx>>,
     {
         debug!(
-            "normalize_erasing_regions::<{}>(value={:?}, typing_env={:?})",
+            "normalize_erasing_regions::<{}>(value={:?}, param_env={:?})",
             std::any::type_name::<T>(),
             value,
-            typing_env,
+            param_env,
         );
 
         // Erase first before we do the real query -- this keeps the
         // cache from being too polluted.
-        let value = self.erase_and_anonymize_regions(value);
+        let value = self.erase_regions(value);
         debug!(?value);
 
         if !value.has_aliases() {
             value
         } else {
-            value.fold_with(&mut NormalizeAfterErasingRegionsFolder { tcx: self, typing_env })
+            value.fold_with(&mut NormalizeAfterErasingRegionsFolder { tcx: self, param_env })
         }
     }
 
@@ -68,28 +66,28 @@ impl<'tcx> TyCtxt<'tcx> {
     /// succeeds.
     pub fn try_normalize_erasing_regions<T>(
         self,
-        typing_env: ty::TypingEnv<'tcx>,
+        param_env: ty::ParamEnv<'tcx>,
         value: T,
     ) -> Result<T, NormalizationError<'tcx>>
     where
         T: TypeFoldable<TyCtxt<'tcx>>,
     {
         debug!(
-            "try_normalize_erasing_regions::<{}>(value={:?}, typing_env={:?})",
+            "try_normalize_erasing_regions::<{}>(value={:?}, param_env={:?})",
             std::any::type_name::<T>(),
             value,
-            typing_env,
+            param_env,
         );
 
         // Erase first before we do the real query -- this keeps the
         // cache from being too polluted.
-        let value = self.erase_and_anonymize_regions(value);
+        let value = self.erase_regions(value);
         debug!(?value);
 
         if !value.has_aliases() {
             Ok(value)
         } else {
-            let mut folder = TryNormalizeAfterErasingRegionsFolder::new(self, typing_env);
+            let mut folder = TryNormalizeAfterErasingRegionsFolder::new(self, param_env);
             value.try_fold_with(&mut folder)
         }
     }
@@ -105,17 +103,17 @@ impl<'tcx> TyCtxt<'tcx> {
     // FIXME(@lcnr): This method should not be necessary, we now normalize
     // inside of binders. We should be able to only use
     // `tcx.instantiate_bound_regions_with_erased`.
-    #[tracing::instrument(level = "debug", skip(self, typing_env))]
+    #[tracing::instrument(level = "debug", skip(self, param_env))]
     pub fn normalize_erasing_late_bound_regions<T>(
         self,
-        typing_env: ty::TypingEnv<'tcx>,
+        param_env: ty::ParamEnv<'tcx>,
         value: ty::Binder<'tcx, T>,
     ) -> T
     where
         T: TypeFoldable<TyCtxt<'tcx>>,
     {
         let value = self.instantiate_bound_regions_with_erased(value);
-        self.normalize_erasing_regions(typing_env, value)
+        self.normalize_erasing_regions(param_env, value)
     }
 
     /// Monomorphizes a type from the AST by first applying the
@@ -127,14 +125,14 @@ impl<'tcx> TyCtxt<'tcx> {
     pub fn instantiate_and_normalize_erasing_regions<T>(
         self,
         param_args: GenericArgsRef<'tcx>,
-        typing_env: ty::TypingEnv<'tcx>,
+        param_env: ty::ParamEnv<'tcx>,
         value: EarlyBinder<'tcx, T>,
     ) -> T
     where
         T: TypeFoldable<TyCtxt<'tcx>>,
     {
         let instantiated = value.instantiate(self, param_args);
-        self.normalize_erasing_regions(typing_env, instantiated)
+        self.normalize_erasing_regions(param_env, instantiated)
     }
 
     /// Monomorphizes a type from the AST by first applying the
@@ -145,20 +143,20 @@ impl<'tcx> TyCtxt<'tcx> {
     pub fn try_instantiate_and_normalize_erasing_regions<T>(
         self,
         param_args: GenericArgsRef<'tcx>,
-        typing_env: ty::TypingEnv<'tcx>,
+        param_env: ty::ParamEnv<'tcx>,
         value: EarlyBinder<'tcx, T>,
     ) -> Result<T, NormalizationError<'tcx>>
     where
         T: TypeFoldable<TyCtxt<'tcx>>,
     {
         let instantiated = value.instantiate(self, param_args);
-        self.try_normalize_erasing_regions(typing_env, instantiated)
+        self.try_normalize_erasing_regions(param_env, instantiated)
     }
 }
 
 struct NormalizeAfterErasingRegionsFolder<'tcx> {
     tcx: TyCtxt<'tcx>,
-    typing_env: ty::TypingEnv<'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
 }
 
 impl<'tcx> NormalizeAfterErasingRegionsFolder<'tcx> {
@@ -166,15 +164,12 @@ impl<'tcx> NormalizeAfterErasingRegionsFolder<'tcx> {
         &self,
         arg: ty::GenericArg<'tcx>,
     ) -> ty::GenericArg<'tcx> {
-        let arg = self.typing_env.as_query_input(arg);
-        self.tcx.try_normalize_generic_arg_after_erasing_regions(arg).unwrap_or_else(|_| {
-            bug!(
-                "Failed to normalize {:?} in typing_env={:?}, \
-                maybe try to call `try_normalize_erasing_regions` instead",
-                arg.value,
-                self.typing_env,
-            )
-        })
+        let arg = self.param_env.and(arg);
+
+        self.tcx.try_normalize_generic_arg_after_erasing_regions(arg).unwrap_or_else(|_| bug!(
+            "Failed to normalize {:?}, maybe try to call `try_normalize_erasing_regions` instead",
+            arg.value
+        ))
     }
 }
 
@@ -194,12 +189,12 @@ impl<'tcx> TypeFolder<TyCtxt<'tcx>> for NormalizeAfterErasingRegionsFolder<'tcx>
 
 struct TryNormalizeAfterErasingRegionsFolder<'tcx> {
     tcx: TyCtxt<'tcx>,
-    typing_env: ty::TypingEnv<'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
 }
 
 impl<'tcx> TryNormalizeAfterErasingRegionsFolder<'tcx> {
-    fn new(tcx: TyCtxt<'tcx>, typing_env: ty::TypingEnv<'tcx>) -> Self {
-        TryNormalizeAfterErasingRegionsFolder { tcx, typing_env }
+    fn new(tcx: TyCtxt<'tcx>, param_env: ty::ParamEnv<'tcx>) -> Self {
+        TryNormalizeAfterErasingRegionsFolder { tcx, param_env }
     }
 
     #[instrument(skip(self), level = "debug")]
@@ -207,8 +202,10 @@ impl<'tcx> TryNormalizeAfterErasingRegionsFolder<'tcx> {
         &self,
         arg: ty::GenericArg<'tcx>,
     ) -> Result<ty::GenericArg<'tcx>, NoSolution> {
-        let input = self.typing_env.as_query_input(arg);
-        self.tcx.try_normalize_generic_arg_after_erasing_regions(input)
+        let arg = self.param_env.and(arg);
+        debug!(?arg);
+
+        self.tcx.try_normalize_generic_arg_after_erasing_regions(arg)
     }
 }
 

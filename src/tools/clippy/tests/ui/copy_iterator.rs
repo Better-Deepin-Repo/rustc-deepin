@@ -5,8 +5,8 @@
 struct Countdown(u8);
 
 impl Iterator for Countdown {
-    //~^ copy_iterator
-
+    //~^ ERROR: you are implementing `Iterator` on a `Copy` type
+    //~| NOTE: consider implementing `IntoIterator` instead
     type Item = u8;
 
     fn next(&mut self) -> Option<u8> {

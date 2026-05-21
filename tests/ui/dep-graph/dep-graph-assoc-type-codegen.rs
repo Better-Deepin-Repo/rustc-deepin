@@ -15,7 +15,7 @@ pub trait Foo: Sized {
 }
 
 mod x {
-    use crate::Foo;
+    use Foo;
 
     #[rustc_if_this_changed]
     impl Foo for char { type T = char; }
@@ -24,7 +24,7 @@ mod x {
 }
 
 mod y {
-    use crate::Foo;
+    use Foo;
 
     #[rustc_then_this_would_need(typeck)] //~ ERROR OK
     pub fn use_char_assoc() {

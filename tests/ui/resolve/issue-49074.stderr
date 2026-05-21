@@ -10,13 +10,7 @@ error: cannot find attribute `marco_use` in this scope
   --> $DIR/issue-49074.rs:3:3
    |
 LL | #[marco_use] // typo
-   |   ^^^^^^^^^
-   |
-help: a built-in attribute with a similar name exists
-   |
-LL - #[marco_use] // typo
-LL + #[macro_use] // typo
-   |
+   |   ^^^^^^^^^ help: a built-in attribute with a similar name exists: `macro_use`
 
 error: aborting due to 2 previous errors
 

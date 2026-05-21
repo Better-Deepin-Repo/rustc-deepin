@@ -1,8 +1,7 @@
 use clippy_utils::diagnostics::span_lint_and_then;
-use clippy_utils::is_from_proc_macro;
 use rustc_errors::Applicability;
 use rustc_hir::def_id::{DefId, DefIdMap};
-use rustc_hir::{BoundPolarity, GenericBound, Generics, PolyTraitRef, TraitBoundModifiers, WherePredicateKind};
+use rustc_hir::{GenericBound, Generics, PolyTraitRef, TraitBoundModifier, WherePredicate};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::{ClauseKind, PredicatePolarity};
 use rustc_session::declare_lint_pass;
@@ -27,21 +26,21 @@ declare_clippy_lint! {
     ///
     /// // or choose alternative bounds for `T` so that it can be unsized
     /// ```
-    #[clippy::version = "1.81.0"]
+    #[clippy::version = "1.79.0"]
     pub NEEDLESS_MAYBE_SIZED,
     suspicious,
     "a `?Sized` bound that is unusable due to a `Sized` requirement"
 }
 declare_lint_pass!(NeedlessMaybeSized => [NEEDLESS_MAYBE_SIZED]);
 
-#[expect(clippy::struct_field_names)]
-#[derive(Debug)]
+#[allow(clippy::struct_field_names)]
 struct Bound<'tcx> {
     /// The [`DefId`] of the type parameter the bound refers to
     param: DefId,
     ident: Ident,
 
     trait_bound: &'tcx PolyTraitRef<'tcx>,
+    modifier: TraitBoundModifier,
 
     predicate_pos: usize,
     bound_pos: usize,
@@ -54,7 +53,7 @@ fn type_param_bounds<'tcx>(generics: &'tcx Generics<'tcx>) -> impl Iterator<Item
         .iter()
         .enumerate()
         .filter_map(|(predicate_pos, predicate)| {
-            let WherePredicateKind::BoundPredicate(bound_predicate) = &predicate.kind else {
+            let WherePredicate::BoundPredicate(bound_predicate) = predicate else {
                 return None;
             };
 
@@ -66,10 +65,11 @@ fn type_param_bounds<'tcx>(generics: &'tcx Generics<'tcx>) -> impl Iterator<Item
                     .iter()
                     .enumerate()
                     .filter_map(move |(bound_pos, bound)| match bound {
-                        GenericBound::Trait(trait_bound) => Some(Bound {
+                        &GenericBound::Trait(ref trait_bound, modifier) => Some(Bound {
                             param,
                             ident,
                             trait_bound,
+                            modifier,
                             predicate_pos,
                             bound_pos,
                         }),
@@ -120,16 +120,15 @@ impl LateLintPass<'_> for NeedlessMaybeSized {
         let maybe_sized_params: DefIdMap<_> = type_param_bounds(generics)
             .filter(|bound| {
                 bound.trait_bound.trait_ref.trait_def_id() == Some(sized_trait)
-                    && matches!(bound.trait_bound.modifiers.polarity, BoundPolarity::Maybe(_))
+                    && bound.modifier == TraitBoundModifier::Maybe
             })
             .map(|bound| (bound.param, bound))
             .collect();
 
         for bound in type_param_bounds(generics) {
-            if bound.trait_bound.modifiers == TraitBoundModifiers::NONE
+            if bound.modifier == TraitBoundModifier::None
                 && let Some(sized_bound) = maybe_sized_params.get(&bound.param)
                 && let Some(path) = path_to_sized_bound(cx, bound.trait_bound)
-                && !is_from_proc_macro(cx, bound.trait_bound)
             {
                 span_lint_and_then(
                     cx,

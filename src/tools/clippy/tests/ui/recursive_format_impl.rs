@@ -29,7 +29,8 @@ impl B for A {
 impl fmt::Display for A {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.to_string())
-        //~^ recursive_format_impl
+        //~^ ERROR: using `self.to_string` in `fmt::Display` implementation will cause inf
+        //~| NOTE: `-D clippy::recursive-format-impl` implied by `-D warnings`
     }
 }
 
@@ -74,7 +75,7 @@ struct G;
 impl std::fmt::Display for G {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self)
-        //~^ recursive_format_impl
+        //~^ ERROR: using `self` as `Display` in `impl Display` will cause infinite recurs
     }
 }
 
@@ -84,14 +85,14 @@ struct H;
 impl std::fmt::Display for H {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", &self)
-        //~^ recursive_format_impl
+        //~^ ERROR: using `self` as `Display` in `impl Display` will cause infinite recurs
     }
 }
 
 impl std::fmt::Debug for H {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", &self)
-        //~^ recursive_format_impl
+        //~^ ERROR: using `self` as `Debug` in `impl Debug` will cause infinite recursion
     }
 }
 
@@ -101,7 +102,7 @@ struct H2;
 impl std::fmt::Display for H2 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", &&&self)
-        //~^ recursive_format_impl
+        //~^ ERROR: using `self` as `Display` in `impl Display` will cause infinite recurs
     }
 }
 
@@ -176,14 +177,14 @@ impl std::ops::Deref for J {
 impl std::fmt::Display for J {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", &*self)
-        //~^ recursive_format_impl
+        //~^ ERROR: using `self` as `Display` in `impl Display` will cause infinite recurs
     }
 }
 
 impl std::fmt::Debug for J {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}", &*self)
-        //~^ recursive_format_impl
+        //~^ ERROR: using `self` as `Debug` in `impl Debug` will cause infinite recursion
     }
 }
 
@@ -200,7 +201,7 @@ impl std::ops::Deref for J2 {
 impl std::fmt::Display for J2 {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", *self)
-        //~^ recursive_format_impl
+        //~^ ERROR: using `self` as `Display` in `impl Display` will cause infinite recurs
     }
 }
 
@@ -217,7 +218,7 @@ impl std::ops::Deref for J3 {
 impl std::fmt::Display for J3 {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", **&&*self)
-        //~^ recursive_format_impl
+        //~^ ERROR: using `self` as `Display` in `impl Display` will cause infinite recurs
     }
 }
 
@@ -234,7 +235,7 @@ impl std::ops::Deref for J4 {
 impl std::fmt::Display for J4 {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{}", &&**&&*self)
-        //~^ recursive_format_impl
+        //~^ ERROR: using `self` as `Display` in `impl Display` will cause infinite recurs
     }
 }
 

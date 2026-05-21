@@ -1,9 +1,9 @@
 use syntax::{
+    ast::{self, HasAttrs},
     AstNode, AstToken,
-    ast::{self, HasAttrs, edit::AstNodeEdit},
 };
 
-use crate::{AssistContext, AssistId, Assists, utils::test_related_attribute_syn};
+use crate::{utils::test_related_attribute_syn, AssistContext, AssistId, AssistKind, Assists};
 
 // Assist: toggle_ignore
 //
@@ -27,19 +27,16 @@ pub(crate) fn toggle_ignore(acc: &mut Assists, ctx: &AssistContext<'_>) -> Optio
     let attr: ast::Attr = ctx.find_node_at_offset()?;
     let func = attr.syntax().parent().and_then(ast::Fn::cast)?;
     let attr = test_related_attribute_syn(&func)?;
-    let indent = attr.indent_level();
 
     match has_ignore_attribute(&func) {
         None => acc.add(
-            AssistId::refactor("toggle_ignore"),
+            AssistId("toggle_ignore", AssistKind::None),
             "Ignore this test",
             attr.syntax().text_range(),
-            |builder| {
-                builder.insert(attr.syntax().text_range().end(), format!("\n{indent}#[ignore]"))
-            },
+            |builder| builder.insert(attr.syntax().text_range().end(), "\n#[ignore]"),
         ),
         Some(ignore_attr) => acc.add(
-            AssistId::refactor("toggle_ignore"),
+            AssistId("toggle_ignore", AssistKind::None),
             "Re-enable this test",
             ignore_attr.syntax().text_range(),
             |builder| {
@@ -72,17 +69,13 @@ mod tests {
         check_assist(
             toggle_ignore,
             r#"
-            mod indent {
-                #[test$0]
-                fn test() {}
-            }
+            #[test$0]
+            fn test() {}
             "#,
             r#"
-            mod indent {
-                #[test]
-                #[ignore]
-                fn test() {}
-            }
+            #[test]
+            #[ignore]
+            fn test() {}
             "#,
         )
     }
@@ -92,17 +85,13 @@ mod tests {
         check_assist(
             toggle_ignore,
             r#"
-            mod indent {
-                #[test$0]
-                #[ignore]
-                fn test() {}
-            }
+            #[test$0]
+            #[ignore]
+            fn test() {}
             "#,
             r#"
-            mod indent {
-                #[test]
-                fn test() {}
-            }
+            #[test]
+            fn test() {}
             "#,
         )
     }

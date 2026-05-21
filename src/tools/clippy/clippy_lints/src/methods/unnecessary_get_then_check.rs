@@ -1,22 +1,21 @@
 use clippy_utils::diagnostics::{span_lint_and_sugg, span_lint_and_then};
-use clippy_utils::res::MaybeDef;
 use clippy_utils::source::SpanRangeExt;
-use clippy_utils::sym;
+use clippy_utils::ty::is_type_diagnostic_item;
 
 use rustc_errors::Applicability;
 use rustc_hir::{Expr, ExprKind};
 use rustc_lint::LateContext;
 use rustc_middle::ty::Ty;
-use rustc_span::Span;
+use rustc_span::{sym, Span};
 
 use super::UNNECESSARY_GET_THEN_CHECK;
 
 fn is_a_std_set_type(cx: &LateContext<'_>, ty: Ty<'_>) -> bool {
-    matches!(ty.opt_diag_name(cx), Some(sym::HashSet | sym::BTreeSet))
+    is_type_diagnostic_item(cx, ty, sym::HashSet) || is_type_diagnostic_item(cx, ty, sym::BTreeSet)
 }
 
 fn is_a_std_map_type(cx: &LateContext<'_>, ty: Ty<'_>) -> bool {
-    matches!(ty.opt_diag_name(cx), Some(sym::HashMap | sym::BTreeMap))
+    is_type_diagnostic_item(cx, ty, sym::HashMap) || is_type_diagnostic_item(cx, ty, sym::BTreeMap)
 }
 
 pub(super) fn check(

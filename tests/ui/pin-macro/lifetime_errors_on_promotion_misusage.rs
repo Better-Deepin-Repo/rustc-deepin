@@ -9,14 +9,14 @@ use core::{
 
 fn function_call_stops_borrow_extension() {
     let phantom_pinned = identity(pin!(PhantomPinned));
-    //~^ ERROR temporary value dropped while borrowed [E0716]
+    //~^ ERROR temporary value dropped while borrowed
     stuff(phantom_pinned)
 }
 
 fn promotion_only_works_for_the_innermost_block() {
     let phantom_pinned = {
         let phantom_pinned = pin!(PhantomPinned);
-        //~^ ERROR temporary value dropped while borrowed [E0716]
+        //~^ ERROR temporary value dropped while borrowed
         phantom_pinned
     };
     stuff(phantom_pinned)

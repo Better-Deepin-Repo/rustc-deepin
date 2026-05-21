@@ -1,6 +1,6 @@
 # Functions
 
-Ignoring [elision], function signatures with lifetimes have a few constraints:
+Ignoring [elision], function signatures with lifetimes have a few constraints: 
 
 * any reference *must* have an annotated lifetime.
 * any reference being returned *must* have the same lifetime as an input or
@@ -42,10 +42,10 @@ fn pass_x<'a, 'b>(x: &'a i32, _: &'b i32) -> &'a i32 { x }
 fn main() {
     let x = 7;
     let y = 9;
-
+    
     print_one(&x);
     print_multi(&x, &y);
-
+    
     let z = pass_x(&x, &y);
     print_one(z);
 

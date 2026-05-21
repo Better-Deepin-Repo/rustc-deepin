@@ -149,7 +149,6 @@ mod function;
 mod index;
 mod index_range;
 mod range;
-mod reborrow;
 mod try_trait;
 mod unsize;
 
@@ -163,18 +162,17 @@ pub use self::async_function::{AsyncFn, AsyncFnMut, AsyncFnOnce};
 pub use self::bit::{BitAnd, BitOr, BitXor, Not, Shl, Shr};
 #[stable(feature = "op_assign_traits", since = "1.8.0")]
 pub use self::bit::{BitAndAssign, BitOrAssign, BitXorAssign, ShlAssign, ShrAssign};
-#[stable(feature = "control_flow_enum_type", since = "1.55.0")]
+#[unstable(feature = "control_flow_enum", reason = "new API", issue = "75744")]
 pub use self::control_flow::ControlFlow;
 #[unstable(feature = "coroutine_trait", issue = "43122")]
 pub use self::coroutine::{Coroutine, CoroutineState};
 #[unstable(feature = "deref_pure_trait", issue = "87121")]
 pub use self::deref::DerefPure;
-#[unstable(feature = "legacy_receiver_trait", issue = "none")]
-pub use self::deref::LegacyReceiver;
-#[unstable(feature = "arbitrary_self_types", issue = "44874")]
+#[unstable(feature = "receiver_trait", issue = "none")]
 pub use self::deref::Receiver;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::deref::{Deref, DerefMut};
+pub(crate) use self::drop::fallback_surface_drop;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::drop::Drop;
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -182,22 +180,18 @@ pub use self::function::{Fn, FnMut, FnOnce};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::index::{Index, IndexMut};
 pub(crate) use self::index_range::IndexRange;
-#[unstable(feature = "range_into_bounds", issue = "136903")]
-pub use self::range::IntoBounds;
+#[unstable(feature = "one_sided_range", issue = "69780")]
+pub use self::range::OneSidedRange;
 #[stable(feature = "inclusive_range", since = "1.26.0")]
 pub use self::range::{Bound, RangeBounds, RangeInclusive, RangeToInclusive};
-#[unstable(feature = "one_sided_range", issue = "69780")]
-pub use self::range::{OneSidedRange, OneSidedRangeBound};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::range::{Range, RangeFrom, RangeFull, RangeTo};
-#[unstable(feature = "reborrow", issue = "145612")]
-pub use self::reborrow::{CoerceShared, Reborrow};
 #[unstable(feature = "try_trait_v2_residual", issue = "91285")]
 pub use self::try_trait::Residual;
 #[unstable(feature = "try_trait_v2_yeet", issue = "96374")]
 pub use self::try_trait::Yeet;
 pub(crate) use self::try_trait::{ChangeOutputType, NeverShortCircuit};
-#[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
+#[unstable(feature = "try_trait_v2", issue = "84277")]
 pub use self::try_trait::{FromResidual, Try};
 #[unstable(feature = "coerce_unsized", issue = "18598")]
 pub use self::unsize::CoerceUnsized;

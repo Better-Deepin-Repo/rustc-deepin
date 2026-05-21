@@ -111,17 +111,8 @@ LL |     let (_a, b): (Vec<&'static String>, _) = (vec![&String::new()], 44);
    |                  |                                  creates a temporary value which is freed while still in use
    |                  type annotation requires that borrow lasts for `'static`
 
-error[E0716]: temporary value dropped while borrowed
-  --> $DIR/patterns.rs:74:44
-   |
-LL |     let _vec: Vec<&'static String> = vec![&String::new()];
-   |               --------------------         ^^^^^^^^^^^^^ - temporary value is freed at the end of this statement
-   |               |                            |
-   |               |                            creates a temporary value which is freed while still in use
-   |               type annotation requires that borrow lasts for `'static`
-
 error[E0597]: `x` does not live long enough
-  --> $DIR/patterns.rs:80:40
+  --> $DIR/patterns.rs:75:40
    |
 LL |     let x = 22;
    |         - binding `x` declared here
@@ -133,7 +124,7 @@ LL | }
    | - `x` dropped here while still borrowed
 
 error[E0597]: `x` does not live long enough
-  --> $DIR/patterns.rs:85:40
+  --> $DIR/patterns.rs:80:40
    |
 LL |     let x = 22;
    |         - binding `x` declared here
@@ -145,7 +136,7 @@ LL | }
    | - `x` dropped here while still borrowed
 
 error[E0597]: `x` does not live long enough
-  --> $DIR/patterns.rs:90:69
+  --> $DIR/patterns.rs:85:69
    |
 LL |     let x = 22;
    |         - binding `x` declared here
@@ -157,7 +148,7 @@ LL | }
    | - `x` dropped here while still borrowed
 
 error[E0597]: `x` does not live long enough
-  --> $DIR/patterns.rs:95:69
+  --> $DIR/patterns.rs:90:69
    |
 LL |     let x = 22;
    |         - binding `x` declared here
@@ -169,7 +160,7 @@ LL | }
    | - `x` dropped here while still borrowed
 
 error[E0597]: `x` does not live long enough
-  --> $DIR/patterns.rs:103:17
+  --> $DIR/patterns.rs:98:17
    |
 LL |     let x = 22;
    |         - binding `x` declared here
@@ -182,7 +173,7 @@ LL | }
    | - `x` dropped here while still borrowed
 
 error: lifetime may not live long enough
-  --> $DIR/patterns.rs:116:5
+  --> $DIR/patterns.rs:111:5
    |
 LL | fn static_to_a_to_static_through_variable<'a>(x: &'a u32) -> &'static u32 {
    |                                           -- lifetime `'a` defined here
@@ -191,7 +182,7 @@ LL |     y
    |     ^ returning this value requires that `'a` must outlive `'static`
 
 error: lifetime may not live long enough
-  --> $DIR/patterns.rs:128:5
+  --> $DIR/patterns.rs:123:5
    |
 LL | fn static_to_a_to_static_through_tuple<'a>(x: &'a u32) -> &'static u32 {
    |                                        -- lifetime `'a` defined here
@@ -200,7 +191,7 @@ LL |     y
    |     ^ returning this value requires that `'a` must outlive `'static`
 
 error: lifetime may not live long enough
-  --> $DIR/patterns.rs:133:5
+  --> $DIR/patterns.rs:128:5
    |
 LL | fn static_to_a_to_static_through_struct<'a>(_x: &'a u32) -> &'static u32 {
    |                                         -- lifetime `'a` defined here
@@ -209,14 +200,14 @@ LL |     y
    |     ^ returning this value requires that `'a` must outlive `'static`
 
 error: lifetime may not live long enough
-  --> $DIR/patterns.rs:137:18
+  --> $DIR/patterns.rs:132:18
    |
 LL | fn a_to_static_then_static<'a>(x: &'a u32) -> &'static u32 {
    |                            -- lifetime `'a` defined here
 LL |     let (y, _z): (&'static u32, u32) = (x, 44);
    |                  ^^^^^^^^^^^^^^^^^^^ type annotation requires that `'a` must outlive `'static`
 
-error: aborting due to 20 previous errors
+error: aborting due to 19 previous errors
 
 Some errors have detailed explanations: E0597, E0716.
 For more information about an error, try `rustc --explain E0597`.

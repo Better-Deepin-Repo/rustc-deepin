@@ -2,43 +2,18 @@
 //!
 //! These types are the public API exposed through the `--output-format json` flag. The [`Crate`]
 //! struct is the root of the JSON blob and all other items are contained within.
-//!
-//! We expose a `rustc-hash` feature that is disabled by default. This feature switches the
-//! [`std::collections::HashMap`] for [`rustc_hash::FxHashMap`] to improve the performance of said
-//! `HashMap` in specific situations.
-//!
-//! `cargo-semver-checks` for example, saw a [-3% improvement][1] when benchmarking using the
-//! `aws_sdk_ec2` JSON output (~500MB of JSON). As always, we recommend measuring the impact before
-//! turning this feature on, as [`FxHashMap`][2] only concerns itself with hash speed, and may
-//! increase the number of collisions.
-//!
-//! [1]: https://rust-lang.zulipchat.com/#narrow/channel/266220-t-rustdoc/topic/rustc-hash.20and.20performance.20of.20rustdoc-types/near/474855731
-//! [2]: https://crates.io/crates/rustc-hash
 
-#[cfg(not(feature = "rustc-hash"))]
-use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[cfg(feature = "rustc-hash")]
-use rustc_hash::FxHashMap as HashMap;
-use serde_derive::{Deserialize, Serialize};
-
-pub type FxHashMap<K, V> = HashMap<K, V>; // re-export for use in src/librustdoc
+pub use rustc_hash::FxHashMap;
+use serde::{Deserialize, Serialize};
 
 /// The version of JSON output that this crate represents.
 ///
 /// This integer is incremented with every breaking change to the API,
 /// and is returned along with the JSON blob as [`Crate::format_version`].
 /// Consuming code should assert that this value matches the format version(s) that it supports.
-//
-// WARNING: When you update `FORMAT_VERSION`, please also update the "Latest feature" line with a
-// description of the change. This minimizes the risk of two concurrent PRs changing
-// `FORMAT_VERSION` from N to N+1 and git merging them without conflicts; the "Latest feature" line
-// will instead cause conflicts. See #94591 for more. (This paragraph and the "Latest feature" line
-// are deliberately not in a doc comment, because they need not be in public docs.)
-//
-// Latest feature: Add `ExternCrate::path`.
-pub const FORMAT_VERSION: u32 = 57;
+pub const FORMAT_VERSION: u32 = 33;
 
 /// The root of the emitted JSON blob.
 ///
@@ -55,92 +30,23 @@ pub struct Crate {
     pub includes_private: bool,
     /// A collection of all items in the local crate as well as some external traits and their
     /// items that are referenced locally.
-    pub index: HashMap<Id, Item>,
+    pub index: FxHashMap<Id, Item>,
     /// Maps IDs to fully qualified paths and other info helpful for generating links.
-    pub paths: HashMap<Id, ItemSummary>,
+    pub paths: FxHashMap<Id, ItemSummary>,
     /// Maps `crate_id` of items to a crate name and html_root_url if it exists.
-    pub external_crates: HashMap<u32, ExternalCrate>,
-    /// Information about the target for which this documentation was generated
-    pub target: Target,
+    pub external_crates: FxHashMap<u32, ExternalCrate>,
     /// A single version number to be used in the future when making backwards incompatible changes
     /// to the JSON output.
     pub format_version: u32,
-}
-
-/// Information about a target
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Target {
-    /// The target triple for which this documentation was generated
-    pub triple: String,
-    /// A list of features valid for use in `#[target_feature]` attributes
-    /// for the target where this rustdoc JSON was generated.
-    pub target_features: Vec<TargetFeature>,
-}
-
-/// Information about a target feature.
-///
-/// Rust target features are used to influence code generation, especially around selecting
-/// instructions which are not universally supported by the target architecture.
-///
-/// Target features are commonly enabled by the [`#[target_feature]` attribute][1] to influence code
-/// generation for a particular function, and less commonly enabled by compiler options like
-/// `-Ctarget-feature` or `-Ctarget-cpu`. Targets themselves automatically enable certain target
-/// features by default, for example because the target's ABI specification requires saving specific
-/// registers which only exist in an architectural extension.
-///
-/// Target features can imply other target features: for example, x86-64 `avx2` implies `avx`, and
-/// aarch64 `sve2` implies `sve`, since both of these architectural extensions depend on their
-/// predecessors.
-///
-/// Target features can be probed at compile time by [`#[cfg(target_feature)]`][2] or `cfg!(…)`
-/// conditional compilation to determine whether a target feature is enabled in a particular
-/// context.
-///
-/// [1]: https://doc.rust-lang.org/stable/reference/attributes/codegen.html#the-target_feature-attribute
-/// [2]: https://doc.rust-lang.org/reference/conditional-compilation.html#target_feature
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TargetFeature {
-    /// The name of this target feature.
-    pub name: String,
-    /// Other target features which are implied by this target feature, if any.
-    pub implies_features: Vec<String>,
-    /// If this target feature is unstable, the name of the associated language feature gate.
-    pub unstable_feature_gate: Option<String>,
-    /// Whether this feature is globally enabled for this compilation session.
-    ///
-    /// Target features can be globally enabled implicitly as a result of the target's definition.
-    /// For example, x86-64 hardware floating point ABIs require saving x87 and SSE2 registers,
-    /// which in turn requires globally enabling the `x87` and `sse2` target features so that the
-    /// generated machine code conforms to the target's ABI.
-    ///
-    /// Target features can also be globally enabled explicitly as a result of compiler flags like
-    /// [`-Ctarget-feature`][1] or [`-Ctarget-cpu`][2].
-    ///
-    /// [1]: https://doc.rust-lang.org/beta/rustc/codegen-options/index.html#target-feature
-    /// [2]: https://doc.rust-lang.org/beta/rustc/codegen-options/index.html#target-cpu
-    pub globally_enabled: bool,
 }
 
 /// Metadata of a crate, either the same crate on which `rustdoc` was invoked, or its dependency.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ExternalCrate {
     /// The name of the crate.
-    ///
-    /// Note: This is the [*crate* name][crate-name], which may not be the same as the
-    /// [*package* name][package-name]. For example, for <https://crates.io/crates/regex-syntax>,
-    /// this field will be `regex_syntax` (which uses an `_`, not a `-`).
-    ///
-    /// [crate-name]: https://doc.rust-lang.org/stable/cargo/reference/cargo-targets.html#the-name-field
-    /// [package-name]: https://doc.rust-lang.org/stable/cargo/reference/manifest.html#the-name-field
     pub name: String,
     /// The root URL at which the crate's documentation lives.
     pub html_root_url: Option<String>,
-
-    /// A path from where this crate was loaded.
-    ///
-    /// This will typically be a `.rlib` or `.rmeta`. It can be used to determine which crate
-    /// this was in terms of whatever build-system invoked rustc.
-    pub path: PathBuf,
 }
 
 /// Information about an external (not defined in the local crate) [`Item`].
@@ -189,107 +95,13 @@ pub struct Item {
     /// Some("") if there is some documentation but it is empty (EG `#[doc = ""]`).
     pub docs: Option<String>,
     /// This mapping resolves [intra-doc links](https://github.com/rust-lang/rfcs/blob/master/text/1946-intra-rustdoc-links.md) from the docstring to their IDs
-    pub links: HashMap<String, Id>,
-    /// Attributes on this item.
-    ///
-    /// Does not include `#[deprecated]` attributes: see the [`Self::deprecation`] field instead.
-    ///
-    /// Attributes appear in pretty-printed Rust form, regardless of their formatting
-    /// in the original source code. For example:
-    /// - `#[non_exhaustive]` and `#[must_use]` are represented as themselves.
-    /// - `#[no_mangle]` and `#[export_name]` are also represented as themselves.
-    /// - `#[repr(C)]` and other reprs also appear as themselves,
-    ///   though potentially with a different order: e.g. `repr(i8, C)` may become `repr(C, i8)`.
-    ///   Multiple repr attributes on the same item may be combined into an equivalent single attr.
-    pub attrs: Vec<Attribute>,
+    pub links: FxHashMap<String, Id>,
+    /// Stringified versions of the attributes on this item (e.g. `"#[inline]"`)
+    pub attrs: Vec<String>,
     /// Information about the item’s deprecation, if present.
     pub deprecation: Option<Deprecation>,
     /// The type-specific fields describing this item.
     pub inner: ItemEnum,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-/// An attribute, e.g. `#[repr(C)]`
-///
-/// This doesn't include:
-/// - `#[doc = "Doc Comment"]` or `/// Doc comment`. These are in [`Item::docs`] instead.
-/// - `#[deprecated]`. These are in [`Item::deprecation`] instead.
-pub enum Attribute {
-    /// `#[non_exhaustive]`
-    NonExhaustive,
-
-    /// `#[must_use]`
-    MustUse { reason: Option<String> },
-
-    /// `#[macro_export]`
-    MacroExport,
-
-    /// `#[export_name = "name"]`
-    ExportName(String),
-
-    /// `#[link_section = "name"]`
-    LinkSection(String),
-
-    /// `#[automatically_derived]`
-    AutomaticallyDerived,
-
-    /// `#[repr]`
-    Repr(AttributeRepr),
-
-    /// `#[no_mangle]`
-    NoMangle,
-
-    /// #[target_feature(enable = "feature1", enable = "feature2")]
-    TargetFeature { enable: Vec<String> },
-
-    /// Something else.
-    ///
-    /// Things here are explicitly *not* covered by the [`FORMAT_VERSION`]
-    /// constant, and may change without bumping the format version.
-    ///
-    /// As an implementation detail, this is currently either:
-    /// 1. A HIR debug printing, like `"#[attr = Optimize(Speed)]"`
-    /// 2. The attribute as it appears in source form, like
-    ///    `"#[optimize(speed)]"`.
-    Other(String),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-/// The contents of a `#[repr(...)]` attribute.
-///
-/// Used in [`Attribute::Repr`].
-pub struct AttributeRepr {
-    /// The representation, e.g. `#[repr(C)]`, `#[repr(transparent)]`
-    pub kind: ReprKind,
-
-    /// Alignment in bytes, if explicitly specified by `#[repr(align(...)]`.
-    pub align: Option<u64>,
-    /// Alignment in bytes, if explicitly specified by `#[repr(packed(...)]]`.
-    pub packed: Option<u64>,
-
-    /// The integer type for an enum descriminant, if explicitly specified.
-    ///
-    /// e.g. `"i32"`, for `#[repr(C, i32)]`
-    pub int: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-/// The kind of `#[repr]`.
-///
-/// See [AttributeRepr::kind]`.
-pub enum ReprKind {
-    /// `#[repr(Rust)]`
-    ///
-    /// Also the default.
-    Rust,
-    /// `#[repr(C)]`
-    C,
-    /// `#[repr(transparent)]
-    Transparent,
-    /// `#[repr(simd)]`
-    Simd,
 }
 
 /// A range of source code.
@@ -297,9 +109,9 @@ pub enum ReprKind {
 pub struct Span {
     /// The path to the source file for this span relative to the path `rustdoc` was invoked with.
     pub filename: PathBuf,
-    /// One indexed Line and Column of the first character of the `Span`.
+    /// Zero indexed Line and Column of the first character of the `Span`
     pub begin: (usize, usize),
-    /// One indexed Line and Column of the last character of the `Span`.
+    /// Zero indexed Line and Column of the last character of the `Span`
     pub end: (usize, usize),
 }
 
@@ -367,8 +179,8 @@ pub struct PolyTrait {
 /// A set of generic arguments provided to a path segment, e.g.
 ///
 /// ```text
-/// std::option::Option<u32>
-///                    ^^^^^
+/// std::option::Option::<u32>::None
+///                      ^^^^^
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -382,7 +194,7 @@ pub enum GenericArgs {
         /// ```
         args: Vec<GenericArg>,
         /// Associated type or constant bindings (e.g. `Item=i32` or `Item: Clone`) for this type.
-        constraints: Vec<AssocItemConstraint>,
+        bindings: Vec<TypeBinding>,
     },
     /// `Fn(A, B) -> C`
     Parenthesized {
@@ -391,8 +203,6 @@ pub enum GenericArgs {
         /// The output type provided after the `->`, if present.
         output: Option<Type>,
     },
-    /// `T::method(..)`
-    ReturnTypeNotation,
 }
 
 /// One argument in a list of generic arguments to a path segment.
@@ -421,7 +231,7 @@ pub enum GenericArg {
     Const(Constant),
     /// A generic argument that's explicitly set to be inferred.
     /// ```text
-    /// std::vec::Vec::<_>
+    /// std::vec::Vec::<_>::new()
     ///                 ^
     /// ```
     Infer,
@@ -448,19 +258,19 @@ pub struct Constant {
 ///              ^^^^^^^^^^  ^^^^^^^^^^^^^^^
 /// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct AssocItemConstraint {
+pub struct TypeBinding {
     /// The name of the associated type/constant.
     pub name: String,
     /// Arguments provided to the associated type/constant.
-    pub args: Option<Box<GenericArgs>>,
+    pub args: GenericArgs,
     /// The kind of bound applied to the associated type/constant.
-    pub binding: AssocItemConstraintKind,
+    pub binding: TypeBindingKind,
 }
 
 /// The way in which an associate type/constant is bound.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AssocItemConstraintKind {
+pub enum TypeBindingKind {
     /// The required value/type is specified exactly. e.g.
     /// ```text
     /// Iterator<Item = u32, IntoIter: DoubleEndedIterator>
@@ -486,14 +296,14 @@ pub enum AssocItemConstraintKind {
 /// Rustdoc makes no guarantees about the inner value of Id's. Applications
 /// should treat them as opaque keys to lookup items, and avoid attempting
 /// to parse them, or otherwise depend on any implementation details.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 // FIXME(aDotInTheVoid): Consider making this non-public in rustdoc-types.
-pub struct Id(pub u32);
+pub struct Id(pub String);
 
-/// The fundamental kind of an item. Unlike [`ItemEnum`], this does not carry any additional info.
+/// The fundamental kind of an item. Unlike [`ItemEnum`], this does not carry any aditional info.
 ///
 /// Part of [`ItemSummary`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ItemKind {
     /// A module declaration, e.g. `mod foo;` or `mod foo {}`
@@ -501,7 +311,7 @@ pub enum ItemKind {
     /// A crate imported via the `extern crate` syntax.
     ExternCrate,
     /// An import of 1 or more items into scope, using the `use` keyword.
-    Use,
+    Import,
     /// A `struct` declaration.
     Struct,
     /// A field of a struct.
@@ -531,7 +341,7 @@ pub enum ItemKind {
     /// `type`s from an `extern` block.
     ///
     /// See [the tracking issue](https://github.com/rust-lang/rust/issues/43467)
-    ExternType,
+    ForeignType,
     /// A macro declaration.
     ///
     /// Corresponds to either `ItemEnum::Macro(_)`
@@ -558,11 +368,6 @@ pub enum ItemKind {
     /// [`Item`]s of this kind only come from the come library and exist solely
     /// to carry documentation for the respective keywords.
     Keyword,
-    /// An attribute declaration.
-    ///
-    /// [`Item`]s of this kind only come from the core library and exist solely
-    /// to carry documentation for the respective builtin attributes.
-    Attribute,
 }
 
 /// Specific fields of an item.
@@ -581,7 +386,7 @@ pub enum ItemEnum {
         rename: Option<String>,
     },
     /// An import of 1 or more items into scope, using the `use` keyword.
-    Use(Use),
+    Import(Import),
 
     /// A `union` declaration.
     Union(Union),
@@ -624,7 +429,7 @@ pub enum ItemEnum {
     /// `type`s from an `extern` block.
     ///
     /// See [the tracking issue](https://github.com/rust-lang/rust/issues/43467)
-    ExternType,
+    ForeignType,
 
     /// A macro_rules! declarative macro. Contains a single string with the source
     /// representation of the macro with the patterns stripped.
@@ -642,19 +447,12 @@ pub enum ItemEnum {
         /// The type of the constant.
         #[serde(rename = "type")]
         type_: Type,
-        /// Inside a trait declaration, this is the default value for the associated constant,
-        /// if provided.
-        /// Inside an `impl` block, this is the value assigned to the associated constant,
-        /// and will always be present.
-        ///
-        /// The representation is implementation-defined and not guaranteed to be representative of
-        /// either the resulting value or of the source code.
-        ///
+        /// The stringified expression for the default value, if provided, e.g.
         /// ```rust
         /// const X: usize = 640 * 1024;
         /// //               ^^^^^^^^^^
         /// ```
-        value: Option<String>,
+        default: Option<String>,
     },
     /// An associated type of a trait or a type.
     AssocType {
@@ -669,16 +467,12 @@ pub enum ItemEnum {
         /// }
         /// ```
         bounds: Vec<GenericBound>,
-        /// Inside a trait declaration, this is the default for the associated type, if provided.
-        /// Inside an impl block, this is the type assigned to the associated type, and will always
-        /// be present.
-        ///
+        /// The default for this type, if provided, e.g.
         /// ```rust
         /// type X = usize;
         /// //       ^^^^^
         /// ```
-        #[serde(rename = "type")]
-        type_: Option<Type>,
+        default: Option<Type>,
     },
 }
 
@@ -703,7 +497,7 @@ pub struct Union {
     /// The generic parameters and where clauses on this union.
     pub generics: Generics,
     /// Whether any fields have been removed from the result, due to being private or hidden.
-    pub has_stripped_fields: bool,
+    pub fields_stripped: bool,
     /// The list of fields in the union.
     ///
     /// All of the corresponding [`Item`]s are of kind [`ItemEnum::StructField`].
@@ -760,7 +554,7 @@ pub enum StructKind {
         /// All of the corresponding [`Item`]s are of kind [`ItemEnum::StructField`].
         fields: Vec<Id>,
         /// Whether any fields have been removed from the result, due to being private or hidden.
-        has_stripped_fields: bool,
+        fields_stripped: bool,
     },
 }
 
@@ -770,7 +564,7 @@ pub struct Enum {
     /// Information about the type parameters and `where` clauses of the enum.
     pub generics: Generics,
     /// Whether any variants have been removed from the result, due to being private or hidden.
-    pub has_stripped_variants: bool,
+    pub variants_stripped: bool,
     /// The list of variants in the enum.
     ///
     /// All of the corresponding [`Item`]s are of kind [`ItemEnum::Variant`]
@@ -827,7 +621,7 @@ pub enum VariantKind {
         /// All of the corresponding [`Item`]s are of kind [`ItemEnum::Variant`].
         fields: Vec<Id>,
         /// Whether any variants have been removed from the result, due to being private or hidden.
-        has_stripped_fields: bool,
+        fields_stripped: bool,
     },
 }
 
@@ -851,13 +645,16 @@ pub struct Discriminant {
 
 /// A set of fundamental properties of a function.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct FunctionHeader {
+pub struct Header {
     /// Is this function marked as `const`?
-    pub is_const: bool,
+    #[serde(rename = "const")]
+    pub const_: bool,
     /// Is this function unsafe?
-    pub is_unsafe: bool,
+    #[serde(rename = "unsafe")]
+    pub unsafe_: bool,
     /// Is this function async?
-    pub is_async: bool,
+    #[serde(rename = "async")]
+    pub async_: bool,
     /// The ABI used by the function.
     pub abi: Abi,
 }
@@ -872,7 +669,7 @@ pub struct FunctionHeader {
 /// on unwinding for more info.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Abi {
-    // We only have a concrete listing here for stable ABI's because there are so many
+    // We only have a concrete listing here for stable ABI's because their are so many
     // See rustc_ast_passes::feature_gate::PostExpansionVisitor::check_abi for the list
     /// The default ABI, but that can also be written explicitly with `extern "Rust"`.
     Rust,
@@ -888,7 +685,7 @@ pub enum Abi {
     Aapcs { unwind: bool },
     /// Can be specified as `extern "win64"`.
     Win64 { unwind: bool },
-    /// Can be specified as `extern "sysv64"`.
+    /// Can be specifed as `extern "sysv64"`.
     SysV64 { unwind: bool },
     /// Can be specified as `extern "system"`.
     System { unwind: bool },
@@ -900,11 +697,11 @@ pub enum Abi {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Function {
     /// Information about the function signature, or declaration.
-    pub sig: FunctionSignature,
+    pub decl: FnDecl,
     /// Information about the function’s type parameters and `where` clauses.
     pub generics: Generics,
     /// Information about core properties of the function, e.g. whether it's `const`, its ABI, etc.
-    pub header: FunctionHeader,
+    pub header: Header,
     /// Whether the function has a body, i.e. an implementation.
     pub has_body: bool,
 }
@@ -987,7 +784,7 @@ pub enum GenericParamDefKind {
         /// In this example, the generic parameter named `impl Trait` (and which
         /// is bound by `Trait`) is synthetic, because it was not originally in
         /// the Rust source text.
-        is_synthetic: bool,
+        synthetic: bool,
     },
 
     /// Denotes a constant parameter.
@@ -1078,11 +875,11 @@ pub enum GenericBound {
     /// ```
     Outlives(String),
     /// `use<'a, T>` precise-capturing bound syntax
-    Use(Vec<PreciseCapturingArg>),
+    Use(Vec<String>),
 }
 
 /// A set of modifiers applied to a trait.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TraitBoundModifier {
     /// Marks the absence of a modifier.
@@ -1096,24 +893,8 @@ pub enum TraitBoundModifier {
     MaybeConst,
 }
 
-/// One precise capturing argument. See [the rust reference](https://doc.rust-lang.org/reference/types/impl-trait.html#precise-capturing).
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PreciseCapturingArg {
-    /// A lifetime.
-    /// ```rust
-    /// pub fn hello<'a, T, const N: usize>() -> impl Sized + use<'a, T, N> {}
-    /// //                                                        ^^
-    Lifetime(String),
-    /// A type or constant parameter.
-    /// ```rust
-    /// pub fn hello<'a, T, const N: usize>() -> impl Sized + use<'a, T, N> {}
-    /// //                                                            ^  ^
-    Param(String),
-}
-
 /// Either a type or a constant, usually stored as the right-hand side of an equation in places like
-/// [`AssocItemConstraint`]
+/// [`TypeBinding`]
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Term {
@@ -1182,7 +963,7 @@ pub enum Type {
     /// A raw pointer type, e.g. `*mut u32`, `*const u8`, etc.
     RawPointer {
         /// This is `true` for `*mut _` and `false` for `*const _`.
-        is_mutable: bool,
+        mutable: bool,
         /// The type of the pointee.
         #[serde(rename = "type")]
         type_: Box<Type>,
@@ -1192,7 +973,7 @@ pub enum Type {
         /// The name of the lifetime of the reference, if provided.
         lifetime: Option<String>,
         /// This is `true` for `&mut i32` and `false` for `&i32`
-        is_mutable: bool,
+        mutable: bool,
         /// The type of the pointee, e.g. the `i32` in `&'a mut i32`
         #[serde(rename = "type")]
         type_: Box<Type>,
@@ -1202,7 +983,7 @@ pub enum Type {
     QualifiedPath {
         /// The name of the associated type in the parent type.
         ///
-        /// ```ignore (incomplete expression)
+        /// ```ignore (incomplete expresssion)
         /// <core::array::IntoIter<u32, 42> as Iterator>::Item
         /// //                                            ^^^^
         /// ```
@@ -1213,7 +994,7 @@ pub enum Type {
         /// <core::slice::IterMut<'static, u32> as BetterIterator>::Item<'static>
         /// //                                                          ^^^^^^^^^
         /// ```
-        args: Option<Box<GenericArgs>>,
+        args: Box<GenericArgs>,
         /// The type with which this type is associated.
         ///
         /// ```ignore (incomplete expression)
@@ -1230,20 +1011,16 @@ pub enum Type {
 /// A type that has a simple path to it. This is the kind of type of structs, unions, enums, etc.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Path {
-    /// The path of the type.
-    ///
-    /// This will be the path that is *used* (not where it is defined), so
-    /// multiple `Path`s may have different values for this field even if
-    /// they all refer to the same item. e.g.
+    /// The name of the type as declared, e.g. in
     ///
     /// ```rust
-    /// pub type Vec1 = std::vec::Vec<i32>; // path: "std::vec::Vec"
-    /// pub type Vec2 = Vec<i32>; // path: "Vec"
-    /// pub type Vec3 = std::prelude::v1::Vec<i32>; // path: "std::prelude::v1::Vec"
+    /// mod foo {
+    ///     struct Bar;
+    /// }
     /// ```
-    //
-    // Example tested in ./tests/rustdoc-json/path_name.rs
-    pub path: String,
+    ///
+    /// for `foo::Bar`, this field will be `Bar`.
+    pub name: String,
     /// The ID of the type.
     pub id: Id,
     /// Generic arguments to the type.
@@ -1259,7 +1036,7 @@ pub struct Path {
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FunctionPointer {
     /// The signature of the function.
-    pub sig: FunctionSignature,
+    pub decl: FnDecl,
     /// Used for Higher-Rank Trait Bounds (HRTBs)
     ///
     /// ```ignore (incomplete expression)
@@ -1268,12 +1045,12 @@ pub struct FunctionPointer {
     /// ```
     pub generic_params: Vec<GenericParamDef>,
     /// The core properties of the function, such as the ABI it conforms to, whether it's unsafe, etc.
-    pub header: FunctionHeader,
+    pub header: Header,
 }
 
 /// The signature of a function.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct FunctionSignature {
+pub struct FnDecl {
     /// List of argument names and their type.
     ///
     /// Note that not all names will be valid identifiers, as some of
@@ -1286,21 +1063,19 @@ pub struct FunctionSignature {
     /// ```ignore (incomplete code)
     /// fn printf(fmt: &str, ...);
     /// ```
-    pub is_c_variadic: bool,
+    pub c_variadic: bool,
 }
 
 /// A `trait` declaration.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Trait {
     /// Whether the trait is marked `auto` and is thus implemented automatically
-    /// for all applicable types.
+    /// for all aplicable types.
     pub is_auto: bool,
     /// Whether the trait is marked as `unsafe`.
     pub is_unsafe: bool,
-    /// Whether the trait is [dyn compatible](https://doc.rust-lang.org/reference/items/traits.html#dyn-compatibility)[^1].
-    ///
-    /// [^1]: Formerly known as "object safe".
-    pub is_dyn_compatible: bool,
+    /// Whether the trait is [object safe](https://doc.rust-lang.org/reference/items/traits.html#object-safety).
+    pub is_object_safe: bool,
     /// Associated [`Item`]s that can/must be implemented by the `impl` blocks.
     pub items: Vec<Id>,
     /// Information about the type parameters and `where` clauses of the trait.
@@ -1352,10 +1127,10 @@ pub struct Impl {
     /// The list of associated items contained in this impl block.
     pub items: Vec<Id>,
     /// Whether this is a negative impl (e.g. `!Sized` or `!Send`).
-    pub is_negative: bool,
+    pub negative: bool,
     /// Whether this is an impl that’s implied by the compiler
     /// (for autotraits, e.g. `Send` or `Sync`).
-    pub is_synthetic: bool,
+    pub synthetic: bool,
     // FIXME: document this
     pub blanket_impl: Option<Type>,
 }
@@ -1363,7 +1138,7 @@ pub struct Impl {
 /// A `use` statement.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub struct Use {
+pub struct Import {
     /// The full path being imported.
     pub source: String,
     /// May be different from the last segment of `source` when renaming imports:
@@ -1375,7 +1150,7 @@ pub struct Use {
     /// ```
     pub id: Option<Id>,
     /// Whether this statement is a wildcard `use`, e.g. `use source::*;`
-    pub is_glob: bool,
+    pub glob: bool,
 }
 
 /// A procedural macro.
@@ -1385,7 +1160,7 @@ pub struct ProcMacro {
     pub kind: MacroKind,
     /// Helper attributes defined by a macro to be used inside it.
     ///
-    /// Defined only for derive macros.
+    /// Defined only for attribute & derive macros.
     ///
     /// E.g. the [`Default`] derive macro defines a `#[default]` helper attribute so that one can
     /// do:
@@ -1402,7 +1177,7 @@ pub struct ProcMacro {
 }
 
 /// The way a [`ProcMacro`] is declared to be used.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MacroKind {
     /// A bang macro `foo!()`.
@@ -1430,27 +1205,11 @@ pub struct Static {
     #[serde(rename = "type")]
     pub type_: Type,
     /// This is `true` for mutable statics, declared as `static mut X: T = f();`
-    pub is_mutable: bool,
+    pub mutable: bool,
     /// The stringified expression for the initial value.
     ///
     /// It's not guaranteed that it'll match the actual source code for the initial value.
     pub expr: String,
-
-    /// Is the static `unsafe`?
-    ///
-    /// This is only true if it's in an `extern` block, and not explicitly marked
-    /// as `safe`.
-    ///
-    /// ```rust
-    /// unsafe extern {
-    ///     static A: i32;      // unsafe
-    ///     safe static B: i32; // safe
-    /// }
-    ///
-    /// static C: i32 = 0;     // safe
-    /// static mut D: i32 = 0; // safe
-    /// ```
-    pub is_unsafe: bool,
 }
 
 /// A primitive type declaration. Declarations of this kind can only come from the core library.

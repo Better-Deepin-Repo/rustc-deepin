@@ -1,9 +1,9 @@
 //! Name resolution for lifetimes and late-bound type and const variables: type declarations.
 
-use rustc_data_structures::sorted_map::SortedMap;
+use rustc_data_structures::fx::FxIndexMap;
 use rustc_errors::ErrorGuaranteed;
-use rustc_hir::ItemLocalId;
-use rustc_hir::def_id::{DefId, LocalDefId, LocalDefIdMap};
+use rustc_hir::def_id::{DefId, LocalDefId};
+use rustc_hir::{ItemLocalId, OwnerId};
 use rustc_macros::{Decodable, Encodable, HashStable, TyDecodable, TyEncodable};
 
 use crate::ty;
@@ -45,22 +45,13 @@ pub enum ObjectLifetimeDefault {
     Param(DefId),
 }
 
-/// Maps the id of each bound variable reference to the variable decl
+/// Maps the id of each lifetime reference to the lifetime decl
 /// that it corresponds to.
-#[derive(Debug, Default, HashStable)]
-pub struct ResolveBoundVars<'tcx> {
-    // Maps from every use of a named (not anonymous) bound var to a
-    // `ResolvedArg` describing how that variable is bound.
-    pub defs: SortedMap<ItemLocalId, ResolvedArg>,
+#[derive(Default, HashStable, Debug)]
+pub struct ResolveBoundVars {
+    /// Maps from every use of a named (not anonymous) lifetime to a
+    /// `Region` describing how that region is bound
+    pub defs: FxIndexMap<OwnerId, FxIndexMap<ItemLocalId, ResolvedArg>>,
 
-    // Maps relevant hir items to the bound vars on them. These include:
-    // - function defs
-    // - function pointers
-    // - closures
-    // - trait refs
-    // - bound types (like `T` in `for<'a> T<'a>: Foo`)
-    pub late_bound_vars: SortedMap<ItemLocalId, Vec<ty::BoundVariableKind<'tcx>>>,
-
-    // List captured variables for each opaque type.
-    pub opaque_captured_lifetimes: LocalDefIdMap<Vec<(ResolvedArg, LocalDefId)>>,
+    pub late_bound_vars: FxIndexMap<OwnerId, FxIndexMap<ItemLocalId, Vec<ty::BoundVariableKind>>>,
 }

@@ -1,7 +1,7 @@
 //@ run-pass
 
 #![allow(unused_variables)]
-//@ proc-macro: derive-union.rs
+//@ aux-build:derive-union.rs
 
 #[macro_use]
 extern crate derive_union;

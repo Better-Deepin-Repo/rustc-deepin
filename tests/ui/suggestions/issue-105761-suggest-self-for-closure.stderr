@@ -1,5 +1,5 @@
 error[E0502]: cannot borrow `*self` as mutable because it is also borrowed as immutable
-  --> $DIR/issue-105761-suggest-self-for-closure.rs:12:9
+  --> $DIR/issue-105761-suggest-self-for-closure.rs:11:9
    |
 LL |         let x = |v: i32| {
    |                 -------- immutable borrow occurs here
@@ -11,7 +11,7 @@ LL |         self.qux();
 LL |         x(1);
    |         - immutable borrow later used here
    |
-help: try explicitly passing `&Self` into the closure as an argument
+help: try explicitly pass `&Self` into the Closure as an argument
    |
 LL ~         let x = |this: &Self, v: i32| {
 LL ~             this.bar();
@@ -23,7 +23,7 @@ LL ~         x(self, 3);
    |
 
 error[E0502]: cannot borrow `*self` as mutable because it is also borrowed as immutable
-  --> $DIR/issue-105761-suggest-self-for-closure.rs:24:9
+  --> $DIR/issue-105761-suggest-self-for-closure.rs:23:9
    |
 LL |         let y = || {
    |                 -- immutable borrow occurs here
@@ -35,7 +35,7 @@ LL |         self.qux();
 LL |         y();
    |         - immutable borrow later used here
    |
-help: try explicitly passing `&Self` into the closure as an argument
+help: try explicitly pass `&Self` into the Closure as an argument
    |
 LL ~         let y = |this: &Self| {
 LL ~             this.bar();

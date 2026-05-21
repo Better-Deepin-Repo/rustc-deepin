@@ -1,3 +1,3 @@
 pub fn main() {
-    br##"a"#;  //~ ERROR unterminated raw string
+    br##"a"#;  //~ unterminated raw string
 }

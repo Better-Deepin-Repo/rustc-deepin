@@ -1,8 +1,7 @@
 //@ build-pass
 //@ edition:2018
 
-// FIXME(static_mut_refs): Do not allow `static_mut_refs` lint
-#![allow(static_mut_refs)]
+#![feature(if_let_guard)]
 
 static mut A: [i32; 5] = [1, 2, 3, 4, 5];
 

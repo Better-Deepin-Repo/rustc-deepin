@@ -1,12 +1,11 @@
 //! Completes constants and paths in unqualified patterns.
 
-use hir::{AssocItem, ScopeDef};
-use ide_db::syntax_helpers::suggest_name;
+use hir::{db::DefDatabase, AssocItem, ScopeDef};
 use syntax::ast::Pat;
 
 use crate::{
-    CompletionContext, Completions,
     context::{PathCompletionCtx, PatternContext, PatternRefutability, Qualified},
+    CompletionContext, Completions,
 };
 
 /// Completes constants and paths in unqualified patterns.
@@ -42,44 +41,27 @@ pub(crate) fn complete_pattern(
         }
     }
 
-    if pattern_ctx.after_if_expr {
-        add_keyword("else", "else {\n    $0\n}");
-        add_keyword("else if", "else if $1 {\n    $0\n}");
-    }
-
     if pattern_ctx.record_pat.is_some() {
         return;
     }
 
-    // Suggest name only in let-stmt and fn param
-    if pattern_ctx.should_suggest_name {
-        let mut name_generator = suggest_name::NameGenerator::default();
-        if let Some(suggested) = ctx
-            .expected_type
-            .as_ref()
-            .map(|ty| ty.strip_references())
-            .and_then(|ty| name_generator.for_type(&ty, ctx.db, ctx.edition))
-        {
-            acc.suggest_name(ctx, &suggested);
-        }
-    }
-
     let refutable = pattern_ctx.refutability == PatternRefutability::Refutable;
-    let single_variant_enum = |enum_: hir::Enum| enum_.num_variants(ctx.db) == 1;
+    let single_variant_enum = |enum_: hir::Enum| ctx.db.enum_data(enum_.into()).variants.len() == 1;
 
     if let Some(hir::Adt::Enum(e)) =
         ctx.expected_type.as_ref().and_then(|ty| ty.strip_references().as_adt())
-        && (refutable || single_variant_enum(e))
     {
-        super::enum_variants_with_paths(
-            acc,
-            ctx,
-            e,
-            pattern_ctx.impl_or_trait.as_ref().and_then(|it| it.as_ref().left()),
-            |acc, ctx, variant, path| {
-                acc.add_qualified_variant_pat(ctx, pattern_ctx, variant, path);
-            },
-        );
+        if refutable || single_variant_enum(e) {
+            super::enum_variants_with_paths(
+                acc,
+                ctx,
+                e,
+                &pattern_ctx.impl_,
+                |acc, ctx, variant, path| {
+                    acc.add_qualified_variant_pat(ctx, pattern_ctx, variant, path);
+                },
+            );
+        }
     }
 
     // FIXME: ideally, we should look at the type we are matching against and
@@ -101,7 +83,6 @@ pub(crate) fn complete_pattern(
                 hir::ModuleDef::Const(..) => refutable,
                 hir::ModuleDef::Module(..) => true,
                 hir::ModuleDef::Macro(mac) => mac.is_fn_like(ctx.db),
-                hir::ModuleDef::TypeAlias(_) => true,
                 _ => false,
             },
             hir::ScopeDef::ImplSelfType(impl_) => match impl_.self_ty(ctx.db).as_adt() {
@@ -129,7 +110,7 @@ pub(crate) fn complete_pattern(
 pub(crate) fn complete_pattern_path(
     acc: &mut Completions,
     ctx: &CompletionContext<'_>,
-    path_ctx @ PathCompletionCtx { qualified, .. }: &PathCompletionCtx<'_>,
+    path_ctx @ PathCompletionCtx { qualified, .. }: &PathCompletionCtx,
 ) {
     match qualified {
         Qualified::With { resolution: Some(resolution), super_chain_len, .. } => {

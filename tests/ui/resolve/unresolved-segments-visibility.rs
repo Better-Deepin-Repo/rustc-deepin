@@ -5,8 +5,7 @@ extern crate alloc as b;
 
 mod foo {
     mod bar {
-        pub(in crate::b::string::String::newy) extern crate alloc as e;
-        //~^ ERROR: cannot find module `String` in `string` [E0433]
-        //~| NOTE: `String` is a struct, not a module
+        pub(in b::string::String::newy) extern crate alloc as e;
+        //~^ ERROR failed to resolve: `String` is a struct, not a module [E0433]
     }
 }

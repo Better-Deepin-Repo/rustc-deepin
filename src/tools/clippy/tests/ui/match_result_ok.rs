@@ -11,7 +11,6 @@
 
 fn str_to_int(x: &str) -> i32 {
     if let Some(y) = x.parse().ok() { y } else { 0 }
-    //~^ match_result_ok
 }
 
 fn str_to_int_ok(x: &str) -> i32 {
@@ -22,7 +21,6 @@ fn str_to_int_ok(x: &str) -> i32 {
 fn strange_some_no_else(x: &str) -> i32 {
     {
         if let Some(y) = x   .   parse()   .   ok   ()    {
-        //~^ match_result_ok
             return y;
         };
         0
@@ -49,7 +47,6 @@ impl Wat {
 fn base_1(x: i32) {
     let mut wat = Wat { counter: x };
     while let Some(a) = wat.next().ok() {
-        //~^ match_result_ok
         println!("{}", a);
     }
 }

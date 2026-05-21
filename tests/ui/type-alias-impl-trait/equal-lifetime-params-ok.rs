@@ -12,7 +12,6 @@ impl<T> Trait<'_, '_> for T {}
 
 mod equal_params {
     type Opaque<'a: 'b, 'b: 'a> = impl super::Trait<'a, 'b>;
-    #[define_opaque(Opaque)]
     fn test<'a: 'b, 'b: 'a>() -> Opaque<'a, 'b> {
         let _ = None::<&'a &'b &'a ()>;
         0u8
@@ -21,7 +20,6 @@ mod equal_params {
 
 mod equal_static {
     type Opaque<'a: 'static> = impl Sized + 'a;
-    #[define_opaque(Opaque)]
     fn test<'a: 'static>() -> Opaque<'a> {
         let _ = None::<&'static &'a ()>;
         0u8

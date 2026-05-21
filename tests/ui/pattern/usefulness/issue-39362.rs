@@ -1,5 +1,3 @@
-//@ dont-require-annotations: NOTE
-
 enum Foo {
     Bar { bar: Bar, id: usize }
 }
@@ -11,7 +9,7 @@ enum Bar {
 fn test(f: Foo) {
     match f {
         //~^ ERROR non-exhaustive patterns
-        //~| NOTE patterns
+        //~| patterns
         Foo::Bar { bar: Bar::A, .. } => (),
         Foo::Bar { bar: Bar::B, .. } => (),
     }

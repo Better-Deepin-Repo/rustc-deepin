@@ -15,11 +15,12 @@ LL | /     || {
 LL | |
 LL | |
 LL | |         println!("{}", p.x);
-...  |
+LL | |
+LL | |
 LL | |     };
    | |_____^
    |
-note: Capturing p[(0, 0)] -> Immutable
+note: Capturing p[(0, 0)] -> ImmBorrow
   --> $DIR/capture-disjoint-field-struct.rs:20:24
    |
 LL |         println!("{}", p.x);
@@ -32,11 +33,12 @@ LL | /     || {
 LL | |
 LL | |
 LL | |         println!("{}", p.x);
-...  |
+LL | |
+LL | |
 LL | |     };
    | |_____^
    |
-note: Min Capture p[(0, 0)] -> Immutable
+note: Min Capture p[(0, 0)] -> ImmBorrow
   --> $DIR/capture-disjoint-field-struct.rs:20:24
    |
 LL |         println!("{}", p.x);

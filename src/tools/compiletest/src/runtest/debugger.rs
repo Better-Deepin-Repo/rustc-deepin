@@ -1,10 +1,10 @@
 use std::fmt::Write;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 
-use camino::{Utf8Path, Utf8PathBuf};
-
-use crate::directives::{LineNumber, line_directive};
+use crate::common::Config;
+use crate::header::line_directive;
 use crate::runtest::ProcRes;
 
 /// Representation of information to invoke a debugger and check its output
@@ -12,64 +12,57 @@ pub(super) struct DebuggerCommands {
     /// Commands for the debuuger
     pub commands: Vec<String>,
     /// Lines to insert breakpoints at
-    pub breakpoint_lines: Vec<LineNumber>,
+    pub breakpoint_lines: Vec<usize>,
     /// Contains the source line number to check and the line itself
-    check_lines: Vec<(LineNumber, String)>,
+    check_lines: Vec<(usize, String)>,
     /// Source file name
-    file: Utf8PathBuf,
-    /// The revision being tested, if any
-    revision: Option<String>,
+    file: PathBuf,
 }
 
 impl DebuggerCommands {
     pub fn parse_from(
-        file: &Utf8Path,
-        debugger_prefix: &str,
-        test_revision: Option<&str>,
+        file: &Path,
+        config: &Config,
+        debugger_prefixes: &[&str],
+        rev: Option<&str>,
     ) -> Result<Self, String> {
-        let command_directive = format!("{debugger_prefix}-command");
-        let check_directive = format!("{debugger_prefix}-check");
+        let directives = debugger_prefixes
+            .iter()
+            .map(|prefix| (format!("{prefix}-command"), format!("{prefix}-check")))
+            .collect::<Vec<_>>();
 
         let mut breakpoint_lines = vec![];
         let mut commands = vec![];
         let mut check_lines = vec![];
-        let reader = BufReader::new(File::open(file.as_std_path()).unwrap());
-        for (line_number, line) in LineNumber::enumerate().zip(reader.lines()) {
+        let mut counter = 0;
+        let reader = BufReader::new(File::open(file).unwrap());
+        for (line_no, line) in reader.lines().enumerate() {
+            counter += 1;
             let line = line.map_err(|e| format!("Error while parsing debugger commands: {}", e))?;
+            let (lnrev, line) = line_directive("//", &line).unwrap_or((None, &line));
 
-            // Breakpoints appear on lines with actual code, typically at the end of the line.
+            // Skip any revision specific directive that doesn't match the current
+            // revision being tested
+            if lnrev.is_some() && lnrev != rev {
+                continue;
+            }
+
             if line.contains("#break") {
-                breakpoint_lines.push(line_number);
-                continue;
+                breakpoint_lines.push(counter);
             }
 
-            let Some(directive) = line_directive(file, line_number, &line) else {
-                continue;
-            };
+            for &(ref command_directive, ref check_directive) in &directives {
+                config
+                    .parse_name_value_directive(&line, command_directive)
+                    .map(|cmd| commands.push(cmd));
 
-            if !directive.applies_to_test_revision(test_revision) {
-                continue;
-            }
-
-            if directive.name == command_directive
-                && let Some(command) = directive.value_after_colon()
-            {
-                commands.push(command.to_string());
-            }
-            if directive.name == check_directive
-                && let Some(pattern) = directive.value_after_colon()
-            {
-                check_lines.push((line_number, pattern.to_string()));
+                config
+                    .parse_name_value_directive(&line, check_directive)
+                    .map(|cmd| check_lines.push((line_no, cmd)));
             }
         }
 
-        Ok(Self {
-            commands,
-            breakpoint_lines,
-            check_lines,
-            file: file.to_path_buf(),
-            revision: test_revision.map(str::to_owned),
-        })
+        Ok(Self { commands, breakpoint_lines, check_lines, file: file.to_owned() })
     }
 
     /// Given debugger output and lines to check, ensure that every line is
@@ -100,23 +93,22 @@ impl DebuggerCommands {
         if missing.is_empty() {
             Ok(())
         } else {
-            let fname = self.file.file_name().unwrap();
-            let revision_suffix =
-                self.revision.as_ref().map_or(String::new(), |r| format!("#{}", r));
+            let fname = self.file.file_name().unwrap().to_string_lossy();
             let mut msg = format!(
-                "check directive(s) from `{}{}` not found in debugger output. errors:",
-                self.file, revision_suffix
+                "check directive(s) from `{}` not found in debugger output. errors:",
+                self.file.display()
             );
 
             for (src_lineno, err_line) in missing {
-                write!(msg, "\n    ({fname}:{src_lineno}) `{err_line}`").unwrap();
+                write!(msg, "\n    ({fname}:{num}) `{err_line}`", num = src_lineno + 1).unwrap();
             }
 
             if !found.is_empty() {
                 let init = "\nthe following subset of check directive(s) was found successfully:";
                 msg.push_str(init);
                 for (src_lineno, found_line) in found {
-                    write!(msg, "\n    ({fname}:{src_lineno}) `{found_line}`").unwrap();
+                    write!(msg, "\n    ({fname}:{num}) `{found_line}`", num = src_lineno + 1)
+                        .unwrap();
                 }
             }
 

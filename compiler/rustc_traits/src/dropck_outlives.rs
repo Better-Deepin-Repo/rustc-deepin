@@ -1,17 +1,16 @@
 use rustc_data_structures::fx::FxHashSet;
-use rustc_infer::infer::TyCtxtInferExt;
+use rustc_hir::def_id::DefId;
 use rustc_infer::infer::canonical::{Canonical, QueryResponse};
+use rustc_infer::infer::TyCtxtInferExt;
 use rustc_middle::bug;
 use rustc_middle::query::Providers;
 use rustc_middle::traits::query::{DropckConstraint, DropckOutlivesResult};
-use rustc_middle::ty::{self, GenericArgs, TyCtxt};
-use rustc_span::DUMMY_SP;
-use rustc_span::def_id::DefId;
+use rustc_middle::ty::{GenericArgs, TyCtxt};
 use rustc_trait_selection::infer::InferCtxtBuilderExt;
 use rustc_trait_selection::traits::query::dropck_outlives::{
     compute_dropck_outlives_inner, dtorck_constraint_for_ty_inner,
 };
-use rustc_trait_selection::traits::query::{CanonicalDropckOutlivesGoal, NoSolution};
+use rustc_trait_selection::traits::query::{CanonicalTyGoal, NoSolution};
 use tracing::debug;
 
 pub(crate) fn provide(p: &mut Providers) {
@@ -20,20 +19,23 @@ pub(crate) fn provide(p: &mut Providers) {
 
 fn dropck_outlives<'tcx>(
     tcx: TyCtxt<'tcx>,
-    canonical_goal: CanonicalDropckOutlivesGoal<'tcx>,
+    canonical_goal: CanonicalTyGoal<'tcx>,
 ) -> Result<&'tcx Canonical<'tcx, QueryResponse<'tcx, DropckOutlivesResult<'tcx>>>, NoSolution> {
     debug!("dropck_outlives(goal={:#?})", canonical_goal);
 
     tcx.infer_ctxt().enter_canonical_trait_query(&canonical_goal, |ocx, goal| {
-        compute_dropck_outlives_inner(ocx, goal, DUMMY_SP)
+        compute_dropck_outlives_inner(ocx, goal)
     })
 }
 
 /// Calculates the dtorck constraint for a type.
-pub(crate) fn adt_dtorck_constraint(tcx: TyCtxt<'_>, def_id: DefId) -> &DropckConstraint<'_> {
+pub(crate) fn adt_dtorck_constraint(
+    tcx: TyCtxt<'_>,
+    def_id: DefId,
+) -> Result<&DropckConstraint<'_>, NoSolution> {
     let def = tcx.adt_def(def_id);
     let span = tcx.def_span(def_id);
-    let typing_env = ty::TypingEnv::non_body_analysis(tcx, def_id);
+    let param_env = tcx.param_env(def_id);
     debug!("dtorck_constraint: {:?}", def);
 
     if def.is_manually_drop() {
@@ -49,20 +51,20 @@ pub(crate) fn adt_dtorck_constraint(tcx: TyCtxt<'_>, def_id: DefId) -> &DropckCo
             overflows: vec![],
         };
         debug!("dtorck_constraint: {:?} => {:?}", def, result);
-        return tcx.arena.alloc(result);
+        return Ok(tcx.arena.alloc(result));
     }
 
     let mut result = DropckConstraint::empty();
     for field in def.all_fields() {
         let fty = tcx.type_of(field.did).instantiate_identity();
-        dtorck_constraint_for_ty_inner(tcx, typing_env, span, 0, fty, &mut result);
+        dtorck_constraint_for_ty_inner(tcx, param_env, span, 0, fty, &mut result)?;
     }
     result.outlives.extend(tcx.destructor_constraints(def));
     dedup_dtorck_constraint(&mut result);
 
     debug!("dtorck_constraint: {:?} => {:?}", def, result);
 
-    tcx.arena.alloc(result)
+    Ok(tcx.arena.alloc(result))
 }
 
 fn dedup_dtorck_constraint(c: &mut DropckConstraint<'_>) {

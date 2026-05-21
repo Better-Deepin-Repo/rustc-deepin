@@ -1,5 +1,4 @@
-//@ proc-macro: bang_proc_macro2.rs
-//@ ignore-backends: gcc
+//@ aux-build:bang_proc_macro2.rs
 
 extern crate bang_proc_macro2;
 

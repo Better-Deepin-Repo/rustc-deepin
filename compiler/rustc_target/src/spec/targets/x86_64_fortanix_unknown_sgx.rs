@@ -1,10 +1,8 @@
 use std::borrow::Cow;
 
-use crate::spec::{
-    Abi, Arch, Cc, Env, LinkerFlavor, Lld, Os, Target, TargetMetadata, TargetOptions, cvs,
-};
+use crate::spec::{cvs, Cc, LinkerFlavor, Lld, Target, TargetOptions};
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     let pre_link_args = TargetOptions::link_args(
         LinkerFlavor::Gnu(Cc::No, Lld::No),
         &[
@@ -57,16 +55,16 @@ pub(crate) fn target() -> Target {
         "TEXT_SIZE",
     ];
     let opts = TargetOptions {
-        os: Os::Unknown,
-        env: Env::Sgx,
+        os: "unknown".into(),
+        env: "sgx".into(),
         vendor: "fortanix".into(),
-        abi: Abi::Fortanix,
+        abi: "fortanix".into(),
         linker_flavor: LinkerFlavor::Gnu(Cc::No, Lld::Yes),
         linker: Some("rust-lld".into()),
         max_atomic_width: Some(64),
         cpu: "x86-64".into(),
         plt_by_default: false,
-        features: "+rdrand,+rdseed,+lvi-cfi,+lvi-load-hardening".into(),
+        features: "+rdrnd,+rdseed,+lvi-cfi,+lvi-load-hardening".into(),
         llvm_args: cvs!["--x86-experimental-lvi-inline-asm-hardening"],
         position_independent_executables: true,
         pre_link_args,
@@ -76,7 +74,7 @@ pub(crate) fn target() -> Target {
     };
     Target {
         llvm_target: "x86_64-elf".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: Some("Fortanix ABI for 64-bit Intel SGX".into()),
             tier: Some(2),
             host_tools: Some(false),
@@ -85,7 +83,7 @@ pub(crate) fn target() -> Target {
         pointer_width: 64,
         data_layout:
             "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128".into(),
-        arch: Arch::X86_64,
+        arch: "x86_64".into(),
         options: opts,
     }
 }

@@ -1,5 +1,3 @@
-//@ check-pass
-
 #![allow(clippy::unnecessary_literal_unwrap)]
 
 trait IsErr {

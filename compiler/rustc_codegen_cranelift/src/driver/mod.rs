@@ -35,15 +35,19 @@ fn predefine_mono_items<'tcx>(
                         is_compiler_builtins,
                     );
                     let is_naked = tcx
-                        .codegen_instance_attrs(instance.def)
+                        .codegen_fn_attrs(instance.def_id())
                         .flags
                         .contains(CodegenFnAttrFlags::NAKED);
-                    if is_naked {
-                        // Naked functions are defined in a separate object
-                        // file, so they can be declared on the fly.
-                        continue;
-                    }
-                    module.declare_function(name, linkage, &sig).unwrap();
+                    module
+                        .declare_function(
+                            name,
+                            // Naked functions are defined in a separate object
+                            // file from the codegen unit rustc expects them to
+                            // be defined in.
+                            if is_naked { Linkage::Import } else { linkage },
+                            &sig,
+                        )
+                        .unwrap();
                 }
                 MonoItem::Static(_) | MonoItem::GlobalAsm(_) => {}
             }
@@ -69,14 +73,12 @@ impl Drop for TimingGuard {
 
 impl cranelift_codegen::timing::Profiler for MeasuremeProfiler {
     fn start_pass(&self, pass: cranelift_codegen::timing::Pass) -> Box<dyn std::any::Any> {
-        let mut timing_guard = Box::new(TimingGuard {
-            profiler: std::mem::ManuallyDrop::new(self.0.clone()),
-            inner: None,
-        });
+        let mut timing_guard =
+            TimingGuard { profiler: std::mem::ManuallyDrop::new(self.0.clone()), inner: None };
         timing_guard.inner = Some(
             unsafe { &*(&*timing_guard.profiler as &SelfProfilerRef as *const SelfProfilerRef) }
                 .generic_activity(pass.description()),
         );
-        timing_guard
+        Box::new(timing_guard)
     }
 }

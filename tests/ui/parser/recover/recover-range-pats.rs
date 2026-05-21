@@ -1,4 +1,3 @@
-//@ edition:2015
 // Here we test all kinds of range patterns in terms of parsing / recovery.
 // We want to ensure that:
 // 1. Things parse as they should.

@@ -1,5 +1,4 @@
-//@ proc-macro: derive-unstable.rs
-//@ ignore-backends: gcc
+//@ aux-build:derive-unstable.rs
 
 #![allow(warnings)]
 

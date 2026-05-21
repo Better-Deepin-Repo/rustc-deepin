@@ -1,5 +1,5 @@
 //@ run-pass
-#![feature(lang_items)]
+#![feature(lang_items, start)]
 #![no_std]
 
 extern crate std as other;
@@ -11,6 +11,8 @@ mod foo {
     }
 }
 
-fn main() {
+#[start]
+fn start(_argc: isize, _argv: *const *const u8) -> isize {
     foo::test();
+    0
 }

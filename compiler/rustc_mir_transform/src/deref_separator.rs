@@ -1,17 +1,16 @@
+use rustc_index::IndexVec;
+use rustc_middle::mir::patch::MirPatch;
 use rustc_middle::mir::visit::NonUseContext::VarDebugInfo;
 use rustc_middle::mir::visit::{MutVisitor, PlaceContext};
 use rustc_middle::mir::*;
 use rustc_middle::ty::TyCtxt;
 
-use crate::patch::MirPatch;
+pub struct Derefer;
 
-pub(super) struct Derefer;
-
-struct DerefChecker<'a, 'tcx> {
+pub struct DerefChecker<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
     patcher: MirPatch<'tcx>,
-    local_decls: &'a LocalDecls<'tcx>,
-    add_deref_metadata: bool,
+    local_decls: &'a IndexVec<Local, LocalDecl<'tcx>>,
 }
 
 impl<'a, 'tcx> MutVisitor<'tcx> for DerefChecker<'a, 'tcx> {
@@ -40,11 +39,7 @@ impl<'a, 'tcx> MutVisitor<'tcx> for DerefChecker<'a, 'tcx> {
                     let temp = self.patcher.new_local_with_info(
                         ty,
                         self.local_decls[p_ref.local].source_info.span,
-                        if self.add_deref_metadata {
-                            LocalInfo::DerefTemp
-                        } else {
-                            LocalInfo::Boring
-                        },
+                        LocalInfo::DerefTemp,
                     );
 
                     // We are adding current p_ref's projections to our
@@ -55,11 +50,7 @@ impl<'a, 'tcx> MutVisitor<'tcx> for DerefChecker<'a, 'tcx> {
                     self.patcher.add_assign(
                         loc,
                         Place::from(temp),
-                        if self.add_deref_metadata {
-                            Rvalue::CopyForDeref(deref_place)
-                        } else {
-                            Rvalue::Use(Operand::Copy(deref_place))
-                        },
+                        Rvalue::CopyForDeref(deref_place),
                     );
                     place_local = temp;
                     last_len = p_ref.projection.len();
@@ -76,14 +67,9 @@ impl<'a, 'tcx> MutVisitor<'tcx> for DerefChecker<'a, 'tcx> {
     }
 }
 
-pub(super) fn deref_finder<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    body: &mut Body<'tcx>,
-    add_deref_metadata: bool,
-) {
+pub fn deref_finder<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
     let patch = MirPatch::new(body);
-    let mut checker =
-        DerefChecker { tcx, patcher: patch, local_decls: &body.local_decls, add_deref_metadata };
+    let mut checker = DerefChecker { tcx, patcher: patch, local_decls: &body.local_decls };
 
     for (bb, data) in body.basic_blocks.as_mut_preserves_cfg().iter_enumerated_mut() {
         checker.visit_basic_block_data(bb, data);
@@ -92,12 +78,8 @@ pub(super) fn deref_finder<'tcx>(
     checker.patcher.apply(body);
 }
 
-impl<'tcx> crate::MirPass<'tcx> for Derefer {
+impl<'tcx> MirPass<'tcx> for Derefer {
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
-        deref_finder(tcx, body, true);
-    }
-
-    fn is_required(&self) -> bool {
-        true
+        deref_finder(tcx, body);
     }
 }

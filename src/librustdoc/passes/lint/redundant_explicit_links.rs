@@ -1,19 +1,19 @@
 use std::ops::Range;
 
-use rustc_ast::NodeId;
-use rustc_errors::SuggestionStyle;
-use rustc_hir::HirId;
-use rustc_hir::def::{DefKind, DocLinkResMap, Namespace, Res};
-use rustc_lint_defs::Applicability;
-use rustc_resolve::rustdoc::pulldown_cmark::{
+use pulldown_cmark::{
     BrokenLink, BrokenLinkCallback, CowStr, Event, LinkType, OffsetIter, Parser, Tag,
 };
+use rustc_ast::NodeId;
+use rustc_errors::SuggestionStyle;
+use rustc_hir::def::{DefKind, DocLinkResMap, Namespace, Res};
+use rustc_hir::HirId;
+use rustc_lint_defs::Applicability;
 use rustc_resolve::rustdoc::{prepare_to_doc_link_resolution, source_span_for_markdown_range};
-use rustc_span::Symbol;
 use rustc_span::def_id::DefId;
+use rustc_span::Symbol;
 
-use crate::clean::Item;
 use crate::clean::utils::{find_nearest_parent_module, inherits_doc_hidden};
+use crate::clean::Item;
 use crate::core::DocContext;
 use crate::html::markdown::main_body_opts;
 
@@ -24,7 +24,12 @@ struct LinkData {
     display_link: String,
 }
 
-pub(crate) fn visit_item(cx: &DocContext<'_>, item: &Item, hir_id: HirId) {
+pub(crate) fn visit_item(cx: &DocContext<'_>, item: &Item) {
+    let Some(hir_id) = DocContext::as_local_hir_id(cx.tcx, item.item_id) else {
+        // If non-local, no need to check anything.
+        return;
+    };
+
     let hunks = prepare_to_doc_link_resolution(&item.attrs.doc_strings);
     for (item_id, doc) in hunks {
         if let Some(item_id) = item_id.or(item.def_id())
@@ -35,24 +40,24 @@ pub(crate) fn visit_item(cx: &DocContext<'_>, item: &Item, hir_id: HirId) {
     }
 }
 
-fn check_redundant_explicit_link_for_did(
+fn check_redundant_explicit_link_for_did<'md>(
     cx: &DocContext<'_>,
     item: &Item,
     did: DefId,
     hir_id: HirId,
-    doc: &str,
+    doc: &'md str,
 ) {
     let Some(local_item_id) = did.as_local() else {
         return;
     };
 
-    let is_hidden = !cx.document_hidden()
+    let is_hidden = !cx.render_options.document_hidden
         && (item.is_doc_hidden() || inherits_doc_hidden(cx.tcx, local_item_id, None));
     if is_hidden {
         return;
     }
-    let is_private =
-        !cx.document_private() && !cx.cache.effective_visibilities.is_directly_public(cx.tcx, did);
+    let is_private = !cx.render_options.document_private
+        && !cx.cache.effective_visibilities.is_directly_public(cx.tcx, did);
     if is_private {
         return;
     }
@@ -71,7 +76,7 @@ fn check_redundant_explicit_link_for_did(
         return;
     };
 
-    check_redundant_explicit_link(cx, item, hir_id, doc, resolutions);
+    check_redundant_explicit_link(cx, item, hir_id, &doc, &resolutions);
 }
 
 fn check_redundant_explicit_link<'md>(
@@ -90,52 +95,60 @@ fn check_redundant_explicit_link<'md>(
     .into_offset_iter();
 
     while let Some((event, link_range)) = offset_iter.next() {
-        if let Event::Start(Tag::Link { link_type, dest_url, .. }) = event {
-            let link_data = collect_link_data(&mut offset_iter);
+        match event {
+            Event::Start(Tag::Link { link_type, dest_url, .. }) => {
+                let link_data = collect_link_data(&mut offset_iter);
 
-            if let Some(resolvable_link) = link_data.resolvable_link.as_ref()
-                && &link_data.display_link.replace('`', "") != resolvable_link
-            {
-                // Skips if display link does not match to actual
-                // resolvable link, usually happens if display link
-                // has several segments, e.g.
-                // [this is just an `Option`](Option)
-                continue;
-            }
-
-            let explicit_link = dest_url.to_string();
-            let display_link = link_data.resolvable_link.clone()?;
-
-            if explicit_link.ends_with(&display_link) || display_link.ends_with(&explicit_link) {
-                match link_type {
-                    LinkType::Inline | LinkType::ReferenceUnknown => {
-                        check_inline_or_reference_unknown_redundancy(
-                            cx,
-                            item,
-                            hir_id,
-                            doc,
-                            resolutions,
-                            link_range,
-                            dest_url.to_string(),
-                            link_data,
-                            if link_type == LinkType::Inline { (b'(', b')') } else { (b'[', b']') },
-                        );
+                if let Some(resolvable_link) = link_data.resolvable_link.as_ref() {
+                    if &link_data.display_link.replace('`', "") != resolvable_link {
+                        // Skips if display link does not match to actual
+                        // resolvable link, usually happens if display link
+                        // has several segments, e.g.
+                        // [this is just an `Option`](Option)
+                        continue;
                     }
-                    LinkType::Reference => {
-                        check_reference_redundancy(
-                            cx,
-                            item,
-                            hir_id,
-                            doc,
-                            resolutions,
-                            link_range,
-                            &dest_url,
-                            link_data,
-                        );
+                }
+
+                let explicit_link = dest_url.to_string();
+                let display_link = link_data.resolvable_link.clone()?;
+
+                if explicit_link.ends_with(&display_link) || display_link.ends_with(&explicit_link)
+                {
+                    match link_type {
+                        LinkType::Inline | LinkType::ReferenceUnknown => {
+                            check_inline_or_reference_unknown_redundancy(
+                                cx,
+                                item,
+                                hir_id,
+                                doc,
+                                resolutions,
+                                link_range,
+                                dest_url.to_string(),
+                                link_data,
+                                if link_type == LinkType::Inline {
+                                    (b'(', b')')
+                                } else {
+                                    (b'[', b']')
+                                },
+                            );
+                        }
+                        LinkType::Reference => {
+                            check_reference_redundancy(
+                                cx,
+                                item,
+                                hir_id,
+                                doc,
+                                resolutions,
+                                link_range,
+                                &dest_url,
+                                link_data,
+                            );
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
+            _ => {}
         }
     }
 
@@ -161,36 +174,20 @@ fn check_inline_or_reference_unknown_redundancy(
 
     if dest_res == display_res {
         let link_span =
-            match source_span_for_markdown_range(cx.tcx, doc, &link_range, &item.attrs.doc_strings)
-            {
-                Some((sp, from_expansion)) => {
-                    if from_expansion {
-                        return None;
-                    }
-                    sp
-                }
-                None => item.attr_span(cx.tcx),
-            };
-        let (explicit_span, false) = source_span_for_markdown_range(
+            source_span_for_markdown_range(cx.tcx, &doc, &link_range, &item.attrs.doc_strings)
+                .unwrap_or(item.attr_span(cx.tcx));
+        let explicit_span = source_span_for_markdown_range(
             cx.tcx,
-            doc,
+            &doc,
             &offset_explicit_range(doc, link_range, open, close),
             &item.attrs.doc_strings,
-        )?
-        else {
-            // This `span` comes from macro expansion so skipping it.
-            return None;
-        };
-        let (display_span, false) = source_span_for_markdown_range(
+        )?;
+        let display_span = source_span_for_markdown_range(
             cx.tcx,
-            doc,
-            resolvable_link_range,
+            &doc,
+            &resolvable_link_range,
             &item.attrs.doc_strings,
-        )?
-        else {
-            // This `span` comes from macro expansion so skipping it.
-            return None;
-        };
+        )?;
 
         cx.tcx.node_span_lint(crate::lint::REDUNDANT_EXPLICIT_LINKS, hir_id, explicit_span, |lint| {
             lint.primary_message("redundant explicit link target")
@@ -218,43 +215,27 @@ fn check_reference_redundancy(
     let (resolvable_link, resolvable_link_range) =
         (&link_data.resolvable_link?, &link_data.resolvable_link_range?);
     let (dest_res, display_res) =
-        (find_resolution(resolutions, dest)?, find_resolution(resolutions, resolvable_link)?);
+        (find_resolution(resolutions, &dest)?, find_resolution(resolutions, resolvable_link)?);
 
     if dest_res == display_res {
         let link_span =
-            match source_span_for_markdown_range(cx.tcx, doc, &link_range, &item.attrs.doc_strings)
-            {
-                Some((sp, from_expansion)) => {
-                    if from_expansion {
-                        return None;
-                    }
-                    sp
-                }
-                None => item.attr_span(cx.tcx),
-            };
-        let (explicit_span, false) = source_span_for_markdown_range(
+            source_span_for_markdown_range(cx.tcx, &doc, &link_range, &item.attrs.doc_strings)
+                .unwrap_or(item.attr_span(cx.tcx));
+        let explicit_span = source_span_for_markdown_range(
             cx.tcx,
-            doc,
+            &doc,
             &offset_explicit_range(doc, link_range.clone(), b'[', b']'),
             &item.attrs.doc_strings,
-        )?
-        else {
-            // This `span` comes from macro expansion so skipping it.
-            return None;
-        };
-        let (display_span, false) = source_span_for_markdown_range(
+        )?;
+        let display_span = source_span_for_markdown_range(
             cx.tcx,
-            doc,
-            resolvable_link_range,
+            &doc,
+            &resolvable_link_range,
             &item.attrs.doc_strings,
-        )?
-        else {
-            // This `span` comes from macro expansion so skipping it.
-            return None;
-        };
-        let (def_span, _) = source_span_for_markdown_range(
+        )?;
+        let def_span = source_span_for_markdown_range(
             cx.tcx,
-            doc,
+            &doc,
             &offset_reference_def_range(doc, dest, link_range),
             &item.attrs.doc_strings,
         )?;
@@ -287,7 +268,7 @@ fn collect_link_data<'input, F: BrokenLinkCallback<'input>>(
     let mut display_link = String::new();
     let mut is_resolvable = true;
 
-    for (event, range) in offset_iter.by_ref() {
+    while let Some((event, range)) = offset_iter.next() {
         match event {
             Event::Text(code) => {
                 let code = code.to_string();

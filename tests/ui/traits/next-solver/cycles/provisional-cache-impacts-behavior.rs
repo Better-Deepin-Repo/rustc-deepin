@@ -1,7 +1,6 @@
 //@ compile-flags: -Znext-solver
 //@ check-pass
 #![feature(rustc_attrs)]
-#![rustc_no_implicit_bounds]
 
 // A test showcasing that using a provisional cache can differ
 // from only tracking stack entries.
@@ -60,9 +59,9 @@ trait B {}
 #[rustc_coinductive]
 trait C {}
 
-impl<T: B + C> A for T {}
-impl<T: A + C> B for T {}
-impl<T: B> C for T {}
+impl<T: ?Sized + B + C> A for T {}
+impl<T: ?Sized + A + C> B for T {}
+impl<T: ?Sized + B> C for T {}
 
 fn impls_a<T: A>() {}
 

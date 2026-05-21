@@ -1,15 +1,7 @@
 //@ check-pass
 //@ run-rustfix
 
-#![feature(f16, f128)]
-
 fn main() {
-    let x = 5f16;
-    let _ = x.is_nan();
-    //~^ WARN incorrect NaN comparison
-    let _ = !x.is_nan();
-    //~^ WARN incorrect NaN comparison
-
     let x = 5f32;
     let _ = x.is_nan();
     //~^ WARN incorrect NaN comparison
@@ -17,12 +9,6 @@ fn main() {
     //~^ WARN incorrect NaN comparison
 
     let x = 5f64;
-    let _ = x.is_nan();
-    //~^ WARN incorrect NaN comparison
-    let _ = !x.is_nan();
-    //~^ WARN incorrect NaN comparison
-
-    let x = 5f128;
     let _ = x.is_nan();
     //~^ WARN incorrect NaN comparison
     let _ = !x.is_nan();

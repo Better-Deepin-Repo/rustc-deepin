@@ -7,7 +7,7 @@ usage.
 
 - Mark-Simulacrum
 - rylev
-- panstromek
+- pnkfelix
 - kobzol
 
 Monday evening to Tuesday afternoon in North America is a good time to do it 

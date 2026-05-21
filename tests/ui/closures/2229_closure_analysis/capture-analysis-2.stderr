@@ -16,6 +16,7 @@ LL | |
 LL | |
 LL | |         let _x = p.x;
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
@@ -24,7 +25,7 @@ note: Capturing p[(0, 0)] -> ByValue
    |
 LL |         let _x = p.x;
    |                  ^^^
-note: Capturing p[] -> Immutable
+note: Capturing p[] -> ImmBorrow
   --> $DIR/capture-analysis-2.rs:24:26
    |
 LL |         println!("{:?}", p);
@@ -38,6 +39,7 @@ LL | |
 LL | |
 LL | |         let _x = p.x;
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |

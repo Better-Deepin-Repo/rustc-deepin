@@ -1,14 +1,7 @@
 //! `core_arch`
 
-#![allow(unknown_lints, unnecessary_transmutes)]
-
 #[macro_use]
 mod macros;
-
-#[cfg(test)]
-mod test;
-#[cfg(test)]
-use test::assert_eq_const;
 
 #[cfg(any(target_arch = "riscv32", target_arch = "riscv64", doc))]
 mod riscv_shared;
@@ -20,9 +13,6 @@ mod riscv_shared;
     doc
 ))]
 mod arm_shared;
-
-#[cfg(any(target_arch = "loongarch32", target_arch = "loongarch64", doc))]
-mod loongarch_shared;
 
 mod simd;
 
@@ -82,8 +72,8 @@ pub mod arch {
     #[doc(cfg(any(target_arch = "riscv32")))]
     #[unstable(feature = "riscv_ext_intrinsics", issue = "114544")]
     pub mod riscv32 {
-        pub use crate::core_arch::riscv_shared::*;
         pub use crate::core_arch::riscv32::*;
+        pub use crate::core_arch::riscv_shared::*;
     }
 
     /// Platform-specific intrinsics for the `riscv64` platform.
@@ -279,59 +269,14 @@ pub mod arch {
         pub use crate::core_arch::nvptx::*;
     }
 
-    /// Platform-specific intrinsics for the `amdgpu` platform.
-    ///
-    /// See the [module documentation](../index.html) for more details.
-    #[cfg(any(target_arch = "amdgpu", doc))]
-    #[doc(cfg(target_arch = "amdgpu"))]
-    #[unstable(feature = "stdarch_amdgpu", issue = "149988")]
-    pub mod amdgpu {
-        pub use crate::core_arch::amdgpu::*;
-    }
-
-    /// Platform-specific intrinsics for the `loongarch32` platform.
-    ///
-    /// See the [module documentation](../index.html) for more details.
-    #[cfg(any(target_arch = "loongarch32", doc))]
-    #[doc(cfg(target_arch = "loongarch32"))]
-    #[unstable(feature = "stdarch_loongarch", issue = "117427")]
-    pub mod loongarch32 {
-        pub use crate::core_arch::loongarch_shared::*;
-        pub use crate::core_arch::loongarch32::*;
-    }
-
-    /// Platform-specific intrinsics for the `loongarch64` platform.
+    /// Platform-specific intrinsics for the `loongarch` platform.
     ///
     /// See the [module documentation](../index.html) for more details.
     #[cfg(any(target_arch = "loongarch64", doc))]
     #[doc(cfg(target_arch = "loongarch64"))]
     #[unstable(feature = "stdarch_loongarch", issue = "117427")]
     pub mod loongarch64 {
-        pub use crate::core_arch::loongarch_shared::*;
         pub use crate::core_arch::loongarch64::*;
-    }
-
-    /// Platform-specific intrinsics for the `s390x` platform.
-    ///
-    /// See the [module documentation](../index.html) for more details.
-    #[cfg(any(target_arch = "s390x", doc))]
-    #[doc(cfg(target_arch = "s390x"))]
-    #[unstable(feature = "stdarch_s390x", issue = "135681")]
-    pub mod s390x {
-        pub use crate::core_arch::s390x::*;
-    }
-
-    /// Platform-specific intrinsics for the `hexagon` platform.
-    ///
-    /// This module provides intrinsics for the Qualcomm Hexagon DSP architecture,
-    /// including the Hexagon Vector Extensions (HVX).
-    ///
-    /// See the [module documentation](../index.html) for more details.
-    #[cfg(any(target_arch = "hexagon", doc))]
-    #[doc(cfg(target_arch = "hexagon"))]
-    #[unstable(feature = "stdarch_hexagon", issue = "151523")]
-    pub mod hexagon {
-        pub use crate::core_arch::hexagon::*;
     }
 }
 
@@ -377,22 +322,6 @@ mod powerpc64;
 #[doc(cfg(target_arch = "nvptx64"))]
 mod nvptx;
 
-#[cfg(any(target_arch = "amdgpu", doc))]
-#[doc(cfg(target_arch = "amdgpu"))]
-mod amdgpu;
-
-#[cfg(any(target_arch = "loongarch32", doc))]
-#[doc(cfg(target_arch = "loongarch32"))]
-mod loongarch32;
-
 #[cfg(any(target_arch = "loongarch64", doc))]
 #[doc(cfg(target_arch = "loongarch64"))]
 mod loongarch64;
-
-#[cfg(any(target_arch = "s390x", doc))]
-#[doc(cfg(target_arch = "s390x"))]
-mod s390x;
-
-#[cfg(any(target_arch = "hexagon", doc))]
-#[doc(cfg(target_arch = "hexagon"))]
-mod hexagon;

@@ -170,17 +170,20 @@ use std::alloc::{self, Layout};
 impl<T> Vec<T> {
     fn grow(&mut self) {
         let (new_cap, new_layout) = if self.cap == 0 {
-            (1, Layout::array::<T>(1))
+            (1, Layout::array::<T>(1).unwrap())
         } else {
             // This can't overflow since self.cap <= isize::MAX.
             let new_cap = 2 * self.cap;
-            (new_cap, Layout::array::<T>(new_cap))
+
+            // `Layout::array` checks that the number of bytes is <= usize::MAX,
+            // but this is redundant since old_layout.size() <= isize::MAX,
+            // so the `unwrap` should never fail.
+            let new_layout = Layout::array::<T>(new_cap).unwrap();
+            (new_cap, new_layout)
         };
 
-        // `Layout::array` checks that the number of bytes allocated is
-        // in 1..=isize::MAX and will error otherwise.  An allocation of
-        // 0 bytes isn't possible thanks to the above condition.
-        let new_layout = new_layout.expect("Allocation too large");
+        // Ensure that the new allocation doesn't exceed `isize::MAX` bytes.
+        assert!(new_layout.size() <= isize::MAX as usize, "Allocation too large");
 
         let new_ptr = if self.cap == 0 {
             unsafe { alloc::alloc(new_layout) }

@@ -1,5 +1,4 @@
 //@compile-flags: --crate-name declare_interior_mutable_const_ignore
-//@check-pass
 
 #![warn(clippy::declare_interior_mutable_const)]
 #![allow(clippy::borrow_interior_mutable_const)]

@@ -1,4 +1,5 @@
-#![feature(unsized_fn_params)]
+#![feature(unsized_locals, unsized_fn_params)]
+//~^ WARN the feature `unsized_locals` is incomplete
 
 pub trait Foo {
     fn foo(self) -> String;
@@ -15,23 +16,28 @@ fn drop_unsized<T: ?Sized>(_: T) {}
 fn main() {
     {
         let x = "hello".to_owned().into_boxed_str();
-        let y = *x; //~ERROR the size for values of type `str` cannot be known at compilation time [E0277]
+        let y = *x;
         drop_unsized(y);
         println!("{}", &x);
+        //~^ERROR borrow of moved value
         println!("{}", &y);
+        //~^ERROR borrow of moved value
     }
 
     {
         let x = "hello".to_owned().into_boxed_str();
-        let y = *x; //~ERROR the size for values of type `str` cannot be known at compilation time [E0277]
+        let y = *x;
         y.foo();
         println!("{}", &x);
+        //~^ERROR borrow of moved value
         println!("{}", &y);
+        //~^ERROR borrow of moved value
     }
 
     {
         let x = "hello".to_owned().into_boxed_str();
         x.foo();
         println!("{}", &x);
+        //~^ERROR borrow of moved value
     }
 }

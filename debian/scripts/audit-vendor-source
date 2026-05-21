@@ -30,7 +30,7 @@ suspicious-source -v "$@"
 # The following shell snippet is a bit more strict than suspicious-source(1)
 find . -type f -exec file '{}' \; | \
   sed -e 's/\btext\b\(.*\), with very long lines/verylongtext\1/g' | \
-  grep -v '\b\(text\|empty\|Rust Source file\)\b' || true
+  grep -v '\b\(text\|empty\)\b' || true
 
 # Most C and JS code should be in their own package
 find . -name '*.c' -o -name '*.js'

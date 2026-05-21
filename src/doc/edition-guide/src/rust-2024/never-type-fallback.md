@@ -1,11 +1,13 @@
 # Never type fallback change
 
+🚧 The 2024 Edition has not yet been released and hence this section is still "under construction".
+
 ## Summary
 
 - Never type (`!`) to any type ("never-to-any") coercions fall back to never type (`!`) rather than to unit type (`()`).
 - The [`never_type_fallback_flowing_into_unsafe`] lint is now `deny` by default.
 
-[`never_type_fallback_flowing_into_unsafe`]: ../../rustc/lints/listing/deny-by-default.html#never-type-fallback-flowing-into-unsafe
+[`never_type_fallback_flowing_into_unsafe`]: ../../rustc/lints/listing/warn-by-default.html#never-type-fallback-flowing-into-unsafe
 
 ## Details
 
@@ -83,7 +85,8 @@ You might think that, in this example, type `T` can't be inferred.  However, due
 
 To fix the issue you need to specify the `T` type explicitly:
 
-```rust,edition2024
+<!-- TODO: edition2024 -->
+```rust
 # #![deny(dependency_on_unit_never_type_fallback)]
 # fn outer<T>(x: T) -> Result<T, ()> {
 # fn f<T: Default>() -> Result<T, ()> {
@@ -112,7 +115,8 @@ run(|| panic!());
 
 Previously `!` from the `panic!` coerced to `()` which implements `Unit`.  However now the `!` is kept as `!` so this code fails because `!` doesn't implement `Unit`.  To fix this you can specify the return type of the closure:
 
-```rust,edition2024,should_panic
+<!-- TODO: edition2024 -->
+```rust,should_panic
 # #![deny(dependency_on_unit_never_type_fallback)]
 # trait Unit {}
 # impl Unit for () {}
@@ -138,7 +142,8 @@ Previously `()` was inferred as the return type of `Default::default()` because 
 
 Again, this can be fixed by specifying the type explicitly:
 
-```rust,edition2024
+<!-- TODO: edition2024 -->
+```rust
 # #![deny(dependency_on_unit_never_type_fallback)]
 () = if true {
     Default::default()

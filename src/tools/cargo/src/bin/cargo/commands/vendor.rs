@@ -37,8 +37,9 @@ pub fn cli() -> Command {
         .arg(unsupported("only-git-deps"))
         .arg(unsupported("disallow-duplicates"))
         .arg_manifest_path()
+        .arg_lockfile_path()
         .after_help(color_print::cstr!(
-            "Run `<bright-cyan,bold>cargo help vendor</>` for more detailed information.\n"
+            "Run `<cyan,bold>cargo help vendor</>` for more detailed information.\n"
         ))
 }
 
@@ -59,8 +60,7 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
     // to respect any of the `source` configuration in Cargo itself. That's
     // intended for other consumers of Cargo, but we want to go straight to the
     // source, e.g. crates.io, to fetch crates.
-    let respect_source_config = args.flag("respect-source-config");
-    if !respect_source_config {
+    if !args.flag("respect-source-config") {
         gctx.values_mut()?.remove("source");
     }
 
@@ -80,7 +80,6 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
                 .unwrap_or_default()
                 .cloned()
                 .collect(),
-            respect_source_config,
         },
     )?;
     Ok(())

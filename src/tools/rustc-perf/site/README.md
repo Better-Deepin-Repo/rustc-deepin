@@ -46,8 +46,3 @@ the `PORT` environment variable.
 ```console
 $ ./target/release/site <database>
 ```
-
-## Development
-We use [insta](https://github.com/mitsuhiko/insta) for snapshot testing. If any tests that use the
-`insta` macros fail, you should `cargo install cargo-insta` and then run `cargo insta review` to review
-the snapshot changes.

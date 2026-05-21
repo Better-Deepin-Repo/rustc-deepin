@@ -7,29 +7,20 @@ mod transcriber;
 
 use intern::Symbol;
 use rustc_hash::FxHashMap;
-use span::Span;
+use span::{Edition, Span};
 
-use crate::{
-    ExpandError, ExpandErrorKind, ExpandResult, MacroCallStyle, MatchedArmIndex,
-    parser::MetaVarKind,
-};
+use crate::{parser::MetaVarKind, ExpandError, ExpandErrorKind, ExpandResult, MatchedArmIndex};
 
 pub(crate) fn expand_rules(
-    db: &dyn salsa::Database,
     rules: &[crate::Rule],
-    input: &tt::TopSubtree,
+    input: &tt::Subtree<Span>,
     marker: impl Fn(&mut Span) + Copy,
-    call_style: MacroCallStyle,
     call_site: Span,
-) -> ExpandResult<(tt::TopSubtree, MatchedArmIndex)> {
-    let mut match_: Option<(matcher::Match<'_>, &crate::Rule, usize)> = None;
+    def_site_edition: Edition,
+) -> ExpandResult<(tt::Subtree<Span>, MatchedArmIndex)> {
+    let mut match_: Option<(matcher::Match, &crate::Rule, usize)> = None;
     for (idx, rule) in rules.iter().enumerate() {
-        // Skip any rules that aren't relevant to the call style (fn-like/attr/derive).
-        if call_style != rule.style {
-            continue;
-        }
-
-        let new_match = matcher::match_(db, &rule.lhs, input);
+        let new_match = matcher::match_(&rule.lhs, input, def_site_edition);
 
         if new_match.err.is_none() {
             // If we find a rule that applies without errors, we're done.
@@ -59,7 +50,13 @@ pub(crate) fn expand_rules(
         ExpandResult { value: (value, idx.try_into().ok()), err: match_.err.or(transcribe_err) }
     } else {
         ExpandResult::new(
-            (tt::TopSubtree::empty(tt::DelimSpan::from_single(call_site)), None),
+            (
+                tt::Subtree {
+                    delimiter: tt::Delimiter::invisible_spanned(call_site),
+                    token_trees: Box::default(),
+                },
+                None,
+            ),
             ExpandError::new(call_site, ExpandErrorKind::NoMatchingRule),
         )
     }
@@ -110,38 +107,32 @@ pub(crate) fn expand_rules(
 /// In other words, `Bindings` is a *multi* mapping from `Symbol` to
 /// `tt::TokenTree`, where the index to select a particular `TokenTree` among
 /// many is not a plain `usize`, but a `&[usize]`.
-#[derive(Debug, Default, Clone)]
-struct Bindings<'a> {
-    inner: FxHashMap<Symbol, Binding<'a>>,
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct Bindings {
+    inner: FxHashMap<Symbol, Binding>,
 }
 
-#[derive(Debug, Clone)]
-enum Binding<'a> {
-    Fragment(Fragment<'a>),
-    Nested(Vec<Binding<'a>>),
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Binding {
+    Fragment(Fragment),
+    Nested(Vec<Binding>),
     Empty,
     Missing(MetaVarKind),
 }
 
-#[derive(Debug, Default, Clone)]
-enum Fragment<'a> {
-    #[default]
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Fragment {
     Empty,
     /// token fragments are just copy-pasted into the output
-    Tokens {
-        tree: tt::TokenTreesView<'a>,
-        origin: TokensOrigin,
-    },
-    /// Expr ast fragments are surrounded with `()` on transcription to preserve precedence.
-    /// Note that this impl is different from the one currently in `rustc` --
-    /// `rustc` doesn't translate fragments into token trees at all.
+    Tokens(tt::TokenTree<Span>),
+    /// Expr ast fragments are surrounded with `()` on insertion to preserve
+    /// precedence. Note that this impl is different from the one currently in
+    /// `rustc` -- `rustc` doesn't translate fragments into token trees at all.
     ///
     /// At one point in time, we tried to use "fake" delimiters here à la
     /// proc-macro delimiter=none. As we later discovered, "none" delimiters are
     /// tricky to handle in the parser, and rustc doesn't handle those either.
-    ///
-    /// The span of the outer delimiters is marked on transcription.
-    Expr(tt::TokenTreesView<'a>),
+    Expr(tt::Subtree<Span>),
     /// There are roughly two types of paths: paths in expression context, where a
     /// separator `::` between an identifier and its following generic argument list
     /// is mandatory, and paths in type context, where `::` can be omitted.
@@ -151,24 +142,5 @@ enum Fragment<'a> {
     /// and is trasncribed as an expression-context path, verbatim transcription
     /// would cause a syntax error. We need to fix it up just before transcribing;
     /// see `transcriber::fix_up_and_push_path_tt()`.
-    Path(tt::TokenTreesView<'a>),
-    TokensOwned(tt::TopSubtree),
-}
-
-impl Fragment<'_> {
-    fn is_empty(&self) -> bool {
-        match self {
-            Fragment::Empty => true,
-            Fragment::Tokens { tree, .. } => tree.len() == 0,
-            Fragment::Expr(it) => it.len() == 0,
-            Fragment::Path(it) => it.len() == 0,
-            Fragment::TokensOwned(_) => false, // A `TopSubtree` is never empty
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TokensOrigin {
-    Raw,
-    Ast,
+    Path(tt::Subtree<Span>),
 }

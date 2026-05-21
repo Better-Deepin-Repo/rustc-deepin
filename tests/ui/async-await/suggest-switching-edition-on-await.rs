@@ -1,4 +1,3 @@
-//@ edition:2015
 use std::pin::Pin;
 use std::future::Future;
 
@@ -11,7 +10,7 @@ fn await_on_struct_missing() {
     //~^ ERROR no field `await` on type
     //~| NOTE unknown field
     //~| NOTE to `.await` a `Future`, switch to Rust 2018
-    //~| HELP pass `--edition 2024` to `rustc`
+    //~| HELP pass `--edition 2021` to `rustc`
     //~| NOTE for more on editions, read https://doc.rust-lang.org/edition-guide
 }
 
@@ -25,7 +24,7 @@ fn await_on_struct_similar() {
     //~| NOTE unknown field
     //~| HELP a field with a similar name exists
     //~| NOTE to `.await` a `Future`, switch to Rust 2018
-    //~| HELP pass `--edition 2024` to `rustc`
+    //~| HELP pass `--edition 2021` to `rustc`
     //~| NOTE for more on editions, read https://doc.rust-lang.org/edition-guide
 }
 
@@ -34,7 +33,7 @@ fn await_on_63533(x: Pin<&mut dyn Future<Output = ()>>) {
     //~^ ERROR no field `await` on type
     //~| NOTE unknown field
     //~| NOTE to `.await` a `Future`, switch to Rust 2018
-    //~| HELP pass `--edition 2024` to `rustc`
+    //~| HELP pass `--edition 2021` to `rustc`
     //~| NOTE for more on editions, read https://doc.rust-lang.org/edition-guide
 }
 
@@ -43,6 +42,6 @@ fn await_on_apit(x: impl Future<Output = ()>) {
     //~^ ERROR no field `await` on type
     //~| NOTE unknown field
     //~| NOTE to `.await` a `Future`, switch to Rust 2018
-    //~| HELP pass `--edition 2024` to `rustc`
+    //~| HELP pass `--edition 2021` to `rustc`
     //~| NOTE for more on editions, read https://doc.rust-lang.org/edition-guide
 }

@@ -1,13 +1,14 @@
 use crate::assist_context::{AssistContext, Assists};
-use hir::{HasVisibility, HirDisplay, Module};
+use hir::{HasVisibility, HirDisplay, HirFileIdExt, Module};
 use ide_db::{
-    FileId,
-    assists::AssistId,
+    assists::{AssistId, AssistKind},
+    base_db::Upcast,
     defs::{Definition, NameRefClass},
+    FileId,
 };
 use syntax::{
+    ast::{self, edit::IndentLevel, NameRef},
     AstNode, Direction, SyntaxKind, TextSize,
-    ast::{self, NameRef, edit::IndentLevel},
 };
 
 // Assist: generate_constant
@@ -63,7 +64,7 @@ pub(crate) fn generate_constant(acc: &mut Assists, ctx: &AssistContext<'_>) -> O
         let name_ref_value = name_ref?;
         let name_ref_class = NameRefClass::classify(&ctx.sema, &name_ref_value);
         match name_ref_class {
-            Some(NameRefClass::Definition(Definition::Module(m), _)) => {
+            Some(NameRefClass::Definition(Definition::Module(m))) => {
                 if !m.visibility(ctx.sema.db).is_visible_from(ctx.sema.db, constant_module.into()) {
                     return None;
                 }
@@ -87,12 +88,17 @@ pub(crate) fn generate_constant(acc: &mut Assists, ctx: &AssistContext<'_>) -> O
         );
 
     let text = get_text_for_generate_constant(not_exist_name_ref, indent, outer_exists, type_name)?;
-    acc.add(AssistId::quick_fix("generate_constant"), "Generate constant", target, |builder| {
-        if let Some(file_id) = file_id {
-            builder.edit_file(file_id);
-        }
-        builder.insert(offset, format!("{text}{post_string}"));
-    })
+    acc.add(
+        AssistId("generate_constant", AssistKind::QuickFix),
+        "Generate constant",
+        target,
+        |builder| {
+            if let Some(file_id) = file_id {
+                builder.edit_file(file_id);
+            }
+            builder.insert(offset, format!("{text}{post_string}"));
+        },
+    )
 }
 
 fn get_text_for_generate_constant(
@@ -122,7 +128,7 @@ fn target_data_for_generate_constant(
         return None;
     }
     let in_file_source = current_module.definition_source(ctx.sema.db);
-    let file_id = in_file_source.file_id.original_file(ctx.sema.db);
+    let file_id = in_file_source.file_id.original_file(ctx.sema.db.upcast());
     match in_file_source.value {
         hir::ModuleSource::Module(module_node) => {
             let indent = IndentLevel::from_node(module_node.syntax());
@@ -134,9 +140,9 @@ fn target_data_for_generate_constant(
                 .any(|it| it.kind() == SyntaxKind::WHITESPACE && it.to_string().contains('\n'));
             let post_string =
                 if siblings_has_newline { format!("{indent}") } else { format!("\n{indent}") };
-            Some((offset, indent + 1, Some(file_id.file_id(ctx.db())), post_string))
+            Some((offset, indent + 1, Some(file_id.file_id()), post_string))
         }
-        _ => Some((TextSize::from(0), 0.into(), Some(file_id.file_id(ctx.db())), "\n".into())),
+        _ => Some((TextSize::from(0), 0.into(), Some(file_id.file_id()), "\n".into())),
     }
 }
 

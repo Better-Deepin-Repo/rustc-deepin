@@ -34,5 +34,3 @@ fn main() {
     let z = foo(double, 2);
     assert_eq!(z, 4);
 }
-
-//~? WARN skipping const checks

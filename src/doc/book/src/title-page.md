@@ -1,14 +1,10 @@
 # The Rust Programming Language
 
-_by Steve Klabnik, Carol Nichols, and Chris Krycho, with contributions from the
-Rust Community_
+*by Steve Klabnik and Carol Nichols, with contributions from the Rust Community*
 
-This version of the text assumes you’re using Rust 1.90.0 (released 2025-09-18)
-or later with `edition = "2024"` in the *Cargo.toml* file of all projects to
-configure them to use Rust 2024 Edition idioms. See the [“Installation” section
-of Chapter 1][install]<!-- ignore --> for instructions on installing or
-updating Rust, and see [Appendix E][appendix-e]<!-- ignore --> for information
-on editions.
+This version of the text assumes you’re using Rust 1.79.0 (released 2024-06-13)
+or later. See the [“Installation” section of Chapter 1][install]<!-- ignore -->
+to install or update Rust.
 
 The HTML format is available online at
 [https://doc.rust-lang.org/stable/book/](https://doc.rust-lang.org/stable/book/)
@@ -21,8 +17,8 @@ This text is available in [paperback and ebook format from No Starch
 Press][nsprust].
 
 [install]: ch01-01-installation.html
-[appendix-e]: appendix-05-editions.html
-[nsprust]: https://nostarch.com/rust-programming-language-3rd-edition
+[editions]: appendix-05-editions.html
+[nsprust]: https://nostarch.com/rust-programming-language-2nd-edition
 [translations]: appendix-06-translation.html
 
 > **🚨 Want a more interactive learning experience? Try out a different version

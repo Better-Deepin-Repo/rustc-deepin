@@ -1,7 +1,10 @@
+ignore = [
+    "example/gen_block_iterate.rs", # uses edition 2024
+]
+
 # Matches rustfmt.toml of rustc
-style_edition = "2024"
+version = "Two"
 use_small_heuristics = "Max"
 merge_derives = false
 group_imports = "StdExternalCrate"
 imports_granularity = "Module"
-use_field_init_shorthand = true

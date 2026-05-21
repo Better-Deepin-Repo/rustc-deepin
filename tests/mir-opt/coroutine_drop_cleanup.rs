@@ -8,7 +8,7 @@
 
 // EMIT_MIR coroutine_drop_cleanup.main-{closure#0}.coroutine_drop.0.mir
 fn main() {
-    let gen_ = #[coroutine]
+    let gen = #[coroutine]
     || {
         let _s = String::new();
         yield;

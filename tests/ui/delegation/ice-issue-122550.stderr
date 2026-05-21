@@ -8,13 +8,8 @@ error[E0277]: the trait bound `S: Trait` is not satisfied
   --> $DIR/ice-issue-122550.rs:13:12
    |
 LL |     reuse <S as Trait>::description { &self.0 }
-   |            ^ unsatisfied trait bound
+   |            ^ the trait `Trait` is not implemented for `S`
    |
-help: the trait `Trait` is not implemented for `S`
-  --> $DIR/ice-issue-122550.rs:10:1
-   |
-LL | struct S(F);
-   | ^^^^^^^^
 help: this trait has no implementations, consider adding one
   --> $DIR/ice-issue-122550.rs:4:1
    |

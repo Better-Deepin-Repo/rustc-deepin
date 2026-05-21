@@ -1,11 +1,11 @@
-use crate::spec::{Env, Os, TargetOptions, base, cvs};
+use crate::spec::{base, cvs, TargetOptions};
 
-pub(crate) fn opts() -> TargetOptions {
+pub fn opts() -> TargetOptions {
     let base = base::msvc::opts();
 
     TargetOptions {
-        os: Os::Windows,
-        env: Env::Msvc,
+        os: "windows".into(),
+        env: "msvc".into(),
         vendor: "pc".into(),
         dynamic_linking: true,
         dll_prefix: "".into(),
@@ -29,7 +29,7 @@ pub(crate) fn opts() -> TargetOptions {
         // they bring in.
         //
         // See also https://learn.microsoft.com/en-us/cpp/preprocessor/comment-c-cpp?view=msvc-170#lib
-        // for documentation on including library dependencies in C/C++ code.
+        // for documention on including library dependencies in C/C++ code.
         no_default_libraries: false,
         has_thread_local: true,
 

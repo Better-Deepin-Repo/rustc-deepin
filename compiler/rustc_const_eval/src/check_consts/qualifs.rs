@@ -2,17 +2,17 @@
 //!
 //! See the `Qualif` trait for more info.
 
-// FIXME(const_trait_impl): This API should be really reworked. It's dangerously general for
-// having basically only two use-cases that act in different ways.
-
 use rustc_errors::ErrorGuaranteed;
 use rustc_hir::LangItem;
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_middle::mir::*;
-use rustc_middle::ty::{self, AdtDef, Ty};
+use rustc_middle::traits::BuiltinImplSource;
+use rustc_middle::ty::{self, AdtDef, GenericArgsRef, Ty};
 use rustc_middle::{bug, mir};
-use rustc_trait_selection::traits::{Obligation, ObligationCause, ObligationCtxt};
-use tracing::instrument;
+use rustc_trait_selection::traits::{
+    ImplSource, Obligation, ObligationCause, ObligationCtxt, SelectionContext,
+};
+use tracing::{instrument, trace};
 
 use super::ConstCx;
 
@@ -62,12 +62,26 @@ pub trait Qualif {
     /// It also determines the `Qualif`s for primitive types.
     fn in_any_value_of_ty<'tcx>(cx: &ConstCx<'_, 'tcx>, ty: Ty<'tcx>) -> bool;
 
-    /// Returns `true` if the `Qualif` is structural in an ADT's fields, i.e. if we may
-    /// recurse into an operand *value* to determine whether it has this `Qualif`.
+    /// Returns `true` if this `Qualif` is inherent to the given struct or enum.
     ///
-    /// If this returns false, `in_any_value_of_ty` will be invoked to determine the
-    /// final qualif for this ADT.
-    fn is_structural_in_adt_value<'tcx>(cx: &ConstCx<'_, 'tcx>, adt: AdtDef<'tcx>) -> bool;
+    /// By default, `Qualif`s propagate into ADTs in a structural way: An ADT only becomes
+    /// qualified if part of it is assigned a value with that `Qualif`. However, some ADTs *always*
+    /// have a certain `Qualif`, regardless of whether their fields have it. For example, a type
+    /// with a custom `Drop` impl is inherently `NeedsDrop`.
+    ///
+    /// Returning `true` for `in_adt_inherently` but `false` for `in_any_value_of_ty` is unsound.
+    fn in_adt_inherently<'tcx>(
+        cx: &ConstCx<'_, 'tcx>,
+        adt: AdtDef<'tcx>,
+        args: GenericArgsRef<'tcx>,
+    ) -> bool;
+
+    /// Returns `true` if this `Qualif` behaves sructurally for pointers and references:
+    /// the pointer/reference qualifies if and only if the pointee qualifies.
+    ///
+    /// (This is currently `false` for all our instances, but that may change in the future. Also,
+    /// by keeping it abstract, the handling of `Deref` in `in_place` becomes more clear.)
+    fn deref_structural<'tcx>(cx: &ConstCx<'_, 'tcx>) -> bool;
 }
 
 /// Constant containing interior mutability (`UnsafeCell<T>`).
@@ -90,43 +104,42 @@ impl Qualif for HasMutInterior {
             return false;
         }
 
-        // Avoid selecting for `UnsafeCell` either.
-        if ty.ty_adt_def().is_some_and(|adt| adt.is_unsafe_cell()) {
-            return true;
-        }
-
         // We do not use `ty.is_freeze` here, because that requires revealing opaque types, which
         // requires borrowck, which in turn will invoke mir_const_qualifs again, causing a cycle error.
         // Instead we invoke an obligation context manually, and provide the opaque type inference settings
         // that allow the trait solver to just error out instead of cycling.
-        let freeze_def_id = cx.tcx.require_lang_item(LangItem::Freeze, cx.body.span);
-        // FIXME(#132279): Once we've got a typing mode which reveals opaque types using the HIR
-        // typeck results without causing query cycles, we should use this here instead of defining
-        // opaque types.
-        let typing_env = ty::TypingEnv {
-            typing_mode: ty::TypingMode::analysis_in_body(
-                cx.tcx,
-                cx.body.source.def_id().expect_local(),
-            ),
-            param_env: cx.typing_env.param_env,
-        };
-        let (infcx, param_env) = cx.tcx.infer_ctxt().build_with_typing_env(typing_env);
-        let ocx = ObligationCtxt::new(&infcx);
+        let freeze_def_id = cx.tcx.require_lang_item(LangItem::Freeze, Some(cx.body.span));
+
         let obligation = Obligation::new(
             cx.tcx,
             ObligationCause::dummy_with_span(cx.body.span),
-            param_env,
+            cx.param_env,
             ty::TraitRef::new(cx.tcx, freeze_def_id, [ty::GenericArg::from(ty)]),
         );
+
+        let infcx = cx
+            .tcx
+            .infer_ctxt()
+            .with_opaque_type_inference(cx.body.source.def_id().expect_local())
+            .build();
+        let ocx = ObligationCtxt::new(&infcx);
         ocx.register_obligation(obligation);
-        let errors = ocx.evaluate_obligations_error_on_ambiguity();
+        let errors = ocx.select_all_or_error();
         !errors.is_empty()
     }
 
-    fn is_structural_in_adt_value<'tcx>(_cx: &ConstCx<'_, 'tcx>, adt: AdtDef<'tcx>) -> bool {
+    fn in_adt_inherently<'tcx>(
+        _cx: &ConstCx<'_, 'tcx>,
+        adt: AdtDef<'tcx>,
+        _: GenericArgsRef<'tcx>,
+    ) -> bool {
         // Exactly one type, `UnsafeCell`, has the `HasMutInterior` qualif inherently.
         // It arises structurally for all other types.
-        !adt.is_unsafe_cell()
+        adt.is_unsafe_cell()
+    }
+
+    fn deref_structural<'tcx>(_cx: &ConstCx<'_, 'tcx>) -> bool {
+        false
     }
 }
 
@@ -140,18 +153,25 @@ pub struct NeedsDrop;
 impl Qualif for NeedsDrop {
     const ANALYSIS_NAME: &'static str = "flow_needs_drop";
     const IS_CLEARED_ON_MOVE: bool = true;
-    const ALLOW_PROMOTED: bool = true;
 
     fn in_qualifs(qualifs: &ConstQualifs) -> bool {
         qualifs.needs_drop
     }
 
     fn in_any_value_of_ty<'tcx>(cx: &ConstCx<'_, 'tcx>, ty: Ty<'tcx>) -> bool {
-        ty.needs_drop(cx.tcx, cx.typing_env)
+        ty.needs_drop(cx.tcx, cx.param_env)
     }
 
-    fn is_structural_in_adt_value<'tcx>(cx: &ConstCx<'_, 'tcx>, adt: AdtDef<'tcx>) -> bool {
-        !adt.has_dtor(cx.tcx)
+    fn in_adt_inherently<'tcx>(
+        cx: &ConstCx<'_, 'tcx>,
+        adt: AdtDef<'tcx>,
+        _: GenericArgsRef<'tcx>,
+    ) -> bool {
+        adt.has_dtor(cx.tcx)
+    }
+
+    fn deref_structural<'tcx>(_cx: &ConstCx<'_, 'tcx>) -> bool {
+        false
     }
 }
 
@@ -170,48 +190,71 @@ impl Qualif for NeedsNonConstDrop {
 
     #[instrument(level = "trace", skip(cx), ret)]
     fn in_any_value_of_ty<'tcx>(cx: &ConstCx<'_, 'tcx>, ty: Ty<'tcx>) -> bool {
-        // If this doesn't need drop at all, then don't select `[const] Destruct`.
-        if !ty.needs_drop(cx.tcx, cx.typing_env) {
+        // Avoid selecting for simple cases, such as builtin types.
+        if ty::util::is_trivially_const_drop(ty) {
             return false;
         }
 
-        // We check that the type is `[const] Destruct` since that will verify that
-        // the type is both `[const] Drop` (if a drop impl exists for the adt), *and*
-        // that the components of this type are also `[const] Destruct`. This
-        // amounts to verifying that there are no values in this ADT that may have
-        // a non-const drop.
-        let destruct_def_id = cx.tcx.require_lang_item(LangItem::Destruct, cx.body.span);
-        let (infcx, param_env) = cx.tcx.infer_ctxt().build_with_typing_env(cx.typing_env);
-        let ocx = ObligationCtxt::new(&infcx);
-        ocx.register_obligation(Obligation::new(
+        // FIXME(effects): If `destruct` is not a `const_trait`,
+        // or effects are disabled in this crate, then give up.
+        let destruct_def_id = cx.tcx.require_lang_item(LangItem::Destruct, Some(cx.body.span));
+        if !cx.tcx.has_host_param(destruct_def_id) || !cx.tcx.features().effects {
+            return NeedsDrop::in_any_value_of_ty(cx, ty);
+        }
+
+        let obligation = Obligation::new(
             cx.tcx,
-            ObligationCause::misc(cx.body.span, cx.def_id()),
-            param_env,
-            ty::Binder::dummy(ty::TraitRef::new(cx.tcx, destruct_def_id, [ty]))
-                .to_host_effect_clause(
-                    cx.tcx,
-                    match cx.const_kind() {
-                        rustc_hir::ConstContext::ConstFn => ty::BoundConstness::Maybe,
-                        rustc_hir::ConstContext::Static(_)
-                        | rustc_hir::ConstContext::Const { .. } => ty::BoundConstness::Const,
-                    },
-                ),
-        ));
-        !ocx.evaluate_obligations_error_on_ambiguity().is_empty()
+            ObligationCause::dummy_with_span(cx.body.span),
+            cx.param_env,
+            ty::TraitRef::new(
+                cx.tcx,
+                destruct_def_id,
+                [
+                    ty::GenericArg::from(ty),
+                    ty::GenericArg::from(cx.tcx.expected_host_effect_param_for_body(cx.def_id())),
+                ],
+            ),
+        );
+
+        let infcx = cx.tcx.infer_ctxt().build();
+        let mut selcx = SelectionContext::new(&infcx);
+        let Some(impl_src) = selcx.select(&obligation).ok().flatten() else {
+            // If we couldn't select a const destruct candidate, then it's bad
+            return true;
+        };
+
+        trace!(?impl_src);
+
+        if !matches!(
+            impl_src,
+            ImplSource::Builtin(BuiltinImplSource::Misc, _) | ImplSource::Param(_)
+        ) {
+            // If our const destruct candidate is not ConstDestruct or implied by the param env,
+            // then it's bad
+            return true;
+        }
+
+        if impl_src.borrow_nested_obligations().is_empty() {
+            return false;
+        }
+
+        // If we had any errors, then it's bad
+        let ocx = ObligationCtxt::new(&infcx);
+        ocx.register_obligations(impl_src.nested_obligations());
+        let errors = ocx.select_all_or_error();
+        !errors.is_empty()
     }
 
-    fn is_structural_in_adt_value<'tcx>(cx: &ConstCx<'_, 'tcx>, adt: AdtDef<'tcx>) -> bool {
-        // As soon as an ADT has a destructor, then the drop becomes non-structural
-        // in its value since:
-        // 1. The destructor may have `[const]` bounds which are not present on the type.
-        //   Someone needs to check that those are satisfied.
-        //   While this could be instead satisfied by checking that the `[const] Drop`
-        //   impl holds (i.e. replicating part of the `in_any_value_of_ty` logic above),
-        //   even in this case, we have another problem, which is,
-        // 2. The destructor may *modify* the operand being dropped, so even if we
-        //   did recurse on the components of the operand, we may not be even dropping
-        //   the same values that were present before the custom destructor was invoked.
-        !adt.has_dtor(cx.tcx)
+    fn in_adt_inherently<'tcx>(
+        cx: &ConstCx<'_, 'tcx>,
+        adt: AdtDef<'tcx>,
+        _: GenericArgsRef<'tcx>,
+    ) -> bool {
+        adt.has_non_const_dtor(cx.tcx)
+    }
+
+    fn deref_structural<'tcx>(_cx: &ConstCx<'_, 'tcx>) -> bool {
+        false
     }
 }
 
@@ -228,16 +271,21 @@ where
     F: FnMut(Local) -> bool,
 {
     match rvalue {
-        Rvalue::ThreadLocalRef(_) => Q::in_any_value_of_ty(cx, rvalue.ty(cx.body, cx.tcx)),
+        Rvalue::ThreadLocalRef(_) | Rvalue::NullaryOp(..) => {
+            Q::in_any_value_of_ty(cx, rvalue.ty(cx.body, cx.tcx))
+        }
 
-        Rvalue::Discriminant(place) => in_place::<Q, _>(cx, in_local, place.as_ref()),
+        Rvalue::Discriminant(place) | Rvalue::Len(place) => {
+            in_place::<Q, _>(cx, in_local, place.as_ref())
+        }
 
         Rvalue::CopyForDeref(place) => in_place::<Q, _>(cx, in_local, place.as_ref()),
 
         Rvalue::Use(operand)
         | Rvalue::Repeat(operand, _)
         | Rvalue::UnaryOp(_, operand)
-        | Rvalue::Cast(_, operand, _) => in_operand::<Q, _>(cx, in_local, operand),
+        | Rvalue::Cast(_, operand, _)
+        | Rvalue::ShallowInitBox(operand, _) => in_operand::<Q, _>(cx, in_local, operand),
 
         Rvalue::BinaryOp(_, box (lhs, rhs)) => {
             in_operand::<Q, _>(cx, in_local, lhs) || in_operand::<Q, _>(cx, in_local, rhs)
@@ -255,20 +303,17 @@ where
             in_place::<Q, _>(cx, in_local, place.as_ref())
         }
 
-        Rvalue::WrapUnsafeBinder(op, _) => in_operand::<Q, _>(cx, in_local, op),
-
         Rvalue::Aggregate(kind, operands) => {
             // Return early if we know that the struct or enum being constructed is always
             // qualified.
-            if let AggregateKind::Adt(adt_did, ..) = **kind {
+            if let AggregateKind::Adt(adt_did, _, args, ..) = **kind {
                 let def = cx.tcx.adt_def(adt_did);
+                if Q::in_adt_inherently(cx, def, args) {
+                    return true;
+                }
                 // Don't do any value-based reasoning for unions.
-                // Also, if the ADT is not structural in its fields,
-                // then we cannot recurse on its fields. Instead,
-                // we fall back to checking the qualif for *any* value
-                // of the ADT.
-                if def.is_union() || !Q::is_structural_in_adt_value(cx, def) {
-                    return Q::in_any_value_of_ty(cx, rvalue.ty(cx.body, cx.tcx));
+                if def.is_union() && Q::in_any_value_of_ty(cx, rvalue.ty(cx.body, cx.tcx)) {
+                    return true;
                 }
             }
 
@@ -290,13 +335,13 @@ where
             ProjectionElem::Index(index) if in_local(index) => return true,
 
             ProjectionElem::Deref
+            | ProjectionElem::Subtype(_)
             | ProjectionElem::Field(_, _)
             | ProjectionElem::OpaqueCast(_)
             | ProjectionElem::ConstantIndex { .. }
             | ProjectionElem::Subslice { .. }
             | ProjectionElem::Downcast(_, _)
-            | ProjectionElem::Index(_)
-            | ProjectionElem::UnwrapUnsafeBinder(_) => {}
+            | ProjectionElem::Index(_) => {}
         }
 
         let base_ty = place_base.ty(cx.body, cx.tcx);
@@ -305,11 +350,7 @@ where
             return false;
         }
 
-        // `Deref` currently unconditionally "qualifies" if `in_any_value_of_ty` returns true,
-        // i.e., we treat all qualifs as non-structural for deref projections. Generally,
-        // we can say very little about `*ptr` even if we know that `ptr` satisfies all
-        // sorts of properties.
-        if elem == ProjectionElem::Deref {
+        if matches!(elem, ProjectionElem::Deref) && !Q::deref_structural(cx) {
             // We have to assume that this qualifies.
             return true;
         }
@@ -335,25 +376,23 @@ where
         Operand::Copy(place) | Operand::Move(place) => {
             return in_place::<Q, _>(cx, in_local, place.as_ref());
         }
-        Operand::RuntimeChecks(_) => return Q::in_any_value_of_ty(cx, cx.tcx.types.bool),
 
         Operand::Constant(c) => c,
     };
 
     // Check the qualifs of the value of `const` items.
     let uneval = match constant.const_ {
-        Const::Ty(_, ct) => match ct.kind() {
-            ty::ConstKind::Param(_) | ty::ConstKind::Error(_) => None,
-            // Unevaluated consts in MIR bodies don't have associated MIR (e.g. `type const`).
-            ty::ConstKind::Unevaluated(_) => None,
-            // FIXME(mgca): Investigate whether using `None` for `ConstKind::Value` is overly
-            // strict, and if instead we should be doing some kind of value-based analysis.
-            ty::ConstKind::Value(_) => None,
-            _ => bug!(
-                "expected ConstKind::Param, ConstKind::Value, ConstKind::Unevaluated, or ConstKind::Error here, found {:?}",
-                ct
-            ),
-        },
+        Const::Ty(_, ct)
+            if matches!(
+                ct.kind(),
+                ty::ConstKind::Param(_) | ty::ConstKind::Error(_) | ty::ConstKind::Value(_, _)
+            ) =>
+        {
+            None
+        }
+        Const::Ty(_, c) => {
+            bug!("expected ConstKind::Param or ConstKind::Value here, found {:?}", c)
+        }
         Const::Unevaluated(uv, _) => Some(uv),
         Const::Val(..) => None,
     };
@@ -364,8 +403,8 @@ where
         // check performed after the promotion. Verify that with an assertion.
         assert!(promoted.is_none() || Q::ALLOW_PROMOTED);
 
-        // Don't peak inside trait associated constants.
-        if promoted.is_none() && cx.tcx.trait_of_assoc(def).is_none() {
+        // Don't peek inside trait associated constants.
+        if promoted.is_none() && cx.tcx.trait_of_item(def).is_none() {
             let qualifs = cx.tcx.at(constant.span).mir_const_qualif(def);
 
             if !Q::in_qualifs(&qualifs) {

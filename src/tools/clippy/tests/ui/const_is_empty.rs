@@ -3,19 +3,19 @@
 
 fn test_literal() {
     if "".is_empty() {
-        //~^ const_is_empty
+        //~^ERROR: this expression always evaluates to true
     }
     if "foobar".is_empty() {
-        //~^ const_is_empty
+        //~^ERROR: this expression always evaluates to false
     }
 }
 
 fn test_byte_literal() {
     if b"".is_empty() {
-        //~^ const_is_empty
+        //~^ERROR: this expression always evaluates to true
     }
     if b"foobar".is_empty() {
-        //~^ const_is_empty
+        //~^ERROR: this expression always evaluates to false
     }
 }
 
@@ -32,10 +32,10 @@ fn test_propagated() {
     let empty2 = empty;
     let non_empty2 = non_empty;
     if empty2.is_empty() {
-        //~^ const_is_empty
+        //~^ERROR: this expression always evaluates to true
     }
     if non_empty2.is_empty() {
-        //~^ const_is_empty
+        //~^ERROR: this expression always evaluates to false
     }
 }
 
@@ -55,25 +55,55 @@ const NON_EMPTY_ARRAY_REPEAT: [u32; 2] = [1; 2];
 const EMPTY_REF_ARRAY: &[u32; 0] = &[];
 const NON_EMPTY_REF_ARRAY: &[u32; 3] = &[1, 2, 3];
 
+fn test_from_const() {
+    let _ = EMPTY_STR.is_empty();
+    //~^ ERROR: this expression always evaluates to true
+    let _ = NON_EMPTY_STR.is_empty();
+    //~^ ERROR: this expression always evaluates to false
+    let _ = EMPTY_BSTR.is_empty();
+    //~^ ERROR: this expression always evaluates to true
+    let _ = NON_EMPTY_BSTR.is_empty();
+    //~^ ERROR: this expression always evaluates to false
+    let _ = EMPTY_ARRAY.is_empty();
+    //~^ ERROR: this expression always evaluates to true
+    let _ = EMPTY_ARRAY_REPEAT.is_empty();
+    //~^ ERROR: this expression always evaluates to true
+    let _ = EMPTY_U8_SLICE.is_empty();
+    //~^ ERROR: this expression always evaluates to true
+    let _ = NON_EMPTY_U8_SLICE.is_empty();
+    //~^ ERROR: this expression always evaluates to false
+    let _ = NON_EMPTY_ARRAY.is_empty();
+    //~^ ERROR: this expression always evaluates to false
+    let _ = NON_EMPTY_ARRAY_REPEAT.is_empty();
+    //~^ ERROR: this expression always evaluates to false
+    let _ = EMPTY_REF_ARRAY.is_empty();
+    //~^ ERROR: this expression always evaluates to true
+    let _ = NON_EMPTY_REF_ARRAY.is_empty();
+    //~^ ERROR: this expression always evaluates to false
+    let _ = EMPTY_SLICE.is_empty();
+    //~^ ERROR: this expression always evaluates to true
+    let _ = NON_EMPTY_SLICE.is_empty();
+    //~^ ERROR: this expression always evaluates to false
+    let _ = NON_EMPTY_SLICE_REPEAT.is_empty();
+    //~^ ERROR: this expression always evaluates to false
+}
+
 fn main() {
     let value = "foobar";
     let _ = value.is_empty();
-    //~^ const_is_empty
-
+    //~^ ERROR: this expression always evaluates to false
     let x = value;
     let _ = x.is_empty();
-    //~^ const_is_empty
-
+    //~^ ERROR: this expression always evaluates to false
     let _ = "".is_empty();
-    //~^ const_is_empty
-
+    //~^ ERROR: this expression always evaluates to true
     let _ = b"".is_empty();
-    //~^ const_is_empty
+    //~^ ERROR: this expression always evaluates to true
 }
 
 fn str_from_arg(var: &str) {
     var.is_empty();
-    // Do not lint, we know nothing about var
+    // Do not lint, we know nothiny about var
 }
 
 fn update_str() {
@@ -122,7 +152,7 @@ fn not_cfg_conditioned() {
     let val = "";
     #[cfg(not(target_os = "inexistent"))]
     let _ = val.is_empty();
-    //~^ const_is_empty
+    //~^ ERROR: this expression always evaluates to true
 }
 
 const fn const_rand() -> &'static str {
@@ -140,18 +170,4 @@ fn const_expressions() {
 fn constant_from_external_crate() {
     let _ = std::env::consts::EXE_EXTENSION.is_empty();
     // Do not lint, `exe_ext` comes from the `std` crate
-}
-
-fn issue_13106() {
-    const {
-        assert!(!NON_EMPTY_STR.is_empty());
-    }
-
-    const {
-        assert!(EMPTY_STR.is_empty());
-    }
-
-    const {
-        EMPTY_STR.is_empty();
-    }
 }

@@ -15,7 +15,7 @@
 //!
 //! If you already know the name of what you are looking for, the fastest way to
 //! find it is to use the <a href="#" onclick="window.searchState.focus();">search
-//! button</a> at the top of the page.
+//! bar</a> at the top of the page.
 //!
 //! Otherwise, you may want to jump to one of these useful sections:
 //!
@@ -32,15 +32,13 @@
 //!
 //! Once you are familiar with the contents of the standard library you may
 //! begin to find the verbosity of the prose distracting. At this stage in your
-//! development you may want to press the
-//! "<svg style="width:0.75rem;height:0.75rem" viewBox="0 0 12 12" stroke="currentColor" fill="none"><path d="M2,2l4,4l4,-4M2,6l4,4l4,-4"/></svg>&nbsp;Summary"
-//! button near the top of the page to collapse it into a more skimmable view.
+//! development you may want to press the `[-]` button near the top of the
+//! page to collapse it into a more skimmable view.
 //!
-//! While you are looking at the top of the page, also notice the
-//! "Source" link. Rust's API documentation comes with the source
-//! code and you are encouraged to read it. The standard library source is
-//! generally high quality and a peek behind the curtains is
-//! often enlightening.
+//! While you are looking at that `[-]` button also notice the `source`
+//! link. Rust's API documentation comes with the source code and you are
+//! encouraged to read it. The standard library source is generally high
+//! quality and a peek behind the curtains is often enlightening.
 //!
 //! # What is in the standard library documentation?
 //!
@@ -63,10 +61,10 @@
 //!    type, but not the all-important methods.
 //!
 //! So for example there is a [page for the primitive type
-//! `char`](primitive::char) that lists all the methods that can be called on
-//! characters (very useful), and there is a [page for the module
-//! `std::char`](crate::char) that documents iterator and error types created by these methods
-//! (rarely useful).
+//! `i32`](primitive::i32) that lists all the methods that can be called on
+//! 32-bit integers (very useful), and there is a [page for the module
+//! `std::i32`] that documents the constant values [`MIN`] and [`MAX`] (rarely
+//! useful).
 //!
 //! Note the documentation for the primitives [`str`] and [`[T]`][prim@slice] (also
 //! called 'slice'). Many method calls on [`String`] and [`Vec<T>`] are actually
@@ -89,12 +87,12 @@
 //! Check out the Rust contribution guidelines [here](
 //! https://rustc-dev-guide.rust-lang.org/contributing.html#writing-documentation).
 //! The source for this documentation can be found on
-//! [GitHub](https://github.com/rust-lang/rust) in the 'library/std/' directory.
+//! [GitHub](https://github.com/rust-lang/rust).
 //! To contribute changes, make sure you read the guidelines first, then submit
 //! pull-requests for your suggested changes.
 //!
 //! Contributions are appreciated! If you see a part of the docs that can be
-//! improved, submit a PR, or chat with us first on [Zulip][rust-zulip]
+//! improved, submit a PR, or chat with us first on [Discord][rust-discord]
 //! #docs.
 //!
 //! # A Tour of The Rust Standard Library
@@ -151,7 +149,7 @@
 //! the [`io`], [`fs`], and [`net`] modules.
 //!
 //! The [`thread`] module contains Rust's threading abstractions. [`sync`]
-//! contains further primitive shared memory types, including [`atomic`], [`mpmc`] and
+//! contains further primitive shared memory types, including [`atomic`] and
 //! [`mpsc`], which contains the channel types for message passing.
 //!
 //! # Use before and after `main()`
@@ -174,12 +172,15 @@
 //!
 //! - after-main use of thread-locals, which also affects additional features:
 //!   - [`thread::current()`]
-//! - under UNIX, before main, file descriptors 0, 1, and 2 may be unchanged
-//!   (they are guaranteed to be open during main,
-//!    and are opened to /dev/null O_RDWR if they weren't open on program start)
+//!   - [`thread::scope()`]
+//!   - [`sync::mpsc`]
+//! - before-main stdio file descriptors are not guaranteed to be open on unix platforms
 //!
 //!
 //! [I/O]: io
+//! [`MIN`]: i32::MIN
+//! [`MAX`]: i32::MAX
+//! [page for the module `std::i32`]: crate::i32
 //! [TCP]: net::TcpStream
 //! [The Rust Prelude]: prelude
 //! [UDP]: net::UdpSocket
@@ -197,7 +198,6 @@
 //! [`atomic`]: sync::atomic
 //! [`for`]: ../book/ch03-05-control-flow.html#looping-through-a-collection-with-for
 //! [`str`]: prim@str
-//! [`mpmc`]: sync::mpmc
 //! [`mpsc`]: sync::mpsc
 //! [`std::cmp`]: cmp
 //! [`std::slice`]: mod@slice
@@ -209,7 +209,7 @@
 //! [multithreading]: thread
 //! [other]: #what-is-in-the-standard-library-documentation
 //! [primitive types]: ../book/ch03-02-data-types.html
-//! [rust-zulip]: https://rust-lang.zulipchat.com/
+//! [rust-discord]: https://discord.gg/rust-lang
 //! [array]: prim@array
 //! [slice]: prim@slice
 
@@ -232,7 +232,12 @@
     test(attr(allow(dead_code, deprecated, unused_variables, unused_mut)))
 )]
 #![doc(rust_logo)]
-#![doc(auto_cfg(hide(no_global_oom_handling)))]
+#![doc(cfg_hide(
+    not(test),
+    not(any(test, bootstrap)),
+    no_global_oom_handling,
+    not(no_global_oom_handling)
+))]
 // Don't link to std. We are std.
 #![no_std]
 // Tell the compiler to link to either panic_abort or panic_unwind
@@ -245,6 +250,7 @@
 #![allow(explicit_outlives_requirements)]
 #![allow(unused_lifetimes)]
 #![allow(internal_features)]
+#![deny(rustc::existing_doc_keyword)]
 #![deny(fuzzy_provenance_casts)]
 #![deny(unsafe_op_in_unsafe_fn)]
 #![allow(rustdoc::redundant_explicit_links)]
@@ -260,125 +266,107 @@
     all(target_vendor = "fortanix", target_env = "sgx"),
     feature(slice_index_methods, coerce_unsized, sgx_platform)
 )]
-#![cfg_attr(all(test, target_os = "uefi"), feature(uefi_std))]
+#![cfg_attr(any(windows, target_os = "uefi"), feature(round_char_boundary))]
 #![cfg_attr(target_family = "wasm", feature(stdarch_wasm_atomic_wait))]
 #![cfg_attr(target_arch = "wasm64", feature(simd_wasm64))]
 //
 // Language features:
 // tidy-alphabetical-start
+#![cfg_attr(bootstrap, feature(min_exhaustive_patterns))]
 #![feature(alloc_error_handler)]
 #![feature(allocator_internals)]
 #![feature(allow_internal_unsafe)]
 #![feature(allow_internal_unstable)]
 #![feature(asm_experimental_arch)]
-#![feature(autodiff)]
 #![feature(cfg_sanitizer_cfi)]
 #![feature(cfg_target_thread_local)]
 #![feature(cfi_encoding)]
-#![feature(const_default)]
-#![feature(const_trait_impl)]
-#![feature(core_float_math)]
+#![feature(concat_idents)]
+#![feature(const_mut_refs)]
 #![feature(decl_macro)]
 #![feature(deprecated_suggestion)]
 #![feature(doc_cfg)]
+#![feature(doc_cfg_hide)]
 #![feature(doc_masked)]
 #![feature(doc_notable_trait)]
 #![feature(dropck_eyepatch)]
-#![feature(f16)]
+#![feature(extended_varargs_abi_support)]
 #![feature(f128)]
-#![feature(ffi_const)]
-#![feature(formatting_options)]
-#![feature(funnel_shifts)]
+#![feature(f16)]
+#![feature(if_let_guard)]
 #![feature(intra_doc_pointers)]
-#![feature(iter_advance_by)]
-#![feature(iter_next_chunk)]
 #![feature(lang_items)]
+#![feature(let_chains)]
 #![feature(link_cfg)]
 #![feature(linkage)]
 #![feature(macro_metavar_expr_concat)]
-#![feature(maybe_uninit_fill)]
 #![feature(min_specialization)]
 #![feature(must_not_suspend)]
 #![feature(needs_panic_runtime)]
 #![feature(negative_impls)]
 #![feature(never_type)]
-#![feature(optimize_attribute)]
+#![feature(no_sanitize)]
 #![feature(prelude_import)]
 #![feature(rustc_attrs)]
 #![feature(rustdoc_internals)]
 #![feature(staged_api)]
-#![feature(stmt_expr_attributes)]
-#![feature(strict_provenance_lints)]
-#![feature(target_feature_inline_always)]
 #![feature(thread_local)]
 #![feature(try_blocks)]
-#![feature(try_trait_v2)]
 #![feature(type_alias_impl_trait)]
-#![feature(uint_carryless_mul)]
 // tidy-alphabetical-end
 //
 // Library features (core):
 // tidy-alphabetical-start
-#![feature(bstr)]
-#![feature(bstr_internals)]
-#![feature(cast_maybe_uninit)]
+#![feature(c_str_module)]
 #![feature(char_internals)]
 #![feature(clone_to_uninit)]
-#![feature(const_convert)]
 #![feature(core_intrinsics)]
 #![feature(core_io_borrowed_buf)]
-#![feature(cstr_display)]
-#![feature(drop_guard)]
 #![feature(duration_constants)]
 #![feature(error_generic_member_access)]
 #![feature(error_iter)]
 #![feature(exact_size_is_empty)]
 #![feature(exclusive_wrapper)]
+#![feature(exposed_provenance)]
 #![feature(extend_one)]
-#![feature(float_algebraic)]
 #![feature(float_gamma)]
 #![feature(float_minimum_maximum)]
+#![feature(float_next_up_down)]
 #![feature(fmt_internals)]
-#![feature(fn_ptr_trait)]
-#![feature(generic_atomic)]
 #![feature(hasher_prefixfree_extras)]
 #![feature(hashmap_internals)]
-#![feature(hint_must_use)]
-#![feature(int_from_ascii)]
 #![feature(ip)]
-#![feature(maybe_uninit_array_assume_init)]
+#![feature(maybe_uninit_slice)]
+#![feature(maybe_uninit_write_slice)]
 #![feature(panic_can_unwind)]
 #![feature(panic_internals)]
 #![feature(pin_coerce_unsized_trait)]
 #![feature(pointer_is_aligned_to)]
 #![feature(portable_simd)]
+#![feature(prelude_2024)]
 #![feature(ptr_as_uninit)]
 #![feature(ptr_mask)]
-#![feature(random)]
 #![feature(slice_internals)]
 #![feature(slice_ptr_get)]
 #![feature(slice_range)]
-#![feature(slice_split_once)]
 #![feature(std_internals)]
 #![feature(str_internals)]
-#![feature(sync_unsafe_cell)]
-#![feature(temporary_niche_types)]
+#![feature(strict_provenance)]
+#![feature(strict_provenance_atomic_ptr)]
 #![feature(ub_checks)]
-#![feature(used_with_arg)]
 // tidy-alphabetical-end
 //
 // Library features (alloc):
 // tidy-alphabetical-start
+#![feature(alloc_layout_extra)]
 #![feature(allocator_api)]
-#![feature(clone_from_ref)]
 #![feature(get_mut_unchecked)]
 #![feature(map_try_insert)]
+#![feature(new_zeroed_alloc)]
 #![feature(slice_concat_trait)]
 #![feature(thin_box)]
 #![feature(try_reserve_kind)]
-#![feature(try_with_capacity)]
-#![feature(unique_rc_arc)]
-#![feature(wtf8_internals)]
+#![feature(vec_into_raw_parts)]
 // tidy-alphabetical-end
 //
 // Library features (unwind):
@@ -403,6 +391,7 @@
 #![feature(custom_test_frameworks)]
 #![feature(edition_panic)]
 #![feature(format_args_nl)]
+#![feature(get_many_mut)]
 #![feature(log_syntax)]
 #![feature(test)]
 #![feature(trace_macros)]
@@ -412,20 +401,21 @@
 //
 // Only for const-ness:
 // tidy-alphabetical-start
-#![feature(io_const_error)]
+#![feature(const_collections_with_hasher)]
+#![feature(const_hash)]
+#![feature(const_ip)]
+#![feature(const_ipv4)]
+#![feature(const_ipv6)]
+#![feature(thread_local_internals)]
 // tidy-alphabetical-end
 //
 #![default_lib_allocator]
-
-// The Rust prelude
-// The compiler expects the prelude definition to be defined before its use statement.
-pub mod prelude;
 
 // Explicitly import the prelude. The compiler uses this same unstable attribute
 // to import the prelude implicitly when building crates that depend on std.
 #[prelude_import]
 #[allow(unused)]
-use prelude::rust_2024::*;
+use prelude::rust_2021::*;
 
 // Access to Bencher, etc.
 #[cfg(test)]
@@ -476,9 +466,12 @@ mod macros;
 #[macro_use]
 pub mod rt;
 
+// The Rust prelude
+pub mod prelude;
+
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::any;
-#[stable(feature = "core_array", since = "1.35.0")]
+#[stable(feature = "core_array", since = "1.36.0")]
 pub use core::array;
 #[unstable(feature = "async_iterator", issue = "79024")]
 pub use core::async_iter;
@@ -498,9 +491,9 @@ pub use core::default;
 pub use core::future;
 #[stable(feature = "core_hint", since = "1.27.0")]
 pub use core::hint;
-#[stable(feature = "rust1", since = "1.0.0")]
+#[stable(feature = "i128", since = "1.26.0")]
 #[allow(deprecated, deprecated_in_future)]
-pub use core::i8;
+pub use core::i128;
 #[stable(feature = "rust1", since = "1.0.0")]
 #[allow(deprecated, deprecated_in_future)]
 pub use core::i16;
@@ -510,9 +503,9 @@ pub use core::i32;
 #[stable(feature = "rust1", since = "1.0.0")]
 #[allow(deprecated, deprecated_in_future)]
 pub use core::i64;
-#[stable(feature = "i128", since = "1.26.0")]
+#[stable(feature = "rust1", since = "1.0.0")]
 #[allow(deprecated, deprecated_in_future)]
-pub use core::i128;
+pub use core::i8;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::intrinsics;
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -532,13 +525,11 @@ pub use core::option;
 pub use core::pin;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::ptr;
-#[unstable(feature = "new_range_api", issue = "125687")]
-pub use core::range;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::result;
-#[stable(feature = "rust1", since = "1.0.0")]
+#[stable(feature = "i128", since = "1.26.0")]
 #[allow(deprecated, deprecated_in_future)]
-pub use core::u8;
+pub use core::u128;
 #[stable(feature = "rust1", since = "1.0.0")]
 #[allow(deprecated, deprecated_in_future)]
 pub use core::u16;
@@ -548,11 +539,9 @@ pub use core::u32;
 #[stable(feature = "rust1", since = "1.0.0")]
 #[allow(deprecated, deprecated_in_future)]
 pub use core::u64;
-#[stable(feature = "i128", since = "1.26.0")]
+#[stable(feature = "rust1", since = "1.0.0")]
 #[allow(deprecated, deprecated_in_future)]
-pub use core::u128;
-#[unstable(feature = "unsafe_binders", issue = "130516")]
-pub use core::unsafe_binder;
+pub use core::u8;
 #[stable(feature = "rust1", since = "1.0.0")]
 #[allow(deprecated, deprecated_in_future)]
 pub use core::usize;
@@ -576,21 +565,17 @@ pub use alloc_crate::string;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use alloc_crate::vec;
 
-#[path = "num/f128.rs"]
+#[unstable(feature = "f128", issue = "116909")]
 pub mod f128;
-#[path = "num/f16.rs"]
+#[unstable(feature = "f16", issue = "116909")]
 pub mod f16;
-#[path = "num/f32.rs"]
 pub mod f32;
-#[path = "num/f64.rs"]
 pub mod f64;
 
 #[macro_use]
 pub mod thread;
 pub mod ascii;
 pub mod backtrace;
-#[unstable(feature = "bstr", issue = "134915")]
-pub mod bstr;
 pub mod collections;
 pub mod env;
 pub mod error;
@@ -602,12 +587,12 @@ pub mod net;
 pub mod num;
 pub mod os;
 pub mod panic;
-#[unstable(feature = "pattern_type_macro", issue = "123646")]
+#[unstable(feature = "core_pattern_types", issue = "123646")]
 pub mod pat;
 pub mod path;
+#[unstable(feature = "anonymous_pipe", issue = "127154")]
+pub mod pipe;
 pub mod process;
-#[unstable(feature = "random", issue = "130703")]
-pub mod random;
 pub mod sync;
 pub mod time;
 
@@ -628,13 +613,6 @@ pub mod simd {
 
     #[doc(inline)]
     pub use crate::std_float::StdFloat;
-}
-
-#[unstable(feature = "autodiff", issue = "124509")]
-/// This module provides support for automatic differentiation.
-pub mod autodiff {
-    /// This macro handles automatic differentiation.
-    pub use core::autodiff::{autodiff_forward, autodiff_reverse};
 }
 
 #[stable(feature = "futures_api", since = "1.36.0")]
@@ -664,25 +642,23 @@ pub mod arch {
     pub use std_detect::is_aarch64_feature_detected;
     #[unstable(feature = "stdarch_arm_feature_detection", issue = "111190")]
     pub use std_detect::is_arm_feature_detected;
-    #[unstable(feature = "is_loongarch_feature_detected", issue = "117425")]
-    pub use std_detect::is_loongarch_feature_detected;
     #[unstable(feature = "is_riscv_feature_detected", issue = "111192")]
     pub use std_detect::is_riscv_feature_detected;
-    #[stable(feature = "stdarch_s390x_feature_detection", since = "1.93.0")]
-    pub use std_detect::is_s390x_feature_detected;
     #[stable(feature = "simd_x86", since = "1.27.0")]
     pub use std_detect::is_x86_feature_detected;
     #[unstable(feature = "stdarch_mips_feature_detection", issue = "111188")]
-    pub use std_detect::{is_mips_feature_detected, is_mips64_feature_detected};
+    pub use std_detect::{is_mips64_feature_detected, is_mips_feature_detected};
     #[unstable(feature = "stdarch_powerpc_feature_detection", issue = "111191")]
-    pub use std_detect::{is_powerpc_feature_detected, is_powerpc64_feature_detected};
+    pub use std_detect::{is_powerpc64_feature_detected, is_powerpc_feature_detected};
 }
 
 // This was stabilized in the crate root so we have to keep it there.
 #[stable(feature = "simd_x86", since = "1.27.0")]
 pub use std_detect::is_x86_feature_detected;
 
+// Platform-abstraction modules
 mod sys;
+mod sys_common;
 
 pub mod alloc;
 
@@ -693,46 +669,31 @@ mod panicking;
 #[allow(dead_code, unused_attributes, fuzzy_provenance_casts, unsafe_op_in_unsafe_fn)]
 mod backtrace_rs;
 
-#[stable(feature = "cfg_select", since = "1.95.0")]
-pub use core::cfg_select;
+#[unstable(feature = "cfg_match", issue = "115585")]
+pub use core::cfg_match;
 #[unstable(
     feature = "concat_bytes",
     issue = "87555",
     reason = "`concat_bytes` is not stable enough for use and is subject to change"
 )]
 pub use core::concat_bytes;
-#[stable(feature = "matches_macro", since = "1.42.0")]
-#[allow(deprecated, deprecated_in_future)]
-pub use core::matches;
 #[stable(feature = "core_primitive", since = "1.43.0")]
 pub use core::primitive;
-#[stable(feature = "todo_macro", since = "1.40.0")]
-#[allow(deprecated, deprecated_in_future)]
-pub use core::todo;
 // Re-export built-in macros defined through core.
 #[stable(feature = "builtin_macro_prelude", since = "1.38.0")]
+#[allow(deprecated)]
 pub use core::{
-    assert, cfg, column, compile_error, concat, const_format_args, env, file, format_args,
-    format_args_nl, include, include_bytes, include_str, line, log_syntax, module_path, option_env,
-    stringify, trace_macros,
+    assert, assert_matches, cfg, column, compile_error, concat, concat_idents, const_format_args,
+    env, file, format_args, format_args_nl, include, include_bytes, include_str, line, log_syntax,
+    module_path, option_env, stringify, trace_macros,
 };
 // Re-export macros defined in core.
 #[stable(feature = "rust1", since = "1.0.0")]
 #[allow(deprecated, deprecated_in_future)]
 pub use core::{
-    assert_eq, assert_ne, debug_assert, debug_assert_eq, debug_assert_ne, r#try, unimplemented,
-    unreachable, write, writeln,
+    assert_eq, assert_ne, debug_assert, debug_assert_eq, debug_assert_ne, matches, todo, r#try,
+    unimplemented, unreachable, write, writeln,
 };
-#[unstable(feature = "assert_matches", issue = "82775")]
-pub use core::{assert_matches, debug_assert_matches};
-
-// Re-export unstable derive macro defined through core.
-#[unstable(feature = "derive_from", issue = "144889")]
-/// Unstable module containing the unstable `From` derive macro.
-pub mod from {
-    #[unstable(feature = "derive_from", issue = "144889")]
-    pub use core::from::From;
-}
 
 // Include a number of private modules that exist solely to provide
 // the rustdoc documentation for primitive types. Using `include!`
@@ -760,4 +721,27 @@ mod sealed {
 
 #[cfg(test)]
 #[allow(dead_code)] // Not used in all configurations.
-pub(crate) mod test_helpers;
+pub(crate) mod test_helpers {
+    /// Test-only replacement for `rand::thread_rng()`, which is unusable for
+    /// us, as we want to allow running stdlib tests on tier-3 targets which may
+    /// not have `getrandom` support.
+    ///
+    /// Does a bit of a song and dance to ensure that the seed is different on
+    /// each call (as some tests sadly rely on this), but doesn't try that hard.
+    ///
+    /// This is duplicated in the `core`, `alloc` test suites (as well as
+    /// `std`'s integration tests), but figuring out a mechanism to share these
+    /// seems far more painful than copy-pasting a 7 line function a couple
+    /// times, given that even under a perma-unstable feature, I don't think we
+    /// want to expose types from `rand` from `std`.
+    #[track_caller]
+    pub(crate) fn test_rng() -> rand_xorshift::XorShiftRng {
+        use core::hash::{BuildHasher, Hash, Hasher};
+        let mut hasher = crate::hash::RandomState::new().build_hasher();
+        core::panic::Location::caller().hash(&mut hasher);
+        let hc64 = hasher.finish();
+        let seed_vec = hc64.to_le_bytes().into_iter().chain(0u8..8).collect::<Vec<u8>>();
+        let seed: [u8; 16] = seed_vec.as_slice().try_into().unwrap();
+        rand::SeedableRng::from_seed(seed)
+    }
+}

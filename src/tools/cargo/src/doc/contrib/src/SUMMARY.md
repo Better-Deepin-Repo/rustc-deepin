@@ -14,7 +14,6 @@
     - [Architecture](./implementation/architecture.md)
     - [New packages](./implementation/packages.md)
     - [New subcommands](./implementation/subcommands.md)
-    - [Data Schemas](./implementation/schemas.md)
     - [Console Output](./implementation/console.md)
     - [Filesystem](./implementation/filesystem.md)
     - [Formatting](./implementation/formatting.md)
@@ -24,4 +23,3 @@
     - [Writing Tests](./tests/writing.md)
     - [Benchmarking and Profiling](./tests/profiling.md)
     - [Crater](./tests/crater.md)
-- [Documentation](./documentation/index.md)

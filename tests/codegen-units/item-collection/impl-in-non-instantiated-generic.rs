@@ -1,7 +1,7 @@
-//@ compile-flags:-Clink-dead-code
+//@ compile-flags:-Zprint-mono-items=eager
 
 #![deny(dead_code)]
-#![crate_type = "lib"]
+#![feature(start)]
 
 trait SomeTrait {
     fn foo(&self);
@@ -19,8 +19,8 @@ pub fn generic_function<T>(x: T) -> (T, i32) {
 }
 
 //~ MONO_ITEM fn start
-#[no_mangle]
-pub fn start(_: isize, _: *const *const u8) -> isize {
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
     0i64.foo();
 
     0

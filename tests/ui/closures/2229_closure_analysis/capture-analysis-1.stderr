@@ -16,25 +16,26 @@ LL | |
 LL | |
 LL | |         println!("{:?}", p);
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
-note: Capturing p[] -> Immutable
+note: Capturing p[] -> ImmBorrow
   --> $DIR/capture-analysis-1.rs:22:26
    |
 LL |         println!("{:?}", p);
    |                          ^
-note: Capturing p[(0, 0)] -> Immutable
+note: Capturing p[(0, 0)] -> ImmBorrow
   --> $DIR/capture-analysis-1.rs:25:26
    |
 LL |         println!("{:?}", p.x);
    |                          ^^^
-note: Capturing q[(0, 0)] -> Immutable
+note: Capturing q[(0, 0)] -> ImmBorrow
   --> $DIR/capture-analysis-1.rs:28:26
    |
 LL |         println!("{:?}", q.x);
    |                          ^^^
-note: Capturing q[] -> Immutable
+note: Capturing q[] -> ImmBorrow
   --> $DIR/capture-analysis-1.rs:30:26
    |
 LL |         println!("{:?}", q);
@@ -48,15 +49,16 @@ LL | |
 LL | |
 LL | |         println!("{:?}", p);
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
-note: Min Capture p[] -> Immutable
+note: Min Capture p[] -> ImmBorrow
   --> $DIR/capture-analysis-1.rs:22:26
    |
 LL |         println!("{:?}", p);
    |                          ^
-note: Min Capture q[] -> Immutable
+note: Min Capture q[] -> ImmBorrow
   --> $DIR/capture-analysis-1.rs:30:26
    |
 LL |         println!("{:?}", q);

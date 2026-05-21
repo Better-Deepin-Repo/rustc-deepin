@@ -14,7 +14,7 @@ fn is_static<T>(_: T) where T: 'static { }
 // Here, we should default to `dyn Bar + 'static`, but the current
 // code forces us into a conservative, hacky path.
 fn bar(x: &str) -> &dyn Foo<Item = dyn Bar> { &() }
-//~^ ERROR cannot deduce the lifetime bound for this trait object type
+//~^ ERROR please supply an explicit bound
 
 fn main() {
     let s = format!("foo");

@@ -21,7 +21,7 @@ By default all binaries are removed for a crate but the `--bin` and
 
 ## OPTIONS
 
-### Uninstall Options
+### Install Options
 
 {{#options}}
 

@@ -2,6 +2,8 @@
 #![allow(unused_variables)]
 // Test that you can supply `&F` where `F: Fn()`.
 
+#![feature(lang_items)]
+
 fn a<F:Fn() -> i32>(f: F) -> i32 {
     f()
 }

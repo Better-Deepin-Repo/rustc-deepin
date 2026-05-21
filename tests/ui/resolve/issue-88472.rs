@@ -1,4 +1,3 @@
-//@ edition:2015
 // Regression test for #88472, where a suggestion was issued to
 // import an inaccessible struct.
 
@@ -15,7 +14,7 @@ mod b {
     use crate::a::*;
     //~^ WARNING: unused import
     type Bar = Foo;
-    //~^ ERROR: cannot find type `Foo` in this scope [E0425]
+    //~^ ERROR: cannot find type `Foo` in this scope [E0412]
     //~| NOTE: not found in this scope
 }
 
@@ -32,7 +31,7 @@ mod c {
 
 mod e {
     type Baz = Eee;
-    //~^ ERROR: cannot find type `Eee` in this scope [E0425]
+    //~^ ERROR: cannot find type `Eee` in this scope [E0412]
     //~| NOTE: not found in this scope
 }
 

@@ -1,6 +1,6 @@
 //@ edition:2018
 
-#![feature(async_trait_bounds)]
+#![feature(async_closure)]
 
 trait Foo {}
 

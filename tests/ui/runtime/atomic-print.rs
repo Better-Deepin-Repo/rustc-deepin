@@ -2,8 +2,8 @@
 
 #![allow(unused_must_use)]
 #![allow(deprecated)]
-//@ needs-threads
-//@ needs-subprocess
+//@ ignore-wasm32 no processes or threads
+//@ ignore-sgx no processes
 
 use std::{env, fmt, process, sync, thread};
 

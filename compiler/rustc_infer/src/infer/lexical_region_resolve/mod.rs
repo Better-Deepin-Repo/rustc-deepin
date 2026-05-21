@@ -3,25 +3,26 @@
 use std::fmt;
 
 use rustc_data_structures::fx::FxHashSet;
+use rustc_data_structures::graph::implementation::{
+    Direction, Graph, NodeIndex, INCOMING, OUTGOING,
+};
 use rustc_data_structures::intern::Interned;
 use rustc_data_structures::unord::UnordSet;
 use rustc_index::{IndexSlice, IndexVec};
+use rustc_middle::ty::fold::TypeFoldable;
 use rustc_middle::ty::{
     self, ReBound, ReEarlyParam, ReErased, ReError, ReLateParam, RePlaceholder, ReStatic, ReVar,
-    Region, RegionVid, Ty, TyCtxt, TypeFoldable, fold_regions,
+    Region, RegionVid, Ty, TyCtxt,
 };
 use rustc_middle::{bug, span_bug};
 use rustc_span::Span;
 use tracing::{debug, instrument};
 
 use super::outlives::test_type_match;
-use crate::infer::lexical_region_resolve::indexed_edges::{EdgeDirection, IndexedConstraintEdges};
 use crate::infer::region_constraints::{
-    ConstraintKind, GenericKind, RegionConstraintData, VarInfos, VerifyBound,
+    Constraint, GenericKind, RegionConstraintData, VarInfos, VerifyBound,
 };
 use crate::infer::{RegionRelations, RegionVariableOrigin, SubregionOrigin};
-
-mod indexed_edges;
 
 /// This function performs lexical region resolution given a complete
 /// set of constraints and variable origins. It performs a fixed-point
@@ -31,7 +32,7 @@ mod indexed_edges;
 #[instrument(level = "debug", skip(region_rels, var_infos, data))]
 pub(crate) fn resolve<'tcx>(
     region_rels: &RegionRelations<'_, 'tcx>,
-    var_infos: VarInfos<'tcx>,
+    var_infos: VarInfos,
     data: RegionConstraintData<'tcx>,
 ) -> (LexicalRegionResolutions<'tcx>, Vec<RegionResolutionError<'tcx>>) {
     let mut errors = vec![];
@@ -80,7 +81,7 @@ pub enum RegionResolutionError<'tcx> {
     /// `sub_r <= sup_r` does not hold.
     SubSupConflict(
         RegionVid,
-        RegionVariableOrigin<'tcx>,
+        RegionVariableOrigin,
         SubregionOrigin<'tcx>,
         Region<'tcx>,
         SubregionOrigin<'tcx>,
@@ -92,7 +93,7 @@ pub enum RegionResolutionError<'tcx> {
     /// cannot name the placeholder `'b`.
     UpperBoundUniverseConflict(
         RegionVid,
-        RegionVariableOrigin<'tcx>,
+        RegionVariableOrigin,
         ty::UniverseIndex,     // the universe index of the region variable
         SubregionOrigin<'tcx>, // cause of the constraint
         Region<'tcx>,          // the placeholder `'b`
@@ -118,9 +119,11 @@ struct RegionAndOrigin<'tcx> {
     origin: SubregionOrigin<'tcx>,
 }
 
+type RegionGraph<'tcx> = Graph<(), Constraint<'tcx>>;
+
 struct LexicalResolver<'cx, 'tcx> {
     region_rels: &'cx RegionRelations<'cx, 'tcx>,
-    var_infos: VarInfos<'tcx>,
+    var_infos: VarInfos,
     data: RegionConstraintData<'tcx>,
 }
 
@@ -157,7 +160,7 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
     /// empty region. The `expansion` phase will grow this larger.
     fn construct_var_data(&self) -> LexicalRegionResolutions<'tcx> {
         LexicalRegionResolutions {
-            values: IndexVec::<RegionVid, _>::from_fn_n(
+            values: IndexVec::from_fn_n(
                 |vid| {
                     let vid_universe = self.var_infos[vid].universe;
                     VarValue::Empty(vid_universe)
@@ -185,96 +188,91 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
         let mut constraints = IndexVec::from_elem(Vec::new(), &var_values.values);
         // Tracks the changed region vids.
         let mut changes = Vec::new();
-        for (c, _) in &self.data.constraints {
-            match c.kind {
-                ConstraintKind::RegSubVar => {
-                    let sup_vid = c.sup.as_var();
-                    let sup_data = var_values.value_mut(sup_vid);
+        for (constraint, _) in &self.data.constraints {
+            match *constraint {
+                Constraint::RegSubVar(a_region, b_vid) => {
+                    let b_data = var_values.value_mut(b_vid);
 
-                    if self.expand_node(c.sub, sup_vid, sup_data) {
-                        changes.push(sup_vid);
+                    if self.expand_node(a_region, b_vid, b_data) {
+                        changes.push(b_vid);
                     }
                 }
-                ConstraintKind::VarSubVar => {
-                    let sub_vid = c.sub.as_var();
-                    let sup_vid = c.sup.as_var();
-                    match *var_values.value(sub_vid) {
-                        VarValue::ErrorValue => continue,
-                        VarValue::Empty(sub_universe) => {
-                            let sup_data = var_values.value_mut(sup_vid);
+                Constraint::VarSubVar(a_vid, b_vid) => match *var_values.value(a_vid) {
+                    VarValue::ErrorValue => continue,
+                    VarValue::Empty(a_universe) => {
+                        let b_data = var_values.value_mut(b_vid);
 
-                            let changed = match *sup_data {
-                                VarValue::Empty(sup_universe) => {
-                                    // Empty regions are ordered according to the universe
-                                    // they are associated with.
-                                    let ui = sub_universe.min(sup_universe);
+                        let changed = match *b_data {
+                            VarValue::Empty(b_universe) => {
+                                // Empty regions are ordered according to the universe
+                                // they are associated with.
+                                let ui = a_universe.min(b_universe);
 
-                                    debug!(
-                                        "Expanding value of {:?} \
+                                debug!(
+                                    "Expanding value of {:?} \
                                     from empty lifetime with universe {:?} \
                                     to empty lifetime with universe {:?}",
-                                        sup_vid, sup_universe, ui
-                                    );
+                                    b_vid, b_universe, ui
+                                );
 
-                                    *sup_data = VarValue::Empty(ui);
-                                    true
-                                }
-                                VarValue::Value(cur_region) => {
-                                    match cur_region.kind() {
-                                        // If this empty region is from a universe that can name
-                                        // the placeholder universe, then the LUB is the
-                                        // Placeholder region (which is the cur_region). Otherwise,
-                                        // the LUB is the Static lifetime.
-                                        RePlaceholder(placeholder)
-                                            if !sub_universe.can_name(placeholder.universe) =>
-                                        {
-                                            let lub = self.tcx().lifetimes.re_static;
-                                            debug!(
-                                                "Expanding value of {:?} from {:?} to {:?}",
-                                                sup_vid, cur_region, lub
-                                            );
+                                *b_data = VarValue::Empty(ui);
+                                true
+                            }
+                            VarValue::Value(cur_region) => {
+                                match *cur_region {
+                                    // If this empty region is from a universe that can name the
+                                    // placeholder universe, then the LUB is the Placeholder region
+                                    // (which is the cur_region). Otherwise, the LUB is the Static
+                                    // lifetime.
+                                    RePlaceholder(placeholder)
+                                        if !a_universe.can_name(placeholder.universe) =>
+                                    {
+                                        let lub = self.tcx().lifetimes.re_static;
+                                        debug!(
+                                            "Expanding value of {:?} from {:?} to {:?}",
+                                            b_vid, cur_region, lub
+                                        );
 
-                                            *sup_data = VarValue::Value(lub);
-                                            true
-                                        }
-
-                                        _ => false,
+                                        *b_data = VarValue::Value(lub);
+                                        true
                                     }
-                                }
 
-                                VarValue::ErrorValue => false,
-                            };
-
-                            if changed {
-                                changes.push(sup_vid);
-                            }
-                            match sup_data {
-                                VarValue::Value(Region(Interned(ReStatic, _)))
-                                | VarValue::ErrorValue => (),
-                                _ => {
-                                    constraints[sub_vid].push((sub_vid, sup_vid));
-                                    constraints[sup_vid].push((sub_vid, sup_vid));
+                                    _ => false,
                                 }
                             }
+
+                            VarValue::ErrorValue => false,
+                        };
+
+                        if changed {
+                            changes.push(b_vid);
                         }
-                        VarValue::Value(sub_region) => {
-                            let sup_data = var_values.value_mut(sup_vid);
-
-                            if self.expand_node(sub_region, sup_vid, sup_data) {
-                                changes.push(sup_vid);
-                            }
-                            match sup_data {
-                                VarValue::Value(Region(Interned(ReStatic, _)))
-                                | VarValue::ErrorValue => (),
-                                _ => {
-                                    constraints[sub_vid].push((sub_vid, sup_vid));
-                                    constraints[sup_vid].push((sub_vid, sup_vid));
-                                }
+                        match b_data {
+                            VarValue::Value(Region(Interned(ReStatic, _)))
+                            | VarValue::ErrorValue => (),
+                            _ => {
+                                constraints[a_vid].push((a_vid, b_vid));
+                                constraints[b_vid].push((a_vid, b_vid));
                             }
                         }
                     }
-                }
-                ConstraintKind::RegSubReg | ConstraintKind::VarSubReg => {
+                    VarValue::Value(a_region) => {
+                        let b_data = var_values.value_mut(b_vid);
+
+                        if self.expand_node(a_region, b_vid, b_data) {
+                            changes.push(b_vid);
+                        }
+                        match b_data {
+                            VarValue::Value(Region(Interned(ReStatic, _)))
+                            | VarValue::ErrorValue => (),
+                            _ => {
+                                constraints[a_vid].push((a_vid, b_vid));
+                                constraints[b_vid].push((a_vid, b_vid));
+                            }
+                        }
+                    }
+                },
+                Constraint::RegSubReg(..) | Constraint::VarSubReg(..) => {
                     // These constraints are checked after expansion
                     // is done, in `collect_errors`.
                     continue;
@@ -313,7 +311,7 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
 
         match *b_data {
             VarValue::Empty(empty_ui) => {
-                let lub = match a_region.kind() {
+                let lub = match *a_region {
                     RePlaceholder(placeholder) => {
                         // If this empty region is from a universe that can
                         // name the placeholder, then the placeholder is
@@ -353,7 +351,7 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
                 // tighter bound than `'static`.
                 //
                 // (This might e.g. arise from being asked to prove `for<'a> { 'b: 'a }`.)
-                if let ty::RePlaceholder(p) = lub.kind()
+                if let ty::RePlaceholder(p) = *lub
                     && b_universe.cannot_name(p.universe)
                 {
                     lub = self.tcx().lifetimes.re_static;
@@ -380,7 +378,7 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
                 a_ui.min(b_ui) == b_ui
             }
             (VarValue::Value(a), VarValue::Empty(_)) => {
-                match a.kind() {
+                match *a {
                     // this is always on an error path,
                     // so it doesn't really matter if it's shorter or longer than an empty region
                     ReError(_) => false,
@@ -413,7 +411,7 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
                 }
             }
             (VarValue::Empty(a_ui), VarValue::Value(b)) => {
-                match b.kind() {
+                match *b {
                     // this is always on an error path,
                     // so it doesn't really matter if it's shorter or longer than an empty region
                     ReError(_) => false,
@@ -482,7 +480,7 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
     /// term "concrete regions").
     #[instrument(level = "trace", skip(self), ret)]
     fn lub_concrete_regions(&self, a: Region<'tcx>, b: Region<'tcx>) -> Region<'tcx> {
-        match (a.kind(), b.kind()) {
+        match (*a, *b) {
             (ReBound(..), _) | (_, ReBound(..)) | (ReErased, _) | (_, ReErased) => {
                 bug!("cannot relate region: LUB({:?}, {:?})", a, b);
             }
@@ -531,48 +529,49 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
         var_data: &mut LexicalRegionResolutions<'tcx>,
         errors: &mut Vec<RegionResolutionError<'tcx>>,
     ) {
-        for (c, origin) in &self.data.constraints {
-            debug!(?c, ?origin);
-            match c.kind {
-                ConstraintKind::RegSubVar | ConstraintKind::VarSubVar => {
+        for (constraint, origin) in &self.data.constraints {
+            debug!(?constraint, ?origin);
+            match *constraint {
+                Constraint::RegSubVar(..) | Constraint::VarSubVar(..) => {
                     // Expansion will ensure that these constraints hold. Ignore.
                 }
 
-                ConstraintKind::RegSubReg => {
-                    if self.sub_concrete_regions(c.sub, c.sup) {
+                Constraint::RegSubReg(sub, sup) => {
+                    if self.sub_concrete_regions(sub, sup) {
                         continue;
                     }
 
                     debug!(
-                        "region error at {:?}: cannot verify that {:?} <= {:?}",
-                        origin, c.sub, c.sup
+                        "region error at {:?}: \
+                         cannot verify that {:?} <= {:?}",
+                        origin, sub, sup
                     );
 
                     errors.push(RegionResolutionError::ConcreteFailure(
                         (*origin).clone(),
-                        c.sub,
-                        c.sup,
+                        sub,
+                        sup,
                     ));
                 }
 
-                ConstraintKind::VarSubReg => {
-                    let sub_vid = c.sub.as_var();
-                    let sub_data = var_data.value_mut(sub_vid);
-                    debug!("contraction: {:?} == {:?}, {:?}", sub_vid, sub_data, c.sup);
+                Constraint::VarSubReg(a_vid, b_region) => {
+                    let a_data = var_data.value_mut(a_vid);
+                    debug!("contraction: {:?} == {:?}, {:?}", a_vid, a_data, b_region);
 
-                    let VarValue::Value(sub_region) = *sub_data else {
+                    let VarValue::Value(a_region) = *a_data else {
                         continue;
                     };
 
                     // Do not report these errors immediately:
                     // instead, set the variable value to error and
                     // collect them later.
-                    if !self.sub_concrete_regions(sub_region, c.sup) {
+                    if !self.sub_concrete_regions(a_region, b_region) {
                         debug!(
-                            "region error at {:?}: cannot verify that {:?}={:?} <= {:?}",
-                            origin, sub_vid, sub_region, c.sup
+                            "region error at {:?}: \
+                            cannot verify that {:?}={:?} <= {:?}",
+                            origin, a_vid, a_region, b_region
                         );
-                        *sub_data = VarValue::ErrorValue;
+                        *a_data = VarValue::ErrorValue;
                     }
                 }
             }
@@ -624,8 +623,9 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
         // overlapping locations.
         let mut dup_vec = IndexVec::from_elem_n(None, self.num_vars());
 
-        // Only construct the edge index when necessary, because it's moderately expensive.
-        let mut edges: Option<IndexedConstraintEdges<'_, 'tcx>> = None;
+        // Only construct the graph when necessary, because it's moderately
+        // expensive.
+        let mut graph = None;
 
         for (node_vid, value) in var_data.values.iter_enumerated() {
             match *value {
@@ -659,18 +659,54 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
                     // influence the constraints on this value for
                     // richer diagnostics in `static_impl_trait`.
 
-                    let e = edges.get_or_insert_with(|| {
-                        IndexedConstraintEdges::build_index(self.num_vars(), &self.data)
-                    });
-                    self.collect_error_for_expanding_node(e, &mut dup_vec, node_vid, errors);
+                    let g = graph.get_or_insert_with(|| self.construct_graph());
+                    self.collect_error_for_expanding_node(g, &mut dup_vec, node_vid, errors);
                 }
             }
         }
     }
 
+    fn construct_graph(&self) -> RegionGraph<'tcx> {
+        let num_vars = self.num_vars();
+
+        let mut graph = Graph::new();
+
+        for _ in 0..num_vars {
+            graph.add_node(());
+        }
+
+        // Issue #30438: two distinct dummy nodes, one for incoming
+        // edges (dummy_source) and another for outgoing edges
+        // (dummy_sink). In `dummy -> a -> b -> dummy`, using one
+        // dummy node leads one to think (erroneously) there exists a
+        // path from `b` to `a`. Two dummy nodes sidesteps the issue.
+        let dummy_source = graph.add_node(());
+        let dummy_sink = graph.add_node(());
+
+        for (constraint, _) in &self.data.constraints {
+            match *constraint {
+                Constraint::VarSubVar(a_id, b_id) => {
+                    graph.add_edge(NodeIndex(a_id.index()), NodeIndex(b_id.index()), *constraint);
+                }
+                Constraint::RegSubVar(_, b_id) => {
+                    graph.add_edge(dummy_source, NodeIndex(b_id.index()), *constraint);
+                }
+                Constraint::VarSubReg(a_id, _) => {
+                    graph.add_edge(NodeIndex(a_id.index()), dummy_sink, *constraint);
+                }
+                Constraint::RegSubReg(..) => {
+                    // this would be an edge from `dummy_source` to
+                    // `dummy_sink`; just ignore it.
+                }
+            }
+        }
+
+        graph
+    }
+
     fn collect_error_for_expanding_node(
         &self,
-        edges: &IndexedConstraintEdges<'_, 'tcx>,
+        graph: &RegionGraph<'tcx>,
         dup_vec: &mut IndexSlice<RegionVid, Option<RegionVid>>,
         node_idx: RegionVid,
         errors: &mut Vec<RegionResolutionError<'tcx>>,
@@ -678,9 +714,9 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
         // Errors in expanding nodes result from a lower-bound that is
         // not contained by an upper-bound.
         let (mut lower_bounds, lower_vid_bounds, lower_dup) =
-            self.collect_bounding_regions(edges, node_idx, EdgeDirection::In, Some(dup_vec));
+            self.collect_bounding_regions(graph, node_idx, INCOMING, Some(dup_vec));
         let (mut upper_bounds, _, upper_dup) =
-            self.collect_bounding_regions(edges, node_idx, EdgeDirection::Out, Some(dup_vec));
+            self.collect_bounding_regions(graph, node_idx, OUTGOING, Some(dup_vec));
 
         if lower_dup || upper_dup {
             return;
@@ -690,7 +726,7 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
         // SubSupConflict(ReLateParam, ReLateParam) when reporting error, and so
         // the user will more likely get a specific suggestion.
         fn region_order_key(x: &RegionAndOrigin<'_>) -> u8 {
-            match x.region.kind() {
+            match *x.region {
                 ReEarlyParam(_) => 0,
                 ReLateParam(_) => 1,
                 _ => 2,
@@ -702,7 +738,7 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
         let node_universe = self.var_infos[node_idx].universe;
 
         for lower_bound in &lower_bounds {
-            let effective_lower_bound = if let ty::RePlaceholder(p) = lower_bound.region.kind() {
+            let effective_lower_bound = if let ty::RePlaceholder(p) = *lower_bound.region {
                 if node_universe.cannot_name(p.universe) {
                     self.tcx().lifetimes.re_static
                 } else {
@@ -750,7 +786,7 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
             .expect("lower_vid_bounds should at least include `node_idx`");
 
         for upper_bound in &upper_bounds {
-            if let ty::RePlaceholder(p) = upper_bound.region.kind() {
+            if let ty::RePlaceholder(p) = *upper_bound.region {
                 if min_universe.cannot_name(p.universe) {
                     let origin = self.var_infos[node_idx].origin;
                     errors.push(RegionResolutionError::UpperBoundUniverseConflict(
@@ -788,9 +824,9 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
     ///   those returned by a previous call for another region.
     fn collect_bounding_regions(
         &self,
-        edges: &IndexedConstraintEdges<'_, 'tcx>,
+        graph: &RegionGraph<'tcx>,
         orig_node_idx: RegionVid,
-        dir: EdgeDirection,
+        dir: Direction,
         mut dup_vec: Option<&mut IndexSlice<RegionVid, Option<RegionVid>>>,
     ) -> (Vec<RegionAndOrigin<'tcx>>, FxHashSet<RegionVid>, bool) {
         struct WalkState<'tcx> {
@@ -809,7 +845,7 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
 
         // to start off the process, walk the source node in the
         // direction specified
-        process_edges(&mut state, edges, orig_node_idx, dir);
+        process_edges(&self.data, &mut state, graph, orig_node_idx, dir);
 
         while let Some(node_idx) = state.stack.pop() {
             // check whether we've visited this node on some previous walk
@@ -826,42 +862,43 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
                 );
             }
 
-            process_edges(&mut state, edges, node_idx, dir);
+            process_edges(&self.data, &mut state, graph, node_idx, dir);
         }
 
         let WalkState { result, dup_found, set, .. } = state;
         return (result, set, dup_found);
 
         fn process_edges<'tcx>(
+            this: &RegionConstraintData<'tcx>,
             state: &mut WalkState<'tcx>,
-            edges: &IndexedConstraintEdges<'_, 'tcx>,
+            graph: &RegionGraph<'tcx>,
             source_vid: RegionVid,
-            dir: EdgeDirection,
+            dir: Direction,
         ) {
             debug!("process_edges(source_vid={:?}, dir={:?})", source_vid, dir);
 
-            for (c, origin) in edges.adjacent_edges(source_vid, dir) {
-                match c.kind {
-                    ConstraintKind::VarSubVar => {
-                        let from_vid = c.sub.as_var();
-                        let to_vid = c.sup.as_var();
+            let source_node_index = NodeIndex(source_vid.index());
+            for (_, edge) in graph.adjacent_edges(source_node_index, dir) {
+                match edge.data {
+                    Constraint::VarSubVar(from_vid, to_vid) => {
                         let opp_vid = if from_vid == source_vid { to_vid } else { from_vid };
                         if state.set.insert(opp_vid) {
                             state.stack.push(opp_vid);
                         }
                     }
 
-                    ConstraintKind::RegSubVar => {
-                        let origin = origin.clone();
-                        state.result.push(RegionAndOrigin { region: c.sub, origin });
+                    Constraint::RegSubVar(region, _) | Constraint::VarSubReg(_, region) => {
+                        let origin = this
+                            .constraints
+                            .iter()
+                            .find(|(c, _)| *c == edge.data)
+                            .unwrap()
+                            .1
+                            .clone();
+                        state.result.push(RegionAndOrigin { region, origin });
                     }
 
-                    ConstraintKind::VarSubReg => {
-                        let origin = origin.clone();
-                        state.result.push(RegionAndOrigin { region: c.sup, origin });
-                    }
-
-                    ConstraintKind::RegSubReg => panic!(
+                    Constraint::RegSubReg(..) => panic!(
                         "cannot reach reg-sub-reg edge in region inference \
                          post-processing"
                     ),
@@ -877,7 +914,7 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
         generic_ty: Ty<'tcx>,
         min: ty::Region<'tcx>,
     ) -> bool {
-        if let ty::ReError(_) = min.kind() {
+        if let ty::ReError(_) = *min {
             return true;
         }
 
@@ -895,18 +932,18 @@ impl<'cx, 'tcx> LexicalResolver<'cx, 'tcx> {
             }
 
             VerifyBound::OutlivedBy(r) => {
-                let a = match min.kind() {
+                let a = match *min {
                     ty::ReVar(rid) => var_values.values[rid],
                     _ => VarValue::Value(min),
                 };
-                let b = match r.kind() {
+                let b = match **r {
                     ty::ReVar(rid) => var_values.values[rid],
                     _ => VarValue::Value(*r),
                 };
                 self.sub_region_values(a, b)
             }
 
-            VerifyBound::IsEmpty => match min.kind() {
+            VerifyBound::IsEmpty => match *min {
                 ty::ReVar(rid) => match var_values.values[rid] {
                     VarValue::ErrorValue => false,
                     VarValue::Empty(_) => true,
@@ -937,7 +974,7 @@ impl<'tcx> LexicalRegionResolutions<'tcx> {
     where
         T: TypeFoldable<TyCtxt<'tcx>>,
     {
-        fold_regions(tcx, value, |r, _db| self.resolve_region(tcx, r))
+        tcx.fold_regions(value, |r, _db| self.resolve_region(tcx, r))
     }
 
     fn value(&self, rid: RegionVid) -> &VarValue<'tcx> {
@@ -953,7 +990,7 @@ impl<'tcx> LexicalRegionResolutions<'tcx> {
         tcx: TyCtxt<'tcx>,
         r: ty::Region<'tcx>,
     ) -> ty::Region<'tcx> {
-        let result = match r.kind() {
+        let result = match *r {
             ty::ReVar(rid) => match self.values[rid] {
                 VarValue::Empty(_) => r,
                 VarValue::Value(r) => r,

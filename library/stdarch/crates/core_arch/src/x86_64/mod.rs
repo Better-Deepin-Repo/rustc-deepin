@@ -47,11 +47,11 @@ mod tbm;
 pub use self::tbm::*;
 
 mod avx512f;
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub use self::avx512f::*;
 
 mod avx512bw;
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 pub use self::avx512bw::*;
 
 mod bswap;
@@ -75,7 +75,7 @@ mod bt;
 pub use self::bt::*;
 
 mod avx512fp16;
-#[stable(feature = "stdarch_x86_avx512fp16", since = "1.94.0")]
+#[unstable(feature = "stdarch_x86_avx512_f16", issue = "127213")]
 pub use self::avx512fp16::*;
 
 mod amx;

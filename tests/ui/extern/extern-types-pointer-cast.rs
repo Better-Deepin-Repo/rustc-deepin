@@ -2,8 +2,7 @@
 #![allow(dead_code)]
 // Test that pointers to extern types can be cast from/to usize,
 // despite being !Sized.
-#![feature(extern_types, sized_hierarchy)]
-use std::marker::PointeeSized;
+#![feature(extern_types)]
 
 extern "C" {
     type A;
@@ -14,7 +13,7 @@ struct Foo {
     tail: A,
 }
 
-struct Bar<T: PointeeSized> {
+struct Bar<T: ?Sized> {
     x: u8,
     tail: T,
 }

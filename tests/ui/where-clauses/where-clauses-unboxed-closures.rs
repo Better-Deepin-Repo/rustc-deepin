@@ -1,5 +1,6 @@
 //@ run-pass
 #![allow(unused_variables)]
+//@ pretty-expanded FIXME #23616
 
 struct Bencher;
 

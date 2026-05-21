@@ -1,4 +1,4 @@
-pub fn add_two(a: u64) -> u64 {
+pub fn add_two(a: usize) -> usize {
     a + 2
 }
 

@@ -1,10 +1,7 @@
 #![warn(clippy::let_unit_value)]
-#![allow(
-    clippy::no_effect,
-    clippy::needless_late_init,
-    path_statements,
-    clippy::match_single_binding
-)]
+#![allow(unused, clippy::no_effect, clippy::needless_late_init, path_statements)]
+
+//@no-rustfix: need to change the suggestion to a multipart suggestion
 
 macro_rules! let_and_return {
     ($n:expr) => {{
@@ -14,18 +11,17 @@ macro_rules! let_and_return {
 
 fn main() {
     let _x = println!("x");
-    //~^ let_unit_value
     let _y = 1; // this is fine
     let _z = ((), 1); // this as well
     if true {
         // do not lint this, since () is explicit
         let _a = ();
-        let () = returns_unit();
+        let () = dummy();
         let () = ();
-        () = returns_unit();
+        () = dummy();
         () = ();
         let _a: () = ();
-        let _a: () = returns_unit();
+        let _a: () = dummy();
     }
 
     consume_units_with_for_loop(); // should be fine as well
@@ -35,7 +31,7 @@ fn main() {
     let_and_return!(()) // should be fine
 }
 
-fn returns_unit() {}
+fn dummy() {}
 
 // Related to issue #1964
 fn consume_units_with_for_loop() {
@@ -63,10 +59,9 @@ fn multiline_sugg() {
     let v: Vec<u8> = vec![2];
 
     let _ = v
-        //~^ let_unit_value
         .into_iter()
         .map(|i| i * 2)
-        .filter(|i| i.is_multiple_of(2))
+        .filter(|i| i % 2 == 0)
         .map(|_| ())
         .next()
         .unwrap();
@@ -113,7 +108,6 @@ fn _returns_generic() {
     let x: () = if true { f() } else { f2(0) };
 
     let x = match Some(0) {
-        //~^ let_unit_value
         None => f2(1),
         Some(0) => f(),
         Some(1) => f2(3),
@@ -186,6 +180,8 @@ async fn issue10433() {
 pub async fn issue11502(a: ()) {}
 
 pub fn issue12594() {
+    fn returns_unit() {}
+
     fn returns_result<T>(res: T) -> Result<T, ()> {
         Ok(res)
     }
@@ -193,47 +189,10 @@ pub fn issue12594() {
     fn actual_test() {
         // create first a unit value'd value
         let res = returns_unit();
-        //~^ let_unit_value
         returns_result(res).unwrap();
         returns_result(res).unwrap();
         // make sure we replace only the first variable
         let res = 1;
         returns_result(res).unwrap();
     }
-}
-
-fn takes_unit(x: ()) {}
-
-fn issue15061() {
-    let res = returns_unit();
-    //~^ let_unit_value
-    takes_unit(res);
-    println!("{res:?}");
-}
-
-fn issue15771() {
-    match "Example String" {
-        _ => _ = returns_unit(),
-        //~^ let_unit_value
-    }
-
-    _ = if true {}
-    //~^ let_unit_value
-}
-
-fn issue_15784() {
-    let res = eprintln!("I return unit");
-    //~^ let_unit_value
-    takes_unit(res);
-    println!("{res:?}");
-}
-
-fn issue15789() {
-    struct Foo {
-        value: (),
-    }
-    let value = println!();
-    //~^ let_unit_value
-
-    Foo { value };
 }

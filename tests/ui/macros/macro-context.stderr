@@ -1,4 +1,4 @@
-error: macro expansion ignores `;` and any tokens following
+error: macro expansion ignores token `;` and any following
   --> $DIR/macro-context.rs:3:15
    |
 LL |     () => ( i ; typeof );
@@ -9,7 +9,7 @@ LL |     let a: m!();
    |
    = note: the usage of `m!` is likely invalid in type context
 
-error: macro expansion ignores reserved keyword `typeof` and any tokens following
+error: macro expansion ignores token `typeof` and any following
   --> $DIR/macro-context.rs:3:17
    |
 LL |     () => ( i ; typeof );
@@ -20,7 +20,7 @@ LL |     let i = m!();
    |
    = note: the usage of `m!` is likely invalid in expression context
 
-error: macro expansion ignores `;` and any tokens following
+error: macro expansion ignores token `;` and any following
   --> $DIR/macro-context.rs:3:15
    |
 LL |     () => ( i ; typeof );
@@ -42,20 +42,16 @@ LL |     m!();
    |
    = note: this error originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error[E0425]: cannot find type `i` in this scope
+error[E0412]: cannot find type `i` in this scope
   --> $DIR/macro-context.rs:3:13
    |
 LL |     () => ( i ; typeof );
-   |             ^
+   |             ^ help: a builtin type with a similar name exists: `i8`
 ...
 LL |     let a: m!();
    |            ---- in this macro invocation
    |
    = note: this error originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
-help: a builtin type with a similar name exists
-   |
-LL |     () => ( i8 ; typeof );
-   |              +
 
 error[E0425]: cannot find value `i` in this scope
   --> $DIR/macro-context.rs:3:13
@@ -68,7 +64,7 @@ LL |     let i = m!();
    |
    = note: this error originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error: trailing semicolon in macro used in expression position
+warning: trailing semicolon in macro used in expression position
   --> $DIR/macro-context.rs:3:15
    |
 LL |     () => ( i ; typeof );
@@ -79,14 +75,15 @@ LL |     let i = m!();
    |
    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
-   = note: `#[deny(semicolon_in_expressions_from_macros)]` (part of `#[deny(future_incompatible)]`) on by default
-   = note: this error originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: `#[warn(semicolon_in_expressions_from_macros)]` on by default
+   = note: this warning originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
 
-error: aborting due to 7 previous errors
+error: aborting due to 6 previous errors; 1 warning emitted
 
-For more information about this error, try `rustc --explain E0425`.
+Some errors have detailed explanations: E0412, E0425.
+For more information about an error, try `rustc --explain E0412`.
 Future incompatibility report: Future breakage diagnostic:
-error: trailing semicolon in macro used in expression position
+warning: trailing semicolon in macro used in expression position
   --> $DIR/macro-context.rs:3:15
    |
 LL |     () => ( i ; typeof );
@@ -97,6 +94,6 @@ LL |     let i = m!();
    |
    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
    = note: for more information, see issue #79813 <https://github.com/rust-lang/rust/issues/79813>
-   = note: `#[deny(semicolon_in_expressions_from_macros)]` (part of `#[deny(future_incompatible)]`) on by default
-   = note: this error originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = note: `#[warn(semicolon_in_expressions_from_macros)]` on by default
+   = note: this warning originates in the macro `m` (in Nightly builds, run with -Z macro-backtrace for more info)
 

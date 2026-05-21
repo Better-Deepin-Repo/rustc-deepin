@@ -3,23 +3,17 @@ use crate::{Diagnostic, DiagnosticCode, DiagnosticsContext, Severity};
 // Diagnostic: macro-error
 //
 // This diagnostic is shown for macro expansion errors.
-
-// Diagnostic: attribute-expansion-disabled
-//
-// This diagnostic is shown for attribute proc macros when attribute expansions have been disabled.
-
-// Diagnostic: proc-macro-disabled
-//
-// This diagnostic is shown for proc macros that have been specifically disabled via `rust-analyzer.procMacro.ignored`.
 pub(crate) fn macro_error(ctx: &DiagnosticsContext<'_>, d: &hir::MacroError) -> Diagnostic {
     // Use more accurate position if available.
-    let display_range = ctx.sema.diagnostics_display_range_for_range(d.range);
+    let display_range = ctx.resolve_precise_location(&d.node, d.precise_location);
     Diagnostic::new(
-        DiagnosticCode::Ra(d.kind, if d.error { Severity::Error } else { Severity::WeakWarning }),
+        DiagnosticCode::Ra(
+            "macro-error",
+            if d.error { Severity::Error } else { Severity::WeakWarning },
+        ),
         d.message.clone(),
         display_range,
     )
-    .stable()
 }
 
 // Diagnostic: macro-def-error
@@ -27,23 +21,20 @@ pub(crate) fn macro_error(ctx: &DiagnosticsContext<'_>, d: &hir::MacroError) -> 
 // This diagnostic is shown for macro expansion errors.
 pub(crate) fn macro_def_error(ctx: &DiagnosticsContext<'_>, d: &hir::MacroDefError) -> Diagnostic {
     // Use more accurate position if available.
-    let display_range = match d.name {
-        Some(name) => ctx.sema.diagnostics_display_range_for_range(d.node.with_value(name)),
-        None => ctx.sema.diagnostics_display_range(d.node.map(|it| it.syntax_node_ptr())),
-    };
+    let display_range =
+        ctx.resolve_precise_location(&d.node.map(|it| it.syntax_node_ptr()), d.name);
     Diagnostic::new(
         DiagnosticCode::Ra("macro-def-error", Severity::Error),
         d.message.clone(),
         display_range,
     )
-    .stable()
 }
 
 #[cfg(test)]
 mod tests {
     use crate::{
-        DiagnosticsConfig,
         tests::{check_diagnostics, check_diagnostics_with_config},
+        DiagnosticsConfig,
     };
 
     #[test]
@@ -127,7 +118,6 @@ include!("foo/bar.rs");
 
     #[test]
     fn good_out_dir_diagnostic() {
-        // FIXME: The diagnostic here is duplicated for each eager expansion
         check_diagnostics(
             r#"
 #[rustc_builtin_macro]
@@ -137,24 +127,23 @@ macro_rules! env { () => {} }
 #[rustc_builtin_macro]
 macro_rules! concat { () => {} }
 
-  include!(concat!(
-        // ^^^^^^ error: `OUT_DIR` not set, build scripts may have failed to run
-    env!(
-  //^^^ error: `OUT_DIR` not set, build scripts may have failed to run
-        "OUT_DIR"), "/out.rs"));
-      //^^^^^^^^^ error: `OUT_DIR` not set, build scripts may have failed to run
+  include!(concat!(env!("OUT_DIR"), "/out.rs"));
+                      //^^^^^^^^^ error: `OUT_DIR` not set, enable "build scripts" to fix
 "#,
         );
     }
 
     #[test]
-    fn register_tool() {
+    fn register_attr_and_tool() {
+        cov_mark::check!(register_attr);
         cov_mark::check!(register_tool);
         check_diagnostics(
             r#"
 #![register_tool(tool)]
+#![register_attr(attr)]
 
 #[tool::path]
+#[attr]
 struct S;
 "#,
         );
@@ -186,13 +175,13 @@ fn main() {
            //^^^^^^^^^^^^^^^^ error: failed to load file `does not exist`
 
     include!(concat!("does ", "not ", "exist"));
-                  // ^^^^^^^^^^^^^^^^^^^^^^^^ error: failed to load file `does not exist`
+                  //^^^^^^^^^^^^^^^^^^^^^^^^^^ error: failed to load file `does not exist`
 
     env!(invalid);
        //^^^^^^^ error: expected string literal
 
     env!("OUT_DIR");
-       //^^^^^^^^^ error: `OUT_DIR` not set, build scripts may have failed to run
+       //^^^^^^^^^ error: `OUT_DIR` not set, enable "build scripts" to fix
 
     compile_error!("compile_error works");
   //^^^^^^^^^^^^^ error: compile_error works
@@ -243,8 +232,7 @@ macro_rules! outer {
 
 fn f() {
     outer!();
-} //^^^^^^ error: leftover tokens
-  //^^^^^^ error: Syntax Error in Expansion: expected expression
+} //^^^^^^^^ error: leftover tokens
 "#,
         )
     }
@@ -293,35 +281,9 @@ include!("include-me.rs");
 //- /include-me.rs
 /// long doc that pushes the diagnostic range beyond the first file's text length
   #[err]
- // ^^^ error: unresolved macro `err`
+//^^^^^^error: unresolved macro `err`
 mod prim_never {}
 "#,
-        );
-    }
-
-    #[test]
-    fn no_stack_overflow_for_missing_binding() {
-        check_diagnostics(
-            r#"
-#[macro_export]
-macro_rules! boom {
-    (
-        $($code:literal),+,
-        $(param: $param:expr,)?
-    ) => {{
-        let _ = $crate::boom!(@param $($param)*);
-    }};
-    (@param) => { () };
-    (@param $param:expr) => { $param };
-}
-
-fn it_works() {
-    // NOTE: there is an error, but RA crashes before showing it
-    boom!("RAND", param: c7.clone());
-               // ^^^^^ error: expected literal
-}
-
-        "#,
         );
     }
 }

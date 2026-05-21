@@ -1,12 +1,10 @@
-use crate::spec::{
-    Abi, Arch, Cc, Env, FloatAbi, LinkerFlavor, Lld, Os, RelocModel, Target, TargetMetadata,
-    TargetOptions, cvs,
-};
+use crate::spec::{cvs, Cc, LinkerFlavor, Lld, RelocModel, Target, TargetOptions};
 
 /// A base target for Nintendo 3DS devices using the devkitARM toolchain.
 ///
 /// Requires the devkitARM toolchain for 3DS targets on the host system.
-pub(crate) fn target() -> Target {
+
+pub fn target() -> Target {
     let pre_link_args = TargetOptions::link_args(
         LinkerFlavor::Gnu(Cc::Yes, Lld::No),
         &["-specs=3dsx.specs", "-mtune=mpcore", "-mfloat-abi=hard", "-mtp=soft"],
@@ -14,7 +12,7 @@ pub(crate) fn target() -> Target {
 
     Target {
         llvm_target: "armv6k-none-eabihf".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: Some("Armv6K Nintendo 3DS, Horizon (Requires devkitARM toolchain)".into()),
             tier: Some(3),
             host_tools: Some(false),
@@ -22,15 +20,14 @@ pub(crate) fn target() -> Target {
         },
         pointer_width: 32,
         data_layout: "e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64".into(),
-        arch: Arch::Arm,
+        arch: "arm".into(),
 
         options: TargetOptions {
-            os: Os::Horizon,
-            env: Env::Newlib,
+            os: "horizon".into(),
+            env: "newlib".into(),
             vendor: "nintendo".into(),
+            abi: "eabihf".into(),
             cpu: "mpcore".into(),
-            abi: Abi::EabiHf,
-            llvm_floatabi: Some(FloatAbi::Hard),
             families: cvs!["unix"],
             linker: Some("arm-none-eabi-gcc".into()),
             relocation_model: RelocModel::Static,

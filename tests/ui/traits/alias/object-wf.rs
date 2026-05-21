@@ -20,7 +20,7 @@ fn _f0() {
     let _: Box<dyn Unpin + _1 + Send + Sync>;
 }
 
-// Include dyn-compatible traits:
+// Include object safe traits:
 
 fn _f1() {
     let _: Box<dyn Obj + _0>;
@@ -28,7 +28,7 @@ fn _f1() {
     let _: Box<dyn Obj + _1 + _0>;
 }
 
-// And when the dyn-compatible trait is in a trait alias:
+// And when the object safe trait is in a trait alias:
 
 trait _2 = Obj;
 

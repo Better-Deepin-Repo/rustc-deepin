@@ -1,11 +1,9 @@
 use clippy_utils::diagnostics::span_lint_and_sugg;
 use clippy_utils::source::snippet;
-use clippy_utils::sym;
 use rustc_ast::ast::{Expr, ExprKind, MethodCall};
 use rustc_errors::Applicability;
 use rustc_lint::{EarlyContext, EarlyLintPass};
 use rustc_session::declare_lint_pass;
-use rustc_span::Symbol;
 
 declare_clippy_lint! {
     /// ### What it does
@@ -32,20 +30,19 @@ declare_clippy_lint! {
 }
 declare_lint_pass!(UnusedRounding => [UNUSED_ROUNDING]);
 
-fn is_useless_rounding(cx: &EarlyContext<'_>, expr: &Expr) -> Option<(Symbol, String)> {
+fn is_useless_rounding<'a>(cx: &EarlyContext<'_>, expr: &'a Expr) -> Option<(&'a str, String)> {
     if let ExprKind::MethodCall(box MethodCall {
         seg: name_ident,
         receiver,
         ..
     }) = &expr.kind
-        && let method_name = name_ident.ident.name
-        && matches!(method_name, sym::ceil | sym::floor | sym::round)
+        && let method_name = name_ident.ident.name.as_str()
+        && (method_name == "ceil" || method_name == "round" || method_name == "floor")
         && let ExprKind::Lit(token_lit) = &receiver.kind
         && token_lit.is_semantic_float()
         && let Ok(f) = token_lit.symbol.as_str().replace('_', "").parse::<f64>()
-        && f.fract() == 0.0
     {
-        Some((method_name, snippet(cx, receiver.span, "..").into()))
+        (f.fract() == 0.0).then(|| (method_name, snippet(cx, receiver.span, "..").to_string()))
     } else {
         None
     }

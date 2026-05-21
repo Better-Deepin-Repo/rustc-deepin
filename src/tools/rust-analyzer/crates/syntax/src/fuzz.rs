@@ -5,8 +5,9 @@
 use std::str::{self, FromStr};
 
 use parser::Edition;
+use text_edit::Indel;
 
-use crate::{AstNode, SourceFile, TextRange, validation};
+use crate::{validation, AstNode, SourceFile, TextRange};
 
 fn check_file_invariants(file: &SourceFile) {
     let root = file.syntax();
@@ -21,8 +22,7 @@ pub fn check_parser(text: &str) {
 #[derive(Debug, Clone)]
 pub struct CheckReparse {
     text: String,
-    delete: TextRange,
-    insert: String,
+    edit: Indel,
     edited_text: String,
 }
 
@@ -43,13 +43,14 @@ impl CheckReparse {
             TextRange::at(delete_start.try_into().unwrap(), delete_len.try_into().unwrap());
         let edited_text =
             format!("{}{}{}", &text[..delete_start], &insert, &text[delete_start + delete_len..]);
-        Some(CheckReparse { text, insert, delete, edited_text })
+        let edit = Indel { insert, delete };
+        Some(CheckReparse { text, edit, edited_text })
     }
 
     #[allow(clippy::print_stderr)]
     pub fn run(&self) {
         let parse = SourceFile::parse(&self.text, Edition::CURRENT);
-        let new_parse = parse.reparse(self.delete, &self.insert, Edition::CURRENT);
+        let new_parse = parse.reparse(&self.edit, Edition::CURRENT);
         check_file_invariants(&new_parse.tree());
         assert_eq!(&new_parse.tree().syntax().text().to_string(), &self.edited_text);
         let full_reparse = SourceFile::parse(&self.edited_text, Edition::CURRENT);

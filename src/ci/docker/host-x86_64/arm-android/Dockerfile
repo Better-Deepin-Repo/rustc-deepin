@@ -1,4 +1,4 @@
-FROM ubuntu:24.04
+FROM ubuntu:23.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 COPY scripts/android-base-apt-get.sh /scripts/
@@ -11,8 +11,7 @@ RUN . /scripts/android-ndk.sh && \
 RUN dpkg --add-architecture i386 && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-  libgl1 \
-  libglx-mesa0 \
+  libgl1-mesa-glx \
   libpulse0 \
   libstdc++6:i386 \
   openjdk-8-jre-headless \
@@ -28,7 +27,6 @@ RUN /scripts/android-sdk.sh
 ENV PATH=$PATH:/android/sdk/emulator
 ENV PATH=$PATH:/android/sdk/tools
 ENV PATH=$PATH:/android/sdk/platform-tools
-ENV PATH=$PATH:/android/ndk/toolchains/llvm/prebuilt/linux-x86_64/bin
 
 ENV TARGETS=arm-linux-androideabi
 

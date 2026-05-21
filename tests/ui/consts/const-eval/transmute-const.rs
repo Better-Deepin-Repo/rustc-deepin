@@ -1,7 +1,7 @@
-#![allow(unnecessary_transmutes)]
+//@ stderr-per-bitwidth
 use std::mem;
 
 static FOO: bool = unsafe { mem::transmute(3u8) };
-//~^ ERROR 0x03, but expected a bool
+//~^ ERROR it is undefined behavior to use this value
 
 fn main() {}

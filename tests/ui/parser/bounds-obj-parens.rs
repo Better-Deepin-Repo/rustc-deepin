@@ -1,5 +1,7 @@
 //@ check-pass
 
-type A = Box<dyn (Fn(u8) -> u8) + 'static + Send + Sync>; // OK (but see #39318)
+#![allow(bare_trait_objects)]
+
+type A = Box<(Fn(u8) -> u8) + 'static + Send + Sync>; // OK (but see #39318)
 
 fn main() {}

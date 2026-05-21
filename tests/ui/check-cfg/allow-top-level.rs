@@ -6,7 +6,7 @@
 
 #![allow(unexpected_cfgs)]
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn bar() {}
 
 fn foo() {

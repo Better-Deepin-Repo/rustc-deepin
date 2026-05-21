@@ -1,6 +1,6 @@
 # use
 
-The `use` declaration can be used to avoid typing the full module path to access a name:
+The `use` declaration can be used so manual scoping isn't needed:
 
 ```rust,editable
 // An attribute to hide warnings for unused code.
@@ -19,9 +19,9 @@ enum Role {
 fn main() {
     // Explicitly `use` each name so they are available without
     // manual scoping.
-    use Stage::{Beginner, Advanced};
+    use crate::Stage::{Beginner, Advanced};
     // Automatically `use` each name inside `Role`.
-    use Role::*;
+    use crate::Role::*;
 
     // Equivalent to `Stage::Beginner`.
     let stage = Beginner;
@@ -44,7 +44,7 @@ fn main() {
 
 ### See also:
 
-[`match`][match] and [`use`][use]
+[`match`][match] and [`use`][use] 
 
 [use]: ../../mod/use.md
 [match]: ../../flow_control/match.md

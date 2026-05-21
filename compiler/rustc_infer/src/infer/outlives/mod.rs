@@ -1,33 +1,41 @@
 //! Various code related to computing outlives relations.
 
-use rustc_data_structures::undo_log::UndoLogs;
 use rustc_middle::traits::query::{NoSolution, OutlivesBound};
 use rustc_middle::ty;
 use tracing::instrument;
 
 use self::env::OutlivesEnvironment;
-use super::region_constraints::{RegionConstraintData, UndoLog};
+use super::region_constraints::RegionConstraintData;
 use super::{InferCtxt, RegionResolutionError, SubregionOrigin};
 use crate::infer::free_regions::RegionRelations;
 use crate::infer::lexical_region_resolve;
-use crate::infer::region_constraints::ConstraintKind;
 
 pub mod env;
 pub mod for_liveness;
 pub mod obligations;
 pub mod test_type_match;
-pub(crate) mod verify;
+pub mod verify;
 
 #[instrument(level = "debug", skip(param_env), ret)]
 pub fn explicit_outlives_bounds<'tcx>(
     param_env: ty::ParamEnv<'tcx>,
-) -> impl Iterator<Item = OutlivesBound<'tcx>> {
+) -> impl Iterator<Item = OutlivesBound<'tcx>> + 'tcx {
     param_env
         .caller_bounds()
         .into_iter()
-        .filter_map(ty::Clause::as_region_outlives_clause)
+        .map(ty::Clause::kind)
         .filter_map(ty::Binder::no_bound_vars)
-        .map(|ty::OutlivesPredicate(r_a, r_b)| OutlivesBound::RegionSubRegion(r_b, r_a))
+        .filter_map(move |kind| match kind {
+            ty::ClauseKind::RegionOutlives(ty::OutlivesPredicate(r_a, r_b)) => {
+                Some(OutlivesBound::RegionSubRegion(r_b, r_a))
+            }
+            ty::ClauseKind::Trait(_)
+            | ty::ClauseKind::TypeOutlives(_)
+            | ty::ClauseKind::Projection(_)
+            | ty::ClauseKind::ConstArgHasType(_, _)
+            | ty::ClauseKind::WellFormed(_)
+            | ty::ClauseKind::ConstEvaluatable(_) => None,
+        })
 }
 
 impl<'tcx> InferCtxt<'tcx> {
@@ -55,33 +63,26 @@ impl<'tcx> InferCtxt<'tcx> {
             }
         };
 
-        let mut storage = {
+        let (var_infos, data) = {
             let mut inner = self.inner.borrow_mut();
             let inner = &mut *inner;
             assert!(
                 self.tainted_by_errors().is_some() || inner.region_obligations.is_empty(),
                 "region_obligations not empty: {:#?}",
-                inner.region_obligations,
+                inner.region_obligations
             );
-            assert!(!UndoLogs::<UndoLog<'_>>::in_snapshot(&inner.undo_log));
-            inner.region_constraint_storage.take().expect("regions already resolved")
+            inner
+                .region_constraint_storage
+                .take()
+                .expect("regions already resolved")
+                .with_log(&mut inner.undo_log)
+                .into_infos_and_data()
         };
-
-        // Filter out any region-region outlives assumptions that are implied by
-        // coroutine well-formedness.
-        if self.tcx.sess.opts.unstable_opts.higher_ranked_assumptions {
-            storage.data.constraints.retain(|(c, _)| match c.kind {
-                ConstraintKind::RegSubReg => !outlives_env
-                    .higher_ranked_assumptions()
-                    .contains(&ty::OutlivesPredicate(c.sup.into(), c.sub)),
-                _ => true,
-            });
-        }
 
         let region_rels = &RegionRelations::new(self.tcx, outlives_env.free_region_map());
 
         let (lexical_region_resolutions, errors) =
-            lexical_region_resolve::resolve(region_rels, storage.var_infos, storage.data);
+            lexical_region_resolve::resolve(region_rels, var_infos, data);
 
         let old_value = self.lexical_region_resolutions.replace(Some(lexical_region_resolutions));
         assert!(old_value.is_none());
@@ -104,11 +105,6 @@ impl<'tcx> InferCtxt<'tcx> {
             self.inner.borrow().region_obligations.is_empty(),
             "region_obligations not empty: {:#?}",
             self.inner.borrow().region_obligations
-        );
-        assert!(
-            self.inner.borrow().region_assumptions.is_empty(),
-            "region_assumptions not empty: {:#?}",
-            self.inner.borrow().region_assumptions
         );
 
         self.inner.borrow_mut().unwrap_region_constraints().take_and_reset_data()

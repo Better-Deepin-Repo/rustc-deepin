@@ -13,13 +13,9 @@ fn func() -> &'static str {
 fn main() {
     // Will lint
     let x: _ = 1;
-    //~^ let_with_type_underscore
     let _: _ = 2;
-    //~^ let_with_type_underscore
     let x: _ = func();
-    //~^ let_with_type_underscore
     let x: _;
-    //~^ let_with_type_underscore
     x = ();
 
     let x = 1; // Will not lint, Rust infers this to an integer before Clippy
@@ -27,7 +23,6 @@ fn main() {
     let x: Vec<_> = Vec::<u32>::new();
     let x: [_; 1] = [1];
     let x : _ = 1;
-    //~^ let_with_type_underscore
 
     // Do not lint from procedural macros
     proc_macros::with_span! {
@@ -44,16 +39,4 @@ fn main() {
         _;
         x = ();
     };
-}
-
-fn issue15377() {
-    let (a): _ = 0;
-    //~^ let_with_type_underscore
-    let ((a)): _ = 0;
-    //~^ let_with_type_underscore
-    let ((a,)): _ = (0,);
-    //~^ let_with_type_underscore
-    #[rustfmt::skip]
-    let (   (a   )   ):  _ = 0;
-    //~^ let_with_type_underscore
 }

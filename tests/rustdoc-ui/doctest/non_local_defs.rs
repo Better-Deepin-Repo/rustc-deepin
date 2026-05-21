@@ -1,8 +1,10 @@
 //@ check-pass
-//@ compile-flags:--test --test-args --test-threads=1 --no-capture -Zunstable-options
-//@ normalize-stdout: "tests/rustdoc-ui/doctest" -> "$$DIR"
-//@ normalize-stderr: "tests/rustdoc-ui/doctest" -> "$$DIR"
-//@ normalize-stdout: "finished in \d+\.\d+s" -> "finished in $$TIME"
+//@ compile-flags:--test --test-args --test-threads=1 --nocapture -Zunstable-options
+//@ normalize-stdout-test: "tests/rustdoc-ui/doctest" -> "$$DIR"
+//@ normalize-stderr-test: "tests/rustdoc-ui/doctest" -> "$$DIR"
+//@ normalize-stdout-test: "finished in \d+\.\d+s" -> "finished in $$TIME"
+
+#![doc(test(attr(warn(non_local_definitions))))]
 
 //! ```
 //! #[macro_export]

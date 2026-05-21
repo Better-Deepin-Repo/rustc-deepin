@@ -1,6 +1,6 @@
 //! This is an implementation of a global allocator on wasm targets when
-//! emscripten or wasi is not in use. In that situation there's no actual runtime
-//! for us to lean on for allocation, so instead we provide our own!
+//! emscripten is not in use. In that situation there's no actual runtime for us
+//! to lean on for allocation, so instead we provide our own!
 //!
 //! The wasm instruction set has two instructions for getting the current
 //! amount of memory and growing the amount of memory. These instructions are the
@@ -16,15 +16,9 @@
 //! The crate itself provides a global allocator which on wasm has no
 //! synchronization as there are no threads!
 
-use core::cell::SyncUnsafeCell;
-
 use crate::alloc::{GlobalAlloc, Layout, System};
 
-struct SyncDlmalloc(dlmalloc::Dlmalloc);
-unsafe impl Sync for SyncDlmalloc {}
-
-static DLMALLOC: SyncUnsafeCell<SyncDlmalloc> =
-    SyncUnsafeCell::new(SyncDlmalloc(dlmalloc::Dlmalloc::new()));
+static mut DLMALLOC: dlmalloc::Dlmalloc = dlmalloc::Dlmalloc::new();
 
 #[stable(feature = "alloc_system_type", since = "1.28.0")]
 unsafe impl GlobalAlloc for System {
@@ -33,7 +27,7 @@ unsafe impl GlobalAlloc for System {
         // SAFETY: DLMALLOC access is guaranteed to be safe because the lock gives us unique and non-reentrant access.
         // Calling malloc() is safe because preconditions on this function match the trait method preconditions.
         let _lock = lock::lock();
-        unsafe { (*DLMALLOC.get()).0.malloc(layout.size(), layout.align()) }
+        unsafe { DLMALLOC.malloc(layout.size(), layout.align()) }
     }
 
     #[inline]
@@ -41,7 +35,7 @@ unsafe impl GlobalAlloc for System {
         // SAFETY: DLMALLOC access is guaranteed to be safe because the lock gives us unique and non-reentrant access.
         // Calling calloc() is safe because preconditions on this function match the trait method preconditions.
         let _lock = lock::lock();
-        unsafe { (*DLMALLOC.get()).0.calloc(layout.size(), layout.align()) }
+        unsafe { DLMALLOC.calloc(layout.size(), layout.align()) }
     }
 
     #[inline]
@@ -49,7 +43,7 @@ unsafe impl GlobalAlloc for System {
         // SAFETY: DLMALLOC access is guaranteed to be safe because the lock gives us unique and non-reentrant access.
         // Calling free() is safe because preconditions on this function match the trait method preconditions.
         let _lock = lock::lock();
-        unsafe { (*DLMALLOC.get()).0.free(ptr, layout.size(), layout.align()) }
+        unsafe { DLMALLOC.free(ptr, layout.size(), layout.align()) }
     }
 
     #[inline]
@@ -57,16 +51,16 @@ unsafe impl GlobalAlloc for System {
         // SAFETY: DLMALLOC access is guaranteed to be safe because the lock gives us unique and non-reentrant access.
         // Calling realloc() is safe because preconditions on this function match the trait method preconditions.
         let _lock = lock::lock();
-        unsafe { (*DLMALLOC.get()).0.realloc(ptr, layout.size(), layout.align(), new_size) }
+        unsafe { DLMALLOC.realloc(ptr, layout.size(), layout.align(), new_size) }
     }
 }
 
 #[cfg(target_feature = "atomics")]
 mod lock {
+    use crate::sync::atomic::AtomicI32;
     use crate::sync::atomic::Ordering::{Acquire, Release};
-    use crate::sync::atomic::{Atomic, AtomicI32};
 
-    static LOCKED: Atomic<i32> = AtomicI32::new(0);
+    static LOCKED: AtomicI32 = AtomicI32::new(0);
 
     pub struct DropLock;
 

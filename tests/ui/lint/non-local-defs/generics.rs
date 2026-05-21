@@ -1,6 +1,8 @@
 //@ check-pass
 //@ edition:2021
 
+#![warn(non_local_definitions)]
+
 trait Global {}
 
 fn main() {
@@ -30,6 +32,7 @@ fn fun() {
     #[derive(Debug)]
     struct OwO;
     impl Default for UwU<OwO> {
+    //~^ WARN non-local `impl` definition
         fn default() -> Self {
             UwU(OwO)
         }
@@ -40,6 +43,7 @@ fn meow() {
     #[derive(Debug)]
     struct Cat;
     impl AsRef<Cat> for () {
+    //~^ WARN non-local `impl` definition
         fn as_ref(&self) -> &Cat { &Cat }
     }
 }
@@ -50,6 +54,7 @@ fn fun2() {
     #[derive(Debug, Default)]
     struct B;
     impl PartialEq<B> for G {
+    //~^ WARN non-local `impl` definition
         fn eq(&self, _: &B) -> bool {
             true
         }
@@ -64,12 +69,14 @@ fn rawr() {
     struct Lion;
 
     impl From<Wrap<Wrap<Lion>>> for () {
+    //~^ WARN non-local `impl` definition
         fn from(_: Wrap<Wrap<Lion>>) -> Self {
             todo!()
         }
     }
 
     impl From<()> for Wrap<Lion> {
+    //~^ WARN non-local `impl` definition
         fn from(_: ()) -> Self {
             todo!()
         }

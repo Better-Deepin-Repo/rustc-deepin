@@ -10,9 +10,9 @@ use stdarch_test::assert_instr;
 #[inline]
 #[target_feature(enable = "avx512fp16")]
 #[cfg_attr(test, assert_instr(vcvtsi2sh))]
-#[stable(feature = "stdarch_x86_avx512fp16", since = "1.94.0")]
-pub fn _mm_cvti64_sh(a: __m128h, b: i64) -> __m128h {
-    unsafe { vcvtsi642sh(a, b, _MM_FROUND_CUR_DIRECTION) }
+#[unstable(feature = "stdarch_x86_avx512_f16", issue = "127213")]
+pub unsafe fn _mm_cvti64_sh(a: __m128h, b: i64) -> __m128h {
+    vcvtsi642sh(a, b, _MM_FROUND_CUR_DIRECTION)
 }
 
 /// Convert the signed 64-bit integer b to a half-precision (16-bit) floating-point element, store the
@@ -21,23 +21,21 @@ pub fn _mm_cvti64_sh(a: __m128h, b: i64) -> __m128h {
 ///
 /// Rounding is done according to the rounding parameter, which can be one of:
 ///
-/// * [`_MM_FROUND_TO_NEAREST_INT`] | [`_MM_FROUND_NO_EXC`] : round to nearest and suppress exceptions
-/// * [`_MM_FROUND_TO_NEG_INF`] | [`_MM_FROUND_NO_EXC`] : round down and suppress exceptions
-/// * [`_MM_FROUND_TO_POS_INF`] | [`_MM_FROUND_NO_EXC`] : round up and suppress exceptions
-/// * [`_MM_FROUND_TO_ZERO`] | [`_MM_FROUND_NO_EXC`] : truncate and suppress exceptions
-/// * [`_MM_FROUND_CUR_DIRECTION`] : use `MXCSR.RC` - see [`_MM_SET_ROUNDING_MODE`]
+///     (_MM_FROUND_TO_NEAREST_INT |_MM_FROUND_NO_EXC) // round to nearest, and suppress exceptions
+///     (_MM_FROUND_TO_NEG_INF |_MM_FROUND_NO_EXC)     // round down, and suppress exceptions
+///     (_MM_FROUND_TO_POS_INF |_MM_FROUND_NO_EXC)     // round up, and suppress exceptions
+///     (_MM_FROUND_TO_ZERO |_MM_FROUND_NO_EXC)        // truncate, and suppress exceptions
+///     _MM_FROUND_CUR_DIRECTION
 ///
 /// [Intel's documentation](https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm_cvt_roundi64_sh)
 #[inline]
 #[target_feature(enable = "avx512fp16")]
 #[cfg_attr(test, assert_instr(vcvtsi2sh, ROUNDING = 8))]
 #[rustc_legacy_const_generics(2)]
-#[stable(feature = "stdarch_x86_avx512fp16", since = "1.94.0")]
-pub fn _mm_cvt_roundi64_sh<const ROUNDING: i32>(a: __m128h, b: i64) -> __m128h {
-    unsafe {
-        static_assert_rounding!(ROUNDING);
-        vcvtsi642sh(a, b, ROUNDING)
-    }
+#[unstable(feature = "stdarch_x86_avx512_f16", issue = "127213")]
+pub unsafe fn _mm_cvt_roundi64_sh<const ROUNDING: i32>(a: __m128h, b: i64) -> __m128h {
+    static_assert_rounding!(ROUNDING);
+    vcvtsi642sh(a, b, ROUNDING)
 }
 
 /// Convert the unsigned 64-bit integer b to a half-precision (16-bit) floating-point element, store the
@@ -48,9 +46,9 @@ pub fn _mm_cvt_roundi64_sh<const ROUNDING: i32>(a: __m128h, b: i64) -> __m128h {
 #[inline]
 #[target_feature(enable = "avx512fp16")]
 #[cfg_attr(test, assert_instr(vcvtusi2sh))]
-#[stable(feature = "stdarch_x86_avx512fp16", since = "1.94.0")]
-pub fn _mm_cvtu64_sh(a: __m128h, b: u64) -> __m128h {
-    unsafe { vcvtusi642sh(a, b, _MM_FROUND_CUR_DIRECTION) }
+#[unstable(feature = "stdarch_x86_avx512_f16", issue = "127213")]
+pub unsafe fn _mm_cvtu64_sh(a: __m128h, b: u64) -> __m128h {
+    vcvtusi642sh(a, b, _MM_FROUND_CUR_DIRECTION)
 }
 
 /// Convert the unsigned 64-bit integer b to a half-precision (16-bit) floating-point element, store the
@@ -59,23 +57,21 @@ pub fn _mm_cvtu64_sh(a: __m128h, b: u64) -> __m128h {
 ///
 /// Rounding is done according to the rounding parameter, which can be one of:
 ///
-/// * [`_MM_FROUND_TO_NEAREST_INT`] | [`_MM_FROUND_NO_EXC`] : round to nearest and suppress exceptions
-/// * [`_MM_FROUND_TO_NEG_INF`] | [`_MM_FROUND_NO_EXC`] : round down and suppress exceptions
-/// * [`_MM_FROUND_TO_POS_INF`] | [`_MM_FROUND_NO_EXC`] : round up and suppress exceptions
-/// * [`_MM_FROUND_TO_ZERO`] | [`_MM_FROUND_NO_EXC`] : truncate and suppress exceptions
-/// * [`_MM_FROUND_CUR_DIRECTION`] : use `MXCSR.RC` - see [`_MM_SET_ROUNDING_MODE`]
+///     (_MM_FROUND_TO_NEAREST_INT |_MM_FROUND_NO_EXC) // round to nearest, and suppress exceptions
+///     (_MM_FROUND_TO_NEG_INF |_MM_FROUND_NO_EXC)     // round down, and suppress exceptions
+///     (_MM_FROUND_TO_POS_INF |_MM_FROUND_NO_EXC)     // round up, and suppress exceptions
+///     (_MM_FROUND_TO_ZERO |_MM_FROUND_NO_EXC)        // truncate, and suppress exceptions
+///     _MM_FROUND_CUR_DIRECTION
 ///
 /// [Intel's documentation](https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm_cvt_roundu64_sh)
 #[inline]
 #[target_feature(enable = "avx512fp16")]
 #[cfg_attr(test, assert_instr(vcvtusi2sh, ROUNDING = 8))]
 #[rustc_legacy_const_generics(2)]
-#[stable(feature = "stdarch_x86_avx512fp16", since = "1.94.0")]
-pub fn _mm_cvt_roundu64_sh<const ROUNDING: i32>(a: __m128h, b: u64) -> __m128h {
-    unsafe {
-        static_assert_rounding!(ROUNDING);
-        vcvtusi642sh(a, b, ROUNDING)
-    }
+#[unstable(feature = "stdarch_x86_avx512_f16", issue = "127213")]
+pub unsafe fn _mm_cvt_roundu64_sh<const ROUNDING: i32>(a: __m128h, b: u64) -> __m128h {
+    static_assert_rounding!(ROUNDING);
+    vcvtusi642sh(a, b, ROUNDING)
 }
 
 /// Convert the lower half-precision (16-bit) floating-point element in a to a 64-bit integer, and store
@@ -85,9 +81,9 @@ pub fn _mm_cvt_roundu64_sh<const ROUNDING: i32>(a: __m128h, b: u64) -> __m128h {
 #[inline]
 #[target_feature(enable = "avx512fp16")]
 #[cfg_attr(test, assert_instr(vcvtsh2si))]
-#[stable(feature = "stdarch_x86_avx512fp16", since = "1.94.0")]
-pub fn _mm_cvtsh_i64(a: __m128h) -> i64 {
-    unsafe { vcvtsh2si64(a, _MM_FROUND_CUR_DIRECTION) }
+#[unstable(feature = "stdarch_x86_avx512_f16", issue = "127213")]
+pub unsafe fn _mm_cvtsh_i64(a: __m128h) -> i64 {
+    vcvtsh2si64(a, _MM_FROUND_CUR_DIRECTION)
 }
 
 /// Convert the lower half-precision (16-bit) floating-point element in a to a 64-bit integer, and store
@@ -95,23 +91,21 @@ pub fn _mm_cvtsh_i64(a: __m128h) -> i64 {
 ///
 /// Rounding is done according to the rounding parameter, which can be one of:
 ///
-/// * [`_MM_FROUND_TO_NEAREST_INT`] | [`_MM_FROUND_NO_EXC`] : round to nearest and suppress exceptions
-/// * [`_MM_FROUND_TO_NEG_INF`] | [`_MM_FROUND_NO_EXC`] : round down and suppress exceptions
-/// * [`_MM_FROUND_TO_POS_INF`] | [`_MM_FROUND_NO_EXC`] : round up and suppress exceptions
-/// * [`_MM_FROUND_TO_ZERO`] | [`_MM_FROUND_NO_EXC`] : truncate and suppress exceptions
-/// * [`_MM_FROUND_CUR_DIRECTION`] : use `MXCSR.RC` - see [`_MM_SET_ROUNDING_MODE`]
+///     (_MM_FROUND_TO_NEAREST_INT |_MM_FROUND_NO_EXC) // round to nearest, and suppress exceptions
+///     (_MM_FROUND_TO_NEG_INF |_MM_FROUND_NO_EXC)     // round down, and suppress exceptions
+///     (_MM_FROUND_TO_POS_INF |_MM_FROUND_NO_EXC)     // round up, and suppress exceptions
+///     (_MM_FROUND_TO_ZERO |_MM_FROUND_NO_EXC)        // truncate, and suppress exceptions
+///     _MM_FROUND_CUR_DIRECTION
 ///
 /// [Intel's documentation](https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm_cvt_roundsh_i64)
 #[inline]
 #[target_feature(enable = "avx512fp16")]
 #[cfg_attr(test, assert_instr(vcvtsh2si, ROUNDING = 8))]
 #[rustc_legacy_const_generics(1)]
-#[stable(feature = "stdarch_x86_avx512fp16", since = "1.94.0")]
-pub fn _mm_cvt_roundsh_i64<const ROUNDING: i32>(a: __m128h) -> i64 {
-    unsafe {
-        static_assert_rounding!(ROUNDING);
-        vcvtsh2si64(a, ROUNDING)
-    }
+#[unstable(feature = "stdarch_x86_avx512_f16", issue = "127213")]
+pub unsafe fn _mm_cvt_roundsh_i64<const ROUNDING: i32>(a: __m128h) -> i64 {
+    static_assert_rounding!(ROUNDING);
+    vcvtsh2si64(a, ROUNDING)
 }
 
 /// Convert the lower half-precision (16-bit) floating-point element in a to a 64-bit unsigned integer, and store
@@ -121,9 +115,9 @@ pub fn _mm_cvt_roundsh_i64<const ROUNDING: i32>(a: __m128h) -> i64 {
 #[inline]
 #[target_feature(enable = "avx512fp16")]
 #[cfg_attr(test, assert_instr(vcvtsh2usi))]
-#[stable(feature = "stdarch_x86_avx512fp16", since = "1.94.0")]
-pub fn _mm_cvtsh_u64(a: __m128h) -> u64 {
-    unsafe { vcvtsh2usi64(a, _MM_FROUND_CUR_DIRECTION) }
+#[unstable(feature = "stdarch_x86_avx512_f16", issue = "127213")]
+pub unsafe fn _mm_cvtsh_u64(a: __m128h) -> u64 {
+    vcvtsh2usi64(a, _MM_FROUND_CUR_DIRECTION)
 }
 
 /// Convert the lower half-precision (16-bit) floating-point element in a to a 64-bit unsigned integer, and store
@@ -131,23 +125,21 @@ pub fn _mm_cvtsh_u64(a: __m128h) -> u64 {
 ///
 /// Rounding is done according to the rounding parameter, which can be one of:
 ///
-/// * [`_MM_FROUND_TO_NEAREST_INT`] | [`_MM_FROUND_NO_EXC`] : round to nearest and suppress exceptions
-/// * [`_MM_FROUND_TO_NEG_INF`] | [`_MM_FROUND_NO_EXC`] : round down and suppress exceptions
-/// * [`_MM_FROUND_TO_POS_INF`] | [`_MM_FROUND_NO_EXC`] : round up and suppress exceptions
-/// * [`_MM_FROUND_TO_ZERO`] | [`_MM_FROUND_NO_EXC`] : truncate and suppress exceptions
-/// * [`_MM_FROUND_CUR_DIRECTION`] : use `MXCSR.RC` - see [`_MM_SET_ROUNDING_MODE`]
+///     (_MM_FROUND_TO_NEAREST_INT |_MM_FROUND_NO_EXC) // round to nearest, and suppress exceptions
+///     (_MM_FROUND_TO_NEG_INF |_MM_FROUND_NO_EXC)     // round down, and suppress exceptions
+///     (_MM_FROUND_TO_POS_INF |_MM_FROUND_NO_EXC)     // round up, and suppress exceptions
+///     (_MM_FROUND_TO_ZERO |_MM_FROUND_NO_EXC)        // truncate, and suppress exceptions
+///     _MM_FROUND_CUR_DIRECTION
 ///
 /// [Intel's documentation](https://software.intel.com/sites/landingpage/IntrinsicsGuide/#text=_mm_cvt_roundsh_u64)
 #[inline]
 #[target_feature(enable = "avx512fp16")]
 #[cfg_attr(test, assert_instr(vcvtsh2usi, ROUNDING = 8))]
 #[rustc_legacy_const_generics(1)]
-#[stable(feature = "stdarch_x86_avx512fp16", since = "1.94.0")]
-pub fn _mm_cvt_roundsh_u64<const ROUNDING: i32>(a: __m128h) -> u64 {
-    unsafe {
-        static_assert_rounding!(ROUNDING);
-        vcvtsh2usi64(a, ROUNDING)
-    }
+#[unstable(feature = "stdarch_x86_avx512_f16", issue = "127213")]
+pub unsafe fn _mm_cvt_roundsh_u64<const ROUNDING: i32>(a: __m128h) -> u64 {
+    static_assert_rounding!(ROUNDING);
+    vcvtsh2usi64(a, ROUNDING)
 }
 
 /// Convert the lower half-precision (16-bit) floating-point element in a to a 64-bit integer with truncation,
@@ -157,9 +149,9 @@ pub fn _mm_cvt_roundsh_u64<const ROUNDING: i32>(a: __m128h) -> u64 {
 #[inline]
 #[target_feature(enable = "avx512fp16")]
 #[cfg_attr(test, assert_instr(vcvttsh2si))]
-#[stable(feature = "stdarch_x86_avx512fp16", since = "1.94.0")]
-pub fn _mm_cvttsh_i64(a: __m128h) -> i64 {
-    unsafe { vcvttsh2si64(a, _MM_FROUND_CUR_DIRECTION) }
+#[unstable(feature = "stdarch_x86_avx512_f16", issue = "127213")]
+pub unsafe fn _mm_cvttsh_i64(a: __m128h) -> i64 {
+    vcvttsh2si64(a, _MM_FROUND_CUR_DIRECTION)
 }
 
 /// Convert the lower half-precision (16-bit) floating-point element in a to a 64-bit integer with truncation,
@@ -172,12 +164,10 @@ pub fn _mm_cvttsh_i64(a: __m128h) -> i64 {
 #[target_feature(enable = "avx512fp16")]
 #[cfg_attr(test, assert_instr(vcvttsh2si, SAE = 8))]
 #[rustc_legacy_const_generics(1)]
-#[stable(feature = "stdarch_x86_avx512fp16", since = "1.94.0")]
-pub fn _mm_cvtt_roundsh_i64<const SAE: i32>(a: __m128h) -> i64 {
-    unsafe {
-        static_assert_sae!(SAE);
-        vcvttsh2si64(a, SAE)
-    }
+#[unstable(feature = "stdarch_x86_avx512_f16", issue = "127213")]
+pub unsafe fn _mm_cvtt_roundsh_i64<const SAE: i32>(a: __m128h) -> i64 {
+    static_assert_sae!(SAE);
+    vcvttsh2si64(a, SAE)
 }
 
 /// Convert the lower half-precision (16-bit) floating-point element in a to a 64-bit unsigned integer with truncation,
@@ -187,9 +177,9 @@ pub fn _mm_cvtt_roundsh_i64<const SAE: i32>(a: __m128h) -> i64 {
 #[inline]
 #[target_feature(enable = "avx512fp16")]
 #[cfg_attr(test, assert_instr(vcvttsh2usi))]
-#[stable(feature = "stdarch_x86_avx512fp16", since = "1.94.0")]
-pub fn _mm_cvttsh_u64(a: __m128h) -> u64 {
-    unsafe { vcvttsh2usi64(a, _MM_FROUND_CUR_DIRECTION) }
+#[unstable(feature = "stdarch_x86_avx512_f16", issue = "127213")]
+pub unsafe fn _mm_cvttsh_u64(a: __m128h) -> u64 {
+    vcvttsh2usi64(a, _MM_FROUND_CUR_DIRECTION)
 }
 
 /// Convert the lower half-precision (16-bit) floating-point element in a to a 64-bit unsigned integer with truncation,
@@ -202,16 +192,14 @@ pub fn _mm_cvttsh_u64(a: __m128h) -> u64 {
 #[target_feature(enable = "avx512fp16")]
 #[cfg_attr(test, assert_instr(vcvttsh2usi, SAE = 8))]
 #[rustc_legacy_const_generics(1)]
-#[stable(feature = "stdarch_x86_avx512fp16", since = "1.94.0")]
-pub fn _mm_cvtt_roundsh_u64<const SAE: i32>(a: __m128h) -> u64 {
-    unsafe {
-        static_assert_sae!(SAE);
-        vcvttsh2usi64(a, SAE)
-    }
+#[unstable(feature = "stdarch_x86_avx512_f16", issue = "127213")]
+pub unsafe fn _mm_cvtt_roundsh_u64<const SAE: i32>(a: __m128h) -> u64 {
+    static_assert_sae!(SAE);
+    vcvttsh2usi64(a, SAE)
 }
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.avx512fp16.vcvtsi642sh"]
     fn vcvtsi642sh(a: __m128h, b: i64, rounding: i32) -> __m128h;
     #[link_name = "llvm.x86.avx512fp16.vcvtusi642sh"]
@@ -231,32 +219,32 @@ mod tests {
     use crate::core_arch::{x86::*, x86_64::*};
     use stdarch_test::simd_test;
 
-    #[simd_test(enable = "avx512fp16,avx512vl")]
-    fn test_mm_cvti64_sh() {
+    #[simd_test(enable = "avx512fp16")]
+    unsafe fn test_mm_cvti64_sh() {
         let a = _mm_setr_ph(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm_cvti64_sh(a, 10);
         let e = _mm_setr_ph(10.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         assert_eq_m128h(r, e);
     }
 
-    #[simd_test(enable = "avx512fp16,avx512vl")]
-    fn test_mm_cvt_roundi64_sh() {
+    #[simd_test(enable = "avx512fp16")]
+    unsafe fn test_mm_cvt_roundi64_sh() {
         let a = _mm_setr_ph(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm_cvt_roundi64_sh::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(a, 10);
         let e = _mm_setr_ph(10.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         assert_eq_m128h(r, e);
     }
 
-    #[simd_test(enable = "avx512fp16,avx512vl")]
-    fn test_mm_cvtu64_sh() {
+    #[simd_test(enable = "avx512fp16")]
+    unsafe fn test_mm_cvtu64_sh() {
         let a = _mm_setr_ph(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm_cvtu64_sh(a, 10);
         let e = _mm_setr_ph(10.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         assert_eq_m128h(r, e);
     }
 
-    #[simd_test(enable = "avx512fp16,avx512vl")]
-    fn test_mm_cvt_roundu64_sh() {
+    #[simd_test(enable = "avx512fp16")]
+    unsafe fn test_mm_cvt_roundu64_sh() {
         let a = _mm_setr_ph(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm_cvt_roundu64_sh::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(a, 10);
         let e = _mm_setr_ph(10.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
@@ -264,56 +252,56 @@ mod tests {
     }
 
     #[simd_test(enable = "avx512fp16")]
-    fn test_mm_cvtsh_i64() {
+    unsafe fn test_mm_cvtsh_i64() {
         let a = _mm_setr_ph(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm_cvtsh_i64(a);
         assert_eq!(r, 1);
     }
 
     #[simd_test(enable = "avx512fp16")]
-    fn test_mm_cvt_roundsh_i64() {
+    unsafe fn test_mm_cvt_roundsh_i64() {
         let a = _mm_setr_ph(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm_cvt_roundsh_i64::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(a);
         assert_eq!(r, 1);
     }
 
     #[simd_test(enable = "avx512fp16")]
-    fn test_mm_cvtsh_u64() {
+    unsafe fn test_mm_cvtsh_u64() {
         let a = _mm_setr_ph(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm_cvtsh_u64(a);
         assert_eq!(r, 1);
     }
 
     #[simd_test(enable = "avx512fp16")]
-    fn test_mm_cvt_roundsh_u64() {
+    unsafe fn test_mm_cvt_roundsh_u64() {
         let a = _mm_setr_ph(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm_cvt_roundsh_u64::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(a);
         assert_eq!(r, 1);
     }
 
     #[simd_test(enable = "avx512fp16")]
-    fn test_mm_cvttsh_i64() {
+    unsafe fn test_mm_cvttsh_i64() {
         let a = _mm_setr_ph(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm_cvttsh_i64(a);
         assert_eq!(r, 1);
     }
 
     #[simd_test(enable = "avx512fp16")]
-    fn test_mm_cvtt_roundsh_i64() {
+    unsafe fn test_mm_cvtt_roundsh_i64() {
         let a = _mm_setr_ph(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm_cvtt_roundsh_i64::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(a);
         assert_eq!(r, 1);
     }
 
     #[simd_test(enable = "avx512fp16")]
-    fn test_mm_cvttsh_u64() {
+    unsafe fn test_mm_cvttsh_u64() {
         let a = _mm_setr_ph(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm_cvttsh_u64(a);
         assert_eq!(r, 1);
     }
 
     #[simd_test(enable = "avx512fp16")]
-    fn test_mm_cvtt_roundsh_u64() {
+    unsafe fn test_mm_cvtt_roundsh_u64() {
         let a = _mm_setr_ph(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0);
         let r = _mm_cvtt_roundsh_u64::<_MM_FROUND_NO_EXC>(a);
         assert_eq!(r, 1);

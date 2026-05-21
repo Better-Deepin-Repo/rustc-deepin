@@ -1,5 +1,5 @@
 //@ check-pass
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 //@ compile-flags: -Z span-debug
 //
 // Regression test for issue #76182

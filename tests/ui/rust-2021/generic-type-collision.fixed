@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ check-pass
 //@ run-rustfix
 //@ edition 2018

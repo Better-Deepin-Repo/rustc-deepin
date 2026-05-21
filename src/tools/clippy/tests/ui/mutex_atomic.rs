@@ -1,79 +1,41 @@
+#![warn(clippy::all)]
 #![warn(clippy::mutex_integer)]
 #![warn(clippy::mutex_atomic)]
 #![allow(clippy::borrow_as_ptr)]
 
-use std::sync::Mutex;
-
 fn main() {
-    let _ = Mutex::new(true);
-    //~^ mutex_atomic
-
-    let _ = Mutex::new(5usize);
-    //~^ mutex_atomic
-
-    let _ = Mutex::new(9isize);
-    //~^ mutex_atomic
-
+    use std::sync::Mutex;
+    Mutex::new(true);
+    //~^ ERROR: consider using an `AtomicBool` instead of a `Mutex` here; if you just want
+    //~| NOTE: `-D clippy::mutex-atomic` implied by `-D warnings`
+    Mutex::new(5usize);
+    //~^ ERROR: consider using an `AtomicUsize` instead of a `Mutex` here; if you just wan
+    Mutex::new(9isize);
+    //~^ ERROR: consider using an `AtomicIsize` instead of a `Mutex` here; if you just wan
     let mut x = 4u32;
-    // `AtomicPtr` only accepts `*mut T`, so this should not lint
-    let _ = Mutex::new(&x as *const u32);
-
-    let _ = Mutex::new(&mut x as *mut u32);
-    //~^ mutex_atomic
-
-    let _ = Mutex::new(0u32);
-    //~^ mutex_integer
-
-    let _ = Mutex::new(0i32);
-    //~^ mutex_integer
-
-    let _ = Mutex::new(0f32); // there are no float atomics, so this should not lint
-    let _ = Mutex::new(0u8);
-    //~^ mutex_integer
-
-    let _ = Mutex::new(0i16);
-    //~^ mutex_integer
-
+    Mutex::new(&x as *const u32);
+    //~^ ERROR: consider using an `AtomicPtr` instead of a `Mutex` here; if you just want
+    Mutex::new(&mut x as *mut u32);
+    //~^ ERROR: consider using an `AtomicPtr` instead of a `Mutex` here; if you just want
+    Mutex::new(0u32);
+    //~^ ERROR: consider using an `AtomicU32` instead of a `Mutex` here; if you just wan
+    //~| NOTE: `-D clippy::mutex-integer` implied by `-D warnings`
+    Mutex::new(0i32);
+    //~^ ERROR: consider using an `AtomicI32` instead of a `Mutex` here; if you just wan
+    Mutex::new(0f32); // there are no float atomics, so this should not lint
+    Mutex::new(0u8);
+    //~^ ERROR: consider using an `AtomicU8` instead of a `Mutex` here; if you just wan
+    Mutex::new(0i16);
+    //~^ ERROR: consider using an `AtomicI16` instead of a `Mutex` here; if you just wan
     let _x: Mutex<i8> = Mutex::new(0);
-    //~^ mutex_integer
-
+    //~^ ERROR: consider using an `AtomicI8` instead of a `Mutex` here; if you just wan
     const X: i64 = 0;
-    let _ = Mutex::new(X);
-    //~^ mutex_integer
+    Mutex::new(X);
+    //~^ ERROR: consider using an `AtomicI64` instead of a `Mutex` here; if you just wan
 
     // there are no 128 atomics, so these two should not lint
     {
-        let _ = Mutex::new(0u128);
+        Mutex::new(0u128);
         let _x: Mutex<i128> = Mutex::new(0);
     }
-}
-
-// don't lint on _use_, only declaration
-fn issue13378() {
-    static MTX: Mutex<u32> = Mutex::new(0);
-    //~^ mutex_integer
-
-    let mtx = Mutex::new(0);
-    //~^ mutex_integer
-    // This will still lint, since we're reassigning the mutex to a variable -- oh well.
-    // But realistically something like this won't really come up.
-    let reassigned = mtx;
-    //~^ mutex_integer
-
-    // don't eat the `)` when removing the type ascription -- see
-    // https://github.com/rust-lang/rust-clippy/issues/15377
-    let (funky_mtx): Mutex<u64> = Mutex::new(0);
-    //~^ mutex_integer
-}
-
-fn wrongly_unmangled_macros() {
-    macro_rules! test_expr {
-        ($val:expr) => {
-            ($val > 0 && true)
-        };
-    }
-
-    let _ = Mutex::new(test_expr!(1));
-    //~^ mutex_atomic
-    // The suggestion should preserve the macro call: `AtomicBool::new(test_expr!(true))`
 }

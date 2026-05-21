@@ -70,20 +70,12 @@ impl<'tcx> LateLintPass<'tcx> for InvalidFromUtf8 {
                 sym::str_from_utf8_mut,
                 sym::str_from_utf8_unchecked,
                 sym::str_from_utf8_unchecked_mut,
-                sym::str_inherent_from_utf8,
-                sym::str_inherent_from_utf8_mut,
-                sym::str_inherent_from_utf8_unchecked,
-                sym::str_inherent_from_utf8_unchecked_mut,
             ]
             .contains(&diag_item)
         {
             let lint = |label, utf8_error: Utf8Error| {
                 let method = diag_item.as_str().strip_prefix("str_").unwrap();
-                let method = if let Some(method) = method.strip_prefix("inherent_") {
-                    format!("str::{method}")
-                } else {
-                    format!("std::str::{method}")
-                };
+                let method = format!("std::str::{method}");
                 let valid_up_to = utf8_error.valid_up_to();
                 let is_unchecked_variant = diag_item.as_str().contains("unchecked");
 
@@ -108,8 +100,8 @@ impl<'tcx> LateLintPass<'tcx> for InvalidFromUtf8 {
             }
             match init.kind {
                 ExprKind::Lit(Spanned { node: lit, .. }) => {
-                    if let LitKind::ByteStr(byte_sym, _) = &lit
-                        && let Err(utf8_error) = std::str::from_utf8(byte_sym.as_byte_str())
+                    if let LitKind::ByteStr(bytes, _) = &lit
+                        && let Err(utf8_error) = std::str::from_utf8(bytes)
                     {
                         lint(init.span, utf8_error);
                     }

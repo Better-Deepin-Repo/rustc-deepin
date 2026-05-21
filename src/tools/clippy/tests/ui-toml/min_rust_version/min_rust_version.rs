@@ -72,7 +72,6 @@ fn check_index_refutable_slice() {
 fn map_clone_suggest_copied() {
     // This should still trigger the lint but suggest `cloned()` instead of `copied()`
     let _: Option<u64> = Some(&16).map(|b| *b);
-    //~^ map_clone
 }
 
 fn borrow_as_ptr() {
@@ -88,4 +87,12 @@ fn manual_bits() {
     size_of_val(&0u32) * 8;
 }
 
-fn main() {}
+fn main() {
+    option_as_ref_deref();
+    match_like_matches();
+    match_same_arms();
+    match_same_arms2();
+    manual_strip_msrv();
+    check_index_refutable_slice();
+    borrow_as_ptr();
+}

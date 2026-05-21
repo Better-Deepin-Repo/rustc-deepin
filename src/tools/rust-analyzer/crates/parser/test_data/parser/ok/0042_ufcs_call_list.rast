@@ -107,14 +107,13 @@ SOURCE_FILE
                 PATH
                   PATH
                     PATH_SEGMENT
-                      TYPE_ANCHOR
-                        L_ANGLE "<"
-                        PATH_TYPE
-                          PATH
-                            PATH_SEGMENT
-                              NAME_REF
-                                IDENT "Foo"
-                        R_ANGLE ">"
+                      L_ANGLE "<"
+                      PATH_TYPE
+                        PATH
+                          PATH_SEGMENT
+                            NAME_REF
+                              IDENT "Foo"
+                      R_ANGLE ">"
                   COLON2 "::"
                   PATH_SEGMENT
                     NAME_REF

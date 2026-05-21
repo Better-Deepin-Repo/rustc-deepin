@@ -1,4 +1,4 @@
-//@ proc-macro: assert-span-pos.rs
+//@ aux-build:assert-span-pos.rs
 // ignore-tidy-tab
 extern crate assert_span_pos;
 

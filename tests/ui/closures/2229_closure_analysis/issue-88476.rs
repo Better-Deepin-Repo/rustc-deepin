@@ -24,7 +24,7 @@ pub fn test1() {
     //~| ERROR: First Pass analysis includes:
     //~| ERROR: Min Capture analysis includes:
         println!("{:?}", f.0);
-        //~^ NOTE: Capturing f[(0, 0)] -> Immutable
+        //~^ NOTE: Capturing f[(0, 0)] -> ImmBorrow
         //~| NOTE: Min Capture f[] -> ByValue
     };
 
@@ -52,7 +52,7 @@ fn test2() {
     //~| ERROR: First Pass analysis includes:
     //~| ERROR: Min Capture analysis includes:
         println!("{}", character.hp)
-        //~^ NOTE: Capturing character[(0, 0)] -> Immutable
+        //~^ NOTE: Capturing character[(0, 0)] -> ImmBorrow
         //~| NOTE: Min Capture character[(0, 0)] -> ByValue
     };
 

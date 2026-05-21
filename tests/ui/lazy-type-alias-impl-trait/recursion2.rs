@@ -4,7 +4,6 @@
 
 type Foo = impl std::fmt::Debug;
 
-#[define_opaque(Foo)]
 fn foo(b: bool) -> Foo {
     if b {
         return vec![];
@@ -15,7 +14,7 @@ fn foo(b: bool) -> Foo {
 
 fn bar(b: bool) -> impl std::fmt::Debug {
     if b {
-        return vec![];
+        return vec![]
     }
     let x: Vec<i32> = bar(false);
     std::iter::empty().collect()

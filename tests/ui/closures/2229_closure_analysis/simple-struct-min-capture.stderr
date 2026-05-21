@@ -16,15 +16,16 @@ LL | |
 LL | |
 LL | |         p.x += 10;
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
-note: Capturing p[(0, 0)] -> Mutable
+note: Capturing p[(0, 0)] -> MutBorrow
   --> $DIR/simple-struct-min-capture.rs:30:9
    |
 LL |         p.x += 10;
    |         ^^^
-note: Capturing p[] -> Immutable
+note: Capturing p[] -> ImmBorrow
   --> $DIR/simple-struct-min-capture.rs:33:26
    |
 LL |         println!("{:?}", p);
@@ -38,14 +39,15 @@ LL | |
 LL | |
 LL | |         p.x += 10;
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
-note: Min Capture p[] -> Mutable
+note: Min Capture p[] -> MutBorrow
   --> $DIR/simple-struct-min-capture.rs:30:9
    |
 LL |         p.x += 10;
-   |         ^^^ p[] captured as Mutable here
+   |         ^^^ p[] captured as MutBorrow here
 ...
 LL |         println!("{:?}", p);
    |                          ^ p[] used here

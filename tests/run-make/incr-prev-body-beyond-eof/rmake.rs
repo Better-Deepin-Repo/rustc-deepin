@@ -7,7 +7,11 @@
 // was hashed by rustc in addition to the span length, and the fix still
 // works.
 
-//@ ignore-cross-compile
+//@ ignore-none
+// reason: no-std is not supported
+
+//@ ignore-nvptx64-nvidia-cuda
+// FIXME: can't find crate for `std`
 
 use run_make_support::{rfs, rustc};
 

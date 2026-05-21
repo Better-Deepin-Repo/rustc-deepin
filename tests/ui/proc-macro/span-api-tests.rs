@@ -1,32 +1,33 @@
 //@ run-pass
-//@ proc-macro: span-api-tests.rs
+//@ aux-build:span-api-tests.rs
 //@ aux-build:span-test-macros.rs
 //@ compile-flags: -Ztranslate-remapped-path-to-local-path=yes
-//@ ignore-backends: gcc
 
 #[macro_use]
 extern crate span_test_macros;
 
 extern crate span_api_tests;
 
-use span_api_tests::{reemit, assert_local_file, macro_stringify};
+// FIXME(69775): Investigate `assert_fake_source_file`.
+
+use span_api_tests::{reemit, assert_source_file, macro_stringify};
 
 macro_rules! say_hello {
     ($macname:ident) => ( $macname! { "Hello, world!" })
 }
 
-assert_local_file! { "Hello, world!" }
+assert_source_file! { "Hello, world!" }
 
-say_hello! { assert_local_file }
+say_hello! { assert_source_file }
 
 reemit_legacy! {
-    assert_local_file! { "Hello, world!" }
+    assert_source_file! { "Hello, world!" }
 }
 
-say_hello_extern! { assert_local_file }
+say_hello_extern! { assert_source_file }
 
 reemit! {
-    assert_local_file! { "Hello, world!" }
+    assert_source_file! { "Hello, world!" }
 }
 
 fn main() {

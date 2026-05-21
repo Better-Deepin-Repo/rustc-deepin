@@ -47,14 +47,92 @@ It can be enabled using:
 #![deny(rustdoc::missing_doc_code_examples)]
 ```
 
-It is not emitted for items that cannot be instantiated/called such as fields, variants, modules,
-associated trait/impl items, impl blocks, statics and constants.
-It is also not emitted for foreign items, aliases, extern crates and imports.
-
 ## Extensions to the `#[doc]` attribute
 
 These features operate by extending the `#[doc]` attribute, and thus can be caught by the compiler
 and enabled with a `#![feature(...)]` attribute in your crate.
+
+### `#[doc(cfg)]`: Recording what platforms or features are required for code to be present
+
+ * Tracking issue: [#43781](https://github.com/rust-lang/rust/issues/43781)
+
+You can use `#[doc(cfg(...))]` to tell Rustdoc exactly which platform items appear on.
+This has two effects:
+
+1. doctests will only run on the appropriate platforms, and
+2. When Rustdoc renders documentation for that item, it will be accompanied by a banner explaining
+   that the item is only available on certain platforms.
+
+`#[doc(cfg)]` is intended to be used alongside [`#[cfg(doc)]`][cfg-doc].
+For example, `#[cfg(any(windows, doc))]` will preserve the item either on Windows or during the
+documentation process. Then, adding a new attribute `#[doc(cfg(windows))]` will tell Rustdoc that
+the item is supposed to be used on Windows. For example:
+
+```rust
+#![feature(doc_cfg)]
+
+/// Token struct that can only be used on Windows.
+#[cfg(any(windows, doc))]
+#[doc(cfg(windows))]
+pub struct WindowsToken;
+
+/// Token struct that can only be used on Unix.
+#[cfg(any(unix, doc))]
+#[doc(cfg(unix))]
+pub struct UnixToken;
+
+/// Token struct that is only available with the `serde` feature
+#[cfg(feature = "serde")]
+#[doc(cfg(feature = "serde"))]
+#[derive(serde::Deserialize)]
+pub struct SerdeToken;
+```
+
+In this sample, the tokens will only appear on their respective platforms, but they will both appear
+in documentation.
+
+`#[doc(cfg(...))]` was introduced to be used by the standard library and currently requires the
+`#![feature(doc_cfg)]` feature gate. For more information, see [its chapter in the Unstable
+Book][unstable-doc-cfg] and [its tracking issue][issue-doc-cfg].
+
+### `doc_auto_cfg`: Automatically generate `#[doc(cfg)]`
+
+ * Tracking issue: [#43781](https://github.com/rust-lang/rust/issues/43781)
+
+`doc_auto_cfg` is an extension to the `#[doc(cfg)]` feature. With it, you don't need to add
+`#[doc(cfg(...)]` anymore unless you want to override the default behaviour. So if we take the
+previous source code:
+
+```rust
+#![feature(doc_auto_cfg)]
+
+/// Token struct that can only be used on Windows.
+#[cfg(any(windows, doc))]
+pub struct WindowsToken;
+
+/// Token struct that can only be used on Unix.
+#[cfg(any(unix, doc))]
+pub struct UnixToken;
+
+/// Token struct that is only available with the `serde` feature
+#[cfg(feature = "serde")]
+#[derive(serde::Deserialize)]
+pub struct SerdeToken;
+```
+
+It'll render almost the same, the difference being that `doc` will also be displayed. To fix this,
+you can use `doc_cfg_hide`:
+
+```rust
+#![feature(doc_cfg_hide)]
+#![doc(cfg_hide(doc))]
+```
+
+And `doc` won't show up anymore!
+
+[cfg-doc]: ./advanced-features.md
+[unstable-doc-cfg]: ../unstable-book/language-features/doc-cfg.html
+[issue-doc-cfg]: https://github.com/rust-lang/rust/issues/43781
 
 ### Adding your trait to the "Notable traits" dialog
 
@@ -114,7 +192,7 @@ to enable.
 
 ### Document keywords
 
-This is for internal use in the std library.
+This is for Rust compiler internal use only.
 
 Rust keywords are documented in the standard library (look for `match` for example).
 
@@ -125,24 +203,7 @@ To do so, the `#[doc(keyword = "...")]` attribute is used. Example:
 #![allow(internal_features)]
 
 /// Some documentation about the keyword.
-#[doc(keyword = "break")]
-mod empty_mod {}
-```
-
-### Document builtin attributes
-
-This is for internal use in the std library.
-
-Rust builtin attributes are documented in the standard library (look for `repr` for example).
-
-To do so, the `#[doc(attribute = "...")]` attribute is used. Example:
-
-```rust
-#![feature(rustdoc_internals)]
-#![allow(internal_features)]
-
-/// Some documentation about the attribute.
-#[doc(attribute = "repr")]
+#[doc(keyword = "keyword")]
 mod empty_mod {}
 ```
 
@@ -197,56 +258,6 @@ themselves marked as unstable. To use any of these options, pass `-Z unstable-op
 the flag in question to Rustdoc on the command-line. To do this from Cargo, you can either use the
 `RUSTDOCFLAGS` environment variable or the `cargo rustdoc` command.
 
-### `--merge`, `--parts-out-dir`, and `--include-parts-dir`
-
-These options control how rustdoc handles files that combine data from multiple crates.
-
-By default, they act like `--merge=shared` is set, and `--parts-out-dir` and `--include-parts-dir`
-are turned off. The `--merge=shared` mode causes rustdoc to load the existing data in the out-dir,
-combine the new crate data into it, and write the result. This is very easy to use in scripts that
-manually invoke rustdoc, but it's also slow, because it performs O(crates) work on
-every crate, meaning it performs O(crates<sup>2</sup>) work.
-
-```console
-$ rustdoc crate1.rs --out-dir=doc
-$ cat doc/search.index/crateNames/*
-rd_("fcrate1")
-$ rustdoc crate2.rs --out-dir=doc
-$ cat doc/search.index/crateNames/*
-rd_("fcrate1fcrate2")
-```
-
-To delay shared-data merging until the end of a build, so that you only have to perform O(crates)
-work, use `--merge=none` on every crate except the last one, which will use `--merge=finalize`.
-
-```console
-$ rustdoc +nightly crate1.rs --merge=none --parts-out-dir=crate1.d -Zunstable-options
-$ cat doc/search.index/crateNames/*
-cat: 'doc/search.index/crateNames/*': No such file or directory
-$ rustdoc +nightly crate2.rs --merge=finalize --include-parts-dir=crate1.d -Zunstable-options
-$ cat doc/search.index/crateNames/*
-rd_("fcrate1fcrate2")
-```
-
-### `--document-hidden-items`: Show items that are `#[doc(hidden)]`
-<span id="document-hidden-items"></span>
-
-By default, `rustdoc` does not document items that are annotated with
-[`#[doc(hidden)]`](write-documentation/the-doc-attribute.html#hidden).
-
-`--document-hidden-items` causes all items to be documented as if they did not have `#[doc(hidden)]`, except that hidden items will be shown with a 👻 icon.
-
-Here is a table that fully describes which items are documented with each combination of `--document-hidden-items` and `--document-private-items`:
-
-
-| rustdoc flags                   | items that will be documented         |
-|---------------------------------|---------------------------------------|
-| neither flag                    | only public items that are not hidden |
-| only `--document-hidden-items`  | all public items                      |
-| only `--document-private-items` | all items that are not hidden         |
-| both flags                      | all items                             |
-
-
 ### `--markdown-before-content`: include rendered Markdown before the content
 
  * Tracking issue: [#44027](https://github.com/rust-lang/rust/issues/44027)
@@ -300,7 +311,7 @@ Markdown file, the URL given to `--markdown-playground-url` will take precedence
 `--playground-url` and `#![doc(html_playground_url = "url")]` are present when rendering crate docs,
 the attribute will take precedence.
 
-## `--sort-modules-by-appearance`: control how items on module pages are sorted
+### `--sort-modules-by-appearance`: control how items on module pages are sorted
 
 Using this flag looks like this:
 
@@ -313,9 +324,9 @@ some consideration for their stability, and names that end in a number). Giving 
 `rustdoc` will disable this sorting and instead make it print the items in the order they appear in
 the source.
 
-## `--show-type-layout`: add a section to each type's docs describing its memory layout
+### `--show-type-layout`: add a section to each type's docs describing its memory layout
 
- * Tracking issue: [#113248](https://github.com/rust-lang/rust/issues/113248)
+* Tracking issue: [#113248](https://github.com/rust-lang/rust/issues/113248)
 
 Using this flag looks like this:
 
@@ -331,7 +342,7 @@ of that type will take in memory.
 Note that most layout information is **completely unstable** and may even differ
 between compilations.
 
-## `--resource-suffix`: modifying the name of CSS/JavaScript in crate docs
+### `--resource-suffix`: modifying the name of CSS/JavaScript in crate docs
 
  * Tracking issue: [#54765](https://github.com/rust-lang/rust/issues/54765)
 
@@ -346,7 +357,7 @@ all these files are linked from every page, changing where they are can be cumbe
 specially cache them. This flag will rename all these files in the output to include the suffix in
 the filename. For example, `light.css` would become `light-suf.css` with the above command.
 
-## `--extern-html-root-url`: control how rustdoc links to non-local crates
+### `--extern-html-root-url`: control how rustdoc links to non-local crates
 
 Using this flag looks like this:
 
@@ -361,13 +372,7 @@ flags to control that behavior. When the `--extern-html-root-url` flag is given 
 one of your dependencies, rustdoc use that URL for those docs. Keep in mind that if those docs exist
 in the output directory, those local docs will still override this flag.
 
-The names in this flag are first matched against the names given in the `--extern name=` flags,
-which allows selecting between multiple crates with the same name (e.g. multiple versions of
-the same crate). For transitive dependencies that haven't been loaded via an `--extern` flag, matching
-falls backs to using crate names only, without ability to distinguish between multiple crates with
-the same name.
-
-## `-Z force-unstable-if-unmarked`
+### `-Z force-unstable-if-unmarked`
 
 Using this flag looks like this:
 
@@ -380,7 +385,7 @@ This is an internal flag intended for the standard library and compiler that app
 allows `rustdoc` to be able to generate documentation for the compiler crates and the standard
 library, as an equivalent command-line argument is provided to `rustc` when building those crates.
 
-## `--index-page`: provide a top-level landing page for docs
+### `--index-page`: provide a top-level landing page for docs
 
 This feature allows you to generate an index-page with a given markdown file. A good example of it
 is the [rust documentation index](https://doc.rust-lang.org/nightly/index.html).
@@ -389,18 +394,18 @@ With this, you'll have a page which you can customize as much as you want at the
 
 Using `index-page` option enables `enable-index-page` option as well.
 
-## `--enable-index-page`: generate a default index page for docs
+### `--enable-index-page`: generate a default index page for docs
 
 This feature allows the generation of a default index-page which lists the generated crates.
 
-## `--no-capture`: disable output capture for test
+### `--nocapture`: disable output capture for test
 
 When this flag is used with `--test`, the output (stdout and stderr) of your tests won't be
 captured by rustdoc. Instead, the output will be directed to your terminal,
 as if you had run the test executable manually. This is especially useful
 for debugging your tests!
 
-## `--check`: only checks the documentation
+### `--check`: only checks the documentation
 
 When this flag is supplied, rustdoc will type check and lint your code, but will not generate any
 documentation or run your doctests.
@@ -411,7 +416,7 @@ Using this flag looks like:
 rustdoc -Z unstable-options --check src/lib.rs
 ```
 
-## `--static-root-path`: control how static files are loaded in HTML output
+### `--static-root-path`: control how static files are loaded in HTML output
 
 Using this flag looks like this:
 
@@ -426,7 +431,7 @@ JavaScript, and font files in a single location, rather than duplicating it once
 files like the search index will still load from the documentation root, but anything that gets
 renamed with `--resource-suffix` will load from the given path.
 
-## `--persist-doctests`: persist doctest executables after running
+### `--persist-doctests`: persist doctest executables after running
 
  * Tracking issue: [#56925](https://github.com/rust-lang/rust/issues/56925)
 
@@ -440,7 +445,7 @@ This flag allows you to keep doctest executables around after they're compiled o
 Usually, rustdoc will immediately discard a compiled doctest after it's been tested, but
 with this option, you can keep those binaries around for farther testing.
 
-## `--show-coverage`: calculate the percentage of items with documentation
+### `--show-coverage`: calculate the percentage of items with documentation
 
  * Tracking issue: [#58154](https://github.com/rust-lang/rust/issues/58154)
 
@@ -491,7 +496,7 @@ Calculating code examples follows these rules:
   * typedef
 2. If one of the previously listed items has a code example, then it'll be counted.
 
-### JSON output
+#### JSON output
 
 When using `--output-format json` with this option, it will display the coverage information in
 JSON format. For example, here is the JSON for a file with one documented item and one
@@ -513,14 +518,11 @@ Note that the third item is the crate root, which in this case is undocumented.
 If you want the JSON output to be displayed on `stdout` instead of having a file generated, you can
 use `-o -`.
 
-## `-w`/`--output-format`: output format
-
-### json
-
- * Tracking Issue: [#76578](https://github.com/rust-lang/rust/issues/76578)
+### `-w`/`--output-format`: output format
 
 `--output-format json` emits documentation in the experimental
-[JSON format](https://doc.rust-lang.org/nightly/nightly-rustc/rustdoc_json_types/).
+[JSON format](https://doc.rust-lang.org/nightly/nightly-rustc/rustdoc_json_types/). `--output-format html` has no effect,
+and is also accepted on stable toolchains.
 
 JSON Output for toolchain crates (`std`, `alloc`, `core`, `test`, and `proc_macro`)
 is available via the `rust-docs-json` rustup component.
@@ -536,88 +538,61 @@ It can also be used with `--show-coverage`. Take a look at its
 [documentation](#--show-coverage-calculate-the-percentage-of-items-with-documentation) for more
 information.
 
-### doctest
+### `--enable-per-target-ignores`: allow `ignore-foo` style filters for doctests
 
- * Tracking issue: [#134529](https://github.com/rust-lang/rust/issues/134529)
+ * Tracking issue: [#64245](https://github.com/rust-lang/rust/issues/64245)
 
-`--output-format doctest` emits JSON on stdout which gives you information about doctests in the
-provided crate.
-
-You can use this option like this:
+Using this flag looks like this:
 
 ```bash
-rustdoc -Zunstable-options --output-format=doctest src/lib.rs
+$ rustdoc src/lib.rs -Z unstable-options --enable-per-target-ignores
 ```
 
-For this rust code:
+This flag allows you to tag doctests with compiletest style `ignore-foo` filters that prevent
+rustdoc from running that test if the target triple string contains foo. For example:
 
 ```rust
-/// ```
-/// #![allow(dead_code)]
-/// let x = 12;
-/// Ok(())
-/// ```
-pub trait Trait {}
+///```ignore-foo,ignore-bar
+///assert!(2 == 2);
+///```
+struct Foo;
 ```
 
-The generated output (formatted) will look like this:
+This will not be run when the build target is `super-awesome-foo` or `less-bar-awesome`.
+If the flag is not enabled, then rustdoc will consume the filter, but do nothing with it, and
+the above example will be run for all targets.
+If you want to preserve backwards compatibility for older versions of rustdoc, you can use
 
-```json
-{
-  "format_version": 2,
-  "doctests": [
-    {
-      "file": "src/lib.rs",
-      "line": 1,
-      "doctest_attributes": {
-        "original": "",
-        "should_panic": false,
-        "no_run": false,
-        "ignore": "None",
-        "rust": true,
-        "test_harness": false,
-        "compile_fail": false,
-        "standalone_crate": false,
-        "error_codes": [],
-        "edition": null,
-        "added_css_classes": [],
-        "unknown": []
-      },
-      "original_code": "#![allow(dead_code)]\nlet x = 12;\nOk(())",
-      "doctest_code": {
-        "crate_level": "#![allow(unused)]\n#![allow(dead_code)]\n\n",
-        "code": "let x = 12;\nOk(())",
-        "wrapper": {
-          "before": "fn main() { fn _inner() -> core::result::Result<(), impl core::fmt::Debug> {\n",
-          "after": "\n} _inner().unwrap() }",
-          "returns_result": true
-        }
-      },
-      "name": "src/lib.rs - (line 1)"
-    }
-  ]
-}
+```rust
+///```ignore,ignore-foo
+///assert!(2 == 2);
+///```
+struct Foo;
 ```
 
- * `format_version` gives you the current version of the generated JSON. If we change the output in any way, the number will increase.
- * `doctests` contains the list of doctests present in the crate.
-   * `file` is the file path where the doctest is located.
-   * `line` is the line where the doctest starts (so where the \`\`\` is located in the current code).
-   * `doctest_attributes` contains computed information about the attributes used on the doctests. For more information about doctest attributes, take a look [here](write-documentation/documentation-tests.html#attributes).
-   * `original_code` is the code as written in the source code before rustdoc modifies it.
-   * `doctest_code` is the code modified by rustdoc that will be run. If there is a fatal syntax error, this field will not be present.
-     * `crate_level` is the crate level code (like attributes or `extern crate`) that will be added at the top-level of the generated doctest.
-     * `code` is "naked" doctest without anything from `crate_level` and `wrapper` content.
-     * `wrapper` contains extra code that will be added before and after `code`.
-       * `returns_result` is a boolean. If `true`, it means that the doctest returns a `Result` type.
-   * `name` is the name generated by rustdoc which represents this doctest.
+In older versions, this will be ignored on all targets, but on newer versions `ignore-gnu` will
+override `ignore`.
 
-### html
+### `--runtool`, `--runtool-arg`: program to run tests with; args to pass to it
 
-`--output-format html` has no effect, as the default output is HTML. This is
-accepted on stable, even though the other options for this flag aren't.
+ * Tracking issue: [#64245](https://github.com/rust-lang/rust/issues/64245)
 
-## `--with-examples`: include examples of uses of items as documentation
+Using these options looks like this:
+
+```bash
+$ rustdoc src/lib.rs -Z unstable-options --runtool runner --runtool-arg --do-thing --runtool-arg --do-other-thing
+```
+
+These options can be used to run the doctest under a program, and also pass arguments to
+that program. For example, if you want to run your doctests under valgrind you might run
+
+```bash
+$ rustdoc src/lib.rs -Z unstable-options --runtool valgrind
+```
+
+Another use case would be to run a test inside an emulator, or through a Virtual Machine.
+
+### `--with-examples`: include examples of uses of items as documentation
 
  * Tracking issue: [#88791](https://github.com/rust-lang/rust/issues/88791)
 
@@ -646,391 +621,9 @@ crate being documented (`foobar`) and a path to output the calls
 To scrape examples from test code, e.g. functions marked `#[test]`, then
 add the `--scrape-tests` flag.
 
-## `--generate-link-to-definition`: Generate links on types in source code
+### `--generate-link-to-definition`: Generate links on types in source code
 
  * Tracking issue: [#89095](https://github.com/rust-lang/rust/issues/89095)
 
 This flag enables the generation of links in the source code pages which allow the reader
 to jump to a type definition.
-
-### `--test-builder`: `rustc`-like program to build tests
-
- * Tracking issue: [#102981](https://github.com/rust-lang/rust/issues/102981)
-
-Using this flag looks like this:
-
-```bash
-$ rustdoc --test-builder /path/to/rustc src/lib.rs
-```
-
-Rustdoc will use the provided program to compile tests instead of the default `rustc` program from
-the sysroot.
-
-### `--test-builder-wrapper`: wrap calls to the test builder
-
- * Tracking issue: [#102981](https://github.com/rust-lang/rust/issues/102981)
-
-Using this flag looks like this:
-
-```bash
-$ rustdoc -Zunstable-options --test-builder-wrapper /path/to/rustc-wrapper src/lib.rs
-$ rustdoc -Zunstable-options \
-    --test-builder-wrapper rustc-wrapper1 \
-    --test-builder-wrapper rustc-wrapper2 \
-    --test-builder rustc \
-    src/lib.rs
-```
-
-Similar to cargo `build.rustc-wrapper` option, this flag takes a `rustc` wrapper program.
-The first argument to the program will be the test builder program.
-
-This flag can be passed multiple times to nest wrappers.
-
-## Passing arguments to rustc when compiling doctests
-
-You can use the `--doctest-build-arg` flag if you want to add options when compiling the
-doctest. For example if you have:
-
-```rust,no_run
-/// ```
-/// #![deny(warnings)]
-/// #![feature(async_await)]
-///
-/// let x = 12;
-/// ```
-pub struct Bar;
-```
-
-And you run `rustdoc --test` on it, you will get:
-
-```console
-running 1 test
-test foo.rs - Bar (line 1) ... FAILED
-
-failures:
-
----- foo.rs - Bar (line 1) stdout ----
-error: the feature `async_await` has been stable since 1.39.0 and no longer requires an attribute to enable
- --> foo.rs:2:12
-  |
-3 | #![feature(async_await)]
-  |            ^^^^^^^^^^^
-  |
-note: the lint level is defined here
- --> foo.rs:1:9
-  |
-2 | #![deny(warnings)]
-  |         ^^^^^^^^
-  = note: `#[deny(stable_features)]` implied by `#[deny(warnings)]`
-
-error: aborting due to 1 previous error
-
-Couldn't compile the test.
-
-failures:
-    foo.rs - Bar (line 1)
-
-test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
-```
-
-But if you can limit the lint level to warning by using `--doctest-build-arg=--cap-lints=warn`:
-
-```console
-$ rustdoc --test --doctest-build-arg=--cap-lints=warn file.rs
-
-running 1 test
-test tests/rustdoc-ui/doctest/rustflags.rs - Bar (line 5) ... ok
-
-test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.06s
-```
-
-In order to pass multiple arguments to the underlying compiler,
-pass `--doctest-build-arg ARG` for each argument `ARG`.
-
-## `--generate-macro-expansion`: Generate macros expansion toggles in source code
-
-This flag enables the generation of toggles to expand macros in the HTML source code pages.
-
-## `--remap-path-prefix`: Remap source code paths in output
-
-This flag is the equivalent flag from `rustc` `--remap-path-prefix`.
-
-it permits remapping source path prefixes in all output, including compiler diagnostics,
-debug information, macro expansions, etc. It takes a value of the form `FROM=TO`
-where a path prefix equal to `FROM` is rewritten to the value `TO`.
-
-### `documentation` scope
-
-`rustdoc` (and by extension `rustc`) have a special `documentation` remapping scope, it
-permits remapping source paths that ends up in the generated documentation.
-
-Currently the scope can only be specified from `rustc`, due to the lack of an equivalent
-`--remap-path-scope` flag in `rustc`.
-
-## `#[doc(cfg)]` and `#[doc(auto_cfg)]`
-
-This feature aims at providing rustdoc users the possibility to add visual markers to the rendered documentation to know under which conditions an item is available (currently possible through the following unstable feature: `doc_cfg`).
-
-It does not aim to allow having a same item with different `cfg`s to appear more than once in the generated documentation.
-
-It does not aim to document items which are *inactive* under the current configuration (i.e., “`cfg`ed out”).
-
-This features adds the following attributes:
-
- * `#[doc(auto_cfg)]`/`#[doc(auto_cfg = true)]`/`#[doc(auto_cfg = false)]`
- * `#[doc(cfg(...))]`
- * `#![doc(auto_cfg(hide(...)))]` / `#[doc(auto_cfg(show(...)))]`
-
-All of these attributes can be added to a module or to the crate root, and they will be inherited by the child items unless another attribute overrides it. This is why "opposite" attributes like `auto_cfg(hide(...))` and `auto_cfg(show(...))` are provided: they allow a child item to override its parent.
-
-### `#[doc(cfg(...))]`
-
-This attribute provides a standardized format to override `#[cfg()]` attributes to document conditionally available items. Example:
-
-```rust,ignore (nightly)
-// the "real" cfg condition
-#[cfg(feature = "futures-io")]
-// the `doc(cfg())` so it's displayed to the readers
-#[doc(cfg(feature = "futures-io"))]
-pub mod futures {}
-```
-
-It will display in the documentation for this module:
-
-```text
-This is supported on feature="futures-io" only.
-```
-
-You can use it to display information in generated documentation, whether or not there is a `#[cfg()]` attribute:
-
-```rust,ignore (nightly)
-#[doc(cfg(feature = "futures-io"))]
-pub mod futures {}
-```
-
-It will be displayed exactly the same as the previous code.
-
-This attribute has the same syntax as conditional compilation, but it only causes documentation to be added. This means `#[doc(cfg(not(windows)))]` will not cause your docs to be hidden on non-windows targets, even though `#[cfg(not(windows))]` does do that.
-
-If `doc(auto_cfg)` is enabled on the item, `doc(cfg)` will override it anyway so in the two previous examples, even if the `doc(auto_cfg)` feature was enabled, it would still display the same thing.
-
-This attribute works on modules and on items.
-
-### `#[doc(auto_cfg(hide(...)))]`
-
-This attribute is used to prevent some `cfg` to be generated in the visual markers. It only applies to `#[doc(auto_cfg = true)]`, not to `#[doc(cfg(...))]`. So in the previous example:
-
-```rust,ignore (nightly)
-#[cfg(any(unix, feature = "futures-io"))]
-pub mod futures {}
-```
-
-It currently displays both `unix` and `feature = "futures-io"` into the documentation, which is not great. To prevent the `unix` cfg to ever be displayed, you can use this attribute at the crate root level:
-
-```rust,ignore (nightly)
-#![doc(auto_cfg(hide(unix)))]
-```
-
-Or directly on a given item/module as it covers any of the item's descendants:
-
-```rust,ignore (nightly)
-#[doc(auto_cfg(hide(unix)))]
-#[cfg(any(unix, feature = "futures-io"))]
-pub mod futures {
-    // `futures` and all its descendants won't display "unix" in their cfgs.
-}
-```
-
-Then, the `unix` cfg will never be displayed into the documentation.
-
-Rustdoc currently hides `doc` and `doctest` attributes by default and reserves the right to change the list of "hidden by default" attributes.
-
-The attribute accepts only a list of identifiers or key/value items. So you can write:
-
-```rust,ignore (nightly)
-#[doc(auto_cfg(hide(unix, doctest, feature = "something")))]
-#[doc(auto_cfg(hide()))]
-```
-
-But you cannot write:
-
-```rust,ignore (nightly)
-#[doc(auto_cfg(hide(not(unix))))]
-```
-
-So if we use `doc(auto_cfg(hide(unix)))`, it means it will hide all mentions of `unix`:
-
-```rust,ignore (nightly)
-#[cfg(unix)] // nothing displayed
-#[cfg(any(unix))] // nothing displayed
-#[cfg(any(unix, windows))] // only `windows` displayed
-```
-
-However, it only impacts the `unix` cfg, not the feature:
-
-```rust,ignore (nightly)
-#[cfg(feature = "unix")] // `feature = "unix"` is displayed
-```
-
-If `cfg_auto(show(...))` and `cfg_auto(hide(...))` are used to show/hide a same `cfg` on a same item, it'll emit an error. Example:
-
-```rust,ignore (nightly)
-#[doc(auto_cfg(hide(unix)))]
-#[doc(auto_cfg(show(unix)))] // Error!
-pub fn foo() {}
-```
-
-Using this attribute will re-enable `auto_cfg` if it was disabled at this location:
-
-```rust,ignore (nightly)
-#[doc(auto_cfg = false)] // Disabling `auto_cfg`
-pub fn foo() {}
-```
-
-And using `doc(auto_cfg)` will re-enable it:
-
-```rust,ignore (nightly)
-#[doc(auto_cfg = false)] // Disabling `auto_cfg`
-pub mod module {
-    #[doc(auto_cfg(hide(unix)))] // `auto_cfg` is re-enabled.
-    pub fn foo() {}
-}
-```
-
-However, using `doc(auto_cfg = ...)` and `doc(auto_cfg(...))` on the same item will emit an error:
-
-```rust,ignore (nightly)
-#[doc(auto_cfg = false)]
-#[doc(auto_cfg(hide(unix)))] // error
-pub fn foo() {}
-```
-
-The reason behind this is that `doc(auto_cfg = ...)` enables or disables the feature, whereas `doc(auto_cfg(...))` enables it unconditionally, making the first attribute to appear useless as it will be overidden by the next `doc(auto_cfg)` attribute.
-
-### `#[doc(auto_cfg(show(...)))]`
-
-This attribute does the opposite of `#[doc(auto_cfg(hide(...)))]`: if you used `#[doc(auto_cfg(hide(...)))]` and want to revert its effect on an item and its descendants, you can use `#[doc(auto_cfg(show(...)))]`.
-It only applies to `#[doc(auto_cfg = true)]`, not to `#[doc(cfg(...))]`.
-
-For example:
-
-```rust,ignore (nightly)
-#[doc(auto_cfg(hide(unix)))]
-#[cfg(any(unix, feature = "futures-io"))]
-pub mod futures {
-    // `futures` and all its descendants won't display "unix" in their cfgs.
-    #[doc(auto_cfg(show(unix)))]
-    pub mod child {
-        // `child` and all its descendants will display "unix" in their cfgs.
-    }
-}
-```
-
-The attribute accepts only a list of identifiers or key/value items. So you can write:
-
-```rust,ignore (nightly)
-#[doc(auto_cfg(show(unix, doctest, feature = "something")))]
-#[doc(auto_cfg(show()))]
-```
-
-But you cannot write:
-
-```rust,ignore (nightly)
-#[doc(auto_cfg(show(not(unix))))]
-```
-
-If `auto_cfg(show(...))` and `auto_cfg(hide(...))` are used to show/hide a same `cfg` on a same item, it'll emit an error. Example:
-
-```rust,ignore (nightly)
-#[doc(auto_cfg(show(unix)))]
-#[doc(auto_cfg(hide(unix)))] // Error!
-pub fn foo() {}
-```
-
-Using this attribute will re-enable `auto_cfg` if it was disabled at this location:
-
-```rust,ignore (nightly)
-#[doc(auto_cfg = false)] // Disabling `auto_cfg`
-#[doc(auto_cfg(show(unix)))] // `auto_cfg` is re-enabled.
-pub fn foo() {}
-```
-
-### `#[doc(auto_cfg)`/`#[doc(auto_cfg = true)]`/`#[doc(auto_cfg = false)]`
-
-By default, `#[doc(auto_cfg)]` is enabled at the crate-level. When it's enabled, Rustdoc will automatically display `cfg(...)` compatibility information as-if the same `#[doc(cfg(...))]` had been specified.
-
-This attribute impacts the item on which it is used and its descendants.
-
-So if we take back the previous example:
-
-```rust
-#[cfg(feature = "futures-io")]
-pub mod futures {}
-```
-
-There's no need to "duplicate" the `cfg` into a `doc(cfg())` to make Rustdoc display it.
-
-In some situations, the detailed conditional compilation rules used to implement the feature might not serve as good documentation (for example, the list of supported platforms might be very long, and it might be better to document them in one place). To turn it off, add the `#[doc(auto_cfg = false)]` attribute on the item.
-
-If no argument is specified (ie `#[doc(auto_cfg)]`), it's the same as writing `#[doc(auto_cfg = true)]`.
-
-## Inheritance
-
-Rustdoc merges `cfg` attributes from parent modules to its children. For example, in this case, the module `non_unix` will describe the entire compatibility matrix for the module, and not just its directly attached information:
-
-```rust,ignore (nightly)
-#[doc(cfg(any(windows, unix)))]
-pub mod desktop {
-    #[doc(cfg(not(unix)))]
-    pub mod non_unix {
-        // ...
-    }
-}
-```
-
-This code will display:
-
-```text
-Available on (Windows or Unix) and non-Unix only.
-```
-
-### Re-exports and inlining
-
-`cfg` attributes of a re-export are never merged with the re-exported item(s) attributes except if the re-export has the `#[doc(inline)]` attribute. In this case, the `cfg` of the re-exported item will be merged with the re-export's.
-
-When talking about "attributes merge", we mean that if the re-export has `#[cfg(unix)]` and the re-exported item has `#[cfg(feature = "foo")]`, you will only see `cfg(unix)` on the re-export and only `cfg(feature = "foo")` on the re-exported item, unless the re-export has `#[doc(inline)]`, then you will only see the re-exported item with both `cfg(unix)` and `cfg(feature = "foo")`.
-
-Example:
-
-```rust,ignore (nightly)
-#[doc(cfg(any(windows, unix)))]
-pub mod desktop {
-    #[doc(cfg(not(unix)))]
-    pub mod non_unix {
-        // code
-    }
-}
-
-#[doc(cfg(target_os = "freebsd"))]
-pub use desktop::non_unix as non_unix_desktop;
-#[doc(cfg(target_os = "macos"))]
-#[doc(inline)]
-pub use desktop::non_unix as inlined_non_unix_desktop;
-```
-
-In this example, `non_unix_desktop` will only display `cfg(target_os = "freeebsd")` and not display any `cfg` from `desktop::non_unix`.
-
-On the contrary, `inlined_non_unix_desktop` will have cfgs from both the re-export and the re-exported item.
-
-So that also means that if a crate re-exports a foreign item, unless it has `#[doc(inline)]`, the `cfg` and `doc(cfg)` attributes will not be visible:
-
-```rust,ignore (nightly)
-// dep:
-#[cfg(feature = "a")]
-pub struct S;
-
-// crate using dep:
-
-// There will be no mention of `feature = "a"` in the documentation.
-pub use dep::S as Y;
-```

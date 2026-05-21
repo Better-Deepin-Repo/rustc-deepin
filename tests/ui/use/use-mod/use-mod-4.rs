@@ -1,4 +1,4 @@
-use crate::foo::self; //~ ERROR unresolved import `crate::foo`
+use foo::self; //~ ERROR unresolved import `foo`
 //~^ ERROR `self` imports are only allowed within a { } list
 
 use std::mem::self;

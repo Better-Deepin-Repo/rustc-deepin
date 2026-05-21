@@ -1,16 +1,14 @@
-use hir::{AsAssocItem, ModuleDef, PathResolution};
+use hir::AsAssocItem;
 use ide_db::{
     helpers::mod_path_to_ast,
-    imports::insert_use::{ImportScope, insert_use},
+    imports::insert_use::{insert_use, ImportScope},
 };
 use syntax::{
-    AstNode, Edition, SyntaxNode,
-    ast::{self, HasGenericArgs, make},
-    match_ast,
-    syntax_editor::SyntaxEditor,
+    ast::{self, make, HasGenericArgs},
+    match_ast, ted, AstNode, Edition, SyntaxNode,
 };
 
-use crate::{AssistContext, AssistId, Assists};
+use crate::{AssistContext, AssistId, AssistKind, Assists};
 
 // Assist: replace_qualified_name_with_use
 //
@@ -38,12 +36,20 @@ pub(crate) fn replace_qualified_name_with_use(
         return None;
     }
 
-    let original_path = target_path(ctx, original_path)?;
+    if original_path.qualifier().is_none() {
+        cov_mark::hit!(dont_import_trivial_paths);
+        return None;
+    }
 
+    // only offer replacement for non assoc items
+    match ctx.sema.resolve_path(&original_path)? {
+        hir::PathResolution::Def(def) if def.as_assoc_item(ctx.sema.db).is_none() => (),
+        _ => return None,
+    }
     // then search for an import for the first path segment of what we want to replace
     // that way it is less likely that we import the item from a different location due re-exports
     let module = match ctx.sema.resolve_path(&original_path.first_qualifier_or_self())? {
-        PathResolution::Def(module @ ModuleDef::Module(_)) => module,
+        hir::PathResolution::Def(module @ hir::ModuleDef::Module(_)) => module,
         _ => return None,
     };
 
@@ -57,25 +63,30 @@ pub(crate) fn replace_qualified_name_with_use(
     );
     let path_to_qualifier = starts_with_name_ref
         .then(|| {
-            let mod_ = ctx.sema.scope(original_path.syntax())?.module();
-            let cfg = ctx.config.find_path_config(ctx.sema.is_nightly(mod_.krate(ctx.sema.db)));
-            mod_.find_use_path(ctx.sema.db, module, ctx.config.insert_use.prefix_kind, cfg)
+            ctx.sema.scope(original_path.syntax())?.module().find_use_path(
+                ctx.sema.db,
+                module,
+                ctx.config.insert_use.prefix_kind,
+                ctx.config.import_path_config(),
+            )
         })
         .flatten();
 
     let scope = ImportScope::find_insert_use_container(original_path.syntax(), &ctx.sema)?;
     let target = original_path.syntax().text_range();
     acc.add(
-        AssistId::refactor_rewrite("replace_qualified_name_with_use"),
+        AssistId("replace_qualified_name_with_use", AssistKind::RefactorRewrite),
         "Replace qualified path with use",
         target,
         |builder| {
             // Now that we've brought the name into scope, re-qualify all paths that could be
             // affected (that is, all paths inside the node we added the `use` to).
-            let scope_node = scope.as_syntax_node();
-            let mut editor = builder.make_editor(scope_node);
-            shorten_paths(&mut editor, scope_node, &original_path);
-            builder.add_file_edits(ctx.vfs_file_id(), editor);
+            let scope = match scope {
+                ImportScope::File(it) => ImportScope::File(builder.make_mut(it)),
+                ImportScope::Module(it) => ImportScope::Module(builder.make_mut(it)),
+                ImportScope::Block(it) => ImportScope::Block(builder.make_mut(it)),
+            };
+            shorten_paths(scope.as_syntax_node(), &original_path);
             let path = drop_generic_args(&original_path);
             let edition = ctx
                 .sema
@@ -88,42 +99,23 @@ pub(crate) fn replace_qualified_name_with_use(
                     Some(qualifier) => make::path_concat(qualifier, path),
                     None => path,
                 };
-            let scope = builder.make_import_scope_mut(scope);
             insert_use(&scope, path, &ctx.config.insert_use);
         },
     )
 }
 
-fn target_path(ctx: &AssistContext<'_>, mut original_path: ast::Path) -> Option<ast::Path> {
-    let on_first = original_path.qualifier().is_none();
-
-    if on_first {
-        original_path = original_path.top_path();
-    }
-
-    match ctx.sema.resolve_path(&original_path)? {
-        PathResolution::Def(ModuleDef::Variant(_)) if on_first => original_path.qualifier(),
-        PathResolution::Def(def) if def.as_assoc_item(ctx.db()).is_some() => {
-            on_first.then_some(original_path.qualifier()?)
-        }
-        _ => Some(original_path),
-    }
-}
-
 fn drop_generic_args(path: &ast::Path) -> ast::Path {
-    let path = path.clone_subtree();
-    let mut editor = SyntaxEditor::new(path.syntax().clone());
-    if let Some(segment) = path.segment()
-        && let Some(generic_args) = segment.generic_arg_list()
-    {
-        editor.delete(generic_args.syntax());
+    let path = path.clone_for_update();
+    if let Some(segment) = path.segment() {
+        if let Some(generic_args) = segment.generic_arg_list() {
+            ted::remove(generic_args.syntax());
+        }
     }
-
-    ast::Path::cast(editor.finish().new_root().clone()).unwrap()
+    path
 }
 
 /// Mutates `node` to shorten `path` in all descendants of `node`.
-fn shorten_paths(editor: &mut SyntaxEditor, node: &SyntaxNode, path: &ast::Path) {
+fn shorten_paths(node: &SyntaxNode, path: &ast::Path) {
     for child in node.children() {
         match_ast! {
             match child {
@@ -133,26 +125,26 @@ fn shorten_paths(editor: &mut SyntaxEditor, node: &SyntaxNode, path: &ast::Path)
                 // Don't descend into submodules, they don't have the same `use` items in scope.
                 // FIXME: This isn't true due to `super::*` imports?
                 ast::Module(_) => continue,
-                ast::Path(p) => if maybe_replace_path(editor, p.clone(), path.clone()).is_none() {
-                    shorten_paths(editor, p.syntax(), path);
+                ast::Path(p) => if maybe_replace_path(p.clone(), path.clone()).is_none() {
+                    shorten_paths(p.syntax(), path);
                 },
-                _ => shorten_paths(editor, &child, path),
+                _ => shorten_paths(&child, path),
             }
         }
     }
 }
 
-fn maybe_replace_path(editor: &mut SyntaxEditor, path: ast::Path, target: ast::Path) -> Option<()> {
+fn maybe_replace_path(path: ast::Path, target: ast::Path) -> Option<()> {
     if !path_eq_no_generics(path.clone(), target) {
         return None;
     }
 
     // Shorten `path`, leaving only its last segment.
     if let Some(parent) = path.qualifier() {
-        editor.delete(parent.syntax());
+        ted::remove(parent.syntax());
     }
     if let Some(double_colon) = path.coloncolon_token() {
-        editor.delete(double_colon);
+        ted::remove(&double_colon);
     }
 
     Some(())
@@ -168,7 +160,7 @@ fn path_eq_no_generics(lhs: ast::Path, rhs: ast::Path) -> bool {
                     && lhs
                         .name_ref()
                         .zip(rhs.name_ref())
-                        .is_some_and(|(lhs, rhs)| lhs.text() == rhs.text()) => {}
+                        .map_or(false, |(lhs, rhs)| lhs.text() == rhs.text()) => {}
             _ => return false,
         }
 
@@ -245,6 +237,12 @@ fs::Path
     }
 
     #[test]
+    fn dont_import_trivial_paths() {
+        cov_mark::check!(dont_import_trivial_paths);
+        check_assist_not_applicable(replace_qualified_name_with_use, r"impl foo$0 for () {}");
+    }
+
+    #[test]
     fn test_replace_not_applicable_in_use() {
         cov_mark::check!(not_applicable_in_use);
         check_assist_not_applicable(replace_qualified_name_with_use, r"use std::fmt$0;");
@@ -268,134 +266,6 @@ mod std { pub mod fmt { pub trait Debug {} } }
 fn main() {
     Debug;
     let x: Debug = Debug;
-}
-    ",
-        );
-    }
-
-    #[test]
-    fn assist_runs_on_first_segment() {
-        check_assist(
-            replace_qualified_name_with_use,
-            r"
-mod std { pub mod fmt { pub trait Debug {} } }
-fn main() {
-    $0std::fmt::Debug;
-    let x: std::fmt::Debug = std::fmt::Debug;
-}
-    ",
-            r"
-use std::fmt::Debug;
-
-mod std { pub mod fmt { pub trait Debug {} } }
-fn main() {
-    Debug;
-    let x: Debug = Debug;
-}
-    ",
-        );
-    }
-
-    #[test]
-    fn assist_runs_on_first_segment_for_enum() {
-        check_assist(
-            replace_qualified_name_with_use,
-            r"
-mod std { pub mod option { pub enum Option<T> { Some(T), None } } }
-fn main() {
-    $0std::option::Option;
-    let x: std::option::Option<()> = std::option::Option::Some(());
-}
-    ",
-            r"
-use std::option::Option;
-
-mod std { pub mod option { pub enum Option<T> { Some(T), None } } }
-fn main() {
-    Option;
-    let x: Option<()> = Option::Some(());
-}
-    ",
-        );
-
-        check_assist(
-            replace_qualified_name_with_use,
-            r"
-mod std { pub mod option { pub enum Option<T> { Some(T), None } } }
-fn main() {
-    std::option::Option;
-    let x: std::option::Option<()> = $0std::option::Option::Some(());
-}
-    ",
-            r"
-use std::option::Option;
-
-mod std { pub mod option { pub enum Option<T> { Some(T), None } } }
-fn main() {
-    Option;
-    let x: Option<()> = Option::Some(());
-}
-    ",
-        );
-    }
-
-    #[test]
-    fn assist_runs_on_first_segment_for_assoc_type() {
-        check_assist(
-            replace_qualified_name_with_use,
-            r"
-mod foo { pub struct Foo; impl Foo { pub fn foo() {} } }
-fn main() {
-    $0foo::Foo::foo();
-}
-    ",
-            r"
-use foo::Foo;
-
-mod foo { pub struct Foo; impl Foo { pub fn foo() {} } }
-fn main() {
-    Foo::foo();
-}
-    ",
-        );
-    }
-
-    #[test]
-    fn assist_runs_on_enum_variant() {
-        check_assist(
-            replace_qualified_name_with_use,
-            r"
-mod std { pub mod option { pub enum Option<T> { Some(T), None } } }
-fn main() {
-    let x = std::option::Option::Some$0(());
-}
-    ",
-            r"
-use std::option::Option::Some;
-
-mod std { pub mod option { pub enum Option<T> { Some(T), None } } }
-fn main() {
-    let x = Some(());
-}
-    ",
-        );
-
-        check_assist(
-            replace_qualified_name_with_use,
-            r"
-mod std { pub mod option { pub enum Option<T> { Some(T), None } } }
-fn main() {
-    std::option::Option;
-    let x: std::option::Option<()> = $0std::option::Option::Some(());
-}
-    ",
-            r"
-use std::option::Option;
-
-mod std { pub mod option { pub enum Option<T> { Some(T), None } } }
-fn main() {
-    Option;
-    let x: Option<()> = Option::Some(());
 }
     ",
         );

@@ -1,4 +1,4 @@
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 //@ check-pass
 
 #[macro_use]

@@ -1,49 +1,34 @@
 //! Finds if an expression is an immutable context or a mutable context, which is used in selecting
 //! between `Deref` and `DerefMut` or `Index` and `IndexMut` or similar.
 
-use hir_def::hir::{
-    Array, AsmOperand, BinaryOp, BindingAnnotation, Expr, ExprId, Pat, PatId, RecordSpread,
-    Statement, UnaryOp,
+use chalk_ir::{cast::Cast, Mutability};
+use hir_def::{
+    hir::{Array, BinaryOp, BindingAnnotation, Expr, ExprId, PatId, Statement, UnaryOp},
+    lang_item::LangItem,
 };
-use rustc_ast_ir::Mutability;
+use hir_expand::name::Name;
+use intern::sym;
 
 use crate::{
-    Adjust, AutoBorrow, OverloadedDeref,
-    infer::{InferenceContext, place_op::PlaceOp},
-    lower::lower_mutability,
+    infer::Expectation, lower::lower_to_chalk_mutability, Adjust, Adjustment, AutoBorrow, Interner,
+    OverloadedDeref, TyBuilder, TyKind,
 };
 
-impl<'db> InferenceContext<'_, 'db> {
+use super::InferenceContext;
+
+impl InferenceContext<'_> {
     pub(crate) fn infer_mut_body(&mut self) {
         self.infer_mut_expr(self.body.body_expr, Mutability::Not);
     }
 
     fn infer_mut_expr(&mut self, tgt_expr: ExprId, mut mutability: Mutability) {
         if let Some(adjustments) = self.result.expr_adjustments.get_mut(&tgt_expr) {
-            let mut adjustments = adjustments.iter_mut().rev().peekable();
-            while let Some(adj) = adjustments.next() {
+            for adj in adjustments.iter_mut().rev() {
                 match &mut adj.kind {
                     Adjust::NeverToAny | Adjust::Deref(None) | Adjust::Pointer(_) => (),
-                    Adjust::Deref(Some(d)) => {
-                        if mutability == Mutability::Mut {
-                            let source_ty = match adjustments.peek() {
-                                Some(prev_adj) => prev_adj.target.as_ref(),
-                                None => self.result.type_of_expr[tgt_expr].as_ref(),
-                            };
-                            if let Some(infer_ok) = Self::try_mutable_overloaded_place_op(
-                                &self.table,
-                                source_ty,
-                                None,
-                                PlaceOp::Deref,
-                            ) {
-                                self.table.register_predicates(infer_ok.obligations);
-                            }
-                            *d = OverloadedDeref(Some(mutability));
-                        }
-                    }
+                    Adjust::Deref(Some(d)) => *d = OverloadedDeref(Some(mutability)),
                     Adjust::Borrow(b) => match b {
-                        AutoBorrow::Ref(m) => mutability = (*m).into(),
-                        AutoBorrow::RawPtr(m) => mutability = *m,
+                        AutoBorrow::Ref(_, m) | AutoBorrow::RawPtr(m) => mutability = *m,
                     },
                 }
             }
@@ -54,25 +39,7 @@ impl<'db> InferenceContext<'_, 'db> {
     fn infer_mut_expr_without_adjust(&mut self, tgt_expr: ExprId, mutability: Mutability) {
         match &self.body[tgt_expr] {
             Expr::Missing => (),
-            Expr::InlineAsm(e) => {
-                e.operands.iter().for_each(|(_, op)| match op {
-                    AsmOperand::In { expr, .. }
-                    | AsmOperand::Out { expr: Some(expr), .. }
-                    | AsmOperand::InOut { expr, .. } => {
-                        self.infer_mut_expr_without_adjust(*expr, Mutability::Not)
-                    }
-                    AsmOperand::SplitInOut { in_expr, out_expr, .. } => {
-                        self.infer_mut_expr_without_adjust(*in_expr, Mutability::Not);
-                        if let Some(out_expr) = out_expr {
-                            self.infer_mut_expr_without_adjust(*out_expr, Mutability::Not);
-                        }
-                    }
-                    AsmOperand::Out { expr: None, .. }
-                    | AsmOperand::Label(_)
-                    | AsmOperand::Sym(_)
-                    | AsmOperand::Const(_) => (),
-                });
-            }
+            Expr::InlineAsm(e) => self.infer_mut_expr_without_adjust(e.e, Mutability::Not),
             Expr::OffsetOf(_) => (),
             &Expr::If { condition, then_branch, else_branch } => {
                 self.infer_mut_expr(condition, Mutability::Not);
@@ -82,7 +49,8 @@ impl<'db> InferenceContext<'_, 'db> {
                 }
             }
             Expr::Const(id) => {
-                self.infer_mut_expr(*id, Mutability::Not);
+                let loc = self.db.lookup_intern_anonymous_const(*id);
+                self.infer_mut_expr(loc.root, Mutability::Not);
             }
             Expr::Let { pat, expr } => self.infer_mut_expr(*expr, self.pat_bound_mutability(*pat)),
             Expr::Block { id: _, statements, tail, label: _ }
@@ -101,7 +69,7 @@ impl<'db> InferenceContext<'_, 'db> {
                         Statement::Expr { expr, has_semi: _ } => {
                             self.infer_mut_expr(*expr, Mutability::Not);
                         }
-                        Statement::Item(_) => (),
+                        Statement::Item => (),
                     }
                 }
                 if let Some(tail) = tail {
@@ -109,7 +77,7 @@ impl<'db> InferenceContext<'_, 'db> {
                 }
             }
             Expr::MethodCall { receiver: it, method_name: _, args, generic_args: _ }
-            | Expr::Call { callee: it, args } => {
+            | Expr::Call { callee: it, args, is_assignee_expr: _ } => {
                 self.infer_mut_not_expr_iter(args.iter().copied().chain(Some(*it)));
             }
             Expr::Match { expr, arms } => {
@@ -133,22 +101,81 @@ impl<'db> InferenceContext<'_, 'db> {
             Expr::Become { expr } => {
                 self.infer_mut_expr(*expr, Mutability::Not);
             }
-            Expr::RecordLit { path: _, fields, spread, .. } => {
-                self.infer_mut_not_expr_iter(fields.iter().map(|it| it.expr));
-                if let RecordSpread::Expr(expr) = *spread {
-                    self.infer_mut_expr(expr, Mutability::Not);
-                }
+            Expr::RecordLit { path: _, fields, spread, ellipsis: _, is_assignee_expr: _ } => {
+                self.infer_mut_not_expr_iter(fields.iter().map(|it| it.expr).chain(*spread))
             }
-            &Expr::Index { base, index } => {
+            &Expr::Index { base, index, is_assignee_expr } => {
                 if mutability == Mutability::Mut {
-                    self.convert_place_op_to_mutable(PlaceOp::Index, tgt_expr, base, Some(index));
+                    if let Some((f, _)) = self.result.method_resolutions.get_mut(&tgt_expr) {
+                        if let Some(index_trait) = self
+                            .db
+                            .lang_item(self.table.trait_env.krate, LangItem::IndexMut)
+                            .and_then(|l| l.as_trait())
+                        {
+                            if let Some(index_fn) = self
+                                .db
+                                .trait_data(index_trait)
+                                .method_by_name(&Name::new_symbol_root(sym::index_mut.clone()))
+                            {
+                                *f = index_fn;
+                                let mut base_ty = None;
+                                let base_adjustments = self
+                                    .result
+                                    .expr_adjustments
+                                    .get_mut(&base)
+                                    .and_then(|it| it.last_mut());
+                                if let Some(Adjustment {
+                                    kind: Adjust::Borrow(AutoBorrow::Ref(_, mutability)),
+                                    target,
+                                }) = base_adjustments
+                                {
+                                    // For assignee exprs `IndexMut` obiligations are already applied
+                                    if !is_assignee_expr {
+                                        if let TyKind::Ref(_, _, ty) = target.kind(Interner) {
+                                            base_ty = Some(ty.clone());
+                                        }
+                                    }
+                                    *mutability = Mutability::Mut;
+                                }
+
+                                // Apply `IndexMut` obligation for non-assignee expr
+                                if let Some(base_ty) = base_ty {
+                                    let index_ty =
+                                        if let Some(ty) = self.result.type_of_expr.get(index) {
+                                            ty.clone()
+                                        } else {
+                                            self.infer_expr(index, &Expectation::none())
+                                        };
+                                    let trait_ref = TyBuilder::trait_ref(self.db, index_trait)
+                                        .push(base_ty)
+                                        .fill(|_| index_ty.clone().cast(Interner))
+                                        .build();
+                                    self.push_obligation(trait_ref.cast(Interner));
+                                }
+                            }
+                        }
+                    }
                 }
                 self.infer_mut_expr(base, mutability);
                 self.infer_mut_expr(index, Mutability::Not);
             }
             Expr::UnaryOp { expr, op: UnaryOp::Deref } => {
-                if mutability == Mutability::Mut {
-                    self.convert_place_op_to_mutable(PlaceOp::Deref, tgt_expr, *expr, None);
+                if let Some((f, _)) = self.result.method_resolutions.get_mut(&tgt_expr) {
+                    if mutability == Mutability::Mut {
+                        if let Some(deref_trait) = self
+                            .db
+                            .lang_item(self.table.trait_env.krate, LangItem::DerefMut)
+                            .and_then(|l| l.as_trait())
+                        {
+                            if let Some(deref_fn) = self
+                                .db
+                                .trait_data(deref_trait)
+                                .method_by_name(&Name::new_symbol_root(sym::deref_mut.clone()))
+                            {
+                                *f = deref_fn;
+                            }
+                        }
+                    }
                 }
                 self.infer_mut_expr(*expr, mutability);
             }
@@ -165,20 +192,12 @@ impl<'db> InferenceContext<'_, 'db> {
                 self.infer_mut_expr(*expr, Mutability::Not);
             }
             Expr::Ref { expr, rawness: _, mutability } => {
-                let mutability = lower_mutability(*mutability);
+                let mutability = lower_to_chalk_mutability(*mutability);
                 self.infer_mut_expr(*expr, mutability);
             }
             Expr::BinaryOp { lhs, rhs, op: Some(BinaryOp::Assignment { .. }) } => {
                 self.infer_mut_expr(*lhs, Mutability::Mut);
                 self.infer_mut_expr(*rhs, Mutability::Not);
-            }
-            &Expr::Assignment { target, value } => {
-                self.body.walk_pats(target, &mut |pat| match self.body[pat] {
-                    Pat::Expr(expr) => self.infer_mut_expr(expr, Mutability::Mut),
-                    Pat::ConstBlock(block) => self.infer_mut_expr(block, Mutability::Not),
-                    _ => {}
-                });
-                self.infer_mut_expr(value, Mutability::Not);
             }
             Expr::Array(Array::Repeat { initializer: lhs, repeat: rhs })
             | Expr::BinaryOp { lhs, rhs, op: _ }
@@ -189,7 +208,8 @@ impl<'db> InferenceContext<'_, 'db> {
             Expr::Closure { body, .. } => {
                 self.infer_mut_expr(*body, Mutability::Not);
             }
-            Expr::Tuple { exprs } | Expr::Array(Array::ElementList { elements: exprs }) => {
+            Expr::Tuple { exprs, is_assignee_expr: _ }
+            | Expr::Array(Array::ElementList { elements: exprs, is_assignee_expr: _ }) => {
                 self.infer_mut_not_expr_iter(exprs.iter().copied());
             }
             // These don't need any action, as they don't have sub expressions
@@ -221,7 +241,7 @@ impl<'db> InferenceContext<'_, 'db> {
     fn pat_bound_mutability(&self, pat: PatId) -> Mutability {
         let mut r = Mutability::Not;
         self.body.walk_bindings_in_pat(pat, |b| {
-            if self.body[b].mode == BindingAnnotation::RefMut {
+            if self.body.bindings[b].mode == BindingAnnotation::RefMut {
                 r = Mutability::Mut;
             }
         });

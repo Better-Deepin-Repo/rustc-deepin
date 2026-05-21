@@ -2,6 +2,6 @@ trait Foo {
     fn foo();
 }
 
-use Foo::foo; //~ ERROR `use` associated items of traits is unstable [E0658]
+use Foo::foo; //~ ERROR not directly importable
 
-fn main() { foo(); } //~ ERROR type annotations needed
+fn main() { foo(); }

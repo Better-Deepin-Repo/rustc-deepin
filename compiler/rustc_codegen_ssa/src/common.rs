@@ -1,13 +1,12 @@
 #![allow(non_camel_case_types)]
 
 use rustc_hir::LangItem;
-use rustc_hir::attrs::PeImportNameType;
 use rustc_middle::ty::layout::TyAndLayout;
 use rustc_middle::ty::{self, Instance, TyCtxt};
 use rustc_middle::{bug, mir, span_bug};
-use rustc_session::cstore::{DllCallingConvention, DllImport};
+use rustc_session::cstore::{DllCallingConvention, DllImport, PeImportNameType};
 use rustc_span::Span;
-use rustc_target::spec::{Abi, Env, Os, Target};
+use rustc_target::spec::Target;
 
 use crate::traits::*;
 
@@ -61,6 +60,16 @@ pub enum AtomicRmwBinOp {
 }
 
 #[derive(Copy, Clone, Debug)]
+pub enum AtomicOrdering {
+    Unordered,
+    Relaxed,
+    Acquire,
+    Release,
+    AcquireRelease,
+    SequentiallyConsistent,
+}
+
+#[derive(Copy, Clone, Debug)]
 pub enum SynchronizationScope {
     SingleThread,
     CrossThread,
@@ -109,9 +118,9 @@ mod temp_stable_hash_impls {
     }
 }
 
-pub(crate) fn build_langcall<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
+pub fn build_langcall<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     bx: &Bx,
-    span: Span,
+    span: Option<Span>,
     li: LangItem,
 ) -> (Bx::FnAbiOfResult, Bx::Value, Instance<'tcx>) {
     let tcx = bx.tcx();
@@ -120,7 +129,7 @@ pub(crate) fn build_langcall<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     (bx.fn_abi_of_instance(instance, ty::List::empty()), bx.get_fn_addr(instance), instance)
 }
 
-pub(crate) fn shift_mask_val<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
+pub fn shift_mask_val<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     bx: &mut Bx,
     llty: Bx::Type,
     mask_llty: Bx::Type,
@@ -149,7 +158,7 @@ pub(crate) fn shift_mask_val<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 pub fn asm_const_to_str<'tcx>(
     tcx: TyCtxt<'tcx>,
     sp: Span,
-    const_value: mir::ConstValue,
+    const_value: mir::ConstValue<'tcx>,
     ty_and_layout: TyAndLayout<'tcx>,
 ) -> String {
     let mir::ConstValue::Scalar(scalar) = const_value else {
@@ -171,22 +180,19 @@ pub fn asm_const_to_str<'tcx>(
 }
 
 pub fn is_mingw_gnu_toolchain(target: &Target) -> bool {
-    target.os == Os::Windows && target.env == Env::Gnu && target.abi == Abi::Unspecified
+    target.vendor == "pc" && target.os == "windows" && target.env == "gnu" && target.abi.is_empty()
 }
 
 pub fn i686_decorated_name(
     dll_import: &DllImport,
     mingw: bool,
     disable_name_mangling: bool,
-    force_fully_decorated: bool,
 ) -> String {
     let name = dll_import.name.as_str();
 
-    let (add_prefix, add_suffix) = match (force_fully_decorated, dll_import.import_name_type) {
-        // No prefix is a bit weird, in that LLVM/ar_archive_writer won't emit it, so we will
-        // ignore `force_fully_decorated` and always partially decorate it.
-        (_, Some(PeImportNameType::NoPrefix)) => (false, true),
-        (false, Some(PeImportNameType::Undecorated)) => (false, false),
+    let (add_prefix, add_suffix) = match dll_import.import_name_type {
+        Some(PeImportNameType::NoPrefix) => (false, true),
+        Some(PeImportNameType::Undecorated) => (false, false),
         _ => (true, true),
     };
 
@@ -194,8 +200,7 @@ pub fn i686_decorated_name(
     let mut decorated_name = String::with_capacity(name.len() + 6);
 
     if disable_name_mangling {
-        // LLVM uses a binary 1 ('\x01') prefix to a name to indicate that mangling needs to be
-        // disabled.
+        // LLVM uses a binary 1 ('\x01') prefix to a name to indicate that mangling needs to be disabled.
         decorated_name.push('\x01');
     }
 

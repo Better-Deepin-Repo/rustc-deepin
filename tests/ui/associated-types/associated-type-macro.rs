@@ -1,4 +1,4 @@
 fn main() {
-    #[cfg(false)]
+    #[cfg(FALSE)]
     <() as module>::mac!(); //~ ERROR macros cannot use qualified paths
 }

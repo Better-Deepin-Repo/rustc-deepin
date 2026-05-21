@@ -10,7 +10,7 @@ struct Foo {
 
 fn use_foo(x: Foo) -> i32 {
     let Foo { foo, bar, .. } = x; //~ WARNING unused variable: `bar`
-                                  //~| help: try ignoring the field
+                                  //~| help: try removing the field
     return foo;
 }
 
@@ -24,7 +24,7 @@ fn use_match(x: Foo) {
 
     match x {
         Foo { foo, .. } => { //~ WARNING unused variable
-                             //~| help: try ignoring the field
+                             //~| help: try removing the field
         }
     }
 }

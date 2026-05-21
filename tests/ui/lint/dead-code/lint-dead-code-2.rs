@@ -1,6 +1,6 @@
 #![allow(unused_variables)]
 #![deny(dead_code)]
-#![feature(rustc_attrs)]
+#![feature(rustc_attrs, start)]
 
 struct Foo;
 
@@ -21,16 +21,21 @@ fn live_fn() {}
 
 fn dead_fn() {} //~ ERROR: function `dead_fn` is never used
 
+#[rustc_main]
+fn dead_fn2() {} //~ ERROR: function `dead_fn2` is never used
+
 fn used_fn() {}
 
-#[rustc_main]
-fn actual_main() {
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
     used_fn();
     let foo = Foo;
     foo.bar2();
+    0
 }
 
 // this is not main
 fn main() { //~ ERROR: function `main` is never used
     dead_fn();
+    dead_fn2();
 }

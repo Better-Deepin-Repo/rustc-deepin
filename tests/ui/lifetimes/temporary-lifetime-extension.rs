@@ -1,18 +1,4 @@
-// This is a test for the new temporary lifetime behaviour as implemented for RFC 3606.
-// In essence, with #3606 we can write the following variable initialisation without
-// a borrow checking error because the temporary lifetime is automatically extended.
-// ```rust
-// let x = if condition() {
-//    &something()
-// } else {
-//    &something_else()
-// };
-// ```
-// More details can be found in https://github.com/rust-lang/rfcs/pull/3606
-
-//@ run-pass
-//@ check-run-results
-//@ edition: 2015..
+//@ check-pass
 
 fn temp() -> (String, i32) {
     (String::from("Hello"), 1)
@@ -27,7 +13,11 @@ fn main() {
         let _ = 123;
         &(*temp().0)[..]
     };
-    let f = if true { &temp() } else { &temp() };
+    let f = if true {
+        &temp()
+    } else {
+        &temp()
+    };
     let g = match true {
         true => &temp(),
         false => {

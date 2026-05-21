@@ -27,9 +27,9 @@ fn normalize(mut symbol: &str) -> String {
         symbol = symbol[last_colon + 1..].to_string();
     }
 
-    // Normalize to no leading mangling chars to handle platforms that may
+    // Normalize to no leading underscore to handle platforms that may
     // inject extra ones in symbol names.
-    while symbol.starts_with('_') || symbol.starts_with('.') || symbol.starts_with('#') {
+    while symbol.starts_with('_') {
         symbol.remove(0);
     }
     // Windows/x86 has a suffix such as @@4.
@@ -49,8 +49,6 @@ pub(crate) fn disassemble_myself() -> HashSet<Function> {
         "i686-pc-windows-msvc"
     } else if cfg!(target_arch = "aarch64") {
         "aarch64-pc-windows-msvc"
-    } else if cfg!(target_arch = "arm64ec") {
-        "arm64ec-pc-windows-msvc"
     } else {
         panic!("disassembly unimplemented")
     };
@@ -76,10 +74,10 @@ pub(crate) fn disassemble_myself() -> HashSet<Function> {
     let me = env::current_exe().expect("failed to get current exe");
 
     let objdump = env::var("OBJDUMP").unwrap_or_else(|_| "objdump".to_string());
-    let add_args = if cfg!(target_vendor = "apple") && cfg!(target_arch = "aarch64") {
-        // Target features need to be enabled for LLVM objdump on Darwin ARM64
-        vec!["--mattr=+v8.6a,+crypto"]
-    } else if cfg!(any(target_arch = "riscv32", target_arch = "riscv64")) {
+    let add_args = if cfg!(target_os = "macos") && cfg!(target_arch = "aarch64") {
+        // Target features need to be enabled for LLVM objdump on Macos ARM64
+        vec!["--mattr=+v8.6a,+crypto,+tme"]
+    } else if cfg!(target_arch = "riscv64") {
         vec!["--mattr=+zk,+zks,+zbc,+zbb"]
     } else {
         vec![]
@@ -142,7 +140,7 @@ fn parse(output: &str) -> HashSet<Function> {
                     .filter(|&x| !x.is_empty())
                     .skip(1)
                     .map(str::to_lowercase)
-                    .skip_while(|s| matches!(&**s, "lock" | "vex")) // skip x86-specific prefix
+                    .skip_while(|s| *s == "lock") // skip x86-specific prefix
                     .collect::<Vec<String>>()
             } else {
                 // objdump with --no-show-raw-insn
@@ -152,8 +150,8 @@ fn parse(output: &str) -> HashSet<Function> {
                 instruction
                     .split_whitespace()
                     .skip(1)
-                    .skip_while(|s| matches!(*s, "lock" | "{evex}" | "{vex}")) // skip x86-specific prefix
-                    .map(ToString::to_string)
+                    .skip_while(|s| *s == "lock" || *s == "{evex}") // skip x86-specific prefix
+                    .map(std::string::ToString::to_string)
                     .collect::<Vec<String>>()
             };
 
@@ -171,7 +169,7 @@ fn parse(output: &str) -> HashSet<Function> {
                     }
                 }
                 match (parts.first(), parts.last()) {
-                    (Some(instr), Some(last_arg)) if is_shll(instr) && last_arg == "#0" => {
+                    (Some(instr), Some(last_arg)) if is_shll(&instr) && last_arg == "#0" => {
                         assert_eq!(parts.len(), 4);
                         let mut new_parts = Vec::with_capacity(3);
                         let new_instr = format!("{}{}{}", &instr[..1], "xtl", &instr[5..]);
@@ -187,12 +185,7 @@ fn parse(output: &str) -> HashSet<Function> {
                     _ => {}
                 };
             }
-
             instructions.push(parts.join(" "));
-            if matches!(&**instructions.last().unwrap(), "ret" | "retq") {
-                cached_header = None;
-                break;
-            }
         }
         let function = Function {
             name: symbol,

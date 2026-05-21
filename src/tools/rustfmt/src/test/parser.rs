@@ -19,11 +19,11 @@ fn parser_errors_in_submods_are_surfaced() {
     {
         assert_eq!(&module, exp_mod_name);
         if let ModuleResolutionErrorKind::ParseError {
-            file: unparsable_file,
+            file: unparseable_file,
         } = kind
         {
             assert_eq!(
-                unparsable_file,
+                unparseable_file,
                 PathBuf::from("tests/parser/issue-4126/invalid.rs"),
             );
         } else {

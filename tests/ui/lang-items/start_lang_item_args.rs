@@ -8,11 +8,7 @@
 #[lang = "copy"]
 pub trait Copy {}
 #[lang = "sized"]
-pub trait Sized: MetaSized {}
-#[lang = "meta_sized"]
-pub trait MetaSized: PointeeSized {}
-#[lang = "pointee_sized"]
-pub trait PointeeSized {}
+pub trait Sized {}
 
 #[cfg(missing_all_args)]
 #[lang = "start"]

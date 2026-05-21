@@ -1,4 +1,5 @@
-// Check that we test WF conditions for fn arguments.
+// Check that we test WF conditions for fn arguments. Because the
+// current code is so goofy, this is only a warning for now.
 
 #![feature(rustc_attrs)]
 #![allow(dead_code)]

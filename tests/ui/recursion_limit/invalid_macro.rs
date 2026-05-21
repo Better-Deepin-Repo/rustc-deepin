@@ -1,4 +1,4 @@
-#![recursion_limit = foo!()] //~ ERROR attribute value must be a literal
+#![recursion_limit = foo!()] //~ ERROR malformed `recursion_limit` attribute
 
 macro_rules! foo {
     () => {"128"};

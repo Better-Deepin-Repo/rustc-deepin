@@ -1,4 +1,3 @@
-//@ check-pass
 //@aux-build:proc_macros.rs
 
 #![warn(clippy::deref_addrof)]

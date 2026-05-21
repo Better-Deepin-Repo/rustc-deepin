@@ -8,9 +8,11 @@ use rustc_middle::mir::{
 use rustc_middle::ty::TyCtxt;
 use tracing::instrument;
 
-pub(super) struct CtfeLimit;
+use crate::MirPass;
 
-impl<'tcx> crate::MirPass<'tcx> for CtfeLimit {
+pub struct CtfeLimit;
+
+impl<'tcx> MirPass<'tcx> for CtfeLimit {
     #[instrument(skip(self, _tcx, body))]
     fn run_pass(&self, _tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         let doms = body.basic_blocks.dominators();
@@ -18,7 +20,7 @@ impl<'tcx> crate::MirPass<'tcx> for CtfeLimit {
             .basic_blocks
             .iter_enumerated()
             .filter_map(|(node, node_data)| {
-                if matches!(node_data.terminator().kind, TerminatorKind::Call { .. } | TerminatorKind::TailCall { .. })
+                if matches!(node_data.terminator().kind, TerminatorKind::Call { .. })
                     // Back edges in a CFG indicate loops
                     || has_back_edge(doms, node, node_data)
                 {
@@ -28,17 +30,13 @@ impl<'tcx> crate::MirPass<'tcx> for CtfeLimit {
                 }
             })
             .collect();
-
-        let basic_blocks = body.basic_blocks.as_mut_preserves_cfg();
         for index in indices {
-            let bbdata = &mut basic_blocks[index];
-            let source_info = bbdata.terminator().source_info;
-            bbdata.statements.push(Statement::new(source_info, StatementKind::ConstEvalCounter));
+            insert_counter(
+                body.basic_blocks_mut()
+                    .get_mut(index)
+                    .expect("basic_blocks index {index} should exist"),
+            );
         }
-    }
-
-    fn is_required(&self) -> bool {
-        true
     }
 }
 
@@ -52,4 +50,11 @@ fn has_back_edge(
     }
     // Check if any of the dominators of the node are also the node's successor.
     node_data.terminator().successors().any(|succ| doms.dominates(succ, node))
+}
+
+fn insert_counter(basic_block_data: &mut BasicBlockData<'_>) {
+    basic_block_data.statements.push(Statement {
+        source_info: basic_block_data.terminator().source_info,
+        kind: StatementKind::ConstEvalCounter,
+    });
 }

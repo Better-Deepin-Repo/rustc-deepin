@@ -1,17 +1,16 @@
 //@no-rustfix
 //@aux-build:proc_macros.rs
 #![warn(clippy::iter_without_into_iter)]
-#![allow(clippy::needless_lifetimes)]
 extern crate proc_macros;
 
 pub struct S1;
 impl S1 {
     pub fn iter(&self) -> std::slice::Iter<'_, u8> {
-        //~^ iter_without_into_iter
+        //~^ ERROR: `iter` method without an `IntoIterator` impl
         [].iter()
     }
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, u8> {
-        //~^ iter_without_into_iter
+        //~^ ERROR: `iter_mut` method without an `IntoIterator` impl
         [].iter_mut()
     }
 }
@@ -27,11 +26,11 @@ impl S2 {
 pub struct S3<'a>(&'a mut [u8]);
 impl<'a> S3<'a> {
     pub fn iter(&self) -> std::slice::Iter<'_, u8> {
-        //~^ iter_without_into_iter
+        //~^ ERROR: `iter` method without an `IntoIterator` impl
         self.0.iter()
     }
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, u8> {
-        //~^ iter_without_into_iter
+        //~^ ERROR: `iter_mut` method without an `IntoIterator` impl
         self.0.iter_mut()
     }
 }
@@ -68,7 +67,6 @@ impl<T> S7<T> {
 pub struct S8<T>(T);
 impl<T> S8<T> {
     pub fn iter(&self) -> std::slice::Iter<'static, T> {
-        //~^ iter_without_into_iter
         todo!()
     }
 }
@@ -77,11 +75,11 @@ impl<T> S8<T> {
 pub struct S9<T>(T);
 impl<T> S9<T> {
     pub fn iter(&self) -> std::slice::Iter<'_, T> {
-        //~^ iter_without_into_iter
+        //~^ ERROR: `iter` method without an `IntoIterator` impl
         todo!()
     }
     pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, T> {
-        //~^ iter_without_into_iter
+        //~^ ERROR: `iter_mut` method without an `IntoIterator` impl
         todo!()
     }
 }
@@ -130,7 +128,6 @@ macro_rules! generate_impl {
     () => {
         impl Issue12037 {
             fn iter(&self) -> std::slice::Iter<'_, u8> {
-                //~^ iter_without_into_iter
                 todo!()
             }
         }

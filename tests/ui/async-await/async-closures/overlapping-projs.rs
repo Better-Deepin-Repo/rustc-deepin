@@ -3,9 +3,11 @@
 //@ run-pass
 //@ check-run-results
 
+#![feature(async_closure)]
+
 extern crate block_on;
 
-async fn call_once(f: impl AsyncFnOnce()) {
+async fn call_once(f: impl async FnOnce()) {
     f().await;
 }
 

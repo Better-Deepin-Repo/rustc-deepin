@@ -31,7 +31,6 @@ TO_PUBLISH = [
     'crates/cargo-util-schemas',
     'crates/cargo-test-macro',
     'crates/cargo-test-support',
-    'crates/build-rs',
     '.',
 ]
 

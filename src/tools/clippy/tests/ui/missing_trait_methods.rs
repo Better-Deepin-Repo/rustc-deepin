@@ -20,11 +20,10 @@ trait B {
 struct Partial;
 
 impl A for Partial {}
-//~^ missing_trait_methods
+//~^ ERROR: missing trait method provided by default: `provided`
 
 impl B for Partial {
-    //~^ missing_trait_methods
-
+    //~^ ERROR: missing trait method provided by default: `b`
     fn required() {}
 
     fn a(_: usize) -> usize {
@@ -57,15 +56,5 @@ trait MissingMultiple {
 }
 
 impl MissingMultiple for Partial {}
-//~^ missing_trait_methods
-//~| missing_trait_methods
-//~| missing_trait_methods
 
 fn main() {}
-
-//~v missing_trait_methods
-impl PartialEq<Partial> for Partial {
-    fn eq(&self, other: &Partial) -> bool {
-        todo!()
-    }
-}

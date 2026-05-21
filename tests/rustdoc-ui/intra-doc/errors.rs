@@ -98,7 +98,7 @@ pub trait T {
 /// [m()]
 //~^ ERROR unresolved link
 //~| HELP to link to the macro
-//~| NOTE not a function
+//~| NOTE not in the value namespace
 #[macro_export]
 macro_rules! m {
     () => {};

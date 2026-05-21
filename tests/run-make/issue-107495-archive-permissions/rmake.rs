@@ -1,11 +1,13 @@
-//@ needs-target-std
+#![feature(rustc_private)]
+
+#[cfg(unix)]
+extern crate libc;
+
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
-#[cfg(unix)]
-use run_make_support::libc;
-use run_make_support::{rfs, rustc};
+use run_make_support::{aux_build, rfs};
 
 fn main() {
     #[cfg(unix)]
@@ -13,7 +15,7 @@ fn main() {
         libc::umask(0o002);
     }
 
-    rustc().crate_type("lib").arg("foo.rs").run();
+    aux_build().arg("foo.rs").run();
     verify(Path::new("libfoo.rlib"));
 }
 

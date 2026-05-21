@@ -1,4 +1,4 @@
-//@ ignore-auxiliary (used by `../inner-attr-non-inline-mod.rs`)
+//@ ignore-test (auxiliary, used by other tests)
 
 #![rustfmt::skip]
 #![print_attr]

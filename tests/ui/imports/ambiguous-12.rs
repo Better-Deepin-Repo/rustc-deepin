@@ -1,5 +1,6 @@
-// https://github.com/rust-lang/rust/pull/113099#issuecomment-1637022296
 //@ check-pass
+// https://github.com/rust-lang/rust/pull/113099#issuecomment-1637022296
+
 macro_rules! m {
     () => {
         pub fn b() {}
@@ -19,6 +20,6 @@ use crate::public::*;
 
 fn main() {
     b();
-    //~^ WARN `b` is ambiguous
+    //~^ WARNING `b` is ambiguous
     //~| WARNING this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
 }

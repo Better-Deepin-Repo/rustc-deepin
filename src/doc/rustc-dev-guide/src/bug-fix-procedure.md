@@ -1,4 +1,6 @@
-# Procedures for breaking changes
+# Procedures for Breaking Changes
+
+<!-- toc -->
 
 This page defines the best practices procedure for making bug fixes or soundness
 corrections in the compiler that can cause existing code to stop compiling. This
@@ -78,11 +80,41 @@ approachable and practical; it may make sense to direct users to an RFC or some
 other issue for the full details. The issue also serves as a place where users
 can comment with questions or other concerns.
 
-A template for these breaking-change tracking issues can be found
-[here][template]. An example of how such an issue should look can be [found
+A template for these breaking-change tracking issues can be found below. An
+example of how such an issue should look can be [found
 here][breaking-change-issue].
 
-[template]: https://github.com/rust-lang/rust/issues/new?template=tracking_issue_future.md
+The issue should be tagged with (at least) `B-unstable` and `T-compiler`.
+
+### Tracking issue template
+
+This is a template to use for tracking issues:
+
+```
+This is the **summary issue** for the `YOUR_LINT_NAME_HERE`
+future-compatibility warning and other related errors. The goal of
+this page is describe why this change was made and how you can fix
+code that is affected by it. It also provides a place to ask questions
+or register a complaint if you feel the change should not be made. For
+more information on the policy around future-compatibility warnings,
+see our [breaking change policy guidelines][guidelines].
+
+[guidelines]: LINK_TO_THIS_RFC
+
+#### What is the warning for?
+
+*Describe the conditions that trigger the warning and how they can be
+fixed. Also explain why the change was made.**
+
+#### When will this warning become a hard error?
+
+At the beginning of each 6-week release cycle, the Rust compiler team
+will review the set of outstanding future compatibility warnings and
+nominate some of them for **Final Comment Period**. Toward the end of
+the cycle, we will review any comments and make a final determination
+whether to convert the warning into a hard error or remove it
+entirely.
+```
 
 ### Issuing future compatibility warnings
 
@@ -91,45 +123,39 @@ future-compatibility warnings. These are a special category of lint warning.
 Adding a new future-compatibility warning can be done as follows.
 
 ```rust
-// 1. Define the lint in `compiler/rustc_lint/src/builtin.rs` and 
-//    add the metadata for the future incompatibility:
+// 1. Define the lint in `compiler/rustc_middle/src/lint/builtin.rs`:
 declare_lint! {
-    pub YOUR_LINT_HERE,
+    pub YOUR_ERROR_HERE,
     Warn,
     "illegal use of foo bar baz"
-    @future_incompatible = FutureIncompatibleInfo {
-        reason: fcw!(FutureReleaseError #1234) // your tracking issue here!
+}
+
+// 2. Add to the list of HardwiredLints in the same file:
+impl LintPass for HardwiredLints {
+    fn get_lints(&self) -> LintArray {
+        lint_array!(
+            ..,
+            YOUR_ERROR_HERE
+        )
+    }
+}
+
+// 3. Register the lint in `compiler/rustc_lint/src/lib.rs`:
+store.register_future_incompatible(sess, vec![
+    ...,
+    FutureIncompatibleInfo {
+        id: LintId::of(YOUR_ERROR_HERE),
+        reference: "issue #1234", // your tracking issue here!
     },
-}
+]);
 
-// 2. Add a decidacted lint pass for it.
-//    This step can be skipped if you emit the lint as part of an existing pass.
-
-#[derive(Default)]
-pub struct MyLintPass {
-    ...
-}
-
-impl {Early,Late}LintPass for MyLintPass { 
-    ...
-}
-
-impl_lint_pass!(MyLintPass => [YOUR_LINT_HERE]);
-
-// 3. emit the lint somewhere in your lint pass:
-cx.emit_span_lint(
-    YOUR_LINT_HERE,
-    pat.span,
-    // some diagnostic struct
-    MyDiagnostic {
-        ...
-    },
-);
-
+// 4. Report the lint:
+tcx.lint_node(
+    lint::builtin::YOUR_ERROR_HERE,
+    path_id,
+    binding.span,
+    format!("some helper message here"));
 ```
-
-Finally, register the lint in `compiler/rustc_lint/src/lib.rs`. 
-There are many examples in that file that already show how to do so.
 
 #### Helpful techniques
 
@@ -201,7 +227,7 @@ that we use for unstable features:
 Ideally, breaking changes should have landed on the **stable branch** of the
 compiler before they are finalized.
 
-<a id="guide"></a>
+<a name="guide">
 
 ### Removing a lint
 
@@ -227,10 +253,7 @@ The first reference you will likely find is the lint definition [in
 declare_lint! {
     pub OVERLAPPING_INHERENT_IMPLS,
     Deny, // this may also say Warning
-    "two overlapping inherent impls define an item with the same name were erroneously allowed",
-    @future_incompatible = FutureIncompatibleInfo {
-        reason: fcw!(FutureReleaseError #1234), // your tracking issue here!
-    },
+    "two overlapping inherent impls define an item with the same name were erroneously allowed"
 }
 ```
 
@@ -239,6 +262,19 @@ will also find that there is a mention of `OVERLAPPING_INHERENT_IMPLS` later in
 the file as [part of a `lint_array!`][lintarraysource]; remove it too.
 
 [lintarraysource]: https://github.com/rust-lang/rust/blob/085d71c3efe453863739c1fb68fd9bd1beff214f/src/librustc/lint/builtin.rs#L252-L290
+
+Next, you see [a reference to `OVERLAPPING_INHERENT_IMPLS` in
+`rustc_lint/src/lib.rs`][futuresource]. This is defining the lint as a "future
+compatibility lint":
+
+```rust
+FutureIncompatibleInfo {
+    id: LintId::of(OVERLAPPING_INHERENT_IMPLS),
+    reference: "issue #36889 <https://github.com/rust-lang/rust/issues/36889>",
+},
+```
+
+Remove this too.
 
 #### Add the lint to the list of removed lints.
 
@@ -265,8 +301,6 @@ self.tcx.sess.add_lint(lint::builtin::OVERLAPPING_INHERENT_IMPLS,
                        msg);
 ```
 
-You'll also often find `node_span_lint` used for this.
-
 We want to convert this into an error. In some cases, there may be an
 existing error for this scenario. In others, we will need to allocate a
 fresh diagnostic code.  [Instructions for allocating a fresh diagnostic
@@ -281,17 +315,6 @@ Let's say that we've adopted `E0592` as our code. Then we can change the
 ```rust
 struct_span_code_err!(self.dcx(), self.tcx.span_of_impl(item1).unwrap(), E0592, msg)
     .emit();
-```
-
-Or better: a structured diagnostic like this:
-
-```rust
-#[derive(Diagnostic)]
-struct MyDiagnostic {
-    #[label]
-    span: Span,
-    ...
-}
 ```
 
 #### Update tests

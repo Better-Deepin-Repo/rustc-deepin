@@ -1,6 +1,6 @@
-//! Tests for `cfg()` expressions.
+//! Tests for cfg() expressions.
 
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::rustc_host;
 use cargo_test_support::{basic_manifest, project, str};
@@ -56,7 +56,7 @@ fn dont_include() {
         .build();
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [CHECKING] a v0.0.1 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -95,7 +95,7 @@ fn works_through_the_registry() {
     p.cargo("check")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 3 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] baz v0.1.0 (registry `dummy-registry`)
 [DOWNLOADED] bar v0.1.0 (registry `dummy-registry`)
@@ -144,8 +144,8 @@ fn ignore_version_from_other_platform() {
     p.cargo("check")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 2 packages to latest compatible versions
-[ADDING] bar v0.1.0 (available: v0.2.0)
+[LOCKING] 3 packages to latest compatible versions
+[ADDING] bar v0.1.0 (latest: v0.2.0)
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.1.0 (registry `dummy-registry`)
 [CHECKING] bar v0.1.0
@@ -280,7 +280,7 @@ fn any_ok() {
 
 // https://github.com/rust-lang/cargo/issues/5313
 #[cargo_test]
-#[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu"))]
+#[cfg(all(target_arch = "x86_64", target_os = "linux", target_env = "gnu", target_pointer_width = "64"))]
 fn cfg_looks_at_rustflags_for_target() {
     let p = project()
         .file(
@@ -518,302 +518,6 @@ fn exclusive_dep_kinds() {
 [COMPILING] foo v0.1.0 ([ROOT]/foo)
 error[E0463]: can't find crate for `bar`
 ...
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn cfg_raw_idents() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "foo"
-                version = "0.1.0"
-                edition = "2015"
-
-                [target.'cfg(any(r#true, r#all, r#target_os = "<>"))'.dependencies]
-                b = { path = "b/" }
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .file("b/Cargo.toml", &basic_manifest("b", "0.0.1"))
-        .file("b/src/lib.rs", "pub fn foo() {}")
-        .build();
-
-    p.cargo("check")
-        .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
-[CHECKING] b v0.0.1 ([ROOT]/foo/b)
-[CHECKING] foo v0.1.0 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn cfg_raw_idents_empty() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "foo"
-                version = "0.1.0"
-                edition = "2015"
-
-                [target.'cfg(r#))'.dependencies]
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .build();
-
-    p.cargo("check")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
-
-Caused by:
-  failed to parse `r#)` as a cfg expression: unexpected character `)` in cfg, expected parens, a comma, an identifier, or a string
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn cfg_raw_idents_not_really() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "foo"
-                version = "0.1.0"
-                edition = "2015"
-
-                [target.'cfg(r#11))'.dependencies]
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .build();
-
-    p.cargo("check")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
-
-Caused by:
-  failed to parse `r#11)` as a cfg expression: unexpected character `1` in cfg, expected parens, a comma, an identifier, or a string
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn cfg_keywords() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "foo"
-                version = "0.1.0"
-                edition = "2015"
-
-                [target.'cfg(any(async, fn, const, return, true))'.dependencies]
-                b = { path = "b/" }
-            "#,
-        )
-        .file(
-            ".cargo/config.toml",
-            r#"
-                [target."cfg(any(for, match, extern, crate, false))"]
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .file("b/Cargo.toml", &basic_manifest("b", "0.0.1"))
-        .file("b/src/lib.rs", "pub fn foo() {}")
-        .build();
-
-    p.cargo("check")
-        .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
-[CHECKING] b v0.0.1 ([ROOT]/foo/b)
-[CHECKING] foo v0.1.0 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn cfg_booleans() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "a"
-                version = "0.0.1"
-                edition = "2015"
-                authors = []
-
-                [target.'cfg(true)'.dependencies]
-                b = { path = 'b' }
-
-                [target.'cfg(false)'.dependencies]
-                c = { path = 'c' }
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .file("b/Cargo.toml", &basic_manifest("b", "0.0.1"))
-        .file("b/src/lib.rs", "")
-        .file("c/Cargo.toml", &basic_manifest("c", "0.0.1"))
-        .file("c/src/lib.rs", "")
-        .build();
-
-    p.cargo("check")
-        .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
-[CHECKING] b v0.0.1 ([ROOT]/foo/b)
-[CHECKING] a v0.0.1 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn cfg_booleans_config() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "a"
-                version = "0.0.1"
-                edition = "2015"
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .file(
-            ".cargo/config.toml",
-            r#"
-                [target.'cfg(true)']
-                rustflags = []
-            "#,
-        )
-        .build();
-
-    p.cargo("check")
-        .with_stderr_data(str![[r#"
-[CHECKING] a v0.0.1 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn cfg_booleans_not() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "a"
-                version = "0.0.1"
-                edition = "2015"
-                authors = []
-
-                [target.'cfg(not(false))'.dependencies]
-                b = { path = 'b' }
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .file("b/Cargo.toml", &basic_manifest("b", "0.0.1"))
-        .file("b/src/lib.rs", "")
-        .build();
-
-    p.cargo("check")
-        .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
-[CHECKING] b v0.0.1 ([ROOT]/foo/b)
-[CHECKING] a v0.0.1 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn cfg_booleans_combinators() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "a"
-                version = "0.0.1"
-                edition = "2015"
-                authors = []
-
-                [target.'cfg(all(any(true), not(false), true))'.dependencies]
-                b = { path = 'b' }
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .file("b/Cargo.toml", &basic_manifest("b", "0.0.1"))
-        .file("b/src/lib.rs", "")
-        .build();
-
-    p.cargo("check")
-        .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
-[CHECKING] b v0.0.1 ([ROOT]/foo/b)
-[CHECKING] a v0.0.1 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn cfg_booleans_rustflags_no_effect() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "a"
-                version = "0.0.1"
-                edition = "2015"
-                authors = []
-
-                [target.'cfg(true)'.dependencies]
-                b = { path = 'b' }
-
-                [target.'cfg(false)'.dependencies]
-                c = { path = 'c' }
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .file("b/Cargo.toml", &basic_manifest("b", "0.0.1"))
-        .file("b/src/lib.rs", "")
-        .file("c/Cargo.toml", &basic_manifest("c", "0.0.1"))
-        .file("c/src/lib.rs", "")
-        .build();
-
-    p.cargo("check")
-        .env("RUSTFLAGS", "--cfg r#false")
-        .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
-[CHECKING] b v0.0.1 ([ROOT]/foo/b)
-[CHECKING] a v0.0.1 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
 "#]])
         .run();
 }

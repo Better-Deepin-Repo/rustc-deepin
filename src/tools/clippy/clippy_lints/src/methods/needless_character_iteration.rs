@@ -1,15 +1,14 @@
-use clippy_utils::res::{MaybeDef, MaybeQPath, MaybeResPath};
 use rustc_errors::Applicability;
 use rustc_hir::{Closure, Expr, ExprKind, HirId, StmtKind, UnOp};
 use rustc_lint::LateContext;
 use rustc_middle::ty;
 use rustc_span::Span;
 
-use super::NEEDLESS_CHARACTER_ITERATION;
 use super::utils::get_last_chain_binding_hir_id;
+use super::NEEDLESS_CHARACTER_ITERATION;
 use clippy_utils::diagnostics::span_lint_and_sugg;
 use clippy_utils::source::SpanRangeExt;
-use clippy_utils::{peel_blocks, sym};
+use clippy_utils::{match_def_path, path_to_local_id, peel_blocks};
 
 fn peels_expr_ref<'a, 'tcx>(mut expr: &'a Expr<'tcx>) -> &'a Expr<'tcx> {
     while let ExprKind::AddrOf(_, _, e) = expr.kind {
@@ -32,8 +31,8 @@ fn handle_expr(
             // If we have `!is_ascii`, then only `.any()` should warn. And if the condition is
             // `is_ascii`, then only `.all()` should warn.
             if revert != is_all
-                && method.ident.name == sym::is_ascii
-                && receiver.res_local_id() == Some(first_param)
+                && method.ident.name.as_str() == "is_ascii"
+                && path_to_local_id(receiver, first_param)
                 && let char_arg_ty = cx.typeck_results().expr_ty_adjusted(receiver).peel_refs()
                 && *char_arg_ty.kind() == ty::Char
                 && let Some(snippet) = before_chars.get_source_text(cx)
@@ -76,8 +75,10 @@ fn handle_expr(
             // If we have `!is_ascii`, then only `.any()` should warn. And if the condition is
             // `is_ascii`, then only `.all()` should warn.
             if revert != is_all
-                && fn_path.ty_rel_def(cx).is_diag_item(cx, sym::char_is_ascii)
-                && peels_expr_ref(arg).res_local_id() == Some(first_param)
+                && let ExprKind::Path(path) = fn_path.kind
+                && let Some(fn_def_id) = cx.qpath_res(&path, fn_path.hir_id).opt_def_id()
+                && match_def_path(cx, fn_def_id, &["core", "char", "methods", "<impl char>", "is_ascii"])
+                && path_to_local_id(peels_expr_ref(arg), first_param)
                 && let Some(snippet) = before_chars.get_source_text(cx)
             {
                 span_lint_and_sugg(
@@ -97,10 +98,10 @@ fn handle_expr(
 
 pub(super) fn check(cx: &LateContext<'_>, call_expr: &Expr<'_>, recv: &Expr<'_>, closure_arg: &Expr<'_>, is_all: bool) {
     if let ExprKind::Closure(&Closure { body, .. }) = closure_arg.kind
-        && let body = cx.tcx.hir_body(body)
+        && let body = cx.tcx.hir().body(body)
         && let Some(first_param) = body.params.first()
         && let ExprKind::MethodCall(method, mut recv, [], _) = recv.kind
-        && method.ident.name == sym::chars
+        && method.ident.name.as_str() == "chars"
         && let str_ty = cx.typeck_results().expr_ty_adjusted(recv).peel_refs()
         && *str_ty.kind() == ty::Str
     {

@@ -1,8 +1,8 @@
-use rustc_index::bit_set::DenseBitSet;
+use rustc_index::bit_set::BitSet;
 use rustc_middle::mir::visit::Visitor;
 use rustc_middle::mir::*;
 
-use crate::{Analysis, GenKill};
+use crate::{AnalysisDomain, GenKill, GenKillAnalysis};
 
 /// A dataflow analysis that tracks whether a pointer or reference could possibly exist that points
 /// to a given local. This analysis ignores fake borrows, so it should not be used by
@@ -11,44 +11,61 @@ use crate::{Analysis, GenKill};
 /// At present, this is used as a very limited form of alias analysis. For example,
 /// `MaybeBorrowedLocals` is used to compute which locals are live during a yield expression for
 /// immovable coroutines.
+#[derive(Clone, Copy)]
 pub struct MaybeBorrowedLocals;
 
 impl MaybeBorrowedLocals {
-    pub(super) fn transfer_function<'a, T>(trans: &'a mut T) -> TransferFunction<'a, T> {
+    pub(super) fn transfer_function<'a, T>(&'a self, trans: &'a mut T) -> TransferFunction<'a, T> {
         TransferFunction { trans }
     }
 }
 
-impl<'tcx> Analysis<'tcx> for MaybeBorrowedLocals {
-    type Domain = DenseBitSet<Local>;
+impl<'tcx> AnalysisDomain<'tcx> for MaybeBorrowedLocals {
+    type Domain = BitSet<Local>;
     const NAME: &'static str = "maybe_borrowed_locals";
 
     fn bottom_value(&self, body: &Body<'tcx>) -> Self::Domain {
         // bottom = unborrowed
-        DenseBitSet::new_empty(body.local_decls().len())
+        BitSet::new_empty(body.local_decls().len())
     }
 
     fn initialize_start_block(&self, _: &Body<'tcx>, _: &mut Self::Domain) {
         // No locals are aliased on function entry
     }
+}
 
-    fn apply_primary_statement_effect(
-        &self,
-        state: &mut Self::Domain,
+impl<'tcx> GenKillAnalysis<'tcx> for MaybeBorrowedLocals {
+    type Idx = Local;
+
+    fn domain_size(&self, body: &Body<'tcx>) -> usize {
+        body.local_decls.len()
+    }
+
+    fn statement_effect(
+        &mut self,
+        trans: &mut impl GenKill<Self::Idx>,
         statement: &Statement<'tcx>,
         location: Location,
     ) {
-        Self::transfer_function(state).visit_statement(statement, location);
+        self.transfer_function(trans).visit_statement(statement, location);
     }
 
-    fn apply_primary_terminator_effect<'mir>(
-        &self,
-        state: &mut Self::Domain,
+    fn terminator_effect<'mir>(
+        &mut self,
+        trans: &mut Self::Domain,
         terminator: &'mir Terminator<'tcx>,
         location: Location,
     ) -> TerminatorEdges<'mir, 'tcx> {
-        Self::transfer_function(state).visit_terminator(terminator, location);
+        self.transfer_function(trans).visit_terminator(terminator, location);
         terminator.edges()
+    }
+
+    fn call_return_effect(
+        &mut self,
+        _trans: &mut Self::Domain,
+        _block: BasicBlock,
+        _return_places: CallReturnPlaces<'_, 'tcx>,
+    ) {
     }
 }
 
@@ -86,15 +103,17 @@ where
 
             Rvalue::Cast(..)
             | Rvalue::Ref(_, BorrowKind::Fake(_), _)
+            | Rvalue::ShallowInitBox(..)
             | Rvalue::Use(..)
             | Rvalue::ThreadLocalRef(..)
             | Rvalue::Repeat(..)
+            | Rvalue::Len(..)
             | Rvalue::BinaryOp(..)
+            | Rvalue::NullaryOp(..)
             | Rvalue::UnaryOp(..)
             | Rvalue::Discriminant(..)
             | Rvalue::Aggregate(..)
-            | Rvalue::CopyForDeref(..)
-            | Rvalue::WrapUnsafeBinder(..) => {}
+            | Rvalue::CopyForDeref(..) => {}
         }
     }
 
@@ -135,8 +154,8 @@ where
 }
 
 /// The set of locals that are borrowed at some point in the MIR body.
-pub fn borrowed_locals(body: &Body<'_>) -> DenseBitSet<Local> {
-    struct Borrowed(DenseBitSet<Local>);
+pub fn borrowed_locals(body: &Body<'_>) -> BitSet<Local> {
+    struct Borrowed(BitSet<Local>);
 
     impl GenKill<Local> for Borrowed {
         #[inline]
@@ -149,7 +168,7 @@ pub fn borrowed_locals(body: &Body<'_>) -> DenseBitSet<Local> {
         }
     }
 
-    let mut borrowed = Borrowed(DenseBitSet::new_empty(body.local_decls.len()));
+    let mut borrowed = Borrowed(BitSet::new_empty(body.local_decls.len()));
     TransferFunction { trans: &mut borrowed }.visit_body(body);
     borrowed.0
 }

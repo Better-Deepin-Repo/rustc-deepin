@@ -1,7 +1,6 @@
 // Verifies that when compiling with -Zsanitizer=kernel-address,
 // the `#[cfg(sanitize = "address")]` attribute is configured.
 
-//@ add-minicore
 //@ check-pass
 //@ compile-flags: -Zsanitizer=kernel-address
 //@ revisions: aarch64 riscv64imac riscv64gc x86_64
@@ -13,14 +12,13 @@
 //@[riscv64gc] needs-llvm-components: riscv
 //@[x86_64] compile-flags: --target x86_64-unknown-none
 //@[x86_64] needs-llvm-components: x86
-//@ ignore-backends: gcc
 
 #![crate_type = "rlib"]
-#![feature(cfg_sanitize, no_core)]
+#![feature(cfg_sanitize, no_core, lang_items)]
 #![no_core]
 
-extern crate minicore;
-use minicore::*;
+#[lang = "sized"]
+trait Sized {}
 
 const _: fn() -> () = main;
 

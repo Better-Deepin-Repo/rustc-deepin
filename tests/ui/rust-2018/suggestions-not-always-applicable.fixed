@@ -1,9 +1,8 @@
-//@ proc-macro: suggestions-not-always-applicable.rs
+//@ aux-build:suggestions-not-always-applicable.rs
 //@ edition:2015
 //@ run-rustfix
 //@ rustfix-only-machine-applicable
 //@ check-pass
-//@ ignore-backends: gcc
 
 #![warn(rust_2018_compatibility)]
 

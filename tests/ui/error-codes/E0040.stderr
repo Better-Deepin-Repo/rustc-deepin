@@ -6,9 +6,8 @@ LL |     x.drop();
    |
 help: consider using `drop` function
    |
-LL -     x.drop();
-LL +     drop(x);
-   |
+LL |     drop(x);
+   |     +++++ ~
 
 error: aborting due to 1 previous error
 

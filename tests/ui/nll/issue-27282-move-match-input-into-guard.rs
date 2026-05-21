@@ -7,6 +7,8 @@
 // reaches the panic code when executed, despite the compiler warning
 // about that match arm being unreachable.
 
+#![feature(if_let_guard)]
+
 fn main() {
     let b = &mut true;
     match b {

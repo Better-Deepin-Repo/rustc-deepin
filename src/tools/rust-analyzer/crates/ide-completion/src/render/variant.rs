@@ -1,10 +1,10 @@
 //! Code common to structs, unions, and enum variants.
 
 use crate::context::CompletionContext;
-use hir::{HasAttrs, HasCrate, HasVisibility, HirDisplay, StructKind};
+use hir::{db::HirDatabase, sym, HasAttrs, HasCrate, HasVisibility, HirDisplay, StructKind};
 use ide_db::SnippetCap;
 use itertools::Itertools;
-use syntax::SmolStr;
+use syntax::{Edition, SmolStr};
 
 /// A rendered struct, union, or enum variant, split into fields for actual
 /// auto-completion (`literal`, using `field: ()`) and display in the
@@ -17,40 +17,32 @@ pub(crate) struct RenderedLiteral {
 /// Render a record type (or sub-type) to a `RenderedCompound`. Use `None` for
 /// the `name` argument for an anonymous type.
 pub(crate) fn render_record_lit(
-    ctx: &CompletionContext<'_>,
+    db: &dyn HirDatabase,
     snippet_cap: Option<SnippetCap>,
     fields: &[hir::Field],
     path: &str,
+    edition: Edition,
 ) -> RenderedLiteral {
     if snippet_cap.is_none() {
         return RenderedLiteral { literal: path.to_owned(), detail: path.to_owned() };
     }
     let completions = fields.iter().enumerate().format_with(", ", |(idx, field), f| {
-        let mut fmt_field = |fill, tab| {
-            let field_name = field.name(ctx.db);
-
-            if let Some(local) = ctx.locals.get(&field_name)
-                && local
-                    .ty(ctx.db)
-                    .could_unify_with_deeply(ctx.db, &field.ty(ctx.db).to_type(ctx.db))
-            {
-                f(&format_args!("{}{tab}", field_name.display(ctx.db, ctx.edition)))
-            } else {
-                f(&format_args!("{}: {fill}", field_name.display(ctx.db, ctx.edition)))
-            }
-        };
         if snippet_cap.is_some() {
-            fmt_field(format_args!("${{{}:()}}", idx + 1), format_args!("${}", idx + 1))
+            f(&format_args!(
+                "{}: ${{{}:()}}",
+                field.name(db).display(db.upcast(), edition),
+                idx + 1
+            ))
         } else {
-            fmt_field(format_args!("()"), format_args!(""))
+            f(&format_args!("{}: ()", field.name(db).display(db.upcast(), edition)))
         }
     });
 
     let types = fields.iter().format_with(", ", |field, f| {
         f(&format_args!(
             "{}: {}",
-            field.name(ctx.db).display(ctx.db, ctx.edition),
-            field.ty(ctx.db).display(ctx.db, ctx.display_target)
+            field.name(db).display(db.upcast(), edition),
+            field.ty(db).display(db, edition)
         ))
     });
 
@@ -63,10 +55,11 @@ pub(crate) fn render_record_lit(
 /// Render a tuple type (or sub-type) to a `RenderedCompound`. Use `None` for
 /// the `name` argument for an anonymous type.
 pub(crate) fn render_tuple_lit(
-    ctx: &CompletionContext<'_>,
+    db: &dyn HirDatabase,
     snippet_cap: Option<SnippetCap>,
     fields: &[hir::Field],
     path: &str,
+    edition: Edition,
 ) -> RenderedLiteral {
     if snippet_cap.is_none() {
         return RenderedLiteral { literal: path.to_owned(), detail: path.to_owned() };
@@ -79,9 +72,7 @@ pub(crate) fn render_tuple_lit(
         }
     });
 
-    let types = fields
-        .iter()
-        .format_with(", ", |field, f| f(&field.ty(ctx.db).display(ctx.db, ctx.display_target)));
+    let types = fields.iter().format_with(", ", |field, f| f(&field.ty(db).display(db, edition)));
 
     RenderedLiteral {
         literal: format!("{path}({completions})"),
@@ -105,8 +96,8 @@ pub(crate) fn visible_fields(
         .copied()
         .collect::<Vec<_>>();
     let has_invisible_field = n_fields - fields.len() > 0;
-    let is_foreign_non_exhaustive =
-        item.attrs(ctx.db).is_non_exhaustive() && item.krate(ctx.db) != module.krate(ctx.db);
+    let is_foreign_non_exhaustive = item.attrs(ctx.db).by_key(&sym::non_exhaustive).exists()
+        && item.krate(ctx.db) != module.krate();
     let fields_omitted = has_invisible_field || is_foreign_non_exhaustive;
     Some((fields, fields_omitted))
 }

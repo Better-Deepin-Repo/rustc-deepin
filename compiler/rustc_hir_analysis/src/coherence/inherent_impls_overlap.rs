@@ -1,4 +1,4 @@
-use rustc_data_structures::fx::{FxIndexMap, FxIndexSet, IndexEntry};
+use rustc_data_structures::fx::{FxHashSet, FxIndexMap, IndexEntry};
 use rustc_errors::codes::*;
 use rustc_errors::struct_span_code_err;
 use rustc_hir as hir;
@@ -18,7 +18,7 @@ pub(crate) fn crate_inherent_impls_overlap_check(
 ) -> Result<(), ErrorGuaranteed> {
     let mut inherent_overlap_checker = InherentOverlapChecker { tcx };
     let mut res = Ok(());
-    for id in tcx.hir_free_items() {
+    for id in tcx.hir().items() {
         res = res.and(inherent_overlap_checker.check_item(id));
     }
     res
@@ -51,7 +51,7 @@ impl<'tcx> InherentOverlapChecker<'tcx> {
 
         for &item1 in impl_items1.in_definition_order() {
             let collision = impl_items2
-                .filter_by_name_unhygienic(item1.name())
+                .filter_by_name_unhygienic(item1.name)
                 .any(|&item2| self.compare_hygienically(item1, item2));
 
             if collision {
@@ -64,7 +64,7 @@ impl<'tcx> InherentOverlapChecker<'tcx> {
 
     fn compare_hygienically(&self, item1: ty::AssocItem, item2: ty::AssocItem) -> bool {
         // Symbols and namespace match, compare hygienically.
-        item1.namespace() == item2.namespace()
+        item1.kind.namespace() == item2.kind.namespace()
             && item1.ident(self.tcx).normalize_to_macros_2_0()
                 == item2.ident(self.tcx).normalize_to_macros_2_0()
     }
@@ -113,7 +113,7 @@ impl<'tcx> InherentOverlapChecker<'tcx> {
         let mut res = Ok(());
         for &item1 in impl_items1.in_definition_order() {
             let collision = impl_items2
-                .filter_by_name_unhygienic(item1.name())
+                .filter_by_name_unhygienic(item1.name)
                 .find(|&&item2| self.compare_hygienically(item1, item2));
 
             if let Some(item2) = collision {
@@ -154,7 +154,7 @@ impl<'tcx> InherentOverlapChecker<'tcx> {
         impl1_def_id: DefId,
         impl2_def_id: DefId,
     ) -> Result<(), ErrorGuaranteed> {
-        let maybe_overlap = traits::overlapping_inherent_impls(
+        let maybe_overlap = traits::overlapping_impls(
             self.tcx,
             impl1_def_id,
             impl2_def_id,
@@ -177,7 +177,8 @@ impl<'tcx> InherentOverlapChecker<'tcx> {
             return Ok(());
         }
 
-        let impls = self.tcx.inherent_impls(id.owner_id);
+        let impls = self.tcx.inherent_impls(id.owner_id)?;
+
         let overlap_mode = OverlapMode::get(self.tcx, id.owner_id.to_def_id());
 
         let impls_items = impls
@@ -215,7 +216,7 @@ impl<'tcx> InherentOverlapChecker<'tcx> {
 
             struct ConnectedRegion {
                 idents: SmallVec<[Symbol; 8]>,
-                impl_blocks: FxIndexSet<usize>,
+                impl_blocks: FxHashSet<usize>,
             }
             let mut connected_regions: IndexVec<RegionId, _> = Default::default();
             // Reverse map from the Symbol to the connected region id.
@@ -230,11 +231,11 @@ impl<'tcx> InherentOverlapChecker<'tcx> {
                 let mut ids = impl_items
                     .in_definition_order()
                     .filter_map(|item| {
-                        let entry = connected_region_ids.entry(item.name());
+                        let entry = connected_region_ids.entry(item.name);
                         if let IndexEntry::Occupied(e) = &entry {
                             Some(*e.get())
                         } else {
-                            idents_to_add.push(item.name());
+                            idents_to_add.push(item.name);
                             None
                         }
                     })
@@ -322,7 +323,9 @@ impl<'tcx> InherentOverlapChecker<'tcx> {
             // List of connected regions is built. Now, run the overlap check
             // for each pair of impl blocks in the same connected region.
             for region in connected_regions.into_iter().flatten() {
-                let impl_blocks = region.impl_blocks.into_iter().collect::<SmallVec<[usize; 8]>>();
+                let mut impl_blocks =
+                    region.impl_blocks.into_iter().collect::<SmallVec<[usize; 8]>>();
+                impl_blocks.sort_unstable();
                 for (i, &impl1_items_idx) in impl_blocks.iter().enumerate() {
                     let &(&impl1_def_id, impl_items1) = &impls_items[impl1_items_idx];
                     res = res.and(self.check_for_duplicate_items_in_impl(impl1_def_id));

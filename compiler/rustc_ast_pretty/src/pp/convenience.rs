@@ -1,27 +1,25 @@
 use std::borrow::Cow;
 
-use crate::pp::{
-    BeginToken, BoxMarker, BreakToken, Breaks, IndentStyle, Printer, SIZE_INFINITY, Token,
-};
+use crate::pp::{BeginToken, BreakToken, Breaks, IndentStyle, Printer, Token, SIZE_INFINITY};
 
 impl Printer {
     /// "raw box"
-    pub fn rbox(&mut self, indent: isize, breaks: Breaks) -> BoxMarker {
+    pub fn rbox(&mut self, indent: isize, breaks: Breaks) {
         self.scan_begin(BeginToken { indent: IndentStyle::Block { offset: indent }, breaks })
     }
 
     /// Inconsistent breaking box
-    pub fn ibox(&mut self, indent: isize) -> BoxMarker {
+    pub fn ibox(&mut self, indent: isize) {
         self.rbox(indent, Breaks::Inconsistent)
     }
 
     /// Consistent breaking box
-    pub fn cbox(&mut self, indent: isize) -> BoxMarker {
+    pub fn cbox(&mut self, indent: isize) {
         self.rbox(indent, Breaks::Consistent)
     }
 
-    pub fn visual_align(&mut self) -> BoxMarker {
-        self.scan_begin(BeginToken { indent: IndentStyle::Visual, breaks: Breaks::Consistent })
+    pub fn visual_align(&mut self) {
+        self.scan_begin(BeginToken { indent: IndentStyle::Visual, breaks: Breaks::Consistent });
     }
 
     pub fn break_offset(&mut self, n: usize, off: isize) {
@@ -32,8 +30,8 @@ impl Printer {
         });
     }
 
-    pub fn end(&mut self, b: BoxMarker) {
-        self.scan_end(b)
+    pub fn end(&mut self) {
+        self.scan_end()
     }
 
     pub fn eof(mut self) -> String {

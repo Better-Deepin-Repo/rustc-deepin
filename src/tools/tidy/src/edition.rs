@@ -2,11 +2,9 @@
 
 use std::path::Path;
 
-use crate::diagnostics::{CheckId, TidyCtx};
 use crate::walk::{filter_dirs, walk};
 
-pub fn check(path: &Path, tidy_ctx: TidyCtx) {
-    let mut check = tidy_ctx.start_check(CheckId::new("edition").path(path));
+pub fn check(path: &Path, bad: &mut bool) {
     walk(path, |path, _is_dir| filter_dirs(path), &mut |entry, contents| {
         let file = entry.path();
         let filename = file.file_name().unwrap();
@@ -25,10 +23,11 @@ pub fn check(path: &Path, tidy_ctx: TidyCtx) {
         // Check that all packages use the 2021 edition. Virtual workspaces don't allow setting an
         // edition, so these shouldn't be checked.
         if is_package && !is_current_edition {
-            check.error(format!(
+            tidy_error!(
+                bad,
                 "{} doesn't have `edition = \"2021\"` or `edition = \"2024\"` on a separate line",
                 file.display()
-            ));
+            );
         }
     });
 }

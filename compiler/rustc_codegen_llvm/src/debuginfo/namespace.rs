@@ -4,7 +4,7 @@ use rustc_codegen_ssa::debuginfo::type_names;
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::{self, Instance};
 
-use super::utils::{DIB, debug_context};
+use super::utils::{debug_context, DIB};
 use crate::common::CodegenCx;
 use crate::llvm;
 use crate::llvm::debuginfo::DIScope;
@@ -13,7 +13,8 @@ pub(crate) fn mangled_name_of_instance<'a, 'tcx>(
     cx: &CodegenCx<'a, 'tcx>,
     instance: Instance<'tcx>,
 ) -> ty::SymbolName<'tcx> {
-    cx.tcx.symbol_name(instance)
+    let tcx = cx.tcx;
+    tcx.symbol_name(instance)
 }
 
 pub(crate) fn item_namespace<'ll>(cx: &CodegenCx<'ll, '_>, def_id: DefId) -> &'ll DIScope {
@@ -33,12 +34,12 @@ pub(crate) fn item_namespace<'ll>(cx: &CodegenCx<'ll, '_>, def_id: DefId) -> &'l
     };
 
     let scope = unsafe {
-        llvm::LLVMDIBuilderCreateNameSpace(
+        llvm::LLVMRustDIBuilderCreateNameSpace(
             DIB(cx),
             parent_scope,
-            namespace_name_string.as_ptr(),
+            namespace_name_string.as_ptr().cast(),
             namespace_name_string.len(),
-            llvm::FALSE, // ExportSymbols (only relevant for C++ anonymous namespaces)
+            false, // ExportSymbols (only relevant for C++ anonymous namespaces)
         )
     };
 

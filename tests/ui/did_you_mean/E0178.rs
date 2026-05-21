@@ -1,4 +1,3 @@
-//@ edition:2015
 #![allow(bare_trait_objects)]
 
 trait Foo {}

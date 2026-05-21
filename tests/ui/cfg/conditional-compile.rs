@@ -6,16 +6,16 @@
 
 // Crate use statements
 
-#[cfg(false)]
+#[cfg(FALSE)]
 use flippity;
 
-#[cfg(false)]
+#[cfg(FALSE)]
 static b: bool = false;
 
 static b: bool = true;
 
 mod rustrt {
-    #[cfg(false)]
+    #[cfg(FALSE)]
     extern "C" {
         // This symbol doesn't exist and would be a link error if this
         // module was codegened
@@ -25,12 +25,12 @@ mod rustrt {
     extern "C" {}
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 type t = isize;
 
 type t = bool;
 
-#[cfg(false)]
+#[cfg(FALSE)]
 enum tg {
     foo,
 }
@@ -39,12 +39,12 @@ enum tg {
     bar,
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 struct r {
     i: isize,
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn r(i: isize) -> r {
     r { i: i }
 }
@@ -57,7 +57,7 @@ fn r(i: isize) -> r {
     r { i: i }
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 mod m {
     // This needs to parse but would fail in typeck. Since it's not in
     // the current config it should not be typechecked.
@@ -69,7 +69,7 @@ mod m {
 mod m {
     // Submodules have slightly different code paths than the top-level
     // module, so let's make sure this jazz works here as well
-    #[cfg(false)]
+    #[cfg(FALSE)]
     pub fn f() {}
 
     pub fn f() {}
@@ -77,7 +77,7 @@ mod m {
 
 // Since the FALSE configuration isn't defined main will just be
 // parsed, but nothing further will be done with it
-#[cfg(false)]
+#[cfg(FALSE)]
 pub fn main() {
     panic!()
 }
@@ -85,7 +85,7 @@ pub fn main() {
 pub fn main() {
     // Exercise some of the configured items in ways that wouldn't be possible
     // if they had the FALSE definition
-    assert!(b);
+    assert!((b));
     let _x: t = true;
     let _y: tg = tg::bar;
 
@@ -93,14 +93,14 @@ pub fn main() {
 }
 
 fn test_in_fn_ctxt() {
-    #[cfg(false)]
+    #[cfg(FALSE)]
     fn f() {
         panic!()
     }
     fn f() {}
     f();
 
-    #[cfg(false)]
+    #[cfg(FALSE)]
     static i: isize = 0;
     static i: isize = 1;
     assert_eq!(i, 1);
@@ -109,7 +109,7 @@ fn test_in_fn_ctxt() {
 mod test_foreign_items {
     pub mod rustrt {
         extern "C" {
-            #[cfg(false)]
+            #[cfg(FALSE)]
             pub fn write() -> String;
             pub fn write() -> String;
         }
@@ -117,7 +117,7 @@ mod test_foreign_items {
 }
 
 mod test_use_statements {
-    #[cfg(false)]
+    #[cfg(FALSE)]
     use flippity_foo;
 }
 
@@ -127,29 +127,29 @@ mod test_methods {
     }
 
     impl Fooable for Foo {
-        #[cfg(false)]
+        #[cfg(FALSE)]
         fn what(&self) {}
 
         fn what(&self) {}
 
-        #[cfg(false)]
+        #[cfg(FALSE)]
         fn the(&self) {}
 
         fn the(&self) {}
     }
 
     trait Fooable {
-        #[cfg(false)]
+        #[cfg(FALSE)]
         fn what(&self);
 
         fn what(&self);
 
-        #[cfg(false)]
+        #[cfg(FALSE)]
         fn the(&self);
 
         fn the(&self);
     }
 }
 
-#[cfg(false)]
+#[cfg(any())]
 mod nonexistent_file; // Check that unconfigured non-inline modules are not loaded or parsed.

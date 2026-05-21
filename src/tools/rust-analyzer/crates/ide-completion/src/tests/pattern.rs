@@ -1,11 +1,16 @@
 //! Completion tests for pattern position.
-use expect_test::expect;
+use expect_test::{expect, Expect};
 
-use crate::tests::{check, check_edit, check_with_base_items};
+use crate::tests::{check_edit, check_empty, completion_list, BASE_ITEMS_FIXTURE};
+
+fn check(ra_fixture: &str, expect: Expect) {
+    let actual = completion_list(&format!("{BASE_ITEMS_FIXTURE}\n{ra_fixture}"));
+    expect.assert_eq(&actual)
+}
 
 #[test]
 fn wildcard() {
-    check_with_base_items(
+    check(
         r#"
 fn quux() {
     let _$0
@@ -17,7 +22,7 @@ fn quux() {
 
 #[test]
 fn ident_rebind_pat() {
-    check(
+    check_empty(
         r#"
 fn quux() {
     let en$0 @ x
@@ -32,7 +37,7 @@ fn quux() {
 
 #[test]
 fn ident_ref_pat() {
-    check(
+    check_empty(
         r#"
 fn quux() {
     let ref en$0
@@ -42,7 +47,7 @@ fn quux() {
             kw mut
         "#]],
     );
-    check(
+    check_empty(
         r#"
 fn quux() {
     let ref en$0 @ x
@@ -56,7 +61,7 @@ fn quux() {
 
 #[test]
 fn ident_ref_mut_pat() {
-    check(
+    check_empty(
         r#"
 fn quux() {
     let ref mut en$0
@@ -64,7 +69,7 @@ fn quux() {
 "#,
         expect![[r#""#]],
     );
-    check(
+    check_empty(
         r#"
 fn quux() {
     let ref mut en$0 @ x
@@ -76,7 +81,7 @@ fn quux() {
 
 #[test]
 fn ref_pat() {
-    check(
+    check_empty(
         r#"
 fn quux() {
     let &en$0
@@ -86,7 +91,7 @@ fn quux() {
             kw mut
         "#]],
     );
-    check(
+    check_empty(
         r#"
 fn quux() {
     let &mut en$0
@@ -94,7 +99,7 @@ fn quux() {
 "#,
         expect![[r#""#]],
     );
-    check(
+    check_empty(
         r#"
 fn foo() {
     for &$0 in () {}
@@ -108,7 +113,7 @@ fn foo() {
 
 #[test]
 fn refutable() {
-    check_with_base_items(
+    check(
         r#"
 fn foo() {
     if let a$0
@@ -117,53 +122,15 @@ fn foo() {
         expect![[r#"
             ct CONST
             en Enum
-            ma makro!(…)    macro_rules! makro
+            ma makro!(…)  macro_rules! makro
             md module
             st Record
             st Tuple
             st Unit
             ev TupleV
             bn Record {…} Record { field$1 }$0
-            bn Tuple(…)            Tuple($1)$0
-            bn TupleV(…)          TupleV($1)$0
-            kw mut
-            kw ref
-        "#]],
-    );
-}
-
-#[test]
-fn refutable_in_record_pat_field() {
-    check(
-        r#"
-enum Bar { Value, Nil }
-struct Foo { x: Bar }
-fn foo(foo: Foo) { match foo { Foo { x: $0 } } }
-"#,
-        expect![[r#"
-            en Bar
-            st Foo
-            bn Foo {…} Foo { x$1 }$0
-            kw mut
-            kw ref
-        "#]],
-    );
-
-    check(
-        r#"
-enum Bar { Value, Nil }
-use Bar::*;
-struct Foo { x: Bar }
-fn foo(foo: Foo) { match foo { Foo { x: $0 } } }
-"#,
-        expect![[r#"
-            en Bar
-            st Foo
-            ev Nil
-            ev Value
-            bn Foo {…} Foo { x$1 }$0
-            bn Nil             Nil$0
-            bn Value         Value$0
+            bn Tuple(…)   Tuple($1)$0
+            bn TupleV(…)  TupleV($1)$0
             kw mut
             kw ref
         "#]],
@@ -172,7 +139,7 @@ fn foo(foo: Foo) { match foo { Foo { x: $0 } } }
 
 #[test]
 fn irrefutable() {
-    check_with_base_items(
+    check(
         r#"
 enum SingleVariantEnum {
     Variant
@@ -184,15 +151,15 @@ fn foo() {
 "#,
         expect![[r#"
             en SingleVariantEnum
-            ma makro!(…)    macro_rules! makro
+            ma makro!(…)         macro_rules! makro
             md module
             st Record
             st Tuple
             st Unit
             ev Variant
-            bn Record {…} Record { field$1 }$0
-            bn Tuple(…)            Tuple($1)$0
-            bn Variant               Variant$0
+            bn Record {…}        Record { field$1 }$0
+            bn Tuple(…)          Tuple($1)$0
+            bn Variant           Variant$0
             kw mut
             kw ref
         "#]],
@@ -201,37 +168,36 @@ fn foo() {
 
 #[test]
 fn in_param() {
-    check_with_base_items(
+    check(
         r#"
 fn foo(a$0) {
 }
 "#,
         expect![[r#"
-            ma makro!(…)            macro_rules! makro
+            ma makro!(…)  macro_rules! makro
             md module
             st Record
             st Tuple
             st Unit
             bn Record {…} Record { field$1 }: Record$0
-            bn Tuple(…)             Tuple($1): Tuple$0
+            bn Tuple(…)   Tuple($1): Tuple$0
             kw mut
             kw ref
         "#]],
     );
-    check_with_base_items(
+    check(
         r#"
 fn foo(a$0: Tuple) {
 }
 "#,
         expect![[r#"
-            ma makro!(…)    macro_rules! makro
+            ma makro!(…)  macro_rules! makro
             md module
             st Record
             st Tuple
             st Unit
             bn Record {…} Record { field$1 }$0
-            bn Tuple(…)            Tuple($1)$0
-            bn tuple
+            bn Tuple(…)   Tuple($1)$0
             kw mut
             kw ref
         "#]],
@@ -240,7 +206,7 @@ fn foo(a$0: Tuple) {
 
 #[test]
 fn only_fn_like_macros() {
-    check(
+    check_empty(
         r#"
 macro_rules! m { ($e:expr) => { $e } }
 
@@ -261,7 +227,7 @@ fn foo() {
 
 #[test]
 fn in_simple_macro_call() {
-    check(
+    check_empty(
         r#"
 macro_rules! m { ($e:expr) => { $e } }
 enum E { X }
@@ -273,7 +239,7 @@ fn foo() {
         expect![[r#"
             en E
             ma m!(…) macro_rules! m
-            bn E::X          E::X$0
+            bn E::X  E::X$0
             kw mut
             kw ref
         "#]],
@@ -282,7 +248,7 @@ fn foo() {
 
 #[test]
 fn omits_private_fields_pat() {
-    check(
+    check_empty(
         r#"
 mod foo {
     pub struct Record { pub field: i32, _field: i32 }
@@ -301,7 +267,7 @@ fn outer() {
             st Record
             st Tuple
             bn Record {…} Record { field$1, .. }$0
-            bn Tuple(…)            Tuple($1, ..)$0
+            bn Tuple(…)   Tuple($1, ..)$0
             kw mut
             kw ref
         "#]],
@@ -310,7 +276,7 @@ fn outer() {
 
 #[test]
 fn completes_self_pats() {
-    check(
+    check_empty(
         r#"
 struct Foo(i32);
 impl Foo {
@@ -324,7 +290,7 @@ impl Foo {
         expect![[r#"
             sp Self
             st Foo
-            bn Foo(…)   Foo($1)$0
+            bn Foo(…)  Foo($1)$0
             bn Self(…) Self($1)$0
             kw mut
             kw ref
@@ -334,7 +300,7 @@ impl Foo {
 
 #[test]
 fn enum_qualified() {
-    check_with_base_items(
+    check(
         r#"
 impl Enum {
     type AssocType = ();
@@ -348,15 +314,15 @@ fn func() {
         expect![[r#"
             ct ASSOC_CONST const ASSOC_CONST: ()
             bn RecordV {…} RecordV { field$1 }$0
-            bn TupleV(…)            TupleV($1)$0
-            bn UnitV                     UnitV$0
+            bn TupleV(…)   TupleV($1)$0
+            bn UnitV       UnitV$0
         "#]],
     );
 }
 
 #[test]
 fn completes_in_record_field_pat() {
-    check(
+    check_empty(
         r#"
 struct Foo { bar: Bar }
 struct Bar(u32);
@@ -365,7 +331,7 @@ fn outer(Foo { bar: $0 }: Foo) {}
         expect![[r#"
             st Bar
             st Foo
-            bn Bar(…)        Bar($1)$0
+            bn Bar(…)  Bar($1)$0
             bn Foo {…} Foo { bar$1 }$0
             kw mut
             kw ref
@@ -375,7 +341,7 @@ fn outer(Foo { bar: $0 }: Foo) {}
 
 #[test]
 fn skips_in_record_field_pat_name() {
-    check(
+    check_empty(
         r#"
 struct Foo { bar: Bar }
 struct Bar(u32);
@@ -390,7 +356,7 @@ fn outer(Foo { bar$0 }: Foo) {}
 
 #[test]
 fn completes_in_record_field_pat_with_generic_type_alias() {
-    check(
+    check_empty(
         r#"
 type Wrap<T> = T;
 
@@ -419,7 +385,7 @@ fn main() {
 
 #[test]
 fn completes_in_fn_param() {
-    check(
+    check_empty(
         r#"
 struct Foo { bar: Bar }
 struct Bar(u32);
@@ -428,7 +394,7 @@ fn foo($0) {}
         expect![[r#"
             st Bar
             st Foo
-            bn Bar(…)        Bar($1): Bar$0
+            bn Bar(…)  Bar($1): Bar$0
             bn Foo {…} Foo { bar$1 }: Foo$0
             kw mut
             kw ref
@@ -437,27 +403,8 @@ fn foo($0) {}
 }
 
 #[test]
-fn completes_in_fn_param_in_nested_pattern() {
-    check(
-        r#"
-struct Foo { num: u32 }
-struct Bar(Foo);
-fn foo(Bar($0)) {}
-"#,
-        expect![[r#"
-            st Bar
-            st Foo
-            bn Bar(…)        Bar($1)$0
-            bn Foo {…} Foo { num$1 }$0
-            kw mut
-            kw ref
-        "#]],
-    )
-}
-
-#[test]
 fn completes_in_closure_param() {
-    check(
+    check_empty(
         r#"
 struct Foo { bar: Bar }
 struct Bar(u32);
@@ -468,7 +415,7 @@ fn foo() {
         expect![[r#"
             st Bar
             st Foo
-            bn Bar(…)        Bar($1)$0
+            bn Bar(…)  Bar($1)$0
             bn Foo {…} Foo { bar$1 }$0
             kw mut
             kw ref
@@ -478,7 +425,7 @@ fn foo() {
 
 #[test]
 fn completes_no_delims_if_existing() {
-    check(
+    check_empty(
         r#"
 struct Bar(u32);
 fn foo() {
@@ -488,12 +435,12 @@ fn foo() {
 }
 "#,
         expect![[r#"
-            st Bar Bar
+            st Bar     Bar
             kw crate::
             kw self::
         "#]],
     );
-    check(
+    check_empty(
         r#"
 struct Foo { bar: u32 }
 fn foo() {
@@ -503,12 +450,12 @@ fn foo() {
 }
 "#,
         expect![[r#"
-            st Foo Foo
+            st Foo     Foo
             kw crate::
             kw self::
         "#]],
     );
-    check(
+    check_empty(
         r#"
 enum Enum {
     TupleVariant(u32)
@@ -523,7 +470,7 @@ fn foo() {
             bn TupleVariant TupleVariant
         "#]],
     );
-    check(
+    check_empty(
         r#"
 enum Enum {
     RecordVariant { field: u32 }
@@ -571,7 +518,7 @@ fn foo() {
 #[test]
 fn completes_enum_variant_pat_escape() {
     cov_mark::check!(enum_variant_pattern_path);
-    check(
+    check_empty(
         r#"
 enum Enum {
     A,
@@ -587,16 +534,16 @@ fn foo() {
 "#,
         expect![[r#"
             en Enum
-            bn Enum::A                              Enum::A$0
-            bn Enum::B {…}             Enum::B { r#type$1 }$0
+            bn Enum::A          Enum::A$0
+            bn Enum::B {…}      Enum::B { r#type$1 }$0
             bn Enum::struct {…} Enum::r#struct { r#type$1 }$0
-            bn Enum::type                      Enum::r#type$0
+            bn Enum::type       Enum::r#type$0
             kw mut
             kw ref
         "#]],
     );
 
-    check(
+    check_empty(
         r#"
 enum Enum {
     A,
@@ -611,17 +558,17 @@ fn foo() {
 }
 "#,
         expect![[r#"
-            bn A                              A$0
-            bn B {…}             B { r#type$1 }$0
+            bn A          A$0
+            bn B {…}      B { r#type$1 }$0
             bn struct {…} r#struct { r#type$1 }$0
-            bn type                      r#type$0
+            bn type       r#type$0
         "#]],
     );
 }
 
 #[test]
 fn completes_associated_const() {
-    check(
+    check_empty(
         r#"
 #[derive(PartialEq, Eq)]
 struct Ty(u8);
@@ -642,7 +589,7 @@ fn f(t: Ty) {
         "#]],
     );
 
-    check(
+    check_empty(
         r#"
 enum MyEnum {}
 
@@ -664,7 +611,7 @@ fn f(e: MyEnum) {
         "#]],
     );
 
-    check(
+    check_empty(
         r#"
 union U {
     i: i32,
@@ -689,9 +636,8 @@ fn f(u: U) {
         "#]],
     );
 
-    check(
+    check_empty(
         r#"
-//- /core.rs crate:core
 #![rustc_coherence_is_core]
 #[lang = "u32"]
 impl u32 {
@@ -712,7 +658,7 @@ fn f(v: u32) {
 
 #[test]
 fn in_method_param() {
-    check(
+    check_empty(
         r#"
 struct Ty(u8);
 
@@ -725,15 +671,15 @@ impl Ty {
             st Ty
             bn &mut self
             bn &self
-            bn Self(…) Self($1): Self$0
-            bn Ty(…)       Ty($1): Ty$0
+            bn Self(…)   Self($1): Self$0
+            bn Ty(…)     Ty($1): Ty$0
             bn mut self
             bn self
             kw mut
             kw ref
         "#]],
     );
-    check(
+    check_empty(
         r#"
 struct Ty(u8);
 
@@ -746,15 +692,15 @@ impl Ty {
             st Ty
             bn &mut self
             bn &self
-            bn Self(…) Self($1): Self$0
-            bn Ty(…)       Ty($1): Ty$0
+            bn Self(…)   Self($1): Self$0
+            bn Ty(…)     Ty($1): Ty$0
             bn mut self
             bn self
             kw mut
             kw ref
         "#]],
     );
-    check(
+    check_empty(
         r#"
 struct Ty(u8);
 
@@ -767,15 +713,15 @@ impl Ty {
             st Ty
             bn &mut self
             bn &self
-            bn Self(…) Self($1): Self$0
-            bn Ty(…)       Ty($1): Ty$0
+            bn Self(…)   Self($1): Self$0
+            bn Ty(…)     Ty($1): Ty$0
             bn mut self
             bn self
             kw mut
             kw ref
         "#]],
     );
-    check(
+    check_empty(
         r#"
 struct Ty(u8);
 
@@ -787,7 +733,7 @@ impl Ty {
             sp Self
             st Ty
             bn Self(…) Self($1): Self$0
-            bn Ty(…)       Ty($1): Ty$0
+            bn Ty(…)   Ty($1): Ty$0
             kw mut
             kw ref
         "#]],
@@ -796,7 +742,7 @@ impl Ty {
 
 #[test]
 fn through_alias() {
-    check(
+    check_empty(
         r#"
 enum Enum<T> {
     Unit,
@@ -816,45 +762,14 @@ fn f(x: EnumAlias<u8>) {
 "#,
         expect![[r#"
             bn Tuple(…) Tuple($1)$0
-            bn Unit          Unit$0
-        "#]],
-    );
-}
-
-#[test]
-fn through_alias_it_self() {
-    check(
-        r#"
-enum Enum<T> {
-    Unit,
-    Tuple(T),
-}
-
-type EnumAlias<T> = Enum<T>;
-
-fn f(x: EnumAlias<u8>) {
-    match x {
-        $0 => (),
-        _ => (),
-    }
-
-}
-
-"#,
-        expect![[r#"
-            en Enum
-            ta EnumAlias
-            bn Enum::Tuple(…) Enum::Tuple($1)$0
-            bn Enum::Unit          Enum::Unit$0
-            kw mut
-            kw ref
+            bn Unit     Unit$0
         "#]],
     );
 }
 
 #[test]
 fn pat_no_unstable_item_on_stable() {
-    check(
+    check_empty(
         r#"
 //- /main.rs crate:main deps:std
 use std::*;
@@ -879,7 +794,7 @@ pub enum Enum {
 
 #[test]
 fn pat_unstable_item_on_nightly() {
-    check(
+    check_empty(
         r#"
 //- toolchain:nightly
 //- /main.rs crate:main deps:std
@@ -933,95 +848,5 @@ fn foo() {
     let ref $0
 }
 "#,
-    );
-}
-
-#[test]
-fn suggest_name_for_pattern() {
-    check_edit(
-        "s1",
-        r#"
-struct S1;
-
-fn foo() {
-    let $0 = S1;
-}
-"#,
-        r#"
-struct S1;
-
-fn foo() {
-    let s1 = S1;
-}
-"#,
-    );
-
-    check_edit(
-        "s1",
-        r#"
-struct S1;
-
-fn foo(s$0: S1) {
-}
-"#,
-        r#"
-struct S1;
-
-fn foo(s1: S1) {
-}
-"#,
-    );
-
-    // Tests for &adt
-    check_edit(
-        "s1",
-        r#"
-struct S1;
-
-fn foo() {
-    let $0 = &S1;
-}
-"#,
-        r#"
-struct S1;
-
-fn foo() {
-    let s1 = &S1;
-}
-"#,
-    );
-
-    // Do not suggest reserved keywords
-    check(
-        r#"
-struct Struct;
-
-fn foo() {
-    let $0 = Struct;
-}
-"#,
-        expect![[r#"
-            st Struct
-            kw mut
-            kw ref
-        "#]],
-    );
-}
-
-#[test]
-fn private_item_in_module_in_function_body() {
-    check(
-        r#"
-fn main() {
-    mod foo {
-        struct Private;
-        pub struct Public;
-    }
-    foo::$0
-}
-"#,
-        expect![[r#"
-            st Public Public
-        "#]],
     );
 }

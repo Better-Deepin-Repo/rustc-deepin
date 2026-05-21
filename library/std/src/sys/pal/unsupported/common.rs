@@ -16,6 +16,18 @@ pub fn unsupported_err() -> std_io::Error {
     std_io::Error::UNSUPPORTED_PLATFORM
 }
 
+pub fn is_interrupted(_code: i32) -> bool {
+    false
+}
+
+pub fn decode_error_kind(_code: i32) -> crate::io::ErrorKind {
+    crate::io::ErrorKind::Uncategorized
+}
+
 pub fn abort_internal() -> ! {
     core::intrinsics::abort();
+}
+
+pub fn hashmap_random_keys() -> (u64, u64) {
+    (1, 2)
 }

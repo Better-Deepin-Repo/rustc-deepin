@@ -6,43 +6,47 @@
 
 set -ex
 
-export RUSTDOCFLAGS="-D warnings"
+rm -rf target/doc
+mkdir -p target/doc
 
 dox() {
+  local arch=$1
+  local target=$2
+
+  echo "documenting ${arch}"
+
   if [ "$CI" != "" ]; then
-    rustup target add "${1}" || true
+    rustup target add "${target}" || true
   fi
 
-  cargo clean --target "${1}"
+  rm -rf "target/doc/${arch}"
+  mkdir "target/doc/${arch}"
 
-  if [ "${1}" == "amdgcn-amd-amdhsa" ]; then
-    if [ "$CI" != "" ]; then
-      rustup component add rust-src
-    fi
-    export CARGO_UNSTABLE_BUILD_STD=core
-    # amdgpu needs a target-cpu, any is fine
-    export RUSTFLAGS="${RUSTFLAGS} -Ctarget-cpu=gfx900"
-  fi
+  cargo build --verbose --target "${target}" --manifest-path crates/core_arch/Cargo.toml
+  cargo build --verbose --target "${target}" --manifest-path crates/std_detect/Cargo.toml
 
-  cargo build --verbose --target "${1}" --manifest-path crates/core_arch/Cargo.toml
-  cargo doc --verbose --target "${1}" --manifest-path crates/core_arch/Cargo.toml
+  rustdoc --verbose --target "${target}" \
+          -o "target/doc/${arch}" crates/core_arch/src/lib.rs \
+          --edition=2018 \
+          --crate-name core_arch \
+          --library-path "target/${target}/debug/deps"
+  rustdoc --verbose --target "${target}" \
+          -o "target/doc/${arch}" crates/std_detect/src/lib.rs \
+          --edition=2018 \
+          --crate-name std_detect \
+          --library-path "target/${target}/debug/deps" \
+          --extern cfg_if="$(ls target/"${target}"/debug/deps/libcfg_if-*.rlib)" \
+          --extern libc="$(ls target/"${target}"/debug/deps/liblibc-*.rlib)"
 }
 
-if [ -z "$1" ]; then
-  dox i686-unknown-linux-gnu
-  dox x86_64-unknown-linux-gnu
-  dox armv7-unknown-linux-gnueabihf
-  dox aarch64-unknown-linux-gnu
-  dox powerpc-unknown-linux-gnu
-  dox powerpc64le-unknown-linux-gnu
-  dox loongarch64-unknown-linux-gnu
-  # MIPS targets disabled since they are dropped to tier 3.
-  # See https://github.com/rust-lang/compiler-team/issues/648
-  #dox mips-unknown-linux-gnu
-  #dox mips64-unknown-linux-gnuabi64
-  dox wasm32-unknown-unknown
-  dox nvptx64-nvidia-cuda
-  dox amdgcn-amd-amdhsa
-else
-  dox "${1}"
-fi
+dox i686 i686-unknown-linux-gnu
+dox x86_64 x86_64-unknown-linux-gnu
+dox arm armv7-unknown-linux-gnueabihf
+dox aarch64 aarch64-unknown-linux-gnu
+dox powerpc powerpc-unknown-linux-gnu
+dox powerpc64le powerpc64le-unknown-linux-gnu
+# MIPS targets disabled since they are dropped to tier 3.
+# See https://github.com/rust-lang/compiler-team/issues/648
+#dox mips mips-unknown-linux-gnu
+#dox mips64 mips64-unknown-linux-gnuabi64
+dox wasm32 wasm32-unknown-unknown

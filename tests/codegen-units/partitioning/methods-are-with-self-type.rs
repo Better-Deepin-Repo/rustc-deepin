@@ -1,10 +1,8 @@
+// We specify incremental here because we want to test the partitioning for incremental compilation
 //@ incremental
-//@ compile-flags: -Copt-level=0
+//@ compile-flags:-Zprint-mono-items=lazy
 
 #![crate_type = "lib"]
-
-// This test ensures that methods are assigned to the module where their self-type is defined, not
-// where the method is defined.
 
 pub struct SomeType;
 
@@ -48,7 +46,6 @@ mod type2 {
 }
 
 //~ MONO_ITEM fn start @@ methods_are_with_self_type[External]
-#[no_mangle]
 pub fn start() {
     //~ MONO_ITEM fn mod1::<impl SomeGenericType<u32, u64>>::method @@ methods_are_with_self_type.volatile[External]
     SomeGenericType(0u32, 0u64).method();

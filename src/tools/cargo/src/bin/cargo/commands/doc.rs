@@ -39,20 +39,20 @@ pub fn cli() -> Command {
         .arg_unit_graph()
         .arg_timings()
         .arg_manifest_path()
+        .arg_lockfile_path()
         .arg_ignore_rust_version()
         .after_help(color_print::cstr!(
-            "Run `<bright-cyan,bold>cargo help doc</>` for more detailed information.\n"
+            "Run `<cyan,bold>cargo help doc</>` for more detailed information.\n"
         ))
 }
 
 pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
     let ws = args.workspace(gctx)?;
-    let intent = UserIntent::Doc {
+    let mode = CompileMode::Doc {
         deps: !args.flag("no-deps"),
         json: false,
     };
-    let mut compile_opts =
-        args.compile_options(gctx, intent, Some(&ws), ProfileChecking::Custom)?;
+    let mut compile_opts = args.compile_options(gctx, mode, Some(&ws), ProfileChecking::Custom)?;
     compile_opts.rustdoc_document_private_items = args.flag("document-private-items");
 
     let doc_opts = DocOptions {

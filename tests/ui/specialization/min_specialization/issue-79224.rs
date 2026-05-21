@@ -1,16 +1,6 @@
 #![feature(min_specialization)]
 use std::fmt::{self, Display};
 
-pub trait ToString {
-    fn to_string(&self) -> String;
-}
-
-impl<T: Display + ?Sized> ToString for T {
-    default fn to_string(&self) -> String {
-        todo!()
-    }
-}
-
 pub enum Cow<'a, B: ?Sized + 'a, O = <B as ToOwned>::Owned>
 where
     B: ToOwned,

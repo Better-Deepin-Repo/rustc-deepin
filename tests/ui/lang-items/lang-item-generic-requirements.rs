@@ -4,14 +4,8 @@
 #![feature(lang_items, no_core)]
 #![no_core]
 
-#[lang = "pointee_sized"]
-pub trait MyPointeeSized {}
-
-#[lang = "meta_sized"]
-pub trait MyMetaSized: MyPointeeSized {}
-
 #[lang = "sized"]
-trait MySized: MyMetaSized {}
+trait MySized {}
 
 #[lang = "add"]
 trait MyAdd<'a, T> {}
@@ -54,16 +48,13 @@ fn ice() {
 
     // Use index
     let arr = [0; 5];
-    //~^ ERROR requires `copy` lang_item
     let _ = arr[2];
-    //~^ ERROR: cannot index into a value of type `[{integer}; 5]`
 
     // Use phantomdata
     let _ = MyPhantomData::<(), i32>;
 
     // Use Foo
     let _: () = Foo;
-    //~^ ERROR: mismatched types
 }
 
 // use `start`

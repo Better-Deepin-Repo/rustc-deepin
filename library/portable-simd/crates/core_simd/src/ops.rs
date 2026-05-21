@@ -1,4 +1,4 @@
-use crate::simd::{Select, Simd, SimdElement, cmp::SimdPartialEq};
+use crate::simd::{cmp::SimdPartialEq, LaneCount, Simd, SimdElement, SupportedLaneCount};
 use core::ops::{Add, Mul};
 use core::ops::{BitAnd, BitOr, BitXor};
 use core::ops::{Div, Rem, Sub};
@@ -12,6 +12,7 @@ mod unary;
 impl<I, T, const N: usize> core::ops::Index<I> for Simd<T, N>
 where
     T: SimdElement,
+    LaneCount<N>: SupportedLaneCount,
     I: core::slice::SliceIndex<[T]>,
 {
     type Output = I::Output;
@@ -24,6 +25,7 @@ where
 impl<I, T, const N: usize> core::ops::IndexMut<I> for Simd<T, N>
 where
     T: SimdElement,
+    LaneCount<N>: SupportedLaneCount,
     I: core::slice::SliceIndex<[T]>,
 {
     #[inline]
@@ -75,7 +77,7 @@ macro_rules! int_divrem_guard {
     (   $lhs:ident,
         $rhs:ident,
         {   const PANIC_ZERO: &'static str = $zero:literal;
-            $simd_call:ident, $op:tt
+            $simd_call:ident
         },
         $int:ident ) => {
         if $rhs.simd_eq(Simd::splat(0 as _)).any() {
@@ -94,23 +96,8 @@ macro_rules! int_divrem_guard {
                 // Nice base case to make it easy to const-fold away the other branch.
                 $rhs
             };
-
-            // aarch64 div fails for arbitrary `v % 0`, mod fails when rhs is MIN, for non-powers-of-two
-            // these operations aren't vectorized on aarch64 anyway
-            #[cfg(target_arch = "aarch64")]
-            {
-                let mut out = Simd::splat(0 as _);
-                for i in 0..Self::LEN {
-                    out[i] = $lhs[i] $op rhs[i];
-                }
-                out
-            }
-
-            #[cfg(not(target_arch = "aarch64"))]
-            {
-                // Safety: $lhs and rhs are vectors
-                unsafe { core::intrinsics::simd::$simd_call($lhs, rhs) }
-            }
+            // Safety: $lhs and rhs are vectors
+            unsafe { core::intrinsics::simd::$simd_call($lhs, rhs) }
         }
     };
 }
@@ -128,10 +115,12 @@ macro_rules! for_base_types {
                 impl<const N: usize> $op<Self> for Simd<$scalar, N>
                 where
                     $scalar: SimdElement,
+                    LaneCount<N>: SupportedLaneCount,
                 {
                     type Output = $out;
 
                     #[inline]
+                    #[must_use = "operator returns a new vector without mutating the inputs"]
                     // TODO: only useful for int Div::div, but we hope that this
                     // will essentially always get inlined anyway.
                     #[track_caller]
@@ -216,14 +205,14 @@ for_base_ops! {
     impl Div::div {
         int_divrem_guard {
             const PANIC_ZERO: &'static str = "attempt to divide by zero";
-            simd_div, /
+            simd_div
         }
     }
 
     impl Rem::rem {
         int_divrem_guard {
             const PANIC_ZERO: &'static str = "attempt to calculate the remainder with a divisor of zero";
-            simd_rem, %
+            simd_rem
         }
     }
 

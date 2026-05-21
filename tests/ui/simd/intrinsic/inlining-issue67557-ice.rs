@@ -3,16 +3,15 @@
 //
 //@ run-pass
 //@ compile-flags: -Zmir-opt-level=4
-#![feature(core_intrinsics, repr_simd)]
+#![feature(intrinsics, repr_simd)]
 
-use std::intrinsics::simd::simd_shuffle;
+extern "rust-intrinsic" {
+    fn simd_shuffle<T, I, U>(x: T, y: T, idx: I) -> U;
+}
 
 #[repr(simd)]
 #[derive(Debug, PartialEq)]
-struct Simd2([u8; 2]);
-
-#[repr(simd)]
-struct SimdShuffleIdx<const LEN: usize>([u32; LEN]);
+struct Simd2(u8, u8);
 
 fn main() {
     unsafe {
@@ -22,6 +21,6 @@ fn main() {
 
 #[inline(always)]
 unsafe fn inline_me() -> Simd2 {
-    const IDX: SimdShuffleIdx<2> = SimdShuffleIdx([0, 3]);
-    simd_shuffle(Simd2([10, 11]), Simd2([12, 13]), IDX)
+    const IDX: [u32; 2] = [0, 3];
+    simd_shuffle(Simd2(10, 11), Simd2(12, 13), IDX)
 }

@@ -1,24 +1,18 @@
 use either::Either;
 use hir::ModuleDef;
 use ide_db::{
-    FxHashSet,
-    assists::AssistId,
+    assists::{AssistId, AssistKind},
     defs::Definition,
     helpers::mod_path_to_ast,
-    imports::insert_use::{ImportScope, insert_use_with_editor},
+    imports::insert_use::{insert_use, ImportScope},
     search::{FileReference, UsageSearchResult},
     source_change::SourceChangeBuilder,
     syntax_helpers::node_ext::{for_each_tail_expr, walk_expr},
+    FxHashSet,
 };
 use syntax::{
-    AstNode, SyntaxNode,
-    ast::{
-        self, HasName,
-        edit::{AstNodeEdit, IndentLevel},
-        syntax_factory::SyntaxFactory,
-    },
-    match_ast,
-    syntax_editor::SyntaxEditor,
+    ast::{self, edit::IndentLevel, edit_in_place::Indent, make, HasName},
+    match_ast, ted, AstNode, SyntaxNode,
 };
 
 use crate::assist_context::{AssistContext, Assists};
@@ -68,19 +62,18 @@ pub(crate) fn convert_tuple_return_type_to_struct(
 
     let target = type_ref.syntax().text_range();
     acc.add(
-        AssistId::refactor_rewrite("convert_tuple_return_type_to_struct"),
+        AssistId("convert_tuple_return_type_to_struct", AssistKind::RefactorRewrite),
         "Convert tuple return type to tuple struct",
         target,
         move |edit| {
-            let mut syntax_editor = edit.make_editor(ret_type.syntax());
-            let syntax_factory = SyntaxFactory::with_mappings();
+            let ret_type = edit.make_mut(ret_type);
+            let fn_ = edit.make_mut(fn_);
 
             let usages = Definition::Function(fn_def).usages(&ctx.sema).all();
             let struct_name = format!("{}Result", stdx::to_camel_case(&fn_name.to_string()));
             let parent = fn_.syntax().ancestors().find_map(<Either<ast::Impl, ast::Trait>>::cast);
             add_tuple_struct_def(
                 edit,
-                &syntax_factory,
                 ctx,
                 &usages,
                 parent.as_ref().map(|it| it.syntax()).unwrap_or(fn_.syntax()),
@@ -89,22 +82,14 @@ pub(crate) fn convert_tuple_return_type_to_struct(
                 &target_module,
             );
 
-            syntax_editor.replace(
+            ted::replace(
                 ret_type.syntax(),
-                syntax_factory.ret_type(syntax_factory.ty(&struct_name)).syntax(),
+                make::ret_type(make::ty(&struct_name)).syntax().clone_for_update(),
             );
 
             if let Some(fn_body) = fn_.body() {
-                replace_body_return_values(
-                    &mut syntax_editor,
-                    &syntax_factory,
-                    ast::Expr::BlockExpr(fn_body),
-                    &struct_name,
-                );
+                replace_body_return_values(ast::Expr::BlockExpr(fn_body), &struct_name);
             }
-
-            syntax_editor.add_mappings(syntax_factory.finish_with_mappings());
-            edit.add_file_edits(ctx.vfs_file_id(), syntax_editor);
 
             replace_usages(edit, ctx, &usages, &struct_name, &target_module);
         },
@@ -120,37 +105,24 @@ fn replace_usages(
     target_module: &hir::Module,
 ) {
     for (file_id, references) in usages.iter() {
-        let Some(first_ref) = references.first() else { continue };
+        edit.edit_file(file_id.file_id());
 
-        let mut editor = edit.make_editor(first_ref.name.syntax().as_node().unwrap());
-        let syntax_factory = SyntaxFactory::with_mappings();
-
-        let refs_with_imports = augment_references_with_imports(
-            &syntax_factory,
-            ctx,
-            references,
-            struct_name,
-            target_module,
-        );
+        let refs_with_imports =
+            augment_references_with_imports(edit, ctx, references, struct_name, target_module);
 
         refs_with_imports.into_iter().rev().for_each(|(name, import_data)| {
             if let Some(fn_) = name.syntax().parent().and_then(ast::Fn::cast) {
                 cov_mark::hit!(replace_trait_impl_fns);
 
                 if let Some(ret_type) = fn_.ret_type() {
-                    editor.replace(
+                    ted::replace(
                         ret_type.syntax(),
-                        syntax_factory.ret_type(syntax_factory.ty(struct_name)).syntax(),
+                        make::ret_type(make::ty(struct_name)).syntax().clone_for_update(),
                     );
                 }
 
                 if let Some(fn_body) = fn_.body() {
-                    replace_body_return_values(
-                        &mut editor,
-                        &syntax_factory,
-                        ast::Expr::BlockExpr(fn_body),
-                        struct_name,
-                    );
+                    replace_body_return_values(ast::Expr::BlockExpr(fn_body), struct_name);
                 }
             } else {
                 // replace tuple patterns
@@ -170,30 +142,22 @@ fn replace_usages(
                     _ => None,
                 });
                 for tuple_pat in tuple_pats {
-                    editor.replace(
+                    ted::replace(
                         tuple_pat.syntax(),
-                        syntax_factory
-                            .tuple_struct_pat(
-                                syntax_factory.path_from_text(struct_name),
-                                tuple_pat.fields(),
-                            )
-                            .syntax(),
+                        make::tuple_struct_pat(
+                            make::path_from_text(struct_name),
+                            tuple_pat.fields(),
+                        )
+                        .clone_for_update()
+                        .syntax(),
                     );
                 }
             }
+            // add imports across modules where needed
             if let Some((import_scope, path)) = import_data {
-                insert_use_with_editor(
-                    &import_scope,
-                    path,
-                    &ctx.config.insert_use,
-                    &mut editor,
-                    &syntax_factory,
-                );
+                insert_use(&import_scope, path, &ctx.config.insert_use);
             }
-        });
-
-        editor.add_mappings(syntax_factory.finish_with_mappings());
-        edit.add_file_edits(file_id.file_id(ctx.db()), editor);
+        })
     }
 }
 
@@ -211,13 +175,15 @@ fn node_to_pats(node: SyntaxNode) -> Option<Vec<ast::Pat>> {
 }
 
 fn augment_references_with_imports(
-    syntax_factory: &SyntaxFactory,
+    edit: &mut SourceChangeBuilder,
     ctx: &AssistContext<'_>,
     references: &[FileReference],
     struct_name: &str,
     target_module: &hir::Module,
 ) -> Vec<(ast::NameLike, Option<(ImportScope, ast::Path)>)> {
     let mut visited_modules = FxHashSet::default();
+
+    let cfg = ctx.config.import_path_config();
 
     references
         .iter()
@@ -226,15 +192,16 @@ fn augment_references_with_imports(
             ctx.sema.scope(name.syntax()).map(|scope| (name, scope.module()))
         })
         .map(|(name, ref_module)| {
+            let new_name = edit.make_mut(name);
+
             // if the referenced module is not the same as the target one and has not been seen before, add an import
             let import_data = if ref_module.nearest_non_block_module(ctx.db()) != *target_module
                 && !visited_modules.contains(&ref_module)
             {
                 visited_modules.insert(ref_module);
 
-                let cfg =
-                    ctx.config.find_path_config(ctx.sema.is_nightly(ref_module.krate(ctx.sema.db)));
-                let import_scope = ImportScope::find_insert_use_container(name.syntax(), &ctx.sema);
+                let import_scope =
+                    ImportScope::find_insert_use_container(new_name.syntax(), &ctx.sema);
                 let path = ref_module
                     .find_use_path(
                         ctx.sema.db,
@@ -243,12 +210,9 @@ fn augment_references_with_imports(
                         cfg,
                     )
                     .map(|mod_path| {
-                        syntax_factory.path_concat(
-                            mod_path_to_ast(
-                                &mod_path,
-                                target_module.krate(ctx.db()).edition(ctx.db()),
-                            ),
-                            syntax_factory.path_from_text(struct_name),
+                        make::path_concat(
+                            mod_path_to_ast(&mod_path, target_module.krate().edition(ctx.db())),
+                            make::path_from_text(struct_name),
                         )
                     });
 
@@ -257,7 +221,7 @@ fn augment_references_with_imports(
                 None
             };
 
-            (name, import_data)
+            (new_name, import_data)
         })
         .collect()
 }
@@ -265,7 +229,6 @@ fn augment_references_with_imports(
 // Adds the definition of the tuple struct before the parent function.
 fn add_tuple_struct_def(
     edit: &mut SourceChangeBuilder,
-    syntax_factory: &SyntaxFactory,
     ctx: &AssistContext<'_>,
     usages: &UsageSearchResult,
     parent: &SyntaxNode,
@@ -281,46 +244,42 @@ fn add_tuple_struct_def(
             ctx.sema.scope(name.syntax()).map(|scope| scope.module())
         })
         .any(|module| module.nearest_non_block_module(ctx.db()) != *target_module);
-    let visibility = if make_struct_pub { Some(syntax_factory.visibility_pub()) } else { None };
+    let visibility = if make_struct_pub { Some(make::visibility_pub()) } else { None };
 
-    let field_list = ast::FieldList::TupleFieldList(syntax_factory.tuple_field_list(
-        tuple_ty.fields().map(|ty| syntax_factory.tuple_field(visibility.clone(), ty)),
+    let field_list = ast::FieldList::TupleFieldList(make::tuple_field_list(
+        tuple_ty.fields().map(|ty| make::tuple_field(visibility.clone(), ty)),
     ));
-    let struct_name = syntax_factory.name(struct_name);
-    let struct_def = syntax_factory.struct_(visibility, struct_name, None, field_list);
+    let struct_name = make::name(struct_name);
+    let struct_def = make::struct_(visibility, struct_name, None, field_list).clone_for_update();
 
     let indent = IndentLevel::from_node(parent);
-    let struct_def = struct_def.indent(indent);
+    struct_def.reindent_to(indent);
 
     edit.insert(parent.text_range().start(), format!("{struct_def}\n\n{indent}"));
 }
 
 /// Replaces each returned tuple in `body` with the constructor of the tuple struct named `struct_name`.
-fn replace_body_return_values(
-    syntax_editor: &mut SyntaxEditor,
-    syntax_factory: &SyntaxFactory,
-    body: ast::Expr,
-    struct_name: &str,
-) {
+fn replace_body_return_values(body: ast::Expr, struct_name: &str) {
     let mut exprs_to_wrap = Vec::new();
 
     let tail_cb = &mut |e: &_| tail_cb_impl(&mut exprs_to_wrap, e);
     walk_expr(&body, &mut |expr| {
-        if let ast::Expr::ReturnExpr(ret_expr) = expr
-            && let Some(ret_expr_arg) = &ret_expr.expr()
-        {
-            for_each_tail_expr(ret_expr_arg, tail_cb);
+        if let ast::Expr::ReturnExpr(ret_expr) = expr {
+            if let Some(ret_expr_arg) = &ret_expr.expr() {
+                for_each_tail_expr(ret_expr_arg, tail_cb);
+            }
         }
     });
     for_each_tail_expr(&body, tail_cb);
 
     for ret_expr in exprs_to_wrap {
         if let ast::Expr::TupleExpr(tuple_expr) = &ret_expr {
-            let struct_constructor = syntax_factory.expr_call(
-                syntax_factory.expr_path(syntax_factory.ident_path(struct_name)),
-                syntax_factory.arg_list(tuple_expr.fields()),
-            );
-            syntax_editor.replace(ret_expr.syntax(), struct_constructor.syntax());
+            let struct_constructor = make::expr_call(
+                make::expr_path(make::ext::ident_path(struct_name)),
+                make::arg_list(tuple_expr.fields()),
+            )
+            .clone_for_update();
+            ted::replace(ret_expr.syntax(), struct_constructor.syntax());
         }
     }
 }

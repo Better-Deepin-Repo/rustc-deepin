@@ -2,9 +2,8 @@
 
 #![allow(path_statements)]
 #![allow(dead_code)]
-//@ proc-macro: derive-atob.rs
-//@ proc-macro: derive-ctod.rs
-//@ ignore-backends: gcc
+//@ aux-build:derive-atob.rs
+//@ aux-build:derive-ctod.rs
 
 #[macro_use]
 extern crate derive_atob;

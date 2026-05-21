@@ -16,7 +16,7 @@ where
     A,
 }
 
-enum EmptyWithComment {
+enum EmtpyWithComment {
     // Some comment
 }
 
@@ -96,7 +96,7 @@ where
     Right { list: I, root: T }, // Post Comment
 }
 
-enum EmptyWithComment {
+enum EmtpyWithComment {
     // Some comment
 }
 
@@ -135,7 +135,7 @@ fn nested_enum_test() {
     }
 }
 
-pub struct EmptyWithComment {
+pub struct EmtpyWithComment {
     // FIXME: Implement this struct
 }
 

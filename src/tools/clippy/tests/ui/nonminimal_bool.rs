@@ -2,7 +2,7 @@
 #![allow(
     unused,
     clippy::diverging_sub_expression,
-    clippy::needless_ifs,
+    clippy::needless_if,
     clippy::redundant_pattern_matching
 )]
 #![warn(clippy::nonminimal_bool)]
@@ -15,28 +15,23 @@ fn main() {
     let d: bool = unimplemented!();
     let e: bool = unimplemented!();
     let _ = !true;
-    //~^ nonminimal_bool
-
+    //~^ ERROR: this boolean expression can be simplified
+    //~| NOTE: `-D clippy::nonminimal-bool` implied by `-D warnings`
     let _ = !false;
-    //~^ nonminimal_bool
-
+    //~^ ERROR: this boolean expression can be simplified
     let _ = !!a;
-    //~^ nonminimal_bool
-
+    //~^ ERROR: this boolean expression can be simplified
     let _ = false || a;
-    //~^ nonminimal_bool
-
+    //~^ ERROR: this boolean expression can be simplified
     // don't lint on cfgs
     let _ = cfg!(you_shall_not_not_pass) && a;
     let _ = a || !b || !c || !d || !e;
     let _ = !(!a && b);
-    //~^ nonminimal_bool
-
+    //~^ ERROR: this boolean expression can be simplified
     let _ = !(!a || b);
-    //~^ nonminimal_bool
-
+    //~^ ERROR: this boolean expression can be simplified
     let _ = !a && !(b && c);
-    //~^ nonminimal_bool
+    //~^ ERROR: this boolean expression can be simplified
 }
 
 fn equality_stuff() {
@@ -45,19 +40,15 @@ fn equality_stuff() {
     let c: i32 = unimplemented!();
     let d: i32 = unimplemented!();
     let _ = a == b && c == 5 && a == b;
-    //~^ nonminimal_bool
-
+    //~^ ERROR: this boolean expression can be simplified
     let _ = a == b || c == 5 || a == b;
-    //~^ nonminimal_bool
-
+    //~^ ERROR: this boolean expression can be simplified
     let _ = a == b && c == 5 && b == a;
-    //~^ nonminimal_bool
-
+    //~^ ERROR: this boolean expression can be simplified
     let _ = a != b || !(a != b || c == d);
-    //~^ nonminimal_bool
-
+    //~^ ERROR: this boolean expression can be simplified
     let _ = a != b && !(a != b && c == d);
-    //~^ nonminimal_bool
+    //~^ ERROR: this boolean expression can be simplified
 }
 
 fn issue3847(a: u32, b: u32) -> bool {
@@ -88,8 +79,7 @@ fn check_expect() {
 
 fn issue9428() {
     if matches!(true, true) && true {
-        //~^ nonminimal_bool
-
+        //~^ ERROR: this boolean expression can be simplified
         println!("foo");
     }
 }
@@ -168,33 +158,19 @@ fn issue11932() {
 
 fn issue_5794() {
     let a = 0;
-    if !(12 == a) {}
-    //~^ nonminimal_bool
-    if !(a == 12) {}
-    //~^ nonminimal_bool
-    if !(12 != a) {}
-    //~^ nonminimal_bool
-    if !(a != 12) {}
-    //~^ nonminimal_bool
+    if !(12 == a) {} //~ ERROR: this boolean expression can be simplified
+    if !(a == 12) {} //~ ERROR: this boolean expression can be simplified
+    if !(12 != a) {} //~ ERROR: this boolean expression can be simplified
+    if !(a != 12) {} //~ ERROR: this boolean expression can be simplified
 
     let b = true;
     let c = false;
-    if !b == true {}
-    //~^ nonminimal_bool
-    //~| bool_comparison
-    if !b != true {}
-    //~^ nonminimal_bool
-    //~| bool_comparison
-    if true == !b {}
-    //~^ nonminimal_bool
-    //~| bool_comparison
-    if true != !b {}
-    //~^ nonminimal_bool
-    //~| bool_comparison
-    if !b == !c {}
-    //~^ nonminimal_bool
-    if !b != !c {}
-    //~^ nonminimal_bool
+    if !b == true {} //~ ERROR: this boolean expression can be simplified
+    if !b != true {} //~ ERROR: this boolean expression can be simplified
+    if true == !b {} //~ ERROR: this boolean expression can be simplified
+    if true != !b {} //~ ERROR: this boolean expression can be simplified
+    if !b == !c {} //~ ERROR: this boolean expression can be simplified
+    if !b != !c {} //~ ERROR: this boolean expression can be simplified
 }
 
 fn issue_12371(x: usize) -> bool {
@@ -206,49 +182,4 @@ fn issue_12371(x: usize) -> bool {
 // https://github.com/rust-lang/rust-clippy/issues/13206
 fn many_ops(a: bool, b: bool, c: bool, d: bool, e: bool, f: bool) -> bool {
     (a && c && f) || (!a && b && !d) || (!b && !c && !e) || (d && e && !f)
-}
-
-fn issue14184(a: f32, b: bool) {
-    if !(a < 2.0 && !b) {
-        //~^ nonminimal_bool
-        println!("Hi");
-    }
-}
-
-mod issue14404 {
-    enum TyKind {
-        Ref(i32, i32, i32),
-        Other,
-    }
-
-    struct Expr;
-
-    fn is_mutable(expr: &Expr) -> bool {
-        todo!()
-    }
-
-    fn should_not_give_macro(ty: TyKind, expr: Expr) {
-        if !(matches!(ty, TyKind::Ref(_, _, _)) && !is_mutable(&expr)) {
-            //~^ nonminimal_bool
-            todo!()
-        }
-    }
-}
-
-fn dont_simplify_double_not_if_types_differ() {
-    struct S;
-
-    impl std::ops::Not for S {
-        type Output = bool;
-        fn not(self) -> bool {
-            true
-        }
-    }
-
-    // The lint must propose `if !!S`, not `if S`.
-    // FIXME: `bool_comparison` will propose to use `S == true`
-    // which is invalid.
-    if !S != true {}
-    //~^ nonminimal_bool
-    //~| bool_comparison
 }

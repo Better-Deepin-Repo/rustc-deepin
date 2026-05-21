@@ -1,5 +1,5 @@
-use rustc_session::lint::LintPass;
 use rustc_session::lint::builtin::HardwiredLints;
+use rustc_session::lint::LintPass;
 
 use crate::context::{EarlyContext, LateContext};
 
@@ -14,8 +14,6 @@ macro_rules! late_lint_methods {
             fn check_mod(a: &'tcx rustc_hir::Mod<'tcx>, b: rustc_hir::HirId);
             fn check_foreign_item(a: &'tcx rustc_hir::ForeignItem<'tcx>);
             fn check_item(a: &'tcx rustc_hir::Item<'tcx>);
-            /// This is called *after* recursing into the item
-            /// (in contrast to `check_item`, which is checked before).
             fn check_item_post(a: &'tcx rustc_hir::Item<'tcx>);
             fn check_local(a: &'tcx rustc_hir::LetStmt<'tcx>);
             fn check_block(a: &'tcx rustc_hir::Block<'tcx>);
@@ -23,10 +21,9 @@ macro_rules! late_lint_methods {
             fn check_stmt(a: &'tcx rustc_hir::Stmt<'tcx>);
             fn check_arm(a: &'tcx rustc_hir::Arm<'tcx>);
             fn check_pat(a: &'tcx rustc_hir::Pat<'tcx>);
-            fn check_lit(hir_id: rustc_hir::HirId, a: rustc_hir::Lit, negated: bool);
             fn check_expr(a: &'tcx rustc_hir::Expr<'tcx>);
             fn check_expr_post(a: &'tcx rustc_hir::Expr<'tcx>);
-            fn check_ty(a: &'tcx rustc_hir::Ty<'tcx, rustc_hir::AmbigArg>);
+            fn check_ty(a: &'tcx rustc_hir::Ty<'tcx>);
             fn check_generic_param(a: &'tcx rustc_hir::GenericParam<'tcx>);
             fn check_generics(a: &'tcx rustc_hir::Generics<'tcx>);
             fn check_poly_trait_ref(a: &'tcx rustc_hir::PolyTraitRef<'tcx>);
@@ -43,9 +40,9 @@ macro_rules! late_lint_methods {
             fn check_field_def(a: &'tcx rustc_hir::FieldDef<'tcx>);
             fn check_variant(a: &'tcx rustc_hir::Variant<'tcx>);
             fn check_path(a: &rustc_hir::Path<'tcx>, b: rustc_hir::HirId);
-            fn check_attribute(a: &'tcx rustc_hir::Attribute);
-            fn check_attributes(a: &'tcx [rustc_hir::Attribute]);
-            fn check_attributes_post(a: &'tcx [rustc_hir::Attribute]);
+            fn check_attribute(a: &'tcx rustc_ast::Attribute);
+            fn check_attributes(a: &'tcx [rustc_ast::Attribute]);
+            fn check_attributes_post(a: &'tcx [rustc_ast::Attribute]);
         ]);
     )
 }
@@ -55,10 +52,10 @@ macro_rules! late_lint_methods {
 /// Each `check` method checks a single syntax node, and should not
 /// invoke methods recursively (unlike `Visitor`). By default they
 /// do nothing.
-///
+//
 // FIXME: eliminate the duplication with `Visitor`. But this also
 // contains a few lint-specific methods with no equivalent in `Visitor`.
-//
+
 macro_rules! declare_late_lint_pass {
     ([], [$($(#[$attr:meta])* fn $name:ident($($param:ident: $arg:ty),*);)*]) => (
         pub trait LateLintPass<'tcx>: LintPass {
@@ -92,7 +89,7 @@ macro_rules! expand_combined_late_lint_pass_methods {
 /// Combines multiple lints passes into a single lint pass, at compile time,
 /// for maximum speed. Each `check_foo` method in `$methods` within this pass
 /// simply calls `check_foo` once per `$pass`. Compare with
-/// `RuntimeCombinedLateLintPass`, which is similar, but combines lint passes at
+/// `LateLintPassObjects`, which is similar, but combines lint passes at
 /// runtime.
 #[macro_export]
 macro_rules! declare_combined_late_lint_pass {
@@ -111,7 +108,7 @@ macro_rules! declare_combined_late_lint_pass {
 
             $v fn get_lints() -> $crate::LintVec {
                 let mut lints = Vec::new();
-                $(lints.extend_from_slice(&$pass::lint_vec());)*
+                $(lints.extend_from_slice(&$pass::get_lints());)*
                 lints
             }
         }
@@ -123,10 +120,7 @@ macro_rules! declare_combined_late_lint_pass {
         #[allow(rustc::lint_pass_impl_without_macro)]
         impl $crate::LintPass for $name {
             fn name(&self) -> &'static str {
-                stringify!($name)
-            }
-            fn get_lints(&self) -> LintVec {
-                $name::get_lints()
+                panic!()
             }
         }
     )
@@ -137,12 +131,10 @@ macro_rules! early_lint_methods {
     ($macro:path, $args:tt) => (
         $macro!($args, [
             fn check_param(a: &rustc_ast::Param);
-            fn check_ident(a: &rustc_span::Ident);
+            fn check_ident(a: rustc_span::symbol::Ident);
             fn check_crate(a: &rustc_ast::Crate);
             fn check_crate_post(a: &rustc_ast::Crate);
             fn check_item(a: &rustc_ast::Item);
-            /// This is called *after* recursing into the item
-            /// (in contrast to `check_item`, which is checked before).
             fn check_item_post(a: &rustc_ast::Item);
             fn check_local(a: &rustc_ast::Local);
             fn check_block(a: &rustc_ast::Block);
@@ -162,9 +154,7 @@ macro_rules! early_lint_methods {
                 c: rustc_span::Span,
                 d_: rustc_ast::NodeId);
             fn check_trait_item(a: &rustc_ast::AssocItem);
-            fn check_trait_item_post(a: &rustc_ast::AssocItem);
             fn check_impl_item(a: &rustc_ast::AssocItem);
-            fn check_impl_item_post(a: &rustc_ast::AssocItem);
             fn check_variant(a: &rustc_ast::Variant);
             fn check_attribute(a: &rustc_ast::Attribute);
             fn check_attributes(a: &[rustc_ast::Attribute]);
@@ -228,7 +218,7 @@ macro_rules! declare_combined_early_lint_pass {
 
             $v fn get_lints() -> $crate::LintVec {
                 let mut lints = Vec::new();
-                $(lints.extend_from_slice(&$pass::lint_vec());)*
+                $(lints.extend_from_slice(&$pass::get_lints());)*
                 lints
             }
         }
@@ -240,9 +230,6 @@ macro_rules! declare_combined_early_lint_pass {
         #[allow(rustc::lint_pass_impl_without_macro)]
         impl $crate::LintPass for $name {
             fn name(&self) -> &'static str {
-                panic!()
-            }
-            fn get_lints(&self) -> LintVec {
                 panic!()
             }
         }

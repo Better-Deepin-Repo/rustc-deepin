@@ -7,20 +7,17 @@
 //!
 //! Historically this target was known as `wasm32-wasi-preview1-threads`.
 
-use crate::spec::{
-    Arch, Cc, Env, LinkSelfContainedDefault, LinkerFlavor, Os, Target, TargetMetadata, base,
-    crt_objects,
-};
+use crate::spec::{base, crt_objects, Cc, LinkSelfContainedDefault, LinkerFlavor, Target};
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     let mut options = base::wasm::options();
 
-    options.os = Os::Wasi;
-    options.env = Env::P1;
+    options.os = "wasi".into();
+    options.env = "p1".into();
 
     options.add_pre_link_args(
         LinkerFlavor::WasmLld(Cc::No),
-        &["--import-memory", "--export-memory", "--shared-memory", "--max-memory=1073741824"],
+        &["--import-memory", "--export-memory", "--shared-memory"],
     );
     options.add_pre_link_args(
         LinkerFlavor::WasmLld(Cc::Yes),
@@ -29,7 +26,6 @@ pub(crate) fn target() -> Target {
             "-Wl,--import-memory",
             "-Wl,--export-memory,",
             "-Wl,--shared-memory",
-            "-Wl,--max-memory=1073741824",
         ],
     );
 
@@ -65,15 +61,15 @@ pub(crate) fn target() -> Target {
 
     Target {
         llvm_target: "wasm32-wasi".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: None,
             tier: Some(2),
             host_tools: Some(false),
             std: Some(true),
         },
         pointer_width: 32,
-        data_layout: "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-i128:128-n32:64-S128-ni:1:10:20".into(),
-        arch: Arch::Wasm32,
+        data_layout: "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20".into(),
+        arch: "wasm32".into(),
         options,
     }
 }

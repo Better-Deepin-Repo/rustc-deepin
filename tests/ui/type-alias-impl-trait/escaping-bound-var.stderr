@@ -2,7 +2,7 @@ error[E0657]: `impl Trait` cannot capture higher-ranked lifetime from outer `imp
   --> $DIR/escaping-bound-var.rs:9:47
    |
 LL | pub type Foo = impl for<'a> Trait<'a, Assoc = impl Test<'a>>;
-   |                                               ^^^^^^^^^^--^ `impl Trait` implicitly captures all lifetimes in scope
+   |                                               ^^^^^^^^^^^^^ `impl Trait` implicitly captures all lifetimes in scope
    |
 note: lifetime declared here
   --> $DIR/escaping-bound-var.rs:9:25

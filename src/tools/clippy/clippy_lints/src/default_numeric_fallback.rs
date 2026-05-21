@@ -3,12 +3,10 @@ use clippy_utils::numeric_literal;
 use clippy_utils::source::snippet_opt;
 use rustc_ast::ast::{LitFloatType, LitIntType, LitKind};
 use rustc_errors::Applicability;
-use rustc_hir::intravisit::{Visitor, walk_expr, walk_pat, walk_stmt};
-use rustc_hir::{
-    Block, Body, ConstContext, Expr, ExprKind, FnRetTy, HirId, Lit, Pat, PatExpr, PatExprKind, PatKind, Stmt, StmtKind,
-    StructTailExpr,
-};
+use rustc_hir::intravisit::{walk_expr, walk_stmt, Visitor};
+use rustc_hir::{Block, Body, ConstContext, Expr, ExprKind, FnRetTy, HirId, Lit, Stmt, StmtKind};
 use rustc_lint::{LateContext, LateLintPass, LintContext};
+use rustc_middle::lint::in_external_macro;
 use rustc_middle::ty::{self, FloatTy, IntTy, PolyFnSig, Ty};
 use rustc_session::declare_lint_pass;
 use std::iter;
@@ -28,8 +26,7 @@ declare_clippy_lint! {
     /// To ensure that every numeric type is chosen explicitly rather than implicitly.
     ///
     /// ### Known problems
-    /// This lint is implemented using a custom algorithm independent of rustc's inference,
-    /// which results in many false positives and false negatives.
+    /// This lint can only be allowed at the function level or above.
     ///
     /// ### Example
     /// ```no_run
@@ -39,8 +36,8 @@ declare_clippy_lint! {
     ///
     /// Use instead:
     /// ```no_run
-    /// let i = 10_i32;
-    /// let f = 1.23_f64;
+    /// let i = 10i32;
+    /// let f = 1.23f64;
     /// ```
     #[clippy::version = "1.52.0"]
     pub DEFAULT_NUMERIC_FALLBACK,
@@ -52,10 +49,11 @@ declare_lint_pass!(DefaultNumericFallback => [DEFAULT_NUMERIC_FALLBACK]);
 
 impl<'tcx> LateLintPass<'tcx> for DefaultNumericFallback {
     fn check_body(&mut self, cx: &LateContext<'tcx>, body: &Body<'tcx>) {
+        let hir = cx.tcx.hir();
         // NOTE: this is different from `clippy_utils::is_inside_always_const_context`.
         // Inline const supports type inference.
         let is_parent_const = matches!(
-            cx.tcx.hir_body_const_context(cx.tcx.hir_body_owner_def_id(body.id())),
+            hir.body_const_context(hir.body_owner_def_id(body.id())),
             Some(ConstContext::Const { inline: false } | ConstContext::Static(_))
         );
         let mut visitor = NumericFallbackVisitor::new(cx, is_parent_const);
@@ -83,8 +81,8 @@ impl<'a, 'tcx> NumericFallbackVisitor<'a, 'tcx> {
     }
 
     /// Check whether a passed literal has potential to cause fallback or not.
-    fn check_lit(&self, lit: Lit, lit_ty: Ty<'tcx>, emit_hir_id: HirId) {
-        if !lit.span.in_external_macro(self.cx.sess().source_map())
+    fn check_lit(&self, lit: &Lit, lit_ty: Ty<'tcx>, emit_hir_id: HirId) {
+        if !in_external_macro(self.cx.sess(), lit.span)
             && matches!(self.ty_bounds.last(), Some(ExplicitTyBound(false)))
             && matches!(
                 lit.node,
@@ -121,7 +119,7 @@ impl<'a, 'tcx> NumericFallbackVisitor<'a, 'tcx> {
     }
 }
 
-impl<'tcx> Visitor<'tcx> for NumericFallbackVisitor<'_, 'tcx> {
+impl<'a, 'tcx> Visitor<'tcx> for NumericFallbackVisitor<'a, 'tcx> {
     fn visit_expr(&mut self, expr: &'tcx Expr<'_>) {
         match &expr.kind {
             ExprKind::Block(
@@ -199,7 +197,7 @@ impl<'tcx> Visitor<'tcx> for NumericFallbackVisitor<'_, 'tcx> {
                     }
 
                     // Visit base with no bound.
-                    if let StructTailExpr::Base(base) = base {
+                    if let Some(base) = base {
                         self.ty_bounds.push(ExplicitTyBound(false));
                         self.visit_expr(base);
                         self.ty_bounds.pop();
@@ -210,7 +208,7 @@ impl<'tcx> Visitor<'tcx> for NumericFallbackVisitor<'_, 'tcx> {
 
             ExprKind::Lit(lit) => {
                 let ty = self.cx.typeck_results().expr_ty(expr);
-                self.check_lit(*lit, ty, expr.hir_id);
+                self.check_lit(lit, ty, expr.hir_id);
                 return;
             },
 
@@ -218,20 +216,6 @@ impl<'tcx> Visitor<'tcx> for NumericFallbackVisitor<'_, 'tcx> {
         }
 
         walk_expr(self, expr);
-    }
-
-    fn visit_pat(&mut self, pat: &'tcx Pat<'_>) {
-        if let PatKind::Expr(&PatExpr {
-            hir_id,
-            kind: PatExprKind::Lit { lit, .. },
-            ..
-        }) = pat.kind
-        {
-            let ty = self.cx.typeck_results().node_type(hir_id);
-            self.check_lit(lit, ty, hir_id);
-            return;
-        }
-        walk_pat(self, pat);
     }
 
     fn visit_stmt(&mut self, stmt: &'tcx Stmt<'_>) {
@@ -269,6 +253,6 @@ impl<'tcx> From<Ty<'tcx>> for ExplicitTyBound {
 
 impl<'tcx> From<Option<Ty<'tcx>>> for ExplicitTyBound {
     fn from(v: Option<Ty<'tcx>>) -> Self {
-        Self(v.is_some_and(Ty::is_numeric))
+        Self(v.map_or(false, Ty::is_numeric))
     }
 }

@@ -1,7 +1,7 @@
 //@ run-fail
-//@ regex-error-pattern: thread 'main'.*panicked
-//@ error-pattern: attempt to multiply with overflow
-//@ needs-subprocess
+//@ error-pattern:thread 'main' panicked
+//@ error-pattern:attempt to multiply with overflow
+//@ ignore-emscripten no processes
 //@ compile-flags: -C debug-assertions
 
 fn main() {

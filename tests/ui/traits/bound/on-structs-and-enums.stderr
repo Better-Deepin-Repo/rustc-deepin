@@ -9,7 +9,7 @@ note: required by a bound in `Foo`
    |
 LL | struct Foo<T:Trait> {
    |              ^^^^^ required by this bound in `Foo`
-help: consider restricting type parameter `T` with trait `Trait`
+help: consider restricting type parameter `T`
    |
 LL | impl<T: Trait> Foo<T> {
    |       +++++++
@@ -59,7 +59,7 @@ note: required by a bound in `Foo`
    |
 LL | struct Foo<T:Trait> {
    |              ^^^^^ required by this bound in `Foo`
-help: consider restricting type parameter `U` with trait `Trait`
+help: consider restricting type parameter `U`
    |
 LL | struct Badness<U: Trait> {
    |                 +++++++
@@ -75,7 +75,7 @@ note: required by a bound in `Bar`
    |
 LL | enum Bar<T:Trait> {
    |            ^^^^^ required by this bound in `Bar`
-help: consider restricting type parameter `V` with trait `Trait`
+help: consider restricting type parameter `V`
    |
 LL | enum MoreBadness<V: Trait> {
    |                   +++++++

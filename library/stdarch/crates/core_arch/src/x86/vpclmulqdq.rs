@@ -12,7 +12,7 @@ use crate::core_arch::x86::__m512i;
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.pclmulqdq.256"]
     fn pclmulqdq_256(a: __m256i, round_key: __m256i, imm8: u8) -> __m256i;
     #[link_name = "llvm.x86.pclmulqdq.512"]
@@ -33,13 +33,13 @@ unsafe extern "C" {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_clmulepi64_epi128)
 #[inline]
 #[target_feature(enable = "vpclmulqdq,avx512f")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 // technically according to Intel's documentation we don't need avx512f here, however LLVM gets confused otherwise
 #[cfg_attr(test, assert_instr(vpclmul, IMM8 = 0))]
 #[rustc_legacy_const_generics(2)]
-pub fn _mm512_clmulepi64_epi128<const IMM8: i32>(a: __m512i, b: __m512i) -> __m512i {
+pub unsafe fn _mm512_clmulepi64_epi128<const IMM8: i32>(a: __m512i, b: __m512i) -> __m512i {
     static_assert_uimm_bits!(IMM8, 8);
-    unsafe { pclmulqdq_512(a, b, IMM8 as u8) }
+    pclmulqdq_512(a, b, IMM8 as u8)
 }
 
 /// Performs a carry-less multiplication of two 64-bit polynomials over the
@@ -52,12 +52,12 @@ pub fn _mm512_clmulepi64_epi128<const IMM8: i32>(a: __m512i, b: __m512i) -> __m5
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_clmulepi64_epi128)
 #[inline]
 #[target_feature(enable = "vpclmulqdq")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vpclmul, IMM8 = 0))]
 #[rustc_legacy_const_generics(2)]
-pub fn _mm256_clmulepi64_epi128<const IMM8: i32>(a: __m256i, b: __m256i) -> __m256i {
+pub unsafe fn _mm256_clmulepi64_epi128<const IMM8: i32>(a: __m256i, b: __m256i) -> __m256i {
     static_assert_uimm_bits!(IMM8, 8);
-    unsafe { pclmulqdq_256(a, b, IMM8 as u8) }
+    pclmulqdq_256(a, b, IMM8 as u8)
 }
 
 #[cfg(test)]
@@ -124,9 +124,9 @@ mod tests {
     // this function tests one of the possible 4 instances
     // with different inputs across lanes
     #[target_feature(enable = "vpclmulqdq,avx512f")]
-    fn verify_512_helper(
-        linear: fn(__m128i, __m128i) -> __m128i,
-        vectorized: fn(__m512i, __m512i) -> __m512i,
+    unsafe fn verify_512_helper(
+        linear: unsafe fn(__m128i, __m128i) -> __m128i,
+        vectorized: unsafe fn(__m512i, __m512i) -> __m512i,
     ) {
         let a = _mm512_set_epi64(
             0xDCB4DB3657BF0B7D,
@@ -165,9 +165,9 @@ mod tests {
     // this function tests one of the possible 4 instances
     // with different inputs across lanes for the VL version
     #[target_feature(enable = "vpclmulqdq,avx512vl")]
-    fn verify_256_helper(
-        linear: fn(__m128i, __m128i) -> __m128i,
-        vectorized: fn(__m256i, __m256i) -> __m256i,
+    unsafe fn verify_256_helper(
+        linear: unsafe fn(__m128i, __m128i) -> __m128i,
+        vectorized: unsafe fn(__m256i, __m256i) -> __m256i,
     ) {
         let a = _mm512_set_epi64(
             0xDCB4DB3657BF0B7D,
@@ -207,7 +207,7 @@ mod tests {
     }
 
     #[simd_test(enable = "vpclmulqdq,avx512f")]
-    fn test_mm512_clmulepi64_epi128() {
+    unsafe fn test_mm512_clmulepi64_epi128() {
         verify_kat_pclmul!(
             _mm512_broadcast_i32x4,
             _mm512_clmulepi64_epi128,
@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[simd_test(enable = "vpclmulqdq,avx512vl")]
-    fn test_mm256_clmulepi64_epi128() {
+    unsafe fn test_mm256_clmulepi64_epi128() {
         verify_kat_pclmul!(
             _mm256_broadcastsi128_si256,
             _mm256_clmulepi64_epi128,

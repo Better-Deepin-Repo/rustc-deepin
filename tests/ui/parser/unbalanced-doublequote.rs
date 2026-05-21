@@ -1,4 +1,6 @@
-//~vv ERROR unterminated double quote string
+//@ error-pattern: unterminated double quote string
+
+
 fn main() {
     "
 }

@@ -4,7 +4,7 @@
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.fxsave"]
     fn fxsave(p: *mut u8);
     #[link_name = "llvm.x86.fxrstor"]
@@ -75,16 +75,39 @@ mod tests {
         }
     }
 
+    impl PartialEq<FxsaveArea> for FxsaveArea {
+        fn eq(&self, other: &FxsaveArea) -> bool {
+            for i in 0..self.data.len() {
+                if self.data[i] != other.data[i] {
+                    return false;
+                }
+            }
+            true
+        }
+    }
+
+    impl fmt::Debug for FxsaveArea {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "[")?;
+            for i in 0..self.data.len() {
+                write!(f, "{}", self.data[i])?;
+                if i != self.data.len() - 1 {
+                    write!(f, ", ")?;
+                }
+            }
+            write!(f, "]")
+        }
+    }
+
     #[simd_test(enable = "fxsr")]
     #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
-    fn test_fxsave() {
+    unsafe fn test_fxsave() {
         let mut a = FxsaveArea::new();
         let mut b = FxsaveArea::new();
 
-        unsafe {
-            fxsr::_fxsave(a.ptr());
-            fxsr::_fxrstor(a.ptr());
-            fxsr::_fxsave(b.ptr());
-        }
+        fxsr::_fxsave(a.ptr());
+        fxsr::_fxrstor(a.ptr());
+        fxsr::_fxsave(b.ptr());
+        assert_eq!(a, b);
     }
 }

@@ -9,7 +9,6 @@ impl Foo for i32 {
     type Assoc = u32;
 }
 type ImplTrait = impl Sized;
-#[define_opaque(ImplTrait)]
 fn constrain() -> ImplTrait {
     1u64
 }

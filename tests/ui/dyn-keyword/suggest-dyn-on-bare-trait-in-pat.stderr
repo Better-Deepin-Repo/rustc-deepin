@@ -1,10 +1,10 @@
-error[E0782]: expected a type, found a trait
+error[E0782]: trait objects must include the `dyn` keyword
   --> $DIR/suggest-dyn-on-bare-trait-in-pat.rs:11:9
    |
 LL |         Trait::CONST => {}
    |         ^^^^^
    |
-help: you can add the `dyn` keyword if you want a trait object
+help: add `dyn` keyword before this trait
    |
 LL |         <dyn Trait>::CONST => {}
    |         ++++      +

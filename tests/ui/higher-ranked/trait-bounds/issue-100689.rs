@@ -1,6 +1,4 @@
 //@ check-pass
-//@ revisions: old next
-//@[next] compile-flags: -Znext-solver
 
 struct Foo<'a> {
     foo: &'a mut usize,

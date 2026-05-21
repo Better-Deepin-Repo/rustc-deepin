@@ -1,13 +1,12 @@
 // test the deref_nullptr lint
 
+#![deny(deref_nullptr)]
+
 use std::ptr;
 
 struct Struct {
     field: u8,
 }
-
-#[derive(Clone, Copy)]
-struct Zst;
 
 fn f() {
     unsafe {
@@ -28,16 +27,11 @@ fn f() {
         let ub = &*ptr::null_mut::<i32>();
         //~^ ERROR dereferencing a null pointer
         ptr::addr_of!(*ptr::null::<i32>());
-        // ^^ OKAY
+        //~^ ERROR dereferencing a null pointer
         ptr::addr_of_mut!(*ptr::null_mut::<i32>());
-        // ^^ OKAY
+        //~^ ERROR dereferencing a null pointer
         let offset = ptr::addr_of!((*ptr::null::<Struct>()).field);
         //~^ ERROR dereferencing a null pointer
-
-        // Make sure the lint permits derefs of null pointers to ZSTs
-        let ok: Zst = *ptr::null();
-        let ok: Zst = *ptr::null_mut();
-        let ok: Zst = *(0 as *const Zst);
     }
 }
 

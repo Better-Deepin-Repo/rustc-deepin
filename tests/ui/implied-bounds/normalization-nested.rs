@@ -3,7 +3,9 @@
 //
 //@ revisions: param_ty lifetime param_ty_no_compat lifetime_no_compat
 
-//@ check-pass
+//@[param_ty] check-pass
+//@[param_ty_no_compat] check-pass
+//@[lifetime_no_compat] check-pass
 //@[param_ty_no_compat] compile-flags: -Zno-implied-bounds-compat
 //@[lifetime_no_compat] compile-flags: -Zno-implied-bounds-compat
 
@@ -36,6 +38,7 @@ pub fn test_wfcheck<'x>(_: Map<Vec<&'x ()>>) {}
 
 pub fn test_borrowck<'x>(_: Map<Vec<&'x ()>>, s: &'x str) -> &'static str {
     s
+    //[lifetime]~^ ERROR lifetime may not live long enough
 }
 
 fn main() {}

@@ -1,5 +1,4 @@
 //@ revisions: rpass1 rpass2
-//@ ignore-backends: gcc
 
 #![allow(unused_imports)]
 

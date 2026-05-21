@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
-use std::os::unix::fs::symlink;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::config::{Channel, ConfigInfo};
 use crate::utils::{
-    create_dir, get_sysroot_dir, run_command, run_command_with_output_and_env, walk_dir,
+    copy_file, create_dir, get_sysroot_dir, run_command, run_command_with_output_and_env, walk_dir,
 };
 
 #[derive(Default)]
@@ -25,6 +24,16 @@ impl BuildArg {
 
         while let Some(arg) = args.next() {
             match arg.as_str() {
+                "--features" => {
+                    if let Some(arg) = args.next() {
+                        build_arg.flags.push("--features".to_string());
+                        build_arg.flags.push(arg.as_str().into());
+                    } else {
+                        return Err(
+                            "Expected a value after `--features`, found nothing".to_string()
+                        );
+                    }
+                }
                 "--sysroot" => {
                     build_arg.build_sysroot = true;
                 }
@@ -34,7 +43,7 @@ impl BuildArg {
                 }
                 arg => {
                     if !build_arg.config_info.parse_argument(arg, &mut args)? {
-                        return Err(format!("Unknown argument `{arg}`"));
+                        return Err(format!("Unknown argument `{}`", arg));
                     }
                 }
             }
@@ -46,27 +55,20 @@ impl BuildArg {
         println!(
             r#"
 `build` command help:
-    --sysroot              : When used on its own, build backend in dev mode with optimized dependencies
-                             and sysroot in dev mode (unoptimized)
-                             When used together with --release, build backend in release mode with optimized dependencies
-                             When used together with --release-sysroot,
-                             build the sysroot in release mode with optimized dependencies instead of in dev mode
-    --release-sysroot      : When combined with --sysroot, additionally
-                             build the sysroot in release mode with optimized dependencies.
-                             It has no effect if `--sysroot` is not specified.
-                             It should not be used on its own.
-    --sysroot-panic-abort  : Build the sysroot without unwinding support"#
+
+    --features [arg]       : Add a new feature [arg]
+    --sysroot              : Build with sysroot"#
         );
         ConfigInfo::show_usage();
         println!("    --help                 : Show this help");
     }
 }
 
-fn cleanup_sysroot_previous_build(library_dir: &Path) {
+fn cleanup_sysroot_previous_build(start_dir: &Path) {
     // Cleanup for previous run
     // Clean target dir except for build scripts and incremental cache
     let _ = walk_dir(
-        library_dir.join("target"),
+        start_dir.join("target"),
         &mut |dir: &Path| {
             for top in &["debug", "release"] {
                 let _ = fs::remove_dir_all(dir.join(top).join("build"));
@@ -104,31 +106,31 @@ fn cleanup_sysroot_previous_build(library_dir: &Path) {
         &mut |_| Ok(()),
         false,
     );
+
+    let _ = fs::remove_file(start_dir.join("Cargo.lock"));
+    let _ = fs::remove_file(start_dir.join("test_target/Cargo.lock"));
+    let _ = fs::remove_dir_all(start_dir.join("sysroot"));
+}
+
+pub fn create_build_sysroot_content(start_dir: &Path) -> Result<(), String> {
+    if !start_dir.is_dir() {
+        create_dir(start_dir)?;
+    }
+    copy_file("build_system/build_sysroot/Cargo.toml", &start_dir.join("Cargo.toml"))?;
+    copy_file("build_system/build_sysroot/Cargo.lock", &start_dir.join("Cargo.lock"))?;
+
+    let src_dir = start_dir.join("src");
+    if !src_dir.is_dir() {
+        create_dir(&src_dir)?;
+    }
+    copy_file("build_system/build_sysroot/lib.rs", &start_dir.join("src/lib.rs"))
 }
 
 pub fn build_sysroot(env: &HashMap<String, String>, config: &ConfigInfo) -> Result<(), String> {
     let start_dir = get_sysroot_dir();
 
-    // Symlink libgccjit.so to sysroot.
-    let lib_path = start_dir.join("sysroot").join("lib");
-    let rustlib_target_path = lib_path
-        .join("rustlib")
-        .join(&config.host_triple)
-        .join("codegen-backends")
-        .join("lib")
-        .join(&config.target_triple);
-    let libgccjit_path =
-        PathBuf::from(config.gcc_path.as_ref().expect("libgccjit should be set by this point"))
-            .join("libgccjit.so");
-    let libgccjit_in_sysroot_path = rustlib_target_path.join("libgccjit.so");
-    // First remove the file to be able to create the symlink even when the file already exists.
-    let _ = fs::remove_file(&libgccjit_in_sysroot_path);
-    create_dir(&rustlib_target_path)?;
-    symlink(libgccjit_path, &libgccjit_in_sysroot_path)
-        .map_err(|error| format!("Cannot create symlink for libgccjit.so: {}", error))?;
-
-    let library_dir = start_dir.join("sysroot_src").join("library");
-    cleanup_sysroot_previous_build(&library_dir);
+    cleanup_sysroot_previous_build(&start_dir);
+    create_build_sysroot_content(&start_dir)?;
 
     // Builds libs
     let mut rustflags = env.get("RUSTFLAGS").cloned().unwrap_or_default();
@@ -140,15 +142,14 @@ pub fn build_sysroot(env: &HashMap<String, String>, config: &ConfigInfo) -> Resu
         rustflags.push_str(" -Csymbol-mangling-version=v0");
     }
 
-    let mut args: Vec<&dyn AsRef<OsStr>> = vec![&"cargo", &"build", &"--target", &config.target];
-    if config.target.ends_with(".json") {
-        args.push(&"-Zjson-target-spec");
-    }
-
-    for feature in &config.features {
-        args.push(&"--features");
-        args.push(feature);
-    }
+    let mut args: Vec<&dyn AsRef<OsStr>> = vec![
+        &"cargo",
+        &"build",
+        &"--target",
+        &config.target,
+        &"--features",
+        &"compiler-builtins-no-f16-f128",
+    ];
 
     if config.no_default_features {
         rustflags.push_str(" -Csymbol-mangling-version=v0");
@@ -163,33 +164,24 @@ pub fn build_sysroot(env: &HashMap<String, String>, config: &ConfigInfo) -> Resu
         "debug"
     };
 
-    // We have a different environment variable than RUSTFLAGS to make sure those flags are only
-    // sent to rustc_codegen_gcc and not the LLVM backend.
     if let Ok(cg_rustflags) = std::env::var("CG_RUSTFLAGS") {
         rustflags.push(' ');
         rustflags.push_str(&cg_rustflags);
     }
 
-    args.push(&"--features");
-    args.push(&"backtrace");
-
     let mut env = env.clone();
     env.insert("RUSTFLAGS".to_string(), rustflags);
-    let sysroot_dir = library_dir.join("sysroot");
-    run_command_with_output_and_env(&args, Some(&sysroot_dir), Some(&env))?;
+    run_command_with_output_and_env(&args, Some(&start_dir), Some(&env))?;
 
     // Copy files to sysroot
-    let sysroot_path = lib_path.join(format!("rustlib/{}/lib/", config.target_triple));
-    // To avoid errors like "multiple candidates for `rmeta` dependency `core` found", we clean the
-    // sysroot directory before copying the sysroot build artifacts.
-    let _ = fs::remove_dir_all(&sysroot_path);
+    let sysroot_path = start_dir.join(format!("sysroot/lib/rustlib/{}/lib/", config.target_triple));
     create_dir(&sysroot_path)?;
     let mut copier = |dir_to_copy: &Path| {
         // FIXME: should not use shell command!
         run_command(&[&"cp", &"-r", &dir_to_copy, &sysroot_path], None).map(|_| ())
     };
     walk_dir(
-        library_dir.join(format!("target/{}/{}/deps", config.target_triple, channel)),
+        start_dir.join(&format!("target/{}/{}/deps", config.target_triple, channel)),
         &mut copier.clone(),
         &mut copier,
         false,
@@ -198,13 +190,16 @@ pub fn build_sysroot(env: &HashMap<String, String>, config: &ConfigInfo) -> Resu
     // Copy the source files to the sysroot (Rust for Linux needs this).
     let sysroot_src_path = start_dir.join("sysroot/lib/rustlib/src/rust");
     create_dir(&sysroot_src_path)?;
-    run_command(&[&"cp", &"-r", &library_dir, &sysroot_src_path], None)?;
+    run_command(&[&"cp", &"-r", &start_dir.join("sysroot_src/library/"), &sysroot_src_path], None)?;
 
     Ok(())
 }
 
 fn build_codegen(args: &mut BuildArg) -> Result<(), String> {
     let mut env = HashMap::new();
+
+    env.insert("LD_LIBRARY_PATH".to_string(), args.config_info.gcc_path.clone());
+    env.insert("LIBRARY_PATH".to_string(), args.config_info.gcc_path.clone());
 
     if args.config_info.no_default_features {
         env.insert("RUSTFLAGS".to_string(), "-Csymbol-mangling-version=v0".to_string());

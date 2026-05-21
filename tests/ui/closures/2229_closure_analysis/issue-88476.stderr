@@ -23,11 +23,15 @@ error: First Pass analysis includes:
    |
 LL |       let x = #[rustc_capture_analysis] move || {
    |  _______________________________________^
+LL | |
+LL | |
+LL | |
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
-note: Capturing f[(0, 0)] -> Immutable
+note: Capturing f[(0, 0)] -> ImmBorrow
   --> $DIR/issue-88476.rs:26:26
    |
 LL |         println!("{:?}", f.0);
@@ -38,7 +42,11 @@ error: Min Capture analysis includes:
    |
 LL |       let x = #[rustc_capture_analysis] move || {
    |  _______________________________________^
+LL | |
+LL | |
+LL | |
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
@@ -53,11 +61,15 @@ error: First Pass analysis includes:
    |
 LL |       let c = #[rustc_capture_analysis] move || {
    |  _______________________________________^
+LL | |
+LL | |
+LL | |
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
-note: Capturing character[(0, 0)] -> Immutable
+note: Capturing character[(0, 0)] -> ImmBorrow
   --> $DIR/issue-88476.rs:54:24
    |
 LL |         println!("{}", character.hp)
@@ -68,7 +80,11 @@ error: Min Capture analysis includes:
    |
 LL |       let c = #[rustc_capture_analysis] move || {
    |  _______________________________________^
+LL | |
+LL | |
+LL | |
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |

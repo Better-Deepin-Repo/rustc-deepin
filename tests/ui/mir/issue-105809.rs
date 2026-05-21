@@ -1,8 +1,7 @@
 // Non-regression test ICE from issue #105809 and duplicates.
 
 //@ build-pass: the ICE is during codegen
-//@ compile-flags: -Zmir-opt-level=1
-//@ edition: 2018
+//@ compile-flags: --edition 2018 -Zmir-opt-level=1
 
 use std::{future::Future, pin::Pin};
 

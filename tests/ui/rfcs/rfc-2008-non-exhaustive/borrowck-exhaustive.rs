@@ -14,6 +14,11 @@ enum Local {
     Variant(u32),
 }
 
+#[non_exhaustive]
+enum LocalNonExhaustive {
+    Variant(u32),
+}
+
 fn main() {
     let mut x = ExhaustiveMonovariant::Variant(1);
     let y = &mut x;
@@ -26,6 +31,13 @@ fn main() {
     let y = &mut x;
     match x {
         Local::Variant(_) => {},
+        _ => {},
+    }
+    drop(y);
+    let mut x = LocalNonExhaustive::Variant(1);
+    let y = &mut x;
+    match x {
+        LocalNonExhaustive::Variant(_) => {},
         _ => {},
     }
     drop(y);

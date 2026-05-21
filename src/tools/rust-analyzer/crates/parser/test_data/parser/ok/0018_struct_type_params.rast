@@ -96,7 +96,6 @@ SOURCE_FILE
         LIFETIME
           LIFETIME_IDENT "'a"
         COLON ":"
-        TYPE_BOUND_LIST
       R_ANGLE ">"
     SEMICOLON ";"
   WHITESPACE "\n"
@@ -112,10 +111,8 @@ SOURCE_FILE
           LIFETIME_IDENT "'a"
         COLON ":"
         WHITESPACE " "
-        TYPE_BOUND_LIST
-          TYPE_BOUND
-            LIFETIME
-              LIFETIME_IDENT "'b"
+        LIFETIME
+          LIFETIME_IDENT "'b"
       R_ANGLE ">"
     SEMICOLON ";"
   WHITESPACE "\n"
@@ -131,12 +128,10 @@ SOURCE_FILE
           LIFETIME_IDENT "'a"
         COLON ":"
         WHITESPACE " "
-        TYPE_BOUND_LIST
-          TYPE_BOUND
-            LIFETIME
-              LIFETIME_IDENT "'b"
-          WHITESPACE " "
-          PLUS "+"
+        LIFETIME
+          LIFETIME_IDENT "'b"
+        WHITESPACE " "
+        PLUS "+"
       WHITESPACE " "
       R_ANGLE ">"
     SEMICOLON ";"
@@ -153,16 +148,13 @@ SOURCE_FILE
           LIFETIME_IDENT "'a"
         COLON ":"
         WHITESPACE " "
-        TYPE_BOUND_LIST
-          TYPE_BOUND
-            LIFETIME
-              LIFETIME_IDENT "'b"
-          WHITESPACE " "
-          PLUS "+"
-          WHITESPACE " "
-          TYPE_BOUND
-            LIFETIME
-              LIFETIME_IDENT "'c"
+        LIFETIME
+          LIFETIME_IDENT "'b"
+        WHITESPACE " "
+        PLUS "+"
+        WHITESPACE " "
+        LIFETIME
+          LIFETIME_IDENT "'c"
       R_ANGLE ">"
     SEMICOLON ";"
   WHITESPACE "\n"
@@ -210,11 +202,9 @@ SOURCE_FILE
           LIFETIME_IDENT "'a"
         COLON ":"
         WHITESPACE " "
-        TYPE_BOUND_LIST
-          TYPE_BOUND
-            LIFETIME
-              LIFETIME_IDENT "'b"
-          PLUS "+"
+        LIFETIME
+          LIFETIME_IDENT "'b"
+        PLUS "+"
       COMMA ","
       WHITESPACE " "
       LIFETIME_PARAM
@@ -222,10 +212,8 @@ SOURCE_FILE
           LIFETIME_IDENT "'b"
         COLON ":"
         WHITESPACE " "
-        TYPE_BOUND_LIST
-          TYPE_BOUND
-            LIFETIME
-              LIFETIME_IDENT "'c"
+        LIFETIME
+          LIFETIME_IDENT "'c"
       COMMA ","
       R_ANGLE ">"
     SEMICOLON ";"

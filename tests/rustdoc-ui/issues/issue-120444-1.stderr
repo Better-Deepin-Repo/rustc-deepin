@@ -15,9 +15,8 @@ LL | #![deny(rustdoc::redundant_explicit_links)]
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 help: remove explicit link target
    |
-LL - /// [`Vfs`][crate::Vfs]
-LL + /// [`Vfs`]
-   |
+LL | /// [`Vfs`]
+   |     ~~~~~~~
 
 error: aborting due to 1 previous error
 

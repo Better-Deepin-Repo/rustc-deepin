@@ -1,7 +1,4 @@
-//@revisions: edition2015 edition2021
-//@[edition2015] edition:2015
-//@[edition2021] edition:2021
-
+#![allow(unused)]
 #![warn(clippy::missing_assert_message)]
 
 macro_rules! bar {

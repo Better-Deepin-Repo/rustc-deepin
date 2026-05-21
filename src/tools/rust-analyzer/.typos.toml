@@ -15,12 +15,7 @@ extend-ignore-re = [
     '"flate2"',
     "raison d'être",
     "inout",
-    "INOUT",
-    "optin",
-    "=Pn",
-    "\\[[0-9A-F]{4},",  # AstId hex hashes
-    # ignore `// spellchecker:off` until `// spellchecker:on`
-    "(?s)(#|//)\\s*spellchecker:off.*?\\n\\s*(#|//)\\s*spellchecker:on",
+    "optin"
 ]
 
 [default.extend-words]
@@ -30,14 +25,8 @@ fo = "fo"
 ket = "ket"
 makro = "makro"
 trivias = "trivias"
-thir = "thir"
-jod = "jod"
-tructure = "tructure"
-taits = "taits"
 
 [default.extend-identifiers]
-anc = "anc"
 datas = "datas"
 impl_froms = "impl_froms"
 selfs = "selfs"
-taits = "taits"

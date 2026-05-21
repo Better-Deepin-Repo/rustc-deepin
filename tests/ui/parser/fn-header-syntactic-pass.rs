@@ -5,7 +5,7 @@
 
 fn main() {}
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn syntax() {
     async fn f();
     unsafe fn f();

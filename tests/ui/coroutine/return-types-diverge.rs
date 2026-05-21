@@ -1,4 +1,4 @@
-//@ edition: 2024
+//@ compile-flags: --edition 2024 -Zunstable-options
 //@ check-pass
 
 #![feature(gen_blocks)]

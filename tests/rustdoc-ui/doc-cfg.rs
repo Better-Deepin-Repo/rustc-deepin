@@ -1,10 +1,9 @@
-#![deny(invalid_doc_attributes)]
 #![feature(doc_cfg)]
 
 #[doc(cfg(), cfg(foo, bar))]
 //~^ ERROR
-//~| ERROR
+//~^^ ERROR
+#[doc(cfg(foo), cfg(bar))] // ok!
 #[doc(cfg())] //~ ERROR
 #[doc(cfg(foo, bar))] //~ ERROR
-#[doc(auto_cfg(hide(foo::bar)))]
 pub fn foo() {}

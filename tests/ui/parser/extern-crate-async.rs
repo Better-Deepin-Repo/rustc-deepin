@@ -1,13 +1,12 @@
-// Make sure that we don't parse `extern crate async` as
+// Make sure that we don't parse `extern crate async`
 // the front matter of a function leading us astray.
 
-//@ edition: 2015
 //@ check-pass
 
 fn main() {}
 
-#[cfg(false)]
+#[cfg(FALSE)]
 extern crate async;
 
-#[cfg(false)]
+#[cfg(FALSE)]
 extern crate async as something_else;

@@ -4,11 +4,10 @@ use derive_where::derive_where;
 #[cfg(feature = "nightly")]
 use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 #[cfg(feature = "nightly")]
-use rustc_macros::{Decodable_NoContext, Encodable_NoContext, HashStable_NoContext};
-use rustc_type_ir_macros::GenericTypeVisitable;
+use rustc_macros::{HashStable_NoContext, TyDecodable, TyEncodable};
 
 use self::RegionKind::*;
-use crate::{BoundRegion, BoundVarIndexKind, Interner, PlaceholderRegion};
+use crate::{DebruijnIndex, Interner};
 
 rustc_index::newtype_index! {
     /// A **region** **v**ariable **ID**.
@@ -126,9 +125,8 @@ rustc_index::newtype_index! {
 /// [1]: https://smallcultfollowing.com/babysteps/blog/2013/10/29/intermingled-parameter-lists/
 /// [2]: https://smallcultfollowing.com/babysteps/blog/2013/11/04/intermingled-parameter-lists/
 /// [rustc dev guide]: https://rustc-dev-guide.rust-lang.org/traits/hrtb.html
-#[derive_where(Clone, Copy, Hash, PartialEq; I: Interner)]
-#[derive(GenericTypeVisitable)]
-#[cfg_attr(feature = "nightly", derive(Encodable_NoContext, Decodable_NoContext))]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq; I: Interner)]
+#[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable))]
 pub enum RegionKind<I: Interner> {
     /// A region parameter; for example `'a` in `impl<'a> Trait for &'a ()`.
     ///
@@ -149,14 +147,14 @@ pub enum RegionKind<I: Interner> {
     /// Bound regions inside of types **must not** be erased, as they impact trait
     /// selection and the `TypeId` of that type. `for<'a> fn(&'a ())` and
     /// `fn(&'static ())` are different types and have to be treated as such.
-    ReBound(BoundVarIndexKind, BoundRegion<I>),
+    ReBound(DebruijnIndex, I::BoundRegion),
 
     /// Late-bound function parameters are represented using a `ReBound`. When
     /// inside of a function, we convert these bound variables to placeholder
     /// parameters via `tcx.liberate_late_bound_regions`. They are then treated
     /// the same way as `ReEarlyParam` while inside of the function.
     ///
-    /// See <https://rustc-dev-guide.rust-lang.org/early_late_parameters.html> for
+    /// See <https://rustc-dev-guide.rust-lang.org/early-late-bound-params/early-late-bound-summary.html> for
     /// more info about early and late bound lifetime parameters.
     ReLateParam(I::LateParamRegion),
 
@@ -170,7 +168,7 @@ pub enum RegionKind<I: Interner> {
     /// Should not exist outside of type inference.
     ///
     /// Used when instantiating a `forall` binder via `infcx.enter_forall`.
-    RePlaceholder(PlaceholderRegion<I>),
+    RePlaceholder(I::PlaceholderRegion),
 
     /// Erased region, used by trait selection, in MIR and during codegen.
     ReErased,
@@ -178,8 +176,6 @@ pub enum RegionKind<I: Interner> {
     /// A region that resulted from some other error. Used exclusively for diagnostics.
     ReError(I::ErrorGuaranteed),
 }
-
-impl<I: Interner> Eq for RegionKind<I> {}
 
 impl<I: Interner> fmt::Debug for RegionKind<I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -197,7 +193,7 @@ impl<I: Interner> fmt::Debug for RegionKind<I> {
 
             ReVar(vid) => write!(f, "{vid:?}"),
 
-            RePlaceholder(placeholder) => write!(f, "'{placeholder:?}"),
+            RePlaceholder(placeholder) => write!(f, "{placeholder:?}"),
 
             // Use `'{erased}` as the output instead of `'erased` so that its more obviously distinct from
             // a `ReEarlyParam` named `'erased`. Technically that would print as `'erased/#IDX` so this is
@@ -214,9 +210,9 @@ impl<I: Interner> fmt::Debug for RegionKind<I> {
 impl<CTX, I: Interner> HashStable<CTX> for RegionKind<I>
 where
     I::EarlyParamRegion: HashStable<CTX>,
+    I::BoundRegion: HashStable<CTX>,
     I::LateParamRegion: HashStable<CTX>,
-    I::DefId: HashStable<CTX>,
-    I::Symbol: HashStable<CTX>,
+    I::PlaceholderRegion: HashStable<CTX>,
 {
     #[inline]
     fn hash_stable(&self, hcx: &mut CTX, hasher: &mut StableHasher) {

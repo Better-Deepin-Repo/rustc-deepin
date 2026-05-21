@@ -1,10 +1,10 @@
 #![feature(rustc_attrs)]
 
-extern //~ WARN missing_abi
+extern
     "C"suffix //~ ERROR suffixes on string literals are invalid
     fn foo() {}
 
-extern //~ WARN missing_abi
+extern
     "C"suffix //~ ERROR suffixes on string literals are invalid
 {}
 
@@ -43,9 +43,3 @@ extern "C" {}
 #[rustc_layout_scalar_valid_range_start(0suffix)]
 //~^ ERROR invalid suffix `suffix` for number literal
 struct S;
-
-impl S {
-    #[rustc_confusables("blah"suffix)]
-    //~^ ERROR suffixes on string literals are invalid
-    fn woof() { }
-}

@@ -1,11 +1,11 @@
+use clippy_config::msrvs::{self, Msrv};
 use clippy_config::Conf;
 use clippy_utils::diagnostics::span_lint_and_help;
-use clippy_utils::msrvs::{self, Msrv};
 use rustc_ast::ast::{FloatTy, LitFloatType, LitKind};
-use rustc_hir::{HirId, Lit, RustcVersion};
+use rustc_hir::{Expr, ExprKind};
 use rustc_lint::{LateContext, LateLintPass};
-use rustc_session::impl_lint_pass;
-use rustc_span::{Span, symbol};
+use rustc_session::{impl_lint_pass, RustcVersion};
+use rustc_span::symbol;
 use std::f64::consts as f64;
 
 declare_clippy_lint! {
@@ -68,38 +68,34 @@ pub struct ApproxConstant {
 
 impl ApproxConstant {
     pub fn new(conf: &'static Conf) -> Self {
-        Self { msrv: conf.msrv }
+        Self {
+            msrv: conf.msrv.clone(),
+        }
     }
-}
 
-impl LateLintPass<'_> for ApproxConstant {
-    fn check_lit(&mut self, cx: &LateContext<'_>, _hir_id: HirId, lit: Lit, _negated: bool) {
-        match lit.node {
+    fn check_lit(&self, cx: &LateContext<'_>, lit: &LitKind, e: &Expr<'_>) {
+        match *lit {
             LitKind::Float(s, LitFloatType::Suffixed(fty)) => match fty {
-                FloatTy::F16 => self.check_known_consts(cx, lit.span, s, "f16"),
-                FloatTy::F32 => self.check_known_consts(cx, lit.span, s, "f32"),
-                FloatTy::F64 => self.check_known_consts(cx, lit.span, s, "f64"),
-                FloatTy::F128 => self.check_known_consts(cx, lit.span, s, "f128"),
+                FloatTy::F16 => self.check_known_consts(cx, e, s, "f16"),
+                FloatTy::F32 => self.check_known_consts(cx, e, s, "f32"),
+                FloatTy::F64 => self.check_known_consts(cx, e, s, "f64"),
+                FloatTy::F128 => self.check_known_consts(cx, e, s, "f128"),
             },
             // FIXME(f16_f128): add `f16` and `f128` when these types become stable.
-            LitKind::Float(s, LitFloatType::Unsuffixed) => self.check_known_consts(cx, lit.span, s, "f{32, 64}"),
+            LitKind::Float(s, LitFloatType::Unsuffixed) => self.check_known_consts(cx, e, s, "f{32, 64}"),
             _ => (),
         }
     }
-}
 
-impl ApproxConstant {
-    fn check_known_consts(&self, cx: &LateContext<'_>, span: Span, s: symbol::Symbol, module: &str) {
+    fn check_known_consts(&self, cx: &LateContext<'_>, e: &Expr<'_>, s: symbol::Symbol, module: &str) {
         let s = s.as_str();
-        if let Ok(maybe_constant) = s.parse::<f64>() {
+        if s.parse::<f64>().is_ok() {
             for &(constant, name, min_digits, msrv) in &KNOWN_CONSTS {
-                if is_approx_const(constant, s, maybe_constant, min_digits)
-                    && msrv.is_none_or(|msrv| self.msrv.meets(cx, msrv))
-                {
+                if is_approx_const(constant, s, min_digits) && msrv.map_or(true, |msrv| self.msrv.meets(msrv)) {
                     span_lint_and_help(
                         cx,
                         APPROX_CONSTANT,
-                        span,
+                        e.span,
                         format!("approximate value of `{module}::consts::{name}` found"),
                         None,
                         "consider using the constant directly",
@@ -113,35 +109,28 @@ impl ApproxConstant {
 
 impl_lint_pass!(ApproxConstant => [APPROX_CONSTANT]);
 
-fn count_digits_after_dot(input: &str) -> usize {
-    input
-        .char_indices()
-        .find(|(_, ch)| *ch == '.')
-        .map_or(0, |(i, _)| input.len() - i - 1)
+impl<'tcx> LateLintPass<'tcx> for ApproxConstant {
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, e: &'tcx Expr<'_>) {
+        if let ExprKind::Lit(lit) = &e.kind {
+            self.check_lit(cx, &lit.node, e);
+        }
+    }
+
+    extract_msrv_attr!(LateContext);
 }
 
 /// Returns `false` if the number of significant figures in `value` are
 /// less than `min_digits`; otherwise, returns true if `value` is equal
-/// to `constant`, rounded to the number of significant digits present in `value`.
+/// to `constant`, rounded to the number of digits present in `value`.
 #[must_use]
-fn is_approx_const(constant: f64, value: &str, f_value: f64, min_digits: usize) -> bool {
+fn is_approx_const(constant: f64, value: &str, min_digits: usize) -> bool {
     if value.len() <= min_digits {
-        // The value is not precise enough
         false
-    } else if f_value.to_string().len() > min_digits && constant.to_string().starts_with(&f_value.to_string()) {
-        // The value represents the same value
+    } else if constant.to_string().starts_with(value) {
+        // The value is a truncated constant
         true
     } else {
-        // The value is a truncated constant
-
-        // Print constant with numeric formatting (`0`), with the length of `value` as minimum width
-        // (`value_len$`), and with the same precision as `value` (`.value_prec$`).
-        // See https://doc.rust-lang.org/std/fmt/index.html.
-        let round_const = format!(
-            "{constant:0value_len$.value_prec$}",
-            value_len = value.len(),
-            value_prec = count_digits_after_dot(value)
-        );
+        let round_const = format!("{constant:.*}", value.len() - 2);
         value == round_const
     }
 }

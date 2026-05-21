@@ -70,7 +70,6 @@ fn moved_loop_2() {
 fn uninit_1() {
     loop {
         let value: NonCopy; //~ NOTE declared here
-        //~^ HELP consider assigning a value
         let _used = value; //~ ERROR binding `value` isn't initialized
         //~^ NOTE `value` used here but it isn't initialized
     }
@@ -78,7 +77,6 @@ fn uninit_1() {
 
 fn uninit_2() {
     let mut value: NonCopy; //~ NOTE declared here
-    //~^ HELP consider assigning a value
     loop {
         let _used = value; //~ ERROR binding `value` isn't initialized
         //~^ NOTE `value` used here but it isn't initialized

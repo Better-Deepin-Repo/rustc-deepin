@@ -1,90 +1,76 @@
-use std::error::Error;
-
 use rustc_macros::{Diagnostic, Subdiagnostic};
 
 #[derive(Diagnostic)]
-#[diag("could not emit MIR: {$error}")]
-pub struct CantEmitMIR {
-    pub error: std::io::Error,
-}
-
-#[derive(Diagnostic)]
-#[diag("failed to read rlink file: `{$err}`")]
+#[diag(driver_impl_rlink_unable_to_read)]
 pub(crate) struct RlinkUnableToRead {
     pub err: std::io::Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("the input does not look like a .rlink file")]
+#[diag(driver_impl_rlink_wrong_file_type)]
 pub(crate) struct RLinkWrongFileType;
 
 #[derive(Diagnostic)]
-#[diag("the input does not contain version number")]
+#[diag(driver_impl_rlink_empty_version_number)]
 pub(crate) struct RLinkEmptyVersionNumber;
 
 #[derive(Diagnostic)]
-#[diag(
-    ".rlink file was produced with encoding version `{$version_array}`, but the current version is `{$rlink_version}`"
-)]
+#[diag(driver_impl_rlink_encoding_version_mismatch)]
 pub(crate) struct RLinkEncodingVersionMismatch {
     pub version_array: String,
     pub rlink_version: u32,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    ".rlink file was produced by rustc version `{$rustc_version}`, but the current version is `{$current_version}`"
-)]
+#[diag(driver_impl_rlink_rustc_version_mismatch)]
 pub(crate) struct RLinkRustcVersionMismatch<'a> {
     pub rustc_version: String,
     pub current_version: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("rlink must be a file")]
+#[diag(driver_impl_rlink_no_a_file)]
 pub(crate) struct RlinkNotAFile;
 
 #[derive(Diagnostic)]
-#[diag("corrupt metadata encountered in `{$file}`")]
+#[diag(driver_impl_rlink_corrupt_file)]
 pub(crate) struct RlinkCorruptFile<'a> {
     pub file: &'a std::path::Path,
 }
 
 #[derive(Diagnostic)]
-#[diag("the compiler unexpectedly panicked. This is a bug")]
+#[diag(driver_impl_ice)]
 pub(crate) struct Ice;
 
 #[derive(Diagnostic)]
-#[diag("we would appreciate a bug report: {$bug_report_url}")]
+#[diag(driver_impl_ice_bug_report)]
 pub(crate) struct IceBugReport<'a> {
     pub bug_report_url: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("please make sure that you have updated to the latest nightly")]
+#[diag(driver_impl_ice_bug_report_update_note)]
 pub(crate) struct UpdateNightlyNote;
 
 #[derive(Diagnostic)]
-#[diag(
-    "using internal features is not supported and expected to cause internal compiler errors when used incorrectly"
-)]
+#[diag(driver_impl_ice_bug_report_internal_feature)]
 pub(crate) struct IceBugReportInternalFeature;
 
 #[derive(Diagnostic)]
-#[diag("rustc {$version} running on {$triple}")]
+#[diag(driver_impl_ice_version)]
 pub(crate) struct IceVersion<'a> {
     pub version: &'a str,
     pub triple: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("please attach the file at `{$path}` to your bug report")]
+#[diag(driver_impl_ice_path)]
 pub(crate) struct IcePath {
     pub path: std::path::PathBuf,
 }
 
 #[derive(Diagnostic)]
-#[diag("the ICE couldn't be written to `{$path}`: {$error}")]
+#[diag(driver_impl_ice_path_error)]
 pub(crate) struct IcePathError {
     pub path: std::path::PathBuf,
     pub error: String,
@@ -93,23 +79,17 @@ pub(crate) struct IcePathError {
 }
 
 #[derive(Subdiagnostic)]
-#[note("the environment variable `RUSTC_ICE` is set to `{$env_var}`")]
+#[note(driver_impl_ice_path_error_env)]
 pub(crate) struct IcePathErrorEnv {
     pub env_var: std::path::PathBuf,
 }
 
 #[derive(Diagnostic)]
-#[diag("compiler flags: {$flags}")]
+#[diag(driver_impl_ice_flags)]
 pub(crate) struct IceFlags {
     pub flags: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("some of the compiler flags provided by cargo are hidden")]
+#[diag(driver_impl_ice_exclude_cargo_defaults)]
 pub(crate) struct IceExcludeCargoDefaults;
-
-#[derive(Diagnostic)]
-#[diag("cannot dump feature usage metrics: {$error}")]
-pub(crate) struct UnstableFeatureUsage {
-    pub error: Box<dyn Error>,
-}

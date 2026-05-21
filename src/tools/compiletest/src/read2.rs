@@ -90,7 +90,7 @@ impl ProcOutput {
                         .count();
                     *filtered_len -= matches * path_bytes.len();
 
-                    // We can't just remove the length of the filtered path from the output length,
+                    // We can't just remove the length of the filtered path from the output lenght,
                     // otherwise a compiler emitting only filtered paths would OOM compiletest. Add
                     // a fixed placeholder length for each path to prevent that.
                     *filtered_len += matches * FILTERED_PATHS_PLACEHOLDER_LEN;
@@ -165,7 +165,6 @@ mod imp {
         mut err_pipe: ChildStderr,
         data: &mut dyn FnMut(bool, &mut Vec<u8>, bool),
     ) -> io::Result<()> {
-        // FIXME(#139616): justify why this is sound.
         unsafe {
             libc::fcntl(out_pipe.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK);
             libc::fcntl(err_pipe.as_raw_fd(), libc::F_SETFL, libc::O_NONBLOCK);
@@ -176,7 +175,6 @@ mod imp {
         let mut out = Vec::new();
         let mut err = Vec::new();
 
-        // FIXME(#139616): justify why this is sound.
         let mut fds: [libc::pollfd; 2] = unsafe { mem::zeroed() };
         fds[0].fd = out_pipe.as_raw_fd();
         fds[0].events = libc::POLLIN;
@@ -187,7 +185,6 @@ mod imp {
 
         while nfds > 0 {
             // wait for either pipe to become readable using `select`
-            // FIXME(#139616): justify why this is sound.
             let r = unsafe { libc::poll(fds.as_mut_ptr(), nfds, -1) };
             if r == -1 {
                 let err = io::Error::last_os_error();
@@ -235,9 +232,9 @@ mod imp {
     use std::process::{ChildStderr, ChildStdout};
     use std::{io, slice};
 
-    use miow::Overlapped;
     use miow::iocp::{CompletionPort, CompletionStatus};
     use miow::pipe::NamedPipe;
+    use miow::Overlapped;
     use windows::Win32::Foundation::ERROR_BROKEN_PIPE;
 
     struct Pipe<'a> {
@@ -259,7 +256,6 @@ mod imp {
         port.add_handle(0, &out_pipe)?;
         port.add_handle(1, &err_pipe)?;
 
-        // FIXME(#139616): justify why this is sound.
         unsafe {
             let mut out_pipe = Pipe::new(out_pipe, &mut out);
             let mut err_pipe = Pipe::new(err_pipe, &mut err);
@@ -288,23 +284,18 @@ mod imp {
     }
 
     impl<'a> Pipe<'a> {
-        // FIXME(#139616): document caller contract.
         unsafe fn new<P: IntoRawHandle>(p: P, dst: &'a mut Vec<u8>) -> Pipe<'a> {
             Pipe {
-                dst,
-                // FIXME(#139616): justify why this is sound.
-                pipe: unsafe { NamedPipe::from_raw_handle(p.into_raw_handle()) },
+                dst: dst,
+                pipe: NamedPipe::from_raw_handle(p.into_raw_handle()),
                 overlapped: Overlapped::zero(),
                 done: false,
             }
         }
 
-        // FIXME(#139616): document caller contract.
         unsafe fn read(&mut self) -> io::Result<()> {
-            // FIXME(#139616): justify why this is sound.
-            let dst = unsafe { slice_to_end(self.dst) };
-            // FIXME(#139616): justify why this is sound.
-            match unsafe { self.pipe.read_overlapped(dst, self.overlapped.raw()) } {
+            let dst = slice_to_end(self.dst);
+            match self.pipe.read_overlapped(dst, self.overlapped.raw()) {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     if e.raw_os_error() == Some(ERROR_BROKEN_PIPE.0 as i32) {
@@ -317,18 +308,15 @@ mod imp {
             }
         }
 
-        // FIXME(#139616): document caller contract.
         unsafe fn complete(&mut self, status: &CompletionStatus) {
             let prev = self.dst.len();
-            // FIXME(#139616): justify why this is sound.
-            unsafe { self.dst.set_len(prev + status.bytes_transferred() as usize) };
+            self.dst.set_len(prev + status.bytes_transferred() as usize);
             if status.bytes_transferred() == 0 {
                 self.done = true;
             }
         }
     }
 
-    // FIXME(#139616): document caller contract.
     unsafe fn slice_to_end(v: &mut Vec<u8>) -> &mut [u8] {
         if v.capacity() == 0 {
             v.reserve(16);
@@ -336,12 +324,6 @@ mod imp {
         if v.capacity() == v.len() {
             v.reserve(1);
         }
-        // FIXME(#139616): justify why this is sound.
-        unsafe {
-            slice::from_raw_parts_mut(
-                v.as_mut_ptr().offset(v.len() as isize),
-                v.capacity() - v.len(),
-            )
-        }
+        slice::from_raw_parts_mut(v.as_mut_ptr().offset(v.len() as isize), v.capacity() - v.len())
     }
 }

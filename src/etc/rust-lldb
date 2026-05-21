@@ -4,13 +4,13 @@
 set -e
 
 # Find the host triple so we can find lldb in rustlib.
-host=$(rustc --print host-tuple)
+host=$(rustc -vV | sed -n -e 's/^host: //p')
 
 # Find out where to look for the pretty printer Python module
-RUSTC_SYSROOT=$(rustc --print sysroot)
+RUSTC_SYSROOT="$(if type "$RUSTC" >/dev/null 2>&1; then "$RUSTC" --print=sysroot; else echo /usr; fi)"
 RUST_LLDB="$RUSTC_SYSROOT/lib/rustlib/$host/bin/lldb"
 
-lldb=lldb
+lldb=lldb-17
 if [ -f "$RUST_LLDB" ]; then
     lldb="$RUST_LLDB"
 else

@@ -45,13 +45,12 @@ fn as_match() {
     // CHECK: bb0: {
     // CHECK: {{_.*}} = empty()
     // CHECK: bb1: {
-    // CHECK: [[eq:_.*]] = Eq({{.*}}, const 0_isize);
+    // CHECK: [[eq:_.*]] = Ne({{.*}}, const 1_isize);
     // CHECK-NEXT: assume(move [[eq]]);
-    // CHECK-NEXT: goto -> [[return:bb.*]];
-    // CHECK: [[return]]: {
-    // CHECK-NOT: {{bb.*}}: {
+    // CHECK-NEXT: goto -> bb2;
+    // CHECK: bb2: {
     // CHECK: return;
-    // CHECK: {{bb.*}}: {
+    // CHECK: bb3: {
     // CHECK-NEXT: unreachable;
     match empty() {
         Some(_x) => match _x {},

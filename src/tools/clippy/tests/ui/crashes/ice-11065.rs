@@ -1,5 +1,3 @@
-//@ check-pass
-
 #![warn(clippy::useless_conversion)]
 
 use std::option::IntoIter as OptionIter;

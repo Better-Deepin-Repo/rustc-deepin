@@ -1,6 +1,4 @@
-//@ edition:2015..2021
-//@ proc-macro: issue-83510.rs
-//@ ignore-backends: gcc
+//@ aux-build: issue-83510.rs
 
 extern crate issue_83510;
 

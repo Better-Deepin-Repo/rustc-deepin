@@ -3,7 +3,6 @@
 // this used to fail to build straight away without needing any kind of
 // stage1/2 builds but tidy demands it
 //@ revisions:rpass1 rpass2
-//@ ignore-backends: gcc
 
 fn main() {
     const BOO: &[u8; 0] = &[];

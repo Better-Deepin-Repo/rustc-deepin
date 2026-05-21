@@ -2,7 +2,6 @@
 import {getJson} from "../../utils/requests";
 import {STATUS_DATA_URL} from "../../urls";
 import {withLoading} from "../../utils/loading";
-import {formatSecondsAsDuration} from "../../utils/formatting";
 import {computed, ref, Ref} from "vue";
 import {
   Artifact,
@@ -25,6 +24,23 @@ async function loadStatus(loading: Ref<boolean>) {
   data.value = await withLoading(loading, () =>
     getJson<StatusResponse>(STATUS_DATA_URL)
   );
+}
+
+function formatDuration(seconds: number): string {
+  let secs = seconds % 60;
+  let mins = Math.trunc(seconds / 60);
+  let hours = Math.trunc(mins / 60);
+  mins -= hours * 60;
+
+  let s = "";
+  if (hours > 0) {
+    s = `${hours}h ${mins < 10 ? "0" + mins : mins}m ${
+      secs < 10 ? "0" + secs : secs
+    }s`;
+  } else {
+    s = `${mins < 10 ? " " + mins : mins}m ${secs < 10 ? "0" + secs : secs}s`;
+  }
+  return s;
 }
 
 function getArtifactPr(reason: MissingReason): number {
@@ -275,9 +291,7 @@ loadStatus(loading);
               <td>
                 {{ format(currentRun.expected_end, "HH:mm") }}
               </td>
-              <td>
-                {{ timeLeft <= 0 ? "?" : formatSecondsAsDuration(timeLeft) }}
-              </td>
+              <td>{{ timeLeft <= 0 ? "?" : formatDuration(timeLeft) }}</td>
             </tr>
           </tbody>
         </table>
@@ -309,11 +323,11 @@ loadStatus(loading);
                 {{
                   step.current_progress == 0
                     ? ""
-                    : formatSecondsAsDuration(step.current_progress)
+                    : formatDuration(step.current_progress)
                 }}
               </td>
               <td class="aligned">
-                {{ formatSecondsAsDuration(step.expected_duration) }}
+                {{ formatDuration(step.expected_duration) }}
               </td>
             </tr>
           </tbody>
@@ -324,7 +338,7 @@ loadStatus(loading);
         <div>
           Last collection finished at
           {{ fromUnixTime(lastFinishedRun.finished_at).toLocaleString() }} ({{
-            formatSecondsAsDuration(
+            formatDuration(
               differenceInSeconds(
                 new Date(),
                 fromUnixTime(lastFinishedRun.finished_at)
@@ -375,7 +389,7 @@ loadStatus(loading);
                 }}<template v-if="item.end_estimated"> (est.)</template>
               </td>
               <td v-if="item.duration !== null">
-                {{ formatSecondsAsDuration(item.duration) }}
+                {{ formatDuration(item.duration) }}
               </td>
               <td v-else class="centered">-</td>
               <td v-if="item.errors.length > 0">

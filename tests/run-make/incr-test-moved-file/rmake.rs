@@ -9,7 +9,10 @@
 // for successful compilation.
 // See https://github.com/rust-lang/rust/issues/83112
 
-//@ ignore-cross-compile
+//@ ignore-none
+// Reason: no-std is not supported
+//@ ignore-nvptx64-nvidia-cuda
+// FIXME: can't find crate for 'std'
 
 use run_make_support::{rfs, rustc};
 

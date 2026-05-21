@@ -40,9 +40,8 @@ SOURCE_FILE
           PLUS "+"
           WHITESPACE " "
           TYPE_BOUND
-            L_BRACK "["
+            TILDE "~"
             CONST_KW "const"
-            R_BRACK "]"
             WHITESPACE " "
             PATH_TYPE
               PATH

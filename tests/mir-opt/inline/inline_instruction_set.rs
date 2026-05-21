@@ -4,7 +4,6 @@
 //
 //@ compile-flags: --target thumbv4t-none-eabi
 //@ needs-llvm-components: arm
-//@ ignore-backends: gcc
 
 #![crate_type = "lib"]
 #![feature(rustc_attrs)]
@@ -23,14 +22,8 @@ macro_rules! asm {
     };
 }
 
-#[lang = "pointee_sized"]
-pub trait PointeeSized {}
-
-#[lang = "meta_sized"]
-pub trait MetaSized: PointeeSized {}
-
 #[lang = "sized"]
-pub trait Sized: MetaSized {}
+trait Sized {}
 #[lang = "copy"]
 trait Copy {}
 

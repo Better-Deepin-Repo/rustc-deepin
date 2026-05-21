@@ -1,12 +1,8 @@
 use super::{
-    AdtExpr, AdtExprBase, Arm, Block, ClosureExpr, Expr, ExprKind, InlineAsmExpr, InlineAsmOperand,
-    Pat, PatKind, Stmt, StmtKind, Thir,
+    AdtExpr, Arm, Block, ClosureExpr, Expr, ExprKind, InlineAsmExpr, InlineAsmOperand, Pat,
+    PatKind, Stmt, StmtKind, Thir,
 };
-use crate::thir::LoopMatchMatchData;
 
-/// Every `walk_*` method uses deconstruction to access fields of structs and
-/// enums. This will result in a compile error if a field is added, which makes
-/// it more likely the appropriate visit call will be added for it.
 pub trait Visitor<'thir, 'tcx: 'thir>: Sized {
     fn thir(&self) -> &'thir Thir<'tcx>;
 
@@ -45,9 +41,11 @@ pub fn walk_expr<'thir, 'tcx: 'thir, V: Visitor<'thir, 'tcx>>(
     expr: &'thir Expr<'tcx>,
 ) {
     use ExprKind::*;
-    let Expr { kind, ty: _, temp_scope_id: _, span: _ } = expr;
-    match *kind {
-        Scope { value, region_scope: _, hir_id: _ } => visitor.visit_expr(&visitor.thir()[value]),
+    match expr.kind {
+        Scope { value, region_scope: _, lint_level: _ } => {
+            visitor.visit_expr(&visitor.thir()[value])
+        }
+        Box { value } => visitor.visit_expr(&visitor.thir()[value]),
         If { cond, then, else_opt, if_then_scope: _ } => {
             visitor.visit_expr(&visitor.thir()[cond]);
             visitor.visit_expr(&visitor.thir()[then]);
@@ -61,9 +59,6 @@ pub fn walk_expr<'thir, 'tcx: 'thir, V: Visitor<'thir, 'tcx>>(
                 visitor.visit_expr(&visitor.thir()[arg]);
             }
         }
-        ByUse { expr, span: _ } => {
-            visitor.visit_expr(&visitor.thir()[expr]);
-        }
         Deref { arg } => visitor.visit_expr(&visitor.thir()[arg]),
         Binary { lhs, rhs, op: _ } | LogicalOp { lhs, rhs, op: _ } => {
             visitor.visit_expr(&visitor.thir()[lhs]);
@@ -73,16 +68,13 @@ pub fn walk_expr<'thir, 'tcx: 'thir, V: Visitor<'thir, 'tcx>>(
         Cast { source } => visitor.visit_expr(&visitor.thir()[source]),
         Use { source } => visitor.visit_expr(&visitor.thir()[source]),
         NeverToAny { source } => visitor.visit_expr(&visitor.thir()[source]),
-        PointerCoercion { source, cast: _, is_from_as_cast: _ } => {
-            visitor.visit_expr(&visitor.thir()[source])
-        }
+        PointerCoercion { source, cast: _ } => visitor.visit_expr(&visitor.thir()[source]),
         Let { expr, ref pat } => {
             visitor.visit_expr(&visitor.thir()[expr]);
             visitor.visit_pat(pat);
         }
         Loop { body } => visitor.visit_expr(&visitor.thir()[body]),
-        LoopMatch { match_data: box LoopMatchMatchData { scrutinee, ref arms, .. }, .. }
-        | Match { scrutinee, ref arms, .. } => {
+        Match { scrutinee, ref arms, .. } => {
             visitor.visit_expr(&visitor.thir()[scrutinee]);
             for &arm in &**arms {
                 visitor.visit_arm(&visitor.thir()[arm]);
@@ -107,7 +99,6 @@ pub fn walk_expr<'thir, 'tcx: 'thir, V: Visitor<'thir, 'tcx>>(
             }
         }
         Continue { label: _ } => {}
-        ConstContinue { value, label: _ } => visitor.visit_expr(&visitor.thir()[value]),
         Return { value } => {
             if let Some(value) = value {
                 visitor.visit_expr(&visitor.thir()[value])
@@ -134,17 +125,13 @@ pub fn walk_expr<'thir, 'tcx: 'thir, V: Visitor<'thir, 'tcx>>(
             for field in &**fields {
                 visitor.visit_expr(&visitor.thir()[field.expr]);
             }
-            if let AdtExprBase::Base(base) = base {
+            if let Some(base) = base {
                 visitor.visit_expr(&visitor.thir()[base.base]);
             }
         }
-        PlaceTypeAscription { source, user_ty: _, user_ty_span: _ }
-        | ValueTypeAscription { source, user_ty: _, user_ty_span: _ } => {
+        PlaceTypeAscription { source, user_ty: _ } | ValueTypeAscription { source, user_ty: _ } => {
             visitor.visit_expr(&visitor.thir()[source])
         }
-        PlaceUnwrapUnsafeBinder { source }
-        | ValueUnwrapUnsafeBinder { source }
-        | WrapUnsafeBinder { source } => visitor.visit_expr(&visitor.thir()[source]),
         Closure(box ClosureExpr {
             closure_id: _,
             args: _,
@@ -158,13 +145,7 @@ pub fn walk_expr<'thir, 'tcx: 'thir, V: Visitor<'thir, 'tcx>>(
         NamedConst { def_id: _, args: _, user_ty: _ } => {}
         ConstParam { param: _, def_id: _ } => {}
         StaticRef { alloc_id: _, ty: _, def_id: _ } => {}
-        InlineAsm(box InlineAsmExpr {
-            asm_macro: _,
-            ref operands,
-            template: _,
-            options: _,
-            line_spans: _,
-        }) => {
+        InlineAsm(box InlineAsmExpr { ref operands, template: _, options: _, line_spans: _ }) => {
             for op in &**operands {
                 use InlineAsmOperand::*;
                 match op {
@@ -179,12 +160,13 @@ pub fn walk_expr<'thir, 'tcx: 'thir, V: Visitor<'thir, 'tcx>>(
                     }
                     Out { expr: None, reg: _, late: _ }
                     | Const { value: _, span: _ }
-                    | SymFn { value: _ }
+                    | SymFn { value: _, span: _ }
                     | SymStatic { def_id: _ } => {}
                     Label { block } => visitor.visit_block(&visitor.thir()[*block]),
                 }
             }
         }
+        OffsetOf { container: _, fields: _ } => {}
         ThreadLocalRef(_) => {}
         Yield { value } => visitor.visit_expr(&visitor.thir()[value]),
     }
@@ -194,15 +176,14 @@ pub fn walk_stmt<'thir, 'tcx: 'thir, V: Visitor<'thir, 'tcx>>(
     visitor: &mut V,
     stmt: &'thir Stmt<'tcx>,
 ) {
-    let Stmt { kind } = stmt;
-    match kind {
+    match &stmt.kind {
         StmtKind::Expr { expr, scope: _ } => visitor.visit_expr(&visitor.thir()[*expr]),
         StmtKind::Let {
             initializer,
             remainder_scope: _,
             init_scope: _,
-            pattern,
-            hir_id: _,
+            ref pattern,
+            lint_level: _,
             else_block,
             span: _,
         } => {
@@ -221,13 +202,11 @@ pub fn walk_block<'thir, 'tcx: 'thir, V: Visitor<'thir, 'tcx>>(
     visitor: &mut V,
     block: &'thir Block,
 ) {
-    let Block { stmts, expr, targeted_by_break: _, region_scope: _, span: _, safety_mode: _ } =
-        block;
-    for &stmt in &*stmts {
+    for &stmt in &*block.stmts {
         visitor.visit_stmt(&visitor.thir()[stmt]);
     }
-    if let Some(expr) = expr {
-        visitor.visit_expr(&visitor.thir()[*expr]);
+    if let Some(expr) = block.expr {
+        visitor.visit_expr(&visitor.thir()[expr]);
     }
 }
 
@@ -235,57 +214,47 @@ pub fn walk_arm<'thir, 'tcx: 'thir, V: Visitor<'thir, 'tcx>>(
     visitor: &mut V,
     arm: &'thir Arm<'tcx>,
 ) {
-    let Arm { guard, pattern, body, hir_id: _, span: _, scope: _ } = arm;
-    if let Some(expr) = guard {
-        visitor.visit_expr(&visitor.thir()[*expr])
+    if let Some(expr) = arm.guard {
+        visitor.visit_expr(&visitor.thir()[expr])
     }
-    visitor.visit_pat(pattern);
-    visitor.visit_expr(&visitor.thir()[*body]);
+    visitor.visit_pat(&arm.pattern);
+    visitor.visit_expr(&visitor.thir()[arm.body]);
 }
 
 pub fn walk_pat<'thir, 'tcx: 'thir, V: Visitor<'thir, 'tcx>>(
     visitor: &mut V,
     pat: &'thir Pat<'tcx>,
 ) {
-    for_each_immediate_subpat(pat, |p| visitor.visit_pat(p));
-}
-
-/// Invokes `callback` on each immediate subpattern of `pat`, if any.
-/// A building block for assembling THIR pattern visitors.
-pub(crate) fn for_each_immediate_subpat<'a, 'tcx>(
-    pat: &'a Pat<'tcx>,
-    mut callback: impl FnMut(&'a Pat<'tcx>),
-) {
-    let Pat { kind, ty: _, span: _, extra: _ } = pat;
-    match kind {
-        PatKind::Missing
-        | PatKind::Wild
-        | PatKind::Binding { subpattern: None, .. }
-        | PatKind::Constant { value: _ }
-        | PatKind::Range(_)
-        | PatKind::Never
-        | PatKind::Error(_) => {}
-
-        PatKind::Binding { subpattern: Some(subpattern), .. }
-        | PatKind::Deref { subpattern, .. }
-        | PatKind::DerefPattern { subpattern, .. } => callback(subpattern),
-
-        PatKind::Variant { subpatterns, .. } | PatKind::Leaf { subpatterns } => {
-            for field_pat in subpatterns {
-                callback(&field_pat.pattern);
+    use PatKind::*;
+    match &pat.kind {
+        AscribeUserType { subpattern, ascription: _ }
+        | Deref { subpattern }
+        | DerefPattern { subpattern, .. }
+        | Binding { subpattern: Some(subpattern), .. } => visitor.visit_pat(subpattern),
+        Binding { .. } | Wild | Never | Error(_) => {}
+        Variant { subpatterns, adt_def: _, args: _, variant_index: _ } | Leaf { subpatterns } => {
+            for subpattern in subpatterns {
+                visitor.visit_pat(&subpattern.pattern);
             }
         }
-
-        PatKind::Slice { prefix, slice, suffix } | PatKind::Array { prefix, slice, suffix } => {
-            for pat in prefix.iter().chain(slice.as_deref()).chain(suffix) {
-                callback(pat);
+        Constant { value: _ } => {}
+        InlineConstant { def: _, subpattern } => visitor.visit_pat(subpattern),
+        Range(_) => {}
+        Slice { prefix, slice, suffix } | Array { prefix, slice, suffix } => {
+            for subpattern in prefix.iter() {
+                visitor.visit_pat(subpattern);
+            }
+            if let Some(pat) = slice {
+                visitor.visit_pat(pat);
+            }
+            for subpattern in suffix.iter() {
+                visitor.visit_pat(subpattern);
             }
         }
-
-        PatKind::Or { pats } => {
-            for pat in pats {
-                callback(pat);
+        Or { pats } => {
+            for pat in pats.iter() {
+                visitor.visit_pat(pat);
             }
         }
-    }
+    };
 }

@@ -1,8 +1,8 @@
-#![feature(portable_simd)]
+#![feature(portable_simd, strict_provenance, exposed_provenance)]
 
 use core_simd::simd::{
-    Simd,
     ptr::{SimdConstPtr, SimdMutPtr},
+    Simd,
 };
 
 macro_rules! common_tests {

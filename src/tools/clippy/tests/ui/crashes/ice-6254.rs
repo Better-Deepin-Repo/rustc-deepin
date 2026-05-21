@@ -1,4 +1,3 @@
-//@ check-pass
 // originally from ./tests/ui/pattern/usefulness/consts-opaque.rs
 // panicked at 'assertion failed: rows.iter().all(|r| r.len() == v.len())',
 // compiler/rustc_mir_build/src/thir/pattern/_match.rs:2030:5

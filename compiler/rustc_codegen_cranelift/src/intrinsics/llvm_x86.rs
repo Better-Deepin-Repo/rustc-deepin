@@ -3,11 +3,11 @@
 use rustc_ast::ast::{InlineAsmOptions, InlineAsmTemplatePiece};
 use rustc_target::asm::*;
 
-use crate::inline_asm::{CInlineAsmOperand, codegen_inline_asm_inner};
+use crate::inline_asm::{codegen_inline_asm_inner, CInlineAsmOperand};
 use crate::intrinsics::*;
 use crate::prelude::*;
 
-pub(super) fn codegen_x86_llvm_intrinsic_call<'tcx>(
+pub(crate) fn codegen_x86_llvm_intrinsic_call<'tcx>(
     fx: &mut FunctionCx<'_, '_, 'tcx>,
     intrinsic: &str,
     args: &[Spanned<mir::Operand<'tcx>>],
@@ -147,10 +147,10 @@ pub(super) fn codegen_x86_llvm_intrinsic_call<'tcx>(
                 let offset = fx.bcx.ins().imul(index_lane, scale);
                 let lane_ptr = fx.bcx.ins().iadd(ptr, offset);
                 let res = fx.bcx.ins().load(lane_clif_ty, MemFlags::trusted(), lane_ptr, 0);
-                fx.bcx.ins().jump(next, &[res.into()]);
+                fx.bcx.ins().jump(next, &[res]);
 
                 fx.bcx.switch_to_block(if_disabled);
-                fx.bcx.ins().jump(next, &[src_lane.into()]);
+                fx.bcx.ins().jump(next, &[src_lane]);
 
                 fx.bcx.seal_block(next);
                 fx.bcx.switch_to_block(next);
@@ -202,10 +202,9 @@ pub(super) fn codegen_x86_llvm_intrinsic_call<'tcx>(
             };
             let x = codegen_operand(fx, &x.node);
             let y = codegen_operand(fx, &y.node);
-            let kind = if let Some(const_) = kind.node.constant() {
-                crate::constant::eval_mir_constant(fx, const_).0
-            } else {
-                unreachable!("{kind:?}")
+            let kind = match &kind.node {
+                Operand::Constant(const_) => crate::constant::eval_mir_constant(fx, const_).0,
+                Operand::Copy(_) | Operand::Move(_) => unreachable!("{kind:?}"),
             };
 
             let flt_cc = match kind
@@ -1313,45 +1312,11 @@ pub(super) fn codegen_x86_llvm_intrinsic_call<'tcx>(
             ret.write_cvalue_transmute(fx, res);
         }
 
-        "llvm.x86.vcvtps2ph.128" => {
-            // https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_cvtps_ph
-            intrinsic_args!(fx, args => (a, _imm8); intrinsic);
-            let a = a.load_scalar(fx);
-
-            let imm8 =
-                if let Some(imm8) = crate::constant::mir_operand_get_const_val(fx, &args[1].node) {
-                    imm8
-                } else {
-                    fx.tcx
-                        .dcx()
-                        .span_fatal(span, "Index argument for `_mm_cvtps_ph` is not a constant");
-                };
-
-            let imm8 = imm8.to_u32();
-
-            codegen_inline_asm_inner(
-                fx,
-                &[InlineAsmTemplatePiece::String(format!("vcvtps2ph xmm0, xmm0, {imm8}").into())],
-                &[CInlineAsmOperand::InOut {
-                    reg: InlineAsmRegOrRegClass::Reg(InlineAsmReg::X86(X86InlineAsmReg::xmm0)),
-                    _late: true,
-                    in_value: a,
-                    out_place: Some(ret),
-                }],
-                InlineAsmOptions::NOSTACK | InlineAsmOptions::PURE | InlineAsmOptions::NOMEM,
-            );
-        }
-
         _ => {
             fx.tcx
                 .dcx()
                 .warn(format!("unsupported x86 llvm intrinsic {}; replacing with trap", intrinsic));
-            let msg = format!(
-                "{intrinsic} is not yet supported.\n\
-                 See https://github.com/rust-lang/rustc_codegen_cranelift/issues/171\n\
-                 Please open an issue at https://github.com/rust-lang/rustc_codegen_cranelift/issues"
-            );
-            crate::base::codegen_panic_nounwind(fx, &msg, span);
+            crate::trap::trap_unimplemented(fx, intrinsic);
             return;
         }
     }

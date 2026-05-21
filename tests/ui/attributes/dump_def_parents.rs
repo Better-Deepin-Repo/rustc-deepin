@@ -1,19 +1,18 @@
-//@ normalize-stderr: "DefId\(.+?\)" -> "DefId(..)"
+//@ normalize-stderr-test: "DefId\(.+?\)" -> "DefId(..)"
 #![feature(rustc_attrs)]
 
 fn bar() {
     fn foo() {
-        #[rustc_dump_def_parents]
         fn baz() {
-            //~^ ERROR: rustc_dump_def_parents: DefId
+            #[rustc_dump_def_parents]
             || {
+                //~^ ERROR: rustc_dump_def_parents: DefId
                 qux::<
                     {
                         //~^ ERROR: rustc_dump_def_parents: DefId
                         fn inhibits_dump() {
                             qux::<
                                 {
-                                    //~^ ERROR: rustc_dump_def_parents: DefId
                                     "hi";
                                     1
                                 },

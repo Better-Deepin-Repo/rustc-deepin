@@ -38,7 +38,6 @@ fn main() {
 
     take_range(..);
     //~^ ERROR mismatched types [E0308]
-    //~| HELP you might have meant
     //~| HELP consider borrowing here
     //~| SUGGESTION &(
 

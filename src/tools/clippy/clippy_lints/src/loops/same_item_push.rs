@@ -1,16 +1,15 @@
 use super::SAME_ITEM_PUSH;
-use clippy_utils::diagnostics::span_lint_and_then;
-use clippy_utils::msrvs::Msrv;
-use clippy_utils::res::{MaybeDef, MaybeResPath};
+use clippy_utils::diagnostics::span_lint_and_help;
+use clippy_utils::path_to_local;
 use clippy_utils::source::snippet_with_context;
-use clippy_utils::ty::implements_trait;
-use clippy_utils::{msrvs, std_or_core, sym};
+use clippy_utils::ty::{implements_trait, is_type_diagnostic_item};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::Applicability;
 use rustc_hir::def::{DefKind, Res};
-use rustc_hir::intravisit::{Visitor, walk_expr};
+use rustc_hir::intravisit::{walk_expr, Visitor};
 use rustc_hir::{BindingMode, Block, Expr, ExprKind, HirId, Mutability, Node, Pat, PatKind, Stmt, StmtKind};
 use rustc_lint::LateContext;
+use rustc_span::symbol::sym;
 use rustc_span::SyntaxContext;
 
 /// Detects for loop pushing the same item into a Vec
@@ -20,30 +19,19 @@ pub(super) fn check<'tcx>(
     _: &'tcx Expr<'_>,
     body: &'tcx Expr<'_>,
     _: &'tcx Expr<'_>,
-    msrv: Msrv,
 ) {
-    fn emit_lint(cx: &LateContext<'_>, vec: &Expr<'_>, pushed_item: &Expr<'_>, ctxt: SyntaxContext, msrv: Msrv) {
+    fn emit_lint(cx: &LateContext<'_>, vec: &Expr<'_>, pushed_item: &Expr<'_>, ctxt: SyntaxContext) {
         let mut app = Applicability::Unspecified;
         let vec_str = snippet_with_context(cx, vec.span, ctxt, "", &mut app).0;
         let item_str = snippet_with_context(cx, pushed_item.span, ctxt, "", &mut app).0;
 
-        let secondary_help = if msrv.meets(cx, msrvs::REPEAT_N)
-            && let Some(std_or_core) = std_or_core(cx)
-        {
-            format!("or `{vec_str}.extend({std_or_core}::iter::repeat_n({item_str}, SIZE))`")
-        } else {
-            format!("or `{vec_str}.resize(NEW_SIZE, {item_str})`")
-        };
-
-        span_lint_and_then(
+        span_lint_and_help(
             cx,
             SAME_ITEM_PUSH,
             vec.span,
-            "it looks like the same item is being pushed into this `Vec`",
-            |diag| {
-                diag.help(format!("consider using `vec![{item_str};SIZE]`"))
-                    .help(secondary_help);
-            },
+            "it looks like the same item is being pushed into this Vec",
+            None,
+            format!("consider using vec![{item_str};SIZE] or {vec_str}.resize(NEW_SIZE, {item_str})"),
         );
     }
 
@@ -62,7 +50,7 @@ pub(super) fn check<'tcx>(
             .tcx
             .lang_items()
             .clone_trait()
-            .is_some_and(|id| implements_trait(cx, ty, id, &[]))
+            .map_or(false, |id| implements_trait(cx, ty, id, &[]))
     {
         // Make sure that the push does not involve possibly mutating values
         match pushed_item.kind {
@@ -79,11 +67,11 @@ pub(super) fn check<'tcx>(
                         {
                             match init.kind {
                                 // immutable bindings that are initialized with literal
-                                ExprKind::Lit(..) => emit_lint(cx, vec, pushed_item, ctxt, msrv),
+                                ExprKind::Lit(..) => emit_lint(cx, vec, pushed_item, ctxt),
                                 // immutable bindings that are initialized with constant
                                 ExprKind::Path(ref path) => {
                                     if let Res::Def(DefKind::Const, ..) = cx.qpath_res(path, init.hir_id) {
-                                        emit_lint(cx, vec, pushed_item, ctxt, msrv);
+                                        emit_lint(cx, vec, pushed_item, ctxt);
                                     }
                                 },
                                 _ => {},
@@ -91,11 +79,11 @@ pub(super) fn check<'tcx>(
                         }
                     },
                     // constant
-                    Res::Def(DefKind::Const, ..) => emit_lint(cx, vec, pushed_item, ctxt, msrv),
+                    Res::Def(DefKind::Const, ..) => emit_lint(cx, vec, pushed_item, ctxt),
                     _ => {},
                 }
             },
-            ExprKind::Lit(..) => emit_lint(cx, vec, pushed_item, ctxt, msrv),
+            ExprKind::Lit(..) => emit_lint(cx, vec, pushed_item, ctxt),
             _ => {},
         }
     }
@@ -126,7 +114,7 @@ impl<'a, 'tcx> SameItemPushVisitor<'a, 'tcx> {
         if !self.non_deterministic_expr
             && !self.multiple_pushes
             && let Some((vec, _, _)) = self.vec_push
-            && let Some(hir_id) = vec.res_local_id()
+            && let Some(hir_id) = path_to_local(vec)
         {
             !self.used_locals.contains(&hir_id)
         } else {
@@ -135,14 +123,14 @@ impl<'a, 'tcx> SameItemPushVisitor<'a, 'tcx> {
     }
 }
 
-impl<'tcx> Visitor<'tcx> for SameItemPushVisitor<'_, 'tcx> {
+impl<'a, 'tcx> Visitor<'tcx> for SameItemPushVisitor<'a, 'tcx> {
     fn visit_expr(&mut self, expr: &'tcx Expr<'_>) {
         match &expr.kind {
             // Non-determinism may occur ... don't give a lint
             ExprKind::Loop(..) | ExprKind::Match(..) | ExprKind::If(..) => self.non_deterministic_expr = true,
             ExprKind::Block(block, _) => self.visit_block(block),
             _ => {
-                if let Some(hir_id) = expr.res_local_id() {
+                if let Some(hir_id) = path_to_local(expr) {
                     self.used_locals.insert(hir_id);
                 }
                 walk_expr(self, expr);
@@ -164,14 +152,15 @@ impl<'tcx> Visitor<'tcx> for SameItemPushVisitor<'_, 'tcx> {
                 StmtKind::Expr(expr) | StmtKind::Semi(expr) => self.visit_expr(expr),
                 _ => {},
             }
-        }
-        // Current statement is a push ...check whether another
-        // push had been previously done
-        else if self.vec_push.is_none() {
-            self.vec_push = vec_push_option;
         } else {
-            // There are multiple pushes ... don't lint
-            self.multiple_pushes = true;
+            // Current statement is a push ...check whether another
+            // push had been previously done
+            if self.vec_push.is_none() {
+                self.vec_push = vec_push_option;
+            } else {
+                // There are multiple pushes ... don't lint
+                self.multiple_pushes = true;
+            }
         }
     }
 }
@@ -183,11 +172,13 @@ fn get_vec_push<'tcx>(
     stmt: &'tcx Stmt<'_>,
 ) -> Option<(&'tcx Expr<'tcx>, &'tcx Expr<'tcx>, SyntaxContext)> {
     if let StmtKind::Semi(semi_stmt) = &stmt.kind
-            // Extract method being called and figure out the parameters for the method call
-            && let ExprKind::MethodCall(path, self_expr, [pushed_item], _) = &semi_stmt.kind
+            // Extract method being called
+            && let ExprKind::MethodCall(path, self_expr, args, _) = &semi_stmt.kind
+            // Figure out the parameters for the method call
+            && let Some(pushed_item) = args.first()
             // Check that the method being called is push() on a Vec
-            && path.ident.name == sym::push
-            && cx.typeck_results().expr_ty(self_expr).is_diag_item(cx, sym::Vec)
+            && is_type_diagnostic_item(cx, cx.typeck_results().expr_ty(self_expr), sym::Vec)
+            && path.ident.name.as_str() == "push"
     {
         return Some((self_expr, pushed_item, semi_stmt.span.ctxt()));
     }

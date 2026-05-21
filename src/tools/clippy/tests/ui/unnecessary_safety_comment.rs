@@ -1,26 +1,22 @@
 #![warn(clippy::undocumented_unsafe_blocks, clippy::unnecessary_safety_comment)]
-#![allow(clippy::let_unit_value, clippy::missing_safety_doc, clippy::needless_ifs)]
+#![allow(clippy::let_unit_value, clippy::missing_safety_doc, clippy::needless_if)]
 
 mod unsafe_items_invalid_comment {
     // SAFETY:
     const CONST: u32 = 0;
-    //~^ unnecessary_safety_comment
-
+    //~^ ERROR: constant item has unnecessary safety comment
     // SAFETY:
     static STATIC: u32 = 0;
-    //~^ unnecessary_safety_comment
-
+    //~^ ERROR: static item has unnecessary safety comment
     // SAFETY:
     struct Struct;
-    //~^ unnecessary_safety_comment
-
+    //~^ ERROR: struct has unnecessary safety comment
     // SAFETY:
     enum Enum {}
-    //~^ unnecessary_safety_comment
-
+    //~^ ERROR: enum has unnecessary safety comment
     // SAFETY:
     mod module {}
-    //~^ unnecessary_safety_comment
+    //~^ ERROR: module has unnecessary safety comment
 }
 
 mod unnecessary_from_macro {
@@ -40,7 +36,6 @@ mod unnecessary_from_macro {
         ($t:ty) => {
             // Safety: unnecessary
             impl T for $t {}
-            //~^ unnecessary_safety_comment
         };
     }
 
@@ -50,15 +45,15 @@ mod unnecessary_from_macro {
 fn unnecessary_on_stmt_and_expr() -> u32 {
     // SAFETY: unnecessary
     let num = 42;
-    //~^ unnecessary_safety_comment
+    //~^ ERROR: statement has unnecessary safety comment
 
     // SAFETY: unnecessary
     if num > 24 {}
-    //~^ unnecessary_safety_comment
+    //~^ ERROR: statement has unnecessary safety comment
 
     // SAFETY: unnecessary
     24
-    //~^ unnecessary_safety_comment
+    //~^ ERROR: expression has unnecessary safety comment
 }
 
 mod issue_10084 {

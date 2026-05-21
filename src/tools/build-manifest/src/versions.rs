@@ -11,54 +11,29 @@ use xz2::read::XzDecoder;
 const DEFAULT_TARGET: &str = "x86_64-unknown-linux-gnu";
 
 macro_rules! pkg_type {
-    ( $($variant:ident = $component:literal $(; preview = true $(@$is_preview:tt)? )? $(; suffixes = [$($suffixes:literal),+] $(@$is_suffixed:tt)? )? ),+ $(,)? ) => {
+    ( $($variant:ident = $component:literal $(; preview = true $(@$is_preview:tt)? )? ),+ $(,)? ) => {
         #[derive(Debug, Hash, Eq, PartialEq, Clone)]
         pub(crate) enum PkgType {
-            $($variant $( $($is_suffixed)? { suffix: &'static str })?,)+
+            $($variant,)+
         }
 
         impl PkgType {
             pub(crate) fn is_preview(&self) -> bool {
                 match self {
-                    $( PkgType::$variant $($($is_suffixed)? { .. })? => false $( $($is_preview)? || true)?, )+
+                    $( $( $($is_preview)? PkgType::$variant => true, )? )+
+                    _ => false,
                 }
             }
 
-            /// First part of the tarball name. May include a suffix, if the package has one.
-            pub(crate) fn tarball_component_name(&self) -> String {
+            /// First part of the tarball name.
+            pub(crate) fn tarball_component_name(&self) -> &str {
                 match self {
-                    $( PkgType::$variant $($($is_suffixed)? { suffix })? => {
-                        #[allow(unused_mut)]
-                        let mut name = $component.to_owned();
-                        $($($is_suffixed)?
-                        name.push('-');
-                        name.push_str(suffix);
-                        )?
-                        name
-                    },)+
+                    $( PkgType::$variant => $component,)+
                 }
             }
 
-            pub(crate) fn all() -> Vec<PkgType> {
-                let mut packages = vec![];
-                $(
-                    // Push the single variant
-                    packages.push(PkgType::$variant $($($is_suffixed)? { suffix: "" })?);
-                    // Macro hell, we have to remove the fake empty suffix if we actually have
-                    // suffixes
-                    $(
-                        $($is_suffixed)?
-                        packages.pop();
-                    )?
-                    // And now add the suffixes, if any
-                    $(
-                        $($is_suffixed)?
-                        $(
-                            packages.push(PkgType::$variant { suffix: $suffixes });
-                        )+
-                    )?
-                )+
-                packages
+            pub(crate) fn all() -> &'static [PkgType] {
+                &[ $(PkgType::$variant),+ ]
             }
         }
     }
@@ -76,6 +51,7 @@ pkg_type! {
     Cargo = "cargo",
     HtmlDocs = "rust-docs",
     RustAnalysis = "rust-analysis",
+    Rls = "rls"; preview = true,
     RustAnalyzer = "rust-analyzer"; preview = true,
     Clippy = "clippy"; preview = true,
     Rustfmt = "rustfmt"; preview = true,
@@ -84,10 +60,6 @@ pkg_type! {
     JsonDocs = "rust-docs-json"; preview = true,
     RustcCodegenCranelift = "rustc-codegen-cranelift"; preview = true,
     LlvmBitcodeLinker = "llvm-bitcode-linker"; preview = true,
-    RustcCodegenGcc = "rustc-codegen-gcc"; preview = true,
-    Gcc = "gcc"; preview = true; suffixes = [
-        "x86_64-unknown-linux-gnu"
-    ],
 }
 
 impl PkgType {
@@ -96,7 +68,7 @@ impl PkgType {
         if self.is_preview() {
             format!("{}-preview", self.tarball_component_name())
         } else {
-            self.tarball_component_name()
+            self.tarball_component_name().to_string()
         }
     }
 
@@ -105,14 +77,13 @@ impl PkgType {
     fn should_use_rust_version(&self) -> bool {
         match self {
             PkgType::Cargo => false,
+            PkgType::Rls => false,
             PkgType::RustAnalyzer => false,
             PkgType::Clippy => false,
             PkgType::Rustfmt => false,
             PkgType::LlvmTools => false,
             PkgType::Miri => false,
             PkgType::RustcCodegenCranelift => false,
-            PkgType::RustcCodegenGcc => false,
-            PkgType::Gcc { suffix: _ } => false,
 
             PkgType::Rust => true,
             PkgType::RustStd => true,
@@ -142,19 +113,12 @@ impl PkgType {
             RustcDocs => HOSTS,
             Cargo => HOSTS,
             RustcCodegenCranelift => HOSTS,
-            RustcCodegenGcc => HOSTS,
-            // Gcc is "special", because we need a separate libgccjit.so for each
-            // (host, target) compilation pair. So it's even more special than stdlib, which has a
-            // separate component per target. This component thus hardcodes its compilation
-            // target in its name, and we thus ship it for HOSTS only. So we essentially have
-            // gcc-T1, gcc-T2, a separate *component/package* per each compilation target.
-            // So on host T1, if you want to compile for T2, you would install gcc-T2.
-            Gcc { suffix: _ } => HOSTS,
             RustMingw => MINGW,
             RustStd => TARGETS,
             HtmlDocs => HOSTS,
             JsonDocs => HOSTS,
             RustSrc => &["*"],
+            Rls => HOSTS,
             RustAnalyzer => HOSTS,
             Clippy => HOSTS,
             Miri => HOSTS,
@@ -172,7 +136,10 @@ impl PkgType {
 
     /// Whether to package these target-specific docs for another similar target.
     pub(crate) fn use_docs_fallback(&self) -> bool {
-        matches!(self, PkgType::JsonDocs | PkgType::HtmlDocs | PkgType::RustcDocs)
+        match self {
+            PkgType::JsonDocs | PkgType::HtmlDocs => true,
+            _ => false,
+        }
     }
 }
 

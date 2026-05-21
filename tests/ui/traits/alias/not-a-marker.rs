@@ -1,7 +1,7 @@
 #![feature(trait_alias, marker_trait_attr)]
 
 #[marker]
-//~^ ERROR attribute cannot be used on
+//~^ ERROR attribute should be applied to a trait
 trait Foo = Send;
 
 fn main() {}

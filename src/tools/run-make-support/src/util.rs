@@ -21,19 +21,16 @@ pub(crate) fn handle_failed_output(
     eprintln!("output status: `{}`", output.status());
     eprintln!("=== STDOUT ===\n{}\n\n", output.stdout_utf8());
     eprintln!("=== STDERR ===\n{}\n\n", output.stderr_utf8());
-    if !cmd.get_context().is_empty() {
-        eprintln!("Context:\n{}", cmd.get_context());
-    }
     std::process::exit(1)
 }
 
-/// Set the runtime library paths as needed for running the host compilers (rustc/rustdoc/etc).
-pub(crate) fn set_host_compiler_dylib_path(cmd: &mut Command) {
+/// Set the runtime library path as needed for running the host rustc/rustdoc/etc.
+pub(crate) fn set_host_rpath(cmd: &mut Command) {
     let ld_lib_path_envvar = env_var("LD_LIB_PATH_ENVVAR");
     cmd.env(&ld_lib_path_envvar, {
         let mut paths = vec![];
         paths.push(cwd());
-        paths.push(PathBuf::from(env_var("HOST_RUSTC_DYLIB_PATH")));
+        paths.push(PathBuf::from(env_var("HOST_RPATH_DIR")));
         for p in std::env::split_paths(&env_var(&ld_lib_path_envvar)) {
             paths.push(p.to_path_buf());
         }

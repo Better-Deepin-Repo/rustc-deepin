@@ -1,17 +1,10 @@
-use ide_db::{
-    source_change::SourceChangeBuilder, syntax_helpers::node_ext::for_each_break_and_continue_expr,
-};
+use ide_db::syntax_helpers::node_ext::for_each_break_and_continue_expr;
 use syntax::{
-    SyntaxToken, T,
-    ast::{
-        self, AstNode, HasLoopBody,
-        make::{self, tokens},
-        syntax_factory::SyntaxFactory,
-    },
-    syntax_editor::{Position, SyntaxEditor},
+    ast::{self, AstNode, HasLoopBody},
+    T,
 };
 
-use crate::{AssistContext, AssistId, Assists};
+use crate::{AssistContext, AssistId, AssistKind, Assists};
 
 // Assist: add_label_to_loop
 //
@@ -28,9 +21,9 @@ use crate::{AssistContext, AssistId, Assists};
 // ->
 // ```
 // fn main() {
-//     ${1:'l}: loop {
-//         break ${2:'l};
-//         continue ${0:'l};
+//     'l: loop {
+//         break 'l;
+//         continue 'l;
 //     }
 // }
 // ```
@@ -42,58 +35,32 @@ pub(crate) fn add_label_to_loop(acc: &mut Assists, ctx: &AssistContext<'_>) -> O
     }
 
     acc.add(
-        AssistId::generate("add_label_to_loop"),
+        AssistId("add_label_to_loop", AssistKind::Generate),
         "Add Label",
         loop_expr.syntax().text_range(),
         |builder| {
-            let make = SyntaxFactory::with_mappings();
-            let mut editor = builder.make_editor(loop_expr.syntax());
-
-            let label = make.lifetime("'l");
-            let elements = vec![
-                label.syntax().clone().into(),
-                make::token(T![:]).into(),
-                tokens::single_space().into(),
-            ];
-            editor.insert_all(Position::before(&loop_kw), elements);
-
-            if let Some(cap) = ctx.config.snippet_cap {
-                editor.add_annotation(label.syntax(), builder.make_placeholder_snippet(cap));
-            }
+            builder.insert(loop_kw.text_range().start(), "'l: ");
 
             let loop_body = loop_expr.loop_body().and_then(|it| it.stmt_list());
-            for_each_break_and_continue_expr(loop_expr.label(), loop_body, &mut |expr| {
-                let token = match expr {
-                    ast::Expr::BreakExpr(break_expr) => break_expr.break_token(),
-                    ast::Expr::ContinueExpr(continue_expr) => continue_expr.continue_token(),
-                    _ => return,
-                };
-                if let Some(token) = token {
-                    insert_label_after_token(&mut editor, &make, &token, ctx, builder);
-                }
-            });
-
-            editor.add_mappings(make.finish_with_mappings());
-            builder.add_file_edits(ctx.vfs_file_id(), editor);
-            builder.rename();
+            for_each_break_and_continue_expr(
+                loop_expr.label(),
+                loop_body,
+                &mut |expr| match expr {
+                    ast::Expr::BreakExpr(break_expr) => {
+                        if let Some(break_token) = break_expr.break_token() {
+                            builder.insert(break_token.text_range().end(), " 'l")
+                        }
+                    }
+                    ast::Expr::ContinueExpr(continue_expr) => {
+                        if let Some(continue_token) = continue_expr.continue_token() {
+                            builder.insert(continue_token.text_range().end(), " 'l")
+                        }
+                    }
+                    _ => {}
+                },
+            );
         },
     )
-}
-
-fn insert_label_after_token(
-    editor: &mut SyntaxEditor,
-    make: &SyntaxFactory,
-    token: &SyntaxToken,
-    ctx: &AssistContext<'_>,
-    builder: &mut SourceChangeBuilder,
-) {
-    let label = make.lifetime("'l");
-    let elements = vec![tokens::single_space().into(), label.syntax().clone().into()];
-    editor.insert_all(Position::after(token), elements);
-
-    if let Some(cap) = ctx.config.snippet_cap {
-        editor.add_annotation(label.syntax(), builder.make_placeholder_snippet(cap));
-    }
 }
 
 #[cfg(test)]
@@ -115,9 +82,9 @@ fn main() {
 }"#,
             r#"
 fn main() {
-    ${1:'l}: loop {
-        break ${2:'l};
-        continue ${0:'l};
+    'l: loop {
+        break 'l;
+        continue 'l;
     }
 }"#,
         );
@@ -140,9 +107,9 @@ fn main() {
 }"#,
             r#"
 fn main() {
-    ${1:'l}: loop {
-        break ${2:'l};
-        continue ${0:'l};
+    'l: loop {
+        break 'l;
+        continue 'l;
         loop {
             break;
             continue;
@@ -172,9 +139,9 @@ fn main() {
     loop {
         break;
         continue;
-        ${1:'l}: loop {
-            break ${2:'l};
-            continue ${0:'l};
+        'l: loop {
+            break 'l;
+            continue 'l;
         }
     }
 }"#,

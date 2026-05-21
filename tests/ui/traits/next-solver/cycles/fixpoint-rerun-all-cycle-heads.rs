@@ -1,24 +1,23 @@
 //@ compile-flags: -Znext-solver
 #![feature(rustc_attrs)]
-#![rustc_no_implicit_bounds]
 
 // Check that we correctly rerun the trait solver for heads of cycles,
 // even if they are not the root.
 
-struct A<T>(*const T);
-struct B<T>(*const T);
-struct C<T>(*const T);
+struct A<T: ?Sized>(*const T);
+struct B<T: ?Sized>(*const T);
+struct C<T: ?Sized>(*const T);
 
 #[rustc_coinductive]
 trait Trait<'a, 'b> {}
 trait NotImplemented {}
 
-impl<'a, 'b, T> Trait<'a, 'b> for A<T> where B<T>: Trait<'a, 'b> {}
+impl<'a, 'b, T: ?Sized> Trait<'a, 'b> for A<T> where B<T>: Trait<'a, 'b> {}
 
 // With this the root of `B<T>` is `A<T>`, even if the other impl does
 // not have a cycle with `A<T>`. This candidate never applies because of
 // the `A<T>: NotImplemented` bound.
-impl<'a, 'b, T> Trait<'a, 'b> for B<T>
+impl<'a, 'b, T: ?Sized> Trait<'a, 'b> for B<T>
 where
     A<T>: Trait<'a, 'b>,
     A<T>: NotImplemented,
@@ -32,7 +31,7 @@ where
 // use the impl itself to prove that adds region constraints as we uniquified the
 // regions in the `A<T>: Trait<'a, 'b>` where-bound. As both the impl above
 // and the impl below now apply with some constraints, we failed with ambiguity.
-impl<'a, 'b, T> Trait<'a, 'b> for B<T>
+impl<'a, 'b, T: ?Sized> Trait<'a, 'b> for B<T>
 where
     A<T>: NotImplemented,
 {}
@@ -41,7 +40,7 @@ where
 //
 // Because of the coinductive cycle through `C<T>` it also requires
 // 'a to be 'static.
-impl<'a, T> Trait<'a, 'static> for B<T>
+impl<'a, T: ?Sized> Trait<'a, 'static> for B<T>
 where
     C<T>: Trait<'a, 'a>,
 {}
@@ -49,14 +48,14 @@ where
 // In the first iteration of `B<T>: Trait<'a, 'b>` we don't add any
 // constraints here, only after setting the provisional result to require
 // `'b == 'static` do we also add that constraint for `'a`.
-impl<'a, 'b, T> Trait<'a, 'b> for C<T>
+impl<'a, 'b, T: ?Sized> Trait<'a, 'b> for C<T>
 where
     B<T>: Trait<'a, 'b>,
 {}
 
-fn impls_trait<'a, 'b, T: Trait<'a, 'b>>() {}
+fn impls_trait<'a, 'b, T: Trait<'a, 'b> + ?Sized>() {}
 
-fn check<'a, T>() {
+fn check<'a, T: ?Sized>() {
     impls_trait::<'a, 'static, A<T>>();
     //~^ ERROR lifetime may not live long enough
 }

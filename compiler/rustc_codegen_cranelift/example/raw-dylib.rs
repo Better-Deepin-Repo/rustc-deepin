@@ -5,7 +5,7 @@ fn main() {
     #[cfg(windows)]
     {
         #[link(name = "kernel32", kind = "raw-dylib")]
-        unsafe extern "C" {
+        extern "C" {
             fn GetModuleFileNameA(
                 module: *mut std::ffi::c_void,
                 filename: *mut u8,

@@ -23,14 +23,12 @@ structs!(Bar, Baz);
 "#,
         expect![[r#"
             crate
-            - Foo : type
-            - nested : type
-            - (legacy) structs : macro!
+            Foo: t
+            nested: t
 
             crate::nested
-            - Bar : type
-            - Baz : type
-            - (legacy) structs : macro!
+            Bar: t
+            Baz: t
         "#]],
     );
 }
@@ -55,25 +53,20 @@ struct Y;
 "#,
         expect![[r#"
             crate
-            - m : type
-            - n1 : type
-            - (legacy) m : macro!
+            m: t
+            n1: t
 
             crate::m
-            - n3 : type
-            - (legacy) m : macro!
+            n3: t
 
             crate::m::n3
-            - Y : type value
-            - (legacy) m : macro!
+            Y: t v
 
             crate::n1
-            - n2 : type
-            - (legacy) m : macro!
+            n2: t
 
             crate::n1::n2
-            - X : type value
-            - (legacy) m : macro!
+            X: t v
         "#]],
     );
 }
@@ -99,14 +92,14 @@ macro_rules! structs {
 "#,
         expect![[r#"
             crate
-            - Bar : type
-            - Foo : type
-            - bar : type
+            Bar: t
+            Foo: t
+            bar: t
 
             crate::bar
-            - Bar : type (glob)
-            - Foo : type (glob)
-            - bar : type (glob)
+            Bar: t
+            Foo: t
+            bar: t
         "#]],
     );
 }
@@ -132,14 +125,14 @@ macro_rules! structs {
 "#,
         expect![[r#"
             crate
-            - Bar : type
-            - Foo : type
-            - bar : type
+            Bar: t
+            Foo: t
+            bar: t
 
             crate::bar
-            - Bar : type (glob)
-            - Foo : type (glob)
-            - bar : type (glob)
+            Bar: t
+            Foo: t
+            bar: t
         "#]],
     );
 }
@@ -171,14 +164,14 @@ macro_rules! inner {
 "#,
         expect![[r#"
             crate
-            - Bar : type
-            - Foo : type
-            - bar : type
+            Bar: t
+            Foo: t
+            bar: t
 
             crate::bar
-            - Bar : type (glob)
-            - Foo : type (glob)
-            - bar : type (glob)
+            Bar: t
+            Foo: t
+            bar: t
         "#]],
     );
 }
@@ -213,10 +206,9 @@ macro_rules! bar {
 "#,
         expect![[r#"
             crate
-            - Foo : type
-            - bar : macro! (import)
-            - foo : macro! (import)
-            - (legacy) baz : macro!
+            Foo: t
+            bar: mi
+            foo: mi
         "#]],
     );
 }
@@ -260,13 +252,13 @@ mod priv_mod {
 "#,
         expect![[r#"
             crate
-            - Bar : type value
-            - Foo : type value
-            - bar : type
-            - foo : type (extern)
+            Bar: t v
+            Foo: t v
+            bar: t
+            foo: te
 
             crate::bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -324,15 +316,15 @@ macro_rules! baz3 { () => { struct OkBaz3; } }
 "#,
         expect![[r#"
             crate
-            - OkBar1 : type value
-            - OkBar2 : type value
-            - OkBar3 : type value
-            - OkBaz1 : type value
-            - OkBaz2 : type value
-            - OkBaz3 : type value
-            - all : type (extern)
-            - empty : type (extern)
-            - multiple : type (extern)
+            OkBar1: t v
+            OkBar2: t v
+            OkBar3: t v
+            OkBaz1: t v
+            OkBaz2: t v
+            OkBaz3: t v
+            all: te
+            empty: te
+            multiple: te
         "#]],
     );
 }
@@ -378,13 +370,13 @@ macro_rules! structs_outside {
 "#,
         expect![[r#"
             crate
-            - Bar : type value
-            - Foo : type value
-            - Out : type value
-            - bar : type
+            Bar: t v
+            Foo: t v
+            Out: t v
+            bar: t
 
             crate::bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -406,10 +398,9 @@ mod prelude {
 "#,
         expect![[r#"
             crate
-            - prelude : type
+            prelude: t
 
             crate::prelude
-            - (legacy) declare_mod : macro!
         "#]],
     );
 }
@@ -428,8 +419,7 @@ macro_rules! m {
 "#,
         expect![[r#"
             crate
-            - S : type value
-            - (legacy) m : macro!
+            S: t v
         "#]],
     );
     // FIXME: should not expand. legacy macro scoping is not implemented.
@@ -509,55 +499,40 @@ macro_rules! baz {
 "#,
         expect![[r#"
             crate
-            - NotFoundBefore : type value
-            - Ok : type value
-            - OkAfter : type value
-            - OkShadowStop : type value
-            - m1 : type
-            - m2 : type
-            - m3 : type
-            - m5 : type
-            - m7 : type
-            - ok_double_macro_use_shadow : value
-            - (legacy) baz : macro!
-            - (legacy) foo : macro! macro! macro!
+            NotFoundBefore: t v
+            Ok: t v
+            OkAfter: t v
+            OkShadowStop: t v
+            m1: t
+            m2: t
+            m3: t
+            m5: t
+            m7: t
+            ok_double_macro_use_shadow: v
 
             crate::m1
-            - (legacy) bar : macro!
 
             crate::m2
 
             crate::m3
-            - OkAfterInside : type value
-            - OkMacroUse : type value
-            - OkMacroUseInner : type value
-            - m4 : type
-            - m5 : type
-            - ok_shadow : value
-            - (legacy) bar : macro! macro!
-            - (legacy) baz : macro!
-            - (legacy) foo : macro! macro! macro! macro!
+            OkAfterInside: t v
+            OkMacroUse: t v
+            OkMacroUseInner: t v
+            m4: t
+            m5: t
+            ok_shadow: v
 
             crate::m3::m4
-            - ok_shadow_deep : value
-            - (legacy) bar : macro!
-            - (legacy) foo : macro! macro!
+            ok_shadow_deep: v
 
             crate::m3::m5
-            - (legacy) bar : macro!
-            - (legacy) baz : macro!
-            - (legacy) foo : macro! macro! macro!
 
             crate::m5
-            - m6 : type
-            - (legacy) foo : macro! macro!
+            m6: t
 
             crate::m5::m6
-            - (legacy) foo : macro! macro!
 
             crate::m7
-            - (legacy) baz : macro!
-            - (legacy) foo : macro! macro!
         "#]],
     );
     // FIXME: should not see `NotFoundBefore`
@@ -580,10 +555,9 @@ fn baz() {}
 "#,
         expect![[r#"
             crate
-            - bar : type (import) macro! (import)
-            - baz : type (import) value macro! (import)
-            - foo : type macro!
-            - (legacy) foo : macro!
+            bar: ti mi
+            baz: ti v mi
+            foo: t m
         "#]],
     );
 }
@@ -611,9 +585,9 @@ mod m {
 "#,
         expect![[r#"
             crate
-            - Alias : type value
-            - Direct : type value
-            - foo : type (extern)
+            Alias: t v
+            Direct: t v
+            foo: te
         "#]],
     );
 }
@@ -649,22 +623,19 @@ mod m {
 "#,
         expect![[r#"
             crate
-            - OkAliasCrate : type value
-            - OkAliasPlain : type value
-            - OkAliasSuper : type value
-            - OkCrate : type value
-            - OkPlain : type value
-            - bar : macro!
-            - m : type
-            - (legacy) foo : macro!
+            OkAliasCrate: t v
+            OkAliasPlain: t v
+            OkAliasSuper: t v
+            OkCrate: t v
+            OkPlain: t v
+            bar: m
+            m: t
 
             crate::m
-            - alias1 : macro! (import)
-            - alias2 : macro! (import)
-            - alias3 : macro! (import)
-            - not_found : _
-            - (legacy) bar : macro!
-            - (legacy) foo : macro!
+            alias1: mi
+            alias2: mi
+            alias3: mi
+            not_found: _
         "#]],
     );
 }
@@ -715,16 +686,14 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - Bar : type (import) value (import)
-            - Baz : type (import) value (import)
-            - Foo : type value
-            - FooSelf : type (import) value (import)
-            - foo : type (extern)
-            - m : type
-            - (legacy) current : macro!
+            Bar: ti vi
+            Baz: ti vi
+            Foo: t v
+            FooSelf: ti vi
+            foo: te
+            m: t
 
             crate::m
-            - (legacy) current : macro!
         "#]],
     );
 }
@@ -760,14 +729,14 @@ pub struct bar;
 "#,
         expect![[r#"
             crate
-            - bar : type (import) value (import)
+            bar: ti vi
         "#]],
     );
 }
 
 #[test]
 fn macro_dollar_crate_is_correct_in_derive_meta() {
-    compute_crate_def_map(
+    let map = compute_crate_def_map(
         r#"
 //- minicore: derive, clone
 //- /main.rs crate:main deps:lib
@@ -784,13 +753,13 @@ macro_rules! foo {
 
 pub use core::clone::Clone;
 "#,
-        |map| assert_eq!(map.modules[map.root].scope.builtin_derive_impls().len(), 1),
     );
+    assert_eq!(map.modules[DefMap::ROOT].scope.impls().len(), 1);
 }
 
 #[test]
 fn expand_derive() {
-    compute_crate_def_map(
+    let map = compute_crate_def_map(
         r#"
 //- /main.rs crate:main deps:core
 use core::Copy;
@@ -806,8 +775,8 @@ pub macro Copy {}
 #[rustc_builtin_macro]
 pub macro Clone {}
 "#,
-        |map| assert_eq!(map.modules[map.root].scope.builtin_derive_impls().len(), 2),
     );
+    assert_eq!(map.modules[DefMap::ROOT].scope.impls().len(), 2);
 }
 
 #[test]
@@ -825,7 +794,7 @@ pub trait Clone {}
 "#,
         expect![[r#"
             crate
-            - Clone : type (glob) macro# (glob)
+            Clone: t m
         "#]],
     );
 }
@@ -834,7 +803,7 @@ pub trait Clone {}
 fn builtin_derive_with_unresolved_attributes_fall_back() {
     // Tests that we still resolve derives after ignoring an unresolved attribute.
     cov_mark::check!(unresolved_attribute_fallback);
-    compute_crate_def_map(
+    let map = compute_crate_def_map(
         r#"
 //- /main.rs crate:main deps:core
 use core::{Clone, derive};
@@ -849,8 +818,8 @@ pub macro derive($item:item) {}
 #[rustc_builtin_macro]
 pub macro Clone {}
 "#,
-        |map| assert_eq!(map.modules[map.root].scope.builtin_derive_impls().len(), 1),
     );
+    assert_eq!(map.modules[DefMap::ROOT].scope.impls().len(), 1);
 }
 
 #[test]
@@ -873,11 +842,11 @@ fn unresolved_attributes_fall_back_track_per_file_moditems() {
         "#,
         expect![[r#"
             crate
-            - Foo : type value
-            - submod : type
+            Foo: t v
+            submod: t
 
             crate::submod
-            - Bar : type value
+            Bar: t v
         "#]],
     );
 }
@@ -894,9 +863,9 @@ extern "C" {
 }
     "#,
         expect![[r#"
-            crate
-            - f : value
-        "#]],
+        crate
+        f: v
+    "#]],
     );
 }
 
@@ -914,8 +883,7 @@ extern {
     "#,
         expect![[r#"
             crate
-            - S : value
-            - (legacy) m : macro!
+            S: v
         "#]],
     );
 }
@@ -941,8 +909,8 @@ fn derive() {}
         "#,
         expect![[r#"
             crate
-            - S : type value
-            - derive : macro#
+            S: t v
+            derive: m
         "#]],
     );
 }
@@ -964,7 +932,7 @@ enum E {
 "#,
         expect![[r#"
             crate
-            - E : type
+            E: t
         "#]],
     );
 }
@@ -979,7 +947,7 @@ struct S;
         "#,
         expect![[r#"
             crate
-            - S : type value
+            S: t v
         "#]],
     );
 }
@@ -1007,8 +975,6 @@ b! { static = #[] ();}
 "#,
         expect![[r#"
             crate
-            - (legacy) a : macro!
-            - (legacy) b : macro!
         "#]],
     );
 }
@@ -1029,9 +995,7 @@ indirect_macro!();
     "#,
         expect![[r#"
             crate
-            - S : type
-            - (legacy) indirect_macro : macro!
-            - (legacy) item : macro!
+            S: t
         "#]],
     );
 }
@@ -1065,11 +1029,13 @@ pub fn derive_macro_2(_item: TokenStream) -> TokenStream {
 "#,
         expect![[r#"
             crate
-            - AnotherTrait : macro#
-            - DummyTrait : macro#
-            - TokenStream : type value
-            - attribute_macro : macro#
-            - function_like_macro : macro!
+            AnotherTrait: m
+            DummyTrait: m
+            TokenStream: t v
+            attribute_macro: v m
+            derive_macro: v
+            derive_macro_2: v
+            function_like_macro: v m
         "#]],
     );
 }
@@ -1109,9 +1075,9 @@ macro_rules! mbe {
 "#,
         expect![[r#"
             crate
-            - DummyTrait : macro# (glob)
-            - attribute_macro : macro# (glob)
-            - function_like_macro : macro! (glob)
+            DummyTrait: m
+            attribute_macro: m
+            function_like_macro: m
         "#]],
     );
 }
@@ -1129,8 +1095,8 @@ pub fn derive_macro_2(_item: TokenStream) -> TokenStream {
 }
 "#,
     );
-    let krate = *db.all_crates().last().expect("no crate graph present");
-    let def_map = crate_def_map(&db, krate);
+    let krate = db.crate_graph().iter().next().unwrap();
+    let def_map = db.crate_def_map(krate);
 
     assert_eq!(def_map.data.exported_derives.len(), 1);
     match def_map.data.exported_derives.values().next() {
@@ -1153,8 +1119,8 @@ structs!(Foo);
 "#,
         expect![[r#"
             crate
-            - Foo : type
-            - structs : macro!
+            Foo: t
+            structs: m
         "#]],
     );
 }
@@ -1177,7 +1143,7 @@ pub mod prelude {
         "#,
         expect![[r#"
             crate
-            - S : type value
+            S: t v
         "#]],
     )
 }
@@ -1195,7 +1161,6 @@ m!(
 "#,
         expect![[r#"
             crate
-            - (legacy) m : macro!
         "#]],
     )
 }
@@ -1228,15 +1193,12 @@ struct A;
 struct B;
 "#,
         expect![[r#"
-            crate
-            - A : type value
-            - B : type value
-            - inner_a : macro!
-            - inner_b : macro!
-            - (legacy) include : macro!
-            - (legacy) inner_a : macro!
-            - (legacy) inner_b : macro!
-        "#]],
+        crate
+        A: t v
+        B: t v
+        inner_a: m
+        inner_b: m
+    "#]],
     );
 }
 
@@ -1265,11 +1227,8 @@ struct A;
 "#,
         expect![[r#"
             crate
-            - A : type value
-            - inner : macro!
-            - (legacy) include : macro!
-            - (legacy) inner : macro!
-            - (legacy) m : macro!
+            A: t v
+            inner: m
         "#]],
     );
     // eager -> MBE -> $crate::mbe
@@ -1297,11 +1256,8 @@ struct A;
 "#,
         expect![[r#"
             crate
-            - A : type value
-            - inner : macro!
-            - (legacy) include : macro!
-            - (legacy) inner : macro!
-            - (legacy) n : macro!
+            A: t v
+            inner: m
         "#]],
     );
 }
@@ -1336,20 +1292,20 @@ pub mod ip_address {
 "#,
         expect![[r#"
             crate
-            - company_name : type
+            company_name: t
 
             crate::company_name
-            - network : type
+            network: t
 
             crate::company_name::network
-            - v1 : type
+            v1: t
 
             crate::company_name::network::v1
-            - IpAddress : type
-            - ip_address : type
+            IpAddress: t
+            ip_address: t
 
             crate::company_name::network::v1::ip_address
-            - IpType : type
+            IpType: t
         "#]],
     );
 }
@@ -1382,20 +1338,20 @@ pub mod ip_address {
 "#,
         expect![[r#"
             crate
-            - company_name : type
+            company_name: t
 
             crate::company_name
-            - network : type
+            network: t
 
             crate::company_name::network
-            - v1 : type
+            v1: t
 
             crate::company_name::network::v1
-            - IpAddress : type
-            - ip_address : type
+            IpAddress: t
+            ip_address: t
 
             crate::company_name::network::v1::ip_address
-            - IpType : type
+            IpType: t
         "#]],
     );
 }
@@ -1436,38 +1392,30 @@ pub struct Url {}
 "#,
         expect![[r#"
             crate
-            - nested : type
-            - (legacy) include : macro!
+            nested: t
 
             crate::nested
-            - company_name : type
-            - different_company : type
-            - util : type
-            - (legacy) include : macro!
+            company_name: t
+            different_company: t
+            util: t
 
             crate::nested::company_name
-            - network : type
-            - (legacy) include : macro!
+            network: t
 
             crate::nested::company_name::network
-            - v1 : type
-            - (legacy) include : macro!
+            v1: t
 
             crate::nested::company_name::network::v1
-            - IpAddress : type
-            - (legacy) include : macro!
+            IpAddress: t
 
             crate::nested::different_company
-            - network : type
-            - (legacy) include : macro!
+            network: t
 
             crate::nested::different_company::network
-            - Url : type
-            - (legacy) include : macro!
+            Url: t
 
             crate::nested::util
-            - Helper : type
-            - (legacy) include : macro!
+            Helper: t
         "#]],
     );
 }
@@ -1497,10 +1445,10 @@ struct TokenStream;
 fn proc_attr(a: TokenStream, b: TokenStream) -> TokenStream { a }
     "#,
     );
-    let krate = *db.all_crates().last().expect("no crate graph present");
-    let def_map = crate_def_map(&db, krate);
+    let krate = db.crate_graph().iter().next().unwrap();
+    let def_map = db.crate_def_map(krate);
 
-    let root_module = &def_map[def_map.root].scope;
+    let root_module = &def_map[DefMap::ROOT].scope;
     assert!(
         root_module.legacy_macros().count() == 0,
         "`#[macro_use]` shouldn't bring macros into textual macro scope",
@@ -1552,11 +1500,11 @@ pub mod prelude {
         "#,
         expect![[r#"
             crate
-            - Ok : type value
-            - bar : macro!
-            - dep : type (extern)
-            - foo : macro!
-            - ok : value
+            Ok: t v
+            bar: m
+            dep: te
+            foo: m
+            ok: v
         "#]],
     );
 }
@@ -1585,20 +1533,18 @@ macro_rules! mk_foo {
     "#,
         expect![[r#"
             crate
-            - a : type
-            - lib : type (extern)
-            - (legacy) foo : macro!
+            a: t
+            lib: te
 
             crate::a
-            - Ok : type value
-            - (legacy) foo : macro!
+            Ok: t v
         "#]],
     );
 }
 
 #[test]
 fn macro_sub_namespace() {
-    compute_crate_def_map(
+    let map = compute_crate_def_map(
         r#"
 //- minicore: derive, clone
 macro_rules! Clone { () => {} }
@@ -1607,8 +1553,8 @@ macro_rules! derive { () => {} }
 #[derive(Clone)]
 struct S;
     "#,
-        |map| assert_eq!(map.modules[map.root].scope.builtin_derive_impls().len(), 1),
     );
+    assert_eq!(map.modules[DefMap::ROOT].scope.impls().len(), 1);
 }
 
 #[test]
@@ -1642,139 +1588,10 @@ pub mod prelude {
     "#,
         expect![[r#"
             crate
-            - Ok : type value
-            - bar : macro# (import)
-            - foo : macro# (import)
-            - ok : value
-        "#]],
-    );
-}
-
-#[test]
-fn macro_rules_mixed_style() {
-    check(
-        r#"
-
-macro_rules! foo {
-             () => {};
-      attr() () => {};
-    derive() () => {};
-}
-
-use foo;
-"#,
-        expect![[r#"
-    crate
-    - foo : macro!# (import)
-    - (legacy) foo : macro!#
-"#]],
-    );
-}
-
-#[test]
-fn macro_2_mixed_style() {
-    check(
-        r#"
-
-macro foo {
-             () => {};
-      attr() () => {};
-    derive() () => {};
-}
-
-use foo;
-"#,
-        expect![[r#"
-            crate
-            - foo : macro!#
-        "#]],
-    );
-}
-
-#[test]
-fn macro_rules_attr() {
-    check(
-        r#"
-
-macro_rules! my_attr {
-    attr() ($($tt:tt)*) => { fn attr_fn() {} }
-}
-
-#[my_attr]
-enum MyEnum {}
-
-"#,
-        expect![[r#"
-    crate
-    - attr_fn : value
-    - (legacy) my_attr : macro#
-"#]],
-    );
-}
-
-#[test]
-fn macro_2_attr() {
-    check(
-        r#"
-
-macro my_attr {
-    attr() ($($tt:tt)*) => { fn attr_fn() {} }
-}
-
-#[my_attr]
-enum MyEnum {}
-
-"#,
-        expect![[r#"
-    crate
-    - attr_fn : value
-    - my_attr : macro#
-"#]],
-    );
-}
-
-#[test]
-fn macro_rules_derive() {
-    check(
-        r#"
-//- minicore: derive
-
-macro_rules! MyDerive {
-    derive() ($($tt:tt)*) => { fn derived_fn() {} }
-}
-
-#[derive(MyDerive)]
-enum MyEnum {}
-
-"#,
-        expect![[r#"
-            crate
-            - MyEnum : type
-            - derived_fn : value
-            - (legacy) MyDerive : macro#
-        "#]],
-    );
-}
-
-#[test]
-fn macro_2_derive() {
-    check(
-        r#"
-//- minicore: derive
-
-macro MyDerive {
-    derive() ($($tt:tt)*) => { fn derived_fn() {} }
-}
-
-#[derive(MyDerive)]
-enum MyEnum {}
-
-"#,
-        expect![[r#"
-            crate
-            - MyDerive : macro#
-            - MyEnum : type
-            - derived_fn : value
+            Ok: t v
+            bar: mi
+            foo: mi
+            ok: v
         "#]],
     );
 }

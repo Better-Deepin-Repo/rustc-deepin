@@ -144,7 +144,7 @@ where
     arg.__isb()
 }
 
-unsafe extern "unadjusted" {
+extern "unadjusted" {
     #[cfg_attr(
         any(target_arch = "aarch64", target_arch = "arm64ec"),
         link_name = "llvm.aarch64.dmb"

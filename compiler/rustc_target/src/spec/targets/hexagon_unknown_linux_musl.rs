@@ -1,22 +1,22 @@
-use crate::spec::{Arch, Cc, LinkerFlavor, Lld, Target, TargetMetadata, base};
+use crate::spec::{base, Cc, LinkerFlavor, Target};
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     let mut base = base::linux_musl::opts();
     base.cpu = "hexagonv60".into();
     base.max_atomic_width = Some(32);
     // FIXME: HVX length defaults are per-CPU
     base.features = "-small-data,+hvx-length128b".into();
 
+    base.crt_static_default = false;
     base.has_rpath = true;
-    base.linker = Some("hexagon-unknown-linux-musl-clang".into());
-    base.linker_flavor = LinkerFlavor::Gnu(Cc::Yes, Lld::No);
+    base.linker_flavor = LinkerFlavor::Unix(Cc::Yes);
 
     base.c_enum_min_bits = Some(8);
 
     Target {
         llvm_target: "hexagon-unknown-linux-musl".into(),
-        metadata: TargetMetadata {
-            description: Some("Hexagon Linux with musl 1.2.5".into()),
+        metadata: crate::spec::TargetMetadata {
+            description: Some("Hexagon Linux with musl 1.2.3".into()),
             tier: Some(3),
             host_tools: Some(false),
             std: Some(true),
@@ -29,7 +29,7 @@ pub(crate) fn target() -> Target {
             ":2048:2048"
         )
         .into(),
-        arch: Arch::Hexagon,
+        arch: "hexagon".into(),
         options: base,
     }
 }

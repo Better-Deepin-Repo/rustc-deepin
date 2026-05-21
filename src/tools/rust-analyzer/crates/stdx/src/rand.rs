@@ -1,7 +1,8 @@
-//! We don't use `rand` because that is too many things for us.
+//! We don't use `rand`, as that's too many things for us.
 //!
-//! `oorandom` is used instead, but it's missing these two utilities.
-//! Switching to `fastrand` or our own small PRNG may be good because only xor-shift is needed.
+//! We currently use oorandom instead, but it's missing these two utilities.
+//! Perhaps we should switch to `fastrand`, or our own small PRNG, it's not like
+//! we need anything more complicated than xor-shift.
 
 pub fn shuffle<T>(slice: &mut [T], mut rand_index: impl FnMut(usize) -> usize) {
     let mut remaining = slice.len() - 1;

@@ -15,7 +15,6 @@ impl Trait<'_> for () {
 
 impl Test<'_> for () {}
 
-#[define_opaque(Foo)]
 fn constrain() -> Foo {
     ()
 }

@@ -6,30 +6,27 @@ mod tests;
 
 use std::iter;
 
-use base_db::RootQueryDb as _;
 use hir::{
-    DisplayTarget, HasAttrs, InFile, Local, ModuleDef, ModuleSource, Name, PathResolution,
-    ScopeDef, Semantics, SemanticsScope, Symbol, Type, TypeInfo,
+    HasAttrs, Local, Name, PathResolution, ScopeDef, Semantics, SemanticsScope, Type, TypeInfo,
 };
 use ide_db::{
-    FilePosition, FxHashMap, FxHashSet, RootDatabase, famous_defs::FamousDefs,
-    helpers::is_editable_crate, syntax_helpers::node_ext::is_in_macro_matcher,
+    base_db::SourceDatabase, famous_defs::FamousDefs, helpers::is_editable_crate, FilePosition,
+    FxHashMap, FxHashSet, RootDatabase,
 };
-use itertools::Either;
 use syntax::{
+    ast::{self, AttrKind, NameOrNameRef},
     AstNode, Edition, SmolStr,
     SyntaxKind::{self, *},
-    SyntaxToken, T, TextRange, TextSize,
-    ast::{self, AttrKind, NameOrNameRef},
+    SyntaxToken, TextRange, TextSize, T,
 };
+use text_edit::Indel;
 
 use crate::{
+    context::analysis::{expand_and_analyze, AnalysisResult},
     CompletionConfig,
-    config::AutoImportExclusionType,
-    context::analysis::{AnalysisResult, expand_and_analyze},
 };
 
-const COMPLETION_MARKER: &str = "raCompletionMarker";
+const COMPLETION_MARKER: &str = "intellijRulezz";
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PatternRefutability {
@@ -50,30 +47,24 @@ pub(crate) struct QualifierCtx {
     // TODO: Add try_tok and default_tok
     pub(crate) async_tok: Option<SyntaxToken>,
     pub(crate) unsafe_tok: Option<SyntaxToken>,
-    pub(crate) safe_tok: Option<SyntaxToken>,
     pub(crate) vis_node: Option<ast::Visibility>,
-    pub(crate) abi_node: Option<ast::Abi>,
 }
 
 impl QualifierCtx {
     pub(crate) fn none(&self) -> bool {
-        self.async_tok.is_none()
-            && self.unsafe_tok.is_none()
-            && self.safe_tok.is_none()
-            && self.vis_node.is_none()
-            && self.abi_node.is_none()
+        self.async_tok.is_none() && self.unsafe_tok.is_none() && self.vis_node.is_none()
     }
 }
 
 /// The state of the path we are currently completing.
 #[derive(Debug)]
-pub(crate) struct PathCompletionCtx<'db> {
+pub(crate) struct PathCompletionCtx {
     /// If this is a call with () already there (or {} in case of record patterns)
     pub(crate) has_call_parens: bool,
     /// If this has a macro call bang !
     pub(crate) has_macro_bang: bool,
     /// The qualifier of the current path.
-    pub(crate) qualified: Qualified<'db>,
+    pub(crate) qualified: Qualified,
     /// The parent of the path we are completing.
     pub(crate) parent: Option<ast::Path>,
     #[allow(dead_code)]
@@ -81,14 +72,14 @@ pub(crate) struct PathCompletionCtx<'db> {
     pub(crate) path: ast::Path,
     /// The path of which we are completing the segment in the original file
     pub(crate) original_path: Option<ast::Path>,
-    pub(crate) kind: PathKind<'db>,
+    pub(crate) kind: PathKind,
     /// Whether the path segment has type args or not.
     pub(crate) has_type_args: bool,
     /// Whether the qualifier comes from a use tree parent or not
     pub(crate) use_tree_parent: bool,
 }
 
-impl PathCompletionCtx<'_> {
+impl PathCompletionCtx {
     pub(crate) fn is_trivial_path(&self) -> bool {
         matches!(
             self,
@@ -106,9 +97,9 @@ impl PathCompletionCtx<'_> {
 
 /// The kind of path we are completing right now.
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) enum PathKind<'db> {
+pub(crate) enum PathKind {
     Expr {
-        expr_ctx: PathExprCtx<'db>,
+        expr_ctx: PathExprCtx,
     },
     Type {
         location: TypeLocation,
@@ -138,27 +129,21 @@ pub(crate) type ExistingDerives = FxHashSet<hir::Macro>;
 pub(crate) struct AttrCtx {
     pub(crate) kind: AttrKind,
     pub(crate) annotated_item_kind: Option<SyntaxKind>,
-    pub(crate) derive_helpers: Vec<(Symbol, Symbol)>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub(crate) struct PathExprCtx<'db> {
+pub(crate) struct PathExprCtx {
     pub(crate) in_block_expr: bool,
-    pub(crate) in_breakable: Option<BreakableKind>,
+    pub(crate) in_breakable: BreakableKind,
     pub(crate) after_if_expr: bool,
-    pub(crate) before_else_kw: bool,
     /// Whether this expression is the direct condition of an if or while expression
     pub(crate) in_condition: bool,
     pub(crate) incomplete_let: bool,
-    pub(crate) after_incomplete_let: bool,
-    pub(crate) in_value: bool,
     pub(crate) ref_expr_parent: Option<ast::RefExpr>,
-    pub(crate) after_amp: bool,
     /// The surrounding RecordExpression we are completing a functional update
     pub(crate) is_func_update: Option<ast::RecordExpr>,
-    pub(crate) self_param: Option<Either<hir::SelfParam, hir::Param<'db>>>,
-    pub(crate) innermost_ret_ty: Option<hir::Type<'db>>,
-    pub(crate) innermost_breakable_ty: Option<hir::Type<'db>>,
+    pub(crate) self_param: Option<hir::SelfParam>,
+    pub(crate) innermost_ret_ty: Option<hir::Type>,
     pub(crate) impl_: Option<ast::Impl>,
     /// Whether this expression occurs in match arm guard position: before the
     /// fat arrow token
@@ -243,11 +228,11 @@ pub(crate) enum ItemListKind {
     Impl,
     TraitImpl(Option<ast::Impl>),
     Trait,
-    ExternBlock { is_unsafe: bool },
+    ExternBlock,
 }
 
 #[derive(Debug)]
-pub(crate) enum Qualified<'db> {
+pub(crate) enum Qualified {
     No,
     With {
         path: ast::Path,
@@ -257,8 +242,8 @@ pub(crate) enum Qualified<'db> {
         /// This would be None, if path is not solely made of
         /// `super` segments, e.g.
         ///
-        /// ```ignore
-        /// use super::foo;
+        /// ```rust
+        ///   use super::foo;
         /// ```
         ///
         /// Otherwise it should be Some(count of `super`)
@@ -266,7 +251,7 @@ pub(crate) enum Qualified<'db> {
     },
     /// <_>::
     TypeAnchor {
-        ty: Option<hir::Type<'db>>,
+        ty: Option<hir::Type>,
         trait_: Option<hir::Trait>,
     },
     /// Whether the path is an absolute path
@@ -279,14 +264,12 @@ pub(crate) struct PatternContext {
     pub(crate) refutability: PatternRefutability,
     pub(crate) param_ctx: Option<ParamContext>,
     pub(crate) has_type_ascription: bool,
-    pub(crate) should_suggest_name: bool,
-    pub(crate) after_if_expr: bool,
     pub(crate) parent_pat: Option<ast::Pat>,
     pub(crate) ref_token: Option<SyntaxToken>,
     pub(crate) mut_token: Option<SyntaxToken>,
     /// The record pattern this name or ref is a field of
     pub(crate) record_pat: Option<ast::RecordPat>,
-    pub(crate) impl_or_trait: Option<Either<ast::Impl, ast::Trait>>,
+    pub(crate) impl_: Option<ast::Impl>,
     /// List of missing variants in a match expr
     pub(crate) missing_variants: Vec<hir::Variant>,
 }
@@ -301,14 +284,15 @@ pub(crate) struct ParamContext {
 /// The state of the lifetime we are completing.
 #[derive(Debug)]
 pub(crate) struct LifetimeContext {
+    pub(crate) lifetime: Option<ast::Lifetime>,
     pub(crate) kind: LifetimeKind,
 }
 
 /// The kind of lifetime we are completing.
 #[derive(Debug)]
 pub(crate) enum LifetimeKind {
-    LifetimeParam,
-    Lifetime { in_lifetime_param_bound: bool, def: Option<hir::GenericDef> },
+    LifetimeParam { is_decl: bool, param: ast::LifetimeParam },
+    Lifetime,
     LabelRef,
     LabelDef,
 }
@@ -348,17 +332,17 @@ pub(crate) enum NameKind {
 
 /// The state of the NameRef we are completing.
 #[derive(Debug)]
-pub(crate) struct NameRefContext<'db> {
+pub(crate) struct NameRefContext {
     /// NameRef syntax in the original file
     pub(crate) nameref: Option<ast::NameRef>,
-    pub(crate) kind: NameRefKind<'db>,
+    pub(crate) kind: NameRefKind,
 }
 
 /// The kind of the NameRef we are completing.
 #[derive(Debug)]
-pub(crate) enum NameRefKind<'db> {
-    Path(PathCompletionCtx<'db>),
-    DotAccess(DotAccess<'db>),
+pub(crate) enum NameRefKind {
+    Path(PathCompletionCtx),
+    DotAccess(DotAccess),
     /// Position where we are only interested in keyword completions
     Keyword(ast::Item),
     /// The record expression this nameref is a field of and whether a dot precedes the completion identifier.
@@ -372,9 +356,9 @@ pub(crate) enum NameRefKind<'db> {
 
 /// The identifier we are currently completing.
 #[derive(Debug)]
-pub(crate) enum CompletionAnalysis<'db> {
+pub(crate) enum CompletionAnalysis {
     Name(NameContext),
-    NameRef(NameRefContext<'db>),
+    NameRef(NameRefContext),
     Lifetime(LifetimeContext),
     /// The string the cursor is currently inside
     String {
@@ -389,36 +373,38 @@ pub(crate) enum CompletionAnalysis<'db> {
         fake_attribute_under_caret: Option<ast::Attr>,
         extern_crate: Option<ast::ExternCrate>,
     },
-    MacroSegment,
 }
 
 /// Information about the field or method access we are completing.
 #[derive(Debug)]
-pub(crate) struct DotAccess<'db> {
+pub(crate) struct DotAccess {
     pub(crate) receiver: Option<ast::Expr>,
-    pub(crate) receiver_ty: Option<TypeInfo<'db>>,
+    pub(crate) receiver_ty: Option<TypeInfo>,
     pub(crate) kind: DotAccessKind,
     pub(crate) ctx: DotAccessExprCtx,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub(crate) enum DotAccessKind {
     Field {
         /// True if the receiver is an integer and there is no ident in the original file after it yet
         /// like `0.$0`
         receiver_is_ambiguous_float_literal: bool,
     },
-    Method,
+    Method {
+        has_parens: bool,
+    },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct DotAccessExprCtx {
     pub(crate) in_block_expr: bool,
-    pub(crate) in_breakable: Option<BreakableKind>,
+    pub(crate) in_breakable: BreakableKind,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub(crate) enum BreakableKind {
+    None,
     Loop,
     For,
     While,
@@ -438,32 +424,26 @@ pub(crate) struct CompletionContext<'a> {
     pub(crate) sema: Semantics<'a, RootDatabase>,
     pub(crate) scope: SemanticsScope<'a>,
     pub(crate) db: &'a RootDatabase,
-    pub(crate) config: &'a CompletionConfig<'a>,
+    pub(crate) config: &'a CompletionConfig,
     pub(crate) position: FilePosition,
 
-    pub(crate) trigger_character: Option<char>,
     /// The token before the cursor, in the original file.
     pub(crate) original_token: SyntaxToken,
     /// The token before the cursor, in the macro-expanded file.
     pub(crate) token: SyntaxToken,
     /// The crate of the current file.
     pub(crate) krate: hir::Crate,
-    pub(crate) display_target: DisplayTarget,
     /// The module of the `scope`.
     pub(crate) module: hir::Module,
-    /// The function where we're completing, if inside a function.
-    pub(crate) containing_function: Option<hir::Function>,
     /// Whether nightly toolchain is used. Cached since this is looked up a lot.
-    pub(crate) is_nightly: bool,
-    /// The edition of the current crate
-    // FIXME: This should probably be the crate of the current token?
+    is_nightly: bool,
     pub(crate) edition: Edition,
 
     /// The expected name of what we are completing.
     /// This is usually the parameter name of the function argument we are completing.
     pub(crate) expected_name: Option<NameOrNameRef>,
     /// The expected type of what we are completing.
-    pub(crate) expected_type: Option<Type<'a>>,
+    pub(crate) expected_type: Option<Type>,
 
     pub(crate) qualifier_ctx: QualifierCtx,
 
@@ -476,27 +456,6 @@ pub(crate) struct CompletionContext<'a> {
     ///
     /// Here depth will be 2
     pub(crate) depth_from_crate_root: usize,
-
-    /// Traits whose methods will be excluded from flyimport. Flyimport should not suggest
-    /// importing those traits.
-    ///
-    /// Note the trait *themselves* are not excluded, only their methods are.
-    pub(crate) exclude_flyimport: FxHashMap<ModuleDef, AutoImportExclusionType>,
-    /// Traits whose methods should always be excluded, even when in scope (compare `exclude_flyimport_traits`).
-    /// They will *not* be excluded, however, if they are available as a generic bound.
-    ///
-    /// Note the trait *themselves* are not excluded, only their methods are.
-    pub(crate) exclude_traits: FxHashSet<hir::Trait>,
-
-    /// Whether and how to complete semicolon for unit-returning functions.
-    pub(crate) complete_semicolon: CompleteSemicolon,
-}
-
-#[derive(Debug)]
-pub(crate) enum CompleteSemicolon {
-    DoNotComplete,
-    CompleteSemi,
-    CompleteComma,
 }
 
 impl CompletionContext<'_> {
@@ -531,6 +490,7 @@ impl CompletionContext<'_> {
                 hir::ModuleDef::Const(it) => self.is_visible(it),
                 hir::ModuleDef::Static(it) => self.is_visible(it),
                 hir::ModuleDef::Trait(it) => self.is_visible(it),
+                hir::ModuleDef::TraitAlias(it) => self.is_visible(it),
                 hir::ModuleDef::TypeAlias(it) => self.is_visible(it),
                 hir::ModuleDef::Macro(it) => self.is_visible(it),
                 hir::ModuleDef::BuiltinType(_) => Visible::Yes,
@@ -544,7 +504,7 @@ impl CompletionContext<'_> {
         }
     }
 
-    /// Checks if an item is visible, not `doc(hidden)` and stable at the completion site.
+    /// Checks if an item is visible and not `doc(hidden)` at the completion site.
     pub(crate) fn is_visible<I>(&self, item: &I) -> Visible
     where
         I: hir::HasVisibility + hir::HasAttrs + hir::HasCrate + Copy,
@@ -559,7 +519,7 @@ impl CompletionContext<'_> {
         I: hir::HasAttrs + Copy,
     {
         let attrs = item.attrs(self.db);
-        attrs.doc_aliases(self.db).iter().map(|it| it.as_str().into()).collect()
+        attrs.doc_aliases().map(|it| it.as_str().into()).collect()
     }
 
     /// Check if an item is `#[doc(hidden)]`.
@@ -573,33 +533,24 @@ impl CompletionContext<'_> {
     }
 
     /// Checks whether this item should be listed in regards to stability. Returns `true` if we should.
-    pub(crate) fn check_stability(&self, attrs: Option<&hir::AttrsWithOwner>) -> bool {
+    pub(crate) fn check_stability(&self, attrs: Option<&hir::Attrs>) -> bool {
         let Some(attrs) = attrs else {
             return true;
         };
         !attrs.is_unstable() || self.is_nightly
     }
 
-    pub(crate) fn check_stability_and_hidden<I>(&self, item: I) -> bool
-    where
-        I: hir::HasAttrs + hir::HasCrate,
-    {
-        let defining_crate = item.krate(self.db);
-        let attrs = item.attrs(self.db);
-        self.check_stability(Some(&attrs)) && !self.is_doc_hidden(&attrs, defining_crate)
-    }
-
     /// Whether the given trait is an operator trait or not.
     pub(crate) fn is_ops_trait(&self, trait_: hir::Trait) -> bool {
-        match trait_.attrs(self.db).lang(self.db) {
-            Some(lang) => OP_TRAIT_LANG.contains(&lang),
+        match trait_.attrs(self.db).lang() {
+            Some(lang) => OP_TRAIT_LANG_NAMES.contains(&lang.as_str()),
             None => false,
         }
     }
 
     /// Whether the given trait has `#[doc(notable_trait)]`
     pub(crate) fn is_doc_notable_trait(&self, trait_: hir::Trait) -> bool {
-        trait_.attrs(self.db).is_doc_notable_trait()
+        trait_.attrs(self.db).has_doc_notable_trait()
     }
 
     /// Returns the traits in scope, with the [`Drop`] trait removed.
@@ -613,22 +564,29 @@ impl CompletionContext<'_> {
 
     pub(crate) fn iterate_path_candidates(
         &self,
-        ty: &hir::Type<'_>,
+        ty: &hir::Type,
         mut cb: impl FnMut(hir::AssocItem),
     ) {
         let mut seen = FxHashSet::default();
-        ty.iterate_path_candidates(self.db, &self.scope, &self.traits_in_scope(), None, |item| {
-            // We might iterate candidates of a trait multiple times here, so deduplicate
-            // them.
-            if seen.insert(item) {
-                cb(item)
-            }
-            None::<()>
-        });
+        ty.iterate_path_candidates(
+            self.db,
+            &self.scope,
+            &self.traits_in_scope(),
+            Some(self.module),
+            None,
+            |item| {
+                // We might iterate candidates of a trait multiple times here, so deduplicate
+                // them.
+                if seen.insert(item) {
+                    cb(item)
+                }
+                None::<()>
+            },
+        );
     }
 
     /// A version of [`SemanticsScope::process_all_names`] that filters out `#[doc(hidden)]` items and
-    /// passes all doc-aliases along, to funnel it into `Completions::add_path_resolution`.
+    /// passes all doc-aliases along, to funnel it into [`Completions::add_path_resolution`].
     pub(crate) fn process_all_names(&self, f: &mut dyn FnMut(Name, ScopeDef, Vec<SmolStr>)) {
         let _p = tracing::info_span!("CompletionContext::process_all_names").entered();
         self.scope.process_all_names(&mut |name, def| {
@@ -656,13 +614,9 @@ impl CompletionContext<'_> {
     fn is_visible_impl(
         &self,
         vis: &hir::Visibility,
-        attrs: &hir::AttrsWithOwner,
+        attrs: &hir::Attrs,
         defining_crate: hir::Crate,
     ) -> Visible {
-        if !self.check_stability(Some(attrs)) {
-            return Visible::No;
-        }
-
         if !vis.is_visible_from(self.db, self.module.into()) {
             if !self.config.enable_private_editable {
                 return Visible::No;
@@ -675,21 +629,21 @@ impl CompletionContext<'_> {
             };
         }
 
-        if self.is_doc_hidden(attrs, defining_crate) { Visible::No } else { Visible::Yes }
+        if self.is_doc_hidden(attrs, defining_crate) {
+            Visible::No
+        } else {
+            Visible::Yes
+        }
     }
 
-    pub(crate) fn is_doc_hidden(
-        &self,
-        attrs: &hir::AttrsWithOwner,
-        defining_crate: hir::Crate,
-    ) -> bool {
+    fn is_doc_hidden(&self, attrs: &hir::Attrs, defining_crate: hir::Crate) -> bool {
         // `doc(hidden)` items are only completed within the defining crate.
-        self.krate != defining_crate && attrs.is_doc_hidden()
+        self.krate != defining_crate && attrs.has_doc_hidden()
     }
 
     pub(crate) fn doc_aliases_in_scope(&self, scope_def: ScopeDef) -> Vec<SmolStr> {
         if let Some(attrs) = scope_def.attrs(self.db) {
-            attrs.doc_aliases(self.db).iter().map(|it| it.as_str().into()).collect()
+            attrs.doc_aliases().map(|it| it.as_str().into()).collect()
         } else {
             vec![]
         }
@@ -697,26 +651,25 @@ impl CompletionContext<'_> {
 }
 
 // CompletionContext construction
-impl<'db> CompletionContext<'db> {
+impl<'a> CompletionContext<'a> {
     pub(crate) fn new(
-        db: &'db RootDatabase,
+        db: &'a RootDatabase,
         position @ FilePosition { file_id, offset }: FilePosition,
-        config: &'db CompletionConfig<'db>,
-        trigger_character: Option<char>,
-    ) -> Option<(CompletionContext<'db>, CompletionAnalysis<'db>)> {
+        config: &'a CompletionConfig,
+    ) -> Option<(CompletionContext<'a>, CompletionAnalysis)> {
         let _p = tracing::info_span!("CompletionContext::new").entered();
         let sema = Semantics::new(db);
 
-        let editioned_file_id = sema.attach_first_edition(file_id);
-        let original_file = sema.parse(editioned_file_id);
+        let file_id = sema.attach_first_edition(file_id)?;
+        let original_file = sema.parse(file_id);
 
         // Insert a fake ident to get a valid parse tree. We will use this file
         // to determine context, though the original_file will be used for
         // actual completion.
         let file_with_fake_ident = {
-            let (_, edition) = editioned_file_id.unpack(db);
-            let parse = db.parse(editioned_file_id);
-            parse.reparse(TextRange::empty(offset), COMPLETION_MARKER, edition).tree()
+            let parse = db.parse(file_id);
+            let edit = Indel::insert(offset, COMPLETION_MARKER.to_owned());
+            parse.reparse(&edit, file_id.edition()).tree()
         };
 
         // always pick the token to the immediate left of the cursor, as that is what we are actually
@@ -730,7 +683,7 @@ impl<'db> CompletionContext<'db> {
             let prev_token = original_token.prev_token()?;
 
             // only has a single colon
-            if prev_token.kind() != T![:] && !is_in_macro_matcher(&original_token) {
+            if prev_token.kind() != T![:] {
                 return None;
             }
 
@@ -751,21 +704,20 @@ impl<'db> CompletionContext<'db> {
             expected: (expected_type, expected_name),
             qualifier_ctx,
             token,
-            original_offset,
+            offset,
         } = expand_and_analyze(
             &sema,
-            InFile::new(editioned_file_id.into(), original_file.syntax().clone()),
+            original_file.syntax().clone(),
             file_with_fake_ident.syntax().clone(),
             offset,
             &original_token,
         )?;
 
         // adjust for macro input, this still fails if there is no token written yet
-        let scope = sema.scope_at_offset(&token.parent()?, original_offset)?;
+        let scope = sema.scope_at_offset(&token.parent()?, offset)?;
 
         let krate = scope.krate();
         let module = scope.module();
-        let containing_function = scope.containing_function();
         let edition = krate.edition(db);
 
         let toolchain = db.toolchain_channel(krate.into());
@@ -776,82 +728,22 @@ impl<'db> CompletionContext<'db> {
         let mut locals = FxHashMap::default();
         scope.process_all_names(&mut |name, scope| {
             if let ScopeDef::Local(local) = scope {
-                // synthetic names currently leak out as we lack synthetic hygiene, so filter them
-                // out here
-                if name.as_str().starts_with('<') {
-                    return;
-                }
                 locals.insert(name, local);
             }
         });
 
-        let depth_from_crate_root = iter::successors(Some(module), |m| m.parent(db))
-            // `BlockExpr` modules do not count towards module depth
-            .filter(|m| !matches!(m.definition_source(db).value, ModuleSource::BlockExpr(_)))
-            .count()
-            // exclude `m` itself
-            .saturating_sub(1);
+        let depth_from_crate_root = iter::successors(module.parent(db), |m| m.parent(db)).count();
 
-        let exclude_traits: FxHashSet<_> = config
-            .exclude_traits
-            .iter()
-            .filter_map(|path| {
-                hir::resolve_absolute_path(db, path.split("::").map(Symbol::intern)).find_map(
-                    |it| match it {
-                        hir::ItemInNs::Types(ModuleDef::Trait(t)) => Some(t),
-                        _ => None,
-                    },
-                )
-            })
-            .collect();
-
-        let mut exclude_flyimport: FxHashMap<_, _> = config
-            .exclude_flyimport
-            .iter()
-            .flat_map(|(path, kind)| {
-                hir::resolve_absolute_path(db, path.split("::").map(Symbol::intern))
-                    .map(|it| (it.into_module_def(), *kind))
-            })
-            .collect();
-        exclude_flyimport
-            .extend(exclude_traits.iter().map(|&t| (t.into(), AutoImportExclusionType::Always)));
-
-        // FIXME: This should be part of `CompletionAnalysis` / `expand_and_analyze`
-        let complete_semicolon = if !config.add_semicolon_to_unit {
-            CompleteSemicolon::DoNotComplete
-        } else if let Some(term_node) =
-            sema.token_ancestors_with_macros(token.clone()).find(|node| {
-                matches!(
-                    node.kind(),
-                    BLOCK_EXPR | MATCH_ARM | CLOSURE_EXPR | ARG_LIST | PAREN_EXPR | ARRAY_EXPR
-                )
-            })
-        {
-            let next_token = iter::successors(token.next_token(), |it| it.next_token())
-                .map(|it| it.kind())
-                .find(|kind| !kind.is_trivia());
-            match term_node.kind() {
-                MATCH_ARM if next_token != Some(T![,]) => CompleteSemicolon::CompleteComma,
-                BLOCK_EXPR if next_token != Some(T![;]) => CompleteSemicolon::CompleteSemi,
-                _ => CompleteSemicolon::DoNotComplete,
-            }
-        } else {
-            CompleteSemicolon::DoNotComplete
-        };
-
-        let display_target = krate.to_display_target(db);
         let ctx = CompletionContext {
             sema,
             scope,
             db,
             config,
             position,
-            trigger_character,
             original_token,
             token,
             krate,
             module,
-            containing_function,
             is_nightly,
             edition,
             expected_name,
@@ -859,44 +751,40 @@ impl<'db> CompletionContext<'db> {
             qualifier_ctx,
             locals,
             depth_from_crate_root,
-            exclude_flyimport,
-            exclude_traits,
-            complete_semicolon,
-            display_target,
         };
         Some((ctx, analysis))
     }
 }
 
-const OP_TRAIT_LANG: &[hir::LangItem] = &[
-    hir::LangItem::AddAssign,
-    hir::LangItem::Add,
-    hir::LangItem::BitAndAssign,
-    hir::LangItem::BitAnd,
-    hir::LangItem::BitOrAssign,
-    hir::LangItem::BitOr,
-    hir::LangItem::BitXorAssign,
-    hir::LangItem::BitXor,
-    hir::LangItem::DerefMut,
-    hir::LangItem::Deref,
-    hir::LangItem::DivAssign,
-    hir::LangItem::Div,
-    hir::LangItem::PartialEq,
-    hir::LangItem::FnMut,
-    hir::LangItem::FnOnce,
-    hir::LangItem::Fn,
-    hir::LangItem::IndexMut,
-    hir::LangItem::Index,
-    hir::LangItem::MulAssign,
-    hir::LangItem::Mul,
-    hir::LangItem::Neg,
-    hir::LangItem::Not,
-    hir::LangItem::PartialOrd,
-    hir::LangItem::RemAssign,
-    hir::LangItem::Rem,
-    hir::LangItem::ShlAssign,
-    hir::LangItem::Shl,
-    hir::LangItem::ShrAssign,
-    hir::LangItem::Shr,
-    hir::LangItem::Sub,
+const OP_TRAIT_LANG_NAMES: &[&str] = &[
+    "add_assign",
+    "add",
+    "bitand_assign",
+    "bitand",
+    "bitor_assign",
+    "bitor",
+    "bitxor_assign",
+    "bitxor",
+    "deref_mut",
+    "deref",
+    "div_assign",
+    "div",
+    "eq",
+    "fn_mut",
+    "fn_once",
+    "fn",
+    "index_mut",
+    "index",
+    "mul_assign",
+    "mul",
+    "neg",
+    "not",
+    "partial_ord",
+    "rem_assign",
+    "rem",
+    "shl_assign",
+    "shl",
+    "shr_assign",
+    "shr",
+    "sub",
 ];

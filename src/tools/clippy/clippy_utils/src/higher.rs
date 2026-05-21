@@ -3,18 +3,17 @@
 #![deny(clippy::missing_docs_in_private_items)]
 
 use crate::consts::{ConstEvalCtxt, Constant};
-use crate::res::MaybeDef;
-use crate::{is_expn_of, sym};
+use crate::ty::is_type_diagnostic_item;
+use crate::{is_expn_of, match_def_path, paths};
 
 use rustc_ast::ast;
 use rustc_hir as hir;
-use rustc_hir::{Arm, Block, Expr, ExprKind, HirId, LoopSource, MatchSource, Node, Pat, QPath, StructTailExpr};
+use rustc_hir::{Arm, Block, Expr, ExprKind, HirId, LoopSource, MatchSource, Node, Pat, QPath};
 use rustc_lint::LateContext;
-use rustc_span::{Span, symbol};
+use rustc_span::{sym, symbol, Span};
 
 /// The essential nodes of a desugared for loop as well as the entire span:
 /// `for pat in arg { body }` becomes `(pat, arg, body)`. Returns `(pat, arg, body, span)`.
-#[derive(Debug)]
 pub struct ForLoop<'tcx> {
     /// `for` loop item
     pub pat: &'tcx Pat<'tcx>,
@@ -55,7 +54,7 @@ impl<'tcx> ForLoop<'tcx> {
     }
 }
 
-/// An `if` expression without `let`
+/// An `if` expression without `DropTemps`
 pub struct If<'hir> {
     /// `if` condition
     pub cond: &'hir Expr<'hir>,
@@ -67,10 +66,16 @@ pub struct If<'hir> {
 
 impl<'hir> If<'hir> {
     #[inline]
-    /// Parses an `if` expression without `let`
+    /// Parses an `if` expression
     pub const fn hir(expr: &Expr<'hir>) -> Option<Self> {
-        if let ExprKind::If(cond, then, r#else) = expr.kind
-            && !has_let_expr(cond)
+        if let ExprKind::If(
+            Expr {
+                kind: ExprKind::DropTemps(cond),
+                ..
+            },
+            then,
+            r#else,
+        ) = expr.kind
         {
             Some(Self { cond, then, r#else })
         } else {
@@ -98,7 +103,7 @@ impl<'hir> IfLet<'hir> {
     /// Parses an `if let` expression
     pub fn hir(cx: &LateContext<'_>, expr: &Expr<'hir>) -> Option<Self> {
         if let ExprKind::If(
-            &Expr {
+            Expr {
                 kind:
                     ExprKind::Let(&hir::LetExpr {
                         pat: let_pat,
@@ -112,18 +117,19 @@ impl<'hir> IfLet<'hir> {
             if_else,
         ) = expr.kind
         {
-            let mut iter = cx.tcx.hir_parent_iter(expr.hir_id);
-            if let Some((_, Node::Block(Block { stmts: [], .. }))) = iter.next()
-                && let Some((
+            let mut iter = cx.tcx.hir().parent_iter(expr.hir_id);
+            if let Some((_, Node::Block(Block { stmts: [], .. }))) = iter.next() {
+                if let Some((
                     _,
                     Node::Expr(Expr {
                         kind: ExprKind::Loop(_, _, LoopSource::While, _),
                         ..
                     }),
                 )) = iter.next()
-            {
-                // while loop desugar
-                return None;
+                {
+                    // while loop desugar
+                    return None;
+                }
             }
             return Some(Self {
                 let_pat,
@@ -170,12 +176,6 @@ impl<'hir> IfLetOrMatch<'hir> {
             ),
         }
     }
-
-    pub fn scrutinee(&self) -> &'hir Expr<'hir> {
-        match self {
-            Self::Match(scrutinee, _, _) | Self::IfLet(scrutinee, _, _, _, _) => scrutinee,
-        }
-    }
 }
 
 /// An `if` or `if let` expression
@@ -193,10 +193,18 @@ impl<'hir> IfOrIfLet<'hir> {
     /// Parses an `if` or `if let` expression
     pub const fn hir(expr: &Expr<'hir>) -> Option<Self> {
         if let ExprKind::If(cond, then, r#else) = expr.kind {
-            Some(Self { cond, then, r#else })
-        } else {
-            None
+            if let ExprKind::DropTemps(new_cond) = cond.kind {
+                return Some(Self {
+                    cond: new_cond,
+                    r#else,
+                    then,
+                });
+            }
+            if let ExprKind::Let(..) = cond.kind {
+                return Some(Self { cond, then, r#else });
+            }
         }
+        None
     }
 }
 
@@ -209,40 +217,39 @@ pub struct Range<'a> {
     pub end: Option<&'a Expr<'a>>,
     /// Whether the interval is open or closed.
     pub limits: ast::RangeLimits,
-    pub span: Span,
 }
 
 impl<'a> Range<'a> {
     /// Higher a `hir` range to something similar to `ast::ExprKind::Range`.
-    #[expect(clippy::similar_names)]
-    pub fn hir(cx: &LateContext<'_>, expr: &'a Expr<'_>) -> Option<Range<'a>> {
-        let span = expr.range_span()?;
+    #[allow(clippy::similar_names)]
+    pub fn hir(expr: &'a Expr<'_>) -> Option<Range<'a>> {
         match expr.kind {
             ExprKind::Call(path, [arg1, arg2])
-                if let ExprKind::Path(qpath) = path.kind
-                    && cx.tcx.qpath_is_lang_item(qpath, hir::LangItem::RangeInclusiveNew) =>
+                if matches!(
+                    path.kind,
+                    ExprKind::Path(QPath::LangItem(hir::LangItem::RangeInclusiveNew, ..))
+                ) =>
             {
                 Some(Range {
                     start: Some(arg1),
                     end: Some(arg2),
                     limits: ast::RangeLimits::Closed,
-                    span,
                 })
             },
-            ExprKind::Struct(&qpath, fields, StructTailExpr::None) => match (cx.tcx.qpath_lang_item(qpath)?, fields) {
-                (hir::LangItem::RangeFull, []) => Some(Range {
+            ExprKind::Struct(path, fields, None) => match (path, fields) {
+                (QPath::LangItem(hir::LangItem::RangeFull, ..), []) => Some(Range {
                     start: None,
                     end: None,
                     limits: ast::RangeLimits::HalfOpen,
-                    span,
                 }),
-                (hir::LangItem::RangeFrom, [field]) if field.ident.name == sym::start => Some(Range {
-                    start: Some(field.expr),
-                    end: None,
-                    limits: ast::RangeLimits::HalfOpen,
-                    span,
-                }),
-                (hir::LangItem::Range, [field1, field2]) => {
+                (QPath::LangItem(hir::LangItem::RangeFrom, ..), [field]) if field.ident.name == sym::start => {
+                    Some(Range {
+                        start: Some(field.expr),
+                        end: None,
+                        limits: ast::RangeLimits::HalfOpen,
+                    })
+                },
+                (QPath::LangItem(hir::LangItem::Range, ..), [field1, field2]) => {
                     let (start, end) = match (field1.ident.name, field2.ident.name) {
                         (sym::start, sym::end) => (field1.expr, field2.expr),
                         (sym::end, sym::start) => (field2.expr, field1.expr),
@@ -252,20 +259,19 @@ impl<'a> Range<'a> {
                         start: Some(start),
                         end: Some(end),
                         limits: ast::RangeLimits::HalfOpen,
-                        span,
                     })
                 },
-                (hir::LangItem::RangeToInclusive, [field]) if field.ident.name == sym::end => Some(Range {
-                    start: None,
-                    end: Some(field.expr),
-                    limits: ast::RangeLimits::Closed,
-                    span,
-                }),
-                (hir::LangItem::RangeTo, [field]) if field.ident.name == sym::end => Some(Range {
+                (QPath::LangItem(hir::LangItem::RangeToInclusive, ..), [field]) if field.ident.name == sym::end => {
+                    Some(Range {
+                        start: None,
+                        end: Some(field.expr),
+                        limits: ast::RangeLimits::Closed,
+                    })
+                },
+                (QPath::LangItem(hir::LangItem::RangeTo, ..), [field]) if field.ident.name == sym::end => Some(Range {
                     start: None,
                     end: Some(field.expr),
                     limits: ast::RangeLimits::HalfOpen,
-                    span,
                 }),
                 _ => None,
             },
@@ -288,24 +294,25 @@ impl<'a> VecArgs<'a> {
     pub fn hir(cx: &LateContext<'_>, expr: &'a Expr<'_>) -> Option<VecArgs<'a>> {
         if let ExprKind::Call(fun, args) = expr.kind
             && let ExprKind::Path(ref qpath) = fun.kind
-            && is_expn_of(fun.span, sym::vec).is_some()
+            && is_expn_of(fun.span, "vec").is_some()
             && let Some(fun_def_id) = cx.qpath_res(qpath, fun.hir_id).opt_def_id()
-            && let Some(name) = cx.tcx.get_diagnostic_name(fun_def_id)
         {
-            return match (name, args) {
-                (sym::vec_from_elem, [elem, size]) => {
-                    // `vec![elem; size]` case
-                    Some(VecArgs::Repeat(elem, size))
-                },
-                (sym::box_assume_init_into_vec_unsafe, [write_box_via_move])
-                    if let ExprKind::Call(_, [_box, elems]) = write_box_via_move.kind
-                        && let ExprKind::Array(elems) = elems.kind =>
+            return if match_def_path(cx, fun_def_id, &paths::VEC_FROM_ELEM) && args.len() == 2 {
+                // `vec![elem; size]` case
+                Some(VecArgs::Repeat(&args[0], &args[1]))
+            } else if match_def_path(cx, fun_def_id, &paths::SLICE_INTO_VEC) && args.len() == 1 {
+                // `vec![a, b, c]` case
+                if let ExprKind::Call(_, [arg]) = &args[0].kind
+                    && let ExprKind::Array(args) = arg.kind
                 {
-                    // `vec![a, b, c]` case
-                    Some(VecArgs::Vec(elems))
-                },
-                (sym::vec_new, []) => Some(VecArgs::Vec(&[])),
-                _ => None,
+                    Some(VecArgs::Vec(args))
+                } else {
+                    None
+                }
+            } else if match_def_path(cx, fun_def_id, &paths::VEC_NEW) && args.is_empty() {
+                Some(VecArgs::Vec(&[]))
+            } else {
+                None
             };
         }
 
@@ -321,7 +328,6 @@ pub struct While<'hir> {
     pub body: &'hir Expr<'hir>,
     /// Span of the loop header
     pub span: Span,
-    pub label: Option<ast::Label>,
 }
 
 impl<'hir> While<'hir> {
@@ -332,23 +338,25 @@ impl<'hir> While<'hir> {
             Block {
                 expr:
                     Some(Expr {
-                        kind: ExprKind::If(condition, body, _),
+                        kind:
+                            ExprKind::If(
+                                Expr {
+                                    kind: ExprKind::DropTemps(condition),
+                                    ..
+                                },
+                                body,
+                                _,
+                            ),
                         ..
                     }),
                 ..
             },
-            label,
+            _,
             LoopSource::While,
             span,
         ) = expr.kind
-            && !has_let_expr(condition)
         {
-            return Some(Self {
-                condition,
-                body,
-                span,
-                label,
-            });
+            return Some(Self { condition, body, span });
         }
         None
     }
@@ -373,12 +381,12 @@ impl<'hir> WhileLet<'hir> {
     /// Parses a desugared `while let` loop
     pub const fn hir(expr: &Expr<'hir>) -> Option<Self> {
         if let ExprKind::Loop(
-            &Block {
+            Block {
                 expr:
-                    Some(&Expr {
+                    Some(Expr {
                         kind:
                             ExprKind::If(
-                                &Expr {
+                                Expr {
                                     kind:
                                         ExprKind::Let(&hir::LetExpr {
                                             pat: let_pat,
@@ -455,23 +463,23 @@ pub fn get_vec_init_kind<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) -
     if let ExprKind::Call(func, args) = expr.kind {
         match func.kind {
             ExprKind::Path(QPath::TypeRelative(ty, name))
-                if cx.typeck_results().node_type(ty.hir_id).is_diag_item(cx, sym::Vec) =>
+                if is_type_diagnostic_item(cx, cx.typeck_results().node_type(ty.hir_id), sym::Vec) =>
             {
                 if name.ident.name == sym::new {
                     return Some(VecInitKind::New);
                 } else if name.ident.name == symbol::kw::Default {
                     return Some(VecInitKind::Default);
-                } else if name.ident.name == sym::with_capacity {
+                } else if name.ident.name.as_str() == "with_capacity" {
                     let arg = args.first()?;
-                    return match ConstEvalCtxt::new(cx).eval_local(arg, expr.span.ctxt()) {
+                    return match ConstEvalCtxt::new(cx).eval_simple(arg) {
                         Some(Constant::Int(num)) => Some(VecInitKind::WithConstCapacity(num)),
                         _ => Some(VecInitKind::WithExprCapacity(arg.hir_id)),
                     };
-                }
+                };
             },
             ExprKind::Path(QPath::Resolved(_, path))
                 if cx.tcx.is_diagnostic_item(sym::default_fn, path.res.opt_def_id()?)
-                    && cx.typeck_results().expr_ty(expr).is_diag_item(cx, sym::Vec) =>
+                    && is_type_diagnostic_item(cx, cx.typeck_results().expr_ty(expr), sym::Vec) =>
             {
                 return Some(VecInitKind::Default);
             },
@@ -479,14 +487,4 @@ pub fn get_vec_init_kind<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) -
         }
     }
     None
-}
-
-/// Checks that a condition doesn't have a `let` expression, to keep `If` and `While` from accepting
-/// `if let` and `while let`.
-pub const fn has_let_expr<'tcx>(cond: &'tcx Expr<'tcx>) -> bool {
-    match &cond.kind {
-        ExprKind::Let(_) => true,
-        ExprKind::Binary(_, lhs, rhs) => has_let_expr(lhs) || has_let_expr(rhs),
-        _ => false,
-    }
 }

@@ -15,5 +15,5 @@ impl Rectangle {
 fn main() {
     let rect = Rectangle::new(3, 4);
     let _ = rect::area();
-    //~^ ERROR: cannot find module or crate `rect`
+    //~^ ERROR failed to resolve: use of undeclared crate or module `rect`
 }

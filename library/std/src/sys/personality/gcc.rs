@@ -5,7 +5,7 @@
 //! documents linked from it.
 //! These are also good reads:
 //!  * <https://itanium-cxx-abi.github.io/cxx-abi/abi-eh.html>
-//!  * <https://nicolasbrailo.github.io/blog/projects_texts/13exceptionsunderthehood.html>
+//!  * <https://monoinfinito.wordpress.com/series/exception-handling-in-c/>
 //!  * <https://www.airs.com/blog/index.php?s=exception+frames>
 //!
 //! ## A brief summary
@@ -86,24 +86,23 @@ const UNWIND_DATA_REG: (i32, i32) = (0, 1); // R0, R1
 #[cfg(any(target_arch = "riscv64", target_arch = "riscv32"))]
 const UNWIND_DATA_REG: (i32, i32) = (10, 11); // x10, x11
 
-#[cfg(any(target_arch = "loongarch32", target_arch = "loongarch64"))]
+#[cfg(target_arch = "loongarch64")]
 const UNWIND_DATA_REG: (i32, i32) = (4, 5); // a0, a1
 
 // The following code is based on GCC's C and C++ personality routines.  For reference, see:
 // https://github.com/gcc-mirror/gcc/blob/master/libstdc++-v3/libsupc++/eh_personality.cc
 // https://github.com/gcc-mirror/gcc/blob/trunk/libgcc/unwind-c.c
 
-cfg_select! {
-    all(
-        target_arch = "arm",
-        not(target_vendor = "apple"),
-        not(target_os = "netbsd"),
-    ) => {
+cfg_if::cfg_if! {
+    if #[cfg(all(
+            target_arch = "arm",
+            not(all(target_vendor = "apple", not(target_os = "watchos"))),
+            not(target_os = "netbsd"),
+        ))] {
         /// personality fn called by [ARM EHABI][armeabi-eh]
         ///
-        /// 32-bit ARM on iOS/tvOS/watchOS does not use ARM EHABI, it uses
-        /// either "setjmp-longjmp" unwinding or DWARF CFI unwinding, which is
-        /// handled by the default routine.
+        /// Apple 32-bit ARM (but not watchOS) uses the default routine instead
+        /// since it uses "setjmp-longjmp" unwinding.
         ///
         /// [armeabi-eh]: https://web.archive.org/web/20190728160938/https://infocenter.arm.com/help/topic/com.arm.doc.ihi0038b/IHI0038B_ehabi.pdf
         #[lang = "eh_personality"]
@@ -194,7 +193,7 @@ cfg_select! {
                     }
                 }
                 // defined in libgcc
-                unsafe extern "C" {
+                extern "C" {
                     fn __gnu_unwind_frame(
                         exception_object: *mut uw::_Unwind_Exception,
                         context: *mut uw::_Unwind_Context,
@@ -202,8 +201,7 @@ cfg_select! {
                 }
             }
         }
-    }
-    _ => {
+    } else {
         /// Default personality routine, which is used directly on most targets
         /// and indirectly on Windows x86_64 and AArch64 via SEH.
         unsafe extern "C" fn rust_eh_personality_impl(
@@ -221,7 +219,7 @@ cfg_select! {
                     Ok(action) => action,
                     Err(_) => return uw::_URC_FATAL_PHASE1_ERROR,
                 };
-                if actions & uw::_UA_SEARCH_PHASE != 0 {
+                if actions as i32 & uw::_UA_SEARCH_PHASE as i32 != 0 {
                     match eh_action {
                         EHAction::None | EHAction::Cleanup(_) => uw::_URC_CONTINUE_UNWIND,
                         EHAction::Catch(_) | EHAction::Filter(_) => uw::_URC_HANDLER_FOUND,
@@ -231,7 +229,7 @@ cfg_select! {
                     match eh_action {
                         EHAction::None => uw::_URC_CONTINUE_UNWIND,
                         // Forced unwinding hits a terminate action.
-                        EHAction::Filter(_) if actions & uw::_UA_FORCE_UNWIND != 0 => uw::_URC_CONTINUE_UNWIND,
+                        EHAction::Filter(_) if actions as i32 & uw::_UA_FORCE_UNWIND as i32 != 0 => uw::_URC_CONTINUE_UNWIND,
                         EHAction::Cleanup(lpad) | EHAction::Catch(lpad) | EHAction::Filter(lpad) => {
                             uw::_Unwind_SetGR(
                                 context,
@@ -248,11 +246,8 @@ cfg_select! {
             }
         }
 
-        cfg_select! {
-            any(
-                all(windows, any(target_arch = "aarch64", target_arch = "x86_64"), target_env = "gnu"),
-                target_os = "cygwin",
-            ) => {
+        cfg_if::cfg_if! {
+            if #[cfg(all(windows, any(target_arch = "aarch64", target_arch = "x86_64"), target_env = "gnu"))] {
                 /// personality fn called by [Windows Structured Exception Handling][windows-eh]
                 ///
                 /// On x86_64 and AArch64 MinGW targets, the unwinding mechanism is SEH,
@@ -280,8 +275,7 @@ cfg_select! {
                         )
                     }
                 }
-            }
-            _ => {
+            } else {
                 /// personality fn called by [Itanium C++ ABI Exception Handling][itanium-eh]
                 ///
                 /// The personality routine for most non-Windows targets. This will be called by

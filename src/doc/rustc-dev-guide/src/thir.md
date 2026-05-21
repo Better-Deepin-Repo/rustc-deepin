@@ -1,11 +1,13 @@
 # The THIR
 
+<!-- toc -->
+
 The THIR ("Typed High-Level Intermediate Representation"), previously called HAIR for
 "High-Level Abstract IR", is another IR used by rustc that is generated after
 [type checking]. It is (as of <!-- date-check --> January 2024) used for
 [MIR construction], [exhaustiveness checking], and [unsafety checking].
 
-[type checking]: ./hir-typeck/summary.md
+[type checking]: ./type-checking.md
 [MIR construction]: ./mir/construction.md
 [exhaustiveness checking]: ./pat-exhaustive-checking.md
 [unsafety checking]: ./unsafety-checking.md
@@ -33,7 +35,7 @@ But it has some other interesting features that distinguish it from the HIR:
 
 [HIR]: ./hir.md
 [`ExprId`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/thir/struct.ExprId.html
-[body owners]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_hir/hir/enum.BodyOwnerKind.html
+[body owners]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_hir/enum.BodyOwnerKind.html
 
 The THIR lives in [`rustc_mir_build::thir`][thir-docs]. To construct a [`thir::Expr`],
 you can use the [`thir_body`] function, passing in the memory arena where the THIR

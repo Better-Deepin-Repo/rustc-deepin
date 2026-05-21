@@ -1,3 +1,3 @@
-use self; //~ERROR imports need to be explicitly named
+use self; //~ERROR `self` imports are only allowed within a { } list
 
 fn main() {}

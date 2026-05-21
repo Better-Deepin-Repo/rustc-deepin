@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 // Test messages where a closure capture conflicts with itself because it's in
 // a loop.
 

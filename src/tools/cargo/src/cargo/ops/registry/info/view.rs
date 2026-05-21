@@ -1,15 +1,14 @@
 use std::collections::HashMap;
 use std::io::Write;
 
-use crate::core::Shell;
-use crate::util::style::{CONTEXT, ERROR, HEADER, LITERAL, NOP, WARN};
+use crate::util::style::{ERROR, HEADER, LITERAL, NOP, NOTE, WARN};
 use crate::{
-    CargoResult, GlobalContext,
     core::{
-        Dependency, FeatureMap, Package, PackageId, SourceId, dependency::DepKind, shell::Verbosity,
+        dependency::DepKind, shell::Verbosity, Dependency, FeatureMap, Package, PackageId, SourceId,
     },
     sources::IndexSummary,
     util::interning::InternedString,
+    CargoResult, GlobalContext,
 };
 
 // Pretty print the package information.
@@ -26,7 +25,7 @@ pub(super) fn pretty_view(
     let header = HEADER;
     let error = ERROR;
     let warn = WARN;
-    let context = CONTEXT;
+    let note = NOTE;
 
     let mut shell = gctx.shell();
     let verbosity = shell.verbosity();
@@ -45,7 +44,7 @@ pub(super) fn pretty_view(
         } else {
             format!("#{}", metadata.keywords.join(" #"))
         };
-        write!(shell.out(), " {context}{message}{context:#}")?;
+        write!(shell.out(), " {note}{message}{note:#}")?;
     }
 
     let stdout = shell.out();
@@ -68,7 +67,7 @@ pub(super) fn pretty_view(
         (Some(latest), false) if latest.as_summary().version() != package_id.version() => {
             write!(
                 stdout,
-                " {warn}(latest {} {warn:#}{context}from {}{context:#}{warn}){warn:#}",
+                " {warn}(latest {} {warn:#}{note}from {}{note:#}{warn}){warn:#}",
                 latest.as_summary().version(),
                 pretty_source(summary.source_id(), gctx)
             )?;
@@ -83,7 +82,7 @@ pub(super) fn pretty_view(
         (_, false) => {
             write!(
                 stdout,
-                " {context}(from {}){context:#}",
+                " {note}(from {}){note:#}",
                 pretty_source(summary.source_id(), gctx)
             )?;
         }
@@ -135,7 +134,7 @@ pub(super) fn pretty_view(
         )?;
     }
 
-    let activated = &["default".into()];
+    let activated = &[InternedString::new("default")];
     let resolved_features = resolve_features(activated, summary.features());
     pretty_features(
         resolved_features.clone(),
@@ -154,7 +153,7 @@ pub(super) fn pretty_view(
     )?;
 
     if suggest_cargo_tree_command {
-        suggest_cargo_tree(package_id, &mut shell)?;
+        suggest_cargo_tree(package_id, stdout)?;
     }
 
     Ok(())
@@ -396,14 +395,23 @@ fn pretty_features(
 }
 
 // Suggest the cargo tree command to view the dependency tree.
-fn suggest_cargo_tree(package_id: PackageId, shell: &mut Shell) -> CargoResult<()> {
+fn suggest_cargo_tree(package_id: PackageId, stdout: &mut dyn Write) -> CargoResult<()> {
     let literal = LITERAL;
 
-    shell.note(format_args!(
-        "to see how you depend on {name}, run `{literal}cargo tree --invert {name}@{version}{literal:#}`",
+    note(format_args!(
+        "to see how you depend on {name}, run `{literal}cargo tree --invert --package {name}@{version}{literal:#}`",
         name = package_id.name(),
         version = package_id.version(),
-    ))
+    ), stdout)
+}
+
+pub(super) fn note(msg: impl std::fmt::Display, stdout: &mut dyn Write) -> CargoResult<()> {
+    let note = NOTE;
+    let bold = anstyle::Style::new() | anstyle::Effects::BOLD;
+
+    writeln!(stdout, "{note}note{note:#}{bold}:{bold:#} {msg}",)?;
+
+    Ok(())
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

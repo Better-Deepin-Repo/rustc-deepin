@@ -1,4 +1,3 @@
-//@ edition:2015
 // --force-warn $LINT_GROUP causes $LINT (which is warn-by-default) to warn
 // despite $LINT being allowed in module
 //@ compile-flags: --force-warn rust-2018-idioms

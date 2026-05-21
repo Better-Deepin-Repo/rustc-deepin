@@ -1,10 +1,9 @@
 use std::cmp::max;
 
-use rustc_ast::ast;
-use rustc_span::{Span, source_map};
+use rustc_ast::{ast, ptr};
+use rustc_span::{source_map, Span};
 
 use crate::macros::MacroArg;
-use crate::patterns::RangeOperand;
 use crate::utils::{mk_sp, outer_attributes};
 
 /// Spanned returns a span including attributes, if available.
@@ -12,7 +11,7 @@ pub(crate) trait Spanned {
     fn span(&self) -> Span;
 }
 
-impl<T: Spanned> Spanned for Box<T> {
+impl<T: Spanned> Spanned for ptr::P<T> {
     fn span(&self) -> Span {
         (**self).span()
     }
@@ -58,7 +57,6 @@ implement_spanned!(ast::ExprField);
 implement_spanned!(ast::ForeignItem);
 implement_spanned!(ast::Item);
 implement_spanned!(ast::Local);
-implement_spanned!(ast::WherePredicate);
 
 impl Spanned for ast::Stmt {
     fn span(&self) -> Span {
@@ -122,7 +120,7 @@ impl Spanned for ast::GenericParam {
     fn span(&self) -> Span {
         let lo = match self.kind {
             _ if !self.attrs.is_empty() => self.attrs[0].span.lo(),
-            ast::GenericParamKind::Const { span, .. } => span.lo(),
+            ast::GenericParamKind::Const { kw_span, .. } => kw_span.lo(),
             _ => self.ident.span.lo(),
         };
         let hi = if self.bounds.is_empty() {
@@ -145,8 +143,17 @@ impl Spanned for ast::GenericParam {
 
 impl Spanned for ast::FieldDef {
     fn span(&self) -> Span {
-        // FIXME(default_field_values): This needs to be adjusted.
         span_with_attrs_lo_hi!(self, self.span.lo(), self.ty.span.hi())
+    }
+}
+
+impl Spanned for ast::WherePredicate {
+    fn span(&self) -> Span {
+        match *self {
+            ast::WherePredicate::BoundPredicate(ref p) => p.span,
+            ast::WherePredicate::RegionPredicate(ref p) => p.span,
+            ast::WherePredicate::EqPredicate(ref p) => p.span,
+        }
     }
 }
 
@@ -172,7 +179,7 @@ impl Spanned for ast::GenericArg {
 impl Spanned for ast::GenericBound {
     fn span(&self) -> Span {
         match *self {
-            ast::GenericBound::Trait(ref ptr) => ptr.span,
+            ast::GenericBound::Trait(ref ptr, _) => ptr.span,
             ast::GenericBound::Outlives(ref l) => l.ident.span,
             ast::GenericBound::Use(_, span) => span,
         }
@@ -191,7 +198,7 @@ impl Spanned for MacroArg {
     }
 }
 
-impl Spanned for ast::MetaItemInner {
+impl Spanned for ast::NestedMetaItem {
     fn span(&self) -> Span {
         self.span()
     }
@@ -203,11 +210,5 @@ impl Spanned for ast::PreciseCapturingArg {
             ast::PreciseCapturingArg::Lifetime(lt) => lt.ident.span,
             ast::PreciseCapturingArg::Arg(path, _) => path.span,
         }
-    }
-}
-
-impl<'a, T> Spanned for RangeOperand<'a, T> {
-    fn span(&self) -> Span {
-        self.span
     }
 }

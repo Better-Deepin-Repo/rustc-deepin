@@ -7,7 +7,7 @@
 //@ needs-sanitizer-address
 //@ ignore-cross-compile
 //
-//@ compile-flags: -Copt-level=0 -Zsanitizer=address -C unsafe-allow-abi-mismatch=sanitizer
+//@ compile-flags: -Copt-level=0 -Zsanitizer=address
 //@ run-pass
 
 pub struct Wrap {

@@ -1,5 +1,7 @@
 #![deny(clippy::index_refutable_slice)]
 
+//@no-rustfix: need to change the suggestion to a multipart suggestion
+
 fn below_limit() {
     let slice: Option<&[u32]> = Some(&[1, 2, 3]);
     if let Some(slice) = slice {
@@ -18,4 +20,7 @@ fn above_limit() {
     }
 }
 
-fn main() {}
+fn main() {
+    below_limit();
+    above_limit();
+}

@@ -1,7 +1,7 @@
 #![feature(stmt_expr_attributes)]
 
 fn foo() -> String {
-    #[cfg(false)]
+    #[cfg(FALSE)]
     [1, 2, 3].iter().map(|c| c.to_string()).collect::<String>() //~ ERROR expected `;`, found `#`
     #[cfg(not(FALSE))]
     String::new()

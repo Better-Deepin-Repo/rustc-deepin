@@ -1,6 +1,6 @@
 //! Tests for --timings.
 
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
@@ -31,7 +31,7 @@ fn timings_works() {
     p.cargo("build --all-targets --timings")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] dep v0.1.0 (registry `dummy-registry`)
 [COMPILING] dep v0.1.0

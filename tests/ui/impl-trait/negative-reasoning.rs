@@ -5,7 +5,6 @@
 trait OpaqueTrait {}
 impl<T> OpaqueTrait for T {}
 type OpaqueType = impl OpaqueTrait;
-#[define_opaque(OpaqueType)]
 fn mk_opaque() -> OpaqueType {
     ()
 }
@@ -18,7 +17,7 @@ impl<T: std::fmt::Debug> AnotherTrait for T {}
 
 // This is in error, because we cannot assume that `OpaqueType: !Debug`
 impl AnotherTrait for D<OpaqueType> {
-    //~^ ERROR conflicting implementations of trait `AnotherTrait` for type `D<_>`
+    //~^ ERROR conflicting implementations of trait `AnotherTrait` for type `D<OpaqueType>`
 }
 
 fn main() {}

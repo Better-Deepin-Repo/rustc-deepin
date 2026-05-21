@@ -4,9 +4,12 @@
 //@ run-fail
 //@ check-run-results
 //@ exec-env:RUST_BACKTRACE=0
-//@ normalize-stdout: "finished in \d+\.\d+s" -> "finished in $$TIME"
+//@ normalize-stdout-test: "finished in \d+\.\d+s" -> "finished in $$TIME"
 
-//@ needs-subprocess
+//@ ignore-android #120567
+//@ ignore-wasm no panic or subprocess support
+//@ ignore-emscripten no panic or subprocess support
+//@ ignore-sgx no subprocess support
 
 #![cfg(test)]
 

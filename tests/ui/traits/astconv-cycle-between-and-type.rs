@@ -4,6 +4,7 @@
 // carries a predicate that references the trait (`u32 : Trait1`,
 // substituted).
 
+//@ pretty-expanded FIXME #23616
 
 #![allow(dead_code)]
 

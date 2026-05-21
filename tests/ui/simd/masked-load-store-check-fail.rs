@@ -1,7 +1,10 @@
 //@ check-fail
-#![feature(repr_simd, core_intrinsics)]
+#![feature(repr_simd, intrinsics)]
 
-use std::intrinsics::simd::{SimdAlign, simd_masked_load, simd_masked_store};
+extern "rust-intrinsic" {
+    fn simd_masked_load<M, P, T>(mask: M, pointer: P, values: T) -> T;
+    fn simd_masked_store<M, P, T>(mask: M, pointer: P, values: T) -> ();
+}
 
 #[derive(Copy, Clone)]
 #[repr(simd)]
@@ -12,17 +15,17 @@ fn main() {
         let mut arr = [4u8, 5, 6, 7];
         let default = Simd::<u8, 4>([9; 4]);
 
-        let _x: Simd<u8, 2> = simd_masked_load::<_, _, _, { SimdAlign::Element }>(
+        let _x: Simd<u8, 2> = simd_masked_load(
             Simd::<i8, 4>([-1, 0, -1, -1]),
             arr.as_ptr(),
-            Simd::<u8, 4>([9; 4]),
+            Simd::<u8, 4>([9; 4])
         );
         //~^^ ERROR mismatched types
 
-        let _x: Simd<u32, 4> = simd_masked_load::<_, _, _, { SimdAlign::Element }>(
+        let _x: Simd<u32, 4> = simd_masked_load(
             Simd::<u8, 4>([1, 0, 1, 1]),
             arr.as_ptr(),
-            default,
+            default
         );
         //~^^ ERROR mismatched types
     }

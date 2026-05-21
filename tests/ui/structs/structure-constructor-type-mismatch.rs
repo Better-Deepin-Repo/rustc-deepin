@@ -1,5 +1,3 @@
-//@ dont-require-annotations: NOTE
-
 struct Point<T> {
     x: T,
     y: T,
@@ -18,32 +16,32 @@ fn main() {
     let pt = PointF {
         x: 1,
         //~^ ERROR mismatched types
-        //~| NOTE expected `f32`, found integer
+        //~| expected `f32`, found integer
         y: 2,
         //~^ ERROR mismatched types
-        //~| NOTE expected `f32`, found integer
+        //~| expected `f32`, found integer
     };
 
     let pt2 = Point::<f32> {
         x: 3,
         //~^ ERROR mismatched types
-        //~| NOTE expected `f32`, found integer
+        //~| expected `f32`, found integer
         y: 4,
         //~^ ERROR mismatched types
-        //~| NOTE expected `f32`, found integer
+        //~| expected `f32`, found integer
     };
 
     let pair = PairF {
         x: 5,
         //~^ ERROR mismatched types
-        //~| NOTE expected `f32`, found integer
+        //~| expected `f32`, found integer
         y: 6,
     };
 
     let pair2 = PairF::<i32> {
         x: 7,
         //~^ ERROR mismatched types
-        //~| NOTE expected `f32`, found integer
+        //~| expected `f32`, found integer
         y: 8,
     };
 

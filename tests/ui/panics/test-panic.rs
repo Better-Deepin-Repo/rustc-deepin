@@ -1,7 +1,7 @@
 //@ run-fail
 //@ check-stdout
 //@ compile-flags: --test
-//@ needs-subprocess
+//@ ignore-emscripten
 
 #[test]
 fn test_foo() {

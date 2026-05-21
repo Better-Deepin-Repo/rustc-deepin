@@ -14,15 +14,12 @@ fn main() {
 
     s.push_str(abc);
     s.extend(abc.chars());
-    //~^ string_extend_chars
 
     s.push_str("abc");
     s.extend("abc".chars());
-    //~^ string_extend_chars
 
     s.push_str(&def);
     s.extend(def.chars());
-    //~^ string_extend_chars
 
     s.extend(abc.chars().skip(1));
     s.extend("abc".chars().skip(1));
@@ -33,5 +30,4 @@ fn main() {
 
     // issue #9735
     s.extend(abc[0..2].chars());
-    //~^ string_extend_chars
 }

@@ -1,43 +1,43 @@
-error[E0433]: cannot find module or crate `clippy` in the crate root
-  --> $DIR/tool-mod-child.rs:3:5
+error[E0433]: failed to resolve: you might be missing crate `clippy`
+  --> $DIR/tool-mod-child.rs:2:5
    |
 LL | use clippy::a::b;
-   |     ^^^^^^ use of unresolved module or unlinked crate `clippy`
+   |     ^^^^^^ you might be missing crate `clippy`
    |
-help: you might be missing a crate named `clippy`, add it to your project and import it in your code
+help: consider importing the `clippy` crate
    |
 LL + extern crate clippy;
    |
 
 error[E0432]: unresolved import `clippy`
-  --> $DIR/tool-mod-child.rs:2:5
+  --> $DIR/tool-mod-child.rs:1:5
    |
 LL | use clippy::a;
-   |     ^^^^^^ use of unresolved module or unlinked crate `clippy`
+   |     ^^^^^^ you might be missing crate `clippy`
    |
-help: you might be missing a crate named `clippy`, add it to your project and import it in your code
+help: consider importing the `clippy` crate
    |
 LL + extern crate clippy;
    |
 
-error[E0433]: cannot find module or crate `rustdoc` in the crate root
-  --> $DIR/tool-mod-child.rs:6:5
+error[E0433]: failed to resolve: you might be missing crate `rustdoc`
+  --> $DIR/tool-mod-child.rs:5:5
    |
 LL | use rustdoc::a::b;
-   |     ^^^^^^^ use of unresolved module or unlinked crate `rustdoc`
+   |     ^^^^^^^ you might be missing crate `rustdoc`
    |
-help: you might be missing a crate named `rustdoc`, add it to your project and import it in your code
+help: consider importing the `rustdoc` crate
    |
 LL + extern crate rustdoc;
    |
 
 error[E0432]: unresolved import `rustdoc`
-  --> $DIR/tool-mod-child.rs:5:5
+  --> $DIR/tool-mod-child.rs:4:5
    |
 LL | use rustdoc::a;
-   |     ^^^^^^^ use of unresolved module or unlinked crate `rustdoc`
+   |     ^^^^^^^ you might be missing crate `rustdoc`
    |
-help: you might be missing a crate named `rustdoc`, add it to your project and import it in your code
+help: consider importing the `rustdoc` crate
    |
 LL + extern crate rustdoc;
    |

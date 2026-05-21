@@ -7,7 +7,6 @@ use proc_macros::external;
 
 /// This is not sufficiently documented
 pub unsafe fn destroy_the_planet() {
-    //~^ missing_safety_doc
     unimplemented!();
 }
 
@@ -31,7 +30,6 @@ mod private_mod {
     }
 
     pub unsafe fn republished() {
-        //~^ missing_safety_doc
         unimplemented!();
     }
 }
@@ -40,14 +38,12 @@ pub use private_mod::republished;
 
 pub trait SafeTraitUnsafeMethods {
     unsafe fn woefully_underdocumented(self);
-    //~^ missing_safety_doc
 
     /// # Safety
     unsafe fn at_least_somewhat_documented(self);
 }
 
 pub unsafe trait UnsafeTrait {
-    //~^ missing_safety_doc
     fn method();
 }
 
@@ -78,7 +74,6 @@ unsafe impl DocumentedUnsafeTrait for Struct {
 
 impl Struct {
     pub unsafe fn more_undocumented_unsafe() -> Self {
-        //~^ missing_safety_doc
         unimplemented!();
     }
 
@@ -95,7 +90,6 @@ impl Struct {
 macro_rules! very_unsafe {
     () => {
         pub unsafe fn whee() {
-            //~^ missing_safety_doc
             unimplemented!()
         }
 
@@ -103,7 +97,7 @@ macro_rules! very_unsafe {
         ///
         /// Please keep the seat belt fastened
         pub unsafe fn drive() {
-            unsafe { whee() }
+            whee()
         }
     };
 }

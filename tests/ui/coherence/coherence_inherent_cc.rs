@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ aux-build:coherence_inherent_cc_lib.rs
 
 // Tests that methods that implement a trait cannot be invoked

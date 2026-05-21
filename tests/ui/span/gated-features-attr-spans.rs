@@ -1,6 +1,7 @@
 #[repr(simd)] //~ ERROR are experimental
 struct Coord {
-    v: [u32; 2],
+    x: u32,
+    y: u32,
 }
 
 fn main() {}

@@ -34,7 +34,7 @@ was not maintained at that time. This means that the list below is not
 exhaustive, and there are more interested parties in this target. That being
 said, those interested in maintaining this target are:
 
-[@alexcrichton](https://github.com/alexcrichton)
+- Alex Crichton, https://github.com/alexcrichton
 
 ## Requirements
 
@@ -46,8 +46,8 @@ This target currently has no equivalent in C/C++. There is no C/C++ toolchain
 for this target. While interop is theoretically possible it's recommended to
 instead use one of:
 
-* [`wasm32-unknown-emscripten`](./wasm32-unknown-emscripten.md) - for web-based
-  use cases the Emscripten toolchain is typically chosen for running C/C++.
+* `wasm32-unknown-emscripten` - for web-based use cases the Emscripten
+  toolchain is typically chosen for running C/C++.
 * [`wasm32-wasip1`](./wasm32-wasip1.md) - the wasi-sdk toolchain is used to
   compile C/C++ on this target and can interop with Rust code. WASI works on
   the web so far as there's no blocker, but an implementation of WASI APIs
@@ -65,7 +65,7 @@ Building this target can be done by:
 * Configure LLD to be built.
 * Ensure the `WebAssembly` target backend is not disabled in LLVM.
 
-These are all controlled through `bootstrap.toml` options. It should be possible
+These are all controlled through `config.toml` options. It should be possible
 to build this target on any platform.
 
 ## Building Rust programs
@@ -129,25 +129,13 @@ As of the time of this writing the proposals that are enabled by default (the
 * `mutable-globals`
 * `reference-types`
 * `sign-ext`
-* `nontrapping-fptoint` (Rust 1.87.0+, LLVM 20+)
-* `bulk-memory` (Rust 1.87.0+, LLVM 20+)
 
 If you're compiling WebAssembly code for an engine that does not support a
 feature in LLVM's default feature set then the feature must be disabled at
-compile time. There are two approaches to choose from:
-
-  - If you are targeting a feature set no smaller than the W3C WebAssembly Core
-    1.0 recommendation -- which is equivalent to the WebAssembly MVP plus the
-    `mutable-globals` feature -- and you are building `no_std`, then you can
-    simply use the [`wasm32v1-none` target](./wasm32v1-none.md) instead of
-    `wasm32-unknown-unknown`, which uses only those minimal features and
-    includes a core and alloc library built with only those minimal features.
-
-  - Otherwise -- if you need std, or if you need to target the ultra-minimal
-    "MVP" feature set, excluding `mutable-globals` -- you will need to manually
-    specify `-Ctarget-cpu=mvp` and also rebuild the stdlib using that target to
-    ensure no features are used in the stdlib. This in turn requires use of a
-    nightly compiler.
+compile time. Note, though, that enabled features may be used in the standard
+library or precompiled libraries shipped via rustup. This means that not only
+does your own code need to be compiled with the correct set of flags but the
+Rust standard library additionally must be recompiled.
 
 Compiling all code for the initial release of WebAssembly looks like:
 
@@ -157,14 +145,14 @@ $ cargo +nightly build -Zbuild-std=panic_abort,std --target wasm32-unknown-unkno
 ```
 
 Here the `mvp` "cpu" is a placeholder in LLVM for disabling all supported
-features by default. Cargo's [`-Zbuild-std`] feature, a Nightly Rust feature, is
+features by default. Cargo's `-Zbuild-std` feature, a Nightly Rust feature, is
 then used to recompile the standard library in addition to your own code. This
 will produce a binary that uses only the original WebAssembly features by
 default and no proposals since its inception.
 
-To enable individual features on either this target or `wasm32v1-none`, pass
-arguments of the form `-Ctarget-feature=+foo`.  Available features for Rust code
-itself are documented in the [reference] and can also be found through:
+To enable individual features it can be done with `-Ctarget-feature=+foo`.
+Available features for Rust code itself are documented in the [reference] and
+can also be found through:
 
 ```sh
 $ rustc -Ctarget-feature=help --target wasm32-unknown-unknown
@@ -207,78 +195,3 @@ conditionally compile code instead. This is notably different to the way native
 platforms such as x86\_64 work, and this is due to the fact that WebAssembly
 binaries must only contain code the engine understands. Native binaries work so
 long as the CPU doesn't execute unknown code dynamically at runtime.
-
-## Unwinding
-
-By default the `wasm32-unknown-unknown` target is compiled with `-Cpanic=abort`.
-Historically this was due to the fact that there was no way to catch panics in
-wasm, but since mid-2025 the WebAssembly [`exception-handling`
-proposal](https://github.com/WebAssembly/exception-handling) reached
-stabilization. LLVM has support for this proposal as well and when this is all
-combined together it's possible to enable `-Cpanic=unwind` on wasm targets.
-
-Compiling wasm targets with `-Cpanic=unwind` is not as easy as just passing
-`-Cpanic=unwind`, however:
-
-```sh
-$ rustc foo.rs -Cpanic=unwind --target wasm32-unknown-unknown
-error: the crate `panic_unwind` does not have the panic strategy `unwind`
-```
-
-Notably the precompiled standard library that is shipped through Rustup is
-compiled with `-Cpanic=abort`, not `-Cpanic=unwind`. While this is the case
-you're going to be required to use Cargo's [`-Zbuild-std`] feature to build with
-unwinding support:
-
-```sh
-$ RUSTFLAGS='-Cpanic=unwind' cargo +nightly build --target wasm32-unknown-unknown -Zbuild-std
-```
-
-Note, however, that as of 2025-10-03 LLVM is still using the "legacy exception
-instructions" by default, not the officially standard version of the
-exception-handling proposal:
-
-```sh
-$ wasm-tools validate target/wasm32-unknown-unknown/debug/foo.wasm
-error: <sysroot>/library/std/src/sys/backtrace.rs:161:5
-function `std::sys::backtrace::__rust_begin_short_backtrace` failed to validate
-
-Caused by:
-    0: func 2 failed to validate
-    1: legacy_exceptions feature required for try instruction (at offset 0x880)
-```
-
-Fixing this requires passing `-Cllvm-args=-wasm-use-legacy-eh=false` to the Rust
-compiler as well:
-
-```sh
-$ RUSTFLAGS='-Cpanic=unwind -Cllvm-args=-wasm-use-legacy-eh=false' cargo +nightly build --target wasm32-unknown-unknown -Zbuild-std
-$ wasm-tools validate target/wasm32-unknown-unknown/debug/foo.wasm
-```
-
-At this time there are no concrete plans for adding new targets to the Rust
-compiler which have `-Cpanic=unwind` enabled-by-default. The most likely route
-to having this enabled is that in a few years when the `exception-handling`
-target feature is enabled by default in LLVM (due to browsers/runtime support
-propagating widely enough) the targets will switch to using `-Cpanic=unwind` by
-default. This is not for certain, however, and will likely be accompanied with
-either an MCP or an RFC about changing all wasm targets in the same manner. In
-the meantime using `-Cpanic=unwind` will require using [`-Zbuild-std`] and
-passing the appropriate flags to rustc.
-
-[`-Zbuild-std`]: ../../cargo/reference/unstable.html#build-std
-
-### The exception tag for panics
-
-Rust panics are currently implemented as a specific class of C++ exceptions.
-This is because llvm only supports throwing and catching the C++ exception tag
-from `wasm_throw` intrinsic and the lowering for the catchpads emitted by the
-Rust try intrinsic.
-
-In particular, llvm throw and catch blocks expect a `WebAssembly.Tag` symbol
-called `__cpp_exception`. If it is not defined somewhere, llvm will generate an
-Emscripten style import from `env.__cpp_exception`. We don't want this, so we
-define the symbol in `libunwind` but only for wasm32-unknown-unknown. WASI
-doesn't currently support unwinding at all, and the Emscripten linker provides
-the tag in an appropriate manner depending on what sort of binary is being
-linked.

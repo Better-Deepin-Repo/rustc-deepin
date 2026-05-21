@@ -1,8 +1,9 @@
 //@ run-pass
 
-#![allow(dead_code, unused_variables, unused_assignments)]
-
+#![allow(dead_code)]
+#![allow(unused_variables)]
 // Type ascription doesn't lead to unsoundness
+
 #![feature(type_ascription)]
 
 use std::mem;

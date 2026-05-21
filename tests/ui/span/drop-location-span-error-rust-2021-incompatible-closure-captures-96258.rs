@@ -1,5 +1,3 @@
-//@ edition: 2015
-
 #![warn(rust_2021_incompatible_closure_captures)]
 
 fn main() {}

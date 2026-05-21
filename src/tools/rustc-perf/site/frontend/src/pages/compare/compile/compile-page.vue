@@ -14,7 +14,6 @@ import {
   computeCompileComparisonsWithNonRelevant,
   createCompileBenchmarkMap,
   defaultCompileFilter,
-  transformDataForBackendComparison,
 } from "./common";
 import {BenchmarkInfo} from "../../../api";
 import {importantCompileMetrics} from "../metrics";
@@ -78,13 +77,6 @@ function loadFilterFromUrl(
         defaultFilter.backend.cranelift
       ),
     },
-    target: {
-      x86_64_unknown_linux_gnu: getBoolOrDefault(
-        urlParams,
-        "target-x86_64-unknown-linux-gnu",
-        defaultFilter.target.x86_64_unknown_linux_gnu
-      ),
-    },
     category: {
       primary: getBoolOrDefault(
         urlParams,
@@ -109,23 +101,6 @@ function loadFilterFromUrl(
         defaultFilter.artifact.library
       ),
     },
-    changes: {
-      regressions: getBoolOrDefault(
-        urlParams,
-        "regressions",
-        defaultFilter.changes.regressions
-      ),
-      improvements: getBoolOrDefault(
-        urlParams,
-        "improvements",
-        defaultCompileFilter.changes.improvements
-      ),
-    },
-    selfCompareBackend: getBoolOrDefault(
-      urlParams,
-      "selfCompareBackend",
-      defaultFilter.selfCompareBackend
-    ),
   };
 }
 
@@ -182,11 +157,6 @@ function storeFilterToUrl(
     defaultFilter.backend.cranelift
   );
   storeOrReset(
-    "target-x86_64-unknown-linux-gnu",
-    filter.target.x86_64_unknown_linux_gnu,
-    defaultFilter.target.x86_64_unknown_linux_gnu
-  );
-  storeOrReset(
     "primary",
     filter.category.primary,
     defaultFilter.category.primary
@@ -201,21 +171,6 @@ function storeFilterToUrl(
     "library",
     filter.artifact.library,
     defaultFilter.artifact.library
-  );
-  storeOrReset(
-    "regressions",
-    filter.changes.regressions,
-    defaultFilter.changes.regressions
-  );
-  storeOrReset(
-    "improvements",
-    filter.changes.improvements,
-    defaultFilter.changes.improvements
-  );
-  storeOrReset(
-    "selfCompareBackend",
-    filter.selfCompareBackend,
-    defaultFilter.selfCompareBackend
   );
 
   changeUrl(urlParams);
@@ -237,41 +192,20 @@ function refreshQuickLinks() {
   quickLinksKey.value += 1;
 }
 
+function exportData() {
+  exportToMarkdown(comparisons.value);
+}
+
 const urlParams = getUrlParams();
 
 const quickLinksKey = ref(0);
 const filter = ref(loadFilterFromUrl(urlParams, defaultCompileFilter));
 
-// Should we use the backend as the source of before/after data?
-const selfCompareBackend = computed(() => {
-  return canCompareBackends.value && filter.value.selfCompareBackend;
-});
-const canCompareBackends = computed(() => {
-  const hasMultipleBackends =
-    new Set(props.data.compile_comparisons.map((c) => c.backend)).size > 1;
-  // Are we currently comparing the same commit in the before/after toolchains?
-  const comparesSameCommit = props.data.a.commit === props.data.b.commit;
-  return hasMultipleBackends && comparesSameCommit;
-});
-
-function exportData() {
-  exportToMarkdown(comparisons.value, filter.value.showRawData);
-}
-
 const benchmarkMap = createCompileBenchmarkMap(props.data);
-
-const compileComparisons = computed(() => {
-  // If requested, artificially restructure the data to create a comparison between backends
-  if (selfCompareBackend.value) {
-    return transformDataForBackendComparison(props.data.compile_comparisons);
-  } else {
-    return props.data.compile_comparisons;
-  }
-});
 const allComparisons = computed(() =>
   computeCompileComparisonsWithNonRelevant(
     filter.value,
-    compileComparisons.value,
+    props.data.compile_comparisons,
     benchmarkMap
   )
 );
@@ -289,18 +223,13 @@ const filteredSummary = computed(() => computeSummary(comparisons.value));
     :metrics="benchmarkInfo.compile_metrics"
   />
   <Filters
-    :default-filter="defaultCompileFilter"
-    :initial-filter="filter"
-    :can-compare-backends="canCompareBackends"
+    :defaultFilter="defaultCompileFilter"
+    :initialFilter="filter"
     @change="updateFilter"
     @export="exportData"
   />
   <OverallSummary :summary="filteredSummary" />
   <Aggregations :cases="comparisons" />
-  <div class="warning" v-if="selfCompareBackend">
-    Note: comparing results of the baseline LLVM backend to the Cranelift
-    backend.
-  </div>
   <Benchmarks
     :data="data"
     :test-cases="comparisons"
@@ -308,12 +237,5 @@ const filteredSummary = computed(() => computeSummary(comparisons.value));
     :filter="filter"
     :stat="selector.stat"
     :benchmark-map="benchmarkMap"
-    :show-backend="!selfCompareBackend"
   ></Benchmarks>
 </template>
-<style lang="scss" scoped>
-.warning {
-  color: red;
-  font-weight: bold;
-}
-</style>

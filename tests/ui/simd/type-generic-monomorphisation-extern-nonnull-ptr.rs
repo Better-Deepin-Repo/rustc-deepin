@@ -6,12 +6,12 @@
 
 use std::ptr::NonNull;
 
-extern "C" {
+extern {
     type Extern;
 }
 
 #[repr(simd)]
-struct S<T>([T; 4]);
+struct S<T>(T);
 
 #[inline(never)]
 fn identity<T>(v: T) -> T {
@@ -19,5 +19,5 @@ fn identity<T>(v: T) -> T {
 }
 
 fn main() {
-    let _v: S<Option<NonNull<Extern>>> = identity(S([None; 4]));
+    let _v: S<[Option<NonNull<Extern>>; 4]> = identity(S([None; 4]));
 }

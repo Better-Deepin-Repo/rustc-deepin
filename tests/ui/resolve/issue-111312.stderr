@@ -1,14 +1,27 @@
-error[E0782]: expected a type, found a trait
+error[E0782]: trait objects must include the `dyn` keyword
   --> $DIR/issue-111312.rs:10:5
    |
 LL |     HasNot::has();
    |     ^^^^^^
    |
-help: you can add the `dyn` keyword if you want a trait object
+help: add `dyn` keyword before this trait
    |
 LL |     <dyn HasNot>::has();
    |     ++++       +
 
-error: aborting due to 1 previous error
+error[E0599]: no function or associated item named `has` found for trait `HasNot`
+  --> $DIR/issue-111312.rs:10:13
+   |
+LL |     HasNot::has();
+   |             ^^^ function or associated item not found in `HasNot`
+   |
+note: `Has` defines an item `has`
+  --> $DIR/issue-111312.rs:3:1
+   |
+LL | trait Has {
+   | ^^^^^^^^^
 
-For more information about this error, try `rustc --explain E0782`.
+error: aborting due to 2 previous errors
+
+Some errors have detailed explanations: E0599, E0782.
+For more information about an error, try `rustc --explain E0599`.

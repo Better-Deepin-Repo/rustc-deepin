@@ -11,7 +11,7 @@ extern crate issue_80074_2;
 
 fn main() {
     foo!();
-    //~^ ERROR: macro `foo` is private
+    //~^ WARN: macro `foo` is private
     //~| WARN: it will become a hard error in a future release!
     bar!();
     //~^ ERROR: cannot find macro `bar` in this scope

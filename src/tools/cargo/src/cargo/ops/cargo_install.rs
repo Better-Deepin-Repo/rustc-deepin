@@ -5,16 +5,15 @@ use std::{env, fs};
 
 use crate::core::compiler::{CompileKind, DefaultExecutor, Executor, UnitOutput};
 use crate::core::{Dependency, Edition, Package, PackageId, SourceId, Target, Workspace};
+use crate::ops::{common_for_install_and_uninstall::*, FilterRule};
 use crate::ops::{CompileFilter, Packages};
-use crate::ops::{FilterRule, common_for_install_and_uninstall::*};
 use crate::sources::source::Source;
 use crate::sources::{GitSource, PathSource, SourceConfigMap};
-use crate::util::context::FeatureUnification;
 use crate::util::errors::CargoResult;
 use crate::util::{Filesystem, GlobalContext, Rustc};
 use crate::{drop_println, ops};
 
-use anyhow::{Context as _, bail};
+use anyhow::{bail, Context as _};
 use cargo_util::paths;
 use cargo_util_schemas::core::PartialVersion;
 use itertools::Itertools;
@@ -47,6 +46,7 @@ struct InstallablePackage<'gctx> {
     vers: Option<VersionReq>,
     force: bool,
     no_track: bool,
+
     pkg: Package,
     ws: Workspace<'gctx>,
     rustc: Rustc,
@@ -72,9 +72,9 @@ impl<'gctx> InstallablePackage<'gctx> {
         if let Some(name) = krate {
             if name == "." {
                 bail!(
-                    "to install the binaries for the package in current working \
+                    "To install the binaries for the package in current working \
                      directory use `cargo install --path .`. \n\
-                     use `cargo build` if you want to simply build the package."
+                     Use `cargo build` if you want to simply build the package."
                 )
             }
         }
@@ -181,23 +181,13 @@ impl<'gctx> InstallablePackage<'gctx> {
 
         let (ws, rustc, target) =
             make_ws_rustc_target(gctx, &original_opts, &source_id, pkg.clone())?;
-
-        if !gctx.lock_update_allowed() {
-            // When --lockfile-path is set, check that passed lock file exists
-            // (unlike the usual flag behavior, lockfile won't be created as we imply --locked)
-            if let Some(requested_lockfile_path) = ws.requested_lockfile_path() {
-                if !requested_lockfile_path.is_file() {
-                    bail!(
-                        "no Cargo.lock file found in the requested path {}",
-                        requested_lockfile_path.display()
-                    );
-                }
-            // If we're installing in --locked mode and there's no `Cargo.lock` published
-            // ie. the bin was published before https://github.com/rust-lang/cargo/pull/7026
-            } else if !ws.root().join("Cargo.lock").exists() {
-                gctx.shell()
-                    .warn(format!("no Cargo.lock file published in {}", pkg))?;
-            }
+        // If we're installing in --locked mode and there's no `Cargo.lock` published
+        // ie. the bin was published before https://github.com/rust-lang/cargo/pull/7026
+        if gctx.locked() && !ws.root().join("Cargo.lock").exists() {
+            gctx.shell().warn(format!(
+                "no Cargo.lock file published in {}",
+                pkg.to_string()
+            ))?;
         }
         let pkg = if source_id.is_git() {
             // Don't use ws.current() in order to keep the package source as a git source so that
@@ -221,17 +211,17 @@ impl<'gctx> InstallablePackage<'gctx> {
         if from_cwd {
             if pkg.manifest().edition() == Edition::Edition2015 {
                 gctx.shell().warn(
-                    "using `cargo install` to install the binaries from the \
+                    "Using `cargo install` to install the binaries from the \
                      package in current working directory is deprecated, \
                      use `cargo install --path .` instead. \
-                     note: use `cargo build` if you want to simply build the package.",
+                     Use `cargo build` if you want to simply build the package.",
                 )?
             } else {
                 bail!(
-                    "using `cargo install` to install the binaries from the \
+                    "Using `cargo install` to install the binaries from the \
                      package in current working directory is no longer supported, \
                      use `cargo install --path .` instead. \
-                     note: use `cargo build` if you want to simply build the package."
+                     Use `cargo build` if you want to simply build the package."
                 )
             }
         };
@@ -256,6 +246,7 @@ impl<'gctx> InstallablePackage<'gctx> {
             vers: vers.cloned(),
             force,
             no_track,
+
             pkg,
             ws,
             rustc,
@@ -306,18 +297,10 @@ impl<'gctx> InstallablePackage<'gctx> {
         Ok(duplicates)
     }
 
-    fn install_one(mut self, dry_run: bool) -> CargoResult<bool> {
+    fn install_one(mut self) -> CargoResult<bool> {
         self.gctx.shell().status("Installing", &self.pkg)?;
 
-        // Normalize to absolute path for consistency throughout.
-        // See: https://github.com/rust-lang/cargo/issues/16023
         let dst = self.root.join("bin").into_path_unlocked();
-        let cwd = self.gctx.cwd();
-        let dst = if dst.is_absolute() {
-            paths::normalize_path(dst.as_path())
-        } else {
-            paths::normalize_path(&cwd.join(&dst))
-        };
 
         let mut td_opt = None;
         let mut needs_cleanup = false;
@@ -338,20 +321,19 @@ impl<'gctx> InstallablePackage<'gctx> {
         self.check_yanked_install()?;
 
         let exec: Arc<dyn Executor> = Arc::new(DefaultExecutor);
-        self.opts.build_config.dry_run = dry_run;
         let compile = ops::compile_ws(&self.ws, &self.opts, &exec).with_context(|| {
             if let Some(td) = td_opt.take() {
                 // preserve the temporary directory, so the user can inspect it
-                drop(td.keep());
+                drop(td.into_path());
             }
 
             format!(
                 "failed to compile `{}`, intermediate artifacts can be \
                  found at `{}`.\nTo reuse those artifacts with a future \
                  compilation, set the environment variable \
-                 `CARGO_BUILD_BUILD_DIR` to that path.",
+                 `CARGO_TARGET_DIR` to that path.",
                 self.pkg,
-                self.ws.build_dir().display()
+                self.ws.target_dir().display()
             )
         })?;
         let mut binaries: Vec<(&str, &Path)> = compile
@@ -377,12 +359,12 @@ impl<'gctx> InstallablePackage<'gctx> {
             // behavior for this fallback case as well.
             if let CompileFilter::Only { bins, examples, .. } = &self.opts.filter {
                 let mut any_specific = false;
-                if let FilterRule::Just(v) = bins {
+                if let FilterRule::Just(ref v) = bins {
                     if !v.is_empty() {
                         any_specific = true;
                     }
                 }
-                if let FilterRule::Just(v) = examples {
+                if let FilterRule::Just(ref v) = examples {
                     if !v.is_empty() {
                         any_specific = true;
                     }
@@ -437,15 +419,13 @@ impl<'gctx> InstallablePackage<'gctx> {
         let staging_dir = TempFileBuilder::new()
             .prefix("cargo-install")
             .tempdir_in(&dst)?;
-        if !dry_run {
-            for &(bin, src) in binaries.iter() {
-                let dst = staging_dir.path().join(bin);
-                // Try to move if `target_dir` is transient.
-                if !self.source_id.is_path() && fs::rename(src, &dst).is_ok() {
-                    continue;
-                }
-                paths::copy(src, &dst)?;
+        for &(bin, src) in binaries.iter() {
+            let dst = staging_dir.path().join(bin);
+            // Try to move if `target_dir` is transient.
+            if !self.source_id.is_path() && fs::rename(src, &dst).is_ok() {
+                continue;
             }
+            paths::copy(src, &dst)?;
         }
 
         let (to_replace, to_install): (Vec<&str>, Vec<&str>) = binaries
@@ -461,13 +441,11 @@ impl<'gctx> InstallablePackage<'gctx> {
             let src = staging_dir.path().join(bin);
             let dst = dst.join(bin);
             self.gctx.shell().status("Installing", dst.display())?;
-            if !dry_run {
-                fs::rename(&src, &dst).with_context(|| {
-                    format!("failed to move `{}` to `{}`", src.display(), dst.display())
-                })?;
-                installed.bins.push(dst);
-                successful_bins.insert(bin.to_string());
-            }
+            fs::rename(&src, &dst).with_context(|| {
+                format!("failed to move `{}` to `{}`", src.display(), dst.display())
+            })?;
+            installed.bins.push(dst);
+            successful_bins.insert(bin.to_string());
         }
 
         // Repeat for binaries which replace existing ones but don't pop the error
@@ -478,12 +456,10 @@ impl<'gctx> InstallablePackage<'gctx> {
                     let src = staging_dir.path().join(bin);
                     let dst = dst.join(bin);
                     self.gctx.shell().status("Replacing", dst.display())?;
-                    if !dry_run {
-                        fs::rename(&src, &dst).with_context(|| {
-                            format!("failed to move `{}` to `{}`", src.display(), dst.display())
-                        })?;
-                        successful_bins.insert(bin.to_string());
-                    }
+                    fs::rename(&src, &dst).with_context(|| {
+                        format!("failed to move `{}` to `{}`", src.display(), dst.display())
+                    })?;
+                    successful_bins.insert(bin.to_string());
                 }
                 Ok(())
             };
@@ -500,14 +476,9 @@ impl<'gctx> InstallablePackage<'gctx> {
                 &self.rustc.verbose_version,
             );
 
-            if let Err(e) = remove_orphaned_bins(
-                &self.ws,
-                &mut tracker,
-                &duplicates,
-                &self.pkg,
-                &dst,
-                dry_run,
-            ) {
+            if let Err(e) =
+                remove_orphaned_bins(&self.ws, &mut tracker, &duplicates, &self.pkg, &dst)
+            {
                 // Don't hard error on remove.
                 self.gctx
                     .shell()
@@ -544,10 +515,7 @@ impl<'gctx> InstallablePackage<'gctx> {
             }
         }
 
-        if dry_run {
-            self.gctx.shell().warn("aborting install due to dry run")?;
-            Ok(true)
-        } else if duplicates.is_empty() {
+        if duplicates.is_empty() {
             self.gctx.shell().status(
                 "Installed",
                 format!(
@@ -652,18 +620,9 @@ pub fn install(
     opts: &ops::CompileOptions,
     force: bool,
     no_track: bool,
-    dry_run: bool,
 ) -> CargoResult<()> {
     let root = resolve_root(root, gctx)?;
-    // Normalize to absolute path for consistency throughout.
-    // See: https://github.com/rust-lang/cargo/issues/16023
     let dst = root.join("bin").into_path_unlocked();
-    let cwd = gctx.cwd();
-    let dst = if dst.is_absolute() {
-        paths::normalize_path(dst.as_path())
-    } else {
-        paths::normalize_path(&cwd.join(&dst))
-    };
     let map = SourceConfigMap::new(gctx)?;
 
     let current_rust_version = if opts.honor_rust_version.unwrap_or(true) {
@@ -695,7 +654,7 @@ pub fn install(
         )?;
         let mut installed_anything = true;
         if let Some(installable_pkg) = installable_pkg {
-            installed_anything = installable_pkg.install_one(dry_run)?;
+            installed_anything = installable_pkg.install_one()?;
         }
         (installed_anything, false)
     } else {
@@ -746,7 +705,7 @@ pub fn install(
 
         let install_results: Vec<_> = pkgs_to_install
             .into_iter()
-            .map(|(krate, installable_pkg)| (krate, installable_pkg.install_one(dry_run)))
+            .map(|(krate, installable_pkg)| (krate, installable_pkg.install_one()))
             .collect();
 
         for (krate, result) in install_results {
@@ -865,12 +824,7 @@ fn make_ws_rustc_target<'gctx>(
         ws.set_resolve_honors_rust_version(Some(false));
         ws
     };
-    ws.set_resolve_feature_unification(FeatureUnification::Selected);
     ws.set_ignore_lock(gctx.lock_update_allowed());
-    // if --lockfile-path is set, imply --locked
-    if ws.requested_lockfile_path().is_some() {
-        ws.set_ignore_lock(false);
-    }
     ws.set_require_optional_deps(false);
 
     let rustc = gctx.load_global_rustc(Some(&ws))?;
@@ -903,7 +857,6 @@ fn remove_orphaned_bins(
     duplicates: &BTreeMap<String, Option<PackageId>>,
     pkg: &Package,
     dst: &Path,
-    dry_run: bool,
 ) -> CargoResult<()> {
     let filter = ops::CompileFilter::new_all_targets();
     let all_self_names = exe_names(pkg, &filter);
@@ -941,10 +894,8 @@ fn remove_orphaned_bins(
                         old_pkg
                     ),
                 )?;
-                if !dry_run {
-                    paths::remove_file(&full_path)
-                        .with_context(|| format!("failed to remove {:?}", full_path))?;
-                }
+                paths::remove_file(&full_path)
+                    .with_context(|| format!("failed to remove {:?}", full_path))?;
             }
         }
     }

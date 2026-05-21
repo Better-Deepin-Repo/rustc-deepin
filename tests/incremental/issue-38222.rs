@@ -12,7 +12,6 @@
 
 //@[rpass1] compile-flags: -C debuginfo=1
 //@[rpass2] compile-flags: -C debuginfo=1
-//@ ignore-backends: gcc
 
 pub fn main() {
     mod1::some_fn();

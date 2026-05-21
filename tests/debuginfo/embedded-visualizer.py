@@ -1,6 +1,5 @@
 import gdb
 
-
 class LinePrinter:
     "Print a Line"
 
@@ -12,7 +11,6 @@ class LinePrinter:
     def to_string(self):
         return "({}, {})".format(self.a, self.b)
 
-
 def lookup(val):
     lookup_tag = val.type.tag
     if lookup_tag is None:
@@ -21,6 +19,5 @@ def lookup(val):
         return LinePrinter(val)
 
     return None
-
 
 gdb.current_objfile().pretty_printers.append(lookup)

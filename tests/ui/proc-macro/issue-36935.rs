@@ -1,4 +1,4 @@
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 //@ needs-unwind proc macro panics to report errors
 
 #[macro_use]

@@ -2,7 +2,7 @@
 //@ ignore-compare-mode-next-solver (explicit revisions)
 //@[next] compile-flags: -Znext-solver
 //@[next] check-pass
-//@[current] known-bug: #132519
+//@[current] known-bug: unknown
 //@[current] failure-status: 101
 //@[current] dont-check-compiler-stderr
 

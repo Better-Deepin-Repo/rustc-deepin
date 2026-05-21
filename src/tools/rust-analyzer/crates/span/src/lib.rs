@@ -1,28 +1,36 @@
 //! File and span related types.
-
-#![cfg_attr(feature = "in-rust-tree", feature(rustc_private))]
-
-#[cfg(feature = "in-rust-tree")]
-extern crate rustc_driver as _;
-
 use std::fmt::{self, Write};
+
+use salsa::InternId;
 
 mod ast_id;
 mod hygiene;
 mod map;
 
 pub use self::{
-    ast_id::{
-        AstIdMap, AstIdNode, ErasedFileAstId, FIXUP_ERASED_FILE_AST_ID_MARKER, FileAstId,
-        NO_DOWNMAP_ERASED_FILE_AST_ID_MARKER, ROOT_ERASED_FILE_AST_ID,
-    },
-    hygiene::{SyntaxContext, Transparency},
+    ast_id::{AstIdMap, AstIdNode, ErasedFileAstId, FileAstId},
+    hygiene::{SyntaxContextData, SyntaxContextId, Transparency},
     map::{RealSpanMap, SpanMap},
 };
 
 pub use syntax::Edition;
 pub use text_size::{TextRange, TextSize};
 pub use vfs::FileId;
+
+// The first index is always the root node's AstId
+/// The root ast id always points to the encompassing file, using this in spans is discouraged as
+/// any range relative to it will be effectively absolute, ruining the entire point of anchored
+/// relative text ranges.
+pub const ROOT_ERASED_FILE_AST_ID: ErasedFileAstId = ErasedFileAstId::from_raw(0);
+
+/// FileId used as the span for syntax node fixups. Any Span containing this file id is to be
+/// considered fake.
+pub const FIXUP_ERASED_FILE_AST_ID_MARKER: ErasedFileAstId =
+    // we pick the second to last for this in case we ever consider making this a NonMaxU32, this
+    // is required to be stable for the proc-macro-server
+    ErasedFileAstId::from_raw(!0 - 1);
+
+pub type Span = SpanData<SyntaxContextId>;
 
 impl Span {
     pub fn cover(self, other: Span) -> Span {
@@ -32,44 +40,13 @@ impl Span {
         let range = self.range.cover(other.range);
         Span { range, ..self }
     }
-
-    pub fn join(
-        self,
-        other: Span,
-        differing_anchor: impl FnOnce(Span, Span) -> Option<Span>,
-    ) -> Option<Span> {
-        // We can't modify the span range for fixup spans, those are meaningful to fixup, so just
-        // prefer the non-fixup span.
-        if self.anchor.ast_id == FIXUP_ERASED_FILE_AST_ID_MARKER {
-            return Some(other);
-        }
-        if other.anchor.ast_id == FIXUP_ERASED_FILE_AST_ID_MARKER {
-            return Some(self);
-        }
-        if self.anchor != other.anchor {
-            return differing_anchor(self, other);
-        }
-        // Differing context, we can't merge these so prefer the one that's root
-        if self.ctx != other.ctx {
-            if self.ctx.is_root() {
-                return Some(other);
-            } else if other.ctx.is_root() {
-                return Some(self);
-            }
-        }
-        Some(Span { range: self.range.cover(other.range), anchor: other.anchor, ctx: other.ctx })
-    }
-
-    pub fn eq_ignoring_ctx(self, other: Self) -> bool {
-        self.anchor == other.anchor && self.range == other.range
-    }
 }
 
 /// Spans represent a region of code, used by the IDE to be able link macro inputs and outputs
 /// together. Positions in spans are relative to some [`SpanAnchor`] to make them more incremental
 /// friendly.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct Span {
+pub struct SpanData<Ctx> {
     /// The text range of this span, relative to the anchor.
     /// We need the anchor for incrementality, as storing absolute ranges will require
     /// recomputation on every change in a file at all times.
@@ -77,15 +54,15 @@ pub struct Span {
     /// The anchor this span is relative to.
     pub anchor: SpanAnchor,
     /// The syntax context of the span.
-    pub ctx: SyntaxContext,
+    pub ctx: Ctx,
 }
 
-impl fmt::Debug for Span {
+impl<Ctx: fmt::Debug> fmt::Debug for SpanData<Ctx> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if f.alternate() {
             fmt::Debug::fmt(&self.anchor.file_id.file_id().index(), f)?;
             f.write_char(':')?;
-            write!(f, "{:#?}", self.anchor.ast_id)?;
+            fmt::Debug::fmt(&self.anchor.ast_id.into_raw(), f)?;
             f.write_char('@')?;
             fmt::Debug::fmt(&self.range, f)?;
             f.write_char('#')?;
@@ -100,11 +77,17 @@ impl fmt::Debug for Span {
     }
 }
 
+impl<Ctx: Copy> SpanData<Ctx> {
+    pub fn eq_ignoring_ctx(self, other: Self) -> bool {
+        self.anchor == other.anchor && self.range == other.range
+    }
+}
+
 impl fmt::Display for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.anchor.file_id.file_id().index(), f)?;
         f.write_char(':')?;
-        write!(f, "{:#?}", self.anchor.ast_id)?;
+        fmt::Debug::fmt(&self.anchor.ast_id.into_raw(), f)?;
         f.write_char('@')?;
         fmt::Debug::fmt(&self.range, f)?;
         f.write_char('#')?;
@@ -120,7 +103,7 @@ pub struct SpanAnchor {
 
 impl fmt::Debug for SpanAnchor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("SpanAnchor").field(&self.file_id).field(&self.ast_id).finish()
+        f.debug_tuple("SpanAnchor").field(&self.file_id).field(&self.ast_id.into_raw()).finish()
     }
 }
 
@@ -131,10 +114,7 @@ pub struct EditionedFileId(u32);
 
 impl fmt::Debug for EditionedFileId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("EditionedFileId")
-            .field(&self.file_id().index())
-            .field(&self.edition())
-            .finish()
+        f.debug_tuple("EditionedFileId").field(&self.file_id()).field(&self.edition()).finish()
     }
 }
 
@@ -202,12 +182,6 @@ impl EditionedFileId {
     }
 }
 
-#[cfg(not(feature = "salsa"))]
-mod salsa {
-    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-    pub struct Id(u32);
-}
-
 /// Input to the analyzer is a set of files, where each file is identified by
 /// `FileId` and contains source code. However, another source of source code in
 /// Rust are macros: each macro can be thought of as producing a "temporary
@@ -222,13 +196,162 @@ mod salsa {
 /// (`MacroCallId` uses the location interning. You can check details here:
 /// <https://en.wikipedia.org/wiki/String_interning>).
 ///
-/// Internally this holds a `salsa::Id`, but we cannot use this definition here
-/// as it references things from base-db and hir-expand.
+/// The two variants are encoded in a single u32 which are differentiated by the MSB.
+/// If the MSB is 0, the value represents a `FileId`, otherwise the remaining 31 bits represent a
+/// `MacroCallId`.
 // FIXME: Give this a better fitting name
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct HirFileId(pub salsa::Id);
+pub struct HirFileId(u32);
+
+impl From<HirFileId> for u32 {
+    fn from(value: HirFileId) -> Self {
+        value.0
+    }
+}
+
+impl From<MacroCallId> for HirFileId {
+    fn from(value: MacroCallId) -> Self {
+        value.as_file()
+    }
+}
+
+impl fmt::Debug for HirFileId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.repr().fmt(f)
+    }
+}
+
+impl PartialEq<FileId> for HirFileId {
+    fn eq(&self, &other: &FileId) -> bool {
+        self.file_id().map(EditionedFileId::file_id) == Some(other)
+    }
+}
+impl PartialEq<HirFileId> for FileId {
+    fn eq(&self, other: &HirFileId) -> bool {
+        other.file_id().map(EditionedFileId::file_id) == Some(*self)
+    }
+}
+
+impl PartialEq<EditionedFileId> for HirFileId {
+    fn eq(&self, &other: &EditionedFileId) -> bool {
+        *self == HirFileId::from(other)
+    }
+}
+impl PartialEq<HirFileId> for EditionedFileId {
+    fn eq(&self, &other: &HirFileId) -> bool {
+        other == HirFileId::from(*self)
+    }
+}
+impl PartialEq<EditionedFileId> for FileId {
+    fn eq(&self, &other: &EditionedFileId) -> bool {
+        *self == FileId::from(other)
+    }
+}
+impl PartialEq<FileId> for EditionedFileId {
+    fn eq(&self, &other: &FileId) -> bool {
+        other == FileId::from(*self)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MacroFileId {
+    pub macro_call_id: MacroCallId,
+}
 
 /// `MacroCallId` identifies a particular macro invocation, like
 /// `println!("Hello, {}", world)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct MacroCallId(pub salsa::Id);
+pub struct MacroCallId(salsa::InternId);
+
+impl salsa::InternKey for MacroCallId {
+    fn from_intern_id(v: salsa::InternId) -> Self {
+        MacroCallId(v)
+    }
+    fn as_intern_id(&self) -> salsa::InternId {
+        self.0
+    }
+}
+
+impl MacroCallId {
+    pub const MAX_ID: u32 = 0x7fff_ffff;
+
+    pub fn as_file(self) -> HirFileId {
+        MacroFileId { macro_call_id: self }.into()
+    }
+
+    pub fn as_macro_file(self) -> MacroFileId {
+        MacroFileId { macro_call_id: self }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum HirFileIdRepr {
+    FileId(EditionedFileId),
+    MacroFile(MacroFileId),
+}
+
+impl fmt::Debug for HirFileIdRepr {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::FileId(arg0) => arg0.fmt(f),
+            Self::MacroFile(arg0) => {
+                f.debug_tuple("MacroFile").field(&arg0.macro_call_id.0).finish()
+            }
+        }
+    }
+}
+
+impl From<EditionedFileId> for HirFileId {
+    #[allow(clippy::let_unit_value)]
+    fn from(id: EditionedFileId) -> Self {
+        assert!(id.as_u32() <= Self::MAX_HIR_FILE_ID, "FileId index {} is too large", id.as_u32());
+        HirFileId(id.as_u32())
+    }
+}
+
+impl From<MacroFileId> for HirFileId {
+    #[allow(clippy::let_unit_value)]
+    fn from(MacroFileId { macro_call_id: MacroCallId(id) }: MacroFileId) -> Self {
+        let id = id.as_u32();
+        assert!(id <= Self::MAX_HIR_FILE_ID, "MacroCallId index {id} is too large");
+        HirFileId(id | Self::MACRO_FILE_TAG_MASK)
+    }
+}
+
+impl HirFileId {
+    const MAX_HIR_FILE_ID: u32 = u32::MAX ^ Self::MACRO_FILE_TAG_MASK;
+    const MACRO_FILE_TAG_MASK: u32 = 1 << 31;
+
+    #[inline]
+    pub fn is_macro(self) -> bool {
+        self.0 & Self::MACRO_FILE_TAG_MASK != 0
+    }
+
+    #[inline]
+    pub fn macro_file(self) -> Option<MacroFileId> {
+        match self.0 & Self::MACRO_FILE_TAG_MASK {
+            0 => None,
+            _ => Some(MacroFileId {
+                macro_call_id: MacroCallId(InternId::from(self.0 ^ Self::MACRO_FILE_TAG_MASK)),
+            }),
+        }
+    }
+
+    #[inline]
+    pub fn file_id(self) -> Option<EditionedFileId> {
+        match self.0 & Self::MACRO_FILE_TAG_MASK {
+            0 => Some(EditionedFileId(self.0)),
+            _ => None,
+        }
+    }
+
+    #[inline]
+    pub fn repr(self) -> HirFileIdRepr {
+        match self.0 & Self::MACRO_FILE_TAG_MASK {
+            0 => HirFileIdRepr::FileId(EditionedFileId(self.0)),
+            _ => HirFileIdRepr::MacroFile(MacroFileId {
+                macro_call_id: MacroCallId(InternId::from(self.0 ^ Self::MACRO_FILE_TAG_MASK)),
+            }),
+        }
+    }
+}

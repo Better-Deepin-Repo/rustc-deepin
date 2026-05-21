@@ -1,14 +1,14 @@
 //! Complete fields in record literals and patterns.
 use ide_db::SymbolKind;
 use syntax::{
-    SmolStr,
     ast::{self, Expr},
+    SmolStr,
 };
 
 use crate::{
+    context::{DotAccess, DotAccessExprCtx, DotAccessKind, PatternContext},
     CompletionContext, CompletionItem, CompletionItemKind, CompletionRelevance,
     CompletionRelevancePostfixMatch, Completions,
-    context::{DotAccess, DotAccessExprCtx, DotAccessKind, PatternContext},
 };
 
 pub(crate) fn complete_record_pattern_fields(
@@ -28,15 +28,11 @@ pub(crate) fn complete_record_pattern_fields(
                     record_pat.record_pat_field_list().and_then(|fl| fl.fields().next()).is_some();
 
                 match were_fields_specified {
-                    false => un
-                        .fields(ctx.db)
-                        .into_iter()
-                        .map(|f| (f, f.ty(ctx.db).to_type(ctx.db)))
-                        .collect(),
+                    false => un.fields(ctx.db).into_iter().map(|f| (f, f.ty(ctx.db))).collect(),
                     true => return,
                 }
             }
-            _ => ctx.sema.record_pattern_matched_fields(record_pat),
+            _ => ctx.sema.record_pattern_missing_fields(record_pat),
         };
         complete_fields(acc, ctx, missing_fields);
     }
@@ -60,23 +56,16 @@ pub(crate) fn complete_record_expr_fields(
                 record_expr.record_expr_field_list().and_then(|fl| fl.fields().next()).is_some();
 
             match were_fields_specified {
-                false => un
-                    .fields(ctx.db)
-                    .into_iter()
-                    .map(|f| (f, f.ty(ctx.db).to_type(ctx.db)))
-                    .collect(),
+                false => un.fields(ctx.db).into_iter().map(|f| (f, f.ty(ctx.db))).collect(),
                 true => return,
             }
         }
         _ => {
-            let suggest_fields = ctx.sema.record_literal_matched_fields(record_expr);
-            let update_exists = record_expr
-                .record_expr_field_list()
-                .is_some_and(|list| list.dotdot_token().is_some());
+            let missing_fields = ctx.sema.record_literal_missing_fields(record_expr);
 
-            if !suggest_fields.is_empty() && !update_exists {
+            if !missing_fields.is_empty() {
                 cov_mark::hit!(functional_update_field);
-                add_default_update(acc, ctx, ty.as_ref());
+                add_default_update(acc, ctx, ty);
             }
             if dot_prefix {
                 cov_mark::hit!(functional_update_one_dot);
@@ -90,7 +79,7 @@ pub(crate) fn complete_record_expr_fields(
                 item.add_to(acc, ctx.db);
                 return;
             }
-            suggest_fields
+            missing_fields
         }
     };
     complete_fields(acc, ctx, missing_fields);
@@ -99,12 +88,12 @@ pub(crate) fn complete_record_expr_fields(
 pub(crate) fn add_default_update(
     acc: &mut Completions,
     ctx: &CompletionContext<'_>,
-    ty: Option<&hir::TypeInfo<'_>>,
+    ty: Option<hir::TypeInfo>,
 ) {
     let default_trait = ctx.famous_defs().core_default_Default();
     let impls_default_trait = default_trait
-        .zip(ty)
-        .is_some_and(|(default_trait, ty)| ty.original.impls_trait(ctx.db, default_trait, &[]));
+        .zip(ty.as_ref())
+        .map_or(false, |(default_trait, ty)| ty.original.impls_trait(ctx.db, default_trait, &[]));
     if impls_default_trait {
         // FIXME: This should make use of scope_def like completions so we get all the other goodies
         // that is we should handle this like actually completing the default function
@@ -128,7 +117,7 @@ pub(crate) fn add_default_update(
 fn complete_fields(
     acc: &mut Completions,
     ctx: &CompletionContext<'_>,
-    missing_fields: Vec<(hir::Field, hir::Type<'_>)>,
+    missing_fields: Vec<(hir::Field, hir::Type)>,
 ) {
     for (field, ty) in missing_fields {
         // This should call something else, we shouldn't be synthesizing a DotAccess here
@@ -138,7 +127,10 @@ fn complete_fields(
                 receiver: None,
                 receiver_ty: None,
                 kind: DotAccessKind::Field { receiver_is_ambiguous_float_literal: false },
-                ctx: DotAccessExprCtx { in_block_expr: false, in_breakable: None },
+                ctx: DotAccessExprCtx {
+                    in_block_expr: false,
+                    in_breakable: crate::context::BreakableKind::None,
+                },
             },
             None,
             field,
@@ -152,8 +144,8 @@ mod tests {
     use ide_db::SnippetCap;
 
     use crate::{
+        tests::{check_edit, check_edit_with_config, TEST_CONFIG},
         CompletionConfig,
-        tests::{TEST_CONFIG, check_edit, check_edit_with_config},
     };
 
     #[test]
@@ -176,33 +168,6 @@ fn create_foo(foo_desc: &FooDesc) -> () { () }
 
 fn baz() {
     let foo = create_foo(&FooDesc { bar: ${1:()} }$0);
-}
-            "#,
-        )
-    }
-
-    #[test]
-    fn literal_struct_completion_shorthand() {
-        check_edit(
-            "FooDesc{}",
-            r#"
-struct FooDesc { pub bar: bool, n: i32 }
-
-fn create_foo(foo_desc: &FooDesc) -> () { () }
-
-fn baz() {
-    let bar = true;
-    let foo = create_foo(&$0);
-}
-            "#,
-            r#"
-struct FooDesc { pub bar: bool, n: i32 }
-
-fn create_foo(foo_desc: &FooDesc) -> () { () }
-
-fn baz() {
-    let bar = true;
-    let foo = create_foo(&FooDesc { bar$1, n: ${2:()} }$0);
 }
             "#,
         )

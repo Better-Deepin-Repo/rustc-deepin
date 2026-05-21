@@ -132,7 +132,7 @@ declare_clippy_lint! {
     /// Because this can be caused purely by the dependencies
     /// themselves, it's not always possible to fix this issue.
     /// In those cases, you can allow that specific crate using
-    /// the `allowed-duplicate-crates` configuration option.
+    /// the `allowed_duplicate_crates` configuration option.
     ///
     /// ### Example
     /// ```toml
@@ -160,15 +160,6 @@ declare_clippy_lint! {
     /// ```toml
     /// [dependencies]
     /// regex = "*"
-    /// ```
-    /// Use instead:
-    /// ```toml
-    /// [dependencies]
-    /// # allow patch updates, but not minor or major version changes
-    /// some_crate_1 = "~1.2.3"
-    ///
-    /// # pin the version to a specific version
-    /// some_crate_2 = "=1.2.3"
     /// ```
     #[clippy::version = "1.32.0"]
     pub WILDCARD_DEPENDENCIES,

@@ -65,58 +65,43 @@ impl Trait for S {
 
 fn main() {
     let _ = f();
-    //~^ let_underscore_must_use
-
+    //~^ ERROR: non-binding `let` on a result of a `#[must_use]` function
     let _ = g();
-    //~^ let_underscore_must_use
-
+    //~^ ERROR: non-binding `let` on an expression with `#[must_use]` type
     let _ = h();
     let _ = l(0_u32);
-    //~^ let_underscore_must_use
+    //~^ ERROR: non-binding `let` on a result of a `#[must_use]` function
 
     let s = S {};
 
     let _ = s.f();
-    //~^ let_underscore_must_use
-
+    //~^ ERROR: non-binding `let` on a result of a `#[must_use]` function
     let _ = s.g();
-    //~^ let_underscore_must_use
-
+    //~^ ERROR: non-binding `let` on an expression with `#[must_use]` type
     let _ = s.k();
 
     let _ = S::h();
-    //~^ let_underscore_must_use
-
+    //~^ ERROR: non-binding `let` on a result of a `#[must_use]` function
     let _ = S::p();
-    //~^ let_underscore_must_use
+    //~^ ERROR: non-binding `let` on an expression with `#[must_use]` type
 
     let _ = S::a();
-    //~^ let_underscore_must_use
+    //~^ ERROR: non-binding `let` on a result of a `#[must_use]` function
 
     let _ = if true { Ok(()) } else { Err(()) };
-    //~^ let_underscore_must_use
+    //~^ ERROR: non-binding `let` on an expression with `#[must_use]` type
 
     let a = Result::<(), ()>::Ok(());
 
     let _ = a.is_ok();
-    //~^ let_underscore_must_use
+    //~^ ERROR: non-binding `let` on a result of a `#[must_use]` function
 
     let _ = a.map(|_| ());
-    //~^ let_underscore_must_use
+    //~^ ERROR: non-binding `let` on an expression with `#[must_use]` type
 
     let _ = a;
-    //~^ let_underscore_must_use
+    //~^ ERROR: non-binding `let` on an expression with `#[must_use]` type
 
     #[allow(clippy::let_underscore_must_use)]
     let _ = a;
-
-    // No lint because this type should behave as `()`
-    let _ = Result::<_, std::convert::Infallible>::Ok(());
-
-    #[must_use]
-    struct T;
-
-    // Lint because this type should behave as `T`
-    let _ = Result::<_, std::convert::Infallible>::Ok(T);
-    //~^ let_underscore_must_use
 }

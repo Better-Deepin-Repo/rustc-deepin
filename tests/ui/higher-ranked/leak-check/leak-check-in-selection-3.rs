@@ -1,5 +1,4 @@
 //@ revisions: old next
-//@ ignore-compare-mode-next-solver (explicit revisions)
 //@[next] compile-flags: -Znext-solver
 
 // cc #119820, the behavior here is  inconsistent,
@@ -17,6 +16,7 @@ fn direct() {
     // The `Box<u16>` impls fails the leak check,
     // meaning that we apply the `Box<u32>` impl.
     impls_leak::<Box<_>>();
+    //[next]~^ ERROR type annotations needed
 }
 
 trait IndirectLeak<'a> {}

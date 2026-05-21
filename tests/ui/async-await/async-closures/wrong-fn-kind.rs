@@ -1,6 +1,8 @@
 //@ edition:2021
 
-fn needs_async_fn(_: impl AsyncFn()) {}
+#![feature(async_closure)]
+
+fn needs_async_fn(_: impl async Fn()) {}
 
 fn a() {
     let mut x = 1;
@@ -13,7 +15,7 @@ fn a() {
 fn b() {
     let x = String::new();
     needs_async_fn(move || async move {
-        //~^ ERROR expected a closure that implements the `AsyncFn` trait, but this closure only implements `AsyncFnOnce`
+        //~^ ERROR expected a closure that implements the `async Fn` trait, but this closure only implements `async FnOnce`
         println!("{x}");
     });
 }

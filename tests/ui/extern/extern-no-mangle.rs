@@ -9,21 +9,21 @@
 
 extern "C" {
     #[no_mangle]
-    //~^ WARNING attribute cannot be used on
-    //~| WARN previously accepted
+    //~^ WARNING `#[no_mangle]` has no effect on a foreign static
+    //~^^ WARNING this was previously accepted by the compiler
     pub static FOO: u8;
 
     #[no_mangle]
-    //~^ WARNING attribute cannot be used on
-    //~| WARN previously accepted
+    //~^ WARNING `#[no_mangle]` has no effect on a foreign function
+    //~^^ WARNING this was previously accepted by the compiler
     pub fn bar();
 }
 
 fn no_new_warn() {
     // Should emit the generic "not a function or static" warning
     #[no_mangle]
-    //~^ WARNING attribute cannot be used on
-    //~| WARN previously accepted
+    //~^ WARNING attribute should be applied to a free function, impl method or static
+    //~^^ WARNING this was previously accepted by the compiler
     let x = 0_u8;
 }
 

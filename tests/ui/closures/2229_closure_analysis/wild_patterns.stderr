@@ -32,11 +32,15 @@ error: First Pass analysis includes:
   --> $DIR/wild_patterns.rs:26:5
    |
 LL | /     || {
+LL | |
+LL | |
+LL | |         // FIXME(arora-aman): Change `_x` to `_`
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
-note: Capturing p[(0, 0)] -> Immutable
+note: Capturing p[(0, 0)] -> ImmBorrow
   --> $DIR/wild_patterns.rs:30:37
    |
 LL |         let Point { x: _x, y: _ } = p;
@@ -46,11 +50,15 @@ error: Min Capture analysis includes:
   --> $DIR/wild_patterns.rs:26:5
    |
 LL | /     || {
+LL | |
+LL | |
+LL | |         // FIXME(arora-aman): Change `_x` to `_`
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
-note: Min Capture p[(0, 0)] -> Immutable
+note: Min Capture p[(0, 0)] -> ImmBorrow
   --> $DIR/wild_patterns.rs:30:37
    |
 LL |         let Point { x: _x, y: _ } = p;
@@ -60,7 +68,11 @@ error: First Pass analysis includes:
   --> $DIR/wild_patterns.rs:45:5
    |
 LL | /     || {
+LL | |
+LL | |
+LL | |         // FIXME(arora-aman): Change `_x` to `_`
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
@@ -74,7 +86,11 @@ error: Min Capture analysis includes:
   --> $DIR/wild_patterns.rs:45:5
    |
 LL | /     || {
+LL | |
+LL | |
+LL | |         // FIXME(arora-aman): Change `_x` to `_`
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
@@ -88,7 +104,11 @@ error: First Pass analysis includes:
   --> $DIR/wild_patterns.rs:64:5
    |
 LL | /     || {
+LL | |
+LL | |
+LL | |         // FIXME(arora-aman): Change `_x` to `_`
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
@@ -102,7 +122,11 @@ error: Min Capture analysis includes:
   --> $DIR/wild_patterns.rs:64:5
    |
 LL | /     || {
+LL | |
+LL | |
+LL | |         // FIXME(arora-aman): Change `_x` to `_`
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |

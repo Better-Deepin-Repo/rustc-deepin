@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 #![allow(warnings)]
 
 trait A<T> { }

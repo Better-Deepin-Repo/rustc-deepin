@@ -11,15 +11,16 @@ use rustc_ast as ast;
 use rustc_ast::visit;
 use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::def_id::{DefId, LocalDefId};
-use rustc_hir::lang_items::GenericRequirement;
+use rustc_hir::lang_items::{extract, GenericRequirement};
 use rustc_hir::{LangItem, LanguageItems, MethodKind, Target};
 use rustc_middle::query::Providers;
 use rustc_middle::ty::{ResolverAstLowering, TyCtxt};
 use rustc_session::cstore::ExternCrate;
-use rustc_span::{Span, Symbol, sym};
+use rustc_span::symbol::kw::Empty;
+use rustc_span::Span;
 
 use crate::errors::{
-    DuplicateLangItem, IncorrectCrateType, IncorrectTarget, LangItemOnIncorrectTarget,
+    DuplicateLangItem, IncorrectTarget, LangItemOnIncorrectTarget, UnknownLangItem,
 };
 use crate::weak_lang_items;
 
@@ -61,7 +62,7 @@ impl<'ast, 'tcx> LanguageItemCollector<'ast, 'tcx> {
         item_span: Span,
         generics: Option<&'ast ast::Generics>,
     ) {
-        if let Some((name, attr_span)) = extract_ast(attrs) {
+        if let Some((name, attr_span)) = extract(attrs) {
             match LangItem::from_name(name) {
                 // Known lang item with attribute on correct target.
                 Some(lang_item) if actual_target == lang_item.target() => {
@@ -85,7 +86,7 @@ impl<'ast, 'tcx> LanguageItemCollector<'ast, 'tcx> {
                 }
                 // Unknown lang item.
                 _ => {
-                    self.tcx.dcx().delayed_bug("unknown lang item");
+                    self.tcx.dcx().emit_err(UnknownLangItem { span: attr_span, name });
                 }
             }
         }
@@ -98,7 +99,7 @@ impl<'ast, 'tcx> LanguageItemCollector<'ast, 'tcx> {
         {
             let lang_item_name = lang_item.name();
             let crate_name = self.tcx.crate_name(item_def_id.krate);
-            let mut dependency_of = None;
+            let mut dependency_of = Empty;
             let is_local = item_def_id.is_local();
             let path = if is_local {
                 String::new()
@@ -112,8 +113,8 @@ impl<'ast, 'tcx> LanguageItemCollector<'ast, 'tcx> {
             };
 
             let first_defined_span = self.item_spans.get(&original_def_id).copied();
-            let mut orig_crate_name = None;
-            let mut orig_dependency_of = None;
+            let mut orig_crate_name = Empty;
+            let mut orig_dependency_of = Empty;
             let orig_is_local = original_def_id.is_local();
             let orig_path = if orig_is_local {
                 String::new()
@@ -127,11 +128,11 @@ impl<'ast, 'tcx> LanguageItemCollector<'ast, 'tcx> {
             };
 
             if first_defined_span.is_none() {
-                orig_crate_name = Some(self.tcx.crate_name(original_def_id.krate));
+                orig_crate_name = self.tcx.crate_name(original_def_id.krate);
                 if let Some(ExternCrate { dependency_of: inner_dependency_of, .. }) =
                     self.tcx.extern_crate(original_def_id.krate)
                 {
-                    orig_dependency_of = Some(self.tcx.crate_name(*inner_dependency_of));
+                    orig_dependency_of = self.tcx.crate_name(*inner_dependency_of);
                 }
             }
 
@@ -140,7 +141,7 @@ impl<'ast, 'tcx> LanguageItemCollector<'ast, 'tcx> {
             } else {
                 match self.tcx.extern_crate(item_def_id.krate) {
                     Some(ExternCrate { dependency_of: inner_dependency_of, .. }) => {
-                        dependency_of = Some(self.tcx.crate_name(*inner_dependency_of));
+                        dependency_of = self.tcx.crate_name(*inner_dependency_of);
                         Duplicate::CrateDepends
                     }
                     _ => Duplicate::Crate,
@@ -236,10 +237,6 @@ impl<'ast, 'tcx> LanguageItemCollector<'ast, 'tcx> {
             }
         }
 
-        if self.tcx.crate_types().contains(&rustc_session::config::CrateType::Sdylib) {
-            self.tcx.dcx().emit_err(IncorrectCrateType { span: attr_span });
-        }
-
         self.collect_item(lang_item, item_def_id.to_def_id(), Some(item_span));
     }
 }
@@ -272,22 +269,22 @@ fn get_lang_items(tcx: TyCtxt<'_>, (): ()) -> LanguageItems {
 impl<'ast, 'tcx> visit::Visitor<'ast> for LanguageItemCollector<'ast, 'tcx> {
     fn visit_item(&mut self, i: &'ast ast::Item) {
         let target = match &i.kind {
-            ast::ItemKind::ExternCrate(..) => Target::ExternCrate,
+            ast::ItemKind::ExternCrate(_) => Target::ExternCrate,
             ast::ItemKind::Use(_) => Target::Use,
             ast::ItemKind::Static(_) => Target::Static,
-            ast::ItemKind::Const(_) | ast::ItemKind::ConstBlock(_) => Target::Const,
+            ast::ItemKind::Const(_) => Target::Const,
             ast::ItemKind::Fn(_) | ast::ItemKind::Delegation(..) => Target::Fn,
-            ast::ItemKind::Mod(..) => Target::Mod,
+            ast::ItemKind::Mod(_, _) => Target::Mod,
             ast::ItemKind::ForeignMod(_) => Target::ForeignFn,
             ast::ItemKind::GlobalAsm(_) => Target::GlobalAsm,
             ast::ItemKind::TyAlias(_) => Target::TyAlias,
-            ast::ItemKind::Enum(..) => Target::Enum,
-            ast::ItemKind::Struct(..) => Target::Struct,
-            ast::ItemKind::Union(..) => Target::Union,
+            ast::ItemKind::Enum(_, _) => Target::Enum,
+            ast::ItemKind::Struct(_, _) => Target::Struct,
+            ast::ItemKind::Union(_, _) => Target::Union,
             ast::ItemKind::Trait(_) => Target::Trait,
-            ast::ItemKind::TraitAlias(..) => Target::TraitAlias,
-            ast::ItemKind::Impl(imp_) => Target::Impl { of_trait: imp_.of_trait.is_some() },
-            ast::ItemKind::MacroDef(..) => Target::MacroDef,
+            ast::ItemKind::TraitAlias(_, _) => Target::TraitAlias,
+            ast::ItemKind::Impl(_) => Target::Impl,
+            ast::ItemKind::MacroDef(_) => Target::MacroDef,
             ast::ItemKind::MacCall(_) | ast::ItemKind::DelegationMac(_) => {
                 unreachable!("macros should have been expanded")
             }
@@ -306,14 +303,18 @@ impl<'ast, 'tcx> visit::Visitor<'ast> for LanguageItemCollector<'ast, 'tcx> {
         self.parent_item = parent_item;
     }
 
-    fn visit_variant(&mut self, variant: &'ast ast::Variant) {
-        self.check_for_lang(
-            Target::Variant,
-            self.resolver.node_id_to_def_id[&variant.id],
-            &variant.attrs,
-            variant.span,
-            None,
-        );
+    fn visit_enum_def(&mut self, enum_definition: &'ast ast::EnumDef) {
+        for variant in &enum_definition.variants {
+            self.check_for_lang(
+                Target::Variant,
+                self.resolver.node_id_to_def_id[&variant.id],
+                &variant.attrs,
+                variant.span,
+                None,
+            );
+        }
+
+        visit::walk_enum_def(self, enum_definition);
     }
 
     fn visit_assoc_item(&mut self, i: &'ast ast::AssocItem, ctxt: visit::AssocCtxt) {
@@ -328,7 +329,7 @@ impl<'ast, 'tcx> visit::Visitor<'ast> for LanguageItemCollector<'ast, 'tcx> {
                     match &self.parent_item.unwrap().kind {
                         ast::ItemKind::Impl(i) => {
                             if i.of_trait.is_some() {
-                                Target::Method(MethodKind::TraitImpl)
+                                Target::Method(MethodKind::Trait { body })
                             } else {
                                 Target::Method(MethodKind::Inherent)
                             }
@@ -356,20 +357,6 @@ impl<'ast, 'tcx> visit::Visitor<'ast> for LanguageItemCollector<'ast, 'tcx> {
 
         visit::walk_assoc_item(self, i, ctxt);
     }
-}
-
-/// Extracts the first `lang = "$name"` out of a list of attributes.
-/// The `#[panic_handler]` attribute is also extracted out when found.
-///
-/// This function is used for `ast::Attribute`, for `hir::Attribute` use the `find_attr!` macro with `AttributeKind::Lang`
-pub(crate) fn extract_ast(attrs: &[rustc_ast::ast::Attribute]) -> Option<(Symbol, Span)> {
-    attrs.iter().find_map(|attr| {
-        Some(match attr {
-            _ if attr.has_name(sym::lang) => (attr.value_str()?, attr.span()),
-            _ if attr.has_name(sym::panic_handler) => (sym::panic_impl, attr.span()),
-            _ => return None,
-        })
-    })
 }
 
 pub(crate) fn provide(providers: &mut Providers) {

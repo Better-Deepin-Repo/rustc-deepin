@@ -1,34 +1,31 @@
-error[E0433]: cannot find module or crate `env` in this scope
+error[E0433]: failed to resolve: use of undeclared crate or module `env`
   --> $DIR/builtin-prelude-no-accidents.rs:5:5
    |
 LL |     env::current_dir;
-   |     ^^^ use of unresolved module or unlinked crate `env`
+   |     ^^^ use of undeclared crate or module `env`
    |
-   = help: you might be missing a crate named `env`
 help: consider importing this module
    |
 LL + use std::env;
    |
 
-error[E0433]: cannot find module or crate `panic` in this scope
+error[E0433]: failed to resolve: use of undeclared crate or module `panic`
   --> $DIR/builtin-prelude-no-accidents.rs:6:14
    |
 LL |     type A = panic::PanicInfo;
-   |              ^^^^^ use of unresolved module or unlinked crate `panic`
+   |              ^^^^^ use of undeclared crate or module `panic`
    |
-   = help: you might be missing a crate named `panic`
 help: consider importing this module
    |
 LL + use std::panic;
    |
 
-error[E0433]: cannot find module or crate `vec` in this scope
+error[E0433]: failed to resolve: use of undeclared crate or module `vec`
   --> $DIR/builtin-prelude-no-accidents.rs:7:14
    |
 LL |     type B = vec::Vec<u8>;
-   |              ^^^ use of unresolved module or unlinked crate `vec`
+   |              ^^^ use of undeclared crate or module `vec`
    |
-   = help: you might be missing a crate named `vec`
 help: consider importing this module
    |
 LL + use std::vec;

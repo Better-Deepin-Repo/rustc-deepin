@@ -14,10 +14,9 @@
 //!    or contains "invocation-specific".
 
 use std::cell::RefCell;
-use std::cmp::Ordering;
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fs::File;
-use std::io::{self, Write as _};
+use std::io::{self, BufWriter, Write as _};
 use std::iter::once;
 use std::marker::PhantomData;
 use std::path::{Component, Path, PathBuf};
@@ -26,35 +25,37 @@ use std::str::FromStr;
 use std::{fmt, fs};
 
 use indexmap::IndexMap;
-use rustc_ast::join_path_syms;
+use itertools::Itertools;
+use regex::Regex;
 use rustc_data_structures::flock;
-use rustc_data_structures::fx::{FxHashSet, FxIndexMap, FxIndexSet};
+use rustc_data_structures::fx::{FxHashMap, FxHashSet};
+use rustc_middle::ty::fast_reject::{DeepRejectCtxt, TreatParams};
 use rustc_middle::ty::TyCtxt;
-use rustc_middle::ty::fast_reject::DeepRejectCtxt;
-use rustc_span::Symbol;
 use rustc_span::def_id::DefId;
+use rustc_span::Symbol;
 use serde::de::DeserializeOwned;
 use serde::ser::SerializeSeq;
 use serde::{Deserialize, Serialize, Serializer};
 
-use super::{Context, RenderMode, collect_paths_for_type, ensure_trailing_slash};
+use super::{collect_paths_for_type, ensure_trailing_slash, Context, RenderMode};
 use crate::clean::{Crate, Item, ItemId, ItemKind};
-use crate::config::{EmitType, PathToParts, RenderOptions, ShouldMerge};
+use crate::config::{EmitType, RenderOptions};
 use crate::docfs::PathError;
 use crate::error::Error;
-use crate::formats::Impl;
+use crate::formats::cache::Cache;
 use crate::formats::item_type::ItemType;
-use crate::html::format::{print_impl, print_path};
+use crate::formats::Impl;
+use crate::html::format::Buffer;
 use crate::html::layout;
 use crate::html::render::ordered_json::{EscapedJson, OrderedJson};
-use crate::html::render::print_item::compare_names;
-use crate::html::render::search_index::{SerializedSearchIndex, build_index};
+use crate::html::render::search_index::{build_index, SerializedSearchIndex};
 use crate::html::render::sorted_template::{self, FileFormat, SortedTemplate};
-use crate::html::render::{AssocItemLink, ImplRenderingParameters, StylePath};
+use crate::html::render::{AssocItemLink, ImplRenderingParameters};
 use crate::html::static_files::{self, suffix_path};
 use crate::visit::DocVisitor;
 use crate::{try_err, try_none};
 
+/// Write cross-crate information files, static files, invocation-specific files, etc. to disk
 pub(crate) fn write_shared(
     cx: &mut Context<'_>,
     krate: &Crate,
@@ -62,138 +63,69 @@ pub(crate) fn write_shared(
     tcx: TyCtxt<'_>,
 ) -> Result<(), Error> {
     // NOTE(EtomicBomb): I don't think we need sync here because no read-after-write?
-    cx.shared.fs.set_sync_only(true);
+    Rc::get_mut(&mut cx.shared).unwrap().fs.set_sync_only(true);
     let lock_file = cx.dst.join(".lock");
     // Write shared runs within a flock; disable thread dispatching of IO temporarily.
     let _lock = try_err!(flock::Lock::new(&lock_file, true, true, true), &lock_file);
 
-    let search_index = build_index(
-        krate,
-        &mut cx.shared.cache,
-        tcx,
-        &cx.dst,
-        &cx.shared.resource_suffix,
-        &opt.should_merge,
-    )?;
+    let SerializedSearchIndex { index, desc } =
+        build_index(&krate, &mut Rc::get_mut(&mut cx.shared).unwrap().cache, tcx);
+    write_search_desc(cx, &krate, &desc)?; // does not need to be merged; written unconditionally
 
     let crate_name = krate.name(cx.tcx());
     let crate_name = crate_name.as_str(); // rand
     let crate_name_json = OrderedJson::serialize(crate_name).unwrap(); // "rand"
     let external_crates = hack_get_external_crate_names(&cx.dst, &cx.shared.resource_suffix)?;
     let info = CrateInfo {
-        version: CrateInfoVersion::V2,
         src_files_js: SourcesPart::get(cx, &crate_name_json)?,
-        search_index,
+        search_index_js: SearchIndexPart::get(index, &cx.shared.resource_suffix)?,
         all_crates: AllCratesPart::get(crate_name_json.clone(), &cx.shared.resource_suffix)?,
-        crates_index: CratesIndexPart::get(crate_name, &external_crates)?,
+        crates_index: CratesIndexPart::get(&crate_name, &external_crates)?,
         trait_impl: TraitAliasPart::get(cx, &crate_name_json)?,
         type_impl: TypeAliasPart::get(cx, krate, &crate_name_json)?,
     };
 
-    if let Some(parts_out_dir) = &opt.parts_out_dir {
-        let mut parts_out_file = parts_out_dir.0.clone();
-        parts_out_file.push(&format!("{crate_name}.json"));
-        create_parents(&parts_out_file)?;
-        try_err!(
-            fs::write(&parts_out_file, serde_json::to_string(&info).unwrap()),
-            &parts_out_dir.0
-        );
-    }
+    let crates = vec![info]; // we have info from just one crate. rest will found in out dir
 
-    let mut crates = CrateInfo::read_many(&opt.include_parts_dir)?;
-    crates.push(info);
-
-    if opt.should_merge.write_rendered_cci {
-        write_not_crate_specific(
-            &crates,
-            &cx.dst,
-            opt,
-            &cx.shared.style_files,
-            cx.shared.layout.css_file_extension.as_deref(),
-            &cx.shared.resource_suffix,
-            cx.info.include_sources,
-        )?;
-        match &opt.index_page {
-            Some(index_page) if opt.enable_index_page => {
-                let mut md_opts = opt.clone();
-                md_opts.output = cx.dst.clone();
-                md_opts.external_html = cx.shared.layout.external_html.clone();
-                try_err!(
-                    crate::markdown::render_and_write(index_page, md_opts, cx.shared.edition()),
-                    &index_page
-                );
-            }
-            None if opt.enable_index_page => {
-                write_rendered_cci::<CratesIndexPart, _>(
-                    || CratesIndexPart::blank(cx),
-                    &cx.dst,
-                    &crates,
-                    &opt.should_merge,
-                )?;
-            }
-            _ => {} // they don't want an index page
+    write_static_files(cx, &opt)?;
+    let dst = &cx.dst;
+    if opt.emit.is_empty() || opt.emit.contains(&EmitType::InvocationSpecific) {
+        if cx.include_sources {
+            write_rendered_cci::<SourcesPart, _>(SourcesPart::blank, dst, &crates)?;
         }
+        write_rendered_cci::<SearchIndexPart, _>(SearchIndexPart::blank, dst, &crates)?;
+        write_rendered_cci::<AllCratesPart, _>(AllCratesPart::blank, dst, &crates)?;
     }
-
-    cx.shared.fs.set_sync_only(false);
-    Ok(())
-}
-
-/// Writes files that are written directly to the `--out-dir`, without the prefix from the current
-/// crate. These are the rendered cross-crate files that encode info from multiple crates (e.g.
-/// search index), and the static files.
-pub(crate) fn write_not_crate_specific(
-    crates: &[CrateInfo],
-    dst: &Path,
-    opt: &RenderOptions,
-    style_files: &[StylePath],
-    css_file_extension: Option<&Path>,
-    resource_suffix: &str,
-    include_sources: bool,
-) -> Result<(), Error> {
-    write_rendered_cross_crate_info(crates, dst, opt, include_sources, resource_suffix)?;
-    write_static_files(dst, opt, style_files, css_file_extension, resource_suffix)?;
-    Ok(())
-}
-
-fn write_rendered_cross_crate_info(
-    crates: &[CrateInfo],
-    dst: &Path,
-    opt: &RenderOptions,
-    include_sources: bool,
-    resource_suffix: &str,
-) -> Result<(), Error> {
-    let m = &opt.should_merge;
-    if opt.should_emit_crate() {
-        if include_sources {
-            write_rendered_cci::<SourcesPart, _>(SourcesPart::blank, dst, crates, m)?;
+    write_rendered_cci::<TraitAliasPart, _>(TraitAliasPart::blank, dst, &crates)?;
+    write_rendered_cci::<TypeAliasPart, _>(TypeAliasPart::blank, dst, &crates)?;
+    match &opt.index_page {
+        Some(index_page) if opt.enable_index_page => {
+            let mut md_opts = opt.clone();
+            md_opts.output = cx.dst.clone();
+            md_opts.external_html = cx.shared.layout.external_html.clone();
+            try_err!(
+                crate::markdown::render(&index_page, md_opts, cx.shared.edition()),
+                &index_page
+            );
         }
-        crates
-            .iter()
-            .fold(SerializedSearchIndex::default(), |a, b| a.union(&b.search_index))
-            .sort()
-            .write_to(dst, resource_suffix)?;
-        write_rendered_cci::<AllCratesPart, _>(AllCratesPart::blank, dst, crates, m)?;
+        None if opt.enable_index_page => {
+            write_rendered_cci::<CratesIndexPart, _>(|| CratesIndexPart::blank(cx), dst, &crates)?;
+        }
+        _ => {} // they don't want an index page
     }
-    write_rendered_cci::<TraitAliasPart, _>(TraitAliasPart::blank, dst, crates, m)?;
-    write_rendered_cci::<TypeAliasPart, _>(TypeAliasPart::blank, dst, crates, m)?;
+
+    Rc::get_mut(&mut cx.shared).unwrap().fs.set_sync_only(false);
     Ok(())
 }
 
-/// Writes the static files, the style files, and the css extensions.
-/// Have to be careful about these, because they write to the root out dir.
-fn write_static_files(
-    dst: &Path,
-    opt: &RenderOptions,
-    style_files: &[StylePath],
-    css_file_extension: Option<&Path>,
-    resource_suffix: &str,
-) -> Result<(), Error> {
-    let static_dir = dst.join("static.files");
-    try_err!(fs::create_dir_all(&static_dir), &static_dir);
+/// Writes the static files, the style files, and the css extensions
+fn write_static_files(cx: &mut Context<'_>, options: &RenderOptions) -> Result<(), Error> {
+    let static_dir = cx.dst.join("static.files");
+
+    cx.shared.fs.create_dir_all(&static_dir).map_err(|e| PathError::new(e, "static.files"))?;
 
     // Handle added third-party themes
-    for entry in style_files {
+    for entry in &cx.shared.style_files {
         let theme = entry.basename()?;
         let extension =
             try_none!(try_none!(entry.path.extension(), &entry.path).to_str(), &entry.path);
@@ -204,81 +136,63 @@ fn write_static_files(
         }
 
         let bytes = try_err!(fs::read(&entry.path), &entry.path);
-        let filename = format!("{theme}{resource_suffix}.{extension}");
-        let dst_filename = dst.join(filename);
-        try_err!(fs::write(&dst_filename, bytes), &dst_filename);
+        let filename = format!("{theme}{suffix}.{extension}", suffix = cx.shared.resource_suffix);
+        cx.shared.fs.write(cx.dst.join(filename), bytes)?;
     }
 
     // When the user adds their own CSS files with --extend-css, we write that as an
     // invocation-specific file (that is, with a resource suffix).
-    if let Some(css) = css_file_extension {
+    if let Some(ref css) = cx.shared.layout.css_file_extension {
         let buffer = try_err!(fs::read_to_string(css), css);
-        let path = static_files::suffix_path("theme.css", resource_suffix);
-        let dst_path = dst.join(path);
-        try_err!(fs::write(&dst_path, buffer), &dst_path);
+        let path = static_files::suffix_path("theme.css", &cx.shared.resource_suffix);
+        cx.shared.fs.write(cx.dst.join(path), buffer)?;
     }
 
-    if opt.emit.is_empty() || opt.emit.contains(&EmitType::Toolchain) {
+    if options.emit.is_empty() || options.emit.contains(&EmitType::Toolchain) {
         static_files::for_each(|f: &static_files::StaticFile| {
             let filename = static_dir.join(f.output_filename());
-            let contents: &[u8] =
-                if opt.disable_minification { f.src_bytes } else { f.minified_bytes };
-            fs::write(&filename, contents).map_err(|e| PathError::new(e, &filename))
+            cx.shared.fs.write(filename, f.minified())
         })?;
     }
 
     Ok(())
 }
 
+/// Write the search description shards to disk
+fn write_search_desc(
+    cx: &mut Context<'_>,
+    krate: &Crate,
+    search_desc: &[(usize, String)],
+) -> Result<(), Error> {
+    let crate_name = krate.name(cx.tcx()).to_string();
+    let encoded_crate_name = OrderedJson::serialize(&crate_name).unwrap();
+    let path = PathBuf::from_iter([&cx.dst, Path::new("search.desc"), Path::new(&crate_name)]);
+    if path.exists() {
+        try_err!(fs::remove_dir_all(&path), &path);
+    }
+    for (i, (_, part)) in search_desc.iter().enumerate() {
+        let filename = static_files::suffix_path(
+            &format!("{crate_name}-desc-{i}-.js"),
+            &cx.shared.resource_suffix,
+        );
+        let path = path.join(filename);
+        let part = OrderedJson::serialize(&part).unwrap();
+        let part = format!("searchState.loadedDescShard({encoded_crate_name}, {i}, {part})");
+        create_parents(&path)?;
+        try_err!(fs::write(&path, part), &path);
+    }
+    Ok(())
+}
+
 /// Contains pre-rendered contents to insert into the CCI template
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub(crate) struct CrateInfo {
-    version: CrateInfoVersion,
+struct CrateInfo {
     src_files_js: PartsAndLocations<SourcesPart>,
-    search_index: SerializedSearchIndex,
+    search_index_js: PartsAndLocations<SearchIndexPart>,
     all_crates: PartsAndLocations<AllCratesPart>,
     crates_index: PartsAndLocations<CratesIndexPart>,
     trait_impl: PartsAndLocations<TraitAliasPart>,
     type_impl: PartsAndLocations<TypeAliasPart>,
-}
-
-impl CrateInfo {
-    /// Read all of the crate info from its location on the filesystem
-    pub(crate) fn read_many(parts_paths: &[PathToParts]) -> Result<Vec<Self>, Error> {
-        parts_paths
-            .iter()
-            .fold(Ok(Vec::new()), |acc, parts_path| {
-                let mut acc = acc?;
-                let dir = &parts_path.0;
-                acc.append(&mut try_err!(std::fs::read_dir(dir), dir.as_path())
-                    .filter_map(|file| {
-                        let to_crate_info = |file: Result<std::fs::DirEntry, std::io::Error>| -> Result<Option<CrateInfo>, Error> {
-                            let file = try_err!(file, dir.as_path());
-                            if file.path().extension() != Some(OsStr::new("json")) {
-                                return Ok(None);
-                            }
-                            let parts = try_err!(fs::read(file.path()), file.path());
-                            let parts: CrateInfo = try_err!(serde_json::from_slice(&parts), file.path());
-                            Ok(Some(parts))
-                        };
-                        to_crate_info(file).transpose()
-                    })
-                    .collect::<Result<Vec<CrateInfo>, Error>>()?);
-                Ok(acc)
-            })
-    }
-}
-
-/// Version for the format of the crate-info file.
-///
-/// This enum should only ever have one variant, representing the current version.
-/// Gives pretty good error message about expecting the current version on deserialize.
-///
-/// Must be incremented (V2, V3, etc.) upon any changes to the search index or CrateInfo,
-/// to provide better diagnostics about including an invalid file.
-#[derive(Serialize, Deserialize, Clone, Debug)]
-enum CrateInfoVersion {
-    V2,
 }
 
 /// Paths (relative to the doc root) and their pre-merge contents
@@ -333,6 +247,36 @@ trait CciPart: Sized + fmt::Display + DeserializeOwned + 'static {
 }
 
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
+struct SearchIndex;
+type SearchIndexPart = Part<SearchIndex, EscapedJson>;
+impl CciPart for SearchIndexPart {
+    type FileFormat = sorted_template::Js;
+    fn from_crate_info(crate_info: &CrateInfo) -> &PartsAndLocations<Self> {
+        &crate_info.search_index_js
+    }
+}
+
+impl SearchIndexPart {
+    fn blank() -> SortedTemplate<<Self as CciPart>::FileFormat> {
+        SortedTemplate::from_before_after(
+            r"var searchIndex = new Map(JSON.parse('[",
+            r"]'));
+if (typeof exports !== 'undefined') exports.searchIndex = searchIndex;
+else if (window.initSearch) window.initSearch(searchIndex);",
+        )
+    }
+
+    fn get(
+        search_index: OrderedJson,
+        resource_suffix: &str,
+    ) -> Result<PartsAndLocations<Self>, Error> {
+        let path = suffix_path("search-index.js", resource_suffix);
+        let search_index = EscapedJson::from(search_index);
+        Ok(PartsAndLocations::with(path, search_index))
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
 struct AllCrates;
 type AllCratesPart = Part<AllCrates, OrderedJson>;
 impl CciPart for AllCratesPart {
@@ -375,15 +319,12 @@ fn hack_get_external_crate_names(
     };
     // this is only run once so it's fine not to cache it
     // !dot_matches_new_line: all crates on same line. greedy: match last bracket
-    if let Some(start) = content.find('[')
-        && let Some(end) = content[start..].find(']')
-    {
-        let content: Vec<String> =
-            try_err!(serde_json::from_str(&content[start..=start + end]), &path);
-        Ok(content)
-    } else {
-        Err(Error::new("could not find crates list in crates.js", path))
-    }
+    let regex = Regex::new(r"\[.*\]").unwrap();
+    let Some(content) = regex.find(&content) else {
+        return Err(Error::new("could not find crates list in crates.js", path));
+    };
+    let content: Vec<String> = try_err!(serde_json::from_str(content.as_str()), &path);
+    Ok(content)
 }
 
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
@@ -400,7 +341,6 @@ impl CratesIndexPart {
     fn blank(cx: &Context<'_>) -> SortedTemplate<<Self as CciPart>::FileFormat> {
         let page = layout::Page {
             title: "Index of crates",
-            short_title: "Crates",
             css_class: "mod sys",
             root_path: "./",
             static_root_path: cx.shared.static_root_path.as_deref(),
@@ -411,28 +351,27 @@ impl CratesIndexPart {
         let layout = &cx.shared.layout;
         let style_files = &cx.shared.style_files;
         const DELIMITER: &str = "\u{FFFC}"; // users are being naughty if they have this
-        let content = format!(
-            "<div class=\"main-heading\">\
-                <h1>List of all crates</h1>\
-                <rustdoc-toolbar></rustdoc-toolbar>\
-            </div>\
-            <ul class=\"all-items\">{DELIMITER}</ul>"
-        );
-        let template = layout::render(layout, &page, "", content, style_files);
-        SortedTemplate::from_template(&template, DELIMITER)
-            .expect("Object Replacement Character (U+FFFC) should not appear in the --index-page")
+        let content =
+            format!("<h1>List of all crates</h1><ul class=\"all-items\">{DELIMITER}</ul>");
+        let template = layout::render(layout, &page, "", content, &style_files);
+        match SortedTemplate::from_template(&template, DELIMITER) {
+            Ok(template) => template,
+            Err(e) => panic!(
+                "Object Replacement Character (U+FFFC) should not appear in the --index-page: {e}"
+            ),
+        }
     }
 
-    /// Might return parts that are duplicate with ones in preexisting index.html
+    /// Might return parts that are duplicate with ones in prexisting index.html
     fn get(crate_name: &str, external_crates: &[String]) -> Result<PartsAndLocations<Self>, Error> {
         let mut ret = PartsAndLocations::default();
-        let path = Path::new("index.html");
+        let path = PathBuf::from("index.html");
         for crate_name in external_crates.iter().map(|s| s.as_str()).chain(once(crate_name)) {
             let part = format!(
                 "<li><a href=\"{trailing_slash}index.html\">{crate_name}</a></li>",
                 trailing_slash = ensure_trailing_slash(crate_name),
             );
-            ret.push(path.to_path_buf(), part);
+            ret.push(path.clone(), part);
         }
         Ok(ret)
     }
@@ -453,7 +392,11 @@ impl SourcesPart {
         // This needs to be `var`, not `const`.
         // This variable needs declared in the current global scope so that if
         // src-script.js loads first, it can pick it up.
-        SortedTemplate::from_before_after(r"createSrcSidebar('[", r"]');")
+        SortedTemplate::from_before_after(
+            r"var srcIndex = new Map(JSON.parse('[",
+            r"]'));
+createSrcSidebar();",
+        )
     }
 
     fn get(cx: &Context<'_>, crate_name: &OrderedJson) -> Result<PartsAndLocations<Self>, Error> {
@@ -476,8 +419,8 @@ impl SourcesPart {
 struct Hierarchy {
     parent: Weak<Self>,
     elem: OsString,
-    children: RefCell<FxIndexMap<OsString, Rc<Self>>>,
-    elems: RefCell<FxIndexSet<OsString>>,
+    children: RefCell<FxHashMap<OsString, Rc<Self>>>,
+    elems: RefCell<FxHashSet<OsString>>,
 }
 
 impl Hierarchy {
@@ -505,36 +448,34 @@ impl Hierarchy {
     }
 
     fn add_path(self: &Rc<Self>, path: &Path) {
-        let mut h = Rc::clone(self);
-        let mut components = path
+        let mut h = Rc::clone(&self);
+        let mut elems = path
             .components()
-            .filter(|component| matches!(component, Component::Normal(_) | Component::ParentDir))
+            .filter_map(|s| match s {
+                Component::Normal(s) => Some(s.to_owned()),
+                Component::ParentDir => Some(OsString::from("..")),
+                _ => None,
+            })
             .peekable();
-
-        assert!(components.peek().is_some(), "empty file path");
-        while let Some(component) = components.next() {
-            match component {
-                Component::Normal(s) => {
-                    if components.peek().is_none() {
-                        h.elems.borrow_mut().insert(s.to_owned());
-                        break;
-                    }
-                    h = {
-                        let mut children = h.children.borrow_mut();
-
-                        if let Some(existing) = children.get(s) {
-                            Rc::clone(existing)
-                        } else {
-                            let new_node = Rc::new(Self::with_parent(s.to_owned(), &h));
-                            children.insert(s.to_owned(), Rc::clone(&new_node));
-                            new_node
-                        }
-                    };
-                }
-                Component::ParentDir if let Some(parent) = h.parent.upgrade() => {
+        loop {
+            let cur_elem = elems.next().expect("empty file path");
+            if cur_elem == ".." {
+                if let Some(parent) = h.parent.upgrade() {
                     h = parent;
                 }
-                _ => {}
+                continue;
+            }
+            if elems.peek().is_none() {
+                h.elems.borrow_mut().insert(cur_elem);
+                break;
+            } else {
+                let entry = Rc::clone(
+                    h.children
+                        .borrow_mut()
+                        .entry(cur_elem.clone())
+                        .or_insert_with(|| Rc::new(Self::with_parent(cur_elem, &h))),
+                );
+                h = entry;
             }
         }
     }
@@ -570,88 +511,96 @@ impl TypeAliasPart {
         krate: &Crate,
         crate_name_json: &OrderedJson,
     ) -> Result<PartsAndLocations<Self>, Error> {
+        let cache = &Rc::clone(&cx.shared).cache;
         let mut path_parts = PartsAndLocations::default();
 
         let mut type_impl_collector = TypeImplCollector {
             aliased_types: IndexMap::default(),
             visited_aliases: FxHashSet::default(),
+            cache,
             cx,
         };
-        DocVisitor::visit_crate(&mut type_impl_collector, krate);
+        DocVisitor::visit_crate(&mut type_impl_collector, &krate);
         let cx = type_impl_collector.cx;
         let aliased_types = type_impl_collector.aliased_types;
         for aliased_type in aliased_types.values() {
-            let impls = aliased_type.impl_.values().filter_map(
-                |AliasedTypeImpl { impl_, type_aliases }| {
-                    let mut ret: Option<AliasSerializableImpl> = None;
+            let impls = aliased_type
+                .impl_
+                .values()
+                .flat_map(|AliasedTypeImpl { impl_, type_aliases }| {
+                    let mut ret = Vec::new();
+                    let trait_ = impl_
+                        .inner_impl()
+                        .trait_
+                        .as_ref()
+                        .map(|trait_| format!("{:#}", trait_.print(cx)));
                     // render_impl will filter out "impossible-to-call" methods
                     // to make that functionality work here, it needs to be called with
                     // each type alias, and if it gives a different result, split the impl
-                    for &(type_alias_fqp, type_alias_item) in type_aliases {
-                        cx.id_map.borrow_mut().clear();
-                        cx.deref_id_map.borrow_mut().clear();
-                        let type_alias_fqp = join_path_syms(type_alias_fqp);
-                        if let Some(ret) = &mut ret {
-                            ret.aliases.push(type_alias_fqp);
+                    for &(type_alias_fqp, ref type_alias_item) in type_aliases {
+                        let mut buf = Buffer::html();
+                        cx.id_map = Default::default();
+                        cx.deref_id_map = Default::default();
+                        let target_did = impl_
+                            .inner_impl()
+                            .trait_
+                            .as_ref()
+                            .map(|trait_| trait_.def_id())
+                            .or_else(|| impl_.inner_impl().for_.def_id(cache));
+                        let provided_methods;
+                        let assoc_link = if let Some(target_did) = target_did {
+                            provided_methods = impl_.inner_impl().provided_trait_methods(cx.tcx());
+                            AssocItemLink::GotoSource(ItemId::DefId(target_did), &provided_methods)
                         } else {
-                            let target_trait_did =
-                                impl_.inner_impl().trait_.as_ref().map(|trait_| trait_.def_id());
-                            let provided_methods;
-                            let assoc_link = if let Some(target_trait_did) = target_trait_did {
-                                provided_methods =
-                                    impl_.inner_impl().provided_trait_methods(cx.tcx());
-                                AssocItemLink::GotoSource(
-                                    ItemId::DefId(target_trait_did),
-                                    &provided_methods,
-                                )
-                            } else {
-                                AssocItemLink::Anchor(None)
-                            };
-                            let text = super::render_impl(
-                                cx,
-                                impl_,
-                                type_alias_item,
-                                assoc_link,
-                                RenderMode::Normal,
-                                None,
-                                &[],
-                                ImplRenderingParameters {
-                                    show_def_docs: true,
-                                    show_default_items: true,
-                                    show_non_assoc_items: true,
-                                    toggle_open_by_default: true,
-                                },
-                            )
-                            .to_string();
-                            // The alternate display prints it as plaintext instead of HTML.
-                            let trait_ = impl_
-                                .inner_impl()
-                                .trait_
-                                .as_ref()
-                                .map(|trait_| format!("{:#}", print_path(trait_, cx)));
-                            ret = Some(AliasSerializableImpl {
+                            AssocItemLink::Anchor(None)
+                        };
+                        super::render_impl(
+                            &mut buf,
+                            cx,
+                            *impl_,
+                            &type_alias_item,
+                            assoc_link,
+                            RenderMode::Normal,
+                            None,
+                            &[],
+                            ImplRenderingParameters {
+                                show_def_docs: true,
+                                show_default_items: true,
+                                show_non_assoc_items: true,
+                                toggle_open_by_default: true,
+                            },
+                        );
+                        let text = buf.into_inner();
+                        let type_alias_fqp = (*type_alias_fqp).iter().join("::");
+                        if Some(&text) == ret.last().map(|s: &AliasSerializableImpl| &s.text) {
+                            ret.last_mut()
+                                .expect("already established that ret.last() is Some()")
+                                .aliases
+                                .push(type_alias_fqp);
+                        } else {
+                            ret.push(AliasSerializableImpl {
                                 text,
-                                trait_,
+                                trait_: trait_.clone(),
                                 aliases: vec![type_alias_fqp],
                             })
                         }
                     }
                     ret
-                },
-            );
+                })
+                .collect::<Vec<_>>();
 
             let mut path = PathBuf::from("type.impl");
             for component in &aliased_type.target_fqp[..aliased_type.target_fqp.len() - 1] {
                 path.push(component.as_str());
             }
             let aliased_item_type = aliased_type.target_type;
-            path.push(format!(
+            path.push(&format!(
                 "{aliased_item_type}.{}.js",
                 aliased_type.target_fqp[aliased_type.target_fqp.len() - 1]
             ));
 
             let part = OrderedJson::array_sorted(
-                impls.map(|impl_| OrderedJson::serialize(impl_).unwrap()),
+                impls.iter().map(OrderedJson::serialize).collect::<Result<Vec<_>, _>>().unwrap(),
             );
             path_parts.push(path, OrderedJson::array_unsorted([crate_name_json, &part]));
         }
@@ -673,7 +622,7 @@ impl TraitAliasPart {
     fn blank() -> SortedTemplate<<Self as CciPart>::FileFormat> {
         SortedTemplate::from_before_after(
             r"(function() {
-    const implementors = Object.fromEntries([",
+    var implementors = Object.fromEntries([",
             r"]);
     if (window.register_implementors) {
         window.register_implementors(implementors);
@@ -685,7 +634,7 @@ impl TraitAliasPart {
     }
 
     fn get(
-        cx: &Context<'_>,
+        cx: &mut Context<'_>,
         crate_name_json: &OrderedJson,
     ) -> Result<PartsAndLocations<Self>, Error> {
         let cache = &cx.shared.cache;
@@ -711,7 +660,7 @@ impl TraitAliasPart {
                 },
             };
 
-            let mut implementors = imps
+            let implementors = imps
                 .iter()
                 .filter_map(|imp| {
                     // If the trait and implementation are in the same crate, then
@@ -726,21 +675,19 @@ impl TraitAliasPart {
                     {
                         None
                     } else {
-                        let impl_ = imp.inner_impl();
                         Some(Implementor {
-                            text: print_impl(impl_, false, cx).to_string(),
+                            text: imp.inner_impl().print(false, cx).to_string(),
                             synthetic: imp.inner_impl().kind.is_auto(),
-                            types: collect_paths_for_type(&imp.inner_impl().for_, cache),
-                            is_negative: impl_.is_negative_trait_impl(),
+                            types: collect_paths_for_type(imp.inner_impl().for_.clone(), cache),
                         })
                     }
                 })
-                .peekable();
+                .collect::<Vec<_>>();
 
             // Only create a js file if we have impls to add to it. If the trait is
             // documented locally though we always create the file to avoid dead
             // links.
-            if implementors.peek().is_none() && !cache.paths.contains_key(&did) {
+            if implementors.is_empty() && !cache.paths.contains_key(&did) {
                 continue;
             }
 
@@ -748,19 +695,9 @@ impl TraitAliasPart {
             for component in &remote_path[..remote_path.len() - 1] {
                 path.push(component.as_str());
             }
-            path.push(format!("{remote_item_type}.{}.js", remote_path[remote_path.len() - 1]));
+            path.push(&format!("{remote_item_type}.{}.js", remote_path[remote_path.len() - 1]));
 
-            let mut implementors = implementors.collect::<Vec<_>>();
-            implementors.sort_unstable_by(|a, b| {
-                // We sort negative impls first.
-                match (a.is_negative, b.is_negative) {
-                    (false, true) => Ordering::Greater,
-                    (true, false) => Ordering::Less,
-                    _ => compare_names(&a.text, &b.text),
-                }
-            });
-
-            let part = OrderedJson::array_unsorted(
+            let part = OrderedJson::array_sorted(
                 implementors
                     .iter()
                     .map(OrderedJson::serialize)
@@ -777,7 +714,6 @@ struct Implementor {
     text: String,
     synthetic: bool,
     types: Vec<String>,
-    is_negative: bool,
 }
 
 impl Serialize for Implementor {
@@ -787,7 +723,6 @@ impl Serialize for Implementor {
     {
         let mut seq = serializer.serialize_seq(None)?;
         seq.serialize_element(&self.text)?;
-        seq.serialize_element(if self.is_negative { &1 } else { &0 })?;
         if self.synthetic {
             seq.serialize_element(&1)?;
             seq.serialize_element(&self.types)?;
@@ -803,11 +738,12 @@ impl Serialize for Implementor {
 /// this visitor works to reverse that: `aliased_types` is a map
 /// from target to the aliases that reference it, and each one
 /// will generate one file.
-struct TypeImplCollector<'cx, 'cache, 'item> {
+struct TypeImplCollector<'cx, 'cache> {
     /// Map from DefId-of-aliased-type to its data.
-    aliased_types: IndexMap<DefId, AliasedType<'cache, 'item>>,
+    aliased_types: IndexMap<DefId, AliasedType<'cache>>,
     visited_aliases: FxHashSet<DefId>,
-    cx: &'cache Context<'cx>,
+    cache: &'cache Cache,
+    cx: &'cache mut Context<'cx>,
 }
 
 /// Data for an aliased type.
@@ -825,29 +761,29 @@ struct TypeImplCollector<'cx, 'cache, 'item> {
 /// ]
 /// )
 /// ```
-struct AliasedType<'cache, 'item> {
+struct AliasedType<'cache> {
     /// This is used to generate the actual filename of this aliased type.
     target_fqp: &'cache [Symbol],
     target_type: ItemType,
     /// This is the data stored inside the file.
     /// ItemId is used to deduplicate impls.
-    impl_: IndexMap<ItemId, AliasedTypeImpl<'cache, 'item>>,
+    impl_: IndexMap<ItemId, AliasedTypeImpl<'cache>>,
 }
 
 /// The `impl_` contains data that's used to figure out if an alias will work,
 /// and to generate the HTML at the end.
 ///
 /// The `type_aliases` list is built up with each type alias that matches.
-struct AliasedTypeImpl<'cache, 'item> {
+struct AliasedTypeImpl<'cache> {
     impl_: &'cache Impl,
-    type_aliases: Vec<(&'cache [Symbol], &'item Item)>,
+    type_aliases: Vec<(&'cache [Symbol], Item)>,
 }
 
-impl<'item> DocVisitor<'item> for TypeImplCollector<'_, '_, 'item> {
-    fn visit_item(&mut self, it: &'item Item) {
+impl<'cx, 'cache> DocVisitor for TypeImplCollector<'cx, 'cache> {
+    fn visit_item(&mut self, it: &Item) {
         self.visit_item_recur(it);
-        let cache = &self.cx.shared.cache;
-        let ItemKind::TypeAliasItem(ref t) = it.kind else { return };
+        let cache = self.cache;
+        let ItemKind::TypeAliasItem(ref t) = *it.kind else { return };
         let Some(self_did) = it.item_id.as_def_id() else { return };
         if !self.visited_aliases.insert(self_did) {
             return;
@@ -862,8 +798,9 @@ impl<'item> DocVisitor<'item> for TypeImplCollector<'_, '_, 'item> {
             let impl_ = cache
                 .impls
                 .get(&target_did)
-                .into_iter()
-                .flatten()
+                .map(|v| &v[..])
+                .unwrap_or_default()
+                .iter()
                 .map(|impl_| {
                     (impl_.impl_item.item_id, AliasedTypeImpl { impl_, type_aliases: Vec::new() })
                 })
@@ -878,19 +815,24 @@ impl<'item> DocVisitor<'item> for TypeImplCollector<'_, '_, 'item> {
         // Exclude impls that are directly on this type. They're already in the HTML.
         // Some inlining scenarios can cause there to be two versions of the same
         // impl: one on the type alias and one on the underlying target type.
-        let mut seen_impls: FxHashSet<ItemId> =
-            cache.impls.get(&self_did).into_iter().flatten().map(|i| i.impl_item.item_id).collect();
+        let mut seen_impls: FxHashSet<ItemId> = cache
+            .impls
+            .get(&self_did)
+            .map(|s| &s[..])
+            .unwrap_or_default()
+            .iter()
+            .map(|i| i.impl_item.item_id)
+            .collect();
         for (impl_item_id, aliased_type_impl) in &mut aliased_type.impl_ {
             // Only include this impl if it actually unifies with this alias.
             // Synthetic impls are not included; those are also included in the HTML.
             //
             // FIXME(lazy_type_alias): Once the feature is complete or stable, rewrite this
             // to use type unification.
-            // Be aware of `tests/rustdoc-html/type-alias/deeply-nested-112515.rs` which might
-            // regress.
+            // Be aware of `tests/rustdoc/type-alias/deeply-nested-112515.rs` which might regress.
             let Some(impl_did) = impl_item_id.as_def_id() else { continue };
             let for_ty = self.cx.tcx().type_of(impl_did).skip_binder();
-            let reject_cx = DeepRejectCtxt::relate_infer_infer(self.cx.tcx());
+            let reject_cx = DeepRejectCtxt::new(self.cx.tcx(), TreatParams::AsCandidateKey);
             if !reject_cx.types_may_unify(aliased_ty, for_ty) {
                 continue;
             }
@@ -899,7 +841,7 @@ impl<'item> DocVisitor<'item> for TypeImplCollector<'_, '_, 'item> {
                 continue;
             }
             // This impl was not found in the set of rejected impls
-            aliased_type_impl.type_aliases.push((&self_fqp[..], it));
+            aliased_type_impl.type_aliases.push((&self_fqp[..], it.clone()));
         }
     }
 }
@@ -933,15 +875,17 @@ impl Serialize for AliasSerializableImpl {
 fn get_path_parts<T: CciPart>(
     dst: &Path,
     crates_info: &[CrateInfo],
-) -> FxIndexMap<PathBuf, Vec<String>> {
-    let mut templates: FxIndexMap<PathBuf, Vec<String>> = FxIndexMap::default();
-    crates_info.iter().flat_map(|crate_info| T::from_crate_info(crate_info).parts.iter()).for_each(
-        |(path, part)| {
-            let path = dst.join(path);
+) -> FxHashMap<PathBuf, Vec<String>> {
+    let mut templates: FxHashMap<PathBuf, Vec<String>> = FxHashMap::default();
+    crates_info
+        .iter()
+        .map(|crate_info| T::from_crate_info(crate_info).parts.iter())
+        .flatten()
+        .for_each(|(path, part)| {
+            let path = dst.join(&path);
             let part = part.to_string();
             templates.entry(path).or_default().push(part);
-        },
-    );
+        });
     templates
 }
 
@@ -956,18 +900,14 @@ fn create_parents(path: &Path) -> Result<(), Error> {
 fn read_template_or_blank<F, T: FileFormat>(
     mut make_blank: F,
     path: &Path,
-    should_merge: &ShouldMerge,
 ) -> Result<SortedTemplate<T>, Error>
 where
     F: FnMut() -> SortedTemplate<T>,
 {
-    if !should_merge.read_rendered_cci {
-        return Ok(make_blank());
-    }
-    match fs::read_to_string(path) {
+    match fs::read_to_string(&path) {
         Ok(template) => Ok(try_err!(SortedTemplate::from_str(&template), &path)),
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(make_blank()),
-        Err(e) => Err(Error::new(e, path)),
+        Err(e) => Err(Error::new(e, &path)),
     }
 }
 
@@ -976,7 +916,6 @@ fn write_rendered_cci<T: CciPart, F>(
     mut make_blank: F,
     dst: &Path,
     crates_info: &[CrateInfo],
-    should_merge: &ShouldMerge,
 ) -> Result<(), Error>
 where
     F: FnMut() -> SortedTemplate<T::FileFormat>,
@@ -985,12 +924,12 @@ where
     for (path, parts) in get_path_parts::<T>(dst, crates_info) {
         create_parents(&path)?;
         // read previous rendered cci from storage, append to them
-        let mut template =
-            read_template_or_blank::<_, T::FileFormat>(&mut make_blank, &path, should_merge)?;
+        let mut template = read_template_or_blank::<_, T::FileFormat>(&mut make_blank, &path)?;
         for part in parts {
             template.append(part);
         }
-        let mut file = try_err!(File::create_buffered(&path), &path);
+        let file = try_err!(File::create(&path), &path);
+        let mut file = BufWriter::new(file);
         try_err!(write!(file, "{template}"), &path);
         try_err!(file.flush(), &path);
     }

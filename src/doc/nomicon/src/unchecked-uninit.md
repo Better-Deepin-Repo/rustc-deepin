@@ -23,8 +23,12 @@ use std::mem::{self, MaybeUninit};
 const SIZE: usize = 10;
 
 let x = {
-    // Create an uninitialized array of `MaybeUninit`.
-    let mut x = [const { MaybeUninit::uninit() }; SIZE];
+    // Create an uninitialized array of `MaybeUninit`. The `assume_init` is
+    // safe because the type we are claiming to have initialized here is a
+    // bunch of `MaybeUninit`s, which do not require initialization.
+    let mut x: [MaybeUninit<Box<u32>>; SIZE] = unsafe {
+        MaybeUninit::uninit().assume_init()
+    };
 
     // Dropping a `MaybeUninit` does nothing. Thus using raw pointer
     // assignment instead of `ptr::write` does not cause the old
@@ -39,12 +43,19 @@ let x = {
     unsafe { mem::transmute::<_, [Box<u32>; SIZE]>(x) }
 };
 
-println!("{x:?}");
+dbg!(x);
 ```
 
 This code proceeds in three steps:
 
-1. Create an array of `MaybeUninit<T>`.
+1. Create an array of `MaybeUninit<T>`. With current stable Rust, we have to use
+   unsafe code for this: we take some uninitialized piece of memory
+   (`MaybeUninit::uninit()`) and claim we have fully initialized it
+   ([`assume_init()`][assume_init]). This seems ridiculous, because we didn't!
+   The reason this is correct is that the array consists itself entirely of
+   `MaybeUninit`, which do not actually require initialization. For most other
+   types, doing `MaybeUninit::uninit().assume_init()` produces an invalid
+   instance of said type, so you got yourself some Undefined Behavior.
 
 2. Initialize the array. The subtle aspect of this is that usually, when we use
    `=` to assign to a value that the Rust type checker considers to already be
@@ -123,7 +134,7 @@ to compute the address of array index `idx`. This relies on
 how arrays are laid out in memory.
 * For a struct, however, in general we do not know how it is laid out, and we
 also cannot use `&mut base_ptr.field` as that would be creating a
-reference. So, you must carefully use the [raw reference][raw_reference] syntax. This creates
+reference. So, you must carefully use the [`addr_of_mut`] macro. This creates
 a raw pointer to the field without creating an intermediate reference:
 
 ```rust
@@ -136,7 +147,7 @@ struct Demo {
 let mut uninit = MaybeUninit::<Demo>::uninit();
 // `&uninit.as_mut().field` would create a reference to an uninitialized `bool`,
 // and thus be Undefined Behavior!
-let f1_ptr = unsafe { &raw mut (*uninit.as_mut_ptr()).field };
+let f1_ptr = unsafe { ptr::addr_of_mut!((*uninit.as_mut_ptr()).field) };
 unsafe { f1_ptr.write(true); }
 
 let init = unsafe { uninit.assume_init() };
@@ -154,8 +165,9 @@ anywhere expects to be handed uninitialized memory, so if you're going to pass
 it around at all, be sure to be *really* careful.
 
 [`MaybeUninit`]: ../core/mem/union.MaybeUninit.html
+[assume_init]: ../core/mem/union.MaybeUninit.html#method.assume_init
 [`ptr`]: ../core/ptr/index.html
-[raw_reference]: ../reference/types/pointer.html#r-type.pointer.raw.constructor
+[`addr_of_mut`]: ../core/ptr/macro.addr_of_mut.html
 [`write`]: ../core/ptr/fn.write.html
 [`copy`]: ../std/ptr/fn.copy.html
 [`copy_nonoverlapping`]: ../std/ptr/fn.copy_nonoverlapping.html

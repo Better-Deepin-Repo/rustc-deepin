@@ -1,9 +1,11 @@
 //@ run-pass
-//@ needs-subprocess
+//@ ignore-wasm32 no processes
+//@ ignore-sgx no processes
 
 use std::alloc::{Layout, handle_alloc_error};
+use std::env;
 use std::process::Command;
-use std::{env, str};
+use std::str;
 
 fn main() {
     if env::args().len() > 1 {
@@ -11,7 +13,7 @@ fn main() {
     }
 
     let me = env::current_exe().unwrap();
-    let output = Command::new(&me).env("RUST_BACKTRACE", "0").arg("next").output().unwrap();
+    let output = Command::new(&me).arg("next").output().unwrap();
     assert!(!output.status.success(), "{:?} is a success", output.status);
 
     let mut stderr = str::from_utf8(&output.stderr).unwrap();
@@ -22,9 +24,5 @@ fn main() {
         .strip_suffix("qemu: uncaught target signal 6 (Aborted) - core dumped\n")
         .unwrap_or(stderr);
 
-    assert_eq!(
-        stderr,
-        "memory allocation of 42 bytes failed\n\
-        note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace\n"
-    );
+    assert_eq!(stderr, "memory allocation of 42 bytes failed\n");
 }

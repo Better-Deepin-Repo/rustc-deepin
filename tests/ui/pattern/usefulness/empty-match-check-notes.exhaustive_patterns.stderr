@@ -2,10 +2,7 @@ error: unreachable pattern
   --> $DIR/empty-match-check-notes.rs:17:9
    |
 LL |         _ => {}
-   |         ^------
-   |         |
-   |         matches no values because `EmptyEnum` is uninhabited
-   |         help: remove the match arm
+   |         ^ matches no values because `EmptyEnum` is uninhabited
    |
    = note: to learn more about uninhabited types, see https://doc.rust-lang.org/nomicon/exotic-sizes.html#empty-types
 note: the lint level is defined here
@@ -18,10 +15,7 @@ error: unreachable pattern
   --> $DIR/empty-match-check-notes.rs:22:9
    |
 LL |         _ if false => {}
-   |         ^---------------
-   |         |
-   |         matches no values because `EmptyEnum` is uninhabited
-   |         help: remove the match arm
+   |         ^ matches no values because `EmptyEnum` is uninhabited
    |
    = note: to learn more about uninhabited types, see https://doc.rust-lang.org/nomicon/exotic-sizes.html#empty-types
 
@@ -29,10 +23,7 @@ error: unreachable pattern
   --> $DIR/empty-match-check-notes.rs:31:9
    |
 LL |         _ => {}
-   |         ^------
-   |         |
-   |         matches no values because `EmptyForeignEnum` is uninhabited
-   |         help: remove the match arm
+   |         ^ matches no values because `EmptyForeignEnum` is uninhabited
    |
    = note: to learn more about uninhabited types, see https://doc.rust-lang.org/nomicon/exotic-sizes.html#empty-types
 
@@ -40,10 +31,7 @@ error: unreachable pattern
   --> $DIR/empty-match-check-notes.rs:36:9
    |
 LL |         _ if false => {}
-   |         ^---------------
-   |         |
-   |         matches no values because `EmptyForeignEnum` is uninhabited
-   |         help: remove the match arm
+   |         ^ matches no values because `EmptyForeignEnum` is uninhabited
    |
    = note: to learn more about uninhabited types, see https://doc.rust-lang.org/nomicon/exotic-sizes.html#empty-types
 
@@ -54,7 +42,7 @@ LL |     let None = *x;
    |         ^^^^ pattern `Some(_)` not covered
    |
    = note: `let` bindings require an "irrefutable pattern", like a `struct` or an `enum` with only one variant
-   = note: for more information, visit https://doc.rust-lang.org/book/ch19-02-refutability.html
+   = note: for more information, visit https://doc.rust-lang.org/book/ch18-02-refutability.html
    = note: pattern `Some(_)` is currently uninhabited, but this variant contains private fields which may become inhabited in the future
    = note: the matched value is of type `Option<SecretlyUninhabitedForeignStruct>`
 help: you might want to use `if let` to ignore the variant that isn't matched

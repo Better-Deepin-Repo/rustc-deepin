@@ -4,8 +4,8 @@ use std::collections::hash_map::HashMap;
 use std::fmt;
 use std::task::Poll;
 
-use crate::core::SourceId;
 use crate::core::package::PackageSet;
+use crate::core::SourceId;
 use crate::core::{Dependency, Package, PackageId};
 use crate::sources::IndexSummary;
 use crate::util::{CargoResult, GlobalContext};
@@ -183,16 +183,9 @@ pub enum QueryKind {
     /// Each source gets to define what `close` means for it.
     ///
     /// Path/Git sources may return all dependencies that are at that URI,
-    /// whereas an `Registry` source may return dependencies that are yanked or invalid.
-    RejectedVersions,
-    /// A query for packages close to the given dependency requirement.
-    ///
-    /// Each source gets to define what `close` means for it.
-    ///
-    /// Path/Git sources may return all dependencies that are at that URI,
     /// whereas an `Registry` source may return dependencies that have the same
     /// canonicalization.
-    AlternativeNames,
+    Alternatives,
     /// Match a dependency in all ways and will normalize the package name.
     /// Each source defines what normalizing means.
     Normalized,

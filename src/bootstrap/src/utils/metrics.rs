@@ -9,16 +9,15 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::time::{Duration, Instant, SystemTime};
 
-use build_helper::ci::CiEnv;
 use build_helper::metrics::{
-    CiMetadata, JsonInvocation, JsonInvocationSystemStats, JsonNode, JsonRoot, JsonStepSystemStats,
-    Test, TestOutcome, TestSuite, TestSuiteMetadata,
+    JsonInvocation, JsonInvocationSystemStats, JsonNode, JsonRoot, JsonStepSystemStats, Test,
+    TestOutcome, TestSuite, TestSuiteMetadata,
 };
 use sysinfo::{CpuRefreshKind, RefreshKind, System};
 
-use crate::Build;
 use crate::core::builder::{Builder, Step};
 use crate::utils::helpers::t;
+use crate::Build;
 
 // Update this number whenever a breaking change is made to the build metrics.
 //
@@ -43,7 +42,7 @@ pub(crate) struct BuildMetrics {
     state: RefCell<MetricsState>,
 }
 
-// NOTE: this isn't really cloning anything, but necessary for `Build: Clone`.
+/// NOTE: this isn't really cloning anything, but `x suggest` doesn't need metrics so this is probably ok.
 impl Clone for BuildMetrics {
     fn clone(&self) -> Self {
         Self::init()
@@ -57,7 +56,7 @@ impl BuildMetrics {
             running_steps: Vec::new(),
 
             system_info: System::new_with_specifics(
-                RefreshKind::nothing().with_cpu(CpuRefreshKind::everything()),
+                RefreshKind::new().with_cpu(CpuRefreshKind::everything()),
             ),
             timer_start: None,
             invocation_timer_start: Instant::now(),
@@ -77,7 +76,7 @@ impl BuildMetrics {
 
         // Consider all the stats gathered so far as the parent's.
         if !state.running_steps.is_empty() {
-            self.collect_stats(&mut state);
+            self.collect_stats(&mut *state);
         }
 
         state.system_info.refresh_cpu_usage();
@@ -103,7 +102,7 @@ impl BuildMetrics {
 
         let mut state = self.state.borrow_mut();
 
-        self.collect_stats(&mut state);
+        self.collect_stats(&mut *state);
 
         let step = state.running_steps.pop().unwrap();
         if state.running_steps.is_empty() {
@@ -162,9 +161,8 @@ impl BuildMetrics {
 
         let dest = build.out.join("metrics.json");
 
-        let mut system = System::new_with_specifics(
-            RefreshKind::nothing().with_cpu(CpuRefreshKind::everything()),
-        );
+        let mut system =
+            System::new_with_specifics(RefreshKind::new().with_cpu(CpuRefreshKind::everything()));
         system.refresh_cpu_usage();
         system.refresh_memory();
 
@@ -201,14 +199,6 @@ impl BuildMetrics {
             }
         };
         invocations.push(JsonInvocation {
-            // The command-line invocation with which bootstrap was invoked.
-            // Skip the first argument, as it is a potentially long absolute
-            // path that is not interesting.
-            cmdline: std::env::args_os()
-                .skip(1)
-                .map(|arg| arg.to_string_lossy().to_string())
-                .collect::<Vec<_>>()
-                .join(" "),
             start_time: state
                 .invocation_start
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -218,19 +208,13 @@ impl BuildMetrics {
             children: steps.into_iter().map(|step| self.prepare_json_step(step)).collect(),
         });
 
-        let json = JsonRoot {
-            format_version: CURRENT_FORMAT_VERSION,
-            system_stats,
-            invocations,
-            ci_metadata: get_ci_metadata(build.config.ci_env),
-        };
+        let json = JsonRoot { format_version: CURRENT_FORMAT_VERSION, system_stats, invocations };
 
         t!(std::fs::create_dir_all(dest.parent().unwrap()));
         let mut file = BufWriter::new(t!(File::create(&dest)));
         t!(serde_json::to_writer(&mut file, &json));
     }
 
-    #[expect(clippy::only_used_in_recursion)]
     fn prepare_json_step(&self, step: StepMetrics) -> JsonNode {
         let mut children = Vec::new();
         children.extend(step.children.into_iter().map(|child| self.prepare_json_step(child)));
@@ -249,16 +233,6 @@ impl BuildMetrics {
             children,
         }
     }
-}
-
-fn get_ci_metadata(ci_env: CiEnv) -> Option<CiMetadata> {
-    if ci_env != CiEnv::GitHubActions {
-        return None;
-    }
-    let workflow_run_id =
-        std::env::var("GITHUB_WORKFLOW_RUN_ID").ok().and_then(|id| id.parse::<u64>().ok())?;
-    let repository = std::env::var("GITHUB_REPOSITORY").ok()?;
-    Some(CiMetadata { workflow_run_id, repository })
 }
 
 struct MetricsState {

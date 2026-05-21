@@ -16,28 +16,28 @@ fn main() {
         HiddenEnum::A => {}
         HiddenEnum::B => {}
     }
-    //~^^^^ ERROR non-exhaustive patterns: `_` not covered
+    //~^^^^ non-exhaustive patterns: `_` not covered
 
     match HiddenEnum::A {
         HiddenEnum::A => {}
         HiddenEnum::C => {}
     }
-    //~^^^^ ERROR non-exhaustive patterns: `HiddenEnum::B` not covered
+    //~^^^^ non-exhaustive patterns: `HiddenEnum::B` not covered
 
     match HiddenEnum::A {
         HiddenEnum::A => {}
     }
-    //~^^^ ERROR non-exhaustive patterns: `HiddenEnum::B` and `_` not covered
+    //~^^^ non-exhaustive patterns: `HiddenEnum::B` and `_` not covered
 
     match None {
         None => {}
         Some(HiddenEnum::A) => {}
     }
-    //~^^^^ ERROR non-exhaustive patterns: `Some(HiddenEnum::B)` and `Some(_)` not covered
+    //~^^^^ non-exhaustive patterns: `Some(HiddenEnum::B)` and `Some(_)` not covered
 
     match InCrate::A {
         InCrate::A => {}
         InCrate::B => {}
     }
-    //~^^^^ ERROR non-exhaustive patterns: `InCrate::C` not covered
+    //~^^^^ non-exhaustive patterns: `InCrate::C` not covered
 }

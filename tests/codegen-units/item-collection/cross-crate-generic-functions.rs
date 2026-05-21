@@ -1,14 +1,14 @@
-//@ compile-flags:-Clink-dead-code
+//@ compile-flags:-Zprint-mono-items=eager
 
 #![deny(dead_code)]
-#![crate_type = "lib"]
+#![feature(start)]
 
 //@ aux-build:cgu_generic_function.rs
 extern crate cgu_generic_function;
 
 //~ MONO_ITEM fn start
-#[no_mangle]
-pub fn start(_: isize, _: *const *const u8) -> isize {
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
     //~ MONO_ITEM fn cgu_generic_function::bar::<u32>
     //~ MONO_ITEM fn cgu_generic_function::foo::<u32>
     let _ = cgu_generic_function::foo(1u32);

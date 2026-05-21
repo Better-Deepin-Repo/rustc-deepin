@@ -1,5 +1,4 @@
-//@ normalize-stderr: "pref: Align\([1-8] bytes\)" -> "pref: $$PREF_ALIGN"
-//@ normalize-stderr: "randomization_seed: \d+" -> "randomization_seed: $$SEED"
+//@ normalize-stderr-test: "pref: Align\([1-8] bytes\)" -> "pref: $$PREF_ALIGN"
 #![crate_type = "lib"]
 #![feature(rustc_attrs)]
 

@@ -2,8 +2,8 @@
 
 use std::fs;
 
-use crate::prelude::*;
 use cargo_test_support::compare::assert_e2e;
+use cargo_test_support::prelude::*;
 use cargo_test_support::publish::validate_alt_upload;
 use cargo_test_support::registry::{self, Package, RegistryBuilder};
 use cargo_test_support::str;
@@ -35,7 +35,7 @@ fn depend_on_alt_registry() {
     p.cargo("check")
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.0.1 (registry `alternative`)
 [CHECKING] bar v0.0.1 (registry `alternative`)
@@ -88,7 +88,7 @@ fn depend_on_alt_registry_depends_on_same_registry_no_index() {
     p.cargo("check")
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 3 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] baz v0.0.1 (registry `alternative`)
 [DOWNLOADED] bar v0.0.1 (registry `alternative`)
@@ -131,7 +131,7 @@ fn depend_on_alt_registry_depends_on_same_registry() {
     p.cargo("check")
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 3 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] baz v0.0.1 (registry `alternative`)
 [DOWNLOADED] bar v0.0.1 (registry `alternative`)
@@ -176,14 +176,14 @@ fn depend_on_alt_registry_depends_on_crates_io() {
             str![[r#"
 [UPDATING] `alternative` index
 [UPDATING] `dummy-registry` index
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 3 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] baz v0.0.1 (registry `dummy-registry`)
 [DOWNLOADED] bar v0.0.1 (registry `alternative`)
 [CHECKING] baz v0.0.1
 [CHECKING] bar v0.0.1 (registry `alternative`)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]]
             .unordered(),
@@ -217,7 +217,7 @@ fn registry_and_path_dep_works() {
 
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [CHECKING] bar v0.0.1 ([ROOT]/foo/bar)
 [CHECKING] foo v0.0.1 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -288,12 +288,9 @@ fn cannot_publish_to_crates_io_with_registry_dependency() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[ERROR] failed to verify manifest at `[ROOT]/foo/Cargo.toml`
-
-Caused by:
-  crates cannot be published to crates.io with dependencies sourced from other
-  registries. `bar` needs to be published to crates.io before publishing this crate.
-  (crate `bar` is pulled from registry `alternative`)
+[ERROR] crates cannot be published to crates.io with dependencies sourced from other
+registries. `bar` needs to be published to crates.io before publishing this crate.
+(crate `bar` is pulled from registry `alternative`)
 
 "#]])
         .run();
@@ -306,14 +303,10 @@ Caused by:
         .arg(crates_io.index_url().as_str())
         .with_status(101)
         .with_stderr_data(str![[r#"
-[WARNING] `cargo publish --token` is deprecated in favor of using `cargo login` and environment variables
 [UPDATING] crates.io index
-[ERROR] failed to verify manifest at `[ROOT]/foo/Cargo.toml`
-
-Caused by:
-  crates cannot be published to crates.io with dependencies sourced from other
-  registries. `bar` needs to be published to crates.io before publishing this crate.
-  (crate `bar` is pulled from registry `alternative`)
+[ERROR] crates cannot be published to crates.io with dependencies sourced from other
+registries. `bar` needs to be published to crates.io before publishing this crate.
+(crate `bar` is pulled from registry `alternative`)
 
 "#]])
         .run();
@@ -350,6 +343,8 @@ fn publish_with_registry_dependency() {
     p.cargo("publish --registry alternative")
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
+[WARNING] manifest has no description, license, license-file, documentation, homepage or repository.
+See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [UPDATING] `alternative` index
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
@@ -361,8 +356,8 @@ fn publish_with_registry_dependency() {
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `alternative`
-[NOTE] waiting for foo v0.0.1 to be available at registry `alternative`
-[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
+[NOTE] waiting for `foo v0.0.1` to be available at registry `alternative`.
+You may press ctrl-c to skip waiting; the crate should be available shortly.
 [PUBLISHED] foo v0.0.1 at registry `alternative`
 
 "#]])
@@ -440,14 +435,14 @@ fn alt_registry_and_crates_io_deps() {
             str![[r#"
 [UPDATING] `alternative` index
 [UPDATING] `dummy-registry` index
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 3 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] crates_io_dep v0.0.1 (registry `dummy-registry`)
 [DOWNLOADED] alt_reg_dep v0.1.0 (registry `alternative`)
 [CHECKING] crates_io_dep v0.0.1
 [CHECKING] alt_reg_dep v0.1.0 (registry `alternative`)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]]
             .unordered(),
@@ -515,6 +510,8 @@ fn publish_to_alt_registry() {
     p.cargo("publish --registry alternative")
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
+[WARNING] manifest has no description, license, license-file, documentation, homepage or repository.
+See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [VERIFYING] foo v0.0.1 ([ROOT]/foo)
@@ -522,8 +519,8 @@ fn publish_to_alt_registry() {
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `alternative`
-[NOTE] waiting for foo v0.0.1 to be available at registry `alternative`
-[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
+[NOTE] waiting for `foo v0.0.1` to be available at registry `alternative`.
+You may press ctrl-c to skip waiting; the crate should be available shortly.
 [PUBLISHED] foo v0.0.1 at registry `alternative`
 
 "#]])
@@ -591,6 +588,8 @@ fn publish_with_crates_io_dep() {
     p.cargo("publish --registry alternative")
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
+[WARNING] manifest has no documentation, homepage or repository.
+See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [UPDATING] `dummy-registry` index
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
@@ -602,8 +601,8 @@ fn publish_with_crates_io_dep() {
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `alternative`
-[NOTE] waiting for foo v0.0.1 to be available at registry `alternative`
-[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
+[NOTE] waiting for `foo v0.0.1` to be available at registry `alternative`.
+You may press ctrl-c to skip waiting; the crate should be available shortly.
 [PUBLISHED] foo v0.0.1 at registry `alternative`
 
 "#]])
@@ -711,7 +710,7 @@ fn patch_alt_reg() {
     p.cargo("check")
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [CHECKING] bar v0.1.0 ([ROOT]/foo/bar)
 [CHECKING] foo v0.0.1 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -744,12 +743,16 @@ fn bad_registry_name() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [ERROR] invalid character ` ` in registry name: `bad name`, characters must be Unicode XID characters (numbers, `-`, `_`, or most letters)
-       
-       
- --> Cargo.toml:8:17
-  |
-8 |                 [dependencies.bar]
-  |                 ^^^^^^^^^^^^^^^^^^
+
+
+  --> Cargo.toml:8:17
+   |
+ 8 |                   [dependencies.bar]
+   |  _________________^
+ 9 | |                 version = "0.0.1"
+10 | |                 registry = "bad name"
+   | |_____________________________________^
+   |
 
 "#]])
         .run();
@@ -801,7 +804,7 @@ fn no_api() {
     p.cargo("check")
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.0.1 (registry `alternative`)
 [CHECKING] bar v0.0.1 (registry `alternative`)
@@ -811,8 +814,7 @@ fn no_api() {
 "#]])
         .run();
 
-    p.cargo("login --registry alternative")
-        .with_stdin("TOKEN")
+    p.cargo("login --registry alternative TOKEN")
         .with_status(101)
         .with_stderr_data(str![[r#"
 [ERROR] registry `alternative` does not support API commands
@@ -977,7 +979,6 @@ fn alt_reg_metadata() {
   ],
   "resolve": null,
   "target_directory": "[ROOT]/foo/target",
-  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.0.1"
@@ -1342,7 +1343,6 @@ fn alt_reg_metadata() {
     "root": "path+[ROOTURL]/foo#0.0.1"
   },
   "target_directory": "[ROOT]/foo/target",
-  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.0.1"
@@ -1605,7 +1605,6 @@ fn unknown_registry() {
     "root": "path+[ROOTURL]/foo#0.0.1"
   },
   "target_directory": "[ROOT]/foo/target",
-  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.0.1"
@@ -1658,7 +1657,7 @@ fn registries_index_relative_url() {
     p.cargo("check")
         .with_stderr_data(str![[r#"
 [UPDATING] `relative` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.0.1 (registry `relative`)
 [CHECKING] bar v0.0.1 (registry `relative`)
@@ -1791,7 +1790,7 @@ fn sparse_lockfile() {
         str![[r##"
 # This file is automatically @generated by Cargo.
 # It is not intended for manual editing.
-version = 4
+version = 3
 
 [[package]]
 name = "a"
@@ -1970,12 +1969,13 @@ fn empty_dependency_registry() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [ERROR] registry name cannot be empty
-       
-       
+
+
  --> Cargo.toml:8:23
   |
 8 |                 bar = { version = "0.1.0", registry = "" }
   |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
 
 "#]])
         .run();

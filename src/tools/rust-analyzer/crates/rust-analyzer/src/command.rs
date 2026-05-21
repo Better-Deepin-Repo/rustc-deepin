@@ -3,50 +3,35 @@
 
 use std::{
     ffi::OsString,
-    fmt,
-    io::{self, BufWriter, Write},
+    fmt, io,
     marker::PhantomData,
     path::PathBuf,
     process::{ChildStderr, ChildStdout, Command, Stdio},
 };
 
-use anyhow::Context;
 use crossbeam_channel::Sender;
-use paths::Utf8PathBuf;
 use process_wrap::std::{StdChildWrapper, StdCommandWrap};
 use stdx::process::streaming_output;
 
-/// This trait abstracts parsing one line of JSON output into a Rust
-/// data type.
-///
-/// This is useful for `cargo check` output, `cargo test` output, as
-/// well as custom discover commands.
-pub(crate) trait JsonLinesParser<T>: Send + 'static {
-    fn from_line(&self, line: &str, error: &mut String) -> Option<T>;
-    fn from_eof(&self) -> Option<T>;
+/// Cargo output is structured as a one JSON per line. This trait abstracts parsing one line of
+/// cargo output into a Rust data type.
+pub(crate) trait ParseFromLine: Sized + Send + 'static {
+    fn from_line(line: &str, error: &mut String) -> Option<Self>;
+    fn from_eof() -> Option<Self>;
 }
 
-struct CommandActor<T> {
-    parser: Box<dyn JsonLinesParser<T>>,
+struct CargoActor<T> {
     sender: Sender<T>,
     stdout: ChildStdout,
     stderr: ChildStderr,
 }
 
-impl<T: Sized + Send + 'static> CommandActor<T> {
-    fn new(
-        parser: impl JsonLinesParser<T>,
-        sender: Sender<T>,
-        stdout: ChildStdout,
-        stderr: ChildStderr,
-    ) -> Self {
-        let parser = Box::new(parser);
-        CommandActor { parser, sender, stdout, stderr }
+impl<T: ParseFromLine> CargoActor<T> {
+    fn new(sender: Sender<T>, stdout: ChildStdout, stderr: ChildStderr) -> Self {
+        CargoActor { sender, stdout, stderr }
     }
-}
 
-impl<T: Sized + Send + 'static> CommandActor<T> {
-    fn run(self, outfile: Option<Utf8PathBuf>) -> io::Result<(bool, String)> {
+    fn run(self) -> io::Result<(bool, String)> {
         // We manually read a line at a time, instead of using serde's
         // stream deserializers, because the deserializer cannot recover
         // from an error, resulting in it getting stuck, because we try to
@@ -56,22 +41,13 @@ impl<T: Sized + Send + 'static> CommandActor<T> {
         // simply skip a line if it doesn't parse, which just ignores any
         // erroneous output.
 
-        let mut stdout = outfile.as_ref().and_then(|path| {
-            _ = std::fs::create_dir_all(path);
-            Some(BufWriter::new(std::fs::File::create(path.join("stdout")).ok()?))
-        });
-        let mut stderr = outfile.as_ref().and_then(|path| {
-            _ = std::fs::create_dir_all(path);
-            Some(BufWriter::new(std::fs::File::create(path.join("stderr")).ok()?))
-        });
-
         let mut stdout_errors = String::new();
         let mut stderr_errors = String::new();
         let mut read_at_least_one_stdout_message = false;
         let mut read_at_least_one_stderr_message = false;
         let process_line = |line: &str, error: &mut String| {
             // Try to deserialize a message from Cargo or Rustc.
-            if let Some(t) = self.parser.from_line(line, error) {
+            if let Some(t) = T::from_line(line, error) {
                 self.sender.send(t).unwrap();
                 true
             } else {
@@ -82,25 +58,17 @@ impl<T: Sized + Send + 'static> CommandActor<T> {
             self.stdout,
             self.stderr,
             &mut |line| {
-                if let Some(stdout) = &mut stdout {
-                    _ = stdout.write_all(line.as_bytes());
-                    _ = stdout.write_all(b"\n");
-                }
                 if process_line(line, &mut stdout_errors) {
                     read_at_least_one_stdout_message = true;
                 }
             },
             &mut |line| {
-                if let Some(stderr) = &mut stderr {
-                    _ = stderr.write_all(line.as_bytes());
-                    _ = stderr.write_all(b"\n");
-                }
                 if process_line(line, &mut stderr_errors) {
                     read_at_least_one_stderr_message = true;
                 }
             },
             &mut || {
-                if let Some(t) = self.parser.from_eof() {
+                if let Some(t) = T::from_eof() {
                     self.sender.send(t).unwrap();
                 }
             },
@@ -117,9 +85,6 @@ impl<T: Sized + Send + 'static> CommandActor<T> {
     }
 }
 
-/// 'Join On Drop' wrapper for a child process.
-///
-/// This wrapper kills the process when the wrapper is dropped.
 struct JodGroupChild(Box<dyn StdChildWrapper>);
 
 impl Drop for JodGroupChild {
@@ -129,9 +94,9 @@ impl Drop for JodGroupChild {
     }
 }
 
-/// A handle to a shell command, such as cargo for diagnostics (flycheck).
+/// A handle to a cargo process used for fly-checking.
 pub(crate) struct CommandHandle<T> {
-    /// The handle to the actual child process. As we cannot cancel directly from with
+    /// The handle to the actual cargo process. As we cannot cancel directly from with
     /// a read syscall dropping and therefore terminating the process is our best option.
     child: JodGroupChild,
     thread: stdx::thread::JoinHandle<io::Result<(bool, String)>>,
@@ -151,13 +116,8 @@ impl<T> fmt::Debug for CommandHandle<T> {
     }
 }
 
-impl<T: Sized + Send + 'static> CommandHandle<T> {
-    pub(crate) fn spawn(
-        mut command: Command,
-        parser: impl JsonLinesParser<T>,
-        sender: Sender<T>,
-        out_file: Option<Utf8PathBuf>,
-    ) -> anyhow::Result<Self> {
+impl<T: ParseFromLine> CommandHandle<T> {
+    pub(crate) fn spawn(mut command: Command, sender: Sender<T>) -> std::io::Result<Self> {
         command.stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::null());
 
         let program = command.get_program().into();
@@ -169,19 +129,16 @@ impl<T: Sized + Send + 'static> CommandHandle<T> {
         child.wrap(process_wrap::std::ProcessSession);
         #[cfg(windows)]
         child.wrap(process_wrap::std::JobObject);
-        let mut child = child
-            .spawn()
-            .map(JodGroupChild)
-            .with_context(|| "Failed to spawn command: {child:?}")?;
+        let mut child = child.spawn().map(JodGroupChild)?;
 
         let stdout = child.0.stdout().take().unwrap();
         let stderr = child.0.stderr().take().unwrap();
 
-        let actor = CommandActor::<T>::new(parser, sender, stdout, stderr);
-        let thread =
-            stdx::thread::Builder::new(stdx::thread::ThreadIntent::Worker, "CommandHandle")
-                .spawn(move || actor.run(out_file))
-                .expect("failed to spawn thread");
+        let actor = CargoActor::<T>::new(sender, stdout, stderr);
+        let thread = stdx::thread::Builder::new(stdx::thread::ThreadIntent::Worker)
+            .name("CommandHandle".to_owned())
+            .spawn(move || actor.run())
+            .expect("failed to spawn thread");
         Ok(CommandHandle { program, arguments, current_dir, child, thread, _phantom: PhantomData })
     }
 
@@ -196,27 +153,9 @@ impl<T: Sized + Send + 'static> CommandHandle<T> {
         if read_at_least_one_message || exit_status.success() {
             Ok(())
         } else {
-            Err(io::Error::other(format!(
-                "Cargo watcher failed, the command produced no valid metadata (exit code: {exit_status:?}):\n{error}"
-            )))
-        }
-    }
-
-    pub(crate) fn has_exited(&mut self) -> bool {
-        match self.child.0.try_wait() {
-            Ok(Some(_exit_code)) => {
-                // We have an exit code.
-                true
-            }
-            Ok(None) => {
-                // Hasn't exited yet.
-                false
-            }
-            Err(_) => {
-                // Couldn't get an exit code. Assume that we've
-                // exited.
-                true
-            }
+            Err(io::Error::new(io::ErrorKind::Other, format!(
+            "Cargo watcher failed, the command produced no valid metadata (exit code: {exit_status:?}):\n{error}"
+        )))
         }
     }
 }

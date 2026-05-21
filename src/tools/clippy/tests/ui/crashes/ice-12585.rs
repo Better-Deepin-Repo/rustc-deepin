@@ -1,5 +1,3 @@
-//@ check-pass
-
 #![allow(clippy::unit_arg)]
 
 struct One {

@@ -1,11 +1,12 @@
-use crate::spec::{Env, TargetOptions, TlsModel, base};
+use crate::spec::{base, TargetOptions, TlsModel};
 
-pub(crate) fn opts() -> TargetOptions {
-    TargetOptions {
-        env: Env::Ohos,
-        crt_static_default: false,
-        tls_model: TlsModel::Emulated,
-        has_thread_local: false,
-        ..base::linux::opts()
-    }
+pub fn opts() -> TargetOptions {
+    let mut base = base::linux::opts();
+
+    base.env = "ohos".into();
+    base.crt_static_default = false;
+    base.tls_model = TlsModel::Emulated;
+    base.has_thread_local = false;
+
+    base
 }

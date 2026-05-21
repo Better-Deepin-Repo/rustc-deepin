@@ -2,14 +2,14 @@
 //!
 //! These are build-and-run steps for `./x.py setup`, which allows quickly setting up the directory
 //! for modifying, building, and running the compiler and library. Running arbitrary configuration
-//! allows setting up things that cannot be simply captured inside the bootstrap.toml, in addition to
-//! leading people away from manually editing most of the bootstrap.toml values.
+//! allows setting up things that cannot be simply captured inside the config.toml, in addition to
+//! leading people away from manually editing most of the config.toml values.
 
 use std::env::consts::EXE_SUFFIX;
 use std::fmt::Write as _;
 use std::fs::File;
 use std::io::Write;
-use std::path::{MAIN_SEPARATOR_STR, Path, PathBuf};
+use std::path::{Path, PathBuf, MAIN_SEPARATOR_STR};
 use std::str::FromStr;
 use std::{fmt, fs, io};
 
@@ -19,7 +19,7 @@ use crate::core::builder::{Builder, RunConfig, ShouldRun, Step};
 use crate::utils::change_tracker::CONFIG_CHANGE_HISTORY;
 use crate::utils::exec::command;
 use crate::utils::helpers::{self, hex_encode};
-use crate::{Config, t};
+use crate::{t, Config};
 
 #[cfg(test)]
 mod tests;
@@ -35,9 +35,23 @@ pub enum Profile {
 
 static PROFILE_DIR: &str = "src/bootstrap/defaults";
 
+/// A list of historical hashes of `src/etc/rust_analyzer_settings.json`.
+/// New entries should be appended whenever this is updated so we can detect
+/// outdated vs. user-modified settings files.
+static SETTINGS_HASHES: &[&str] = &[
+    "ea67e259dedf60d4429b6c349a564ffcd1563cf41c920a856d1f5b16b4701ac8",
+    "56e7bf011c71c5d81e0bf42e84938111847a810eee69d906bba494ea90b51922",
+    "af1b5efe196aed007577899db9dae15d6dbc923d6fa42fa0934e68617ba9bbe0",
+    "3468fea433c25fff60be6b71e8a215a732a7b1268b6a83bf10d024344e140541",
+    "47d227f424bf889b0d899b9cc992d5695e1b78c406e183cd78eafefbe5488923",
+    "b526bd58d0262dd4dda2bff5bc5515b705fb668a46235ace3e057f807963a11a",
+    "828666b021d837a33e78d870b56d34c88a5e2c85de58b693607ec574f0c27000",
+];
+static RUST_ANALYZER_SETTINGS: &str = include_str!("../../../../etc/rust_analyzer_settings.json");
+
 impl Profile {
     fn include_path(&self, src_path: &Path) -> PathBuf {
-        PathBuf::from(format!("{}/{PROFILE_DIR}/bootstrap.{}.toml", src_path.display(), self))
+        PathBuf::from(format!("{}/{PROFILE_DIR}/config.{}.toml", src_path.display(), self))
     }
 
     pub fn all() -> impl Iterator<Item = Self> {
@@ -53,7 +67,7 @@ impl Profile {
             Compiler => "Contribute to the compiler itself",
             Tools => "Contribute to tools which depend on the compiler, but do not modify it directly (e.g. rustdoc, clippy, miri)",
             Dist => "Install Rust from source",
-            None => "Do not modify `bootstrap.toml`"
+            None => "Do not modify `config.toml`"
         }
         .to_string()
     }
@@ -85,7 +99,9 @@ impl FromStr for Profile {
             "lib" | "library" => Ok(Profile::Library),
             "compiler" => Ok(Profile::Compiler),
             "maintainer" | "dist" | "user" => Ok(Profile::Dist),
-            "tools" | "tool" | "rustdoc" | "clippy" | "miri" | "rustfmt" => Ok(Profile::Tools),
+            "tools" | "tool" | "rustdoc" | "clippy" | "miri" | "rustfmt" | "rls" => {
+                Ok(Profile::Tools)
+            }
             "none" => Ok(Profile::None),
             "llvm" | "codegen" => Err("the \"llvm\" and \"codegen\" profiles have been removed,\
                 use \"compiler\" instead which has the same functionality"
@@ -103,6 +119,7 @@ impl fmt::Display for Profile {
 
 impl Step for Profile {
     type Output = ();
+    const DEFAULT: bool = true;
 
     fn should_run(mut run: ShouldRun<'_>) -> ShouldRun<'_> {
         for choice in Profile::all() {
@@ -111,16 +128,12 @@ impl Step for Profile {
         run
     }
 
-    fn is_default_step(_builder: &Builder<'_>) -> bool {
-        true
-    }
-
     fn make_run(run: RunConfig<'_>) {
         if run.builder.config.dry_run() {
             return;
         }
 
-        let path = &run.builder.config.config.clone().unwrap_or(PathBuf::from("bootstrap.toml"));
+        let path = &run.builder.config.config.clone().unwrap_or(PathBuf::from("config.toml"));
         if path.exists() {
             eprintln!();
             eprintln!(
@@ -206,20 +219,19 @@ pub fn setup(config: &Config, profile: Profile) {
         )
     }
 
-    let path = &config.config.clone().unwrap_or(PathBuf::from("bootstrap.toml"));
+    let path = &config.config.clone().unwrap_or(PathBuf::from("config.toml"));
     setup_config_toml(path, profile, config);
 }
 
-fn setup_config_toml(path: &Path, profile: Profile, config: &Config) {
+fn setup_config_toml(path: &PathBuf, profile: Profile, config: &Config) {
     if profile == Profile::None {
         return;
     }
 
     let latest_change_id = CONFIG_CHANGE_HISTORY.last().unwrap().change_id;
     let settings = format!(
-        "# See bootstrap.example.toml for documentation of available options\n\
-    #\n\
-    profile = \"{profile}\"  # Includes one of the default files in {PROFILE_DIR}\n\
+        "# Includes one of the default files in {PROFILE_DIR}\n\
+    profile = \"{profile}\"\n\
     change-id = {latest_change_id}\n"
     );
 
@@ -234,23 +246,20 @@ fn setup_config_toml(path: &Path, profile: Profile, config: &Config) {
 pub struct Link;
 impl Step for Link {
     type Output = ();
+    const DEFAULT: bool = true;
 
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
         run.alias("link")
-    }
-
-    fn is_default_step(_builder: &Builder<'_>) -> bool {
-        true
     }
 
     fn make_run(run: RunConfig<'_>) {
         if run.builder.config.dry_run() {
             return;
         }
-        if let [cmd] = &run.paths[..]
-            && cmd.assert_single_path().path.as_path().as_os_str() == "link"
-        {
-            run.builder.ensure(Link);
+        if let [cmd] = &run.paths[..] {
+            if cmd.assert_single_path().path.as_path().as_os_str() == "link" {
+                run.builder.ensure(Link);
+            }
         }
     }
     fn run(self, builder: &Builder<'_>) -> Self::Output {
@@ -266,7 +275,7 @@ impl Step for Link {
         }
 
         let stage_path =
-            ["build", config.host_target.rustc_target_arg(), "stage1"].join(MAIN_SEPARATOR_STR);
+            ["build", config.build.rustc_target_arg(), "stage1"].join(MAIN_SEPARATOR_STR);
 
         if stage_dir_exists(&stage_path[..]) && !config.dry_run() {
             attempt_toolchain_link(builder, &stage_path[..]);
@@ -278,7 +287,7 @@ fn rustup_installed(builder: &Builder<'_>) -> bool {
     let mut rustup = command("rustup");
     rustup.arg("--version");
 
-    rustup.allow_failure().run_in_dry_run().run_capture_stdout(builder).is_success()
+    rustup.allow_failure().run_always().run_capture_stdout(builder).is_success()
 }
 
 fn stage_dir_exists(stage_path: &str) -> bool {
@@ -456,30 +465,25 @@ pub struct Hook;
 
 impl Step for Hook {
     type Output = ();
-
+    const DEFAULT: bool = true;
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
         run.alias("hook")
     }
-
-    fn is_default_step(_builder: &Builder<'_>) -> bool {
-        true
-    }
-
     fn make_run(run: RunConfig<'_>) {
-        if let [cmd] = &run.paths[..]
-            && cmd.assert_single_path().path.as_path().as_os_str() == "hook"
-        {
-            run.builder.ensure(Hook);
-        }
-    }
-
-    fn run(self, builder: &Builder<'_>) -> Self::Output {
-        let config = &builder.config;
-
-        if config.dry_run() || !config.rust_info.is_managed_git_subrepository() {
+        if run.builder.config.dry_run() {
             return;
         }
-
+        if let [cmd] = &run.paths[..] {
+            if cmd.assert_single_path().path.as_path().as_os_str() == "hook" {
+                run.builder.ensure(Hook);
+            }
+        }
+    }
+    fn run(self, builder: &Builder<'_>) -> Self::Output {
+        let config = &builder.config;
+        if config.dry_run() {
+            return;
+        }
         t!(install_git_hook_maybe(builder, config));
     }
 }
@@ -528,215 +532,46 @@ undesirable, simply delete the `pre-push` file from .git/hooks."
     Ok(())
 }
 
-/// Handles editor-specific setup differences
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum EditorKind {
-    Emacs,
-    Helix,
-    Vim,
-    VsCode,
-    Zed,
-}
-
-impl EditorKind {
-    // Used in `./tests.rs`.
-    #[cfg(test)]
-    pub const ALL: &[EditorKind] = &[
-        EditorKind::Emacs,
-        EditorKind::Helix,
-        EditorKind::Vim,
-        EditorKind::VsCode,
-        EditorKind::Zed,
-    ];
-
-    fn prompt_user() -> io::Result<Option<EditorKind>> {
-        let prompt_str = "Available editors:
-1. Emacs
-2. Helix
-3. Vim
-4. VS Code
-5. Zed
-
-Select which editor you would like to set up [default: None]: ";
-
-        let mut input = String::new();
-        loop {
-            print!("{prompt_str}");
-            io::stdout().flush()?;
-            io::stdin().read_line(&mut input)?;
-
-            let mut modified_input = input.to_lowercase();
-            modified_input.retain(|ch| !ch.is_whitespace());
-            match modified_input.as_str() {
-                "1" | "emacs" => return Ok(Some(EditorKind::Emacs)),
-                "2" | "helix" => return Ok(Some(EditorKind::Helix)),
-                "3" | "vim" => return Ok(Some(EditorKind::Vim)),
-                "4" | "vscode" => return Ok(Some(EditorKind::VsCode)),
-                "5" | "zed" => return Ok(Some(EditorKind::Zed)),
-                "" | "none" => return Ok(None),
-                _ => {
-                    eprintln!("ERROR: unrecognized option '{}'", input.trim());
-                    eprintln!("NOTE: press Ctrl+C to exit");
-                }
-            }
-
-            input.clear();
-        }
-    }
-
-    /// A list of historical hashes of each LSP settings file
-    /// New entries should be appended whenever this is updated so we can detect
-    /// outdated vs. user-modified settings files.
-    fn hashes(&self) -> &'static [&'static str] {
-        match self {
-            EditorKind::Emacs => &[
-                "51068d4747a13732440d1a8b8f432603badb1864fa431d83d0fd4f8fa57039e0",
-                "d29af4d949bbe2371eac928a3c31cf9496b1701aa1c45f11cd6c759865ad5c45",
-                "b5dd299b93dca3ceeb9b335f929293cb3d4bf4977866fbe7ceeac2a8a9f99088",
-                "631c837b0e98ae35fd48b0e5f743b1ca60adadf2d0a2b23566ba25df372cf1a9",
-                "080955765db84bb6cbf178879f489c4e2369397626a6ecb3debedb94a9d0b3ce",
-                "f501475c6654187091c924ae26187fa5791d74d4a8ab3fb61fbbe4c0275aade1",
-                "54bc48fe1996177f5eef86d7231b33978e6d8b737cb0a899e622b7e975c95308",
-                "08d30e455ceec6e01d9bcef8b9449f2ddd14d278ca8627cdad90e02d9f44e938",
-            ],
-            EditorKind::Helix => &[
-                "2d3069b8cf1b977e5d4023965eb6199597755e6c96c185ed5f2854f98b83d233",
-                "6736d61409fbebba0933afd2e4c44ff2f97c1cb36cf0299a7f4a7819b8775040",
-                "f252dcc30ca85a193a699581e5e929d5bd6c19d40d7a7ade5e257a9517a124a5",
-                "198c195ed0c070d15907b279b8b4ea96198ca71b939f5376454f3d636ab54da5",
-                "1c43ead340b20792b91d02b08494ee68708e7e09f56b6766629b4b72079208f1",
-                "eec09a09452682060afd23dd5d3536ccac5615b3cdbf427366446901215fb9f6",
-                "cb653043852d9d5ff4a5be56407b859ff9928be055ad3f307eb309aad04765e6",
-            ],
-            EditorKind::Vim | EditorKind::VsCode => &[
-                "ea67e259dedf60d4429b6c349a564ffcd1563cf41c920a856d1f5b16b4701ac8",
-                "56e7bf011c71c5d81e0bf42e84938111847a810eee69d906bba494ea90b51922",
-                "af1b5efe196aed007577899db9dae15d6dbc923d6fa42fa0934e68617ba9bbe0",
-                "3468fea433c25fff60be6b71e8a215a732a7b1268b6a83bf10d024344e140541",
-                "47d227f424bf889b0d899b9cc992d5695e1b78c406e183cd78eafefbe5488923",
-                "b526bd58d0262dd4dda2bff5bc5515b705fb668a46235ace3e057f807963a11a",
-                "828666b021d837a33e78d870b56d34c88a5e2c85de58b693607ec574f0c27000",
-                "811fb3b063c739d261fd8590dd30242e117908f5a095d594fa04585daa18ec4d",
-                "4eecb58a2168b252077369da446c30ed0e658301efe69691979d1ef0443928f4",
-                "c394386e6133bbf29ffd32c8af0bb3d4aac354cba9ee051f29612aa9350f8f8d",
-                "e53e9129ca5ee5dcbd6ec8b68c2d87376474eb154992deba3c6d9ab1703e0717",
-                "f954316090936c7e590c253ca9d524008375882fa13c5b41d7e2547a896ff893",
-                "701b73751efd7abd6487f2c79348dab698af7ac4427b79fa3d2087c867144b12",
-                "a61df796c0c007cb6512127330564e49e57d558dec715703916a928b072a1054",
-                "02a49ac2d31f00ef6e4531c44e00dac51cea895112e480553f1ba060b3942a47",
-                "0aa4748848de0d1cb7ece92a0123c8897fef6de2f58aff8fda1426f098b7a798",
-                "e5e357862e5d6d0d9da335e9823c07b8a7dc42bbf18d72cc5206ad1049cd8fcc",
-            ],
-            EditorKind::Zed => &[
-                "bbce727c269d1bd0c98afef4d612eb4ce27aea3c3a8968c5f10b31affbc40b6c",
-                "a5380cf5dd9328731aecc5dfb240d16dac46ed272126b9728006151ef42f5909",
-                "2e96bf0d443852b12f016c8fc9840ab3d0a2b4fe0b0fb3a157e8d74d5e7e0e26",
-                "4fadd4c87389a601a27db0d3d74a142fa3a2e656ae78982e934dbe24bee32ad6",
-                "f0bb3d23ab1a49175ab0ef5c4071af95bb03d01d460776cdb716d91333443382",
-                "5ef83292111d9a8bb63b6afc3abf42d0bc78fe24985f0d2e039e73258b5dab8f",
-                "74420c13094b530a986b37c4f1d23cb58c0e8e2295f5858ded129fb1574e66f9",
-                "2d3b592c089b2ad2c528686a1e371af49922edad1c59accd5d5f31612a441568",
-            ],
-        }
-    }
-
-    fn settings_path(&self, config: &Config) -> PathBuf {
-        config.src.join(self.settings_short_path())
-    }
-
-    fn settings_short_path(&self) -> PathBuf {
-        self.settings_folder().join(match self {
-            EditorKind::Emacs => ".dir-locals.el",
-            EditorKind::Helix => "languages.toml",
-            EditorKind::Vim => "coc-settings.json",
-            EditorKind::VsCode | EditorKind::Zed => "settings.json",
-        })
-    }
-
-    fn settings_folder(&self) -> PathBuf {
-        match self {
-            EditorKind::Emacs => PathBuf::new(),
-            EditorKind::Helix => PathBuf::from(".helix"),
-            EditorKind::Vim => PathBuf::from(".vim"),
-            EditorKind::VsCode => PathBuf::from(".vscode"),
-            EditorKind::Zed => PathBuf::from(".zed"),
-        }
-    }
-
-    fn settings_template(&self) -> &'static str {
-        match self {
-            EditorKind::Emacs => include_str!("../../../../etc/rust_analyzer_eglot.el"),
-            EditorKind::Helix => include_str!("../../../../etc/rust_analyzer_helix.toml"),
-            EditorKind::Vim | EditorKind::VsCode => {
-                include_str!("../../../../etc/rust_analyzer_settings.json")
-            }
-            EditorKind::Zed => include_str!("../../../../etc/rust_analyzer_zed.json"),
-        }
-    }
-
-    fn backup_extension(&self) -> String {
-        format!("{}.bak", self.settings_short_path().extension().unwrap().to_str().unwrap())
-    }
-}
-
-/// Sets up or displays the LSP config for one of the supported editors
+/// Sets up or displays `src/etc/rust_analyzer_settings.json`
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Editor;
+pub struct Vscode;
 
-impl Step for Editor {
+impl Step for Vscode {
     type Output = ();
-
+    const DEFAULT: bool = true;
     fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
-        run.alias("editor")
+        run.alias("vscode")
     }
-
-    fn is_default_step(_builder: &Builder<'_>) -> bool {
-        true
-    }
-
     fn make_run(run: RunConfig<'_>) {
         if run.builder.config.dry_run() {
             return;
         }
-        if let [cmd] = &run.paths[..]
-            && cmd.assert_single_path().path.as_path().as_os_str() == "editor"
-        {
-            run.builder.ensure(Editor);
+        if let [cmd] = &run.paths[..] {
+            if cmd.assert_single_path().path.as_path().as_os_str() == "vscode" {
+                run.builder.ensure(Vscode);
+            }
         }
     }
-
     fn run(self, builder: &Builder<'_>) -> Self::Output {
         let config = &builder.config;
         if config.dry_run() {
             return;
         }
-        match EditorKind::prompt_user() {
-            Ok(editor_kind) => {
-                if let Some(editor_kind) = editor_kind {
-                    while !t!(create_editor_settings_maybe(config, &editor_kind)) {}
-                } else {
-                    println!("Ok, skipping editor setup!");
-                }
-            }
-            Err(e) => eprintln!("Could not determine the editor: {e}"),
-        }
+        while !t!(create_vscode_settings_maybe(config)) {}
     }
 }
 
-/// Create the recommended editor LSP config file for rustc development, or just print it
+/// Create a `.vscode/settings.json` file for rustc development, or just print it
 /// If this method should be re-called, it returns `false`.
-fn create_editor_settings_maybe(config: &Config, editor: &EditorKind) -> io::Result<bool> {
-    let hashes = editor.hashes();
-    let (current_hash, historical_hashes) = hashes.split_last().unwrap();
-    let settings_path = editor.settings_path(config);
-    let settings_short_path = editor.settings_short_path();
-    let settings_filename = settings_short_path.to_str().unwrap();
-    // If None, no settings file exists
+fn create_vscode_settings_maybe(config: &Config) -> io::Result<bool> {
+    let (current_hash, historical_hashes) = SETTINGS_HASHES.split_last().unwrap();
+    let vscode_settings = config.src.join(".vscode").join("settings.json");
+    // If None, no settings.json exists
     // If Some(true), is a previous version of settings.json
     // If Some(false), is not a previous version (i.e. user modified)
     // If it's up to date we can just skip this
     let mut mismatched_settings = None;
-    if let Ok(current) = fs::read_to_string(&settings_path) {
+    if let Ok(current) = fs::read_to_string(&vscode_settings) {
         let mut hasher = sha2::Sha256::new();
         hasher.update(&current);
         let hash = hex_encode(hasher.finalize().as_slice());
@@ -749,21 +584,20 @@ fn create_editor_settings_maybe(config: &Config, editor: &EditorKind) -> io::Res
         }
     }
     println!(
-        "\nx.py can automatically install the recommended `{settings_filename}` file for rustc development"
+        "\nx.py can automatically install the recommended `.vscode/settings.json` file for rustc development"
     );
-
     match mismatched_settings {
-        Some(true) => {
-            eprintln!("WARNING: existing `{settings_filename}` is out of date, x.py will update it")
-        }
+        Some(true) => eprintln!(
+            "WARNING: existing `.vscode/settings.json` is out of date, x.py will update it"
+        ),
         Some(false) => eprintln!(
-            "WARNING: existing `{settings_filename}` has been modified by user, x.py will back it up and replace it"
+            "WARNING: existing `.vscode/settings.json` has been modified by user, x.py will back it up and replace it"
         ),
         _ => (),
     }
-    let should_create = match prompt_user(&format!(
-        "Would you like to create/update `{settings_filename}`? (Press 'p' to preview values): [y/N]"
-    ))? {
+    let should_create = match prompt_user(
+        "Would you like to create/update settings.json? (Press 'p' to preview values): [y/N]",
+    )? {
         Some(PromptResult::Yes) => true,
         Some(PromptResult::Print) => false,
         _ => {
@@ -772,9 +606,9 @@ fn create_editor_settings_maybe(config: &Config, editor: &EditorKind) -> io::Res
         }
     };
     if should_create {
-        let settings_folder_path = config.src.join(editor.settings_folder());
-        if !settings_folder_path.exists() {
-            fs::create_dir(settings_folder_path)?;
+        let path = config.src.join(".vscode");
+        if !path.exists() {
+            fs::create_dir(&path)?;
         }
         let verb = match mismatched_settings {
             // exists but outdated, we can replace this
@@ -782,21 +616,18 @@ fn create_editor_settings_maybe(config: &Config, editor: &EditorKind) -> io::Res
             // exists but user modified, back it up
             Some(false) => {
                 // exists and is not current version or outdated, so back it up
-                let backup = settings_path.with_extension(editor.backup_extension());
-                eprintln!(
-                    "WARNING: copying `{}` to `{}`",
-                    settings_path.file_name().unwrap().to_str().unwrap(),
-                    backup.file_name().unwrap().to_str().unwrap(),
-                );
-                fs::copy(&settings_path, &backup)?;
+                let mut backup = vscode_settings.clone();
+                backup.set_extension("json.bak");
+                eprintln!("WARNING: copying `settings.json` to `settings.json.bak`");
+                fs::copy(&vscode_settings, &backup)?;
                 "Updated"
             }
             _ => "Created",
         };
-        fs::write(&settings_path, editor.settings_template())?;
-        println!("{verb} `{settings_filename}`");
+        fs::write(&vscode_settings, RUST_ANALYZER_SETTINGS)?;
+        println!("{verb} `.vscode/settings.json`");
     } else {
-        println!("\n{}", editor.settings_template());
+        println!("\n{RUST_ANALYZER_SETTINGS}");
     }
     Ok(should_create)
 }

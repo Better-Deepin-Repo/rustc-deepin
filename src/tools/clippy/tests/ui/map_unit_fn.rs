@@ -1,5 +1,3 @@
-//@ check-pass
-
 #![allow(unused)]
 struct Mappable;
 

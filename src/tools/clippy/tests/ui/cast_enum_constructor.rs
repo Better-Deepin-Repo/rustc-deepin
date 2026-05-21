@@ -1,5 +1,5 @@
 #![warn(clippy::cast_enum_constructor)]
-#![allow(clippy::fn_to_numeric_cast, function_casts_as_integer)]
+#![allow(clippy::fn_to_numeric_cast)]
 
 fn main() {
     enum Foo {
@@ -11,11 +11,10 @@ fn main() {
     }
 
     let _ = Foo::Y as usize;
-    //~^ cast_enum_constructor
-
+    //~^ ERROR: cast of an enum tuple constructor to an integer
+    //~| NOTE: `-D clippy::cast-enum-constructor` implied by `-D warnings`
     let _ = Foo::Y as isize;
-    //~^ cast_enum_constructor
-
+    //~^ ERROR: cast of an enum tuple constructor to an integer
     let _ = Foo::Y as fn(u32) -> Foo;
     let _ = Bar::X as usize;
 }

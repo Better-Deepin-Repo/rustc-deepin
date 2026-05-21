@@ -1,5 +1,6 @@
-//@ proc-macro: multispan.rs
-//@ compile-flags: --error-format human
+//@ aux-build:multispan.rs
+//@ error-pattern:hello to you, too!
+//@ compile-flags: --error-format human-annotate-rs -Z unstable-options
 
 #![feature(proc_macro_hygiene)]
 
@@ -26,5 +27,3 @@ fn main() {
     hello!(whoah. hi di hi di ho);
     hello!(hi good hi and good bye);
 }
-
-//~? RAW hello to you, too!

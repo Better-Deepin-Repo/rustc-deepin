@@ -4,10 +4,11 @@
 //! of MIR building, and only after this pass we think of the program has having the
 //! normal MIR semantics.
 
+use rustc_hir::LangItem;
 use rustc_middle::mir::*;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 
-pub(super) struct AddRetag;
+pub struct AddRetag;
 
 /// Determine whether this type may contain a reference (or box), and thus needs retagging.
 /// We will only recurse `depth` times into Tuples/ADTs to bound the cost of this.
@@ -27,6 +28,7 @@ fn may_contain_reference<'tcx>(ty: Ty<'tcx>, depth: u32, tcx: TyCtxt<'tcx>) -> b
         // References and Boxes (`noalias` sources)
         ty::Ref(..) => true,
         ty::Adt(..) if ty.is_box() => true,
+        ty::Adt(adt, _) if tcx.is_lang_item(adt.did(), LangItem::PtrUnique) => true,
         // Compound types: recurse
         ty::Array(ty, _) | ty::Slice(ty) => {
             // This does not branch so we keep the depth the same.
@@ -46,7 +48,7 @@ fn may_contain_reference<'tcx>(ty: Ty<'tcx>, depth: u32, tcx: TyCtxt<'tcx>) -> b
     }
 }
 
-impl<'tcx> crate::MirPass<'tcx> for AddRetag {
+impl<'tcx> MirPass<'tcx> for AddRetag {
     fn is_enabled(&self, sess: &rustc_session::Session) -> bool {
         sess.opts.unstable_opts.mir_emit_retag
     }
@@ -58,9 +60,7 @@ impl<'tcx> crate::MirPass<'tcx> for AddRetag {
         let basic_blocks = body.basic_blocks.as_mut();
         let local_decls = &body.local_decls;
         let needs_retag = |place: &Place<'tcx>| {
-            // We're not really interested in stores to "outside" locations, they are hard to keep
-            // track of anyway.
-            !place.is_indirect_first_projection()
+            !place.is_indirect_first_projection() // we're not really interested in stores to "outside" locations, they are hard to keep track of anyway
                 && may_contain_reference(place.ty(&*local_decls, tcx).ty, /*depth*/ 3, tcx)
                 && !local_decls[place.local].is_deref_temp()
         };
@@ -79,11 +79,9 @@ impl<'tcx> crate::MirPass<'tcx> for AddRetag {
             // Emit their retags.
             basic_blocks[START_BLOCK].statements.splice(
                 0..0,
-                places.map(|(place, source_info)| {
-                    Statement::new(
-                        source_info,
-                        StatementKind::Retag(RetagKind::FnEntry, Box::new(place)),
-                    )
+                places.map(|(place, source_info)| Statement {
+                    source_info,
+                    kind: StatementKind::Retag(RetagKind::FnEntry, Box::new(place)),
                 }),
             );
         }
@@ -113,10 +111,10 @@ impl<'tcx> crate::MirPass<'tcx> for AddRetag {
         for (source_info, dest_place, dest_block) in returns {
             basic_blocks[dest_block].statements.insert(
                 0,
-                Statement::new(
+                Statement {
                     source_info,
-                    StatementKind::Retag(RetagKind::Default, Box::new(dest_place)),
-                ),
+                    kind: StatementKind::Retag(RetagKind::Default, Box::new(dest_place)),
+                },
             );
         }
 
@@ -131,9 +129,9 @@ impl<'tcx> crate::MirPass<'tcx> for AddRetag {
                     StatementKind::Assign(box (ref place, ref rvalue)) => {
                         let add_retag = match rvalue {
                             // Ptr-creating operations already do their own internal retagging, no
-                            // need to also add a retag statement. *Except* if we are deref'ing a
-                            // Box, because those get desugared to directly working with the inner
-                            // raw pointer! That's relevant for `RawPtr` as Miri otherwise makes it
+                            // need to also add a retag statement.
+                            // *Except* if we are deref'ing a Box, because those get desugared to directly working
+                            // with the inner raw pointer! That's relevant for `RawPtr` as Miri otherwise makes it
                             // a NOP when the original pointer is already raw.
                             Rvalue::RawPtr(_mutbl, place) => {
                                 // Using `is_box_global` here is a bit sketchy: if this code is
@@ -174,13 +172,12 @@ impl<'tcx> crate::MirPass<'tcx> for AddRetag {
                 let source_info = block_data.statements[i].source_info;
                 block_data.statements.insert(
                     i + 1,
-                    Statement::new(source_info, StatementKind::Retag(retag_kind, Box::new(place))),
+                    Statement {
+                        source_info,
+                        kind: StatementKind::Retag(retag_kind, Box::new(place)),
+                    },
                 );
             }
         }
-    }
-
-    fn is_required(&self) -> bool {
-        true
     }
 }

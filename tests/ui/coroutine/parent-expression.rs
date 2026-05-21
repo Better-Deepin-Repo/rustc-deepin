@@ -1,5 +1,3 @@
-//@ dont-require-annotations: NOTE
-
 #![feature(coroutines, negative_impls, rustc_attrs, stmt_expr_attributes)]
 
 macro_rules! type_combinations {
@@ -17,9 +15,9 @@ macro_rules! type_combinations {
         // dropped *after* the yield.
         {
             let g = #[coroutine] move || match drop($name::Client { ..$name::Client::default() }) {
-            //~^ NOTE `significant_drop::Client` which is not `Send`
-            //~| NOTE `insignificant_dtor::Client` which is not `Send`
-            //~| NOTE `derived_drop::Client` which is not `Send`
+            //~^ `significant_drop::Client` which is not `Send`
+            //~| `insignificant_dtor::Client` which is not `Send`
+            //~| `derived_drop::Client` which is not `Send`
                 _ => yield,
             };
             assert_send(g);

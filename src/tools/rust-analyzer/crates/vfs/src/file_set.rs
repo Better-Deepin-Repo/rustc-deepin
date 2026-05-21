@@ -5,8 +5,8 @@
 use std::fmt;
 
 use fst::{IntoStreamer, Streamer};
-use indexmap::IndexMap;
-use rustc_hash::{FxBuildHasher, FxHashMap};
+use nohash_hasher::IntMap;
+use rustc_hash::FxHashMap;
 
 use crate::{AnchoredPath, FileId, Vfs, VfsPath};
 
@@ -14,7 +14,7 @@ use crate::{AnchoredPath, FileId, Vfs, VfsPath};
 #[derive(Default, Clone, Eq, PartialEq)]
 pub struct FileSet {
     files: FxHashMap<VfsPath, FileId>,
-    paths: IndexMap<FileId, VfsPath, FxBuildHasher>,
+    paths: IntMap<FileId, VfsPath>,
 }
 
 impl FileSet {
@@ -211,7 +211,11 @@ impl fst::Automaton for PrefixOf<'_> {
         state != !0
     }
     fn accept(&self, &state: &usize, byte: u8) -> usize {
-        if self.prefix_of.get(state) == Some(&byte) { state + 1 } else { !0 }
+        if self.prefix_of.get(state) == Some(&byte) {
+            state + 1
+        } else {
+            !0
+        }
     }
 }
 

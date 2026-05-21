@@ -1,12 +1,13 @@
 use rustc_data_structures::fx::FxIndexMap;
 use rustc_errors::ErrorGuaranteed;
 use rustc_hir::def_id::{DefId, DefIdMap};
-use rustc_hir::find_attr;
 use rustc_macros::{HashStable, TyDecodable, TyEncodable};
+use rustc_span::symbol::sym;
 
 use crate::error::StrictCoherenceNeedsNegativeCoherence;
 use crate::ty::fast_reject::SimplifiedType;
-use crate::ty::{self, TyCtxt, TypeVisitableExt};
+use crate::ty::visit::TypeVisitableExt;
+use crate::ty::{self, TyCtxt};
 
 /// A per-trait graph of impls in specialization order. At the moment, this
 /// graph forms a tree rooted with the trait itself, with all other nodes
@@ -60,16 +61,24 @@ pub enum OverlapMode {
 
 impl OverlapMode {
     pub fn get(tcx: TyCtxt<'_>, trait_id: DefId) -> OverlapMode {
-        let with_negative_coherence = tcx.features().with_negative_coherence();
-        let strict_coherence = find_attr!(tcx, trait_id, RustcStrictCoherence(span) => *span);
+        let with_negative_coherence = tcx.features().with_negative_coherence;
+        let strict_coherence = tcx.has_attr(trait_id, sym::rustc_strict_coherence);
 
         if with_negative_coherence {
-            if strict_coherence.is_some() { OverlapMode::Strict } else { OverlapMode::WithNegative }
+            if strict_coherence { OverlapMode::Strict } else { OverlapMode::WithNegative }
         } else {
-            if let Some(span) = strict_coherence {
+            if strict_coherence {
+                let attr_span = trait_id
+                    .as_local()
+                    .into_iter()
+                    .flat_map(|local_def_id| {
+                        tcx.hir().attrs(tcx.local_def_id_to_hir_id(local_def_id))
+                    })
+                    .find(|attr| attr.has_name(sym::rustc_strict_coherence))
+                    .map(|attr| attr.span);
                 tcx.dcx().emit_err(StrictCoherenceNeedsNegativeCoherence {
                     span: tcx.def_span(trait_id),
-                    attr_span: span,
+                    attr_span,
                 });
             }
             OverlapMode::Stable

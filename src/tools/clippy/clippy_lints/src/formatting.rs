@@ -3,6 +3,7 @@ use clippy_utils::is_span_if;
 use clippy_utils::source::snippet_opt;
 use rustc_ast::ast::{BinOpKind, Block, Expr, ExprKind, StmtKind};
 use rustc_lint::{EarlyContext, EarlyLintPass, LintContext};
+use rustc_middle::lint::in_external_macro;
 use rustc_session::declare_lint_pass;
 use rustc_span::Span;
 
@@ -93,31 +94,6 @@ declare_clippy_lint! {
 
 declare_clippy_lint! {
     /// ### What it does
-    /// Checks for an `if` expression followed by either a block or another `if` that
-    /// looks like it should have an `else` between them.
-    ///
-    /// ### Why is this bad?
-    /// This is probably some refactoring remnant, even if the code is correct, it
-    /// might look confusing.
-    ///
-    /// ### Example
-    /// ```rust,ignore
-    /// if foo {
-    /// } { // looks like an `else` is missing here
-    /// }
-    ///
-    /// if foo {
-    /// } if bar { // looks like an `else` is missing here
-    /// }
-    /// ```
-    #[clippy::version = "1.91.0"]
-    pub POSSIBLE_MISSING_ELSE,
-    suspicious,
-    "possibly missing `else`"
-}
-
-declare_clippy_lint! {
-    /// ### What it does
     /// Checks for possible missing comma in an array. It lints if
     /// an array element is a binary operator expression and it lies on two lines.
     ///
@@ -141,7 +117,6 @@ declare_lint_pass!(Formatting => [
     SUSPICIOUS_ASSIGNMENT_FORMATTING,
     SUSPICIOUS_UNARY_OP_FORMATTING,
     SUSPICIOUS_ELSE_FORMATTING,
-    POSSIBLE_MISSING_ELSE,
     POSSIBLE_MISSING_COMMA
 ]);
 
@@ -164,28 +139,27 @@ impl EarlyLintPass for Formatting {
 
 /// Implementation of the `SUSPICIOUS_ASSIGNMENT_FORMATTING` lint.
 fn check_assign(cx: &EarlyContext<'_>, expr: &Expr) {
-    if let ExprKind::Assign(ref lhs, ref rhs, _) = expr.kind
-        && !lhs.span.from_expansion()
-        && !rhs.span.from_expansion()
-    {
-        let eq_span = lhs.span.between(rhs.span);
-        if let ExprKind::Unary(op, ref sub_rhs) = rhs.kind
-            && let Some(eq_snippet) = snippet_opt(cx, eq_span)
-        {
-            let op = op.as_str();
-            let eqop_span = lhs.span.between(sub_rhs.span);
-            if eq_snippet.ends_with('=') {
-                span_lint_and_note(
-                    cx,
-                    SUSPICIOUS_ASSIGNMENT_FORMATTING,
-                    eqop_span,
-                    format!(
-                        "this looks like you are trying to use `.. {op}= ..`, but you \
+    if let ExprKind::Assign(ref lhs, ref rhs, _) = expr.kind {
+        if !lhs.span.from_expansion() && !rhs.span.from_expansion() {
+            let eq_span = lhs.span.between(rhs.span);
+            if let ExprKind::Unary(op, ref sub_rhs) = rhs.kind {
+                if let Some(eq_snippet) = snippet_opt(cx, eq_span) {
+                    let op = op.as_str();
+                    let eqop_span = lhs.span.between(sub_rhs.span);
+                    if eq_snippet.ends_with('=') {
+                        span_lint_and_note(
+                            cx,
+                            SUSPICIOUS_ASSIGNMENT_FORMATTING,
+                            eqop_span,
+                            format!(
+                                "this looks like you are trying to use `.. {op}= ..`, but you \
                                  really are doing `.. = ({op} ..)`"
-                    ),
-                    None,
-                    format!("to remove this lint, use either `{op}=` or `= {op}`"),
-                );
+                            ),
+                            None,
+                            format!("to remove this lint, use either `{op}=` or `= {op}`"),
+                        );
+                    }
+                }
             }
         }
     }
@@ -228,7 +202,7 @@ fn check_else(cx: &EarlyContext<'_>, expr: &Expr) {
     if let ExprKind::If(_, then, Some(else_)) = &expr.kind
         && (is_block(else_) || is_if(else_))
         && !then.span.from_expansion() && !else_.span.from_expansion()
-        && !expr.span.in_external_macro(cx.sess().source_map())
+        && !in_external_macro(cx.sess(), expr.span)
 
         // workaround for rust-lang/rust#43081
         && expr.span.lo().0 != 0 && expr.span.hi().0 != 0
@@ -333,11 +307,11 @@ fn check_missing_else(cx: &EarlyContext<'_>, first: &Expr, second: &Expr) {
 
         span_lint_and_note(
             cx,
-            POSSIBLE_MISSING_ELSE,
+            SUSPICIOUS_ELSE_FORMATTING,
             else_span,
             format!("this looks like {looks_like} but the `else` is missing"),
             None,
-            format!("to remove this lint, add the missing `else` or add a new line before {next_thing}"),
+            format!("to remove this lint, add the missing `else` or add a new line before {next_thing}",),
         );
     }
 }

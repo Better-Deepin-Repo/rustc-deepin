@@ -2,7 +2,7 @@
 
 fn main() {}
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn syntax() {
     type A: Ord;
     type B: Ord = u8;

@@ -30,8 +30,7 @@ where
     type Output = B;
     extern "rust-call" fn call_once(mut self, a: A) -> Self::Output {
     //~^ ERROR functions with the "rust-call" ABI must take a single non-self tuple argument
-    //~| ERROR type parameter to bare `FnOnce` trait must be a tuple
-    self.call_mut(a)
+        self.call_mut(a)
         //~^ ERROR `A` is not a tuple
     }
 }
@@ -44,7 +43,6 @@ where
 {
     extern "rust-call" fn call_mut(&mut self, a: A) -> Self::Output {
     //~^ ERROR functions with the "rust-call" ABI must take a single non-self tuple argument
-    //~| ERROR type parameter to bare `FnOnce` trait must be a tuple
         self.cache.get(&a).map(|a| a.clone()).unwrap_or_else(|| {
             let b = (self.fun)(self, a.clone());
             self.cache.insert(a, b.clone());

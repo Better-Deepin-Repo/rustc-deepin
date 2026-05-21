@@ -6,5 +6,3 @@
 #![feature(no_core)]
 #![no_core]
 #![no_main]
-
-//~? ERROR `-Zsanitizer-cfi-canonical-jump-tables` requires `-Zsanitizer=cfi`

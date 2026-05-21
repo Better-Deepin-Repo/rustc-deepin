@@ -4,7 +4,7 @@ mod fs;
 pub mod sockets;
 pub use self::fs::*;
 // `solid_types.h`
-pub use super::itron::abi::{E_TMOUT, ER, ER_ID, ID};
+pub use super::itron::abi::{ER, ER_ID, E_TMOUT, ID};
 
 pub const SOLID_ERR_NOTFOUND: ER = -1000;
 pub const SOLID_ERR_NOTSUPPORTED: ER = -1001;
@@ -33,27 +33,27 @@ pub struct SOLID_RTC_TIME {
     pub tm_wday: c_int,
 }
 
-unsafe extern "C" {
+extern "C" {
     pub fn SOLID_RTC_ReadTime(time: *mut SOLID_RTC_TIME) -> c_int;
 }
 
 // `solid_log.h`
-unsafe extern "C" {
+extern "C" {
     pub fn SOLID_LOG_write(s: *const u8, l: usize);
 }
 
 // `solid_mem.h`
-unsafe extern "C" {
+extern "C" {
     pub fn SOLID_TLS_AddDestructor(id: i32, dtor: unsafe extern "C" fn(*mut u8));
 }
 
 // `solid_rng.h`
-unsafe extern "C" {
+extern "C" {
     pub fn SOLID_RNG_SampleRandomBytes(buffer: *mut u8, length: usize) -> c_int;
 }
 
 // `rwlock.h`
-unsafe extern "C" {
+extern "C" {
     pub fn rwl_loc_rdl(id: ID) -> ER;
     pub fn rwl_loc_wrl(id: ID) -> ER;
     pub fn rwl_ploc_rdl(id: ID) -> ER;

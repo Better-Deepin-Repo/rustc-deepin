@@ -1,5 +1,4 @@
 //@ compile-flags: -Zunpretty=hir
-//@ edition: 2015
 
 // issue#97006
 

@@ -1,8 +1,10 @@
 error: unit tests in doctest are not executed
   --> tests/ui/test_attr_in_doctest.rs:6:5
    |
-LL | /// #[test]
-   |     ^^^^^^^
+LL |   /// #[test]
+   |  _____^
+LL | | /// fn should_be_linted() {
+   | |_______________________^
    |
    = note: `-D clippy::test-attr-in-doctest` implied by `-D warnings`
    = help: to override `-D warnings` add `#[allow(clippy::test_attr_in_doctest)]`
@@ -10,11 +12,18 @@ LL | /// #[test]
 error: unit tests in doctest are not executed
   --> tests/ui/test_attr_in_doctest.rs:16:5
    |
-LL | /// #[test]
-   |     ^^^^^^^
-...
-LL | /// #[test]
-   |     ^^^^^^^
+LL |   /// #[test]
+   |  _____^
+LL | | /// fn should_also_be_linted() {
+   | |____________________________^
 
-error: aborting due to 2 previous errors
+error: unit tests in doctest are not executed
+  --> tests/ui/test_attr_in_doctest.rs:22:5
+   |
+LL |   /// #[test]
+   |  _____^
+LL | | /// fn should_be_linted_too() {
+   | |___________________________^
+
+error: aborting due to 3 previous errors
 

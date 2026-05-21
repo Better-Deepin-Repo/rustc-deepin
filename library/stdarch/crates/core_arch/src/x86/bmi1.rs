@@ -6,7 +6,7 @@
 //! [Wikipedia][wikipedia_bmi] provides a quick overview of the instructions
 //! available.
 //!
-//! [intel64_ref]: https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-instruction-set-reference-manual-325383.pdf
+//! [intel64_ref]: http://www.intel.de/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-instruction-set-reference-manual-325383.pdf
 //! [wikipedia_bmi]: https://en.wikipedia.org/wiki/Bit_Manipulation_Instruction_Sets#ABM_.28Advanced_Bit_Manipulation.29
 
 #[cfg(test)]
@@ -20,7 +20,7 @@ use stdarch_test::assert_instr;
 #[target_feature(enable = "bmi1")]
 #[cfg_attr(test, assert_instr(bextr))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _bextr_u32(a: u32, start: u32, len: u32) -> u32 {
+pub unsafe fn _bextr_u32(a: u32, start: u32, len: u32) -> u32 {
     _bextr2_u32(a, (start & 0xff_u32) | ((len & 0xff_u32) << 8_u32))
 }
 
@@ -35,8 +35,8 @@ pub fn _bextr_u32(a: u32, start: u32, len: u32) -> u32 {
 #[target_feature(enable = "bmi1")]
 #[cfg_attr(test, assert_instr(bextr))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _bextr2_u32(a: u32, control: u32) -> u32 {
-    unsafe { x86_bmi_bextr_32(a, control) }
+pub unsafe fn _bextr2_u32(a: u32, control: u32) -> u32 {
+    x86_bmi_bextr_32(a, control)
 }
 
 /// Bitwise logical `AND` of inverted `a` with `b`.
@@ -46,8 +46,7 @@ pub fn _bextr2_u32(a: u32, control: u32) -> u32 {
 #[target_feature(enable = "bmi1")]
 #[cfg_attr(test, assert_instr(andn))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _andn_u32(a: u32, b: u32) -> u32 {
+pub unsafe fn _andn_u32(a: u32, b: u32) -> u32 {
     !a & b
 }
 
@@ -58,8 +57,7 @@ pub const fn _andn_u32(a: u32, b: u32) -> u32 {
 #[target_feature(enable = "bmi1")]
 #[cfg_attr(test, assert_instr(blsi))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _blsi_u32(x: u32) -> u32 {
+pub unsafe fn _blsi_u32(x: u32) -> u32 {
     x & x.wrapping_neg()
 }
 
@@ -70,8 +68,7 @@ pub const fn _blsi_u32(x: u32) -> u32 {
 #[target_feature(enable = "bmi1")]
 #[cfg_attr(test, assert_instr(blsmsk))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _blsmsk_u32(x: u32) -> u32 {
+pub unsafe fn _blsmsk_u32(x: u32) -> u32 {
     x ^ (x.wrapping_sub(1_u32))
 }
 
@@ -84,8 +81,7 @@ pub const fn _blsmsk_u32(x: u32) -> u32 {
 #[target_feature(enable = "bmi1")]
 #[cfg_attr(test, assert_instr(blsr))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _blsr_u32(x: u32) -> u32 {
+pub unsafe fn _blsr_u32(x: u32) -> u32 {
     x & (x.wrapping_sub(1))
 }
 
@@ -98,8 +94,7 @@ pub const fn _blsr_u32(x: u32) -> u32 {
 #[target_feature(enable = "bmi1")]
 #[cfg_attr(test, assert_instr(tzcnt))]
 #[stable(feature = "simd_x86_updates", since = "1.82.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _tzcnt_u16(x: u16) -> u16 {
+pub unsafe fn _tzcnt_u16(x: u16) -> u16 {
     x.trailing_zeros() as u16
 }
 
@@ -112,8 +107,7 @@ pub const fn _tzcnt_u16(x: u16) -> u16 {
 #[target_feature(enable = "bmi1")]
 #[cfg_attr(test, assert_instr(tzcnt))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _tzcnt_u32(x: u32) -> u32 {
+pub unsafe fn _tzcnt_u32(x: u32) -> u32 {
     x.trailing_zeros()
 }
 
@@ -126,31 +120,29 @@ pub const fn _tzcnt_u32(x: u32) -> u32 {
 #[target_feature(enable = "bmi1")]
 #[cfg_attr(test, assert_instr(tzcnt))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_tzcnt_32(x: u32) -> i32 {
+pub unsafe fn _mm_tzcnt_32(x: u32) -> i32 {
     x.trailing_zeros() as i32
 }
 
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.bmi.bextr.32"]
     fn x86_bmi_bextr_32(x: u32, y: u32) -> u32;
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::core_arch::assert_eq_const as assert_eq;
     use stdarch_test::simd_test;
 
     use crate::core_arch::x86::*;
 
     #[simd_test(enable = "bmi1")]
-    fn test_bextr_u32() {
+    unsafe fn test_bextr_u32() {
         let r = _bextr_u32(0b0101_0000u32, 4, 4);
         assert_eq!(r, 0b0000_0101u32);
     }
 
     #[simd_test(enable = "bmi1")]
-    const fn test_andn_u32() {
+    unsafe fn test_andn_u32() {
         assert_eq!(_andn_u32(0, 0), 0);
         assert_eq!(_andn_u32(0, 1), 1);
         assert_eq!(_andn_u32(1, 0), 0);
@@ -173,32 +165,32 @@ mod tests {
     }
 
     #[simd_test(enable = "bmi1")]
-    const fn test_blsi_u32() {
+    unsafe fn test_blsi_u32() {
         assert_eq!(_blsi_u32(0b1101_0000u32), 0b0001_0000u32);
     }
 
     #[simd_test(enable = "bmi1")]
-    const fn test_blsmsk_u32() {
+    unsafe fn test_blsmsk_u32() {
         let r = _blsmsk_u32(0b0011_0000u32);
         assert_eq!(r, 0b0001_1111u32);
     }
 
     #[simd_test(enable = "bmi1")]
-    const fn test_blsr_u32() {
+    unsafe fn test_blsr_u32() {
         // TODO: test the behavior when the input is `0`.
         let r = _blsr_u32(0b0011_0000u32);
         assert_eq!(r, 0b0010_0000u32);
     }
 
     #[simd_test(enable = "bmi1")]
-    const fn test_tzcnt_u16() {
+    unsafe fn test_tzcnt_u16() {
         assert_eq!(_tzcnt_u16(0b0000_0001u16), 0u16);
         assert_eq!(_tzcnt_u16(0b0000_0000u16), 16u16);
         assert_eq!(_tzcnt_u16(0b1001_0000u16), 4u16);
     }
 
     #[simd_test(enable = "bmi1")]
-    const fn test_tzcnt_u32() {
+    unsafe fn test_tzcnt_u32() {
         assert_eq!(_tzcnt_u32(0b0000_0001u32), 0u32);
         assert_eq!(_tzcnt_u32(0b0000_0000u32), 32u32);
         assert_eq!(_tzcnt_u32(0b1001_0000u32), 4u32);

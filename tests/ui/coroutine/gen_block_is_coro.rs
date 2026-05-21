@@ -1,5 +1,4 @@
-//@ edition: 2024
-//@ compile-flags: --diagnostic-width=300
+//@compile-flags: --edition 2024 -Zunstable-options
 #![feature(coroutines, coroutine_trait, gen_blocks)]
 
 use std::ops::Coroutine;

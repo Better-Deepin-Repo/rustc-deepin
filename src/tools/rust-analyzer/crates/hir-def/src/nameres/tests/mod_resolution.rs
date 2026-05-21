@@ -18,8 +18,8 @@ pub struct Baz;
 ",
         expect![[r#"
             crate
-            - Baz : _
-            - foo : type
+            Baz: _
+            foo: t
 
             crate::foo
         "#]],
@@ -41,13 +41,13 @@ struct X;
 "#,
         expect![[r#"
             crate
-            - n1 : type
+            n1: t
 
             crate::n1
-            - n2 : type
+            n2: t
 
             crate::n1::n2
-            - X : type value
+            X: t v
         "#]],
     );
 }
@@ -76,22 +76,22 @@ pub trait Iterator;
 "#,
         expect![[r#"
             crate
-            - iter : type
-            - prelude : type
+            iter: t
+            prelude: t
 
             crate::iter
-            - Iterator : type (import)
-            - traits : type
+            Iterator: ti
+            traits: t
 
             crate::iter::traits
-            - Iterator : type (import)
-            - iterator : type
+            Iterator: ti
+            iterator: t
 
             crate::iter::traits::iterator
-            - Iterator : type
+            Iterator: t
 
             crate::prelude
-            - Iterator : type (import)
+            Iterator: ti
         "#]],
     );
 }
@@ -109,11 +109,11 @@ pub struct Bar;
 "#,
         expect![[r#"
             crate
-            - Bar : type (import) value (import)
-            - foo : type
+            Bar: ti vi
+            foo: t
 
             crate::foo
-            - Bar : type value
+            Bar: t v
         "#]],
     );
 }
@@ -139,19 +139,19 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - Bar : type (import) value (import)
-            - r#async : type
+            Bar: ti vi
+            r#async: t
 
             crate::r#async
-            - Bar : type value
-            - r#async : type
-            - foo : type
+            Bar: t v
+            r#async: t
+            foo: t
 
             crate::r#async::r#async
-            - Baz : type value
+            Baz: t v
 
             crate::r#async::foo
-            - Foo : type value
+            Foo: t v
         "#]],
     );
 }
@@ -176,19 +176,19 @@ pub struct Bar;
 "#,
         expect![[r#"
             crate
-            - Bar : type (import) value (import)
-            - Foo : type (import) value (import)
-            - r#async : type
+            Bar: ti vi
+            Foo: ti vi
+            r#async: t
 
             crate::r#async
-            - a : type
-            - r#async : type
+            a: t
+            r#async: t
 
             crate::r#async::a
-            - Foo : type value
+            Foo: t v
 
             crate::r#async::r#async
-            - Bar : type value
+            Bar: t v
         "#]],
     );
 }
@@ -207,11 +207,11 @@ pub struct Bar;
 "#,
         expect![[r#"
             crate
-            - Bar : type (import) value (import)
-            - foo : type
+            Bar: ti vi
+            foo: t
 
             crate::foo
-            - Bar : type value
+            Bar: t v
         "#]],
     );
 }
@@ -233,14 +233,14 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - Baz : type (import) value (import)
-            - bar : type
+            Baz: ti vi
+            bar: t
 
             crate::foo::bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -262,14 +262,14 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - Baz : type (import) value (import)
-            - bar : type
+            Baz: ti vi
+            bar: t
 
             crate::foo::bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -288,11 +288,11 @@ use super::Baz;
 "#,
         expect![[r#"
             crate
-            - Baz : type value
-            - foo : type
+            Baz: t v
+            foo: t
 
             crate::foo
-            - Baz : type (import) value (import)
+            Baz: ti vi
         "#]],
     );
 }
@@ -310,10 +310,10 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -334,13 +334,13 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - foo_bar : type
+            foo_bar: t
 
             crate::foo::foo_bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -361,13 +361,13 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - foo_bar : type
+            foo_bar: t
 
             crate::foo::foo_bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -388,14 +388,14 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - bar : type
+            bar: t
 
             crate::foo::bar
-            - Baz : type value
-        "#]],
+            Baz: t v
+"#]],
     );
 }
 
@@ -412,10 +412,10 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -433,10 +433,10 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -454,13 +454,13 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - bar : type
+            bar: t
 
             crate::foo::bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -477,13 +477,13 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - bar : type
+            bar: t
 
             crate::foo::bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -501,13 +501,13 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - bar : type
+            bar: t
 
             crate::foo::bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -528,13 +528,13 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - bar : type
+            bar: t
 
             crate::foo::bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -555,13 +555,13 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - bar : type
+            bar: t
 
             crate::foo::bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -579,7 +579,7 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
         "#]],
@@ -599,13 +599,13 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - bar : type
+            bar: t
 
             crate::foo::bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -626,14 +626,14 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - Baz : type (import) value (import)
-            - foo : type
+            Baz: ti vi
+            foo: t
 
             crate::foo
-            - bar : type
+            bar: t
 
             crate::foo::bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -657,17 +657,17 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - Baz : type (import) value (import)
-            - bar : type
+            Baz: ti vi
+            bar: t
 
             crate::foo::bar
-            - baz : type
+            baz: t
 
             crate::foo::bar::baz
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -691,17 +691,17 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - Baz : type (import) value (import)
-            - bar : type
+            Baz: ti vi
+            bar: t
 
             crate::foo::bar
-            - baz : type
+            baz: t
 
             crate::foo::bar::baz
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -725,17 +725,17 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - foo : type
+            foo: t
 
             crate::foo
-            - Baz : type (import) value (import)
-            - bar : type
+            Baz: ti vi
+            bar: t
 
             crate::foo::bar
-            - baz : type
+            baz: t
 
             crate::foo::bar::baz
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -756,13 +756,13 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - module : type
+            module: t
 
             crate::module
-            - submod : type
+            submod: t
 
             crate::module::submod
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -783,16 +783,16 @@ struct X;
 "#,
         expect![[r#"
             crate
-            - a : type
+            a: t
 
             crate::a
-            - b : type
+            b: t
 
             crate::a::b
-            - c : type
+            c: t
 
             crate::a::b::c
-            - X : type value
+            X: t v
         "#]],
     );
 }
@@ -814,16 +814,16 @@ struct X;
 "#,
         expect![[r#"
             crate
-            - a : type
+            a: t
 
             crate::a
-            - b : type
+            b: t
 
             crate::a::b
-            - c : type
+            c: t
 
             crate::a::b::c
-            - X : type value
+            X: t v
         "#]],
     );
 }
@@ -839,7 +839,6 @@ mod foo;
 #[path = "./foo.rs"]
 mod foo;
 "#,
-        |_| (),
     );
 
     compute_crate_def_map(
@@ -853,7 +852,6 @@ mod bar;
 #[path = "./foo.rs"]
 mod foo;
 "#,
-        |_| (),
     );
 }
 
@@ -870,8 +868,8 @@ pub mod hash { pub trait Hash {} }
 "#,
         expect![[r#"
             crate
-            - Hash : type (import)
-            - core : type
+            Hash: ti
+            core: t
 
             crate::core
         "#]],
@@ -895,152 +893,4 @@ struct AlsoShouldNotAppear;
             crate
         "#]],
     )
-}
-
-#[test]
-fn invalid_imports() {
-    check(
-        r#"
-//- /main.rs
-mod module;
-
-use self::module::S::new;
-use self::module::unresolved;
-use self::module::C::const_based;
-use self::module::Enum::Variant::NoAssoc;
-
-//- /module.rs
-pub struct S;
-impl S {
-    pub fn new() {}
-}
-pub const C: () = ();
-pub enum Enum {
-    Variant,
-}
-        "#,
-        expect![[r#"
-            crate
-            - NoAssoc : _
-            - const_based : _
-            - module : type
-            - new : _
-            - unresolved : _
-
-            crate::module
-            - C : value
-            - Enum : type
-            - S : type value
-        "#]],
-    );
-}
-
-#[test]
-fn trait_item_imports_same_crate() {
-    check(
-        r#"
-//- /main.rs
-mod module;
-
-use self::module::Trait::{AssocType, ASSOC_CONST, MACRO_CONST, method};
-
-//- /module.rs
-macro_rules! m {
-    ($name:ident) => { const $name: () = (); };
-}
-pub trait Trait {
-    type AssocType;
-    const ASSOC_CONST: ();
-    fn method(&self);
-    m!(MACRO_CONST);
-}
-        "#,
-        expect![[r#"
-            crate
-            - ASSOC_CONST : _
-            - AssocType : _
-            - MACRO_CONST : _
-            - method : _
-            - module : type
-
-            crate::module
-            - Trait : type
-            - (legacy) m : macro!
-        "#]],
-    );
-    check(
-        r#"
-//- /main.rs
-mod module;
-
-use self::module::Trait::*;
-
-//- /module.rs
-macro_rules! m {
-    ($name:ident) => { const $name: () = (); };
-}
-pub trait Trait {
-    type AssocType;
-    const ASSOC_CONST: ();
-    fn method(&self);
-    m!(MACRO_CONST);
-}
-        "#,
-        expect![[r#"
-            crate
-            - module : type
-
-            crate::module
-            - Trait : type
-            - (legacy) m : macro!
-        "#]],
-    );
-}
-
-#[test]
-fn trait_item_imports_differing_crate() {
-    check(
-        r#"
-//- /main.rs deps:lib crate:main
-use lib::Trait::{AssocType, ASSOC_CONST, MACRO_CONST, method};
-
-//- /lib.rs crate:lib
-macro_rules! m {
-    ($name:ident) => { const $name: () = (); };
-}
-pub trait Trait {
-    type AssocType;
-    const ASSOC_CONST: ();
-    fn method(&self);
-    m!(MACRO_CONST);
-}
-        "#,
-        expect![[r#"
-            crate
-            - ASSOC_CONST : _
-            - AssocType : _
-            - MACRO_CONST : _
-            - method : _
-        "#]],
-    );
-    check(
-        r#"
-//- /main.rs deps:lib crate:main
-use lib::Trait::*;
-
-//- /lib.rs crate:lib
-macro_rules! m {
-    ($name:ident) => { const $name: () = (); };
-}
-pub trait Trait {
-    type AssocType;
-    const ASSOC_CONST: ();
-    fn method(&self);
-    m!(MACRO_CONST);
-}
-        "#,
-        expect![[r#"
-            crate
-        "#]],
-    );
 }

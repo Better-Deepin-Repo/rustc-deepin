@@ -4,7 +4,7 @@ struct A;
 
 impl A {
     fn result_with_panic() -> Result<bool, String> // should emit lint
-    //~^ panic_in_result_fn
+    //~^ ERROR: used `panic!()` or assertion in a function that returns `Result`
     {
         panic!("error");
     }
@@ -51,13 +51,12 @@ impl A {
 }
 
 fn function_result_with_panic() -> Result<bool, String> // should emit lint
-//~^ panic_in_result_fn
+//~^ ERROR: used `panic!()` or assertion in a function that returns `Result`
 {
     panic!("error");
 }
 
 fn in_closure() -> Result<bool, String> {
-    //~^ panic_in_result_fn
     let c = || panic!();
     c()
 }
@@ -70,15 +69,6 @@ fn function_result_with_custom_todo() -> Result<bool, String> // should not emit
 {
     todo();
     Ok(true)
-}
-
-fn issue_13381<const N: usize>() -> Result<(), String> {
-    const {
-        if N == 0 {
-            panic!();
-        }
-    }
-    Ok(())
 }
 
 fn main() -> Result<(), String> {

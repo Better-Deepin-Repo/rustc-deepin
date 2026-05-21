@@ -4,10 +4,8 @@
 
 // A sample of various built-in attributes.
 #[macro_export]
-#[macro_use] //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
-#[path="foo"] //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
+#[macro_use] //~ ERROR `#[macro_use]` only has an effect
+#[path="foo"] //~ ERROR #[path]` only has an effect
 #[recursion_limit="1"] //~ ERROR crate-level attribute should be an inner attribute
 macro_rules! foo {
     () => {};
@@ -19,7 +17,7 @@ macro_rules! foo2 {
     () => {};
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 macro_rules! foo {
     () => {};
 }

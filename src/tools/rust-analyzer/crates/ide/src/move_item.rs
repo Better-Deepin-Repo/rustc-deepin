@@ -1,11 +1,10 @@
 use std::{iter::once, mem};
 
 use hir::Semantics;
-use ide_db::syntax_helpers::tree_diff::diff;
-use ide_db::text_edit::{TextEdit, TextEditBuilder};
-use ide_db::{FileRange, RootDatabase, helpers::pick_best_token};
+use ide_db::{helpers::pick_best_token, FileRange, RootDatabase};
 use itertools::Itertools;
-use syntax::{AstNode, SyntaxElement, SyntaxKind, SyntaxNode, TextRange, ast, match_ast};
+use syntax::{algo, ast, match_ast, AstNode, SyntaxElement, SyntaxKind, SyntaxNode, TextRange};
+use text_edit::{TextEdit, TextEditBuilder};
 
 #[derive(Copy, Clone, Debug)]
 pub enum Direction {
@@ -17,12 +16,14 @@ pub enum Direction {
 //
 // Move item under cursor or selection up and down.
 //
-// | Editor  | Action Name |
-// |---------|-------------|
+// |===
+// | Editor  | Action Name
+//
 // | VS Code | **rust-analyzer: Move item up**
 // | VS Code | **rust-analyzer: Move item down**
+// |===
 //
-// ![Move Item](https://user-images.githubusercontent.com/48062697/113065576-04298180-91b1-11eb-91ce-4505e99ed598.gif)
+// image::https://user-images.githubusercontent.com/48062697/113065576-04298180-91b1-11eb-91ce-4505e99ed598.gif[]
 pub(crate) fn move_item(
     db: &RootDatabase,
     range: FileRange,
@@ -72,6 +73,7 @@ fn find_ancestors(item: SyntaxElement, direction: Direction, range: TextRange) -
         SyntaxKind::MACRO_CALL,
         SyntaxKind::TYPE_ALIAS,
         SyntaxKind::TRAIT,
+        SyntaxKind::TRAIT_ALIAS,
         SyntaxKind::IMPL,
         SyntaxKind::MACRO_DEF,
         SyntaxKind::STRUCT,
@@ -164,7 +166,7 @@ fn replace_nodes<'a>(
 
     let mut edit = TextEditBuilder::default();
 
-    diff(first, second).into_text_edit(&mut edit);
+    algo::diff(first, second).into_text_edit(&mut edit);
     edit.replace(second.text_range(), first_with_cursor);
 
     edit.finish()
@@ -173,15 +175,11 @@ fn replace_nodes<'a>(
 #[cfg(test)]
 mod tests {
     use crate::fixture;
-    use expect_test::{Expect, expect};
+    use expect_test::{expect, Expect};
 
     use crate::Direction;
 
-    fn check(
-        #[rust_analyzer::rust_fixture] ra_fixture: &str,
-        expect: Expect,
-        direction: Direction,
-    ) {
+    fn check(ra_fixture: &str, expect: Expect, direction: Direction) {
         let (analysis, range) = fixture::range(ra_fixture);
         let edit = analysis.move_item(range, direction).unwrap().unwrap_or_default();
         let mut file = analysis.file_text(range.file_id).unwrap().to_string();

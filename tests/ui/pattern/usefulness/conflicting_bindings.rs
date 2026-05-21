@@ -1,4 +1,4 @@
-//@ edition: 2024
+#![feature(if_let_guard, let_chains)]
 
 fn main() {
     let mut x = Some(String::new());
@@ -9,8 +9,6 @@ fn main() {
     if let Some(ref mut y @ ref mut z) = x {}
     //~^ ERROR: mutable more than once
     if let Some(ref mut y @ ref mut z) = x && true {}
-    //~^ ERROR: mutable more than once
-    if let Some(_) = Some(()) && let Some(ref mut y @ ref mut z) = x && true {}
     //~^ ERROR: mutable more than once
     while let Some(ref mut y @ ref mut z) = x {}
     //~^ ERROR: mutable more than once

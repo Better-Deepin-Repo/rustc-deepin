@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ aux-build:pub_restricted.rs
 
 #![allow(warnings)]
@@ -48,6 +47,6 @@ fn main() {
 }
 
 mod pathological {
-    pub(in bad::path) mod m1 {} //~ ERROR: cannot find module or crate `bad`
+    pub(in bad::path) mod m1 {} //~ ERROR failed to resolve: you might be missing crate `bad`
     pub(in foo) mod m2 {} //~ ERROR visibilities can only be restricted to ancestor modules
 }

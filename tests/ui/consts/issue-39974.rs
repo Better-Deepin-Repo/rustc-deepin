@@ -1,11 +1,10 @@
 const LENGTH: f64 = 2;
 //~^ ERROR mismatched types
-//~| NOTE expected `f64`, found integer
 
 struct Thing {
     f: [[f64; 2]; LENGTH],
     //~^ ERROR mismatched types
-    //~| NOTE expected `usize`, found `f64`
+    //~| expected `usize`, found `f64`
 }
 
 fn main() {

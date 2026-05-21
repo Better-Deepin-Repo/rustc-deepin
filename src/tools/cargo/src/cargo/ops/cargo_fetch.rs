@@ -1,12 +1,10 @@
-use crate::core::compiler::BuildConfig;
-use crate::core::compiler::RustcTargetData;
-use crate::core::compiler::UserIntent;
 use crate::core::compiler::standard_lib;
+use crate::core::compiler::{BuildConfig, CompileMode, RustcTargetData};
 use crate::core::{PackageSet, Resolve, Workspace};
 use crate::ops;
+use crate::util::context::JobsConfig;
 use crate::util::CargoResult;
 use crate::util::GlobalContext;
-use crate::util::context::JobsConfig;
 use std::collections::HashSet;
 
 pub struct FetchOptions<'a> {
@@ -28,7 +26,7 @@ pub fn fetch<'a>(
     let keep_going = false;
     let gctx = ws.gctx();
     let build_config =
-        BuildConfig::new(gctx, jobs, keep_going, &options.targets, UserIntent::Build)?;
+        BuildConfig::new(gctx, jobs, keep_going, &options.targets, CompileMode::Build)?;
     let mut data = RustcTargetData::new(ws, &build_config.requested_kinds)?;
     let mut fetched_packages = HashSet::new();
     let mut deps_to_fetch = ws.members().map(|p| p.package_id()).collect::<Vec<_>>();
@@ -66,14 +64,10 @@ pub fn fetch<'a>(
     }
 
     // If -Zbuild-std was passed, download dependencies for the standard library.
-    if let Some(crates) = &gctx.cli_unstable().build_std {
-        let (std_package_set, _, _) = standard_lib::resolve_std(
-            ws,
-            &mut data,
-            &build_config,
-            crates,
-            &build_config.requested_kinds,
-        )?;
+    // We don't know ahead of time what jobs we'll be running, so tell `std_crates` that.
+    if let Some(crates) = standard_lib::std_crates(gctx, None) {
+        let (std_package_set, _, _) =
+            standard_lib::resolve_std(ws, &mut data, &build_config, &crates)?;
         packages.add_set(std_package_set);
     }
 

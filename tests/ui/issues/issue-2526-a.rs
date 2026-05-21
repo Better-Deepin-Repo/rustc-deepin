@@ -1,6 +1,7 @@
 //@ run-pass
 //@ aux-build:issue-2526.rs
 
+//@ pretty-expanded FIXME #23616
 
 #![allow(unused_imports)]
 

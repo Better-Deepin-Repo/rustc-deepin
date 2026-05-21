@@ -3,46 +3,39 @@
 //! [rustc dev guide]: https://rustc-dev-guide.rust-lang.org/hir.html
 
 // tidy-alphabetical-start
+#![allow(internal_features)]
 #![feature(associated_type_defaults)]
 #![feature(closure_track_caller)]
-#![feature(const_default)]
-#![feature(const_trait_impl)]
-#![feature(derive_const)]
-#![feature(exhaustive_patterns)]
+#![feature(let_chains)]
 #![feature(never_type)]
+#![feature(rustc_attrs)]
 #![feature(variant_count)]
-#![recursion_limit = "256"]
+#![warn(unreachable_pub)]
 // tidy-alphabetical-end
 
 extern crate self as rustc_hir;
 
 mod arena;
-pub mod attrs;
 pub mod def;
 pub mod def_path_hash_map;
 pub mod definitions;
 pub mod diagnostic_items;
 pub use rustc_span::def_id;
 mod hir;
-pub use rustc_hir_id::{self as hir_id, *};
+pub mod hir_id;
 pub mod intravisit;
 pub mod lang_items;
-pub mod limit;
-pub mod lints;
 pub mod pat_util;
-mod stability;
 mod stable_hash_impls;
-pub mod target;
+mod target;
 pub mod weak_lang_items;
 
 #[cfg(test)]
 mod tests;
 
-#[doc(no_inline)]
 pub use hir::*;
+pub use hir_id::*;
 pub use lang_items::{LangItem, LanguageItems};
-pub use rustc_ast::attr::version::*;
-pub use stability::*;
 pub use stable_hash_impls::HashStableContext;
 pub use target::{MethodKind, Target};
 

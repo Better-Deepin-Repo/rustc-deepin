@@ -1,27 +1,21 @@
 use std::path::{Path, PathBuf};
 
 use cargo_util_schemas::core::PackageIdSpec;
-use serde::Serialize;
 use serde::ser;
-use serde_json::value::RawValue;
+use serde::Serialize;
+use serde_json::{json, value::RawValue};
 
+use crate::core::compiler::CompileMode;
 use crate::core::Target;
 
 pub trait Message: ser::Serialize {
     fn reason(&self) -> &str;
 
     fn to_json_string(&self) -> String {
-        #[derive(Serialize)]
-        struct WithReason<'a, S: Serialize> {
-            reason: &'a str,
-            #[serde(flatten)]
-            msg: &'a S,
-        }
-        let with_reason = WithReason {
-            reason: self.reason(),
-            msg: &self,
-        };
-        serde_json::to_string(&with_reason).unwrap()
+        let json = serde_json::to_string(self).unwrap();
+        assert!(json.starts_with("{\""));
+        let reason = json!(self.reason());
+        format!("{{\"reason\":{},{}", reason, &json[1..])
     }
 }
 
@@ -90,6 +84,22 @@ pub struct BuildScript<'a> {
 impl<'a> Message for BuildScript<'a> {
     fn reason(&self) -> &str {
         "build-script-executed"
+    }
+}
+
+#[derive(Serialize)]
+pub struct TimingInfo<'a> {
+    pub package_id: PackageIdSpec,
+    pub target: &'a Target,
+    pub mode: CompileMode,
+    pub duration: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rmeta_time: Option<f64>,
+}
+
+impl<'a> Message for TimingInfo<'a> {
+    fn reason(&self) -> &str {
+        "timing-info"
     }
 }
 

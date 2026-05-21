@@ -6,70 +6,121 @@ use std::sync::atomic::AtomicU32;
 
 use super::*;
 
-#[repr(C)]
-pub(super) struct HandleCounters {
-    pub(super) token_stream: AtomicU32,
-    pub(super) span: AtomicU32,
-}
+macro_rules! define_client_handles {
+    (
+        'owned: $($oty:ident,)*
+        'interned: $($ity:ident,)*
+    ) => {
+        #[repr(C)]
+        #[allow(non_snake_case)]
+        pub(super) struct HandleCounters {
+            $(pub(super) $oty: AtomicU32,)*
+            $(pub(super) $ity: AtomicU32,)*
+        }
 
-static COUNTERS: HandleCounters =
-    HandleCounters { token_stream: AtomicU32::new(1), span: AtomicU32::new(1) };
+        impl HandleCounters {
+            // FIXME(eddyb) use a reference to the `static COUNTERS`, instead of
+            // a wrapper `fn` pointer, once `const fn` can reference `static`s.
+            extern "C" fn get() -> &'static Self {
+                static COUNTERS: HandleCounters = HandleCounters {
+                    $($oty: AtomicU32::new(1),)*
+                    $($ity: AtomicU32::new(1),)*
+                };
+                &COUNTERS
+            }
+        }
 
-pub(crate) struct TokenStream {
-    handle: handle::Handle,
-}
+        $(
+            pub(crate) struct $oty {
+                handle: handle::Handle,
+                // Prevent Send and Sync impls. `!Send`/`!Sync` is the usual
+                // way of doing this, but that requires unstable features.
+                // rust-analyzer uses this code and avoids unstable features.
+                _marker: PhantomData<*mut ()>,
+            }
 
-impl !Send for TokenStream {}
-impl !Sync for TokenStream {}
+            // Forward `Drop::drop` to the inherent `drop` method.
+            impl Drop for $oty {
+                fn drop(&mut self) {
+                    $oty {
+                        handle: self.handle,
+                        _marker: PhantomData,
+                    }.drop();
+                }
+            }
 
-// Forward `Drop::drop` to the inherent `drop` method.
-impl Drop for TokenStream {
-    fn drop(&mut self) {
-        Methods::ts_drop(TokenStream { handle: self.handle });
+            impl<S> Encode<S> for $oty {
+                fn encode(self, w: &mut Writer, s: &mut S) {
+                    mem::ManuallyDrop::new(self).handle.encode(w, s);
+                }
+            }
+
+            impl<S> Encode<S> for &$oty {
+                fn encode(self, w: &mut Writer, s: &mut S) {
+                    self.handle.encode(w, s);
+                }
+            }
+
+            impl<S> Encode<S> for &mut $oty {
+                fn encode(self, w: &mut Writer, s: &mut S) {
+                    self.handle.encode(w, s);
+                }
+            }
+
+            impl<S> DecodeMut<'_, '_, S> for $oty {
+                fn decode(r: &mut Reader<'_>, s: &mut S) -> Self {
+                    $oty {
+                        handle: handle::Handle::decode(r, s),
+                        _marker: PhantomData,
+                    }
+                }
+            }
+        )*
+
+        $(
+            #[derive(Copy, Clone, PartialEq, Eq, Hash)]
+            pub(crate) struct $ity {
+                handle: handle::Handle,
+                // Prevent Send and Sync impls. `!Send`/`!Sync` is the usual
+                // way of doing this, but that requires unstable features.
+                // rust-analyzer uses this code and avoids unstable features.
+                _marker: PhantomData<*mut ()>,
+            }
+
+            impl<S> Encode<S> for $ity {
+                fn encode(self, w: &mut Writer, s: &mut S) {
+                    self.handle.encode(w, s);
+                }
+            }
+
+            impl<S> DecodeMut<'_, '_, S> for $ity {
+                fn decode(r: &mut Reader<'_>, s: &mut S) -> Self {
+                    $ity {
+                        handle: handle::Handle::decode(r, s),
+                        _marker: PhantomData,
+                    }
+                }
+            }
+        )*
     }
 }
+with_api_handle_types!(define_client_handles);
 
-impl<S> Encode<S> for TokenStream {
-    fn encode(self, w: &mut Buffer, s: &mut S) {
-        mem::ManuallyDrop::new(self).handle.encode(w, s);
-    }
-}
-
-impl<S> Encode<S> for &TokenStream {
-    fn encode(self, w: &mut Buffer, s: &mut S) {
-        self.handle.encode(w, s);
-    }
-}
-
-impl<S> Decode<'_, '_, S> for TokenStream {
-    fn decode(r: &mut &[u8], s: &mut S) -> Self {
-        TokenStream { handle: handle::Handle::decode(r, s) }
-    }
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct Span {
-    handle: handle::Handle,
-}
-
-impl !Send for Span {}
-impl !Sync for Span {}
-
-impl<S> Encode<S> for Span {
-    fn encode(self, w: &mut Buffer, s: &mut S) {
-        self.handle.encode(w, s);
-    }
-}
-
-impl<S> Decode<'_, '_, S> for Span {
-    fn decode(r: &mut &[u8], s: &mut S) -> Self {
-        Span { handle: handle::Handle::decode(r, s) }
-    }
-}
+// FIXME(eddyb) generate these impls by pattern-matching on the
+// names of methods - also could use the presence of `fn drop`
+// to distinguish between 'owned and 'interned, above.
+// Alternatively, special "modes" could be listed of types in with_api
+// instead of pattern matching on methods, here and in server decl.
 
 impl Clone for TokenStream {
     fn clone(&self) -> Self {
-        Methods::ts_clone(self)
+        self.clone()
+    }
+}
+
+impl Clone for SourceFile {
+    fn clone(&self) -> Self {
+        self.clone()
     }
 }
 
@@ -89,25 +140,24 @@ impl Span {
 
 impl fmt::Debug for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&Methods::span_debug(*self))
+        f.write_str(&self.debug())
     }
 }
 
-pub(crate) use super::Methods;
 pub(crate) use super::symbol::Symbol;
 
 macro_rules! define_client_side {
-    (
+    ($($name:ident {
         $(fn $method:ident($($arg:ident: $arg_ty:ty),* $(,)?) $(-> $ret_ty:ty)?;)*
-    ) => {
-        impl Methods {
+    }),* $(,)?) => {
+        $(impl $name {
             $(pub(crate) fn $method($($arg: $arg_ty),*) $(-> $ret_ty)? {
                 Bridge::with(|bridge| {
                     let mut buf = bridge.cached_buffer.take();
 
                     buf.clear();
-                    ApiTags::$method.encode(&mut buf, &mut ());
-                    $($arg.encode(&mut buf, &mut ());)*
+                    api_tags::Method::$name(api_tags::$name::$method).encode(&mut buf, &mut ());
+                    reverse_encode!(buf; $($arg),*);
 
                     buf = bridge.dispatch.call(buf);
 
@@ -118,10 +168,10 @@ macro_rules! define_client_side {
                     r.unwrap_or_else(|e| panic::resume_unwind(e.into()))
                 })
             })*
-        }
+        })*
     }
 }
-with_api!(define_client_side, TokenStream, Span, Symbol);
+with_api!(self, self, define_client_side);
 
 struct Bridge<'a> {
     /// Reusable buffer (only `clear`-ed, never shrunk), primarily
@@ -129,7 +179,7 @@ struct Bridge<'a> {
     cached_buffer: Buffer,
 
     /// Server-side function that the client uses to make requests.
-    dispatch: closure::Closure<'a>,
+    dispatch: closure::Closure<'a, Buffer, Buffer>,
 
     /// Provided globals for this macro expansion.
     globals: ExpnGlobals<Span>,
@@ -209,7 +259,9 @@ pub(crate) fn is_available() -> bool {
 /// and forcing the use of APIs that take/return `S::TokenStream`, server-side.
 #[repr(C)]
 pub struct Client<I, O> {
-    pub(super) handle_counters: &'static HandleCounters,
+    // FIXME(eddyb) use a reference to the `static COUNTERS`, instead of
+    // a wrapper `fn` pointer, once `const fn` can reference `static`s.
+    pub(super) get_handle_counters: extern "C" fn() -> &'static HandleCounters,
 
     pub(super) run: extern "C" fn(BridgeConfig<'_>) -> Buffer,
 
@@ -244,7 +296,7 @@ fn maybe_install_panic_hook(force_show_panics: bool) {
 /// Client-side helper for handling client panics, entering the bridge,
 /// deserializing input and serializing output.
 // FIXME(eddyb) maybe replace `Bridge::enter` with this?
-fn run_client<A: for<'a, 's> Decode<'a, 's, ()>, R: Encode<()>>(
+fn run_client<A: for<'a, 's> DecodeMut<'a, 's, ()>, R: Encode<()>>(
     config: BridgeConfig<'_>,
     f: impl FnOnce(A) -> R,
 ) -> Buffer {
@@ -294,7 +346,7 @@ fn run_client<A: for<'a, 's> Decode<'a, 's, ()>, R: Encode<()>>(
 impl Client<crate::TokenStream, crate::TokenStream> {
     pub const fn expand1(f: impl Fn(crate::TokenStream) -> crate::TokenStream + Copy) -> Self {
         Client {
-            handle_counters: &COUNTERS,
+            get_handle_counters: HandleCounters::get,
             run: super::selfless_reify::reify_to_extern_c_fn_hrt_bridge(move |bridge| {
                 run_client(bridge, |input| f(crate::TokenStream(Some(input))).0)
             }),
@@ -308,7 +360,7 @@ impl Client<(crate::TokenStream, crate::TokenStream), crate::TokenStream> {
         f: impl Fn(crate::TokenStream, crate::TokenStream) -> crate::TokenStream + Copy,
     ) -> Self {
         Client {
-            handle_counters: &COUNTERS,
+            get_handle_counters: HandleCounters::get,
             run: super::selfless_reify::reify_to_extern_c_fn_hrt_bridge(move |bridge| {
                 run_client(bridge, |(input, input2)| {
                     f(crate::TokenStream(Some(input)), crate::TokenStream(Some(input2))).0

@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use quote::{ToTokens, quote};
+use quote::{quote, ToTokens};
 
 pub fn fold_quote<F, I, T>(input: impl Iterator<Item = I>, f: F) -> TokenStream
 where

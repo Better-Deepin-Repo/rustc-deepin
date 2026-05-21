@@ -39,9 +39,6 @@ version = "1.0.1"
 [dev-dependencies.doc-comment]
 version = "0.3"
 
-[target."cfg(windows)".dependencies.winapi-util]
-version = "0.1.1"
-
 [badges.appveyor]
 repository = "BurntSushi/walkdir"
 

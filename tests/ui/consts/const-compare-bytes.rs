@@ -1,6 +1,7 @@
 //@ run-pass
 
-#![feature(core_intrinsics, const_cmp)]
+#![feature(core_intrinsics)]
+#![feature(const_intrinsic_compare_bytes)]
 use std::intrinsics::compare_bytes;
 
 fn main() {

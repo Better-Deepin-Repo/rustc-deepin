@@ -1,7 +1,8 @@
 //@ check-pass
-//@ edition:2024
 
-#[cfg(false)]
+#![feature(let_chains)]
+
+#[cfg(FALSE)]
 fn foo() {
     #[attr]
     if let Some(_) = Some(true) && let Ok(_) = Ok(1) {

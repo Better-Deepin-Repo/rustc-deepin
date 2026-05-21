@@ -1,18 +1,19 @@
 use itertools::Itertools;
-use rustc_abi::ExternAbi;
 use rustc_hir::def_id::DefId;
 use rustc_middle::mir::visit::Visitor;
 use rustc_middle::mir::*;
 use rustc_middle::ty::{self, EarlyBinder, GenericArgsRef, Ty, TyCtxt};
 use rustc_session::lint::builtin::FUNCTION_ITEM_REFERENCES;
 use rustc_span::source_map::Spanned;
-use rustc_span::{Span, sym};
+use rustc_span::symbol::sym;
+use rustc_span::Span;
+use rustc_target::spec::abi::Abi;
 
-use crate::errors;
+use crate::{errors, MirLint};
 
-pub(super) struct FunctionItemReferences;
+pub struct FunctionItemReferences;
 
-impl<'tcx> crate::MirLint<'tcx> for FunctionItemReferences {
+impl<'tcx> MirLint<'tcx> for FunctionItemReferences {
     fn run_lint(&self, tcx: TyCtxt<'tcx>, body: &Body<'tcx>) {
         let mut checker = FunctionItemRefChecker { tcx, body };
         checker.visit_body(body);
@@ -91,8 +92,8 @@ impl<'tcx> FunctionItemRefChecker<'_, 'tcx> {
                             {
                                 let mut span = self.nth_arg_span(args, arg_num);
                                 if span.from_expansion() {
-                                    // The operand's ctxt wouldn't display the lint since it's
-                                    // inside a macro so we have to use the callsite's ctxt.
+                                    // The operand's ctxt wouldn't display the lint since it's inside a macro so
+                                    // we have to use the callsite's ctxt.
                                     let callsite_ctxt = span.source_callsite().ctxt();
                                     span = span.with_ctxt(callsite_ctxt);
                                 }
@@ -136,7 +137,12 @@ impl<'tcx> FunctionItemRefChecker<'_, 'tcx> {
     }
 
     fn nth_arg_span(&self, args: &[Spanned<Operand<'tcx>>], n: usize) -> Span {
-        args[n].node.span(&self.body.local_decls)
+        match &args[n].node {
+            Operand::Copy(place) | Operand::Move(place) => {
+                self.body.local_decls[place.local].source_info.span
+            }
+            Operand::Constant(constant) => constant.span,
+        }
     }
 
     fn emit_lint(
@@ -149,16 +155,21 @@ impl<'tcx> FunctionItemRefChecker<'_, 'tcx> {
         let lint_root = self.body.source_scopes[source_info.scope]
             .local_data
             .as_ref()
-            .unwrap_crate_local()
+            .assert_crate_local()
             .lint_root;
         // FIXME: use existing printing routines to print the function signature
         let fn_sig = self.tcx.fn_sig(fn_id).instantiate(self.tcx, fn_args);
         let unsafety = fn_sig.safety().prefix_str();
         let abi = match fn_sig.abi() {
-            ExternAbi::Rust => String::from(""),
-            other_abi => format!("extern {other_abi} "),
+            Abi::Rust => String::from(""),
+            other_abi => {
+                let mut s = String::from("extern \"");
+                s.push_str(other_abi.name());
+                s.push_str("\" ");
+                s
+            }
         };
-        let ident = self.tcx.item_ident(fn_id);
+        let ident = self.tcx.item_name(fn_id).to_ident_string();
         let ty_params = fn_args.types().map(|ty| format!("{ty}"));
         let const_params = fn_args.consts().map(|c| format!("{c}"));
         let params = ty_params.chain(const_params).join(", ");
@@ -167,7 +178,7 @@ impl<'tcx> FunctionItemRefChecker<'_, 'tcx> {
         let ret = if fn_sig.output().skip_binder().is_unit() { "" } else { " -> _" };
         let sugg = format!(
             "{} as {}{}fn({}{}){}",
-            if params.is_empty() { ident.to_string() } else { format!("{ident}::<{params}>") },
+            if params.is_empty() { ident.clone() } else { format!("{ident}::<{params}>") },
             unsafety,
             abi,
             vec!["_"; num_args].join(", "),

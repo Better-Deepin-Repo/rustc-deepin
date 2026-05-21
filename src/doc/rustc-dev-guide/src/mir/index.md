@@ -1,5 +1,7 @@
 # The MIR (Mid-level IR)
 
+<!-- toc -->
+
 MIR is Rust's _Mid-level Intermediate Representation_. It is
 constructed from [HIR](../hir.html). MIR was introduced in
 [RFC 1211]. It is a radically simplified form of Rust that is used for
@@ -59,7 +61,13 @@ show you the MIR for your program. Try putting this program into play
 (or [clicking on this link][sample-play]), and then clicking the "MIR"
 button on the top:
 
-[sample-play]: https://play.rust-lang.org/?gist=30074856e62e74e91f06abd19bd72ece&version=stable&edition=2021
+[sample-play]: https://play.rust-lang.org/?gist=30074856e62e74e91f06abd19bd72ece&version=stable
+MIR shown by above link is optimized.
+Some statements like `StorageLive` are removed in optimization.
+This happens because the compiler notices the value is never accessed in the code.
+We can use `rustc [filename].rs -Z mir-opt-level=0 --emit mir` to view unoptimized MIR.
+This requires the nightly toolchain.
+
 
 ```rust
 fn main() {
@@ -80,12 +88,6 @@ fn main() -> () {
 ```
 
 This is the MIR format for the `main` function.
-MIR shown by above link is optimized.
-Some statements like `StorageLive` are removed in optimization.
-This happens because the compiler notices the value is never accessed in the code.
-We can use `rustc [filename].rs -Z mir-opt-level=0 --emit mir` to view unoptimized MIR.
-This requires the nightly toolchain.
-
 
 **Variable declarations.** If we drill in a bit, we'll see it begins
 with a bunch of variable declarations. They look like this:
@@ -260,7 +262,7 @@ similarly, in `x + 2`, `2` is a MIR constant. Type system constants are used in
 the type system, in particular for array lengths but also for const generics.
 
 Generally, both kinds of constants can be "unevaluated" or "already evaluated".
-An unevaluated constant simply stores the `DefId` of what needs to be evaluated
+And unevaluated constant simply stores the `DefId` of what needs to be evaluated
 to compute this result. An evaluated constant (a "value") has already been
 computed; their representation differs between type system constants and MIR
 constants: MIR constants evaluate to a `mir::ConstValue`; type system constants
@@ -302,9 +304,9 @@ The most important rule for
 this representation is that every value must be uniquely represented. In other
 words: a specific value must only be representable in one specific way. For example: there is only
 one way to represent an array of two integers as a `ValTree`:
-`Branch([Leaf(first_int), Leaf(second_int)])`.
+`ValTree::Branch(&[ValTree::Leaf(first_int), ValTree::Leaf(second_int)])`.
 Even though theoretically a `[u32; 2]` could be encoded in a `u64` and thus just be a
-`Leaf(bits_of_two_u32)`, that is not a legal construction of `ValTree`
+`ValTree::Leaf(bits_of_two_u32)`, that is not a legal construction of `ValTree`
 (and is very complex to do, so it is unlikely anyone is tempted to do so).
 
 These rules also mean that some values are not representable. There can be no `union`s in type
@@ -323,7 +325,7 @@ As a consequence, all decoding of `ValTree` must happen by matching on the type 
 decisions depending on that. The value itself gives no useful information without the type that
 belongs to it.
 
-<a id="promoted"></a>
+<a name="promoted"></a>
 
 ### Promoted constants
 

@@ -2,19 +2,20 @@ use std::fmt::Write;
 
 use hir::def_id::DefId;
 use hir::{HirId, ItemKind};
-use rustc_ast::join_path_idents;
 use rustc_errors::Applicability;
 use rustc_hir as hir;
 use rustc_lint::{ARRAY_INTO_ITER, BOXED_SLICE_INTO_ITER};
 use rustc_middle::span_bug;
 use rustc_middle::ty::{self, Ty};
 use rustc_session::lint::builtin::{RUST_2021_PRELUDE_COLLISIONS, RUST_2024_PRELUDE_COLLISIONS};
-use rustc_span::{Ident, STDLIB_STABLE_CRATES, Span, kw, sym};
+use rustc_span::symbol::kw::{Empty, Underscore};
+use rustc_span::symbol::{sym, Ident};
+use rustc_span::Span;
 use rustc_trait_selection::infer::InferCtxtExt;
 use tracing::debug;
 
-use crate::FnCtxt;
 use crate::method::probe::{self, Pick};
+use crate::FnCtxt;
 
 impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     pub(super) fn lint_edition_dependent_dot_call(
@@ -62,7 +63,8 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     // Instead, the problem is that the array-into_iter hack will no longer
                     // apply in Rust 2021.
                     (ARRAY_INTO_ITER, "2021")
-                } else if self_ty.boxed_ty().is_some_and(Ty::is_slice)
+                } else if self_ty.is_box()
+                    && self_ty.boxed_ty().is_slice()
                     && !span.at_least_rust_2024()
                 {
                     // In this case, it wasn't really a prelude addition that was the problem.
@@ -77,7 +79,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         };
 
         // No need to lint if method came from std/core, as that will now be in the prelude
-        if STDLIB_STABLE_CRATES.contains(&self.tcx.crate_name(pick.item.def_id.krate)) {
+        if matches!(self.tcx.crate_name(pick.item.def_id.krate), sym::std | sym::core) {
             return;
         }
 
@@ -120,27 +122,16 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                             mutbl.ref_prefix_str()
                         }
                         Some(probe::AutorefOrPtrAdjustment::ToConstPtr) | None => "",
-                        Some(probe::AutorefOrPtrAdjustment::ReborrowPin(mutbl)) => match mutbl {
-                            hir::Mutability::Mut => "Pin<&mut ",
-                            hir::Mutability::Not => "Pin<&",
-                        },
                     };
                     if let Ok(self_expr) = self.sess().source_map().span_to_snippet(self_expr.span)
                     {
-                        let mut self_adjusted =
-                            if let Some(probe::AutorefOrPtrAdjustment::ToConstPtr) =
-                                pick.autoref_or_ptr_adjustment
-                            {
-                                format!("{derefs}{self_expr} as *const _")
-                            } else {
-                                format!("{autoref}{derefs}{self_expr}")
-                            };
-
-                        if let Some(probe::AutorefOrPtrAdjustment::ReborrowPin(_)) =
+                        let self_adjusted = if let Some(probe::AutorefOrPtrAdjustment::ToConstPtr) =
                             pick.autoref_or_ptr_adjustment
                         {
-                            self_adjusted.push('>');
-                        }
+                            format!("{derefs}{self_expr} as *const _")
+                        } else {
+                            format!("{autoref}{derefs}{self_expr}")
+                        };
 
                         lint.span_suggestion(
                             sp,
@@ -253,7 +244,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         }
 
         // No need to lint if method came from std/core, as that will now be in the prelude
-        if STDLIB_STABLE_CRATES.contains(&self.tcx.crate_name(pick.item.def_id.krate)) {
+        if matches!(self.tcx.crate_name(pick.item.def_id.krate), sym::std | sym::core) {
             return;
         }
 
@@ -364,29 +355,32 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let import_items: Vec<_> = applicable_trait
             .import_ids
             .iter()
-            .map(|&import_id| self.tcx.hir_expect_item(import_id))
+            .map(|&import_id| self.tcx.hir().expect_item(import_id))
             .collect();
 
         // Find an identifier with which this trait was imported (note that `_` doesn't count).
-        for item in import_items.iter() {
-            let (_, kind) = item.expect_use();
-            match kind {
-                hir::UseKind::Single(ident) => {
-                    if ident.name != kw::Underscore {
-                        return Some(format!("{}", ident.name));
-                    }
-                }
-                hir::UseKind::Glob => return None, // Glob import, so just use its name.
-                hir::UseKind::ListStem => unreachable!(),
+        let any_id = import_items
+            .iter()
+            .find_map(|item| if item.ident.name != Underscore { Some(item.ident) } else { None });
+        if let Some(any_id) = any_id {
+            if any_id.name == Empty {
+                // Glob import, so just use its name.
+                return None;
+            } else {
+                return Some(format!("{any_id}"));
             }
         }
 
-        // All that is left is `_`! We need to use the full path. It doesn't matter which one we
-        // pick, so just take the first one.
+        // All that is left is `_`! We need to use the full path. It doesn't matter which one we pick,
+        // so just take the first one.
         match import_items[0].kind {
-            ItemKind::Use(path, _) => {
-                Some(join_path_idents(path.segments.iter().map(|seg| seg.ident)))
-            }
+            ItemKind::Use(path, _) => Some(
+                path.segments
+                    .iter()
+                    .map(|segment| segment.ident.to_string())
+                    .collect::<Vec<_>>()
+                    .join("::"),
+            ),
             _ => {
                 span_bug!(span, "unexpected item kind, expected a use: {:?}", import_items[0].kind);
             }
@@ -407,10 +401,6 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let autoref = match pick.autoref_or_ptr_adjustment {
             Some(probe::AutorefOrPtrAdjustment::Autoref { mutbl, .. }) => mutbl.ref_prefix_str(),
             Some(probe::AutorefOrPtrAdjustment::ToConstPtr) | None => "",
-            Some(probe::AutorefOrPtrAdjustment::ReborrowPin(mutbl)) => match mutbl {
-                hir::Mutability::Mut => "Pin<&mut ",
-                hir::Mutability::Not => "Pin<&",
-            },
         };
 
         let (expr_text, precise) = if let Some(expr_text) = expr
@@ -423,18 +413,13 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             ("(..)".to_string(), false)
         };
 
-        let mut adjusted_text = if let Some(probe::AutorefOrPtrAdjustment::ToConstPtr) =
+        let adjusted_text = if let Some(probe::AutorefOrPtrAdjustment::ToConstPtr) =
             pick.autoref_or_ptr_adjustment
         {
             format!("{derefs}{expr_text} as *const _")
         } else {
             format!("{autoref}{derefs}{expr_text}")
         };
-
-        if let Some(probe::AutorefOrPtrAdjustment::ReborrowPin(_)) = pick.autoref_or_ptr_adjustment
-        {
-            adjusted_text.push('>');
-        }
 
         (adjusted_text, precise)
     }

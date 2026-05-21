@@ -3,10 +3,12 @@
 
 #![feature(type_alias_impl_trait)]
 
-pub type Debuggable = impl core::fmt::Debug;
-#[define_opaque(Debuggable)]
-fn foo() -> Debuggable {
-    0u32
+mod bar {
+    pub type Debuggable = impl core::fmt::Debug;
+    fn foo() -> Debuggable {
+        0u32
+    }
 }
+use bar::Debuggable;
 
 static mut TEST: Option<Debuggable> = None;

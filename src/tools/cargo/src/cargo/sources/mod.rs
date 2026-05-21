@@ -29,11 +29,10 @@
 pub use self::config::SourceConfigMap;
 pub use self::directory::DirectorySource;
 pub use self::git::GitSource;
-pub use self::path::PathEntry;
 pub use self::path::PathSource;
 pub use self::path::RecursivePathSource;
 pub use self::registry::{
-    CRATES_IO_DOMAIN, CRATES_IO_INDEX, CRATES_IO_REGISTRY, IndexSummary, RegistrySource,
+    IndexSummary, RegistrySource, CRATES_IO_DOMAIN, CRATES_IO_INDEX, CRATES_IO_REGISTRY,
 };
 pub use self::replaced::ReplacedSource;
 

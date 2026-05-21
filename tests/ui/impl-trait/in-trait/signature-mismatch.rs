@@ -75,7 +75,7 @@ impl AsyncTrait for Struct {
         buff: &'b [u8],
         t: T,
     ) -> impl Future<Output = Vec<u8>> {
-        //[failure]~^ ERROR the type `impl Future<Output = Vec<u8>>` does not fulfill the required lifetime
+        //[failure]~^ ERROR lifetime mismatch
         async move {
             let _t = t;
             vec![]

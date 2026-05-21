@@ -1,14 +1,14 @@
 use clippy_config::Conf;
-use clippy_utils::diagnostics::span_lint_and_then;
-use clippy_utils::{sym, trait_ref_of_method};
+use clippy_utils::diagnostics::span_lint;
+use clippy_utils::trait_ref_of_method;
 use clippy_utils::ty::InteriorMut;
 use rustc_hir as hir;
 use rustc_lint::{LateContext, LateLintPass};
-use rustc_middle::ty::print::with_forced_trimmed_paths;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_session::impl_lint_pass;
-use rustc_span::Span;
 use rustc_span::def_id::LocalDefId;
+use rustc_span::symbol::sym;
+use rustc_span::Span;
 use std::iter;
 
 declare_clippy_lint! {
@@ -75,16 +75,16 @@ impl_lint_pass!(MutableKeyType<'_> => [ MUTABLE_KEY_TYPE ]);
 
 impl<'tcx> LateLintPass<'tcx> for MutableKeyType<'tcx> {
     fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx hir::Item<'tcx>) {
-        if let hir::ItemKind::Fn { ref sig, .. } = item.kind {
+        if let hir::ItemKind::Fn(ref sig, ..) = item.kind {
             self.check_sig(cx, item.owner_id.def_id, sig.decl);
         }
     }
 
     fn check_impl_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx hir::ImplItem<'tcx>) {
-        if let hir::ImplItemKind::Fn(ref sig, ..) = item.kind
-            && trait_ref_of_method(cx, item.owner_id).is_none()
-        {
-            self.check_sig(cx, item.owner_id.def_id, sig.decl);
+        if let hir::ImplItemKind::Fn(ref sig, ..) = item.kind {
+            if trait_ref_of_method(cx, item.owner_id.def_id).is_none() {
+                self.check_sig(cx, item.owner_id.def_id, sig.decl);
+            }
         }
     }
 
@@ -132,14 +132,8 @@ impl<'tcx> MutableKeyType<'tcx> {
             )
         {
             let subst_ty = args.type_at(0);
-            if let Some(chain) = self.interior_mut.interior_mut_ty_chain(cx, subst_ty) {
-                span_lint_and_then(cx, MUTABLE_KEY_TYPE, span, "mutable key type", |diag| {
-                    for ty in chain.iter().rev() {
-                        diag.note(with_forced_trimmed_paths!(format!(
-                            "... because it contains `{ty}`, which has interior mutability"
-                        )));
-                    }
-                });
+            if self.interior_mut.is_interior_mut_ty(cx, subst_ty) {
+                span_lint(cx, MUTABLE_KEY_TYPE, span, "mutable key type");
             }
         }
     }

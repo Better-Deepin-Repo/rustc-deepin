@@ -1,12 +1,13 @@
 use clippy_utils::diagnostics::span_lint_and_sugg;
-use clippy_utils::res::MaybeDef;
 use clippy_utils::sugg::Sugg;
-use clippy_utils::{is_in_const_context, is_integer_literal, sym};
+use clippy_utils::ty::{is_type_diagnostic_item, is_type_lang_item};
+use clippy_utils::{is_in_const_context, is_integer_literal};
 use rustc_errors::Applicability;
-use rustc_hir::{Expr, ExprKind, LangItem, PrimTy, QPath, TyKind, def};
+use rustc_hir::{def, Expr, ExprKind, LangItem, PrimTy, QPath, TyKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::Ty;
 use rustc_session::declare_lint_pass;
+use rustc_span::symbol::sym;
 
 declare_clippy_lint! {
     /// ### What it does
@@ -52,7 +53,7 @@ impl<'tcx> LateLintPass<'tcx> for FromStrRadix10 {
 
             // check if the second part of the path indeed calls the associated
             // function `from_str_radix`
-            && pathseg.ident.name == sym::from_str_radix
+            && pathseg.ident.name.as_str() == "from_str_radix"
 
             // check if the first part of the path is some integer primitive
             && let TyKind::Path(ty_qpath) = &ty.kind
@@ -72,7 +73,7 @@ impl<'tcx> LateLintPass<'tcx> for FromStrRadix10 {
             };
 
             let sugg =
-                Sugg::hir_with_applicability(cx, expr, "<string>", &mut Applicability::MachineApplicable).maybe_paren();
+                Sugg::hir_with_applicability(cx, expr, "<string>", &mut Applicability::MachineApplicable).maybe_par();
 
             span_lint_and_sugg(
                 cx,
@@ -89,5 +90,5 @@ impl<'tcx> LateLintPass<'tcx> for FromStrRadix10 {
 
 /// Checks if a Ty is `String` or `&str`
 fn is_ty_stringish(cx: &LateContext<'_>, ty: Ty<'_>) -> bool {
-    ty.is_lang_item(cx, LangItem::String) || ty.peel_refs().is_str()
+    is_type_lang_item(cx, ty, LangItem::String) || is_type_diagnostic_item(cx, ty, sym::str)
 }

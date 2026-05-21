@@ -4,7 +4,7 @@
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.sse42.crc32.64.64"]
     fn crc32_64_64(crc: u64, v: u64) -> u64;
 }
@@ -17,8 +17,8 @@ unsafe extern "C" {
 #[target_feature(enable = "sse4.2")]
 #[cfg_attr(test, assert_instr(crc32))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_crc32_u64(crc: u64, v: u64) -> u64 {
-    unsafe { crc32_64_64(crc, v) }
+pub unsafe fn _mm_crc32_u64(crc: u64, v: u64) -> u64 {
+    crc32_64_64(crc, v)
 }
 
 #[cfg(test)]
@@ -28,7 +28,7 @@ mod tests {
     use stdarch_test::simd_test;
 
     #[simd_test(enable = "sse4.2")]
-    fn test_mm_crc32_u64() {
+    unsafe fn test_mm_crc32_u64() {
         let crc = 0x7819dccd3e824;
         let v = 0x2a22b845fed;
         let i = _mm_crc32_u64(crc, v);

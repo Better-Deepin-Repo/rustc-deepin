@@ -2,30 +2,28 @@ use std::char;
 use std::collections::BTreeMap;
 use std::fmt::{self, Write};
 
-use crate::{UnicodeData, fmt_list};
+use crate::{fmt_list, UnicodeData};
 
 const INDEX_MASK: u32 = 1 << 22;
 
-pub(crate) fn generate_case_mapping(data: &UnicodeData) -> (String, [usize; 2]) {
+pub(crate) fn generate_case_mapping(data: &UnicodeData) -> String {
     let mut file = String::new();
 
-    write!(file, "const INDEX_MASK: u32 = 0x{INDEX_MASK:x};").unwrap();
+    write!(file, "const INDEX_MASK: u32 = 0x{:x};", INDEX_MASK).unwrap();
     file.push_str("\n\n");
     file.push_str(HEADER.trim_start());
     file.push('\n');
-    let (lower_tables, lower_size) = generate_tables("LOWER", &data.to_lower);
-    file.push_str(&lower_tables);
+    file.push_str(&generate_tables("LOWER", &data.to_lower));
     file.push_str("\n\n");
-    let (upper_tables, upper_size) = generate_tables("UPPER", &data.to_upper);
-    file.push_str(&upper_tables);
-    (file, [lower_size, upper_size])
+    file.push_str(&generate_tables("UPPER", &data.to_upper));
+    file
 }
 
-fn generate_tables(case: &str, data: &BTreeMap<u32, [u32; 3]>) -> (String, usize) {
+fn generate_tables(case: &str, data: &BTreeMap<u32, (u32, u32, u32)>) -> String {
     let mut mappings = Vec::with_capacity(data.len());
     let mut multis = Vec::new();
 
-    for (&key, &[a, b, c]) in data.iter() {
+    for (&key, &(a, b, c)) in data.iter() {
         let key = char::from_u32(key).unwrap();
 
         if key.is_ascii() {
@@ -48,31 +46,16 @@ fn generate_tables(case: &str, data: &BTreeMap<u32, [u32; 3]>) -> (String, usize
     }
 
     let mut tables = String::new();
-    let mut size = 0;
 
-    size += size_of_val(mappings.as_slice());
-    write!(
-        tables,
-        "static {}CASE_TABLE: &[(char, u32); {}] = &[{}];",
-        case,
-        mappings.len(),
-        fmt_list(mappings),
-    )
-    .unwrap();
+    write!(tables, "static {}CASE_TABLE: &[(char, u32)] = &[{}];", case, fmt_list(mappings))
+        .unwrap();
 
     tables.push_str("\n\n");
 
-    size += size_of_val(multis.as_slice());
-    write!(
-        tables,
-        "static {}CASE_TABLE_MULTI: &[[char; 3]; {}] = &[{}];",
-        case,
-        multis.len(),
-        fmt_list(multis),
-    )
-    .unwrap();
+    write!(tables, "static {}CASE_TABLE_MULTI: &[[char; 3]] = &[{}];", case, fmt_list(multis))
+        .unwrap();
 
-    (tables, size)
+    tables
 }
 
 struct CharEscape(char);
@@ -91,8 +74,7 @@ pub fn to_lower(c: char) -> [char; 3] {
         LOWERCASE_TABLE
             .binary_search_by(|&(key, _)| key.cmp(&c))
             .map(|i| {
-                // SAFETY: i is the result of the binary search
-                let u = unsafe { LOWERCASE_TABLE.get_unchecked(i) }.1;
+                let u = LOWERCASE_TABLE[i].1;
                 char::from_u32(u).map(|c| [c, '\0', '\0']).unwrap_or_else(|| {
                     // SAFETY: Index comes from statically generated table
                     unsafe { *LOWERCASE_TABLE_MULTI.get_unchecked((u & (INDEX_MASK - 1)) as usize) }
@@ -109,8 +91,7 @@ pub fn to_upper(c: char) -> [char; 3] {
         UPPERCASE_TABLE
             .binary_search_by(|&(key, _)| key.cmp(&c))
             .map(|i| {
-                // SAFETY: i is the result of the binary search
-                let u = unsafe { UPPERCASE_TABLE.get_unchecked(i) }.1;
+                let u = UPPERCASE_TABLE[i].1;
                 char::from_u32(u).map(|c| [c, '\0', '\0']).unwrap_or_else(|| {
                     // SAFETY: Index comes from statically generated table
                     unsafe { *UPPERCASE_TABLE_MULTI.get_unchecked((u & (INDEX_MASK - 1)) as usize) }

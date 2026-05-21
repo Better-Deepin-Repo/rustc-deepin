@@ -4,5 +4,3 @@
 
 #![feature(no_core)]
 #![no_core]
-
-//~? WARN unknown and unstable feature specified for `-Ctarget-feature`: `rdrnd`

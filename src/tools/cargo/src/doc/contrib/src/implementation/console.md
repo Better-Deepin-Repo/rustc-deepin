@@ -17,21 +17,11 @@ if they are unable to be displayed. This is generally automatically handled in
 the [`JobQueue`] as it processes each message.
 
 [`Shell`]: https://github.com/rust-lang/cargo/blob/master/src/cargo/core/shell.rs
-[`GlobalContext`]: https://github.com/rust-lang/cargo/blob/master/src/cargo/util/context/mod.rs
+[`GlobalContext`]: https://github.com/rust-lang/cargo/blob/master/src/cargo/util/config/mod.rs
 [`drop_print`]: https://github.com/rust-lang/cargo/blob/e4b65bdc80f2a293447f2f6a808fa7c84bf9a357/src/cargo/util/config/mod.rs#L1820-L1848
 [`JobQueue`]: https://github.com/rust-lang/cargo/blob/master/src/cargo/core/compiler/job_queue/mod.rs
 
-## Diagnostics
-
-See rustc's [Errors and lints] for:
-- diagnostic structure
-- hard diagnostics vs lints
-- diagnostic style guide
-- lint naming
-- diagnostic levels
-- suggestion style guide
-
-### Errors
+## Errors
 
 Cargo uses [`anyhow`] for managing errors. This makes it convenient to "chain"
 errors together, so that Cargo can report how an error originated, and what it
@@ -66,4 +56,3 @@ Some guidelines for Cargo's output:
   future to be more structured.
 
 [`anyhow`]: https://docs.rs/anyhow
-[Errors and lints]: https://rustc-dev-guide.rust-lang.org/diagnostics.html

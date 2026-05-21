@@ -1,7 +1,10 @@
 //@ run-pass
 #![allow(unused_variables)]
+#![allow(stable_features)]
 
 // test that ordinary fat pointer operations work.
+
+#![feature(braced_empty_structs)]
 #![feature(rustc_attrs)]
 
 use std::sync::atomic;

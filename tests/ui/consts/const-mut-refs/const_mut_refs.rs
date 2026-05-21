@@ -1,4 +1,5 @@
 //@ check-pass
+#![feature(const_mut_refs)]
 
 use std::sync::Mutex;
 

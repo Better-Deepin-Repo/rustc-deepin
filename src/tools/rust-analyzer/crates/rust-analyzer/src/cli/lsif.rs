@@ -4,16 +4,14 @@ use std::env;
 use std::time::Instant;
 
 use ide::{
-    Analysis, AnalysisHost, FileId, FileRange, MonikerKind, MonikerResult, PackageInformation,
-    RootDatabase, StaticIndex, StaticIndexedFile, TokenId, TokenStaticData,
-    VendoredLibrariesConfig,
+    Analysis, AnalysisHost, FileId, FileRange, MonikerKind, PackageInformation, RootDatabase,
+    StaticIndex, StaticIndexedFile, TokenId, TokenStaticData, VendoredLibrariesConfig,
 };
-use ide_db::{LineIndexDatabase, line_index::WideEncoding};
-use load_cargo::{LoadCargoConfig, ProcMacroServerChoice, load_workspace};
+use ide_db::{line_index::WideEncoding, LineIndexDatabase};
+use load_cargo::{load_workspace, LoadCargoConfig, ProcMacroServerChoice};
 use lsp_types::lsif;
 use project_model::{CargoConfig, ProjectManifest, ProjectWorkspace, RustLibSource};
 use rustc_hash::FxHashMap;
-use stdx::format_to;
 use vfs::{AbsPathBuf, Vfs};
 
 use crate::{
@@ -23,7 +21,7 @@ use crate::{
     version::version,
 };
 
-struct LsifManager<'a, 'w> {
+struct LsifManager<'a> {
     count: i32,
     token_map: FxHashMap<TokenId, Id>,
     range_map: FxHashMap<FileRange, Id>,
@@ -32,7 +30,6 @@ struct LsifManager<'a, 'w> {
     analysis: &'a Analysis,
     db: &'a RootDatabase,
     vfs: &'a Vfs,
-    out: &'w mut dyn std::io::Write,
 }
 
 #[derive(Clone, Copy)]
@@ -44,13 +41,8 @@ impl From<Id> for lsp_types::NumberOrString {
     }
 }
 
-impl LsifManager<'_, '_> {
-    fn new<'a, 'w>(
-        analysis: &'a Analysis,
-        db: &'a RootDatabase,
-        vfs: &'a Vfs,
-        out: &'w mut dyn std::io::Write,
-    ) -> LsifManager<'a, 'w> {
+impl LsifManager<'_> {
+    fn new<'a>(analysis: &'a Analysis, db: &'a RootDatabase, vfs: &'a Vfs) -> LsifManager<'a> {
         LsifManager {
             count: 0,
             token_map: FxHashMap::default(),
@@ -60,7 +52,6 @@ impl LsifManager<'_, '_> {
             analysis,
             db,
             vfs,
-            out,
         }
     }
 
@@ -79,8 +70,9 @@ impl LsifManager<'_, '_> {
         self.add(lsif::Element::Edge(edge))
     }
 
-    fn emit(&mut self, data: &str) {
-        format_to!(self.out, "{data}\n");
+    // FIXME: support file in addition to stdout here
+    fn emit(&self, data: &str) {
+        println!("{data}");
     }
 
     fn get_token_id(&mut self, id: TokenId) -> Id {
@@ -168,7 +160,7 @@ impl LsifManager<'_, '_> {
                 out_v: result_set_id.into(),
             }));
         }
-        if let Some(MonikerResult::Moniker(moniker)) = token.moniker {
+        if let Some(moniker) = token.moniker {
             let package_id = self.get_package_id(moniker.package_information);
             let moniker_id = self.add_vertex(lsif::Vertex::Moniker(lsp_types::Moniker {
                 scheme: "rust-analyzer".to_owned(),
@@ -280,24 +272,19 @@ impl LsifManager<'_, '_> {
 }
 
 impl flags::Lsif {
-    pub fn run(
-        self,
-        out: &mut dyn std::io::Write,
-        sysroot: Option<RustLibSource>,
-    ) -> anyhow::Result<()> {
+    pub fn run(self) -> anyhow::Result<()> {
+        eprintln!("Generating LSIF started...");
         let now = Instant::now();
         let cargo_config =
-            &CargoConfig { sysroot, all_targets: true, set_test: true, ..Default::default() };
+            &CargoConfig { sysroot: Some(RustLibSource::Discover), ..Default::default() };
         let no_progress = &|_| ();
         let load_cargo_config = LoadCargoConfig {
             load_out_dirs_from_check: true,
             with_proc_macro_server: ProcMacroServerChoice::Sysroot,
             prefill_caches: false,
-            proc_macro_processes: 1,
         };
         let path = AbsPathBuf::assert_utf8(env::current_dir()?.join(self.path));
         let root = ProjectManifest::discover_single(&path)?;
-        eprintln!("Generating LSIF for project at {root}");
         let mut workspace = ProjectWorkspace::load(root, cargo_config, no_progress)?;
 
         let build_scripts = workspace.run_build_scripts(cargo_config, no_progress)?;
@@ -317,7 +304,7 @@ impl flags::Lsif {
 
         let si = StaticIndex::compute(&analysis, vendored_libs_config);
 
-        let mut lsif = LsifManager::new(&analysis, db, &vfs, out);
+        let mut lsif = LsifManager::new(&analysis, db, &vfs);
         lsif.add_vertex(lsif::Vertex::MetaData(lsif::MetaData {
             version: String::from("0.5.0"),
             project_root: lsp_types::Url::from_file_path(path).unwrap(),

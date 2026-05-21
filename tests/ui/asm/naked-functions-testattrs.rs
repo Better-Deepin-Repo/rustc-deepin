@@ -1,37 +1,39 @@
 //@ needs-asm-support
 //@ compile-flags: --test
 
+#![allow(undefined_naked_function_abi)]
+#![feature(naked_functions)]
 #![feature(test)]
 #![crate_type = "lib"]
 
-use std::arch::naked_asm;
+use std::arch::asm;
 
 #[test]
-#[unsafe(naked)]
+#[naked]
 //~^ ERROR [E0736]
-extern "C" fn test_naked() {
-    naked_asm!("")
+fn test_naked() {
+    unsafe { asm!("", options(noreturn)) };
 }
 
 #[should_panic]
 #[test]
-#[unsafe(naked)]
+#[naked]
 //~^ ERROR [E0736]
-extern "C" fn test_naked_should_panic() {
-    naked_asm!("")
+fn test_naked_should_panic() {
+    unsafe { asm!("", options(noreturn)) };
 }
 
 #[ignore]
 #[test]
-#[unsafe(naked)]
+#[naked]
 //~^ ERROR [E0736]
-extern "C" fn test_naked_ignore() {
-    naked_asm!("")
+fn test_naked_ignore() {
+    unsafe { asm!("", options(noreturn)) };
 }
 
 #[bench]
-#[unsafe(naked)]
+#[naked]
 //~^ ERROR [E0736]
-extern "C" fn bench_naked() {
-    naked_asm!("")
+fn bench_naked() {
+    unsafe { asm!("", options(noreturn)) };
 }

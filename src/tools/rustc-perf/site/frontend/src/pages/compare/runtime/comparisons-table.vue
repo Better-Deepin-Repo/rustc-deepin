@@ -50,7 +50,6 @@ const unit = computed(() => {
     <table v-else class="benches compare">
       <thead>
         <tr>
-          <th class="toggle-arrow"></th>
           <th>Benchmark</th>
           <th>% Change</th>
           <th>

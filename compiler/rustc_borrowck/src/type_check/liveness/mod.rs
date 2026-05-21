@@ -1,21 +1,25 @@
+use std::rc::Rc;
+
 use itertools::{Either, Itertools};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_middle::mir::visit::{TyContext, Visitor};
 use rustc_middle::mir::{Body, Local, Location, SourceInfo};
 use rustc_middle::span_bug;
-use rustc_middle::ty::relate::Relate;
-use rustc_middle::ty::{GenericArgsRef, Region, RegionVid, Ty, TyCtxt, TypeVisitable};
+use rustc_middle::ty::visit::TypeVisitable;
+use rustc_middle::ty::{GenericArgsRef, Region, RegionVid, Ty, TyCtxt};
+use rustc_mir_dataflow::impls::MaybeInitializedPlaces;
 use rustc_mir_dataflow::move_paths::MoveData;
 use rustc_mir_dataflow::points::DenseLocationMap;
+use rustc_mir_dataflow::ResultsCursor;
 use tracing::debug;
 
 use super::TypeChecker;
 use crate::constraints::OutlivesConstraintSet;
-use crate::polonius::PoloniusContext;
 use crate::region_infer::values::LivenessValues;
 use crate::universal_regions::UniversalRegions;
 
 mod local_use_map;
+mod polonius;
 mod trace;
 
 /// Combines liveness analysis with initialization analysis to
@@ -26,45 +30,41 @@ mod trace;
 ///
 /// N.B., this computation requires normalization; therefore, it must be
 /// performed before
-pub(super) fn generate<'tcx>(
+pub(super) fn generate<'mir, 'tcx>(
     typeck: &mut TypeChecker<'_, 'tcx>,
-    location_map: &DenseLocationMap,
+    body: &Body<'tcx>,
+    elements: &Rc<DenseLocationMap>,
+    flow_inits: &mut ResultsCursor<'mir, 'tcx, MaybeInitializedPlaces<'_, 'mir, 'tcx>>,
     move_data: &MoveData<'tcx>,
 ) {
     debug!("liveness::generate");
 
-    let mut free_regions = regions_that_outlive_free_regions(
+    let free_regions = regions_that_outlive_free_regions(
         typeck.infcx.num_region_vars(),
-        &typeck.universal_regions,
-        &typeck.constraints.outlives_constraints,
+        typeck.borrowck_context.universal_regions,
+        &typeck.borrowck_context.constraints.outlives_constraints,
     );
-
-    // NLLs can avoid computing some liveness data here because its constraints are
-    // location-insensitive, but that doesn't work in polonius: locals whose type contains a region
-    // that outlives a free region are not necessarily live everywhere in a flow-sensitive setting,
-    // unlike NLLs.
-    // We do record these regions in the polonius context, since they're used to differentiate
-    // relevant and boring locals, which is a key distinction used later in diagnostics.
-    if typeck.tcx().sess.opts.unstable_opts.polonius.is_next_enabled() {
-        let (_, boring_locals) =
-            compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
-        typeck.polonius_context.as_mut().unwrap().boring_nll_locals =
-            boring_locals.into_iter().collect();
-        free_regions = typeck.universal_regions.universal_regions_iter().collect();
-    }
     let (relevant_live_locals, boring_locals) =
-        compute_relevant_live_locals(typeck.tcx(), &free_regions, typeck.body);
+        compute_relevant_live_locals(typeck.tcx(), &free_regions, body);
 
-    trace::trace(typeck, location_map, move_data, relevant_live_locals, boring_locals);
+    polonius::populate_access_facts(typeck, body, move_data);
+
+    trace::trace(
+        typeck,
+        body,
+        elements,
+        flow_inits,
+        move_data,
+        relevant_live_locals,
+        boring_locals,
+    );
 
     // Mark regions that should be live where they appear within rvalues or within a call: like
     // args, regions, and types.
     record_regular_live_regions(
         typeck.tcx(),
-        &mut typeck.constraints.liveness_constraints,
-        &typeck.universal_regions,
-        &mut typeck.polonius_context,
-        typeck.body,
+        &mut typeck.borrowck_context.constraints.liveness_constraints,
+        body,
     );
 }
 
@@ -113,7 +113,7 @@ fn regions_that_outlive_free_regions<'tcx>(
     let rev_region_graph = rev_constraint_graph.region_graph(constraint_set, fr_static);
 
     // Stack for the depth-first search. Start out with all the free regions.
-    let mut stack: Vec<_> = universal_regions.universal_regions_iter().collect();
+    let mut stack: Vec<_> = universal_regions.universal_regions().collect();
 
     // Set of all free regions, plus anything that outlives them. Initially
     // just contains the free regions.
@@ -139,26 +139,21 @@ fn regions_that_outlive_free_regions<'tcx>(
 fn record_regular_live_regions<'tcx>(
     tcx: TyCtxt<'tcx>,
     liveness_constraints: &mut LivenessValues,
-    universal_regions: &UniversalRegions<'tcx>,
-    polonius_context: &mut Option<PoloniusContext>,
     body: &Body<'tcx>,
 ) {
-    let mut visitor =
-        LiveVariablesVisitor { tcx, liveness_constraints, universal_regions, polonius_context };
+    let mut visitor = LiveVariablesVisitor { tcx, liveness_constraints };
     for (bb, data) in body.basic_blocks.iter_enumerated() {
         visitor.visit_basic_block_data(bb, data);
     }
 }
 
 /// Visitor looking for regions that should be live within rvalues or calls.
-struct LiveVariablesVisitor<'a, 'tcx> {
+struct LiveVariablesVisitor<'cx, 'tcx> {
     tcx: TyCtxt<'tcx>,
-    liveness_constraints: &'a mut LivenessValues,
-    universal_regions: &'a UniversalRegions<'tcx>,
-    polonius_context: &'a mut Option<PoloniusContext>,
+    liveness_constraints: &'cx mut LivenessValues,
 }
 
-impl<'a, 'tcx> Visitor<'tcx> for LiveVariablesVisitor<'a, 'tcx> {
+impl<'cx, 'tcx> Visitor<'tcx> for LiveVariablesVisitor<'cx, 'tcx> {
     /// We sometimes have `args` within an rvalue, or within a
     /// call. Make them live at the location where they appear.
     fn visit_args(&mut self, args: &GenericArgsRef<'tcx>, location: Location) {
@@ -193,22 +188,17 @@ impl<'a, 'tcx> Visitor<'tcx> for LiveVariablesVisitor<'a, 'tcx> {
     }
 }
 
-impl<'a, 'tcx> LiveVariablesVisitor<'a, 'tcx> {
+impl<'cx, 'tcx> LiveVariablesVisitor<'cx, 'tcx> {
     /// Some variable is "regular live" at `location` -- i.e., it may be used later. This means that
     /// all regions appearing in the type of `value` must be live at `location`.
     fn record_regions_live_at<T>(&mut self, value: T, location: Location)
     where
-        T: TypeVisitable<TyCtxt<'tcx>> + Relate<TyCtxt<'tcx>>,
+        T: TypeVisitable<TyCtxt<'tcx>>,
     {
         debug!("record_regions_live_at(value={:?}, location={:?})", value, location);
         self.tcx.for_each_free_region(&value, |live_region| {
             let live_region_vid = live_region.as_var();
             self.liveness_constraints.add_location(live_region_vid, location);
         });
-
-        // When using `-Zpolonius=next`, we record the variance of each live region.
-        if let Some(polonius_context) = self.polonius_context {
-            polonius_context.record_live_region_variance(self.tcx, self.universal_regions, value);
-        }
     }
 }

@@ -7,7 +7,7 @@ fn foo() {
         const {
             let awd = ();
             let _: &'a () = &awd;
-            //~^ ERROR `awd` does not live long enough
+            //~^ `awd` does not live long enough
         };
         b
     };

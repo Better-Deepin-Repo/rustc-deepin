@@ -1,4 +1,3 @@
-//@ ignore-backends: gcc
 //@ compile-flags: -C lto=thin
 //@ aux-build:lto-rustc-loads-linker-plugin.rs
 //@ run-pass

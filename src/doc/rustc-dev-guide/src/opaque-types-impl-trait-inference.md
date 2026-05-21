@@ -5,7 +5,7 @@ This kind of type inference is particularly complex because,
 unlike other kinds of type inference,
 it can work across functions and function bodies.
 
-[hidden type]: ./borrow-check/region-inference/member-constraints.html?highlight=%22hidden%20type%22#member-constraints
+[hidden type]: ./borrow_check/region_inference/member_constraints.html?highlight=%22hidden%20type%22#member-constraints
 [opaque type]: ./opaque-types-type-alias-impl-trait.md
 
 ## Running example
@@ -13,16 +13,13 @@ it can work across functions and function bodies.
 To help explain how it works, let's consider an example.
 
 ```rust
-#![feature(type_alias_impl_trait)]
 mod m {
     pub type Seq<T> = impl IntoIterator<Item = T>;
 
-    #[define_opaque(Seq)]
     pub fn produce_singleton<T>(t: T) -> Seq<T> {
         vec![t]
     }
 
-    #[define_opaque(Seq)]
     pub fn produce_doubleton<T>(t: T, u: T) -> Seq<T> {
         vec![t, u]
     }
@@ -58,7 +55,7 @@ which is provable from the bounds declared on `Seq<T>`.
 
 Let's start by looking what happens when we type-check `main`.
 Initially we invoke `produce_singleton` and the return type is an opaque type
-[`OpaqueTy`](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_hir/hir/enum.ItemKind.html#variant.OpaqueTy).
+[`OpaqueTy`](https://doc.rust-lang.org/nightly/nightly-rustc/rustc_hir/enum.ItemKind.html#variant.OpaqueTy).
 
 #### Type-checking the for loop
 
@@ -81,7 +78,7 @@ If that fails, we reveal the hidden type of the opaque type,
 but only to prove this specific trait bound, not in general.
 Revealing is done by invoking the `type_of` query on the `DefId` of the opaque type.
 The query will internally request the hidden types from the defining function(s)
-and return that (see [the section on `type_of`](#within-the-type_of-query) for more details).
+and return that (see [the section on `type_of`](#Within-the-type_of-query) for more details).
 
 #### Flowchart of type checking steps
 

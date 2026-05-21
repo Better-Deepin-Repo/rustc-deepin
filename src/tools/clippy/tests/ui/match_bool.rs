@@ -1,24 +1,24 @@
+//@no-rustfix: overlapping suggestions
 #![deny(clippy::match_bool)]
-#![allow(clippy::nonminimal_bool, clippy::eq_op)]
 
 fn match_bool() {
     let test: bool = true;
 
     match test {
-        //~^ match_bool
+        //~^ ERROR: you seem to be trying to match on a boolean expression
         true => 0,
         false => 42,
     };
 
     let option = 1;
     match option == 1 {
-        //~^ match_bool
+        //~^ ERROR: you seem to be trying to match on a boolean expression
         true => 1,
         false => 0,
     };
 
     match test {
-        //~^ match_bool
+        //~^ ERROR: you seem to be trying to match on a boolean expression
         true => (),
         false => {
             println!("Noooo!");
@@ -26,7 +26,7 @@ fn match_bool() {
     };
 
     match test {
-        //~^ match_bool
+        //~^ ERROR: you seem to be trying to match on a boolean expression
         false => {
             println!("Noooo!");
         },
@@ -34,7 +34,11 @@ fn match_bool() {
     };
 
     match test && test {
-        //~^ match_bool
+        //~^ ERROR: this boolean expression can be simplified
+        //~| NOTE: `-D clippy::nonminimal-bool` implied by `-D warnings`
+        //~| ERROR: you seem to be trying to match on a boolean expression
+        //~| ERROR: equal expressions as operands to `&&`
+        //~| NOTE: `#[deny(clippy::eq_op)]` on by default
         false => {
             println!("Noooo!");
         },
@@ -42,7 +46,7 @@ fn match_bool() {
     };
 
     match test {
-        //~^ match_bool
+        //~^ ERROR: you seem to be trying to match on a boolean expression
         false => {
             println!("Noooo!");
         },
@@ -64,80 +68,6 @@ fn match_bool() {
         true if option == 5 => 10,
         true => 0,
         false => 1,
-    };
-
-    let _ = match test {
-        //~^ match_bool
-        true if option == 5 => 10,
-        _ => 1,
-    };
-
-    let _ = match test {
-        //~^ match_bool
-        false if option == 5 => 10,
-        _ => 1,
-    };
-
-    match test {
-        //~^ match_bool
-        true if option == 5 => println!("Hello"),
-        _ => (),
-    };
-
-    match test {
-        //~^ match_bool
-        true if option == 5 => (),
-        _ => println!("Hello"),
-    };
-
-    match test {
-        //~^ match_bool
-        false if option == 5 => println!("Hello"),
-        _ => (),
-    };
-
-    match test {
-        //~^ match_bool
-        false if option == 5 => (),
-        _ => println!("Hello"),
-    };
-}
-
-fn issue14099() {
-    match true {
-        //~^ match_bool
-        true => 'a: {
-            break 'a;
-        },
-        _ => (),
-    }
-}
-
-fn issue15351() {
-    let mut d = false;
-    match d {
-        false => println!("foo"),
-        ref mut d => *d = false,
-    }
-
-    match d {
-        false => println!("foo"),
-        e => println!("{e}"),
-    }
-}
-
-fn wrongly_unmangled_macros() {
-    macro_rules! test_expr {
-        ($val:expr) => {
-            ($val + 1) > 0
-        };
-    }
-
-    let x = 5;
-    match test_expr!(x) {
-        //~^ match_bool
-        true => 1,
-        false => 0,
     };
 }
 

@@ -10,9 +10,6 @@
     clippy::needless_lifetimes,
     clippy::missing_transmute_annotations
 )]
-#![allow(incomplete_features)]
-#![feature(adt_const_params)]
-#![feature(unsized_const_params)]
 
 #[macro_use]
 extern crate proc_macro_derive;
@@ -24,22 +21,16 @@ mod use_self {
 
     impl Foo {
         fn new() -> Foo {
-            //~^ use_self
             Foo {}
-            //~^ use_self
         }
         fn test() -> Foo {
-            //~^ use_self
             Foo::new()
-            //~^ use_self
         }
     }
 
     impl Default for Foo {
         fn default() -> Foo {
-            //~^ use_self
             Foo::new()
-            //~^ use_self
         }
     }
 }
@@ -72,7 +63,7 @@ mod lifetimes {
     impl<'a> Foo<'a> {
         // Cannot use `Self` as return type, because the function is actually `fn foo<'b>(s: &'b str) ->
         // Foo<'b>`
-        fn foo(s: &str) -> Foo<'_> {
+        fn foo(s: &str) -> Foo {
             Foo { foo_str: s }
         }
         // cannot replace with `Self`, because that's `Foo<'a>`
@@ -81,7 +72,6 @@ mod lifetimes {
         }
 
         fn clone(&self) -> Foo<'a> {
-            //~^ use_self
             Foo { foo_str: self.foo_str }
         }
 
@@ -115,8 +105,6 @@ mod existential {
 
     impl Foo {
         fn bad(foos: &[Foo]) -> impl Iterator<Item = &Foo> {
-            //~^ use_self
-            //~| use_self
             foos.iter()
         }
 
@@ -132,7 +120,6 @@ mod tuple_structs {
     impl TS {
         pub fn ts() -> Self {
             TS(0)
-            //~^ use_self
         }
     }
 }
@@ -168,9 +155,7 @@ mod nesting {
 
             impl Bar {
                 fn bar() -> Bar {
-                    //~^ use_self
                     Bar { foo: Foo {} }
-                    //~^ use_self
                 }
             }
 
@@ -182,9 +167,7 @@ mod nesting {
 
         // Should lint here
         fn baz() -> Foo {
-            //~^ use_self
             Foo {}
-            //~^ use_self
         }
     }
 
@@ -202,11 +185,8 @@ mod nesting {
 
         fn method2() {
             let _ = Enum::B(42);
-            //~^ use_self
             let _ = Enum::C { field: true };
-            //~^ use_self
             let _ = Enum::A;
-            //~^ use_self
         }
     }
 }
@@ -249,12 +229,9 @@ mod rustfix {
 
         fn fun_2() {
             nested::A::fun_1();
-            //~^ use_self
             nested::A::A;
-            //~^ use_self
 
             nested::A {};
-            //~^ use_self
         }
     }
 }
@@ -274,7 +251,6 @@ mod issue3567 {
     impl Test for TestStruct {
         fn test() -> TestStruct {
             TestStruct::from_something()
-            //~^ use_self
         }
     }
 }
@@ -289,15 +265,11 @@ mod paths_created_by_lowering {
         const B: usize = 1;
 
         async fn g() -> S {
-            //~^ use_self
             S {}
-            //~^ use_self
         }
 
         fn f<'a>(&self, p: &'a [u8]) -> &'a [u8] {
             &p[S::A..S::B]
-            //~^ use_self
-            //~| use_self
         }
     }
 
@@ -321,9 +293,7 @@ mod generics {
     impl<T> Foo<T> {
         // `Self` is applicable here
         fn foo(value: T) -> Foo<T> {
-            //~^ use_self
             Foo::<T> { value }
-            //~^ use_self
         }
 
         // `Cannot` use `Self` as a return type as the generic types are different
@@ -496,7 +466,6 @@ mod nested_paths {
     impl A<submod::C> {
         fn test() -> Self {
             A::new::<submod::B>(submod::B {})
-            //~^ use_self
         }
     }
 }
@@ -534,7 +503,6 @@ mod issue7206 {
     impl<'a> S2<S<'a>> {
         fn new_again() -> Self {
             S2::new()
-            // FIXME: ^Broken by PR #15611
         }
     }
 }
@@ -572,16 +540,13 @@ mod use_self_in_pat {
         fn do_stuff(self) {
             match self {
                 Foo::Bar => unimplemented!(),
-                //~^ use_self
                 Foo::Baz => unimplemented!(),
-                //~^ use_self
             }
             match Some(1) {
                 Some(_) => unimplemented!(),
                 None => unimplemented!(),
             }
             if let Foo::Bar = self {
-                //~^ use_self
                 unimplemented!()
             }
         }
@@ -606,22 +571,16 @@ mod issue8845 {
         fn get_value(&self) -> u8 {
             match self {
                 Something::Num(n) => *n,
-                //~^ use_self
                 Something::TupleNums(n, _m) => *n,
-                //~^ use_self
                 Something::StructNums { one, two: _ } => *one,
-                //~^ use_self
             }
         }
 
         fn use_crate(&self) -> u8 {
             match self {
                 crate::issue8845::Something::Num(n) => *n,
-                //~^ use_self
                 crate::issue8845::Something::TupleNums(n, _m) => *n,
-                //~^ use_self
                 crate::issue8845::Something::StructNums { one, two: _ } => *one,
-                //~^ use_self
             }
         }
 
@@ -638,13 +597,11 @@ mod issue8845 {
     impl Foo {
         fn get_value(&self) -> u8 {
             let Foo(x) = self;
-            //~^ use_self
             *x
         }
 
         fn use_crate(&self) -> u8 {
             let crate::issue8845::Foo(x) = self;
-            //~^ use_self
             *x
         }
     }
@@ -652,13 +609,11 @@ mod issue8845 {
     impl Bar {
         fn get_value(&self) -> u8 {
             let Bar { x, .. } = self;
-            //~^ use_self
             *x
         }
 
         fn use_crate(&self) -> u8 {
             let crate::issue8845::Bar { x, .. } = self;
-            //~^ use_self
             *x
         }
     }
@@ -698,7 +653,6 @@ fn msrv_1_37() {
         fn foo(self) {
             match self {
                 E::A => {},
-                //~^ use_self
             }
         }
     }
@@ -709,87 +663,6 @@ mod issue_10371 {
 
     impl<const V: i32> From<Val<V>> for i32 {
         fn from(_: Val<V>) -> Self {
-            todo!()
-        }
-    }
-}
-
-mod issue_13092 {
-    use std::cell::RefCell;
-    macro_rules! macro_inner_item {
-        ($ty:ty) => {
-            fn foo(_: $ty) {
-                fn inner(_: $ty) {}
-            }
-        };
-    }
-
-    #[derive(Default)]
-    struct MyStruct;
-
-    impl MyStruct {
-        macro_inner_item!(MyStruct);
-    }
-
-    impl MyStruct {
-        thread_local! {
-            static SPECIAL: RefCell<MyStruct> = RefCell::default();
-        }
-    }
-}
-
-mod crash_check_13128 {
-    struct A;
-
-    impl A {
-        fn a() {
-            struct B;
-
-            // pushes a NoCheck
-            impl Iterator for &B {
-                // Pops the NoCheck
-                type Item = A;
-
-                // Lints A -> Self
-                fn next(&mut self) -> Option<A> {
-                    Some(A)
-                }
-            }
-        }
-    }
-}
-
-mod issue_13277 {
-    trait Foo {
-        type Item<'foo>;
-    }
-    struct Bar<'b> {
-        content: &'b str,
-    }
-    impl<'b> Foo for Option<Bar<'b>> {
-        // when checking whether `Option<Bar<'foo>>` has a lifetime, check not only the outer
-        // `Option<T>`, but also the inner `Bar<'foo>`
-        type Item<'foo> = Option<Bar<'foo>>;
-    }
-}
-
-mod issue16164 {
-    trait Bits {
-        fn bit<const I: u8>(self) -> bool;
-    }
-
-    impl Bits for u8 {
-        fn bit<const I: u8>(self) -> bool {
-            todo!()
-        }
-    }
-
-    trait T {
-        fn f<const C: (u8, u8)>(self) -> bool;
-    }
-
-    impl T for u8 {
-        fn f<const C: (u8, u8)>(self) -> bool {
             todo!()
         }
     }

@@ -1,10 +1,10 @@
 use super::MISSING_SPIN_LOOP;
 use clippy_utils::diagnostics::span_lint_and_sugg;
-use clippy_utils::res::MaybeDef;
-use clippy_utils::std_or_core;
+use clippy_utils::is_no_std_crate;
 use rustc_errors::Applicability;
 use rustc_hir::{Block, Expr, ExprKind};
 use rustc_lint::LateContext;
+use rustc_middle::ty;
 use rustc_span::sym;
 
 fn unpack_cond<'tcx>(cond: &'tcx Expr<'tcx>) -> &'tcx Expr<'tcx> {
@@ -39,9 +39,8 @@ pub(super) fn check<'tcx>(cx: &LateContext<'tcx>, cond: &'tcx Expr<'_>, body: &'
     ) = body.kind
         && let ExprKind::MethodCall(method, callee, ..) = unpack_cond(cond).kind
         && [sym::load, sym::compare_exchange, sym::compare_exchange_weak].contains(&method.ident.name)
-        && let callee_ty = cx.typeck_results().expr_ty(callee)
-        && callee_ty.is_diag_item(cx, sym::AtomicBool)
-        && let Some(std_or_core) = std_or_core(cx)
+        && let ty::Adt(def, _args) = cx.typeck_results().expr_ty(callee).kind()
+        && cx.tcx.is_diagnostic_item(sym::AtomicBool, def.did())
     {
         span_lint_and_sugg(
             cx,
@@ -49,7 +48,12 @@ pub(super) fn check<'tcx>(cx: &LateContext<'tcx>, cond: &'tcx Expr<'_>, body: &'
             body.span,
             "busy-waiting loop should at least have a spin loop hint",
             "try",
-            format!("{{ {std_or_core}::hint::spin_loop() }}"),
+            (if is_no_std_crate(cx) {
+                "{ core::hint::spin_loop() }"
+            } else {
+                "{ std::hint::spin_loop() }"
+            })
+            .into(),
             Applicability::MachineApplicable,
         );
     }

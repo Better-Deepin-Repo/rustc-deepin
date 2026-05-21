@@ -13,10 +13,12 @@ macro_rules! deref_lhs {
         where
             T: SimdElement,
             $simd: $trait<$simd, Output = $simd>,
+            LaneCount<N>: SupportedLaneCount,
         {
             type Output = Simd<T, N>;
 
             #[inline]
+            #[must_use = "operator returns a new vector without mutating the inputs"]
             fn $call(self, rhs: $simd) -> Self::Output {
                 (*self).$call(rhs)
             }
@@ -32,10 +34,12 @@ macro_rules! deref_rhs {
         where
             T: SimdElement,
             $simd: $trait<$simd, Output = $simd>,
+            LaneCount<N>: SupportedLaneCount,
         {
             type Output = Simd<T, N>;
 
             #[inline]
+            #[must_use = "operator returns a new vector without mutating the inputs"]
             fn $call(self, rhs: &$simd) -> Self::Output {
                 self.$call(*rhs)
             }
@@ -62,10 +66,12 @@ macro_rules! deref_ops {
             where
                 T: SimdElement,
                 $simd: $trait<$simd, Output = $simd>,
+                LaneCount<N>: SupportedLaneCount,
             {
                 type Output = $simd;
 
                 #[inline]
+                #[must_use = "operator returns a new vector without mutating the inputs"]
                 fn $call(self, rhs: &'rhs $simd) -> Self::Output {
                     (*self).$call(*rhs)
                 }

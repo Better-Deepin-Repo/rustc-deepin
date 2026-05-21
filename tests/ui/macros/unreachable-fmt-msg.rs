@@ -1,6 +1,6 @@
 //@ run-fail
 //@ error-pattern:internal error: entered unreachable code: 6 is not prime
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 fn main() {
     unreachable!("{} is not {}", 6u32, "prime");

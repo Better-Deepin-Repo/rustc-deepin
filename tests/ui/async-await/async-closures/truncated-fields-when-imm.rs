@@ -1,6 +1,8 @@
 //@ edition: 2021
 //@ check-pass
 
+#![feature(async_closure)]
+
 pub struct Struct {
     pub path: String,
 }

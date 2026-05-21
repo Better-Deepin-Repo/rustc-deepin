@@ -13,6 +13,6 @@ pub mod a {
 pub mod b {
     #[no_mangle]
     pub extern "C" fn fail() {
-    //~^ ERROR symbol `fail` is already defined
+    //~^ symbol `fail` is already defined
     }
 }

@@ -1,5 +1,6 @@
 // tidy-alphabetical-start
-#![cfg_attr(test, feature(test))]
+#![allow(unused_variables)]
+#![feature(alloc_layout_extra)]
 #![feature(never_type)]
 // tidy-alphabetical-end
 
@@ -19,29 +20,23 @@ pub struct Assume {
 /// Either transmutation is allowed, we have an error, or we have an optional
 /// Condition that must hold.
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
-pub enum Answer<R, T> {
+pub enum Answer<R> {
     Yes,
-    No(Reason<T>),
-    If(Condition<R, T>),
+    No(Reason<R>),
+    If(Condition<R>),
 }
 
 /// A condition which must hold for safe transmutation to be possible.
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
-pub enum Condition<R, T> {
+pub enum Condition<R> {
     /// `Src` is transmutable into `Dst`, if `src` is transmutable into `dst`.
-    Transmutable { src: T, dst: T },
-
-    /// The region `long` must outlive `short`.
-    Outlives { long: R, short: R },
-
-    /// The `ty` is immutable.
-    Immutable { ty: T },
+    IfTransmutable { src: R, dst: R },
 
     /// `Src` is transmutable into `Dst`, if all of the enclosed requirements are met.
-    IfAll(Vec<Condition<R, T>>),
+    IfAll(Vec<Condition<R>>),
 
     /// `Src` is transmutable into `Dst` if any of the enclosed requirements are met.
-    IfAny(Vec<Condition<R, T>>),
+    IfAny(Vec<Condition<R>>),
 }
 
 /// Answers "why wasn't the source type transmutable into the destination type?"
@@ -59,16 +54,12 @@ pub enum Reason<T> {
     DstMayHaveSafetyInvariants,
     /// `Dst` is larger than `Src`, and the excess bytes were not exclusively uninitialized.
     DstIsTooBig,
-    /// `Dst` is larger `Src`.
+    /// A referent of `Dst` is larger than a referent in `Src`.
     DstRefIsTooBig {
         /// The referent of the source type.
         src: T,
-        /// The size of the source type's referent.
-        src_size: usize,
         /// The too-large referent of the destination type.
         dst: T,
-        /// The size of the destination type's referent.
-        dst_size: usize,
     },
     /// Src should have a stricter alignment than Dst, but it does not.
     DstHasStricterAlignment { src_min_align: usize, dst_min_align: usize },
@@ -89,54 +80,89 @@ pub enum Reason<T> {
 #[cfg(feature = "rustc")]
 mod rustc {
     use rustc_hir::lang_items::LangItem;
-    use rustc_middle::ty::{Const, Region, Ty, TyCtxt};
+    use rustc_infer::infer::InferCtxt;
+    use rustc_macros::TypeVisitable;
+    use rustc_middle::traits::ObligationCause;
+    use rustc_middle::ty::{Const, ParamEnv, Ty, TyCtxt, ValTree};
+    use rustc_span::DUMMY_SP;
 
     use super::*;
 
-    pub struct TransmuteTypeEnv<'tcx> {
-        tcx: TyCtxt<'tcx>,
+    /// The source and destination types of a transmutation.
+    #[derive(TypeVisitable, Debug, Clone, Copy)]
+    pub struct Types<'tcx> {
+        /// The source type.
+        pub src: Ty<'tcx>,
+        /// The destination type.
+        pub dst: Ty<'tcx>,
     }
 
-    impl<'tcx> TransmuteTypeEnv<'tcx> {
-        pub fn new(tcx: TyCtxt<'tcx>) -> Self {
-            Self { tcx }
+    pub struct TransmuteTypeEnv<'cx, 'tcx> {
+        infcx: &'cx InferCtxt<'tcx>,
+    }
+
+    impl<'cx, 'tcx> TransmuteTypeEnv<'cx, 'tcx> {
+        pub fn new(infcx: &'cx InferCtxt<'tcx>) -> Self {
+            Self { infcx }
         }
 
+        #[allow(unused)]
         pub fn is_transmutable(
             &mut self,
-            src: Ty<'tcx>,
-            dst: Ty<'tcx>,
+            cause: ObligationCause<'tcx>,
+            types: Types<'tcx>,
             assume: crate::Assume,
-        ) -> crate::Answer<Region<'tcx>, Ty<'tcx>> {
-            crate::maybe_transmutable::MaybeTransmutableQuery::new(src, dst, assume, self.tcx)
-                .answer()
+        ) -> crate::Answer<crate::layout::rustc::Ref<'tcx>> {
+            crate::maybe_transmutable::MaybeTransmutableQuery::new(
+                types.src,
+                types.dst,
+                assume,
+                self.infcx.tcx,
+            )
+            .answer()
         }
     }
 
     impl Assume {
         /// Constructs an `Assume` from a given const-`Assume`.
-        pub fn from_const<'tcx>(tcx: TyCtxt<'tcx>, ct: Const<'tcx>) -> Option<Self> {
+        pub fn from_const<'tcx>(
+            tcx: TyCtxt<'tcx>,
+            param_env: ParamEnv<'tcx>,
+            c: Const<'tcx>,
+        ) -> Option<Self> {
             use rustc_middle::ty::ScalarInt;
-            use rustc_span::sym;
+            use rustc_span::symbol::sym;
 
-            let cv = ct.try_to_value()?;
-            let adt_def = cv.ty.ty_adt_def()?;
-
-            if !tcx.is_lang_item(adt_def.did(), LangItem::TransmuteOpts) {
-                tcx.dcx().delayed_bug(format!(
-                    "The given `const` was not marked with the `{}` lang item.",
-                    LangItem::TransmuteOpts.name()
-                ));
+            let Ok((ty, cv)) = c.eval(tcx, param_env, DUMMY_SP) else {
                 return Some(Self {
                     alignment: true,
                     lifetimes: true,
                     safety: true,
                     validity: true,
                 });
-            }
+            };
+
+            let adt_def = ty.ty_adt_def()?;
+
+            assert_eq!(
+                tcx.require_lang_item(LangItem::TransmuteOpts, None),
+                adt_def.did(),
+                "The given `Const` was not marked with the `{}` lang item.",
+                LangItem::TransmuteOpts.name(),
+            );
 
             let variant = adt_def.non_enum_variant();
-            let fields = cv.to_branch();
+            let fields = match cv {
+                ValTree::Branch(branch) => branch,
+                _ => {
+                    return Some(Self {
+                        alignment: true,
+                        lifetimes: true,
+                        safety: true,
+                        validity: true,
+                    });
+                }
+            };
 
             let get_field = |name| {
                 let (field_idx, _) = variant
@@ -145,14 +171,14 @@ mod rustc {
                     .enumerate()
                     .find(|(_, field_def)| name == field_def.name)
                     .unwrap_or_else(|| panic!("There were no fields named `{name}`."));
-                fields[field_idx].try_to_leaf().map(|leaf| leaf == ScalarInt::TRUE)
+                fields[field_idx].unwrap_leaf() == ScalarInt::TRUE
             };
 
             Some(Self {
-                alignment: get_field(sym::alignment)?,
-                lifetimes: get_field(sym::lifetimes)?,
-                safety: get_field(sym::safety)?,
-                validity: get_field(sym::validity)?,
+                alignment: get_field(sym::alignment),
+                lifetimes: get_field(sym::lifetimes),
+                safety: get_field(sym::safety),
+                validity: get_field(sym::validity),
             })
         }
     }

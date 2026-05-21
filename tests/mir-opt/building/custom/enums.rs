@@ -88,6 +88,7 @@ fn switch_option_repr(option: Bool) -> bool {
 fn set_discr(option: &mut Option<()>) {
     mir! {
         {
+            Deinit(*option);
             SetDiscriminant(*option, 0);
             Return()
         }

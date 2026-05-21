@@ -1,4 +1,4 @@
-// rustfmt-style_edition: 2024
+// rustfmt-version: Two
 fn main() {
     match a {
         _ => // comment with => 

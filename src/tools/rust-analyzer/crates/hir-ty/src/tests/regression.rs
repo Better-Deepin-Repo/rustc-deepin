@@ -1,5 +1,3 @@
-mod new_solver;
-
 use expect_test::expect;
 
 use super::{check_infer, check_no_mismatches, check_types};
@@ -88,7 +86,6 @@ fn bug_651() {
 
 #[test]
 fn recursive_vars() {
-    // FIXME: This isn't nice, but I guess as long as we don't hang/crash that's fine?
     check_infer(
         r#"
         fn test() {
@@ -98,12 +95,12 @@ fn recursive_vars() {
         "#,
         expect![[r#"
             10..47 '{     ...&y]; }': ()
-            20..21 'y': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            24..31 'unknown': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            37..44 '[y, &y]': [&'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}; 2]
-            38..39 'y': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            41..43 '&y': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            42..43 'y': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
+            20..21 'y': {unknown}
+            24..31 'unknown': {unknown}
+            37..44 '[y, &y]': [{unknown}; 2]
+            38..39 'y': {unknown}
+            41..43 '&y': &'? {unknown}
+            42..43 'y': {unknown}
         "#]],
     );
 }
@@ -120,19 +117,19 @@ fn recursive_vars_2() {
         "#,
         expect![[r#"
             10..79 '{     ...x)]; }': ()
-            20..21 'x': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            24..31 'unknown': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            41..42 'y': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            45..52 'unknown': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            58..76 '[(x, y..., &x)]': [(&'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}, &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}); 2]
-            59..65 '(x, y)': (&'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}, &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown})
-            60..61 'x': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            63..64 'y': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            67..75 '(&y, &x)': (&'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}, &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown})
-            68..70 '&y': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            69..70 'y': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            72..74 '&x': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            73..74 'x': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
+            20..21 'x': &'? {unknown}
+            24..31 'unknown': &'? {unknown}
+            41..42 'y': {unknown}
+            45..52 'unknown': {unknown}
+            58..76 '[(x, y..., &x)]': [(&'? {unknown}, {unknown}); 2]
+            59..65 '(x, y)': (&'? {unknown}, {unknown})
+            60..61 'x': &'? {unknown}
+            63..64 'y': {unknown}
+            67..75 '(&y, &x)': (&'? {unknown}, {unknown})
+            68..70 '&y': &'? {unknown}
+            69..70 'y': {unknown}
+            72..74 '&x': &'? &'? {unknown}
+            73..74 'x': &'? {unknown}
         "#]],
     );
 }
@@ -269,37 +266,36 @@ fn infer_std_crash_5() {
         expect![[r#"
             26..322 '{     ...   } }': ()
             32..320 'for co...     }': fn into_iter<{unknown}>({unknown}) -> <{unknown} as IntoIterator>::IntoIter
-            32..320 'for co...     }': <{unknown} as IntoIterator>::IntoIter
+            32..320 'for co...     }': {unknown}
             32..320 'for co...     }': !
             32..320 'for co...     }': {unknown}
             32..320 'for co...     }': &'? mut {unknown}
             32..320 'for co...     }': fn next<{unknown}>(&'? mut {unknown}) -> Option<<{unknown} as Iterator>::Item>
-            32..320 'for co...     }': Option<<{unknown} as Iterator>::Item>
+            32..320 'for co...     }': Option<{unknown}>
             32..320 'for co...     }': ()
             32..320 'for co...     }': ()
             32..320 'for co...     }': ()
-            32..320 'for co...     }': ()
-            36..43 'content': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
+            36..43 'content': {unknown}
             47..60 'doesnt_matter': {unknown}
             61..320 '{     ...     }': ()
-            75..79 'name': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            82..166 'if doe...     }': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
+            75..79 'name': &'? {unknown}
+            82..166 'if doe...     }': &'? {unknown}
             85..98 'doesnt_matter': bool
-            99..128 '{     ...     }': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            113..118 'first': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            134..166 '{     ...     }': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            148..156 '&content': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            149..156 'content': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            181..188 'content': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            191..313 'if ICE...     }': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
+            99..128 '{     ...     }': &'? {unknown}
+            113..118 'first': &'? {unknown}
+            134..166 '{     ...     }': &'? {unknown}
+            148..156 '&content': &'? {unknown}
+            149..156 'content': {unknown}
+            181..188 'content': &'? {unknown}
+            191..313 'if ICE...     }': &'? {unknown}
             194..231 'ICE_RE..._VALUE': {unknown}
             194..247 'ICE_RE...&name)': bool
-            241..246 '&name': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            242..246 'name': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            248..276 '{     ...     }': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            262..266 'name': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            282..313 '{     ...     }': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
-            296..303 'content': &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? &'? {unknown}
+            241..246 '&name': &'? &'? {unknown}
+            242..246 'name': &'? {unknown}
+            248..276 '{     ...     }': &'? {unknown}
+            262..266 'name': &'? {unknown}
+            282..313 '{     ...     }': {unknown}
+            296..303 'content': {unknown}
         "#]],
     );
 }
@@ -395,7 +391,7 @@ fn issue_2669() {
         r#"
         trait A {}
         trait Write {}
-        struct Response<T>(T);
+        struct Response<T> {}
 
         trait D {
             fn foo();
@@ -411,13 +407,13 @@ fn issue_2669() {
         }
         "#,
         expect![[r#"
-            120..215 '{     ...     }': ()
-            130..133 'end': fn end<{unknown}>()
-            130..135 'end()': ()
-            164..209 '{     ...     }': ()
-            182..184 '_x': !
-            191..198 'loop {}': !
-            196..198 '{}': ()
+            119..214 '{     ...     }': ()
+            129..132 'end': fn end<{unknown}>()
+            129..134 'end()': ()
+            163..208 '{     ...     }': ()
+            181..183 '_x': !
+            190..197 'loop {}': !
+            195..197 '{}': ()
         "#]],
     )
 }
@@ -629,10 +625,10 @@ fn issue_4053_diesel_where_clauses() {
             65..69 'self': Self
             267..271 'self': Self
             466..470 'self': SelectStatement<F, S, D, W, O, LOf, {unknown}, {unknown}>
-            488..522 '{     ...     }': {unknown}
+            488..522 '{     ...     }': ()
             498..502 'self': SelectStatement<F, S, D, W, O, LOf, {unknown}, {unknown}>
             498..508 'self.order': O
-            498..515 'self.o...into()': dyn QueryFragment<DB> + 'static
+            498..515 'self.o...into()': dyn QueryFragment<DB>
         "#]],
     );
 }
@@ -648,7 +644,7 @@ fn issue_4953() {
         "#,
         expect![[r#"
             58..72 '{ Self(0i64) }': Foo
-            60..64 'Self': fn Foo(i64) -> Foo
+            60..64 'Self': extern "rust-call" Foo(i64) -> Foo
             60..70 'Self(0i64)': Foo
             65..69 '0i64': i64
         "#]],
@@ -662,7 +658,7 @@ fn issue_4953() {
         "#,
         expect![[r#"
             64..78 '{ Self(0i64) }': Foo<i64>
-            66..70 'Self': fn Foo<i64>(i64) -> Foo<i64>
+            66..70 'Self': extern "rust-call" Foo<i64>(i64) -> Foo<i64>
             66..76 'Self(0i64)': Foo<i64>
             71..75 '0i64': i64
         "#]],
@@ -776,7 +772,7 @@ fn issue_4800() {
         "#,
         expect![[r#"
             379..383 'self': &'? mut PeerSet<D>
-            401..424 '{     ...     }': dyn Future<Output = ()> + 'static
+            401..424 '{     ...     }': dyn Future<Output = ()>
             411..418 'loop {}': !
             416..418 '{}': ()
             575..579 'self': &'? mut Self
@@ -784,9 +780,6 @@ fn issue_4800() {
     );
 }
 
-// FIXME(next-solver): Though `Repeat: IntoIterator` does not hold here, we
-// should be able to do better at given type hints (with Chalk, we did `IntoIterator::Item<Repeat<...>>`)
-// From what I can tell, the point of this test is to not panic though.
 #[test]
 fn issue_4966() {
     check_infer(
@@ -800,7 +793,7 @@ fn issue_4966() {
 
         struct Map<F> { f: F }
 
-        struct Vec<T> { p: *mut T }
+        struct Vec<T> {}
 
         impl<T> core::ops::Deref for Vec<T> {
             type Target = [T];
@@ -819,23 +812,23 @@ fn issue_4966() {
         }
         "#,
         expect![[r#"
-            236..240 'iter': T
-            255..257 '{}': Vec<A>
-            269..413 '{     ...r(); }': ()
-            279..284 'inner': Map<impl Fn(&'? f64) -> f64>
-            287..311 'Map { ... 0.0 }': Map<impl Fn(&'? f64) -> f64>
-            296..309 '|_: &f64| 0.0': impl Fn(&'? f64) -> f64
-            297..298 '_': &'? f64
-            306..309 '0.0': f64
-            322..328 'repeat': Repeat<Map<impl Fn(&'? f64) -> f64>>
-            331..356 'Repeat...nner }': Repeat<Map<impl Fn(&'? f64) -> f64>>
-            349..354 'inner': Map<impl Fn(&'? f64) -> f64>
-            367..370 'vec': Vec<{unknown}>
-            373..382 'from_iter': fn from_iter<{unknown}, Repeat<Map<impl Fn(&'? f64) -> f64>>>(Repeat<Map<impl Fn(&'? f64) -> f64>>) -> Vec<{unknown}>
-            373..390 'from_i...epeat)': Vec<{unknown}>
-            383..389 'repeat': Repeat<Map<impl Fn(&'? f64) -> f64>>
-            397..400 'vec': Vec<{unknown}>
-            397..410 'vec.foo_bar()': {unknown}
+            225..229 'iter': T
+            244..246 '{}': Vec<A>
+            258..402 '{     ...r(); }': ()
+            268..273 'inner': Map<impl Fn(&'? f64) -> f64>
+            276..300 'Map { ... 0.0 }': Map<impl Fn(&'? f64) -> f64>
+            285..298 '|_: &f64| 0.0': impl Fn(&'? f64) -> f64
+            286..287 '_': &'? f64
+            295..298 '0.0': f64
+            311..317 'repeat': Repeat<Map<impl Fn(&'? f64) -> f64>>
+            320..345 'Repeat...nner }': Repeat<Map<impl Fn(&'? f64) -> f64>>
+            338..343 'inner': Map<impl Fn(&'? f64) -> f64>
+            356..359 'vec': Vec<IntoIterator::Item<Repeat<Map<impl Fn(&'? f64) -> f64>>>>
+            362..371 'from_iter': fn from_iter<IntoIterator::Item<Repeat<Map<impl Fn(&'? f64) -> f64>>>, Repeat<Map<impl Fn(&'? f64) -> f64>>>(Repeat<Map<impl Fn(&'? f64) -> f64>>) -> Vec<IntoIterator::Item<Repeat<Map<impl Fn(&'? f64) -> f64>>>>
+            362..379 'from_i...epeat)': Vec<IntoIterator::Item<Repeat<Map<impl Fn(&'? f64) -> f64>>>>
+            372..378 'repeat': Repeat<Map<impl Fn(&'? f64) -> f64>>
+            386..389 'vec': Vec<IntoIterator::Item<Repeat<Map<impl Fn(&'? f64) -> f64>>>>
+            386..399 'vec.foo_bar()': {unknown}
         "#]],
     );
 }
@@ -844,40 +837,37 @@ fn issue_4966() {
 fn issue_6628() {
     check_infer(
         r#"
-//- minicore: fn, phantom_data
-use core::marker::PhantomData;
-
-struct S<T>(PhantomData<T>);
+//- minicore: fn
+struct S<T>();
 impl<T> S<T> {
     fn f(&self, _t: T) {}
     fn g<F: FnOnce(&T)>(&self, _f: F) {}
 }
 fn main() {
-    let s = S(PhantomData);
+    let s = S();
     s.g(|_x| {});
     s.f(10);
 }
 "#,
         expect![[r#"
-            86..90 'self': &'? S<T>
-            92..94 '_t': T
-            99..101 '{}': ()
-            127..131 'self': &'? S<T>
-            133..135 '_f': F
-            140..142 '{}': ()
-            155..217 '{     ...10); }': ()
-            165..166 's': S<i32>
-            169..170 'S': fn S<i32>(PhantomData<i32>) -> S<i32>
-            169..183 'S(PhantomData)': S<i32>
-            171..182 'PhantomData': PhantomData<i32>
-            189..190 's': S<i32>
-            189..201 's.g(|_x| {})': ()
-            193..200 '|_x| {}': impl FnOnce(&'? i32)
-            194..196 '_x': &'? i32
-            198..200 '{}': ()
-            207..208 's': S<i32>
-            207..214 's.f(10)': ()
-            211..213 '10': i32
+            40..44 'self': &'? S<T>
+            46..48 '_t': T
+            53..55 '{}': ()
+            81..85 'self': &'? S<T>
+            87..89 '_f': F
+            94..96 '{}': ()
+            109..160 '{     ...10); }': ()
+            119..120 's': S<i32>
+            123..124 'S': extern "rust-call" S<i32>() -> S<i32>
+            123..126 'S()': S<i32>
+            132..133 's': S<i32>
+            132..144 's.g(|_x| {})': ()
+            136..143 '|_x| {}': impl FnOnce(&'? i32)
+            137..139 '_x': &'? i32
+            141..143 '{}': ()
+            150..151 's': S<i32>
+            150..157 's.f(10)': ()
+            154..156 '10': i32
         "#]],
     );
 }
@@ -891,14 +881,13 @@ use core::ops::Deref;
 
 struct BufWriter {}
 
-struct Mutex<T>(T);
-struct MutexGuard<'a, T>(&'a T);
+struct Mutex<T> {}
+struct MutexGuard<'a, T> {}
 impl<T> Mutex<T> {
     fn lock(&self) -> MutexGuard<'_, T> {}
 }
 impl<'a, T: 'a> Deref for MutexGuard<'a, T> {
     type Target = T;
-    fn deref(&self) -> &Self::Target { loop {} }
 }
 fn flush(&self) {
     let w: &Mutex<BufWriter>;
@@ -906,18 +895,14 @@ fn flush(&self) {
 }
 "#,
         expect![[r#"
-            129..133 'self': &'? Mutex<T>
-            156..158 '{}': MutexGuard<'?, T>
-            242..246 'self': &'? MutexGuard<'a, T>
-            265..276 '{ loop {} }': &'? T
-            267..274 'loop {}': !
-            272..274 '{}': ()
-            289..293 'self': &'? {unknown}
-            295..345 '{     ...()); }': ()
-            305..306 'w': &'? Mutex<BufWriter>
-            331..342 '*(w.lock())': BufWriter
-            333..334 'w': &'? Mutex<BufWriter>
-            333..341 'w.lock()': MutexGuard<'?, BufWriter>
+            123..127 'self': &'? Mutex<T>
+            150..152 '{}': MutexGuard<'?, T>
+            234..238 'self': &'? {unknown}
+            240..290 '{     ...()); }': ()
+            250..251 'w': &'? Mutex<BufWriter>
+            276..287 '*(w.lock())': BufWriter
+            278..279 'w': &'? Mutex<BufWriter>
+            278..286 'w.lock()': MutexGuard<'?, BufWriter>
         "#]],
     );
 }
@@ -940,7 +925,7 @@ fn lifetime_from_chalk_during_deref() {
     check_types(
         r#"
 //- minicore: deref
-struct Box<T: ?Sized>(T);
+struct Box<T: ?Sized> {}
 impl<T: ?Sized> core::ops::Deref for Box<T> {
     type Target = T;
 
@@ -973,9 +958,6 @@ fn clone_iter<T>(s: Iter<T>) {
 fn issue_8686() {
     check_infer(
         r#"
-//- minicore: phantom_data
-use core::marker::PhantomData;
-
 pub trait Try: FromResidual {
     type Output;
     type Residual;
@@ -984,32 +966,28 @@ pub trait FromResidual<R = <Self as Try>::Residual> {
      fn from_residual(residual: R) -> Self;
 }
 
-struct ControlFlow<B, C>(PhantomData<(B, C)>);
+struct ControlFlow<B, C>;
 impl<B, C> Try for ControlFlow<B, C> {
     type Output = C;
     type Residual = ControlFlow<B, !>;
 }
 impl<B, C> FromResidual for ControlFlow<B, C> {
-    fn from_residual(r: ControlFlow<B, !>) -> Self { ControlFlow(PhantomData) }
+    fn from_residual(r: ControlFlow<B, !>) -> Self { ControlFlow }
 }
 
 fn test() {
-    ControlFlow::from_residual(ControlFlow::<u32, !>(PhantomData));
+    ControlFlow::from_residual(ControlFlow::<u32, !>);
 }
         "#,
         expect![[r#"
-            176..184 'residual': R
-            418..419 'r': ControlFlow<B, !>
-            448..476 '{ Cont...ata) }': ControlFlow<B, C>
-            450..461 'ControlFlow': fn ControlFlow<B, C>(PhantomData<(B, C)>) -> ControlFlow<B, C>
-            450..474 'Contro...mData)': ControlFlow<B, C>
-            462..473 'PhantomData': PhantomData<(B, C)>
-            490..561 '{     ...a)); }': ()
-            496..522 'Contro...sidual': fn from_residual<ControlFlow<u32, {unknown}>, ControlFlow<u32, !>>(ControlFlow<u32, !>) -> ControlFlow<u32, {unknown}>
-            496..558 'Contro...Data))': ControlFlow<u32, {unknown}>
-            523..544 'Contro...32, !>': fn ControlFlow<u32, !>(PhantomData<(u32, !)>) -> ControlFlow<u32, !>
-            523..557 'Contro...mData)': ControlFlow<u32, !>
-            545..556 'PhantomData': PhantomData<(u32, !)>
+            144..152 'residual': R
+            365..366 'r': ControlFlow<B, !>
+            395..410 '{ ControlFlow }': ControlFlow<B, C>
+            397..408 'ControlFlow': ControlFlow<B, C>
+            424..482 '{     ...!>); }': ()
+            430..456 'Contro...sidual': fn from_residual<ControlFlow<u32, {unknown}>, ControlFlow<u32, !>>(ControlFlow<u32, !>) -> ControlFlow<u32, {unknown}>
+            430..479 'Contro...2, !>)': ControlFlow<u32, {unknown}>
+            457..478 'Contro...32, !>': ControlFlow<u32, !>
         "#]],
     );
 }
@@ -1068,13 +1046,12 @@ fn impl_trait_in_option_9530() {
     check_types(
         r#"
 //- minicore: sized
-struct Option<T>(T);
+struct Option<T>;
 impl<T> Option<T> {
     fn unwrap(self) -> T { loop {} }
 }
-fn make() -> Option<impl Copy> { Option(()) }
+fn make() -> Option<impl Copy> { Option }
 trait Copy {}
-impl Copy for () {}
 fn test() {
     let o = make();
     o.unwrap();
@@ -1088,7 +1065,7 @@ fn test() {
 fn bare_dyn_trait_binders_9639() {
     check_no_mismatches(
         r#"
-//- minicore: fn, coerce_unsized, dispatch_from_dyn
+//- minicore: fn, coerce_unsized
 fn infix_parse<T, S>(_state: S, _level_code: &Fn(S)) -> T {
     loop {}
 }
@@ -1180,9 +1157,9 @@ pub trait BitView {
 
 pub struct Lsb0;
 
-pub struct BitArray<V: BitView>(V);
+pub struct BitArray<V: BitView> { }
 
-pub struct BitSlice<T>(T);
+pub struct BitSlice<T> { }
 
 impl<V: BitView> core::ops::Deref for BitArray<V> {
     type Target = BitSlice<V::Store>;
@@ -1246,8 +1223,6 @@ fn mamba(a: U32!(), p: u32) -> u32 {
 
 #[test]
 fn for_loop_block_expr_iterable() {
-    // FIXME(next-solver): it would be nice to be able to hint `IntoIterator::IntoIter<()>` instead of just `{unknown}`
-    // (even though `(): IntoIterator` does not hold)
     check_infer(
         r#"
 //- minicore: iterator
@@ -1260,17 +1235,16 @@ fn test() {
         expect![[r#"
             10..68 '{     ...   } }': ()
             16..66 'for _ ...     }': fn into_iter<()>(()) -> <() as IntoIterator>::IntoIter
-            16..66 'for _ ...     }': <() as IntoIterator>::IntoIter
+            16..66 'for _ ...     }': IntoIterator::IntoIter<()>
             16..66 'for _ ...     }': !
-            16..66 'for _ ...     }': {unknown}
-            16..66 'for _ ...     }': &'? mut {unknown}
-            16..66 'for _ ...     }': fn next<{unknown}>(&'? mut {unknown}) -> Option<<{unknown} as Iterator>::Item>
-            16..66 'for _ ...     }': Option<<{unknown} as Iterator>::Item>
+            16..66 'for _ ...     }': IntoIterator::IntoIter<()>
+            16..66 'for _ ...     }': &'? mut IntoIterator::IntoIter<()>
+            16..66 'for _ ...     }': fn next<IntoIterator::IntoIter<()>>(&'? mut IntoIterator::IntoIter<()>) -> Option<<IntoIterator::IntoIter<()> as Iterator>::Item>
+            16..66 'for _ ...     }': Option<IntoIterator::Item<()>>
             16..66 'for _ ...     }': ()
             16..66 'for _ ...     }': ()
             16..66 'for _ ...     }': ()
-            16..66 'for _ ...     }': ()
-            20..21 '_': {unknown}
+            20..21 '_': IntoIterator::Item<()>
             25..39 '{ let x = 0; }': ()
             31..32 'x': i32
             35..36 '0': i32
@@ -1307,6 +1281,7 @@ fn test() {
 
 #[test]
 fn bug_11242() {
+    // FIXME: wrong, should be u32
     check_types(
         r#"
 fn foo<A, B>()
@@ -1315,7 +1290,7 @@ where
     B: IntoIterator<Item = usize>,
 {
     let _x: <A as IntoIterator>::Item;
-     // ^^ u32
+     // ^^ {unknown}
 }
 
 pub trait Iterator {
@@ -1518,7 +1493,7 @@ fn regression_11688_2() {
 fn regression_11688_3() {
     check_types(
         r#"
-        //- minicore: iterator, dispatch_from_dyn
+        //- minicore: iterator
         struct Ar<T, const N: u8>(T);
         fn f<const LEN: usize, T, const BASE: u8>(
             num_zeros: usize,
@@ -1537,7 +1512,6 @@ fn regression_11688_3() {
 fn regression_11688_4() {
     check_types(
         r#"
-        //- minicore: dispatch_from_dyn
         trait Bar<const C: usize> {
             fn baz(&self) -> [i32; C];
         }
@@ -1609,6 +1583,23 @@ type Member<U> = ConstGen<U, N>;
 }
 
 #[test]
+fn cfgd_out_self_param() {
+    cov_mark::check!(cfgd_out_self_param);
+    check_no_mismatches(
+        r#"
+struct S;
+impl S {
+    fn f(#[cfg(never)] &self) {}
+}
+
+fn f(s: S) {
+    s.f();
+}
+"#,
+    );
+}
+
+#[test]
 fn tuple_struct_pattern_with_unmatched_args_crash() {
     check_infer(
         r#"
@@ -1623,7 +1614,7 @@ fn main() {
             37..48 'S(.., a, b)': S
             43..44 'a': usize
             46..47 'b': {unknown}
-            51..52 'S': fn S(usize) -> S
+            51..52 'S': extern "rust-call" S(usize) -> S
             51..55 'S(1)': S
             53..54 '1': usize
             65..75 '(.., a, b)': (i32, {unknown})
@@ -1796,7 +1787,7 @@ fn regression_14844() {
         r#"
 pub type Ty = Unknown;
 
-pub struct Inner<T>(T);
+pub struct Inner<T>();
 
 pub struct Outer {
     pub inner: Inner<Ty>,
@@ -1804,7 +1795,7 @@ pub struct Outer {
 
 fn main() {
     _ = Outer {
-        inner: Inner::<i32>(0),
+        inner: Inner::<i32>(),
     };
 }
         "#,
@@ -1916,7 +1907,6 @@ fn dont_unify_on_casts() {
     // #15246
     check_types(
         r#"
-//- minicore: sized
 fn unify(_: [bool; 1]) {}
 fn casted(_: *const bool) {}
 fn default<T>() -> T { loop {} }
@@ -1936,7 +1926,6 @@ fn test() {
 fn rustc_test_issue_52437() {
     check_types(
         r#"
-    //- minicore: sized
     fn main() {
         let x = [(); &(&'static: loop { |x| {}; }) as *const _ as usize]
           //^ [(); _]
@@ -2034,12 +2023,12 @@ fn tait_async_stack_overflow_17199() {
 fn lifetime_params_move_param_defaults() {
     check_types(
         r#"
-pub struct Thing<'s, T = u32>(&'s T);
+pub struct Thing<'s, T = u32>;
 
 impl <'s> Thing<'s> {
     pub fn new() -> Thing<'s> {
-        Thing(&0)
-      //^^^^^^^^^ Thing<'?, u32>
+        Thing
+      //^^^^^ Thing<'?, u32>
     }
 }
 
@@ -2076,7 +2065,7 @@ impl S {
     }
 }
 
-struct Wrap<'a, T>(&'a T);
+struct Wrap<'a, T>(T);
 trait Trait<'a> {
     type Proj;
 }
@@ -2235,563 +2224,7 @@ async fn f<A, B, C>() -> Bar {}
 "#,
         expect![[r#"
             64..66 '{}': ()
-        "#]],
-    );
-}
-
-#[test]
-fn issue_18109() {
-    check_infer(
-        r#"
-//- minicore: option
-struct Map<T, U>(T, U);
-
-impl<T, U> Map<T, U> {
-    fn new() -> Self { loop {} }
-    fn get(&self, _: &T) -> Option<&U> { loop {} }
-}
-
-fn test(x: bool) {
-    let map = Map::new();
-    let _ = match x {
-        true => {
-            let Some(val) = map.get(&8) else { return };
-            *val
-        }
-        false => return,
-        _ => 42,
-    };
-}
-"#,
-        expect![[r#"
-            69..80 '{ loop {} }': Map<T, U>
-            71..78 'loop {}': !
-            76..78 '{}': ()
-            93..97 'self': &'? Map<T, U>
-            99..100 '_': &'? T
-            120..131 '{ loop {} }': Option<&'? U>
-            122..129 'loop {}': !
-            127..129 '{}': ()
-            143..144 'x': bool
-            152..354 '{     ...  }; }': ()
-            162..165 'map': Map<i32, i32>
-            168..176 'Map::new': fn new<i32, i32>() -> Map<i32, i32>
-            168..178 'Map::new()': Map<i32, i32>
-            188..189 '_': i32
-            192..351 'match ...     }': i32
-            198..199 'x': bool
-            210..214 'true': bool
-            210..214 'true': bool
-            218..303 '{     ...     }': i32
-            236..245 'Some(val)': Option<&'? i32>
-            241..244 'val': &'? i32
-            248..251 'map': Map<i32, i32>
-            248..259 'map.get(&8)': Option<&'? i32>
-            256..258 '&8': &'? i32
-            257..258 '8': i32
-            265..275 '{ return }': !
-            267..273 'return': !
-            289..293 '*val': i32
-            290..293 'val': &'? i32
-            312..317 'false': bool
-            312..317 'false': bool
-            321..327 'return': !
-            337..338 '_': bool
-            342..344 '42': i32
-        "#]],
-    );
-}
-
-#[test]
-fn issue_19730() {
-    check_infer(
-        r#"
-trait Trait<T = Self> {}
-
-trait Foo {
-    type Bar<A, B>: Trait;
-
-    fn foo<A, B>(bar: Self::Bar<A, B>) {
-        let _ = bar;
-    }
-}
-"#,
-        expect![[r#"
-            83..86 'bar': <Self as Foo>::Bar<A, B>
-            105..133 '{     ...     }': ()
-            119..120 '_': <Self as Foo>::Bar<A, B>
-            123..126 'bar': <Self as Foo>::Bar<A, B>
-        "#]],
-    );
-}
-
-#[test]
-fn no_panic_on_recursive_const() {
-    check_infer(
-        r#"
-struct Foo<const N: usize> {}
-impl<const N: Foo<N>> Foo<N> {
-    fn foo(self) {}
-}
-
-fn test() {
-    let _ = N;
-}
-"#,
-        expect![[r#"
-            72..76 'self': Foo<N>
-            78..80 '{}': ()
-            94..112 '{     ...= N; }': ()
-            104..105 '_': {unknown}
-            108..109 'N': {unknown}
-        "#]],
-    );
-
-    check_infer(
-        r#"
-struct Foo<const N: usize>;
-const N: Foo<N> = Foo;
-
-impl<const N: usize> Foo<N> {
-    fn foo(self) -> usize {
-        N
-    }
-}
-
-fn test() {
-    let _ = N;
-}
-"#,
-        expect![[r#"
-            93..97 'self': Foo<N>
-            108..125 '{     ...     }': usize
-            118..119 'N': usize
-            139..157 '{     ...= N; }': ()
-            149..150 '_': Foo<N>
-            153..154 'N': Foo<N>
-        "#]],
-    );
-}
-
-#[test]
-fn rust_destruct_option_clone() {
-    check_types(
-        r#"
-//- minicore: option, drop
-#![feature(lang_items)]
-fn test(o: &Option<i32>) {
-    o.my_clone();
-  //^^^^^^^^^^^^ Option<i32>
-}
-pub trait MyClone: Sized {
-    fn my_clone(&self) -> Self;
-}
-impl<T> const MyClone for Option<T>
-where
-    T: ~const MyClone + ~const Destruct,
-{
-    fn my_clone(&self) -> Self {
-        match self {
-            Some(x) => Some(x.my_clone()),
-            None => None,
-        }
-    }
-}
-impl const MyClone for i32 {
-    fn my_clone(&self) -> Self {
-        *self
-    }
-}
-#[lang = "destruct"]
-pub trait Destruct {}
-"#,
-    );
-}
-
-#[test]
-fn no_duplicated_lang_item_metadata() {
-    check_types(
-        r#"
-//- minicore: pointee
-//- /main.rs crate:main deps:std,core
-use std::AtomicPtr;
-use std::null_mut;
-
-fn main() {
-    let x: AtomicPtr<()> = AtomicPtr::new(null_mut());
-      //^ AtomicPtr<()>
-}
-
-//- /lib.rs crate:r#std deps:core
-#![no_std]
-pub use core::*;
-
-//- /lib.rs crate:r#core
-#![no_core]
-
-#[lang = "pointee_trait"]
-pub trait Pointee {
-    #[lang = "metadata_type"]
-    type Metadata;
-}
-
-pub struct AtomicPtr<T>(T);
-
-impl<T> AtomicPtr<T> {
-    pub fn new(p: *mut T) -> AtomicPtr<T> {
-        loop {}
-    }
-}
-
-#[lang = "pointee_sized"]
-pub trait PointeeSized {}
-#[lang = "meta_sized"]
-pub trait MetaSized: PointeeSized {}
-#[lang = "sized"]
-pub trait Sized: MetaSized {}
-
-pub trait Thin = Pointee<Metadata = ()> + PointeeSized;
-
-pub fn null_mut<T: PointeeSized + Thin>() -> *mut T {
-    loop {}
-}
-"#,
-    );
-}
-
-#[test]
-fn issue_20484() {
-    check_no_mismatches(
-        r#"
-struct Eth;
-
-trait FullBlockBody {
-    type Transaction;
-}
-
-impl FullBlockBody for () {
-    type Transaction = ();
-}
-
-trait NodePrimitives {
-    type BlockBody;
-    type SignedTx;
-}
-
-impl NodePrimitives for () {
-    type BlockBody = ();
-    type SignedTx = ();
-}
-
-impl NodePrimitives for Eth {
-    type BlockBody = ();
-    type SignedTx = ();
-}
-
-trait FullNodePrimitives
-where
-    Self: NodePrimitives<BlockBody: FullBlockBody<Transaction = Self::SignedTx>>,
-{
-}
-
-impl<T> FullNodePrimitives for T where
-    T: NodePrimitives<BlockBody: FullBlockBody<Transaction = Self::SignedTx>>,
-{
-}
-
-fn node<N>(_: N)
-where
-    N: FullNodePrimitives,
-{
-}
-
-fn main() {
-    node(Eth);
-}
-"#,
-    );
-}
-
-#[test]
-fn module_inside_block() {
-    check_types(
-        r#"
-fn foo() {
-    mod my_mod {
-        pub type Bool = bool;
-    }
-
-    let _: my_mod::Bool;
-     // ^ bool
-}
-    "#,
-    );
-}
-
-#[test]
-fn issue_9881_super_trait_blanket_impl() {
-    check_types(
-        r#"
-pub trait TryStream: Stream {
-    fn try_poll_next(&self) {}
-}
-
-pub trait Stream {
-    type Item;
-    fn poll_next(&self) {}
-}
-
-trait StreamAlias: Stream<Item = ()> {}
-
-impl<S: Stream<Item = ()>> TryStream for S {}
-
-impl<S: Stream<Item = ()>> StreamAlias for S {}
-
-struct StreamImpl;
-
-impl Stream for StreamImpl {
-    type Item = ();
-}
-
-fn foo() -> impl StreamAlias {
-    StreamImpl
-}
-
-fn main() {
-    let alias = foo();
-    let _: () = alias.try_poll_next();
-     // ^ ()
-    let _: () = alias.poll_next();
-     // ^ ()
-}
-        "#,
-    );
-}
-
-#[test]
-fn regression_21429() {
-    check_no_mismatches(
-        r#"
-trait DatabaseLike {
-    type ForeignKey: ForeignKeyLike<DB = Self>;
-}
-
-trait ForeignKeyLike {
-    type DB: DatabaseLike;
-
-    fn host_columns(&self, database: &Self::DB);
-}
-
-trait ColumnLike {
-    type DB: DatabaseLike;
-
-    fn foo() -> &&<<Self as ColumnLike>::DB as DatabaseLike>::ForeignKey {
-        loop {}
-    }
-
-    fn foreign_keys(&self, database: &Self::DB) {
-        let fk = Self::foo();
-        fk.host_columns(database);
-    }
-}
-    "#,
-    );
-}
-
-#[test]
-fn issue_21006_generic_predicates_for_param_supertrait_cycle() {
-    check_no_mismatches(
-        r#"
-trait VCipherSuite {}
-
-trait CipherSuite
-where
-    OprfHash<Self>: Hash,
-{
-}
-
-type Bar<CS: CipherSuite> = <CS::Baz as VCipherSuite>::Hash;
-
-type OprfHash<CS: CipherSuite> = <CS::Baz as VCipherSuite>::Hash;
-
-impl<CS: CipherSuite> Foo<CS> {
-    fn seal() {}
-}
-        "#,
-    );
-}
-
-#[test]
-fn issue_21006_self_assoc_trait() {
-    check_types(
-        r#"
-trait Baz {
-    fn baz(&self);
-}
-
-trait Foo {
-    type Assoc;
-}
-
-trait Bar: Foo
-where
-    Self::Assoc: Baz,
-{
-    fn bar(v: Self::Assoc) {
-        let _ = v.baz();
-        //  ^ ()
-    }
-}
-        "#,
-    );
-}
-
-#[test]
-fn issue_21560() {
-    check_no_mismatches(
-        r#"
-mod bindings {
-    use super::*;
-    pub type HRESULT = i32;
-}
-use bindings::*;
-
-
-mod error {
-    use super::*;
-    pub fn nonzero_hresult(hr: HRESULT) -> crate::HRESULT {
-        hr
-    }
-}
-pub use error::*;
-
-mod hresult {
-    use super::*;
-    pub struct HRESULT(pub i32);
-}
-pub use hresult::HRESULT;
-
-        "#,
-    );
-}
-
-#[test]
-fn regression_21577() {
-    check_no_mismatches(
-        r#"
-pub trait FilterT<F: FilterT<F, V = Self::V> = Self> {
-    type V;
-
-    fn foo() {}
-}
-    "#,
-    );
-}
-
-#[test]
-fn regression_21605() {
-    check_infer(
-        r#"
-//- minicore: fn, coerce_unsized, dispatch_from_dyn, iterator, iterators
-pub struct Filter<'a, 'b, T>
-where
-    T: 'b,
-    'a: 'b,
-{
-    filter_fn: dyn Fn(&'a T) -> bool,
-    t: Option<T>,
-    b: &'b (),
-}
-
-impl<'a, 'b, T> Filter<'a, 'b, T>
-where
-    T: 'b,
-    'a: 'b,
-{
-    pub fn new(filter_fn: dyn Fn(&T) -> bool) -> Self {
-        Self {
-            filter_fn: filter_fn,
-            t: None,
-            b: &(),
-        }
-    }
-}
-
-pub trait FilterExt<T> {
-    type Output;
-    fn filter(&self, filter: &Filter<T>) -> Self::Output;
-}
-
-impl<const N: usize, T> FilterExt<T> for [T; N]
-where
-    T: IntoIterator,
-{
-    type Output = T;
-    fn filter(&self, filter: &Filter<T>) -> Self::Output {
-        let _ = self.into_iter().filter(filter.filter_fn);
-        loop {}
-    }
-}
-"#,
-        expect![[r#"
-            214..223 'filter_fn': dyn Fn(&'? T) -> bool + 'static
-            253..360 '{     ...     }': Filter<'a, 'b, T>
-            263..354 'Self {...     }': Filter<'a, 'b, T>
-            293..302 'filter_fn': dyn Fn(&'? T) -> bool + 'static
-            319..323 'None': Option<T>
-            340..343 '&()': &'? ()
-            341..343 '()': ()
-            421..425 'self': &'? Self
-            427..433 'filter': &'? Filter<'?, '?, T>
-            580..584 'self': &'? [T; N]
-            586..592 'filter': &'? Filter<'?, '?, T>
-            622..704 '{     ...     }': T
-            636..637 '_': Filter<Iter<'?, T>, dyn Fn(&'? T) -> bool + '?>
-            640..644 'self': &'? [T; N]
-            640..656 'self.i...iter()': Iter<'?, T>
-            640..681 'self.i...er_fn)': Filter<Iter<'?, T>, dyn Fn(&'? T) -> bool + '?>
-            664..670 'filter': &'? Filter<'?, '?, T>
-            664..680 'filter...ter_fn': dyn Fn(&'? T) -> bool + 'static
-            691..698 'loop {}': !
-            696..698 '{}': ()
-        "#]],
-    );
-}
-
-#[test]
-fn extern_fns_cannot_have_param_patterns() {
-    check_no_mismatches(
-        r#"
-pub(crate) struct Builder<'a>(&'a ());
-
-unsafe extern "C"  {
-    pub(crate) fn foo<'a>(Builder: &Builder<'a>);
-}
-    "#,
-    );
-}
-
-#[test]
-fn infinitely_sized_type() {
-    check_infer(
-        r#"
-//- minicore: sized
-
-pub struct Recursive {
-    pub content: Recursive,
-}
-
-fn is_sized<T: Sized>() {}
-
-fn foo() {
-    is_sized::<Recursive>();
-}
-    "#,
-        expect![[r#"
-            79..81 '{}': ()
-            92..124 '{     ...>(); }': ()
-            98..119 'is_siz...rsive>': fn is_sized<Recursive>()
-            98..121 'is_siz...ive>()': ()
+            64..66 '{}': impl Future<Output = ()>
         "#]],
     );
 }

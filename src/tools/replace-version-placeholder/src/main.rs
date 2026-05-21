@@ -10,14 +10,13 @@ fn main() {
     let version_str = t!(std::fs::read_to_string(&version_path), version_path);
     let version_str = version_str.trim();
     walk::walk_many(
-        &[
-            &root_path.join("compiler"),
-            &root_path.join("library"),
-            &root_path.join("src/doc/rustc"),
-            &root_path.join("src/doc/rustdoc"),
-            &root_path.join("src/tools/clippy"),
-        ],
-        |path, _is_dir| filter_dirs(path),
+        &[&root_path.join("compiler"), &root_path.join("library")],
+        |path, _is_dir| {
+            walk::filter_dirs(path)
+                // We exempt these as they require the placeholder
+                // for their operation
+                || path.ends_with("compiler/rustc_attr/src/builtin.rs")
+        },
         &mut |entry, contents| {
             if !contents.contains(VERSION_PLACEHOLDER) {
                 return;
@@ -27,10 +26,4 @@ fn main() {
             t!(std::fs::write(&path, new_contents), path);
         },
     );
-}
-
-fn filter_dirs(path: &std::path::Path) -> bool {
-    // tidy would skip some paths that we do want to process
-    let allow = ["library/stdarch"];
-    walk::filter_dirs(path) && !allow.iter().any(|p| path.ends_with(p))
 }

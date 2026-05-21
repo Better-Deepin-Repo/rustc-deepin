@@ -1,20 +1,18 @@
 use cargo_platform::Platform;
 use semver::VersionReq;
-use serde::Serialize;
 use serde::ser;
+use serde::Serialize;
 use std::borrow::Cow;
 use std::fmt;
-use std::fmt::{Display, Formatter};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::trace;
 
 use crate::core::compiler::{CompileKind, CompileTarget};
-use crate::core::{CliUnstable, Feature, Features, PackageId, SourceId, Summary};
-use crate::util::OptVersionReq;
-use crate::util::context::Definition;
+use crate::core::{PackageId, SourceId, Summary};
 use crate::util::errors::CargoResult;
 use crate::util::interning::InternedString;
+use crate::util::OptVersionReq;
 
 /// Information about a dependency requested by a Cargo manifest.
 /// Cheap to copy.
@@ -54,32 +52,50 @@ struct Inner {
 }
 
 #[derive(Serialize)]
-pub struct SerializedDependency {
-    name: InternedString,
+struct SerializedDependency<'a> {
+    name: &'a str,
     source: SourceId,
     req: String,
     kind: DepKind,
-    rename: Option<InternedString>,
+    rename: Option<&'a str>,
 
     optional: bool,
     uses_default_features: bool,
-    features: Vec<InternedString>,
+    features: &'a [InternedString],
     #[serde(skip_serializing_if = "Option::is_none")]
-    artifact: Option<Artifact>,
-    target: Option<Platform>,
+    artifact: Option<&'a Artifact>,
+    target: Option<&'a Platform>,
     /// The registry URL this dependency is from.
     /// If None, then it comes from the default registry (crates.io).
-    registry: Option<String>,
+    registry: Option<&'a str>,
 
     /// The file system path for a local path dependency.
     #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<PathBuf>,
+}
 
-    /// `public` flag is unset if `-Zpublic-dependency` is not enabled
-    ///
-    /// Once that feature is stabilized, `public` will not need to be `Option`
-    #[serde(skip_serializing_if = "Option::is_none")]
-    public: Option<bool>,
+impl ser::Serialize for Dependency {
+    fn serialize<S>(&self, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: ser::Serializer,
+    {
+        let registry_id = self.registry_id();
+        SerializedDependency {
+            name: &*self.package_name(),
+            source: self.source_id(),
+            req: self.version_req().to_string(),
+            kind: self.kind(),
+            optional: self.is_optional(),
+            uses_default_features: self.uses_default_features(),
+            features: self.features(),
+            target: self.platform(),
+            rename: self.explicit_name_in_toml().map(|s| s.as_str()),
+            registry: registry_id.as_ref().map(|sid| sid.url().as_str()),
+            path: self.source_id().local_path(),
+            artifact: self.artifact(),
+        }
+        .serialize(s)
+    }
 }
 
 #[derive(PartialEq, Eq, Hash, Ord, PartialOrd, Clone, Debug, Copy)]
@@ -128,7 +144,7 @@ impl Dependency {
                     return Err(anyhow::Error::new(err).context(format!(
                         "failed to parse the version requirement `{}` for dependency `{}`",
                         v, name,
-                    )));
+                    )))
                 }
             },
             None => (false, OptVersionReq::Any),
@@ -163,34 +179,6 @@ impl Dependency {
                 explicit_name_in_toml: None,
                 artifact: None,
             }),
-        }
-    }
-
-    pub fn serialized(
-        &self,
-        unstable_flags: &CliUnstable,
-        features: &Features,
-    ) -> SerializedDependency {
-        SerializedDependency {
-            name: self.package_name(),
-            source: self.source_id(),
-            req: self.version_req().to_string(),
-            kind: self.kind(),
-            optional: self.is_optional(),
-            uses_default_features: self.uses_default_features(),
-            features: self.features().to_vec(),
-            target: self.inner.platform.clone(),
-            rename: self.explicit_name_in_toml(),
-            registry: self.registry_id().as_ref().map(|sid| sid.url().to_string()),
-            path: self.source_id().local_path(),
-            artifact: self.inner.artifact.clone(),
-            public: if unstable_flags.public_dependency
-                || features.is_enabled(Feature::public_dependency())
-            {
-                Some(self.inner.public)
-            } else {
-                None
-            },
         }
     }
 
@@ -445,7 +433,7 @@ impl Dependency {
         Arc::make_mut(&mut self.inner).artifact = Some(artifact);
     }
 
-    pub fn artifact(&self) -> Option<&Artifact> {
+    pub(crate) fn artifact(&self) -> Option<&Artifact> {
         self.inner.artifact.as_ref()
     }
 
@@ -496,7 +484,6 @@ impl Artifact {
         artifacts: &[impl AsRef<str>],
         is_lib: bool,
         target: Option<&str>,
-        unstable_json: bool,
     ) -> CargoResult<Self> {
         let kinds = ArtifactKind::validate(
             artifacts
@@ -507,21 +494,19 @@ impl Artifact {
         Ok(Artifact {
             inner: Arc::new(kinds),
             is_lib,
-            target: target
-                .map(|name| ArtifactTarget::parse(name, unstable_json))
-                .transpose()?,
+            target: target.map(ArtifactTarget::parse).transpose()?,
         })
     }
 
-    pub fn kinds(&self) -> &[ArtifactKind] {
+    pub(crate) fn kinds(&self) -> &[ArtifactKind] {
         &self.inner
     }
 
-    pub fn is_lib(&self) -> bool {
+    pub(crate) fn is_lib(&self) -> bool {
         self.is_lib
     }
 
-    pub fn target(&self) -> Option<ArtifactTarget> {
+    pub(crate) fn target(&self) -> Option<ArtifactTarget> {
         self.target
     }
 }
@@ -539,10 +524,10 @@ pub enum ArtifactTarget {
 }
 
 impl ArtifactTarget {
-    pub fn parse(target: &str, unstable_json: bool) -> CargoResult<ArtifactTarget> {
+    pub fn parse(target: &str) -> CargoResult<ArtifactTarget> {
         Ok(match target {
             "target" => ArtifactTarget::BuildDependencyAssumeTarget,
-            name => ArtifactTarget::Force(CompileTarget::new(name, unstable_json)?),
+            name => ArtifactTarget::Force(CompileTarget::new(name)?),
         })
     }
 
@@ -637,10 +622,8 @@ impl ArtifactKind {
             _ => {
                 return kind
                     .strip_prefix("bin:")
-                    .map(|bin_name| ArtifactKind::SelectedBinary(bin_name.into()))
-                    .ok_or_else(|| {
-                        anyhow::anyhow!("'{}' is not a valid artifact specifier", kind)
-                    });
+                    .map(|bin_name| ArtifactKind::SelectedBinary(InternedString::new(bin_name)))
+                    .ok_or_else(|| anyhow::anyhow!("'{}' is not a valid artifact specifier", kind))
             }
         })
     }
@@ -651,9 +634,7 @@ impl ArtifactKind {
                 .iter()
                 .any(|k| matches!(k, ArtifactKind::SelectedBinary(_)))
         {
-            anyhow::bail!(
-                "Cannot specify both 'bin' and 'bin:<name>' binary artifacts, as 'bin' selects all available binaries."
-            );
+            anyhow::bail!("Cannot specify both 'bin' and 'bin:<name>' binary artifacts, as 'bin' selects all available binaries.");
         }
         let mut kinds_without_dupes = kinds.clone();
         kinds_without_dupes.sort();
@@ -667,31 +648,5 @@ impl ArtifactKind {
             );
         }
         Ok(kinds)
-    }
-}
-
-/// Patch is a dependency override that knows where it has been defined.
-/// See [`PatchLocation`] for possible locations.
-#[derive(Clone, Debug)]
-pub struct Patch {
-    pub dep: Dependency,
-    pub loc: PatchLocation,
-}
-
-/// Place where a [`Patch`] has been defined.
-#[derive(Clone, Debug)]
-pub enum PatchLocation {
-    /// Defined in a manifest.
-    Manifest(PathBuf),
-    /// Defined in cargo configuration.
-    Config(Definition),
-}
-
-impl Display for PatchLocation {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            PatchLocation::Manifest(p) => Path::display(p).fmt(f),
-            PatchLocation::Config(def) => def.fmt(f),
-        }
     }
 }

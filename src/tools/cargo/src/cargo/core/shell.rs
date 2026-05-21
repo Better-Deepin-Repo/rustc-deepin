@@ -1,9 +1,8 @@
 use std::fmt;
-use std::io::IsTerminal;
 use std::io::prelude::*;
+use std::io::IsTerminal;
 
-use annotate_snippets::renderer::DecorStyle;
-use annotate_snippets::{Renderer, Report};
+use annotate_snippets::{Message, Renderer};
 use anstream::AutoStream;
 use anstyle::Style;
 
@@ -57,8 +56,6 @@ impl Shell {
                 stderr_tty: std::io::stderr().is_terminal(),
                 stdout_unicode: supports_unicode(&std::io::stdout()),
                 stderr_unicode: supports_unicode(&std::io::stderr()),
-                stderr_term_integration: supports_term_integration(&std::io::stderr()),
-                unstable_flags_rustc_unicode: false,
             },
             verbosity: Verbosity::Verbose,
             needs_clear: false,
@@ -67,7 +64,7 @@ impl Shell {
     }
 
     /// Creates a shell from a plain writable object, with no color, and max verbosity.
-    pub fn from_write(out: Box<dyn Write + Send + Sync>) -> Shell {
+    pub fn from_write(out: Box<dyn Write>) -> Shell {
         Shell {
             output: ShellOut::Write(AutoStream::never(out)), // strip all formatting on write
             verbosity: Verbosity::Verbose,
@@ -125,18 +122,6 @@ impl Shell {
         }
     }
 
-    pub fn is_err_term_integration_available(&self) -> bool {
-        if let ShellOut::Stream {
-            stderr_term_integration,
-            ..
-        } = self.output
-        {
-            stderr_term_integration
-        } else {
-            false
-        }
-    }
-
     /// Gets a reference to the underlying stdout writer.
     pub fn out(&mut self) -> &mut dyn Write {
         if self.needs_clear {
@@ -170,11 +155,11 @@ impl Shell {
         self.print(&status, Some(&message), &HEADER, true)
     }
 
-    pub fn transient_status<T>(&mut self, status: T) -> CargoResult<()>
+    pub fn status_header<T>(&mut self, status: T) -> CargoResult<()>
     where
         T: fmt::Display,
     {
-        self.print(&status, None, &TRANSIENT, true)
+        self.print(&status, None, &NOTE, true)
     }
 
     /// Shortcut to right-align a status message.
@@ -224,15 +209,15 @@ impl Shell {
 
     /// Prints an amber 'warning' message.
     pub fn warn<T: fmt::Display>(&mut self, message: T) -> CargoResult<()> {
-        self.print(&"warning", Some(&message), &WARN, false)
+        match self.verbosity {
+            Verbosity::Quiet => Ok(()),
+            _ => self.print(&"warning", Some(&message), &WARN, false),
+        }
     }
 
     /// Prints a cyan 'note' message.
     pub fn note<T: fmt::Display>(&mut self, message: T) -> CargoResult<()> {
-        let report = &[annotate_snippets::Group::with_title(
-            annotate_snippets::Level::NOTE.secondary_title(message.to_string()),
-        )];
-        self.print_report(report, false)
+        self.print(&"note", Some(&message), &NOTE, false)
     }
 
     /// Updates the verbosity of the shell.
@@ -366,7 +351,7 @@ impl Shell {
     fn file_hyperlink(&mut self, path: &std::path::Path) -> Option<url::Url> {
         let mut url = url::Url::from_file_path(path).ok()?;
         // Do a best-effort of setting the host in the URL to avoid issues with opening a link
-        // scoped to the computer you've SSH'ed into
+        // scoped to the computer you've SSHed into
         let hostname = if cfg!(windows) {
             // Not supported correctly on windows
             None
@@ -380,27 +365,6 @@ impl Shell {
         };
         let _ = url.set_host(hostname);
         Some(url)
-    }
-
-    fn unstable_flags_rustc_unicode(&self) -> bool {
-        match &self.output {
-            ShellOut::Write(_) => false,
-            ShellOut::Stream {
-                unstable_flags_rustc_unicode,
-                ..
-            } => *unstable_flags_rustc_unicode,
-        }
-    }
-
-    pub(crate) fn set_unstable_flags_rustc_unicode(&mut self, yes: bool) -> CargoResult<()> {
-        if let ShellOut::Stream {
-            unstable_flags_rustc_unicode,
-            ..
-        } = &mut self.output
-        {
-            *unstable_flags_rustc_unicode = yes;
-        }
-        Ok(())
     }
 
     /// Prints a message to stderr and translates ANSI escape code into console colors.
@@ -423,37 +387,23 @@ impl Shell {
 
     pub fn print_json<T: serde::ser::Serialize>(&mut self, obj: &T) -> CargoResult<()> {
         // Path may fail to serialize to JSON ...
-        let encoded = serde_json::to_string(obj)?;
+        let encoded = serde_json::to_string(&obj)?;
         // ... but don't fail due to a closed pipe.
         drop(writeln!(self.out(), "{}", encoded));
         Ok(())
     }
 
-    /// Prints the passed in [`Report`] to stderr
-    pub fn print_report(&mut self, report: Report<'_>, force: bool) -> CargoResult<()> {
-        if !force && matches!(self.verbosity, Verbosity::Quiet) {
-            return Ok(());
-        }
-
-        if self.needs_clear {
-            self.err_erase_line();
-        }
+    /// Prints the passed in [Message] to stderr
+    pub fn print_message(&mut self, message: Message<'_>) -> std::io::Result<()> {
         let term_width = self
             .err_width()
             .diagnostic_terminal_width()
             .unwrap_or(annotate_snippets::renderer::DEFAULT_TERM_WIDTH);
-        let decor_style = if self.err_unicode() && self.unstable_flags_rustc_unicode() {
-            DecorStyle::Unicode
-        } else {
-            DecorStyle::Ascii
-        };
-        let rendered = Renderer::styled()
-            .term_width(term_width)
-            .decor_style(decor_style)
-            .render(report);
-        self.err().write_all(rendered.as_bytes())?;
-        self.err().write_all(b"\n")?;
-        Ok(())
+        writeln!(
+            self.err(),
+            "{}",
+            Renderer::styled().term_width(term_width).render(message)
+        )
     }
 }
 
@@ -466,7 +416,7 @@ impl Default for Shell {
 /// A `Write`able object, either with or without color support
 enum ShellOut {
     /// A plain write object without color support
-    Write(AutoStream<Box<dyn Write + Send + Sync>>),
+    Write(AutoStream<Box<dyn Write>>),
     /// Color-enabled stdio, with information on whether color should be used
     Stream {
         stdout: AutoStream<std::io::Stdout>,
@@ -476,8 +426,6 @@ enum ShellOut {
         hyperlinks: bool,
         stdout_unicode: bool,
         stderr_unicode: bool,
-        stderr_term_integration: bool,
-        unstable_flags_rustc_unicode: bool,
     },
 }
 
@@ -492,11 +440,13 @@ impl ShellOut {
         style: &Style,
         justified: bool,
     ) -> CargoResult<()> {
+        let bold = anstyle::Style::new() | anstyle::Effects::BOLD;
+
         let mut buffer = Vec::new();
         if justified {
             write!(&mut buffer, "{style}{status:>12}{style:#}")?;
         } else {
-            write!(&mut buffer, "{style}{status}{style:#}:")?;
+            write!(&mut buffer, "{style}{status}{style:#}{bold}:{bold:#}")?;
         }
         match message {
             Some(message) => writeln!(buffer, " {message}")?,
@@ -533,10 +483,8 @@ impl TtyWidth {
     /// Returns the width of the terminal to use for diagnostics (which is
     /// relayed to rustc via `--diagnostic-width`).
     pub fn diagnostic_terminal_width(&self) -> Option<usize> {
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "testing only, no reason for config support"
-        )]
+        // ALLOWED: For testing cargo itself only.
+        #[allow(clippy::disallowed_methods)]
         if let Ok(width) = std::env::var("__CARGO_TEST_TTY_WIDTH_DO_NOT_USE_THIS") {
             return Some(width.parse().unwrap());
         }
@@ -618,72 +566,13 @@ fn supports_unicode(stream: &dyn IsTerminal) -> bool {
 }
 
 fn supports_hyperlinks() -> bool {
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "reading the state of the system, not config"
-    )]
+    #[allow(clippy::disallowed_methods)] // We are reading the state of the system, not config
     if std::env::var_os("TERM_PROGRAM").as_deref() == Some(std::ffi::OsStr::new("iTerm.app")) {
         // Override `supports_hyperlinks` as we have an unknown incompatibility with iTerm2
         return false;
     }
 
     supports_hyperlinks::supports_hyperlinks()
-}
-
-/// Determines whether the terminal supports ANSI OSC 9;4.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "reading the state of the system, not config"
-)]
-fn supports_term_integration(stream: &dyn IsTerminal) -> bool {
-    let windows_terminal = std::env::var("WT_SESSION").is_ok();
-    let conemu = std::env::var("ConEmuANSI").ok() == Some("ON".into());
-    let wezterm = std::env::var("TERM_PROGRAM").ok() == Some("WezTerm".into());
-    let ghostty = std::env::var("TERM_PROGRAM").ok() == Some("ghostty".into());
-    // iTerm added OSC 9;4 support in v3.6.6, which we can check for.
-    // For context: https://github.com/rust-lang/cargo/pull/16506#discussion_r2706584034
-    let iterm = std::env::var("TERM_PROGRAM").ok() == Some("iTerm.app".into())
-        && std::env::var("TERM_FEATURES")
-            .ok()
-            .is_some_and(|v| term_features_has_progress(&v));
-
-    (windows_terminal || conemu || wezterm || ghostty || iterm) && stream.is_terminal()
-}
-
-// For iTerm, the TERM_FEATURES value "P" indicates OSC 9;4 support.
-// Context: https://iterm2.com/feature-reporting/
-fn term_features_has_progress(value: &str) -> bool {
-    let mut current = String::new();
-
-    for ch in value.chars() {
-        if !ch.is_ascii_alphanumeric() {
-            break;
-        }
-        if ch.is_ascii_uppercase() {
-            if current == "P" {
-                return true;
-            }
-            current.clear();
-            current.push(ch);
-        } else {
-            current.push(ch);
-        }
-    }
-    current == "P"
-}
-
-#[cfg(test)]
-mod tests {
-    use super::term_features_has_progress;
-
-    #[test]
-    fn term_features_progress_detection() {
-        // With PROGRESS feature ("P")
-        assert!(term_features_has_progress("MBT2ScP"));
-
-        // Without PROGRESS feature
-        assert!(!term_features_has_progress("MBT2Sc"));
-    }
 }
 
 pub struct Hyperlink<D: fmt::Display> {
@@ -742,6 +631,7 @@ mod imp {
 mod imp {
     use std::{cmp, mem, ptr};
 
+    use windows_sys::core::PCSTR;
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE};
@@ -749,11 +639,10 @@ mod imp {
         CreateFileA, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
     use windows_sys::Win32::System::Console::{
-        CONSOLE_SCREEN_BUFFER_INFO, GetConsoleScreenBufferInfo, GetStdHandle, STD_ERROR_HANDLE,
+        GetConsoleScreenBufferInfo, GetStdHandle, CONSOLE_SCREEN_BUFFER_INFO, STD_ERROR_HANDLE,
     };
-    use windows_sys::core::PCSTR;
 
-    pub(super) use super::{TtyWidth, default_err_erase_line as err_erase_line};
+    pub(super) use super::{default_err_erase_line as err_erase_line, TtyWidth};
 
     pub fn stderr_width() -> TtyWidth {
         unsafe {

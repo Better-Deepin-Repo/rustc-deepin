@@ -1,5 +1,3 @@
-//@ dont-require-annotations: NOTE
-
 #![feature(specialization)] //~ WARN the feature `specialization` is incomplete
 
 trait Foo: Copy + ToString {}
@@ -26,21 +24,21 @@ impl Leak for i32 {
 fn main() {
     let _: u32 = hide(0_u32);
     //~^ ERROR mismatched types
-    //~| NOTE expected type `u32`
-    //~| NOTE found opaque type `impl Foo`
-    //~| NOTE expected `u32`, found opaque type
+    //~| expected type `u32`
+    //~| found opaque type `impl Foo`
+    //~| expected `u32`, found opaque type
 
     let _: i32 = Leak::leak(hide(0_i32));
     //~^ ERROR mismatched types
-    //~| NOTE expected type `i32`
-    //~| NOTE found associated type `<impl Foo as Leak>::T`
-    //~| NOTE expected `i32`, found associated type
+    //~| expected type `i32`
+    //~| found associated type `<impl Foo as Leak>::T`
+    //~| expected `i32`, found associated type
 
     let mut x = (hide(0_u32), hide(0_i32));
     x = (x.1,
     //~^ ERROR mismatched types
-    //~| NOTE expected `u32`, found `i32`
+    //~| expected `u32`, found `i32`
          x.0);
     //~^ ERROR mismatched types
-    //~| NOTE expected `i32`, found `u32`
+    //~| expected `i32`, found `u32`
 }

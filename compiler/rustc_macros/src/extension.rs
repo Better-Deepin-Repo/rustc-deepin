@@ -4,9 +4,9 @@ use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{
-    Attribute, Generics, ImplItem, Pat, PatIdent, Path, Signature, Token, TraitItem,
-    TraitItemConst, TraitItemFn, TraitItemMacro, TraitItemType, Type, Visibility, WhereClause,
-    braced, parse_macro_input,
+    braced, parse_macro_input, Attribute, Generics, ImplItem, Pat, PatIdent, Path, Signature,
+    Token, TraitItem, TraitItemConst, TraitItemFn, TraitItemMacro, TraitItemType, Type, Visibility,
+    WhereClause,
 };
 
 pub(crate) fn extension(

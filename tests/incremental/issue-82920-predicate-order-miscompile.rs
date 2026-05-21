@@ -1,5 +1,4 @@
 //@ revisions: rpass1 rpass2
-//@ ignore-backends: gcc
 
 trait MyTrait: One + Two {}
 impl<T> One for T {

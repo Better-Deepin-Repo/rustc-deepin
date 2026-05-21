@@ -4,18 +4,18 @@ Subject: d-ignore-test_arc_condvar_poison-ppc
 
 Forwarded: no
 ---
- library/std/tests/sync/mutex.rs | 1 +
+ library/std/src/sync/mutex/tests.rs | 1 +
  1 file changed, 1 insertion(+)
 
-diff --git a/library/std/tests/sync/mutex.rs b/library/std/tests/sync/mutex.rs
-index 75a6bf6..65019f9 100644
---- a/library/std/tests/sync/mutex.rs
-+++ b/library/std/tests/sync/mutex.rs
-@@ -424,6 +424,7 @@ fn test_replace_poison() {
+diff --git a/library/std/src/sync/mutex/tests.rs b/library/std/src/sync/mutex/tests.rs
+index 19ec096..d9e84cc 100644
+--- a/library/std/src/sync/mutex/tests.rs
++++ b/library/std/src/sync/mutex/tests.rs
+@@ -145,6 +145,7 @@ fn test_mutex_arc_condvar() {
+     }
  }
  
- #[test]
 +#[cfg(not(target_arch = "powerpc"))]
- #[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
- fn test_mutex_arc_poison() {
-     let arc = Arc::new(Mutex::new(1));
+ #[test]
+ fn test_arc_condvar_poison() {
+     let packet = Packet(Arc::new((Mutex::new(1), Condvar::new())));

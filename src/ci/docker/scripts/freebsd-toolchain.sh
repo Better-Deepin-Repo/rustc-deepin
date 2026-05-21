@@ -28,9 +28,7 @@ exit 1
 # First up, build binutils
 mkdir binutils
 cd binutils
-# Originally downloaded from:
-# https://sourceware.org/pub/binutils/releases/binutils-${binutils_version}.tar.bz2
-curl https://ci-mirrors.rust-lang.org/rustc/binutils-${binutils_version}.tar.bz2 | tar xjf -
+curl https://ftp.gnu.org/gnu/binutils/binutils-${binutils_version}.tar.bz2 | tar xjf -
 mkdir binutils-build
 cd binutils-build
 hide_output ../binutils-${binutils_version}/configure \

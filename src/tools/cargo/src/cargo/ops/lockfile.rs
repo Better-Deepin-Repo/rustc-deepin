@@ -1,12 +1,10 @@
 use std::io::prelude::*;
 
-use crate::core::resolver::encode::into_resolve;
-use crate::core::{Resolve, ResolveVersion, Workspace};
-use crate::util::Filesystem;
+use crate::core::{resolver, Resolve, ResolveVersion, Workspace};
 use crate::util::errors::CargoResult;
+use crate::util::Filesystem;
 
 use anyhow::Context as _;
-use cargo_util_schemas::lockfile::TomlLockfile;
 
 pub const LOCKFILE_NAME: &str = "Cargo.lock";
 
@@ -24,8 +22,8 @@ pub fn load_pkg_lockfile(ws: &Workspace<'_>) -> CargoResult<Option<Resolve>> {
         .with_context(|| format!("failed to read file: {}", f.path().display()))?;
 
     let resolve = (|| -> CargoResult<Option<Resolve>> {
-        let v: TomlLockfile = toml::from_str(&s)?;
-        Ok(Some(into_resolve(v, &s, ws)?))
+        let v: resolver::EncodableResolve = toml::from_str(&s)?;
+        Ok(Some(v.into_resolve(&s, ws)?))
     })()
     .with_context(|| format!("failed to parse lock file at: {}", f.path().display()))?;
     Ok(resolve)
@@ -52,18 +50,19 @@ pub fn write_pkg_lockfile(ws: &Workspace<'_>, resolve: &mut Resolve) -> CargoRes
         }
     }
 
-    if let Some(locked_flag) = ws.gctx().locked_flag() {
-        let lockfile_path = lock_root.as_path_unlocked().join(LOCKFILE_NAME);
-        let action = if lockfile_path.exists() {
-            "update"
+    if !ws.gctx().lock_update_allowed() {
+        let flag = if ws.gctx().locked() {
+            "--locked"
         } else {
-            "create"
+            "--frozen"
         };
-        let lockfile_path = lockfile_path.display();
         anyhow::bail!(
-            "cannot {action} the lock file {lockfile_path} because {locked_flag} was passed to prevent this\n\
-             help: to generate the lock file without accessing the network, \
-             remove the {locked_flag} flag and use --offline instead."
+            "the lock file {} needs to be updated but {} was passed to prevent this\n\
+             If you want to try to generate the lock file without accessing the network, \
+             remove the {} flag and use --offline instead.",
+            lock_root.as_path_unlocked().join(LOCKFILE_NAME).display(),
+            flag,
+            flag
         );
     }
 
@@ -72,7 +71,7 @@ pub fn write_pkg_lockfile(ws: &Workspace<'_>, resolve: &mut Resolve) -> CargoRes
     // out lock file updates as they're otherwise already updated, and changes
     // which don't touch dependencies won't seemingly spuriously update the lock
     // file.
-    let default_version = ResolveVersion::with_rust_version(ws.lowest_rust_version());
+    let default_version = ResolveVersion::with_rust_version(ws.rust_version());
     let current_version = resolve.version();
     let next_lockfile_bump = ws.gctx().cli_unstable().next_lockfile_bump;
     tracing::debug!("lockfile - current: {current_version:?}, default: {default_version:?}");
@@ -212,9 +211,9 @@ fn are_equal_lockfiles(orig: &str, current: &str, ws: &Workspace<'_>) -> bool {
     // common case where we can update lock files.
     if !ws.gctx().lock_update_allowed() {
         let res: CargoResult<bool> = (|| {
-            let old: TomlLockfile = toml::from_str(orig)?;
-            let new: TomlLockfile = toml::from_str(current)?;
-            Ok(into_resolve(old, orig, ws)? == into_resolve(new, current, ws)?)
+            let old: resolver::EncodableResolve = toml::from_str(orig)?;
+            let new: resolver::EncodableResolve = toml::from_str(current)?;
+            Ok(old.into_resolve(orig, ws)? == new.into_resolve(current, ws)?)
         })();
         if let Ok(true) = res {
             return true;

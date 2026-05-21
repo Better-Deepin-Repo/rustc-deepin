@@ -8,13 +8,15 @@ pub(crate) fn unresolved_macro_call(
     ctx: &DiagnosticsContext<'_>,
     d: &hir::UnresolvedMacroCall,
 ) -> Diagnostic {
-    let display_range = ctx.sema.diagnostics_display_range_for_range(d.range);
+    // Use more accurate position if available.
+    let display_range = ctx.resolve_precise_location(&d.macro_call, d.precise_location);
     let bang = if d.is_bang { "!" } else { "" };
     Diagnostic::new(
         DiagnosticCode::RustcHardError("unresolved-macro-call"),
         format!("unresolved macro `{}{bang}`", d.path.display(ctx.sema.db, ctx.edition)),
         display_range,
     )
+    .experimental()
 }
 
 #[cfg(test)]
@@ -75,34 +77,9 @@ self::m!(); self::m2!();
             r#"
     mod _test_inner {
         #![empty_attr]
-        // ^^^^^^^^^^ error: unresolved macro `empty_attr`
+      //^^^^^^^^^^^^^^ error: unresolved macro `empty_attr`
     }
 "#,
-        );
-    }
-
-    #[test]
-    fn no_unresolved_panic_inside_mod_inside_fn() {
-        check_diagnostics(
-            r#"
-//- /core.rs library crate:core
-#[macro_export]
-macro_rules! panic {
-    () => {};
-}
-
-//- /lib.rs crate:foo deps:core
-#[macro_use]
-extern crate core;
-
-fn foo() {
-    mod init {
-        pub fn init() {
-            panic!();
-        }
-    }
-}
-    "#,
         );
     }
 }

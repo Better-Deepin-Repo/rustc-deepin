@@ -1,15 +1,15 @@
 use std::fs;
-// Needed to set the script mode to executable.
-#[cfg(unix)]
-use std::os::unix::fs::OpenOptionsExt;
 // FIXME: what about Windows? Are default ACLs executable?
 #[cfg(unix)]
 use std::os::unix::fs::symlink as symlink_file;
+// Needed to set the script mode to executable.
+#[cfg(unix)]
+use std::os::unix::fs::OpenOptionsExt;
 #[cfg(windows)]
 use std::os::windows::fs::symlink_file;
 use std::path::Path;
 
-use anyhow::{Context, Result, format_err};
+use anyhow::{format_err, Context, Result};
 use walkdir::WalkDir;
 
 /// Converts a `&Path` to a UTF-8 `&str`.

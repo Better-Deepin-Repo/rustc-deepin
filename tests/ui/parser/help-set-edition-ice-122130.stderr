@@ -1,16 +1,16 @@
 error: expected one of `(`, `,`, `=`, `{`, or `}`, found `#`
-  --> $DIR/help-set-edition-ice-122130.rs:3:6
+  --> $DIR/help-set-edition-ice-122130.rs:2:6
    |
 LL |     s#[c"owned_box"]
    |      ^ expected one of `(`, `,`, `=`, `{`, or `}`
    |
    = note: you may be trying to write a c-string literal
    = note: c-string literals require Rust 2021 or later
-   = help: pass `--edition 2024` to `rustc`
+   = help: pass `--edition 2021` to `rustc`
    = note: for more on editions, read https://doc.rust-lang.org/edition-guide
 
 error: expected item, found `"owned_box"`
-  --> $DIR/help-set-edition-ice-122130.rs:3:9
+  --> $DIR/help-set-edition-ice-122130.rs:2:9
    |
 LL |     s#[c"owned_box"]
    |         ^^^^^^^^^^^ expected item

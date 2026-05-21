@@ -1,10 +1,10 @@
 /*
- * https://gcc.gnu.org/git/?p=gcc.git;a=blob_plain;f=gcc/config/loongarch/lsxintrin.h;hb=6441eb6dc020faae0672ea724dfdb38c6a9bf6a1
+ * https://gcc.gnu.org/git/?p=gcc.git;a=blob_plain;f=gcc/config/loongarch/lsxintrin.h;hb=4912418dc1b51d49aca5982c6a2061bb912b92b7
  */
 
 /* LARCH Loongson SX intrinsics include file.
 
-   Copyright (C) 2018-2025 Free Software Foundation, Inc.
+   Copyright (C) 2018 Free Software Foundation, Inc.
 
    This file is part of GCC.
 
@@ -2484,40 +2484,6 @@ __m128d __lsx_vfrecip_d (__m128d _1)
   return (__m128d)__builtin_lsx_vfrecip_d ((v2f64)_1);
 }
 
-#if defined(__loongarch_frecipe)
-/* Assembly instruction format: vd, vj.  */
-/* Data types in instruction templates:  V4SF, V4SF.  */
-extern __inline __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-__m128 __lsx_vfrecipe_s (__m128 _1)
-{
-  return (__m128)__builtin_lsx_vfrecipe_s ((v4f32)_1);
-}
-
-/* Assembly instruction format: vd, vj.  */
-/* Data types in instruction templates:  V2DF, V2DF.  */
-extern __inline __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-__m128d __lsx_vfrecipe_d (__m128d _1)
-{
-  return (__m128d)__builtin_lsx_vfrecipe_d ((v2f64)_1);
-}
-
-/* Assembly instruction format: vd, vj.  */
-/* Data types in instruction templates:  V4SF, V4SF.  */
-extern __inline __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-__m128 __lsx_vfrsqrte_s (__m128 _1)
-{
-  return (__m128)__builtin_lsx_vfrsqrte_s ((v4f32)_1);
-}
-
-/* Assembly instruction format: vd, vj.  */
-/* Data types in instruction templates:  V2DF, V2DF.  */
-extern __inline __attribute__((__gnu_inline__, __always_inline__, __artificial__))
-__m128d __lsx_vfrsqrte_d (__m128d _1)
-{
-  return (__m128d)__builtin_lsx_vfrsqrte_d ((v2f64)_1);
-}
-#endif
-
 /* Assembly instruction format:	vd, vj.  */
 /* Data types in instruction templates:  V4SF, V4SF.  */
 extern __inline __attribute__((__gnu_inline__, __always_inline__, __artificial__))
@@ -4749,11 +4715,11 @@ __m128i __lsx_vssrln_w_d (__m128i _1, __m128i _2)
 }
 
 /* Assembly instruction format:	vd, vj, vk.  */
-/* Data types in instruction templates:  UV16QI, UV16QI, UV16QI.  */
+/* Data types in instruction templates:  V16QI, V16QI, V16QI.  */
 extern __inline __attribute__((__gnu_inline__, __always_inline__, __artificial__))
 __m128i __lsx_vorn_v (__m128i _1, __m128i _2)
 {
-  return (__m128i)__builtin_lsx_vorn_v ((v16u8)_1, (v16u8)_2);
+  return (__m128i)__builtin_lsx_vorn_v ((v16i8)_1, (v16i8)_2);
 }
 
 /* Assembly instruction format:	vd, i13.  */

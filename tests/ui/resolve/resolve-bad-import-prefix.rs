@@ -1,4 +1,3 @@
-//@ edition:2015
 mod m {}
 enum E {}
 struct S;

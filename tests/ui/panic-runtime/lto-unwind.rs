@@ -1,9 +1,11 @@
 //@ run-pass
+#![allow(unused_variables)]
+
 //@ compile-flags:-C lto -C panic=unwind
 //@ needs-unwind
 //@ no-prefer-dynamic
-//@ needs-subprocess
-//@ ignore-backends: gcc
+//@ ignore-emscripten no processes
+//@ ignore-sgx no processes
 
 use std::process::Command;
 use std::env;
@@ -18,7 +20,7 @@ impl Drop for Bomb {
 
 fn main() {
     let mut args = env::args_os();
-    let _ = args.next().unwrap();
+    let me = args.next().unwrap();
 
     if let Some(s) = args.next() {
         if &*s == "foo" {

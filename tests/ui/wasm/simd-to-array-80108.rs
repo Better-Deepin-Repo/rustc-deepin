@@ -10,8 +10,6 @@ pub struct Vector([i32; 4]);
 
 impl Vector {
     pub const fn to_array(self) -> [i32; 4] {
-        // This used to just be `.0`, but that was banned in
-        // <https://github.com/rust-lang/compiler-team/issues/838>
-        unsafe { std::mem::transmute(self) }
+        self.0
     }
 }

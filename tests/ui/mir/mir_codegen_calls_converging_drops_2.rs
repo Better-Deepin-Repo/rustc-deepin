@@ -2,7 +2,7 @@
 //@ error-pattern:complex called
 //@ error-pattern:dropped
 //@ error-pattern:exit
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 struct Droppable;
 impl Drop for Droppable {

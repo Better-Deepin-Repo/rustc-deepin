@@ -1,6 +1,6 @@
 use clippy_utils::diagnostics::span_lint_and_sugg;
-use clippy_utils::res::MaybeDef;
 use clippy_utils::source::snippet_with_applicability;
+use clippy_utils::ty::get_type_diagnostic_name;
 use rustc_errors::Applicability;
 use rustc_hir as hir;
 use rustc_lint::{LateContext, LateLintPass};
@@ -35,17 +35,20 @@ declare_lint_pass!(UnnecessaryMapOnConstructor => [UNNECESSARY_MAP_ON_CONSTRUCTO
 
 impl<'tcx> LateLintPass<'tcx> for UnnecessaryMapOnConstructor {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx rustc_hir::Expr<'tcx>) {
-        if !expr.span.from_expansion()
-            && let hir::ExprKind::MethodCall(path, recv, [map_arg], ..) = expr.kind
-            && !map_arg.span.from_expansion()
-            && let hir::ExprKind::Path(fun) = map_arg.kind
-            && let Some(sym::Option | sym::Result) = cx.typeck_results().expr_ty(recv).opt_diag_name(cx)
+        if expr.span.from_expansion() {
+            return;
+        }
+        if let hir::ExprKind::MethodCall(path, recv, args, ..) = expr.kind
+            && let Some(sym::Option | sym::Result) = get_type_diagnostic_name(cx, cx.typeck_results().expr_ty(recv))
         {
-            let (constructor_path, constructor_item) = if let hir::ExprKind::Call(constructor, [arg, ..]) = recv.kind
+            let (constructor_path, constructor_item) = if let hir::ExprKind::Call(constructor, constructor_args) =
+                recv.kind
                 && let hir::ExprKind::Path(constructor_path) = constructor.kind
-                && !constructor.span.from_expansion()
-                && !arg.span.from_expansion()
+                && let Some(arg) = constructor_args.first()
             {
+                if constructor.span.from_expansion() || arg.span.from_expansion() {
+                    return;
+                }
                 (constructor_path, arg)
             } else {
                 return;
@@ -59,6 +62,7 @@ impl<'tcx> LateLintPass<'tcx> for UnnecessaryMapOnConstructor {
                     }
                 },
                 hir::QPath::TypeRelative(_, path) => path.ident.name,
+                hir::QPath::LangItem(..) => return,
             };
             match constructor_symbol {
                 sym::Some | sym::Ok if path.ident.name == sym::map => (),
@@ -66,22 +70,31 @@ impl<'tcx> LateLintPass<'tcx> for UnnecessaryMapOnConstructor {
                 _ => return,
             }
 
-            let mut app = Applicability::MachineApplicable;
-            let fun_snippet = snippet_with_applicability(cx, fun.span(), "_", &mut app);
-            let constructor_snippet = snippet_with_applicability(cx, constructor_path.span(), "_", &mut app);
-            let constructor_arg_snippet = snippet_with_applicability(cx, constructor_item.span, "_", &mut app);
-            span_lint_and_sugg(
-                cx,
-                UNNECESSARY_MAP_ON_CONSTRUCTOR,
-                expr.span,
-                format!(
-                    "unnecessary `{}` on constructor `{constructor_snippet}(_)`",
-                    path.ident.name
-                ),
-                "try",
-                format!("{constructor_snippet}({fun_snippet}({constructor_arg_snippet}))"),
-                app,
-            );
+            if let Some(map_arg) = args.first()
+                && let hir::ExprKind::Path(fun) = map_arg.kind
+            {
+                if map_arg.span.from_expansion() {
+                    return;
+                }
+                let mut applicability = Applicability::MachineApplicable;
+                let fun_snippet = snippet_with_applicability(cx, fun.span(), "_", &mut applicability);
+                let constructor_snippet =
+                    snippet_with_applicability(cx, constructor_path.span(), "_", &mut applicability);
+                let constructor_arg_snippet =
+                    snippet_with_applicability(cx, constructor_item.span, "_", &mut applicability);
+                span_lint_and_sugg(
+                    cx,
+                    UNNECESSARY_MAP_ON_CONSTRUCTOR,
+                    expr.span,
+                    format!(
+                        "unnecessary {} on constructor {constructor_snippet}(_)",
+                        path.ident.name
+                    ),
+                    "try",
+                    format!("{constructor_snippet}({fun_snippet}({constructor_arg_snippet}))"),
+                    applicability,
+                );
+            }
         }
     }
 }

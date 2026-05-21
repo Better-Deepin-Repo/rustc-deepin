@@ -1,4 +1,6 @@
-//@ ignore-auxiliary (used by `./non_modrs_mods.rs`)
+//@ run-pass
+//
+//@ ignore-test: not a test, used by non_modrs_mods.rs
 
 pub mod inner_modrs_mod;
 pub mod inner_foors_mod;

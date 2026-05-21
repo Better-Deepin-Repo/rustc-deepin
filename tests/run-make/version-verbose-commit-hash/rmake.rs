@@ -5,13 +5,13 @@
 
 //@ needs-git-hash
 
-use run_make_support::{bare_rustc, regex, rustdoc};
+use run_make_support::{bare_rustc, bare_rustdoc, regex};
 
 fn main() {
     let out_rustc =
         bare_rustc().arg("--version").arg("--verbose").run().stdout_utf8().to_lowercase();
     let out_rustdoc =
-        rustdoc().arg("--version").arg("--verbose").run().stdout_utf8().to_lowercase();
+        bare_rustdoc().arg("--version").arg("--verbose").run().stdout_utf8().to_lowercase();
     let re =
         regex::Regex::new(r#"commit-hash: [0-9a-f]{40}\ncommit-date: [0-9]{4}-[0-9]{2}-[0-9]{2}"#)
             .unwrap();

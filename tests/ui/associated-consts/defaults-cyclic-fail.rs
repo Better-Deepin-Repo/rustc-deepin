@@ -3,7 +3,7 @@
 // Cyclic assoc. const defaults don't error unless *used*
 trait Tr {
     const A: u8 = Self::B;
-    //~^ ERROR cycle detected
+    //~^ cycle detected
 
     const B: u8 = Self::A;
 }

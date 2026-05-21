@@ -1,11 +1,3 @@
-warning: denote infinite loops with `loop { ... }`
-  --> $DIR/force_warn_expected_lints_fulfilled.rs:8:5
-   |
-LL |     while true {
-   |     ^^^^^^^^^^ help: use `loop`
-   |
-   = note: requested on the command line with `--force-warn while-true`
-
 warning: unused variable: `x`
   --> $DIR/force_warn_expected_lints_fulfilled.rs:18:9
    |
@@ -13,6 +5,12 @@ LL |     let x = 2;
    |         ^ help: if this is intentional, prefix it with an underscore: `_x`
    |
    = note: requested on the command line with `--force-warn unused-variables`
+
+warning: unused variable: `fox_name`
+  --> $DIR/force_warn_expected_lints_fulfilled.rs:26:9
+   |
+LL |     let fox_name = "Sir Nibbles";
+   |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fox_name`
 
 warning: variable does not need to be mutable
   --> $DIR/force_warn_expected_lints_fulfilled.rs:30:9
@@ -24,17 +22,19 @@ LL |     let mut what_does_the_fox_say = "*ding* *deng* *dung*";
    |
    = note: requested on the command line with `--force-warn unused-mut`
 
-warning: unused variable: `fox_name`
-  --> $DIR/force_warn_expected_lints_fulfilled.rs:26:9
-   |
-LL |     let fox_name = "Sir Nibbles";
-   |         ^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_fox_name`
-
 warning: unused variable: `this_should_fulfill_the_expectation`
   --> $DIR/force_warn_expected_lints_fulfilled.rs:41:9
    |
 LL |     let this_should_fulfill_the_expectation = "The `#[allow]` has no power here";
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_this_should_fulfill_the_expectation`
+
+warning: denote infinite loops with `loop { ... }`
+  --> $DIR/force_warn_expected_lints_fulfilled.rs:8:5
+   |
+LL |     while true {
+   |     ^^^^^^^^^^ help: use `loop`
+   |
+   = note: requested on the command line with `--force-warn while-true`
 
 warning: 5 warnings emitted
 

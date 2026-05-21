@@ -1,11 +1,12 @@
 use std::fmt;
 
-use hir::{DisplayTarget, Field, HirDisplay, Layout, Semantics, Type};
+use hir::{Field, HirDisplay, Layout, Semantics, Type};
 use ide_db::{
-    RootDatabase,
     defs::Definition,
     helpers::{get_definition, pick_best_token},
+    RootDatabase,
 };
+use span::Edition;
 use syntax::{AstNode, SyntaxKind};
 
 use crate::FilePosition;
@@ -74,16 +75,21 @@ impl FieldOrTupleIdx {
 //
 // Displays the recursive memory layout of a datatype.
 //
-// | Editor  | Action Name |
-// |---------|-------------|
-// | VS Code | **rust-analyzer: View Memory Layout** |
+// |===
+// | Editor  | Action Name
+//
+// | VS Code | **rust-analyzer: View Memory Layout**
+// |===
 pub(crate) fn view_memory_layout(
     db: &RootDatabase,
     position: FilePosition,
 ) -> Option<RecursiveMemoryLayout> {
     let sema = Semantics::new(db);
     let file = sema.parse_guess_edition(position.file_id);
-    let display_target = sema.first_crate(position.file_id)?.to_display_target(db);
+    let edition = sema
+        .attach_first_edition(position.file_id)
+        .map(|it| it.edition())
+        .unwrap_or(Edition::CURRENT);
     let token =
         pick_best_token(file.syntax().token_at_offset(position.offset), |kind| match kind {
             SyntaxKind::IDENT => 3,
@@ -98,7 +104,7 @@ pub(crate) fn view_memory_layout(
         Definition::BuiltinType(it) => it.ty(db),
         Definition::SelfType(it) => it.self_ty(db),
         Definition::Local(it) => it.ty(db),
-        Definition::Field(it) => it.ty(db).to_type(db),
+        Definition::Field(it) => it.ty(db),
         Definition::Const(it) => it.ty(db),
         Definition::Static(it) => it.ty(db),
         _ => return None,
@@ -107,10 +113,10 @@ pub(crate) fn view_memory_layout(
     fn read_layout(
         nodes: &mut Vec<MemoryLayoutNode>,
         db: &RootDatabase,
-        ty: &Type<'_>,
+        ty: &Type,
         layout: &Layout,
         parent_idx: usize,
-        display_target: DisplayTarget,
+        edition: Edition,
     ) {
         let mut fields = ty
             .fields(db)
@@ -141,7 +147,7 @@ pub(crate) fn view_memory_layout(
             if let Ok(child_layout) = child_ty.layout(db) {
                 nodes.push(MemoryLayoutNode {
                     item_name: field.name(db),
-                    typename: { child_ty.display(db, display_target).to_string() },
+                    typename: child_ty.display(db, edition).to_string(),
                     size: child_layout.size(),
                     alignment: child_layout.align(),
                     offset: match *field {
@@ -157,7 +163,7 @@ pub(crate) fn view_memory_layout(
                     item_name: field.name(db)
                         + format!("(no layout data: {:?})", child_ty.layout(db).unwrap_err())
                             .as_ref(),
-                    typename: child_ty.display(db, display_target).to_string(),
+                    typename: child_ty.display(db, edition).to_string(),
                     size: 0,
                     offset: 0,
                     alignment: 0,
@@ -170,7 +176,7 @@ pub(crate) fn view_memory_layout(
 
         for (i, (_, child_ty)) in fields.iter().enumerate() {
             if let Ok(child_layout) = child_ty.layout(db) {
-                read_layout(nodes, db, child_ty, &child_layout, children_start + i, display_target);
+                read_layout(nodes, db, child_ty, &child_layout, children_start + i, edition);
             }
         }
     }
@@ -188,7 +194,7 @@ pub(crate) fn view_memory_layout(
                 def => def.name(db).map(|n| n.as_str().to_owned()).unwrap_or("[ROOT]".to_owned()),
             };
 
-            let typename = ty.display(db, display_target).to_string();
+            let typename = ty.display(db, edition).to_string();
 
             let mut nodes = vec![MemoryLayoutNode {
                 item_name,
@@ -200,7 +206,7 @@ pub(crate) fn view_memory_layout(
                 children_start: -1,
                 children_len: 0,
             }];
-            read_layout(&mut nodes, db, &ty, &layout, 0, display_target);
+            read_layout(&mut nodes, db, &ty, &layout, 0, edition);
 
             RecursiveMemoryLayout { nodes }
         })
@@ -214,12 +220,10 @@ mod tests {
     use crate::fixture;
     use expect_test::expect;
 
-    fn make_memory_layout(
-        #[rust_analyzer::rust_fixture] ra_fixture: &str,
-    ) -> Option<RecursiveMemoryLayout> {
+    fn make_memory_layout(ra_fixture: &str) -> Option<RecursiveMemoryLayout> {
         let (analysis, position, _) = fixture::annotations(ra_fixture);
 
-        hir::attach_db(&analysis.db, || view_memory_layout(&analysis.db, position))
+        view_memory_layout(&analysis.db, position)
     }
 
     #[test]

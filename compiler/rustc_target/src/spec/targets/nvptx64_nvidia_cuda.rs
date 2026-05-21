@@ -1,14 +1,13 @@
 use crate::spec::{
-    Arch, LinkSelfContainedDefault, LinkerFlavor, MergeFunctions, Os, PanicStrategy, Target,
-    TargetMetadata, TargetOptions,
+    LinkSelfContainedDefault, LinkerFlavor, MergeFunctions, PanicStrategy, Target, TargetOptions,
 };
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     Target {
-        arch: Arch::Nvptx64,
-        data_layout: "e-p6:32:32-i64:64-i128:128-i256:256-v16:16-v32:32-n16:32:64".into(),
+        arch: "nvptx64".into(),
+        data_layout: "e-i64:64-i128:128-v16:16-v32:32-n16:32:64".into(),
         llvm_target: "nvptx64-nvidia-cuda".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: Some("--emit=asm generates PTX code that runs on NVIDIA GPUs".into()),
             tier: Some(2),
             host_tools: Some(false),
@@ -17,9 +16,11 @@ pub(crate) fn target() -> Target {
         pointer_width: 64,
 
         options: TargetOptions {
-            os: Os::Cuda,
+            os: "cuda".into(),
             vendor: "nvidia".into(),
-            linker_flavor: LinkerFlavor::Llbc,
+            linker_flavor: LinkerFlavor::Ptx,
+            // The linker can be installed from `crates.io`.
+            linker: Some("rust-ptx-linker".into()),
 
             // With `ptx-linker` approach, it can be later overridden via link flags.
             cpu: "sm_30".into(),
@@ -40,9 +41,6 @@ pub(crate) fn target() -> Target {
             // Let the `ptx-linker` to handle LLVM lowering into MC / assembly.
             obj_is_bitcode: true,
 
-            // Clearly a GPU
-            is_like_gpu: true,
-
             // Convenient and predicable naming scheme.
             dll_prefix: "".into(),
             dll_suffix: ".ptx".into(),
@@ -58,9 +56,6 @@ pub(crate) fn target() -> Target {
 
             // Support using `self-contained` linkers like the llvm-bitcode-linker
             link_self_contained: LinkSelfContainedDefault::True,
-
-            // Static initializers must not have cycles on this target
-            static_initializer_must_be_acyclic: true,
 
             ..Default::default()
         },

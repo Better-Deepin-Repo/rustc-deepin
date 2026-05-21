@@ -9,7 +9,7 @@ pub trait Foo {
         [(); Self::ASSOC_C]:;
 }
 
-struct Bar<const N: &'static ()>; //~ WARN struct `Bar` is never constructed
+struct Bar<const N: &'static ()>;
 impl<const N: &'static ()> Foo for Bar<N> {
     const ASSOC_C: usize = 3;
 

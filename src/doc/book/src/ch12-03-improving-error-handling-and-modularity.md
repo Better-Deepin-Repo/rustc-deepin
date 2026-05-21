@@ -2,14 +2,14 @@
 
 To improve our program, we’ll fix four problems that have to do with the
 program’s structure and how it’s handling potential errors. First, our `main`
-function now performs two tasks: It parses arguments and reads files. As our
+function now performs two tasks: it parses arguments and reads files. As our
 program grows, the number of separate tasks the `main` function handles will
 increase. As a function gains responsibilities, it becomes more difficult to
 reason about, harder to test, and harder to change without breaking one of its
-parts. It’s best to separate functionality so that each function is responsible
-for one task.
+parts. It’s best to separate functionality so each function is responsible for
+one task.
 
-This issue also ties into the second problem: Although `query` and `file_path`
+This issue also ties into the second problem: although `query` and `file_path`
 are configuration variables to our program, variables like `contents` are used
 to perform the program’s logic. The longer `main` becomes, the more variables
 we’ll need to bring into scope; the more variables we have in scope, the harder
@@ -18,7 +18,7 @@ configuration variables into one structure to make their purpose clear.
 
 The third problem is that we’ve used `expect` to print an error message when
 reading the file fails, but the error message just prints `Should have been
-able to read the file`. Reading a file can fail in a number of ways: For
+able to read the file`. Reading a file can fail in a number of ways: for
 example, the file could be missing, or we might not have permission to open it.
 Right now, regardless of the situation, we’d print the same error message for
 everything, which wouldn’t give the user any information!
@@ -26,52 +26,49 @@ everything, which wouldn’t give the user any information!
 Fourth, we use `expect` to handle an error, and if the user runs our program
 without specifying enough arguments, they’ll get an `index out of bounds` error
 from Rust that doesn’t clearly explain the problem. It would be best if all the
-error-handling code were in one place so that future maintainers had only one
-place to consult the code if the error-handling logic needed to change. Having
-all the error-handling code in one place will also ensure that we’re printing
-messages that will be meaningful to our end users.
+error-handling code were in one place so future maintainers had only one place
+to consult the code if the error-handling logic needed to change. Having all the
+error-handling code in one place will also ensure that we’re printing messages
+that will be meaningful to our end users.
 
 Let’s address these four problems by refactoring our project.
 
-<!-- Old headings. Do not remove or links may break. -->
-
-<a id="separation-of-concerns-for-binary-projects"></a>
-
-### Separating Concerns in Binary Projects
+### Separation of Concerns for Binary Projects
 
 The organizational problem of allocating responsibility for multiple tasks to
-the `main` function is common to many binary projects. As a result, many Rust
-programmers find it useful to split up the separate concerns of a binary
-program when the `main` function starts getting large. This process has the
-following steps:
+the `main` function is common to many binary projects. As a result, the Rust
+community has developed guidelines for splitting the separate concerns of a
+binary program when `main` starts getting large. This process has the following
+steps:
 
-- Split your program into a _main.rs_ file and a _lib.rs_ file and move your
-  program’s logic to _lib.rs_.
-- As long as your command line parsing logic is small, it can remain in
-  the `main` function.
-- When the command line parsing logic starts getting complicated, extract it
-  from the `main` function into other functions or types.
+* Split your program into a *main.rs* file and a *lib.rs* file and move your
+  program’s logic to *lib.rs*.
+* As long as your command line parsing logic is small, it can remain in
+  *main.rs*.
+* When the command line parsing logic starts getting complicated, extract it
+  from *main.rs* and move it to *lib.rs*.
 
 The responsibilities that remain in the `main` function after this process
 should be limited to the following:
 
-- Calling the command line parsing logic with the argument values
-- Setting up any other configuration
-- Calling a `run` function in _lib.rs_
-- Handling the error if `run` returns an error
+* Calling the command line parsing logic with the argument values
+* Setting up any other configuration
+* Calling a `run` function in *lib.rs*
+* Handling the error if `run` returns an error
 
-This pattern is about separating concerns: _main.rs_ handles running the
-program and _lib.rs_ handles all the logic of the task at hand. Because you
+This pattern is about separating concerns: *main.rs* handles running the
+program and *lib.rs* handles all the logic of the task at hand. Because you
 can’t test the `main` function directly, this structure lets you test all of
-your program’s logic by moving it out of the `main` function. The code that
-remains in the `main` function will be small enough to verify its correctness
-by reading it. Let’s rework our program by following this process.
+your program’s logic by moving it into functions in *lib.rs*. The code that
+remains in *main.rs* will be small enough to verify its correctness by reading
+it. Let’s rework our program by following this process.
 
 #### Extracting the Argument Parser
 
 We’ll extract the functionality for parsing arguments into a function that
-`main` will call. Listing 12-5 shows the new start of the `main` function that
-calls a new function `parse_config`, which we’ll define in _src/main.rs_.
+`main` will call to prepare for moving the command line parsing logic to
+*src/lib.rs*. Listing 12-5 shows the new start of `main` that calls a new
+function `parse_config`, which we’ll define in *src/main.rs* for the moment.
 
 <Listing number="12-5" file-name="src/main.rs" caption="Extracting a `parse_config` function from `main`">
 
@@ -152,10 +149,10 @@ giving up a little performance to gain simplicity is a worthwhile trade-off.
 > easier to start with the most efficient solution, but for now, it’s
 > perfectly acceptable to call `clone`.
 
-We’ve updated `main` so that it places the instance of `Config` returned by
+We’ve updated `main` so it places the instance of `Config` returned by
 `parse_config` into a variable named `config`, and we updated the code that
-previously used the separate `query` and `file_path` variables so that it now
-uses the fields on the `Config` struct instead.
+previously used the separate `query` and `file_path` variables so it now uses
+the fields on the `Config` struct instead.
 
 Now our code more clearly conveys that `query` and `file_path` are related and
 that their purpose is to configure how the program will work. Any code that
@@ -171,7 +168,7 @@ relationship should be conveyed in our code. We then added a `Config` struct to
 name the related purpose of `query` and `file_path` and to be able to return the
 values’ names as struct field names from the `parse_config` function.
 
-So, now that the purpose of the `parse_config` function is to create a `Config`
+So now that the purpose of the `parse_config` function is to create a `Config`
 instance, we can change `parse_config` from a plain function to a function
 named `new` that is associated with the `Config` struct. Making this change
 will make the code more idiomatic. We can create instances of types in the
@@ -237,16 +234,15 @@ arguments again to see what the error looks like now:
 {{#include ../listings/ch12-an-io-project/listing-12-08/output.txt}}
 ```
 
-This output is better: We now have a reasonable error message. However, we also
+This output is better: we now have a reasonable error message. However, we also
 have extraneous information we don’t want to give to our users. Perhaps the
-technique we used in Listing 9-13 isn’t the best one to use here: A call to
+technique we used in Listing 9-13 isn’t the best one to use here: a call to
 `panic!` is more appropriate for a programming problem than a usage problem,
 [as discussed in Chapter 9][ch9-error-guidelines]<!-- ignore -->. Instead,
 we’ll use the other technique you learned about in Chapter 9—[returning a
 `Result`][ch9-result]<!-- ignore --> that indicates either success or an error.
 
 <!-- Old headings. Do not remove or links may break. -->
-
 <a id="returning-a-result-from-new-instead-of-calling-panic"></a>
 
 #### Returning a `Result` Instead of Calling `panic!`
@@ -256,7 +252,7 @@ the successful case and will describe the problem in the error case. We’re als
 going to change the function name from `new` to `build` because many
 programmers expect `new` functions to never fail. When `Config::build` is
 communicating to `main`, we can use the `Result` type to signal there was a
-problem. Then, we can change `main` to convert an `Err` variant into a more
+problem. Then we can change `main` to convert an `Err` variant into a more
 practical error for our users without the surrounding text about `thread
 'main'` and `RUST_BACKTRACE` that a call to `panic!` causes.
 
@@ -277,7 +273,7 @@ Our `build` function returns a `Result` with a `Config` instance in the success
 case and a string literal in the error case. Our error values will always be
 string literals that have the `'static` lifetime.
 
-We’ve made two changes in the body of the function: Instead of calling `panic!`
+We’ve made two changes in the body of the function: instead of calling `panic!`
 when the user doesn’t pass enough arguments, we now return an `Err` value, and
 we’ve wrapped the `Config` return value in an `Ok`. These changes make the
 function conform to its new type signature.
@@ -287,7 +283,6 @@ handle the `Result` value returned from the `build` function and exit the
 process more cleanly in the error case.
 
 <!-- Old headings. Do not remove or links may break. -->
-
 <a id="calling-confignew-and-handling-errors"></a>
 
 #### Calling `Config::build` and Handling Errors
@@ -311,8 +306,8 @@ In this listing, we’ve used a method we haven’t covered in detail yet:
 `unwrap_or_else`, which is defined on `Result<T, E>` by the standard library.
 Using `unwrap_or_else` allows us to define some custom, non-`panic!` error
 handling. If the `Result` is an `Ok` value, this method’s behavior is similar
-to `unwrap`: It returns the inner value that `Ok` is wrapping. However, if the
-value is an `Err` value, this method calls the code in the closure, which is
+to `unwrap`: it returns the inner value that `Ok` is wrapping. However, if the
+value is an `Err` value, this method calls the code in the *closure*, which is
 an anonymous function we define and pass as an argument to `unwrap_or_else`.
 We’ll cover closures in more detail in [Chapter 13][ch13]<!-- ignore -->. For
 now, you just need to know that `unwrap_or_else` will pass the inner value of
@@ -323,7 +318,7 @@ appears between the vertical pipes. The code in the closure can then use the
 
 We’ve added a new `use` line to bring `process` from the standard library into
 scope. The code in the closure that will be run in the error case is only two
-lines: We print the `err` value and then call `process::exit`. The
+lines: we print the `err` value and then call `process::exit`. The
 `process::exit` function will stop the program immediately and return the
 number that was passed as the exit status code. This is similar to the
 `panic!`-based handling we used in Listing 12-8, but we no longer get all the
@@ -335,22 +330,19 @@ extra output. Let’s try it:
 
 Great! This output is much friendlier for our users.
 
-<!-- Old headings. Do not remove or links may break. -->
-
-<a id="extracting-logic-from-the-main-function"></a>
-
 ### Extracting Logic from `main`
 
 Now that we’ve finished refactoring the configuration parsing, let’s turn to
-the program’s logic. As we stated in [“Separating Concerns in Binary
+the program’s logic. As we stated in [“Separation of Concerns for Binary
 Projects”](#separation-of-concerns-for-binary-projects)<!-- ignore -->, we’ll
 extract a function named `run` that will hold all the logic currently in the
 `main` function that isn’t involved with setting up configuration or handling
-errors. When we’re done, the `main` function will be concise and easy to verify
-by inspection, and we’ll be able to write tests for all the other logic.
+errors. When we’re done, `main` will be concise and easy to verify by
+inspection, and we’ll be able to write tests for all the other logic.
 
-Listing 12-11 shows the small, incremental improvement of extracting a `run`
-function.
+Listing 12-11 shows the extracted `run` function. For now, we’re just making
+the small, incremental improvement of extracting the function. We’re still
+defining the function in *src/main.rs*.
 
 <Listing number="12-11" file-name="src/main.rs" caption="Extracting a `run` function containing the rest of the program logic">
 
@@ -364,11 +356,7 @@ The `run` function now contains all the remaining logic from `main`, starting
 from reading the file. The `run` function takes the `Config` instance as an
 argument.
 
-<!-- Old headings. Do not remove or links may break. -->
-
-<a id="returning-errors-from-the-run-function"></a>
-
-#### Returning Errors from `run`
+#### Returning Errors from the `run` Function
 
 With the remaining program logic separated into the `run` function, we can
 improve the error handling, as we did with `Config::build` in Listing 12-9.
@@ -391,14 +379,14 @@ the `run` function to `Result<(), Box<dyn Error>>`. This function previously
 returned the unit type, `()`, and we keep that as the value returned in the
 `Ok` case.
 
-For the error type, we used the trait object `Box<dyn Error>` (and we brought
-`std::error::Error` into scope with a `use` statement at the top). We’ll cover
-trait objects in [Chapter 18][ch18]<!-- ignore -->. For now, just know that
-`Box<dyn Error>` means the function will return a type that implements the
-`Error` trait, but we don’t have to specify what particular type the return
-value will be. This gives us flexibility to return error values that may be of
-different types in different error cases. The `dyn` keyword is short for
-_dynamic_.
+For the error type, we used the *trait object* `Box<dyn Error>` (and we’ve
+brought `std::error::Error` into scope with a `use` statement at the top).
+We’ll cover trait objects in [Chapter 17][ch17]<!-- ignore -->. For now, just
+know that `Box<dyn Error>` means the function will return a type that
+implements the `Error` trait, but we don’t have to specify what particular type
+the return value will be. This gives us flexibility to return error values that
+may be of different types in different error cases. The `dyn` keyword is short
+for *dynamic*.
 
 Second, we’ve removed the call to `expect` in favor of the `?` operator, as we
 talked about in [Chapter 9][ch9-question-mark]<!-- ignore -->. Rather than
@@ -408,7 +396,7 @@ for the caller to handle.
 Third, the `run` function now returns an `Ok` value in the success case.
 We’ve declared the `run` function’s success type as `()` in the signature,
 which means we need to wrap the unit type value in the `Ok` value. This
-`Ok(())` syntax might look a bit strange at first. But using `()` like this is
+`Ok(())` syntax might look a bit strange at first, but using `()` like this is
 the idiomatic way to indicate that we’re calling `run` for its side effects
 only; it doesn’t return a value we need.
 
@@ -442,39 +430,42 @@ the success case, we only care about detecting an error, so we don’t need
 `unwrap_or_else` to return the unwrapped value, which would only be `()`.
 
 The bodies of the `if let` and the `unwrap_or_else` functions are the same in
-both cases: We print the error and exit.
+both cases: we print the error and exit.
 
 ### Splitting Code into a Library Crate
 
 Our `minigrep` project is looking good so far! Now we’ll split the
-_src/main.rs_ file and put some code into the _src/lib.rs_ file. That way, we
-can test the code and have a _src/main.rs_ file with fewer responsibilities.
+*src/main.rs* file and put some code into the *src/lib.rs* file. That way, we
+can test the code and have a *src/main.rs* file with fewer responsibilities.
 
-Let’s define the code responsible for searching text in _src/lib.rs_ rather
-than in _src/main.rs_, which will let us (or anyone else using our
-`minigrep` library) call the searching function from more contexts than our
-`minigrep` binary.
+Let’s move all the code that isn’t in the `main` function from *src/main.rs* to
+*src/lib.rs*:
 
-First, let’s define the `search` function signature in _src/lib.rs_ as shown in
-Listing 12-13, with a body that calls the `unimplemented!` macro. We’ll explain
-the signature in more detail when we fill in the implementation.
+* The `run` function definition
+* The relevant `use` statements
+* The definition of `Config`
+* The `Config::build` function definition
 
-<Listing number="12-13" file-name="src/lib.rs" caption="Defining the `search` function in *src/lib.rs*">
+The contents of *src/lib.rs* should have the signatures shown in Listing 12-13
+(we’ve omitted the bodies of the functions for brevity). Note that this won’t
+compile until we modify *src/main.rs* in Listing 12-14.
+
+<Listing number="12-13" file-name="src/lib.rs" caption="Moving `Config` and `run` into *src/lib.rs*">
 
 ```rust,ignore,does_not_compile
-{{#rustdoc_include ../listings/ch12-an-io-project/listing-12-13/src/lib.rs}}
+{{#rustdoc_include ../listings/ch12-an-io-project/listing-12-13/src/lib.rs:here}}
 ```
 
 </Listing>
 
-We’ve used the `pub` keyword on the function definition to designate `search`
-as part of our library crate’s public API. We now have a library crate that we
-can use from our binary crate and that we can test!
+We’ve made liberal use of the `pub` keyword: on `Config`, on its fields and its
+`build` method, and on the `run` function. We now have a library crate that has
+a public API we can test!
 
-Now we need to bring the code defined in _src/lib.rs_ into the scope of the
-binary crate in _src/main.rs_ and call it, as shown in Listing 12-14.
+Now we need to bring the code we moved to *src/lib.rs* into the scope of the
+binary crate in *src/main.rs*, as shown in Listing 12-14.
 
-<Listing number="12-14" file-name="src/main.rs" caption="Using the `minigrep` library crate’s `search` function in *src/main.rs*">
+<Listing number="12-14" file-name="src/main.rs" caption="Using the `minigrep` library crate in *src/main.rs*">
 
 ```rust,ignore
 {{#rustdoc_include ../listings/ch12-an-io-project/listing-12-14/src/main.rs:here}}
@@ -482,32 +473,22 @@ binary crate in _src/main.rs_ and call it, as shown in Listing 12-14.
 
 </Listing>
 
-We add a `use minigrep::search` line to bring the `search` function from
-the library crate into the binary crate’s scope. Then, in the `run` function,
-rather than printing out the contents of the file, we call the `search`
-function and pass the `config.query` value and `contents` as arguments. Then,
-`run` will use a `for` loop to print each line returned from `search` that
-matched the query. This is also a good time to remove the `println!` calls in
-the `main` function that displayed the query and the file path so that our
-program only prints the search results (if no errors occur).
-
-Note that the search function will be collecting all the results into a vector
-it returns before any printing happens. This implementation could be slow to
-display results when searching large files, because results aren’t printed as
-they’re found; we’ll discuss a possible way to fix this using iterators in
-Chapter 13.
+We add a `use minigrep::Config` line to bring the `Config` type from the
+library crate into the binary crate’s scope, and we prefix the `run` function
+with our crate name. Now all the functionality should be connected and should
+work. Run the program with `cargo run` and make sure everything works correctly.
 
 Whew! That was a lot of work, but we’ve set ourselves up for success in the
 future. Now it’s much easier to handle errors, and we’ve made the code more
-modular. Almost all of our work will be done in _src/lib.rs_ from here on out.
+modular. Almost all of our work will be done in *src/lib.rs* from here on out.
 
 Let’s take advantage of this newfound modularity by doing something that would
-have been difficult with the old code but is easy with the new code: We’ll
+have been difficult with the old code but is easy with the new code: we’ll
 write some tests!
 
 [ch13]: ch13-00-functional-features.html
 [ch9-custom-types]: ch09-03-to-panic-or-not-to-panic.html#creating-custom-types-for-validation
 [ch9-error-guidelines]: ch09-03-to-panic-or-not-to-panic.html#guidelines-for-error-handling
 [ch9-result]: ch09-02-recoverable-errors-with-result.html
-[ch18]: ch18-00-oop.html
+[ch17]: ch17-00-oop.html
 [ch9-question-mark]: ch09-02-recoverable-errors-with-result.html#a-shortcut-for-propagating-errors-the--operator

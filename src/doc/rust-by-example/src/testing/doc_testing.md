@@ -1,9 +1,9 @@
 # Documentation testing
 
 The primary way of documenting a Rust project is through annotating the source
-code. Documentation comments are written in
+code. Documentation comments are written in 
 [CommonMark Markdown specification][commonmark] and support code blocks in them.
-Rust takes care about correctness, so these code blocks are compiled and used
+Rust takes care about correctness, so these code blocks are compiled and used 
 as documentation tests.
 
 ```rust,ignore
@@ -11,11 +11,10 @@ as documentation tests.
 ///
 /// The next lines present detailed documentation. Code blocks start with
 /// triple backquotes and have implicit `fn main()` inside
-/// and `extern crate <cratename>`. Assume we're testing a `playground` library
-/// crate or using the Playground's Test action:
+/// and `extern crate <cratename>`. Assume we're testing `doccomments` crate:
 ///
 /// ```
-/// let result = playground::add(2, 3);
+/// let result = doccomments::add(2, 3);
 /// assert_eq!(result, 5);
 /// ```
 pub fn add(a: i32, b: i32) -> i32 {
@@ -29,7 +28,7 @@ pub fn add(a: i32, b: i32) -> i32 {
 /// # Examples
 ///
 /// ```
-/// let result = playground::div(10, 2);
+/// let result = doccomments::div(10, 2);
 /// assert_eq!(result, 5);
 /// ```
 ///
@@ -39,7 +38,7 @@ pub fn add(a: i32, b: i32) -> i32 {
 ///
 /// ```rust,should_panic
 /// // panics on division by zero
-/// playground::div(10, 0);
+/// doccomments::div(10, 0);
 /// ```
 pub fn div(a: i32, b: i32) -> i32 {
     if b == 0 {
@@ -59,7 +58,7 @@ running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 
-   Doc-tests playground
+   Doc-tests doccomments
 
 running 3 tests
 test src/lib.rs - add (line 7) ... ok
@@ -85,7 +84,7 @@ and `unwrap` it in hidden `main`. Sounds complicated? Here's an example:
 /// ```
 /// # // hidden lines start with `#` symbol, but they're still compilable!
 /// # fn try_main() -> Result<(), String> { // line that wraps the body shown in doc
-/// let res = playground::try_div(10, 2)?;
+/// let res = doccomments::try_div(10, 2)?;
 /// # Ok(()) // returning from try_main
 /// # }
 /// # fn main() { // starting main that'll unwrap()

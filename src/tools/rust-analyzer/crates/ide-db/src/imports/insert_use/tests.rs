@@ -1,6 +1,6 @@
 use stdx::trim_indent;
 use test_fixture::WithFixture;
-use test_utils::{CURSOR_MARKER, assert_eq_text};
+use test_utils::{assert_eq_text, CURSOR_MARKER};
 
 use super::*;
 
@@ -23,7 +23,7 @@ struct Struct;
 }
 
 #[test]
-fn respects_cfg_attr_fn_body() {
+fn respects_cfg_attr_fn() {
     check(
         r"bar::Bar",
         r#"
@@ -35,25 +35,6 @@ fn foo() {$0}
 fn foo() {
     use bar::Bar;
 }
-"#,
-        ImportGranularity::Crate,
-    );
-}
-
-#[test]
-fn respects_cfg_attr_fn_sig() {
-    check(
-        r"bar::Bar",
-        r#"
-#[cfg(test)]
-fn foo($0) {}
-"#,
-        r#"
-#[cfg(test)]
-use bar::Bar;
-
-#[cfg(test)]
-fn foo() {}
 "#,
         ImportGranularity::Crate,
     );
@@ -72,51 +53,6 @@ const FOO: Bar = {$0};
 const FOO: Bar = {
     use bar::Bar;
 };
-"#,
-        ImportGranularity::Crate,
-    );
-}
-
-#[test]
-fn respects_cfg_attr_impl() {
-    check(
-        r"bar::Bar",
-        r#"
-#[cfg(test)]
-impl () {$0}
-"#,
-        r#"
-#[cfg(test)]
-use bar::Bar;
-
-#[cfg(test)]
-impl () {}
-"#,
-        ImportGranularity::Crate,
-    );
-}
-
-#[test]
-fn respects_cfg_attr_multiple_layers() {
-    check(
-        r"bar::Bar",
-        r#"
-#[cfg(test)]
-impl () {
-    #[cfg(test2)]
-    fn f($0) {}
-}
-"#,
-        r#"
-#[cfg(test)]
-#[cfg(test2)]
-use bar::Bar;
-
-#[cfg(test)]
-impl () {
-    #[cfg(test2)]
-    fn f() {}
-}
 "#,
         ImportGranularity::Crate,
     );
@@ -782,18 +718,18 @@ fn merge_groups_long_last_list() {
 fn merge_groups_long_full_nested() {
     check_crate(
         "std::foo::bar::Baz",
-        r"use std::foo::bar::{quux::{Fez, Fizz}, Qux};",
-        r"use std::foo::bar::{Baz, Qux, quux::{Fez, Fizz}};",
+        r"use std::foo::bar::{Qux, quux::{Fez, Fizz}};",
+        r"use std::foo::bar::{quux::{Fez, Fizz}, Baz, Qux};",
     );
     check_crate(
         "std::foo::bar::r#Baz",
-        r"use std::foo::bar::{quux::{Fez, Fizz}, Qux};",
-        r"use std::foo::bar::{r#Baz, Qux, quux::{Fez, Fizz}};",
+        r"use std::foo::bar::{Qux, quux::{Fez, Fizz}};",
+        r"use std::foo::bar::{quux::{Fez, Fizz}, r#Baz, Qux};",
     );
     check_one(
         "std::foo::bar::Baz",
-        r"use {std::foo::bar::{quux::{Fez, Fizz}}, Qux};",
-        r"use {Qux, std::foo::bar::{Baz, quux::{Fez, Fizz}}};",
+        r"use {std::foo::bar::{Qux, quux::{Fez, Fizz}}};",
+        r"use {std::foo::bar::{quux::{Fez, Fizz}, Baz, Qux}};",
     );
 }
 
@@ -811,13 +747,13 @@ use std::foo::bar::{Qux, quux::{Fez, Fizz}};",
 fn merge_groups_full_nested_deep() {
     check_crate(
         "std::foo::bar::quux::Baz",
-        r"use std::foo::bar::{quux::{Fez, Fizz}, Qux};",
-        r"use std::foo::bar::{Qux, quux::{Baz, Fez, Fizz}};",
+        r"use std::foo::bar::{Qux, quux::{Fez, Fizz}};",
+        r"use std::foo::bar::{quux::{Baz, Fez, Fizz}, Qux};",
     );
     check_one(
         "std::foo::bar::quux::Baz",
-        r"use {std::foo::bar::{quux::{Fez, Fizz}}, Qux};",
-        r"use {Qux, std::foo::bar::quux::{Baz, Fez, Fizz}};",
+        r"use {std::foo::bar::{Qux, quux::{Fez, Fizz}}};",
+        r"use {std::foo::bar::{quux::{Baz, Fez, Fizz}, Qux}};",
     );
 }
 
@@ -877,7 +813,7 @@ use {std::io};",
 }
 
 #[test]
-fn merge_groups_cfg_vs_no_cfg() {
+fn merge_groups_skip_attributed() {
     check_crate(
         "std::io",
         r#"
@@ -896,25 +832,6 @@ use std::io;
         r#"
 #[cfg(feature = "gated")] use {std::fmt::{Result, Display}};
 use {std::io};
-"#,
-    );
-}
-
-#[test]
-fn merge_groups_cfg_matching() {
-    check_crate(
-        "std::io",
-        r#"
-#[cfg(feature = "gated")] use std::fmt::{Result, Display};
-
-#[cfg(feature = "gated")]
-fn f($0) {}
-"#,
-        r#"
-#[cfg(feature = "gated")] use std::{fmt::{Display, Result}, io};
-
-#[cfg(feature = "gated")]
-fn f() {}
 "#,
     );
 }
@@ -988,8 +905,8 @@ use syntax::SyntaxKind::{self, *};",
 fn merge_glob_nested() {
     check_crate(
         "foo::bar::quux::Fez",
-        r"use foo::bar::{quux::*, Baz};",
-        r"use foo::bar::{Baz, quux::{Fez, *}};",
+        r"use foo::bar::{Baz, quux::*};",
+        r"use foo::bar::{quux::{Fez, *}, Baz};",
     )
 }
 
@@ -998,7 +915,7 @@ fn merge_nested_considers_first_segments() {
     check_crate(
         "hir_ty::display::write_bounds_like_dyn_trait",
         r"use hir_ty::{autoderef, display::{HirDisplayError, HirFormatter}, method_resolution};",
-        r"use hir_ty::{autoderef, display::{HirDisplayError, HirFormatter, write_bounds_like_dyn_trait}, method_resolution};",
+        r"use hir_ty::{autoderef, display::{write_bounds_like_dyn_trait, HirDisplayError, HirFormatter}, method_resolution};",
     );
 }
 
@@ -1327,29 +1244,25 @@ use ::ext::foo::Foo;
 
 fn check_with_config(
     path: &str,
-    #[rust_analyzer::rust_fixture] ra_fixture_before: &str,
-    #[rust_analyzer::rust_fixture] ra_fixture_after: &str,
+    ra_fixture_before: &str,
+    ra_fixture_after: &str,
     config: &InsertUseConfig,
 ) {
     let (db, file_id, pos) = if ra_fixture_before.contains(CURSOR_MARKER) {
         let (db, file_id, range_or_offset) = RootDatabase::with_range_or_offset(ra_fixture_before);
-
         (db, file_id, Some(range_or_offset))
     } else {
         let (db, file_id) = RootDatabase::with_single_file(ra_fixture_before);
-
         (db, file_id, None)
     };
     let sema = &Semantics::new(&db);
     let source_file = sema.parse(file_id);
+    let syntax = source_file.syntax().clone_for_update();
     let file = pos
-        .and_then(|pos| source_file.syntax().token_at_offset(pos.expect_offset()).next()?.parent())
+        .and_then(|pos| syntax.token_at_offset(pos.expect_offset()).next()?.parent())
         .and_then(|it| ImportScope::find_insert_use_container(&it, sema))
-        .unwrap_or_else(|| ImportScope {
-            kind: ImportScopeKind::File(source_file),
-            required_cfgs: vec![],
-        })
-        .clone_for_update();
+        .or_else(|| ImportScope::from(syntax))
+        .unwrap();
     let path = ast::SourceFile::parse(&format!("use {path};"), span::Edition::CURRENT)
         .tree()
         .syntax()
@@ -1364,8 +1277,8 @@ fn check_with_config(
 
 fn check(
     path: &str,
-    #[rust_analyzer::rust_fixture] ra_fixture_before: &str,
-    #[rust_analyzer::rust_fixture] ra_fixture_after: &str,
+    ra_fixture_before: &str,
+    ra_fixture_after: &str,
     granularity: ImportGranularity,
 ) {
     check_with_config(
@@ -1382,35 +1295,19 @@ fn check(
     )
 }
 
-fn check_crate(
-    path: &str,
-    #[rust_analyzer::rust_fixture] ra_fixture_before: &str,
-    #[rust_analyzer::rust_fixture] ra_fixture_after: &str,
-) {
+fn check_crate(path: &str, ra_fixture_before: &str, ra_fixture_after: &str) {
     check(path, ra_fixture_before, ra_fixture_after, ImportGranularity::Crate)
 }
 
-fn check_module(
-    path: &str,
-    #[rust_analyzer::rust_fixture] ra_fixture_before: &str,
-    #[rust_analyzer::rust_fixture] ra_fixture_after: &str,
-) {
+fn check_module(path: &str, ra_fixture_before: &str, ra_fixture_after: &str) {
     check(path, ra_fixture_before, ra_fixture_after, ImportGranularity::Module)
 }
 
-fn check_none(
-    path: &str,
-    #[rust_analyzer::rust_fixture] ra_fixture_before: &str,
-    #[rust_analyzer::rust_fixture] ra_fixture_after: &str,
-) {
+fn check_none(path: &str, ra_fixture_before: &str, ra_fixture_after: &str) {
     check(path, ra_fixture_before, ra_fixture_after, ImportGranularity::Item)
 }
 
-fn check_one(
-    path: &str,
-    #[rust_analyzer::rust_fixture] ra_fixture_before: &str,
-    #[rust_analyzer::rust_fixture] ra_fixture_after: &str,
-) {
+fn check_one(path: &str, ra_fixture_before: &str, ra_fixture_after: &str) {
     check(path, ra_fixture_before, ra_fixture_after, ImportGranularity::One)
 }
 
@@ -1433,161 +1330,8 @@ fn check_merge_only_fail(ra_fixture0: &str, ra_fixture1: &str, mb: MergeBehavior
     assert_eq!(result.map(|u| u.to_string()), None);
 }
 
-fn check_guess(#[rust_analyzer::rust_fixture] ra_fixture: &str, expected: ImportGranularityGuess) {
-    let syntax = ast::SourceFile::parse(ra_fixture, span::Edition::CURRENT).tree();
-    let file = ImportScope { kind: ImportScopeKind::File(syntax), required_cfgs: vec![] };
+fn check_guess(ra_fixture: &str, expected: ImportGranularityGuess) {
+    let syntax = ast::SourceFile::parse(ra_fixture, span::Edition::CURRENT).tree().syntax().clone();
+    let file = ImportScope::from(syntax).unwrap();
     assert_eq!(super::guess_granularity_from_scope(&file), expected);
-}
-
-#[test]
-fn insert_with_existing_imports_and_cfg_module() {
-    check(
-        "std::fmt",
-        r#"
-use foo::bar;
-
-#[cfg(target_arch = "x86_64")]
-pub mod api;
-"#,
-        r#"
-use std::fmt;
-
-use foo::bar;
-
-#[cfg(target_arch = "x86_64")]
-pub mod api;
-"#,
-        ImportGranularity::Crate,
-    );
-}
-
-#[test]
-fn insert_before_cfg_module() {
-    check(
-        "std::fmt",
-        r#"
-#[cfg(target_arch = "x86_64")]
-pub mod api;
-"#,
-        r#"
-use std::fmt;
-
-#[cfg(target_arch = "x86_64")]
-pub mod api;
-"#,
-        ImportGranularity::Crate,
-    );
-}
-
-fn check_merge(ra_fixture0: &str, ra_fixture1: &str, last: &str, mb: MergeBehavior) {
-    let use0 = ast::SourceFile::parse(ra_fixture0, span::Edition::CURRENT)
-        .tree()
-        .syntax()
-        .descendants()
-        .find_map(ast::Use::cast)
-        .unwrap();
-
-    let use1 = ast::SourceFile::parse(ra_fixture1, span::Edition::CURRENT)
-        .tree()
-        .syntax()
-        .descendants()
-        .find_map(ast::Use::cast)
-        .unwrap();
-
-    let result = try_merge_imports(&use0, &use1, mb);
-    assert_eq!(result.map(|u| u.to_string().trim().to_owned()), Some(last.trim().to_owned()));
-}
-
-#[test]
-fn merge_gated_imports() {
-    check_merge(
-        r#"#[cfg(test)] use foo::bar;"#,
-        r#"#[cfg(test)] use foo::baz;"#,
-        r#"#[cfg(test)] use foo::{bar, baz};"#,
-        MergeBehavior::Crate,
-    );
-}
-
-#[test]
-fn merge_gated_imports_with_different_values() {
-    let use0 = ast::SourceFile::parse(r#"#[cfg(a)] use foo::bar;"#, span::Edition::CURRENT)
-        .tree()
-        .syntax()
-        .descendants()
-        .find_map(ast::Use::cast)
-        .unwrap();
-
-    let use1 = ast::SourceFile::parse(r#"#[cfg(b)] use foo::baz;"#, span::Edition::CURRENT)
-        .tree()
-        .syntax()
-        .descendants()
-        .find_map(ast::Use::cast)
-        .unwrap();
-
-    let result = try_merge_imports(&use0, &use1, MergeBehavior::Crate);
-    assert_eq!(result, None);
-}
-
-#[test]
-fn merge_gated_imports_different_order() {
-    check_merge(
-        r#"#[cfg(a)] #[cfg(b)] use foo::bar;"#,
-        r#"#[cfg(b)] #[cfg(a)] use foo::baz;"#,
-        r#"#[cfg(a)] #[cfg(b)] use foo::{bar, baz};"#,
-        MergeBehavior::Crate,
-    );
-}
-
-#[test]
-fn merge_into_existing_cfg_import() {
-    check(
-        r#"foo::Foo"#,
-        r#"
-#[cfg(target_os = "windows")]
-use bar::Baz;
-
-#[cfg(target_os = "windows")]
-fn buzz() {
-    Foo$0;
-}
-"#,
-        r#"
-#[cfg(target_os = "windows")]
-use bar::Baz;
-#[cfg(target_os = "windows")]
-use foo::Foo;
-
-#[cfg(target_os = "windows")]
-fn buzz() {
-    Foo;
-}
-"#,
-        ImportGranularity::Crate,
-    );
-}
-
-#[test]
-fn reproduce_user_issue_missing_semicolon() {
-    check(
-        "std::fmt",
-        r#"
-use {
-    foo
-}
-
-#[cfg(target_arch = "x86_64")]
-pub mod api;
-"#,
-        r#"
-use std::fmt;
-
-use {
-    foo
-}
-
-#[cfg(target_arch = "x86_64")]
-pub mod api;
-"#,
-        ImportGranularity::Crate,
-    );
 }

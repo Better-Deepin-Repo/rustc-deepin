@@ -17,7 +17,7 @@ mod assert {
         Dst: TransmuteFrom<
                 //~^ ERROR trait takes at most 2 generic arguments but 5 generic arguments were supplied
                 Src,
-                ASSUME_ALIGNMENT,
+                ASSUME_ALIGNMENT, //~ ERROR: mismatched types
                 ASSUME_LIFETIMES,
                 ASSUME_VALIDITY,
                 ASSUME_VISIBILITY,

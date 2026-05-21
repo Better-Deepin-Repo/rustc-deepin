@@ -94,6 +94,7 @@ if its name is the same as the lib target. Binaries are skipped if they have
 
 {{> options-locked }}
 
+{{> options-lockfile-path }}
 {{/options}}
 
 {{> section-options-common }}

@@ -9,11 +9,13 @@ extern "C" {
 // Make sure we catch accessing extern static.
 static TEST_READ: () = {
     unsafe { let _val = DATA; }
-    //~^ ERROR cannot access extern static
+    //~^ ERROR could not evaluate static initializer
+    //~| NOTE cannot access extern static
 };
 static TEST_WRITE: () = {
     unsafe { DATA = 0; }
-    //~^ ERROR cannot access extern static
+    //~^ ERROR could not evaluate static initializer
+    //~| NOTE cannot access extern static
 };
 
 // Just creating a reference is fine, as long as we are not reading or writing.

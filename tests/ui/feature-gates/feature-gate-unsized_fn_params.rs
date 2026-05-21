@@ -1,6 +1,3 @@
-//@revisions: edition2015 edition2021
-//@[edition2015] edition:2015
-//@[edition2021] edition:2021
 #![allow(unused, bare_trait_objects)]
 #[repr(align(256))]
 struct A {
@@ -21,9 +18,7 @@ fn foo(x: dyn Foo) { //~ ERROR [E0277]
     x.foo()
 }
 
-fn bar(x: Foo) {
-//[edition2015]~^ ERROR [E0277]
-//[edition2021]~^^ ERROR expected a type, found a trait
+fn bar(x: Foo) { //~ ERROR [E0277]
     x.foo()
 }
 

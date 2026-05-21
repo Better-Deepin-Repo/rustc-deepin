@@ -1,5 +1,4 @@
 //@ revisions:rpass1 rpass2
-//@ ignore-backends: gcc
 
 #[cfg(rpass1)]
 pub static A: u8 = 42;

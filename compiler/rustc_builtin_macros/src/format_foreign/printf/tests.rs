@@ -1,4 +1,4 @@
-use super::{Format as F, Num as N, Substitution as S, iter_subs, parse_next_substitution as pns};
+use super::{iter_subs, parse_next_substitution as pns, Format as F, Num as N, Substitution as S};
 
 macro_rules! assert_eq_pnsat {
     ($lhs:expr, $rhs:expr) => {

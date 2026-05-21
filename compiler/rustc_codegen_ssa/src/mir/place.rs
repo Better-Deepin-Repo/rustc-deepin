@@ -1,11 +1,10 @@
-use rustc_abi::{
-    Align, BackendRepr, FieldIdx, FieldsShape, Size, TagEncoding, VariantIdx, Variants,
-};
-use rustc_middle::mir::PlaceTy;
-use rustc_middle::mir::interpret::Scalar;
-use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv, LayoutOf, TyAndLayout};
+use rustc_middle::mir::tcx::PlaceTy;
+use rustc_middle::ty::layout::{HasTyCtxt, LayoutOf, TyAndLayout};
 use rustc_middle::ty::{self, Ty};
 use rustc_middle::{bug, mir};
+use rustc_target::abi::{
+    Align, FieldsShape, Int, Pointer, Size, TagEncoding, VariantIdx, Variants,
+};
 use tracing::{debug, instrument};
 
 use super::operand::OperandValue;
@@ -56,7 +55,7 @@ impl<V: CodegenObject> PlaceValue<V> {
     /// Creates a `PlaceRef` to this location with the given type.
     pub fn with_type<'tcx>(self, layout: TyAndLayout<'tcx>) -> PlaceRef<'tcx, V> {
         assert!(
-            layout.is_unsized() || layout.is_uninhabited() || self.llextra.is_none(),
+            layout.is_unsized() || layout.abi.is_uninhabited() || self.llextra.is_none(),
             "Had pointer metadata {:?} for sized type {layout:?}",
             self.llextra,
         );
@@ -109,11 +108,7 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
         bx: &mut Bx,
         layout: TyAndLayout<'tcx>,
     ) -> Self {
-        if layout.is_runtime_sized() {
-            Self::alloca_runtime_sized(bx, layout)
-        } else {
-            Self::alloca_size(bx, layout.size, layout)
-        }
+        Self::alloca_size(bx, layout.size, layout)
     }
 
     pub fn alloca_size<Bx: BuilderMethods<'a, 'tcx, Value = V>>(
@@ -138,7 +133,7 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
         Self::alloca(bx, ptr_layout)
     }
 
-    pub fn len<Cx: ConstCodegenMethods<Value = V>>(&self, cx: &Cx) -> V {
+    pub fn len<Cx: ConstMethods<'tcx, Value = V>>(&self, cx: &Cx) -> V {
         if let FieldsShape::Array { count, .. } = self.layout.fields {
             if self.layout.is_unsized() {
                 assert_eq!(count, 0);
@@ -149,18 +144,6 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
         } else {
             bug!("unexpected layout `{:#?}` in PlaceRef::len", self.layout)
         }
-    }
-
-    fn alloca_runtime_sized<Bx: BuilderMethods<'a, 'tcx, Value = V>>(
-        bx: &mut Bx,
-        layout: TyAndLayout<'tcx>,
-    ) -> Self {
-        let (element_count, ty) = layout.ty.scalable_vector_element_count_and_type(bx.tcx());
-        PlaceValue::new_sized(
-            bx.scalable_alloca(element_count as u64, layout.align.abi, ty),
-            layout.align.abi,
-        )
-        .with_type(layout)
     }
 }
 
@@ -185,11 +168,7 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
             };
             let val = PlaceValue {
                 llval,
-                llextra: if bx.cx().tcx().type_has_metadata(field.ty, bx.cx().typing_env()) {
-                    self.val.llextra
-                } else {
-                    None
-                },
+                llextra: if bx.cx().type_has_metadata(field.ty) { self.val.llextra } else { None },
                 align: effective_field_align,
             };
             val.with_type(field)
@@ -250,6 +229,128 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
         val.with_type(field)
     }
 
+    /// Obtain the actual discriminant of a value.
+    #[instrument(level = "trace", skip(bx))]
+    pub fn codegen_get_discr<Bx: BuilderMethods<'a, 'tcx, Value = V>>(
+        self,
+        bx: &mut Bx,
+        cast_to: Ty<'tcx>,
+    ) -> V {
+        let dl = &bx.tcx().data_layout;
+        let cast_to_layout = bx.cx().layout_of(cast_to);
+        let cast_to = bx.cx().immediate_backend_type(cast_to_layout);
+        if self.layout.abi.is_uninhabited() {
+            return bx.cx().const_poison(cast_to);
+        }
+        let (tag_scalar, tag_encoding, tag_field) = match self.layout.variants {
+            Variants::Single { index } => {
+                let discr_val = self
+                    .layout
+                    .ty
+                    .discriminant_for_variant(bx.cx().tcx(), index)
+                    .map_or(index.as_u32() as u128, |discr| discr.val);
+                return bx.cx().const_uint_big(cast_to, discr_val);
+            }
+            Variants::Multiple { tag, ref tag_encoding, tag_field, .. } => {
+                (tag, tag_encoding, tag_field)
+            }
+        };
+
+        // Read the tag/niche-encoded discriminant from memory.
+        let tag = self.project_field(bx, tag_field);
+        let tag_op = bx.load_operand(tag);
+        let tag_imm = tag_op.immediate();
+
+        // Decode the discriminant (specifically if it's niche-encoded).
+        match *tag_encoding {
+            TagEncoding::Direct => {
+                let signed = match tag_scalar.primitive() {
+                    // We use `i1` for bytes that are always `0` or `1`,
+                    // e.g., `#[repr(i8)] enum E { A, B }`, but we can't
+                    // let LLVM interpret the `i1` as signed, because
+                    // then `i1 1` (i.e., `E::B`) is effectively `i8 -1`.
+                    Int(_, signed) => !tag_scalar.is_bool() && signed,
+                    _ => false,
+                };
+                bx.intcast(tag_imm, cast_to, signed)
+            }
+            TagEncoding::Niche { untagged_variant, ref niche_variants, niche_start } => {
+                // Cast to an integer so we don't have to treat a pointer as a
+                // special case.
+                let (tag, tag_llty) = match tag_scalar.primitive() {
+                    // FIXME(erikdesjardins): handle non-default addrspace ptr sizes
+                    Pointer(_) => {
+                        let t = bx.type_from_integer(dl.ptr_sized_integer());
+                        let tag = bx.ptrtoint(tag_imm, t);
+                        (tag, t)
+                    }
+                    _ => (tag_imm, bx.cx().immediate_backend_type(tag_op.layout)),
+                };
+
+                let relative_max = niche_variants.end().as_u32() - niche_variants.start().as_u32();
+
+                // We have a subrange `niche_start..=niche_end` inside `range`.
+                // If the value of the tag is inside this subrange, it's a
+                // "niche value", an increment of the discriminant. Otherwise it
+                // indicates the untagged variant.
+                // A general algorithm to extract the discriminant from the tag
+                // is:
+                // relative_tag = tag - niche_start
+                // is_niche = relative_tag <= (ule) relative_max
+                // discr = if is_niche {
+                //     cast(relative_tag) + niche_variants.start()
+                // } else {
+                //     untagged_variant
+                // }
+                // However, we will likely be able to emit simpler code.
+                let (is_niche, tagged_discr, delta) = if relative_max == 0 {
+                    // Best case scenario: only one tagged variant. This will
+                    // likely become just a comparison and a jump.
+                    // The algorithm is:
+                    // is_niche = tag == niche_start
+                    // discr = if is_niche {
+                    //     niche_start
+                    // } else {
+                    //     untagged_variant
+                    // }
+                    let niche_start = bx.cx().const_uint_big(tag_llty, niche_start);
+                    let is_niche = bx.icmp(IntPredicate::IntEQ, tag, niche_start);
+                    let tagged_discr =
+                        bx.cx().const_uint(cast_to, niche_variants.start().as_u32() as u64);
+                    (is_niche, tagged_discr, 0)
+                } else {
+                    // The special cases don't apply, so we'll have to go with
+                    // the general algorithm.
+                    let relative_discr = bx.sub(tag, bx.cx().const_uint_big(tag_llty, niche_start));
+                    let cast_tag = bx.intcast(relative_discr, cast_to, false);
+                    let is_niche = bx.icmp(
+                        IntPredicate::IntULE,
+                        relative_discr,
+                        bx.cx().const_uint(tag_llty, relative_max as u64),
+                    );
+                    (is_niche, cast_tag, niche_variants.start().as_u32() as u128)
+                };
+
+                let tagged_discr = if delta == 0 {
+                    tagged_discr
+                } else {
+                    bx.add(tagged_discr, bx.cx().const_uint_big(cast_to, delta))
+                };
+
+                let discr = bx.select(
+                    is_niche,
+                    tagged_discr,
+                    bx.cx().const_uint(cast_to, untagged_variant.as_u32() as u64),
+                );
+
+                // In principle we could insert assumes on the possible range of `discr`, but
+                // currently in LLVM this seems to be a pessimization.
+
+                discr
+            }
+        }
+    }
+
     /// Sets the discriminant for a new value of the given case of the given
     /// representation.
     pub fn codegen_set_discr<Bx: BuilderMethods<'a, 'tcx, Value = V>>(
@@ -257,17 +358,46 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
         bx: &mut Bx,
         variant_index: VariantIdx,
     ) {
-        match codegen_tag_value(bx.cx(), variant_index, self.layout) {
-            Err(UninhabitedVariantError) => {
-                // We play it safe by using a well-defined `abort`, but we could go for immediate UB
-                // if that turns out to be helpful.
-                bx.abort();
+        if self.layout.for_variant(bx.cx(), variant_index).abi.is_uninhabited() {
+            // We play it safe by using a well-defined `abort`, but we could go for immediate UB
+            // if that turns out to be helpful.
+            bx.abort();
+            return;
+        }
+        match self.layout.variants {
+            Variants::Single { index } => {
+                assert_eq!(index, variant_index);
             }
-            Ok(Some((tag_field, imm))) => {
-                let tag_place = self.project_field(bx, tag_field.as_usize());
-                OperandValue::Immediate(imm).store(bx, tag_place);
+            Variants::Multiple { tag_encoding: TagEncoding::Direct, tag_field, .. } => {
+                let ptr = self.project_field(bx, tag_field);
+                let to =
+                    self.layout.ty.discriminant_for_variant(bx.tcx(), variant_index).unwrap().val;
+                bx.store_to_place(
+                    bx.cx().const_uint_big(bx.cx().backend_type(ptr.layout), to),
+                    ptr.val,
+                );
             }
-            Ok(None) => {}
+            Variants::Multiple {
+                tag_encoding:
+                    TagEncoding::Niche { untagged_variant, ref niche_variants, niche_start },
+                tag_field,
+                ..
+            } => {
+                if variant_index != untagged_variant {
+                    let niche = self.project_field(bx, tag_field);
+                    let niche_llty = bx.cx().immediate_backend_type(niche.layout);
+                    let niche_value = variant_index.as_u32() - niche_variants.start().as_u32();
+                    let niche_value = (niche_value as u128).wrapping_add(niche_start);
+                    // FIXME(eddyb): check the actual primitive type here.
+                    let niche_llval = if niche_value == 0 {
+                        // HACK(eddyb): using `c_null` as it works on all types.
+                        bx.cx().const_null(niche_llty)
+                    } else {
+                        bx.cx().const_uint_big(niche_llty, niche_value)
+                    };
+                    OperandValue::Immediate(niche_llval).store(bx, niche);
+                }
+            }
         }
     }
 
@@ -285,7 +415,11 @@ impl<'a, 'tcx, V: CodegenObject> PlaceRef<'tcx, V> {
             layout.size
         };
 
-        let llval = bx.inbounds_nuw_gep(bx.cx().backend_type(layout), self.val.llval, &[llindex]);
+        let llval = bx.inbounds_gep(
+            bx.cx().backend_type(self.layout),
+            self.val.llval,
+            &[bx.cx().const_usize(0), llindex],
+        );
         let align = self.val.align.restrict_for_offset(offset);
         PlaceValue::new_sized(llval, align).with_type(layout)
     }
@@ -363,9 +497,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 mir::ProjectionElem::OpaqueCast(ty) => {
                     bug!("encountered OpaqueCast({ty}) in codegen")
                 }
-                mir::ProjectionElem::UnwrapUnsafeBinder(ty) => {
-                    cg_base.project_type(bx, self.monomorphize(ty))
-                }
+                mir::ProjectionElem::Subtype(ty) => cg_base.project_type(bx, self.monomorphize(ty)),
                 mir::ProjectionElem::Index(index) => {
                     let index = &mir::Operand::Copy(mir::Place::from(index));
                     let index = self.codegen_operand(bx, index);
@@ -452,73 +584,3 @@ fn round_up_const_value_to_alignment<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     let offset = bx.and(neg_value, align_minus_1);
     bx.add(value, offset)
 }
-
-/// Calculates the value that needs to be stored to mark the discriminant.
-///
-/// This might be `None` for a `struct` or a niched variant (like `Some(&3)`).
-///
-/// If it's `Some`, it returns the value to store and the field in which to
-/// store it. Note that this value is *not* the same as the discriminant, in
-/// general, as it might be a niche value or have a different size.
-///
-/// It might also be an `Err` because the variant is uninhabited.
-pub(super) fn codegen_tag_value<'tcx, V>(
-    cx: &impl CodegenMethods<'tcx, Value = V>,
-    variant_index: VariantIdx,
-    layout: TyAndLayout<'tcx>,
-) -> Result<Option<(FieldIdx, V)>, UninhabitedVariantError> {
-    // By checking uninhabited-ness first we don't need to worry about types
-    // like `(u32, !)` which are single-variant but weird.
-    if layout.for_variant(cx, variant_index).is_uninhabited() {
-        return Err(UninhabitedVariantError);
-    }
-
-    Ok(match layout.variants {
-        Variants::Empty => unreachable!("we already handled uninhabited types"),
-        Variants::Single { index } => {
-            assert_eq!(index, variant_index);
-            None
-        }
-
-        Variants::Multiple { tag_encoding: TagEncoding::Direct, tag_field, .. } => {
-            let discr = layout.ty.discriminant_for_variant(cx.tcx(), variant_index);
-            let to = discr.unwrap().val;
-            let tag_layout = layout.field(cx, tag_field.as_usize());
-            let tag_llty = cx.immediate_backend_type(tag_layout);
-            let imm = cx.const_uint_big(tag_llty, to);
-            Some((tag_field, imm))
-        }
-        Variants::Multiple {
-            tag_encoding: TagEncoding::Niche { untagged_variant, ref niche_variants, niche_start },
-            tag_field,
-            ..
-        } => {
-            if variant_index != untagged_variant {
-                let niche_layout = layout.field(cx, tag_field.as_usize());
-                let niche_llty = cx.immediate_backend_type(niche_layout);
-                let BackendRepr::Scalar(scalar) = niche_layout.backend_repr else {
-                    bug!("expected a scalar placeref for the niche");
-                };
-                // We are supposed to compute `niche_value.wrapping_add(niche_start)` wrapping
-                // around the `niche`'s type.
-                // The easiest way to do that is to do wrapping arithmetic on `u128` and then
-                // masking off any extra bits that occur because we did the arithmetic with too many bits.
-                let niche_value = variant_index.as_u32() - niche_variants.start().as_u32();
-                let niche_value = (niche_value as u128).wrapping_add(niche_start);
-                let niche_value = niche_value & niche_layout.size.unsigned_int_max();
-
-                let niche_llval = cx.scalar_to_backend(
-                    Scalar::from_uint(niche_value, niche_layout.size),
-                    scalar,
-                    niche_llty,
-                );
-                Some((tag_field, niche_llval))
-            } else {
-                None
-            }
-        }
-    })
-}
-
-#[derive(Debug)]
-pub(super) struct UninhabitedVariantError;

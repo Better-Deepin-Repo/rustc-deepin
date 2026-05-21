@@ -1,17 +1,17 @@
-use crate::spec::{Arch, Target, TargetMetadata, TargetOptions, base};
+use crate::spec::{base, Target, TargetOptions};
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     Target {
         llvm_target: "mipsisa32r6el-unknown-linux-gnu".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: Some("32-bit MIPS Release 6 Little Endian".into()),
             tier: Some(3),
             host_tools: Some(false),
-            std: Some(true),
+            std: None, // ?
         },
         pointer_width: 32,
         data_layout: "e-m:m-p:32:32-i8:8:32-i16:16:32-i64:64-n32-S64".into(),
-        arch: Arch::Mips32r6,
+        arch: "mips32r6".into(),
 
         options: TargetOptions {
             cpu: "mips32r6".into(),

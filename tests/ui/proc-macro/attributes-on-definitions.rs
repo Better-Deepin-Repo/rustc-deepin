@@ -1,5 +1,5 @@
 //@ check-pass
-//@ proc-macro: attributes-on-definitions.rs
+//@ aux-build:attributes-on-definitions.rs
 
 #![forbid(unsafe_code)]
 

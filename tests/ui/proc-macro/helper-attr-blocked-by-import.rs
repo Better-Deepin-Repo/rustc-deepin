@@ -1,5 +1,5 @@
 //@ check-pass
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 
 #[macro_use(Empty)]
 extern crate test_macros;
@@ -10,7 +10,7 @@ use self::two::*;
 mod empty_helper {}
 
 mod one {
-    use crate::empty_helper;
+    use empty_helper;
 
     #[derive(Empty)]
     #[empty_helper]
@@ -18,7 +18,7 @@ mod one {
 }
 
 mod two {
-    use crate::empty_helper;
+    use empty_helper;
 
     #[derive(Empty)]
     #[empty_helper]

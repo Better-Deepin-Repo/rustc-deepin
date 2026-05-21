@@ -12,13 +12,11 @@ pub use os_impl::*;
 mod os_impl {
     use std::path::Path;
 
-    use crate::diagnostics::TidyCtx;
-
     pub fn check_filesystem_support(_sources: &[&Path], _output: &Path) -> bool {
         return false;
     }
 
-    pub fn check(_path: &Path, _tidy_ctx: TidyCtx) {}
+    pub fn check(_path: &Path, _bad: &mut bool) {}
 }
 
 #[cfg(unix)]
@@ -37,8 +35,6 @@ mod os_impl {
     }
 
     use FilesystemSupport::*;
-
-    use crate::diagnostics::TidyCtx;
 
     fn is_executable(path: &Path) -> std::io::Result<bool> {
         Ok(path.metadata()?.mode() & 0o111 != 0)
@@ -79,7 +75,7 @@ mod os_impl {
                         return ReadOnlyFs;
                     }
 
-                    panic!("unable to create temporary file `{path:?}`: {e:?}");
+                    panic!("unable to create temporary file `{:?}`: {:?}", path, e);
                 }
             }
         }
@@ -87,7 +83,12 @@ mod os_impl {
         for &source_dir in sources {
             match check_dir(source_dir) {
                 Unsupported => return false,
-                ReadOnlyFs => return matches!(check_dir(output), Supported),
+                ReadOnlyFs => {
+                    return match check_dir(output) {
+                        Supported => true,
+                        _ => false,
+                    };
+                }
                 _ => {}
             }
         }
@@ -110,16 +111,14 @@ mod os_impl {
     }
 
     #[cfg(unix)]
-    pub fn check(path: &Path, tidy_ctx: TidyCtx) {
-        let mut check = tidy_ctx.start_check("bins");
-
+    pub fn check(path: &Path, bad: &mut bool) {
         use std::ffi::OsStr;
 
         const ALLOWED: &[&str] = &["configure", "x"];
 
         for p in RI_EXCLUSION_LIST {
             if !path.join(Path::new(p)).exists() {
-                check.error(format!("rust-installer test bins missed: {p}"));
+                tidy_error!(bad, "rust-installer test bins missed: {p}");
             }
         }
 
@@ -135,12 +134,12 @@ mod os_impl {
             &mut |entry| {
                 let file = entry.path();
                 let extension = file.extension();
-                let scripts = ["py", "sh", "ps1", "woff2"];
+                let scripts = ["py", "sh", "ps1"];
                 if scripts.into_iter().any(|e| extension == Some(OsStr::new(e))) {
                     return;
                 }
 
-                if t!(is_executable(file), file) {
+                if t!(is_executable(&file), file) {
                     let rel_path = file.strip_prefix(path).unwrap();
                     let git_friendly_path = rel_path.to_str().unwrap().replace("\\", "/");
 
@@ -159,7 +158,7 @@ mod os_impl {
                         });
                     let path_bytes = rel_path.as_os_str().as_bytes();
                     if output.status.success() && output.stdout.starts_with(path_bytes) {
-                        check.error(format!("binary checked into source: {}", file.display()));
+                        tidy_error!(bad, "binary checked into source: {}", file.display());
                     }
                 }
             },

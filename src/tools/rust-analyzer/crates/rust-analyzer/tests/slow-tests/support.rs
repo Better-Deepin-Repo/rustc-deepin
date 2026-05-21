@@ -1,25 +1,21 @@
 use std::{
     cell::{Cell, RefCell},
-    env, fs,
+    fs,
     sync::Once,
     time::Duration,
 };
 
-use crossbeam_channel::{Receiver, after, select};
-use itertools::Itertools;
+use crossbeam_channel::{after, select, Receiver};
 use lsp_server::{Connection, Message, Notification, Request};
-use lsp_types::{
-    PublishDiagnosticsParams, TextDocumentIdentifier, Url, notification::Exit, request::Shutdown,
-};
+use lsp_types::{notification::Exit, request::Shutdown, TextDocumentIdentifier, Url};
 use parking_lot::{Mutex, MutexGuard};
 use paths::{Utf8Path, Utf8PathBuf};
 use rust_analyzer::{
-    cli::flags,
     config::{Config, ConfigChange, ConfigErrors},
     lsp, main_loop,
 };
 use serde::Serialize;
-use serde_json::{Value, json, to_string_pretty};
+use serde_json::{json, to_string_pretty, Value};
 use test_utils::FixtureWithProjectMeta;
 use tracing_subscriber::fmt::TestWriter;
 use vfs::AbsPathBuf;
@@ -50,7 +46,6 @@ impl Project<'_> {
                         "enable": false,
                     },
                 },
-                "checkOnSave": false,
                 "procMacro": {
                     "enable": false,
                 }
@@ -89,78 +84,14 @@ impl Project<'_> {
         self
     }
 
-    pub(crate) fn run_lsif(self) -> String {
-        let tmp_dir = self.tmp_dir.unwrap_or_else(|| {
-            if self.root_dir_contains_symlink { TestDir::new_symlink() } else { TestDir::new() }
-        });
-
-        let FixtureWithProjectMeta {
-            fixture,
-            mini_core,
-            proc_macro_names,
-            toolchain,
-            target_data_layout: _,
-            target_arch: _,
-        } = FixtureWithProjectMeta::parse(self.fixture);
-        assert!(proc_macro_names.is_empty());
-        assert!(mini_core.is_none());
-        assert!(toolchain.is_none());
-
-        for entry in fixture {
-            let path = tmp_dir.path().join(&entry.path['/'.len_utf8()..]);
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(path.as_path(), entry.text.as_bytes()).unwrap();
-        }
-
-        let tmp_dir_path = AbsPathBuf::assert(tmp_dir.path().to_path_buf());
-        let mut buf = Vec::new();
-        flags::Lsif::run(
-            flags::Lsif {
-                // FIXME: rewrite in terms of `#![feature(exact_length_collection)]`. See: #149266
-                path: tmp_dir_path.join(Itertools::exactly_one(self.roots.iter()).unwrap()).into(),
-                exclude_vendored_libraries: false,
-            },
-            &mut buf,
-            None,
-        )
-        .unwrap();
-        String::from_utf8(buf).unwrap()
-    }
-
     pub(crate) fn server(self) -> Server {
-        Project::server_with_lock(self, false)
-    }
-
-    /// `prelock` : Forcefully acquire a lock that will maintain the path to the config dir throughout the whole test.
-    ///
-    /// When testing we set the user config dir by setting an envvar `__TEST_RA_USER_CONFIG_DIR`.
-    /// This value must be maintained until the end of a test case. When tests run in parallel
-    /// this value may change thus making the tests flaky. As such, we use a `MutexGuard` that locks
-    /// the process until `Server` is dropped. To optimize parallelization we use a lock only when it is
-    /// needed, that is when a test uses config directory to do stuff. Our naive approach is to use a lock
-    /// if there is a path to config dir in the test fixture. However, in certain cases we create a
-    /// file in the config dir after server is run, something where our naive approach comes short.
-    /// Using a `prelock` allows us to force a lock when we know we need it.
-    pub(crate) fn server_with_lock(self, config_lock: bool) -> Server {
         static CONFIG_DIR_LOCK: Mutex<()> = Mutex::new(());
-
-        let config_dir_guard = if config_lock {
-            Some({
-                let guard = CONFIG_DIR_LOCK.lock();
-                let test_dir = TestDir::new();
-                let value = test_dir.path().to_owned();
-                // SAFETY: This is safe because this is single-threaded.
-                unsafe {
-                    env::set_var("__TEST_RA_USER_CONFIG_DIR", &value);
-                }
-                (guard, test_dir)
-            })
-        } else {
-            None
-        };
-
         let tmp_dir = self.tmp_dir.unwrap_or_else(|| {
-            if self.root_dir_contains_symlink { TestDir::new_symlink() } else { TestDir::new() }
+            if self.root_dir_contains_symlink {
+                TestDir::new_symlink()
+            } else {
+                TestDir::new()
+            }
         });
 
         static INIT: Once = Once::new();
@@ -172,7 +103,6 @@ impl Project<'_> {
                 filter: std::env::var("RA_LOG").ok().unwrap_or_else(|| "error".to_owned()),
                 chalk_filter: std::env::var("CHALK_DEBUG").ok(),
                 profile_filter: std::env::var("RA_PROFILE").ok(),
-                json_profile_filter: std::env::var("RA_PROFILE_JSON").ok(),
             };
         });
 
@@ -182,15 +112,18 @@ impl Project<'_> {
             proc_macro_names,
             toolchain,
             target_data_layout: _,
-            target_arch: _,
         } = FixtureWithProjectMeta::parse(self.fixture);
         assert!(proc_macro_names.is_empty());
         assert!(mini_core.is_none());
         assert!(toolchain.is_none());
 
+        let mut config_dir_guard = None;
         for entry in fixture {
             if let Some(pth) = entry.path.strip_prefix("/$$CONFIG_DIR$$") {
-                let path = Config::user_config_dir_path().unwrap().join(&pth['/'.len_utf8()..]);
+                if config_dir_guard.is_none() {
+                    config_dir_guard = Some(CONFIG_DIR_LOCK.lock());
+                }
+                let path = Config::user_config_path().unwrap().join(&pth['/'.len_utf8()..]);
                 fs::create_dir_all(path.parent().unwrap()).unwrap();
                 fs::write(path.as_path(), entry.text.as_bytes()).unwrap();
             } else {
@@ -208,7 +141,7 @@ impl Project<'_> {
         }
 
         let mut config = Config::new(
-            tmp_dir_path,
+            tmp_dir_path.clone(),
             lsp_types::ClientCapabilities {
                 workspace: Some(lsp_types::WorkspaceClientCapabilities {
                     did_change_watched_files: Some(
@@ -293,18 +226,19 @@ pub(crate) struct Server {
     client: Connection,
     /// XXX: remove the tempdir last
     dir: TestDir,
-    _config_dir_guard: Option<(MutexGuard<'static, ()>, TestDir)>,
+    _config_dir_guard: Option<MutexGuard<'static, ()>>,
 }
 
 impl Server {
     fn new(
-        config_dir_guard: Option<(MutexGuard<'static, ()>, TestDir)>,
+        config_dir_guard: Option<MutexGuard<'static, ()>>,
         dir: TestDir,
         config: Config,
     ) -> Server {
         let (connection, client) = Connection::memory();
 
-        let _thread = stdx::thread::Builder::new(stdx::thread::ThreadIntent::Worker, "test server")
+        let _thread = stdx::thread::Builder::new(stdx::thread::ThreadIntent::Worker)
+            .name("test server".to_owned())
             .spawn(move || main_loop(config, connection).unwrap())
             .expect("failed to spawn a thread");
 
@@ -409,53 +343,6 @@ impl Server {
         .unwrap_or_else(|Timeout| panic!("timeout while waiting for ws to load"));
         self
     }
-    pub(crate) fn wait_for_diagnostics(&self) -> PublishDiagnosticsParams {
-        for msg in self.messages.borrow().iter() {
-            if let Message::Notification(n) = msg
-                && n.method == "textDocument/publishDiagnostics"
-            {
-                let params: PublishDiagnosticsParams =
-                    serde_json::from_value(n.params.clone()).unwrap();
-                if !params.diagnostics.is_empty() {
-                    return params;
-                }
-            }
-        }
-        loop {
-            let msg = self
-                .recv()
-                .unwrap_or_else(|Timeout| panic!("timeout while waiting for diagnostics"))
-                .expect("connection closed while waiting for diagnostics");
-            if let Message::Notification(n) = &msg
-                && n.method == "textDocument/publishDiagnostics"
-            {
-                let params: PublishDiagnosticsParams =
-                    serde_json::from_value(n.params.clone()).unwrap();
-                if !params.diagnostics.is_empty() {
-                    return params;
-                }
-            }
-        }
-    }
-
-    pub(crate) fn wait_for_diagnostics_cleared(&self) {
-        loop {
-            let msg = self
-                .recv()
-                .unwrap_or_else(|Timeout| panic!("timeout while waiting for diagnostics to clear"))
-                .expect("connection closed while waiting for diagnostics to clear");
-            if let Message::Notification(n) = &msg
-                && n.method == "textDocument/publishDiagnostics"
-            {
-                let params: PublishDiagnosticsParams =
-                    serde_json::from_value(n.params.clone()).unwrap();
-                if params.diagnostics.is_empty() {
-                    return;
-                }
-            }
-        }
-    }
-
     fn wait_for_message_cond(
         &self,
         n: usize,

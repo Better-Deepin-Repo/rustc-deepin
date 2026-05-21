@@ -1,6 +1,6 @@
 //@ run-fail
 //@ error-pattern:explicit panic
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 fn build1() -> Vec<isize> {
     vec![0, 0, 0, 0, 0, 0, 0]

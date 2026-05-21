@@ -9,7 +9,8 @@ static A: u8 = 0;
 // Make sure we catch accessing thread-local storage.
 static TEST_BAD: () = {
     unsafe { let _val = A; }
-    //~^ ERROR cannot access thread local static
+    //~^ ERROR could not evaluate static initializer
+    //~| NOTE cannot access thread local static
 };
 
 // Make sure we catch taking a reference to thread-local storage.
@@ -17,9 +18,8 @@ static TEST_BAD: () = {
 // sense at compile-time.
 static TEST_BAD_REF: () = {
     unsafe { let _val = &A; }
-    //~^ ERROR cannot access thread local static
+    //~^ ERROR could not evaluate static initializer
+    //~| NOTE cannot access thread local static
 };
 
 fn main() {}
-
-//~? WARN skipping const checks

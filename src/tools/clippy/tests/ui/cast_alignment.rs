@@ -1,8 +1,11 @@
 //! Test casts for alignment issues
 
+#![feature(rustc_private)]
 #![feature(core_intrinsics)]
-#![warn(clippy::cast_ptr_alignment)]
-#![allow(
+extern crate libc;
+
+#[warn(clippy::cast_ptr_alignment)]
+#[allow(
     clippy::no_effect,
     clippy::unnecessary_operation,
     clippy::cast_lossless,
@@ -14,17 +17,16 @@ fn main() {
 
     // cast to more-strictly-aligned type
     (&1u8 as *const u8) as *const u16;
-    //~^ cast_ptr_alignment
-
+    //~^ ERROR: casting from `*const u8` to a more-strictly-aligned pointer (`*const u16`)
+    //~| NOTE: `-D clippy::cast-ptr-alignment` implied by `-D warnings`
     (&mut 1u8 as *mut u8) as *mut u16;
-    //~^ cast_ptr_alignment
+    //~^ ERROR: casting from `*mut u8` to a more-strictly-aligned pointer (`*mut u16`) (1
 
     // cast to more-strictly-aligned type, but with the `pointer::cast` function.
     (&1u8 as *const u8).cast::<u16>();
-    //~^ cast_ptr_alignment
-
+    //~^ ERROR: casting from `*const u8` to a more-strictly-aligned pointer (`*const u16`)
     (&mut 1u8 as *mut u8).cast::<u16>();
-    //~^ cast_ptr_alignment
+    //~^ ERROR: casting from `*mut u8` to a more-strictly-aligned pointer (`*mut u16`) (1
 
     /* These should be ok */
 

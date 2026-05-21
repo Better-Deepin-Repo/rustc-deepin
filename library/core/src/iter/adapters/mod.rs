@@ -28,11 +28,11 @@ mod take;
 mod take_while;
 mod zip;
 
-#[unstable(feature = "iter_array_chunks", issue = "100450")]
+#[unstable(feature = "iter_array_chunks", reason = "recently added", issue = "100450")]
 pub use self::array_chunks::ArrayChunks;
 #[unstable(feature = "std_internals", issue = "none")]
 pub use self::by_ref_sized::ByRefSized;
-#[stable(feature = "iter_chain", since = "1.91.0")]
+#[unstable(feature = "iter_chain", reason = "recently added", issue = "125964")]
 pub use self::chain::chain;
 #[stable(feature = "iter_cloned", since = "1.1.0")]
 pub use self::cloned::Cloned;
@@ -40,20 +40,20 @@ pub use self::cloned::Cloned;
 pub use self::copied::Copied;
 #[stable(feature = "iterator_flatten", since = "1.29.0")]
 pub use self::flatten::Flatten;
-#[unstable(feature = "iter_intersperse", issue = "79524")]
+#[unstable(feature = "iter_intersperse", reason = "recently added", issue = "79524")]
 pub use self::intersperse::{Intersperse, IntersperseWith};
 #[stable(feature = "iter_map_while", since = "1.57.0")]
 pub use self::map_while::MapWhile;
-#[unstable(feature = "iter_map_windows", issue = "87155")]
+#[unstable(feature = "iter_map_windows", reason = "recently added", issue = "87155")]
 pub use self::map_windows::MapWindows;
 #[stable(feature = "iterator_step_by", since = "1.28.0")]
 pub use self::step_by::StepBy;
+#[stable(feature = "iter_zip", since = "1.59.0")]
+pub use self::zip::zip;
 #[unstable(feature = "trusted_random_access", issue = "none")]
 pub use self::zip::TrustedRandomAccess;
 #[unstable(feature = "trusted_random_access", issue = "none")]
 pub use self::zip::TrustedRandomAccessNoCoerce;
-#[stable(feature = "iter_zip", since = "1.59.0")]
-pub use self::zip::zip;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::{
     chain::Chain, cycle::Cycle, enumerate::Enumerate, filter::Filter, filter_map::FilterMap,
@@ -71,7 +71,7 @@ pub use self::{
 /// this can be useful for specializing [`FromIterator`] implementations or recovering the
 /// remaining elements after an iterator has been partially exhausted.
 ///
-/// Note that implementations do not necessarily have to provide access to the innermost
+/// Note that implementations do not necessarily have to provide access to the inner-most
 /// source of a pipeline. A stateful intermediate adapter might eagerly evaluate a part
 /// of the pipeline and expose its internal storage as source.
 ///

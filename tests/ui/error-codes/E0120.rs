@@ -1,4 +1,4 @@
-trait MyTrait { fn foo(&self) {} }
+trait MyTrait { fn foo() {} }
 
 impl Drop for dyn MyTrait {
               //~^ ERROR E0120

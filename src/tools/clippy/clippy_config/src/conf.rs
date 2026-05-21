@@ -1,19 +1,12 @@
+use crate::msrvs::Msrv;
+use crate::types::{DisallowedPath, MacroMatcher, MatchLintBehaviour, PubUnderscoreFieldsBehaviour, Rename};
 use crate::ClippyConfiguration;
-use crate::types::{
-    DisallowedPath, DisallowedPathWithoutReplacement, InherentImplLintScope, MacroMatcher, MatchLintBehaviour,
-    PubUnderscoreFieldsBehaviour, Rename, SourceItemOrdering, SourceItemOrderingCategory,
-    SourceItemOrderingModuleItemGroupings, SourceItemOrderingModuleItemKind, SourceItemOrderingTraitAssocItemKind,
-    SourceItemOrderingTraitAssocItemKinds, SourceItemOrderingWithinModuleItemGroupings,
-};
-use clippy_utils::msrvs::Msrv;
-use itertools::Itertools;
 use rustc_errors::Applicability;
 use rustc_session::Session;
 use rustc_span::edit_distance::edit_distance;
 use rustc_span::{BytePos, Pos, SourceFile, Span, SyntaxContext};
 use serde::de::{IgnoredAny, IntoDeserializer, MapAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
-use std::collections::HashMap;
 use std::fmt::{Debug, Display, Formatter};
 use std::ops::Range;
 use std::path::PathBuf;
@@ -24,18 +17,16 @@ use std::{cmp, env, fmt, fs, io};
 #[rustfmt::skip]
 const DEFAULT_DOC_VALID_IDENTS: &[&str] = &[
     "KiB", "MiB", "GiB", "TiB", "PiB", "EiB",
-    "MHz", "GHz", "THz",
     "AccessKit",
-    "CoAP", "CoreFoundation", "CoreGraphics", "CoreText",
+    "CoreFoundation", "CoreGraphics", "CoreText",
     "DevOps",
     "Direct2D", "Direct3D", "DirectWrite", "DirectX",
     "ECMAScript",
     "GPLv2", "GPLv3",
     "GitHub", "GitLab",
     "IPv4", "IPv6",
-    "InfiniBand", "RoCE",
     "ClojureScript", "CoffeeScript", "JavaScript", "PostScript", "PureScript", "TypeScript",
-    "PowerPC", "PowerShell", "WebAssembly",
+    "WebAssembly",
     "NaN", "NaNs",
     "OAuth", "GraphQL",
     "OCaml",
@@ -45,7 +36,7 @@ const DEFAULT_DOC_VALID_IDENTS: &[&str] = &[
     "WebP", "OpenExr", "YCbCr", "sRGB",
     "TensorFlow",
     "TrueType",
-    "iOS", "macOS", "FreeBSD", "NetBSD", "OpenBSD", "NixOS",
+    "iOS", "macOS", "FreeBSD", "NetBSD", "OpenBSD",
     "TeX", "LaTeX", "BibTeX", "BibLaTeX",
     "MinGW",
     "CamelCase",
@@ -55,35 +46,11 @@ const DEFAULT_ALLOWED_IDENTS_BELOW_MIN_CHARS: &[&str] = &["i", "j", "x", "y", "z
 const DEFAULT_ALLOWED_PREFIXES: &[&str] = &["to", "as", "into", "from", "try_into", "try_from"];
 const DEFAULT_ALLOWED_TRAITS_WITH_RENAMED_PARAMS: &[&str] =
     &["core::convert::From", "core::convert::TryFrom", "core::str::FromStr"];
-const DEFAULT_MODULE_ITEM_ORDERING_GROUPS: &[(&str, &[SourceItemOrderingModuleItemKind])] = {
-    #[allow(clippy::enum_glob_use)] // Very local glob use for legibility.
-    use SourceItemOrderingModuleItemKind::*;
-    &[
-        ("modules", &[ExternCrate, Mod, ForeignMod]),
-        ("use", &[Use]),
-        ("macros", &[Macro]),
-        ("global_asm", &[GlobalAsm]),
-        ("UPPER_SNAKE_CASE", &[Static, Const]),
-        ("PascalCase", &[TyAlias, Enum, Struct, Union, Trait, TraitAlias, Impl]),
-        ("lower_snake_case", &[Fn]),
-    ]
-};
-const DEFAULT_TRAIT_ASSOC_ITEM_KINDS_ORDER: &[SourceItemOrderingTraitAssocItemKind] = {
-    #[allow(clippy::enum_glob_use)] // Very local glob use for legibility.
-    use SourceItemOrderingTraitAssocItemKind::*;
-    &[Const, Type, Fn]
-};
-const DEFAULT_SOURCE_ITEM_ORDERING: &[SourceItemOrderingCategory] = {
-    #[allow(clippy::enum_glob_use)] // Very local glob use for legibility.
-    use SourceItemOrderingCategory::*;
-    &[Enum, Impl, Module, Struct, Trait]
-};
 
 /// Conf with parse errors
 #[derive(Default)]
 struct TryConf {
     conf: Conf,
-    value_spans: HashMap<String, Range<usize>>,
     errors: Vec<ConfError>,
     warnings: Vec<ConfError>,
 }
@@ -92,7 +59,6 @@ impl TryConf {
     fn from_toml_error(file: &SourceFile, error: &toml::de::Error) -> Self {
         Self {
             conf: Conf::default(),
-            value_spans: HashMap::default(),
             errors: vec![ConfError::from_toml(file, error)],
             warnings: vec![],
         }
@@ -108,7 +74,7 @@ struct ConfError {
 
 impl ConfError {
     fn from_toml(file: &SourceFile, error: &toml::de::Error) -> Self {
-        let span = error.span().unwrap_or(0..file.normalized_source_len.0 as usize);
+        let span = error.span().unwrap_or(0..file.source_len.0 as usize);
         Self::spanned(file, error.message(), None, span)
     }
 
@@ -121,35 +87,14 @@ impl ConfError {
         Self {
             message: message.into(),
             suggestion,
-            span: span_from_toml_range(file, span),
+            span: Span::new(
+                file.start_pos + BytePos::from_usize(span.start),
+                file.start_pos + BytePos::from_usize(span.end),
+                SyntaxContext::root(),
+                None,
+            ),
         }
     }
-}
-
-// Remove code tags and code behind '# 's, as they are not needed for the lint docs and --explain
-pub fn sanitize_explanation(raw_docs: &str) -> String {
-    // Remove tags and hidden code:
-    let mut explanation = String::with_capacity(128);
-    let mut in_code = false;
-    for line in raw_docs.lines() {
-        let line = line.strip_prefix(' ').unwrap_or(line);
-
-        if let Some(lang) = line.strip_prefix("```") {
-            let tag = lang.split_once(',').map_or(lang, |(left, _)| left);
-            if !in_code && matches!(tag, "" | "rust" | "ignore" | "should_panic" | "no_run" | "compile_fail") {
-                explanation += "```rust\n";
-            } else {
-                explanation += line;
-                explanation.push('\n');
-            }
-            in_code = !in_code;
-        } else if !(in_code && line.starts_with("# ")) {
-            explanation += line;
-            explanation.push('\n');
-        }
-    }
-
-    explanation
 }
 
 macro_rules! wrap_option {
@@ -172,67 +117,17 @@ macro_rules! default_text {
     };
 }
 
-macro_rules! deserialize {
-    ($map:expr, $ty:ty, $errors:expr, $file:expr) => {{
-        let raw_value = $map.next_value::<toml::Spanned<toml::Value>>()?;
-        let value_span = raw_value.span();
-        let value = match <$ty>::deserialize(raw_value.into_inner()) {
-            Err(e) => {
-                $errors.push(ConfError::spanned(
-                    $file,
-                    e.to_string().replace('\n', " ").trim(),
-                    None,
-                    value_span,
-                ));
-                continue;
-            },
-            Ok(value) => value,
-        };
-        (value, value_span)
-    }};
-
-    ($map:expr, $ty:ty, $errors:expr, $file:expr, $replacements_allowed:expr) => {{
-        let array = $map.next_value::<Vec<toml::Spanned<toml::Value>>>()?;
-        let mut disallowed_paths_span = Range {
-            start: usize::MAX,
-            end: usize::MIN,
-        };
-        let mut disallowed_paths = Vec::new();
-        for raw_value in array {
-            let value_span = raw_value.span();
-            let mut disallowed_path = match DisallowedPath::<$replacements_allowed>::deserialize(raw_value.into_inner())
-            {
-                Err(e) => {
-                    $errors.push(ConfError::spanned(
-                        $file,
-                        e.to_string().replace('\n', " ").trim(),
-                        None,
-                        value_span,
-                    ));
-                    continue;
-                },
-                Ok(disallowed_path) => disallowed_path,
-            };
-            disallowed_paths_span = union(&disallowed_paths_span, &value_span);
-            disallowed_path.set_span(span_from_toml_range($file, value_span));
-            disallowed_paths.push(disallowed_path);
-        }
-        (disallowed_paths, disallowed_paths_span)
-    }};
-}
-
 macro_rules! define_Conf {
     ($(
         $(#[doc = $doc:literal])+
         $(#[conf_deprecated($dep:literal, $new_conf:ident)])?
         $(#[default_text = $default_text:expr])?
-        $(#[disallowed_paths_allow_replacements = $replacements_allowed:expr])?
         $(#[lints($($for_lints:ident),* $(,)?)])?
         $name:ident: $ty:ty = $default:expr,
     )*) => {
         /// Clippy lint configuration
         pub struct Conf {
-            $($(#[cfg_attr(doc, doc = $doc)])+ pub $name: $ty,)*
+            $($(#[doc = $doc])+ pub $name: $ty,)*
         }
 
         mod defaults {
@@ -248,7 +143,7 @@ macro_rules! define_Conf {
 
         #[derive(Deserialize)]
         #[serde(field_identifier, rename_all = "kebab-case")]
-        #[expect(non_camel_case_types)]
+        #[allow(non_camel_case_types)]
         enum Field { $($name,)* third_party, }
 
         struct ConfVisitor<'a>(&'a SourceFile);
@@ -261,53 +156,47 @@ macro_rules! define_Conf {
             }
 
             fn visit_map<V>(self, mut map: V) -> Result<Self::Value, V::Error> where V: MapAccess<'de> {
-                let mut value_spans = HashMap::new();
                 let mut errors = Vec::new();
                 let mut warnings = Vec::new();
-
-                // Declare a local variable for each field available to a configuration file.
                 $(let mut $name = None;)*
-
                 // could get `Field` here directly, but get `String` first for diagnostics
                 while let Some(name) = map.next_key::<toml::Spanned<String>>()? {
-                    let field = match Field::deserialize(name.get_ref().as_str().into_deserializer()) {
+                    match Field::deserialize(name.get_ref().as_str().into_deserializer()) {
                         Err(e) => {
                             let e: FieldError = e;
                             errors.push(ConfError::spanned(self.0, e.error, e.suggestion, name.span()));
-                            continue;
                         }
-                        Ok(field) => field
-                    };
-
-                    match field {
-                        $(Field::$name => {
-                            // Is this a deprecated field, i.e., is `$dep` set? If so, push a warning.
+                        $(Ok(Field::$name) => {
                             $(warnings.push(ConfError::spanned(self.0, format!("deprecated field `{}`. {}", name.get_ref(), $dep), None, name.span()));)?
-                            let (value, value_span) =
-                                deserialize!(map, $ty, errors, self.0 $(, $replacements_allowed)?);
-                            // Was this field set previously?
-                            if $name.is_some() {
-                                errors.push(ConfError::spanned(self.0, format!("duplicate field `{}`", name.get_ref()), None, name.span()));
-                                continue;
+                            let raw_value = map.next_value::<toml::Spanned<toml::Value>>()?;
+                            let value_span = raw_value.span();
+                            match <$ty>::deserialize(raw_value.into_inner()) {
+                                Err(e) => errors.push(ConfError::spanned(self.0, e.to_string().replace('\n', " ").trim(), None, value_span)),
+                                Ok(value) => match $name {
+                                    Some(_) => {
+                                        errors.push(ConfError::spanned(self.0, format!("duplicate field `{}`", name.get_ref()), None, name.span()));
+                                    }
+                                    None => {
+                                        $name = Some(value);
+                                        // $new_conf is the same as one of the defined `$name`s, so
+                                        // this variable is defined in line 2 of this function.
+                                        $(match $new_conf {
+                                            Some(_) => errors.push(ConfError::spanned(self.0, concat!(
+                                                "duplicate field `", stringify!($new_conf),
+                                                "` (provided as `", stringify!($name), "`)"
+                                            ), None, name.span())),
+                                            None => $new_conf = $name.clone(),
+                                        })?
+                                    },
+                                }
                             }
-                            $name = Some(value);
-                            value_spans.insert(name.get_ref().as_str().to_string(), value_span);
-                            // If this is a deprecated field, was the new field (`$new_conf`) set previously?
-                            // Note that `$new_conf` is one of the defined `$name`s.
-                            $(match $new_conf {
-                                Some(_) => errors.push(ConfError::spanned(self.0, concat!(
-                                    "duplicate field `", stringify!($new_conf),
-                                    "` (provided as `", stringify!($name), "`)"
-                                ), None, name.span())),
-                                None => $new_conf = $name.clone(),
-                            })?
                         })*
                         // ignore contents of the third_party key
-                        Field::third_party => drop(map.next_value::<IgnoredAny>())
+                        Ok(Field::third_party) => drop(map.next_value::<IgnoredAny>())
                     }
                 }
                 let conf = Conf { $($name: $name.unwrap_or_else(defaults::$name),)* };
-                Ok(TryConf { conf, value_spans, errors, warnings })
+                Ok(TryConf { conf, errors, warnings })
             }
         }
 
@@ -323,22 +212,6 @@ macro_rules! define_Conf {
             )*]
         }
     };
-}
-
-fn union(x: &Range<usize>, y: &Range<usize>) -> Range<usize> {
-    Range {
-        start: cmp::min(x.start, y.start),
-        end: cmp::max(x.end, y.end),
-    }
-}
-
-fn span_from_toml_range(file: &SourceFile, span: Range<usize>) -> Span {
-    Span::new(
-        file.start_pos + BytePos::from_usize(span.start),
-        file.start_pos + BytePos::from_usize(span.end),
-        SyntaxContext::root(),
-        None,
-    )
 }
 
 define_Conf! {
@@ -361,26 +234,14 @@ define_Conf! {
     /// Whether `dbg!` should be allowed in test functions or `#[cfg(test)]`
     #[lints(dbg_macro)]
     allow_dbg_in_tests: bool = false,
-    /// Whether an item should be allowed to have the same name as its containing module
-    #[lints(module_name_repetitions)]
-    allow_exact_repetitions: bool = true,
-    /// Whether `expect` should be allowed in code always evaluated at compile time
-    #[lints(expect_used)]
-    allow_expect_in_consts: bool = true,
     /// Whether `expect` should be allowed in test functions or `#[cfg(test)]`
     #[lints(expect_used)]
     allow_expect_in_tests: bool = false,
-    /// Whether `indexing_slicing` should be allowed in test functions or `#[cfg(test)]`
-    #[lints(indexing_slicing)]
-    allow_indexing_slicing_in_tests: bool = false,
-    /// Whether functions inside `#[cfg(test)]` modules or test functions should be checked.
-    #[lints(large_stack_frames)]
-    allow_large_stack_frames_in_tests: bool = true,
     /// Whether to allow mixed uninlined format args, e.g. `format!("{} {}", a, foo.bar)`
     #[lints(uninlined_format_args)]
     allow_mixed_uninlined_format_args: bool = true,
     /// Whether to allow `r#""#` when `r""` can be used
-    #[lints(needless_raw_string_hashes)]
+    #[lints(unnecessary_raw_string_hashes)]
     allow_one_hash_in_raw_strings: bool = false,
     /// Whether `panic` should be allowed in test functions or `#[cfg(test)]`
     #[lints(panic)]
@@ -407,21 +268,9 @@ define_Conf! {
     #[lints(renamed_function_params)]
     allow_renamed_params_for: Vec<String> =
         DEFAULT_ALLOWED_TRAITS_WITH_RENAMED_PARAMS.iter().map(ToString::to_string).collect(),
-    /// Whether `unwrap` should be allowed in code always evaluated at compile time
-    #[lints(unwrap_used)]
-    allow_unwrap_in_consts: bool = true,
     /// Whether `unwrap` should be allowed in test functions or `#[cfg(test)]`
     #[lints(unwrap_used)]
     allow_unwrap_in_tests: bool = false,
-    /// List of types to allow `unwrap()` and `expect()` on.
-    ///
-    /// #### Example
-    ///
-    /// ```toml
-    /// allow-unwrap-types = [ "std::sync::LockResult" ]
-    /// ```
-    #[lints(expect_used, unwrap_used)]
-    allow_unwrap_types: Vec<String> = Vec::new(),
     /// Whether `useless_vec` should ignore test functions or `#[cfg(test)]`
     #[lints(useless_vec)]
     allow_useless_vec_in_tests: bool = false,
@@ -432,7 +281,7 @@ define_Conf! {
     #[lints(multiple_crate_versions)]
     allowed_duplicate_crates: Vec<String> = Vec::new(),
     /// Allowed names below the minimum allowed characters. The value `".."` can be used as part of
-    /// the list to indicate that the configured values should be appended to the default
+    /// the list to indicate, that the configured values should be appended to the default
     /// configuration of Clippy. By default, any configuration will replace the default value.
     #[lints(min_ident_chars)]
     allowed_idents_below_min_chars: Vec<String> =
@@ -517,7 +366,7 @@ define_Conf! {
     arithmetic_side_effects_allowed_unary: Vec<String> = <_>::default(),
     /// The maximum allowed size for arrays on the stack
     #[lints(large_const_arrays, large_stack_arrays)]
-    array_size_threshold: u64 = 16 * 1024,
+    array_size_threshold: u64 = 512_000,
     /// Suppress lints whenever the suggested change would cause breakage for other crates.
     #[lints(
         box_collection,
@@ -526,11 +375,9 @@ define_Conf! {
         linkedlist,
         needless_pass_by_ref_mut,
         option_option,
-        owned_cow,
         rc_buffer,
         rc_mutex,
         redundant_allocation,
-        ref_option,
         single_call_fn,
         trivially_copy_pass_by_ref,
         unnecessary_box_returns,
@@ -542,9 +389,8 @@ define_Conf! {
     )]
     avoid_breaking_exported_api: bool = true,
     /// The list of types which may not be held across an await point.
-    #[disallowed_paths_allow_replacements = false]
     #[lints(await_holding_invalid_type)]
-    await_holding_invalid_types: Vec<DisallowedPathWithoutReplacement> = Vec::new(),
+    await_holding_invalid_types: Vec<DisallowedPath> = Vec::new(),
     /// DEPRECATED LINT: BLACKLISTED_NAME.
     ///
     /// Use the Disallowed Names lint instead
@@ -553,74 +399,21 @@ define_Conf! {
     /// For internal testing only, ignores the current `publish` settings in the Cargo manifest.
     #[lints(cargo_common_metadata)]
     cargo_ignore_publish: bool = false,
-    /// Whether to check MSRV compatibility in `#[test]` and `#[cfg(test)]` code.
-    #[lints(incompatible_msrv)]
-    check_incompatible_msrv_in_tests: bool = false,
-    /// Whether to suggest reordering constructor fields when initializers are present.
-    ///
-    /// Warnings produced by this configuration aren't necessarily fixed by just reordering the fields. Even if the
-    /// suggested code would compile, it can change semantics if the initializer expressions have side effects. The
-    /// following example [from rust-clippy#11846] shows how the suggestion can run into borrow check errors:
-    ///
-    /// ```rust
-    /// struct MyStruct {
-    ///     vector: Vec<u32>,
-    ///     length: usize
-    /// }
-    /// fn main() {
-    ///     let vector = vec![1,2,3];
-    ///     MyStruct { length: vector.len(), vector};
-    /// }
-    /// ```
-    ///
-    /// [from rust-clippy#11846]: https://github.com/rust-lang/rust-clippy/issues/11846#issuecomment-1820747924
-    #[lints(inconsistent_struct_constructor)]
-    check_inconsistent_struct_field_initializers: bool = false,
     /// Whether to also run the listed lints on private items.
     #[lints(missing_errors_doc, missing_panics_doc, missing_safety_doc, unnecessary_safety_doc)]
     check_private_items: bool = false,
     /// The maximum cognitive complexity a function can have
     #[lints(cognitive_complexity)]
     cognitive_complexity_threshold: u64 = 25,
-    /// The minimum digits a const float literal must have to supress the `excessive_precicion` lint
-    #[lints(excessive_precision)]
-    const_literal_digits_threshold: usize = 30,
     /// DEPRECATED LINT: CYCLOMATIC_COMPLEXITY.
     ///
     /// Use the Cognitive Complexity lint instead.
     #[conf_deprecated("Please use `cognitive-complexity-threshold` instead", cognitive_complexity_threshold)]
     cyclomatic_complexity_threshold: u64 = 25,
-    /// The list of disallowed fields, written as fully qualified paths.
-    ///
-    /// **Fields:**
-    /// - `path` (required): the fully qualified path to the field that should be disallowed
-    /// - `reason` (optional): explanation why this field is disallowed
-    /// - `replacement` (optional): suggested alternative method
-    /// - `allow-invalid` (optional, `false` by default): when set to `true`, it will ignore this entry
-    ///   if the path doesn't exist, instead of emitting an error
-    #[disallowed_paths_allow_replacements = true]
-    #[lints(disallowed_fields)]
-    disallowed_fields: Vec<DisallowedPath> = Vec::new(),
     /// The list of disallowed macros, written as fully qualified paths.
-    ///
-    /// **Fields:**
-    /// - `path` (required): the fully qualified path to the macro that should be disallowed
-    /// - `reason` (optional): explanation why this macro is disallowed
-    /// - `replacement` (optional): suggested alternative macro
-    /// - `allow-invalid` (optional, `false` by default): when set to `true`, it will ignore this entry
-    ///   if the path doesn't exist, instead of emitting an error
-    #[disallowed_paths_allow_replacements = true]
     #[lints(disallowed_macros)]
     disallowed_macros: Vec<DisallowedPath> = Vec::new(),
     /// The list of disallowed methods, written as fully qualified paths.
-    ///
-    /// **Fields:**
-    /// - `path` (required): the fully qualified path to the method that should be disallowed
-    /// - `reason` (optional): explanation why this method is disallowed
-    /// - `replacement` (optional): suggested alternative method
-    /// - `allow-invalid` (optional, `false` by default): when set to `true`, it will ignore this entry
-    ///   if the path doesn't exist, instead of emitting an error
-    #[disallowed_paths_allow_replacements = true]
     #[lints(disallowed_methods)]
     disallowed_methods: Vec<DisallowedPath> = Vec::new(),
     /// The list of disallowed names to lint about. NB: `bar` is not here since it has legitimate uses. The value
@@ -629,18 +422,10 @@ define_Conf! {
     #[lints(disallowed_names)]
     disallowed_names: Vec<String> = DEFAULT_DISALLOWED_NAMES.iter().map(ToString::to_string).collect(),
     /// The list of disallowed types, written as fully qualified paths.
-    ///
-    /// **Fields:**
-    /// - `path` (required): the fully qualified path to the type that should be disallowed
-    /// - `reason` (optional): explanation why this type is disallowed
-    /// - `replacement` (optional): suggested alternative type
-    /// - `allow-invalid` (optional, `false` by default): when set to `true`, it will ignore this entry
-    ///   if the path doesn't exist, instead of emitting an error
-    #[disallowed_paths_allow_replacements = true]
     #[lints(disallowed_types)]
     disallowed_types: Vec<DisallowedPath> = Vec::new(),
     /// The list of words this lint should not consider as identifiers needing ticks. The value
-    /// `".."` can be used as part of the list to indicate that the configured values should be appended to the
+    /// `".."` can be used as part of the list to indicate, that the configured values should be appended to the
     /// default configuration of Clippy. By default, any configuration will replace the default value. For example:
     /// * `doc-valid-idents = ["ClipPy"]` would replace the default list with `["ClipPy"]`.
     /// * `doc-valid-idents = ["ClipPy", ".."]` would append `ClipPy` to the default list.
@@ -686,26 +471,9 @@ define_Conf! {
     /// A list of paths to types that should be treated as if they do not contain interior mutability
     #[lints(borrow_interior_mutable_const, declare_interior_mutable_const, ifs_same_cond, mutable_key_type)]
     ignore_interior_mutability: Vec<String> = Vec::from(["bytes::Bytes".into()]),
-    /// Sets the scope ("crate", "file", or "module") in which duplicate inherent `impl` blocks for the same type are linted.
-    #[lints(multiple_inherent_impl)]
-    inherent_impl_lint_scope: InherentImplLintScope = InherentImplLintScope::Crate,
-    /// A list of paths to types that should be ignored as overly large `Err`-variants in a
-    /// `Result` returned from a function
-    #[lints(result_large_err)]
-    large_error_ignored: Vec<String> = Vec::default(),
     /// The maximum size of the `Err`-variant in a `Result` returned from a function
     #[lints(result_large_err)]
     large_error_threshold: u64 = 128,
-    /// Whether collapsible `if` and `else if` chains are linted if they contain comments inside the parts
-    /// that would be collapsed.
-    #[lints(collapsible_else_if, collapsible_if)]
-    lint_commented_code: bool = false,
-    /// Whether to suggest reordering constructor fields when initializers are present.
-    /// DEPRECATED CONFIGURATION: lint-inconsistent-struct-field-initializers
-    ///
-    /// Use the `check-inconsistent-struct-field-initializers` configuration instead.
-    #[conf_deprecated("Please use `check-inconsistent-struct-field-initializers` instead", check_inconsistent_struct_field_initializers)]
-    lint_inconsistent_struct_field_initializers: bool = false,
     /// The lower bound for linting decimal literals
     #[lints(decimal_literal_representation)]
     literal_representation_threshold: u64 = 16384,
@@ -733,23 +501,10 @@ define_Conf! {
     /// Minimum chars an ident can have, anything below or equal to this will be linted.
     #[lints(min_ident_chars)]
     min_ident_chars_threshold: u64 = 1,
-    /// Whether to allow fields starting with an underscore to skip documentation requirements
-    #[lints(missing_docs_in_private_items)]
-    missing_docs_allow_unused: bool = false,
     /// Whether to **only** check for missing documentation in items visible within the current
     /// crate. For example, `pub(crate)` items.
     #[lints(missing_docs_in_private_items)]
     missing_docs_in_crate_items: bool = false,
-    /// The named groupings of different source item kinds within modules.
-    #[lints(arbitrary_source_item_ordering)]
-    module_item_order_groupings: SourceItemOrderingModuleItemGroupings = DEFAULT_MODULE_ITEM_ORDERING_GROUPS.into(),
-    /// Whether the items within module groups should be ordered alphabetically or not.
-    ///
-    /// This option can be configured to "all", "none", or a list of specific grouping names that should be checked
-    /// (e.g. only "enums").
-    #[lints(arbitrary_source_item_ordering)]
-    module_items_ordered_within_groupings: SourceItemOrderingWithinModuleItemGroupings =
-        SourceItemOrderingWithinModuleItemGroupings::None,
     /// The minimum rust version that the project supports. Defaults to the `rust-version` field in `Cargo.toml`
     #[default_text = "current version"]
     #[lints(
@@ -771,69 +526,46 @@ define_Conf! {
         from_over_into,
         if_then_some_else_none,
         index_refutable_slice,
-        inefficient_to_string,
-        io_other_error,
         iter_kv_map,
         legacy_numeric_constants,
-        len_zero,
-        lines_filter_map_ok,
-        manual_abs_diff,
         manual_bits,
         manual_c_str_literals,
         manual_clamp,
-        manual_div_ceil,
-        manual_flatten,
         manual_hash_one,
         manual_is_ascii_check,
-        manual_is_power_of_two,
         manual_let_else,
-        manual_midpoint,
         manual_non_exhaustive,
-        manual_option_as_slice,
         manual_pattern_char_comparison,
         manual_range_contains,
         manual_rem_euclid,
-        manual_repeat_n,
         manual_retain,
-        manual_slice_fill,
-        manual_slice_size_calculation,
         manual_split_once,
         manual_str_repeat,
         manual_strip,
-        manual_take,
         manual_try_fold,
         map_clone,
         map_unwrap_or,
-        map_with_unused_argument_over_ranges,
         match_like_matches_macro,
-        mem_replace_option_with_some,
         mem_replace_with_default,
         missing_const_for_fn,
         needless_borrow,
-        non_std_lazy_statics,
         option_as_ref_deref,
-        or_fun_call,
+        option_map_unwrap_or,
         ptr_as_ptr,
-        question_mark,
         redundant_field_names,
         redundant_static_lifetimes,
-        repeat_vec_with_capacity,
-        same_item_push,
         seek_from_current,
-        to_digit_is_some,
+        seek_rewind,
         transmute_ptr_to_ref,
         tuple_array_conversions,
         type_repetition_in_bounds,
-        unchecked_time_subtraction,
+        unchecked_duration_subtraction,
         uninlined_format_args,
         unnecessary_lazy_evaluations,
-        unnecessary_unwrap,
         unnested_or_patterns,
-        unused_trait_names,
         use_self,
-        zero_ptr,
     )]
-    msrv: Msrv = Msrv::default(),
+    msrv: Msrv = Msrv::empty(),
     /// The minimum size (in bytes) to consider a type for passing by reference instead of by value.
     #[lints(large_types_passed_by_value)]
     pass_by_value_size_limit: u64 = 256,
@@ -841,9 +573,6 @@ define_Conf! {
     /// exported visibility, or whether they are marked as "pub".
     #[lints(pub_underscore_fields)]
     pub_underscore_fields_behavior: PubUnderscoreFieldsBehaviour = PubUnderscoreFieldsBehaviour::PubliclyExported,
-    /// Whether the type itself in a struct or enum should be replaced with `Self` when encountering recursive types.
-    #[lints(use_self)]
-    recursive_self_in_type_definitions: bool = true,
     /// Whether to lint only if it's multiline.
     #[lints(semicolon_inside_block)]
     semicolon_inside_block_ignore_singleline: bool = false,
@@ -853,9 +582,6 @@ define_Conf! {
     /// The maximum number of single char bindings a scope may have
     #[lints(many_single_char_names)]
     single_char_binding_names_threshold: u64 = 4,
-    /// Which kind of elements should be ordered internally, possible values being `enum`, `impl`, `module`, `struct`, `trait`.
-    #[lints(arbitrary_source_item_ordering)]
-    source_item_ordering: SourceItemOrdering = DEFAULT_SOURCE_ITEM_ORDERING.into(),
     /// The maximum allowed stack size for functions in bytes
     #[lints(large_stack_frames)]
     stack_size_threshold: u64 = 512_000,
@@ -885,12 +611,9 @@ define_Conf! {
     /// The maximum number of lines a function or method can have
     #[lints(too_many_lines)]
     too_many_lines_threshold: u64 = 100,
-    /// The order of associated items in traits.
-    #[lints(arbitrary_source_item_ordering)]
-    trait_assoc_item_kinds_order: SourceItemOrderingTraitAssocItemKinds = DEFAULT_TRAIT_ASSOC_ITEM_KINDS_ORDER.into(),
     /// The maximum size (in bytes) to consider a `Copy` type for passing by value instead of by
-    /// reference.
-    #[default_text = "target_pointer_width"]
+    /// reference. By default there is no limit
+    #[default_text = "target_pointer_width * 2"]
     #[lints(trivially_copy_pass_by_ref)]
     trivial_copy_size_limit: Option<u64> = None,
     /// The maximum complexity a type can have
@@ -911,8 +634,7 @@ define_Conf! {
     /// The maximum allowed size of a bit mask before suggesting to use 'trailing_zeros'
     #[lints(verbose_bit_mask)]
     verbose_bit_mask_threshold: u64 = 1,
-    /// Whether to emit warnings on all wildcard imports, including those from `prelude`, from `super` in tests,
-    /// or for `pub use` reexports.
+    /// Whether to allow certain wildcard imports (prelude, super in tests).
     #[lints(wildcard_imports)]
     warn_on_all_wildcard_imports: bool = false,
     /// Whether to also emit warnings for unsafe blocks with metavariable expansions in **private** macros.
@@ -982,36 +704,6 @@ fn deserialize(file: &SourceFile) -> TryConf {
                 &mut conf.conf.allow_renamed_params_for,
                 DEFAULT_ALLOWED_TRAITS_WITH_RENAMED_PARAMS,
             );
-
-            // Confirms that the user has not accidentally configured ordering requirements for groups that
-            // aren't configured.
-            if let SourceItemOrderingWithinModuleItemGroupings::Custom(groupings) =
-                &conf.conf.module_items_ordered_within_groupings
-            {
-                for grouping in groupings {
-                    if !conf.conf.module_item_order_groupings.is_grouping(grouping) {
-                        // Since this isn't fixable by rustfix, don't emit a `Suggestion`. This just adds some useful
-                        // info for the user instead.
-
-                        let names = conf.conf.module_item_order_groupings.grouping_names();
-                        let suggestion = suggest_candidate(grouping, names.iter().map(String::as_str))
-                            .map(|s| format!(" perhaps you meant `{s}`?"))
-                            .unwrap_or_default();
-                        let names = names.iter().map(|s| format!("`{s}`")).join(", ");
-                        let message = format!(
-                            "unknown ordering group: `{grouping}` was not specified in `module-items-ordered-within-groupings`,{suggestion} expected one of: {names}"
-                        );
-
-                        let span = conf
-                            .value_spans
-                            .get("module_item_order_groupings")
-                            .cloned()
-                            .unwrap_or_default();
-                        conf.errors.push(ConfError::spanned(file, message, None, span));
-                    }
-                }
-            }
-
             // TODO: THIS SHOULD BE TESTED, this comment will be gone soon
             if conf.conf.allowed_idents_below_min_chars.iter().any(|e| e == "..") {
                 conf.conf
@@ -1057,7 +749,6 @@ impl Conf {
 
         let TryConf {
             mut conf,
-            value_spans: _,
             errors,
             warnings,
         } = match path {
@@ -1133,23 +824,7 @@ impl serde::de::Error for FieldError {
         // set and allows it.
         use fmt::Write;
 
-        let metadata = get_configuration_metadata();
-        let deprecated = metadata
-            .iter()
-            .filter_map(|conf| {
-                if conf.deprecation_reason.is_some() {
-                    Some(conf.name.as_str())
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
-
-        let mut expected = expected
-            .iter()
-            .copied()
-            .filter(|name| !deprecated.contains(name))
-            .collect::<Vec<_>>();
+        let mut expected = expected.to_vec();
         expected.sort_unstable();
 
         let (rows, column_widths) = calculate_dimensions(&expected);
@@ -1164,10 +839,17 @@ impl serde::de::Error for FieldError {
             }
         }
 
-        let suggestion = suggest_candidate(field, expected).map(|suggestion| Suggestion {
-            message: "perhaps you meant",
-            suggestion,
-        });
+        let suggestion = expected
+            .iter()
+            .filter_map(|expected| {
+                let dist = edit_distance(field, expected, 4)?;
+                Some((dist, expected))
+            })
+            .min_by_key(|&(dist, _)| dist)
+            .map(|(_, suggestion)| Suggestion {
+                message: "perhaps you meant",
+                suggestion,
+            });
 
         Self { error: msg, suggestion }
     }
@@ -1182,7 +864,7 @@ fn calculate_dimensions(fields: &[&str]) -> (usize, Vec<usize>) {
             cmp::max(1, terminal_width / (SEPARATOR_WIDTH + max_field_width))
         });
 
-    let rows = fields.len().div_ceil(columns);
+    let rows = (fields.len() + (columns - 1)) / columns;
 
     let column_widths = (0..columns)
         .map(|column| {
@@ -1205,22 +887,6 @@ fn calculate_dimensions(fields: &[&str]) -> (usize, Vec<usize>) {
     (rows, column_widths)
 }
 
-/// Given a user-provided value that couldn't be matched to a known option, finds the most likely
-/// candidate among candidates that the user might have meant.
-fn suggest_candidate<'a, I>(value: &str, candidates: I) -> Option<&'a str>
-where
-    I: IntoIterator<Item = &'a str>,
-{
-    candidates
-        .into_iter()
-        .filter_map(|expected| {
-            let dist = edit_distance(value, expected, 4)?;
-            Some((dist, expected))
-        })
-        .min_by_key(|&(dist, _)| dist)
-        .map(|(_, suggestion)| suggestion)
-}
-
 #[cfg(test)]
 mod tests {
     use serde::de::IgnoredAny;
@@ -1232,13 +898,7 @@ mod tests {
     fn configs_are_tested() {
         let mut names: HashSet<String> = crate::get_configuration_metadata()
             .into_iter()
-            .filter_map(|meta| {
-                if meta.deprecation_reason.is_none() {
-                    Some(meta.name.replace('_', "-"))
-                } else {
-                    None
-                }
-            })
+            .map(|meta| meta.name.replace('_', "-"))
             .collect();
 
         let toml_files = WalkDir::new("../tests")
@@ -1248,7 +908,7 @@ mod tests {
 
         for entry in toml_files {
             let file = fs::read_to_string(entry.path()).unwrap();
-            #[expect(clippy::zero_sized_map_values)]
+            #[allow(clippy::zero_sized_map_values)]
             if let Ok(map) = toml::from_str::<HashMap<String, IgnoredAny>>(&file) {
                 for name in map.keys() {
                     names.remove(name.as_str());

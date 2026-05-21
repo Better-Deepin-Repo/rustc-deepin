@@ -3,7 +3,7 @@
 use crate::io;
 use crate::os::unix::net;
 use crate::sealed::Sealed;
-use crate::sys::AsInner;
+use crate::sys_common::AsInner;
 
 /// Linux-specific functionality for `AF_UNIX` sockets [`UnixDatagram`]
 /// and [`UnixStream`].
@@ -27,10 +27,7 @@ pub trait UnixSocketExt: Sealed {
     ///
     /// ```no_run
     /// #![feature(unix_socket_ancillary_data)]
-    /// #[cfg(target_os = "linux")]
     /// use std::os::linux::net::UnixSocketExt;
-    /// #[cfg(target_os = "android")]
-    /// use std::os::android::net::UnixSocketExt;
     /// use std::os::unix::net::UnixDatagram;
     ///
     /// fn main() -> std::io::Result<()> {

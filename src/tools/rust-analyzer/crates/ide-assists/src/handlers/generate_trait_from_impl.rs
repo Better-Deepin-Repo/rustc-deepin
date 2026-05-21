@@ -1,9 +1,13 @@
 use crate::assist_context::{AssistContext, Assists};
 use ide_db::assists::AssistId;
 use syntax::{
+    ast::{
+        self,
+        edit_in_place::{HasVisibilityEdit, Indent},
+        make, HasGenericParams, HasName,
+    },
+    ted::{self, Position},
     AstNode, SyntaxKind, T,
-    ast::{self, HasGenericParams, HasName, HasVisibility, edit::AstNodeEdit, make},
-    syntax_editor::{Position, SyntaxEditor},
 };
 
 // NOTES :
@@ -84,27 +88,31 @@ pub(crate) fn generate_trait_from_impl(acc: &mut Assists, ctx: &AssistContext<'_
         return None;
     }
 
-    let impl_assoc_items = impl_ast.assoc_item_list()?;
-    let first_element = impl_assoc_items.assoc_items().next();
+    let assoc_items = impl_ast.assoc_item_list()?;
+    let first_element = assoc_items.assoc_items().next();
     first_element.as_ref()?;
 
     let impl_name = impl_ast.self_ty()?;
 
     acc.add(
-        AssistId::generate("generate_trait_from_impl"),
+        AssistId("generate_trait_from_impl", ide_db::assists::AssistKind::Generate),
         "Generate trait from impl",
         impl_ast.syntax().text_range(),
         |builder| {
-            let trait_items: ast::AssocItemList = {
-                let trait_items = impl_assoc_items.clone_subtree();
-                let mut trait_items_editor = SyntaxEditor::new(trait_items.syntax().clone());
+            let impl_ast = builder.make_mut(impl_ast);
+            let trait_items = assoc_items.clone_for_update();
+            let impl_items = builder.make_mut(assoc_items);
+            let impl_name = builder.make_mut(impl_name);
 
-                trait_items.assoc_items().for_each(|item| {
-                    strip_body(&mut trait_items_editor, &item);
-                    remove_items_visibility(&mut trait_items_editor, &item);
-                });
-                ast::AssocItemList::cast(trait_items_editor.finish().new_root().clone()).unwrap()
-            };
+            trait_items.assoc_items().for_each(|item| {
+                strip_body(&item);
+                remove_items_visibility(&item);
+            });
+
+            impl_items.assoc_items().for_each(|item| {
+                remove_items_visibility(&item);
+            });
+
             let trait_ast = make::trait_(
                 false,
                 "NewTrait",
@@ -122,7 +130,6 @@ pub(crate) fn generate_trait_from_impl(acc: &mut Assists, ctx: &AssistContext<'_
                 trait_name_ref.syntax().clone().into(),
                 make::tokens::single_space().into(),
                 make::token(T![for]).into(),
-                make::tokens::single_space().into(),
             ];
 
             if let Some(params) = impl_ast.generic_param_list() {
@@ -130,15 +137,10 @@ pub(crate) fn generate_trait_from_impl(acc: &mut Assists, ctx: &AssistContext<'_
                 elements.insert(1, gen_args.syntax().clone().into());
             }
 
-            let mut editor = builder.make_editor(impl_ast.syntax());
-            impl_assoc_items.assoc_items().for_each(|item| {
-                remove_items_visibility(&mut editor, &item);
-            });
-
-            editor.insert_all(Position::before(impl_name.syntax()), elements);
+            ted::insert_all(Position::before(impl_name.syntax()), elements);
 
             // Insert trait before TraitImpl
-            editor.insert_all(
+            ted::insert_all_raw(
                 Position::before(impl_ast.syntax()),
                 vec![
                     trait_ast.syntax().clone().into(),
@@ -148,12 +150,11 @@ pub(crate) fn generate_trait_from_impl(acc: &mut Assists, ctx: &AssistContext<'_
 
             // Link the trait name & trait ref names together as a placeholder snippet group
             if let Some(cap) = ctx.config.snippet_cap {
-                let placeholder = builder.make_placeholder_snippet(cap);
-                editor.add_annotation(trait_name.syntax(), placeholder);
-                editor.add_annotation(trait_name_ref.syntax(), placeholder);
+                builder.add_placeholder_snippet_group(
+                    cap,
+                    vec![trait_name.syntax().clone(), trait_name_ref.syntax().clone()],
+                );
             }
-
-            builder.add_file_edits(ctx.vfs_file_id(), editor);
         },
     );
 
@@ -161,33 +162,25 @@ pub(crate) fn generate_trait_from_impl(acc: &mut Assists, ctx: &AssistContext<'_
 }
 
 /// `E0449` Trait items always share the visibility of their trait
-fn remove_items_visibility(editor: &mut SyntaxEditor, item: &ast::AssocItem) {
+fn remove_items_visibility(item: &ast::AssocItem) {
     if let Some(has_vis) = ast::AnyHasVisibility::cast(item.syntax().clone()) {
-        if let Some(vis) = has_vis.visibility()
-            && let Some(token) = vis.syntax().next_sibling_or_token()
-            && token.kind() == SyntaxKind::WHITESPACE
-        {
-            editor.delete(token);
-        }
-        if let Some(vis) = has_vis.visibility() {
-            editor.delete(vis.syntax());
-        }
+        has_vis.set_visibility(None);
     }
 }
 
-fn strip_body(editor: &mut SyntaxEditor, item: &ast::AssocItem) {
-    if let ast::AssocItem::Fn(f) = item
-        && let Some(body) = f.body()
-    {
-        // In contrast to function bodies, we want to see no ws before a semicolon.
-        // So let's remove them if we see any.
-        if let Some(prev) = body.syntax().prev_sibling_or_token()
-            && prev.kind() == SyntaxKind::WHITESPACE
-        {
-            editor.delete(prev);
-        }
+fn strip_body(item: &ast::AssocItem) {
+    if let ast::AssocItem::Fn(f) = item {
+        if let Some(body) = f.body() {
+            // In contrast to function bodies, we want to see no ws before a semicolon.
+            // So let's remove them if we see any.
+            if let Some(prev) = body.syntax().prev_sibling_or_token() {
+                if prev.kind() == SyntaxKind::WHITESPACE {
+                    ted::remove(prev);
+                }
+            }
 
-        editor.replace(body.syntax(), make::tokens::semicolon());
+            ted::replace(body.syntax(), make::tokens::semicolon());
+        }
     };
 }
 
@@ -340,11 +333,11 @@ impl F$0oo {
 struct Foo;
 
 trait NewTrait {
-    fn a_func() -> Option<()>;
+     fn a_func() -> Option<()>;
 }
 
 impl NewTrait for Foo {
-    fn a_func() -> Option<()> {
+     fn a_func() -> Option<()> {
         Some(())
     }
 }"#,

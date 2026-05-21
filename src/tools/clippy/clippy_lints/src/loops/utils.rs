@@ -1,15 +1,14 @@
-use clippy_utils::res::MaybeResPath;
 use clippy_utils::ty::{has_iter_method, implements_trait};
-use clippy_utils::{get_parent_expr, is_integer_const, sugg};
+use clippy_utils::{get_parent_expr, is_integer_const, path_to_local, path_to_local_id, sugg};
 use rustc_ast::ast::{LitIntType, LitKind};
 use rustc_errors::Applicability;
-use rustc_hir::intravisit::{Visitor, walk_expr, walk_local};
-use rustc_hir::{AssignOpKind, BorrowKind, Expr, ExprKind, HirId, HirIdMap, LetStmt, Mutability, PatKind};
+use rustc_hir::intravisit::{walk_expr, walk_local, Visitor};
+use rustc_hir::{BinOpKind, BorrowKind, Expr, ExprKind, HirId, HirIdMap, LetStmt, Mutability, PatKind};
 use rustc_lint::LateContext;
 use rustc_middle::hir::nested_filter;
 use rustc_middle::ty::{self, Ty};
 use rustc_span::source_map::Spanned;
-use rustc_span::symbol::{Symbol, sym};
+use rustc_span::symbol::{sym, Symbol};
 
 #[derive(Debug, PartialEq, Eq)]
 enum IncrementVisitorVarState {
@@ -45,10 +44,10 @@ impl<'a, 'tcx> IncrementVisitor<'a, 'tcx> {
     }
 }
 
-impl<'tcx> Visitor<'tcx> for IncrementVisitor<'_, 'tcx> {
+impl<'a, 'tcx> Visitor<'tcx> for IncrementVisitor<'a, 'tcx> {
     fn visit_expr(&mut self, expr: &'tcx Expr<'_>) {
         // If node is a variable
-        if let Some(def_id) = expr.res_local_id() {
+        if let Some(def_id) = path_to_local(expr) {
             if let Some(parent) = get_parent_expr(self.cx, expr) {
                 let state = self.states.entry(def_id).or_insert(IncrementVisitorVarState::Initial);
                 if *state == IncrementVisitorVarState::IncrOnce {
@@ -57,17 +56,19 @@ impl<'tcx> Visitor<'tcx> for IncrementVisitor<'_, 'tcx> {
                 }
 
                 match parent.kind {
-                    ExprKind::AssignOp(op, lhs, rhs) if lhs.hir_id == expr.hir_id => {
-                        *state = if op.node == AssignOpKind::AddAssign
-                            && is_integer_const(self.cx, rhs, 1)
-                            && *state == IncrementVisitorVarState::Initial
-                            && self.depth == 0
-                        {
-                            IncrementVisitorVarState::IncrOnce
-                        } else {
-                            // Assigned some other value or assigned multiple times
-                            IncrementVisitorVarState::DontWarn
-                        };
+                    ExprKind::AssignOp(op, lhs, rhs) => {
+                        if lhs.hir_id == expr.hir_id {
+                            *state = if op.node == BinOpKind::Add
+                                && is_integer_const(self.cx, rhs, 1)
+                                && *state == IncrementVisitorVarState::Initial
+                                && self.depth == 0
+                            {
+                                IncrementVisitorVarState::IncrOnce
+                            } else {
+                                // Assigned some other value or assigned multiple times
+                                IncrementVisitorVarState::DontWarn
+                            };
+                        }
                     },
                     ExprKind::Assign(lhs, _, _) if lhs.hir_id == expr.hir_id => {
                         *state = IncrementVisitorVarState::DontWarn;
@@ -137,7 +138,7 @@ impl<'a, 'tcx> InitializeVisitor<'a, 'tcx> {
     }
 }
 
-impl<'tcx> Visitor<'tcx> for InitializeVisitor<'_, 'tcx> {
+impl<'a, 'tcx> Visitor<'tcx> for InitializeVisitor<'a, 'tcx> {
     type NestedFilter = nested_filter::OnlyBodies;
 
     fn visit_local(&mut self, l: &'tcx LetStmt<'_>) {
@@ -174,7 +175,7 @@ impl<'tcx> Visitor<'tcx> for InitializeVisitor<'_, 'tcx> {
         }
 
         // If node is the desired variable, see how it's used
-        if expr.res_local_id() == Some(self.var_id) {
+        if path_to_local_id(expr, self.var_id) {
             if self.past_loop {
                 self.state = InitializeVisitorState::DontWarn;
                 return;
@@ -239,8 +240,8 @@ impl<'tcx> Visitor<'tcx> for InitializeVisitor<'_, 'tcx> {
         }
     }
 
-    fn maybe_tcx(&mut self) -> Self::MaybeTyCtxt {
-        self.cx.tcx
+    fn nested_visit_map(&mut self) -> Self::Map {
+        self.cx.tcx.hir()
     }
 }
 
@@ -254,15 +255,14 @@ fn is_conditional(expr: &Expr<'_>) -> bool {
 
 /// If `arg` was the argument to a `for` loop, return the "cleanest" way of writing the
 /// actual `Iterator` that the loop uses.
-pub(super) fn make_iterator_snippet(cx: &LateContext<'_>, arg: &Expr<'_>, applicability: &mut Applicability) -> String {
-    let impls_iterator = cx
-        .tcx
-        .get_diagnostic_item(sym::Iterator)
-        .is_some_and(|id| implements_trait(cx, cx.typeck_results().expr_ty(arg), id, &[]));
+pub(super) fn make_iterator_snippet(cx: &LateContext<'_>, arg: &Expr<'_>, applic_ref: &mut Applicability) -> String {
+    let impls_iterator = cx.tcx.get_diagnostic_item(sym::Iterator).map_or(false, |id| {
+        implements_trait(cx, cx.typeck_results().expr_ty(arg), id, &[])
+    });
     if impls_iterator {
         format!(
             "{}",
-            sugg::Sugg::hir_with_applicability(cx, arg, "_", applicability).maybe_paren()
+            sugg::Sugg::hir_with_applicability(cx, arg, "_", applic_ref).maybe_par()
         )
     } else {
         // (&x).into_iter() ==> x.iter()
@@ -280,12 +280,12 @@ pub(super) fn make_iterator_snippet(cx: &LateContext<'_>, arg: &Expr<'_>, applic
                 };
                 format!(
                     "{}.{method_name}()",
-                    sugg::Sugg::hir_with_applicability(cx, caller, "_", applicability).maybe_paren(),
+                    sugg::Sugg::hir_with_applicability(cx, caller, "_", applic_ref).maybe_par(),
                 )
             },
             _ => format!(
                 "{}.into_iter()",
-                sugg::Sugg::hir_with_applicability(cx, arg, "_", applicability).maybe_paren()
+                sugg::Sugg::hir_with_applicability(cx, arg, "_", applic_ref).maybe_par()
             ),
         }
     }

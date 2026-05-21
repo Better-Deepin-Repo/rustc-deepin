@@ -28,33 +28,28 @@
 //! [build script]: https://doc.rust-lang.org/nightly/cargo/reference/build-scripts.html
 //! [`TargetKind::CustomBuild`]: crate::core::manifest::TargetKind::CustomBuild
 //! [`UnitGraph`]: super::unit_graph::UnitGraph
-//! [`CompileMode::RunCustomBuild`]: crate::core::compiler::CompileMode::RunCustomBuild
+//! [`CompileMode::RunCustomBuild`]: super::CompileMode
 //! [instructions]: https://doc.rust-lang.org/cargo/reference/build-scripts.html#outputs-of-the-build-script
 
-use super::{BuildRunner, Job, Unit, Work, fingerprint, get_dynamic_search_path};
-use crate::core::compiler::CompileMode;
+use super::{fingerprint, BuildRunner, Job, Unit, Work};
 use crate::core::compiler::artifact;
-use crate::core::compiler::build_runner::UnitHash;
+use crate::core::compiler::build_runner::Metadata;
+use crate::core::compiler::fingerprint::DirtyReason;
 use crate::core::compiler::job_queue::JobState;
-use crate::core::{PackageId, Target, profiles::ProfileRoot};
+use crate::core::{profiles::ProfileRoot, PackageId, Target};
 use crate::util::errors::CargoResult;
 use crate::util::internal;
 use crate::util::machine_message::{self, Message};
-use anyhow::{Context as _, bail};
+use anyhow::{bail, Context as _};
 use cargo_platform::Cfg;
 use cargo_util::paths;
 use cargo_util_schemas::manifest::RustVersion;
 use std::collections::hash_map::{Entry, HashMap};
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
-use std::str;
+use std::str::{self, FromStr};
 use std::sync::{Arc, Mutex};
 
-/// A build script instruction that tells Cargo to display an error after the
-/// build script has finished running. Read [the doc] for more.
-///
-/// [the doc]: https://doc.rust-lang.org/nightly/cargo/reference/build-scripts.html#cargo-error
-const CARGO_ERROR_SYNTAX: &str = "cargo::error=";
 /// Deprecated: A build script instruction that tells Cargo to display a warning after the
 /// build script has finished running. Read [the doc] for more.
 ///
@@ -65,85 +60,11 @@ const OLD_CARGO_WARNING_SYNTAX: &str = "cargo:warning=";
 ///
 /// [the doc]: https://doc.rust-lang.org/nightly/cargo/reference/build-scripts.html#cargo-warning
 const NEW_CARGO_WARNING_SYNTAX: &str = "cargo::warning=";
-
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Severity {
-    Error,
-    Warning,
-}
-
-pub type LogMessage = (Severity, String);
-
-/// Represents a path added to the library search path.
-///
-/// We need to keep track of requests to add search paths within the cargo build directory
-/// separately from paths outside of Cargo. The reason is that we want to give precedence to linking
-/// against libraries within the Cargo build directory even if a similar library exists in the
-/// system (e.g. crate A adds `/usr/lib` to the search path and then a later build of crate B adds
-/// `target/debug/...` to satisfy its request to link against the library B that it built, but B is
-/// also found in `/usr/lib`).
-///
-/// There's some nuance here because we want to preserve relative order of paths of the same type.
-/// For example, if the build process would in declaration order emit the following linker line:
-/// ```bash
-/// -L/usr/lib -Ltarget/debug/build/crate1/libs -L/lib -Ltarget/debug/build/crate2/libs)
-/// ```
-///
-/// we want the linker to actually receive:
-/// ```bash
-/// -Ltarget/debug/build/crate1/libs -Ltarget/debug/build/crate2/libs) -L/usr/lib -L/lib
-/// ```
-///
-/// so that the library search paths within the crate artifacts directory come first but retain
-/// relative ordering while the system library paths come after while still retaining relative
-/// ordering among them; ordering is the order they are emitted within the build process,
-/// not lexicographic order.
-///
-/// WARNING: Even though this type implements PartialOrd + Ord, this is a lexicographic ordering.
-/// The linker line will require an explicit sorting algorithm. PartialOrd + Ord is derived because
-/// BuildOutput requires it but that ordering is different from the one for the linker search path,
-/// at least today. It may be worth reconsidering & perhaps it's ok if BuildOutput doesn't have
-/// a lexicographic ordering for the library_paths? I'm not sure the consequence of that.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub enum LibraryPath {
-    /// The path is pointing within the output folder of the crate and takes priority over
-    /// external paths when passed to the linker.
-    CargoArtifact(PathBuf),
-    /// The path is pointing outside of the crate's build location. The linker will always
-    /// receive such paths after `CargoArtifact`.
-    External(PathBuf),
-}
-
-impl LibraryPath {
-    fn new(p: PathBuf, script_out_dir: &Path) -> Self {
-        let search_path = get_dynamic_search_path(&p);
-        if search_path.starts_with(script_out_dir) {
-            Self::CargoArtifact(p)
-        } else {
-            Self::External(p)
-        }
-    }
-
-    pub fn into_path_buf(self) -> PathBuf {
-        match self {
-            LibraryPath::CargoArtifact(p) | LibraryPath::External(p) => p,
-        }
-    }
-}
-
-impl AsRef<PathBuf> for LibraryPath {
-    fn as_ref(&self) -> &PathBuf {
-        match self {
-            LibraryPath::CargoArtifact(p) | LibraryPath::External(p) => p,
-        }
-    }
-}
-
 /// Contains the parsed output of a custom build script.
 #[derive(Clone, Debug, Hash, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BuildOutput {
     /// Paths to pass to rustc with the `-L` flag.
-    pub library_paths: Vec<LibraryPath>,
+    pub library_paths: Vec<PathBuf>,
     /// Names and link kinds of libraries, suitable for the `-l` flag.
     pub library_links: Vec<String>,
     /// Linker arguments suitable to be passed to `-C link-arg=<args>`
@@ -161,13 +82,11 @@ pub struct BuildOutput {
     pub rerun_if_changed: Vec<PathBuf>,
     /// Environment variables which, when changed, will cause a rebuild.
     pub rerun_if_env_changed: Vec<String>,
-    /// Errors and warnings generated by this build.
+    /// Warnings generated by this build.
     ///
-    /// These are only displayed if this is a "local" package, `-vv` is used, or
-    /// there is a build error for any target in this package. Note that any log
-    /// message of severity `Error` will by itself cause a build error, and will
-    /// cause all log messages to be displayed.
-    pub log_messages: Vec<LogMessage>,
+    /// These are only displayed if this is a "local" package, `-vv` is used,
+    /// or there is a build error for any target in this package.
+    pub warnings: Vec<String>,
 }
 
 /// Map of packages to build script output.
@@ -176,13 +95,13 @@ pub struct BuildOutput {
 /// inserted during `build_map`. The rest of the entries are added
 /// immediately after each build script runs.
 ///
-/// The [`UnitHash`] is the unique metadata hash for the `RunCustomBuild` Unit of
+/// The `Metadata` is the unique metadata hash for the RunCustomBuild Unit of
 /// the package. It needs a unique key, since the build script can be run
 /// multiple times with different profiles or features. We can't embed a
 /// `Unit` because this structure needs to be shareable between threads.
 #[derive(Default)]
 pub struct BuildScriptOutputs {
-    outputs: HashMap<UnitHash, BuildOutput>,
+    outputs: HashMap<Metadata, BuildOutput>,
 }
 
 /// Linking information for a `Unit`.
@@ -206,18 +125,18 @@ pub struct BuildScripts {
     /// usage here doesn't blow up too much.
     ///
     /// For more information, see #2354.
-    pub to_link: Vec<(PackageId, UnitHash)>,
+    pub to_link: Vec<(PackageId, Metadata)>,
     /// This is only used while constructing `to_link` to avoid duplicates.
-    seen_to_link: HashSet<(PackageId, UnitHash)>,
+    seen_to_link: HashSet<(PackageId, Metadata)>,
     /// Host-only dependencies that have build scripts. Each element is an
     /// index into `BuildScriptOutputs`.
     ///
     /// This is the set of transitive dependencies that are host-only
     /// (proc-macro, plugin, build-dependency) that contain a build script.
     /// Any `BuildOutput::library_paths` path relative to `target` will be
-    /// added to `LD_LIBRARY_PATH` so that the compiler can find any dynamic
+    /// added to LD_LIBRARY_PATH so that the compiler can find any dynamic
     /// libraries a build script may have generated.
-    pub plugins: BTreeSet<(PackageId, UnitHash)>,
+    pub plugins: BTreeSet<(PackageId, Metadata)>,
 }
 
 /// Dependency information as declared by a build script that might trigger
@@ -261,11 +180,10 @@ pub enum LinkArgTarget {
 
 impl LinkArgTarget {
     /// Checks if this link type applies to a given [`Target`].
-    pub fn applies_to(&self, target: &Target, mode: CompileMode) -> bool {
-        let is_test = mode.is_any_test();
+    pub fn applies_to(&self, target: &Target) -> bool {
         match self {
             LinkArgTarget::All => true,
-            LinkArgTarget::Cdylib => !is_test && target.is_cdylib(),
+            LinkArgTarget::Cdylib => target.is_cdylib(),
             LinkArgTarget::Bin => target.is_bin(),
             LinkArgTarget::SingleBin(name) => target.is_bin() && target.name() == name,
             LinkArgTarget::Test => target.is_test(),
@@ -303,7 +221,7 @@ fn emit_build_output(
     let library_paths = output
         .library_paths
         .iter()
-        .map(|l| l.as_ref().display().to_string())
+        .map(|l| l.display().to_string())
         .collect::<Vec<_>>();
 
     let msg = machine_message::BuildScript {
@@ -337,12 +255,10 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         .map(|d| &d.unit)
         .expect("running a script not depending on an actual script");
     let script_dir = build_runner.files().build_script_dir(build_script_unit);
-
-    let script_out_dir = if bcx.gctx.cli_unstable().build_dir_new_layout {
-        build_runner.files().out_dir_new_layout(unit)
-    } else {
-        build_runner.files().build_script_out_dir(unit)
-    };
+    let script_out_dir = build_runner.files().build_script_out_dir(unit);
+    let script_run_dir = build_runner.files().build_script_run_dir(unit);
+    let build_plan = bcx.build_config.build_plan;
+    let invocation_name = unit.buildkey();
 
     if let Some(deps) = unit.pkg.manifest().metabuild() {
         prepare_metabuild(build_runner, build_script_unit, deps)?;
@@ -363,7 +279,6 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
     let debug = unit.profile.debuginfo.is_turned_on();
     cmd.env("OUT_DIR", &script_out_dir)
         .env("CARGO_MANIFEST_DIR", unit.pkg.root())
-        .env("CARGO_MANIFEST_PATH", unit.pkg.manifest_path())
         .env("NUM_JOBS", &bcx.jobs().to_string())
         .env("TARGET", bcx.target_data.short_name(&unit.kind))
         .env("DEBUG", debug.to_string())
@@ -381,7 +296,7 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         .inherit_jobserver(&build_runner.jobserver);
 
     // Find all artifact dependencies and make their file and containing directory discoverable using environment variables.
-    for (var, value) in artifact::get_env(build_runner, unit, dependencies)? {
+    for (var, value) in artifact::get_env(build_runner, dependencies)? {
         cmd.env(&var, value);
     }
 
@@ -404,35 +319,24 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
     }
 
     let mut cfg_map = HashMap::new();
-    cfg_map.insert(
-        "feature",
-        unit.features.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-    );
-    // Manually inject debug_assertions based on the profile setting.
-    // The cfg query from rustc doesn't include profile settings and would always be true,
-    // so we override it with the actual profile setting.
-    if unit.profile.debug_assertions {
-        cfg_map.insert("debug_assertions", Vec::new());
-    }
     for cfg in bcx.target_data.cfg(unit.kind) {
         match *cfg {
             Cfg::Name(ref n) => {
-                // Skip debug_assertions from rustc query; we use the profile setting instead
-                if n.as_str() == "debug_assertions" {
-                    continue;
-                }
-                cfg_map.insert(n.as_str(), Vec::new());
+                cfg_map.insert(n.clone(), Vec::new());
             }
             Cfg::KeyPair(ref k, ref v) => {
-                let values = cfg_map.entry(k.as_str()).or_default();
-                values.push(v.as_str());
+                let values = cfg_map.entry(k.clone()).or_default();
+                values.push(v.clone());
             }
         }
     }
     for (k, v) in cfg_map {
-        // FIXME: We should handle raw-idents somehow instead of predenting they
-        // don't exist here
-        let k = format!("CARGO_CFG_{}", super::envify(k));
+        if k == "debug_assertions" {
+            // This cfg is always true and misleading, so avoid setting it.
+            // That is because Cargo queries rustc without any profile settings.
+            continue;
+        }
+        let k = format!("CARGO_CFG_{}", super::envify(&k));
         cmd.env(&k, v.join(","));
     }
 
@@ -455,8 +359,6 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         cmd.display_env_vars();
     }
 
-    let any_build_script_metadata = bcx.gctx.cli_unstable().any_build_script_metadata;
-
     // Gather the set of native dependencies that this package has along with
     // some other variables to close over.
     //
@@ -467,16 +369,8 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         .filter_map(|dep| {
             if dep.unit.mode.is_run_custom_build() {
                 let dep_metadata = build_runner.get_run_build_script_metadata(&dep.unit);
-
-                let dep_name = dep.dep_name.unwrap_or(dep.unit.pkg.name());
-
                 Some((
-                    dep_name,
-                    dep.unit
-                        .pkg
-                        .manifest()
-                        .links()
-                        .map(|links| links.to_string()),
+                    dep.unit.pkg.manifest().links().unwrap().to_string(),
                     dep.unit.pkg.package_id(),
                     dep_metadata,
                 ))
@@ -489,14 +383,16 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
     let pkg_descr = unit.pkg.to_string();
     let build_script_outputs = Arc::clone(&build_runner.build_script_outputs);
     let id = unit.pkg.package_id();
-    let run_files = BuildScriptRunFiles::for_unit(build_runner, unit);
-    let host_target_root = build_runner.files().host_dest().map(|v| v.to_path_buf());
+    let output_file = script_run_dir.join("output");
+    let err_file = script_run_dir.join("stderr");
+    let root_output_file = script_run_dir.join("root-output");
+    let host_target_root = build_runner.files().host_dest().to_path_buf();
     let all = (
         id,
         library_name.clone(),
         pkg_descr.clone(),
         Arc::clone(&build_script_outputs),
-        run_files.stdout.clone(),
+        output_file.clone(),
         script_out_dir.clone(),
     );
     let build_scripts = build_runner.build_scripts.get(unit).cloned();
@@ -507,7 +403,6 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
 
     paths::create_dir_all(&script_dir)?;
     paths::create_dir_all(&script_out_dir)?;
-    paths::create_dir_all(&run_files.root)?;
 
     let nightly_features_allowed = build_runner.bcx.gctx.nightly_features_allowed;
     let targets: Vec<Target> = unit.pkg.targets().to_vec();
@@ -542,9 +437,9 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         // along to this custom build command. We're also careful to augment our
         // dynamic library search path in case the build script depended on any
         // native dynamic libraries.
-        {
+        if !build_plan {
             let build_script_outputs = build_script_outputs.lock().unwrap();
-            for (name, links, dep_id, dep_metadata) in lib_deps {
+            for (name, dep_id, dep_metadata) in lib_deps {
                 let script_output = build_script_outputs.get(dep_metadata).ok_or_else(|| {
                     internal(format!(
                         "failed to locate build state for env vars: {}/{}",
@@ -553,49 +448,40 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
                 })?;
                 let data = &script_output.metadata;
                 for (key, value) in data.iter() {
-                    if let Some(ref links) = links {
-                        cmd.env(
-                            &format!("DEP_{}_{}", super::envify(&links), super::envify(key)),
-                            value,
-                        );
-                    }
-                    if any_build_script_metadata {
-                        cmd.env(
-                            &format!("CARGO_DEP_{}_{}", super::envify(&name), super::envify(key)),
-                            value,
-                        );
-                    }
+                    cmd.env(
+                        &format!("DEP_{}_{}", super::envify(&name), super::envify(key)),
+                        value,
+                    );
                 }
             }
-            if let Some(build_scripts) = build_scripts
-                && let Some(ref host_target_root) = host_target_root
-            {
+            if let Some(build_scripts) = build_scripts {
                 super::add_plugin_deps(
                     &mut cmd,
                     &build_script_outputs,
                     &build_scripts,
-                    host_target_root,
+                    &host_target_root,
                 )?;
             }
         }
 
+        if build_plan {
+            state.build_plan(invocation_name, cmd.clone(), Arc::new(Vec::new()));
+            return Ok(());
+        }
+
         // And now finally, run the build command itself!
         state.running(&cmd);
-        let timestamp = paths::set_invocation_time(&run_files.root)?;
+        let timestamp = paths::set_invocation_time(&script_run_dir)?;
         let prefix = format!("[{} {}] ", id.name(), id.version());
-        let mut log_messages_in_case_of_panic = Vec::new();
-        let span = tracing::debug_span!("build_script", process = cmd.to_string());
-        let output = span.in_scope(|| {
-            cmd.exec_with_streaming(
+        let mut warnings_in_case_of_panic = Vec::new();
+        let output = cmd
+            .exec_with_streaming(
                 &mut |stdout| {
-                    if let Some(error) = stdout.strip_prefix(CARGO_ERROR_SYNTAX) {
-                        log_messages_in_case_of_panic.push((Severity::Error, error.to_owned()));
-                    }
                     if let Some(warning) = stdout
                         .strip_prefix(OLD_CARGO_WARNING_SYNTAX)
                         .or(stdout.strip_prefix(NEW_CARGO_WARNING_SYNTAX))
                     {
-                        log_messages_in_case_of_panic.push((Severity::Warning, warning.to_owned()));
+                        warnings_in_case_of_panic.push(warning.to_owned());
                     }
                     if extra_verbose {
                         state.stdout(format!("{}{}", prefix, stdout))?;
@@ -617,7 +503,10 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
                 // If we're opting into backtraces, mention that build dependencies' backtraces can
                 // be improved by requesting debuginfo to be built, if we're not building with
                 // debuginfo already.
-                #[expect(clippy::disallowed_methods, reason = "consistency with rustc")]
+                //
+                // ALLOWED: Other tools like `rustc` might read it directly
+                // through `std::env`. We should make their behavior consistent.
+                #[allow(clippy::disallowed_methods)]
                 if let Ok(show_backtraces) = std::env::var("RUST_BACKTRACE") {
                     if !built_with_debuginfo && show_backtraces != "0" {
                         build_error_context.push_str(&format!(
@@ -630,31 +519,16 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
                 }
 
                 build_error_context
-            })
-        });
+            });
 
-        // If the build failed
         if let Err(error) = output {
-            insert_log_messages_in_build_outputs(
+            insert_warnings_in_build_outputs(
                 build_script_outputs,
                 id,
                 metadata_hash,
-                log_messages_in_case_of_panic,
+                warnings_in_case_of_panic,
             );
             return Err(error);
-        }
-        // ... or it logged any errors
-        else if log_messages_in_case_of_panic
-            .iter()
-            .any(|(severity, _)| *severity == Severity::Error)
-        {
-            insert_log_messages_in_build_outputs(
-                build_script_outputs,
-                id,
-                metadata_hash,
-                log_messages_in_case_of_panic,
-            );
-            anyhow::bail!("build script logged errors");
         }
 
         let output = output.unwrap();
@@ -666,12 +540,12 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         // This is also the location where we provide feedback into the build
         // state informing what variables were discovered via our script as
         // well.
-        paths::write(&run_files.stdout, &output.stdout)?;
+        paths::write(&output_file, &output.stdout)?;
         // This mtime shift allows Cargo to detect if a source file was
         // modified in the middle of the build.
-        paths::set_file_time_no_err(run_files.stdout, timestamp);
-        paths::write(&run_files.stderr, &output.stderr)?;
-        paths::write(&run_files.root_output, paths::path2bytes(&script_out_dir)?)?;
+        paths::set_file_time_no_err(output_file, timestamp);
+        paths::write(&err_file, &output.stderr)?;
+        paths::write(&root_output_file, paths::path2bytes(&script_out_dir)?)?;
         let parsed_output = BuildOutput::parse(
             &output.stdout,
             library_name,
@@ -723,7 +597,11 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         Ok(())
     });
 
-    let mut job = fingerprint::prepare_target(build_runner, unit, false)?;
+    let mut job = if build_runner.bcx.build_config.build_plan {
+        Job::new_dirty(Work::noop(), DirtyReason::FreshBuild)
+    } else {
+        fingerprint::prepare_target(build_runner, unit, false)?
+    };
     if job.freshness().is_dirty() {
         job.before(dirty);
     } else {
@@ -732,23 +610,22 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
     Ok(job)
 }
 
-/// When a build script run fails, store only log messages, and nuke other
-/// outputs, as they are likely broken.
-fn insert_log_messages_in_build_outputs(
+/// When a build script run fails, store only warnings and nuke other outputs,
+/// as they are likely broken.
+fn insert_warnings_in_build_outputs(
     build_script_outputs: Arc<Mutex<BuildScriptOutputs>>,
     id: PackageId,
-    metadata_hash: UnitHash,
-    log_messages: Vec<LogMessage>,
+    metadata_hash: Metadata,
+    warnings: Vec<String>,
 ) {
-    let build_output_with_only_log_messages = BuildOutput {
-        log_messages,
+    let build_output_with_only_warnings = BuildOutput {
+        warnings,
         ..BuildOutput::default()
     };
-    build_script_outputs.lock().unwrap().insert(
-        id,
-        metadata_hash,
-        build_output_with_only_log_messages,
-    );
+    build_script_outputs
+        .lock()
+        .unwrap()
+        .insert(id, metadata_hash, build_output_with_only_warnings);
 }
 
 impl BuildOutput {
@@ -800,7 +677,7 @@ impl BuildOutput {
         let mut metadata = Vec::new();
         let mut rerun_if_changed = Vec::new();
         let mut rerun_if_env_changed = Vec::new();
-        let mut log_messages = Vec::new();
+        let mut warnings = Vec::new();
         let whence = format!("build script of `{}`", pkg_descr);
         // Old syntax:
         //    cargo:rustc-flags=VALUE
@@ -843,17 +720,15 @@ impl BuildOutput {
             flag: &str,
         ) -> CargoResult<()> {
             if let Some(msrv) = msrv {
-                let new_syntax_added_in = RustVersion::new(1, 77, 0);
-                if !new_syntax_added_in.is_compatible_with(&msrv.to_partial()) {
+                let new_syntax_added_in = RustVersion::from_str("1.77.0")?;
+                if !new_syntax_added_in.is_compatible_with(msrv.as_partial()) {
                     let old_syntax_suggestion = if has_reserved_prefix(flag) {
                         format!(
                             "Switch to the old `cargo:{flag}` syntax (note the single colon).\n"
                         )
                     } else if flag.starts_with("metadata=") {
                         let old_format_flag = flag.strip_prefix("metadata=").unwrap();
-                        format!(
-                            "Switch to the old `cargo:{old_format_flag}` syntax instead of `cargo::{flag}` (note the single colon).\n"
-                        )
+                        format!("Switch to the old `cargo:{old_format_flag}` syntax instead of `cargo::{flag}` (note the single colon).\n")
                     } else {
                         String::new()
                     };
@@ -968,30 +843,21 @@ impl BuildOutput {
                 "rustc-flags" => {
                     let (paths, links) = BuildOutput::parse_rustc_flags(&value, &whence)?;
                     library_links.extend(links.into_iter());
-                    library_paths.extend(
-                        paths
-                            .into_iter()
-                            .map(|p| LibraryPath::new(p, script_out_dir)),
-                    );
+                    library_paths.extend(paths.into_iter());
                 }
                 "rustc-link-lib" => library_links.push(value.to_string()),
-                "rustc-link-search" => {
-                    library_paths.push(LibraryPath::new(PathBuf::from(value), script_out_dir))
-                }
+                "rustc-link-search" => library_paths.push(PathBuf::from(value)),
                 "rustc-link-arg-cdylib" | "rustc-cdylib-link-arg" => {
                     if !targets.iter().any(|target| target.is_cdylib()) {
-                        log_messages.push((
-                            Severity::Warning,
-                            format!(
-                                "{}{} was specified in the build script of {}, \
+                        warnings.push(format!(
+                            "{}{} was specified in the build script of {}, \
                              but that package does not contain a cdylib target\n\
                              \n\
                              Allowing this was an unintended change in the 1.50 \
                              release, and may become an error in the future. \
                              For more information, see \
                              <https://github.com/rust-lang/cargo/issues/9562>.",
-                                syntax_prefix, key, pkg_descr
-                            ),
+                            syntax_prefix, key, pkg_descr
                         ));
                     }
                     linker_args.push((LinkArgTarget::Cdylib, value))
@@ -1067,26 +933,25 @@ impl BuildOutput {
                                 None => return false,
                                 Some(n) => n,
                             };
-                            #[expect(
-                                clippy::disallowed_methods,
-                                reason = "consistency with rustc, not specified behavior"
-                            )]
+                            // ALLOWED: the process of rustc bootstrapping reads this through
+                            // `std::env`. We should make the behavior consistent. Also, we
+                            // don't advertise this for bypassing nightly.
+                            #[allow(clippy::disallowed_methods)]
                             std::env::var("RUSTC_BOOTSTRAP")
                                 .map_or(false, |var| var.split(',').any(|s| s == name))
                         };
                         if nightly_features_allowed
                             || rustc_bootstrap_allows(library_name.as_deref())
                         {
-                            log_messages.push((Severity::Warning, format!("cannot set `RUSTC_BOOTSTRAP={}` from {}.\n\
-                                note: crates cannot set `RUSTC_BOOTSTRAP` themselves, as doing so would subvert the stability guarantees of Rust for your project.",
+                            warnings.push(format!("Cannot set `RUSTC_BOOTSTRAP={}` from {}.\n\
+                                note: Crates cannot set `RUSTC_BOOTSTRAP` themselves, as doing so would subvert the stability guarantees of Rust for your project.",
                                 val, whence
-                            )));
+                            ));
                         } else {
                             // Setting RUSTC_BOOTSTRAP would change the behavior of the crate.
                             // Abort with an error.
-                            bail!(
-                                "cannot set `RUSTC_BOOTSTRAP={}` from {}.\n\
-                                note: crates cannot set `RUSTC_BOOTSTRAP` themselves, as doing so would subvert the stability guarantees of Rust for your project.\n\
+                            bail!("Cannot set `RUSTC_BOOTSTRAP={}` from {}.\n\
+                                note: Crates cannot set `RUSTC_BOOTSTRAP` themselves, as doing so would subvert the stability guarantees of Rust for your project.\n\
                                 help: If you're sure you want to do this in your project, set the environment variable `RUSTC_BOOTSTRAP={}` before running cargo instead.",
                                 val,
                                 whence,
@@ -1097,8 +962,7 @@ impl BuildOutput {
                         env.push((key, val));
                     }
                 }
-                "error" => log_messages.push((Severity::Error, value.to_string())),
-                "warning" => log_messages.push((Severity::Warning, value.to_string())),
+                "warning" => warnings.push(value.to_string()),
                 "rerun-if-changed" => rerun_if_changed.push(PathBuf::from(value)),
                 "rerun-if-env-changed" => rerun_if_env_changed.push(value.to_string()),
                 "metadata" => {
@@ -1123,7 +987,7 @@ impl BuildOutput {
             metadata,
             rerun_if_changed,
             rerun_if_env_changed,
-            log_messages,
+            warnings,
         })
     }
 
@@ -1150,7 +1014,7 @@ impl BuildOutput {
                     value = match flags_iter.next() {
                         Some(v) => v,
                         None => bail! {
-                            "flag in rustc-flags has no value in {}: {}",
+                            "Flag in rustc-flags has no value in {}: {}",
                             whence,
                             value
                         },
@@ -1166,7 +1030,7 @@ impl BuildOutput {
                 };
             } else {
                 bail!(
-                    "only `-l` and `-L` flags are allowed in {}: `{}`",
+                    "Only `-l` and `-L` flags are allowed in {}: `{}`",
                     whence,
                     value
                 )
@@ -1215,7 +1079,7 @@ fn prepare_metabuild(
     let path = unit
         .pkg
         .manifest()
-        .metabuild_path(build_runner.bcx.ws.build_dir());
+        .metabuild_path(build_runner.bcx.ws.target_dir());
     paths::create_dir_all(path.parent().unwrap())?;
     paths::write_if_changed(path, &output)?;
     Ok(())
@@ -1301,12 +1165,10 @@ pub fn build_map(build_runner: &mut BuildRunner<'_, '_>) -> CargoResult<()> {
 
         // If a package has a build script, add itself as something to inspect for linking.
         if !unit.target.is_custom_build() && unit.pkg.has_custom_build() {
-            let script_metas = build_runner
-                .find_build_script_metadatas(unit)
+            let script_meta = build_runner
+                .find_build_script_metadata(unit)
                 .expect("has_custom_build should have RunCustomBuild");
-            for script_meta in script_metas {
-                add_to_link(&mut ret, unit.pkg.package_id(), script_meta);
-            }
+            add_to_link(&mut ret, unit.pkg.package_id(), script_meta);
         }
 
         if unit.mode.is_run_custom_build() {
@@ -1344,7 +1206,7 @@ pub fn build_map(build_runner: &mut BuildRunner<'_, '_>) -> CargoResult<()> {
 
     // When adding an entry to 'to_link' we only actually push it on if the
     // script hasn't seen it yet (e.g., we don't push on duplicates).
-    fn add_to_link(scripts: &mut BuildScripts, pkg: PackageId, metadata: UnitHash) {
+    fn add_to_link(scripts: &mut BuildScripts, pkg: PackageId, metadata: Metadata) {
         if scripts.seen_to_link.insert((pkg, metadata)) {
             scripts.to_link.push((pkg, metadata));
         }
@@ -1352,9 +1214,10 @@ pub fn build_map(build_runner: &mut BuildRunner<'_, '_>) -> CargoResult<()> {
 
     /// Load any dependency declarations from a previous build script run.
     fn parse_previous_explicit_deps(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) {
-        let run_files = BuildScriptRunFiles::for_unit(build_runner, unit);
+        let script_run_dir = build_runner.files().build_script_run_dir(unit);
+        let output_file = script_run_dir.join("output");
         let (prev_output, _) = prev_build_output(build_runner, unit);
-        let deps = BuildDeps::new(&run_files.stdout, prev_output.as_ref());
+        let deps = BuildDeps::new(&output_file, prev_output.as_ref());
         build_runner.build_explicit_deps.insert(unit.clone(), deps);
     }
 }
@@ -1368,20 +1231,18 @@ fn prev_build_output(
     build_runner: &mut BuildRunner<'_, '_>,
     unit: &Unit,
 ) -> (Option<BuildOutput>, PathBuf) {
-    let script_out_dir = if build_runner.bcx.gctx.cli_unstable().build_dir_new_layout {
-        build_runner.files().out_dir_new_layout(unit)
-    } else {
-        build_runner.files().build_script_out_dir(unit)
-    };
-    let run_files = BuildScriptRunFiles::for_unit(build_runner, unit);
+    let script_out_dir = build_runner.files().build_script_out_dir(unit);
+    let script_run_dir = build_runner.files().build_script_run_dir(unit);
+    let root_output_file = script_run_dir.join("root-output");
+    let output_file = script_run_dir.join("output");
 
-    let prev_script_out_dir = paths::read_bytes(&run_files.root_output)
+    let prev_script_out_dir = paths::read_bytes(&root_output_file)
         .and_then(|bytes| paths::bytes2path(&bytes))
         .unwrap_or_else(|_| script_out_dir.clone());
 
     (
         BuildOutput::parse_file(
-            &run_files.stdout,
+            &output_file,
             unit.pkg.library().map(|t| t.crate_name()),
             &unit.pkg.to_string(),
             &prev_script_out_dir,
@@ -1397,7 +1258,7 @@ fn prev_build_output(
 
 impl BuildScriptOutputs {
     /// Inserts a new entry into the map.
-    fn insert(&mut self, pkg_id: PackageId, metadata: UnitHash, parsed_output: BuildOutput) {
+    fn insert(&mut self, pkg_id: PackageId, metadata: Metadata, parsed_output: BuildOutput) {
         match self.outputs.entry(metadata) {
             Entry::Vacant(entry) => {
                 entry.insert(parsed_output);
@@ -1414,49 +1275,17 @@ impl BuildScriptOutputs {
     }
 
     /// Returns `true` if the given key already exists.
-    fn contains_key(&self, metadata: UnitHash) -> bool {
+    fn contains_key(&self, metadata: Metadata) -> bool {
         self.outputs.contains_key(&metadata)
     }
 
     /// Gets the build output for the given key.
-    pub fn get(&self, meta: UnitHash) -> Option<&BuildOutput> {
+    pub fn get(&self, meta: Metadata) -> Option<&BuildOutput> {
         self.outputs.get(&meta)
     }
 
     /// Returns an iterator over all entries.
-    pub fn iter(&self) -> impl Iterator<Item = (&UnitHash, &BuildOutput)> {
+    pub fn iter(&self) -> impl Iterator<Item = (&Metadata, &BuildOutput)> {
         self.outputs.iter()
-    }
-}
-
-/// Files with information about a running build script.
-struct BuildScriptRunFiles {
-    /// The directory containing files related to running a build script.
-    root: PathBuf,
-    /// The stdout produced by the build script
-    stdout: PathBuf,
-    /// The stderr produced by the build script
-    stderr: PathBuf,
-    /// A file that contains the path to the `out` dir of the build script.
-    /// This is used for detect if the directory was moved since the previous run.
-    root_output: PathBuf,
-}
-
-impl BuildScriptRunFiles {
-    pub fn for_unit(build_runner: &BuildRunner<'_, '_>, unit: &Unit) -> Self {
-        let root = build_runner.files().build_script_run_dir(unit);
-        let stdout = if build_runner.bcx.gctx.cli_unstable().build_dir_new_layout {
-            root.join("stdout")
-        } else {
-            root.join("output")
-        };
-        let stderr = root.join("stderr");
-        let root_output = root.join("root-output");
-        Self {
-            root,
-            stdout,
-            stderr,
-            root_output,
-        }
     }
 }

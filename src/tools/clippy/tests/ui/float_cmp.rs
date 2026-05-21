@@ -8,7 +8,7 @@
     clippy::unnecessary_operation,
     clippy::cast_lossless
 )]
-//@no-rustfix: suggestions have an error margin placeholder
+//@no-rustfix
 use std::ops::Add;
 
 const ZERO: f32 = 0.0;
@@ -70,19 +70,17 @@ fn main() {
     ONE != 0.0; // no error, comparison with zero is ok
     twice(ONE) != ONE;
     ONE as f64 != 2.0;
-    //~^ float_cmp
-
+    //~^ ERROR: strict comparison of `f32` or `f64`
     ONE as f64 != 0.0; // no error, comparison with zero is ok
 
     let x: f64 = 1.0;
 
     x == 1.0;
-    //~^ float_cmp
-
+    //~^ ERROR: strict comparison of `f32` or `f64`
     x != 0f64; // no error, comparison with zero is ok
 
     twice(x) != twice(ONE as f64);
-    //~^ float_cmp
+    //~^ ERROR: strict comparison of `f32` or `f64`
 
     x < 0.0; // no errors, lower or greater comparisons need no fuzzyness
     x > 0.0;
@@ -103,16 +101,15 @@ fn main() {
 
     ZERO_ARRAY[i] == NON_ZERO_ARRAY[j]; // ok, because lhs is zero regardless of i
     NON_ZERO_ARRAY[i] == NON_ZERO_ARRAY[j];
-    //~^ float_cmp
+    //~^ ERROR: strict comparison of `f32` or `f64`
 
     let a1: [f32; 1] = [0.0];
     let a2: [f32; 1] = [1.1];
 
     a1 == a2;
-    //~^ float_cmp
-
+    //~^ ERROR: strict comparison of `f32` or `f64` arrays
     a1[0] == a2[0];
-    //~^ float_cmp
+    //~^ ERROR: strict comparison of `f32` or `f64`
 
     // no errors - comparing signums is ok
     let x32 = 3.21f32;

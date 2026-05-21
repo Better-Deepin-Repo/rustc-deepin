@@ -1,4 +1,4 @@
-// rustfmt-style_edition: 2024
+// rustfmt-version: Two
 // rustfmt-single_line_let_else_max_width: 100
 
 fn issue5901() {

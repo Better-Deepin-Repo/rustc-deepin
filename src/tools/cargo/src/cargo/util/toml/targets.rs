@@ -10,39 +10,26 @@
 //! It is a bit tricky because we need match explicit information from `Cargo.toml`
 //! with implicit info in directory layout.
 
-use std::collections::{HashMap, HashSet};
-use std::fmt::Write;
+use std::collections::HashSet;
 use std::fs::{self, DirEntry};
 use std::path::{Path, PathBuf};
 
 use anyhow::Context as _;
-use cargo_util::paths;
 use cargo_util_schemas::manifest::{
-    PathValue, StringOrVec, TomlBenchTarget, TomlBinTarget, TomlExampleTarget, TomlLibTarget,
-    TomlManifest, TomlPackageBuild, TomlTarget, TomlTestTarget,
+    PathValue, StringOrBool, StringOrVec, TomlBenchTarget, TomlBinTarget, TomlExampleTarget,
+    TomlLibTarget, TomlManifest, TomlTarget, TomlTestTarget,
 };
 
-use crate::core::compiler::{CrateType, rustdoc::RustdocScrapeExamples};
+use crate::core::compiler::rustdoc::RustdocScrapeExamples;
+use crate::core::compiler::CrateType;
 use crate::core::{Edition, Feature, Features, Target};
-use crate::util::{
-    closest_msg, errors::CargoResult, restricted_names, toml::deprecated_underscore,
-};
+use crate::util::errors::CargoResult;
+use crate::util::restricted_names;
+use crate::util::toml::deprecated_underscore;
 
 const DEFAULT_TEST_DIR_NAME: &'static str = "tests";
 const DEFAULT_BENCH_DIR_NAME: &'static str = "benches";
 const DEFAULT_EXAMPLE_DIR_NAME: &'static str = "examples";
-
-const TARGET_KIND_HUMAN_LIB: &str = "library";
-const TARGET_KIND_HUMAN_BIN: &str = "binary";
-const TARGET_KIND_HUMAN_EXAMPLE: &str = "example";
-const TARGET_KIND_HUMAN_TEST: &str = "test";
-const TARGET_KIND_HUMAN_BENCH: &str = "benchmark";
-
-const TARGET_KIND_LIB: &str = "lib";
-const TARGET_KIND_BIN: &str = "bin";
-const TARGET_KIND_EXAMPLE: &str = "example";
-const TARGET_KIND_TEST: &str = "test";
-const TARGET_KIND_BENCH: &str = "bench";
 
 #[tracing::instrument(skip_all)]
 pub(super) fn to_targets(
@@ -76,28 +63,24 @@ pub(super) fn to_targets(
         normalized_toml.bin.as_deref().unwrap_or_default(),
         package_root,
         edition,
-        warnings,
     )?);
 
     targets.extend(to_example_targets(
         normalized_toml.example.as_deref().unwrap_or_default(),
         package_root,
         edition,
-        warnings,
     )?);
 
     targets.extend(to_test_targets(
         normalized_toml.test.as_deref().unwrap_or_default(),
         package_root,
         edition,
-        warnings,
     )?);
 
     targets.extend(to_bench_targets(
         normalized_toml.bench.as_deref().unwrap_or_default(),
         package_root,
         edition,
-        warnings,
     )?);
 
     // processing the custom build script
@@ -105,22 +88,19 @@ pub(super) fn to_targets(
         if metabuild.is_some() {
             anyhow::bail!("cannot specify both `metabuild` and `build`");
         }
-        validate_unique_build_scripts(custom_build)?;
-        for script in custom_build {
-            let script_path = Path::new(script);
-            let name = format!(
-                "build-script-{}",
-                script_path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("")
-            );
-            targets.push(Target::custom_build_target(
-                &name,
-                package_root.join(script_path),
-                edition,
-            ));
-        }
+        let custom_build = Path::new(custom_build);
+        let name = format!(
+            "build-script-{}",
+            custom_build
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+        );
+        targets.push(Target::custom_build_target(
+            &name,
+            package_root.join(custom_build),
+            edition,
+        ));
     }
     if let Some(metabuild) = metabuild {
         // Verify names match available build deps.
@@ -136,7 +116,7 @@ pub(super) fn to_targets(
 
         targets.push(Target::metabuild_target(&format!(
             "metabuild-{}",
-            package.normalized_name().expect("previously normalized")
+            package.name
         )));
     }
 
@@ -149,71 +129,48 @@ pub fn normalize_lib(
     package_root: &Path,
     package_name: &str,
     edition: Edition,
-    autodiscover: Option<bool>,
     warnings: &mut Vec<String>,
 ) -> CargoResult<Option<TomlLibTarget>> {
-    if is_normalized(original_lib, autodiscover) {
-        let Some(mut lib) = original_lib.cloned() else {
-            return Ok(None);
-        };
+    let inferred = inferred_lib(package_root);
+    let lib = original_lib.cloned().or_else(|| {
+        inferred.as_ref().map(|lib| TomlTarget {
+            path: Some(PathValue(lib.clone())),
+            ..TomlTarget::new()
+        })
+    });
+    let Some(mut lib) = lib else { return Ok(None) };
+    lib.name
+        .get_or_insert_with(|| package_name.replace("-", "_"));
 
-        // Check early to improve error messages
-        validate_lib_name(&lib, warnings)?;
+    // Check early to improve error messages
+    validate_lib_name(&lib, warnings)?;
 
-        validate_proc_macro(&lib, TARGET_KIND_HUMAN_LIB, edition, warnings)?;
-        validate_crate_types(&lib, TARGET_KIND_HUMAN_LIB, edition, warnings)?;
+    validate_proc_macro(&lib, "library", edition, warnings)?;
+    validate_crate_types(&lib, "library", edition, warnings)?;
 
-        if let Some(PathValue(path)) = &lib.path {
-            lib.path = Some(PathValue(paths::normalize_path(path).into()));
-        }
-
-        Ok(Some(lib))
-    } else {
-        let inferred = inferred_lib(package_root);
-        let lib = original_lib.cloned().or_else(|| {
-            inferred.as_ref().map(|lib| TomlTarget {
-                path: Some(PathValue(lib.clone())),
-                ..TomlTarget::new()
-            })
-        });
-        let Some(mut lib) = lib else { return Ok(None) };
-        lib.name
-            .get_or_insert_with(|| package_name.replace("-", "_"));
-
-        // Check early to improve error messages
-        validate_lib_name(&lib, warnings)?;
-
-        validate_proc_macro(&lib, TARGET_KIND_HUMAN_LIB, edition, warnings)?;
-        validate_crate_types(&lib, TARGET_KIND_HUMAN_LIB, edition, warnings)?;
-
-        if lib.path.is_none() {
-            if let Some(inferred) = inferred {
-                lib.path = Some(PathValue(inferred));
-            } else {
-                let name = name_or_panic(&lib);
-                let legacy_path = Path::new("src").join(format!("{name}.rs"));
-                if edition == Edition::Edition2015 && package_root.join(&legacy_path).exists() {
-                    warnings.push(format!(
-                        "path `{}` was erroneously implicitly accepted for library `{name}`,\n\
+    if lib.path.is_none() {
+        if let Some(inferred) = inferred {
+            lib.path = Some(PathValue(inferred));
+        } else {
+            let name = name_or_panic(&lib);
+            let legacy_path = Path::new("src").join(format!("{name}.rs"));
+            if edition == Edition::Edition2015 && package_root.join(&legacy_path).exists() {
+                warnings.push(format!(
+                    "path `{}` was erroneously implicitly accepted for library `{name}`,\n\
                      please rename the file to `src/lib.rs` or set lib.path in Cargo.toml",
-                        legacy_path.display(),
-                    ));
-                    lib.path = Some(PathValue(legacy_path));
-                } else {
-                    anyhow::bail!(
-                        "can't find library `{name}`, \
+                    legacy_path.display(),
+                ));
+                lib.path = Some(PathValue(legacy_path));
+            } else {
+                anyhow::bail!(
+                    "can't find library `{name}`, \
                      rename file to `src/lib.rs` or specify lib.path",
-                    )
-                }
+                )
             }
         }
-
-        if let Some(PathValue(path)) = lib.path.as_ref() {
-            lib.path = Some(PathValue(paths::normalize_path(&path).into()));
-        }
-
-        Ok(Some(lib))
     }
+
+    Ok(Some(lib))
 }
 
 #[tracing::instrument(skip_all)]
@@ -266,7 +223,7 @@ fn to_lib_target(
     };
 
     let mut target = Target::lib_target(name_or_panic(lib), crate_types, path, edition);
-    configure(lib, &mut target, TARGET_KIND_HUMAN_LIB, warnings)?;
+    configure(lib, &mut target)?;
     target.set_name_inferred(original_lib.map_or(true, |v| v.name.is_none()));
     Ok(Some(target))
 }
@@ -282,16 +239,12 @@ pub fn normalize_bins(
     errors: &mut Vec<String>,
     has_lib: bool,
 ) -> CargoResult<Vec<TomlBinTarget>> {
-    if are_normalized(toml_bins, autodiscover) {
-        let mut toml_bins = toml_bins.cloned().unwrap_or_default();
-        for bin in toml_bins.iter_mut() {
+    if is_normalized(toml_bins, autodiscover) {
+        let toml_bins = toml_bins.cloned().unwrap_or_default();
+        for bin in &toml_bins {
             validate_bin_name(bin, warnings)?;
             validate_bin_crate_types(bin, edition, warnings, errors)?;
             validate_bin_proc_macro(bin, edition, warnings, errors)?;
-
-            if let Some(PathValue(path)) = &bin.path {
-                bin.path = Some(PathValue(paths::normalize_path(path).into()));
-            }
         }
         Ok(toml_bins)
     } else {
@@ -304,8 +257,8 @@ pub fn normalize_bins(
             autodiscover,
             edition,
             warnings,
-            TARGET_KIND_HUMAN_BIN,
-            TARGET_KIND_BIN,
+            "binary",
+            "bin",
             "autobins",
         );
 
@@ -316,30 +269,23 @@ pub fn normalize_bins(
             validate_bin_crate_types(bin, edition, warnings, errors)?;
             validate_bin_proc_macro(bin, edition, warnings, errors)?;
 
-            let path = target_path(
-                bin,
-                &inferred,
-                TARGET_KIND_BIN,
-                package_root,
-                edition,
-                &mut |_| {
-                    if let Some(legacy_path) =
-                        legacy_bin_path(package_root, name_or_panic(bin), has_lib)
-                    {
-                        warnings.push(format!(
-                            "path `{}` was erroneously implicitly accepted for binary `{}`,\n\
+            let path = target_path(bin, &inferred, "bin", package_root, edition, &mut |_| {
+                if let Some(legacy_path) =
+                    legacy_bin_path(package_root, name_or_panic(bin), has_lib)
+                {
+                    warnings.push(format!(
+                        "path `{}` was erroneously implicitly accepted for binary `{}`,\n\
                      please set bin.path in Cargo.toml",
-                            legacy_path.display(),
-                            name_or_panic(bin)
-                        ));
-                        Some(legacy_path)
-                    } else {
-                        None
-                    }
-                },
-            );
+                        legacy_path.display(),
+                        name_or_panic(bin)
+                    ));
+                    Some(legacy_path)
+                } else {
+                    None
+                }
+            });
             let path = match path {
-                Ok(path) => paths::normalize_path(&path).into(),
+                Ok(path) => path,
                 Err(e) => anyhow::bail!("{}", e),
             };
             bin.path = Some(PathValue(path));
@@ -355,7 +301,6 @@ fn to_bin_targets(
     bins: &[TomlBinTarget],
     package_root: &Path,
     edition: Edition,
-    warnings: &mut Vec<String>,
 ) -> CargoResult<Vec<Target>> {
     // This loop performs basic checks on each of the TomlTarget in `bins`.
     for bin in bins {
@@ -366,7 +311,7 @@ fn to_bin_targets(
         }
     }
 
-    validate_unique_names(&bins, TARGET_KIND_HUMAN_BIN)?;
+    validate_unique_names(&bins, "binary")?;
 
     let mut result = Vec::new();
     for bin in bins {
@@ -379,7 +324,7 @@ fn to_bin_targets(
             edition,
         );
 
-        configure(bin, &mut target, TARGET_KIND_HUMAN_BIN, warnings)?;
+        configure(bin, &mut target)?;
         result.push(target);
     }
     Ok(result)
@@ -418,8 +363,8 @@ pub fn normalize_examples(
     let mut inferred = || infer_from_directory(&package_root, Path::new(DEFAULT_EXAMPLE_DIR_NAME));
 
     let targets = normalize_targets(
-        TARGET_KIND_HUMAN_EXAMPLE,
-        TARGET_KIND_EXAMPLE,
+        "example",
+        "example",
         toml_examples,
         &mut inferred,
         package_root,
@@ -438,9 +383,8 @@ fn to_example_targets(
     targets: &[TomlExampleTarget],
     package_root: &Path,
     edition: Edition,
-    warnings: &mut Vec<String>,
 ) -> CargoResult<Vec<Target>> {
-    validate_unique_names(&targets, TARGET_KIND_EXAMPLE)?;
+    validate_unique_names(&targets, "example")?;
 
     let mut result = Vec::new();
     for toml in targets {
@@ -457,7 +401,7 @@ fn to_example_targets(
             toml.required_features.clone(),
             edition,
         );
-        configure(&toml, &mut target, TARGET_KIND_HUMAN_EXAMPLE, warnings)?;
+        configure(&toml, &mut target)?;
         result.push(target);
     }
 
@@ -476,8 +420,8 @@ pub fn normalize_tests(
     let mut inferred = || infer_from_directory(&package_root, Path::new(DEFAULT_TEST_DIR_NAME));
 
     let targets = normalize_targets(
-        TARGET_KIND_HUMAN_TEST,
-        TARGET_KIND_TEST,
+        "test",
+        "test",
         toml_tests,
         &mut inferred,
         package_root,
@@ -496,9 +440,8 @@ fn to_test_targets(
     targets: &[TomlTestTarget],
     package_root: &Path,
     edition: Edition,
-    warnings: &mut Vec<String>,
 ) -> CargoResult<Vec<Target>> {
-    validate_unique_names(&targets, TARGET_KIND_TEST)?;
+    validate_unique_names(&targets, "test")?;
 
     let mut result = Vec::new();
     for toml in targets {
@@ -509,7 +452,7 @@ fn to_test_targets(
             toml.required_features.clone(),
             edition,
         );
-        configure(&toml, &mut target, TARGET_KIND_HUMAN_TEST, warnings)?;
+        configure(&toml, &mut target)?;
         result.push(target);
     }
     Ok(result)
@@ -542,8 +485,8 @@ pub fn normalize_benches(
     let mut inferred = || infer_from_directory(&package_root, Path::new(DEFAULT_BENCH_DIR_NAME));
 
     let targets = normalize_targets_with_legacy_path(
-        TARGET_KIND_HUMAN_BENCH,
-        TARGET_KIND_BENCH,
+        "benchmark",
+        "bench",
         toml_benches,
         &mut inferred,
         package_root,
@@ -564,9 +507,8 @@ fn to_bench_targets(
     targets: &[TomlBenchTarget],
     package_root: &Path,
     edition: Edition,
-    warnings: &mut Vec<String>,
 ) -> CargoResult<Vec<Target>> {
-    validate_unique_names(&targets, TARGET_KIND_BENCH)?;
+    validate_unique_names(&targets, "bench")?;
 
     let mut result = Vec::new();
     for toml in targets {
@@ -577,22 +519,14 @@ fn to_bench_targets(
             toml.required_features.clone(),
             edition,
         );
-        configure(&toml, &mut target, TARGET_KIND_HUMAN_BENCH, warnings)?;
+        configure(&toml, &mut target)?;
         result.push(target);
     }
 
     Ok(result)
 }
 
-fn is_normalized(toml_target: Option<&TomlTarget>, autodiscover: Option<bool>) -> bool {
-    are_normalized_(toml_target.map(std::slice::from_ref), autodiscover)
-}
-
-fn are_normalized(toml_targets: Option<&Vec<TomlTarget>>, autodiscover: Option<bool>) -> bool {
-    are_normalized_(toml_targets.map(|v| v.as_slice()), autodiscover)
-}
-
-fn are_normalized_(toml_targets: Option<&[TomlTarget]>, autodiscover: Option<bool>) -> bool {
+fn is_normalized(toml_targets: Option<&Vec<TomlTarget>>, autodiscover: Option<bool>) -> bool {
     if autodiscover != Some(false) {
         return false;
     }
@@ -645,18 +579,14 @@ fn normalize_targets_with_legacy_path(
     legacy_path: &mut dyn FnMut(&TomlTarget) -> Option<PathBuf>,
     autodiscover_flag_name: &str,
 ) -> CargoResult<Vec<TomlTarget>> {
-    if are_normalized(toml_targets, autodiscover) {
-        let mut toml_targets = toml_targets.cloned().unwrap_or_default();
-        for target in toml_targets.iter_mut() {
+    if is_normalized(toml_targets, autodiscover) {
+        let toml_targets = toml_targets.cloned().unwrap_or_default();
+        for target in &toml_targets {
             // Check early to improve error messages
             validate_target_name(target, target_kind_human, target_kind, warnings)?;
 
             validate_proc_macro(target, target_kind_human, edition, warnings)?;
             validate_crate_types(target, target_kind_human, edition, warnings)?;
-
-            if let Some(PathValue(path)) = &target.path {
-                target.path = Some(PathValue(paths::normalize_path(path).into()));
-            }
         }
         Ok(toml_targets)
     } else {
@@ -698,7 +628,7 @@ fn normalize_targets_with_legacy_path(
                     continue;
                 }
             };
-            target.path = Some(PathValue(paths::normalize_path(&path).into()));
+            target.path = Some(PathValue(path));
             result.push(target);
         }
         Ok(result)
@@ -903,37 +833,7 @@ fn validate_unique_names(targets: &[TomlTarget], target_kind: &str) -> CargoResu
     Ok(())
 }
 
-/// Will check a list of build scripts, and make sure script file stems are unique within a vector.
-fn validate_unique_build_scripts(scripts: &[String]) -> CargoResult<()> {
-    let mut seen = HashMap::new();
-    for script in scripts {
-        let stem = Path::new(script).file_stem().unwrap().to_str().unwrap();
-        seen.entry(stem)
-            .or_insert_with(Vec::new)
-            .push(script.as_str());
-    }
-    let mut conflict_file_stem = false;
-    let mut err_msg = String::from(
-        "found build scripts with duplicate file stems, but all build scripts must have a unique file stem",
-    );
-    for (stem, paths) in seen {
-        if paths.len() > 1 {
-            conflict_file_stem = true;
-            write!(&mut err_msg, "\n  for stem `{stem}`: {}", paths.join(", "))?;
-        }
-    }
-    if conflict_file_stem {
-        anyhow::bail!(err_msg);
-    }
-    Ok(())
-}
-
-fn configure(
-    toml: &TomlTarget,
-    target: &mut Target,
-    target_kind_human: &str,
-    warnings: &mut Vec<String>,
-) -> CargoResult<()> {
+fn configure(toml: &TomlTarget, target: &mut Target) -> CargoResult<()> {
     let t2 = target.clone();
     target
         .set_tested(toml.test.unwrap_or_else(|| t2.tested()))
@@ -950,10 +850,6 @@ fn configure(
         .set_for_host(toml.proc_macro().unwrap_or_else(|| t2.for_host()));
 
     if let Some(edition) = toml.edition.clone() {
-        let name = target.name();
-        warnings.push(format!(
-            "`edition` is set on {target_kind_human} `{name}` which is deprecated"
-        ));
         target.set_edition(
             edition
                 .parse()
@@ -978,59 +874,73 @@ fn target_path_not_found_error_message(
     package_root: &Path,
     target: &TomlTarget,
     target_kind: &str,
-    inferred: &[(String, PathBuf)],
 ) -> String {
     fn possible_target_paths(name: &str, kind: &str, commonly_wrong: bool) -> [PathBuf; 2] {
         let mut target_path = PathBuf::new();
         match (kind, commonly_wrong) {
             // commonly wrong paths
             ("test" | "bench" | "example", true) => target_path.push(kind),
-            ("bin", true) => target_path.extend(["src", "bins"]),
+            ("bin", true) => {
+                target_path.push("src");
+                target_path.push("bins");
+            }
             // default inferred paths
             ("test", false) => target_path.push(DEFAULT_TEST_DIR_NAME),
             ("bench", false) => target_path.push(DEFAULT_BENCH_DIR_NAME),
             ("example", false) => target_path.push(DEFAULT_EXAMPLE_DIR_NAME),
-            ("bin", false) => target_path.extend(["src", "bin"]),
+            ("bin", false) => {
+                target_path.push("src");
+                target_path.push("bin");
+            }
             _ => unreachable!("invalid target kind: {}", kind),
         }
+        target_path.push(name);
 
         let target_path_file = {
             let mut path = target_path.clone();
-            path.push(format!("{name}.rs"));
+            path.set_extension("rs");
             path
         };
         let target_path_subdir = {
-            target_path.extend([name, "main.rs"]);
+            target_path.push("main.rs");
             target_path
         };
         return [target_path_file, target_path_subdir];
     }
 
     let target_name = name_or_panic(target);
-
     let commonly_wrong_paths = possible_target_paths(&target_name, target_kind, true);
     let possible_paths = possible_target_paths(&target_name, target_kind, false);
+    let existing_wrong_path_index = match (
+        package_root.join(&commonly_wrong_paths[0]).exists(),
+        package_root.join(&commonly_wrong_paths[1]).exists(),
+    ) {
+        (true, _) => Some(0),
+        (_, true) => Some(1),
+        _ => None,
+    };
 
-    let msg = closest_msg(target_name, inferred.iter(), |(n, _p)| n, target_kind);
-    if let Some((wrong_path, possible_path)) = commonly_wrong_paths
-        .iter()
-        .zip(possible_paths.iter())
-        .filter(|(wp, _)| package_root.join(wp).exists())
-        .next()
-    {
-        let [wrong_path, possible_path] = [wrong_path, possible_path].map(|p| p.display());
-        format!(
-            "can't find `{target_name}` {target_kind} at default paths, but found a file at `{wrong_path}`.\n\
-             Perhaps rename the file to `{possible_path}` for target auto-discovery, \
-             or specify {target_kind}.path if you want to use a non-default path.{msg}",
-        )
-    } else {
-        let [path_file, path_dir] = possible_paths.each_ref().map(|p| p.display());
-        format!(
-            "can't find `{target_name}` {target_kind} at `{path_file}` or `{path_dir}`. \
-             Please specify {target_kind}.path if you want to use a non-default path.{msg}"
-        )
+    if let Some(i) = existing_wrong_path_index {
+        return format!(
+            "\
+can't find `{name}` {kind} at default paths, but found a file at `{wrong_path}`.
+Perhaps rename the file to `{possible_path}` for target auto-discovery, \
+or specify {kind}.path if you want to use a non-default path.",
+            name = target_name,
+            kind = target_kind,
+            wrong_path = commonly_wrong_paths[i].display(),
+            possible_path = possible_paths[i].display(),
+        );
     }
+
+    format!(
+        "can't find `{name}` {kind} at `{path_file}` or `{path_dir}`. \
+        Please specify {kind}.path if you want to use a non-default path.",
+        name = target_name,
+        kind = target_kind,
+        path_file = possible_paths[0].display(),
+        path_dir = possible_paths[1].display(),
+    )
 }
 
 fn target_path(
@@ -1066,7 +976,6 @@ fn target_path(
                 package_root,
                 target,
                 target_kind,
-                inferred,
             ))
         }
         (Some(p0), Some(p1)) => {
@@ -1091,10 +1000,7 @@ Cargo doesn't know which to use because multiple target files found at `{}` and 
 
 /// Returns the path to the build script if one exists for this crate.
 #[tracing::instrument(skip_all)]
-pub fn normalize_build(
-    build: Option<&TomlPackageBuild>,
-    package_root: &Path,
-) -> CargoResult<Option<TomlPackageBuild>> {
+pub fn normalize_build(build: Option<&StringOrBool>, package_root: &Path) -> Option<StringOrBool> {
     const BUILD_RS: &str = "build.rs";
     match build {
         None => {
@@ -1102,24 +1008,14 @@ pub fn normalize_build(
             // a build script.
             let build_rs = package_root.join(BUILD_RS);
             if build_rs.is_file() {
-                Ok(Some(TomlPackageBuild::SingleScript(BUILD_RS.to_owned())))
+                Some(StringOrBool::String(BUILD_RS.to_owned()))
             } else {
-                Ok(Some(TomlPackageBuild::Auto(false)))
+                Some(StringOrBool::Bool(false))
             }
         }
         // Explicitly no build script.
-        Some(TomlPackageBuild::Auto(false)) => Ok(build.cloned()),
-        Some(TomlPackageBuild::SingleScript(build_file)) => {
-            let build_file = paths::normalize_path(Path::new(build_file));
-            let build = build_file.into_os_string().into_string().expect(
-                "`build_file` started as a String and `normalize_path` shouldn't have changed that",
-            );
-            Ok(Some(TomlPackageBuild::SingleScript(build)))
-        }
-        Some(TomlPackageBuild::Auto(true)) => {
-            Ok(Some(TomlPackageBuild::SingleScript(BUILD_RS.to_owned())))
-        }
-        Some(TomlPackageBuild::MultipleScript(_scripts)) => Ok(build.cloned()),
+        Some(StringOrBool::Bool(false)) | Some(StringOrBool::String(_)) => build.cloned(),
+        Some(StringOrBool::Bool(true)) => Some(StringOrBool::String(BUILD_RS.to_owned())),
     }
 }
 
@@ -1131,7 +1027,7 @@ fn name_or_panic(target: &TomlTarget) -> &str {
 }
 
 fn validate_lib_name(target: &TomlTarget, warnings: &mut Vec<String>) -> CargoResult<()> {
-    validate_target_name(target, TARGET_KIND_HUMAN_LIB, TARGET_KIND_LIB, warnings)?;
+    validate_target_name(target, "library", "lib", warnings)?;
     let name = name_or_panic(target);
     if name.contains('-') {
         anyhow::bail!("library target names cannot contain hyphens: {}", name)
@@ -1141,7 +1037,7 @@ fn validate_lib_name(target: &TomlTarget, warnings: &mut Vec<String>) -> CargoRe
 }
 
 fn validate_bin_name(bin: &TomlTarget, warnings: &mut Vec<String>) -> CargoResult<()> {
-    validate_target_name(bin, TARGET_KIND_HUMAN_BIN, TARGET_KIND_BIN, warnings)?;
+    validate_target_name(bin, "binary", "bin", warnings)?;
     let name = name_or_panic(bin).to_owned();
     if restricted_names::is_conflicting_artifact_name(&name) {
         anyhow::bail!(
@@ -1196,7 +1092,7 @@ fn validate_bin_proc_macro(
             name
         ));
     } else {
-        validate_proc_macro(target, TARGET_KIND_HUMAN_BIN, edition, warnings)?;
+        validate_proc_macro(target, "binary", edition, warnings)?;
     }
     Ok(())
 }
@@ -1234,7 +1130,7 @@ fn validate_bin_crate_types(
                 crate_types.join(", ")
             ));
         } else {
-            validate_crate_types(target, TARGET_KIND_HUMAN_BIN, edition, warnings)?;
+            validate_crate_types(target, "binary", edition, warnings)?;
         }
     }
     Ok(())

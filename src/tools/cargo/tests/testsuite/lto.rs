@@ -1,8 +1,9 @@
-use crate::prelude::*;
+use std::process::Output;
+
 use cargo::core::compiler::Lto;
-use cargo_test_support::RawOutput;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
-use cargo_test_support::{Project, basic_manifest, project, str};
+use cargo_test_support::{basic_manifest, project, str, Project};
 
 #[cargo_test]
 fn with_deps() {
@@ -29,7 +30,7 @@ fn with_deps() {
     p.cargo("build -v --release")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.0.1 (registry `dummy-registry`)
 [COMPILING] bar v0.0.1
@@ -72,7 +73,7 @@ fn shared_deps() {
         .with_stderr_data(
             str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.0.1 (registry `dummy-registry`)
 [COMPILING] bar v0.0.1
@@ -116,7 +117,7 @@ fn build_dep_not_ltod() {
     p.cargo("build -v --release")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.0.1 (registry `dummy-registry`)
 [COMPILING] bar v0.0.1
@@ -131,6 +132,7 @@ fn build_dep_not_ltod() {
         .run();
 }
 
+#[allow(deprecated)]
 #[cargo_test]
 fn complicated() {
     Package::new("dep-shared", "0.0.1")
@@ -297,7 +299,7 @@ fn off_in_manifest_works() {
     p.cargo("build -v --release")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.0.1 (registry `dummy-registry`)
 [COMPILING] bar v0.0.1
@@ -508,7 +510,7 @@ fn project_with_dep(crate_types: &str) -> Project {
 ///
 /// `krate_info` is extra compiler flags used to distinguish this if the same
 /// crate name is being built multiple times.
-fn verify_lto(output: &RawOutput, krate: &str, krate_info: &str, expected_lto: Lto) {
+fn verify_lto(output: &Output, krate: &str, krate_info: &str, expected_lto: Lto) {
     let stderr = std::str::from_utf8(&output.stderr).unwrap();
     let mut matches = stderr.lines().filter(|line| {
         line.contains("Running")
@@ -553,7 +555,7 @@ fn verify_lto(output: &RawOutput, krate: &str, krate_info: &str, expected_lto: L
 #[cargo_test]
 fn cdylib_and_rlib() {
     let p = project_with_dep("'cdylib', 'rlib'");
-    let output = p.cargo("build --release -v").run();
+    let output = p.cargo("build --release -v").exec_with_output().unwrap();
     // `registry` is ObjectAndBitcode because it needs Object for the
     // rlib, and Bitcode for the cdylib (which doesn't support LTO).
     verify_lto(
@@ -626,7 +628,7 @@ fn cdylib_and_rlib() {
 #[cargo_test]
 fn dylib() {
     let p = project_with_dep("'dylib'");
-    let output = p.cargo("build --release -v").run();
+    let output = p.cargo("build --release -v").exec_with_output().unwrap();
     // `registry` is OnlyObject because rustc doesn't support LTO with dylibs.
     verify_lto(&output, "registry", "--crate-type lib", Lto::OnlyObject);
     // `registry_shared` is both because it is needed by both bar (Object) and
@@ -672,7 +674,7 @@ fn dylib() {
 [COMPILING] registry-shared v0.0.1
 [FRESH] registry v0.0.1
 [RUNNING] `rustc --crate-name registry_shared [..]-C embed-bitcode=no [..]`
-[DIRTY] bar v0.0.0 ([ROOT]/foo/bar): info of dependency `registry-shared` changed
+[DIRTY] bar v0.0.0 ([..]): dependency info changed
 [COMPILING] bar v0.0.0 ([ROOT]/foo/bar)
 [RUNNING] `rustc --crate-name bar [..]--crate-type dylib [..]-C embed-bitcode=no [..]`
 [FINISHED] `release` profile [optimized] target(s) in [ELAPSED]s
@@ -692,7 +694,7 @@ fn dylib() {
 [FRESH] registry-shared v0.0.1
 [COMPILING] registry v0.0.1
 [RUNNING] `rustc --crate-name registry [..]`
-[DIRTY] bar v0.0.0 ([ROOT]/foo/bar): info of dependency `registry` changed
+[DIRTY] bar v0.0.0 ([..]): dependency info changed
 [COMPILING] bar v0.0.0 ([ROOT]/foo/bar)
 [RUNNING] `rustc --crate-name bar [..]--crate-type dylib [..]-C embed-bitcode=no [..]`
 [RUNNING] `rustc --crate-name bar [..]-C lto [..]--test [..]`
@@ -749,7 +751,7 @@ fn test_profile() {
         // unordered because the two `foo` builds start in parallel
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.0.1 (registry `dummy-registry`)
 [COMPILING] bar v0.0.1
@@ -807,7 +809,7 @@ fn doctest() {
     p.cargo("test --doc --release -v")
         // embed-bitcode should be harmless here
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [COMPILING] bar v0.1.0 ([ROOT]/foo/bar)
 [RUNNING] `rustc --crate-name bar [..]--crate-type lib [..]-C linker-plugin-lto [..]`
 [COMPILING] foo v0.1.0 ([ROOT]/foo)
@@ -859,7 +861,7 @@ fn dylib_rlib_bin() {
         .file("src/bin/ferret.rs", "fn main() { foo::foo(); }")
         .build();
 
-    let output = p.cargo("build --release -v").run();
+    let output = p.cargo("build --release -v").exec_with_output().unwrap();
     verify_lto(
         &output,
         "foo",
@@ -898,7 +900,7 @@ fn fresh_swapping_commands() {
     p.cargo("build --release -v")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v1.0.0 (registry `dummy-registry`)
 [COMPILING] bar v1.0.0

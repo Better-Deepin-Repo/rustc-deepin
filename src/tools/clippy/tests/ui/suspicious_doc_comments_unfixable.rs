@@ -1,17 +1,16 @@
-#![allow(unused, clippy::empty_line_after_doc_comments)]
+#![allow(unused)]
 #![warn(clippy::suspicious_doc_comments)]
 //@no-rustfix
 ///! a
-//~^ suspicious_doc_comments
-
+//~^ ERROR: this is an outer doc comment and does not apply to the parent module or crate
+//~| NOTE: `-D clippy::suspicious-doc-comments` implied by `-D warnings`
 ///! b
 /// c
 ///! d
 pub fn foo() {}
 
 ///! a
-//~^ suspicious_doc_comments
-
+//~^ ERROR: this is an outer doc comment and does not apply to the parent module or crate
 ///! b
 /// c
 ///! d

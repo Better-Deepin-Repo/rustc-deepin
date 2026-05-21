@@ -1,7 +1,7 @@
 //@ check-pass
 //@ edition:2018
 //@ compile-flags: -Z span-debug
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 
 #![feature(rustc_attrs)]
 

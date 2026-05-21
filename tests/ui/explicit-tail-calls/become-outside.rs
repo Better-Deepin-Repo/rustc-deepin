@@ -1,5 +1,5 @@
 //@ revisions: constant array
-#![expect(incomplete_features)]
+#![allow(incomplete_features)]
 #![feature(explicit_tail_calls)]
 
 #[cfg(constant)]

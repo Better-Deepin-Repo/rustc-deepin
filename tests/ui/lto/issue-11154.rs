@@ -1,6 +1,6 @@
 //@ build-fail
 //@ compile-flags: -C lto -C prefer-dynamic
 
-fn main() {}
+//@ error-pattern: cannot prefer dynamic linking
 
-//~? ERROR cannot prefer dynamic linking when performing LTO
+fn main() {}

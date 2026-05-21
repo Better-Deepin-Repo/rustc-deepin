@@ -1,4 +1,4 @@
-//@ proc-macro: proc-macro-panic.rs
+//@ aux-build:proc-macro-panic.rs
 //@ edition:2018
 //@ needs-unwind proc macro panics to report errors
 

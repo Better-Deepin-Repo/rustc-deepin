@@ -1,4 +1,4 @@
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 
 // Regression test for issue #81543
 // Tests that we emit a properly spanned error

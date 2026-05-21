@@ -1,6 +1,6 @@
 //@ pp-exact
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn simple_attr() {
 
     #[attr]
@@ -10,21 +10,21 @@ fn simple_attr() {
     if true {}
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn if_else_chain() {
 
     #[first_attr]
     if true {} else if false {} else {}
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn if_let() {
 
     #[attr]
     if let Some(_) = Some(true) {}
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn let_attr_if() {
     let _ = #[attr] if let _ = 0 {};
     let _ = #[attr] if true {};

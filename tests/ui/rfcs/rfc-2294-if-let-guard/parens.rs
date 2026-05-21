@@ -1,6 +1,9 @@
 // Parenthesised let "expressions" are not allowed in guards
 
-#[cfg(false)]
+#![feature(if_let_guard)]
+#![feature(let_chains)]
+
+#[cfg(FALSE)]
 fn un_cfged() {
     match () {
         () if let 0 = 1 => {}

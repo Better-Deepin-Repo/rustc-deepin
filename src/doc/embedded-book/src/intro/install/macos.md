@@ -9,7 +9,7 @@ All the tools can be installed using [Homebrew] or [MacPorts]:
 
 ``` text
 $ # GDB
-$ brew install arm-none-eabi-gdb
+$ brew install armmbed/formulae/arm-none-eabi-gcc
 
 $ # OpenOCD
 $ brew install openocd

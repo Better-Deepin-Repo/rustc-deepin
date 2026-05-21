@@ -5,8 +5,6 @@
 // `all-shared` should only emit files that can be shared between crates.
 // See https://github.com/rust-lang/rust/pull/83478
 
-//@ needs-target-std
-
 use run_make_support::{has_extension, has_prefix, path, rustdoc, shallow_find_files};
 
 fn main() {
@@ -19,7 +17,7 @@ fn main() {
         .args(&["--extend-css", "z.css"])
         .input("x.rs")
         .run();
-    assert!(path("invocation-only/search.index/root-xxx.js").exists());
+    assert!(path("invocation-only/search-index-xxx.js").exists());
     assert!(path("invocation-only/crates-xxx.js").exists());
     assert!(path("invocation-only/settings.html").exists());
     assert!(path("invocation-only/x/all.html").exists());
@@ -68,7 +66,7 @@ fn main() {
 
     rustdoc()
         .arg("-Zunstable-options")
-        .arg("--emit=toolchain-shared-resources")
+        .arg("--emit=toolchain-shared-resources,unversioned-shared-resources")
         .out_dir("all-shared")
         .arg("--resource-suffix=-xxx")
         .args(&["--extend-css", "z.css"])

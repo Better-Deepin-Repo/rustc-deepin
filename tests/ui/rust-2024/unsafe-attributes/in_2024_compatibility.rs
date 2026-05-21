@@ -1,4 +1,3 @@
-//@ edition:2015
 #![deny(rust_2024_compatibility)]
 
 #[no_mangle]

@@ -1,10 +1,10 @@
 //! Tests for network configuration.
 
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::str;
 
-#[cargo_test]
+#[allow(dead_code)]
 fn net_retry_loads_from_config() {
     let p = project()
         .file(
@@ -35,13 +35,13 @@ fn net_retry_loads_from_config() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 ...
-[WARNING] spurious network error (1 try remaining): [..]
+[WARNING] spurious network error (1 tries remaining): [..]
 ...
 "#]])
         .run();
 }
 
-#[cargo_test]
+#[allow(dead_code)]
 fn net_retry_git_outputs_warning() {
     let p = project()
         .file(
@@ -71,7 +71,7 @@ fn net_retry_git_outputs_warning() {
         .with_stderr_data(str![[r#"
 ...
 [WARNING] spurious network error (2 tries remaining): [..]
-[WARNING] spurious network error (1 try remaining): [..]
+[WARNING] spurious network error (1 tries remaining): [..]
 ...
 "#]])
         .run();

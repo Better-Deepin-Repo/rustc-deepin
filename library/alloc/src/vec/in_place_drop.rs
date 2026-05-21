@@ -1,5 +1,6 @@
 use core::marker::PhantomData;
-use core::ptr::{self, NonNull, drop_in_place};
+use core::ptr::{self, drop_in_place, NonNull};
+use core::slice::{self};
 
 use crate::alloc::Global;
 use crate::raw_vec::RawVec;
@@ -13,7 +14,7 @@ pub(super) struct InPlaceDrop<T> {
 
 impl<T> InPlaceDrop<T> {
     fn len(&self) -> usize {
-        unsafe { self.dst.offset_from_unsigned(self.inner) }
+        unsafe { self.dst.sub_ptr(self.inner) }
     }
 }
 
@@ -21,7 +22,7 @@ impl<T> Drop for InPlaceDrop<T> {
     #[inline]
     fn drop(&mut self) {
         unsafe {
-            ptr::drop_in_place(ptr::slice_from_raw_parts_mut(self.inner, self.len()));
+            ptr::drop_in_place(slice::from_raw_parts_mut(self.inner, self.len()));
         }
     }
 }

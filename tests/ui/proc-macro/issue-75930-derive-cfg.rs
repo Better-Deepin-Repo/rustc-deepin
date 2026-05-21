@@ -1,12 +1,12 @@
 //@ check-pass
 //@ compile-flags: -Z span-debug
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 
 // Regression test for issue #75930
 // Tests that we cfg-strip all targets before invoking
 // a derive macro
 // FIXME: We currently lose spans here (see issue #43081)
-#![warn(legacy_derive_helpers)]
+
 #![no_std] // Don't load unnecessary hygiene information from std
 extern crate std;
 
@@ -31,7 +31,7 @@ extern crate test_macros;
 //
 // It is because of this code from below:
 // ```
-// struct Foo<#[cfg(false)] A, B>
+// struct Foo<#[cfg(FALSE)] A, B>
 // ```
 // When the token stream is formed during parsing, `<` is followed immediately
 // by `#`, which is punctuation, so it is marked `Joint`. But before being
@@ -51,22 +51,22 @@ extern crate test_macros;
 #[print_attr]
 #[derive(Print)]
 #[print_helper(b)]
-struct Foo<#[cfg(false)] A, B> {
-    #[cfg(false)] first: String,
+struct Foo<#[cfg(FALSE)] A, B> {
+    #[cfg(FALSE)] first: String,
     #[cfg_attr(FALSE, deny(warnings))] second: bool,
     third: [u8; {
-        #[cfg(false)] struct Bar;
+        #[cfg(FALSE)] struct Bar;
         #[cfg(not(FALSE))] struct Inner;
-        #[cfg(false)] let a = 25;
+        #[cfg(FALSE)] let a = 25;
         match true {
-            #[cfg(false)] true => {},
+            #[cfg(FALSE)] true => {},
             #[cfg_attr(not(FALSE), allow(warnings))] false => {},
             _ => {}
         };
 
         #[print_helper(should_be_removed)]
         fn removed_fn() {
-            #![cfg(false)]
+            #![cfg(FALSE)]
         }
 
         #[print_helper(c)] #[cfg(not(FALSE))] fn kept_fn() {
@@ -76,22 +76,22 @@ struct Foo<#[cfg(false)] A, B> {
 
         enum TupleEnum {
             Foo(
-                #[cfg(false)] u8,
-                #[cfg(false)] bool,
+                #[cfg(FALSE)] u8,
+                #[cfg(FALSE)] bool,
                 #[cfg(not(FALSE))] i32,
-                #[cfg(false)] String, u8
+                #[cfg(FALSE)] String, u8
             )
         }
 
         struct TupleStruct(
-            #[cfg(false)] String,
+            #[cfg(FALSE)] String,
             #[cfg(not(FALSE))] i32,
-            #[cfg(false)] bool,
+            #[cfg(FALSE)] bool,
             u8
         );
 
         fn plain_removed_fn() {
-            #![cfg_attr(not(FALSE), cfg(false))]
+            #![cfg_attr(not(FALSE), cfg(FALSE))]
         }
 
         0

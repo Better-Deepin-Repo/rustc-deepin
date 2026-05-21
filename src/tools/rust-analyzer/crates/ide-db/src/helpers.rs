@@ -2,18 +2,17 @@
 
 use std::collections::VecDeque;
 
-use base_db::SourceDatabase;
+use base_db::SourceRootDatabase;
 use hir::{Crate, ItemInNs, ModuleDef, Name, Semantics};
 use span::{Edition, FileId};
 use syntax::{
-    AstToken, SyntaxKind, SyntaxToken, ToSmolStr, TokenAtOffset,
     ast::{self, make},
+    AstToken, SyntaxKind, SyntaxToken, ToSmolStr, TokenAtOffset,
 };
 
 use crate::{
-    RootDatabase,
     defs::{Definition, IdentClass},
-    generated,
+    generated, RootDatabase,
 };
 
 pub fn item_name(db: &RootDatabase, item: ItemInNs) -> Option<Name> {
@@ -70,17 +69,17 @@ pub fn visit_file_defs(
     };
     let mut defs: VecDeque<_> = module.declarations(db).into();
     while let Some(def) = defs.pop_front() {
-        if let ModuleDef::Module(submodule) = def
-            && submodule.is_inline(db)
-        {
-            defs.extend(submodule.declarations(db));
-            submodule.impl_defs(db).into_iter().for_each(|impl_| cb(impl_.into()));
+        if let ModuleDef::Module(submodule) = def {
+            if submodule.is_inline(db) {
+                defs.extend(submodule.declarations(db));
+                submodule.impl_defs(db).into_iter().for_each(|impl_| cb(impl_.into()));
+            }
         }
         cb(def.into());
     }
     module.impl_defs(db).into_iter().for_each(|impl_| cb(impl_.into()));
 
-    let is_root = module.is_crate_root(db);
+    let is_root = module.is_crate_root();
     module
         .legacy_macros(db)
         .into_iter()
@@ -109,8 +108,8 @@ pub fn lint_eq_or_in_group(lint: &str, lint_is: &str) -> bool {
 
 pub fn is_editable_crate(krate: Crate, db: &RootDatabase) -> bool {
     let root_file = krate.root_file(db);
-    let source_root_id = db.file_source_root(root_file).source_root_id(db);
-    !db.source_root(source_root_id).source_root(db).is_library
+    let source_root_id = db.file_source_root(root_file);
+    !db.source_root(source_root_id).is_library
 }
 
 // FIXME: This is a weird function

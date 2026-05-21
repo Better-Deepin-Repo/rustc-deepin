@@ -1,8 +1,7 @@
-//@compile-flags: --diagnostic-width=300
 #![feature(coroutines)]
 #![feature(coroutine_clone)]
 #![feature(coroutine_trait)]
-#![feature(rustc_attrs, stmt_expr_attributes, liballoc_internals)]
+#![feature(rustc_attrs, stmt_expr_attributes)]
 
 use std::ops::Coroutine;
 use std::pin::Pin;
@@ -15,11 +14,12 @@ fn main() {
     let mut g = #[coroutine]
     || {
         // This is desuraged as 4 stages:
-        // - `vec!` macro
-        // - `write_via_move`
+        // - allocate a `*mut u8` with `exchange_malloc`;
+        // - create a Box that is ignored for trait computations;
         // - compute fields (and yields);
         // - assign to `t`.
-        let t = vec![(5, yield)];
+        let t = #[rustc_box]
+        Box::new((5, yield));
         drop(t);
     };
 
@@ -30,12 +30,13 @@ fn main() {
     // As it is not taken into account for trait computation,
     // the coroutine is `Copy`.
     let mut h = copy(g);
-    //~^ ERROR the trait bound `Box<MaybeUninit<[(i32, ()); 1]>>: Copy` is not satisfied in
+    //~^ ERROR the trait bound `Box<(i32, ())>: Copy` is not satisfied in
 
     // We now have 2 boxes with the same backing allocation:
     // one inside `g` and one inside `h`.
     // Proceed and drop `t` in `g`.
     Pin::new(&mut g).resume(());
+    //~^ ERROR borrow of moved value: `g`
 
     // Proceed and drop `t` in `h` -> double free!
     Pin::new(&mut h).resume(());

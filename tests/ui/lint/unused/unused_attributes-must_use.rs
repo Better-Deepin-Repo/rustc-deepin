@@ -1,26 +1,19 @@
-//@ run-rustfix
-
 #![allow(dead_code, path_statements)]
 #![deny(unused_attributes, unused_must_use)]
 #![feature(asm_experimental_arch, stmt_expr_attributes, trait_alias)]
 
-#[must_use] //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
+#[must_use] //~ ERROR `#[must_use]` has no effect
 extern crate std as std2;
 
-#[must_use] //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
+#[must_use] //~ ERROR `#[must_use]` has no effect
 mod test_mod {}
 
-#[must_use] //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
+#[must_use] //~ ERROR `#[must_use]` has no effect
 use std::arch::global_asm;
 
-#[must_use] //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
+#[must_use] //~ ERROR `#[must_use]` has no effect
 const CONST: usize = 4;
-#[must_use] //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
+#[must_use] //~ ERROR `#[must_use]` has no effect
 #[no_mangle]
 static STATIC: usize = 4;
 
@@ -37,8 +30,7 @@ union U {
     unit: (),
 }
 
-#[must_use] //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
+#[must_use] //~ ERROR `#[must_use]` has no effect
 impl U {
     #[must_use]
     fn method() -> i32 {
@@ -52,12 +44,10 @@ fn foo() -> i64 {
     4
 }
 
-#[must_use] //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
+#[must_use] //~ ERROR `#[must_use]` has no effect
 extern "Rust" {
     #[link_name = "STATIC"]
-    #[must_use] //~ ERROR attribute cannot be used on
-    //~| WARN previously accepted
+    #[must_use] //~ ERROR `#[must_use]` has no effect
     static FOREIGN_STATIC: usize;
 
     #[link_name = "foo"]
@@ -65,25 +55,19 @@ extern "Rust" {
     fn foreign_foo() -> i64;
 }
 
-#[must_use]
-//~^ ERROR `#[must_use]` attribute cannot be used on macro calls
-//~| WARN this was previously accepted by the compiler but is being phased out
+#[must_use] //~ ERROR unused attribute
 global_asm!("");
 
-#[must_use] //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
+#[must_use] //~ ERROR `#[must_use]` has no effect
 type UseMe = ();
 
-fn qux<#[must_use] T>(_: T) {} //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
+fn qux<#[must_use] T>(_: T) {} //~ ERROR `#[must_use]` has no effect
 
 #[must_use]
 trait Use {
-    #[must_use] //~ ERROR attribute cannot be used on
-    //~| WARN previously accepted
+    #[must_use] //~ ERROR `#[must_use]` has no effect
     const ASSOC_CONST: usize = 4;
-    #[must_use] //~ ERROR attribute cannot be used on
-    //~| WARN previously accepted
+    #[must_use] //~ ERROR `#[must_use]` has no effect
     type AssocTy;
 
     #[must_use]
@@ -92,24 +76,15 @@ trait Use {
     }
 }
 
-#[must_use] //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
+#[must_use] //~ ERROR `#[must_use]` has no effect
 impl Use for () {
     type AssocTy = ();
-
-    #[must_use] //~ ERROR attribute cannot be used on
-    //~| WARN previously accepted
-    fn get_four(&self) -> usize {
-        4
-    }
 }
 
-#[must_use] //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
+#[must_use] //~ ERROR `#[must_use]` has no effect
 trait Alias = Use;
 
-#[must_use] //~ ERROR attribute cannot be used on
-//~| WARN previously accepted
+#[must_use] //~ ERROR `#[must_use]` has no effect
 macro_rules! cool_macro {
     () => {
         4
@@ -117,13 +92,11 @@ macro_rules! cool_macro {
 }
 
 fn main() {
-    #[must_use] //~ ERROR attribute cannot be used on
-    //~| WARN previously accepted
+    #[must_use] //~ ERROR `#[must_use]` has no effect
     let x = || {};
     x();
 
-    let x = #[must_use] //~ ERROR attribute cannot be used on
-    //~| WARN previously accepted
+    let x = #[must_use] //~ ERROR `#[must_use]` has no effect
     || {};
     x();
 
@@ -145,8 +118,7 @@ fn main() {
     ().get_four(); //~ ERROR that must be used
 
     match Some(4) {
-        #[must_use] //~ ERROR attribute cannot be used on
-        //~| WARN previously accepted
+        #[must_use] //~ ERROR `#[must_use]` has no effect
         Some(res) => res,
         None => 0,
     };
@@ -154,9 +126,6 @@ fn main() {
     struct PatternField {
         foo: i32,
     }
-    let s = PatternField { #[must_use]  foo: 123 }; //~ ERROR attribute cannot be used on
-    //~| WARN previously accepted
-    let PatternField { #[must_use] foo } = s; //~ ERROR attribute cannot be used on
-    //~| WARN previously accepted
-    let _ = foo;
+    let s = PatternField { #[must_use]  foo: 123 }; //~ ERROR `#[must_use]` has no effect
+    let PatternField { #[must_use] foo } = s; //~ ERROR `#[must_use]` has no effect
 }

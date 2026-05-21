@@ -1,6 +1,5 @@
-use rustc_hir::def_id::DefId;
 use rustc_infer::infer::relate::{
-    self, Relate, RelateResult, TypeRelation, structurally_relate_tys,
+    self, structurally_relate_tys, Relate, RelateResult, TypeRelation,
 };
 use rustc_middle::ty::error::{ExpectedFound, TypeError};
 use rustc_middle::ty::{self, InferConst, Ty, TyCtxt};
@@ -22,12 +21,12 @@ use tracing::instrument;
 /// Like subtyping, matching is really a binary relation, so the only
 /// important thing about the result is Ok/Err. Also, matching never
 /// affects any type variables or unification state.
-pub(crate) struct MatchAgainstFreshVars<'tcx> {
+pub struct MatchAgainstFreshVars<'tcx> {
     tcx: TyCtxt<'tcx>,
 }
 
 impl<'tcx> MatchAgainstFreshVars<'tcx> {
-    pub(crate) fn new(tcx: TyCtxt<'tcx>) -> MatchAgainstFreshVars<'tcx> {
+    pub fn new(tcx: TyCtxt<'tcx>) -> MatchAgainstFreshVars<'tcx> {
         MatchAgainstFreshVars { tcx }
     }
 }
@@ -35,19 +34,6 @@ impl<'tcx> MatchAgainstFreshVars<'tcx> {
 impl<'tcx> TypeRelation<TyCtxt<'tcx>> for MatchAgainstFreshVars<'tcx> {
     fn cx(&self) -> TyCtxt<'tcx> {
         self.tcx
-    }
-
-    fn relate_ty_args(
-        &mut self,
-        a_ty: Ty<'tcx>,
-        _: Ty<'tcx>,
-        _: DefId,
-        a_args: ty::GenericArgsRef<'tcx>,
-        b_args: ty::GenericArgsRef<'tcx>,
-        _: impl FnOnce(ty::GenericArgsRef<'tcx>) -> Ty<'tcx>,
-    ) -> RelateResult<'tcx, Ty<'tcx>> {
-        relate::relate_args_invariantly(self, a_args, b_args)?;
-        Ok(a_ty)
     }
 
     fn relate_with_variance<T: Relate<TyCtxt<'tcx>>>(
@@ -84,7 +70,7 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for MatchAgainstFreshVars<'tcx> {
             ) => Ok(a),
 
             (&ty::Infer(_), _) | (_, &ty::Infer(_)) => {
-                Err(TypeError::Sorts(ExpectedFound::new(a, b)))
+                Err(TypeError::Sorts(ExpectedFound::new(true, a, b)))
             }
 
             (&ty::Error(guar), _) | (_, &ty::Error(guar)) => Ok(Ty::new_error(self.cx(), guar)),
@@ -109,7 +95,7 @@ impl<'tcx> TypeRelation<TyCtxt<'tcx>> for MatchAgainstFreshVars<'tcx> {
             }
 
             (ty::ConstKind::Infer(_), _) | (_, ty::ConstKind::Infer(_)) => {
-                return Err(TypeError::ConstMismatch(ExpectedFound::new(a, b)));
+                return Err(TypeError::ConstMismatch(ExpectedFound::new(true, a, b)));
             }
 
             _ => {}

@@ -1,5 +1,4 @@
-//@ proc-macro: format-string-proc-macro.rs
-//@ ignore-backends: gcc
+//@ aux-build:format-string-proc-macro.rs
 
 extern crate format_string_proc_macro;
 

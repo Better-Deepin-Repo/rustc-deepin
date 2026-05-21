@@ -4,5 +4,4 @@
 // next flag as the argument of this flag.
 //
 //@ compile-flags: --cap-lints
-
-//~? RAW Argument to option 'cap-lints' missing
+//@ error-pattern: Argument to option 'cap-lints' missing

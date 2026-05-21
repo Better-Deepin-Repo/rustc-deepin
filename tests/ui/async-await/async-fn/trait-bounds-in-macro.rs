@@ -6,7 +6,7 @@ macro_rules! x {
 
 x! {
     async fn foo() -> impl async Fn() { }
-    //~^ ERROR `async` trait bounds are unstable
+    //~^ ERROR async closures are unstable
 }
 
 fn main() {}

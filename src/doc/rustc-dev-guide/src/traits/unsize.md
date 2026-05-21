@@ -16,7 +16,7 @@ pointers, and there are rules about when a type is allowed to implement
 # [`Unsize`](https://doc.rust-lang.org/std/marker/trait.Unsize.html)
 
 To contrast, the `Unsize` trait is concerned the actual types that are allowed
-to be unsized.
+to be unsized. 
 
 This is not intended to be implemented by users ever, since `Unsize` does not
 instruct the compiler (namely codegen) *how* to unsize a type, just whether it
@@ -27,26 +27,26 @@ which must understand how types are represented and unsized.
 
 Built-in implementations are provided for:
 * `T` -> `dyn Trait + 'a` when `T: Trait` (and `T: Sized + 'a`, and `Trait`
-  is dyn-compatible[^2]).
+  is object safe).
 * `[T; N]` -> `[T]`
 
 ## Structural implementations
 
-There is one implementation of `Unsize` which can be thought of as
+There are two implementations of `Unsize` which can be thought of as
 structural:
+* `(A1, A2, .., An): Unsize<(A1, A2, .., U)>` given `An: Unsize<U>`, which
+  allows the tail field of a tuple to be unsized. This is gated behind the
+  [`unsized_tuple_coercion`] feature.
 * `Struct<.., Pi, .., Pj, ..>: Unsize<Struct<.., Ui, .., Uj, ..>>` given 
   `TailField<Pi, .., Pj>: Unsize<Ui, .. Uj>`, which allows the tail field of a
   struct to be unsized if it is the only field that mentions generic parameters
   `Pi`, .., `Pj` (which don't need to be contiguous).
 
-The rules for struct unsizing are slightly complicated, since they
+The rules for the latter implementation are slightly complicated, since they
 may allow more than one parameter to be changed (not necessarily unsized) and
 are best stated in terms of the tail field of the struct.
 
-(Tuple unsizing was previously implemented behind the feature gate
-`unsized_tuple_coercion`, but the implementation was removed by [#137728].)
-
-[#137728]: https://github.com/rust-lang/rust/pull/137728
+[`unsized_tuple_coercion`]: https://doc.rust-lang.org/beta/unstable-book/language-features/unsized-tuple-coercion.html
 
 ## Upcasting implementations
 
@@ -82,4 +82,4 @@ Specifically, (3.) prevents a choice of projection bound to guide inference
 unnecessarily, though it may guide inference when it is unambiguous.
 
 [^1]: The principal is the one non-auto trait of a `dyn Trait`.
-[^2]: Formerly known as "object safe".
+

@@ -1,6 +1,7 @@
 //@ run-pass
 #![feature(core_intrinsics)]
 #![feature(const_heap)]
+#![feature(const_mut_refs)]
 
 use std::intrinsics;
 
@@ -12,7 +13,7 @@ const _X: () = unsafe {
 const Y: &u32 = unsafe {
     let ptr = intrinsics::const_allocate(4, 4) as *mut u32;
     *ptr = 42;
-    &*(intrinsics::const_make_global(ptr as *mut u8) as *const u32)
+    &*ptr
 };
 
 const Z: &u32 = &42;

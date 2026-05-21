@@ -1,8 +1,6 @@
-#![allow(rustc::symbol_intern_string_literal)]
-
 use rustc_ast::token::{self, IdentIsRaw};
 use rustc_ast::tokenstream::{TokenStream, TokenTree};
-use rustc_span::{BytePos, Span, Symbol, create_default_session_globals_then};
+use rustc_span::{create_default_session_globals_then, BytePos, Span, Symbol};
 
 use crate::parser::tests::string_to_stream;
 
@@ -14,10 +12,6 @@ fn sp(a: u32, b: u32) -> Span {
     Span::with_root_ctxt(BytePos(a), BytePos(b))
 }
 
-fn cmp_token_stream(a: &TokenStream, b: &TokenStream) -> bool {
-    a.iter().eq_by(b.iter(), |x, y| x.eq_unspanned(y))
-}
-
 #[test]
 fn test_concat() {
     create_default_session_globals_then(|| {
@@ -27,9 +21,9 @@ fn test_concat() {
         let mut eq_res = TokenStream::default();
         eq_res.push_stream(test_fst);
         eq_res.push_stream(test_snd);
-        assert_eq!(test_res.iter().count(), 5);
-        assert_eq!(eq_res.iter().count(), 5);
-        assert_eq!(cmp_token_stream(&test_res, &eq_res), true);
+        assert_eq!(test_res.trees().count(), 5);
+        assert_eq!(eq_res.trees().count(), 5);
+        assert_eq!(test_res.eq_unspanned(&eq_res), true);
     })
 }
 
@@ -37,7 +31,7 @@ fn test_concat() {
 fn test_to_from_bijection() {
     create_default_session_globals_then(|| {
         let test_start = string_to_ts("foo::bar(baz)");
-        let test_end = test_start.iter().cloned().collect();
+        let test_end = test_start.trees().cloned().collect();
         assert_eq!(test_start, test_end)
     })
 }
@@ -108,7 +102,7 @@ fn test_dotdotdot() {
         stream.push_tree(TokenTree::token_joint(token::Dot, sp(0, 1)));
         stream.push_tree(TokenTree::token_joint(token::Dot, sp(1, 2)));
         stream.push_tree(TokenTree::token_alone(token::Dot, sp(2, 3)));
-        assert!(cmp_token_stream(&stream, &string_to_ts("...")));
-        assert_eq!(stream.iter().count(), 1);
+        assert!(stream.eq_unspanned(&string_to_ts("...")));
+        assert_eq!(stream.trees().count(), 1);
     })
 }

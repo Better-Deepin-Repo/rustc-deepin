@@ -1,5 +1,8 @@
 # Unsafe attributes
 
+🚧 The 2024 Edition has not yet been released and hence this section is still "under construction".
+More information may be found in the tracking issue at <https://github.com/rust-lang/rust/issues/123757>.
+
 ## Summary
 
 - The following attributes must now be marked as `unsafe`:
@@ -46,7 +49,8 @@ fn foo() -> usize { 1 }
 
 In the 2024 Edition, it is now required to mark these attributes as unsafe to emphasize that it is required to ensure that the symbol is defined correctly:
 
-```rust,edition2024
+<!-- TODO: edition2024 -->
+```rust
 // SAFETY: There should only be a single definition of the loop symbol.
 #[unsafe(export_name="loop")]
 fn arduino_loop() {

@@ -2,7 +2,7 @@
 mod foo {
     struct Priv;
     mod bar {
-        use crate::foo::Priv;
+        use foo::Priv;
         pub(super) fn f(_: Priv) {}
         pub(crate) fn g(_: Priv) {}
         pub(crate) fn h(_: Priv) {}

@@ -1,25 +1,24 @@
 //! Validates syntax inside Rust code blocks (\`\`\`rust).
 
-use std::borrow::Cow;
-use std::sync::Arc;
-
-use rustc_data_structures::sync::Lock;
+use rustc_data_structures::sync::{Lock, Lrc};
 use rustc_errors::emitter::Emitter;
-use rustc_errors::translation::{format_diag_message, to_fluent_args};
-use rustc_errors::{Applicability, DiagCtxt, DiagInner};
+use rustc_errors::translation::{to_fluent_args, Translate};
+use rustc_errors::{Applicability, DiagCtxt, DiagInner, LazyFallbackBundle};
 use rustc_parse::{source_str_to_stream, unwrap_or_emit_fatal};
 use rustc_resolve::rustdoc::source_span_for_markdown_range;
 use rustc_session::parse::ParseSess;
 use rustc_span::hygiene::{AstPass, ExpnData, ExpnKind, LocalExpnId, Transparency};
 use rustc_span::source_map::{FilePathMapping, SourceMap};
-use rustc_span::{DUMMY_SP, FileName, InnerSpan};
+use rustc_span::{FileName, InnerSpan, DUMMY_SP};
 
 use crate::clean;
 use crate::core::DocContext;
 use crate::html::markdown::{self, RustCodeBlock};
 
-pub(crate) fn visit_item(cx: &DocContext<'_>, item: &clean::Item, dox: &str) {
-    if let Some(def_id) = item.item_id.as_local_def_id() {
+pub(crate) fn visit_item(cx: &DocContext<'_>, item: &clean::Item) {
+    if let Some(def_id) = item.item_id.as_local_def_id()
+        && let Some(dox) = &item.opt_doc_value()
+    {
         let sp = item.attr_span(cx.tcx);
         let extra = crate::html::markdown::ExtraInfo::new(cx.tcx, def_id, sp);
         for code_block in markdown::rust_code_blocks(dox, &extra) {
@@ -34,16 +33,16 @@ fn check_rust_syntax(
     dox: &str,
     code_block: RustCodeBlock,
 ) {
-    let buffer = Arc::new(Lock::new(Buffer::default()));
-    let emitter = BufferEmitter { buffer: Arc::clone(&buffer) };
+    let buffer = Lrc::new(Lock::new(Buffer::default()));
+    let fallback_bundle = rustc_errors::fallback_fluent_bundle(
+        rustc_driver::DEFAULT_LOCALE_RESOURCES.to_vec(),
+        false,
+    );
+    let emitter = BufferEmitter { buffer: Lrc::clone(&buffer), fallback_bundle };
 
-    let sm = Arc::new(SourceMap::new(FilePathMapping::empty()));
+    let sm = Lrc::new(SourceMap::new(FilePathMapping::empty()));
     let dcx = DiagCtxt::new(Box::new(emitter)).disable_warnings();
-    let source = dox[code_block.code]
-        .lines()
-        .map(|line| crate::html::markdown::map_line(line).for_code())
-        .intersperse(Cow::Borrowed("\n"))
-        .collect::<String>();
+    let source = dox[code_block.code].to_owned();
     let psess = ParseSess::with_dcx(dcx, sm);
 
     let edition = code_block.lang_string.edition.unwrap_or_else(|| cx.tcx.sess.edition());
@@ -85,7 +84,7 @@ fn check_rust_syntax(
         &code_block.range,
         &item.attrs.doc_strings,
     ) {
-        Some((sp, _)) => (sp, true),
+        Some(sp) => (sp, true),
         None => (item.attr_span(cx.tcx), false),
     };
 
@@ -143,7 +142,18 @@ struct Buffer {
 }
 
 struct BufferEmitter {
-    buffer: Arc<Lock<Buffer>>,
+    buffer: Lrc<Lock<Buffer>>,
+    fallback_bundle: LazyFallbackBundle,
+}
+
+impl Translate for BufferEmitter {
+    fn fluent_bundle(&self) -> Option<&Lrc<rustc_errors::FluentBundle>> {
+        None
+    }
+
+    fn fallback_fluent_bundle(&self) -> &rustc_errors::FluentBundle {
+        &**self.fallback_bundle
+    }
 }
 
 impl Emitter for BufferEmitter {
@@ -151,7 +161,8 @@ impl Emitter for BufferEmitter {
         let mut buffer = self.buffer.borrow_mut();
 
         let fluent_args = to_fluent_args(diag.args.iter());
-        let translated_main_message = format_diag_message(&diag.messages[0].0, &fluent_args)
+        let translated_main_message = self
+            .translate_message(&diag.messages[0].0, &fluent_args)
             .unwrap_or_else(|e| panic!("{e}"));
 
         buffer.messages.push(format!("error from rustc: {translated_main_message}"));
@@ -160,7 +171,7 @@ impl Emitter for BufferEmitter {
         }
     }
 
-    fn source_map(&self) -> Option<&SourceMap> {
+    fn source_map(&self) -> Option<&Lrc<SourceMap>> {
         None
     }
 }

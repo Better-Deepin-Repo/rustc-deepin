@@ -1,8 +1,7 @@
 error: methods called `new` usually return `Self`
-  --> tests/ui/methods.rs:102:5
+  --> tests/ui/methods.rs:103:5
    |
 LL | /     fn new() -> i32 {
-LL | |
 LL | |         0
 LL | |     }
    | |_____^
@@ -15,7 +14,6 @@ error: called `filter(..).next()` on an `Iterator`. This is more succinctly expr
    |
 LL |       let _ = v.iter().filter(|&x| {
    |  _____________^
-LL | |
 LL | |                                 *x < 0
 LL | |                             }
 LL | |                    ).next();
@@ -24,16 +22,5 @@ LL | |                    ).next();
    = note: `-D clippy::filter-next` implied by `-D warnings`
    = help: to override `-D warnings` add `#[allow(clippy::filter_next)]`
 
-error: called `filter(..).next_back()` on an `DoubleEndedIterator`. This is more succinctly expressed by calling `.rfind(..)` instead
-  --> tests/ui/methods.rs:143:13
-   |
-LL |       let _ = v.iter().filter(|&x| {
-   |  _____________^
-LL | |
-LL | |                                 *x < 0
-LL | |                             }
-LL | |                    ).next_back();
-   | |________________________________^
-
-error: aborting due to 3 previous errors
+error: aborting due to 2 previous errors
 

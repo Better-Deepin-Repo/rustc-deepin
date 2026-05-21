@@ -3,41 +3,22 @@
 #![warn(clippy::module_name_repetitions)]
 #![allow(dead_code)]
 
-pub mod foo {
+mod foo {
     pub fn foo() {}
     pub fn foo_bar() {}
-    //~^ module_name_repetitions
-
+    //~^ ERROR: item name starts with its containing module's name
+    //~| NOTE: `-D clippy::module-name-repetitions` implied by `-D warnings`
     pub fn bar_foo() {}
-    //~^ module_name_repetitions
-
+    //~^ ERROR: item name ends with its containing module's name
     pub struct FooCake;
-    //~^ module_name_repetitions
-
+    //~^ ERROR: item name starts with its containing module's name
     pub enum CakeFoo {}
-    //~^ module_name_repetitions
-
+    //~^ ERROR: item name ends with its containing module's name
     pub struct Foo7Bar;
-    //~^ module_name_repetitions
+    //~^ ERROR: item name starts with its containing module's name
 
     // Should not warn
     pub struct Foobar;
-
-    // #8524 - shouldn't warn when item is declared in a private module...
-    mod error {
-        pub struct Error;
-        pub struct FooError;
-    }
-    pub use error::Error;
-    // ... but should still warn when the item is reexported to create a *public* path with repetition.
-    pub use error::FooError;
-    //~^ module_name_repetitions
-
-    // FIXME: This should also warn because it creates the public path `foo::FooIter`.
-    mod iter {
-        pub struct FooIter;
-    }
-    pub use iter::*;
 
     // #12544 - shouldn't warn if item name consists only of an allowed prefix and a module name.
     pub fn to_foo() {}
@@ -55,21 +36,3 @@ pub mod foo {
 }
 
 fn main() {}
-
-pub mod issue14095 {
-    pub mod widget {
-        #[macro_export]
-        macro_rules! define_widget {
-            ($id:ident) => {
-                /* ... */
-            };
-        }
-
-        #[macro_export]
-        macro_rules! widget_impl {
-            ($id:ident) => {
-                /* ... */
-            };
-        }
-    }
-}

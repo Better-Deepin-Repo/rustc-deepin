@@ -128,7 +128,7 @@ historical editions.
 
 ### The Cargo Book
 
-[The Cargo Book](cargo/index.html) is a guide to Cargo, Rust's build tool and
+[The Cargo Book](../../cargo/book/index.html) is a guide to Cargo, Rust's build tool and
 dependency manager.
 
 ### The Rustdoc Book
@@ -172,9 +172,9 @@ unsafe Rust. It's also sometimes called "the 'nomicon."
 [The Unstable Book](unstable-book/index.html) has documentation for unstable
 features.
 
-### The `rustc` Development Guide
+### The `rustc` Contribution Guide
 
-[The `rustc-dev-guide`](https://rustc-dev-guide.rust-lang.org/)
+[The `rustc` Guide](https://rustc-dev-guide.rust-lang.org/)
 documents how the compiler works and how to contribute to it. This is useful if
 you want to build or modify the Rust compiler from source (e.g. to target
 something non-standard).
@@ -194,8 +194,9 @@ resources maintained by the [Embedded Working Group] useful.
 
 #### The Embedded Rust Book
 
-[The Embedded Rust Book] is targeted at developers who are familiar with embedded
-development and Rust, but who have not used Rust for embedded development.
+[The Embedded Rust Book] is targeted at developers familiar with embedded
+development and familiar with Rust, but have not used Rust for embedded
+development.
 
 [The Embedded Rust Book]: embedded-book/index.html
 [Rust project]: https://www.rust-lang.org

@@ -1,5 +1,5 @@
 //@ check-pass
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 //@ aux-build:derive-helper-shadowed-2.rs
 
 #[macro_use]

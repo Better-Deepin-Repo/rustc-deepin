@@ -1,10 +1,11 @@
-warning: unreachable call
-  --> $DIR/unreachable-try-pattern.rs:19:33
+warning: unreachable expression
+  --> $DIR/unreachable-try-pattern.rs:19:36
    |
 LL |     let y = (match x { Ok(n) => Ok(n as u32), Err(e) => Err(e) })?;
-   |                                 ^^ - any code following this expression is unreachable
-   |                                 |
-   |                                 unreachable call
+   |                                    -^^^^^^^
+   |                                    |
+   |                                    unreachable expression
+   |                                    any code following this expression is unreachable
    |
 note: the lint level is defined here
   --> $DIR/unreachable-try-pattern.rs:3:9
@@ -16,10 +17,7 @@ warning: unreachable pattern
   --> $DIR/unreachable-try-pattern.rs:19:24
    |
 LL |     let y = (match x { Ok(n) => Ok(n as u32), Err(e) => Err(e) })?;
-   |                        ^^^^^-----------------
-   |                        |
-   |                        matches no values because `!` is uninhabited
-   |                        help: remove the match arm
+   |                        ^^^^^ matches no values because `!` is uninhabited
    |
    = note: to learn more about uninhabited types, see https://doc.rust-lang.org/nomicon/exotic-sizes.html#empty-types
 note: the lint level is defined here
@@ -32,10 +30,7 @@ warning: unreachable pattern
   --> $DIR/unreachable-try-pattern.rs:30:40
    |
 LL |     let y = (match x { Ok(n) => Ok(n), Err(e) => Err(e) })?;
-   |                                        ^^^^^^----------
-   |                                        |
-   |                                        matches no values because `Void` is uninhabited
-   |                                        help: remove the match arm
+   |                                        ^^^^^^ matches no values because `Void` is uninhabited
    |
    = note: to learn more about uninhabited types, see https://doc.rust-lang.org/nomicon/exotic-sizes.html#empty-types
 

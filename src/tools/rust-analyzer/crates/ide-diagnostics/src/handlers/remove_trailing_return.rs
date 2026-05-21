@@ -1,9 +1,9 @@
-use hir::{FileRange, db::ExpandDatabase, diagnostics::RemoveTrailingReturn};
-use ide_db::text_edit::TextEdit;
+use hir::{db::ExpandDatabase, diagnostics::RemoveTrailingReturn, FileRange};
 use ide_db::{assists::Assist, source_change::SourceChange};
-use syntax::{AstNode, ast};
+use syntax::{ast, AstNode};
+use text_edit::TextEdit;
 
-use crate::{Diagnostic, DiagnosticCode, DiagnosticsContext, adjusted_display_range, fix};
+use crate::{adjusted_display_range, fix, Diagnostic, DiagnosticCode, DiagnosticsContext};
 
 // Diagnostic: remove-trailing-return
 //
@@ -31,7 +31,6 @@ pub(crate) fn remove_trailing_return(
             "replace return <expr>; with <expr>",
             display_range,
         )
-        .stable()
         .with_fixes(fixes(ctx, d)),
     )
 }
@@ -50,7 +49,7 @@ fn fixes(ctx: &DiagnosticsContext<'_>, d: &RemoveTrailingReturn) -> Option<Vec<A
     let replacement =
         return_expr.expr().map_or_else(String::new, |expr| format!("{}", expr.syntax().text()));
     let edit = TextEdit::replace(range, replacement);
-    let source_change = SourceChange::from_text_edit(file_id.file_id(ctx.sema.db), edit);
+    let source_change = SourceChange::from_text_edit(file_id, edit);
 
     Some(vec![fix(
         "remove_trailing_return",

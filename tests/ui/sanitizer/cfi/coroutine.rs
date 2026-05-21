@@ -3,21 +3,20 @@
 //@ revisions: cfi kcfi
 // FIXME(#122848) Remove only-linux once OSX CFI binaries work
 //@ only-linux
-//@ ignore-backends: gcc
 //@ edition: 2024
 //@ [cfi] needs-sanitizer-cfi
 //@ [kcfi] needs-sanitizer-kcfi
 //@ compile-flags: -C target-feature=-crt-static
-//@ compile-flags: -C unsafe-allow-abi-mismatch=sanitizer
 //@ [cfi] compile-flags: -C codegen-units=1 -C lto -C prefer-dynamic=off -C opt-level=0
 //@ [cfi] compile-flags: -Z sanitizer=cfi
 //@ [kcfi] compile-flags: -Z sanitizer=kcfi
 //@ [kcfi] compile-flags: -C panic=abort -Z panic-abort-tests -C prefer-dynamic=off
-//@ compile-flags: --test
+//@ compile-flags: --test -Z unstable-options
 //@ run-pass
 
 #![feature(coroutines, stmt_expr_attributes)]
 #![feature(coroutine_trait)]
+#![feature(noop_waker)]
 #![feature(gen_blocks)]
 #![feature(async_iterator)]
 
@@ -28,7 +27,7 @@ use std::async_iter::AsyncIterator;
 
 #[test]
 fn general_coroutine() {
-    let coro = #[coroutine] |x: i32| {
+    let mut coro = #[coroutine] |x: i32| {
         yield x;
         "done"
     };

@@ -1,6 +1,6 @@
 use hir::GenericParam;
-use ide_db::{RootDatabase, defs::Definition, helpers::pick_best_token};
-use syntax::{AstNode, SyntaxKind::*, SyntaxToken, T, ast, match_ast};
+use ide_db::{base_db::Upcast, defs::Definition, helpers::pick_best_token, RootDatabase};
+use syntax::{ast, match_ast, AstNode, SyntaxKind::*, SyntaxToken, T};
 
 use crate::{FilePosition, NavigationTarget, RangeInfo, TryToNav};
 
@@ -8,11 +8,13 @@ use crate::{FilePosition, NavigationTarget, RangeInfo, TryToNav};
 //
 // Navigates to the type of an identifier.
 //
-// | Editor  | Action Name |
-// |---------|-------------|
-// | VS Code | **Go to Type Definition** |
+// |===
+// | Editor  | Action Name
 //
-// ![Go to Type Definition](https://user-images.githubusercontent.com/48062697/113020657-b560f500-917a-11eb-9007-0f809733a338.gif)
+// | VS Code | **Go to Type Definition**
+// |===
+//
+// image::https://user-images.githubusercontent.com/48062697/113020657-b560f500-917a-11eb-9007-0f809733a338.gif[]
 pub(crate) fn goto_type_definition(
     db: &RootDatabase,
     FilePosition { file_id, offset }: FilePosition,
@@ -22,15 +24,14 @@ pub(crate) fn goto_type_definition(
     let file: ast::SourceFile = sema.parse_guess_edition(file_id);
     let token: SyntaxToken =
         pick_best_token(file.syntax().token_at_offset(offset), |kind| match kind {
-            IDENT | INT_NUMBER | T![self] => 3,
+            IDENT | INT_NUMBER | T![self] => 2,
             kind if kind.is_trivia() => 0,
-            T![;] => 1,
-            _ => 2,
+            _ => 1,
         })?;
 
     let mut res = Vec::new();
     let mut push = |def: Definition| {
-        if let Some(navs) = def.try_to_nav(&sema) {
+        if let Some(navs) = def.try_to_nav(db) {
             for nav in navs {
                 if !res.contains(&nav) {
                     res.push(nav);
@@ -38,7 +39,7 @@ pub(crate) fn goto_type_definition(
             }
         }
     };
-    let mut process_ty = |ty: hir::Type<'_>| {
+    let mut process_ty = |ty: hir::Type| {
         // collect from each `ty` into the `res` result vec
         let ty = ty.strip_references();
         ty.walk(db, |t| {
@@ -53,9 +54,7 @@ pub(crate) fn goto_type_definition(
             }
         });
     };
-    if let Some((range, _, _, resolution)) =
-        sema.check_for_format_args_template(token.clone(), offset)
-    {
+    if let Some((range, resolution)) = sema.check_for_format_args_template(token.clone(), offset) {
         if let Some(ty) = resolution.and_then(|res| match Definition::from(res) {
             Definition::Const(it) => Some(it.ty(db)),
             Definition::Static(it) => Some(it.ty(db)),
@@ -70,10 +69,11 @@ pub(crate) fn goto_type_definition(
     }
 
     let range = token.text_range();
-    sema.descend_into_macros_no_opaque(token, false)
+    sema.descend_into_macros(token)
         .into_iter()
         .filter_map(|token| {
-            sema.token_ancestors_with_macros(token.value)
+            let ty = sema
+                .token_ancestors_with_macros(token)
                 // When `token` is within a macro call, we can't determine its type. Don't continue
                 // this traversal because otherwise we'll end up returning the type of *that* macro
                 // call, which is not what we want in general.
@@ -88,7 +88,7 @@ pub(crate) fn goto_type_definition(
                             ast::Pat(it) => sema.type_of_pat(&it)?.original,
                             ast::SelfParam(it) => sema.type_of_self(&it)?,
                             ast::Type(it) => sema.resolve_type(&it)?,
-                            ast::RecordField(it) => sema.to_def(&it)?.ty(db).to_type(db),
+                            ast::RecordField(it) => sema.to_def(&it)?.ty(db.upcast()),
                             // can't match on RecordExprField directly as `ast::Expr` will match an iteration too early otherwise
                             ast::NameRef(it) => {
                                 if let Some(record_field) = ast::RecordExprField::for_name_ref(&it) {
@@ -102,8 +102,10 @@ pub(crate) fn goto_type_definition(
                             _ => return None,
                         }
                     };
+
                     Some(ty)
-                })
+                });
+            ty
         })
         .for_each(process_ty);
     Some(RangeInfo::new(range, res))
@@ -116,7 +118,7 @@ mod tests {
 
     use crate::fixture;
 
-    fn check(#[rust_analyzer::rust_fixture] ra_fixture: &str) {
+    fn check(ra_fixture: &str) {
         let (analysis, position, expected) = fixture::annotations(ra_fixture);
         let navs = analysis.goto_type_definition(position).unwrap().unwrap().info;
         assert!(!navs.is_empty(), "navigation is empty");

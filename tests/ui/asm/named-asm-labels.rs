@@ -10,7 +10,9 @@
 // which causes less readable LLVM errors and in the worst cases causes ICEs
 // or segfaults based on system dependent behavior and codegen flags.
 
-use std::arch::{asm, global_asm, naked_asm};
+#![feature(naked_functions)]
+
+use std::arch::{asm, global_asm};
 
 #[no_mangle]
 pub static FOO: usize = 42;
@@ -171,10 +173,12 @@ fn main() {
     }
 }
 
-// Don't trigger on naked functions.
-#[unsafe(naked)]
+// Trigger on naked fns too, even though they can't be inlined, reusing a
+// label or LTO can cause labels to break
+#[naked]
 pub extern "C" fn foo() -> i32 {
-    naked_asm!(".Lfoo: mov rax, {}; ret;", "nop", const 1)
+    unsafe { asm!(".Lfoo: mov rax, {}; ret;", "nop", const 1, options(noreturn)) }
+    //~^ ERROR avoid using named labels
 }
 
 // Make sure that non-naked attributes *do* still let the lint happen
@@ -184,32 +188,21 @@ pub extern "C" fn bar() {
     //~^ ERROR avoid using named labels
 }
 
-#[unsafe(naked)]
+#[naked]
 pub extern "C" fn aaa() {
     fn _local() {}
 
-    naked_asm!(".Laaa: nop; ret;")
-}
-
-#[unsafe(naked)]
-pub extern "C" fn bbb<'a>(a: &'a u32) {
-    naked_asm!(".Lbbb: nop; ret;")
-}
-
-#[unsafe(naked)]
-pub extern "C" fn ccc<T>(a: &T) {
-    naked_asm!(".Lccc: nop; ret;")
-    //~^ ERROR avoid using named labels
+    unsafe { asm!(".Laaa: nop; ret;", options(noreturn)) } //~ ERROR avoid using named labels
 }
 
 pub fn normal() {
     fn _local1() {}
 
-    #[unsafe(naked)]
+    #[naked]
     pub extern "C" fn bbb() {
         fn _very_local() {}
 
-        naked_asm!(".Lbbb: nop; ret;")
+        unsafe { asm!(".Lbbb: nop; ret;", options(noreturn)) } //~ ERROR avoid using named labels
     }
 
     fn _local2() {}
@@ -226,9 +219,9 @@ fn closures() {
     };
 
     || {
-        #[unsafe(naked)]
-        extern "C" fn _nested() {
-            naked_asm!("ret;");
+        #[naked]
+        unsafe extern "C" fn _nested() {
+            asm!("ret;", options(noreturn));
         }
 
         unsafe {
@@ -239,10 +232,3 @@ fn closures() {
 
 // Don't trigger on global asm
 global_asm!("aaaaaaaa: nop");
-
-trait Foo {
-    #[unsafe(naked)]
-    extern "C" fn bbb<'a>(a: &'a u32) {
-        naked_asm!(".Lbbb: nop; ret;") //~ ERROR avoid using named labels
-    }
-}

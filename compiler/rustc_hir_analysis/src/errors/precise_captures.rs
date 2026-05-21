@@ -1,56 +1,40 @@
-use rustc_errors::E0799;
 use rustc_macros::Diagnostic;
 use rustc_span::{Span, Symbol};
 
 #[derive(Diagnostic)]
-#[diag("`impl Trait` must mention all {$kind} parameters in scope in `use<...>`")]
-#[note(
-    "currently, all {$kind} parameters are required to be mentioned in the precise captures list"
-)]
+#[diag(hir_analysis_param_not_captured)]
+#[note]
 pub(crate) struct ParamNotCaptured {
     #[primary_span]
     pub opaque_span: Span,
-    #[label("{$kind} parameter is implicitly captured by this `impl Trait`")]
+    #[label]
     pub param_span: Span,
     pub kind: &'static str,
 }
 
 #[derive(Diagnostic)]
-#[diag("`impl Trait` must mention the `Self` type of the trait in `use<...>`")]
-#[note("currently, all type parameters are required to be mentioned in the precise captures list")]
+#[diag(hir_analysis_self_ty_not_captured)]
+#[note]
 pub(crate) struct SelfTyNotCaptured {
     #[primary_span]
     pub opaque_span: Span,
-    #[label("`Self` type parameter is implicitly captured by this `impl Trait`")]
+    #[label]
     pub trait_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "`impl Trait` captures lifetime parameter, but it is not mentioned in `use<...>` precise captures list"
-)]
+#[diag(hir_analysis_lifetime_not_captured)]
 pub(crate) struct LifetimeNotCaptured {
     #[primary_span]
     pub use_span: Span,
-    #[label("this lifetime parameter is captured")]
+    #[label(hir_analysis_param_label)]
     pub param_span: Span,
-    #[label("lifetime captured due to being mentioned in the bounds of the `impl Trait`")]
+    #[label]
     pub opaque_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "`impl Trait` captures lifetime parameter, but it is not mentioned in `use<...>` precise captures list"
-)]
-pub(crate) struct LifetimeImplicitlyCaptured {
-    #[primary_span]
-    pub opaque_span: Span,
-    #[label("all lifetime parameters originating from a trait are captured implicitly")]
-    pub param_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("expected {$kind} parameter in `use<...>` precise captures list, found {$found}")]
+#[diag(hir_analysis_bad_precise_capture)]
 pub(crate) struct BadPreciseCapture {
     #[primary_span]
     pub span: Span,
@@ -59,31 +43,31 @@ pub(crate) struct BadPreciseCapture {
 }
 
 #[derive(Diagnostic)]
-#[diag("`Self` can't be captured in `use<...>` precise captures list, since it is an alias", code = E0799)]
+#[diag(hir_analysis_precise_capture_self_alias)]
 pub(crate) struct PreciseCaptureSelfAlias {
     #[primary_span]
     pub span: Span,
-    #[label("`Self` is not a generic argument, but an alias to the type of the {$what}")]
+    #[label]
     pub self_span: Span,
     pub what: &'static str,
 }
 
 #[derive(Diagnostic)]
-#[diag("cannot capture parameter `{$name}` twice")]
+#[diag(hir_analysis_duplicate_precise_capture)]
 pub(crate) struct DuplicatePreciseCapture {
     #[primary_span]
     pub first_span: Span,
     pub name: Symbol,
-    #[label("parameter captured again here")]
+    #[label]
     pub second_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("lifetime parameter `{$name}` must be listed before non-lifetime parameters")]
+#[diag(hir_analysis_lifetime_must_be_first)]
 pub(crate) struct LifetimesMustBeFirst {
     #[primary_span]
     pub lifetime_span: Span,
     pub name: Symbol,
-    #[label("move the lifetime before this parameter")]
+    #[label]
     pub other_span: Span,
 }

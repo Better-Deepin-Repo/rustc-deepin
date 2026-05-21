@@ -1,8 +1,7 @@
-// Test that if we build `b` against a version of `a` that has
-// one set of types, it will not run with a dylib that has a different set of types.
+// ignore-tidy-linelength
 
-//@ ignore-cross-compile
-// Reason: the compiled binary is executed
+// Test that if we build `b` against a version of `a` that has one set of types, it will not run
+// with a dylib that has a different set of types.
 
 use run_make_support::{run, run_fail, rustc};
 

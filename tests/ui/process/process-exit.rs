@@ -1,8 +1,10 @@
 //@ run-pass
-//@ needs-subprocess
+#![allow(unused_imports)]
+//@ ignore-wasm32 no processes
+//@ ignore-sgx no processes
 
 use std::env;
-use std::process::{self, Command};
+use std::process::{self, Command, Stdio};
 
 fn main() {
     let args: Vec<String> = env::args().collect();

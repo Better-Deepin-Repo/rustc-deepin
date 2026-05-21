@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ aux-build:macro-in-other-crate.rs
 
 #![feature(decl_macro)]

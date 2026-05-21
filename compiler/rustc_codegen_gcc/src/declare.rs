@@ -1,13 +1,14 @@
 #[cfg(feature = "master")]
 use gccjit::{FnAttribute, ToRValue};
 use gccjit::{Function, FunctionType, GlobalKind, LValue, RValue, Type};
-use rustc_codegen_ssa::traits::BaseTypeCodegenMethods;
+use rustc_codegen_ssa::traits::BaseTypeMethods;
 use rustc_middle::ty::Ty;
 use rustc_span::Symbol;
-use rustc_target::callconv::FnAbi;
+use rustc_target::abi::call::FnAbi;
 
 use crate::abi::{FnAbiGcc, FnAbiGccExt};
 use crate::context::CodegenCx;
+use crate::intrinsic::llvm;
 
 impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
     pub fn get_or_insert_global(
@@ -57,7 +58,7 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
         variadic: bool,
     ) -> Function<'gcc> {
         self.linkage.set(FunctionType::Extern);
-        declare_raw_fn(self, name, None, return_type, params, variadic)
+        declare_raw_fn(self, name, () /*llvm::CCallConv*/, return_type, params, variadic)
     }
 
     pub fn declare_global(
@@ -91,22 +92,26 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
         &self,
         name: &str,
         _fn_type: Type<'gcc>,
-        #[cfg(feature = "master")] callconv: Option<FnAttribute<'gcc>>,
-        #[cfg(not(feature = "master"))] callconv: Option<()>,
-    ) -> Function<'gcc> {
+        callconv: (), /*llvm::CCallConv*/
+    ) -> RValue<'gcc> {
         // TODO(antoyo): use the fn_type parameter.
         let const_string = self.context.new_type::<u8>().make_pointer().make_pointer();
         let return_type = self.type_i32();
         let variadic = false;
         self.linkage.set(FunctionType::Exported);
-        declare_raw_fn(
+        let func = declare_raw_fn(
             self,
             name,
             callconv,
             return_type,
             &[self.type_i32(), const_string],
             variadic,
-        )
+        );
+        // NOTE: it is needed to set the current_func here as well, because get_fn() is not called
+        // for the main function.
+        *self.current_func.borrow_mut() = Some(func);
+        // FIXME(antoyo): this is a wrong cast. That requires changing the compiler API.
+        unsafe { std::mem::transmute(func) }
     }
 
     pub fn declare_fn(&self, name: &str, fn_abi: &FnAbi<'tcx, Ty<'tcx>>) -> Function<'gcc> {
@@ -118,11 +123,14 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
             #[cfg(feature = "master")]
             fn_attributes,
         } = fn_abi.gcc_type(self);
-        #[cfg(feature = "master")]
-        let conv = fn_abi.gcc_cconv(self);
-        #[cfg(not(feature = "master"))]
-        let conv = None;
-        let func = declare_raw_fn(self, name, conv, return_type, &arguments_type, is_c_variadic);
+        let func = declare_raw_fn(
+            self,
+            name,
+            (), /*fn_abi.llvm_cconv()*/
+            return_type,
+            &arguments_type,
+            is_c_variadic,
+        );
         self.on_stack_function_params.borrow_mut().insert(func, on_stack_param_indices);
         #[cfg(feature = "master")]
         for fn_attr in fn_attributes {
@@ -154,12 +162,16 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
 fn declare_raw_fn<'gcc>(
     cx: &CodegenCx<'gcc, '_>,
     name: &str,
-    #[cfg(feature = "master")] callconv: Option<FnAttribute<'gcc>>,
-    #[cfg(not(feature = "master"))] _callconv: Option<()>,
+    _callconv: (), /*llvm::CallConv*/
     return_type: Type<'gcc>,
     param_types: &[Type<'gcc>],
     variadic: bool,
 ) -> Function<'gcc> {
+    if name.starts_with("llvm.") {
+        let intrinsic = llvm::intrinsic(name, cx);
+        cx.intrinsics.borrow_mut().insert(name.to_string(), intrinsic);
+        return intrinsic;
+    }
     let func = if cx.functions.borrow().contains_key(name) {
         cx.functions.borrow()[name]
     } else {
@@ -172,10 +184,6 @@ fn declare_raw_fn<'gcc>(
         let name = &mangle_name(name);
         let func =
             cx.context.new_function(None, cx.linkage.get(), return_type, &params, name, variadic);
-        #[cfg(feature = "master")]
-        if let Some(attribute) = callconv {
-            func.add_attribute(attribute);
-        }
         cx.functions.borrow_mut().insert(name.to_string(), func);
 
         #[cfg(feature = "master")]

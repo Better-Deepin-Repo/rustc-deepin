@@ -21,14 +21,11 @@ impl Foo for Bar {
     type X = i32;
     fn foo(#[doc(alias = "qux")] _x: u32) -> Self::X {
         //~^ ERROR
-        #[doc(alias = "stmt")]
-        //~^ ERROR
+        #[doc(alias = "stmt")] //~ ERROR
         let x = 0;
-        #[doc(alias = "expr")]
-        //~^ ERROR
+        #[doc(alias = "expr")] //~ ERROR
         match x {
-            #[doc(alias = "arm")]
-            //~^ ERROR
+            #[doc(alias = "arm")] //~ ERROR
             _ => 0
         }
     }

@@ -1,10 +1,9 @@
 use clippy_utils::diagnostics::span_lint_and_help;
-use clippy_utils::{qpath_generic_tys, sym};
-use clippy_utils::res::MaybeResPath;
+use clippy_utils::{path_def_id, qpath_generic_tys};
 use rustc_hir::def_id::DefId;
 use rustc_hir::{self as hir, QPath};
 use rustc_lint::LateContext;
-use rustc_span::Symbol;
+use rustc_span::{sym, Symbol};
 
 use super::BOX_COLLECTION;
 
@@ -34,7 +33,7 @@ pub(super) fn check(cx: &LateContext<'_>, hir_ty: &hir::Ty<'_>, qpath: &QPath<'_
 
 fn get_std_collection(cx: &LateContext<'_>, qpath: &QPath<'_>) -> Option<Symbol> {
     let param = qpath_generic_tys(qpath).next()?;
-    let id = param.basic_res().opt_def_id()?;
+    let id = path_def_id(cx, param)?;
     cx.tcx
         .get_diagnostic_name(id)
         .filter(|&name| {

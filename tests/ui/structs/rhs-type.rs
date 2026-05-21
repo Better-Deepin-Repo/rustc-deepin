@@ -3,7 +3,7 @@
 
 //@ run-fail
 //@ error-pattern:bye
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 #![allow(unreachable_code)]
 #![allow(unused_variables)]

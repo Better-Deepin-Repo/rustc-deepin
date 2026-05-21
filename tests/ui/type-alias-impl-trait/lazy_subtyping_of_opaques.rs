@@ -6,7 +6,6 @@
 
 type Tait = impl FnOnce() -> ();
 
-#[define_opaque(Tait)]
 fn reify_as_tait() -> Thunk<Tait> {
     //~^ ERROR: expected a `FnOnce()` closure, found `()`
     Thunk::new(|cont| cont)

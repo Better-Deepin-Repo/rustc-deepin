@@ -1,5 +1,5 @@
 use super::*;
-use crate::rustfmt_diff::{ModifiedLines, make_diff};
+use crate::rustfmt_diff::{make_diff, ModifiedLines};
 
 #[derive(Debug, Default)]
 pub(crate) struct ModifiedLinesEmitter;

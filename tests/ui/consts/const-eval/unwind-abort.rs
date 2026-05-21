@@ -1,10 +1,10 @@
-//@ dont-require-annotations: NOTE
+#![feature(const_extern_fn)]
 
 const extern "C" fn foo() {
-    panic!() //~ NOTE inside `foo`
+    panic!() //~ ERROR evaluation of constant value failed
 }
 
-const _: () = foo(); //~ ERROR explicit panic
+const _: () = foo();
 // Ensure that the CTFE engine handles calls to `extern "C"` aborting gracefully
 
 fn main() {

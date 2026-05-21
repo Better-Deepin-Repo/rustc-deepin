@@ -13,19 +13,34 @@
 //! [`OsString`]: crate::ffi::OsString
 #![forbid(unsafe_op_in_unsafe_fn)]
 
+pub mod args;
+pub mod env;
+#[path = "../unsupported/fs.rs"]
+pub mod fs;
 pub mod helpers;
+#[path = "../unsupported/io.rs"]
+pub mod io;
+#[path = "../unsupported/net.rs"]
+pub mod net;
 pub mod os;
-pub mod system_time;
+#[path = "../unsupported/pipe.rs"]
+pub mod pipe;
+pub mod process;
+pub mod stdio;
+pub mod thread;
+pub mod time;
 
 #[cfg(test)]
 mod tests;
 
-use crate::io;
+pub type RawOsError = usize;
+
+use crate::io as std_io;
 use crate::os::uefi;
 use crate::ptr::NonNull;
-use crate::sync::atomic::{Atomic, AtomicPtr, Ordering};
+use crate::sync::atomic::{AtomicPtr, Ordering};
 
-static EXIT_BOOT_SERVICE_EVENT: Atomic<*mut crate::ffi::c_void> =
+static EXIT_BOOT_SERVICE_EVENT: AtomicPtr<crate::ffi::c_void> =
     AtomicPtr::new(crate::ptr::null_mut());
 
 /// # SAFETY
@@ -39,17 +54,17 @@ pub(crate) unsafe fn init(argc: isize, argv: *const *const u8, _sigpipe: u8) {
     unsafe { uefi::env::init_globals(image_handle, system_table) };
 
     // Register exit boot services handler
-    match helpers::OwnedEvent::new(
+    match helpers::create_event(
         r_efi::efi::EVT_SIGNAL_EXIT_BOOT_SERVICES,
         r_efi::efi::TPL_NOTIFY,
         Some(exit_boot_service_handler),
-        None,
+        crate::ptr::null_mut(),
     ) {
         Ok(x) => {
             if EXIT_BOOT_SERVICE_EVENT
                 .compare_exchange(
                     crate::ptr::null_mut(),
-                    x.into_raw(),
+                    x.as_ptr(),
                     Ordering::Release,
                     Ordering::Acquire,
                 )
@@ -69,25 +84,73 @@ pub unsafe fn cleanup() {
     if let Some(exit_boot_service_event) =
         NonNull::new(EXIT_BOOT_SERVICE_EVENT.swap(crate::ptr::null_mut(), Ordering::Acquire))
     {
-        let _ = unsafe { helpers::OwnedEvent::from_raw(exit_boot_service_event.as_ptr()) };
+        let _ = unsafe { helpers::close_event(exit_boot_service_event) };
     }
 }
 
 #[inline]
-pub const fn unsupported<T>() -> io::Result<T> {
+pub const fn unsupported<T>() -> std_io::Result<T> {
     Err(unsupported_err())
 }
 
 #[inline]
-pub const fn unsupported_err() -> io::Error {
-    io::const_error!(io::ErrorKind::Unsupported, "operation not supported on UEFI")
+pub const fn unsupported_err() -> std_io::Error {
+    std_io::const_io_error!(std_io::ErrorKind::Unsupported, "operation not supported on UEFI",)
+}
+
+pub fn decode_error_kind(code: RawOsError) -> crate::io::ErrorKind {
+    use r_efi::efi::Status;
+
+    use crate::io::ErrorKind;
+
+    match r_efi::efi::Status::from_usize(code) {
+        Status::ALREADY_STARTED
+        | Status::COMPROMISED_DATA
+        | Status::CONNECTION_FIN
+        | Status::CRC_ERROR
+        | Status::DEVICE_ERROR
+        | Status::END_OF_MEDIA
+        | Status::HTTP_ERROR
+        | Status::ICMP_ERROR
+        | Status::INCOMPATIBLE_VERSION
+        | Status::LOAD_ERROR
+        | Status::MEDIA_CHANGED
+        | Status::NO_MAPPING
+        | Status::NO_MEDIA
+        | Status::NOT_STARTED
+        | Status::PROTOCOL_ERROR
+        | Status::PROTOCOL_UNREACHABLE
+        | Status::TFTP_ERROR
+        | Status::VOLUME_CORRUPTED => ErrorKind::Other,
+        Status::BAD_BUFFER_SIZE | Status::INVALID_LANGUAGE => ErrorKind::InvalidData,
+        Status::ABORTED => ErrorKind::ConnectionAborted,
+        Status::ACCESS_DENIED => ErrorKind::PermissionDenied,
+        Status::BUFFER_TOO_SMALL => ErrorKind::FileTooLarge,
+        Status::CONNECTION_REFUSED => ErrorKind::ConnectionRefused,
+        Status::CONNECTION_RESET => ErrorKind::ConnectionReset,
+        Status::END_OF_FILE => ErrorKind::UnexpectedEof,
+        Status::HOST_UNREACHABLE => ErrorKind::HostUnreachable,
+        Status::INVALID_PARAMETER => ErrorKind::InvalidInput,
+        Status::IP_ADDRESS_CONFLICT => ErrorKind::AddrInUse,
+        Status::NETWORK_UNREACHABLE => ErrorKind::NetworkUnreachable,
+        Status::NO_RESPONSE => ErrorKind::HostUnreachable,
+        Status::NOT_FOUND => ErrorKind::NotFound,
+        Status::NOT_READY => ErrorKind::ResourceBusy,
+        Status::OUT_OF_RESOURCES => ErrorKind::OutOfMemory,
+        Status::SECURITY_VIOLATION => ErrorKind::PermissionDenied,
+        Status::TIMEOUT => ErrorKind::TimedOut,
+        Status::UNSUPPORTED => ErrorKind::Unsupported,
+        Status::VOLUME_FULL => ErrorKind::StorageFull,
+        Status::WRITE_PROTECTED => ErrorKind::ReadOnlyFilesystem,
+        _ => ErrorKind::Uncategorized,
+    }
 }
 
 pub fn abort_internal() -> ! {
     if let Some(exit_boot_service_event) =
         NonNull::new(EXIT_BOOT_SERVICE_EVENT.load(Ordering::Acquire))
     {
-        let _ = unsafe { helpers::OwnedEvent::from_raw(exit_boot_service_event.as_ptr()) };
+        let _ = unsafe { helpers::close_event(exit_boot_service_event) };
     }
 
     if let (Some(boot_services), Some(handle)) =
@@ -108,7 +171,52 @@ pub fn abort_internal() -> ! {
     core::intrinsics::abort();
 }
 
+// This function is needed by the panic runtime. The symbol is named in
+// pre-link args for the target specification, so keep that in sync.
+#[cfg(not(test))]
+#[no_mangle]
+pub extern "C" fn __rust_abort() {
+    abort_internal();
+}
+
+#[inline]
+pub fn hashmap_random_keys() -> (u64, u64) {
+    get_random().unwrap()
+}
+
+fn get_random() -> Option<(u64, u64)> {
+    use r_efi::protocols::rng;
+
+    let mut buf = [0u8; 16];
+    let handles = helpers::locate_handles(rng::PROTOCOL_GUID).ok()?;
+    for handle in handles {
+        if let Ok(protocol) = helpers::open_protocol::<rng::Protocol>(handle, rng::PROTOCOL_GUID) {
+            let r = unsafe {
+                ((*protocol.as_ptr()).get_rng)(
+                    protocol.as_ptr(),
+                    crate::ptr::null_mut(),
+                    buf.len(),
+                    buf.as_mut_ptr(),
+                )
+            };
+            if r.is_error() {
+                continue;
+            } else {
+                return Some((
+                    u64::from_le_bytes(buf[..8].try_into().ok()?),
+                    u64::from_le_bytes(buf[8..].try_into().ok()?),
+                ));
+            }
+        }
+    }
+    None
+}
+
 /// Disable access to BootServices if `EVT_SIGNAL_EXIT_BOOT_SERVICES` is signaled
 extern "efiapi" fn exit_boot_service_handler(_e: r_efi::efi::Event, _ctx: *mut crate::ffi::c_void) {
     uefi::env::disable_boot_services();
+}
+
+pub fn is_interrupted(_code: RawOsError) -> bool {
+    false
 }

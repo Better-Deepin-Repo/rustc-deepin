@@ -3,8 +3,8 @@
 #![warn(clippy::blocks_in_conditions)]
 #![allow(
     unused,
-    unnecessary_transmutes,
-    clippy::needless_ifs,
+    clippy::let_and_return,
+    clippy::needless_if,
     clippy::missing_transmute_annotations
 )]
 #![warn(clippy::nonminimal_bool)]
@@ -46,7 +46,6 @@ fn condition_has_block_with_single_expression() -> i32 {
 fn condition_is_normal() -> i32 {
     let x = 3;
     if true && x == 3 { 6 } else { 10 }
-    //~^ nonminimal_bool
 }
 
 fn condition_is_unsafe_block() {
@@ -69,6 +68,28 @@ fn block_in_assert() {
             })
             .is_some()
     );
+}
+
+// issue #11814
+fn block_in_match_expr(num: i32) -> i32 {
+    match {
+        //~^ ERROR: in a `match` scrutinee, avoid complex blocks or closures with blocks; instead, move the block or closure higher and bind it with a `let`
+        let opt = Some(2);
+        opt
+    } {
+        Some(0) => 1,
+        Some(n) => num * 2,
+        None => 0,
+    };
+
+    match unsafe {
+        let hearty_hearty_hearty = vec![240, 159, 146, 150];
+        String::from_utf8_unchecked(hearty_hearty_hearty).as_str()
+    } {
+        "💖" => 1,
+        "what" => 2,
+        _ => 3,
+    }
 }
 
 // issue #12162
@@ -94,13 +115,6 @@ mod issue_12016 {
             _ => 0,
         }
     }
-}
-
-fn issue_9911() {
-    if { return } {}
-
-    let a = 1;
-    if { if a == 1 { return } else { true } } {}
 }
 
 fn in_closure() {

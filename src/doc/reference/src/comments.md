@@ -1,87 +1,61 @@
-r[comments]
 # Comments
 
-r[comments.syntax]
-```grammar,lexer
-@root COMMENT ->
-      LINE_COMMENT
-    | INNER_LINE_DOC
-    | OUTER_LINE_DOC
-    | INNER_BLOCK_DOC
-    | OUTER_BLOCK_DOC
-    | BLOCK_COMMENT
+> **<sup>Lexer</sup>**\
+> LINE_COMMENT :\
+> &nbsp;&nbsp; &nbsp;&nbsp; `//` (~\[`/` `!` `\n`] | `//`) ~`\n`<sup>\*</sup>\
+> &nbsp;&nbsp; | `//`
+>
+> BLOCK_COMMENT :\
+> &nbsp;&nbsp; &nbsp;&nbsp; `/*` (~\[`*` `!`] | `**` | _BlockCommentOrDoc_)
+>      (_BlockCommentOrDoc_ | ~`*/`)<sup>\*</sup> `*/`\
+> &nbsp;&nbsp; | `/**/`\
+> &nbsp;&nbsp; | `/***/`
+>
+> INNER_LINE_DOC :\
+> &nbsp;&nbsp; `//!` ~\[`\n` _IsolatedCR_]<sup>\*</sup>
+>
+> INNER_BLOCK_DOC :\
+> &nbsp;&nbsp; `/*!` ( _BlockCommentOrDoc_ | ~\[`*/` _IsolatedCR_] )<sup>\*</sup> `*/`
+>
+> OUTER_LINE_DOC :\
+> &nbsp;&nbsp; `///` (~`/` ~\[`\n` _IsolatedCR_]<sup>\*</sup>)<sup>?</sup>
+>
+> OUTER_BLOCK_DOC :\
+> &nbsp;&nbsp; `/**` (~`*` | _BlockCommentOrDoc_ )
+>              (_BlockCommentOrDoc_ | ~\[`*/` _IsolatedCR_])<sup>\*</sup> `*/`
+>
+> _BlockCommentOrDoc_ :\
+> &nbsp;&nbsp; &nbsp;&nbsp; BLOCK_COMMENT\
+> &nbsp;&nbsp; | OUTER_BLOCK_DOC\
+> &nbsp;&nbsp; | INNER_BLOCK_DOC
+>
+> _IsolatedCR_ :\
+> &nbsp;&nbsp; \\r
 
-LINE_COMMENT ->
-      `//` (~[`/` `!` LF] | `//`) ~LF*
-    | `//` EOF
-    | `//` _immediately followed by LF_
-
-BLOCK_COMMENT ->
-      `/**/`
-    | `/***/`
-    | `/*`
-        ^
-        ( ~[`*` `!`] | `**` | BLOCK_COMMENT_OR_DOC )
-        ( BLOCK_COMMENT_OR_DOC | ~`*/` )*
-      `*/`
-
-INNER_LINE_DOC ->
-    `//!` ^ LINE_DOC_COMMENT_CONTENT (LF | EOF)
-
-LINE_DOC_COMMENT_CONTENT -> (!CR ~LF)*
-
-INNER_BLOCK_DOC ->
-    `/*!` ^ ( BLOCK_COMMENT_OR_DOC | BLOCK_CHAR )* `*/`
-
-OUTER_LINE_DOC ->
-    `///` ^ LINE_DOC_COMMENT_CONTENT (LF | EOF)
-
-OUTER_BLOCK_DOC ->
-    `/**` ![`*` `/`]
-      ^
-      ( ~`*` | BLOCK_COMMENT_OR_DOC )
-      ( BLOCK_COMMENT_OR_DOC | BLOCK_CHAR )*
-    `*/`
-
-BLOCK_CHAR -> (!(`*/` | CR) CHAR)
-
-BLOCK_COMMENT_OR_DOC ->
-      BLOCK_COMMENT
-    | OUTER_BLOCK_DOC
-    | INNER_BLOCK_DOC
-```
-
-r[comments.normal]
 ## Non-doc comments
 
-Comments follow the general C++ style of line (`//`) and block (`/* ... */`) comment forms. Nested block comments are supported.
+Comments follow the general C++ style of line (`//`) and
+block (`/* ... */`) comment forms. Nested block comments are supported.
 
-r[comments.normal.tokenization]
 Non-doc comments are interpreted as a form of whitespace.
 
-r[comments.doc]
 ## Doc comments
 
-r[comments.doc.syntax]
-Line doc comments beginning with exactly _three_ slashes (`///`), and block doc comments (`/** ... */`), both outer doc comments, are interpreted as a special syntax for [`doc` attributes].
+Line doc comments beginning with exactly _three_ slashes (`///`), and block
+doc comments (`/** ... */`), both outer doc comments, are interpreted as a
+special syntax for [`doc` attributes]. That is, they are equivalent to writing
+`#[doc="..."]` around the body of the comment, i.e., `/// Foo` turns into
+`#[doc="Foo"]` and `/** Bar */` turns into `#[doc="Bar"]`.
 
-r[comments.doc.attributes]
-That is, they are equivalent to writing `#[doc="..."]` around the body of the comment, i.e., `/// Foo` turns into `#[doc=" Foo"]` and `/** Bar */` turns into `#[doc=" Bar "]`. They must therefore appear before something that accepts an outer attribute.
+Line comments beginning with `//!` and block comments `/*! ... */` are
+doc comments that apply to the parent of the comment, rather than the item
+that follows.  That is, they are equivalent to writing `#![doc="..."]` around
+the body of the comment. `//!` comments are usually used to document
+modules that occupy a source file.
 
-r[comments.doc.inner-syntax]
-Line comments beginning with `//!` and block comments `/*! ... */` are doc comments that apply to the parent of the comment, rather than the item that follows.
-
-r[comments.doc.inner-attributes]
-That is, they are equivalent to writing `#![doc="..."]` around the body of the comment. `//!` comments are usually used to document modules that occupy a source file.
-
-r[comments.doc.bare-crs]
 The character `U+000D` (CR) is not allowed in doc comments.
 
-> [!NOTE]
-> It is conventional for doc comments to contain Markdown, as expected by `rustdoc`. However, the comment syntax does not respect any internal Markdown. ``/** `glob = "*/*.rs";` */`` terminates the comment at the first `*/`, and the remaining code would cause a syntax error. This slightly limits the content of block doc comments compared to line doc comments.
-
-> [!NOTE]
-> The sequence `U+000D` (CR) immediately followed by `U+000A` (LF) would have been previously transformed into a single `U+000A` (LF).
+> **Note**:  The sequence `U+000D` (CR) immediately followed by `U+000A` (LF) would have been previously transformed into a single `U+000A` (LF).
 
 ## Examples
 

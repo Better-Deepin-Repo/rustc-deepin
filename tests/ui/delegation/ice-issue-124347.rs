@@ -3,10 +3,11 @@
 
 trait Trait {
     reuse Trait::foo { &self.0 }
-    //~^ ERROR failed to resolve delegation callee
+    //~^ ERROR recursive delegation is not supported yet
 }
 
+// FIXME(fn_delegation): `recursive delegation` error should be emitted here
 reuse foo;
-//~^ ERROR failed to resolve delegation callee
+//~^ ERROR cycle detected when computing generics of `foo`
 
 fn main() {}

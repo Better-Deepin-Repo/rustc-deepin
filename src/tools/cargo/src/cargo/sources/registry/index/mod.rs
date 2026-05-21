@@ -21,14 +21,13 @@
 //! To learn the rationale behind this multi-layer index metadata loading,
 //! see [the documentation of the on-disk index cache](cache).
 use crate::core::dependency::{Artifact, DepKind};
-use crate::core::{CliUnstable, Dependency};
+use crate::core::Dependency;
 use crate::core::{PackageId, SourceId, Summary};
 use crate::sources::registry::{LoadResponse, RegistryData};
-use crate::util::IntoUrl;
 use crate::util::interning::InternedString;
-use crate::util::{CargoResult, Filesystem, GlobalContext, OptVersionReq, internal};
+use crate::util::IntoUrl;
+use crate::util::{internal, CargoResult, Filesystem, GlobalContext, OptVersionReq};
 use cargo_util::registry::make_dep_path;
-use cargo_util_schemas::index::{IndexPackage, RegistryDependency};
 use cargo_util_schemas::manifest::RustVersion;
 use semver::Version;
 use serde::{Deserialize, Serialize};
@@ -37,8 +36,8 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::path::Path;
 use std::str;
-use std::task::{Poll, ready};
-use tracing::info;
+use std::task::{ready, Poll};
+use tracing::{debug, info};
 
 mod cache;
 use self::cache::CacheManager;
@@ -52,7 +51,7 @@ const INDEX_V_MAX: u32 = 2;
 ///
 /// Different kinds of registries store the index differently:
 ///
-/// * [`LocalRegistry`] is a simple on-disk tree of files of the raw index.
+/// * [`LocalRegistry`]` is a simple on-disk tree of files of the raw index.
 /// * [`RemoteRegistry`] is stored as a raw git repository.
 /// * [`HttpRegistry`] fills the on-disk index cache directly without keeping
 ///   any raw index.
@@ -136,8 +135,6 @@ pub enum IndexSummary {
     Offline(Summary),
     /// From a newer schema version and is likely incomplete or inaccurate
     Unsupported(Summary, u32),
-    /// An error was encountered despite being a supported schema version
-    Invalid(Summary),
 }
 
 impl IndexSummary {
@@ -147,8 +144,7 @@ impl IndexSummary {
             IndexSummary::Candidate(sum)
             | IndexSummary::Yanked(sum)
             | IndexSummary::Offline(sum)
-            | IndexSummary::Unsupported(sum, _)
-            | IndexSummary::Invalid(sum) => sum,
+            | IndexSummary::Unsupported(sum, _) => sum,
         }
     }
 
@@ -158,8 +154,7 @@ impl IndexSummary {
             IndexSummary::Candidate(sum)
             | IndexSummary::Yanked(sum)
             | IndexSummary::Offline(sum)
-            | IndexSummary::Unsupported(sum, _)
-            | IndexSummary::Invalid(sum) => sum,
+            | IndexSummary::Unsupported(sum, _) => sum,
         }
     }
 
@@ -169,13 +164,17 @@ impl IndexSummary {
             IndexSummary::Yanked(s) => IndexSummary::Yanked(f(s)),
             IndexSummary::Offline(s) => IndexSummary::Offline(f(s)),
             IndexSummary::Unsupported(s, v) => IndexSummary::Unsupported(f(s), v.clone()),
-            IndexSummary::Invalid(s) => IndexSummary::Invalid(f(s)),
         }
     }
 
     /// Extract the package id from any variant
     pub fn package_id(&self) -> PackageId {
-        self.as_summary().package_id()
+        match self {
+            IndexSummary::Candidate(sum)
+            | IndexSummary::Yanked(sum)
+            | IndexSummary::Offline(sum)
+            | IndexSummary::Unsupported(sum, _) => sum.package_id(),
+        }
     }
 
     /// Returns `true` if the index summary is [`Yanked`].
@@ -195,52 +194,102 @@ impl IndexSummary {
     }
 }
 
-fn index_package_to_summary(
-    pkg: &IndexPackage<'_>,
-    source_id: SourceId,
-    cli_unstable: &CliUnstable,
-) -> CargoResult<Summary> {
-    // ****CAUTION**** Please be extremely careful with returning errors, see
-    // `IndexSummary::parse` for details
-    let pkgid = PackageId::new(pkg.name.as_ref().into(), pkg.vers.clone(), source_id);
-    let deps = pkg
-        .deps
-        .iter()
-        .map(|dep| registry_dependency_into_dep(dep.clone(), source_id, cli_unstable))
-        .collect::<CargoResult<Vec<_>>>()?;
-    let mut features = pkg.features.clone();
-    if let Some(features2) = pkg.features2.clone() {
-        for (name, values) in features2 {
-            features.entry(name).or_default().extend(values);
-        }
-    }
-    let features = features
-        .into_iter()
-        .map(|(name, values)| (name.into(), values.into_iter().map(|v| v.into()).collect()))
-        .collect::<BTreeMap<_, _>>();
-    let links: Option<InternedString> = pkg.links.as_ref().map(|l| l.as_ref().into());
-    let mut summary = Summary::new(pkgid, deps, &features, links, pkg.rust_version.clone())?;
-    summary.set_checksum(pkg.cksum.clone());
-    if let Some(pubtime) = pkg.pubtime {
-        summary.set_pubtime(pubtime);
-    }
-    Ok(summary)
-}
-
+/// A single line in the index representing a single version of a package.
 #[derive(Deserialize, Serialize)]
-struct IndexPackageMinimum<'a> {
-    name: Cow<'a, str>,
-    vers: Version,
+pub struct IndexPackage<'a> {
+    /// Name of the package.
+    pub name: InternedString,
+    /// The version of this dependency.
+    pub vers: Version,
+    /// All kinds of direct dependencies of the package, including dev and
+    /// build dependencies.
+    #[serde(borrow)]
+    pub deps: Vec<RegistryDependency<'a>>,
+    /// Set of features defined for the package, i.e., `[features]` table.
+    pub features: BTreeMap<InternedString, Vec<InternedString>>,
+    /// This field contains features with new, extended syntax. Specifically,
+    /// namespaced features (`dep:`) and weak dependencies (`pkg?/feat`).
+    ///
+    /// This is separated from `features` because versions older than 1.19
+    /// will fail to load due to not being able to parse the new syntax, even
+    /// with a `Cargo.lock` file.
+    pub features2: Option<BTreeMap<InternedString, Vec<InternedString>>>,
+    /// Checksum for verifying the integrity of the corresponding downloaded package.
+    pub cksum: String,
+    /// If `true`, Cargo will skip this version when resolving.
+    ///
+    /// This was added in 2014. Everything in the crates.io index has this set
+    /// now, so this probably doesn't need to be an option anymore.
+    pub yanked: Option<bool>,
+    /// Native library name this package links to.
+    ///
+    /// Added early 2018 (see <https://github.com/rust-lang/cargo/pull/4978>),
+    /// can be `None` if published before then.
+    pub links: Option<InternedString>,
+    /// Required version of rust
+    ///
+    /// Corresponds to `package.rust-version`.
+    ///
+    /// Added in 2023 (see <https://github.com/rust-lang/crates.io/pull/6267>),
+    /// can be `None` if published before then or if not set in the manifest.
+    pub rust_version: Option<RustVersion>,
+    /// The schema version for this entry.
+    ///
+    /// If this is None, it defaults to version `1`. Entries with unknown
+    /// versions are ignored.
+    ///
+    /// Version `2` schema adds the `features2` field.
+    ///
+    /// Version `3` schema adds `artifact`, `bindep_targes`, and `lib` for
+    /// artifact dependencies support.
+    ///
+    /// This provides a method to safely introduce changes to index entries
+    /// and allow older versions of cargo to ignore newer entries it doesn't
+    /// understand. This is honored as of 1.51, so unfortunately older
+    /// versions will ignore it, and potentially misinterpret version 2 and
+    /// newer entries.
+    ///
+    /// The intent is that versions older than 1.51 will work with a
+    /// pre-existing `Cargo.lock`, but they may not correctly process `cargo
+    /// update` or build a lock from scratch. In that case, cargo may
+    /// incorrectly select a new package that uses a new index schema. A
+    /// workaround is to downgrade any packages that are incompatible with the
+    /// `--precise` flag of `cargo update`.
+    pub v: Option<u32>,
 }
 
-#[derive(Deserialize, Serialize, Default)]
-struct IndexPackageRustVersion {
-    rust_version: Option<RustVersion>,
-}
-
-#[derive(Deserialize, Serialize, Default)]
-struct IndexPackageV {
-    v: Option<u32>,
+/// A dependency as encoded in the [`IndexPackage`] index JSON.
+#[derive(Deserialize, Serialize)]
+pub struct RegistryDependency<'a> {
+    /// Name of the dependency. If the dependency is renamed, the original
+    /// would be stored in [`RegistryDependency::package`].
+    pub name: InternedString,
+    /// The SemVer requirement for this dependency.
+    #[serde(borrow)]
+    pub req: Cow<'a, str>,
+    /// Set of features enabled for this dependency.
+    pub features: Vec<InternedString>,
+    /// Whether or not this is an optional dependency.
+    pub optional: bool,
+    /// Whether or not default features are enabled.
+    pub default_features: bool,
+    /// The target platform for this dependency.
+    pub target: Option<Cow<'a, str>>,
+    /// The dependency kind. "dev", "build", and "normal".
+    pub kind: Option<Cow<'a, str>>,
+    // The URL of the index of the registry where this dependency is from.
+    // `None` if it is from the same index.
+    pub registry: Option<Cow<'a, str>>,
+    /// The original name if the dependency is renamed.
+    pub package: Option<InternedString>,
+    /// Whether or not this is a public dependency. Unstable. See [RFC 1977].
+    ///
+    /// [RFC 1977]: https://rust-lang.github.io/rfcs/1977-public-private-dependencies.html
+    pub public: Option<bool>,
+    pub artifact: Option<Vec<Cow<'a, str>>>,
+    pub bindep_target: Option<Cow<'a, str>>,
+    #[serde(default)]
+    pub lib: bool,
 }
 
 impl<'gctx> RegistryIndex<'gctx> {
@@ -293,7 +342,7 @@ impl<'gctx> RegistryIndex<'gctx> {
     where
         'a: 'b,
     {
-        let cli_unstable = self.gctx.cli_unstable();
+        let bindeps = self.gctx.cli_unstable().bindeps;
 
         let source_id = self.source_id;
 
@@ -312,8 +361,22 @@ impl<'gctx> RegistryIndex<'gctx> {
             .iter_mut()
             .filter_map(move |(k, v)| if req.matches(k) { Some(v) } else { None })
             .filter_map(move |maybe| {
-                match maybe.parse(raw_data, source_id, cli_unstable) {
-                    Ok(sum) => Some(sum),
+                match maybe.parse(raw_data, source_id, bindeps) {
+                    Ok(sum @ IndexSummary::Candidate(_) | sum @ IndexSummary::Yanked(_)) => {
+                        Some(sum)
+                    }
+                    Ok(IndexSummary::Unsupported(summary, v)) => {
+                        debug!(
+                            "unsupported schema version {} ({} {})",
+                            v,
+                            summary.name(),
+                            summary.version()
+                        );
+                        None
+                    }
+                    Ok(IndexSummary::Offline(_)) => {
+                        unreachable!("We do not check for off-line until later")
+                    }
                     Err(e) => {
                         info!("failed to parse `{}` registry package: {}", name, e);
                         None
@@ -358,7 +421,7 @@ impl<'gctx> RegistryIndex<'gctx> {
             &name,
             self.source_id,
             load,
-            self.gctx.cli_unstable(),
+            self.gctx.cli_unstable().bindeps,
             &self.cache_manager,
         ))?
         .unwrap_or_default();
@@ -381,7 +444,7 @@ impl<'gctx> RegistryIndex<'gctx> {
         load: &mut dyn RegistryData,
         f: &mut dyn FnMut(IndexSummary),
     ) -> Poll<CargoResult<()>> {
-        if !self.gctx.network_allowed() {
+        if self.gctx.offline() {
             // This should only return `Poll::Ready(Ok(()))` if there is at least 1 match.
             //
             // If there are 0 matches it should fall through and try again with online.
@@ -468,7 +531,7 @@ impl Summaries {
     ///
     /// * `root` --- this is the root argument passed to `load`
     /// * `name` --- the name of the package.
-    /// * `source_id` --- the registry's `SourceId` used when parsing JSON blobs
+    /// * `source_id` --- the registry's SourceId used when parsing JSON blobs
     ///   to create summaries.
     /// * `load` --- the actual index implementation which may be very slow to
     ///   call. We avoid this if we can.
@@ -478,24 +541,24 @@ impl Summaries {
         name: &str,
         source_id: SourceId,
         load: &mut dyn RegistryData,
-        cli_unstable: &CliUnstable,
+        bindeps: bool,
         cache_manager: &CacheManager<'_>,
     ) -> Poll<CargoResult<Option<Summaries>>> {
         // This is the file we're loading from cache or the index data.
         // See module comment in `registry/mod.rs` for why this is structured the way it is.
-        let lowered_name = &name.to_lowercase();
-        let relative = make_dep_path(&lowered_name, false);
+        let name = &name.to_lowercase();
+        let relative = make_dep_path(&name, false);
 
         let mut cached_summaries = None;
         let mut index_version = None;
-        if let Some(contents) = cache_manager.get(lowered_name) {
+        if let Some(contents) = cache_manager.get(name) {
             match Summaries::parse_cache(contents) {
                 Ok((s, v)) => {
                     cached_summaries = Some(s);
                     index_version = Some(v);
                 }
                 Err(e) => {
-                    tracing::debug!("failed to parse {lowered_name:?} cache: {e}");
+                    tracing::debug!("failed to parse {name:?} cache: {e}");
                 }
             }
         }
@@ -508,7 +571,7 @@ impl Summaries {
                 return Poll::Ready(Ok(cached_summaries));
             }
             LoadResponse::NotFound => {
-                cache_manager.invalidate(lowered_name);
+                cache_manager.invalidate(name);
                 return Poll::Ready(Ok(None));
             }
             LoadResponse::Data {
@@ -528,7 +591,7 @@ impl Summaries {
                     // allow future cargo implementations to break the
                     // interpretation of each line here and older cargo will simply
                     // ignore the new lines.
-                    let summary = match IndexSummary::parse(line, source_id, cli_unstable) {
+                    let summary = match IndexSummary::parse(line, source_id, bindeps) {
                         Ok(summary) => summary,
                         Err(e) => {
                             // This should only happen when there is an index
@@ -557,7 +620,7 @@ impl Summaries {
                     // Once we have our `cache_bytes` which represents the `Summaries` we're
                     // about to return, write that back out to disk so future Cargo
                     // invocations can use it.
-                    cache_manager.put(lowered_name, &cache_bytes);
+                    cache_manager.put(name, &cache_bytes);
 
                     // If we've got debug assertions enabled read back in the cached values
                     // and assert they match the expected result.
@@ -581,7 +644,7 @@ impl Summaries {
     /// represents information previously cached by Cargo.
     pub fn parse_cache(contents: Vec<u8>) -> CargoResult<(Summaries, InternedString)> {
         let cache = SummariesCache::parse(&contents)?;
-        let index_version = cache.index_version.into();
+        let index_version = InternedString::new(cache.index_version);
         let mut ret = Summaries::default();
         for (version, summary) in cache.versions {
             let (start, end) = subslice_bounds(&contents, summary);
@@ -615,13 +678,13 @@ impl MaybeIndexSummary {
         &mut self,
         raw_data: &[u8],
         source_id: SourceId,
-        cli_unstable: &CliUnstable,
+        bindeps: bool,
     ) -> CargoResult<&IndexSummary> {
         let (start, end) = match self {
             MaybeIndexSummary::Unparsed { start, end } => (*start, *end),
             MaybeIndexSummary::Parsed(summary) => return Ok(summary),
         };
-        let summary = IndexSummary::parse(&raw_data[start..end], source_id, cli_unstable)?;
+        let summary = IndexSummary::parse(&raw_data[start..end], source_id, bindeps)?;
         *self = MaybeIndexSummary::Parsed(summary);
         match self {
             MaybeIndexSummary::Unparsed { .. } => unreachable!(),
@@ -642,59 +705,41 @@ impl IndexSummary {
     ///
     /// The `line` provided is expected to be valid JSON. It is supposed to be
     /// a [`IndexPackage`].
-    fn parse(
-        line: &[u8],
-        source_id: SourceId,
-        cli_unstable: &CliUnstable,
-    ) -> CargoResult<IndexSummary> {
+    fn parse(line: &[u8], source_id: SourceId, bindeps: bool) -> CargoResult<IndexSummary> {
         // ****CAUTION**** Please be extremely careful with returning errors
         // from this function. Entries that error are not included in the
         // index cache, and can cause cargo to get confused when switching
         // between different versions that understand the index differently.
         // Make sure to consider the INDEX_V_MAX and CURRENT_CACHE_VERSION
         // values carefully when making changes here.
-        let index_summary = (|| {
-            let index = serde_json::from_slice::<IndexPackage<'_>>(line)?;
-            let summary = index_package_to_summary(&index, source_id, cli_unstable)?;
-            Ok((index, summary))
-        })();
-        let (index, summary, valid) = match index_summary {
-            Ok((index, summary)) => (index, summary, true),
-            Err(err) => {
-                let Ok(IndexPackageMinimum { name, vers }) =
-                    serde_json::from_slice::<IndexPackageMinimum<'_>>(line)
-                else {
-                    // If we can't recover, prefer the original error
-                    return Err(err);
-                };
-                tracing::info!(
-                    "recoverying from failed parse of registry package {name}@{vers}: {err}"
-                );
-                let IndexPackageRustVersion { rust_version } =
-                    serde_json::from_slice::<IndexPackageRustVersion>(line).unwrap_or_default();
-                let IndexPackageV { v } =
-                    serde_json::from_slice::<IndexPackageV>(line).unwrap_or_default();
-                let index = IndexPackage {
-                    name,
-                    vers,
-                    rust_version,
-                    v,
-                    deps: Default::default(),
-                    features: Default::default(),
-                    features2: Default::default(),
-                    cksum: Default::default(),
-                    yanked: Default::default(),
-                    links: Default::default(),
-                    pubtime: Default::default(),
-                };
-                let summary = index_package_to_summary(&index, source_id, cli_unstable)?;
-                (index, summary, false)
+        let IndexPackage {
+            name,
+            vers,
+            cksum,
+            deps,
+            mut features,
+            features2,
+            yanked,
+            links,
+            rust_version,
+            v,
+        } = serde_json::from_slice(line)?;
+        let v = v.unwrap_or(1);
+        tracing::trace!("json parsed registry {}/{}", name, vers);
+        let pkgid = PackageId::new(name.into(), vers.clone(), source_id);
+        let deps = deps
+            .into_iter()
+            .map(|dep| dep.into_dep(source_id))
+            .collect::<CargoResult<Vec<_>>>()?;
+        if let Some(features2) = features2 {
+            for (name, values) in features2 {
+                features.entry(name).or_default().extend(values);
             }
-        };
-        let v = index.v.unwrap_or(1);
-        tracing::trace!("json parsed registry {}/{}", index.name, index.vers);
+        }
+        let mut summary = Summary::new(pkgid, deps, &features, links, rust_version)?;
+        summary.set_checksum(cksum);
 
-        let v_max = if cli_unstable.bindeps {
+        let v_max = if bindeps {
             INDEX_V_MAX + 1
         } else {
             INDEX_V_MAX
@@ -702,9 +747,7 @@ impl IndexSummary {
 
         if v_max < v {
             Ok(IndexSummary::Unsupported(summary, v))
-        } else if !valid {
-            Ok(IndexSummary::Invalid(summary))
-        } else if index.yanked.unwrap_or(false) {
+        } else if yanked.unwrap_or(false) {
             Ok(IndexSummary::Yanked(summary))
         } else {
             Ok(IndexSummary::Candidate(summary))
@@ -712,84 +755,76 @@ impl IndexSummary {
     }
 }
 
-/// Converts an encoded dependency in the registry to a cargo dependency
-fn registry_dependency_into_dep(
-    dep: RegistryDependency<'_>,
-    default: SourceId,
-    cli_unstable: &CliUnstable,
-) -> CargoResult<Dependency> {
-    let RegistryDependency {
-        name,
-        req,
-        mut features,
-        optional,
-        default_features,
-        target,
-        kind,
-        registry,
-        package,
-        public,
-        artifact,
-        bindep_target,
-        lib,
-    } = dep;
-
-    let id = if let Some(registry) = &registry {
-        SourceId::for_registry(&registry.into_url()?)?
-    } else {
-        default
-    };
-
-    let interned_name = InternedString::new(package.as_ref().unwrap_or(&name));
-    let mut dep = Dependency::parse(interned_name, Some(&req), id)?;
-    if package.is_some() {
-        dep.set_explicit_name_in_toml(name);
-    }
-    let kind = match kind.as_deref().unwrap_or("") {
-        "dev" => DepKind::Development,
-        "build" => DepKind::Build,
-        _ => DepKind::Normal,
-    };
-
-    let platform = match target {
-        Some(target) => Some(target.parse()?),
-        None => None,
-    };
-
-    // All dependencies are private by default
-    let public = public.unwrap_or(false);
-
-    // Unfortunately older versions of cargo and/or the registry ended up
-    // publishing lots of entries where the features array contained the
-    // empty feature, "", inside. This confuses the resolution process much
-    // later on and these features aren't actually valid, so filter them all
-    // out here.
-    features.retain(|s| !s.is_empty());
-
-    // In index, "registry" is null if it is from the same index.
-    // In Cargo.toml, "registry" is None if it is from the default
-    if !id.is_crates_io() {
-        dep.set_registry_id(id);
-    }
-
-    if let Some(artifacts) = artifact {
-        let artifact = Artifact::parse(
-            &artifacts,
+impl<'a> RegistryDependency<'a> {
+    /// Converts an encoded dependency in the registry to a cargo dependency
+    pub fn into_dep(self, default: SourceId) -> CargoResult<Dependency> {
+        let RegistryDependency {
+            name,
+            req,
+            mut features,
+            optional,
+            default_features,
+            target,
+            kind,
+            registry,
+            package,
+            public,
+            artifact,
+            bindep_target,
             lib,
-            bindep_target.as_deref(),
-            cli_unstable.json_target_spec,
-        )?;
-        dep.set_artifact(artifact);
+        } = self;
+
+        let id = if let Some(registry) = &registry {
+            SourceId::for_registry(&registry.into_url()?)?
+        } else {
+            default
+        };
+
+        let mut dep = Dependency::parse(package.unwrap_or(name), Some(&req), id)?;
+        if package.is_some() {
+            dep.set_explicit_name_in_toml(name);
+        }
+        let kind = match kind.as_deref().unwrap_or("") {
+            "dev" => DepKind::Development,
+            "build" => DepKind::Build,
+            _ => DepKind::Normal,
+        };
+
+        let platform = match target {
+            Some(target) => Some(target.parse()?),
+            None => None,
+        };
+
+        // All dependencies are private by default
+        let public = public.unwrap_or(false);
+
+        // Unfortunately older versions of cargo and/or the registry ended up
+        // publishing lots of entries where the features array contained the
+        // empty feature, "", inside. This confuses the resolution process much
+        // later on and these features aren't actually valid, so filter them all
+        // out here.
+        features.retain(|s| !s.is_empty());
+
+        // In index, "registry" is null if it is from the same index.
+        // In Cargo.toml, "registry" is None if it is from the default
+        if !id.is_crates_io() {
+            dep.set_registry_id(id);
+        }
+
+        if let Some(artifacts) = artifact {
+            let artifact = Artifact::parse(&artifacts, lib, bindep_target.as_deref())?;
+            dep.set_artifact(artifact);
+        }
+
+        dep.set_optional(optional)
+            .set_default_features(default_features)
+            .set_features(features)
+            .set_platform(platform)
+            .set_kind(kind)
+            .set_public(public);
+
+        Ok(dep)
     }
-
-    dep.set_optional(optional)
-        .set_default_features(default_features)
-        .set_features(features)
-        .set_platform(platform)
-        .set_kind(kind)
-        .set_public(public);
-
-    Ok(dep)
 }
 
 /// Like [`slice::split`] but is optimized by [`memchr`].
@@ -816,4 +851,37 @@ fn split(haystack: &[u8], needle: u8) -> impl Iterator<Item = &[u8]> {
     }
 
     Split { haystack, needle }
+}
+
+#[test]
+fn escaped_char_in_index_json_blob() {
+    let _: IndexPackage<'_> = serde_json::from_str(
+        r#"{"name":"a","vers":"0.0.1","deps":[],"cksum":"bae3","features":{}}"#,
+    )
+    .unwrap();
+    let _: IndexPackage<'_> = serde_json::from_str(
+        r#"{"name":"a","vers":"0.0.1","deps":[],"cksum":"bae3","features":{"test":["k","q"]},"links":"a-sys"}"#
+    ).unwrap();
+
+    // Now we add escaped cher all the places they can go
+    // these are not valid, but it should error later than json parsing
+    let _: IndexPackage<'_> = serde_json::from_str(
+        r#"{
+        "name":"This name has a escaped cher in it \n\t\" ",
+        "vers":"0.0.1",
+        "deps":[{
+            "name": " \n\t\" ",
+            "req": " \n\t\" ",
+            "features": [" \n\t\" "],
+            "optional": true,
+            "default_features": true,
+            "target": " \n\t\" ",
+            "kind": " \n\t\" ",
+            "registry": " \n\t\" "
+        }],
+        "cksum":"bae3",
+        "features":{"test \n\t\" ":["k \n\t\" ","q \n\t\" "]},
+        "links":" \n\t\" "}"#,
+    )
+    .unwrap();
 }

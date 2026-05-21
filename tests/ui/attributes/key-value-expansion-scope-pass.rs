@@ -3,7 +3,6 @@
 //@ check-pass
 //@ edition:2018
 
-#![warn(unused_imports)]
 #![doc = in_root!()]
 
 macro_rules! in_root { () => { "" } }

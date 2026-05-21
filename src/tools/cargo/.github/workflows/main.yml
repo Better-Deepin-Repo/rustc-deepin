@@ -1,6 +1,10 @@
 name: CI
 on:
-  merge_group:
+  push:
+    branches:
+      - auto-cargo
+      - try
+      - automation/bors/try
   pull_request:
     branches:
       - "**"
@@ -13,71 +17,61 @@ permissions:
   contents: read
 
 concurrency:
-  group: "${{ github.workflow }}-${{ github.ref }}"
+  group: "${{ github.workflow }}-${{ (github.ref == 'refs/heads/try' && github.sha) || github.ref }}"
   cancel-in-progress: true
 
-env:
-  MDBOOK_VERSION: 0.5.1
-
 jobs:
-  conclusion:
-    needs:
-      - build_std
-      - clippy
-      - msrv
-      - docs
-      - lint-docs
-      - lockfile
-      - resolver
-      - report-timings
-      - rustfmt
-      - schema
-      - spellcheck
-      - test
-      - test_gitoxide
+  success:
     permissions:
       contents: none
-    # We need to ensure this job does *not* get skipped if its dependencies fail,
-    # because a skipped job is considered a success by GitHub. So we have to
-    # overwrite `if:`. We use `!cancelled()` to ensure the job does still not get run
-    # when the workflow is canceled manually.
-    #
-    # ALL THE PREVIOUS JOBS NEED TO BE ADDED TO THE `needs` SECTION OF THIS JOB!
-    if: ${{ !cancelled() }}
+    name: bors build finished
+    needs:
+    - build_std
+    - clippy
+    - msrv
+    - docs
+    - lockfile
+    - resolver
+    - rustfmt
+    - test
+    - test_gitoxide
     runs-on: ubuntu-latest
+    if: "success() && github.event_name == 'push' && (github.ref == 'refs/heads/auto-cargo' || github.ref == 'refs/heads/try') && github.repository == 'rust-lang/cargo'"
     steps:
-      # Manually check the status of all dependencies. `if: failure()` does not work.
-      - name: Conclusion
-        run: |
-          # Print the dependent jobs to see them in the CI log
-          jq -C <<< '${{ toJson(needs) }}'
-          # Check if all jobs that we depend on (in the needs array) were successful.
-          jq --exit-status 'all(.result == "success")' <<< '${{ toJson(needs) }}'
+    - run: echo ok
+  failure:
+    permissions:
+      contents: none
+    name: bors build finished
+    needs:
+    - build_std
+    - clippy
+    - msrv
+    - docs
+    - lockfile
+    - resolver
+    - rustfmt
+    - test
+    - test_gitoxide
+    runs-on: ubuntu-latest
+    if: "!success() && github.event_name == 'push' && (github.ref == 'refs/heads/auto-cargo' || github.ref == 'refs/heads/try') && github.repository == 'rust-lang/cargo'"
+    steps:
+    - run: exit 1
 
   # Check Code style quickly by running `rustfmt` over all code
   rustfmt:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v4
     - run: rustup update stable && rustup default stable
     - run: rustup component add rustfmt
     - run: cargo fmt --all --check
 
   # Ensure there are no clippy warnings
   clippy:
-    strategy:
-      matrix:
-        include:
-        - name: Linux x86_64
-          os: ubuntu-latest
-        - name: macOS aarch64
-          os: macos-14
-        - name: Windows x86_64 MSVC
-          os: windows-latest
-    name: Clippy ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
       - run: rustup update stable && rustup default stable
       - run: rustup component add clippy
       - run: cargo clippy --workspace --all-targets --no-deps -- -D warnings
@@ -85,14 +79,14 @@ jobs:
   stale-label:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
       - run: rustup update stable && rustup default stable
       - run: cargo stale-label
 
   lint-docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
       - run: rustup update stable && rustup default stable
       - run: cargo lint-docs --check
 
@@ -100,25 +94,24 @@ jobs:
   lockfile:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
       - run: rustup update stable && rustup default stable
       - run: cargo update -p cargo --locked
 
   check-version-bump:
     runs-on: ubuntu-latest
-    if: github.repository_owner == 'rust-lang'
     env:
       BASE_SHA: ${{ github.event.pull_request.base.sha }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha != '' && github.event.pull_request.head.sha || github.sha  }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - run: rustup update stable && rustup default stable
       - name: Install cargo-semver-checks
         run: |
           mkdir installed-bins
-          curl -Lf https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.46.0/cargo-semver-checks-x86_64-unknown-linux-gnu.tar.gz \
+          curl -Lf https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v0.32.0/cargo-semver-checks-x86_64-unknown-linux-gnu.tar.gz \
             | tar -xz --directory=./installed-bins
           echo `pwd`/installed-bins >> $GITHUB_PATH
       - run: ci/validate-version-bump.sh
@@ -147,18 +140,14 @@ jobs:
           os: ubuntu-latest
           rust: nightly
           other: i686-unknown-linux-gnu
-        - name: Linux aarch64 stable
-          os: ubuntu-24.04-arm
-          rust: stable
-          other: TODO # cross-compile tests are disabled, this shouldn't matter.
-        - name: Linux aarch64 nightly
-          os: ubuntu-24.04-arm
-          rust: nightly
-          other: TODO # cross-compile tests are disabled, this shouldn't matter.
         - name: macOS aarch64 stable
           os: macos-14
           rust: stable
           other: x86_64-apple-darwin
+        - name: macOS x86_64 nightly
+          os: macos-13
+          rust: nightly
+          other: x86_64-apple-ios
         - name: macOS aarch64 nightly
           os: macos-14
           rust: nightly
@@ -167,25 +156,13 @@ jobs:
           os: windows-latest
           rust: stable-msvc
           other: i686-pc-windows-msvc
-        - name: Windows x86_64 MSVC nightly
-          os: windows-latest
-          rust: nightly-msvc
-          other: i686-pc-windows-msvc
-        - name: Windows aarch64 MSVC stable
-          os: windows-11-arm
-          rust: stable-msvc
-          other: i686-pc-windows-msvc
-        - name: Windows aarch64 MSVC nightly
-          os: windows-11-arm
-          rust: nightly-msvc
-          other: i686-pc-windows-msvc
         - name: Windows x86_64 gnu nightly # runs out of space while trying to link the test suite
           os: windows-latest
           rust: nightly-gnu
           other: i686-pc-windows-gnu
     name: Tests ${{ matrix.name }}
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v4
     - name: Dump Environment
       run: ci/dump-environment.sh
     # Some tests require stable. Make sure it is set to the most recent stable
@@ -194,23 +171,11 @@ jobs:
     - run: rustup update --no-self-update stable
     - run: rustup update --no-self-update ${{ matrix.rust }} && rustup default ${{ matrix.rust }}
     - run: rustup target add ${{ matrix.other }}
-      if: matrix.os != 'ubuntu-24.04-arm' # cross-compile tests are disabled on ARM machines
-    - run: rustup target add wasm32-unknown-unknown
-    - run: rustup target add aarch64-unknown-none # need this for build-std mock tests
-      if: startsWith(matrix.rust, 'nightly')
     - run: rustup component add rustc-dev llvm-tools-preview rust-docs
       if: startsWith(matrix.rust, 'nightly')
     - run: sudo apt update -y && sudo apt install lldb gcc-multilib libsecret-1-0 libsecret-1-dev -y
       if: matrix.os == 'ubuntu-latest'
     - run: rustup component add rustfmt || echo "rustfmt not available"
-    - name: Add Windows debuggers bin to PATH
-      shell: pwsh
-      run: Add-Content $env:GITHUB_PATH "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64"
-      if: matrix.os == 'windows-latest'
-    - name: Add Windows debuggers bin to PATH
-      shell: pwsh
-      run: Add-Content $env:GITHUB_PATH "C:\Program Files (x86)\Windows Kits\10\Debuggers\arm64"
-      if: matrix.os == 'windows-11-arm'
     - name: Configure extra test environment
       run: echo CARGO_CONTAINER_TESTS=1 >> $GITHUB_ENV
       if: matrix.os == 'ubuntu-latest'
@@ -248,27 +213,19 @@ jobs:
     - name: Fetch smoke test
       run: ci/fetch-smoke-test.sh
 
-  schema:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v5
-    - run: rustup update stable && rustup default stable
-    - run: cargo test -p cargo-util-schemas -F unstable-schema
-
   resolver:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v4
     - run: rustup update stable && rustup default stable
     - run: cargo test -p resolver-tests
 
   test_gitoxide:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
       - run: rustup update --no-self-update stable && rustup default stable
       - run: rustup target add i686-unknown-linux-gnu
-      - run: rustup target add wasm32-unknown-unknown
       - run: sudo apt update -y && sudo apt install gcc-multilib libsecret-1-0 libsecret-1-dev -y
       - run: rustup component add rustfmt || echo "rustfmt not available"
       - run: cargo test -p cargo
@@ -278,7 +235,7 @@ jobs:
   build_std:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v4
     - run: rustup update nightly && rustup default nightly
     - run: rustup component add rust-src
     - run: cargo build
@@ -288,11 +245,10 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v4
     - run: rustup update nightly && rustup default nightly
     - run: rustup update stable
     - run: rustup component add rust-docs
-    - run: rustup component add rustfmt --toolchain stable
     - run: ci/validate-man.sh
     # This requires rustfmt, use stable.
     - name: Run semver-check
@@ -304,7 +260,7 @@ jobs:
     - name: Install mdbook
       run: |
         mkdir mdbook
-        curl -Lf https://github.com/rust-lang/mdBook/releases/download/v${MDBOOK_VERSION}/mdbook-v${MDBOOK_VERSION}-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory=./mdbook
+        curl -Lf https://github.com/rust-lang/mdBook/releases/download/v0.4.40/mdbook-v0.4.40-x86_64-unknown-linux-gnu.tar.gz | tar -xz --directory=./mdbook
         echo `pwd`/mdbook >> $GITHUB_PATH
     - run: cd src/doc && mdbook build --dest-dir ../../target/doc
     - name: Run linkchecker.sh
@@ -316,32 +272,6 @@ jobs:
   msrv:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v4
     - uses: taiki-e/install-action@cargo-hack
     - run: cargo hack check --all-targets --rust-version --workspace --ignore-private --locked
-
-  spellcheck:
-    name: Spell Check with Typos
-    runs-on: ubuntu-latest
-    steps:
-    - name: Checkout Actions Repository
-      uses: actions/checkout@v5
-    - name: Spell Check Repo
-      uses: crate-ci/typos@v1.42.3
-
-  report-timings:
-    name: Timing HTML report
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v5
-    - run: rustup update nightly && rustup default nightly
-    - run: cargo build
-    - name: Generate timing report for rustfix
-      run: |
-        cargo run -- build -p rustfix -Zbuild-analysis -Zsection-timings --config build.analysis.enabled=true --config 'build.build-dir="tmp"'
-        cargo run -- report timings -Zbuild-analysis
-    - uses: actions/upload-artifact@v6
-      with:
-        name: timing-report
-        path: target/cargo-timings/*.html
-        if-no-files-found: error

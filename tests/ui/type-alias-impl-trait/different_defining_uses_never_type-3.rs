@@ -2,7 +2,6 @@
 
 type Tait<T> = impl Sized;
 
-#[define_opaque(Tait)]
 fn foo<T, U>() -> Tait<T> {
     if false {
         if { return } {

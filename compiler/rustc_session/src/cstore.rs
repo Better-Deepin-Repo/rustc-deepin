@@ -5,15 +5,19 @@
 use std::any::Any;
 use std::path::PathBuf;
 
-use rustc_abi::ExternAbi;
+use rustc_ast as ast;
 use rustc_data_structures::sync::{self, AppendOnlyIndexVec, FreezeLock};
-use rustc_hir::attrs::{CfgEntry, NativeLibKind, PeImportNameType};
 use rustc_hir::def_id::{
-    CrateNum, DefId, LOCAL_CRATE, LocalDefId, StableCrateId, StableCrateIdMap,
+    CrateNum, DefId, LocalDefId, StableCrateId, StableCrateIdMap, LOCAL_CRATE,
 };
 use rustc_hir::definitions::{DefKey, DefPath, DefPathHash, Definitions};
-use rustc_macros::{BlobDecodable, Decodable, Encodable, HashStable_Generic};
-use rustc_span::{Span, Symbol};
+use rustc_macros::{Decodable, Encodable, HashStable_Generic};
+use rustc_span::symbol::Symbol;
+use rustc_span::Span;
+use rustc_target::spec::abi::Abi;
+
+use crate::search_paths::PathKind;
+use crate::utils::NativeLibKind;
 
 // lonely orphan structs and enums looking for a better home
 
@@ -21,31 +25,29 @@ use rustc_span::{Span, Symbol};
 /// must be non-None.
 #[derive(PartialEq, Clone, Debug, HashStable_Generic, Encodable, Decodable)]
 pub struct CrateSource {
-    pub dylib: Option<PathBuf>,
-    pub rlib: Option<PathBuf>,
-    pub rmeta: Option<PathBuf>,
-    pub sdylib_interface: Option<PathBuf>,
+    pub dylib: Option<(PathBuf, PathKind)>,
+    pub rlib: Option<(PathBuf, PathKind)>,
+    pub rmeta: Option<(PathBuf, PathKind)>,
 }
 
 impl CrateSource {
     #[inline]
     pub fn paths(&self) -> impl Iterator<Item = &PathBuf> {
-        self.dylib.iter().chain(self.rlib.iter()).chain(self.rmeta.iter())
+        self.dylib.iter().chain(self.rlib.iter()).chain(self.rmeta.iter()).map(|p| &p.0)
     }
 }
 
-#[derive(Encodable, BlobDecodable, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+#[derive(Encodable, Decodable, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
 #[derive(HashStable_Generic)]
 pub enum CrateDepKind {
     /// A dependency that is only used for its macros.
     MacrosOnly,
-    /// A dependency that is injected into the crate graph but which only
-    /// sometimes needs to actually be linked in, e.g., the injected panic runtime.
-    Conditional,
+    /// A dependency that is always injected into the dependency list and so
+    /// doesn't need to be linked to an rlib, e.g., the injected allocator.
+    Implicit,
     /// A dependency that is required by an rlib version of this crate.
-    /// Ordinary `extern crate`s as well as most injected dependencies result
-    /// in `Unconditional` dependencies.
-    Unconditional,
+    /// Ordinary `extern crate`s result in `Explicit` dependencies.
+    Explicit,
 }
 
 impl CrateDepKind {
@@ -53,12 +55,12 @@ impl CrateDepKind {
     pub fn macros_only(self) -> bool {
         match self {
             CrateDepKind::MacrosOnly => true,
-            CrateDepKind::Conditional | CrateDepKind::Unconditional => false,
+            CrateDepKind::Implicit | CrateDepKind::Explicit => false,
         }
     }
 }
 
-#[derive(Copy, Debug, PartialEq, Clone, Encodable, BlobDecodable, HashStable_Generic)]
+#[derive(Copy, Debug, PartialEq, Clone, Encodable, Decodable, HashStable_Generic)]
 pub enum LinkagePreference {
     RequireDynamic,
     RequireStatic,
@@ -70,7 +72,7 @@ pub struct NativeLib {
     pub name: Symbol,
     /// If packed_bundled_libs enabled, actual filename of library is stored.
     pub filename: Option<Symbol>,
-    pub cfg: Option<CfgEntry>,
+    pub cfg: Option<ast::MetaItem>,
     pub foreign_module: Option<DefId>,
     pub verbatim: Option<bool>,
     pub dll_imports: Vec<DllImport>,
@@ -84,6 +86,25 @@ impl NativeLib {
     pub fn wasm_import_module(&self) -> Option<Symbol> {
         if self.kind == NativeLibKind::WasmImportModule { Some(self.name) } else { None }
     }
+}
+
+/// Different ways that the PE Format can decorate a symbol name.
+/// From <https://docs.microsoft.com/en-us/windows/win32/debug/pe-format#import-name-type>
+#[derive(Copy, Clone, Debug, Encodable, Decodable, HashStable_Generic, PartialEq, Eq)]
+pub enum PeImportNameType {
+    /// IMPORT_ORDINAL
+    /// Uses the ordinal (i.e., a number) rather than the name.
+    Ordinal(u16),
+    /// Same as IMPORT_NAME
+    /// Name is decorated with all prefixes and suffixes.
+    Decorated,
+    /// Same as IMPORT_NAME_NOPREFIX
+    /// Prefix (e.g., the leading `_` or `@`) is skipped, but suffix is kept.
+    NoPrefix,
+    /// Same as IMPORT_NAME_UNDECORATE
+    /// Prefix (e.g., the leading `_` or `@`) and suffix (the first `@` and all
+    /// trailing characters) are skipped.
+    Undecorated,
 }
 
 #[derive(Clone, Debug, Encodable, Decodable, HashStable_Generic)]
@@ -109,11 +130,6 @@ impl DllImport {
             None
         }
     }
-
-    pub fn is_missing_decorations(&self) -> bool {
-        self.import_name_type == Some(PeImportNameType::Undecorated)
-            || self.import_name_type == Some(PeImportNameType::NoPrefix)
-    }
 }
 
 /// Calling convention for a function defined in an external library.
@@ -132,7 +148,7 @@ pub enum DllCallingConvention {
 pub struct ForeignModule {
     pub foreign_items: Vec<DefId>,
     pub def_id: DefId,
-    pub abi: ExternAbi,
+    pub abi: Abi,
 }
 
 #[derive(Copy, Clone, Debug, HashStable_Generic)]

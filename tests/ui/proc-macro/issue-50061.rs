@@ -1,7 +1,7 @@
 //@ run-pass
 
 #![allow(path_statements)]
-//@ proc-macro: issue-50061.rs
+//@ aux-build:issue-50061.rs
 
 #![feature(decl_macro)]
 

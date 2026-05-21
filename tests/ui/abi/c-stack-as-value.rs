@@ -1,4 +1,5 @@
 //@ run-pass
+//@ pretty-expanded FIXME #23616
 
 mod rustrt {
     #[link(name = "rust_test_helpers", kind = "static")]

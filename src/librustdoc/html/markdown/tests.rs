@@ -1,8 +1,8 @@
-use rustc_span::edition::{DEFAULT_EDITION, Edition};
+use rustc_span::edition::{Edition, DEFAULT_EDITION};
 
 use super::{
-    ErrorCodes, HeadingOffset, IdMap, Ignore, LangString, LangStringToken, Markdown,
-    MarkdownItemInfo, TagIterator, find_testable_code, plain_text_summary, short_markdown_summary,
+    find_testable_code, plain_text_summary, short_markdown_summary, ErrorCodes, HeadingOffset,
+    IdMap, Ignore, LangString, LangStringToken, Markdown, MarkdownItemInfo, TagIterator,
 };
 
 #[test]
@@ -49,7 +49,7 @@ fn test_unique_id() {
 fn test_lang_string_parse() {
     fn t(lg: LangString) {
         let s = &lg.original;
-        assert_eq!(LangString::parse(s, ErrorCodes::Yes, None), lg)
+        assert_eq!(LangString::parse(s, ErrorCodes::Yes, true, None), lg)
     }
 
     t(Default::default());
@@ -297,8 +297,7 @@ fn test_lang_string_tokenizer() {
 fn test_header() {
     fn t(input: &str, expect: &str) {
         let mut map = IdMap::new();
-        let mut output = String::new();
-        Markdown {
+        let output = Markdown {
             content: input,
             links: &[],
             ids: &mut map,
@@ -307,8 +306,7 @@ fn test_header() {
             playground: &None,
             heading_offset: HeadingOffset::H2,
         }
-        .write_into(&mut output)
-        .unwrap();
+        .into_string();
         assert_eq!(output, expect, "original: {}", input);
     }
 
@@ -350,8 +348,7 @@ fn test_header() {
 fn test_header_ids_multiple_blocks() {
     let mut map = IdMap::new();
     fn t(map: &mut IdMap, input: &str, expect: &str) {
-        let mut output = String::new();
-        Markdown {
+        let output = Markdown {
             content: input,
             links: &[],
             ids: map,
@@ -360,8 +357,7 @@ fn test_header_ids_multiple_blocks() {
             playground: &None,
             heading_offset: HeadingOffset::H2,
         }
-        .write_into(&mut output)
-        .unwrap();
+        .into_string();
         assert_eq!(output, expect, "original: {}", input);
     }
 
@@ -470,8 +466,7 @@ fn test_plain_text_summary() {
 fn test_markdown_html_escape() {
     fn t(input: &str, expect: &str) {
         let mut idmap = IdMap::new();
-        let mut output = String::new();
-        MarkdownItemInfo::new(input, &[], &mut idmap).write_into(&mut output).unwrap();
+        let output = MarkdownItemInfo(input, &mut idmap).into_string();
         assert_eq!(output, expect, "original: {}", input);
     }
 
@@ -484,7 +479,7 @@ fn test_markdown_html_escape() {
 fn test_find_testable_code_line() {
     fn t(input: &str, expect: &[usize]) {
         let mut lines = Vec::<usize>::new();
-        find_testable_code(input, &mut lines, ErrorCodes::No, None);
+        find_testable_code(input, &mut lines, ErrorCodes::No, false, None);
         assert_eq!(lines, expect);
     }
 
@@ -501,8 +496,7 @@ fn test_find_testable_code_line() {
 fn test_ascii_with_prepending_hashtag() {
     fn t(input: &str, expect: &str) {
         let mut map = IdMap::new();
-        let mut output = String::new();
-        Markdown {
+        let output = Markdown {
             content: input,
             links: &[],
             ids: &mut map,
@@ -511,8 +505,7 @@ fn test_ascii_with_prepending_hashtag() {
             playground: &None,
             heading_offset: HeadingOffset::H2,
         }
-        .write_into(&mut output)
-        .unwrap();
+        .into_string();
         assert_eq!(output, expect, "original: {}", input);
     }
 
@@ -531,13 +524,15 @@ fn test_ascii_with_prepending_hashtag() {
 ####.###..#....#....#..#.
 #..#.#....#....#....#..#.
 #..#.#....#....#....#..#.
-#..#.####.####.####..##..</code></pre></div>",
+#..#.####.####.####..##..
+</code></pre></div>",
     );
     t(
         r#"```markdown
 # hello
 ```"#,
         "<div class=\"example-wrap\"><pre class=\"language-markdown\"><code>\
-# hello</code></pre></div>",
+# hello
+</code></pre></div>",
     );
 }

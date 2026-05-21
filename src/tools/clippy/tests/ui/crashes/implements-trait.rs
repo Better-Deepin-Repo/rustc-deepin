@@ -1,5 +1,3 @@
-//@ check-pass
-
 #[allow(clippy::needless_borrowed_reference)]
 fn main() {
     let mut v = Vec::<String>::new();

@@ -7,12 +7,11 @@ pub enum UninhabitedEnum {
 }
 
 #[non_exhaustive]
-pub struct UninhabitedTupleStruct(pub !);
+pub struct UninhabitedTupleStruct(!);
 
 #[non_exhaustive]
 pub struct UninhabitedStruct {
-    pub never: !,
-    _priv: (),
+    _priv: !,
 }
 
 pub enum UninhabitedVariants {

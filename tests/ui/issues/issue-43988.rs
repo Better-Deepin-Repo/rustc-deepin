@@ -4,13 +4,12 @@ fn main() {
 
     #[inline]
     let _a = 4;
-    //~^^ ERROR attribute cannot be used on
+    //~^^ ERROR attribute should be applied to function or closure
 
 
     #[inline(XYZ)]
     let _b = 4;
-    //~^^ ERROR malformed `inline` attribute
-    //~| ERROR attribute cannot be used on
+    //~^^ ERROR attribute should be applied to function or closure
 
     #[repr(nothing)]
     let _x = 0;
@@ -30,8 +29,7 @@ fn main() {
 
     #[inline(ABC)]
     foo();
-    //~^^ ERROR malformed `inline` attribute
-    //~| ERROR attribute cannot be used on
+    //~^^ ERROR attribute should be applied to function or closure
 
     let _z = #[repr] 1;
     //~^ ERROR malformed `repr` attribute

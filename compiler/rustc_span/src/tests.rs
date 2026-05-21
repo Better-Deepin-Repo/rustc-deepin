@@ -3,13 +3,9 @@ use super::*;
 #[test]
 fn test_lookup_line() {
     let source = "abcdefghijklm\nabcdefghij\n...".to_owned();
-    let mut sf = SourceFile::new(
-        FileName::Anon(Hash64::ZERO),
-        source,
-        SourceFileHashAlgorithm::Sha256,
-        Some(SourceFileHashAlgorithm::Sha256),
-    )
-    .unwrap();
+    let mut sf =
+        SourceFile::new(FileName::Anon(Hash64::ZERO), source, SourceFileHashAlgorithm::Sha256)
+            .unwrap();
     sf.start_pos = BytePos(3);
     assert_eq!(sf.lines(), &[RelativeBytePos(0), RelativeBytePos(14), RelativeBytePos(25)]);
 
@@ -102,18 +98,4 @@ fn test_trim() {
     assert_eq!(span(before, start).trim_start(other), None);
 
     assert_eq!(span(well_before, before).trim_start(other), None);
-}
-
-#[test]
-fn test_unnormalized_source_length() {
-    let source = "\u{feff}hello\r\nferries\r\n".to_owned();
-    let sf = SourceFile::new(
-        FileName::Anon(Hash64::ZERO),
-        source,
-        SourceFileHashAlgorithm::Sha256,
-        Some(SourceFileHashAlgorithm::Sha256),
-    )
-    .unwrap();
-    assert_eq!(sf.unnormalized_source_len, 19);
-    assert_eq!(sf.normalized_source_len.0, 14);
 }

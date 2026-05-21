@@ -1,6 +1,6 @@
-use syntax::{SyntaxKind, T};
+use syntax::{SyntaxKind, TextRange, T};
 
-use crate::{AssistContext, AssistId, Assists};
+use crate::{AssistContext, AssistId, AssistKind, Assists};
 
 // Assist: remove_mut
 //
@@ -19,15 +19,19 @@ use crate::{AssistContext, AssistId, Assists};
 // ```
 pub(crate) fn remove_mut(acc: &mut Assists, ctx: &AssistContext<'_>) -> Option<()> {
     let mut_token = ctx.find_token_syntax_at_offset(T![mut])?;
+    let delete_from = mut_token.text_range().start();
+    let delete_to = match mut_token.next_token() {
+        Some(it) if it.kind() == SyntaxKind::WHITESPACE => it.text_range().end(),
+        _ => mut_token.text_range().end(),
+    };
 
     let target = mut_token.text_range();
-    acc.add(AssistId::refactor("remove_mut"), "Remove `mut` keyword", target, |builder| {
-        let mut editor = builder.make_editor(&mut_token.parent().unwrap());
-        match mut_token.next_token() {
-            Some(it) if it.kind() == SyntaxKind::WHITESPACE => editor.delete(it),
-            _ => (),
-        }
-        editor.delete(mut_token);
-        builder.add_file_edits(ctx.vfs_file_id(), editor);
-    })
+    acc.add(
+        AssistId("remove_mut", AssistKind::Refactor),
+        "Remove `mut` keyword",
+        target,
+        |builder| {
+            builder.delete(TextRange::new(delete_from, delete_to));
+        },
+    )
 }

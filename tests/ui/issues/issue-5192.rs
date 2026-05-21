@@ -1,5 +1,6 @@
 //@ run-pass
 #![allow(dead_code)]
+//@ pretty-expanded FIXME #23616
 
 pub trait EventLoop {
     fn dummy(&self) { }

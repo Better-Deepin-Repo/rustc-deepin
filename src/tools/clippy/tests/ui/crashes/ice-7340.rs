@@ -1,5 +1,3 @@
-//@ check-pass
-
 #![allow(clippy::no_effect)]
 
 fn main() {

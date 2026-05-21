@@ -1,4 +1,5 @@
 //@ run-pass
+//@ pretty-expanded FIXME #23616
 
 use m::f;
 use m::g;

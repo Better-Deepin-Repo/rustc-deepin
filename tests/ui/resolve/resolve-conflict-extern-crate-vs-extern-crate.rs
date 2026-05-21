@@ -1,4 +1,3 @@
-//@ edition:2015
 extern crate std;
 //~^ ERROR the name `std` is defined multiple times
 

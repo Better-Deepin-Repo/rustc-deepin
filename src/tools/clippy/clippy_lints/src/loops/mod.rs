@@ -1,4 +1,3 @@
-mod char_indices_as_byte_indices;
 mod empty_loop;
 mod explicit_counter_loop;
 mod explicit_into_iter_loop;
@@ -9,7 +8,6 @@ mod iter_next_loop;
 mod manual_find;
 mod manual_flatten;
 mod manual_memcpy;
-mod manual_slice_fill;
 mod manual_while_let_some;
 mod missing_spin_loop;
 mod mut_range_bound;
@@ -24,16 +22,15 @@ mod while_immutable_condition;
 mod while_let_loop;
 mod while_let_on_iterator;
 
+use clippy_config::msrvs::Msrv;
 use clippy_config::Conf;
-use clippy_utils::msrvs::Msrv;
-use clippy_utils::res::{MaybeDef, MaybeTypeckRes};
-use clippy_utils::{higher, sym};
+use clippy_utils::higher;
 use rustc_ast::Label;
 use rustc_hir::{Expr, ExprKind, LoopSource, Pat};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::impl_lint_pass;
 use rustc_span::Span;
-use utils::{IncrementVisitor, InitializeVisitor, make_iterator_snippet};
+use utils::{make_iterator_snippet, IncrementVisitor, InitializeVisitor};
 
 declare_clippy_lint! {
     /// ### What it does
@@ -191,22 +188,22 @@ declare_clippy_lint! {
     /// The `while let` loop is usually shorter and more
     /// readable.
     ///
+    /// ### Known problems
+    /// Sometimes the wrong binding is displayed ([#383](https://github.com/rust-lang/rust-clippy/issues/383)).
+    ///
     /// ### Example
     /// ```rust,no_run
-    /// let y = Some(1);
+    /// # let y = Some(1);
     /// loop {
     ///     let x = match y {
     ///         Some(x) => x,
     ///         None => break,
     ///     };
-    ///     // ..
+    ///     // .. do something with x
     /// }
-    /// ```
-    /// Use instead:
-    /// ```rust,no_run
-    /// let y = Some(1);
+    /// // is easier written as
     /// while let Some(x) = y {
-    ///     // ..
+    ///     // .. do something with x
     /// };
     /// ```
     #[clippy::version = "pre 1.29.0"]
@@ -471,7 +468,7 @@ declare_clippy_lint! {
     /// let item2 = 3;
     /// let mut vec: Vec<u8> = Vec::new();
     /// for _ in 0..20 {
-    ///     vec.push(item1);
+    ///    vec.push(item1);
     /// }
     /// for _ in 0..30 {
     ///     vec.push(item2);
@@ -717,74 +714,6 @@ declare_clippy_lint! {
     "possibly unintended infinite loop"
 }
 
-declare_clippy_lint! {
-    /// ### What it does
-    /// Checks for manually filling a slice with a value.
-    ///
-    /// ### Why is this bad?
-    /// Using the `fill` method is more idiomatic and concise.
-    ///
-    /// ### Example
-    /// ```no_run
-    /// let mut some_slice = [1, 2, 3, 4, 5];
-    /// for i in 0..some_slice.len() {
-    ///     some_slice[i] = 0;
-    /// }
-    /// ```
-    /// Use instead:
-    /// ```no_run
-    /// let mut some_slice = [1, 2, 3, 4, 5];
-    /// some_slice.fill(0);
-    /// ```
-    #[clippy::version = "1.86.0"]
-    pub MANUAL_SLICE_FILL,
-    style,
-    "manually filling a slice with a value"
-}
-
-declare_clippy_lint! {
-    /// ### What it does
-    /// Checks for usage of a character position yielded by `.chars().enumerate()` in a context where a **byte index** is expected,
-    /// such as an argument to a specific `str` method or indexing into a `str` or `String`.
-    ///
-    /// ### Why is this bad?
-    /// A character (more specifically, a Unicode scalar value) that is yielded by `str::chars` can take up multiple bytes,
-    /// so a character position does not necessarily have the same byte index at which the character is stored.
-    /// Thus, using the character position where a byte index is expected can unexpectedly return wrong values
-    /// or panic when the string consists of multibyte characters.
-    ///
-    /// For example, the character `a` in `äa` is stored at byte index 2 but has the character position 1.
-    /// Using the character position 1 to index into the string will lead to a panic as it is in the middle of the first character.
-    ///
-    /// Instead of `.chars().enumerate()`, the correct iterator to use is `.char_indices()`, which yields byte indices.
-    ///
-    /// This pattern is technically fine if the strings are known to only use the ASCII subset,
-    /// though in those cases it would be better to use `bytes()` directly to make the intent clearer,
-    /// but there is also no downside to just using `.char_indices()` directly and supporting non-ASCII strings.
-    ///
-    /// You may also want to read the [chapter on strings in the Rust Book](https://doc.rust-lang.org/book/ch08-02-strings.html)
-    /// which goes into this in more detail.
-    ///
-    /// ### Example
-    /// ```no_run
-    /// # let s = "...";
-    /// for (idx, c) in s.chars().enumerate() {
-    ///     let _ = s[idx..]; // ⚠️ Panics for strings consisting of multibyte characters
-    /// }
-    /// ```
-    /// Use instead:
-    /// ```no_run
-    /// # let s = "...";
-    /// for (idx, c) in s.char_indices() {
-    ///     let _ = s[idx..];
-    /// }
-    /// ```
-    #[clippy::version = "1.88.0"]
-    pub CHAR_INDICES_AS_BYTE_INDICES,
-    correctness,
-    "using the character position yielded by `.chars().enumerate()` in a context where a byte index is expected"
-}
-
 pub struct Loops {
     msrv: Msrv,
     enforce_iter_loop_reborrow: bool,
@@ -792,7 +721,7 @@ pub struct Loops {
 impl Loops {
     pub fn new(conf: &'static Conf) -> Self {
         Self {
-            msrv: conf.msrv,
+            msrv: conf.msrv.clone(),
             enforce_iter_loop_reborrow: conf.enforce_iter_loop_reborrow,
         }
     }
@@ -821,8 +750,6 @@ impl_lint_pass!(Loops => [
     MANUAL_WHILE_LET_SOME,
     UNUSED_ENUMERATE_INDEX,
     INFINITE_LOOP,
-    MANUAL_SLICE_FILL,
-    CHAR_INDICES_AS_BYTE_INDICES,
 ]);
 
 impl<'tcx> LateLintPass<'tcx> for Loops {
@@ -862,7 +789,6 @@ impl<'tcx> LateLintPass<'tcx> for Loops {
         // check for `loop { if let {} else break }` that could be `while let`
         // (also matches an explicit "match" instead of "if let")
         // (even if the "match" or "if let" is used for declaration)
-        // (also matches on `let {} else break`)
         if let ExprKind::Loop(block, label, LoopSource::Loop, _) = expr.kind {
             // also check for empty `loop {}` statements, skipping those in #[panic_handler]
             empty_loop::check(cx, expr, block);
@@ -872,60 +798,19 @@ impl<'tcx> LateLintPass<'tcx> for Loops {
 
         while_let_on_iterator::check(cx, expr);
 
-        if let Some(higher::While {
-            condition, body, span, ..
-        }) = higher::While::hir(expr)
-        {
+        if let Some(higher::While { condition, body, span }) = higher::While::hir(expr) {
             while_immutable_condition::check(cx, condition, body);
             while_float::check(cx, condition);
             missing_spin_loop::check(cx, condition, body);
             manual_while_let_some::check(cx, condition, body, span);
         }
-
-        if let ExprKind::MethodCall(path, recv, args, _) = expr.kind {
-            let name = path.ident.name;
-
-            let is_iterator_method = || {
-                cx.ty_based_def(expr)
-                    .assoc_fn_parent(cx)
-                    .is_diag_item(cx, sym::Iterator)
-            };
-
-            // is_iterator_method is a bit expensive, so we call it last in each match arm
-            match (name, args) {
-                (sym::for_each | sym::all | sym::any, [arg]) => {
-                    if let ExprKind::Closure(closure) = arg.kind
-                        && is_iterator_method()
-                    {
-                        unused_enumerate_index::check_method(cx, recv, arg, closure);
-                        never_loop::check_iterator_reduction(cx, expr, recv, closure);
-                    }
-                },
-
-                (sym::filter_map | sym::find_map | sym::flat_map | sym::map, [arg]) => {
-                    if let ExprKind::Closure(closure) = arg.kind
-                        && is_iterator_method()
-                    {
-                        unused_enumerate_index::check_method(cx, recv, arg, closure);
-                    }
-                },
-
-                (sym::try_for_each | sym::reduce, [arg]) | (sym::fold | sym::try_fold, [_, arg]) => {
-                    if let ExprKind::Closure(closure) = arg.kind
-                        && is_iterator_method()
-                    {
-                        never_loop::check_iterator_reduction(cx, expr, recv, closure);
-                    }
-                },
-
-                _ => {},
-            }
-        }
     }
+
+    extract_msrv_attr!(LateContext);
 }
 
 impl Loops {
-    #[expect(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_arguments)]
     fn check_for_loop<'tcx>(
         &self,
         cx: &LateContext<'tcx>,
@@ -938,33 +823,29 @@ impl Loops {
     ) {
         let is_manual_memcpy_triggered = manual_memcpy::check(cx, pat, arg, body, expr);
         if !is_manual_memcpy_triggered {
-            manual_slice_fill::check(cx, pat, arg, body, expr, self.msrv);
             needless_range_loop::check(cx, pat, arg, body, expr);
             explicit_counter_loop::check(cx, pat, arg, body, expr, label);
         }
         self.check_for_loop_arg(cx, pat, arg);
-        for_kv_map::check(cx, pat, arg, body, span);
+        for_kv_map::check(cx, pat, arg, body);
         mut_range_bound::check(cx, arg, body);
         single_element_loop::check(cx, pat, arg, body, expr);
-        same_item_push::check(cx, pat, arg, body, expr, self.msrv);
-        manual_flatten::check(cx, pat, arg, body, span, self.msrv);
+        same_item_push::check(cx, pat, arg, body, expr);
+        manual_flatten::check(cx, pat, arg, body, span);
         manual_find::check(cx, pat, arg, body, span, expr);
-        unused_enumerate_index::check(cx, arg, pat, None, body);
-        char_indices_as_byte_indices::check(cx, pat, arg, body);
+        unused_enumerate_index::check(cx, pat, arg, body);
     }
 
     fn check_for_loop_arg(&self, cx: &LateContext<'_>, _: &Pat<'_>, arg: &Expr<'_>) {
-        if !arg.span.from_expansion()
-            && let ExprKind::MethodCall(method, self_arg, [], _) = arg.kind
-        {
-            match method.ident.name {
-                sym::iter | sym::iter_mut => {
-                    explicit_iter_loop::check(cx, self_arg, arg, self.msrv, self.enforce_iter_loop_reborrow);
+        if let ExprKind::MethodCall(method, self_arg, [], _) = arg.kind {
+            match method.ident.as_str() {
+                "iter" | "iter_mut" => {
+                    explicit_iter_loop::check(cx, self_arg, arg, &self.msrv, self.enforce_iter_loop_reborrow);
                 },
-                sym::into_iter => {
+                "into_iter" => {
                     explicit_into_iter_loop::check(cx, self_arg, arg);
                 },
-                sym::next => {
+                "next" => {
                     iter_next_loop::check(cx, arg);
                 },
                 _ => {},

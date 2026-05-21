@@ -3,7 +3,7 @@ use hir::ModuleDef;
 use ide_db::SymbolKind;
 use syntax::ast;
 
-use crate::{Completions, context::CompletionContext, item::CompletionItem};
+use crate::{context::CompletionContext, item::CompletionItem, Completions};
 
 pub(super) fn complete_macro_use(
     acc: &mut Completions,
@@ -15,7 +15,7 @@ pub(super) fn complete_macro_use(
     let Some(extern_crate) = ctx.sema.to_def(extern_crate) else { return };
     let Some(krate) = extern_crate.resolved_crate(ctx.db) else { return };
 
-    for mod_def in krate.root_module(ctx.db).declarations(ctx.db) {
+    for mod_def in krate.root_module().declarations(ctx.db) {
         if let ModuleDef::Macro(mac) = mod_def {
             let mac_name = mac.name(ctx.db);
             let mac_name = mac_name.as_str();

@@ -1,6 +1,6 @@
 //@ run-pass
 //@ needs-unwind
-//@ needs-threads
+//@ ignore-emscripten no threads support
 
 // rust-lang/rust#64655: with panic=unwind, a panic from a subroutine
 // should still run destructors as it unwinds the stack. However,
@@ -48,7 +48,6 @@
 //@[fat1]compile-flags: -C opt-level=1 -C lto=fat
 //@[fat2]compile-flags: -C opt-level=2 -C lto=fat
 //@[fat3]compile-flags: -C opt-level=3 -C lto=fat
-//@ ignore-backends: gcc
 
 fn main() {
     use std::sync::atomic::{AtomicUsize, Ordering};

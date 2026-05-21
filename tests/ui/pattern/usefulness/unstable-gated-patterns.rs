@@ -11,7 +11,7 @@ fn main() {
         UnstableEnum::Stable => {}
         UnstableEnum::Stable2 => {}
     }
-    //~^^^^ ERROR non-exhaustive patterns: `UnstableEnum::Unstable` not covered
+    //~^^^^ non-exhaustive patterns: `UnstableEnum::Unstable` not covered
 
     // Ok: all variants are explicitly matched
     match UnstableEnum::Stable {

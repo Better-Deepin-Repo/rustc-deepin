@@ -1,4 +1,6 @@
-use foo::* as baz; //~ ERROR expected `;`, found keyword `as`
+//@ error-pattern:expected
+
+use foo::* as baz;
 
 mod foo {
     pub fn bar() {}

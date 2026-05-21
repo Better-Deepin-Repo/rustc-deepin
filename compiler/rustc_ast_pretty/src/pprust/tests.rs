@@ -1,5 +1,6 @@
 use rustc_ast as ast;
-use rustc_span::{DUMMY_SP, Ident, create_default_session_globals_then};
+use rustc_span::symbol::Ident;
+use rustc_span::{create_default_session_globals_then, DUMMY_SP};
 use thin_vec::ThinVec;
 
 use super::*;
@@ -7,14 +8,14 @@ use super::*;
 fn fun_to_string(
     decl: &ast::FnDecl,
     header: ast::FnHeader,
-    ident: Ident,
+    name: Ident,
     generics: &ast::Generics,
 ) -> String {
     to_string(|s| {
-        let (cb, ib) = s.head("");
-        s.print_fn(decl, header, Some(ident), generics);
-        s.end(ib);
-        s.end(cb);
+        s.head("");
+        s.print_fn(decl, header, Some(name), generics);
+        s.end(); // Close the head box.
+        s.end(); // Close the outer box.
     })
 }
 

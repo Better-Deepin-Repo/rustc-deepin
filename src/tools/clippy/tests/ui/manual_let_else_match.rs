@@ -1,4 +1,4 @@
-#![allow(unused_braces, unused_variables, dead_code, irrefutable_let_patterns)]
+#![allow(unused_braces, unused_variables, dead_code)]
 #![allow(
     clippy::collapsible_else_if,
     clippy::let_unit_value,
@@ -34,13 +34,14 @@ fn main() {}
 
 fn fire() {
     let v = match g() {
-        //~^ manual_let_else
+        //~^ ERROR: this could be rewritten as `let...else`
+        //~| NOTE: `-D clippy::manual-let-else` implied by `-D warnings`
         Some(v_some) => v_some,
         None => return,
     };
 
     let v = match g() {
-        //~^ manual_let_else
+        //~^ ERROR: this could be rewritten as `let...else`
         Some(v_some) => v_some,
         _ => return,
     };
@@ -48,13 +49,13 @@ fn fire() {
     loop {
         // More complex pattern for the identity arm and diverging arm
         let v = match h() {
-            //~^ manual_let_else
+            //~^ ERROR: this could be rewritten as `let...else`
             (Some(v), None) | (None, Some(v)) => v,
             (Some(_), Some(_)) | (None, None) => continue,
         };
         // Custom enums are supported as long as the "else" arm is a simple _
         let v = match build_enum() {
-            //~^ manual_let_else
+            //~^ ERROR: this could be rewritten as `let...else`
             Variant::Bar(v) | Variant::Baz(v) => v,
             _ => continue,
         };
@@ -63,14 +64,14 @@ fn fire() {
     // There is a _ in the diverging arm
     // TODO also support unused bindings aka _v
     let v = match f() {
-        //~^ manual_let_else
+        //~^ ERROR: this could be rewritten as `let...else`
         Ok(v) => v,
         Err(_) => return,
     };
 
     // Err(()) is an allowed pattern
     let v = match f().map_err(|_| ()) {
-        //~^ manual_let_else
+        //~^ ERROR: this could be rewritten as `let...else`
         Ok(v) => v,
         Err(()) => return,
     };
@@ -78,20 +79,20 @@ fn fire() {
     let f = Variant::Bar(1);
 
     let _value = match f {
-        //~^ manual_let_else
+        //~^ ERROR: this could be rewritten as `let...else`
         Variant::Bar(v) | Variant::Baz(v) => v,
         _ => return,
     };
 
     let _value = match Some(build_enum()) {
-        //~^ manual_let_else
+        //~^ ERROR: this could be rewritten as `let...else`
         Some(Variant::Bar(v) | Variant::Baz(v)) => v,
         _ => return,
     };
 
     let data = [1_u8, 2, 3, 4, 0, 0, 0, 0];
     let data = match data.as_slice() {
-        //~^ manual_let_else
+        //~^ ERROR: this could be rewritten as `let...else`
         [data @ .., 0, 0, 0, 0] | [data @ .., 0, 0] | [data @ .., 0] => data,
         _ => return,
     };
@@ -172,98 +173,8 @@ fn not_fire() {
 
 fn issue11579() {
     let msg = match Some("hi") {
-        //~^ manual_let_else
+        //~^ ERROR: this could be rewritten as `let...else`
         Some(m) => m,
         _ => unreachable!("can't happen"),
     };
-}
-
-#[derive(Clone, Copy)]
-struct Issue9939<T> {
-    avalanche: T,
-}
-
-fn issue9939() {
-    let issue = Some(Issue9939 { avalanche: 1 });
-    let tornado = match issue {
-        //~^ manual_let_else
-        Some(Issue9939 { avalanche }) => avalanche,
-        _ => unreachable!("can't happen"),
-    };
-    let issue = Some(Issue9939 { avalanche: true });
-    let acid_rain = match issue {
-        //~^ manual_let_else
-        Some(Issue9939 { avalanche: tornado }) => tornado,
-        _ => unreachable!("can't happen"),
-    };
-    assert_eq!(tornado, 1);
-    assert!(acid_rain);
-
-    // without shadowing
-    let _y = match issue {
-        //~^ manual_let_else
-        _x @ Some(Issue9939 { avalanche }) => avalanche,
-        None => unreachable!("can't happen"),
-    };
-
-    // with shadowing
-    let _x = match issue {
-        //~^ manual_let_else
-        _x @ Some(Issue9939 { avalanche }) => avalanche,
-        None => unreachable!("can't happen"),
-    };
-}
-
-#[derive(Clone, Copy)]
-struct Issue9939b<T, U> {
-    earthquake: T,
-    hurricane: U,
-}
-
-fn issue9939b() {
-    let issue = Some(Issue9939b {
-        earthquake: true,
-        hurricane: 1,
-    });
-    let (issue, drought, flood) = match issue {
-        //~^ manual_let_else
-        flood @ Some(Issue9939b { earthquake, hurricane }) => (flood, hurricane, earthquake),
-        None => unreachable!("can't happen"),
-    };
-    assert_eq!(drought, 1);
-    assert!(flood);
-    assert!(issue.is_some());
-
-    // without shadowing
-    let (_y, erosion) = match issue {
-        //~^ manual_let_else
-        _x @ Some(Issue9939b { earthquake, hurricane }) => (hurricane, earthquake),
-        None => unreachable!("can't happen"),
-    };
-    assert!(erosion);
-
-    // with shadowing
-    let (_x, erosion) = match issue {
-        //~^ manual_let_else
-        _x @ Some(Issue9939b { earthquake, hurricane }) => (hurricane, earthquake),
-        None => unreachable!("can't happen"),
-    };
-    assert!(erosion);
-}
-
-mod issue16433 {
-    // https://github.com/rust-lang/rust-clippy/issues/16433
-    struct A {
-        a: u32,
-        b: u32,
-    }
-
-    fn foo() {
-        let a = A { a: 1, b: 1 };
-        let first_arg = match a {
-            //~^ manual_let_else
-            A { a, .. } => a,
-            _ => return,
-        };
-    }
 }

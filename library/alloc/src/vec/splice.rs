@@ -1,4 +1,5 @@
-use core::{ptr, slice};
+use core::ptr::{self};
+use core::slice::{self};
 
 use super::{Drain, Vec};
 use crate::alloc::{Allocator, Global};
@@ -49,7 +50,6 @@ impl<I: Iterator, A: Allocator> DoubleEndedIterator for Splice<'_, I, A> {
 #[stable(feature = "vec_splice", since = "1.21.0")]
 impl<I: Iterator, A: Allocator> ExactSizeIterator for Splice<'_, I, A> {}
 
-// See also: [`crate::collections::vec_deque::Splice`].
 #[stable(feature = "vec_splice", since = "1.21.0")]
 impl<I: Iterator, A: Allocator> Drop for Splice<'_, I, A> {
     fn drop(&mut self) {
@@ -58,7 +58,7 @@ impl<I: Iterator, A: Allocator> Drop for Splice<'_, I, A> {
         // and moving things into the final place.
         // Which means we can replace the slice::Iter with pointers that won't point to deallocated
         // memory, so that Drain::drop is still allowed to call iter.len(), otherwise it would break
-        // the ptr.offset_from_unsigned contract.
+        // the ptr.sub_ptr contract.
         self.drain.iter = (&[]).iter();
 
         unsafe {
@@ -112,11 +112,12 @@ impl<T, A: Allocator> Drain<'_, T, A> {
         };
 
         for place in range_slice {
-            let Some(new_item) = replace_with.next() else {
+            if let Some(new_item) = replace_with.next() {
+                unsafe { ptr::write(place, new_item) };
+                vec.len += 1;
+            } else {
                 return false;
-            };
-            unsafe { ptr::write(place, new_item) };
-            vec.len += 1;
+            }
         }
         true
     }

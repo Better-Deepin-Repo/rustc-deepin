@@ -1,5 +1,7 @@
 # Incremental compilation
 
+<!-- toc -->
+
 The incremental compilation scheme is, in essence, a surprisingly
 simple extension to the overall query system. We'll start by describing
 a slightly simplified variant of the real thing – the "basic algorithm" –
@@ -18,20 +20,6 @@ because queries cannot depend on themselves, this results in a DAG and
 not a general graph).
 
 [DAG]: https://en.wikipedia.org/wiki/Directed_acyclic_graph
-
-> **NOTE**: You might think of a query as simply the definition of a query.
-> A thing that you can invoke, a bit like a function, 
-> and which either returns a cached result or actually executes the code.
-> 
-> If that's the way you think about queries,
-> it's good to know that in the following text, queries will be said to have colours. 
-> Keep in mind though, that here the word query also refers to a certain invocation of 
-> the query for a certain input. As you will read later, queries are fingerprinted based 
-> on their arguments. The result of a query might change when we give it one argument 
-> and be coloured red, while it stays the same for another argument and is thus green.
-> 
-> In short, the word query is here not just used to mean the definition of a query, 
-> but also for a specific instance of that query with given arguments.
 
 On the next run of the compiler, then, we can sometimes reuse these
 query results to avoid re-executing a query. We do this by assigning
@@ -90,7 +78,7 @@ Try-mark-green works as follows:
     - Otherwise, **all** of the nodes in `reads(Q)` must be **green**. In that
       case, we can color Q as **green** and return.
 
-<a id="dag"></a>
+<a name="dag"></a>
 
 ### The query DAG
 

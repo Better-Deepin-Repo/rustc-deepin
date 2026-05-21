@@ -1,13 +1,11 @@
 use brotli::enc::BrotliEncoderParams;
 use brotli::BrotliCompress;
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Instant;
 use std::{fmt, str};
 
@@ -17,6 +15,7 @@ use http::header::CACHE_CONTROL;
 use hyper::StatusCode;
 use log::{debug, error, info};
 use parking_lot::{Mutex, RwLock};
+use ring::hmac;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use uuid::Uuid;
@@ -258,7 +257,9 @@ impl Server {
     }
 
     async fn handle_push(&self, _req: Request) -> Response {
-        static LAST_UPDATE: LazyLock<Mutex<Option<Instant>>> = LazyLock::new(|| Mutex::new(None));
+        lazy_static::lazy_static! {
+            static ref LAST_UPDATE: Mutex<Option<Instant>> = Mutex::new(None);
+        }
 
         let last = *LAST_UPDATE.lock();
         if let Some(last) = last {
@@ -269,7 +270,8 @@ impl Server {
                     .status(StatusCode::OK)
                     .header_typed(ContentType::text_utf8())
                     .body(hyper::Body::from(format!(
-                        "Refreshed too recently ({elapsed:?} ago). Please wait."
+                        "Refreshed too recently ({:?} ago). Please wait.",
+                        elapsed
                     )))
                     .unwrap();
             }
@@ -340,8 +342,7 @@ async fn serve_req(server: Server, req: Request) -> Result<Response, ServerError
     let allow_compression = req
         .headers()
         .get(hyper::header::ACCEPT_ENCODING)
-        .and_then(|e| e.to_str().ok())
-        .is_some_and(|s| s.split(',').any(|part| part.trim().starts_with("br")));
+        .map_or(false, |e| e.to_str().unwrap().contains("br"));
 
     let compression = if allow_compression {
         // In tests on /perf/graphs and /perf/get, quality = 2 reduces size by 20-40% compared to 0,
@@ -381,22 +382,6 @@ async fn serve_req(server: Server, req: Request) -> Result<Response, ServerError
             return server
                 .handle_get_async(&req, request_handlers::handle_status_page)
                 .await;
-        }
-        "/perf/status_page_new" => {
-            let ctxt: Arc<SiteCtxt> = server.ctxt.read().as_ref().unwrap().clone();
-            let result = request_handlers::handle_status_page_new(ctxt).await;
-            return match result {
-                Ok(result) => Ok(http::Response::builder()
-                    .header_typed(ContentType::json())
-                    .body(hyper::Body::from(serde_json::to_string(&result).unwrap()))
-                    .unwrap()),
-                Err(err) => Ok(http::Response::builder()
-                    .status(StatusCode::INTERNAL_SERVER_ERROR)
-                    .header_typed(ContentType::text_utf8())
-                    .header_typed(CacheControl::new().with_no_cache().with_no_store())
-                    .body(hyper::Body::from(format!("{err:?}")))
-                    .unwrap()),
-            };
         }
         "/perf/next_artifact" => {
             return server
@@ -456,12 +441,7 @@ async fn serve_req(server: Server, req: Request) -> Result<Response, ServerError
         "/perf/processed-self-profile" => {
             let ctxt: Arc<SiteCtxt> = server.ctxt.read().as_ref().unwrap().clone();
             let req = check!(parse_query_string(req.uri()));
-            return Ok(request_handlers::handle_self_profile_processed_download(
-                req,
-                &ctxt,
-                allow_compression,
-            )
-            .await);
+            return Ok(request_handlers::handle_self_profile_processed_download(req, &ctxt).await);
         }
         _ if req.method() == http::Method::GET => return Ok(not_found()),
         _ => {}
@@ -473,7 +453,7 @@ async fn serve_req(server: Server, req: Request) -> Result<Response, ServerError
     let ctxt: Arc<SiteCtxt> = server.ctxt.read().as_ref().unwrap().clone();
     let mut body = Vec::new();
     while let Some(chunk) = body_stream.next().await {
-        let chunk = chunk.map_err(|e| ServerError(format!("failed to read chunk: {e:?}")))?;
+        let chunk = chunk.map_err(|e| ServerError(format!("failed to read chunk: {:?}", e)))?;
         body.extend_from_slice(&chunk);
         // More than 10 MB of data
         if body.len() > 1024 * 1024 * 10 {
@@ -526,7 +506,7 @@ async fn serve_req(server: Server, req: Request) -> Result<Response, ServerError
                 )),
                 _ => Ok(http::Response::builder()
                     .status(StatusCode::OK)
-                    .body(hyper::Body::from(format!("unknown event: {event}")))
+                    .body(hyper::Body::from(format!("unknown event: {}", event)))
                     .unwrap()),
             }
         }
@@ -567,7 +547,6 @@ async fn serve_req(server: Server, req: Request) -> Result<Response, ServerError
     }
 }
 
-#[allow(clippy::result_large_err)]
 fn parse_body<D>(body: &[u8]) -> Result<D, Response>
 where
     D: DeserializeOwned,
@@ -584,14 +563,14 @@ where
                 .header_typed(ContentType::text_utf8())
                 .status(StatusCode::BAD_REQUEST)
                 .body(hyper::Body::from(format!(
-                    "Failed to deserialize request: {err:?}"
+                    "Failed to deserialize request: {:?}",
+                    err
                 )))
                 .unwrap())
         }
     }
 }
 
-#[allow(clippy::result_large_err)]
 fn parse_query_string<D>(uri: &http::Uri) -> Result<D, Response>
 where
     D: DeserializeOwned,
@@ -611,15 +590,17 @@ where
             .header_typed(ContentType::text_utf8())
             .status(StatusCode::BAD_REQUEST)
             .body(hyper::Body::from(format!(
-                "Failed to deserialize request {uri}: {err:?}",
+                "Failed to deserialize request {}: {:?}",
+                uri, err,
             )))
             .unwrap()),
     }
 }
 
-static VERSION_UUID: LazyLock<Uuid> = LazyLock::new(Uuid::new_v4); // random UUID used as ETag for cache revalidation
-static TEMPLATES: LazyLock<ResourceResolver> =
-    LazyLock::new(|| ResourceResolver::new().expect("Cannot load resources"));
+lazy_static::lazy_static! {
+    static ref VERSION_UUID: Uuid = Uuid::new_v4(); // random UUID used as ETag for cache revalidation
+    static ref TEMPLATES: ResourceResolver = ResourceResolver::new().expect("Cannot load resources");
+}
 
 /// Handle the case where the path is to a static file
 async fn handle_fs_path(
@@ -645,7 +626,7 @@ async fn handle_fs_path(
 
     async fn resolve_template(path: &str) -> Vec<u8> {
         TEMPLATES
-            .get_template(&format!("pages/{path}"))
+            .get_template(&format!("pages/{}", path))
             .await
             .unwrap()
     }
@@ -658,7 +639,6 @@ async fn handle_fs_path(
         | "/dashboard.html"
         | "/detailed-query.html"
         | "/help.html"
-        | "/status_new.html"
         | "/status.html" => resolve_template(relative_path).await,
         _ => match TEMPLATES.get_static_asset(relative_path, use_compression)? {
             Payload::Compressed(data) => {
@@ -706,27 +686,23 @@ fn not_found() -> http::Response<hyper::Body> {
 }
 
 fn verify_gh(config: &Config, req: &http::request::Parts, body: &[u8]) -> bool {
-    let gh_header = req
-        .headers
-        .get("X-Hub-Signature-256")
-        .and_then(|g| g.to_str().ok());
+    let gh_header = req.headers.get("X-Hub-Signature").cloned();
+    let gh_header = gh_header.and_then(|g| g.to_str().ok().map(|s| s.to_owned()));
     let gh_header = match gh_header {
         Some(v) => v,
         None => return false,
     };
-    verify_gh_sig(config, gh_header, body).unwrap_or(false)
+    verify_gh_sig(config, &gh_header, body).unwrap_or(false)
 }
 
 fn verify_gh_sig(cfg: &Config, header: &str, body: &[u8]) -> Option<bool> {
-    type HmacSha256 = Hmac<Sha256>;
-
-    let mut mac =
-        HmacSha256::new_from_slice(cfg.keys.github_webhook_secret.as_ref().unwrap().as_bytes())
-            .expect("HMAC can take key of any size");
-    mac.update(body);
-    let sha = header.strip_prefix("sha256=")?;
+    let key = hmac::Key::new(
+        hmac::HMAC_SHA1_FOR_LEGACY_USE_ONLY,
+        cfg.keys.github_webhook_secret.as_ref().unwrap().as_bytes(),
+    );
+    let sha = header.get(5..)?; // strip sha1=
     let sha = hex::decode(sha).ok()?;
-    if let Ok(()) = mac.verify_slice(&sha) {
+    if let Ok(()) = hmac::verify(&key, body, &sha) {
         return Some(true);
     }
 
@@ -754,7 +730,7 @@ where
     }
 }
 
-pub fn maybe_compressed_response(
+fn maybe_compressed_response(
     response: http::response::Builder,
     body: Vec<u8>,
     compression: &Option<BrotliEncoderParams>,
@@ -819,7 +795,7 @@ async fn run_server(ctxt: Arc<RwLock<Option<Arc<SiteCtxt>>>>, addr: SocketAddr) 
     });
     let server = hyper::server::Server::bind(&addr).serve(svc);
     if let Err(e) = server.await {
-        eprintln!("server error: {e:?}");
+        eprintln!("server error: {:?}", e);
     }
 }
 

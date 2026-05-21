@@ -2,9 +2,9 @@
 
 use std::env;
 
-use crate::prelude::*;
-use crate::utils::tools::echo_subcommand;
+use cargo_test_support::prelude::*;
 use cargo_test_support::str;
+use cargo_test_support::tools::echo_subcommand;
 use cargo_test_support::{basic_bin_manifest, project};
 
 #[cargo_test]
@@ -58,7 +58,8 @@ Caused by:
     |
   3 |                 b-cargo-test = `
     |                                ^
-  string values must be quoted, expected literal string
+  invalid string
+  expected `"`, `'`
 
 "#]])
         .run();
@@ -81,10 +82,19 @@ fn alias_malformed_config_list() {
     p.cargo("b-cargo-test -v")
         .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] error in [ROOT]/foo/.cargo/config.toml: failed to parse config at `alias.b-cargo-test[0]`
+[ERROR] could not load Cargo configuration
 
 Caused by:
-  invalid type: integer `1`, expected a string
+  failed to load TOML configuration from `[ROOT]/foo/.cargo/config.toml`
+
+Caused by:
+  failed to parse key `alias`
+
+Caused by:
+  failed to parse key `b-cargo-test`
+
+Caused by:
+  expected string but found integer in list
 
 "#]])
         .run();
@@ -184,9 +194,9 @@ fn alias_shadowing_external_subcommand() {
     p.cargo("echo")
         .env("PATH", &path)
         .with_stderr_data(str![[r#"
-[WARNING] user-defined alias `echo` is shadowing an external subcommand found at `[ROOT]/cargo-echo/target/debug/cargo-echo[EXE]`
-  |
-  = [NOTE] this was previously accepted but will become a hard error in the future; see <https://github.com/rust-lang/cargo/issues/10049>
+[WARNING] user-defined alias `echo` is shadowing an external subcommand found at: `[ROOT]/cargo-echo/target/debug/cargo-echo[EXE]`
+This was previously accepted but is being phased out; it will become a hard error in a future release.
+For more information, see issue #10049 <https://github.com/rust-lang/cargo/issues/10049>.
 [COMPILING] foo v0.5.0 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -219,9 +229,9 @@ fn default_args_alias() {
         .env("PATH", &path)
         .with_status(101)
         .with_stderr_data(str![[r#"
-[WARNING] user-defined alias `echo` is shadowing an external subcommand found at `[ROOT]/cargo-echo/target/debug/cargo-echo[EXE]`
-  |
-  = [NOTE] this was previously accepted but will become a hard error in the future; see <https://github.com/rust-lang/cargo/issues/10049>
+[WARNING] user-defined alias `echo` is shadowing an external subcommand found at: `[ROOT]/cargo-echo/target/debug/cargo-echo[EXE]`
+This was previously accepted but is being phased out; it will become a hard error in a future release.
+For more information, see issue #10049 <https://github.com/rust-lang/cargo/issues/10049>.
 [ERROR] alias echo has unresolvable recursive definition: echo -> echo
 
 "#]])
@@ -231,9 +241,9 @@ fn default_args_alias() {
         .env("PATH", &path)
         .with_status(101)
         .with_stderr_data(str![[r#"
-[WARNING] user-defined alias `echo` is shadowing an external subcommand found at `[ROOT]/cargo-echo/target/debug/cargo-echo[EXE]`
-  |
-  = [NOTE] this was previously accepted but will become a hard error in the future; see <https://github.com/rust-lang/cargo/issues/10049>
+[WARNING] user-defined alias `echo` is shadowing an external subcommand found at: `[ROOT]/cargo-echo/target/debug/cargo-echo[EXE]`
+This was previously accepted but is being phased out; it will become a hard error in a future release.
+For more information, see issue #10049 <https://github.com/rust-lang/cargo/issues/10049>.
 [ERROR] alias test-1 has unresolvable recursive definition: test-1 -> echo -> echo
 
 "#]])

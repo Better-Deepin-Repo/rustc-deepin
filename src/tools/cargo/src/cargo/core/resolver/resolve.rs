@@ -1,12 +1,12 @@
 use cargo_util_schemas::core::PartialVersion;
 use cargo_util_schemas::manifest::RustVersion;
 
+use super::encode::Metadata;
 use crate::core::dependency::DepKind;
 use crate::core::{Dependency, PackageId, PackageIdSpec, PackageIdSpecQuery, Summary, Target};
-use crate::util::Graph;
 use crate::util::errors::CargoResult;
 use crate::util::interning::InternedString;
-use cargo_util_schemas::lockfile::TomlLockfileMetadata;
+use crate::util::Graph;
 use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -34,7 +34,7 @@ pub struct Resolve {
     /// "Unknown" metadata. This is a collection of extra, unrecognized data
     /// found in the `[metadata]` section of `Cargo.lock`, preserved for
     /// forwards compatibility.
-    metadata: TomlLockfileMetadata,
+    metadata: Metadata,
     /// `[patch]` entries that did not match anything, preserved in
     /// `Cargo.lock` as the `[[patch.unused]]` table array. Tracking unused
     /// patches helps prevent Cargo from being forced to re-update the
@@ -84,14 +84,13 @@ pub enum ResolveVersion {
     /// branch specifiers.
     ///
     /// * Introduced in 2020 in version 1.47.
-    /// * New lockfiles use V3 by default from in 1.53 to 1.82.
+    /// * New lockfiles use V3 by default starting in 1.53.
     V3,
-    /// `SourceId` URL serialization is aware of URL encoding. For example,
+    /// SourceId URL serialization is aware of URL encoding. For example,
     /// `?branch=foo bar` is now encoded as `?branch=foo+bar` and can be decoded
     /// back and forth correctly.
     ///
     /// * Introduced in 2024 in version 1.78.
-    /// * New lockfiles use V4 by default starting in 1.83.
     V4,
     /// Unstable. Will collect a certain amount of changes and then go.
     ///
@@ -108,7 +107,7 @@ impl ResolveVersion {
     /// Update this and the description of enum variants of [`ResolveVersion`]
     /// when we're changing the default lockfile version.
     fn default() -> ResolveVersion {
-        ResolveVersion::V4
+        ResolveVersion::V3
     }
 
     /// The maximum version of lockfile made into the stable channel.
@@ -126,23 +125,28 @@ impl ResolveVersion {
             return ResolveVersion::default();
         };
 
-        let rust = |major, minor| -> RustVersion {
-            PartialVersion {
-                major,
-                minor: Some(minor),
-                patch: None,
-                pre: None,
-                build: None,
-            }
-            .try_into()
-            .unwrap()
-        };
+        let rust_1_41 = PartialVersion {
+            major: 1,
+            minor: Some(41),
+            patch: None,
+            pre: None,
+            build: None,
+        }
+        .try_into()
+        .expect("PartialVersion 1.41");
+        let rust_1_53 = PartialVersion {
+            major: 1,
+            minor: Some(53),
+            patch: None,
+            pre: None,
+            build: None,
+        }
+        .try_into()
+        .expect("PartialVersion 1.53");
 
-        if rust_version >= &rust(1, 83) {
-            ResolveVersion::V4
-        } else if rust_version >= &rust(1, 53) {
+        if rust_version >= &rust_1_53 {
             ResolveVersion::V3
-        } else if rust_version >= &rust(1, 41) {
+        } else if rust_version >= &rust_1_41 {
             ResolveVersion::V2
         } else {
             ResolveVersion::V1
@@ -156,7 +160,7 @@ impl Resolve {
         replacements: HashMap<PackageId, PackageId>,
         features: HashMap<PackageId, Vec<InternedString>>,
         checksums: HashMap<PackageId, Option<String>>,
-        metadata: TomlLockfileMetadata,
+        metadata: Metadata,
         unused_patches: Vec<PackageId>,
         version: ResolveVersion,
         summaries: HashMap<PackageId, Summary>,
@@ -390,11 +394,7 @@ unable to verify that `{0}` is the same as when the lockfile was generated
         &self.checksums
     }
 
-    pub fn set_checksum(&mut self, pkg_id: PackageId, checksum: String) {
-        self.checksums.insert(pkg_id, Some(checksum));
-    }
-
-    pub fn metadata(&self) -> &TomlLockfileMetadata {
+    pub fn metadata(&self) -> &Metadata {
         &self.metadata
     }
 

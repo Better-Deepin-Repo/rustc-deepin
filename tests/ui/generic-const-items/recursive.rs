@@ -1,11 +1,12 @@
-//@ build-fail
+// FIXME(generic_const_items): This leads to a stack overflow in the compiler!
+//@ known-bug: unknown
+//@ ignore-test
 
 #![feature(generic_const_items)]
 #![allow(incomplete_features)]
-#![recursion_limit = "15"]
 
 const RECUR<T>: () = RECUR::<(T,)>;
 
 fn main() {
-    let _ = RECUR::<()>; //~ ERROR: queries overflow the depth limit!
+    let _ = RECUR::<()>;
 }

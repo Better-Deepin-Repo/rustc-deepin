@@ -6,14 +6,14 @@ Description: always enable cross compilation via pkgconf, and set the right bina
 
 Forwarded: not-needed
 ---
- vendor/pkg-config-0.3.32/src/lib.rs    | 26 +++++++++++---------------
- vendor/pkg-config-0.3.32/tests/test.rs |  2 --
+ vendor/pkg-config-0.3.30/src/lib.rs    | 26 +++++++++++---------------
+ vendor/pkg-config-0.3.30/tests/test.rs |  2 --
  2 files changed, 11 insertions(+), 17 deletions(-)
 
-diff --git a/vendor/pkg-config-0.3.32/src/lib.rs b/vendor/pkg-config-0.3.32/src/lib.rs
-index 93e34c6..c0a3e08 100644
---- a/vendor/pkg-config-0.3.32/src/lib.rs
-+++ b/vendor/pkg-config-0.3.32/src/lib.rs
+diff --git a/vendor/pkg-config-0.3.30/src/lib.rs b/vendor/pkg-config-0.3.30/src/lib.rs
+index b425404..b880079 100644
+--- a/vendor/pkg-config-0.3.30/src/lib.rs
++++ b/vendor/pkg-config-0.3.30/src/lib.rs
 @@ -150,11 +150,8 @@ pub enum Error {
      /// Contains the name of the responsible environment variable.
      EnvNoPkgConfig(String),
@@ -28,8 +28,8 @@ index 93e34c6..c0a3e08 100644
      CrossCompilation,
  
      /// Failed to run `pkg-config`.
-@@ -284,14 +281,6 @@ impl fmt::Display for Error {
-     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+@@ -269,14 +266,6 @@ impl fmt::Display for Error {
+     fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
          match *self {
              Error::EnvNoPkgConfig(ref name) => write!(f, "Aborted because {} is set", name),
 -            Error::CrossCompilation => f.write_str(
@@ -43,7 +43,7 @@ index 93e34c6..c0a3e08 100644
              Error::Command {
                  ref command,
                  ref cause,
-@@ -419,7 +408,7 @@ impl fmt::Display for Error {
+@@ -402,7 +391,7 @@ impl fmt::Display for Error {
                  )?;
                  format_output(output, f)
              }
@@ -52,7 +52,7 @@ index 93e34c6..c0a3e08 100644
          }
      }
  }
-@@ -613,6 +602,8 @@ impl Config {
+@@ -596,6 +585,8 @@ impl Config {
          if host == target {
              return true;
          }
@@ -61,7 +61,7 @@ index 93e34c6..c0a3e08 100644
  
          // pkg-config may not be aware of cross-compilation, and require
          // a wrapper script that sets up platform-specific prefixes.
-@@ -670,7 +661,12 @@ impl Config {
+@@ -653,7 +644,12 @@ impl Config {
      }
  
      fn run(&self, name: &str, args: &[&str]) -> Result<Vec<u8>, Error> {
@@ -75,11 +75,11 @@ index 93e34c6..c0a3e08 100644
          let fallback_exe = if pkg_config_exe.is_none() {
              Some(OsString::from("pkgconf"))
          } else {
-diff --git a/vendor/pkg-config-0.3.32/tests/test.rs b/vendor/pkg-config-0.3.32/tests/test.rs
-index ef80fc7..dad738d 100644
---- a/vendor/pkg-config-0.3.32/tests/test.rs
-+++ b/vendor/pkg-config-0.3.32/tests/test.rs
-@@ -28,7 +28,6 @@ fn find(name: &str) -> Result<pkg_config::Library, Error> {
+diff --git a/vendor/pkg-config-0.3.30/tests/test.rs b/vendor/pkg-config-0.3.30/tests/test.rs
+index 0f37c72..f70e8b7 100644
+--- a/vendor/pkg-config-0.3.30/tests/test.rs
++++ b/vendor/pkg-config-0.3.30/tests/test.rs
+@@ -31,7 +31,6 @@ fn find(name: &str) -> Result<pkg_config::Library, Error> {
      pkg_config::probe_library(name)
  }
  
@@ -87,7 +87,7 @@ index ef80fc7..dad738d 100644
  fn cross_disabled() {
      let _g = LOCK.lock();
      reset();
-@@ -40,7 +39,6 @@ fn cross_disabled() {
+@@ -43,7 +42,6 @@ fn cross_disabled() {
      }
  }
  

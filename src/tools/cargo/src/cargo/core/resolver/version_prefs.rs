@@ -21,8 +21,7 @@ pub struct VersionPreferences {
     try_to_use: HashSet<PackageId>,
     prefer_patch_deps: HashMap<InternedString, HashSet<Dependency>>,
     version_ordering: VersionOrdering,
-    rust_versions: Vec<PartialVersion>,
-    publish_time: Option<jiff::Timestamp>,
+    max_rust_version: Option<PartialVersion>,
 }
 
 #[derive(Copy, Clone, Default, PartialEq, Eq, Hash, Debug)]
@@ -50,12 +49,8 @@ impl VersionPreferences {
         self.version_ordering = ordering;
     }
 
-    pub fn rust_versions(&mut self, vers: Vec<PartialVersion>) {
-        self.rust_versions = vers;
-    }
-
-    pub fn publish_time(&mut self, publish_time: jiff::Timestamp) {
-        self.publish_time = Some(publish_time);
+    pub fn max_rust_version(&mut self, ver: Option<PartialVersion>) {
+        self.max_rust_version = ver;
     }
 
     /// Sort (and filter) the given vector of summaries in-place
@@ -64,11 +59,10 @@ impl VersionPreferences {
     ///
     /// Sort order:
     /// 1. Preferred packages
-    /// 2. Most compatible [`VersionPreferences::rust_versions`]
+    /// 2. [`VersionPreferences::max_rust_version`]
     /// 3. `first_version`, falling back to [`VersionPreferences::version_ordering`] when `None`
     ///
     /// Filtering:
-    /// - `publish_time`
     /// - `first_version`
     pub fn sort_summaries(
         &self,
@@ -83,15 +77,6 @@ impl VersionPreferences {
                     .map(|deps| deps.iter().any(|d| d.matches_id(*pkg_id)))
                     .unwrap_or(false)
         };
-        if let Some(max_publish_time) = self.publish_time {
-            summaries.retain(|s| {
-                if let Some(summary_publish_time) = s.pubtime() {
-                    summary_publish_time <= max_publish_time
-                } else {
-                    true
-                }
-            });
-        }
         summaries.sort_unstable_by(|a, b| {
             let prefer_a = should_prefer(&a.package_id());
             let prefer_b = should_prefer(&b.package_id());
@@ -100,11 +85,20 @@ impl VersionPreferences {
                 return previous_cmp;
             }
 
-            if !self.rust_versions.is_empty() {
-                let a_compat_count = self.msrv_compat_count(a);
-                let b_compat_count = self.msrv_compat_count(b);
-                if b_compat_count != a_compat_count {
-                    return b_compat_count.cmp(&a_compat_count);
+            if let Some(max_rust_version) = &self.max_rust_version {
+                let a_is_compat = a
+                    .rust_version()
+                    .map(|a| a.is_compatible_with(max_rust_version))
+                    .unwrap_or(true);
+                let b_is_compat = b
+                    .rust_version()
+                    .map(|b| b.is_compatible_with(max_rust_version))
+                    .unwrap_or(true);
+                match (a_is_compat, b_is_compat) {
+                    (true, true) => {}   // fallback
+                    (false, false) => {} // fallback
+                    (true, false) => return Ordering::Less,
+                    (false, true) => return Ordering::Greater,
                 }
             }
 
@@ -117,17 +111,6 @@ impl VersionPreferences {
         if first_version.is_some() && !summaries.is_empty() {
             let _ = summaries.split_off(1);
         }
-    }
-
-    fn msrv_compat_count(&self, summary: &Summary) -> usize {
-        let Some(rust_version) = summary.rust_version() else {
-            return self.rust_versions.len();
-        };
-
-        self.rust_versions
-            .iter()
-            .filter(|max| rust_version.is_compatible_with(max))
-            .count()
     }
 }
 
@@ -253,9 +236,9 @@ mod test {
     }
 
     #[test]
-    fn test_single_rust_version() {
+    fn test_max_rust_version() {
         let mut vp = VersionPreferences::default();
-        vp.rust_versions(vec!["1.50".parse().unwrap()]);
+        vp.max_rust_version(Some("1.50".parse().unwrap()));
 
         let mut summaries = vec![
             summ("foo", "1.2.4", None),
@@ -280,38 +263,6 @@ mod test {
         assert_eq!(
             describe(&summaries),
             "foo/1.0.9, foo/1.1.0, foo/1.2.0, foo/1.2.1, foo/1.2.2, foo/1.2.4, foo/1.2.3"
-                .to_string()
-        );
-    }
-
-    #[test]
-    fn test_multiple_rust_versions() {
-        let mut vp = VersionPreferences::default();
-        vp.rust_versions(vec!["1.45".parse().unwrap(), "1.55".parse().unwrap()]);
-
-        let mut summaries = vec![
-            summ("foo", "1.2.4", None),
-            summ("foo", "1.2.3", Some("1.60")),
-            summ("foo", "1.2.2", None),
-            summ("foo", "1.2.1", Some("1.50")),
-            summ("foo", "1.2.0", None),
-            summ("foo", "1.1.0", Some("1.40")),
-            summ("foo", "1.0.9", None),
-        ];
-
-        vp.version_ordering(VersionOrdering::MaximumVersionsFirst);
-        vp.sort_summaries(&mut summaries, None);
-        assert_eq!(
-            describe(&summaries),
-            "foo/1.2.4, foo/1.2.2, foo/1.2.0, foo/1.1.0, foo/1.0.9, foo/1.2.1, foo/1.2.3"
-                .to_string()
-        );
-
-        vp.version_ordering(VersionOrdering::MinimumVersionsFirst);
-        vp.sort_summaries(&mut summaries, None);
-        assert_eq!(
-            describe(&summaries),
-            "foo/1.0.9, foo/1.1.0, foo/1.2.0, foo/1.2.2, foo/1.2.4, foo/1.2.1, foo/1.2.3"
                 .to_string()
         );
     }

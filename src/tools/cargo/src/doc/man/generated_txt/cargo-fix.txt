@@ -84,8 +84,7 @@ OPTIONS
            Fix code even if a VCS was not detected.
 
        --allow-dirty
-           Fix code even if the working directory has changes (including staged
-           changes).
+           Fix code even if the working directory has changes.
 
        --allow-staged
            Fix code even if the working directory has staged changes.
@@ -160,26 +159,26 @@ OPTIONS
            multiple times and supports common Unix glob patterns.
 
        --tests
-           Fix all targets that have the test = true manifest flag set. By
-           default this includes the library and binaries built as unittests,
-           and integration tests. Be aware that this will also build any
-           required dependencies, so the lib target may be built twice (once as
-           a unittest, and once as a dependency for binaries, integration
-           tests, etc.). Targets may be enabled or disabled by setting the test
-           flag in the manifest settings for the target.
+           Fix all targets in test mode that have the test = true manifest flag
+           set. By default this includes the library and binaries built as
+           unittests, and integration tests. Be aware that this will also build
+           any required dependencies, so the lib target may be built twice
+           (once as a unittest, and once as a dependency for binaries,
+           integration tests, etc.). Targets may be enabled or disabled by
+           setting the test flag in the manifest settings for the target.
 
        --bench name…
            Fix the specified benchmark. This flag may be specified multiple
            times and supports common Unix glob patterns.
 
        --benches
-           Fix all targets that have the bench = true manifest flag set. By
-           default this includes the library and binaries built as benchmarks,
-           and bench targets. Be aware that this will also build any required
-           dependencies, so the lib target may be built twice (once as a
-           benchmark, and once as a dependency for binaries, benchmarks, etc.).
-           Targets may be enabled or disabled by setting the bench flag in the
-           manifest settings for the target.
+           Fix all targets in benchmark mode that have the bench = true
+           manifest flag set. By default this includes the library and binaries
+           built as benchmarks, and bench targets. Be aware that this will also
+           build any required dependencies, so the lib target may be built
+           twice (once as a benchmark, and once as a dependency for binaries,
+           benchmarks, etc.). Targets may be enabled or disabled by setting the
+           bench flag in the manifest settings for the target.
 
        --all-targets
            Fix all targets. This is equivalent to specifying --lib --bins
@@ -208,24 +207,11 @@ OPTIONS
 
    Compilation Options
        --target triple
-           Fix for the specified target architecture. Flag may be specified
-           multiple times. The default is the host architecture. The general
-           format of the triple is <arch><sub>-<vendor>-<sys>-<abi>.
-
-           Possible values:
-
-           o  Any supported target in rustc --print target-list.
-
-           o  "host-tuple", which will internally be substituted by the
-              host’s target. This can be particularly useful if you’re
-              cross-compiling some crates, and don’t want to specify your
-              host’s machine as a target (for instance, an xtask in a shared
-              project that may be worked on by many hosts).
-
-           o  A path to a custom target specification. See Custom Target Lookup
-              Path
-              <https://doc.rust-lang.org/rustc/targets/custom.html#custom-target-lookup-path>
-              for more information.
+           Fix for the given architecture. The default is the host
+           architecture. The general format of the triple is
+           <arch><sub>-<vendor>-<sys>-<abi>. Run rustc --print target-list for
+           a list of supported targets. This flag may be specified multiple
+           times.
 
            This may also be specified with the build.target config value
            <https://doc.rust-lang.org/cargo/reference/config.html>.
@@ -233,7 +219,7 @@ OPTIONS
            Note that specifying this flag makes Cargo run in a different mode
            where the target artifacts are placed in a separate directory. See
            the build cache
-           <https://doc.rust-lang.org/cargo/reference/build-cache.html>
+           <https://doc.rust-lang.org/cargo/guide/build-cache.html>
            documentation for more details.
 
        -r, --release
@@ -252,15 +238,24 @@ OPTIONS
            <https://doc.rust-lang.org/cargo/reference/profiles.html> for more
            details on profiles.
 
-       --timings
+       --timings=fmts
            Output information how long each compilation takes, and track
-           concurrency information over time.
+           concurrency information over time. Accepts an optional
+           comma-separated list of output formats; --timings without an
+           argument will default to --timings=html. Specifying an output format
+           (rather than the default) is unstable and requires
+           -Zunstable-options. Valid output formats:
 
-           A file cargo-timing.html will be written to the target/cargo-timings
-           directory at the end of the build. An additional report with a
-           timestamp in its filename is also written if you want to look at a
-           previous run. These reports are suitable for human consumption only,
-           and do not provide machine-readable timing data.
+           o  html (unstable, requires -Zunstable-options): Write a
+              human-readable file cargo-timing.html to the target/cargo-timings
+              directory with a report of the compilation. Also write a report
+              to the same directory with a timestamp in the filename if you
+              want to look at older runs. HTML output is suitable for human
+              consumption only, and does not provide machine-readable timing
+              data.
+
+           o  json (unstable, requires -Zunstable-options): Emit
+              machine-readable JSON information about timing information.
 
    Output Options
        --target-dir directory
@@ -364,6 +359,21 @@ OPTIONS
 
        --frozen
            Equivalent to specifying both --locked and --offline.
+
+       --lockfile-path PATH
+           Changes the path of the lockfile from the default
+           (<workspace_root>/Cargo.lock) to PATH. PATH must end with Cargo.lock
+           (e.g. --lockfile-path /tmp/temporary-lockfile/Cargo.lock). Note that
+           providing --lockfile-path will ignore existing lockfile at the
+           default path, and instead will either use the lockfile from PATH, or
+           write a new lockfile into the provided PATH if it doesn’t exist.
+           This flag can be used to run most commands in read-only directories,
+           writing lockfile into the provided PATH.
+
+           This option is only available on the nightly channel
+           <https://doc.rust-lang.org/book/appendix-07-nightly-rust.html> and
+           requires the -Z unstable-options flag to enable (see #14421
+           <https://github.com/rust-lang/cargo/issues/14421>).
 
    Common Options
        +toolchain

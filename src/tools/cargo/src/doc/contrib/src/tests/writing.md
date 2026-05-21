@@ -29,7 +29,7 @@ stdout and stderr output against the expected output.
 
 Generally, a functional test will be placed in `tests/testsuite/<command>.rs` and will look roughly like:
 ```rust,ignore
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::str;
 use cargo_test_support::project;
 
@@ -63,16 +63,6 @@ test.
 - This executes the command and evaluates different assertions
   - See [`support::compare`] for an explanation of the string pattern matching.
     Patterns are used to make it easier to match against the expected output.
-
-#### Filesystem layout testing
-
-Tests often to need to verify Cargo created/removed files.
-The `CargoPathExt` trait (implemented by `Path` and `PathBuf`) provides a `assert_dir_layout()` to verify the files in a directory (including nested directories).
-This takes a snapshot of file paths for the given directory and asserts that all files are present and no new files have been created.
-This function also takes a list of patterns to ignore from the snapshot to make working with platform specific files easier.
-
-Note: You will commonly need to call `unordered()` before passing your snapshot to deal with platform differences like binaries having `.exe` on Windows.
-`assert_build_dir_layout` is a more specialized version of `assert_dir_layout()` that is automatically unordered and ignores common platform specific files designed for the Cargo build cache.
 
 #### Testing Nightly Features
 
@@ -133,7 +123,7 @@ Tests that need to do cross-compilation should include this at the top of the
 test to disable it in scenarios where cross compilation isn't available:
 
 ```rust,ignore
-if crate::utils::cross_compile::disabled() {
+if cargo_test_support::cross_compile::disabled() {
     return;
 }
 ```
@@ -142,11 +132,21 @@ The name of the target can be fetched with the [`cross_compile::alternate()`]
 function. The name of the host target can be fetched with
 [`cargo_test_support::rustc_host()`].
 
+The cross-tests need to distinguish between targets which can *build* versus
+those which can actually *run* the resulting executable. Unfortunately, macOS is
+currently unable to run an alternate target (Apple removed 32-bit support a
+long time ago). For building, `x86_64-apple-darwin` will target
+`x86_64-apple-ios` as its alternate. However, the iOS target can only execute
+binaries if the iOS simulator is installed and configured. The simulator is
+not available in CI, so all tests that need to run cross-compiled binaries are
+disabled on CI. If you are running on macOS locally, and have the simulator
+installed, then it should be able to run them.
+
 If the test needs to run the cross-compiled binary, then it should have
 something like this to exit the test before doing so:
 
 ```rust,ignore
-if crate::utils::cross_compile::can_run_on_host() {
+if cargo_test_support::cross_compile::can_run_on_host() {
     return;
 }
 ```
@@ -165,10 +165,10 @@ mod <case>;
 
 `tests/testsuite/<command>/<case>/mod.rs`:
 ```rust,ignore
-use crate::prelude::*;
 use cargo_test_support::compare::assert_ui;
 use cargo_test_support::current_dir;
 use cargo_test_support::file;
+use cargo_test_support::prelude::*;
 use cargo_test_support::Project;
 
 #[cargo_test]
@@ -200,10 +200,8 @@ Then populate
 - This is used in place of `#[test]`
 - This attribute injects code which does some setup before starting the
   test, creating a filesystem "sandbox" under the "cargo integration test"
-  directory for each test. The directory for each test is based on the
-  integration test name, module (if there is one), and function name[^1]:
-
-  `/path/to/cargo/target/tmp/cit/<integration test>/<module>/<fn name>/`
+  directory for each test such as
+  `/path/to/cargo/target/cit/t123/`
 - The sandbox will contain a `home` directory that will be used instead of your normal home directory
 
 `Project`:
@@ -260,11 +258,6 @@ or overwrite a binary immediately after running it. Under some conditions
 Windows will fail with errors like "directory not empty" or "failed to remove"
 or "access is denied".
 
-On Windows, to avoid path length limitations, the tests use the following
-directory structure instead:
-
-`/path/to/cargo/target/tmp/cit/t123/`
-
 ## Debugging tests
 
 In some cases, you may need to dig into a test that is not working as you
@@ -275,7 +268,7 @@ environment. The general process is:
 
    `cargo test --test testsuite -- features2::inactivate_targets`.
 2. In another terminal, head into the sandbox directory to inspect the files and run `cargo` directly.
-    1. The first test's sandbox directory is called `t0`.
+    1. The sandbox directories start with `t0` for the first test.
 
        `cd target/tmp/cit/t0`
     2. Set up the environment so that the sandbox configuration takes effect:
@@ -306,6 +299,3 @@ environment. The general process is:
 [`Command`]: https://docs.rs/snapbox/latest/snapbox/cmd/struct.Command.html
 [`OutputAssert`]: https://docs.rs/snapbox/latest/snapbox/cmd/struct.OutputAssert.html
 [`Assert`]: https://docs.rs/snapbox/latest/snapbox/struct.Assert.html
-
-[^1]: Windows uses a separate directory layout, see [Platform-Specific Notes](#platform-specific-notes)
-    for more details.

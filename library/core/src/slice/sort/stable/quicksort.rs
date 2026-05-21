@@ -1,14 +1,12 @@
 //! This module contains a stable quicksort and partition implementation.
 
-use crate::mem::MaybeUninit;
-use crate::slice::sort::shared::FreezeMarker;
+use crate::mem::{self, ManuallyDrop, MaybeUninit};
 use crate::slice::sort::shared::pivot::choose_pivot;
 use crate::slice::sort::shared::smallsort::StableSmallSortTypeImpl;
+use crate::slice::sort::shared::FreezeMarker;
 use crate::{intrinsics, ptr};
 
 /// Sorts `v` recursively using quicksort.
-/// `scratch.len()` must be at least `max(v.len() - v.len() / 2, SMALL_SORT_GENERAL_SCRATCH_LEN)`
-/// otherwise the implementation may abort.
 ///
 /// `limit` when initialized with `c*log(v.len())` for some c ensures we do not
 /// overflow the stack or go quadratic.
@@ -37,15 +35,16 @@ pub fn quicksort<T, F: FnMut(&T, &T) -> bool>(
         limit -= 1;
 
         let pivot_pos = choose_pivot(v, is_less);
+        // SAFETY: choose_pivot promises to return a valid pivot index.
+        unsafe {
+            intrinsics::assume(pivot_pos < v.len());
+        }
 
         // SAFETY: We only access the temporary copy for Freeze types, otherwise
         // self-modifications via `is_less` would not be observed and this would
         // be unsound. Our temporary copy does not escape this scope.
-        // We use `MaybeUninit` to avoid re-tag issues. FIXME: use `MaybeDangling`.
-        let pivot_copy = unsafe { ptr::read((&raw const v[pivot_pos]).cast::<MaybeUninit<T>>()) };
-        let pivot_ref =
-            // SAFETY: We created the value in an init state.
-            (!has_direct_interior_mutability::<T>()).then_some(unsafe { &*pivot_copy.as_ptr() });
+        let pivot_copy = unsafe { ManuallyDrop::new(ptr::read(&v[pivot_pos])) };
+        let pivot_ref = (!has_direct_interior_mutability::<T>()).then_some(&*pivot_copy);
 
         // We choose a pivot, and check if this pivot is equal to our left
         // ancestor. If true, we do a partition putting equal elements on the
@@ -100,7 +99,7 @@ fn stable_partition<T, F: FnMut(&T, &T) -> bool>(
     }
 
     let v_base = v.as_ptr();
-    let scratch_base = scratch.as_mut_ptr().cast_init();
+    let scratch_base = MaybeUninit::slice_as_mut_ptr(scratch);
 
     // The core idea is to write the values that compare as less-than to the left
     // side of `scratch`, while the values that compared as greater or equal than
@@ -125,7 +124,7 @@ fn stable_partition<T, F: FnMut(&T, &T) -> bool>(
             // this gave significant performance boosts in benchmarks. Unrolling
             // through for _ in 0..UNROLL_LEN { .. } instead of manually improves
             // compile times but has a ~10-20% performance penalty on opt-level=s.
-            if const { size_of::<T>() <= 16 } {
+            if const { mem::size_of::<T>() <= 16 } {
                 const UNROLL_LEN: usize = 4;
                 let unroll_end = v_base.add(loop_end_pos.saturating_sub(UNROLL_LEN - 1));
                 while state.scan < unroll_end {

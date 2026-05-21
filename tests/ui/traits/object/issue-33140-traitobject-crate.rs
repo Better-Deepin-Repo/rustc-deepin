@@ -1,3 +1,6 @@
+//@ check-pass
+
+#![warn(order_dependent_trait_objects)]
 #![allow(dyn_drop)]
 
 // Check that traitobject 0.1.0 compiles
@@ -81,12 +84,15 @@ unsafe impl<T> Trait for dyn (::std::iter::Iterator<Item=T>) + Send + Sync { }
 unsafe impl Trait for dyn (::std::marker::Send) + Send { }
 unsafe impl Trait for dyn (::std::marker::Send) + Sync { }
 unsafe impl Trait for dyn (::std::marker::Send) + Send + Sync { }
-//~^ ERROR conflicting implementations of trait `Trait` for type
+//~^ WARNING conflicting implementations of trait `Trait` for type
+//~| WARNING this was previously accepted by the compiler but is being phased out
 unsafe impl Trait for dyn (::std::marker::Sync) + Send { }
-//~^ ERROR conflicting implementations of trait `Trait` for type
+//~^ WARNING conflicting implementations of trait `Trait` for type
+//~| WARNING this was previously accepted by the compiler but is being phased out
 unsafe impl Trait for dyn (::std::marker::Sync) + Sync { }
 unsafe impl Trait for dyn (::std::marker::Sync) + Send + Sync { }
-//~^ ERROR conflicting implementations of trait `Trait` for type
+//~^ WARNING conflicting implementations of trait `Trait` for type
+//~| WARNING this was previously accepted by the compiler but is being phased out
 unsafe impl Trait for dyn (::std::ops::Drop) + Send { }
 unsafe impl Trait for dyn (::std::ops::Drop) + Sync { }
 unsafe impl Trait for dyn (::std::ops::Drop) + Send + Sync { }

@@ -1,7 +1,5 @@
-//@revisions: edition2021 edition2024
-//@[edition2021] edition:2021
-//@[edition2024] edition:2024
-
+#![feature(if_let_guard)]
+#![feature(let_chains)]
 #![allow(irrefutable_let_patterns)]
 
 fn same_pattern(c: bool) {
@@ -93,17 +91,6 @@ fn use_in_arm_ok(c: bool) {
     match v {
         (1, 2) if c && let y = x => false,
         _ => { *x == 1 },
-    };
-}
-
-fn use_in_same_chain(c: bool) {
-    let x: Box<_> = Box::new(1);
-
-    let v = (1, 2);
-
-    match v {
-        (1, 2) if let y = x && c && let z = x => false, //~ ERROR use of moved value: `x`
-        _ => true,
     };
 }
 

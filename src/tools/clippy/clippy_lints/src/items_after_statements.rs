@@ -1,6 +1,7 @@
 use clippy_utils::diagnostics::span_lint_hir;
 use rustc_hir::{Block, ItemKind, StmtKind};
 use rustc_lint::{LateContext, LateLintPass, LintContext};
+use rustc_middle::lint::in_external_macro;
 use rustc_session::declare_lint_pass;
 
 declare_clippy_lint! {
@@ -59,7 +60,7 @@ impl LateLintPass<'_> for ItemsAfterStatements {
                 .iter()
                 .skip_while(|stmt| matches!(stmt.kind, StmtKind::Item(..)))
                 .filter_map(|stmt| match stmt.kind {
-                    StmtKind::Item(id) => Some(cx.tcx.hir_item(id)),
+                    StmtKind::Item(id) => Some(cx.tcx.hir().item(id)),
                     _ => None,
                 })
                 // Ignore macros since they can only see previously defined locals.
@@ -69,7 +70,7 @@ impl LateLintPass<'_> for ItemsAfterStatements {
                 // Don't use `next` due to the complex filter chain.
                 .for_each(|item| {
                     // Only do the macro check once, but delay it until it's needed.
-                    if !*in_external.get_or_insert_with(|| block.span.in_external_macro(cx.sess().source_map())) {
+                    if !*in_external.get_or_insert_with(|| in_external_macro(cx.sess(), block.span)) {
                         span_lint_hir(
                             cx,
                             ITEMS_AFTER_STATEMENTS,

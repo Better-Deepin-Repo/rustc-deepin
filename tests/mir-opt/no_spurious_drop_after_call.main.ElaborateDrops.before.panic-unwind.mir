@@ -38,5 +38,3 @@ fn main() -> () {
         resume;
     }
 }
-
-ALLOC0 (size: 0, align: 1) {}

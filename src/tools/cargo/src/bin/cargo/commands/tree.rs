@@ -1,13 +1,11 @@
 use crate::cli;
 use crate::command_prelude::*;
-use annotate_snippets::Level;
 use anyhow::{bail, format_err};
 use cargo::core::dependency::DepKind;
+use cargo::ops::tree::{self, EdgeKind};
 use cargo::ops::Packages;
-use cargo::ops::tree::{self, DisplayDepth, EdgeKind};
-use cargo::util::CargoResult;
 use cargo::util::print_available_packages;
-use clap_complete::ArgValueCandidates;
+use cargo::util::CargoResult;
 use std::collections::HashSet;
 use std::str::FromStr;
 
@@ -22,21 +20,14 @@ pub fn cli() -> Command {
         .arg_silent_suggestion()
         .arg(flag("no-dev-dependencies", "Deprecated, use -e=no-dev instead").hide(true))
         .arg(
-            multi_opt("edges", "KINDS", "The kinds of dependencies to display")
-                .short('e')
-                .value_delimiter(',')
-                .value_parser([
-                    "all",
-                    "normal",
-                    "build",
-                    "dev",
-                    "features",
-                    "public",
-                    "no-normal",
-                    "no-build",
-                    "no-dev",
-                    "no-proc-macro",
-                ]),
+            multi_opt(
+                "edges",
+                "KINDS",
+                "The kinds of dependencies to display \
+                 (features, normal, build, dev, all, \
+                 no-normal, no-build, no-dev, no-proc-macro)",
+            )
+            .short('e'),
         )
         .arg(
             optional_multi_opt(
@@ -44,21 +35,13 @@ pub fn cli() -> Command {
                 "SPEC",
                 "Invert the tree direction and focus on the given package",
             )
-            .short('i')
-            .add(clap_complete::ArgValueCandidates::new(
-                get_pkg_id_spec_candidates,
-            )),
+            .short('i'),
         )
-        .arg(
-            multi_opt(
-                "prune",
-                "SPEC",
-                "Prune the given package from the display of the dependency tree",
-            )
-            .add(clap_complete::ArgValueCandidates::new(
-                get_pkg_id_spec_candidates,
-            )),
-        )
+        .arg(multi_opt(
+            "prune",
+            "SPEC",
+            "Prune the given package from the display of the dependency tree",
+        ))
         .arg(opt("depth", "Maximum display depth of the dependency tree").value_name("DEPTH"))
         .arg(flag("no-indent", "Deprecated, use --prefix=none instead").hide(true))
         .arg(flag("prefix-depth", "Deprecated, use --prefix=depth instead").hide(true))
@@ -104,18 +87,17 @@ pub fn cli() -> Command {
             "Package to be used as the root of the tree",
             "Display the tree for all packages in the workspace",
             "Exclude specific workspace members",
-            ArgValueCandidates::new(get_pkg_id_spec_candidates),
         )
         .arg_features()
         .arg(flag("all-targets", "Deprecated, use --target=all instead").hide(true))
-        .arg_target_triple_with_candidates(
+        .arg_target_triple(
             "Filter dependencies matching the given target-triple (default host platform). \
             Pass `all` to include all targets.",
-            ArgValueCandidates::new(get_target_triples_with_all),
         )
         .arg_manifest_path()
+        .arg_lockfile_path()
         .after_help(color_print::cstr!(
-            "Run `<bright-cyan,bold>cargo help tree</>` for more detailed information.\n"
+            "Run `<cyan,bold>cargo help tree</>` for more detailed information.\n"
         ))
 }
 
@@ -159,16 +141,10 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
 
     let no_dedupe = args.flag("no-dedupe") || args.flag("all");
     if args.flag("all") {
-        gctx.shell().print_report(
-            &[Level::WARNING
-                .secondary_title(
-                    "the `cargo tree` --all flag has been changed to --no-dedupe, \
-                    and may be removed in a future version",
-                )
-                .element(Level::HELP.message(
-                    "if you are looking to display all workspace members, use the --workspace flag",
-                ))],
-            false,
+        gctx.shell().warn(
+            "The `cargo tree` --all flag has been changed to --no-dedupe, \
+             and may be removed in a future version.\n\
+             If you are looking to display all workspace members, use the --workspace flag.",
         )?;
     }
 
@@ -181,16 +157,10 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
     };
     let target = tree::Target::from_cli(targets);
 
-    let (edge_kinds, no_proc_macro, public) = parse_edge_kinds(gctx, args)?;
+    let (edge_kinds, no_proc_macro) = parse_edge_kinds(gctx, args)?;
     let graph_features = edge_kinds.contains(&EdgeKind::Feature);
 
     let pkgs_to_prune = args._values_of("prune");
-
-    let display_depth = args
-        ._value_of("depth")
-        .map(|s| s.parse::<DisplayDepth>())
-        .transpose()?
-        .unwrap_or(DisplayDepth::MaxDisplayDepth(u32::MAX));
 
     let packages = args.packages_from_flags()?;
     let mut invert = args
@@ -252,9 +222,8 @@ subtree of the package given to -p.\n\
         duplicates: args.flag("duplicates"),
         format: args.get_one::<String>("format").cloned().unwrap(),
         graph_features,
-        display_depth,
+        max_display_depth: args.value_of_u32("depth")?.unwrap_or(u32::MAX),
         no_proc_macro,
-        public,
     };
 
     if opts.graph_features && opts.duplicates {
@@ -271,24 +240,16 @@ subtree of the package given to -p.\n\
 fn parse_edge_kinds(
     gctx: &GlobalContext,
     args: &ArgMatches,
-) -> CargoResult<(HashSet<EdgeKind>, bool, bool)> {
-    let (kinds, no_proc_macro, public) = {
+) -> CargoResult<(HashSet<EdgeKind>, bool)> {
+    let (kinds, no_proc_macro) = {
         let mut no_proc_macro = false;
-        let mut public = false;
         let mut kinds = args.get_many::<String>("edges").map_or_else(
             || Vec::new(),
             |es| {
-                es.map(|e| e.as_str())
+                es.flat_map(|e| e.split(','))
                     .filter(|e| {
-                        if *e == "no-proc-macro" {
-                            no_proc_macro = true;
-                            false
-                        } else if *e == "public" {
-                            public = true;
-                            false
-                        } else {
-                            true
-                        }
+                        no_proc_macro = *e == "no-proc-macro";
+                        !no_proc_macro
                     })
                     .collect()
             },
@@ -304,11 +265,7 @@ fn parse_edge_kinds(
             kinds.extend(&["normal", "build", "dev"]);
         }
 
-        if public && !gctx.cli_unstable().unstable_options {
-            anyhow::bail!("`--edges public` requires `-Zunstable-options`");
-        }
-
-        (kinds, no_proc_macro, public)
+        (kinds, no_proc_macro)
     };
 
     let mut result = HashSet::new();
@@ -316,6 +273,15 @@ fn parse_edge_kinds(
         result.insert(EdgeKind::Dep(DepKind::Normal));
         result.insert(EdgeKind::Dep(DepKind::Build));
         result.insert(EdgeKind::Dep(DepKind::Development));
+    };
+    let unknown = |k| {
+        bail!(
+            "unknown edge kind `{}`, valid values are \
+                \"normal\", \"build\", \"dev\", \
+                \"no-normal\", \"no-build\", \"no-dev\", \"no-proc-macro\", \
+                \"features\", or \"all\"",
+            k
+        )
     };
     if kinds.iter().any(|k| k.starts_with("no-")) {
         insert_defaults(&mut result);
@@ -333,10 +299,10 @@ fn parse_edge_kinds(
                         kind
                     )
                 }
-                _ => unreachable!("`{kind}` was validated by clap"),
+                k => return unknown(k),
             };
         }
-        return Ok((result, no_proc_macro, public));
+        return Ok((result, no_proc_macro));
     }
     for kind in &kinds {
         match *kind {
@@ -356,11 +322,11 @@ fn parse_edge_kinds(
             "dev" => {
                 result.insert(EdgeKind::Dep(DepKind::Development));
             }
-            _ => unreachable!("`{kind}` was validated by clap"),
+            k => return unknown(k),
         }
     }
     if kinds.len() == 1 && kinds[0] == "features" {
         insert_defaults(&mut result);
     }
-    Ok((result, no_proc_macro, public))
+    Ok((result, no_proc_macro))
 }

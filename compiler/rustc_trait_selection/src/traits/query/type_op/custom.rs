@@ -1,17 +1,16 @@
 use std::fmt;
 
 use rustc_errors::ErrorGuaranteed;
-use rustc_hir::def_id::LocalDefId;
 use rustc_infer::infer::region_constraints::RegionConstraintData;
 use rustc_middle::traits::query::NoSolution;
 use rustc_middle::ty::{TyCtxt, TypeFoldable};
 use rustc_span::Span;
 use tracing::info;
 
-use crate::infer::InferCtxt;
 use crate::infer::canonical::query_response;
-use crate::traits::ObligationCtxt;
+use crate::infer::InferCtxt;
 use crate::traits::query::type_op::TypeOpOutput;
+use crate::traits::ObligationCtxt;
 
 pub struct CustomTypeOp<F> {
     closure: F,
@@ -43,14 +42,13 @@ where
     fn fully_perform(
         self,
         infcx: &InferCtxt<'tcx>,
-        root_def_id: LocalDefId,
         span: Span,
     ) -> Result<TypeOpOutput<'tcx, Self>, ErrorGuaranteed> {
         if cfg!(debug_assertions) {
             info!("fully_perform({:?})", self);
         }
 
-        Ok(scrape_region_constraints(infcx, root_def_id, self.description, span, self.closure)?.0)
+        Ok(scrape_region_constraints(infcx, self.closure, self.description, span)?.0)
     }
 }
 
@@ -64,10 +62,9 @@ impl<F> fmt::Debug for CustomTypeOp<F> {
 /// constraints that result, creating query-region-constraints.
 pub fn scrape_region_constraints<'tcx, Op, R>(
     infcx: &InferCtxt<'tcx>,
-    root_def_id: LocalDefId,
+    op: impl FnOnce(&ObligationCtxt<'_, 'tcx>) -> Result<R, NoSolution>,
     name: &'static str,
     span: Span,
-    op: impl FnOnce(&ObligationCtxt<'_, 'tcx>) -> Result<R, NoSolution>,
 ) -> Result<(TypeOpOutput<'tcx, Op>, RegionConstraintData<'tcx>), ErrorGuaranteed>
 where
     R: TypeFoldable<TyCtxt<'tcx>>,
@@ -83,26 +80,19 @@ where
         pre_obligations.is_empty(),
         "scrape_region_constraints: incoming region obligations = {pre_obligations:#?}",
     );
-    let pre_assumptions = infcx.take_registered_region_assumptions();
-    assert!(
-        pre_assumptions.is_empty(),
-        "scrape_region_constraints: incoming region assumptions = {pre_assumptions:#?}",
-    );
 
     let value = infcx.commit_if_ok(|_| {
         let ocx = ObligationCtxt::new(infcx);
         let value = op(&ocx).map_err(|_| {
             infcx.dcx().span_delayed_bug(span, format!("error performing operation: {name}"))
         })?;
-        let errors = ocx.evaluate_obligations_error_on_ambiguity();
+        let errors = ocx.select_all_or_error();
         if errors.is_empty() {
             Ok(value)
-        } else if let Err(guar) = infcx.tcx.check_potentially_region_dependent_goals(root_def_id) {
-            Err(guar)
         } else {
-            Err(infcx.dcx().delayed_bug(format!(
-                "errors selecting obligation during MIR typeck: {name} {root_def_id:?} {errors:?}"
-            )))
+            Err(infcx
+                .dcx()
+                .delayed_bug(format!("errors selecting obligation during MIR typeck: {errors:?}")))
         }
     })?;
 
@@ -110,12 +100,14 @@ where
     let value = infcx.resolve_vars_if_possible(value);
 
     let region_obligations = infcx.take_registered_region_obligations();
-    let region_assumptions = infcx.take_registered_region_assumptions();
     let region_constraint_data = infcx.take_and_reset_region_constraints();
     let region_constraints = query_response::make_query_region_constraints(
-        region_obligations,
+        infcx.tcx,
+        region_obligations
+            .iter()
+            .map(|r_o| (r_o.sup_type, r_o.sub_region, r_o.origin.to_constraint_category()))
+            .map(|(ty, r, cc)| (infcx.resolve_vars_if_possible(ty), r, cc)),
         &region_constraint_data,
-        region_assumptions,
     );
 
     if region_constraints.is_empty() {

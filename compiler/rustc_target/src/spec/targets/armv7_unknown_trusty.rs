@@ -1,30 +1,26 @@
-use crate::spec::{
-    Abi, Arch, FloatAbi, LinkSelfContainedDefault, Os, PanicStrategy, RelroLevel, Target,
-    TargetMetadata, TargetOptions,
-};
+use crate::spec::{LinkSelfContainedDefault, PanicStrategy, RelroLevel, Target, TargetOptions};
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     Target {
         // It's important we use "gnueabi" and not "musleabi" here. LLVM uses it
         // to determine the calling convention and float ABI, and it doesn't
         // support the "musleabi" value.
         llvm_target: "armv7-unknown-unknown-gnueabi".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: Some("Armv7-A Trusty".into()),
             tier: Some(3),
             host_tools: Some(false),
-            std: Some(true),
+            std: Some(false),
         },
         pointer_width: 32,
         data_layout: "e-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64".into(),
-        arch: Arch::Arm,
+        arch: "arm".into(),
         options: TargetOptions {
-            abi: Abi::Eabi,
-            llvm_floatabi: Some(FloatAbi::Soft),
+            abi: "eabi".into(),
             features: "+v7,+thumb2,+soft-float,-neon".into(),
             max_atomic_width: Some(64),
             mcount: "\u{1}mcount".into(),
-            os: Os::Trusty,
+            os: "trusty".into(),
             link_self_contained: LinkSelfContainedDefault::InferredForMusl,
             dynamic_linking: false,
             executables: true,

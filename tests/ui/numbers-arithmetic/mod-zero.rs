@@ -1,6 +1,6 @@
 //@ run-fail
 //@ error-pattern:attempt to calculate the remainder with a divisor of zero
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 #[allow(unconditional_panic)]
 fn main() {

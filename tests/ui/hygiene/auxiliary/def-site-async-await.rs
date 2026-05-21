@@ -1,5 +1,6 @@
 //@ edition:2018
-//@ proc-macro: opaque-hygiene.rs
+
+extern crate opaque_hygiene;
 
 pub async fn serve() {
     opaque_hygiene::make_it!();

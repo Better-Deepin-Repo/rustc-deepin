@@ -1,116 +1,83 @@
 //! Errors emitted by ast_passes.
 
-use rustc_abi::ExternAbi;
 use rustc_ast::ParamKindOrd;
 use rustc_errors::codes::*;
-use rustc_errors::{Applicability, Diag, EmissionGuarantee, Subdiagnostic};
-use rustc_macros::{Diagnostic, LintDiagnostic, Subdiagnostic};
-use rustc_span::{Ident, Span, Symbol};
+use rustc_errors::{Applicability, Diag, EmissionGuarantee, SubdiagMessageOp, Subdiagnostic};
+use rustc_macros::{Diagnostic, Subdiagnostic};
+use rustc_span::symbol::Ident;
+use rustc_span::{Span, Symbol};
+
+use crate::fluent_generated as fluent;
 
 #[derive(Diagnostic)]
-#[diag("visibility qualifiers are not permitted here", code = E0449)]
+#[diag(ast_passes_visibility_not_permitted, code = E0449)]
 pub(crate) struct VisibilityNotPermitted {
     #[primary_span]
     pub span: Span,
     #[subdiagnostic]
     pub note: VisibilityNotPermittedNote,
-    #[suggestion("remove the qualifier", code = "", applicability = "machine-applicable")]
+    #[suggestion(
+        ast_passes_remove_qualifier_sugg,
+        code = "",
+        applicability = "machine-applicable"
+    )]
     pub remove_qualifier_sugg: Span,
 }
 
 #[derive(Subdiagnostic)]
 pub(crate) enum VisibilityNotPermittedNote {
-    #[note("enum variants and their fields always share the visibility of the enum they are in")]
+    #[note(ast_passes_enum_variant)]
     EnumVariant,
-    #[note("trait items always share the visibility of their trait")]
+    #[note(ast_passes_trait_impl)]
     TraitImpl,
-    #[note("place qualifiers on individual impl items instead")]
+    #[note(ast_passes_individual_impl_items)]
     IndividualImplItems,
-    #[note("place qualifiers on individual foreign items instead")]
+    #[note(ast_passes_individual_foreign_items)]
     IndividualForeignItems,
-}
-#[derive(Diagnostic)]
-#[diag("redundant `const` fn marker in const impl")]
-pub(crate) struct ImplFnConst {
-    #[primary_span]
-    #[suggestion("remove the `const`", code = "", applicability = "machine-applicable")]
-    pub span: Span,
-    #[label("this declares all associated functions implicitly const")]
-    pub parent_constness: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("functions in {$in_impl ->
-        [true] trait impls
-        *[false] traits
-    } cannot be declared const", code = E0379)]
+#[diag(ast_passes_trait_fn_const, code = E0379)]
 pub(crate) struct TraitFnConst {
     #[primary_span]
-    #[label(
-        "functions in {$in_impl ->
-            [true] trait impls
-            *[false] traits
-        } cannot be const"
-    )]
+    #[label]
     pub span: Span,
     pub in_impl: bool,
-    #[label("this declares all associated functions implicitly const")]
+    #[label(ast_passes_const_context_label)]
     pub const_context_label: Option<Span>,
-    #[suggestion(
-        "remove the `const`{$requires_multiple_changes ->
-            [true] {\" ...\"}
-            *[false] {\"\"}
-        }",
-        code = ""
-    )]
+    #[suggestion(ast_passes_remove_const_sugg, code = "")]
     pub remove_const_sugg: (Span, Applicability),
     pub requires_multiple_changes: bool,
     #[suggestion(
-        "... and declare the impl to be const instead",
+        ast_passes_make_impl_const_sugg,
         code = "const ",
         applicability = "maybe-incorrect"
     )]
     pub make_impl_const_sugg: Option<Span>,
     #[suggestion(
-        "... and declare the trait to be const instead",
-        code = "const ",
+        ast_passes_make_trait_const_sugg,
+        code = "#[const_trait]\n",
         applicability = "maybe-incorrect"
     )]
     pub make_trait_const_sugg: Option<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "async functions are not allowed in `const` {$context ->
-        [trait_impl] trait impls
-        [impl] impls
-        *[trait] traits
-    }"
-)]
-pub(crate) struct AsyncFnInConstTraitOrTraitImpl {
-    #[primary_span]
-    pub async_keyword: Span,
-    pub context: &'static str,
-    #[label("associated functions of `const` cannot be declared `async`")]
-    pub const_keyword: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("bounds cannot be used in this context")]
+#[diag(ast_passes_forbidden_bound)]
 pub(crate) struct ForbiddenBound {
     #[primary_span]
     pub spans: Vec<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("late-bound const parameters cannot be used currently")]
+#[diag(ast_passes_forbidden_const_param)]
 pub(crate) struct ForbiddenConstParam {
     #[primary_span]
     pub const_param_spans: Vec<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("function can not have more than {$max_num_args} arguments")]
+#[diag(ast_passes_fn_param_too_many)]
 pub(crate) struct FnParamTooMany {
     #[primary_span]
     pub span: Span,
@@ -118,153 +85,105 @@ pub(crate) struct FnParamTooMany {
 }
 
 #[derive(Diagnostic)]
-#[diag("`...` must be the last argument of a C-variadic function")]
+#[diag(ast_passes_fn_param_c_var_args_not_last)]
 pub(crate) struct FnParamCVarArgsNotLast {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("documentation comments cannot be applied to function parameters")]
+#[diag(ast_passes_fn_param_doc_comment)]
 pub(crate) struct FnParamDocComment {
     #[primary_span]
-    #[label("doc comments are not allowed here")]
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "allow, cfg, cfg_attr, deny, expect, forbid, and warn are the only allowed built-in attributes in function parameters"
-)]
+#[diag(ast_passes_fn_param_forbidden_attr)]
 pub(crate) struct FnParamForbiddenAttr {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`self` parameter is only allowed in associated functions")]
-#[note("associated functions are those in `impl` or `trait` definitions")]
+#[diag(ast_passes_fn_param_forbidden_self)]
+#[note]
 pub(crate) struct FnParamForbiddenSelf {
     #[primary_span]
-    #[label("not semantically valid as function parameter")]
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`default` is only allowed on items in trait impls")]
+#[diag(ast_passes_forbidden_default)]
 pub(crate) struct ForbiddenDefault {
     #[primary_span]
     pub span: Span,
-    #[label("`default` because of this")]
+    #[label]
     pub def_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`final` is only allowed on associated functions in traits")]
-pub(crate) struct ForbiddenFinal {
-    #[primary_span]
-    pub span: Span,
-    #[label("`final` because of this")]
-    pub def_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`final` is only allowed on associated functions if they have a body")]
-pub(crate) struct ForbiddenFinalWithoutBody {
-    #[primary_span]
-    pub span: Span,
-    #[label("`final` because of this")]
-    pub def_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("associated constant in `impl` without body")]
+#[diag(ast_passes_assoc_const_without_body)]
 pub(crate) struct AssocConstWithoutBody {
     #[primary_span]
     pub span: Span,
-    #[suggestion(
-        "provide a definition for the constant",
-        code = " = <expr>;",
-        applicability = "has-placeholders"
-    )]
+    #[suggestion(code = " = <expr>;", applicability = "has-placeholders")]
     pub replace_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("associated function in `impl` without body")]
+#[diag(ast_passes_assoc_fn_without_body)]
 pub(crate) struct AssocFnWithoutBody {
     #[primary_span]
     pub span: Span,
-    #[suggestion(
-        "provide a definition for the function",
-        code = " {{ <body> }}",
-        applicability = "has-placeholders"
-    )]
+    #[suggestion(code = " {{ <body> }}", applicability = "has-placeholders")]
     pub replace_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("associated type in `impl` without body")]
+#[diag(ast_passes_assoc_type_without_body)]
 pub(crate) struct AssocTypeWithoutBody {
     #[primary_span]
     pub span: Span,
-    #[suggestion(
-        "provide a definition for the type",
-        code = " = <type>;",
-        applicability = "has-placeholders"
-    )]
+    #[suggestion(code = " = <type>;", applicability = "has-placeholders")]
     pub replace_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("free constant item without body")]
+#[diag(ast_passes_const_without_body)]
 pub(crate) struct ConstWithoutBody {
     #[primary_span]
     pub span: Span,
-    #[suggestion(
-        "provide a definition for the constant",
-        code = " = <expr>;",
-        applicability = "has-placeholders"
-    )]
+    #[suggestion(code = " = <expr>;", applicability = "has-placeholders")]
     pub replace_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("free static item without body")]
+#[diag(ast_passes_static_without_body)]
 pub(crate) struct StaticWithoutBody {
     #[primary_span]
     pub span: Span,
-    #[suggestion(
-        "provide a definition for the static",
-        code = " = <expr>;",
-        applicability = "has-placeholders"
-    )]
+    #[suggestion(code = " = <expr>;", applicability = "has-placeholders")]
     pub replace_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("free type alias without body")]
+#[diag(ast_passes_ty_alias_without_body)]
 pub(crate) struct TyAliasWithoutBody {
     #[primary_span]
     pub span: Span,
-    #[suggestion(
-        "provide a definition for the type",
-        code = " = <type>;",
-        applicability = "has-placeholders"
-    )]
+    #[suggestion(code = " = <type>;", applicability = "has-placeholders")]
     pub replace_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("free function without a body")]
+#[diag(ast_passes_fn_without_body)]
 pub(crate) struct FnWithoutBody {
     #[primary_span]
     pub span: Span,
-    #[suggestion(
-        "provide a definition for the function",
-        code = " {{ <body> }}",
-        applicability = "has-placeholders"
-    )]
+    #[suggestion(code = " {{ <body> }}", applicability = "has-placeholders")]
     pub replace_span: Span,
     #[subdiagnostic]
     pub extern_block_suggestion: Option<ExternBlockSuggestion>,
@@ -272,20 +191,14 @@ pub(crate) struct FnWithoutBody {
 
 #[derive(Subdiagnostic)]
 pub(crate) enum ExternBlockSuggestion {
-    #[multipart_suggestion(
-        "if you meant to declare an externally defined function, use an `extern` block",
-        applicability = "maybe-incorrect"
-    )]
+    #[multipart_suggestion(ast_passes_extern_block_suggestion, applicability = "maybe-incorrect")]
     Implicit {
         #[suggestion_part(code = "extern {{")]
         start_span: Span,
         #[suggestion_part(code = " }}")]
         end_span: Span,
     },
-    #[multipart_suggestion(
-        "if you meant to declare an externally defined function, use an `extern` block",
-        applicability = "maybe-incorrect"
-    )]
+    #[multipart_suggestion(ast_passes_extern_block_suggestion, applicability = "maybe-incorrect")]
     Explicit {
         #[suggestion_part(code = "extern \"{abi}\" {{")]
         start_span: Span,
@@ -296,44 +209,37 @@ pub(crate) enum ExternBlockSuggestion {
 }
 
 #[derive(Diagnostic)]
-#[diag("items in `extern` blocks without an `unsafe` qualifier cannot have safety qualifiers")]
+#[diag(ast_passes_extern_invalid_safety)]
 pub(crate) struct InvalidSafetyOnExtern {
     #[primary_span]
     pub item_span: Span,
-    #[suggestion(
-        "add `unsafe` to this `extern` block",
-        code = "unsafe ",
-        applicability = "machine-applicable",
-        style = "verbose"
-    )]
+    #[suggestion(code = "unsafe ", applicability = "machine-applicable", style = "verbose")]
     pub block: Option<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "items outside of `unsafe extern {\"{ }\"}` cannot be declared with `safe` safety qualifier"
-)]
+#[diag(ast_passes_item_invalid_safety)]
 pub(crate) struct InvalidSafetyOnItem {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("function pointers cannot be declared with `safe` safety qualifier")]
-pub(crate) struct InvalidSafetyOnFnPtr {
+#[diag(ast_passes_bare_fn_invalid_safety)]
+pub(crate) struct InvalidSafetyOnBareFn {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("static items cannot be declared with `unsafe` safety qualifier outside of `extern` block")]
+#[diag(ast_passes_unsafe_static)]
 pub(crate) struct UnsafeStatic {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("bounds on `type`s in {$ctx} have no effect")]
+#[diag(ast_passes_bound_in_context)]
 pub(crate) struct BoundInContext<'a> {
     #[primary_span]
     pub span: Span,
@@ -341,143 +247,92 @@ pub(crate) struct BoundInContext<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("`type`s inside `extern` blocks cannot have {$descr}")]
-#[note("for more information, visit https://doc.rust-lang.org/std/keyword.extern.html")]
+#[diag(ast_passes_extern_types_cannot)]
+#[note(ast_passes_extern_keyword_link)]
 pub(crate) struct ExternTypesCannotHave<'a> {
     #[primary_span]
-    #[suggestion("remove the {$remove_descr}", code = "", applicability = "maybe-incorrect")]
+    #[suggestion(code = "", applicability = "maybe-incorrect")]
     pub span: Span,
     pub descr: &'a str,
     pub remove_descr: &'a str,
-    #[label("`extern` block begins here")]
+    #[label]
     pub block_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("incorrect `{$kind}` inside `extern` block")]
-#[note("for more information, visit https://doc.rust-lang.org/std/keyword.extern.html")]
+#[diag(ast_passes_body_in_extern)]
+#[note(ast_passes_extern_keyword_link)]
 pub(crate) struct BodyInExtern<'a> {
     #[primary_span]
-    #[label("cannot have a body")]
+    #[label(ast_passes_cannot_have)]
     pub span: Span,
-    #[label("the invalid body")]
+    #[label(ast_passes_invalid)]
     pub body: Span,
-    #[label(
-        "`extern` blocks define existing foreign {$kind}s and {$kind}s inside of them cannot have a body"
-    )]
+    #[label(ast_passes_existing)]
     pub block: Span,
     pub kind: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("incorrect function inside `extern` block")]
-#[help(
-    "you might have meant to write a function accessible through FFI, which can be done by writing `extern fn` outside of the `extern` block"
-)]
-#[note("for more information, visit https://doc.rust-lang.org/std/keyword.extern.html")]
+#[diag(ast_passes_fn_body_extern)]
+#[help]
+#[note(ast_passes_extern_keyword_link)]
 pub(crate) struct FnBodyInExtern {
     #[primary_span]
-    #[label("cannot have a body")]
+    #[label(ast_passes_cannot_have)]
     pub span: Span,
-    #[suggestion("remove the invalid body", code = ";", applicability = "maybe-incorrect")]
+    #[suggestion(code = ";", applicability = "maybe-incorrect")]
     pub body: Span,
-    #[label(
-        "`extern` blocks define existing foreign functions and functions inside of them cannot have a body"
-    )]
+    #[label]
     pub block: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("functions in `extern` blocks cannot have `{$kw}` qualifier")]
+#[diag(ast_passes_extern_fn_qualifiers)]
 pub(crate) struct FnQualifierInExtern {
     #[primary_span]
-    #[suggestion("remove the `{$kw}` qualifier", code = "", applicability = "maybe-incorrect")]
+    #[suggestion(code = "", applicability = "maybe-incorrect")]
     pub span: Span,
-    #[label("in this `extern` block")]
+    #[label]
     pub block: Span,
-    pub kw: &'static str,
 }
 
 #[derive(Diagnostic)]
-#[diag("items in `extern` blocks cannot use non-ascii identifiers")]
-#[note(
-    "this limitation may be lifted in the future; see issue #83942 <https://github.com/rust-lang/rust/issues/83942> for more information"
-)]
+#[diag(ast_passes_extern_item_ascii)]
+#[note]
 pub(crate) struct ExternItemAscii {
     #[primary_span]
     pub span: Span,
-    #[label("in this `extern` block")]
+    #[label]
     pub block: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`...` is not supported for non-extern functions")]
-#[help(
-    "only `extern \"C\"` and `extern \"C-unwind\"` functions may have a C variable argument list"
-)]
-pub(crate) struct CVariadicNoExtern {
+#[diag(ast_passes_bad_c_variadic)]
+pub(crate) struct BadCVariadic {
     #[primary_span]
-    pub span: Span,
+    pub span: Vec<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("functions with a C variable argument list must be unsafe")]
-pub(crate) struct CVariadicMustBeUnsafe {
-    #[primary_span]
-    pub span: Span,
-
-    #[suggestion(
-        "add the `unsafe` keyword to this definition",
-        applicability = "maybe-incorrect",
-        code = "unsafe ",
-        style = "verbose"
-    )]
-    pub unsafe_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`...` is not supported for `extern \"{$abi}\"` functions")]
-#[help(
-    "only `extern \"C\"` and `extern \"C-unwind\"` functions may have a C variable argument list"
-)]
-pub(crate) struct CVariadicBadExtern {
-    #[primary_span]
-    pub span: Span,
-    pub abi: &'static str,
-    #[label("`extern \"{$abi}\"` because of this")]
-    pub extern_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`...` is not supported for `extern \"{$abi}\"` naked functions")]
-#[help("C-variadic function must have a compatible calling convention")]
-pub(crate) struct CVariadicBadNakedExtern {
-    #[primary_span]
-    pub span: Span,
-    pub abi: &'static str,
-    #[label("`extern \"{$abi}\"` because of this")]
-    pub extern_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`{$kind}` items in this context need a name")]
+#[diag(ast_passes_item_underscore)]
 pub(crate) struct ItemUnderscore<'a> {
     #[primary_span]
-    #[label("`_` is not a valid name for this `{$kind}` item")]
+    #[label]
     pub span: Span,
     pub kind: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[no_mangle]` requires ASCII identifier", code = E0754)]
+#[diag(ast_passes_nomangle_ascii, code = E0754)]
 pub(crate) struct NoMangleAscii {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("trying to load file for module `{$name}` with non-ascii identifier name", code = E0754)]
-#[help("consider using the `#[path]` attribute to specify filesystem path")]
+#[diag(ast_passes_module_nonascii, code = E0754)]
+#[help]
 pub(crate) struct ModuleNonAscii {
     #[primary_span]
     pub span: Span,
@@ -485,91 +340,46 @@ pub(crate) struct ModuleNonAscii {
 }
 
 #[derive(Diagnostic)]
-#[diag("auto traits cannot have generic parameters", code = E0567)]
+#[diag(ast_passes_auto_generic, code = E0567)]
 pub(crate) struct AutoTraitGeneric {
     #[primary_span]
-    #[suggestion(
-        "remove the parameters",
-        code = "",
-        applicability = "machine-applicable",
-        style = "tool-only"
-    )]
+    #[suggestion(code = "", applicability = "machine-applicable")]
     pub span: Span,
-    #[label("auto trait cannot have generic parameters")]
+    #[label]
     pub ident: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("auto traits cannot have super traits or lifetime bounds", code = E0568)]
+#[diag(ast_passes_auto_super_lifetime, code = E0568)]
 pub(crate) struct AutoTraitBounds {
     #[primary_span]
-    pub span: Vec<Span>,
-    #[suggestion(
-        "remove the super traits or lifetime bounds",
-        code = "",
-        applicability = "machine-applicable",
-        style = "tool-only"
-    )]
-    pub removal: Span,
-    #[label("auto traits cannot have super traits or lifetime bounds")]
+    #[suggestion(code = "", applicability = "machine-applicable")]
+    pub span: Span,
+    #[label]
     pub ident: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("auto traits cannot have associated items", code = E0380)]
+#[diag(ast_passes_auto_items, code = E0380)]
 pub(crate) struct AutoTraitItems {
     #[primary_span]
     pub spans: Vec<Span>,
-    #[suggestion(
-        "remove the associated items",
-        code = "",
-        applicability = "machine-applicable",
-        style = "tool-only"
-    )]
+    #[suggestion(code = "", applicability = "machine-applicable")]
     pub total: Span,
-    #[label("auto traits cannot have associated items")]
+    #[label]
     pub ident: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("auto traits cannot be const")]
-#[help("remove the `const` keyword")]
-pub(crate) struct ConstAutoTrait {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("generic arguments must come before the first constraint")]
+#[diag(ast_passes_generic_before_constraints)]
 pub(crate) struct ArgsBeforeConstraint {
     #[primary_span]
     pub arg_spans: Vec<Span>,
-    #[label(
-        "{$constraint_len ->
-            [one] constraint
-            *[other] constraints
-        }"
-    )]
+    #[label(ast_passes_constraints)]
     pub constraints: Span,
-    #[label(
-        "generic {$args_len ->
-            [one] argument
-            *[other] arguments
-        }"
-    )]
+    #[label(ast_passes_args)]
     pub args: Span,
-    #[suggestion(
-        "move the {$constraint_len ->
-            [one] constraint
-            *[other] constraints
-        } after the generic {$args_len ->
-            [one] argument
-            *[other] arguments
-        }",
-        code = "{suggestion}",
-        applicability = "machine-applicable",
-        style = "verbose"
-    )]
+    #[suggestion(code = "{suggestion}", applicability = "machine-applicable", style = "verbose")]
     pub data: Span,
     pub suggestion: String,
     pub constraint_len: usize,
@@ -584,53 +394,60 @@ pub(crate) struct EmptyLabelManySpans(pub Vec<Span>);
 
 // The derive for `Vec<Span>` does multiple calls to `span_label`, adding commas between each
 impl Subdiagnostic for EmptyLabelManySpans {
-    fn add_to_diag<G: EmissionGuarantee>(self, diag: &mut Diag<'_, G>) {
+    fn add_to_diag_with<G: EmissionGuarantee, F: SubdiagMessageOp<G>>(
+        self,
+        diag: &mut Diag<'_, G>,
+        _: &F,
+    ) {
         diag.span_labels(self.0, "");
     }
 }
 
 #[derive(Diagnostic)]
-#[diag("patterns aren't allowed in function pointer types", code = E0561)]
+#[diag(ast_passes_pattern_in_fn_pointer, code = E0561)]
 pub(crate) struct PatternFnPointer {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("only a single explicit lifetime bound is permitted", code = E0226)]
+#[diag(ast_passes_trait_object_single_bound, code = E0226)]
 pub(crate) struct TraitObjectBound {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("nested `impl Trait` is not allowed", code = E0666)]
+#[diag(ast_passes_impl_trait_path, code = E0667)]
+pub(crate) struct ImplTraitPath {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(ast_passes_nested_impl_trait, code = E0666)]
 pub(crate) struct NestedImplTrait {
     #[primary_span]
     pub span: Span,
-    #[label("outer `impl Trait`")]
+    #[label(ast_passes_outer)]
     pub outer: Span,
-    #[label("nested `impl Trait` here")]
+    #[label(ast_passes_inner)]
     pub inner: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("at least one trait must be specified")]
+#[diag(ast_passes_at_least_one_trait)]
 pub(crate) struct AtLeastOneTrait {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("{$param_ord} parameters must be declared prior to {$max_param} parameters")]
+#[diag(ast_passes_out_of_order_params)]
 pub(crate) struct OutOfOrderParams<'a> {
     #[primary_span]
     pub spans: Vec<Span>,
-    #[suggestion(
-        "reorder the parameters: lifetimes, then consts and types",
-        code = "{ordered_params}",
-        applicability = "machine-applicable"
-    )]
+    #[suggestion(code = "{ordered_params}", applicability = "machine-applicable")]
     pub sugg_span: Span,
     pub param_ord: &'a ParamKindOrd,
     pub max_param: &'a ParamKindOrd,
@@ -638,26 +455,52 @@ pub(crate) struct OutOfOrderParams<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("`impl Trait for .. {\"{}\"}` is an obsolete syntax")]
-#[help("use `auto trait Trait {\"{}\"}` instead")]
+#[diag(ast_passes_obsolete_auto)]
+#[help]
 pub(crate) struct ObsoleteAuto {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("negative impls cannot be unsafe", code = E0198)]
+#[diag(ast_passes_unsafe_negative_impl, code = E0198)]
 pub(crate) struct UnsafeNegativeImpl {
     #[primary_span]
     pub span: Span,
-    #[label("negative because of this")]
+    #[label(ast_passes_negative)]
     pub negative: Span,
-    #[label("unsafe because of this")]
+    #[label(ast_passes_unsafe)]
     pub r#unsafe: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("{$kind} cannot be declared unsafe")]
+#[diag(ast_passes_inherent_cannot_be)]
+pub(crate) struct InherentImplCannot<'a> {
+    #[primary_span]
+    pub span: Span,
+    #[label(ast_passes_because)]
+    pub annotation_span: Span,
+    pub annotation: &'a str,
+    #[label(ast_passes_type)]
+    pub self_ty: Span,
+    #[note(ast_passes_only_trait)]
+    pub only_trait: bool,
+}
+
+#[derive(Diagnostic)]
+#[diag(ast_passes_inherent_cannot_be, code = E0197)]
+pub(crate) struct InherentImplCannotUnsafe<'a> {
+    #[primary_span]
+    pub span: Span,
+    #[label(ast_passes_because)]
+    pub annotation_span: Span,
+    pub annotation: &'a str,
+    #[label(ast_passes_type)]
+    pub self_ty: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(ast_passes_unsafe_item)]
 pub(crate) struct UnsafeItem {
     #[primary_span]
     pub span: Span,
@@ -665,43 +508,32 @@ pub(crate) struct UnsafeItem {
 }
 
 #[derive(Diagnostic)]
-#[diag("extern blocks must be unsafe")]
+#[diag(ast_passes_missing_unsafe_on_extern)]
 pub(crate) struct MissingUnsafeOnExtern {
     #[primary_span]
     pub span: Span,
 }
 
-#[derive(LintDiagnostic)]
-#[diag("extern blocks should be unsafe")]
-pub(crate) struct MissingUnsafeOnExternLint {
-    #[suggestion(
-        "needs `unsafe` before the extern keyword",
-        code = "unsafe ",
-        applicability = "machine-applicable"
-    )]
-    pub suggestion: Span,
-}
-
 #[derive(Diagnostic)]
-#[diag("unions cannot have zero fields")]
+#[diag(ast_passes_fieldless_union)]
 pub(crate) struct FieldlessUnion {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("where clauses are not allowed after the type for type aliases")]
-#[note("see issue #112792 <https://github.com/rust-lang/rust/issues/112792> for more information")]
+#[diag(ast_passes_where_clause_after_type_alias)]
+#[note]
 pub(crate) struct WhereClauseAfterTypeAlias {
     #[primary_span]
     pub span: Span,
-    #[help("add `#![feature(lazy_type_alias)]` to the crate attributes to enable")]
+    #[help]
     pub help: bool,
 }
 
 #[derive(Diagnostic)]
-#[diag("where clauses are not allowed before the type for type aliases")]
-#[note("see issue #89122 <https://github.com/rust-lang/rust/issues/89122> for more information")]
+#[diag(ast_passes_where_clause_before_type_alias)]
+#[note]
 pub(crate) struct WhereClauseBeforeTypeAlias {
     #[primary_span]
     pub span: Span,
@@ -710,14 +542,15 @@ pub(crate) struct WhereClauseBeforeTypeAlias {
 }
 
 #[derive(Subdiagnostic)]
+
 pub(crate) enum WhereClauseBeforeTypeAliasSugg {
-    #[suggestion("remove this `where`", applicability = "machine-applicable", code = "")]
+    #[suggestion(ast_passes_remove_suggestion, applicability = "machine-applicable", code = "")]
     Remove {
         #[primary_span]
         span: Span,
     },
     #[multipart_suggestion(
-        "move it to the end of the type declaration",
+        ast_passes_move_suggestion,
         applicability = "machine-applicable",
         style = "verbose"
     )]
@@ -731,30 +564,46 @@ pub(crate) enum WhereClauseBeforeTypeAliasSugg {
 }
 
 #[derive(Diagnostic)]
-#[diag("generic parameters with a default must be trailing")]
+#[diag(ast_passes_generic_default_trailing)]
 pub(crate) struct GenericDefaultTrailing {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("nested quantification of lifetimes", code = E0316)]
+#[diag(ast_passes_nested_lifetimes, code = E0316)]
 pub(crate) struct NestedLifetimes {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("const trait bounds are not allowed in trait object types")]
+#[diag(ast_passes_optional_trait_supertrait)]
+#[note]
+pub(crate) struct OptionalTraitSupertrait {
+    #[primary_span]
+    pub span: Span,
+    pub path_str: String,
+}
+
+#[derive(Diagnostic)]
+#[diag(ast_passes_optional_trait_object)]
+pub(crate) struct OptionalTraitObject {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(ast_passes_const_bound_trait_object)]
 pub(crate) struct ConstBoundTraitObject {
     #[primary_span]
     pub span: Span,
 }
 
-// FIXME(const_trait_impl): Consider making the note/reason the message of the diagnostic.
-// FIXME(const_trait_impl): Provide structured suggestions (e.g., add `const` here).
+// FIXME(effects): Consider making the note/reason the message of the diagnostic.
+// FIXME(effects): Provide structured suggestions (e.g., add `const` / `#[const_trait]` here).
 #[derive(Diagnostic)]
-#[diag("`[const]` is not allowed here")]
+#[diag(ast_passes_tilde_const_disallowed)]
 pub(crate) struct TildeConstDisallowed {
     #[primary_span]
     pub span: Span,
@@ -764,127 +613,97 @@ pub(crate) struct TildeConstDisallowed {
 
 #[derive(Subdiagnostic, Copy, Clone)]
 pub(crate) enum TildeConstReason {
-    #[note("closures cannot have `[const]` trait bounds")]
+    #[note(ast_passes_closure)]
     Closure,
-    #[note("this function is not `const`, so it cannot have `[const]` trait bounds")]
+    #[note(ast_passes_function)]
     Function {
         #[primary_span]
         ident: Span,
     },
-    #[note("this trait is not `const`, so it cannot have `[const]` trait bounds")]
+    #[note(ast_passes_trait)]
     Trait {
         #[primary_span]
         span: Span,
     },
-    #[note("this impl is not `const`, so it cannot have `[const]` trait bounds")]
+    #[note(ast_passes_trait_impl)]
     TraitImpl {
         #[primary_span]
         span: Span,
     },
-    #[note("inherent impls cannot have `[const]` trait bounds")]
+    #[note(ast_passes_impl)]
     Impl {
         #[primary_span]
         span: Span,
     },
-    #[note("associated types in non-`const` traits cannot have `[const]` trait bounds")]
+    #[note(ast_passes_trait_assoc_ty)]
     TraitAssocTy {
         #[primary_span]
         span: Span,
     },
-    #[note("associated types in non-const impls cannot have `[const]` trait bounds")]
+    #[note(ast_passes_trait_impl_assoc_ty)]
     TraitImplAssocTy {
         #[primary_span]
         span: Span,
     },
-    #[note("inherent associated types cannot have `[const]` trait bounds")]
+    #[note(ast_passes_inherent_assoc_ty)]
     InherentAssocTy {
         #[primary_span]
         span: Span,
     },
-    #[note("structs cannot have `[const]` trait bounds")]
-    Struct {
-        #[primary_span]
-        span: Span,
-    },
-    #[note("enums cannot have `[const]` trait bounds")]
-    Enum {
-        #[primary_span]
-        span: Span,
-    },
-    #[note("unions cannot have `[const]` trait bounds")]
-    Union {
-        #[primary_span]
-        span: Span,
-    },
-    #[note("anonymous constants cannot have `[const]` trait bounds")]
-    AnonConst {
-        #[primary_span]
-        span: Span,
-    },
-    #[note("trait objects cannot have `[const]` trait bounds")]
+    #[note(ast_passes_object)]
     TraitObject,
-    #[note("this item cannot have `[const]` trait bounds")]
+    #[note(ast_passes_item)]
     Item,
 }
 
 #[derive(Diagnostic)]
-#[diag("functions cannot be both `const` and `{$coroutine_kind}`")]
-pub(crate) struct ConstAndCoroutine {
+#[diag(ast_passes_const_and_async)]
+pub(crate) struct ConstAndAsync {
     #[primary_span]
     pub spans: Vec<Span>,
-    #[label("`const` because of this")]
-    pub const_span: Span,
-    #[label("`{$coroutine_kind}` because of this")]
-    pub coroutine_span: Span,
-    #[label("{\"\"}")]
+    #[label(ast_passes_const)]
+    pub cspan: Span,
+    #[label(ast_passes_async)]
+    pub aspan: Span,
+    #[label]
     pub span: Span,
-    pub coroutine_kind: &'static str,
 }
 
 #[derive(Diagnostic)]
-#[diag("functions cannot be both `{$coroutine_kind}` and C-variadic")]
-pub(crate) struct CoroutineAndCVariadic {
+#[diag(ast_passes_const_and_c_variadic)]
+pub(crate) struct ConstAndCVariadic {
     #[primary_span]
     pub spans: Vec<Span>,
-    pub coroutine_kind: &'static str,
-    #[label("`{$coroutine_kind}` because of this")]
-    pub coroutine_span: Span,
-    #[label("C-variadic because of this")]
-    pub variadic_span: Span,
+    #[label(ast_passes_const)]
+    pub const_span: Span,
+    #[label(ast_passes_variadic)]
+    pub variadic_spans: Vec<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("the `{$target}` target does not support c-variadic functions")]
-pub(crate) struct CVariadicNotSupported<'a> {
-    #[primary_span]
-    pub variadic_span: Span,
-    pub target: &'a str,
-}
-
-#[derive(Diagnostic)]
-#[diag("patterns aren't allowed in foreign function declarations", code = E0130)]
+#[diag(ast_passes_pattern_in_foreign, code = E0130)]
 // FIXME: deduplicate with rustc_lint (`BuiltinLintDiag::PatternsInFnsWithoutBody`)
 pub(crate) struct PatternInForeign {
     #[primary_span]
-    #[label("pattern not allowed in foreign function")]
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("patterns aren't allowed in functions without bodies", code = E0642)]
+#[diag(ast_passes_pattern_in_bodiless, code = E0642)]
 // FIXME: deduplicate with rustc_lint (`BuiltinLintDiag::PatternsInFnsWithoutBody`)
 pub(crate) struct PatternInBodiless {
     #[primary_span]
-    #[label("pattern not allowed in function without body")]
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("equality constraints are not yet supported in `where` clauses")]
-#[note("see issue #20041 <https://github.com/rust-lang/rust/issues/20041> for more information")]
+#[diag(ast_passes_equality_in_where)]
+#[note]
 pub(crate) struct EqualityInWhere {
     #[primary_span]
-    #[label("not supported")]
+    #[label]
     pub span: Span,
     #[subdiagnostic]
     pub assoc: Option<AssociatedSuggestion>,
@@ -894,7 +713,7 @@ pub(crate) struct EqualityInWhere {
 
 #[derive(Subdiagnostic)]
 #[suggestion(
-    "if `{$ident}` is an associated type you're trying to set, use the associated type binding syntax",
+    ast_passes_suggestion,
     code = "{param}: {path}",
     style = "verbose",
     applicability = "maybe-incorrect"
@@ -908,10 +727,7 @@ pub(crate) struct AssociatedSuggestion {
 }
 
 #[derive(Subdiagnostic)]
-#[multipart_suggestion(
-    "if `{$trait_segment}::{$potential_assoc}` is an associated type you're trying to set, use the associated type binding syntax",
-    applicability = "maybe-incorrect"
-)]
+#[multipart_suggestion(ast_passes_suggestion_path, applicability = "maybe-incorrect")]
 pub(crate) struct AssociatedSuggestion2 {
     #[suggestion_part(code = "{args}")]
     pub span: Span,
@@ -923,29 +739,44 @@ pub(crate) struct AssociatedSuggestion2 {
 }
 
 #[derive(Diagnostic)]
-#[diag("`#![feature]` may not be used on the {$channel} release channel", code = E0554)]
+#[diag(ast_passes_stability_outside_std, code = E0734)]
+pub(crate) struct StabilityOutsideStd {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(ast_passes_feature_on_non_nightly, code = E0554)]
 pub(crate) struct FeatureOnNonNightly {
     #[primary_span]
     pub span: Span,
     pub channel: &'static str,
     #[subdiagnostic]
     pub stable_features: Vec<StableFeature>,
-    #[suggestion("remove the attribute", code = "", applicability = "machine-applicable")]
+    #[suggestion(code = "", applicability = "machine-applicable")]
     pub sugg: Option<Span>,
 }
 
-#[derive(Subdiagnostic)]
-#[help(
-    "the feature `{$name}` has been stable since `{$since}` and no longer requires an attribute to enable"
-)]
 pub(crate) struct StableFeature {
     pub name: Symbol,
     pub since: Symbol,
 }
 
+impl Subdiagnostic for StableFeature {
+    fn add_to_diag_with<G: EmissionGuarantee, F: SubdiagMessageOp<G>>(
+        self,
+        diag: &mut Diag<'_, G>,
+        _: &F,
+    ) {
+        diag.arg("name", self.name);
+        diag.arg("since", self.since);
+        diag.help(fluent::ast_passes_stable_since);
+    }
+}
+
 #[derive(Diagnostic)]
-#[diag("`{$f1}` and `{$f2}` are incompatible, using them at the same time is not allowed")]
-#[help("remove one of these features")]
+#[diag(ast_passes_incompatible_features)]
+#[help]
 pub(crate) struct IncompatibleFeatures {
     #[primary_span]
     pub spans: Vec<Span>,
@@ -954,55 +785,72 @@ pub(crate) struct IncompatibleFeatures {
 }
 
 #[derive(Diagnostic)]
-#[diag("`{$parent}` requires {$missing} to be enabled")]
-#[help("enable all of these features")]
-pub(crate) struct MissingDependentFeatures {
+#[diag(ast_passes_show_span)]
+pub(crate) struct ShowSpan {
     #[primary_span]
-    pub parent_span: Span,
-    pub parent: Symbol,
-    pub missing: String,
+    pub span: Span,
+    pub msg: &'static str,
 }
 
 #[derive(Diagnostic)]
-#[diag("negative bounds are not supported")]
+#[diag(ast_passes_negative_bound_not_supported)]
 pub(crate) struct NegativeBoundUnsupported {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("associated type constraints not allowed on negative bounds")]
+#[diag(ast_passes_constraint_on_negative_bound)]
 pub(crate) struct ConstraintOnNegativeBound {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("parenthetical notation may not be used for negative bounds")]
+#[diag(ast_passes_negative_bound_with_parenthetical_notation)]
 pub(crate) struct NegativeBoundWithParentheticalNotation {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`match` arm with no body")]
+#[diag(ast_passes_invalid_unnamed_field_ty)]
+pub(crate) struct InvalidUnnamedFieldTy {
+    #[primary_span]
+    pub span: Span,
+    #[label]
+    pub ty_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(ast_passes_invalid_unnamed_field)]
+pub(crate) struct InvalidUnnamedField {
+    #[primary_span]
+    pub span: Span,
+    #[label]
+    pub ident_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(ast_passes_anon_struct_or_union_not_allowed)]
+pub(crate) struct AnonStructOrUnionNotAllowed {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+    pub struct_or_union: &'static str,
+}
+
+#[derive(Diagnostic)]
+#[diag(ast_passes_match_arm_with_no_body)]
 pub(crate) struct MatchArmWithNoBody {
     #[primary_span]
     pub span: Span,
-    // We include the braces around `todo!()` so that a comma is optional, and we don't have to have
-    // any logic looking at the arm being replaced if there was a comma already or not for the
-    // resulting code to be correct.
-    #[suggestion(
-        "add a body after the pattern",
-        code = " => {{ todo!() }}",
-        applicability = "has-placeholders",
-        style = "verbose"
-    )]
+    #[suggestion(code = " => todo!(),", applicability = "has-placeholders")]
     pub suggestion: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`use<...>` precise capturing syntax not allowed in {$loc}")]
+#[diag(ast_passes_precise_capturing_not_allowed_here)]
 pub(crate) struct PreciseCapturingNotAllowedHere {
     #[primary_span]
     pub span: Span,
@@ -1010,126 +858,10 @@ pub(crate) struct PreciseCapturingNotAllowedHere {
 }
 
 #[derive(Diagnostic)]
-#[diag("duplicate `use<...>` precise capturing syntax")]
+#[diag(ast_passes_precise_capturing_duplicated)]
 pub(crate) struct DuplicatePreciseCapturing {
     #[primary_span]
     pub bound1: Span,
-    #[label("second `use<...>` here")]
+    #[label]
     pub bound2: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`extern` declarations without an explicit ABI are disallowed")]
-#[help("prior to Rust 2024, a default ABI was inferred")]
-pub(crate) struct MissingAbi {
-    #[primary_span]
-    #[suggestion("specify an ABI", code = "extern \"<abi>\"", applicability = "has-placeholders")]
-    pub span: Span,
-}
-
-#[derive(LintDiagnostic)]
-#[diag("`extern` declarations without an explicit ABI are deprecated")]
-pub(crate) struct MissingAbiSugg {
-    #[suggestion(
-        "explicitly specify the {$default_abi} ABI",
-        code = "extern {default_abi}",
-        applicability = "machine-applicable"
-    )]
-    pub span: Span,
-    pub default_abi: ExternAbi,
-}
-
-#[derive(Diagnostic)]
-#[diag("foreign functions with the \"custom\" ABI cannot be safe")]
-pub(crate) struct AbiCustomSafeForeignFunction {
-    #[primary_span]
-    pub span: Span,
-
-    #[suggestion(
-        "remove the `safe` keyword from this definition",
-        applicability = "maybe-incorrect",
-        code = "",
-        style = "verbose"
-    )]
-    pub safe_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("functions with the \"custom\" ABI must be unsafe")]
-pub(crate) struct AbiCustomSafeFunction {
-    #[primary_span]
-    pub span: Span,
-    pub abi: ExternAbi,
-
-    #[suggestion(
-        "add the `unsafe` keyword to this definition",
-        applicability = "maybe-incorrect",
-        code = "unsafe ",
-        style = "verbose"
-    )]
-    pub unsafe_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("functions with the {$abi} ABI cannot be `{$coroutine_kind_str}`")]
-pub(crate) struct AbiCannotBeCoroutine {
-    #[primary_span]
-    pub span: Span,
-    pub abi: ExternAbi,
-
-    #[suggestion(
-        "remove the `{$coroutine_kind_str}` keyword from this definition",
-        applicability = "maybe-incorrect",
-        code = "",
-        style = "verbose"
-    )]
-    pub coroutine_kind_span: Span,
-    pub coroutine_kind_str: &'static str,
-}
-
-#[derive(Diagnostic)]
-#[diag("invalid signature for `extern {$abi}` function")]
-#[note("functions with the {$abi} ABI cannot have any parameters or return type")]
-pub(crate) struct AbiMustNotHaveParametersOrReturnType {
-    #[primary_span]
-    pub spans: Vec<Span>,
-    pub abi: ExternAbi,
-
-    #[suggestion(
-        "remove the parameters and return type",
-        applicability = "maybe-incorrect",
-        code = "{padding}fn {symbol}()",
-        style = "verbose"
-    )]
-    pub suggestion_span: Span,
-    pub symbol: Symbol,
-    pub padding: &'static str,
-}
-
-#[derive(Diagnostic)]
-#[diag("invalid signature for `extern {$abi}` function")]
-#[note("functions with the {$abi} ABI cannot have a return type")]
-pub(crate) struct AbiMustNotHaveReturnType {
-    #[primary_span]
-    #[help("remove the return type")]
-    pub span: Span,
-    pub abi: ExternAbi,
-}
-
-#[derive(Diagnostic)]
-#[diag("invalid signature for `extern \"x86-interrupt\"` function")]
-#[note(
-    "functions with the \"x86-interrupt\" ABI must be have either 1 or 2 parameters (but found {$param_count})"
-)]
-pub(crate) struct AbiX86Interrupt {
-    #[primary_span]
-    pub spans: Vec<Span>,
-    pub param_count: usize,
-}
-
-#[derive(Diagnostic)]
-#[diag("scalable vectors must be tuple structs")]
-pub(crate) struct ScalableVectorNotTupleStruct {
-    #[primary_span]
-    pub span: Span,
 }

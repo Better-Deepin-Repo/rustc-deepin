@@ -1,6 +1,0 @@
-# bpf object files count as arch-independent for now,
-# at least until we starting offering Debian in bpf ;)
-libstd-rust-dev-bpf binary: arch-independent-package-contains-binary-or-object [usr/lib/rustlib/bpf*-unknown-none/lib/lib*.rlib]
-
-# lintian doesn't understand rlib files
-libstd-rust-dev-bpf binary: no-code-sections [usr/lib/rustlib/bpf*-unknown-none/lib/lib*.rlib]

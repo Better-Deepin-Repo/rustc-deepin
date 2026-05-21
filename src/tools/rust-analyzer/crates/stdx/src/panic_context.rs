@@ -1,25 +1,28 @@
 //! A micro-crate to enhance panic messages with context info.
+//!
+//! FIXME: upstream to <https://github.com/kriomant/panic-context> ?
 
 use std::{cell::RefCell, panic, sync::Once};
 
-/// Dummy for leveraging RAII cleanup to pop frames.
+pub fn enter(context: String) -> PanicContext {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(PanicContext::init);
+
+    with_ctx(|ctx| ctx.push(context));
+    PanicContext { _priv: () }
+}
+
 #[must_use]
 pub struct PanicContext {
-    // prevent arbitrary construction
     _priv: (),
 }
 
-impl Drop for PanicContext {
-    fn drop(&mut self) {
-        with_ctx(|ctx| assert!(ctx.pop().is_some()));
-    }
-}
-
-pub fn enter(frame: String) -> PanicContext {
-    #[expect(clippy::print_stderr, reason = "already panicking anyway")]
-    fn set_hook() {
+impl PanicContext {
+    #[allow(clippy::print_stderr)]
+    fn init() {
         let default_hook = panic::take_hook();
-        panic::set_hook(Box::new(move |panic_info| {
+        #[allow(deprecated)]
+        let hook = move |panic_info: &panic::PanicInfo<'_>| {
             with_ctx(|ctx| {
                 if !ctx.is_empty() {
                     eprintln!("Panic context:");
@@ -27,16 +30,17 @@ pub fn enter(frame: String) -> PanicContext {
                         eprintln!("> {frame}\n");
                     }
                 }
+                default_hook(panic_info);
             });
-            default_hook(panic_info);
-        }));
+        };
+        panic::set_hook(Box::new(hook));
     }
+}
 
-    static SET_HOOK: Once = Once::new();
-    SET_HOOK.call_once(set_hook);
-
-    with_ctx(|ctx| ctx.push(frame));
-    PanicContext { _priv: () }
+impl Drop for PanicContext {
+    fn drop(&mut self) {
+        with_ctx(|ctx| assert!(ctx.pop().is_some()));
+    }
 }
 
 fn with_ctx(f: impl FnOnce(&mut Vec<String>)) {

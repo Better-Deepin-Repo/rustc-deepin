@@ -3,16 +3,16 @@
 #![deny(unused_attributes)]
 #![allow(dead_code)]
 
-#[linkage = "weak"] //~ ERROR attribute cannot be used on
+#[linkage = "weak"] //~ ERROR attribute should be applied to a function or static
 type InvalidTy = ();
 
-#[linkage = "weak"] //~ ERROR attribute cannot be used on
+#[linkage = "weak"] //~ ERROR attribute should be applied to a function or static
 mod invalid_module {}
 
-#[linkage = "weak"] //~ ERROR attribute cannot be used on
+#[linkage = "weak"] //~ ERROR attribute should be applied to a function or static
 struct F;
 
-#[linkage = "weak"] //~ ERROR attribute cannot be used on
+#[linkage = "weak"] //~ ERROR attribute should be applied to a function or static
 impl F {
     #[linkage = "weak"]
     fn valid(&self) {}
@@ -24,7 +24,7 @@ fn f() {
     {
         1
     };
-    //~^^^^ ERROR attribute cannot be used on
+    //~^^^^ ERROR attribute should be applied to a function or static
 }
 
 extern "C" {
@@ -38,5 +38,5 @@ extern "C" {
 fn main() {
     let _ = #[linkage = "weak"]
     (|| 1);
-    //~^^ ERROR attribute cannot be used on
+    //~^^ ERROR attribute should be applied to a function or static
 }

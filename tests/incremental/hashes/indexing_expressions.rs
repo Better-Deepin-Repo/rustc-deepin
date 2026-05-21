@@ -11,7 +11,6 @@
 //@ [cfail1]compile-flags: -Zincremental-ignore-spans
 //@ [cfail2]compile-flags: -Zincremental-ignore-spans
 //@ [cfail3]compile-flags: -Zincremental-ignore-spans
-//@ ignore-backends: gcc
 
 #![allow(warnings)]
 #![feature(rustc_attrs)]

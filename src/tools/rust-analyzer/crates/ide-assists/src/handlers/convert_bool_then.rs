@@ -1,21 +1,20 @@
-use hir::{AsAssocItem, Semantics, sym};
+use hir::{sym, AsAssocItem, Semantics};
 use ide_db::{
-    RootDatabase,
     famous_defs::FamousDefs,
     syntax_helpers::node_ext::{
         block_as_lone_tail, for_each_tail_expr, is_pattern_cond, preorder_expr,
     },
+    RootDatabase,
 };
 use itertools::Itertools;
 use syntax::{
-    AstNode, SyntaxNode,
-    ast::{self, HasArgList, edit::AstNodeEdit, syntax_factory::SyntaxFactory},
-    syntax_editor::SyntaxEditor,
+    ast::{self, edit::AstNodeEdit, make, HasArgList},
+    ted, AstNode, SyntaxNode,
 };
 
 use crate::{
-    AssistContext, AssistId, Assists,
     utils::{invert_boolean_expression, unwrap_trivial_block},
+    AssistContext, AssistId, AssistKind, Assists,
 };
 
 // Assist: convert_if_to_bool_then
@@ -73,39 +72,31 @@ pub(crate) fn convert_if_to_bool_then(acc: &mut Assists, ctx: &AssistContext<'_>
 
     let target = expr.syntax().text_range();
     acc.add(
-        AssistId::refactor_rewrite("convert_if_to_bool_then"),
+        AssistId("convert_if_to_bool_then", AssistKind::RefactorRewrite),
         "Convert `if` expression to `bool::then` call",
         target,
         |builder| {
-            let closure_body = closure_body.clone_subtree();
-            let mut editor = SyntaxEditor::new(closure_body.syntax().clone());
+            let closure_body = closure_body.clone_for_update();
             // Rewrite all `Some(e)` in tail position to `e`
+            let mut replacements = Vec::new();
             for_each_tail_expr(&closure_body, &mut |e| {
                 let e = match e {
                     ast::Expr::BreakExpr(e) => e.expr(),
                     e @ ast::Expr::CallExpr(_) => Some(e.clone()),
                     _ => None,
                 };
-                if let Some(ast::Expr::CallExpr(call)) = e
-                    && let Some(arg_list) = call.arg_list()
-                    && let Some(arg) = arg_list.args().next()
-                {
-                    editor.replace(call.syntax(), arg.syntax());
+                if let Some(ast::Expr::CallExpr(call)) = e {
+                    if let Some(arg_list) = call.arg_list() {
+                        if let Some(arg) = arg_list.args().next() {
+                            replacements.push((call.syntax().clone(), arg.syntax().clone()));
+                        }
+                    }
                 }
             });
-            let edit = editor.finish();
-            let closure_body = ast::Expr::cast(edit.new_root().clone()).unwrap();
-
-            let mut editor = builder.make_editor(expr.syntax());
-            let make = SyntaxFactory::with_mappings();
+            replacements.into_iter().for_each(|(old, new)| ted::replace(old, new));
             let closure_body = match closure_body {
                 ast::Expr::BlockExpr(block) => unwrap_trivial_block(block),
                 e => e,
-            };
-            let cond = if invert_cond {
-                invert_boolean_expression(&make, cond)
-            } else {
-                cond.clone_for_update()
             };
 
             let parenthesize = matches!(
@@ -128,14 +119,11 @@ pub(crate) fn convert_if_to_bool_then(acc: &mut Assists, ctx: &AssistContext<'_>
                     | ast::Expr::WhileExpr(_)
                     | ast::Expr::YieldExpr(_)
             );
-
-            let cond = if parenthesize { make.expr_paren(cond).into() } else { cond };
-            let arg_list = make.arg_list(Some(make.expr_closure(None, closure_body).into()));
-            let mcall = make.expr_method_call(cond, make.name_ref("then"), arg_list);
-            editor.replace(expr.syntax(), mcall.syntax());
-
-            editor.add_mappings(make.finish_with_mappings());
-            builder.add_file_edits(ctx.vfs_file_id(), editor);
+            let cond = if invert_cond { invert_boolean_expression(cond) } else { cond };
+            let cond = if parenthesize { make::expr_paren(cond) } else { cond };
+            let arg_list = make::arg_list(Some(make::expr_closure(None, closure_body)));
+            let mcall = make::expr_method_call(cond, make::name_ref("then"), arg_list);
+            builder.replace(target, mcall.to_string());
         },
     )
 }
@@ -164,15 +152,14 @@ pub(crate) fn convert_bool_then_to_if(acc: &mut Assists, ctx: &AssistContext<'_>
     let name_ref = ctx.find_node_at_offset::<ast::NameRef>()?;
     let mcall = name_ref.syntax().parent().and_then(ast::MethodCallExpr::cast)?;
     let receiver = mcall.receiver()?;
-    // FIXME: rewrite in terms of `#![feature(exact_length_collection)]`. See: #149266
-    let closure_body = Itertools::exactly_one(mcall.arg_list()?.args()).ok()?;
+    let closure_body = mcall.arg_list()?.args().exactly_one().ok()?;
     let closure_body = match closure_body {
         ast::Expr::ClosureExpr(expr) => expr.body()?,
         _ => return None,
     };
     // Verify this is `bool::then` that is being called.
     let func = ctx.sema.resolve_method_call(&mcall)?;
-    if func.name(ctx.sema.db) != sym::then {
+    if !func.name(ctx.sema.db).eq_ident("then") {
         return None;
     }
     let assoc = func.as_assoc_item(ctx.sema.db)?;
@@ -182,58 +169,49 @@ pub(crate) fn convert_bool_then_to_if(acc: &mut Assists, ctx: &AssistContext<'_>
 
     let target = mcall.syntax().text_range();
     acc.add(
-        AssistId::refactor_rewrite("convert_bool_then_to_if"),
+        AssistId("convert_bool_then_to_if", AssistKind::RefactorRewrite),
         "Convert `bool::then` call to `if`",
         target,
         |builder| {
-            let mapless_make = SyntaxFactory::without_mappings();
-            let closure_body = match closure_body.reset_indent() {
+            let closure_body = match closure_body {
                 ast::Expr::BlockExpr(block) => block,
-                e => mapless_make.block_expr(None, Some(e)),
+                e => make::block_expr(None, Some(e)),
             };
 
-            let closure_body = closure_body.clone_subtree();
-            let mut editor = SyntaxEditor::new(closure_body.syntax().clone());
+            let closure_body = closure_body.clone_for_update();
             // Wrap all tails in `Some(...)`
-            let none_path = mapless_make.expr_path(mapless_make.ident_path("None"));
-            let some_path = mapless_make.expr_path(mapless_make.ident_path("Some"));
-            for_each_tail_expr(&ast::Expr::BlockExpr(closure_body), &mut |e| {
+            let none_path = make::expr_path(make::ext::ident_path("None"));
+            let some_path = make::expr_path(make::ext::ident_path("Some"));
+            let mut replacements = Vec::new();
+            for_each_tail_expr(&ast::Expr::BlockExpr(closure_body.clone()), &mut |e| {
                 let e = match e {
                     ast::Expr::BreakExpr(e) => e.expr(),
                     ast::Expr::ReturnExpr(e) => e.expr(),
                     _ => Some(e.clone()),
                 };
                 if let Some(expr) = e {
-                    editor.replace(
+                    replacements.push((
                         expr.syntax().clone(),
-                        mapless_make
-                            .expr_call(some_path.clone(), mapless_make.arg_list(Some(expr)))
+                        make::expr_call(some_path.clone(), make::arg_list(Some(expr)))
                             .syntax()
-                            .clone(),
-                    );
+                            .clone_for_update(),
+                    ));
                 }
             });
-            let edit = editor.finish();
-            let closure_body = ast::BlockExpr::cast(edit.new_root().clone()).unwrap();
-
-            let mut editor = builder.make_editor(mcall.syntax());
-            let make = SyntaxFactory::with_mappings();
+            replacements.into_iter().for_each(|(old, new)| ted::replace(old, new));
 
             let cond = match &receiver {
                 ast::Expr::ParenExpr(expr) => expr.expr().unwrap_or(receiver),
                 _ => receiver,
             };
-            let if_expr = make
-                .expr_if(
-                    cond,
-                    closure_body,
-                    Some(ast::ElseBranch::Block(make.block_expr(None, Some(none_path)))),
-                )
-                .indent(mcall.indent_level());
-            editor.replace(mcall.syntax().clone(), if_expr.syntax().clone());
+            let if_expr = make::expr_if(
+                cond,
+                closure_body.reset_indent(),
+                Some(ast::ElseBranch::Block(make::block_expr(None, Some(none_path)))),
+            )
+            .indent(mcall.indent_level());
 
-            editor.add_mappings(make.finish_with_mappings());
-            builder.add_file_edits(ctx.vfs_file_id(), editor);
+            builder.replace(target, if_expr.to_string());
         },
     )
 }
@@ -245,7 +223,7 @@ fn option_variants(
     let fam = FamousDefs(sema, sema.scope(expr)?.krate());
     let option_variants = fam.core_option_Option()?.variants(sema.db);
     match &*option_variants {
-        &[variant0, variant1] => Some(if variant0.name(sema.db) == sym::None {
+        &[variant0, variant1] => Some(if variant0.name(sema.db) == sym::None.clone() {
             (variant0, variant1)
         } else {
             (variant1, variant0)
@@ -277,12 +255,12 @@ fn is_invalid_body(
                 e @ ast::Expr::CallExpr(_) => Some(e.clone()),
                 _ => None,
             };
-            if let Some(ast::Expr::CallExpr(call)) = e
-                && let Some(ast::Expr::PathExpr(p)) = call.expr()
-            {
-                let res = p.path().and_then(|p| sema.resolve_path(&p));
-                if let Some(hir::PathResolution::Def(hir::ModuleDef::Variant(v))) = res {
-                    return invalid |= v != some_variant;
+            if let Some(ast::Expr::CallExpr(call)) = e {
+                if let Some(ast::Expr::PathExpr(p)) = call.expr() {
+                    let res = p.path().and_then(|p| sema.resolve_path(&p));
+                    if let Some(hir::PathResolution::Def(hir::ModuleDef::Variant(v))) = res {
+                        return invalid |= v != some_variant;
+                    }
                 }
             }
             invalid = true
@@ -588,25 +566,6 @@ fn main() {
     } else {
         None
     }
-}
-",
-        );
-    }
-    #[test]
-    fn convert_if_to_bool_then_invert_method_call() {
-        check_assist(
-            convert_if_to_bool_then,
-            r"
-//- minicore:option
-fn main() {
-    let test = &[()];
-    let value = if$0 test.is_empty() { None } else { Some(()) };
-}
-",
-            r"
-fn main() {
-    let test = &[()];
-    let value = (!test.is_empty()).then(|| ());
 }
 ",
         );

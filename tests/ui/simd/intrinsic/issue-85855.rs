@@ -3,19 +3,17 @@
 // that no ICE occurs in these cases.
 
 #![feature(intrinsics)]
-#![crate_type = "lib"]
+#![crate_type="lib"]
 
-#[rustc_intrinsic]
-unsafe fn simd_saturating_add<'a, T: 'a>(x: T, y: T);
-//~^ ERROR: intrinsic has wrong number of lifetime parameters
+extern "rust-intrinsic" {
+    fn simd_saturating_add<'a, T: 'a>(x: T, y: T);
+    //~^ ERROR: intrinsic has wrong number of lifetime parameters
 
-#[rustc_intrinsic]
-unsafe fn simd_add<'a, T>(x: T, y: T) -> T;
+    fn simd_add<'a, T>(x: T, y: T) -> T;
 
-#[rustc_intrinsic]
-unsafe fn simd_sub<T, U>(x: T, y: U);
-//~^ ERROR: intrinsic has wrong number of type parameters
+    fn simd_sub<T, U>(x: T, y: U);
+    //~^ ERROR: intrinsic has wrong number of type parameters
 
-#[rustc_intrinsic]
-unsafe fn simd_mul<T, const N: usize>(x: T, y: T);
-//~^ ERROR: intrinsic has wrong number of const parameters
+    fn simd_mul<T, const N: usize>(x: T, y: T);
+    //~^ ERROR: intrinsic has wrong number of const parameters
+}

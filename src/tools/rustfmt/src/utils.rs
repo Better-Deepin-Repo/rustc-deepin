@@ -1,16 +1,16 @@
 use std::borrow::Cow;
 
-use rustc_ast::YieldKind;
 use rustc_ast::ast::{
-    self, Attribute, MetaItem, MetaItemInner, MetaItemKind, NodeId, Path, Visibility,
+    self, Attribute, MetaItem, MetaItemKind, NestedMetaItem, NodeId, Path, Visibility,
     VisibilityKind,
 };
+use rustc_ast::ptr;
 use rustc_ast_pretty::pprust;
-use rustc_span::{BytePos, LocalExpnId, Span, Symbol, SyntaxContext, sym, symbol};
+use rustc_span::{sym, symbol, BytePos, LocalExpnId, Span, Symbol, SyntaxContext};
 use unicode_width::UnicodeWidthStr;
 
-use crate::comment::{CharClasses, FullCodeCharKind, LineClasses, filter_normal_code};
-use crate::config::{Config, StyleEdition};
+use crate::comment::{filter_normal_code, CharClasses, FullCodeCharKind, LineClasses};
+use crate::config::{Config, Version};
 use crate::rewrite::RewriteContext;
 use crate::shape::{Indent, Shape};
 
@@ -102,9 +102,8 @@ pub(crate) fn format_constness_right(constness: ast::Const) -> &'static str {
 #[inline]
 pub(crate) fn format_defaultness(defaultness: ast::Defaultness) -> &'static str {
     match defaultness {
-        ast::Defaultness::Implicit => "",
         ast::Defaultness::Default(..) => "default ",
-        ast::Defaultness::Final(..) => "final ",
+        ast::Defaultness::Final => "",
     }
 }
 
@@ -134,19 +133,6 @@ pub(crate) fn format_mutability(mutability: ast::Mutability) -> &'static str {
 }
 
 #[inline]
-pub(crate) fn format_pinnedness_and_mutability(
-    pinnedness: ast::Pinnedness,
-    mutability: ast::Mutability,
-) -> (&'static str, &'static str) {
-    match (pinnedness, mutability) {
-        (ast::Pinnedness::Pinned, ast::Mutability::Mut) => ("pin ", "mut "),
-        (ast::Pinnedness::Pinned, ast::Mutability::Not) => ("pin ", "const "),
-        (ast::Pinnedness::Not, ast::Mutability::Mut) => ("", "mut "),
-        (ast::Pinnedness::Not, ast::Mutability::Not) => ("", ""),
-    }
-}
-
-#[inline]
 pub(crate) fn format_extern(ext: ast::Extern, explicit_abi: bool) -> Cow<'static, str> {
     match ext {
         ast::Extern::None => Cow::from(""),
@@ -163,8 +149,8 @@ pub(crate) fn format_extern(ext: ast::Extern, explicit_abi: bool) -> Cow<'static
 }
 
 #[inline]
-// Transform `Vec<Box<T>>` into `Vec<&T>`
-pub(crate) fn ptr_vec_to_ref_vec<T>(vec: &[Box<T>]) -> Vec<&T> {
+// Transform `Vec<rustc_ast::ptr::P<T>>` into `Vec<&T>`
+pub(crate) fn ptr_vec_to_ref_vec<T>(vec: &[ptr::P<T>]) -> Vec<&T> {
     vec.iter().map(|x| &**x).collect::<Vec<_>>()
 }
 
@@ -271,10 +257,10 @@ fn is_skip(meta_item: &MetaItem) -> bool {
 }
 
 #[inline]
-fn is_skip_nested(meta_item: &MetaItemInner) -> bool {
+fn is_skip_nested(meta_item: &NestedMetaItem) -> bool {
     match meta_item {
-        MetaItemInner::MetaItem(ref mi) => is_skip(mi),
-        MetaItemInner::Lit(_) => false,
+        NestedMetaItem::MetaItem(ref mi) => is_skip(mi),
+        NestedMetaItem::Lit(_) => false,
     }
 }
 
@@ -381,10 +367,10 @@ macro_rules! out_of_file_lines_range {
     };
 }
 
-macro_rules! skip_out_of_file_lines_range_err {
+macro_rules! skip_out_of_file_lines_range {
     ($self:ident, $span:expr) => {
         if out_of_file_lines_range!($self, $span) {
-            return Err(RewriteError::SkipFormatting);
+            return None;
         }
     };
 }
@@ -499,9 +485,7 @@ pub(crate) fn is_block_expr(context: &RewriteContext<'_>, expr: &ast::Expr, repr
         | ast::ExprKind::Index(_, ref expr, _)
         | ast::ExprKind::Unary(_, ref expr)
         | ast::ExprKind::Try(ref expr)
-        | ast::ExprKind::Yield(YieldKind::Prefix(Some(ref expr))) => {
-            is_block_expr(context, expr, repr)
-        }
+        | ast::ExprKind::Yield(Some(ref expr)) => is_block_expr(context, expr, repr),
         ast::ExprKind::Closure(ref closure) => is_block_expr(context, &closure.body, repr),
         // This can only be a string lit
         ast::ExprKind::Lit(_) => {
@@ -520,7 +504,6 @@ pub(crate) fn is_block_expr(context: &RewriteContext<'_>, expr: &ast::Expr, repr
         | ast::ExprKind::IncludedBytes(..)
         | ast::ExprKind::InlineAsm(..)
         | ast::ExprKind::OffsetOf(..)
-        | ast::ExprKind::UnsafeBinderCast(..)
         | ast::ExprKind::Let(..)
         | ast::ExprKind::Path(..)
         | ast::ExprKind::Range(..)
@@ -529,9 +512,8 @@ pub(crate) fn is_block_expr(context: &RewriteContext<'_>, expr: &ast::Expr, repr
         | ast::ExprKind::Become(..)
         | ast::ExprKind::Yeet(..)
         | ast::ExprKind::Tup(..)
-        | ast::ExprKind::Use(..)
         | ast::ExprKind::Type(..)
-        | ast::ExprKind::Yield(..)
+        | ast::ExprKind::Yield(None)
         | ast::ExprKind::Underscore => false,
     }
 }
@@ -614,7 +596,7 @@ pub(crate) fn trim_left_preserve_layout(
 
             // just InString{Commented} in order to allow the start of a string to be indented
             let new_veto_trim_value = (kind == FullCodeCharKind::InString
-                || (config.style_edition() >= StyleEdition::Edition2024
+                || (config.version() == Version::Two
                     && kind == FullCodeCharKind::InStringCommented))
                 && !line.ends_with('\\');
             let line = if veto_trim || new_veto_trim_value {
@@ -630,7 +612,7 @@ pub(crate) fn trim_left_preserve_layout(
             // such lines should not be taken into account when computing the minimum.
             match kind {
                 FullCodeCharKind::InStringCommented | FullCodeCharKind::EndStringCommented
-                    if config.style_edition() >= StyleEdition::Edition2024 =>
+                    if config.version() == Version::Two =>
                 {
                     None
                 }
@@ -674,7 +656,7 @@ pub(crate) fn indent_next_line(kind: FullCodeCharKind, line: &str, config: &Conf
         // formatting the code block, therefore the string's indentation needs
         // to be adjusted for the code surrounding the code block.
         config.format_strings() && line.ends_with('\\')
-    } else if config.style_edition() >= StyleEdition::Edition2024 {
+    } else if config.version() == Version::Two {
         !kind.is_commented_string()
     } else {
         true

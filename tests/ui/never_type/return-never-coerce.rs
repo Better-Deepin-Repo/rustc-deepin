@@ -2,7 +2,7 @@
 
 //@ run-fail
 //@ error-pattern:aah!
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 fn call_another_fn<T, F: FnOnce() -> T>(f: F) -> T {
     f()

@@ -2,7 +2,7 @@
 
 #![allow(unused_must_use)]
 #![allow(path_statements)]
-//@ proc-macro: derive-a.rs
+//@ aux-build:derive-a.rs
 
 #[macro_use]
 extern crate derive_a;

@@ -1,6 +1,9 @@
+//@ force-host
+//@ no-prefer-dynamic
 // ignore-tidy-linelength
 
 #![feature(proc_macro_quote)]
+#![crate_type = "proc-macro"]
 
 extern crate proc_macro;
 use std::iter::FromIterator;

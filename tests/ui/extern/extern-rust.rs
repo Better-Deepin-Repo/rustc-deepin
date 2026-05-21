@@ -1,4 +1,5 @@
 //@ run-pass
+//@ pretty-expanded FIXME #23616
 
 #[repr(C)]
 pub struct Foo(u32);

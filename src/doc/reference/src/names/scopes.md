@@ -1,63 +1,46 @@
-r[names.scopes]
 # Scopes
 
-r[names.scopes.intro]
-A *scope* is the region of source text where a named [entity] may be referenced with that name. The following sections provide details on the scoping rules and behavior, which depend on the kind of entity and where it is declared. The process of how names are resolved to entities is described in the [name resolution] chapter. More information on "drop scopes" used for the purpose of running destructors may be found in the [destructors] chapter.
+A *scope* is the region of source text where a named [entity] may be referenced with that name.
+The following sections provide details on the scoping rules and behavior, which depend on the kind of entity and where it is declared.
+The process of how names are resolved to entities is described in the [name resolution] chapter.
+More information on "drop scopes" used for the purpose of running destructors may be found in the [destructors] chapter.
 
-r[names.scopes.items]
 ## Item scopes
 
-r[names.scopes.items.module]
 The name of an [item][items] declared directly in a [module] has a scope that extends from the start of the module to the end of the module. These items are also members of the module and can be referred to with a [path] leading from their module.
 
-r[names.scopes.items.statement]
 The name of an item declared as a [statement] has a scope that extends from the start of the block the item statement is in until the end of the block.
 
-r[names.scopes.items.duplicate]
-It is an error to introduce an item with a duplicate name of another item in the same [namespace] within the same module or block. [Asterisk glob imports] have special behavior for dealing with duplicate names and shadowing, see the linked chapter for more details.
-
-r[names.scopes.items.shadow-prelude]
+It is an error to introduce an item with a duplicate name of another item in the same [namespace] within the same module or block.
+[Asterisk glob imports] have special behavior for dealing with duplicate names and shadowing, see the linked chapter for more details.
 Items in a module may shadow items in a [prelude](#prelude-scopes).
 
-r[names.scopes.items.nested-modules]
-Item names from outer modules are not in scope within a nested module. A [path] may be used to refer to an item in another module.
+Item names from outer modules are not in scope within a nested module.
+A [path] may be used to refer to an item in another module.
 
-r[names.scopes.associated-items]
 ### Associated item scopes
 
-r[names.scopes.associated-items.scope]
-[Associated items] are not scoped and can only be referred to by using a [path] leading from the type or trait they are associated with. [Methods] can also be referred to via [call expressions].
+[Associated items] are not scoped and can only be referred to by using a [path] leading from the type or trait they are associated with.
+[Methods] can also be referred to via [call expressions].
 
-r[names.scopes.associated-items.duplicate]
 Similar to items within a module or block,  it is an error to introduce an item within a trait or implementation that is a duplicate of another item in the trait or impl in the same namespace.
 
-r[names.scopes.pattern-bindings]
 ## Pattern binding scopes
 
 The scope of a local variable [pattern] binding depends on where it is used:
 
-r[names.scopes.pattern-bindings.let]
 * [`let` statement] bindings range from just after the `let` statement until the end of the block where it is declared.
-r[names.scopes.pattern-bindings.parameter]
 * [Function parameter] bindings are within the body of the function.
-r[names.scopes.pattern-bindings.closure]
 * [Closure parameter] bindings are within the closure body.
-r[names.scopes.pattern-bindings.loop]
-* [`for`] bindings are within the loop body.
-r[names.scopes.pattern-bindings.let-chains]
-* [`if let`] and [`while let`] bindings are valid in the following conditions as well as the consequent block.
-r[names.scopes.pattern-bindings.match-arm]
+* [`for`] and [`while let`] bindings are within the loop body.
+* [`if let`] bindings are within the consequent block.
 * [`match` arms] bindings are within the [match guard] and the match arm expression.
-r[names.scopes.pattern-bindings.match-guard-let]
-* [`match` guard `let`] bindings are valid in the following guard conditions and the match arm expression.
 
-r[names.scopes.pattern-bindings.items]
 Local variable scopes do not extend into item declarations.
 <!-- Not entirely, see https://github.com/rust-lang/rust/issues/33118 -->
 
 ### Pattern binding shadowing
 
-r[names.scopes.pattern-bindings.shadow]
 Pattern bindings are allowed to shadow any name in scope with the following exceptions which are an error:
 
 * [Const generic parameters]
@@ -78,14 +61,13 @@ fn shadow_example() {
 }
 ```
 
-r[names.scopes.generic-parameters]
 ## Generic parameter scopes
 
-r[names.scopes.generic-parameters.param-list]
-Generic parameters are declared in a [GenericParams] list. The scope of a generic parameter is within the item it is declared on.
+Generic parameters are declared in a [_GenericParams_] list.
+The scope of a generic parameter is within the item it is declared on.
 
-r[names.scopes.generic-parameters.order-independent]
-All parameters are in scope within the generic parameter list regardless of the order they are declared. The following shows some examples where a parameter may be referenced before it is declared:
+All parameters are in scope within the generic parameter list regardless of the order they are declared.
+The following shows some examples where a parameter may be referenced before it is declared:
 
 ```rust
 // The 'b bound is referenced before it is declared.
@@ -96,7 +78,6 @@ fn params_scope<'a: 'b, 'b>() {}
 fn f<T: SomeTrait<N>, const N: usize>() {}
 ```
 
-r[names.scopes.generic-parameters.bounds]
 Generic parameters are also in scope for type bounds and where clauses, for example:
 
 ```rust
@@ -109,7 +90,6 @@ fn where_scope<'a, T, U>()
 {}
 ```
 
-r[names.scopes.generic-parameters.inner-items]
 It is an error for [items] declared inside a function to refer to a generic parameter from their outer scope.
 
 ```rust,compile_fail
@@ -120,7 +100,6 @@ fn example<T>() {
 
 ### Generic parameter shadowing
 
-r[names.scopes.generic-parameters.shadow]
 It is an error to shadow a generic parameter with the exception that items declared within functions are allowed to shadow generic parameter names from the function.
 
 ```rust
@@ -141,27 +120,24 @@ trait SomeTrait<'a, T, const N: usize> {
 }
 ```
 
-r[names.scopes.lifetimes]
 ### Lifetime scopes
 
-Lifetime parameters are declared in a [GenericParams] list and [higher-ranked trait bounds][hrtb].
+Lifetime parameters are declared in a [_GenericParams_] list and [higher-ranked trait bounds][hrtb].
 
-r[names.scopes.lifetimes.special]
 The `'static` lifetime and [placeholder lifetime] `'_` have a special meaning and cannot be declared as a parameter.
 
 #### Lifetime generic parameter scopes
 
-r[names.scopes.lifetimes.generic]
-[Constant] and [static] items and [const contexts] only ever allow `'static` lifetime references, so no other lifetime may be in scope within them. [Associated consts] do allow referring to lifetimes declared in their trait or implementation.
+[Constant] and [static] items and [const contexts] only ever allow `'static` lifetime references, so no other lifetime may be in scope within them.
+[Associated consts] do allow referring to lifetimes declared in their trait or implementation.
 
 #### Higher-ranked trait bound scopes
 
-r[names.scopes.lifetimes.higher-ranked]
 The scope of a lifetime parameter declared as a [higher-ranked trait bound][hrtb] depends on the scenario where it is used.
 
-* As a [TypeBoundWhereClauseItem] the declared lifetimes are in scope in the type and the type bounds.
-* As a [TraitBound] the declared lifetimes are in scope within the bound type path.
-* As a [BareFunctionType] the declared lifetimes are in scope within the function parameters and return type.
+* As a [_TypeBoundWhereClauseItem_] the declared lifetimes are in scope in the type and the type bounds.
+* As a [_TraitBound_] the declared lifetimes are in scope within the bound type path.
+* As a [_BareFunctionType_] the declared lifetimes are in scope within the function parameters and return type.
 
 ```rust
 # trait Trait<'a>{}
@@ -186,7 +162,6 @@ type FnExample = for<'a> fn(x: Example<'a>) -> Example<'a>;
 
 #### Impl trait restrictions
 
-r[names.scopes.lifetimes.impl-trait]
 [Impl trait] types can only reference lifetimes declared on a function or implementation.
 
 <!-- not able to demonstrate the scope error because the compiler panics
@@ -209,17 +184,17 @@ r[names.scopes.lifetimes.impl-trait]
 #
 // The `impl Trait2` here is not allowed to refer to 'b but it is allowed to
 // refer to 'a.
-fn foo<'a>() -> impl for<'b> Trait1<Item = impl Trait2<'a> + use<'a>> {
+fn foo<'a>() -> impl for<'b> Trait1<Item = impl Trait2<'a>> {
     // ...
 #    Example
 }
 ```
 
-r[names.scopes.loop-label]
 ## Loop label scopes
 
-r[names.scopes.loop-label.scope]
-[Loop labels] may be declared by a [loop expression]. The scope of a loop label is from the point it is declared till the end of the loop expression. The scope does not extend into [items], [closures], [async blocks], [const arguments], [const contexts], and the iterator expression of the defining [`for` loop].
+[Loop labels] may be declared by a [loop expression].
+The scope of a loop label is from the point it is declared till the end of the loop expression.
+The scope does not extend into [items], [closures], [async blocks], [const arguments], [const contexts], and the iterator expression of the defining [`for` loop].
 
 ```rust
 'a: for n in 0..3 {
@@ -248,8 +223,8 @@ r[names.scopes.loop-label.scope]
 
 ```
 
-r[names.scopes.loop-label.shadow]
-Loop labels may shadow labels of the same name in outer scopes. References to a label refer to the closest definition.
+Loop labels may shadow labels of the same name in outer scopes.
+References to a label refer to the closest definition.
 
 ```rust
 // Loop label shadowing example.
@@ -261,17 +236,14 @@ Loop labels may shadow labels of the same name in outer scopes. References to a 
 }
 ```
 
-r[names.scopes.prelude]
 ## Prelude scopes
 
-r[names.scopes.prelude.intro]
-[Preludes] bring entities into scope of every module. The entities are not members of the module, but are implicitly queried during [name resolution].
-
-r[names.scopes.prelude.shadow]
+[Preludes] bring entities into scope of every module.
+The entities are not members of the module, but are implicitly queried during [name resolution].
 The prelude names may be shadowed by declarations in a module.
 
-r[names.scopes.prelude.layers]
-The preludes are layered such that one shadows another if they contain entities of the same name. The order that preludes may shadow other preludes is the following where earlier entries may shadow later ones:
+The preludes are layered such that one shadows another if they contain entities of the same name.
+The order that preludes may shadow other preludes is the following where earlier entries may shadow later ones:
 
 1. [Extern prelude]
 2. [Tool prelude]
@@ -279,30 +251,23 @@ The preludes are layered such that one shadows another if they contain entities 
 4. [Standard library prelude]
 5. [Language prelude]
 
-r[names.scopes.macro_rules]
 ## `macro_rules` scopes
 
-The scope of `macro_rules` macros is described in the [Macros By Example] chapter. The behavior depends on the use of the [`macro_use`] and [`macro_export`] attributes.
+The scope of `macro_rules` macros is described in the [Macros By Example] chapter.
+The behavior depends on the use of the [`macro_use`] and [`macro_export`] attributes.
 
-r[names.scopes.derive]
 ## Derive macro helper attributes
 
-r[names.scopes.derive.scope]
-[Derive macro helper attributes] are in scope in the item where their corresponding [`derive` attribute] is specified. The scope extends from just after the `derive` attribute to the end of the item. <!-- Note: Not strictly true, see https://github.com/rust-lang/rust/issues/79202, but this is the intention. -->
-
-r[names.scopes.derive.shadow]
+[Derive macro helper attributes] are in scope in the item where their corresponding [`derive` attribute] is specified.
+The scope extends from just after the `derive` attribute to the end of the item. <!-- Note: Not strictly true, see https://github.com/rust-lang/rust/issues/79202, but this is the intention. -->
 Helper attributes shadow other attributes of the same name in scope.
 
-r[names.scopes.self]
 ## `Self` scope
 
-r[names.scopes.self.intro]
 Although [`Self`] is a keyword with special meaning, it interacts with name resolution in a way similar to normal names.
 
-r[names.scopes.self.def-scope]
 The implicit `Self` type in the definition of a [struct], [enum], [union], [trait], or [implementation] is treated similarly to a [generic parameter](#generic-parameter-scopes), and is in scope in the same way as a generic type parameter.
 
-r[names.scopes.self.impl-scope]
 The implicit `Self` constructor in the value [namespace] of an [implementation] is in scope within the body of the implementation (the implementation's [associated items]).
 
 ```rust
@@ -323,18 +288,21 @@ impl ImplExample {
 }
 ```
 
+[_BareFunctionType_]: ../types/function-pointer.md
+[_GenericParams_]: ../items/generics.md
+[_TraitBound_]: ../trait-bounds.md
+[_TypeBoundWhereClauseItem_]: ../items/generics.md
 [`derive` attribute]: ../attributes/derive.md
 [`for` loop]: ../expressions/loop-expr.md#iterator-loops
 [`for`]: ../expressions/loop-expr.md#iterator-loops
-[`if let`]: ../expressions/if-expr.md#if-let-patterns
-[`while let`]: ../expressions/loop-expr.md#while-let-patterns
+[`if let`]: ../expressions/if-expr.md#if-let-expressions
 [`let` statement]: ../statements.md#let-statements
-[`macro_export`]: ../macros-by-example.md#the-macro_export-attribute
+[`macro_export`]: ../macros-by-example.md#path-based-scope
 [`macro_use` prelude]: preludes.md#macro_use-prelude
 [`macro_use`]: ../macros-by-example.md#the-macro_use-attribute
 [`match` arms]: ../expressions/match-expr.md
-[`match` guard `let`]: expr.match.guard.let
 [`Self`]: ../paths.md#self-1
+[`while let`]: ../expressions/loop-expr.md#predicate-pattern-loops
 [Associated consts]: ../items/associated-items.md#associated-constants
 [associated items]: ../items/associated-items.md
 [Asterisk glob imports]: ../items/use-declarations.md

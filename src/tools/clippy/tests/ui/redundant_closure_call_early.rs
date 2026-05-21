@@ -7,11 +7,12 @@ fn main() {
 
     // lint here
     let mut k = (|m| m + 1)(i);
-    //~^ redundant_closure_call
+    //~^ ERROR: try not to call a closure in the expression where it is declared
+    //~| NOTE: `-D clippy::redundant-closure-call` implied by `-D warnings`
 
     // lint here
     k = (|a, b| a * b)(1, 5);
-    //~^ redundant_closure_call
+    //~^ ERROR: try not to call a closure in the expression where it is declared
 
     // don't lint these
     #[allow(clippy::needless_return)]

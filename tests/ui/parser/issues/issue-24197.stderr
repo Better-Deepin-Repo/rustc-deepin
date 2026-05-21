@@ -2,9 +2,7 @@ error: expected a pattern, found an expression
   --> $DIR/issue-24197.rs:2:9
    |
 LL |     let buf[0] = 0;
-   |         ^^^^^^ not a pattern
-   |
-   = note: arbitrary expressions are not allowed in patterns: <https://doc.rust-lang.org/book/ch19-00-patterns.html>
+   |         ^^^^^^ arbitrary expressions are not allowed in patterns
 
 error: aborting due to 1 previous error
 

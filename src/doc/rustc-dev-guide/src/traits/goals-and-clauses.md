@@ -1,5 +1,7 @@
 # Goals and clauses
 
+<!-- toc -->
+
 In logic programming terms, a **goal** is something that you must
 prove and a **clause** is something that you know is true. As
 described in the [lowering to logic](./lowering-to-logic.html)
@@ -42,10 +44,10 @@ In terms of code, these types are defined in
 [`chalk-ir/src/lib.rs`][chalk_ir] in chalk.
 
 [pphhf]: https://rust-lang.github.io/chalk/book/bibliography.html#pphhf
-[traits_mod]: https://github.com/rust-lang/rust/blob/HEAD/compiler/rustc_middle/src/traits/mod.rs
+[traits_mod]: https://github.com/rust-lang/rust/blob/master/compiler/rustc_middle/src/traits/mod.rs
 [chalk_ir]: https://github.com/rust-lang/chalk/blob/master/chalk-ir/src/lib.rs
 
-<a id="domain-goals"></a>
+<a name="domain-goals"></a>
 
 ## Domain goals
 
@@ -61,7 +63,7 @@ forall<K1, ..., Kn> { DomainGoal :- Goal }
 hence domain goals are in fact clauses' LHS. That is, at the most granular level,
 domain goals are what the trait solver will end up trying to prove.
 
-<a id="trait-ref"></a>
+<a name="trait-ref"></a>
 
 To define the set of domain goals in our system, we need to first
 introduce a few simple formulations. A **trait reference** consists of
@@ -76,7 +78,7 @@ IntoIterator`. Note that Rust surface syntax also permits some extra
 things, like associated type bindings (`Vec<T>: IntoIterator<Item =
 T>`), that are not part of a trait reference.
 
-<a id="projection"></a>
+<a name="projection"></a>
 
 A **projection** consists of an associated item reference along with
 its inputs P0..Pm:
@@ -203,7 +205,7 @@ e.g. `Outlives(&'a str: 'b)`, `Outlives('a: 'static)`
 
 True if the given type or region on the left outlives the right-hand region.
 
-<a id="coinductive"></a>
+<a name="coinductive"></a>
 
 ## Coinductive goals
 

@@ -1,22 +1,19 @@
 use std::fmt::Write;
-use std::time::Duration;
 
-use rustc_data_structures::fx::FxIndexSet;
+use rustc_data_structures::fx::FxHashSet;
 use rustc_span::edition::Edition;
 
 use crate::doctest::{
-    DocTestBuilder, GlobalTestOptions, IndividualTestOptions, RunnableDocTest, RustdocOptions,
-    ScrapedDocTest, TestFailure, UnusedExterns, run_test,
+    run_test, DocTestBuilder, GlobalTestOptions, IndividualTestOptions, RunnableDocTest,
+    RustdocOptions, ScrapedDocTest, TestFailure, UnusedExterns,
 };
 use crate::html::markdown::{Ignore, LangString};
 
 /// Convenient type to merge compatible doctests into one.
 pub(crate) struct DocTestRunner {
-    crate_attrs: FxIndexSet<String>,
-    global_crate_attrs: FxIndexSet<String>,
+    crate_attrs: FxHashSet<String>,
     ids: String,
     output: String,
-    output_merged_tests: String,
     supports_color: bool,
     nb_tests: usize,
 }
@@ -24,11 +21,9 @@ pub(crate) struct DocTestRunner {
 impl DocTestRunner {
     pub(crate) fn new() -> Self {
         Self {
-            crate_attrs: FxIndexSet::default(),
-            global_crate_attrs: FxIndexSet::default(),
+            crate_attrs: FxHashSet::default(),
             ids: String::new(),
             output: String::new(),
-            output_merged_tests: String::new(),
             supports_color: true,
             nb_tests: 0,
         }
@@ -49,29 +44,24 @@ impl DocTestRunner {
             for line in doctest.crate_attrs.split('\n') {
                 self.crate_attrs.insert(line.to_string());
             }
-            for line in &doctest.global_crate_attrs {
-                self.global_crate_attrs.insert(line.to_string());
-            }
+        }
+        if !self.ids.is_empty() {
+            self.ids.push(',');
         }
         self.ids.push_str(&format!(
-            "tests.push({}::TEST);\n",
+            "{}::TEST",
             generate_mergeable_doctest(
                 doctest,
                 scraped_test,
                 ignore,
                 self.nb_tests,
-                &mut self.output,
-                &mut self.output_merged_tests,
+                &mut self.output
             ),
         ));
         self.supports_color &= doctest.supports_color;
         self.nb_tests += 1;
     }
 
-    /// Returns a tuple containing the `Duration` of the compilation and the `Result` of the test.
-    ///
-    /// If compilation failed, it will return `Err`, otherwise it will return `Ok` containing if
-    /// the test ran successfully.
     pub(crate) fn run_merged_tests(
         &mut self,
         test_options: IndividualTestOptions,
@@ -79,7 +69,7 @@ impl DocTestRunner {
         opts: &GlobalTestOptions,
         test_args: &[String],
         rustdoc_options: &RustdocOptions,
-    ) -> (Duration, Result<bool, ()>) {
+    ) -> Result<bool, ()> {
         let mut code = "\
 #![allow(unused_extern_crates)]
 #![allow(internal_features)]
@@ -88,28 +78,25 @@ impl DocTestRunner {
 "
         .to_string();
 
-        let mut code_prefix = String::new();
-
         for crate_attr in &self.crate_attrs {
-            code_prefix.push_str(crate_attr);
-            code_prefix.push('\n');
+            code.push_str(crate_attr);
+            code.push('\n');
         }
 
-        if self.global_crate_attrs.is_empty() {
+        if opts.attrs.is_empty() {
             // If there aren't any attributes supplied by #![doc(test(attr(...)))], then allow some
             // lints that are commonly triggered in doctests. The crate-level test attributes are
             // commonly used to make tests fail in case they trigger warnings, so having this there in
             // that case may cause some tests to pass when they shouldn't have.
-            code_prefix.push_str("#![allow(unused)]\n");
+            code.push_str("#![allow(unused)]\n");
         }
 
-        // Next, any attributes that came from #![doc(test(attr(...)))].
-        for attr in &self.global_crate_attrs {
-            code_prefix.push_str(&format!("#![{attr}]\n"));
+        // Next, any attributes that came from the crate root via #![doc(test(attr(...)))].
+        for attr in &opts.attrs {
+            code.push_str(&format!("#![{attr}]\n"));
         }
 
         code.push_str("extern crate test;\n");
-        writeln!(code, "extern crate doctest_bundle_{edition} as doctest_bundle;").unwrap();
 
         let test_args = test_args.iter().fold(String::new(), |mut x, arg| {
             write!(x, "{arg:?}.to_string(),").unwrap();
@@ -123,10 +110,10 @@ impl DocTestRunner {
 mod __doctest_mod {{
     use std::sync::OnceLock;
     use std::path::PathBuf;
-    use std::process::ExitCode;
 
     pub static BINARY_PATH: OnceLock<PathBuf> = OnceLock::new();
-    pub const RUN_OPTION: &str = \"RUSTDOC_DOCTEST_RUN_NB_TEST\";
+    pub const RUN_OPTION: &str = \"*doctest-inner-test\";
+    pub const BIN_OPTION: &str = \"*doctest-bin-path\";
 
     #[allow(unused)]
     pub fn doctest_path() -> Option<&'static PathBuf> {{
@@ -134,72 +121,62 @@ mod __doctest_mod {{
     }}
 
     #[allow(unused)]
-    pub fn doctest_runner(bin: &std::path::Path, test_nb: usize) -> ExitCode {{
+    pub fn doctest_runner(bin: &std::path::Path, test_nb: usize) -> Result<(), String> {{
         let out = std::process::Command::new(bin)
-            .env(self::RUN_OPTION, test_nb.to_string())
-            .args(std::env::args().skip(1).collect::<Vec<_>>())
+            .arg(self::RUN_OPTION)
+            .arg(test_nb.to_string())
             .output()
             .expect(\"failed to run command\");
         if !out.status.success() {{
-            if let Some(code) = out.status.code() {{
-                eprintln!(\"Test executable failed (exit status: {{code}}).\");
-            }} else {{
-                eprintln!(\"Test executable failed (terminated by signal).\");
-            }}
-            if !out.stdout.is_empty() || !out.stderr.is_empty() {{
-                eprintln!();
-            }}
-            if !out.stdout.is_empty() {{
-                eprintln!(\"stdout:\");
-                eprintln!(\"{{}}\", String::from_utf8_lossy(&out.stdout));
-            }}
-            if !out.stderr.is_empty() {{
-                eprintln!(\"stderr:\");
-                eprintln!(\"{{}}\", String::from_utf8_lossy(&out.stderr));
-            }}
-            ExitCode::FAILURE
+            Err(String::from_utf8_lossy(&out.stderr).to_string())
         }} else {{
-            ExitCode::SUCCESS
+            Ok(())
         }}
     }}
 }}
 
 #[rustc_main]
 fn main() -> std::process::ExitCode {{
-let tests = {{
-    let mut tests = Vec::with_capacity({nb_tests});
-    {ids}
-    tests
-}};
+const TESTS: [test::TestDescAndFn; {nb_tests}] = [{ids}];
+let bin_marker = std::ffi::OsStr::new(__doctest_mod::BIN_OPTION);
+let test_marker = std::ffi::OsStr::new(__doctest_mod::RUN_OPTION);
 let test_args = &[{test_args}];
-const ENV_BIN: &'static str = \"RUSTDOC_DOCTEST_BIN_PATH\";
 
-if let Ok(binary) = std::env::var(ENV_BIN) {{
-    let _ = crate::__doctest_mod::BINARY_PATH.set(binary.into());
-    unsafe {{ std::env::remove_var(ENV_BIN); }}
-    return std::process::Termination::report(test::test_main(test_args, tests, None));
-}} else if let Ok(nb_test) = std::env::var(__doctest_mod::RUN_OPTION) {{
-    if let Ok(nb_test) = nb_test.parse::<usize>() {{
-        if let Some(test) = tests.get(nb_test) {{
-            if let test::StaticTestFn(f) = &test.testfn {{
-                return std::process::Termination::report(f());
+let mut args = std::env::args_os().skip(1);
+while let Some(arg) = args.next() {{
+    if arg == bin_marker {{
+        let Some(binary) = args.next() else {{
+            panic!(\"missing argument after `{{}}`\", __doctest_mod::BIN_OPTION);
+        }};
+        if crate::__doctest_mod::BINARY_PATH.set(binary.into()).is_err() {{
+            panic!(\"`{{}}` option was used more than once\", bin_marker.to_string_lossy());
+        }}
+        return std::process::Termination::report(test::test_main(test_args, Vec::from(TESTS), None));
+    }} else if arg == test_marker {{
+        let Some(nb_test) = args.next() else {{
+            panic!(\"missing argument after `{{}}`\", __doctest_mod::RUN_OPTION);
+        }};
+        if let Some(nb_test) = nb_test.to_str().and_then(|nb| nb.parse::<usize>().ok()) {{
+            if let Some(test) = TESTS.get(nb_test) {{
+                if let test::StaticTestFn(f) = test.testfn {{
+                    return std::process::Termination::report(f());
+                }}
             }}
         }}
+        panic!(\"Unexpected value after `{{}}`\", __doctest_mod::RUN_OPTION);
     }}
-    panic!(\"Unexpected value for `{{}}`\", __doctest_mod::RUN_OPTION);
 }}
 
-eprintln!(\"WARNING: No rustdoc doctest environment variable provided so doctests will be run in \
-the same process\");
-std::process::Termination::report(test::test_main(test_args, tests, None))
+eprintln!(\"WARNING: No argument provided so doctests will be run in the same process\");
+std::process::Termination::report(test::test_main(test_args, Vec::from(TESTS), None))
 }}",
             nb_tests = self.nb_tests,
-            output = self.output_merged_tests,
+            output = self.output,
             ids = self.ids,
         )
         .expect("failed to generate test code");
         let runnable_test = RunnableDocTest {
-            full_test_code: format!("{code_prefix}{code}", code = self.output),
+            full_test_code: code,
             full_test_line_offset: 0,
             test_opts: test_options,
             global_opts: opts.clone(),
@@ -207,11 +184,11 @@ std::process::Termination::report(test::test_main(test_args, tests, None))
             line: 0,
             edition,
             no_run: false,
-            merged_test_code: Some(code),
+            is_multiple_tests: true,
         };
-        let (duration, ret) =
+        let ret =
             run_test(runnable_test, rustdoc_options, self.supports_color, |_: UnusedExterns| {});
-        (duration, if let Err(TestFailure::CompileError) = ret { Err(()) } else { Ok(ret.is_ok()) })
+        if let Err(TestFailure::CompileError) = ret { Err(()) } else { Ok(ret.is_ok()) }
     }
 }
 
@@ -222,16 +199,19 @@ fn generate_mergeable_doctest(
     ignore: bool,
     id: usize,
     output: &mut String,
-    output_merged_tests: &mut String,
 ) -> String {
     let test_id = format!("__doctest_{id}");
 
     if ignore {
         // We generate nothing else.
-        writeln!(output, "pub mod {test_id} {{}}\n").unwrap();
+        writeln!(output, "mod {test_id} {{\n").unwrap();
     } else {
-        writeln!(output, "pub mod {test_id} {{\n{}{}", doctest.crates, doctest.maybe_crate_attrs)
+        writeln!(output, "mod {test_id} {{\n{}{}", doctest.crates, doctest.maybe_crate_attrs)
             .unwrap();
+        if scraped_test.langstr.no_run {
+            // To prevent having warnings about unused items since they're not called.
+            writeln!(output, "#![allow(unused)]").unwrap();
+        }
         if doctest.has_main_fn {
             output.push_str(&doctest.everything_else);
         } else {
@@ -250,17 +230,11 @@ fn main() {returns_result} {{
             )
             .unwrap();
         }
-        writeln!(
-            output,
-            "\npub fn __main_fn() -> impl std::process::Termination {{ main() }} \n}}\n"
-        )
-        .unwrap();
     }
     let not_running = ignore || scraped_test.langstr.no_run;
     writeln!(
-        output_merged_tests,
+        output,
         "
-mod {test_id} {{
 pub const TEST: test::TestDescAndFn = test::TestDescAndFn::new_doctest(
 {test_name:?}, {ignore}, {file:?}, {line}, {no_run}, {should_panic},
 test::StaticTestFn(
@@ -282,7 +256,7 @@ test::StaticTestFn(
 if let Some(bin_path) = crate::__doctest_mod::doctest_path() {{
     test::assert_test_result(crate::__doctest_mod::doctest_runner(bin_path, {id}))
 }} else {{
-    test::assert_test_result(doctest_bundle::{test_id}::__main_fn())
+    test::assert_test_result(self::main())
 }}
 ",
             )

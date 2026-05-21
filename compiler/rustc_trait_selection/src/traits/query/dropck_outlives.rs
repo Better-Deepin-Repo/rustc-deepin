@@ -1,14 +1,12 @@
 use rustc_data_structures::fx::FxHashSet;
-use rustc_infer::traits::query::type_op::DropckOutlives;
 use rustc_middle::traits::query::{DropckConstraint, DropckOutlivesResult};
 use rustc_middle::ty::{self, EarlyBinder, ParamEnvAnd, Ty, TyCtxt};
-use rustc_span::Span;
+use rustc_span::{Span, DUMMY_SP};
 use tracing::{debug, instrument};
 
-use crate::solve::NextSolverError;
-use crate::traits::query::NoSolution;
 use crate::traits::query::normalize::QueryNormalizeExt;
-use crate::traits::{FromSolverError, Normalized, ObligationCause, ObligationCtxt};
+use crate::traits::query::NoSolution;
+use crate::traits::{Normalized, ObligationCause, ObligationCtxt};
 
 /// This returns true if the type `ty` is "trivial" for
 /// dropck-outlives -- that is, if it doesn't require any types to
@@ -84,32 +82,16 @@ pub fn trivial_dropck_outlives<'tcx>(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> bool {
         | ty::Placeholder(..)
         | ty::Infer(_)
         | ty::Bound(..)
-        | ty::Coroutine(..)
-        | ty::UnsafeBinder(_) => false,
+        | ty::Coroutine(..) => false,
     }
 }
 
 pub fn compute_dropck_outlives_inner<'tcx>(
     ocx: &ObligationCtxt<'_, 'tcx>,
-    goal: ParamEnvAnd<'tcx, DropckOutlives<'tcx>>,
-    span: Span,
+    goal: ParamEnvAnd<'tcx, Ty<'tcx>>,
 ) -> Result<DropckOutlivesResult<'tcx>, NoSolution> {
-    match compute_dropck_outlives_with_errors(ocx, goal, span) {
-        Ok(r) => Ok(r),
-        Err(_) => Err(NoSolution),
-    }
-}
-
-pub fn compute_dropck_outlives_with_errors<'tcx, E>(
-    ocx: &ObligationCtxt<'_, 'tcx, E>,
-    goal: ParamEnvAnd<'tcx, DropckOutlives<'tcx>>,
-    span: Span,
-) -> Result<DropckOutlivesResult<'tcx>, Vec<E>>
-where
-    E: FromSolverError<'tcx, NextSolverError<'tcx>>,
-{
     let tcx = ocx.infcx.tcx;
-    let ParamEnvAnd { param_env, value: DropckOutlives { dropped_ty } } = goal;
+    let ParamEnvAnd { param_env, value: for_ty } = goal;
 
     let mut result = DropckOutlivesResult { kinds: vec![], overflows: vec![] };
 
@@ -117,7 +99,7 @@ where
     // something from the stack and invoke
     // `dtorck_constraint_for_ty_inner`. This may produce new types that
     // have to be pushed on the stack. This continues until we have explored
-    // all the reachable types from the type `dropped_ty`.
+    // all the reachable types from the type `for_ty`.
     //
     // Example: Imagine that we have the following code:
     //
@@ -147,12 +129,12 @@ where
     // lead to us trying to push `A` a second time -- to prevent
     // infinite recursion, we notice that `A` was already pushed
     // once and stop.
-    let mut ty_stack = vec![(dropped_ty, 0)];
+    let mut ty_stack = vec![(for_ty, 0)];
 
     // Set used to detect infinite recursion.
     let mut ty_set = FxHashSet::default();
 
-    let cause = ObligationCause::dummy_with_span(span);
+    let cause = ObligationCause::dummy();
     let mut constraints = DropckConstraint::empty();
     while let Some((ty, depth)) = ty_stack.pop() {
         debug!(
@@ -161,14 +143,7 @@ where
             result.overflows.len(),
             ty_stack.len()
         );
-        dtorck_constraint_for_ty_inner(
-            tcx,
-            ocx.infcx.typing_env(param_env),
-            span,
-            depth,
-            ty,
-            &mut constraints,
-        );
+        dtorck_constraint_for_ty_inner(tcx, param_env, DUMMY_SP, depth, ty, &mut constraints)?;
 
         // "outlives" represent types/regions that may be touched
         // by a destructor.
@@ -188,40 +163,11 @@ where
         // do not themselves define a destructor", more or less. We have
         // to push them onto the stack to be expanded.
         for ty in constraints.dtorck_types.drain(..) {
-            let ty = if let Ok(Normalized { value: ty, obligations }) =
-                ocx.infcx.at(&cause, param_env).query_normalize(ty)
-            {
-                ocx.register_obligations(obligations);
+            let Normalized { value: ty, obligations } =
+                ocx.infcx.at(&cause, param_env).query_normalize(ty)?;
+            ocx.register_obligations(obligations);
 
-                debug!("dropck_outlives: ty from dtorck_types = {:?}", ty);
-                ty
-            } else {
-                // Flush errors b/c `deeply_normalize` doesn't expect pending
-                // obligations, and we may have pending obligations from the
-                // branch above (from other types).
-                let errors = ocx.evaluate_obligations_error_on_ambiguity();
-                if !errors.is_empty() {
-                    return Err(errors);
-                }
-
-                // When query normalization fails, we don't get back an interesting
-                // reason that we could use to report an error in borrowck. In order to turn
-                // this into a reportable error, we deeply normalize again. We don't expect
-                // this to succeed, so delay a bug if it does.
-                match ocx.deeply_normalize(&cause, param_env, ty) {
-                    Ok(_) => {
-                        tcx.dcx().span_delayed_bug(
-                            span,
-                            format!(
-                                "query normalize succeeded of {ty}, \
-                                but deep normalize failed",
-                            ),
-                        );
-                        ty
-                    }
-                    Err(errors) => return Err(errors),
-                }
-            };
+            debug!("dropck_outlives: ty from dtorck_types = {:?}", ty);
 
             match ty.kind() {
                 // All parameters live for the duration of the
@@ -249,25 +195,25 @@ where
 
 /// Returns a set of constraints that needs to be satisfied in
 /// order for `ty` to be valid for destruction.
-#[instrument(level = "debug", skip(tcx, typing_env, span, constraints))]
+#[instrument(level = "debug", skip(tcx, param_env, span, constraints))]
 pub fn dtorck_constraint_for_ty_inner<'tcx>(
     tcx: TyCtxt<'tcx>,
-    typing_env: ty::TypingEnv<'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
     span: Span,
     depth: usize,
     ty: Ty<'tcx>,
     constraints: &mut DropckConstraint<'tcx>,
-) {
+) -> Result<(), NoSolution> {
     if !tcx.recursion_limit().value_within_limit(depth) {
         constraints.overflows.push(ty);
-        return;
+        return Ok(());
     }
 
     if trivial_dropck_outlives(tcx, ty) {
-        return;
+        return Ok(());
     }
 
-    match *ty.kind() {
+    match ty.kind() {
         ty::Bool
         | ty::Char
         | ty::Int(_)
@@ -287,105 +233,77 @@ pub fn dtorck_constraint_for_ty_inner<'tcx>(
         ty::Pat(ety, _) | ty::Array(ety, _) | ty::Slice(ety) => {
             // single-element containers, behave like their element
             rustc_data_structures::stack::ensure_sufficient_stack(|| {
-                dtorck_constraint_for_ty_inner(tcx, typing_env, span, depth + 1, ety, constraints)
-            });
+                dtorck_constraint_for_ty_inner(tcx, param_env, span, depth + 1, *ety, constraints)
+            })?;
         }
 
         ty::Tuple(tys) => rustc_data_structures::stack::ensure_sufficient_stack(|| {
             for ty in tys.iter() {
-                dtorck_constraint_for_ty_inner(tcx, typing_env, span, depth + 1, ty, constraints);
+                dtorck_constraint_for_ty_inner(tcx, param_env, span, depth + 1, ty, constraints)?;
             }
-        }),
+            Ok::<_, NoSolution>(())
+        })?,
 
         ty::Closure(_, args) => rustc_data_structures::stack::ensure_sufficient_stack(|| {
             for ty in args.as_closure().upvar_tys() {
-                dtorck_constraint_for_ty_inner(tcx, typing_env, span, depth + 1, ty, constraints);
+                dtorck_constraint_for_ty_inner(tcx, param_env, span, depth + 1, ty, constraints)?;
             }
-        }),
+            Ok::<_, NoSolution>(())
+        })?,
 
         ty::CoroutineClosure(_, args) => {
             rustc_data_structures::stack::ensure_sufficient_stack(|| {
                 for ty in args.as_coroutine_closure().upvar_tys() {
                     dtorck_constraint_for_ty_inner(
                         tcx,
-                        typing_env,
+                        param_env,
                         span,
                         depth + 1,
                         ty,
                         constraints,
-                    );
+                    )?;
                 }
-            })
+                Ok::<_, NoSolution>(())
+            })?
         }
 
-        ty::Coroutine(def_id, args) => {
-            // rust-lang/rust#49918: Locals can be stored across await points in the coroutine,
-            // called interior/witness types. Since we do not compute these witnesses until after
-            // building MIR, we consider all coroutines to unconditionally require a drop during
-            // MIR building. However, considering the coroutine to unconditionally require a drop
-            // here may unnecessarily require its upvars' regions to be live when they don't need
-            // to be, leading to borrowck errors: <https://github.com/rust-lang/rust/issues/116242>.
+        ty::Coroutine(_, args) => {
+            // rust-lang/rust#49918: types can be constructed, stored
+            // in the interior, and sit idle when coroutine yields
+            // (and is subsequently dropped).
             //
-            // Here, we implement a more precise approximation for the coroutine's dtorck constraint
-            // by considering whether any of the interior types needs drop. Note that this is still
-            // an approximation because the coroutine interior has its regions erased, so we must add
-            // *all* of the upvars to live types set if we find that *any* interior type needs drop.
-            // This is because any of the regions captured in the upvars may be stored in the interior,
-            // which then has its regions replaced by a binder (conceptually erasing the regions),
-            // so there's no way to enforce that the precise region in the interior type is live
-            // since we've lost that information by this point.
+            // It would be nice to descend into interior of a
+            // coroutine to determine what effects dropping it might
+            // have (by looking at any drop effects associated with
+            // its interior).
             //
-            // Note also that this check requires that the coroutine's upvars are use-live, since
-            // a region from a type that does not have a destructor that was captured in an upvar
-            // may flow into an interior type with a destructor. This is stronger than requiring
-            // the upvars are drop-live.
+            // However, the interior's representation uses things like
+            // CoroutineWitness that explicitly assume they are not
+            // traversed in such a manner. So instead, we will
+            // simplify things for now by treating all coroutines as
+            // if they were like trait objects, where its upvars must
+            // all be alive for the coroutine's (potential)
+            // destructor.
             //
-            // For example, if we capture two upvar references `&'1 (), &'2 ()` and have some type
-            // in the interior, `for<'r> { NeedsDrop<'r> }`, we have no way to tell whether the
-            // region `'r` came from the `'1` or `'2` region, so we require both are live. This
-            // could even be unnecessary if `'r` was actually a `'static` region or some region
-            // local to the coroutine! That's why it's an approximation.
+            // In particular, skipping over `_interior` is safe
+            // because any side-effects from dropping `_interior` can
+            // only take place through references with lifetimes
+            // derived from lifetimes attached to the upvars and resume
+            // argument, and we *do* incorporate those here.
             let args = args.as_coroutine();
 
-            // Note that we don't care about whether the resume type has any drops since this is
-            // redundant; there is no storage for the resume type, so if it is actually stored
-            // in the interior, we'll already detect the need for a drop by checking the interior.
-            //
-            // FIXME(@lcnr): Why do we erase regions in the env here? Seems odd
-            let typing_env = tcx.erase_and_anonymize_regions(typing_env);
-            let needs_drop = tcx.mir_coroutine_witnesses(def_id).is_some_and(|witness| {
-                witness.field_tys.iter().any(|field| field.ty.needs_drop(tcx, typing_env))
-            });
-            if needs_drop {
-                // Pushing types directly to `constraints.outlives` is equivalent
-                // to requiring them to be use-live, since if we were instead to
-                // recurse on them like we do below, we only end up collecting the
-                // types that are relevant for drop-liveness.
+            // While we conservatively assume that all coroutines require drop
+            // to avoid query cycles during MIR building, we can check the actual
+            // witness during borrowck to avoid unnecessary liveness constraints.
+            if args.witness().needs_drop(tcx, tcx.erase_regions(param_env)) {
                 constraints.outlives.extend(args.upvar_tys().iter().map(ty::GenericArg::from));
                 constraints.outlives.push(args.resume_ty().into());
-            } else {
-                // Even if a witness type doesn't need a drop, we still require that
-                // the upvars are drop-live. This is only needed if we aren't already
-                // counting *all* of the upvars as use-live above, since use-liveness
-                // is a *stronger requirement* than drop-liveness. Recursing here
-                // unconditionally would just be collecting duplicated types for no
-                // reason.
-                for ty in args.upvar_tys() {
-                    dtorck_constraint_for_ty_inner(
-                        tcx,
-                        typing_env,
-                        span,
-                        depth + 1,
-                        ty,
-                        constraints,
-                    );
-                }
             }
         }
 
         ty::Adt(def, args) => {
             let DropckConstraint { dtorck_types, outlives, overflows } =
-                tcx.at(span).adt_dtorck_constraint(def.did());
+                tcx.at(span).adt_dtorck_constraint(def.did())?;
             // FIXME: we can try to recursively `dtorck_constraint_on_ty`
             // there, but that needs some way to handle cycles.
             constraints
@@ -410,15 +328,12 @@ pub fn dtorck_constraint_for_ty_inner<'tcx>(
             constraints.dtorck_types.push(ty);
         }
 
-        // Can't instantiate binder here.
-        ty::UnsafeBinder(_) => {
-            constraints.dtorck_types.push(ty);
-        }
-
         ty::Placeholder(..) | ty::Bound(..) | ty::Infer(..) | ty::Error(_) => {
             // By the time this code runs, all type variables ought to
             // be fully resolved.
-            tcx.dcx().span_delayed_bug(span, format!("Unresolved type in dropck: {:?}.", ty));
+            return Err(NoSolution);
         }
     }
+
+    Ok(())
 }

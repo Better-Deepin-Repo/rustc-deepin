@@ -1,14 +1,15 @@
 use clippy_utils::diagnostics::span_lint_and_sugg;
-use clippy_utils::res::{MaybeDef, MaybeResPath};
-use clippy_utils::source::{SpanRangeExt, snippet};
-use clippy_utils::sym;
+use clippy_utils::path_to_local_id;
+use clippy_utils::source::{snippet, SpanRangeExt};
+use clippy_utils::ty::is_type_diagnostic_item;
 use rustc_ast::{LitKind, StrStyle};
 use rustc_errors::Applicability;
 use rustc_hir::def::Res;
 use rustc_hir::{BindingMode, Block, Expr, ExprKind, HirId, LetStmt, PatKind, QPath, Stmt, StmtKind, TyKind};
 use rustc_lint::{LateContext, LateLintPass, LintContext};
+use rustc_middle::lint::in_external_macro;
 use rustc_session::impl_lint_pass;
-use rustc_span::{Span, Symbol};
+use rustc_span::{sym, Span, Symbol};
 
 declare_clippy_lint! {
     /// ### What it does
@@ -36,7 +37,7 @@ declare_clippy_lint! {
     /// // or
     /// let path_buf = PathBuf::new().join("foo");
     /// ```
-    #[clippy::version = "1.82.0"]
+    #[clippy::version = "1.81.0"]
     pub PATHBUF_INIT_THEN_PUSH,
     restriction,
     "`push` immediately after `PathBuf` creation"
@@ -59,7 +60,7 @@ struct PathbufPushSearcher<'tcx> {
     err_span: Span,
 }
 
-impl PathbufPushSearcher<'_> {
+impl<'tcx> PathbufPushSearcher<'tcx> {
     /// Try to generate a suggestion with `PathBuf::from`.
     /// Returns `None` if the suggestion would be invalid.
     fn gen_pathbuf_from(&self, cx: &LateContext<'_>) -> Option<String> {
@@ -135,18 +136,18 @@ impl<'tcx> LateLintPass<'tcx> for PathbufThenPush<'tcx> {
     fn check_local(&mut self, cx: &LateContext<'tcx>, local: &'tcx LetStmt<'tcx>) {
         if let Some(init_expr) = local.init
             && let PatKind::Binding(BindingMode::MUT, id, name, None) = local.pat.kind
-            && !local.span.in_external_macro(cx.sess().source_map())
+            && !in_external_macro(cx.sess(), local.span)
             && let ty = cx.typeck_results().pat_ty(local.pat)
-            && ty.is_diag_item(cx, sym::PathBuf)
+            && is_type_diagnostic_item(cx, ty, sym::PathBuf)
         {
             self.searcher = Some(PathbufPushSearcher {
                 local_id: id,
                 lhs_is_let: true,
+                name: name.name,
                 let_ty_span: local.ty.map(|ty| ty.span),
+                err_span: local.span,
                 init_val: *init_expr,
                 arg: None,
-                name: name.name,
-                err_span: local.span,
             });
         }
     }
@@ -156,32 +157,33 @@ impl<'tcx> LateLintPass<'tcx> for PathbufThenPush<'tcx> {
             && let ExprKind::Path(QPath::Resolved(None, path)) = left.kind
             && let [name] = &path.segments
             && let Res::Local(id) = path.res
-            && !expr.span.in_external_macro(cx.sess().source_map())
+            && !in_external_macro(cx.sess(), expr.span)
             && let ty = cx.typeck_results().expr_ty(left)
-            && ty.is_diag_item(cx, sym::PathBuf)
+            && is_type_diagnostic_item(cx, ty, sym::PathBuf)
         {
             self.searcher = Some(PathbufPushSearcher {
                 local_id: id,
                 lhs_is_let: false,
                 let_ty_span: None,
-                init_val: *right,
-                arg: None,
                 name: name.ident.name,
                 err_span: expr.span,
+                init_val: *right,
+                arg: None,
             });
         }
     }
 
     fn check_stmt(&mut self, cx: &LateContext<'tcx>, stmt: &'tcx Stmt<'_>) {
-        if let Some(mut searcher) = self.searcher.take()
-            && let StmtKind::Expr(expr) | StmtKind::Semi(expr) = stmt.kind
-            && let ExprKind::MethodCall(name, self_arg, [arg_expr], _) = expr.kind
-            && self_arg.res_local_id() == Some(searcher.local_id)
-            && name.ident.name == sym::push
-        {
-            searcher.err_span = searcher.err_span.to(stmt.span);
-            searcher.arg = Some(*arg_expr);
-            searcher.display_err(cx);
+        if let Some(mut searcher) = self.searcher.take() {
+            if let StmtKind::Expr(expr) | StmtKind::Semi(expr) = stmt.kind
+                && let ExprKind::MethodCall(name, self_arg, [arg_expr], _) = expr.kind
+                && path_to_local_id(self_arg, searcher.local_id)
+                && name.ident.as_str() == "push"
+            {
+                searcher.err_span = searcher.err_span.to(stmt.span);
+                searcher.arg = Some(*arg_expr);
+                searcher.display_err(cx);
+            }
         }
     }
 

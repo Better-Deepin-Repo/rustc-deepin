@@ -1,5 +1,5 @@
 //@ run-rustfix
-#![allow(dead_code, mismatched_lifetime_syntaxes)]
+#![allow(dead_code)]
 #![deny(no_mangle_generic_items)]
 
 #[no_mangle]

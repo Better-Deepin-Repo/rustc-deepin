@@ -19,6 +19,3 @@ fn main() {
     post_monomorphization_error::stdarch_intrinsic::<2>();
     //~^ NOTE the above error was encountered while instantiating
 }
-
-//~? ERROR attempt to divide `1_usize` by zero
-//~? NOTE erroneous constant encountered

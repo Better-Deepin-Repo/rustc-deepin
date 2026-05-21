@@ -1,6 +1,6 @@
 //@ check-pass
 //@ edition:2021
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 
 #![no_std] // Don't load unnecessary hygiene information from std
 extern crate std;

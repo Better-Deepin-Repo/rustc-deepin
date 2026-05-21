@@ -110,12 +110,11 @@ SOURCE_FILE
                 NAME_REF
                   IDENT "S"
             L_PAREN "("
-            OR_PAT
-              PIPE "|"
-              WHITESPACE " "
-              IDENT_PAT
-                NAME
-                  IDENT "a"
+            PIPE "|"
+            WHITESPACE " "
+            IDENT_PAT
+              NAME
+                IDENT "a"
             R_PAREN ")"
           WHITESPACE " "
           EQ "="

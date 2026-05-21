@@ -3,6 +3,10 @@
 
 trait TensorDimension {
     const DIM: usize;
+    //~^ ERROR cycle detected when resolving instance
+    //~| ERROR cycle detected when resolving instance
+    // FIXME Given the current state of the compiler its expected that we cycle here,
+    // but the cycle is still wrong.
     const ISSCALAR: bool = Self::DIM == 0;
     fn is_scalar(&self) -> bool {
         Self::ISSCALAR
@@ -45,7 +49,6 @@ impl<'a, T: Broadcastable, const DIM: usize> TensorDimension for LazyUpdim<'a, T
 
 impl<'a, T: Broadcastable, const DIM: usize> TensorSize for LazyUpdim<'a, T, { T::DIM }, DIM> {
     fn size(&self) -> [usize; DIM] {
-        //~^ ERROR: method not compatible with trait
         self.size
     }
 }
@@ -53,17 +56,12 @@ impl<'a, T: Broadcastable, const DIM: usize> TensorSize for LazyUpdim<'a, T, { T
 impl<'a, T: Broadcastable, const DIM: usize> Broadcastable for LazyUpdim<'a, T, { T::DIM }, DIM> {
     type Element = T::Element;
     fn bget(&self, index: [usize; DIM]) -> Option<Self::Element> {
-        //~^ ERROR: method not compatible with trait
         assert!(DIM >= T::DIM);
         if !self.inbounds(index) {
-            //~^ ERROR: unconstrained generic constant
-            //~| ERROR: mismatched types
             return None;
         }
         let size = self.size();
-        //~^ ERROR: unconstrained generic constant
         let newindex: [usize; T::DIM] = Default::default();
-        //~^ ERROR: the trait bound
         self.reference.bget(newindex)
     }
 }
@@ -84,8 +82,6 @@ impl<'a, R, T: Broadcastable, F: Fn(T::Element) -> R, const DIM: usize> TensorSi
     fn size(&self) -> [usize; DIM] {
         //~^ ERROR: method not compatible with trait
         self.reference.size()
-        //~^ ERROR: unconstrained generic constant
-        //~| ERROR: mismatched types
     }
 }
 
@@ -96,8 +92,6 @@ impl<'a, R, T: Broadcastable, F: Fn(T::Element) -> R, const DIM: usize> Broadcas
     fn bget(&self, index: [usize; DIM]) -> Option<Self::Element> {
         //~^ ERROR: method not compatible with trait
         self.reference.bget(index).map(&self.closure)
-        //~^ ERROR: unconstrained generic constant
-        //~| ERROR: mismatched types
     }
 }
 
@@ -106,14 +100,12 @@ impl<T> TensorDimension for Vec<T> {
 }
 impl<T> TensorSize for Vec<T> {
     fn size(&self) -> [usize; 1] {
-        //~^ ERROR: method not compatible with trait
         [self.len()]
     }
 }
 impl<T: Clone> Broadcastable for Vec<T> {
     type Element = T;
     fn bget(&self, index: [usize; 1]) -> Option<T> {
-        //~^ ERROR: method not compatible with trait
         self.get(index[0]).cloned()
     }
 }

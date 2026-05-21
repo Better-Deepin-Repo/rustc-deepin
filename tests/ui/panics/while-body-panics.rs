@@ -2,7 +2,7 @@
 
 //@ run-fail
 //@ error-pattern:quux
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 fn main() {
     let _x: isize = {

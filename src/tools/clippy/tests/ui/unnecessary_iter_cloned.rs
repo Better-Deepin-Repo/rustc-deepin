@@ -1,5 +1,7 @@
-#![allow(unused_assignments, clippy::uninlined_format_args)]
+#![allow(unused_assignments)]
 #![warn(clippy::unnecessary_to_owned)]
+
+//@no-rustfix: need to change the suggestion to a multipart suggestion
 
 #[allow(dead_code)]
 #[derive(Clone, Copy)]
@@ -29,7 +31,6 @@ fn main() {
 // https://github.com/breard-r/acmed/blob/1f0dcc32aadbc5e52de6d23b9703554c0f925113/acmed/src/storage.rs#L262
 fn check_files(files: &[(FileType, &std::path::Path)]) -> bool {
     for (t, path) in files.iter().copied() {
-        //~^ unnecessary_to_owned
         let other = match get_file_path(&t) {
             Ok(p) => p,
             Err(_) => {
@@ -45,7 +46,6 @@ fn check_files(files: &[(FileType, &std::path::Path)]) -> bool {
 
 fn check_files_vec(files: Vec<(FileType, &std::path::Path)>) -> bool {
     for (t, path) in files.iter().copied() {
-        //~^ unnecessary_to_owned
         let other = match get_file_path(&t) {
             Ok(p) => p,
             Err(_) => {
@@ -177,8 +177,7 @@ mod issue_12821 {
     fn foo() {
         let v: Vec<_> = "hello".chars().collect();
         for c in v.iter().cloned() {
-            //~^ unnecessary_to_owned
-
+            //~^ ERROR: unnecessary use of `cloned`
             println!("{c}"); // should not suggest to remove `&`
         }
     }
@@ -186,9 +185,8 @@ mod issue_12821 {
     fn bar() {
         let v: Vec<_> = "hello".chars().collect();
         for c in v.iter().cloned() {
-            //~^ unnecessary_to_owned
-
-            let ref_c = &c;
+            //~^ ERROR: unnecessary use of `cloned`
+            let ref_c = &c; //~ HELP: remove any references to the binding
             println!("{ref_c}");
         }
     }
@@ -196,9 +194,8 @@ mod issue_12821 {
     fn baz() {
         let v: Vec<_> = "hello".chars().enumerate().collect();
         for (i, c) in v.iter().cloned() {
-            //~^ unnecessary_to_owned
-
-            let ref_c = &c;
+            //~^ ERROR: unnecessary use of `cloned`
+            let ref_c = &c; //~ HELP: remove any references to the binding
             let ref_i = &i;
             println!("{i} {ref_c}"); // should not suggest to remove `&` from `i`
         }

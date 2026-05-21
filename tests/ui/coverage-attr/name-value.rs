@@ -1,6 +1,5 @@
 #![feature(coverage_attribute)]
 //@ edition: 2021
-//@ reference: attributes.coverage.syntax
 
 // Demonstrates the diagnostics produced when using the syntax
 // `#[coverage = "off"]`, which should not be allowed.
@@ -20,7 +19,7 @@ mod my_mod_inner {
 
 #[coverage = "off"]
 //~^ ERROR malformed `coverage` attribute input
-//~| ERROR attribute cannot be used on
+//~| ERROR attribute should be applied to a function definition or closure
 struct MyStruct;
 
 #[coverage = "off"]
@@ -28,22 +27,22 @@ struct MyStruct;
 impl MyStruct {
     #[coverage = "off"]
     //~^ ERROR malformed `coverage` attribute input
-    //~| ERROR attribute cannot be used on
+    //~| ERROR attribute should be applied to a function definition or closure
     const X: u32 = 7;
 }
 
 #[coverage = "off"]
 //~^ ERROR malformed `coverage` attribute input
-//~| ERROR attribute cannot be used on
+//~| ERROR attribute should be applied to a function definition or closure
 trait MyTrait {
     #[coverage = "off"]
     //~^ ERROR malformed `coverage` attribute input
-    //~| ERROR attribute cannot be used on
+    //~| ERROR attribute should be applied to a function definition or closure
     const X: u32;
 
     #[coverage = "off"]
     //~^ ERROR malformed `coverage` attribute input
-    //~| ERROR attribute cannot be used on
+    //~| ERROR attribute should be applied to a function definition or closure
     type T;
 }
 
@@ -52,12 +51,12 @@ trait MyTrait {
 impl MyTrait for MyStruct {
     #[coverage = "off"]
     //~^ ERROR malformed `coverage` attribute input
-    //~| ERROR attribute cannot be used on
+    //~| ERROR attribute should be applied to a function definition or closure
     const X: u32 = 8;
 
     #[coverage = "off"]
     //~^ ERROR malformed `coverage` attribute input
-    //~| ERROR attribute cannot be used on
+    //~| ERROR attribute should be applied to a function definition or closure
     type T = ();
 }
 

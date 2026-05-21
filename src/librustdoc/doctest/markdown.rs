@@ -3,17 +3,14 @@
 use std::fs::read_to_string;
 use std::sync::{Arc, Mutex};
 
-use rustc_errors::DiagCtxtHandle;
-use rustc_session::config::Input;
-use rustc_span::source_map::FilePathMapping;
-use rustc_span::{DUMMY_SP, FileName, RealFileName};
+use rustc_span::FileName;
 use tempfile::tempdir;
 
 use super::{
-    CreateRunnableDocTests, DocTestVisitor, GlobalTestOptions, ScrapedDocTest, generate_args_file,
+    generate_args_file, CreateRunnableDocTests, DocTestVisitor, GlobalTestOptions, ScrapedDocTest,
 };
 use crate::config::Options;
-use crate::html::markdown::{ErrorCodes, LangString, MdRelLine, find_testable_code};
+use crate::html::markdown::{find_testable_code, ErrorCodes, LangString, MdRelLine};
 
 struct MdCollector {
     tests: Vec<ScrapedDocTest>,
@@ -26,15 +23,7 @@ impl DocTestVisitor for MdCollector {
         let filename = self.filename.clone();
         // First line of Markdown is line 1.
         let line = 1 + rel_line.offset();
-        self.tests.push(ScrapedDocTest::new(
-            filename,
-            line,
-            self.cur_path.clone(),
-            config,
-            test,
-            DUMMY_SP,
-            Vec::new(),
-        ));
+        self.tests.push(ScrapedDocTest::new(filename, line, self.cur_path.clone(), config, test));
     }
 
     fn visit_header(&mut self, name: &str, level: u32) {
@@ -80,8 +69,9 @@ impl DocTestVisitor for MdCollector {
 }
 
 /// Runs any tests/code examples in the markdown file `options.input`.
-pub(crate) fn test(input: &Input, options: Options, dcx: DiagCtxtHandle<'_>) -> Result<(), String> {
-    let input_str = match input {
+pub(crate) fn test(options: Options) -> Result<(), String> {
+    use rustc_session::config::Input;
+    let input_str = match &options.input {
         Input::File(path) => {
             read_to_string(path).map_err(|err| format!("{}: {err}", path.display()))?
         }
@@ -89,7 +79,7 @@ pub(crate) fn test(input: &Input, options: Options, dcx: DiagCtxtHandle<'_>) -> 
     };
 
     // Obviously not a real crate name, but close enough for purposes of doctests.
-    let crate_name = input.filestem().to_string();
+    let crate_name = options.input.filestem().to_string();
     let temp_dir =
         tempdir().map_err(|error| format!("failed to create temporary directory: {error:?}"))?;
     let args_file = temp_dir.path().join("rustdoc-cfgs");
@@ -99,38 +89,40 @@ pub(crate) fn test(input: &Input, options: Options, dcx: DiagCtxtHandle<'_>) -> 
         crate_name,
         no_crate_inject: true,
         insert_indent_space: false,
+        attrs: vec![],
         args_file,
     };
 
     let mut md_collector = MdCollector {
         tests: vec![],
         cur_path: vec![],
-        filename: input
+        filename: options
+            .input
             .opt_path()
-            .map(|f| {
-                // We don't have access to a rustc Session so let's just use a dummy
-                // filepath mapping to create a real filename.
-                let file_mapping = FilePathMapping::empty();
-                FileName::Real(file_mapping.to_real_filename(&RealFileName::empty(), f))
-            })
+            .map(ToOwned::to_owned)
+            .map(FileName::from)
             .unwrap_or(FileName::Custom("input".to_owned())),
     };
     let codes = ErrorCodes::from(options.unstable_features.is_nightly_build());
 
-    find_testable_code(&input_str, &mut md_collector, codes, None);
+    find_testable_code(
+        &input_str,
+        &mut md_collector,
+        codes,
+        options.enable_per_target_ignores,
+        None,
+    );
 
     let mut collector = CreateRunnableDocTests::new(options.clone(), opts);
-    md_collector.tests.into_iter().for_each(|t| collector.add_test(t, None));
+    md_collector.tests.into_iter().for_each(|t| collector.add_test(t));
     let CreateRunnableDocTests { opts, rustdoc_options, standalone_tests, mergeable_tests, .. } =
         collector;
     crate::doctest::run_tests(
-        dcx,
         opts,
         &rustdoc_options,
         &Arc::new(Mutex::new(Vec::new())),
         standalone_tests,
         mergeable_tests,
-        None,
     );
     Ok(())
 }

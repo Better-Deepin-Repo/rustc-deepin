@@ -1,6 +1,5 @@
 import gdb
 
-
 class PointPrinter:
     "Print a Point"
 
@@ -12,7 +11,6 @@ class PointPrinter:
     def to_string(self):
         return "({}, {})".format(self.x, self.y)
 
-
 def lookup(val):
     lookup_tag = val.type.tag
     if lookup_tag is None:
@@ -21,6 +19,5 @@ def lookup(val):
         return PointPrinter(val)
 
     return None
-
 
 gdb.current_objfile().pretty_printers.append(lookup)

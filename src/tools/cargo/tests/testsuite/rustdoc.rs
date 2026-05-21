@@ -1,10 +1,8 @@
 //! Tests for the `cargo rustdoc` command.
 
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::str;
 use cargo_test_support::{basic_manifest, cross_compile, project};
-
-use crate::utils::cross_compile::disabled as cross_compile_disabled;
 
 #[cargo_test]
 fn rustdoc_simple() {
@@ -108,7 +106,7 @@ fn rustdoc_args() {
     p.cargo("rustdoc -v -- --cfg=foo")
         .with_stderr_data(str![[r#"
 [DOCUMENTING] foo v0.0.1 ([ROOT]/foo)
-[RUNNING] `rustdoc [..] --crate-name foo src/lib.rs -o [ROOT]/foo/target/doc [..]-C metadata=[..] -L dependency=[ROOT]/foo/target/debug/deps [..]--cfg=foo[..]`
+[RUNNING] `rustdoc [..] --crate-name foo src/lib.rs -o [ROOT]/foo/target/doc [..] --cfg=foo -C metadata=[..] -L dependency=[ROOT]/foo/target/debug/deps [..]`
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [GENERATED] [ROOT]/foo/target/doc/foo/index.html
 
@@ -157,11 +155,11 @@ fn rustdoc_foo_with_bar_dependency() {
 
     foo.cargo("rustdoc -v -- --cfg=foo")
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [CHECKING] bar v0.0.1 ([ROOT]/bar)
 [RUNNING] `rustc [..] [ROOT]/bar/src/lib.rs [..]`
 [DOCUMENTING] foo v0.0.1 ([ROOT]/foo)
-[RUNNING] `rustdoc [..] --crate-name foo src/lib.rs -o [ROOT]/foo/target/doc [..]-C metadata=[..] -L dependency=[ROOT]/foo/target/debug/deps --extern [..]--cfg=foo[..]`
+[RUNNING] `rustdoc [..] --crate-name foo src/lib.rs -o [ROOT]/foo/target/doc [..] --cfg=foo -C metadata=[..] -L dependency=[ROOT]/foo/target/debug/deps --extern [..]`
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [GENERATED] [ROOT]/foo/target/doc/foo/index.html
 
@@ -195,9 +193,9 @@ fn rustdoc_only_bar_dependency() {
 
     foo.cargo("rustdoc -v -p bar -- --cfg=foo")
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOCUMENTING] bar v0.0.1 ([ROOT]/bar)
-[RUNNING] `rustdoc [..] --crate-name bar [ROOT]/bar/src/lib.rs -o [ROOT]/foo/target/doc [..]-C metadata=[..] -L dependency=[ROOT]/foo/target/debug/deps [..]--cfg=foo[..]`
+[RUNNING] `rustdoc [..] --crate-name bar [ROOT]/bar/src/lib.rs -o [ROOT]/foo/target/doc [..] --cfg=foo -C metadata=[..] -L dependency=[ROOT]/foo/target/debug/deps [..]`
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [GENERATED] [ROOT]/foo/target/doc/bar/index.html
 
@@ -215,7 +213,7 @@ fn rustdoc_same_name_documents_lib() {
     p.cargo("rustdoc -v -- --cfg=foo")
         .with_stderr_data(str![[r#"
 [DOCUMENTING] foo v0.0.1 ([ROOT]/foo)
-[RUNNING] `rustdoc [..] --crate-name foo src/lib.rs -o [ROOT]/foo/target/doc [..]-C metadata=[..] -L dependency=[ROOT]/foo/target/debug/deps [..]--cfg=foo[..]`
+[RUNNING] `rustdoc [..] --crate-name foo src/lib.rs -o [ROOT]/foo/target/doc [..] --cfg=foo -C metadata=[..] -L dependency=[ROOT]/foo/target/debug/deps [..]`
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [GENERATED] [ROOT]/foo/target/doc/foo/index.html
 
@@ -282,7 +280,7 @@ fn proc_macro_crate_type() {
 
 #[cargo_test]
 fn rustdoc_target() {
-    if cross_compile_disabled() {
+    if cross_compile::disabled() {
         return;
     }
 
@@ -317,7 +315,7 @@ fn fail_with_glob() {
     p.cargo("rustdoc -p '*z'")
         .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] glob patterns on package selection are not supported.
+[ERROR] Glob patterns on package selection are not supported.
 
 "#]])
         .run();

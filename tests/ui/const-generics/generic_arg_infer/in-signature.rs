@@ -1,4 +1,5 @@
 #![crate_type = "rlib"]
+#![feature(generic_arg_infer)]
 
 struct Foo<const N: usize>;
 struct Bar<T, const N: usize>(T);
@@ -41,7 +42,6 @@ trait TyAssocConst {
 trait TyAssocConstMixed {
     const ARR: Bar<_, _>;
     //~^ ERROR the placeholder `_` is not allowed within types on item signatures for associated constants
-    //~| ERROR the placeholder `_` is not allowed within types on item signatures for associated constants
 }
 
 trait AssocTy {
@@ -58,5 +58,4 @@ impl AssocTy for i16 {
 impl AssocTy for i32 {
     type Assoc = Bar<_, _>;
     //~^ ERROR the placeholder `_` is not allowed within types on item signatures for associated types
-    //~| ERROR the placeholder `_` is not allowed within types on item signatures for associated types
 }

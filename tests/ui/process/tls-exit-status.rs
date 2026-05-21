@@ -1,7 +1,7 @@
 //@ run-fail
 //@ error-pattern:nonzero
 //@ exec-env:RUST_NEWRT=1
-//@ needs-subprocess
+//@ ignore-wasm32 no processes
 
 use std::env;
 

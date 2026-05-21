@@ -79,8 +79,9 @@ const EXPECTED = [
     },
     {
         'query': 'reference<ring>, reference<ring> -> ()',
-        // can't leave out the `mut`, because can't reorder like that
-        'others': [],
+        'others': [
+            { 'path': 'reference::Ring', 'name': 'wear' },
+        ],
     },
     {
         'query': 'reference<mut, ring>, reference<ring> -> ()',
@@ -101,8 +102,9 @@ const EXPECTED = [
     },
     {
         'query': 'reference<middle>, reference<middle> -> ()',
-        // can't leave out the mut
-        'others': [],
+        'others': [
+            { 'path': 'reference', 'name': 'show' },
+        ],
     },
     {
         'query': 'reference<mut, middle>, reference<mut, middle> -> ()',
@@ -201,8 +203,9 @@ const EXPECTED = [
     // middle with shorthand
     {
         'query': '&middle, &middle -> ()',
-        // can't leave out the mut
-        'others': [],
+        'others': [
+            { 'path': 'reference', 'name': 'show' },
+        ],
     },
     {
         'query': '&mut middle, &mut middle -> ()',

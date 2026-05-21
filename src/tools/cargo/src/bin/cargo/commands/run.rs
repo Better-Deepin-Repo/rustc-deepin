@@ -38,12 +38,12 @@ pub fn cli() -> Command {
         .arg_target_triple("Build for the target triple")
         .arg_target_dir()
         .arg_manifest_path()
+        .arg_lockfile_path()
         .arg_ignore_rust_version()
         .arg_unit_graph()
         .arg_timings()
         .after_help(color_print::cstr!(
-            "Run `<bright-cyan,bold>cargo help run</>` for more detailed information.\n\
-             To pass `--help` to the specified binary, use `<bright-cyan,bold>-- --help</>`.\n",
+            "Run `<cyan,bold>cargo help run</>` for more detailed information.\n"
         ))
 }
 
@@ -51,7 +51,7 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
     let ws = args.workspace(gctx)?;
 
     let mut compile_opts =
-        args.compile_options(gctx, UserIntent::Build, Some(&ws), ProfileChecking::Custom)?;
+        args.compile_options(gctx, CompileMode::Build, Some(&ws), ProfileChecking::Custom)?;
 
     // Disallow `spec` to be an glob pattern
     if let Packages::Packages(opt_in) = &compile_opts.spec {
@@ -90,7 +90,9 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
 /// See also `util/toml/mod.rs`s `is_embedded`
 pub fn is_manifest_command(arg: &str) -> bool {
     let path = Path::new(arg);
-    1 < path.components().count() || path.extension() == Some(OsStr::new("rs"))
+    1 < path.components().count()
+        || path.extension() == Some(OsStr::new("rs"))
+        || path.file_name() == Some(OsStr::new("Cargo.toml"))
 }
 
 pub fn exec_manifest_command(gctx: &mut GlobalContext, cmd: &str, args: &[OsString]) -> CliResult {
@@ -103,7 +105,7 @@ pub fn exec_manifest_command(gctx: &mut GlobalContext, cmd: &str, args: &[OsStri
         (false, true) => {
             let possible_commands = crate::list_commands(gctx);
             let is_dir = if manifest_path.is_dir() {
-                format!(": `{cmd}` is a directory")
+                format!("\n\t`{cmd}` is a directory")
             } else {
                 "".to_owned()
             };
@@ -121,14 +123,12 @@ pub fn exec_manifest_command(gctx: &mut GlobalContext, cmd: &str, args: &[OsStri
                         args.into_iter().map(|os| os.to_string_lossy()).join(" ")
                     )
                 };
-                format!(
-                    "\nhelp: there is a command with a similar name: `{suggested_command} {actual_args}{args}`"
-                )
+                format!("\n\tDid you mean the command `{suggested_command} {actual_args}{args}`")
             } else {
                 "".to_owned()
             };
             let suggested_script = if let Some(suggested_script) = suggested_script(cmd) {
-                format!("\nhelp: there is a script with a similar name: `{suggested_script}`")
+                format!("\n\tDid you mean the file `{suggested_script}`")
             } else {
                 "".to_owned()
             };
@@ -155,16 +155,12 @@ pub fn exec_manifest_command(gctx: &mut GlobalContext, cmd: &str, args: &[OsStri
                         args.into_iter().map(|os| os.to_string_lossy()).join(" ")
                     )
                 };
-                format!(
-                    "\nhelp: there is a command with a similar name: `{suggested_command} {actual_args}{args}`"
-                )
+                format!("\n\tDid you mean the command `{suggested_command} {actual_args}{args}`")
             } else {
                 "".to_owned()
             };
             let suggested_script = if let Some(suggested_script) = suggested_script(cmd) {
-                format!(
-                    "\nhelp: there is a script with a similar name: `{suggested_script}` (requires `-Zscript`)"
-                )
+                format!("\n\tDid you mean the file `{suggested_script}` with `-Zscript`")
             } else {
                 "".to_owned()
             };
@@ -190,7 +186,7 @@ pub fn exec_manifest_command(gctx: &mut GlobalContext, cmd: &str, args: &[OsStri
     }
 
     let mut compile_opts =
-        cargo::ops::CompileOptions::new(gctx, cargo::core::compiler::UserIntent::Build)?;
+        cargo::ops::CompileOptions::new(gctx, cargo::core::compiler::CompileMode::Build)?;
     compile_opts.spec = cargo::ops::Packages::Default;
 
     cargo::ops::run(&ws, &compile_opts, args).map_err(|err| to_run_error(gctx, err))

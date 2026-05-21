@@ -1,5 +1,4 @@
 // Can't use unit struct as constructor function
-// related issue <https://github.com/rust-lang/rust/issues/20714>
 
 //@ aux-build:empty-struct.rs
 
@@ -9,7 +8,7 @@ use empty_struct::*;
 struct Empty2;
 
 enum E {
-    Empty4,
+    Empty4
 }
 
 fn main() {

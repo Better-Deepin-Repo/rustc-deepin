@@ -12,7 +12,6 @@ const props = defineProps<{
   defaultFilter: CompileBenchmarkFilter;
   // Initialize the filter with this value
   initialFilter: CompileBenchmarkFilter;
-  canCompareBackends: boolean;
 }>();
 const emit = defineEmits<{
   (e: "change", filter: CompileBenchmarkFilter): void;
@@ -193,7 +192,7 @@ const opened = createPersistedRef(PREF_FILTERS_OPENED);
                   <input type="checkbox" v-model="filter.backend.llvm" />
                   <span class="label">LLVM</span>
                 </label>
-                <Tooltip>The default LLVM backend.</Tooltip>
+                <Tooltip>The default LLVM backend. </Tooltip>
               </li>
               <li>
                 <label>
@@ -204,26 +203,6 @@ const opened = createPersistedRef(PREF_FILTERS_OPENED);
                   >Alternative Cranelift backend, used primarily for faster
                   debug builds.
                 </Tooltip>
-              </li>
-            </ul>
-          </div>
-          <div class="section section-list-wrapper">
-            <div class="section-heading">
-              <div style="width: 160px">
-                <span>Targets</span>
-                <Tooltip>The host target of the benchmarked compiler. </Tooltip>
-              </div>
-            </div>
-            <ul class="states-list">
-              <li>
-                <label>
-                  <input
-                    type="checkbox"
-                    v-model="filter.target.x86_64_unknown_linux_gnu"
-                  />
-                  <span class="label">x86_64-unknown-linux-gnu</span>
-                </label>
-                <Tooltip>The default Linux x64 target.</Tooltip>
               </li>
             </ul>
           </div>
@@ -279,33 +258,6 @@ const opened = createPersistedRef(PREF_FILTERS_OPENED);
               </li>
             </ul>
           </div>
-          <div class="section section-list-wrapper">
-            <div class="section-heading">
-              <div style="width: 160px">
-                <span>Changes</span>
-                <Tooltip>
-                  Select only improvements, only regressions, or both.
-                </Tooltip>
-              </div>
-            </div>
-            <ul class="states-list">
-              <li>
-                <label>
-                  <input type="checkbox" v-model="filter.changes.regressions" />
-                  <span class="label">regressions</span>
-                </label>
-              </li>
-              <li>
-                <label>
-                  <input
-                    type="checkbox"
-                    v-model="filter.changes.improvements"
-                  />
-                  <span class="label">improvements</span>
-                </label>
-              </li>
-            </ul>
-          </div>
           <div class="section">
             <div class="section-heading">
               <span>Show non-relevant results</span>
@@ -336,14 +288,6 @@ const opened = createPersistedRef(PREF_FILTERS_OPENED);
               v-model="filter.showRawData"
               style="margin-left: 20px"
             />
-          </div>
-          <div
-            class="section"
-            v-if="canCompareBackends"
-            :title="`Compare codegen backends for this commit`"
-          >
-            Compare codegen backends for this commit:
-            <input type="checkbox" v-model="filter.selfCompareBackend" />
           </div>
           <button @click="reset" style="margin-right: 10px">
             Reset filters

@@ -1,18 +1,18 @@
 use super::REDUNDANT_PATTERN_MATCHING;
 use clippy_utils::diagnostics::{span_lint_and_sugg, span_lint_and_then};
-use clippy_utils::res::{MaybeDef, MaybeTypeckRes};
-use clippy_utils::sugg::{Sugg, make_unop};
-use clippy_utils::ty::needs_ordered_drop;
+use clippy_utils::source::{snippet, walk_span_to_context};
+use clippy_utils::sugg::{make_unop, Sugg};
+use clippy_utils::ty::{is_type_diagnostic_item, needs_ordered_drop};
 use clippy_utils::visitors::{any_temporaries_need_ordered_drop, for_each_expr_without_closures};
-use clippy_utils::{higher, is_expn_of, sym};
+use clippy_utils::{higher, is_expn_of, is_trait_method};
 use rustc_ast::ast::LitKind;
 use rustc_errors::Applicability;
-use rustc_hir::LangItem::{self, OptionNone, OptionSome, PollPending, PollReady, ResultErr, ResultOk};
 use rustc_hir::def::{DefKind, Res};
-use rustc_hir::{Arm, Expr, ExprKind, Node, Pat, PatExpr, PatExprKind, PatKind, QPath, UnOp};
+use rustc_hir::LangItem::{self, OptionNone, OptionSome, PollPending, PollReady, ResultErr, ResultOk};
+use rustc_hir::{Arm, Expr, ExprKind, Node, Pat, PatKind, QPath, UnOp};
 use rustc_lint::LateContext;
 use rustc_middle::ty::{self, GenericArgKind, Ty};
-use rustc_span::{Span, Symbol};
+use rustc_span::{sym, Span, Symbol};
 use std::fmt::Write;
 use std::ops::ControlFlow;
 
@@ -24,7 +24,7 @@ pub(super) fn check<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
         ..
     }) = higher::WhileLet::hir(expr)
     {
-        find_method_sugg_for_if_let(cx, expr, let_pat, let_expr, "while", false, let_span);
+        find_method_sugg_for_if_let(cx, expr, let_pat, let_expr, "while", false);
         find_if_let_true(cx, let_pat, let_expr, let_span);
     }
 }
@@ -38,7 +38,7 @@ pub(super) fn check_if_let<'tcx>(
     let_span: Span,
 ) {
     find_if_let_true(cx, pat, scrutinee, let_span);
-    find_method_sugg_for_if_let(cx, expr, pat, scrutinee, "if", has_else, let_span);
+    find_method_sugg_for_if_let(cx, expr, pat, scrutinee, "if", has_else);
 }
 
 /// Looks for:
@@ -74,8 +74,8 @@ fn find_match_true<'tcx>(
     span: Span,
     message: &'static str,
 ) {
-    if let PatKind::Expr(lit) = pat.kind
-        && let PatExprKind::Lit { lit, negated: false } = lit.kind
+    if let PatKind::Lit(lit) = pat.kind
+        && let ExprKind::Lit(lit) = lit.kind
         && let LitKind::Bool(pat_is_true) = lit.node
     {
         let mut applicability = Applicability::MachineApplicable;
@@ -108,7 +108,7 @@ fn find_match_true<'tcx>(
 fn try_get_generic_ty(ty: Ty<'_>, index: usize) -> Option<Ty<'_>> {
     if let ty::Adt(_, subs) = ty.kind()
         && let Some(sub) = subs.get(index)
-        && let GenericArgKind::Type(sub_ty) = sub.kind()
+        && let GenericArgKind::Type(sub_ty) = sub.unpack()
     {
         Some(sub_ty)
     } else {
@@ -138,9 +138,9 @@ fn find_method_and_type<'tcx>(
                     Some(("is_some()", op_ty))
                 } else if Some(id) == lang_items.poll_ready_variant() {
                     Some(("is_ready()", op_ty))
-                } else if is_pat_variant(cx, check_pat, qpath, Item::Diag(sym::IpAddr, sym::V4)) {
+                } else if is_pat_variant(cx, check_pat, qpath, Item::Diag(sym::IpAddr, sym!(V4))) {
                     Some(("is_ipv4()", op_ty))
-                } else if is_pat_variant(cx, check_pat, qpath, Item::Diag(sym::IpAddr, sym::V6)) {
+                } else if is_pat_variant(cx, check_pat, qpath, Item::Diag(sym::IpAddr, sym!(V6))) {
                     Some(("is_ipv6()", op_ty))
                 } else {
                     None
@@ -149,12 +149,8 @@ fn find_method_and_type<'tcx>(
                 None
             }
         },
-        PatKind::Expr(PatExpr {
-            kind: PatExprKind::Path(path),
-            hir_id,
-            ..
-        }) => {
-            if let Res::Def(DefKind::Ctor(..), ctor_id) = cx.qpath_res(path, *hir_id)
+        PatKind::Path(ref path) => {
+            if let Res::Def(DefKind::Ctor(..), ctor_id) = cx.qpath_res(path, check_pat.hir_id)
                 && let Some(variant_id) = cx.tcx.opt_parent(ctor_id)
             {
                 let method = if cx.tcx.lang_items().option_none_variant() == Some(variant_id) {
@@ -181,12 +177,11 @@ fn find_method_sugg_for_if_let<'tcx>(
     let_expr: &'tcx Expr<'_>,
     keyword: &'static str,
     has_else: bool,
-    let_span: Span,
 ) {
     // also look inside refs
     // if we have &None for example, peel it so we can detect "if let None = x"
     let check_pat = match let_pat.kind {
-        PatKind::Ref(inner, _pinnedness, _mutability) => inner,
+        PatKind::Ref(inner, _mutability) => inner,
         _ => let_pat,
     };
     let op_ty = cx.typeck_results().expr_ty(let_expr);
@@ -200,7 +195,7 @@ fn find_method_sugg_for_if_let<'tcx>(
     // type needs to be considered, not just the inner type of the branch being matched on.
     // Note the last expression in a block is dropped after all local bindings.
     let check_ty = if has_else
-        || (keyword == "if" && matches!(cx.tcx.hir_parent_iter(expr.hir_id).next(), Some((_, Node::Block(..)))))
+        || (keyword == "if" && matches!(cx.tcx.hir().parent_iter(expr.hir_id).next(), Some((_, Node::Block(..)))))
     {
         op_ty
     } else {
@@ -215,9 +210,9 @@ fn find_method_sugg_for_if_let<'tcx>(
 
     // check that `while_let_on_iterator` lint does not trigger
     if keyword == "while"
-        && let ExprKind::MethodCall(method_path, _, [], _) = let_expr.kind
+        && let ExprKind::MethodCall(method_path, ..) = let_expr.kind
         && method_path.ident.name == sym::next
-        && cx.ty_based_def(let_expr).opt_parent(cx).is_diag_item(cx, sym::Iterator)
+        && is_trait_method(cx, let_expr, sym::Iterator)
     {
         return;
     }
@@ -240,8 +235,14 @@ fn find_method_sugg_for_if_let<'tcx>(
             let ctxt = expr.span.ctxt();
 
             // if/while let ... = ... { ... }
+            //                    ^^^
+            let Some(res_span) = walk_span_to_context(result_expr.span.source_callsite(), ctxt) else {
+                return;
+            };
+
+            // if/while let ... = ... { ... }
             // ^^^^^^^^^^^^^^^^^^^^^^
-            let span = expr_span.until(let_span.shrink_to_hi());
+            let span = expr_span.until(res_span.shrink_to_hi());
 
             let mut app = if needs_drop {
                 Applicability::MaybeIncorrect
@@ -250,7 +251,7 @@ fn find_method_sugg_for_if_let<'tcx>(
             };
 
             let sugg = Sugg::hir_with_context(cx, result_expr, ctxt, "_", &mut app)
-                .maybe_paren()
+                .maybe_par()
                 .to_string();
 
             diag.span_suggestion(span, "try", format!("{keyword} {sugg}.{good_method}"), app);
@@ -264,62 +265,65 @@ fn find_method_sugg_for_if_let<'tcx>(
 }
 
 pub(super) fn check_match<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>, op: &Expr<'_>, arms: &[Arm<'_>]) {
-    if let Ok(arms) = arms.try_into() // TODO: use `slice::as_array` once stabilized
-        && let Some((good_method, maybe_guard)) = found_good_method(cx, arms)
-    {
-        let expr_span = is_expn_of(expr.span, sym::matches).unwrap_or(expr.span);
+    if arms.len() == 2 {
+        let node_pair = (&arms[0].pat.kind, &arms[1].pat.kind);
 
-        let result_expr = match &op.kind {
-            ExprKind::AddrOf(_, _, borrowed) => borrowed,
-            _ => op,
-        };
-        let mut app = Applicability::MachineApplicable;
-        let receiver_sugg = Sugg::hir_with_context(cx, result_expr, expr_span.ctxt(), "_", &mut app).maybe_paren();
-        let mut sugg = format!("{receiver_sugg}.{good_method}");
+        if let Some((good_method, maybe_guard)) = found_good_method(cx, arms, node_pair) {
+            let span = is_expn_of(expr.span, "matches").unwrap_or(expr.span.to(op.span));
+            let result_expr = match &op.kind {
+                ExprKind::AddrOf(_, _, borrowed) => borrowed,
+                _ => op,
+            };
+            let mut sugg = format!("{}.{good_method}", snippet(cx, result_expr.span, "_"));
 
-        if let Some(guard) = maybe_guard {
-            // wow, the HIR for match guards in `PAT if let PAT = expr && expr => ...` is annoying!
-            // `guard` here is `Guard::If` with the let expression somewhere deep in the tree of exprs,
-            // counter to the intuition that it should be `Guard::IfLet`, so we need another check
-            // to see that there aren't any let chains anywhere in the guard, as that would break
-            // if we suggest `t.is_none() && (let X = y && z)` for:
-            // `match t { None if let X = y && z => true, _ => false }`
-            let has_nested_let_chain = for_each_expr_without_closures(guard, |expr| {
-                if matches!(expr.kind, ExprKind::Let(..)) {
-                    ControlFlow::Break(())
-                } else {
-                    ControlFlow::Continue(())
+            if let Some(guard) = maybe_guard {
+                // wow, the HIR for match guards in `PAT if let PAT = expr && expr => ...` is annoying!
+                // `guard` here is `Guard::If` with the let expression somewhere deep in the tree of exprs,
+                // counter to the intuition that it should be `Guard::IfLet`, so we need another check
+                // to see that there aren't any let chains anywhere in the guard, as that would break
+                // if we suggest `t.is_none() && (let X = y && z)` for:
+                // `match t { None if let X = y && z => true, _ => false }`
+                let has_nested_let_chain = for_each_expr_without_closures(guard, |expr| {
+                    if matches!(expr.kind, ExprKind::Let(..)) {
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(())
+                    }
+                })
+                .is_some();
+
+                if has_nested_let_chain {
+                    return;
                 }
-            })
-            .is_some();
 
-            if has_nested_let_chain {
-                return;
+                let guard = Sugg::hir(cx, guard, "..");
+                let _ = write!(sugg, " && {}", guard.maybe_par());
             }
 
-            let guard = Sugg::hir_with_context(cx, guard, expr_span.ctxt(), "..", &mut app);
-            let _ = write!(sugg, " && {}", guard.maybe_paren());
+            span_lint_and_sugg(
+                cx,
+                REDUNDANT_PATTERN_MATCHING,
+                span,
+                format!("redundant pattern matching, consider using `{good_method}`"),
+                "try",
+                sugg,
+                Applicability::MachineApplicable,
+            );
         }
-
-        span_lint_and_sugg(
-            cx,
-            REDUNDANT_PATTERN_MATCHING,
-            expr_span,
-            format!("redundant pattern matching, consider using `{good_method}`"),
-            "try",
-            sugg,
-            app,
-        );
     }
 }
 
 fn found_good_method<'tcx>(
     cx: &LateContext<'_>,
-    arms: &'tcx [Arm<'tcx>; 2],
+    arms: &'tcx [Arm<'tcx>],
+    node: (&PatKind<'_>, &PatKind<'_>),
 ) -> Option<(&'static str, Option<&'tcx Expr<'tcx>>)> {
-    match (&arms[0].pat.kind, &arms[1].pat.kind) {
-        (PatKind::TupleStruct(path_left, [pattern_left], _), PatKind::TupleStruct(path_right, [pattern_right], _)) => {
-            if let (PatKind::Wild, PatKind::Wild) = (&pattern_left.kind, &pattern_right.kind) {
+    match node {
+        (
+            PatKind::TupleStruct(ref path_left, patterns_left, _),
+            PatKind::TupleStruct(ref path_right, patterns_right, _),
+        ) if patterns_left.len() == 1 && patterns_right.len() == 1 => {
+            if let (PatKind::Wild, PatKind::Wild) = (&patterns_left[0].kind, &patterns_right[0].kind) {
                 find_good_method_for_match(
                     cx,
                     arms,
@@ -336,8 +340,8 @@ fn found_good_method<'tcx>(
                         arms,
                         path_left,
                         path_right,
-                        Item::Diag(sym::IpAddr, sym::V4),
-                        Item::Diag(sym::IpAddr, sym::V6),
+                        Item::Diag(sym::IpAddr, sym!(V4)),
+                        Item::Diag(sym::IpAddr, sym!(V6)),
                         "is_ipv4()",
                         "is_ipv6()",
                     )
@@ -346,21 +350,11 @@ fn found_good_method<'tcx>(
                 None
             }
         },
-        (
-            PatKind::TupleStruct(path_left, [pattern], _),
-            PatKind::Expr(PatExpr {
-                kind: PatExprKind::Path(path_right),
-                ..
-            }),
-        )
-        | (
-            PatKind::Expr(PatExpr {
-                kind: PatExprKind::Path(path_left),
-                ..
-            }),
-            PatKind::TupleStruct(path_right, [pattern], _),
-        ) => {
-            if let PatKind::Wild = pattern.kind {
+        (PatKind::TupleStruct(ref path_left, patterns, _), PatKind::Path(ref path_right))
+        | (PatKind::Path(ref path_left), PatKind::TupleStruct(ref path_right, patterns, _))
+            if patterns.len() == 1 =>
+        {
+            if let PatKind::Wild = patterns[0].kind {
                 find_good_method_for_match(
                     cx,
                     arms,
@@ -387,20 +381,14 @@ fn found_good_method<'tcx>(
                 None
             }
         },
-        (PatKind::TupleStruct(path_left, [pattern], _), PatKind::Wild) => {
-            if let PatKind::Wild = pattern.kind {
+        (PatKind::TupleStruct(ref path_left, patterns, _), PatKind::Wild) if patterns.len() == 1 => {
+            if let PatKind::Wild = patterns[0].kind {
                 get_good_method(cx, arms, path_left)
             } else {
                 None
             }
         },
-        (
-            PatKind::Expr(PatExpr {
-                kind: PatExprKind::Path(path_left),
-                ..
-            }),
-            PatKind::Wild,
-        ) => get_good_method(cx, arms, path_left),
+        (PatKind::Path(ref path_left), PatKind::Wild) => get_good_method(cx, arms, path_left),
         _ => None,
     }
 }
@@ -411,29 +399,37 @@ fn get_ident(path: &QPath<'_>) -> Option<rustc_span::symbol::Ident> {
             let name = path.segments[0].ident;
             Some(name)
         },
-        QPath::TypeRelative(..) => None,
+        _ => None,
     }
 }
 
 fn get_good_method<'tcx>(
     cx: &LateContext<'_>,
-    arms: &'tcx [Arm<'tcx>; 2],
+    arms: &'tcx [Arm<'tcx>],
     path_left: &QPath<'_>,
 ) -> Option<(&'static str, Option<&'tcx Expr<'tcx>>)> {
-    let ident = get_ident(path_left)?;
-
-    let (expected_item_left, should_be_left, should_be_right) = match ident.name {
-        sym::Ok => (Item::Lang(ResultOk), "is_ok()", "is_err()"),
-        sym::Err => (Item::Lang(ResultErr), "is_err()", "is_ok()"),
-        sym::Some => (Item::Lang(OptionSome), "is_some()", "is_none()"),
-        sym::None => (Item::Lang(OptionNone), "is_none()", "is_some()"),
-        sym::Ready => (Item::Lang(PollReady), "is_ready()", "is_pending()"),
-        sym::Pending => (Item::Lang(PollPending), "is_pending()", "is_ready()"),
-        sym::V4 => (Item::Diag(sym::IpAddr, sym::V4), "is_ipv4()", "is_ipv6()"),
-        sym::V6 => (Item::Diag(sym::IpAddr, sym::V6), "is_ipv6()", "is_ipv4()"),
-        _ => return None,
-    };
-    find_good_method_for_matches_macro(cx, arms, path_left, expected_item_left, should_be_left, should_be_right)
+    if let Some(name) = get_ident(path_left) {
+        let (expected_item_left, should_be_left, should_be_right) = match name.as_str() {
+            "Ok" => (Item::Lang(ResultOk), "is_ok()", "is_err()"),
+            "Err" => (Item::Lang(ResultErr), "is_err()", "is_ok()"),
+            "Some" => (Item::Lang(OptionSome), "is_some()", "is_none()"),
+            "None" => (Item::Lang(OptionNone), "is_none()", "is_some()"),
+            "Ready" => (Item::Lang(PollReady), "is_ready()", "is_pending()"),
+            "Pending" => (Item::Lang(PollPending), "is_pending()", "is_ready()"),
+            "V4" => (Item::Diag(sym::IpAddr, sym!(V4)), "is_ipv4()", "is_ipv6()"),
+            "V6" => (Item::Diag(sym::IpAddr, sym!(V6)), "is_ipv6()", "is_ipv4()"),
+            _ => return None,
+        };
+        return find_good_method_for_matches_macro(
+            cx,
+            arms,
+            path_left,
+            expected_item_left,
+            should_be_left,
+            should_be_right,
+        );
+    }
+    None
 }
 
 #[derive(Clone, Copy)]
@@ -452,11 +448,11 @@ fn is_pat_variant(cx: &LateContext<'_>, pat: &Pat<'_>, path: &QPath<'_>, expecte
             .tcx
             .lang_items()
             .get(expected_lang_item)
-            .is_some_and(|expected_id| cx.tcx.parent(id) == expected_id),
+            .map_or(false, |expected_id| cx.tcx.parent(id) == expected_id),
         Item::Diag(expected_ty, expected_variant) => {
             let ty = cx.typeck_results().pat_ty(pat);
 
-            if ty.is_diag_item(cx, expected_ty) {
+            if is_type_diagnostic_item(cx, ty, expected_ty) {
                 let variant = ty
                     .ty_adt_def()
                     .expect("struct pattern type is not an ADT")
@@ -473,7 +469,7 @@ fn is_pat_variant(cx: &LateContext<'_>, pat: &Pat<'_>, path: &QPath<'_>, expecte
 #[expect(clippy::too_many_arguments)]
 fn find_good_method_for_match<'a, 'tcx>(
     cx: &LateContext<'_>,
-    arms: &'tcx [Arm<'tcx>; 2],
+    arms: &'tcx [Arm<'tcx>],
     path_left: &QPath<'_>,
     path_right: &QPath<'_>,
     expected_item_left: Item,
@@ -508,7 +504,7 @@ fn find_good_method_for_match<'a, 'tcx>(
 
 fn find_good_method_for_matches_macro<'a, 'tcx>(
     cx: &LateContext<'_>,
-    arms: &'tcx [Arm<'tcx>; 2],
+    arms: &'tcx [Arm<'tcx>],
     path_left: &QPath<'_>,
     expected_item_left: Item,
     should_be_left: &'a str,

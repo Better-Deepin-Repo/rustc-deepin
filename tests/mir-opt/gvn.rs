@@ -9,11 +9,10 @@
 #![feature(freeze)]
 #![allow(ambiguous_wide_pointer_comparisons)]
 #![allow(unconditional_panic)]
-#![allow(unnecessary_transmutes)]
 #![allow(unused)]
 
 use std::intrinsics::mir::*;
-use std::marker::{Freeze, PhantomData};
+use std::marker::Freeze;
 use std::mem::transmute;
 
 struct S<T>(T);
@@ -100,13 +99,11 @@ fn subexpression_elimination(x: u64, y: u64, mut z: u64) {
     opaque((x * y) - y);
     opaque((x * y) - y);
 
-    // We can substitute through an immutable reference.
+    // We can substitute through an immutable reference too.
     // CHECK: [[ref:_.*]] = &_3;
     // CHECK: [[deref:_.*]] = copy (*[[ref]]);
     // CHECK: [[addref:_.*]] = Add(copy [[deref]], copy _1);
     // CHECK: opaque::<u64>(copy [[addref]])
-    // CHECK: [[deref2:_.*]] = copy [[deref]];
-    // CHECK: [[addref2:_.*]] = copy [[addref]];
     // CHECK: opaque::<u64>(copy [[addref]])
     let a = &z;
     opaque(*a + x);
@@ -140,13 +137,12 @@ fn subexpression_elimination(x: u64, y: u64, mut z: u64) {
         opaque(*d + x);
     }
 
+    // We can substitute again, but not with the earlier computations.
     // Important: `e` is not `a`!
     // CHECK: [[ref2:_.*]] = &_3;
     // CHECK: [[deref2:_.*]] = copy (*[[ref2]]);
     // CHECK: [[addref2:_.*]] = Add(copy [[deref2]], copy _1);
     // CHECK: opaque::<u64>(copy [[addref2]])
-    // CHECK: [[deref3:_.*]] = copy [[deref2]];
-    // CHECK: [[addref3:_.*]] = copy [[addref2]];
     // CHECK: opaque::<u64>(copy [[addref2]])
     let e = &z;
     opaque(*e + x);
@@ -451,21 +447,20 @@ fn references(mut x: impl Sized) {
     // CHECK: opaque::<*mut impl Sized>(move [[ref8]])
     opaque(&raw mut x);
 
-    // FIXME: ReferencePropagation transform this pattern.
     let r = &mut x;
     let s = S(r).0; // Obfuscate `r`. Following lines should still reborrow `r`.
     // CHECK: [[ref9:_.*]] = &mut _1;
-    // COM: CHECK: [[ref10:_.*]] = &(*[[ref9]]);
-    // COM: CHECK: opaque::<&impl Sized>(move [[ref10]])
+    // CHECK: [[ref10:_.*]] = &(*[[ref9]]);
+    // CHECK: opaque::<&impl Sized>(move [[ref10]])
     opaque(&*s);
-    // COM: CHECK: [[ref11:_.*]] = &mut (*[[ref9]]);
-    // COM: CHECK: opaque::<&mut impl Sized>(move [[ref11]])
+    // CHECK: [[ref11:_.*]] = &mut (*[[ref9]]);
+    // CHECK: opaque::<&mut impl Sized>(move [[ref11]])
     opaque(&mut *s);
-    // COM: CHECK: [[ref12:_.*]] = &raw const (*[[ref9]]);
-    // COM: CHECK: opaque::<*const impl Sized>(move [[ref12]])
+    // CHECK: [[ref12:_.*]] = &raw const (*[[ref9]]);
+    // CHECK: opaque::<*const impl Sized>(move [[ref12]])
     opaque(&raw const *s);
-    // COM: CHECK: [[ref12:_.*]] = &raw mut (*[[ref9]]);
-    // COM: CHECK: opaque::<*mut impl Sized>(move [[ref12]])
+    // CHECK: [[ref12:_.*]] = &raw mut (*[[ref9]]);
+    // CHECK: opaque::<*mut impl Sized>(move [[ref12]])
     opaque(&raw mut *s);
 }
 
@@ -473,21 +468,17 @@ fn dereferences(t: &mut u32, u: &impl Copy, s: &S<u32>) {
     // CHECK-LABEL: fn dereferences(
 
     // Do not reuse dereferences of `&mut`.
-    // CHECK: bb0:
     // CHECK: [[st1:_.*]] = copy (*_1);
     // CHECK: opaque::<u32>(move [[st1]])
-    // CHECK: bb1:
     // CHECK: [[st2:_.*]] = copy (*_1);
     // CHECK: opaque::<u32>(move [[st2]])
     opaque(*t);
     opaque(*t);
 
     // Do not reuse dereferences of `*const`.
-    // CHECK: bb2:
     // CHECK: [[raw:_.*]] = &raw const (*_1);
     // CHECK: [[st3:_.*]] = copy (*[[raw]]);
     // CHECK: opaque::<u32>(move [[st3]])
-    // CHECK: bb3:
     // CHECK: [[st4:_.*]] = copy (*[[raw]]);
     // CHECK: opaque::<u32>(move [[st4]])
     let z = &raw const *t;
@@ -495,48 +486,39 @@ fn dereferences(t: &mut u32, u: &impl Copy, s: &S<u32>) {
     unsafe { opaque(*z) };
 
     // Do not reuse dereferences of `*mut`.
-    // CHECK: bb4:
     // CHECK: [[ptr:_.*]] = &raw mut (*_1);
     // CHECK: [[st5:_.*]] = copy (*[[ptr]]);
     // CHECK: opaque::<u32>(move [[st5]])
-    // CHECK: bb5:
     // CHECK: [[st6:_.*]] = copy (*[[ptr]]);
     // CHECK: opaque::<u32>(move [[st6]])
     let z = &raw mut *t;
     unsafe { opaque(*z) };
     unsafe { opaque(*z) };
 
-    // CHECK: bb6:
+    // We can reuse dereferences of `&Freeze`.
     // CHECK: [[ref:_.*]] = &(*_1);
     // CHECK: [[st7:_.*]] = copy (*[[ref]]);
     // CHECK: opaque::<u32>(copy [[st7]])
-    // CHECK: bb7:
-    // CHECK: [[st8:_.*]] = copy [[st7]];
     // CHECK: opaque::<u32>(copy [[st7]])
     let z = &*t;
     opaque(*z);
     opaque(*z);
-    // Not in reborrows either.
-    // CHECK: bb8:
+    // But not in reborrows.
     // CHECK: [[reborrow:_.*]] = &(*[[ref]]);
     // CHECK: opaque::<&u32>(move [[reborrow]])
     opaque(&*z);
 
     // `*u` is not Freeze, so we cannot reuse.
-    // CHECK: bb9:
     // CHECK: [[st8:_.*]] = copy (*_2);
     // CHECK: opaque::<impl Copy>(move [[st8]])
-    // CHECK: bb10:
     // CHECK: [[st9:_.*]] = copy (*_2);
     // CHECK: opaque::<impl Copy>(move [[st9]])
     opaque(*u);
     opaque(*u);
 
-    // CHECK: bb11:
+    // `*s` is not Copy, but `(*s).0` is, so we can reuse.
     // CHECK: [[st10:_.*]] = copy ((*_3).0: u32);
     // CHECK: opaque::<u32>(copy [[st10]])
-    // CHECK: bb12:
-    // CHECK: [[st11:_.*]] = copy [[st10]];
     // CHECK: opaque::<u32>(copy [[st10]])
     opaque(s.0);
     opaque(s.0);
@@ -545,10 +527,10 @@ fn dereferences(t: &mut u32, u: &impl Copy, s: &S<u32>) {
 fn slices() {
     // CHECK-LABEL: fn slices(
     // CHECK: {{_.*}} = const "
-    // CHECK: {{_.*}} = const "
-    let s = "my favourite slice";
+    // CHECK-NOT: {{_.*}} = const "
+    let s = "my favourite slice"; // This is a `Const::Slice` in MIR.
     opaque(s);
-    let t = s; // This should be the same pointer.
+    let t = s; // This should be the same pointer, so cannot be a `Const::Slice`.
     opaque(t);
     assert_eq!(s.as_ptr(), t.as_ptr());
     let u = unsafe { transmute::<&str, &[u8]>(s) };
@@ -568,12 +550,12 @@ fn duplicate_slice() -> (bool, bool) {
         let d: &str;
         {
             // CHECK: [[a:_.*]] = (const "a",);
-            // CHECK: [[au:_.*]] = const "a" as u128 (Transmute);
+            // CHECK: [[au:_.*]] = copy ([[a]].0: &str) as u128 (Transmute);
             let a = ("a",);
             Call(au = transmute::<_, u128>(a.0), ReturnTo(bb1), UnwindContinue())
         }
         bb1 = {
-            // CHECK: [[c:_.*]] = identity::<&str>(const "a")
+            // CHECK: [[c:_.*]] = identity::<&str>(copy ([[a]].0: &str))
             Call(c = identity(a.0), ReturnTo(bb2), UnwindContinue())
         }
         bb2 = {
@@ -581,13 +563,15 @@ fn duplicate_slice() -> (bool, bool) {
             Call(cu = transmute::<_, u128>(c), ReturnTo(bb3), UnwindContinue())
         }
         bb3 = {
+            // This slice is different from `a.0`. Hence `bu` is not `au`.
             // CHECK: [[b:_.*]] = const "a";
-            // CHECK: [[bu:_.*]] = copy [[au]];
+            // CHECK: [[bu:_.*]] = copy [[b]] as u128 (Transmute);
             let b = "a";
             Call(bu = transmute::<_, u128>(b), ReturnTo(bb4), UnwindContinue())
         }
         bb4 = {
-            // CHECK: [[d:_.*]] = identity::<&str>(const "a")
+            // This returns a copy of `b`, which is not `a`.
+            // CHECK: [[d:_.*]] = identity::<&str>(copy [[b]])
             Call(d = identity(b), ReturnTo(bb5), UnwindContinue())
         }
         bb5 = {
@@ -595,7 +579,8 @@ fn duplicate_slice() -> (bool, bool) {
             Call(du = transmute::<_, u128>(d), ReturnTo(bb6), UnwindContinue())
         }
         bb6 = {
-            // CHECK: = const true;
+            // `direct` must not fold to `true`, as `indirect` will not.
+            // CHECK: = Eq(copy [[au]], copy [[bu]]);
             // CHECK: = Eq(copy [[cu]], copy [[du]]);
             let direct = au == bu;
             let indirect = cu == du;
@@ -849,25 +834,6 @@ fn array_len(x: &mut [i32; 42]) -> usize {
     std::intrinsics::ptr_metadata(x)
 }
 
-// Check that we only load the length once, rather than all 3 times.
-fn dedup_multiple_bounds_checks_lengths(x: &[i32]) -> [i32; 3] {
-    // CHECK-LABEL: fn dedup_multiple_bounds_checks_lengths
-    // CHECK: [[LEN:_.+]] = PtrMetadata(copy _1);
-    // CHECK: Lt(const 42_usize, copy [[LEN]]);
-    // CHECK: assert{{.+}}copy [[LEN]]
-    // CHECK: [[A:_.+]] = copy (*_1)[42 of 43];
-    // CHECK-NOT: PtrMetadata
-    // CHECK: Lt(const 13_usize, copy [[LEN]]);
-    // CHECK: assert{{.+}}copy [[LEN]]
-    // CHECK: [[B:_.+]] = copy (*_1)[13 of 14];
-    // CHECK-NOT: PtrMetadata
-    // CHECK: Lt(const 7_usize, copy [[LEN]]);
-    // CHECK: assert{{.+}}copy [[LEN]]
-    // CHECK: [[C:_.+]] = copy (*_1)[7 of 8];
-    // CHECK: _0 = [move [[A]], move [[B]], move [[C]]]
-    [x[42], x[13], x[7]]
-}
-
 #[custom_mir(dialect = "runtime")]
 fn generic_cast_metadata<T, A: ?Sized, B: ?Sized>(ps: *const [T], pa: *const A, pb: *const B) {
     // CHECK-LABEL: fn generic_cast_metadata
@@ -878,7 +844,7 @@ fn generic_cast_metadata<T, A: ?Sized, B: ?Sized>(ps: *const [T], pa: *const A, 
 
             // Metadata usize -> (), do not optimize.
             // CHECK: [[T:_.+]] = copy _1 as
-            // CHECK-NEXT: const ();
+            // CHECK-NEXT: PtrMetadata(copy [[T]])
             let t1 = CastPtrToPtr::<_, *const T>(ps);
             let m1 = PtrMetadata(t1);
 
@@ -947,86 +913,6 @@ fn cast_pointer_eq(p1: *mut u8, p2: *mut u32, p3: *mut u32, p4: *mut [u32]) {
     // CHECK: _0 = const ();
 }
 
-unsafe fn aggregate_struct_then_transmute(id: u16, thin: *const u8) {
-    // CHECK: opaque::<u16>(copy _1)
-    let a = MyId(id);
-    opaque(std::intrinsics::transmute::<_, u16>(a));
-
-    // CHECK: opaque::<u16>(copy _1)
-    let b = TypedId::<String>(id, PhantomData);
-    opaque(std::intrinsics::transmute::<_, u16>(b));
-
-    // CHECK: opaque::<u16>(copy _1)
-    let c = Err::<Never, u16>(id);
-    opaque(std::intrinsics::transmute::<_, u16>(c));
-
-    // CHECK: [[TEMP1:_[0-9]+]] = Option::<u16>::Some(copy _1);
-    // CHECK: [[TEMP2:_[0-9]+]] = copy [[TEMP1]] as u32 (Transmute);
-    // CHECK: opaque::<u32>(move [[TEMP2]])
-    let d = Some(id);
-    opaque(std::intrinsics::transmute::<_, u32>(d));
-
-    // Still need the transmute, but the aggregate can be skipped
-    // CHECK: [[TEMP:_[0-9]+]] = copy _1 as i16 (Transmute);
-    // CHECK: opaque::<i16>(move [[TEMP]])
-    let e = MyId(id);
-    opaque(std::intrinsics::transmute::<_, i16>(e));
-
-    // CHECK: [[PAIR:_[0-9]+]] = Pair(copy _1, copy _1);
-    // CHECK: [[TEMP:_[0-9]+]] = copy [[PAIR]] as u32 (Transmute);
-    // CHECK: opaque::<u32>(move [[TEMP]])
-    struct Pair(u16, u16);
-    let f = Pair(id, id);
-    opaque(std::intrinsics::transmute::<_, u32>(f));
-
-    // CHECK: [[TEMP:_[0-9]+]] = copy [[PAIR]] as u16 (Transmute);
-    // CHECK: opaque::<u16>(move [[TEMP]])
-    let g = Pair(id, id);
-    opaque(std::intrinsics::transmute_unchecked::<_, u16>(g));
-
-    // CHECK: opaque::<u16>(copy _1)
-    let h = (id,);
-    opaque(std::intrinsics::transmute::<_, u16>(h));
-
-    // CHECK: opaque::<u16>(copy _1)
-    let i = [id];
-    opaque(std::intrinsics::transmute::<_, u16>(i));
-
-    // CHECK: opaque::<*const u8>(copy _2)
-    let j: *const i32 = std::intrinsics::aggregate_raw_ptr(thin, ());
-    opaque(std::intrinsics::transmute::<_, *const u8>(j));
-}
-
-#[repr(u8)]
-enum ZeroOneTwo {
-    Zero,
-    One,
-    Two,
-}
-
-unsafe fn transmute_then_transmute_again(a: u32, c: char, b: bool, d: u8) {
-    // CHECK: [[TEMP1:_[0-9]+]] = copy _1 as char (Transmute);
-    // CHECK: [[TEMP2:_[0-9]+]] = copy [[TEMP1]] as i32 (Transmute);
-    // CHECK: opaque::<i32>(move [[TEMP2]])
-    let x = std::intrinsics::transmute::<u32, char>(a);
-    opaque(std::intrinsics::transmute::<char, i32>(x));
-
-    // CHECK: [[TEMP:_[0-9]+]] = copy _2 as i32 (Transmute);
-    // CHECK: opaque::<i32>(move [[TEMP]])
-    let x = std::intrinsics::transmute::<char, u32>(c);
-    opaque(std::intrinsics::transmute::<u32, i32>(x));
-
-    // CHECK: [[TEMP:_[0-9]+]] = copy _3 as u8 (Transmute);
-    // CHECK: opaque::<u8>(move [[TEMP]])
-    let x = std::intrinsics::transmute::<bool, ZeroOneTwo>(b);
-    opaque(std::intrinsics::transmute::<ZeroOneTwo, u8>(x));
-
-    // CHECK: [[TEMP:_[0-9]+]] = copy _4 as bool (Transmute);
-    // CHECK: opaque::<bool>(move [[TEMP]])
-    let x = std::intrinsics::transmute::<u8, ZeroOneTwo>(d);
-    opaque(std::intrinsics::transmute::<ZeroOneTwo, bool>(x));
-}
-
 // Transmuting can skip a pointer cast so long as it wasn't a fat-to-thin cast.
 unsafe fn cast_pointer_then_transmute(thin: *mut u32, fat: *mut [u8]) {
     // CHECK-LABEL: fn cast_pointer_then_transmute
@@ -1038,28 +924,6 @@ unsafe fn cast_pointer_then_transmute(thin: *mut u32, fat: *mut [u8]) {
     // CHECK: [[TEMP2:_.+]] = copy _2 as *const () (PtrToPtr);
     // CHECK: = move [[TEMP2]] as usize (Transmute);
     let fat_addr: usize = std::intrinsics::transmute(fat as *const ());
-}
-
-unsafe fn transmute_then_cast_pointer(addr: usize, fat: *mut [u8]) {
-    // CHECK-LABEL: fn transmute_then_cast_pointer
-
-    // This is roughly what `NonNull::dangling` does
-    // CHECK: [[CPTR:_.+]] = copy _1 as *const u8 (Transmute);
-    // CHECK: takes_const_ptr::<u8>(move [[CPTR]])
-    let p: *mut u8 = std::intrinsics::transmute(addr);
-    takes_const_ptr(p);
-
-    // This cast is fat-to-thin, so can't be merged with the transmute
-    // CHECK: [[FAT:_.+]] = move {{.+}} as *const [i32] (Transmute);
-    // CHECK: [[THIN:_.+]] = copy [[FAT]] as *const i32 (PtrToPtr);
-    // CHECK: takes_const_ptr::<i32>(move [[THIN]])
-    let q = std::intrinsics::transmute::<&mut [i32], *const [i32]>(&mut [1, 2, 3]);
-    takes_const_ptr(q as *const i32);
-
-    // CHECK: [[TPTR:_.+]] = copy _2 as *const u8 (PtrToPtr);
-    // CHECK: takes_const_ptr::<u8>(move [[TPTR]])
-    let w = std::intrinsics::transmute::<*mut [u8], *const [u8]>(fat);
-    takes_const_ptr(w as *const u8);
 }
 
 #[custom_mir(dialect = "analysis")]
@@ -1081,73 +945,6 @@ fn remove_casts_must_change_both_sides(mut_a: &*mut u8, mut_b: *mut u8) -> bool 
     }
 }
 
-/// Verify that we do not references to non-existing locals when dereferencing projections.
-fn dereference_indexing(array: [u8; 2], index: usize) {
-    // CHECK-LABEL: fn dereference_indexing(
-    // CHECK: debug a => [[a:_.*]];
-    // CHECK: debug i => [[i:_.*]];
-
-    let a = {
-        // CHECK: [[i]] = Add(copy _2, const 1_usize);
-        let i = index + 1;
-        // CHECK: [[a]] = &_1[[[i]]];
-        &array[i]
-    };
-
-    // CHECK-NOT: StorageDead([[i]]);
-    // CHECK: [[tmp:_.*]] = copy _1[[[i]]];
-    // CHECK: opaque::<u8>(move [[tmp]])
-    opaque(*a);
-}
-
-// EMIT_MIR gvn.dereference_reborrow.GVN.diff
-fn dereference_reborrow(mut_a: &mut u8) {
-    // CHECK-LABEL: fn dereference_reborrow(
-    // CHECK: debug a => [[a:_.*]];
-    // CHECK: debug b => [[b:_.*]];
-    // CHECK: debug c => [[c:_.*]];
-    // CHECK: [[a]] = &(*_1);
-    // CHECK: [[b]] = copy (*[[a]]);
-    // CHECK: [[c]] = copy [[b]];
-    let a = &*mut_a;
-    let b = *a;
-    let c = *a;
-}
-
-struct FieldBorrow<'a>(&'a u8);
-
-// EMIT_MIR gvn.field_borrow.GVN.diff
-fn field_borrow(a: &FieldBorrow<'_>) {
-    // CHECK-LABEL: fn field_borrow(
-    // CHECK: debug b => [[b:_.*]];
-    // CHECK: debug c => [[c:_.*]];
-    // CHECK: [[b]] = copy ((*_1).0: &u8);
-    // CHECK: [[c]] = copy [[b]];
-    let b = a.0;
-    let c = a.0;
-}
-
-// EMIT_MIR gvn.field_borrow_2.GVN.diff
-fn field_borrow_2(a: &&FieldBorrow<'_>) {
-    // CHECK-LABEL: fn field_borrow_2(
-    // CHECK: debug b => [[b:_.*]];
-    // CHECK: debug c => [[c:_.*]];
-    // CHECK: debug d => [[d:_.*]];
-    // CHECK: debug e => [[e:_.*]];
-    // CHECK: debug f => [[f:_.*]];
-    // CHECK: [[b]] = copy (*_1);
-    // CHECK: [[c]] = copy ((*[[b]]).0: &u8);
-    // CHECK: [[d]] = copy (*_1);
-    // CHECK: [[e]] = copy ((*[[d]]).0: &u8);
-    // CHECK: [[f]] = copy [[e]];
-    let b = *a;
-    let c = b.0;
-    let d = *a;
-    let e = d.0;
-    let f = d.0;
-}
-
-// CHECK-LABEL: fn main(
 fn main() {
     subexpression_elimination(2, 4, 5);
     wrap_unwrap(5);
@@ -1175,10 +972,6 @@ fn main() {
     slice_const_length(&[1]);
     meta_of_ref_to_slice(&42);
     slice_from_raw_parts_as_ptr(&123, 456);
-    dereference_indexing([129, 14], 5);
-    dereference_reborrow(&mut 5);
-    field_borrow(&FieldBorrow(&0));
-    field_borrow(&&FieldBorrow(&0));
 }
 
 #[inline(never)]
@@ -1188,18 +981,6 @@ fn opaque(_: impl Sized) {}
 fn identity<T>(x: T) -> T {
     x
 }
-
-#[inline(never)]
-fn takes_const_ptr<T>(_: *const T) {}
-
-#[repr(transparent)]
-#[rustc_layout_scalar_valid_range_end(55555)]
-struct MyId(u16);
-
-#[repr(transparent)]
-struct TypedId<T>(u16, PhantomData<T>);
-
-enum Never {}
 
 // EMIT_MIR gvn.subexpression_elimination.GVN.diff
 // EMIT_MIR gvn.wrap_unwrap.GVN.diff
@@ -1230,12 +1011,7 @@ enum Never {}
 // EMIT_MIR gvn.casts_before_aggregate_raw_ptr.GVN.diff
 // EMIT_MIR gvn.manual_slice_mut_len.GVN.diff
 // EMIT_MIR gvn.array_len.GVN.diff
-// EMIT_MIR gvn.dedup_multiple_bounds_checks_lengths.GVN.diff
 // EMIT_MIR gvn.generic_cast_metadata.GVN.diff
 // EMIT_MIR gvn.cast_pointer_eq.GVN.diff
-// EMIT_MIR gvn.aggregate_struct_then_transmute.GVN.diff
-// EMIT_MIR gvn.transmute_then_transmute_again.GVN.diff
 // EMIT_MIR gvn.cast_pointer_then_transmute.GVN.diff
-// EMIT_MIR gvn.transmute_then_cast_pointer.GVN.diff
 // EMIT_MIR gvn.remove_casts_must_change_both_sides.GVN.diff
-// EMIT_MIR gvn.dereference_indexing.GVN.diff

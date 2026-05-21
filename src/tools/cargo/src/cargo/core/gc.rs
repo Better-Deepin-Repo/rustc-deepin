@@ -23,7 +23,7 @@ use crate::core::global_cache_tracker::{self, GlobalCacheTracker};
 use crate::ops::CleanContext;
 use crate::util::cache_lock::{CacheLock, CacheLockMode};
 use crate::{CargoResult, GlobalContext};
-use anyhow::{Context as _, format_err};
+use anyhow::{format_err, Context as _};
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -49,6 +49,9 @@ const DEFAULT_AUTO_FREQUENCY: &str = "1 day";
 /// It should be cheap to call this multiple times (subsequent calls are
 /// ignored), but try not to abuse that.
 pub fn auto_gc(gctx: &GlobalContext) {
+    if !gctx.cli_unstable().gc {
+        return;
+    }
     if !gctx.network_allowed() {
         // As a conservative choice, auto-gc is disabled when offline. If the
         // user is indefinitely offline, we don't want to delete things they
@@ -88,7 +91,7 @@ fn auto_gc_inner(gctx: &GlobalContext) -> CargoResult<()> {
     Ok(())
 }
 
-/// Cache cleaning settings from the `cache.global-clean` config table.
+/// Automatic garbage collection settings from the `gc.auto` config table.
 ///
 /// NOTE: Not all of these options may get stabilized. Some of them are very
 /// low-level details, and may not be something typical users need.
@@ -96,7 +99,9 @@ fn auto_gc_inner(gctx: &GlobalContext) -> CargoResult<()> {
 /// If any of these options are `None`, the built-in default is used.
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
-struct GlobalCleanConfig {
+struct AutoConfig {
+    /// The maximum frequency that automatic garbage collection happens.
+    frequency: Option<String>,
     /// Anything older than this duration will be deleted in the source cache.
     max_src_age: Option<String>,
     /// Anything older than this duration will be deleted in the compressed crate cache.
@@ -168,77 +173,52 @@ impl GcOpts {
     /// Updates the configuration of this [`GcOpts`] to incorporate the
     /// settings from config.
     pub fn update_for_auto_gc(&mut self, gctx: &GlobalContext) -> CargoResult<()> {
-        let config = gctx
-            .get::<Option<GlobalCleanConfig>>("cache.global-clean")?
+        let auto_config = gctx
+            .get::<Option<AutoConfig>>("gc.auto")?
             .unwrap_or_default();
-        self.update_for_auto_gc_config(&config, gctx.cli_unstable().gc)
+        self.update_for_auto_gc_config(&auto_config)
     }
 
-    fn update_for_auto_gc_config(
-        &mut self,
-        config: &GlobalCleanConfig,
-        unstable_allowed: bool,
-    ) -> CargoResult<()> {
-        macro_rules! config_default {
-            ($config:expr, $field:ident, $default:expr, $unstable_allowed:expr) => {
-                if !unstable_allowed {
-                    // These config options require -Zgc
-                    $default
-                } else {
-                    $config.$field.as_deref().unwrap_or($default)
-                }
-            };
-        }
-
+    fn update_for_auto_gc_config(&mut self, auto_config: &AutoConfig) -> CargoResult<()> {
         self.max_src_age = newer_time_span_for_config(
             self.max_src_age,
             "gc.auto.max-src-age",
-            config_default!(
-                config,
-                max_src_age,
-                DEFAULT_MAX_AGE_EXTRACTED,
-                unstable_allowed
-            ),
+            auto_config
+                .max_src_age
+                .as_deref()
+                .unwrap_or(DEFAULT_MAX_AGE_EXTRACTED),
         )?;
         self.max_crate_age = newer_time_span_for_config(
             self.max_crate_age,
             "gc.auto.max-crate-age",
-            config_default!(
-                config,
-                max_crate_age,
-                DEFAULT_MAX_AGE_DOWNLOADED,
-                unstable_allowed
-            ),
+            auto_config
+                .max_crate_age
+                .as_deref()
+                .unwrap_or(DEFAULT_MAX_AGE_DOWNLOADED),
         )?;
         self.max_index_age = newer_time_span_for_config(
             self.max_index_age,
             "gc.auto.max-index-age",
-            config_default!(
-                config,
-                max_index_age,
-                DEFAULT_MAX_AGE_DOWNLOADED,
-                unstable_allowed
-            ),
+            auto_config
+                .max_index_age
+                .as_deref()
+                .unwrap_or(DEFAULT_MAX_AGE_DOWNLOADED),
         )?;
         self.max_git_co_age = newer_time_span_for_config(
             self.max_git_co_age,
             "gc.auto.max-git-co-age",
-            config_default!(
-                config,
-                max_git_co_age,
-                DEFAULT_MAX_AGE_EXTRACTED,
-                unstable_allowed
-            ),
+            auto_config
+                .max_git_co_age
+                .as_deref()
+                .unwrap_or(DEFAULT_MAX_AGE_EXTRACTED),
         )?;
         self.max_git_db_age = newer_time_span_for_config(
             self.max_git_db_age,
             "gc.auto.max-git-db-age",
-            config_default!(
-                config,
-                max_git_db_age,
-                DEFAULT_MAX_AGE_DOWNLOADED,
-                unstable_allowed
-            ),
+            auto_config
+                .max_git_db_age
+                .as_deref()
+                .unwrap_or(DEFAULT_MAX_AGE_DOWNLOADED),
         )?;
         Ok(())
     }
@@ -255,7 +235,7 @@ pub struct Gc<'a, 'gctx> {
     /// This is important to be held, since we don't want multiple cargos to
     /// be allowed to write to the cache at the same time, or for others to
     /// read while we are modifying the cache.
-    #[expect(dead_code, reason = "held for `drop`")]
+    #[allow(dead_code)] // Held for drop.
     lock: CacheLock<'gctx>,
 }
 
@@ -275,25 +255,30 @@ impl<'a, 'gctx> Gc<'a, 'gctx> {
     /// Performs automatic garbage cleaning.
     ///
     /// This returns immediately without doing work if garbage collection has
-    /// been performed recently (since `cache.auto-clean-frequency`).
+    /// been performed recently (since `gc.auto.frequency`).
     fn auto(&mut self, clean_ctx: &mut CleanContext<'gctx>) -> CargoResult<()> {
-        let freq = self
+        if !self.gctx.cli_unstable().gc {
+            return Ok(());
+        }
+        let auto_config = self
             .gctx
-            .get::<Option<String>>("cache.auto-clean-frequency")?;
-        let Some(freq) = parse_frequency(freq.as_deref().unwrap_or(DEFAULT_AUTO_FREQUENCY))? else {
+            .get::<Option<AutoConfig>>("gc.auto")?
+            .unwrap_or_default();
+        let Some(freq) = parse_frequency(
+            auto_config
+                .frequency
+                .as_deref()
+                .unwrap_or(DEFAULT_AUTO_FREQUENCY),
+        )?
+        else {
             tracing::trace!(target: "gc", "auto gc disabled");
             return Ok(());
         };
         if !self.global_cache_tracker.should_run_auto_gc(freq)? {
             return Ok(());
         }
-        let config = self
-            .gctx
-            .get::<Option<GlobalCleanConfig>>("cache.global-clean")?
-            .unwrap_or_default();
-
         let mut gc_opts = GcOpts::default();
-        gc_opts.update_for_auto_gc_config(&config, self.gctx.cli_unstable().gc)?;
+        gc_opts.update_for_auto_gc_config(&auto_config)?;
         self.gc(clean_ctx, &gc_opts)?;
         if !clean_ctx.dry_run {
             self.global_cache_tracker.set_last_auto_gc()?;
@@ -352,7 +337,7 @@ fn parse_frequency(frequency: &str) -> CargoResult<Option<Duration>> {
     }
     let duration = maybe_parse_time_span(frequency).ok_or_else(|| {
         format_err!(
-            "config option `cache.auto-clean-frequency` expected a value of \"always\", \"never\", \
+            "config option `gc.auto.frequency` expected a value of \"always\", \"never\", \
              or \"N seconds/minutes/days/weeks/months\", got: {frequency:?}"
         )
     })?;
@@ -430,7 +415,7 @@ pub fn parse_human_size(input: &str) -> CargoResult<u64> {
         None => {
             return cap[1]
                 .parse()
-                .with_context(|| format!("expected an integer size, got `{}`", &cap[1]));
+                .with_context(|| format!("expected an integer size, got `{}`", &cap[1]))
         }
     };
     let num = cap[1]
@@ -475,18 +460,17 @@ mod tests {
         assert_eq!(maybe_parse_time_span(" 1 day"), None);
         assert_eq!(maybe_parse_time_span("1  second"), None);
 
-        let e =
-            parse_time_span_for_config("cache.global-clean.max-src-age", "-1 days").unwrap_err();
+        let e = parse_time_span_for_config("gc.auto.max-src-age", "-1 days").unwrap_err();
         assert_eq!(
             e.to_string(),
-            "config option `cache.global-clean.max-src-age` \
+            "config option `gc.auto.max-src-age` \
              expected a value of the form \"N seconds/minutes/days/weeks/months\", \
              got: \"-1 days\""
         );
         let e = parse_frequency("abc").unwrap_err();
         assert_eq!(
             e.to_string(),
-            "config option `cache.auto-clean-frequency` \
+            "config option `gc.auto.frequency` \
              expected a value of \"always\", \"never\", or \"N seconds/minutes/days/weeks/months\", \
              got: \"abc\""
         );

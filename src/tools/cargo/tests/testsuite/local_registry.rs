@@ -2,9 +2,9 @@
 
 use std::fs;
 
-use crate::prelude::*;
 use cargo_test_support::paths;
-use cargo_test_support::registry::{Package, registry_path};
+use cargo_test_support::prelude::*;
+use cargo_test_support::registry::{registry_path, Package};
 use cargo_test_support::{basic_manifest, project, str, t};
 
 fn setup() {
@@ -53,7 +53,7 @@ fn simple() {
 
     p.cargo("build")
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [UNPACKING] bar v0.0.1 (registry `[ROOT]/registry`)
 [COMPILING] bar v0.0.1
 [COMPILING] foo v0.0.1 ([ROOT]/foo)
@@ -74,7 +74,7 @@ fn simple() {
 fn not_found() {
     setup();
     // Publish a package so that the directory hierarchy is created.
-    // Note, however, that we declare a dependency on baz.
+    // Note, however, that we declare a dependency on baZ.
     Package::new("bar", "0.0.1").local(true).publish();
 
     let p = project()
@@ -101,7 +101,7 @@ fn not_found() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [ERROR] no matching package named `baz` found
-location searched: `[ROOT]/registry` index (which is replacing registry `crates-io`)
+location searched: registry `crates-io`
 required by package `foo v0.0.1 ([ROOT]/foo)`
 
 "#]])
@@ -178,7 +178,7 @@ fn multiple_versions() {
 
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [UNPACKING] bar v0.1.0 (registry `[ROOT]/registry`)
 [CHECKING] bar v0.1.0
 [CHECKING] foo v0.0.1 ([ROOT]/foo)
@@ -244,7 +244,7 @@ fn multiple_names() {
     p.cargo("check")
         .with_stderr_data(
             str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 3 packages to latest compatible versions
 [UNPACKING] bar v0.0.1 (registry `[ROOT]/registry`)
 [UNPACKING] baz v0.1.0 (registry `[ROOT]/registry`)
 [CHECKING] bar v0.0.1
@@ -301,7 +301,7 @@ fn interdependent() {
 
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 3 packages to latest compatible versions
 [UNPACKING] bar v0.0.1 (registry `[ROOT]/registry`)
 [UNPACKING] baz v0.1.0 (registry `[ROOT]/registry`)
 [CHECKING] bar v0.0.1
@@ -371,7 +371,7 @@ fn path_dep_rewritten() {
 
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 3 packages to latest compatible versions
 [UNPACKING] bar v0.0.1 (registry `[ROOT]/registry`)
 [UNPACKING] baz v0.1.0 (registry `[ROOT]/registry`)
 [CHECKING] bar v0.0.1
@@ -423,7 +423,7 @@ Caused by:
   failed to load source for dependency `bar`
 
 Caused by:
-  unable to update registry `crates-io`
+  Unable to update registry `crates-io`
 
 Caused by:
   failed to update replaced source registry `crates-io`
@@ -536,7 +536,7 @@ fn crates_io_registry_url_is_optional() {
 
     p.cargo("build")
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [UNPACKING] bar v0.0.1 (registry `[ROOT]/registry`)
 [COMPILING] bar v0.0.1
 [COMPILING] foo v0.0.1 ([ROOT]/foo)

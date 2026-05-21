@@ -2,13 +2,7 @@ error: cannot find attribute `C` in this scope
   --> $DIR/proc-macro-attributes.rs:9:3
    |
 LL | #[C]
-   |   ^
-   |
-help: the derive macro `B` accepts the similarly named `B` attribute
-   |
-LL - #[C]
-LL + #[B]
-   |
+   |   ^ help: a derive helper attribute with a similar name exists: `B`
 
 error[E0659]: `B` is ambiguous
   --> $DIR/proc-macro-attributes.rs:6:3
@@ -82,7 +76,7 @@ note: `B` could also refer to the derive macro imported here
 LL | #[macro_use]
    | ^^^^^^^^^^^^
 
-error: derive helper attribute is used before it is introduced
+warning: derive helper attribute is used before it is introduced
   --> $DIR/proc-macro-attributes.rs:6:3
    |
 LL | #[B]
@@ -93,9 +87,9 @@ LL | #[derive(B)]
    |
    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
    = note: for more information, see issue #79202 <https://github.com/rust-lang/rust/issues/79202>
-   = note: `#[deny(legacy_derive_helpers)]` (part of `#[deny(future_incompatible)]`) on by default
+   = note: `#[warn(legacy_derive_helpers)]` on by default
 
-error: derive helper attribute is used before it is introduced
+warning: derive helper attribute is used before it is introduced
   --> $DIR/proc-macro-attributes.rs:10:3
    |
 LL | #[B(D)]
@@ -107,7 +101,7 @@ LL | #[derive(B)]
    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
    = note: for more information, see issue #79202 <https://github.com/rust-lang/rust/issues/79202>
 
-error: derive helper attribute is used before it is introduced
+warning: derive helper attribute is used before it is introduced
   --> $DIR/proc-macro-attributes.rs:13:3
    |
 LL | #[B(E = "foo")]
@@ -119,7 +113,7 @@ LL | #[derive(B)]
    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
    = note: for more information, see issue #79202 <https://github.com/rust-lang/rust/issues/79202>
 
-error: derive helper attribute is used before it is introduced
+warning: derive helper attribute is used before it is introduced
   --> $DIR/proc-macro-attributes.rs:16:3
    |
 LL | #[B(arbitrary tokens)]
@@ -131,62 +125,6 @@ LL | #[derive(B)]
    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
    = note: for more information, see issue #79202 <https://github.com/rust-lang/rust/issues/79202>
 
-error: aborting due to 9 previous errors
+error: aborting due to 5 previous errors; 4 warnings emitted
 
 For more information about this error, try `rustc --explain E0659`.
-Future incompatibility report: Future breakage diagnostic:
-error: derive helper attribute is used before it is introduced
-  --> $DIR/proc-macro-attributes.rs:6:3
-   |
-LL | #[B]
-   |   ^
-...
-LL | #[derive(B)]
-   |          - the attribute is introduced here
-   |
-   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
-   = note: for more information, see issue #79202 <https://github.com/rust-lang/rust/issues/79202>
-   = note: `#[deny(legacy_derive_helpers)]` (part of `#[deny(future_incompatible)]`) on by default
-
-Future breakage diagnostic:
-error: derive helper attribute is used before it is introduced
-  --> $DIR/proc-macro-attributes.rs:10:3
-   |
-LL | #[B(D)]
-   |   ^
-...
-LL | #[derive(B)]
-   |          - the attribute is introduced here
-   |
-   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
-   = note: for more information, see issue #79202 <https://github.com/rust-lang/rust/issues/79202>
-   = note: `#[deny(legacy_derive_helpers)]` (part of `#[deny(future_incompatible)]`) on by default
-
-Future breakage diagnostic:
-error: derive helper attribute is used before it is introduced
-  --> $DIR/proc-macro-attributes.rs:13:3
-   |
-LL | #[B(E = "foo")]
-   |   ^
-...
-LL | #[derive(B)]
-   |          - the attribute is introduced here
-   |
-   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
-   = note: for more information, see issue #79202 <https://github.com/rust-lang/rust/issues/79202>
-   = note: `#[deny(legacy_derive_helpers)]` (part of `#[deny(future_incompatible)]`) on by default
-
-Future breakage diagnostic:
-error: derive helper attribute is used before it is introduced
-  --> $DIR/proc-macro-attributes.rs:16:3
-   |
-LL | #[B(arbitrary tokens)]
-   |   ^
-...
-LL | #[derive(B)]
-   |          - the attribute is introduced here
-   |
-   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
-   = note: for more information, see issue #79202 <https://github.com/rust-lang/rust/issues/79202>
-   = note: `#[deny(legacy_derive_helpers)]` (part of `#[deny(future_incompatible)]`) on by default
-

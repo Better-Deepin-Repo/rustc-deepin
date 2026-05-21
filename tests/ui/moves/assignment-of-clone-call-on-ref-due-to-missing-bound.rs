@@ -1,16 +1,15 @@
 //@ run-rustfix
-//@ revisions: current next
-//@[next] compile-flags: -Znext-solver
 #![allow(unused_variables, dead_code)]
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
+use std::collections::HashSet;
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Debug,Eq,PartialEq,Hash)]
 enum Day {
     Mon,
 }
 
 struct Class {
-    days: BTreeMap<u32, HashSet<Day>>,
+    days: BTreeMap<u32, HashSet<Day>>
 }
 
 impl Class {

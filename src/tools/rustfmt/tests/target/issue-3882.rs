@@ -1,4 +1,4 @@
-// rustfmt-style_edition: 2024
+// rustfmt-version: Two
 fn bar(_t: T, // bar
 ) {
 }

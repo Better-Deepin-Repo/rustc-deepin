@@ -1,6 +1,6 @@
-use std::ops::{ControlFlow, RangeInclusive};
+use std::ops::ControlFlow;
 
-use super::{Byte, Def, Reference, Region, Type};
+use super::{Byte, Def, Ref};
 
 #[cfg(test)]
 mod tests;
@@ -15,11 +15,10 @@ mod tests;
 /// 2. A `Seq` is never directly nested beneath another `Seq`.
 /// 3. `Seq`s and `Alt`s with a single member do not exist.
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
-pub(crate) enum Tree<D, R, T>
+pub(crate) enum Tree<D, R>
 where
     D: Def,
-    R: Region,
-    T: Type,
+    R: Ref,
 {
     /// A sequence of successive layouts.
     Seq(Vec<Self>),
@@ -28,32 +27,15 @@ where
     /// A definition node.
     Def(D),
     /// A reference node.
-    Ref(Reference<R, T>),
+    Ref(R),
     /// A byte node.
     Byte(Byte),
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub(crate) enum Endian {
-    Little,
-    Big,
-}
-
-#[cfg(feature = "rustc")]
-impl From<rustc_abi::Endian> for Endian {
-    fn from(order: rustc_abi::Endian) -> Endian {
-        match order {
-            rustc_abi::Endian::Little => Endian::Little,
-            rustc_abi::Endian::Big => Endian::Big,
-        }
-    }
-}
-
-impl<D, R, T> Tree<D, R, T>
+impl<D, R> Tree<D, R>
 where
     D: Def,
-    R: Region,
-    T: Type,
+    R: Ref,
 {
     /// A `Tree` consisting only of a definition node.
     pub(crate) fn def(def: D) -> Self {
@@ -72,65 +54,27 @@ where
 
     /// A `Tree` containing a single, uninitialized byte.
     pub(crate) fn uninit() -> Self {
-        Self::Byte(Byte::uninit())
+        Self::Byte(Byte::Uninit)
     }
 
     /// A `Tree` representing the layout of `bool`.
     pub(crate) fn bool() -> Self {
-        Self::byte(0x00..=0x01)
+        Self::from_bits(0x00).or(Self::from_bits(0x01))
     }
 
     /// A `Tree` whose layout matches that of a `u8`.
     pub(crate) fn u8() -> Self {
-        Self::byte(0x00..=0xFF)
+        Self::Alt((0u8..=255).map(Self::from_bits).collect())
     }
 
-    /// A `Tree` whose layout matches that of a `char`.
-    pub(crate) fn char(order: Endian) -> Self {
-        // `char`s can be in the following ranges:
-        // - [0, 0xD7FF]
-        // - [0xE000, 10FFFF]
-        //
-        // All other `char` values are illegal. We can thus represent a `char`
-        // as a union of three possible layouts:
-        // - 00 00 [00, D7] XX
-        // - 00 00 [E0, FF] XX
-        // - 00 [01, 10] XX XX
-
-        const _0: RangeInclusive<u8> = 0..=0;
-        const BYTE: RangeInclusive<u8> = 0x00..=0xFF;
-        let x = Self::from_big_endian(order, [_0, _0, 0x00..=0xD7, BYTE]);
-        let y = Self::from_big_endian(order, [_0, _0, 0xE0..=0xFF, BYTE]);
-        let z = Self::from_big_endian(order, [_0, 0x01..=0x10, BYTE, BYTE]);
-        Self::alt([x, y, z])
-    }
-
-    /// A `Tree` whose layout matches `std::num::NonZeroXxx`.
-    #[allow(dead_code)]
-    pub(crate) fn nonzero(width_in_bytes: u64) -> Self {
-        const BYTE: RangeInclusive<u8> = 0x00..=0xFF;
-        const NONZERO: RangeInclusive<u8> = 0x01..=0xFF;
-
-        (0..width_in_bytes)
-            .map(|nz_idx| {
-                (0..width_in_bytes)
-                    .map(|pos| Self::byte(if pos == nz_idx { NONZERO } else { BYTE }))
-                    .fold(Self::unit(), Self::then)
-            })
-            .fold(Self::uninhabited(), Self::or)
-    }
-
-    pub(crate) fn bytes<const N: usize, B: Into<Byte>>(bytes: [B; N]) -> Self {
-        Self::seq(bytes.map(B::into).map(Self::Byte))
-    }
-
-    pub(crate) fn byte(byte: impl Into<Byte>) -> Self {
-        Self::Byte(byte.into())
+    /// A `Tree` whose layout accepts exactly the given bit pattern.
+    pub(crate) fn from_bits(bits: u8) -> Self {
+        Self::Byte(Byte::Init(bits))
     }
 
     /// A `Tree` whose layout is a number of the given width.
-    pub(crate) fn number(width_in_bytes: u64) -> Self {
-        Self::Seq(vec![Self::u8(); width_in_bytes.try_into().unwrap()])
+    pub(crate) fn number(width_in_bytes: usize) -> Self {
+        Self::Seq(vec![Self::u8(); width_in_bytes])
     }
 
     /// A `Tree` whose layout is entirely padding of the given width.
@@ -140,7 +84,7 @@ where
 
     /// Remove all `Def` nodes, and all branches of the layout for which `f`
     /// produces `true`.
-    pub(crate) fn prune<F>(self, f: &F) -> Tree<!, R, T>
+    pub(crate) fn prune<F>(self, f: &F) -> Tree<!, R>
     where
         F: Fn(D) -> bool,
     {
@@ -181,35 +125,13 @@ where
             Self::Byte(..) | Self::Ref(..) | Self::Def(..) => true,
         }
     }
+}
 
-    /// Produces a `Tree` which represents a sequence of bytes stored in
-    /// `order`.
-    ///
-    /// `bytes` is taken to be in big-endian byte order, and its order will be
-    /// swapped if `order == Endian::Little`.
-    pub(crate) fn from_big_endian<const N: usize, B: Into<Byte>>(
-        order: Endian,
-        mut bytes: [B; N],
-    ) -> Self {
-        if order == Endian::Little {
-            (&mut bytes[..]).reverse();
-        }
-
-        Self::bytes(bytes)
-    }
-
-    /// Produces a `Tree` where each of the trees in `trees` are sequenced one
-    /// after another.
-    pub(crate) fn seq<const N: usize>(trees: [Tree<D, R, T>; N]) -> Self {
-        trees.into_iter().fold(Tree::unit(), Self::then)
-    }
-
-    /// Produces a `Tree` where each of the trees in `trees` are accepted as
-    /// alternative layouts.
-    pub(crate) fn alt<const N: usize>(trees: [Tree<D, R, T>; N]) -> Self {
-        trees.into_iter().fold(Tree::uninhabited(), Self::or)
-    }
-
+impl<D, R> Tree<D, R>
+where
+    D: Def,
+    R: Ref,
+{
     /// Produces a new `Tree` where `other` is sequenced after `self`.
     pub(crate) fn then(self, other: Self) -> Self {
         match (self, other) {
@@ -249,18 +171,15 @@ where
 
 #[cfg(feature = "rustc")]
 pub(crate) mod rustc {
-    use rustc_abi::{
-        FieldIdx, FieldsShape, Layout, Size, TagEncoding, TyAndLayout, VariantIdx, Variants,
-    };
     use rustc_middle::ty::layout::{HasTyCtxt, LayoutCx, LayoutError};
-    use rustc_middle::ty::{
-        self, AdtDef, AdtKind, List, Region, ScalarInt, Ty, TyCtxt, TypeVisitableExt,
-    };
+    use rustc_middle::ty::{self, AdtDef, AdtKind, List, ScalarInt, Ty, TyCtxt, TypeVisitableExt};
     use rustc_span::ErrorGuaranteed;
+    use rustc_target::abi::{
+        FieldIdx, FieldsShape, Layout, Size, TyAndLayout, VariantIdx, Variants,
+    };
 
     use super::Tree;
-    use crate::layout::Reference;
-    use crate::layout::rustc::{Def, layout_of};
+    use crate::layout::rustc::{layout_of, Def, Ref};
 
     #[derive(Debug, Copy, Clone)]
     pub(crate) enum Err {
@@ -276,103 +195,76 @@ pub(crate) mod rustc {
     impl<'tcx> From<&LayoutError<'tcx>> for Err {
         fn from(err: &LayoutError<'tcx>) -> Self {
             match err {
-                LayoutError::Unknown(..)
-                | LayoutError::ReferencesError(..)
-                | LayoutError::TooGeneric(..)
-                | LayoutError::InvalidSimd { .. }
-                | LayoutError::NormalizationFailure(..) => Self::UnknownLayout,
+                LayoutError::Unknown(..) | LayoutError::ReferencesError(..) => Self::UnknownLayout,
                 LayoutError::SizeOverflow(..) => Self::SizeOverflow,
                 LayoutError::Cycle(err) => Self::TypeError(*err),
+                err => unimplemented!("{:?}", err),
             }
         }
     }
 
-    impl<'tcx> Tree<Def<'tcx>, Region<'tcx>, Ty<'tcx>> {
-        pub(crate) fn from_ty(ty: Ty<'tcx>, cx: LayoutCx<'tcx>) -> Result<Self, Err> {
-            use rustc_abi::HasDataLayout;
+    impl<'tcx> Tree<Def<'tcx>, Ref<'tcx>> {
+        pub fn from_ty(ty: Ty<'tcx>, cx: LayoutCx<'tcx, TyCtxt<'tcx>>) -> Result<Self, Err> {
+            use rustc_target::abi::HasDataLayout;
             let layout = layout_of(cx, ty)?;
 
             if let Err(e) = ty.error_reported() {
                 return Err(Err::TypeError(e));
             }
 
-            let target = cx.data_layout();
-            let pointer_size = target.pointer_size();
+            let target = cx.tcx.data_layout();
+            let pointer_size = target.pointer_size;
 
             match ty.kind() {
                 ty::Bool => Ok(Self::bool()),
 
                 ty::Float(nty) => {
                     let width = nty.bit_width() / 8;
-                    Ok(Self::number(width.try_into().unwrap()))
+                    Ok(Self::number(width as _))
                 }
 
                 ty::Int(nty) => {
                     let width = nty.normalize(pointer_size.bits() as _).bit_width().unwrap() / 8;
-                    Ok(Self::number(width.try_into().unwrap()))
+                    Ok(Self::number(width as _))
                 }
 
                 ty::Uint(nty) => {
                     let width = nty.normalize(pointer_size.bits() as _).bit_width().unwrap() / 8;
-                    Ok(Self::number(width.try_into().unwrap()))
+                    Ok(Self::number(width as _))
                 }
 
                 ty::Tuple(members) => Self::from_tuple((ty, layout), members, cx),
 
-                ty::Array(inner_ty, _len) => {
+                ty::Array(inner_ty, len) => {
                     let FieldsShape::Array { stride, count } = &layout.fields else {
                         return Err(Err::NotYetSupported);
                     };
                     let inner_layout = layout_of(cx, *inner_ty)?;
                     assert_eq!(*stride, inner_layout.size);
                     let elt = Tree::from_ty(*inner_ty, cx)?;
-                    Ok(std::iter::repeat_n(elt, *count as usize)
+                    Ok(std::iter::repeat(elt)
+                        .take(*count as usize)
                         .fold(Tree::unit(), |tree, elt| tree.then(elt)))
                 }
 
-                ty::Adt(adt_def, _args_ref) if !ty.is_box() => {
-                    let (lo, hi) = cx.tcx().layout_scalar_valid_range(adt_def.did());
+                ty::Adt(adt_def, _args_ref) if !ty.is_box() => match adt_def.adt_kind() {
+                    AdtKind::Struct => Self::from_struct((ty, layout), *adt_def, cx),
+                    AdtKind::Enum => Self::from_enum((ty, layout), *adt_def, cx),
+                    AdtKind::Union => Self::from_union((ty, layout), *adt_def, cx),
+                },
 
-                    use core::ops::Bound::*;
-                    let is_transparent = adt_def.repr().transparent();
-                    match (adt_def.adt_kind(), lo, hi) {
-                        (AdtKind::Struct, Unbounded, Unbounded) => {
-                            Self::from_struct((ty, layout), *adt_def, cx)
-                        }
-                        (AdtKind::Struct, Included(1), Included(_hi)) if is_transparent => {
-                            // FIXME(@joshlf): Support `NonZero` types:
-                            // - Check to make sure that the first field is
-                            //   numerical
-                            // - Check to make sure that the upper bound is the
-                            //   maximum value for the field's type
-                            // - Construct `Self::nonzero`
-                            Err(Err::NotYetSupported)
-                        }
-                        (AdtKind::Enum, Unbounded, Unbounded) => {
-                            Self::from_enum((ty, layout), *adt_def, cx)
-                        }
-                        (AdtKind::Union, Unbounded, Unbounded) => {
-                            Self::from_union((ty, layout), *adt_def, cx)
-                        }
-                        _ => Err(Err::NotYetSupported),
-                    }
-                }
-
-                ty::Ref(region, ty, mutability) => {
+                ty::Ref(lifetime, ty, mutability) => {
                     let layout = layout_of(cx, *ty)?;
-                    let referent_align = layout.align.bytes_usize();
-                    let referent_size = layout.size.bytes_usize();
-
-                    Ok(Tree::Ref(Reference {
-                        region: *region,
-                        is_mut: mutability.is_mut(),
-                        referent: *ty,
-                        referent_align,
-                        referent_size,
+                    let align = layout.align.abi.bytes_usize();
+                    let size = layout.size.bytes_usize();
+                    Ok(Tree::Ref(Ref {
+                        lifetime: *lifetime,
+                        ty: *ty,
+                        mutability: *mutability,
+                        align,
+                        size,
                     }))
                 }
-
-                ty::Char => Ok(Self::char(cx.tcx().data_layout.endian.into())),
 
                 _ => Err(Err::NotYetSupported),
             }
@@ -382,12 +274,13 @@ pub(crate) mod rustc {
         fn from_tuple(
             (ty, layout): (Ty<'tcx>, Layout<'tcx>),
             members: &'tcx List<Ty<'tcx>>,
-            cx: LayoutCx<'tcx>,
+            cx: LayoutCx<'tcx, TyCtxt<'tcx>>,
         ) -> Result<Self, Err> {
             match &layout.fields {
                 FieldsShape::Primitive => {
                     assert_eq!(members.len(), 1);
                     let inner_ty = members[0];
+                    let inner_layout = layout_of(cx, inner_ty)?;
                     Self::from_ty(inner_ty, cx)
                 }
                 FieldsShape::Arbitrary { offsets, .. } => {
@@ -406,7 +299,7 @@ pub(crate) mod rustc {
         fn from_struct(
             (ty, layout): (Ty<'tcx>, Layout<'tcx>),
             def: AdtDef<'tcx>,
-            cx: LayoutCx<'tcx>,
+            cx: LayoutCx<'tcx, TyCtxt<'tcx>>,
         ) -> Result<Self, Err> {
             assert!(def.is_struct());
             let def = Def::Adt(def);
@@ -421,54 +314,57 @@ pub(crate) mod rustc {
         fn from_enum(
             (ty, layout): (Ty<'tcx>, Layout<'tcx>),
             def: AdtDef<'tcx>,
-            cx: LayoutCx<'tcx>,
+            cx: LayoutCx<'tcx, TyCtxt<'tcx>>,
         ) -> Result<Self, Err> {
             assert!(def.is_enum());
 
-            // Computes the layout of a variant.
-            let layout_of_variant = |index, encoding: Option<_>| -> Result<Self, Err> {
-                let variant_layout = ty_variant(cx, (ty, layout), index);
-                if variant_layout.is_uninhabited() {
-                    return Ok(Self::uninhabited());
-                }
-                let tag = cx.tcx().tag_for_variant(
-                    cx.typing_env.as_query_input((cx.tcx().erase_and_anonymize_regions(ty), index)),
-                );
+            // Computes the variant of a given index.
+            let layout_of_variant = |index| {
+                let tag = cx.tcx.tag_for_variant((cx.tcx.erase_regions(ty), index));
                 let variant_def = Def::Variant(def.variant(index));
-                Self::from_variant(
-                    variant_def,
-                    tag.map(|tag| (tag, index, encoding.unwrap())),
-                    (ty, variant_layout),
-                    layout.size,
-                    cx,
-                )
+                let variant_layout = ty_variant(cx, (ty, layout), index);
+                Self::from_variant(variant_def, tag, (ty, variant_layout), layout.size, cx)
             };
 
+            // We consider three kinds of enums, each demanding a different
+            // treatment of their layout computation:
+            // 1. enums that are uninhabited ZSTs
+            // 2. enums that delegate their layout to a variant
+            // 3. enums with multiple variants
             match layout.variants() {
-                Variants::Empty => Ok(Self::uninhabited()),
+                Variants::Single { .. }
+                    if layout.abi.is_uninhabited() && layout.size == Size::ZERO =>
+                {
+                    // The layout representation of uninhabited, ZST enums is
+                    // defined to be like that of the `!` type, as opposed of a
+                    // typical enum. Consequently, they cannot be descended into
+                    // as if they typical enums. We therefore special-case this
+                    // scenario and simply return an uninhabited `Tree`.
+                    Ok(Self::uninhabited())
+                }
                 Variants::Single { index } => {
                     // `Variants::Single` on enums with variants denotes that
                     // the enum delegates its layout to the variant at `index`.
-                    layout_of_variant(*index, None)
+                    layout_of_variant(*index)
                 }
-                Variants::Multiple { tag: _, tag_encoding, tag_field, .. } => {
+                Variants::Multiple { tag_field, .. } => {
                     // `Variants::Multiple` denotes an enum with multiple
                     // variants. The layout of such an enum is the disjunction
                     // of the layouts of its tagged variants.
 
                     // For enums (but not coroutines), the tag field is
                     // currently always the first field of the layout.
-                    assert_eq!(*tag_field, FieldIdx::ZERO);
+                    assert_eq!(*tag_field, 0);
 
                     let variants = def.discriminants(cx.tcx()).try_fold(
                         Self::uninhabited(),
-                        |variants, (idx, _discriminant)| {
-                            let variant = layout_of_variant(idx, Some(tag_encoding.clone()))?;
+                        |variants, (idx, ref discriminant)| {
+                            let variant = layout_of_variant(idx)?;
                             Result::<Self, Err>::Ok(variants.or(variant))
                         },
                     )?;
 
-                    Ok(Self::def(Def::Adt(def)).then(variants))
+                    return Ok(Self::def(Def::Adt(def)).then(variants));
                 }
             }
         }
@@ -484,14 +380,14 @@ pub(crate) mod rustc {
         /// `0`.
         fn from_variant(
             def: Def<'tcx>,
-            tag: Option<(ScalarInt, VariantIdx, TagEncoding<VariantIdx>)>,
+            tag: Option<ScalarInt>,
             (ty, layout): (Ty<'tcx>, Layout<'tcx>),
             total_size: Size,
-            cx: LayoutCx<'tcx>,
+            cx: LayoutCx<'tcx, TyCtxt<'tcx>>,
         ) -> Result<Self, Err> {
             // This constructor does not support non-`FieldsShape::Arbitrary`
             // layouts.
-            let FieldsShape::Arbitrary { offsets, in_memory_order } = layout.fields() else {
+            let FieldsShape::Arbitrary { offsets, memory_index } = layout.fields() else {
                 return Err(Err::NotYetSupported);
             };
 
@@ -504,22 +400,14 @@ pub(crate) mod rustc {
             let mut struct_tree = Self::def(def);
 
             // If a `tag` is provided, place it at the start of the layout.
-            if let Some((tag, index, encoding)) = &tag {
-                match encoding {
-                    TagEncoding::Direct => {
-                        size += tag.size();
-                    }
-                    TagEncoding::Niche { niche_variants, .. } => {
-                        if !niche_variants.contains(index) {
-                            size += tag.size();
-                        }
-                    }
-                }
-                struct_tree = struct_tree.then(Self::from_tag(*tag, cx.tcx()));
+            if let Some(tag) = tag {
+                size += tag.size();
+                struct_tree = struct_tree.then(Self::from_tag(tag, cx.tcx));
             }
 
             // Append the fields, in memory order, to the layout.
-            for &field_idx in in_memory_order.iter() {
+            let inverse_memory_index = memory_index.invert_bijective_mapping();
+            for (memory_idx, &field_idx) in inverse_memory_index.iter_enumerated() {
                 // Add interfield padding.
                 let padding_needed = offsets[field_idx] - size;
                 let padding = Self::padding(padding_needed.bytes_usize());
@@ -542,7 +430,7 @@ pub(crate) mod rustc {
 
         /// Constructs a `Tree` representing the value of a enum tag.
         fn from_tag(tag: ScalarInt, tcx: TyCtxt<'tcx>) -> Self {
-            use rustc_abi::Endian;
+            use rustc_target::abi::Endian;
             let size = tag.size();
             let bits = tag.to_bits(size);
             let bytes: [u8; 16];
@@ -556,7 +444,7 @@ pub(crate) mod rustc {
                     &bytes[bytes.len() - size.bytes_usize()..]
                 }
             };
-            Self::Seq(bytes.iter().map(|&b| Self::byte(b)).collect())
+            Self::Seq(bytes.iter().map(|&b| Self::from_bits(b)).collect())
         }
 
         /// Constructs a `Tree` from a union.
@@ -567,20 +455,21 @@ pub(crate) mod rustc {
         fn from_union(
             (ty, layout): (Ty<'tcx>, Layout<'tcx>),
             def: AdtDef<'tcx>,
-            cx: LayoutCx<'tcx>,
+            cx: LayoutCx<'tcx, TyCtxt<'tcx>>,
         ) -> Result<Self, Err> {
             assert!(def.is_union());
 
             // This constructor does not support non-`FieldsShape::Union`
             // layouts. Fields of this shape are all placed at offset 0.
-            let FieldsShape::Union(_fields) = layout.fields() else {
+            let FieldsShape::Union(fields) = layout.fields() else {
                 return Err(Err::NotYetSupported);
             };
 
             let fields = &def.non_enum_variant().fields;
             let fields = fields.iter_enumerated().try_fold(
                 Self::uninhabited(),
-                |fields, (idx, _field_def)| {
+                |fields, (idx, field_def)| {
+                    let field_def = Def::Field(field_def);
                     let field_ty = ty_field(cx, (ty, layout), idx);
                     let field_layout = layout_of(cx, field_ty)?;
                     let field = Self::from_ty(field_ty, cx)?;
@@ -596,31 +485,26 @@ pub(crate) mod rustc {
     }
 
     fn ty_field<'tcx>(
-        cx: LayoutCx<'tcx>,
+        cx: LayoutCx<'tcx, TyCtxt<'tcx>>,
         (ty, layout): (Ty<'tcx>, Layout<'tcx>),
         i: FieldIdx,
     ) -> Ty<'tcx> {
-        // We cannot use `ty_and_layout_field` to retrieve the field type, since
-        // `ty_and_layout_field` erases regions in the returned type. We must
-        // not erase regions here, since we may need to ultimately emit outlives
-        // obligations as a consequence of the transmutability analysis.
         match ty.kind() {
             ty::Adt(def, args) => {
                 match layout.variants {
                     Variants::Single { index } => {
                         let field = &def.variant(index).fields[i];
-                        field.ty(cx.tcx(), args)
+                        field.ty(cx.tcx, args)
                     }
-                    Variants::Empty => panic!("there is no field in Variants::Empty types"),
                     // Discriminant field for enums (where applicable).
                     Variants::Multiple { tag, .. } => {
                         assert_eq!(i.as_usize(), 0);
-                        ty::layout::PrimitiveExt::to_ty(&tag.primitive(), cx.tcx())
+                        ty::layout::PrimitiveExt::to_ty(&tag.primitive(), cx.tcx)
                     }
                 }
             }
             ty::Tuple(fields) => fields[i.as_usize()],
-            kind => unimplemented!(
+            kind @ _ => unimplemented!(
                 "only a subset of `Ty::ty_and_layout_field`'s functionality is implemented. implementation needed for {:?}",
                 kind
             ),
@@ -628,11 +512,11 @@ pub(crate) mod rustc {
     }
 
     fn ty_variant<'tcx>(
-        cx: LayoutCx<'tcx>,
+        cx: LayoutCx<'tcx, TyCtxt<'tcx>>,
         (ty, layout): (Ty<'tcx>, Layout<'tcx>),
         i: VariantIdx,
     ) -> Layout<'tcx> {
-        let ty = cx.tcx().erase_and_anonymize_regions(ty);
+        let ty = cx.tcx.erase_regions(ty);
         TyAndLayout { ty, layout }.for_variant(&cx, i).layout
     }
 }

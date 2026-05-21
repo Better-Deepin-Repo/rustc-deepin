@@ -1,7 +1,7 @@
 //@ check-pass
 
 macro_rules! m {
-    () => { #[cfg(false)] fn f() {} }
+    () => { #[cfg(any())] fn f() {} }
 }
 
 trait T {}

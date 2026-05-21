@@ -28,7 +28,7 @@ fn ok_compiler_version(compiler: &str) -> bool {
     }
 
     let compiler_output =
-        cmd(compiler).stdin_buf(trigger).arg("-").arg("-E").arg("-x").arg("c").run().stdout_utf8();
+        cmd(compiler).stdin(trigger).arg("-").arg("-E").arg("-x").arg("c").run().stdout_utf8();
     let re = Regex::new(r"(?m)^(\d+)").unwrap();
     let version: u32 =
         re.captures(&compiler_output).unwrap().get(1).unwrap().as_str().parse().unwrap();
@@ -49,6 +49,7 @@ fn test(compiler: &str) {
 
     rustc()
         .input("test-aslr.rs")
+        .target(target())
         .linker(compiler)
         .arg("-Clinker-flavor=gcc")
         .arg("-Ctarget-feature=+crt-static")

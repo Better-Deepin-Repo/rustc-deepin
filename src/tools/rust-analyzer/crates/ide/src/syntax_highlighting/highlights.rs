@@ -4,7 +4,7 @@ use std::iter;
 use stdx::equal_range_by;
 use syntax::TextRange;
 
-use crate::{HighlightConfig, HlRange, HlTag};
+use crate::{HlRange, HlTag};
 
 pub(super) struct Highlights {
     root: Node,
@@ -24,12 +24,6 @@ impl Highlights {
 
     pub(super) fn add(&mut self, hl_range: HlRange) {
         self.root.add(hl_range);
-    }
-
-    pub(super) fn add_with(&mut self, config: &HighlightConfig<'_>, mut hl_range: HlRange) {
-        if super::filter_by_config(&mut hl_range.highlight, config) {
-            self.root.add(hl_range);
-        }
     }
 
     pub(super) fn to_vec(&self) -> Vec<HlRange> {

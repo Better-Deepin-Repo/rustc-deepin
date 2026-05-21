@@ -45,5 +45,5 @@ impl<T> TraitB for T {
 
 fn test() {
     S.f();
-   //~^ ERROR multiple applicable items in scope
+   //~^ multiple applicable items in scope
 }

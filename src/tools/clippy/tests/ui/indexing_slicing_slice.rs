@@ -1,5 +1,6 @@
 //@aux-build: proc_macros.rs
 
+#![warn(clippy::indexing_slicing)]
 // We also check the out_of_bounds_indexing lint here, because it lints similar things and
 // we want to avoid false positives.
 #![warn(clippy::out_of_bounds_indexing)]
@@ -112,21 +113,22 @@ fn main() {
     let index_from: usize = 2;
     let index_to: usize = 3;
     &x[index..];
-    //~^ indexing_slicing
+    //~^ ERROR: slicing may panic
     &x[..index];
-    //~^ indexing_slicing
+    //~^ ERROR: slicing may panic
     &x[index_from..index_to];
-    //~^ indexing_slicing
+    //~^ ERROR: slicing may panic
     &x[index_from..][..index_to];
-    //~^ indexing_slicing
-    //~| indexing_slicing
+    //~^ ERROR: slicing may panic
+    //~| ERROR: slicing may panic
     &x[5..][..10];
-    //~^ indexing_slicing
-    //~| out_of_bounds_indexing
+    //~^ ERROR: slicing may panic
+    //~| ERROR: range is out of bounds
+    //~| NOTE: `-D clippy::out-of-bounds-indexing` implied by `-D warnings`
     &x[0..][..3];
-    //~^ indexing_slicing
+    //~^ ERROR: slicing may panic
     &x[1..][..5];
-    //~^ indexing_slicing
+    //~^ ERROR: slicing may panic
 
     &x[0..].get(..3); // Ok, should not produce stderr.
     &x[0..3]; // Ok, should not produce stderr.
@@ -134,22 +136,22 @@ fn main() {
     let y = &x;
     &y[1..2];
     &y[0..=4];
-    //~^ out_of_bounds_indexing
+    //~^ ERROR: range is out of bounds
     &y[..=4];
-    //~^ out_of_bounds_indexing
+    //~^ ERROR: range is out of bounds
 
     &y[..]; // Ok, should not produce stderr.
 
     let v = vec![0; 5];
     &v[10..100];
-    //~^ indexing_slicing
+    //~^ ERROR: slicing may panic
     &x[10..][..100];
-    //~^ indexing_slicing
-    //~| out_of_bounds_indexing
+    //~^ ERROR: slicing may panic
+    //~| ERROR: range is out of bounds
     &v[10..];
-    //~^ indexing_slicing
+    //~^ ERROR: slicing may panic
     &v[..100];
-    //~^ indexing_slicing
+    //~^ ERROR: slicing may panic
 
     &v[..]; // Ok, should not produce stderr.
 
@@ -167,15 +169,12 @@ fn main() {
 
     // Lint on this, because `get` does exist with same signature
     map_with_get[true];
-    //~^ indexing_slicing
 
     let s = S::<i32>(1);
     s[0];
-    //~^ indexing_slicing
 
     let y = Y::<i32>(1);
     y[0];
-    //~^ indexing_slicing
 
     let z = Z::<i32>(1);
     z[0];

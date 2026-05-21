@@ -1,5 +1,9 @@
 //@ run-pass
-//@ needs-subprocess
+#![allow(stable_features)]
+//@ ignore-wasm32 no processes
+//@ ignore-sgx no processes
+
+#![feature(os)]
 
 #[cfg(unix)]
 fn main() {

@@ -7,10 +7,9 @@
 //! - <https://doc.rust-lang.org/nightly/nightly-rustc/cargo>: targeted at cargo contributors
 //!   - Updated on each update of the `cargo` submodule in `rust-lang/rust`
 //!
-//! > This library is maintained by the Cargo team, primarily for use by Cargo
-//! > and not intended for external use (except as a transitive dependency). This
-//! > crate may make major changes to its APIs. See [The Cargo Book:
-//! > External tools] for more on this topic.
+//! **WARNING:** Using Cargo as a library has drawbacks, particularly the API is unstable,
+//! and there is no clear path to stabilize it soon at the time of writing.  See [The Cargo Book:
+//! External tools] for more on this topic.
 //!
 //! ## Overview
 //!
@@ -139,14 +138,13 @@
 //! [The Cargo Book]: https://doc.rust-lang.org/cargo/
 //! [Cargo Contributor Guide]: https://doc.crates.io/contrib/
 
-use crate::core::Shell;
-use crate::core::shell::Verbosity;
 use crate::core::shell::Verbosity::Verbose;
+use crate::core::Shell;
 use anyhow::Error;
 use tracing::debug;
 
 pub use crate::util::errors::{AlreadyPrintedError, InternalError, VerboseError};
-pub use crate::util::{CargoResult, CliError, CliResult, GlobalContext, indented_lines};
+pub use crate::util::{indented_lines, CargoResult, CliError, CliResult, GlobalContext};
 pub use crate::version::version;
 
 pub const CARGO_ENV: &str = "CARGO";
@@ -155,7 +153,6 @@ pub const CARGO_ENV: &str = "CARGO";
 mod macros;
 
 pub mod core;
-pub mod lints;
 pub mod ops;
 pub mod sources;
 pub mod util;
@@ -208,21 +205,18 @@ pub fn display_warning_with_error(warning: &str, err: &Error, shell: &mut Shell)
     _display_error(err, shell, false);
 }
 
-fn error_chain(err: &Error, verbosity: Verbosity) -> impl Iterator<Item = &dyn std::fmt::Display> {
-    err.chain()
-        .take_while(move |err| {
-            // If we're not in verbose mode then only print cause chain until one
-            // marked as `VerboseError` appears.
-            //
-            // Generally the top error shouldn't be verbose, but check it anyways.
-            verbosity == Verbose || !err.is::<VerboseError>()
-        })
-        .take_while(|err| !err.is::<AlreadyPrintedError>())
-        .map(|err| err as &dyn std::fmt::Display)
-}
-
-fn _display_error(err: &Error, shell: &mut Shell, as_err: bool) {
-    for (i, err) in error_chain(err, shell.verbosity()).enumerate() {
+fn _display_error(err: &Error, shell: &mut Shell, as_err: bool) -> bool {
+    for (i, err) in err.chain().enumerate() {
+        // If we're not in verbose mode then only print cause chain until one
+        // marked as `VerboseError` appears.
+        //
+        // Generally the top error shouldn't be verbose, but check it anyways.
+        if shell.verbosity() != Verbose && err.is::<VerboseError>() {
+            return true;
+        }
+        if err.is::<AlreadyPrintedError>() {
+            break;
+        }
         if i == 0 {
             if as_err {
                 drop(shell.error(&err));
@@ -234,4 +228,5 @@ fn _display_error(err: &Error, shell: &mut Shell, as_err: bool) {
             drop(write!(shell.err(), "{}", indented_lines(&err.to_string())));
         }
     }
+    false
 }

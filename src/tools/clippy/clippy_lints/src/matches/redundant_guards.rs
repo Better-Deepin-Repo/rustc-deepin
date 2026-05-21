@@ -1,23 +1,22 @@
+use clippy_config::msrvs::Msrv;
 use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::macros::matching_root_macro_call;
-use clippy_utils::msrvs::Msrv;
-use clippy_utils::res::MaybeResPath;
 use clippy_utils::source::snippet;
 use clippy_utils::visitors::{for_each_expr_without_closures, is_local_used};
-use clippy_utils::{is_in_const_context, sym};
+use clippy_utils::{is_in_const_context, path_to_local};
 use rustc_ast::{BorrowKind, LitKind};
 use rustc_errors::Applicability;
 use rustc_hir::def::{DefKind, Res};
 use rustc_hir::{Arm, BinOpKind, Expr, ExprKind, MatchSource, Node, PatKind, UnOp};
 use rustc_lint::LateContext;
 use rustc_span::symbol::Ident;
-use rustc_span::{Span, Symbol};
+use rustc_span::{sym, Span, Symbol};
 use std::borrow::Cow;
 use std::ops::ControlFlow;
 
-use super::{REDUNDANT_GUARDS, pat_contains_disallowed_or};
+use super::{pat_contains_disallowed_or, REDUNDANT_GUARDS};
 
-pub(super) fn check<'tcx>(cx: &LateContext<'tcx>, arms: &'tcx [Arm<'tcx>], msrv: Msrv) {
+pub(super) fn check<'tcx>(cx: &LateContext<'tcx>, arms: &'tcx [Arm<'tcx>], msrv: &Msrv) {
     for outer_arm in arms {
         let Some(guard) = outer_arm.guard else {
             continue;
@@ -27,10 +26,10 @@ pub(super) fn check<'tcx>(cx: &LateContext<'tcx>, arms: &'tcx [Arm<'tcx>], msrv:
         if let ExprKind::Match(scrutinee, [arm, _], MatchSource::Normal) = guard.kind
             && matching_root_macro_call(cx, guard.span, sym::matches_macro).is_some()
             && let Some(binding) = get_pat_binding(cx, scrutinee, outer_arm)
-            && !pat_contains_disallowed_or(cx, arm.pat, msrv)
+            && !pat_contains_disallowed_or(arm.pat, msrv)
         {
             let pat_span = match (arm.pat.kind, binding.byref_ident) {
-                (PatKind::Ref(pat, _, _), Some(_)) => pat.span,
+                (PatKind::Ref(pat, _), Some(_)) => pat.span,
                 (PatKind::Ref(..), None) | (_, Some(_)) => continue,
                 _ => arm.pat.span,
             };
@@ -46,10 +45,10 @@ pub(super) fn check<'tcx>(cx: &LateContext<'tcx>, arms: &'tcx [Arm<'tcx>], msrv:
         // `Some(x) if let Some(2) = x`
         else if let ExprKind::Let(let_expr) = guard.kind
             && let Some(binding) = get_pat_binding(cx, let_expr.init, outer_arm)
-            && !pat_contains_disallowed_or(cx, let_expr.pat, msrv)
+            && !pat_contains_disallowed_or(let_expr.pat, msrv)
         {
             let pat_span = match (let_expr.pat.kind, binding.byref_ident) {
-                (PatKind::Ref(pat, _, _), Some(_)) => pat.span,
+                (PatKind::Ref(pat, _), Some(_)) => pat.span,
                 (PatKind::Ref(..), None) | (_, Some(_)) => continue,
                 _ => let_expr.pat.span,
             };
@@ -113,7 +112,7 @@ fn check_method_calls<'tcx>(
     let ty = cx.typeck_results().expr_ty(recv).peel_refs();
     let slice_like = ty.is_slice() || ty.is_array();
 
-    let sugg = if method == sym::is_empty {
+    let sugg = if method == sym!(is_empty) {
         // `s if s.is_empty()` becomes ""
         // `arr if arr.is_empty()` becomes []
 
@@ -138,9 +137,9 @@ fn check_method_calls<'tcx>(
 
         if needles.is_empty() {
             sugg.insert_str(1, "..");
-        } else if method == sym::starts_with {
+        } else if method == sym!(starts_with) {
             sugg.insert_str(sugg.len() - 1, ", ..");
-        } else if method == sym::ends_with {
+        } else if method == sym!(ends_with) {
             sugg.insert_str(1, ".., ");
         } else {
             return;
@@ -165,7 +164,7 @@ fn get_pat_binding<'tcx>(
     guard_expr: &Expr<'_>,
     outer_arm: &Arm<'tcx>,
 ) -> Option<PatBindingInfo> {
-    if let Some(local) = guard_expr.res_local_id()
+    if let Some(local) = path_to_local(guard_expr)
         && !is_local_used(cx, outer_arm.body, local)
     {
         let mut span = None;
@@ -176,7 +175,7 @@ fn get_pat_binding<'tcx>(
             if let PatKind::Binding(bind_annot, hir_id, ident, _) = pat.kind
                 && hir_id == local
             {
-                if matches!(bind_annot.0, rustc_ast::ByRef::Yes(..)) {
+                if matches!(bind_annot.0, rustc_ast::ByRef::Yes(_)) {
                     let _ = byref_ident.insert(ident);
                 }
                 // the second call of `replace()` returns a `Some(span)`, meaning a multi-binding pattern
@@ -226,7 +225,7 @@ fn emit_redundant_guards<'tcx>(
                 } => (span.shrink_to_hi(), format!(": {binding_replacement}")),
                 PatBindingInfo { span, .. } => (span, binding_replacement.into_owned()),
             };
-            diag.multipart_suggestion(
+            diag.multipart_suggestion_verbose(
                 "try",
                 vec![
                     suggestion_span,
@@ -244,9 +243,15 @@ fn emit_redundant_guards<'tcx>(
 }
 
 /// Checks if the given `Expr` can also be represented as a `Pat`.
+///
+/// All literals generally also work as patterns, however float literals are special.
+/// They are currently (as of 2023/08/08) still allowed in patterns, but that will become
+/// an error in the future, and rustc already actively warns against this (see rust#41620),
+/// so we don't consider those as usable within patterns for linting purposes.
 fn expr_can_be_pat(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
     for_each_expr_without_closures(expr, |expr| {
         if match expr.kind {
+            ExprKind::ConstBlock(..) => cx.tcx.features().inline_const_pat,
             ExprKind::Call(c, ..) if let ExprKind::Path(qpath) = c.kind => {
                 // Allow ctors
                 matches!(cx.qpath_res(&qpath, c.hir_id), Res::Def(DefKind::Ctor(..), ..))
@@ -262,7 +267,7 @@ fn expr_can_be_pat(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
             | ExprKind::Tup(..)
             | ExprKind::Struct(..)
             | ExprKind::Unary(UnOp::Neg, _) => true,
-            ExprKind::Lit(lit) if !matches!(lit.node, LitKind::CStr(..)) => true,
+            ExprKind::Lit(lit) if !matches!(lit.node, LitKind::Float(..)) => true,
             _ => false,
         } {
             return ControlFlow::Continue(());

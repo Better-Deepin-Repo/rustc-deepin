@@ -10,20 +10,19 @@
 //! while the latter involves operations on the registry Web API.
 
 use std::collections::{HashMap, HashSet};
-use std::task::{Poll, ready};
+use std::task::{ready, Poll};
 
-use crate::core::{Dependency, PackageId, PackageSet, Patch, SourceId, Summary};
-use crate::sources::IndexSummary;
+use crate::core::PackageSet;
+use crate::core::{Dependency, PackageId, SourceId, Summary};
 use crate::sources::config::SourceConfigMap;
 use crate::sources::source::QueryKind;
 use crate::sources::source::Source;
 use crate::sources::source::SourceMap;
+use crate::sources::IndexSummary;
 use crate::util::errors::CargoResult;
 use crate::util::interning::InternedString;
 use crate::util::{CanonicalUrl, GlobalContext};
-use annotate_snippets::Level;
-use anyhow::Context as _;
-use itertools::Itertools;
+use anyhow::{bail, Context as _};
 use tracing::{debug, trace};
 use url::Url;
 
@@ -110,7 +109,7 @@ pub struct PackageRegistry<'gctx> {
     /// This is constructed via [`PackageRegistry::register_lock`].
     /// See also [`LockedMap`].
     locked: LockedMap,
-    /// Packages allowed to be used, even if they are yanked.
+    /// A group of packages tha allows to use even when yanked.
     yanked_whitelist: HashSet<PackageId>,
     source_config: SourceConfigMap<'gctx>,
 
@@ -177,7 +176,7 @@ enum Kind {
 ///   It is the patch locked to a specific version found in Cargo.lock.
 ///   This will be `None` if `Cargo.lock` doesn't exist,
 ///   or the patch did not match any existing entries in `Cargo.lock`.
-pub type PatchDependency<'a> = (&'a Patch, Option<LockedPatchDependency>);
+pub type PatchDependency<'a> = (&'a Dependency, Option<LockedPatchDependency>);
 
 /// Argument to [`PackageRegistry::patch`] which is information about a `[patch]`
 /// directive that we found in a lockfile, if present.
@@ -342,7 +341,7 @@ impl<'gctx> PackageRegistry<'gctx> {
         &mut self,
         url: &Url,
         patch_deps: &[PatchDependency<'_>],
-    ) -> CargoResult<Vec<(Patch, PackageId)>> {
+    ) -> CargoResult<Vec<(Dependency, PackageId)>> {
         // NOTE: None of this code is aware of required features. If a patch
         // is missing a required feature, you end up with an "unused patch"
         // warning, which is very hard to understand. Ideally the warning
@@ -372,7 +371,7 @@ impl<'gctx> PackageRegistry<'gctx> {
                 // Use the locked patch if it exists, otherwise use the original.
                 let dep = match locked {
                     Some(lock) => &lock.dependency,
-                    None => &orig_patch.dep,
+                    None => *orig_patch,
                 };
                 debug!(
                     "registering a patch for `{}` with `{}`",
@@ -380,27 +379,12 @@ impl<'gctx> PackageRegistry<'gctx> {
                     dep.package_name()
                 );
 
-                let mut unused_fields = Vec::new();
-                if dep.features().len() != 0 {
-                    unused_fields.push("`features`");
-                }
-                if !dep.uses_default_features() {
-                    unused_fields.push("`default-features`")
-                }
-                if !unused_fields.is_empty() {
-                    self.source_config.gctx().shell().print_report(
-                        &[Level::WARNING
-                            .secondary_title(format!(
-                                "unused field in patch for `{}`: {}",
-                                dep.package_name(),
-                                unused_fields.join(", ")
-                            ))
-                            .element(Level::HELP.message(format!(
-                                "configure {} in the `dependencies` entry",
-                                unused_fields.join(", ")
-                            )))],
-                        false,
-                    )?;
+                if dep.features().len() != 0 || !dep.uses_default_features() {
+                    self.source_config.gctx().shell().warn(format!(
+                        "patch for `{}` uses the features mechanism. \
+                        default-features and features will not take effect because the patch dependency does not support this mechanism",
+                        dep.package_name()
+                    ))?;
                 }
 
                 // Go straight to the source for resolving `dep`. Load it as we
@@ -430,13 +414,21 @@ impl<'gctx> PackageRegistry<'gctx> {
                 let summaries = summaries.into_iter().map(|s| s.into_summary()).collect();
 
                 let (summary, should_unlock) =
-                    match summary_for_patch(&orig_patch, url, &locked, summaries, source) {
+                    match summary_for_patch(orig_patch, &locked, summaries, source) {
                         Poll::Ready(x) => x,
                         Poll::Pending => {
                             patch_deps_pending.push(patch_dep_remaining);
                             continue;
                         }
-                    }?;
+                    }
+                    .with_context(|| {
+                        format!(
+                            "patch for `{}` in `{}` failed to resolve",
+                            orig_patch.package_name(),
+                            url,
+                        )
+                    })
+                    .with_context(|| format!("failed to resolve patches for `{}`", url))?;
 
                 debug!(
                     "patch summary is {:?} should_unlock={:?}",
@@ -448,13 +440,12 @@ impl<'gctx> PackageRegistry<'gctx> {
 
                 if *summary.package_id().source_id().canonical_url() == canonical {
                     return Err(anyhow::anyhow!(
-                        "patch for `{}` points to the same source, but patches must point to different sources\n\
-                        help: check `{}` patch definition for `{}` in `{}`",
+                        "patch for `{}` in `{}` points to the same source, but \
+                        patches must point to different sources",
                         dep.package_name(),
-                        dep.package_name(),
-                        url,
-                        orig_patch.loc
-                    ));
+                        url
+                    )
+                    .context(format!("failed to resolve patches for `{}`", url)));
                 }
                 unlocked_summaries.push(summary);
             }
@@ -468,21 +459,12 @@ impl<'gctx> PackageRegistry<'gctx> {
             let name = summary.package_id().name();
             let version = summary.package_id().version();
             if !name_and_version.insert((name, version)) {
-                let duplicate_locations = patch_deps
-                    .iter()
-                    .filter(|&p| p.0.dep.package_name() == name)
-                    .map(|p| format!("`{}`", p.0.loc))
-                    .unique()
-                    .join(", ");
-                return Err(anyhow::anyhow!(
-                    "several `[patch]` entries resolving to same version `{} v{}`\n\
-                    help: check `{}` patch definitions for `{}` in {}",
+                bail!(
+                    "cannot have two `[patch]` entries which both resolve \
+                     to `{} v{}`",
                     name,
-                    version,
-                    name,
-                    url,
-                    duplicate_locations
-                ));
+                    version
+                );
             }
         }
 
@@ -542,7 +524,7 @@ impl<'gctx> PackageRegistry<'gctx> {
         let source = self
             .source_config
             .load(source_id, &self.yanked_whitelist)
-            .with_context(|| format!("unable to update {}", source_id))?;
+            .with_context(|| format!("Unable to update {}", source_id))?;
         assert_eq!(source.source_id(), source_id);
 
         if kind == Kind::Override {
@@ -692,10 +674,9 @@ impl<'gctx> Registry for PackageRegistry<'gctx> {
             let patch = patches.remove(0);
             match override_summary {
                 Some(override_summary) => {
-                    self.warn_bad_override(override_summary.as_summary(), &patch)?;
-                    let override_summary =
-                        override_summary.map_summary(|summary| self.lock(summary));
-                    f(override_summary);
+                    let override_summary = override_summary.into_summary();
+                    self.warn_bad_override(&override_summary, &patch)?;
+                    f(IndexSummary::Candidate(self.lock(override_summary)));
                 }
                 None => f(IndexSummary::Candidate(patch)),
             }
@@ -727,7 +708,7 @@ impl<'gctx> Registry for PackageRegistry<'gctx> {
         let source = self.sources.get_mut(dep.source_id());
         match (override_summary, source) {
             (Some(_), None) => {
-                return Poll::Ready(Err(anyhow::anyhow!("override found but no real ones")));
+                return Poll::Ready(Err(anyhow::anyhow!("override found but no real ones")))
             }
             (None, None) => return Poll::Ready(Ok(())),
 
@@ -752,8 +733,8 @@ impl<'gctx> Registry for PackageRegistry<'gctx> {
                             return;
                         }
                     }
-                    let summary = summary.map_summary(|summary| lock(locked, all_patches, summary));
-                    f(summary)
+                    let summary = summary.into_summary();
+                    f(IndexSummary::Candidate(lock(locked, all_patches, summary)))
                 };
                 return source.query(dep, kind, callback);
             }
@@ -779,11 +760,11 @@ impl<'gctx> Registry for PackageRegistry<'gctx> {
                         "found an override with a non-locked list"
                     )));
                 }
+                let override_summary = override_summary.into_summary();
                 if let Some(to_warn) = to_warn {
-                    self.warn_bad_override(override_summary.as_summary(), to_warn.as_summary())?;
+                    self.warn_bad_override(&override_summary, to_warn.as_summary())?;
                 }
-                let override_summary = override_summary.map_summary(|summary| self.lock(summary));
-                f(override_summary);
+                f(IndexSummary::Candidate(self.lock(override_summary)));
             }
         }
 
@@ -806,13 +787,15 @@ impl<'gctx> Registry for PackageRegistry<'gctx> {
 
     #[tracing::instrument(skip_all)]
     fn block_until_ready(&mut self) -> CargoResult<()> {
-        // Ensure `shell` is not already in use,
-        // regardless of which source is used and how it happens to behave this time
-        self.gctx.debug_assert_shell_not_borrowed();
+        if cfg!(debug_assertions) {
+            // Force borrow to catch invalid borrows, regardless of which source is used and how it
+            // happens to behave this time
+            self.gctx.shell().verbosity();
+        }
         for (source_id, source) in self.sources.sources_mut() {
             source
                 .block_until_ready()
-                .with_context(|| format!("unable to update {}", source_id))?;
+                .with_context(|| format!("Unable to update {}", source_id))?;
         }
         Ok(())
     }
@@ -934,8 +917,7 @@ fn lock(
 /// happens when a match cannot be found with the `locked` one, but found one
 /// via the original patch, so we need to inform the resolver to "unlock" it.
 fn summary_for_patch(
-    original_patch: &Patch,
-    orig_patch_url: &Url,
+    orig_patch: &Dependency,
     locked: &Option<LockedPatchDependency>,
     mut summaries: Vec<Summary>,
     source: &mut dyn Source,
@@ -956,15 +938,13 @@ fn summary_for_patch(
         let versions: Vec<_> = vers.into_iter().map(|v| v.to_string()).collect();
         return Poll::Ready(Err(anyhow::anyhow!(
             "patch for `{}` in `{}` resolved to more than one candidate\n\
-            note: found versions: {}\n\
-            help: check `{}` patch definition for `{}` in `{}`\n\
-            help: select only one package using `version = \"={}\"`",
-            &original_patch.dep.package_name(),
-            &original_patch.dep.source_id(),
+            Found versions: {}\n\
+            Update the patch definition to select only one package.\n\
+            For example, add an `=` version requirement to the patch definition, \
+            such as `version = \"={}\"`.",
+            orig_patch.package_name(),
+            orig_patch.source_id(),
             versions.join(", "),
-            &original_patch.dep.package_name(),
-            orig_patch_url,
-            original_patch.loc,
             versions.last().unwrap()
         )));
     }
@@ -972,11 +952,11 @@ fn summary_for_patch(
     // No summaries found, try to help the user figure out what is wrong.
     if let Some(locked) = locked {
         // Since the locked patch did not match anything, try the unlocked one.
-        let orig_matches = ready!(source.query_vec(&original_patch.dep, QueryKind::Exact))
-            .unwrap_or_else(|e| {
+        let orig_matches =
+            ready!(source.query_vec(orig_patch, QueryKind::Exact)).unwrap_or_else(|e| {
                 tracing::warn!(
                     "could not determine unlocked summaries for dep {:?}: {:?}",
-                    &original_patch.dep,
+                    orig_patch,
                     e
                 );
                 Vec::new()
@@ -984,20 +964,11 @@ fn summary_for_patch(
 
         let orig_matches = orig_matches.into_iter().map(|s| s.into_summary()).collect();
 
-        let summary = ready!(summary_for_patch(
-            original_patch,
-            orig_patch_url,
-            &None,
-            orig_matches,
-            source
-        ))?;
+        let summary = ready!(summary_for_patch(orig_patch, &None, orig_matches, source))?;
         return Poll::Ready(Ok((summary.0, Some(locked.package_id))));
     }
     // Try checking if there are *any* packages that match this by name.
-    let name_only_dep = Dependency::new_override(
-        original_patch.dep.package_name(),
-        original_patch.dep.source_id(),
-    );
+    let name_only_dep = Dependency::new_override(orig_patch.package_name(), orig_patch.source_id());
 
     let name_summaries =
         ready!(source.query_vec(&name_only_dep, QueryKind::Exact)).unwrap_or_else(|e| {
@@ -1013,7 +984,7 @@ fn summary_for_patch(
         .map(|summary| summary.as_summary().version())
         .collect::<Vec<_>>();
     let found = match vers.len() {
-        0 => "".to_string(),
+        0 => format!(""),
         1 => format!("version `{}`", vers[0]),
         _ => {
             vers.sort();
@@ -1023,27 +994,21 @@ fn summary_for_patch(
     };
     Poll::Ready(Err(if found.is_empty() {
         anyhow::anyhow!(
-            "patch location `{}` does not contain packages matching `{}`\n\
-            help: check `{}` patch definition for `{}` in `{}`",
-            &original_patch.dep.source_id(),
-            &original_patch.dep.package_name(),
-            &original_patch.dep.package_name(),
-            orig_patch_url,
-            original_patch.loc
+            "The patch location `{}` does not appear to contain any packages \
+            matching the name `{}`.",
+            orig_patch.source_id(),
+            orig_patch.package_name()
         )
     } else {
         anyhow::anyhow!(
-            "patch `{}` version mismatch\n\
-            note: patch location contains {}, but patch definition requires `{}`\n\
-            help: check patch location `{}`\n\
-            help: check `{}` patch definition for `{}` in `{}`",
-            &original_patch.dep.package_name(),
+            "The patch location `{}` contains a `{}` package with {}, but the patch \
+            definition requires `{}`.\n\
+            Check that the version in the patch location is what you expect, \
+            and update the patch definition to match.",
+            orig_patch.source_id(),
+            orig_patch.package_name(),
             found,
-            &original_patch.dep.version_req(),
-            &original_patch.dep.source_id(),
-            &original_patch.dep.package_name(),
-            orig_patch_url,
-            original_patch.loc
+            orig_patch.version_req()
         )
     }))
 }

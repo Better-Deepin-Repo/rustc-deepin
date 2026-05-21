@@ -81,7 +81,6 @@ considered incompatible.
         * [Minor: generalizing a type to use generics (with identical types)](#generic-generalize-identical)
         * [Major: generalizing a type to use generics (with possibly different types)](#generic-generalize-different)
         * [Minor: changing a generic type to a more generic type](#generic-more-generic)
-        * [Major: capturing more generic parameters in RPIT](#generic-rpit-capture)
     * Functions
         * [Major: adding/removing function parameters](#fn-change-arity)
         * [Possibly-breaking: introducing a new function type parameter](#fn-generic-new)
@@ -471,7 +470,7 @@ pub struct Example {
 // Example usage that will break.
 fn main() {
     let f = updated_crate::Example { f1: 1, f2: 2 };
-    let x = &f.f2; // Error: error[E0793]: reference to field of packed struct is unaligned
+    let x = &f.f2; // Error: reference to packed field is unaligned
 }
 ```
 
@@ -577,7 +576,7 @@ fn main() {
     let p = Packed { a: 1, b: 2 };
     // Some assumption about the size of the type.
     // Without `packed`, this fails since the size is 4.
-    const _: () = assert!(std::mem::size_of::<Packed>() == 3); // Error: assertion failed
+    const _: () = assert!(std::mem::size_of::<Packed>() == 3); // Error: evaluation of constant value failed
 }
 ```
 
@@ -656,7 +655,7 @@ use updated_crate::Packed;
 
 fn main() {
     let p = Packed { a: 1, b: 2 };
-    let x = &p.b; // Error: error[E0793]: reference to field of packed struct is unaligned
+    let x = &p.b; // Error: reference to packed field is unaligned
 }
 ```
 
@@ -696,7 +695,7 @@ fn main() {
     let p = Packed { a: 1, b: 2 };
     // Some assumption about the size of the type.
     // The alignment has changed from 8 to 4.
-    const _: () = assert!(std::mem::align_of::<Packed>() == 8); // Error: assertion failed
+    const _: () = assert!(std::mem::align_of::<Packed>() == 8); // Error: evaluation of constant value failed
 }
 ```
 
@@ -734,7 +733,7 @@ fn main() {
     let p = Packed { a: 1, b: 2 };
     // Some assumption about the size of the type.
     // The alignment has changed from 8 to 4.
-    const _: () = assert!(std::mem::align_of::<Packed>() == 8); // Error: assertion failed
+    const _: () = assert!(std::mem::align_of::<Packed>() == 8); // Error: evaluation of constant value failed
 }
 ```
 
@@ -766,7 +765,7 @@ pub struct SpecificLayout {
 // Example usage that will break.
 use updated_crate::SpecificLayout;
 
-unsafe extern "C" {
+extern "C" {
     // This C function is assuming a specific layout defined in a C header.
     fn c_fn_get_b(x: &SpecificLayout) -> u32;
 }
@@ -820,7 +819,7 @@ pub struct SpecificLayout {
 // Example usage that will break.
 use updated_crate::SpecificLayout;
 
-unsafe extern "C" {
+extern "C" {
     // This C function is assuming a specific layout defined in a C header.
     fn c_fn_get_b(x: &SpecificLayout) -> u32; // Error: is not FFI-safe
 }
@@ -941,7 +940,7 @@ pub struct Transparent<T>(T);
 #![deny(improper_ctypes)]
 use updated_crate::Transparent;
 
-unsafe extern "C" {
+extern "C" {
     fn c_fn() -> Transparent<f64>; // Error: is not FFI-safe
 }
 
@@ -1341,7 +1340,7 @@ struct Foo;
 impl Trait for Foo {}
 
 fn main() {
-    let obj: Box<dyn Trait> = Box::new(Foo); // Error: the trait `Trait` is not dyn compatible
+    let obj: Box<dyn Trait> = Box::new(Foo); // Error: cannot be made into an object
 }
 ```
 
@@ -1616,49 +1615,6 @@ fn main() {
     let s: Foo<f32> = Foo(1.0, 2.0);
 }
 ```
-
-### Major: capturing more generic parameters in RPIT {#generic-rpit-capture}
-
-It is a breaking change to capture additional generic parameters in an [RPIT] (return-position impl trait).
-
-```rust,ignore
-// MAJOR CHANGE
-
-///////////////////////////////////////////////////////////
-// Before
-pub fn f<'a, 'b>(x: &'a str, y: &'b str) -> impl Iterator<Item = char> + use<'a> {
-    x.chars()
-}
-
-///////////////////////////////////////////////////////////
-// After
-pub fn f<'a, 'b>(x: &'a str, y: &'b str) -> impl Iterator<Item = char> + use<'a, 'b> {
-    x.chars().chain(y.chars())
-}
-
-///////////////////////////////////////////////////////////
-// Example usage that will break.
-fn main() {
-    let a = String::new();
-    let b = String::new();
-    let iter = updated_crate::f(&a, &b);
-    drop(b); // Error: cannot move out of `b` because it is borrowed
-}
-```
-
-Adding generic parameters to an RPIT places additional constraints on how the resulting type may be used.
-
-Note that there are implicit captures when the `use<>` syntax is not specified. In Rust 2021 and earlier editions, the lifetime parameters are only captured if they appear syntactically within a bound in the RPIT type signature. Starting in Rust 2024, all lifetime parameters are unconditionally captured. This means that starting in Rust 2024, the default is maximally compatible, requiring you to be explicit when you want to capture less, which is a SemVer commitment.
-
-See the [edition guide][rpit-capture-guide] and the [reference][rpit-reference] for more information on RPIT capturing.
-
-It is a minor change to capture fewer generic parameters in an RPIT.
-
-> Note: All in-scope type and const generic parameters must be either implicitly captured (no `+ use<…>` specified) or explicitly captured (must be listed in `+ use<…>`), and thus currently it is not allowed to change what is captured of those kinds of generics.
-
-[RPIT]: ../../reference/types/impl-trait.md#abstract-return-types
-[rpit-capture-guide]: ../../edition-guide/rust-2024/rpit-lifetime-capture.html
-[rpit-reference]: ../../reference/types/impl-trait.md#capturing
 
 ### Major: adding/removing function parameters {#fn-change-arity}
 
@@ -2018,10 +1974,6 @@ previous releases). Just keep in mind that some large projects may not be able
 to update their Rust toolchain rapidly.
 
 Mitigation strategies:
-* Document your package’s minimum-supported Rust version by setting
-  [`package.rust-version`], allowing Cargo’s dependency resolution to
-  attempt to [select older versions of your package] when needed.
-  Be sure to consider the [support expectations] when doing so.
 * Use [Cargo features] to make the new features opt-in.
 * Provide a large window of support for older releases.
 * Copy the source of new standard library items if possible so that you
@@ -2032,9 +1984,6 @@ Mitigation strategies:
   [`#[cfg(accessible(..))]`][cfg-accessible] features which provide an opt-in
   mechanism for new features. These are currently unstable and only available
   in the nightly channel.
-
-[select older versions of your package]: resolver.md#rust-version
-[support expectations]: rust-version.md#support-expectations
 
 ### Possibly-breaking: changing the platform and environment requirements {#env-change-requirements}
 
@@ -2303,7 +2252,6 @@ document what your commitments are.
 
 [`cfg` attribute]: ../../reference/conditional-compilation.md#the-cfg-attribute
 [`no_std`]: ../../reference/names/preludes.html#the-no_std-attribute
-[`package.rust-version`]: rust-version.md
 [`pub use`]: ../../reference/items/use-declarations.html
 [Cargo feature]: features.md
 [Cargo features]: features.md

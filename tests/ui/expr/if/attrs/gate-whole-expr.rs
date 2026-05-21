@@ -3,7 +3,7 @@
 fn main() {
     let x = 1;
 
-    #[cfg(false)]
+    #[cfg(FALSE)]
     if false {
         x = 2;
     } else if true {

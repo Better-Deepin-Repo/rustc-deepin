@@ -8,9 +8,8 @@ LL |     let _: char = "a";
    |
 help: if you meant to write a `char` literal, use single quotes
    |
-LL -     let _: char = "a";
-LL +     let _: char = 'a';
-   |
+LL |     let _: char = 'a';
+   |                   ~~~
 
 error[E0308]: mismatched types
   --> $DIR/char-as-str-single.rs:10:19
@@ -22,9 +21,8 @@ LL |     let _: char = "人";
    |
 help: if you meant to write a `char` literal, use single quotes
    |
-LL -     let _: char = "人";
-LL +     let _: char = '人';
-   |
+LL |     let _: char = '人';
+   |                   ~~~~
 
 error[E0308]: mismatched types
   --> $DIR/char-as-str-single.rs:11:19
@@ -36,9 +34,8 @@ LL |     let _: char = "'";
    |
 help: if you meant to write a `char` literal, use single quotes
    |
-LL -     let _: char = "'";
-LL +     let _: char = '\'';
-   |
+LL |     let _: char = '\'';
+   |                   ~~~~
 
 error[E0308]: mismatched types
   --> $DIR/char-as-str-single.rs:18:9
@@ -50,9 +47,8 @@ LL |         "A" => {}
    |
 help: if you meant to write a `char` literal, use single quotes
    |
-LL -         "A" => {}
-LL +         'A' => {}
-   |
+LL |         'A' => {}
+   |         ~~~
 
 error: aborting due to 4 previous errors
 

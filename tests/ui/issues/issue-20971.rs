@@ -2,7 +2,7 @@
 
 //@ run-fail
 //@ error-pattern:Hello, world!
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 pub trait Parser {
     type Input;

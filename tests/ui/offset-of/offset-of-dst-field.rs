@@ -1,6 +1,5 @@
-#![feature(extern_types, sized_hierarchy)]
+#![feature(extern_types)]
 
-use std::marker::PointeeSized;
 use std::mem::offset_of;
 
 struct Alpha {
@@ -17,7 +16,7 @@ struct Beta {
     z: dyn Trait,
 }
 
-extern "C" {
+extern {
     type Extern;
 }
 
@@ -27,7 +26,7 @@ struct Gamma {
     z: Extern,
 }
 
-struct Delta<T: PointeeSized> {
+struct Delta<T: ?Sized> {
     x: u8,
     y: u16,
     z: T,

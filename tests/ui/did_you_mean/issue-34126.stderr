@@ -9,7 +9,7 @@ note: the binding is already a mutable borrow
    |
 LL |     fn start(&mut self) {
    |              ^^^^^^^^^
-help: if there is only one mutable reborrow, remove the `&mut`
+help: try removing `&mut` here
    |
 LL -         self.run(&mut self);
 LL +         self.run(self);

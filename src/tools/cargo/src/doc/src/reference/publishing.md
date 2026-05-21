@@ -107,13 +107,14 @@ exclude = [
 ```
 
 If you’d rather explicitly list the files to include, Cargo also supports an
-[`include` key](manifest.md#the-exclude-and-include-fields), which if set, overrides the `exclude` key:
+`include` key, which if set, overrides the `exclude` key:
 
 ```toml
 [package]
 # ...
 include = [
     "**/*.rs",
+    "Cargo.toml",
 ]
 ```
 

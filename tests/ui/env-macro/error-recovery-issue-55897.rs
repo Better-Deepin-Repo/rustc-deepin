@@ -1,4 +1,3 @@
-//@ edition:2015
 use prelude::*; //~ ERROR unresolved import `prelude`
 
 mod unresolved_env {

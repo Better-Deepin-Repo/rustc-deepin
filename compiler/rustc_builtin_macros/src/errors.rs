@@ -1,244 +1,164 @@
 use rustc_errors::codes::*;
 use rustc_errors::{
     Diag, DiagCtxtHandle, Diagnostic, EmissionGuarantee, Level, MultiSpan, SingleLabelManySpans,
-    Subdiagnostic, msg,
+    SubdiagMessageOp, Subdiagnostic,
 };
-use rustc_macros::{Diagnostic, LintDiagnostic, Subdiagnostic};
-use rustc_span::{Ident, Span, Symbol};
-
-#[derive(LintDiagnostic)]
-#[diag("avoid using `.intel_syntax`, Intel syntax is the default")]
-pub(crate) struct AvoidIntelSyntax;
-
-#[derive(LintDiagnostic)]
-#[diag("avoid using `.att_syntax`, prefer using `options(att_syntax)` instead")]
-pub(crate) struct AvoidAttSyntax;
-
-#[derive(LintDiagnostic)]
-#[diag("include macro expected single expression in source")]
-pub(crate) struct IncompleteInclude;
-
-#[derive(LintDiagnostic)]
-#[diag("cannot test inner items")]
-pub(crate) struct UnnameableTestItems;
-
-#[derive(LintDiagnostic)]
-#[diag("duplicated attribute")]
-pub(crate) struct DuplicateMacroAttribute;
+use rustc_macros::{Diagnostic, Subdiagnostic};
+use rustc_span::symbol::Ident;
+use rustc_span::{Span, Symbol};
 
 #[derive(Diagnostic)]
-#[diag("macro requires a cfg-pattern as an argument")]
+#[diag(builtin_macros_requires_cfg_pattern)]
 pub(crate) struct RequiresCfgPattern {
     #[primary_span]
-    #[label("cfg-pattern required")]
+    #[label]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("expected 1 cfg-pattern")]
+#[diag(builtin_macros_expected_one_cfg_pattern)]
 pub(crate) struct OneCfgPattern {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("alloc_error_handler must be a function")]
+#[diag(builtin_macros_alloc_error_must_be_fn)]
 pub(crate) struct AllocErrorMustBeFn {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("macro requires a boolean expression as an argument")]
+#[diag(builtin_macros_assert_requires_boolean)]
 pub(crate) struct AssertRequiresBoolean {
     #[primary_span]
-    #[label("boolean expression required")]
+    #[label]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("macro requires an expression as an argument")]
+#[diag(builtin_macros_assert_requires_expression)]
 pub(crate) struct AssertRequiresExpression {
     #[primary_span]
     pub(crate) span: Span,
-    #[suggestion("try removing semicolon", code = "", applicability = "maybe-incorrect")]
+    #[suggestion(code = "", applicability = "maybe-incorrect")]
     pub(crate) token: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("unexpected string literal")]
+#[diag(builtin_macros_assert_missing_comma)]
 pub(crate) struct AssertMissingComma {
     #[primary_span]
     pub(crate) span: Span,
-    #[suggestion(
-        "try adding a comma",
-        code = ", ",
-        applicability = "maybe-incorrect",
-        style = "short"
-    )]
+    #[suggestion(code = ", ", applicability = "maybe-incorrect", style = "short")]
     pub(crate) comma: Span,
 }
 
 #[derive(Diagnostic)]
 pub(crate) enum CfgAccessibleInvalid {
-    #[diag("`cfg_accessible` path is not specified")]
+    #[diag(builtin_macros_cfg_accessible_unspecified_path)]
     UnspecifiedPath(#[primary_span] Span),
-    #[diag("multiple `cfg_accessible` paths are specified")]
+    #[diag(builtin_macros_cfg_accessible_multiple_paths)]
     MultiplePaths(#[primary_span] Span),
-    #[diag("`cfg_accessible` path cannot be a literal")]
+    #[diag(builtin_macros_cfg_accessible_literal_path)]
     LiteralPath(#[primary_span] Span),
-    #[diag("`cfg_accessible` path cannot accept arguments")]
+    #[diag(builtin_macros_cfg_accessible_has_args)]
     HasArguments(#[primary_span] Span),
 }
 
 #[derive(Diagnostic)]
-#[diag("cannot determine whether the path is accessible or not")]
+#[diag(builtin_macros_cfg_accessible_indeterminate)]
 pub(crate) struct CfgAccessibleIndeterminate {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("expected a literal")]
-#[note("only literals (like `\"foo\"`, `-42` and `3.14`) can be passed to `concat!()`")]
+#[diag(builtin_macros_concat_missing_literal)]
+#[note]
 pub(crate) struct ConcatMissingLiteral {
     #[primary_span]
     pub(crate) spans: Vec<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("cannot concatenate a byte string literal")]
+#[diag(builtin_macros_concat_bytestr)]
 pub(crate) struct ConcatBytestr {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("cannot concatenate a C string literal")]
+#[diag(builtin_macros_concat_c_str_lit)]
 pub(crate) struct ConcatCStrLit {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("cannot export macro_rules! macros from a `proc-macro` crate type currently")]
+#[diag(builtin_macros_export_macro_rules)]
 pub(crate) struct ExportMacroRules {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "`proc-macro` crate types currently cannot export any items other than functions tagged with `#[proc_macro]`, `#[proc_macro_derive]`, or `#[proc_macro_attribute]`"
-)]
+#[diag(builtin_macros_proc_macro)]
 pub(crate) struct ProcMacro {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("trace_macros! accepts only `true` or `false`")]
+#[diag(builtin_macros_invalid_crate_attribute)]
+pub(crate) struct InvalidCrateAttr {
+    #[primary_span]
+    pub(crate) span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_non_abi)]
+pub(crate) struct NonABI {
+    #[primary_span]
+    pub(crate) span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_trace_macros)]
 pub(crate) struct TraceMacros {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("functions used as benches must have signature `fn(&mut Bencher) -> impl Termination`")]
+#[diag(builtin_macros_bench_sig)]
 pub(crate) struct BenchSig {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("allocators must be statics")]
+#[diag(builtin_macros_alloc_must_statics)]
 pub(crate) struct AllocMustStatics {
     #[primary_span]
     pub(crate) span: Span,
 }
 
-pub(crate) use autodiff::*;
-
-mod autodiff {
-    use super::*;
-    #[derive(Diagnostic)]
-    #[diag("autodiff requires at least a name and mode")]
-    pub(crate) struct AutoDiffMissingConfig {
-        #[primary_span]
-        pub(crate) span: Span,
-    }
-    #[derive(Diagnostic)]
-    #[diag("did not recognize Activity: `{$act}`")]
-    pub(crate) struct AutoDiffUnknownActivity {
-        #[primary_span]
-        pub(crate) span: Span,
-        pub(crate) act: String,
-    }
-    #[derive(Diagnostic)]
-    #[diag("{$act} can not be used for this type")]
-    pub(crate) struct AutoDiffInvalidTypeForActivity {
-        #[primary_span]
-        pub(crate) span: Span,
-        pub(crate) act: String,
-    }
-    #[derive(Diagnostic)]
-    #[diag("expected {$expected} activities, but found {$found}")]
-    pub(crate) struct AutoDiffInvalidNumberActivities {
-        #[primary_span]
-        pub(crate) span: Span,
-        pub(crate) expected: usize,
-        pub(crate) found: usize,
-    }
-    #[derive(Diagnostic)]
-    #[diag("{$act} can not be used in {$mode} Mode")]
-    pub(crate) struct AutoDiffInvalidApplicationModeAct {
-        #[primary_span]
-        pub(crate) span: Span,
-        pub(crate) mode: String,
-        pub(crate) act: String,
-    }
-
-    #[derive(Diagnostic)]
-    #[diag("invalid return activity {$act} in {$mode} Mode")]
-    pub(crate) struct AutoDiffInvalidRetAct {
-        #[primary_span]
-        pub(crate) span: Span,
-        pub(crate) mode: String,
-        pub(crate) act: String,
-    }
-
-    #[derive(Diagnostic)]
-    #[diag("autodiff width must fit u32, but is {$width}")]
-    pub(crate) struct AutoDiffInvalidWidth {
-        #[primary_span]
-        pub(crate) span: Span,
-        pub(crate) width: u128,
-    }
-
-    #[derive(Diagnostic)]
-    #[diag("autodiff must be applied to function")]
-    pub(crate) struct AutoDiffInvalidApplication {
-        #[primary_span]
-        pub(crate) span: Span,
-    }
-}
-
 #[derive(Diagnostic)]
-#[diag("cannot concatenate {$lit_kind} literals")]
+#[diag(builtin_macros_concat_bytes_invalid)]
 pub(crate) struct ConcatBytesInvalid {
     #[primary_span]
     pub(crate) span: Span,
     pub(crate) lit_kind: &'static str,
     #[subdiagnostic]
     pub(crate) sugg: Option<ConcatBytesInvalidSuggestion>,
-    #[note("concatenating C strings is ambiguous about including the '\\0'")]
-    pub(crate) cs_note: Option<()>,
 }
 
 #[derive(Subdiagnostic)]
 pub(crate) enum ConcatBytesInvalidSuggestion {
     #[suggestion(
-        "try using a byte character",
+        builtin_macros_byte_char,
         code = "b{snippet}",
         applicability = "machine-applicable"
     )]
@@ -248,7 +168,7 @@ pub(crate) enum ConcatBytesInvalidSuggestion {
         snippet: String,
     },
     #[suggestion(
-        "try using a byte string",
+        builtin_macros_byte_str,
         code = "b{snippet}",
         applicability = "machine-applicable"
     )]
@@ -257,19 +177,8 @@ pub(crate) enum ConcatBytesInvalidSuggestion {
         span: Span,
         snippet: String,
     },
-    #[note("concatenating C strings is ambiguous about including the '\\0'")]
     #[suggestion(
-        "try using a null-terminated byte string",
-        code = "{as_bstr}",
-        applicability = "machine-applicable"
-    )]
-    CStrLit {
-        #[primary_span]
-        span: Span,
-        as_bstr: String,
-    },
-    #[suggestion(
-        "try wrapping the number in an array",
+        builtin_macros_number_array,
         code = "[{snippet}]",
         applicability = "machine-applicable"
     )]
@@ -281,65 +190,84 @@ pub(crate) enum ConcatBytesInvalidSuggestion {
 }
 
 #[derive(Diagnostic)]
-#[diag("numeric literal is out of bounds")]
+#[diag(builtin_macros_concat_bytes_oob)]
 pub(crate) struct ConcatBytesOob {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("numeric literal is not a `u8`")]
+#[diag(builtin_macros_concat_bytes_non_u8)]
 pub(crate) struct ConcatBytesNonU8 {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("expected a byte literal")]
-#[note(
-    "only byte literals (like `b\"foo\"`, `b's'` and `[3, 4, 5]`) can be passed to `concat_bytes!()`"
-)]
+#[diag(builtin_macros_concat_bytes_missing_literal)]
+#[note]
 pub(crate) struct ConcatBytesMissingLiteral {
     #[primary_span]
     pub(crate) spans: Vec<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("cannot concatenate doubly nested array")]
+#[diag(builtin_macros_concat_bytes_array)]
 pub(crate) struct ConcatBytesArray {
     #[primary_span]
     pub(crate) span: Span,
-    #[note("byte strings are treated as arrays of bytes")]
-    #[help("try flattening the array")]
+    #[note]
+    #[help]
     pub(crate) bytestr: bool,
 }
 
 #[derive(Diagnostic)]
-#[diag("repeat count is not a positive number")]
+#[diag(builtin_macros_concat_bytes_bad_repeat)]
 pub(crate) struct ConcatBytesBadRepeat {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`derive` may only be applied to `struct`s, `enum`s and `union`s", code = E0774)]
+#[diag(builtin_macros_concat_idents_missing_args)]
+pub(crate) struct ConcatIdentsMissingArgs {
+    #[primary_span]
+    pub(crate) span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_concat_idents_missing_comma)]
+pub(crate) struct ConcatIdentsMissingComma {
+    #[primary_span]
+    pub(crate) span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_concat_idents_ident_args)]
+pub(crate) struct ConcatIdentsIdentArgs {
+    #[primary_span]
+    pub(crate) span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_bad_derive_target, code = E0774)]
 pub(crate) struct BadDeriveTarget {
     #[primary_span]
-    #[label("not applicable here")]
+    #[label]
     pub(crate) span: Span,
-    #[label("not a `struct`, `enum` or `union`")]
+    #[label(builtin_macros_label2)]
     pub(crate) item: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("building tests with panic=abort is not supported without `-Zpanic_abort_tests`")]
+#[diag(builtin_macros_tests_not_support)]
 pub(crate) struct TestsNotSupport {}
 
 #[derive(Diagnostic)]
-#[diag("expected path to a trait, found literal", code = E0777)]
+#[diag(builtin_macros_unexpected_lit, code = E0777)]
 pub(crate) struct BadDeriveLit {
     #[primary_span]
-    #[label("not a trait")]
+    #[label]
     pub(crate) span: Span,
     #[subdiagnostic]
     pub help: BadDeriveLitHelp,
@@ -347,59 +275,60 @@ pub(crate) struct BadDeriveLit {
 
 #[derive(Subdiagnostic)]
 pub(crate) enum BadDeriveLitHelp {
-    #[help("try using `#[derive({$sym})]`")]
+    #[help(builtin_macros_str_lit)]
     StrLit { sym: Symbol },
-    #[help("for example, write `#[derive(Debug)]` for `Debug`")]
+    #[help(builtin_macros_other)]
     Other,
 }
 
 #[derive(Diagnostic)]
-#[diag("traits in `#[derive(...)]` don't accept arguments")]
+#[diag(builtin_macros_derive_path_args_list)]
 pub(crate) struct DerivePathArgsList {
-    #[suggestion("remove the arguments", code = "", applicability = "machine-applicable")]
+    #[suggestion(code = "", applicability = "machine-applicable")]
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("traits in `#[derive(...)]` don't accept values")]
+#[diag(builtin_macros_derive_path_args_value)]
 pub(crate) struct DerivePathArgsValue {
-    #[suggestion("remove the value", code = "", applicability = "machine-applicable")]
+    #[suggestion(code = "", applicability = "machine-applicable")]
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[derive(Default)]` on enum with no `#[default]`", code = E0665)]
+#[diag(builtin_macros_no_default_variant)]
+#[help]
 pub(crate) struct NoDefaultVariant {
     #[primary_span]
     pub(crate) span: Span,
-    #[label("this enum needs a unit variant marked with `#[default]`")]
-    pub(crate) item_span: Span,
     #[subdiagnostic]
     pub(crate) suggs: Vec<NoDefaultVariantSugg>,
 }
 
 #[derive(Subdiagnostic)]
 #[suggestion(
-    "make this unit variant default by placing `#[default]` on it",
-    code = "#[default] ",
-    applicability = "maybe-incorrect"
+    builtin_macros_suggestion,
+    code = "#[default] {ident}",
+    applicability = "maybe-incorrect",
+    style = "tool-only"
 )]
 pub(crate) struct NoDefaultVariantSugg {
     #[primary_span]
     pub(crate) span: Span,
+    pub(crate) ident: Ident,
 }
 
 #[derive(Diagnostic)]
-#[diag("multiple declared defaults")]
-#[note("only one variant can be default")]
+#[diag(builtin_macros_multiple_defaults)]
+#[note]
 pub(crate) struct MultipleDefaults {
     #[primary_span]
     pub(crate) span: Span,
-    #[label("first default")]
+    #[label]
     pub(crate) first: Span,
-    #[label("additional default")]
+    #[label(builtin_macros_additional)]
     pub additional: Vec<Span>,
     #[subdiagnostic]
     pub suggs: Vec<MultipleDefaultsSugg>,
@@ -407,7 +336,7 @@ pub(crate) struct MultipleDefaults {
 
 #[derive(Subdiagnostic)]
 #[multipart_suggestion(
-    "make `{$ident}` default",
+    builtin_macros_suggestion,
     applicability = "maybe-incorrect",
     style = "tool-only"
 )]
@@ -418,40 +347,34 @@ pub(crate) struct MultipleDefaultsSugg {
 }
 
 #[derive(Diagnostic)]
-#[diag("the `#[default]` attribute may only be used on unit enum variants{$post}")]
-#[help("consider a manual implementation of `Default`")]
+#[diag(builtin_macros_non_unit_default)]
+#[help]
 pub(crate) struct NonUnitDefault {
     #[primary_span]
     pub(crate) span: Span,
-    pub(crate) post: &'static str,
 }
 
 #[derive(Diagnostic)]
-#[diag("default variant must be exhaustive")]
-#[help("consider a manual implementation of `Default`")]
+#[diag(builtin_macros_non_exhaustive_default)]
+#[help]
 pub(crate) struct NonExhaustiveDefault {
     #[primary_span]
     pub(crate) span: Span,
-    #[label("declared `#[non_exhaustive]` here")]
+    #[label]
     pub(crate) non_exhaustive: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("multiple `#[default]` attributes")]
-#[note("only one `#[default]` attribute is needed")]
+#[diag(builtin_macros_multiple_default_attrs)]
+#[note]
 pub(crate) struct MultipleDefaultAttrs {
     #[primary_span]
     pub(crate) span: Span,
-    #[label("`#[default]` used here")]
+    #[label]
     pub(crate) first: Span,
-    #[label("`#[default]` used again here")]
+    #[label(builtin_macros_label_again)]
     pub(crate) first_rest: Span,
-    #[help(
-        "try removing {$only_one ->
-            [true] this
-            *[false] these
-        }"
-    )]
+    #[help]
     pub(crate) rest: MultiSpan,
     pub(crate) only_one: bool,
     #[subdiagnostic]
@@ -460,7 +383,7 @@ pub(crate) struct MultipleDefaultAttrs {
 
 #[derive(Subdiagnostic)]
 #[multipart_suggestion(
-    "consider a manual implementation of `Default`",
+    builtin_macros_help,
     applicability = "machine-applicable",
     style = "tool-only"
 )]
@@ -470,57 +393,29 @@ pub(crate) struct MultipleDefaultAttrsSugg {
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[default]` attribute does not accept a value")]
+#[diag(builtin_macros_default_arg)]
 pub(crate) struct DefaultHasArg {
     #[primary_span]
-    #[suggestion(
-        "try using `#[default]`",
-        code = "#[default]",
-        style = "hidden",
-        applicability = "maybe-incorrect"
-    )]
+    #[suggestion(code = "#[default]", style = "hidden", applicability = "maybe-incorrect")]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[derive(From)]` used on {$kind}")]
-#[note("`#[derive(From)]` can only be used on structs with exactly one field")]
-pub(crate) struct DeriveFromWrongTarget<'a> {
-    #[primary_span]
-    pub(crate) span: MultiSpan,
-    pub(crate) kind: &'a str,
-}
-
-#[derive(Diagnostic)]
-#[diag(
-    "`#[derive(From)]` used on a struct with {$multiple_fields ->
-        [true] multiple fields
-        *[false] no fields
-    }"
-)]
-#[note("`#[derive(From)]` can only be used on structs with exactly one field")]
-pub(crate) struct DeriveFromWrongFieldCount {
-    #[primary_span]
-    pub(crate) span: MultiSpan,
-    pub(crate) multiple_fields: bool,
-}
-
-#[derive(Diagnostic)]
-#[diag("`derive` cannot be used on items with type macros")]
+#[diag(builtin_macros_derive_macro_call)]
 pub(crate) struct DeriveMacroCall {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("this trait cannot be derived for unions")]
+#[diag(builtin_macros_cannot_derive_union)]
 pub(crate) struct DeriveUnion {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`env!()` takes 1 or 2 arguments")]
+#[diag(builtin_macros_env_takes_args)]
 pub(crate) struct EnvTakesArgs {
     #[primary_span]
     pub(crate) span: Span,
@@ -535,6 +430,10 @@ pub(crate) struct EnvNotDefinedWithUserMessage {
 impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for EnvNotDefinedWithUserMessage {
     #[track_caller]
     fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, G> {
+        #[expect(
+            rustc::untranslatable_diagnostic,
+            reason = "cannot translate user-provided messages"
+        )]
         let mut diag = Diag::new(dcx, level, self.msg_from_user.to_string());
         diag.span(self.span);
         diag
@@ -543,26 +442,16 @@ impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for EnvNotDefinedWithUserMessag
 
 #[derive(Diagnostic)]
 pub(crate) enum EnvNotDefined<'a> {
-    #[diag("environment variable `{$var}` not defined at compile time")]
-    #[help(
-        "Cargo sets build script variables at run time. Use `std::env::var({$var_expr})` instead"
-    )]
+    #[diag(builtin_macros_env_not_defined)]
+    #[help(builtin_macros_cargo)]
     CargoEnvVar {
         #[primary_span]
         span: Span,
         var: Symbol,
         var_expr: &'a rustc_ast::Expr,
     },
-    #[diag("environment variable `{$var}` not defined at compile time")]
-    #[help("there is a similar Cargo environment variable: `{$suggested_var}`")]
-    CargoEnvVarTypo {
-        #[primary_span]
-        span: Span,
-        var: Symbol,
-        suggested_var: Symbol,
-    },
-    #[diag("environment variable `{$var}` not defined at compile time")]
-    #[help("use `std::env::var({$var_expr})` to read the variable at run time")]
+    #[diag(builtin_macros_env_not_defined)]
+    #[help(builtin_macros_custom)]
     CustomEnvVar {
         #[primary_span]
         span: Span,
@@ -572,7 +461,7 @@ pub(crate) enum EnvNotDefined<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("environment variable `{$var}` is not a valid Unicode string")]
+#[diag(builtin_macros_env_not_unicode)]
 pub(crate) struct EnvNotUnicode {
     #[primary_span]
     pub(crate) span: Span,
@@ -580,39 +469,39 @@ pub(crate) struct EnvNotUnicode {
 }
 
 #[derive(Diagnostic)]
-#[diag("requires at least a format string argument")]
+#[diag(builtin_macros_format_requires_string)]
 pub(crate) struct FormatRequiresString {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("duplicate argument named `{$ident}`")]
+#[diag(builtin_macros_format_duplicate_arg)]
 pub(crate) struct FormatDuplicateArg {
     #[primary_span]
     pub(crate) span: Span,
-    #[label("previously here")]
+    #[label(builtin_macros_label1)]
     pub(crate) prev: Span,
-    #[label("duplicate argument")]
+    #[label(builtin_macros_label2)]
     pub(crate) duplicate: Span,
     pub(crate) ident: Ident,
 }
 
 #[derive(Diagnostic)]
-#[diag("positional arguments cannot follow named arguments")]
+#[diag(builtin_macros_format_positional_after_named)]
 pub(crate) struct PositionalAfterNamed {
     #[primary_span]
-    #[label("positional arguments must be before named arguments")]
+    #[label]
     pub(crate) span: Span,
-    #[label("named argument")]
+    #[label(builtin_macros_named_args)]
     pub(crate) args: Vec<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("invalid format string: {$desc}")]
+#[diag(builtin_macros_format_string_invalid)]
 pub(crate) struct InvalidFormatString {
     #[primary_span]
-    #[label("{$label1} in format string")]
+    #[label]
     pub(crate) span: Span,
     pub(crate) desc: String,
     pub(crate) label1: String,
@@ -625,13 +514,13 @@ pub(crate) struct InvalidFormatString {
 }
 
 #[derive(Subdiagnostic)]
-#[note("{$note}")]
+#[note(builtin_macros_note)]
 pub(crate) struct InvalidFormatStringNote {
     pub(crate) note: String,
 }
 
 #[derive(Subdiagnostic)]
-#[label("{$label}")]
+#[label(builtin_macros_second_label)]
 pub(crate) struct InvalidFormatStringLabel {
     #[primary_span]
     pub(crate) span: Span,
@@ -641,7 +530,7 @@ pub(crate) struct InvalidFormatStringLabel {
 #[derive(Subdiagnostic)]
 pub(crate) enum InvalidFormatStringSuggestion {
     #[multipart_suggestion(
-        "consider using a positional formatting argument instead",
+        builtin_macros_format_use_positional,
         style = "verbose",
         applicability = "machine-applicable"
     )]
@@ -653,51 +542,21 @@ pub(crate) enum InvalidFormatStringSuggestion {
         span: Span,
         arg: String,
     },
-    #[suggestion("remove the `r#`", code = "", applicability = "machine-applicable")]
+    #[suggestion(
+        builtin_macros_format_remove_raw_ident,
+        code = "",
+        applicability = "machine-applicable"
+    )]
     RemoveRawIdent {
         #[primary_span]
         span: Span,
     },
-    #[suggestion(
-        "did you mean `{$replacement}`?",
-        code = "{replacement}",
-        style = "verbose",
-        applicability = "machine-applicable"
-    )]
-    ReorderFormatParameter {
-        #[primary_span]
-        span: Span,
-        replacement: String,
-    },
-    #[suggestion(
-        "add a colon before the format specifier",
-        code = ":?",
-        applicability = "machine-applicable"
-    )]
-    AddMissingColon {
-        #[primary_span]
-        span: Span,
-    },
-
-    #[suggestion(
-        "use rust debug printing macro",
-        code = "{replacement}",
-        style = "verbose",
-        applicability = "machine-applicable"
-    )]
-    UseRustDebugPrintingMacro {
-        #[primary_span]
-        macro_span: Span,
-        replacement: String,
-    },
 }
 
 #[derive(Diagnostic)]
-#[diag("there is no argument named `{$name}`")]
-#[note("did you intend to capture a variable `{$name}` from the surrounding scope?")]
-#[note(
-    "to avoid ambiguity, `format_args!` cannot capture variables when the format string is expanded from a macro"
-)]
+#[diag(builtin_macros_format_no_arg_named)]
+#[note]
+#[note(builtin_macros_note2)]
 pub(crate) struct FormatNoArgNamed {
     #[primary_span]
     pub(crate) span: Span,
@@ -705,19 +564,8 @@ pub(crate) struct FormatNoArgNamed {
 }
 
 #[derive(Diagnostic)]
-#[diag("unknown format trait `{$ty}`")]
-#[note(
-    "the only appropriate formatting traits are:
-                                            - ``, which uses the `Display` trait
-                                            - `?`, which uses the `Debug` trait
-                                            - `e`, which uses the `LowerExp` trait
-                                            - `E`, which uses the `UpperExp` trait
-                                            - `o`, which uses the `Octal` trait
-                                            - `p`, which uses the `Pointer` trait
-                                            - `b`, which uses the `Binary` trait
-                                            - `x`, which uses the `LowerHex` trait
-                                            - `X`, which uses the `UpperHex` trait"
-)]
+#[diag(builtin_macros_format_unknown_trait)]
+#[note]
 pub(crate) struct FormatUnknownTrait<'a> {
     #[primary_span]
     pub(crate) span: Span,
@@ -728,7 +576,7 @@ pub(crate) struct FormatUnknownTrait<'a> {
 
 #[derive(Subdiagnostic)]
 #[suggestion(
-    "use the `{$trait_name}` trait",
+    builtin_macros_suggestion,
     code = "{fmt}",
     style = "tool-only",
     applicability = "maybe-incorrect"
@@ -741,20 +589,10 @@ pub(crate) struct FormatUnknownTraitSugg {
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "{$named ->
-        [true] named argument
-        *[false] argument
-    } never used"
-)]
+#[diag(builtin_macros_format_unused_arg)]
 pub(crate) struct FormatUnusedArg {
     #[primary_span]
-    #[label(
-        "{$named ->
-            [true] named argument
-            *[false] argument
-        } never used"
-    )]
+    #[label(builtin_macros_format_unused_arg)]
     pub(crate) span: Span,
     pub(crate) named: bool,
 }
@@ -762,37 +600,30 @@ pub(crate) struct FormatUnusedArg {
 // Allow the singular form to be a subdiagnostic of the multiple-unused
 // form of diagnostic.
 impl Subdiagnostic for FormatUnusedArg {
-    fn add_to_diag<G: EmissionGuarantee>(self, diag: &mut Diag<'_, G>) {
+    fn add_to_diag_with<G: EmissionGuarantee, F: SubdiagMessageOp<G>>(
+        self,
+        diag: &mut Diag<'_, G>,
+        f: &F,
+    ) {
         diag.arg("named", self.named);
-        let msg = diag.eagerly_translate(msg!(
-            "{$named ->
-                [true] named argument
-                *[false] argument
-            } never used"
-        ));
-        diag.remove_arg("named");
+        let msg = f(diag, crate::fluent_generated::builtin_macros_format_unused_arg.into());
         diag.span_label(self.span, msg);
     }
 }
 
 #[derive(Diagnostic)]
-#[diag("multiple unused formatting arguments")]
+#[diag(builtin_macros_format_unused_args)]
 pub(crate) struct FormatUnusedArgs {
     #[primary_span]
     pub(crate) unused: Vec<Span>,
-    #[label("multiple missing formatting specifiers")]
+    #[label]
     pub(crate) fmt: Span,
     #[subdiagnostic]
     pub(crate) unused_labels: Vec<FormatUnusedArg>,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "{$n} positional {$n ->
-        [one] argument
-        *[more] arguments
-    } in format string, but {$desc}"
-)]
+#[diag(builtin_macros_format_pos_mismatch)]
 pub(crate) struct FormatPositionalMismatch {
     #[primary_span]
     pub(crate) span: MultiSpan,
@@ -803,23 +634,13 @@ pub(crate) struct FormatPositionalMismatch {
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "redundant {$n ->
-        [one] argument
-        *[more] arguments
-    }"
-)]
+#[diag(builtin_macros_format_redundant_args)]
 pub(crate) struct FormatRedundantArgs {
     #[primary_span]
     pub(crate) span: MultiSpan,
     pub(crate) n: usize,
 
-    #[note(
-        "{$n ->
-            [one] the formatting specifier is referencing the binding already
-            *[more] the formatting specifiers are referencing the bindings already
-        }"
-    )]
+    #[note]
     pub(crate) note: MultiSpan,
 
     #[subdiagnostic]
@@ -827,38 +648,38 @@ pub(crate) struct FormatRedundantArgs {
 }
 
 #[derive(Subdiagnostic)]
-#[multipart_suggestion("this can be removed", applicability = "machine-applicable")]
+#[multipart_suggestion(builtin_macros_suggestion, applicability = "machine-applicable")]
 pub(crate) struct FormatRedundantArgsSugg {
     #[suggestion_part(code = "")]
     pub(crate) spans: Vec<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[test_case]` attribute is only allowed on items")]
+#[diag(builtin_macros_test_case_non_item)]
 pub(crate) struct TestCaseNonItem {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("{$kind} functions cannot be used for tests")]
+#[diag(builtin_macros_test_bad_fn)]
 pub(crate) struct TestBadFn {
     #[primary_span]
     pub(crate) span: Span,
-    #[label("`{$kind}` because of this")]
+    #[label]
     pub(crate) cause: Span,
     pub(crate) kind: &'static str,
 }
 
 #[derive(Diagnostic)]
-#[diag("explicit register arguments cannot have names")]
+#[diag(builtin_macros_asm_explicit_register_name)]
 pub(crate) struct AsmExplicitRegisterName {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("the `{$opt1}` and `{$opt2}` options are mutually exclusive")]
+#[diag(builtin_macros_asm_mutually_exclusive)]
 pub(crate) struct AsmMutuallyExclusive {
     #[primary_span]
     pub(crate) spans: Vec<Span>,
@@ -867,65 +688,104 @@ pub(crate) struct AsmMutuallyExclusive {
 }
 
 #[derive(Diagnostic)]
-#[diag("the `pure` option must be combined with either `nomem` or `readonly`")]
+#[diag(builtin_macros_asm_pure_combine)]
 pub(crate) struct AsmPureCombine {
     #[primary_span]
     pub(crate) spans: Vec<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("asm with the `pure` option must have at least one output")]
+#[diag(builtin_macros_asm_pure_no_output)]
 pub(crate) struct AsmPureNoOutput {
     #[primary_span]
     pub(crate) spans: Vec<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("asm template modifier must be a single character")]
+#[diag(builtin_macros_asm_modifier_invalid)]
 pub(crate) struct AsmModifierInvalid {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("this attribute is not supported on assembly")]
-pub(crate) struct AsmAttributeNotSupported {
+#[diag(builtin_macros_asm_requires_template)]
+pub(crate) struct AsmRequiresTemplate {
     #[primary_span]
     pub(crate) span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("duplicate argument named `{$name}`")]
+#[diag(builtin_macros_asm_expected_comma)]
+pub(crate) struct AsmExpectedComma {
+    #[primary_span]
+    #[label]
+    pub(crate) span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_asm_expected_string_literal)]
+pub(crate) struct AsmExpectedStringLiteral {
+    #[primary_span]
+    #[label]
+    pub(crate) span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_asm_underscore_input)]
+pub(crate) struct AsmUnderscoreInput {
+    #[primary_span]
+    pub(crate) span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_asm_sym_no_path)]
+pub(crate) struct AsmSymNoPath {
+    #[primary_span]
+    pub(crate) span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_asm_expected_other)]
+pub(crate) struct AsmExpectedOther {
+    #[primary_span]
+    #[label(builtin_macros_asm_expected_other)]
+    pub(crate) span: Span,
+    pub(crate) is_global_asm: bool,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_asm_duplicate_arg)]
 pub(crate) struct AsmDuplicateArg {
     #[primary_span]
-    #[label("duplicate argument")]
+    #[label(builtin_macros_arg)]
     pub(crate) span: Span,
-    #[label("previously here")]
+    #[label]
     pub(crate) prev: Span,
     pub(crate) name: Symbol,
 }
 
 #[derive(Diagnostic)]
-#[diag("positional arguments cannot follow named arguments or explicit register arguments")]
+#[diag(builtin_macros_asm_pos_after)]
 pub(crate) struct AsmPositionalAfter {
     #[primary_span]
-    #[label("positional argument")]
+    #[label(builtin_macros_pos)]
     pub(crate) span: Span,
-    #[label("named argument")]
+    #[label(builtin_macros_named)]
     pub(crate) named: Vec<Span>,
-    #[label("explicit register argument")]
+    #[label(builtin_macros_explicit)]
     pub(crate) explicit: Vec<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("asm outputs are not allowed with the `noreturn` option")]
+#[diag(builtin_macros_asm_noreturn)]
 pub(crate) struct AsmNoReturn {
     #[primary_span]
     pub(crate) outputs_sp: Vec<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("there is no argument named `{$name}`")]
+#[diag(builtin_macros_asm_no_matched_argument_name)]
 pub(crate) struct AsmNoMatchedArgumentName {
     pub(crate) name: String,
     #[primary_span]
@@ -933,10 +793,17 @@ pub(crate) struct AsmNoMatchedArgumentName {
 }
 
 #[derive(Diagnostic)]
-#[diag("asm labels are not allowed with the `may_unwind` option")]
+#[diag(builtin_macros_asm_mayunwind)]
 pub(crate) struct AsmMayUnwind {
     #[primary_span]
     pub(crate) labels_sp: Vec<Span>,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_global_asm_clobber_abi)]
+pub(crate) struct GlobalAsmClobberAbi {
+    #[primary_span]
+    pub(crate) spans: Vec<Span>,
 }
 
 pub(crate) struct AsmClobberNoReg {
@@ -947,69 +814,82 @@ pub(crate) struct AsmClobberNoReg {
 impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for AsmClobberNoReg {
     fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, G> {
         // eager translation as `span_labels` takes `AsRef<str>`
-        let lbl1 = dcx.eagerly_translate_to_string(msg!("clobber_abi"), [].into_iter());
-        let lbl2 = dcx.eagerly_translate_to_string(msg!("generic outputs"), [].into_iter());
-        Diag::new(
-            dcx,
-            level,
-            msg!("asm with `clobber_abi` must specify explicit registers for outputs"),
-        )
-        .with_span(self.spans.clone())
-        .with_span_labels(self.clobbers, &lbl1)
-        .with_span_labels(self.spans, &lbl2)
+        let lbl1 = dcx.eagerly_translate_to_string(
+            crate::fluent_generated::builtin_macros_asm_clobber_abi,
+            [].into_iter(),
+        );
+        let lbl2 = dcx.eagerly_translate_to_string(
+            crate::fluent_generated::builtin_macros_asm_clobber_outputs,
+            [].into_iter(),
+        );
+        Diag::new(dcx, level, crate::fluent_generated::builtin_macros_asm_clobber_no_reg)
+            .with_span(self.spans.clone())
+            .with_span_labels(self.clobbers, &lbl1)
+            .with_span_labels(self.spans, &lbl2)
     }
 }
 
 #[derive(Diagnostic)]
-#[diag("the `{$symbol}` option was already provided")]
+#[diag(builtin_macros_asm_opt_already_provided)]
 pub(crate) struct AsmOptAlreadyprovided {
     #[primary_span]
-    #[label("this option was already provided")]
+    #[label]
     pub(crate) span: Span,
     pub(crate) symbol: Symbol,
-    #[suggestion(
-        "remove this option",
-        code = "",
-        applicability = "machine-applicable",
-        style = "tool-only"
-    )]
-    pub(crate) span_with_comma: Span,
+    #[suggestion(code = "", applicability = "machine-applicable", style = "tool-only")]
+    pub(crate) full_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("the `{$symbol}` option cannot be used with `{$macro_name}!`")]
-pub(crate) struct AsmUnsupportedOption {
+#[diag(builtin_macros_global_asm_unsupported_option)]
+pub(crate) struct GlobalAsmUnsupportedOption {
     #[primary_span]
-    #[label("the `{$symbol}` option is not meaningful for global-scoped inline assembly")]
+    #[label]
     pub(crate) span: Span,
     pub(crate) symbol: Symbol,
-    #[suggestion(
-        "remove this option",
-        code = "",
-        applicability = "machine-applicable",
-        style = "tool-only"
-    )]
-    pub(crate) span_with_comma: Span,
-    pub(crate) macro_name: &'static str,
+    #[suggestion(code = "", applicability = "machine-applicable", style = "tool-only")]
+    pub(crate) full_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`clobber_abi` cannot be used with `{$macro_name}!`")]
-pub(crate) struct AsmUnsupportedClobberAbi {
+#[diag(builtin_macros_global_asm_unsupported_operand)]
+pub(crate) struct GlobalAsmUnsupportedOperand<'a> {
     #[primary_span]
-    pub(crate) spans: Vec<Span>,
-    pub(crate) macro_name: &'static str,
+    #[label]
+    pub(crate) span: Span,
+    pub(crate) symbol: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("expected token: `,`")]
+#[diag(builtin_macros_test_runner_invalid)]
+pub(crate) struct TestRunnerInvalid {
+    #[primary_span]
+    pub(crate) span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_test_runner_nargs)]
+pub(crate) struct TestRunnerNargs {
+    #[primary_span]
+    pub(crate) span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_expected_register_class_or_explicit_register)]
+pub(crate) struct ExpectedRegisterClassOrExplicitRegister {
+    #[primary_span]
+    pub(crate) span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_expected_comma_in_list)]
 pub(crate) struct ExpectedCommaInList {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("{$name} takes 1 argument")]
+#[diag(builtin_macros_only_one_argument)]
 pub(crate) struct OnlyOneArgument<'a> {
     #[primary_span]
     pub span: Span,
@@ -1017,7 +897,7 @@ pub(crate) struct OnlyOneArgument<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("{$name} takes no arguments")]
+#[diag(builtin_macros_takes_no_arguments)]
 pub(crate) struct TakesNoArguments<'a> {
     #[primary_span]
     pub span: Span,
@@ -1025,7 +905,15 @@ pub(crate) struct TakesNoArguments<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("the `#[{$path}]` attribute is only usable with crates of the `proc-macro` crate type")]
+#[diag(builtin_macros_proc_macro_attribute_only_be_used_on_bare_functions)]
+pub(crate) struct AttributeOnlyBeUsedOnBareFunctions<'a> {
+    #[primary_span]
+    pub span: Span,
+    pub path: &'a str,
+}
+
+#[derive(Diagnostic)]
+#[diag(builtin_macros_proc_macro_attribute_only_usable_with_crate_type)]
 pub(crate) struct AttributeOnlyUsableWithCrateType<'a> {
     #[primary_span]
     pub span: Span,
@@ -1033,7 +921,7 @@ pub(crate) struct AttributeOnlyUsableWithCrateType<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("expected item, found `{$token}`")]
+#[diag(builtin_macros_source_uitls_expected_item)]
 pub(crate) struct ExpectedItem<'a> {
     #[primary_span]
     pub span: Span,
@@ -1041,102 +929,11 @@ pub(crate) struct ExpectedItem<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("cannot use `#[unsafe(naked)]` with testing attributes", code = E0736)]
+#[diag(builtin_macros_naked_functions_testing_attribute, code = E0736)]
 pub(crate) struct NakedFunctionTestingAttribute {
     #[primary_span]
-    #[label("`#[unsafe(naked)]` is incompatible with testing attributes")]
+    #[label(builtin_macros_naked_attribute)]
     pub naked_span: Span,
-    #[label("function marked with testing attribute here")]
+    #[label]
     pub testing_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("the `#[pointee]` attribute may only be used on generic parameters")]
-pub(crate) struct NonGenericPointee {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(
-    "expected operand, {$is_inline_asm ->
-        [false] options
-        *[true] clobber_abi, options
-    }, or additional template string"
-)]
-pub(crate) struct AsmExpectedOther {
-    #[primary_span]
-    #[label(
-        "expected operand, {$is_inline_asm ->
-            [false] options
-            *[true] clobber_abi, options
-        }, or additional template string"
-    )]
-    pub(crate) span: Span,
-    pub(crate) is_inline_asm: bool,
-}
-
-#[derive(Diagnostic)]
-#[diag("none of the predicates in this `cfg_select` evaluated to true")]
-pub(crate) struct CfgSelectNoMatches {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`#[eii_declaration(...)]` is only valid on macros")]
-pub(crate) struct EiiExternTargetExpectedMacro {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`#[eii_declaration(...)]` expects a list of one or two elements")]
-pub(crate) struct EiiExternTargetExpectedList {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("expected this argument to be \"unsafe\"")]
-pub(crate) struct EiiExternTargetExpectedUnsafe {
-    #[primary_span]
-    #[note("the second argument is optional")]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`#[{$name}]` is only valid on functions")]
-pub(crate) struct EiiSharedMacroExpectedFunction {
-    #[primary_span]
-    pub span: Span,
-    pub name: String,
-}
-
-#[derive(Diagnostic)]
-#[diag("`#[{$name}]` can only be used on functions inside a module")]
-pub(crate) struct EiiSharedMacroInStatementPosition {
-    #[primary_span]
-    pub span: Span,
-    pub name: String,
-    #[label("`#[{$name}]` is used on this item, which is part of another item's local scope")]
-    pub item_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`#[{$name}]` can only be specified once")]
-pub(crate) struct EiiOnlyOnce {
-    #[primary_span]
-    pub span: Span,
-    #[note("specified again here")]
-    pub first_span: Span,
-    pub name: String,
-}
-
-#[derive(Diagnostic)]
-#[diag("`#[{$name}]` expected no arguments or a single argument: `#[{$name}(default)]`")]
-pub(crate) struct EiiMacroExpectedMaxOneArgument {
-    #[primary_span]
-    pub span: Span,
-    pub name: String,
 }

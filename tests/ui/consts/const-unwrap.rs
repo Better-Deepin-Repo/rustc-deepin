@@ -1,13 +1,11 @@
 //@ check-fail
-// Verify that panicking `const_option` methods do the correct thing
+
+#![feature(const_option)]
 
 const FOO: i32 = Some(42i32).unwrap();
 
 const BAR: i32 = Option::<i32>::None.unwrap();
-//~^ ERROR: called `Option::unwrap()` on a `None` value
-
-const BAZ: i32 = Option::<i32>::None.expect("absolutely not!");
-//~^ ERROR: absolutely not!
+//~^ERROR: evaluation of constant value failed
 
 fn main() {
     println!("{}", FOO);

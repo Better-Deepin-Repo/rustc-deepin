@@ -1,20 +1,19 @@
 use rustc_data_structures::fx::FxHashMap;
 use rustc_errors::ErrorGuaranteed;
-use rustc_hir::def_id::DefId;
 use rustc_infer::infer::relate::{
     PredicateEmittingRelation, Relate, RelateResult, StructurallyRelateAliases, TypeRelation,
 };
 use rustc_infer::infer::{InferCtxt, NllRegionVariableOrigin};
-use rustc_infer::traits::Obligation;
 use rustc_infer::traits::solve::Goal;
+use rustc_infer::traits::Obligation;
 use rustc_middle::mir::ConstraintCategory;
-use rustc_middle::traits::ObligationCause;
+use rustc_middle::span_bug;
 use rustc_middle::traits::query::NoSolution;
-use rustc_middle::ty::relate::combine::{combine_ty_args, super_combine_consts, super_combine_tys};
-use rustc_middle::ty::relate::relate_args_invariantly;
-use rustc_middle::ty::{self, FnMutDelegate, Ty, TyCtxt, TypeVisitableExt};
-use rustc_middle::{bug, span_bug};
-use rustc_span::{Span, Symbol, sym};
+use rustc_middle::traits::ObligationCause;
+use rustc_middle::ty::fold::FnMutDelegate;
+use rustc_middle::ty::{self, Ty, TyCtxt, TypeVisitableExt};
+use rustc_span::symbol::sym;
+use rustc_span::{Span, Symbol};
 use tracing::{debug, instrument};
 
 use crate::constraints::OutlivesConstraint;
@@ -59,8 +58,8 @@ impl<'a, 'tcx> TypeChecker<'a, 'tcx> {
     }
 }
 
-struct NllTypeRelating<'a, 'b, 'tcx> {
-    type_checker: &'a mut TypeChecker<'b, 'tcx>,
+struct NllTypeRelating<'me, 'bccx, 'tcx> {
+    type_checker: &'me mut TypeChecker<'bccx, 'tcx>,
 
     /// Where (and why) is this relation taking place?
     locations: Locations,
@@ -83,9 +82,9 @@ struct NllTypeRelating<'a, 'b, 'tcx> {
     ambient_variance_info: ty::VarianceDiagInfo<TyCtxt<'tcx>>,
 }
 
-impl<'a, 'b, 'tcx> NllTypeRelating<'a, 'b, 'tcx> {
+impl<'me, 'bccx, 'tcx> NllTypeRelating<'me, 'bccx, 'tcx> {
     fn new(
-        type_checker: &'a mut TypeChecker<'b, 'tcx>,
+        type_checker: &'me mut TypeChecker<'bccx, 'tcx>,
         locations: Locations,
         category: ConstraintCategory<'tcx>,
         universe_info: UniverseInfo<'tcx>,
@@ -126,13 +125,8 @@ impl<'a, 'b, 'tcx> NllTypeRelating<'a, 'b, 'tcx> {
         // by using `ty_vid rel B` and then finally and end by equating `ty_vid` to
         // the opaque.
         let mut enable_subtyping = |ty, opaque_is_expected| {
-            // We create the fresh inference variable in the highest universe.
-            // In theory we could limit it to the highest universe in the args of
-            // the opaque but that isn't really worth the effort.
-            //
-            // We'll make sure that the opaque type can actually name everything
-            // in its hidden type later on.
-            let ty_vid = infcx.next_ty_vid(self.span());
+            let ty_vid = infcx.next_ty_var_id_in_universe(self.span(), ty::UniverseIndex::ROOT);
+
             let variance = if opaque_is_expected {
                 self.ambient_variance
             } else {
@@ -174,7 +168,7 @@ impl<'a, 'b, 'tcx> NllTypeRelating<'a, 'b, 'tcx> {
             let infcx = self.type_checker.infcx;
             let mut lazy_universe = None;
             let delegate = FnMutDelegate {
-                regions: &mut |br: ty::BoundRegion<'tcx>| {
+                regions: &mut |br: ty::BoundRegion| {
                     // The first time this closure is called, create a
                     // new universe for the placeholders we will make
                     // from here out.
@@ -184,17 +178,17 @@ impl<'a, 'b, 'tcx> NllTypeRelating<'a, 'b, 'tcx> {
                         universe
                     });
 
-                    let placeholder = ty::PlaceholderRegion::new(universe, br);
+                    let placeholder = ty::PlaceholderRegion { universe, bound: br };
                     debug!(?placeholder);
                     let placeholder_reg = self.next_placeholder_region(placeholder);
                     debug!(?placeholder_reg);
 
                     placeholder_reg
                 },
-                types: &mut |_bound_ty: ty::BoundTy<'tcx>| {
+                types: &mut |_bound_ty: ty::BoundTy| {
                     unreachable!("we only replace regions in nll_relate, not types")
                 },
-                consts: &mut |_bound_const: ty::BoundConst<'tcx>| {
+                consts: &mut |_bound_var: ty::BoundVar| {
                     unreachable!("we only replace regions in nll_relate, not consts")
                 },
             };
@@ -218,22 +212,21 @@ impl<'a, 'b, 'tcx> NllTypeRelating<'a, 'b, 'tcx> {
         let infcx = self.type_checker.infcx;
         let mut reg_map = FxHashMap::default();
         let delegate = FnMutDelegate {
-            regions: &mut |br: ty::BoundRegion<'tcx>| {
+            regions: &mut |br: ty::BoundRegion| {
                 if let Some(ex_reg_var) = reg_map.get(&br) {
-                    *ex_reg_var
+                    return *ex_reg_var;
                 } else {
-                    let ex_reg_var =
-                        self.next_existential_region_var(br.kind.get_name(infcx.infcx.tcx));
+                    let ex_reg_var = self.next_existential_region_var(true, br.kind.get_name());
                     debug!(?ex_reg_var);
                     reg_map.insert(br, ex_reg_var);
 
                     ex_reg_var
                 }
             },
-            types: &mut |_bound_ty: ty::BoundTy<'tcx>| {
+            types: &mut |_bound_ty: ty::BoundTy| {
                 unreachable!("we only replace regions in nll_relate, not types")
             },
-            consts: &mut |_bound_const: ty::BoundConst<'tcx>| {
+            consts: &mut |_bound_var: ty::BoundVar| {
                 unreachable!("we only replace regions in nll_relate, not consts")
             },
         };
@@ -246,29 +239,40 @@ impl<'a, 'b, 'tcx> NllTypeRelating<'a, 'b, 'tcx> {
 
     fn create_next_universe(&mut self) -> ty::UniverseIndex {
         let universe = self.type_checker.infcx.create_next_universe();
-        self.type_checker.constraints.universe_causes.insert(universe, self.universe_info.clone());
+        self.type_checker
+            .borrowck_context
+            .constraints
+            .universe_causes
+            .insert(universe, self.universe_info.clone());
         universe
     }
 
     #[instrument(skip(self), level = "debug")]
-    fn next_existential_region_var(&mut self, name: Option<Symbol>) -> ty::Region<'tcx> {
-        let origin = NllRegionVariableOrigin::Existential { name };
-        self.type_checker.infcx.next_nll_region_var(origin, || RegionCtxt::Existential(name))
+    fn next_existential_region_var(
+        &mut self,
+        from_forall: bool,
+        name: Option<Symbol>,
+    ) -> ty::Region<'tcx> {
+        let origin = NllRegionVariableOrigin::Existential { from_forall };
+
+        let reg_var =
+            self.type_checker.infcx.next_nll_region_var(origin, || RegionCtxt::Existential(name));
+
+        reg_var
     }
 
     #[instrument(skip(self), level = "debug")]
-    fn next_placeholder_region(
-        &mut self,
-        placeholder: ty::PlaceholderRegion<'tcx>,
-    ) -> ty::Region<'tcx> {
-        let reg =
-            self.type_checker.constraints.placeholder_region(self.type_checker.infcx, placeholder);
+    fn next_placeholder_region(&mut self, placeholder: ty::PlaceholderRegion) -> ty::Region<'tcx> {
+        let reg = self
+            .type_checker
+            .borrowck_context
+            .constraints
+            .placeholder_region(self.type_checker.infcx, placeholder);
 
         let reg_info = match placeholder.bound.kind {
-            ty::BoundRegionKind::Anon => sym::anon,
-            ty::BoundRegionKind::Named(def_id) => self.type_checker.tcx().item_name(def_id),
-            ty::BoundRegionKind::ClosureEnv => sym::env,
-            ty::BoundRegionKind::NamedForPrinting(_) => bug!("only used for pretty printing"),
+            ty::BoundRegionKind::BrAnon => sym::anon,
+            ty::BoundRegionKind::BrNamed(_, name) => name,
+            ty::BoundRegionKind::BrEnv => sym::env,
         };
 
         if cfg!(debug_assertions) {
@@ -289,52 +293,25 @@ impl<'a, 'b, 'tcx> NllTypeRelating<'a, 'b, 'tcx> {
         sub: ty::Region<'tcx>,
         info: ty::VarianceDiagInfo<TyCtxt<'tcx>>,
     ) {
-        let sub = self.type_checker.universal_regions.to_region_vid(sub);
-        let sup = self.type_checker.universal_regions.to_region_vid(sup);
-        self.type_checker.constraints.outlives_constraints.push(OutlivesConstraint {
-            sup,
-            sub,
-            locations: self.locations,
-            span: self.locations.span(self.type_checker.body),
-            category: self.category,
-            variance_info: info,
-            from_closure: false,
-        });
+        let sub = self.type_checker.borrowck_context.universal_regions.to_region_vid(sub);
+        let sup = self.type_checker.borrowck_context.universal_regions.to_region_vid(sup);
+        self.type_checker.borrowck_context.constraints.outlives_constraints.push(
+            OutlivesConstraint {
+                sup,
+                sub,
+                locations: self.locations,
+                span: self.locations.span(self.type_checker.body),
+                category: self.category,
+                variance_info: info,
+                from_closure: false,
+            },
+        );
     }
 }
 
-impl<'b, 'tcx> TypeRelation<TyCtxt<'tcx>> for NllTypeRelating<'_, 'b, 'tcx> {
+impl<'bccx, 'tcx> TypeRelation<TyCtxt<'tcx>> for NllTypeRelating<'_, 'bccx, 'tcx> {
     fn cx(&self) -> TyCtxt<'tcx> {
         self.type_checker.infcx.tcx
-    }
-
-    fn relate_ty_args(
-        &mut self,
-        a_ty: Ty<'tcx>,
-        b_ty: Ty<'tcx>,
-        def_id: DefId,
-        a_args: ty::GenericArgsRef<'tcx>,
-        b_args: ty::GenericArgsRef<'tcx>,
-        _: impl FnOnce(ty::GenericArgsRef<'tcx>) -> Ty<'tcx>,
-    ) -> RelateResult<'tcx, Ty<'tcx>> {
-        if self.ambient_variance == ty::Invariant {
-            // Avoid fetching the variance if we are in an invariant context,
-            // slightly improves perf.
-            relate_args_invariantly(self, a_args, b_args)?;
-            Ok(a_ty)
-        } else {
-            let variances = self.cx().variances_of(def_id);
-            combine_ty_args(
-                &self.type_checker.infcx.infcx,
-                self,
-                a_ty,
-                b_ty,
-                variances,
-                a_args,
-                b_args,
-                |_| a_ty,
-            )
-        }
     }
 
     #[instrument(skip(self, info), level = "trace", ret)]
@@ -362,7 +339,7 @@ impl<'b, 'tcx> TypeRelation<TyCtxt<'tcx>> for NllTypeRelating<'_, 'b, 'tcx> {
     fn tys(&mut self, a: Ty<'tcx>, b: Ty<'tcx>) -> RelateResult<'tcx, Ty<'tcx>> {
         let infcx = self.type_checker.infcx;
 
-        let a = infcx.shallow_resolve(a);
+        let a = self.type_checker.infcx.shallow_resolve(a);
         assert!(!b.has_non_region_infer(), "unexpected inference var {:?}", b);
 
         if a == b {
@@ -385,7 +362,7 @@ impl<'b, 'tcx> TypeRelation<TyCtxt<'tcx>> for NllTypeRelating<'_, 'b, 'tcx> {
                 &ty::Alias(ty::Opaque, ty::AliasTy { def_id: a_def_id, .. }),
                 &ty::Alias(ty::Opaque, ty::AliasTy { def_id: b_def_id, .. }),
             ) if a_def_id == b_def_id || infcx.next_trait_solver() => {
-                super_combine_tys(&infcx.infcx, self, a, b).map(|_| ()).or_else(|err| {
+                infcx.super_combine_tys(self, a, b).map(|_| ()).or_else(|err| {
                     // This behavior is only there for the old solver, the new solver
                     // shouldn't ever fail. Instead, it unconditionally emits an
                     // alias-relate goal.
@@ -408,7 +385,7 @@ impl<'b, 'tcx> TypeRelation<TyCtxt<'tcx>> for NllTypeRelating<'_, 'b, 'tcx> {
                 debug!(?a, ?b, ?self.ambient_variance);
 
                 // Will also handle unification of `IntVar` and `FloatVar`.
-                super_combine_tys(&self.type_checker.infcx.infcx, self, a, b)?;
+                self.type_checker.infcx.super_combine_tys(self, a, b)?;
             }
         }
 
@@ -445,7 +422,7 @@ impl<'b, 'tcx> TypeRelation<TyCtxt<'tcx>> for NllTypeRelating<'_, 'b, 'tcx> {
         assert!(!a.has_non_region_infer(), "unexpected inference var {:?}", a);
         assert!(!b.has_non_region_infer(), "unexpected inference var {:?}", b);
 
-        super_combine_consts(&self.type_checker.infcx.infcx, self, a, b)
+        self.type_checker.infcx.super_combine_consts(self, a, b)
     }
 
     #[instrument(skip(self), level = "trace")]
@@ -543,7 +520,7 @@ impl<'b, 'tcx> TypeRelation<TyCtxt<'tcx>> for NllTypeRelating<'_, 'b, 'tcx> {
     }
 }
 
-impl<'b, 'tcx> PredicateEmittingRelation<InferCtxt<'tcx>> for NllTypeRelating<'_, 'b, 'tcx> {
+impl<'bccx, 'tcx> PredicateEmittingRelation<InferCtxt<'tcx>> for NllTypeRelating<'_, 'bccx, 'tcx> {
     fn span(&self) -> Span {
         self.locations.span(self.type_checker.body)
     }
@@ -553,7 +530,7 @@ impl<'b, 'tcx> PredicateEmittingRelation<InferCtxt<'tcx>> for NllTypeRelating<'_
     }
 
     fn param_env(&self) -> ty::ParamEnv<'tcx> {
-        self.type_checker.infcx.param_env
+        self.type_checker.param_env
     }
 
     fn register_predicates(

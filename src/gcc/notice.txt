@@ -1,1 +1,0 @@
-The GCC source code is not included due to unclear licensing implications

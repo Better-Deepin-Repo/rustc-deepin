@@ -1,18 +1,12 @@
 use crate::clean::*;
 
-/// Allows a type to traverse the cleaned ast of a crate.
-///
-/// Note that like [`rustc_ast::visit::Visitor`], but
-/// unlike [`rustc_lint::EarlyLintPass`], if you override a
-/// `visit_*` method, you will need to manually recurse into
-/// its contents.
-pub(crate) trait DocVisitor<'a>: Sized {
-    fn visit_item(&mut self, item: &'a Item) {
+pub(crate) trait DocVisitor: Sized {
+    fn visit_item(&mut self, item: &Item) {
         self.visit_item_recur(item)
     }
 
-    /// Don't override!
-    fn visit_inner_recur(&mut self, kind: &'a ItemKind) {
+    /// don't override!
+    fn visit_inner_recur(&mut self, kind: &ItemKind) {
         match kind {
             StrippedItem(..) => unreachable!(),
             ModuleItem(i) => {
@@ -35,8 +29,8 @@ pub(crate) trait DocVisitor<'a>: Sized {
             | StaticItem(_)
             | ConstantItem(..)
             | TraitAliasItem(_)
-            | RequiredMethodItem(..)
-            | MethodItem(..)
+            | TyMethodItem(_)
+            | MethodItem(_, _)
             | StructFieldItem(_)
             | ForeignFunctionItem(..)
             | ForeignStaticItem(..)
@@ -44,34 +38,34 @@ pub(crate) trait DocVisitor<'a>: Sized {
             | MacroItem(_)
             | ProcMacroItem(_)
             | PrimitiveItem(_)
-            | RequiredAssocConstItem(..)
-            | ProvidedAssocConstItem(..)
-            | ImplAssocConstItem(..)
-            | RequiredAssocTypeItem(..)
+            | TyAssocConstItem(..)
+            | AssocConstItem(..)
+            | TyAssocTypeItem(..)
             | AssocTypeItem(..)
-            | KeywordItem
-            | AttributeItem => {}
+            | KeywordItem => {}
         }
     }
 
-    /// Don't override!
-    fn visit_item_recur(&mut self, item: &'a Item) {
-        match &item.kind {
+    /// don't override!
+    fn visit_item_recur(&mut self, item: &Item) {
+        match &*item.kind {
             StrippedItem(i) => self.visit_inner_recur(i),
             _ => self.visit_inner_recur(&item.kind),
         }
     }
 
-    fn visit_mod(&mut self, m: &'a Module) {
+    fn visit_mod(&mut self, m: &Module) {
         m.items.iter().for_each(|i| self.visit_item(i))
     }
 
-    /// This is the main entrypoint of [`DocVisitor`].
-    fn visit_crate(&mut self, c: &'a Crate) {
+    fn visit_crate(&mut self, c: &Crate) {
         self.visit_item(&c.module);
 
-        for trait_ in c.external_traits.values() {
-            trait_.items.iter().for_each(|i| self.visit_item(i));
+        // FIXME: make this a simple by-ref for loop once external_traits is cleaned up
+        let external_traits = { std::mem::take(&mut *c.external_traits.borrow_mut()) };
+        for (k, v) in external_traits {
+            v.items.iter().for_each(|i| self.visit_item(i));
+            c.external_traits.borrow_mut().insert(k, v);
         }
     }
 }

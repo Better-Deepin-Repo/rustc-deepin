@@ -1,4 +1,5 @@
-#![feature(unsized_fn_params)]
+#![feature(unsized_locals, unsized_fn_params)]
+//~^ WARN the feature `unsized_locals` is incomplete
 
 fn main() {
     struct A<X: ?Sized>(X);

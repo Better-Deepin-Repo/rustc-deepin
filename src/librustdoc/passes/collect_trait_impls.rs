@@ -3,10 +3,9 @@
 //! struct implements that trait.
 
 use rustc_data_structures::fx::FxHashSet;
-use rustc_hir::attrs::{AttributeKind, DocAttribute};
 use rustc_hir::def_id::{DefId, DefIdMap, DefIdSet, LOCAL_CRATE};
-use rustc_hir::{Attribute, find_attr};
 use rustc_middle::ty;
+use rustc_span::symbol::sym;
 use tracing::debug;
 
 use super::Pass;
@@ -17,7 +16,7 @@ use crate::visit::DocVisitor;
 
 pub(crate) const COLLECT_TRAIT_IMPLS: Pass = Pass {
     name: "collect-trait-impls",
-    run: Some(collect_trait_impls),
+    run: collect_trait_impls,
     description: "retrieves trait impls for items in the crate",
 };
 
@@ -36,7 +35,7 @@ pub(crate) fn collect_trait_impls(mut krate: Crate, cx: &mut DocContext<'_>) -> 
     });
 
     let local_crate = ExternalCrate { crate_num: LOCAL_CRATE };
-    let prims: FxHashSet<PrimitiveType> = local_crate.primitives(tcx).map(|(_, p)| p).collect();
+    let prims: FxHashSet<PrimitiveType> = local_crate.primitives(tcx).iter().map(|p| p.1).collect();
 
     let crate_items = {
         let mut coll = ItemAndAliasCollector::new(&cx.cache);
@@ -66,11 +65,17 @@ pub(crate) fn collect_trait_impls(mut krate: Crate, cx: &mut DocContext<'_>) -> 
         for &impl_def_id in tcx.trait_impls_in_crate(LOCAL_CRATE) {
             let mut parent = Some(tcx.parent(impl_def_id));
             while let Some(did) = parent {
-                attr_buf.extend(find_attr!(tcx, did, Doc(d) if !d.cfg.is_empty() => {
-                    let mut new_attr = DocAttribute::default();
-                    new_attr.cfg = d.cfg.clone();
-                    Attribute::Parsed(AttributeKind::Doc(Box::new(new_attr)))
-                }));
+                attr_buf.extend(
+                    tcx.get_attrs(did, sym::doc)
+                        .filter(|attr| {
+                            if let Some([attr]) = attr.meta_item_list().as_deref() {
+                                attr.has_name(sym::cfg)
+                            } else {
+                                false
+                            }
+                        })
+                        .cloned(),
+                );
                 parent = tcx.opt_parent(did);
             }
             cx.with_param_env(impl_def_id, |cx| {
@@ -94,7 +99,7 @@ pub(crate) fn collect_trait_impls(mut krate: Crate, cx: &mut DocContext<'_>) -> 
             // While the `impl` blocks themselves are only in `libcore`, the module with `doc`
             // attached is directly included in `libstd` as well.
             if did.is_local() {
-                for def_id in prim.impls(tcx).filter(|&def_id| {
+                for def_id in prim.impls(tcx).filter(|def_id| {
                     // Avoid including impl blocks with filled-in generics.
                     // https://github.com/rust-lang/rust/issues/94937
                     //
@@ -155,13 +160,13 @@ pub(crate) fn collect_trait_impls(mut krate: Crate, cx: &mut DocContext<'_>) -> 
 
     // scan through included items ahead of time to splice in Deref targets to the "valid" sets
     for it in new_items_external.iter().chain(new_items_local.iter()) {
-        if let ImplItem(box Impl { ref for_, ref trait_, ref items, .. }) = it.kind
+        if let ImplItem(box Impl { ref for_, ref trait_, ref items, .. }) = *it.kind
             && trait_.as_ref().map(|t| t.def_id()) == tcx.lang_items().deref_trait()
             && cleaner.keep_impl(for_, true)
         {
             let target = items
                 .iter()
-                .find_map(|item| match item.kind {
+                .find_map(|item| match *item.kind {
                     AssocTypeItem(ref t, _) => Some(&t.type_),
                     _ => None,
                 })
@@ -172,29 +177,30 @@ pub(crate) fn collect_trait_impls(mut krate: Crate, cx: &mut DocContext<'_>) -> 
             } else if let Some(did) = target.def_id(&cx.cache) {
                 cleaner.items.insert(did.into());
             }
-            if let Some(for_did) = for_.def_id(&cx.cache)
-                && type_did_to_deref_target.insert(for_did, target).is_none()
-                // Since only the `DefId` portion of the `Type` instances is known to be same for both the
-                // `Deref` target type and the impl for type positions, this map of types is keyed by
-                // `DefId` and for convenience uses a special cleaner that accepts `DefId`s directly.
-                && cleaner.keep_impl_with_def_id(for_did.into())
-            {
-                let mut targets = DefIdSet::default();
-                targets.insert(for_did);
-                add_deref_target(
-                    cx,
-                    &type_did_to_deref_target,
-                    &mut cleaner,
-                    &mut targets,
-                    for_did,
-                );
+            if let Some(for_did) = for_.def_id(&cx.cache) {
+                if type_did_to_deref_target.insert(for_did, target).is_none() {
+                    // Since only the `DefId` portion of the `Type` instances is known to be same for both the
+                    // `Deref` target type and the impl for type positions, this map of types is keyed by
+                    // `DefId` and for convenience uses a special cleaner that accepts `DefId`s directly.
+                    if cleaner.keep_impl_with_def_id(for_did.into()) {
+                        let mut targets = DefIdSet::default();
+                        targets.insert(for_did);
+                        add_deref_target(
+                            cx,
+                            &type_did_to_deref_target,
+                            &mut cleaner,
+                            &mut targets,
+                            for_did,
+                        );
+                    }
+                }
             }
         }
     }
 
     // Filter out external items that are not needed
     new_items_external.retain(|it| {
-        if let ImplItem(box Impl { ref for_, ref trait_, ref kind, .. }) = it.kind {
+        if let ImplItem(box Impl { ref for_, ref trait_, ref kind, .. }) = *it.kind {
             cleaner.keep_impl(
                 for_,
                 trait_.as_ref().map(|t| t.def_id()) == tcx.lang_items().deref_trait(),
@@ -205,15 +211,13 @@ pub(crate) fn collect_trait_impls(mut krate: Crate, cx: &mut DocContext<'_>) -> 
         }
     });
 
-    if let ModuleItem(Module { items, .. }) = &mut krate.module.inner.kind {
+    if let ModuleItem(Module { items, .. }) = &mut *krate.module.kind {
         items.extend(synth_impls);
         items.extend(new_items_external);
         items.extend(new_items_local);
     } else {
         panic!("collect-trait-impls can't run");
     };
-
-    krate.external_traits.extend(cx.external_traits.drain(..));
 
     krate
 }
@@ -223,7 +227,7 @@ struct SyntheticImplCollector<'a, 'tcx> {
     impls: Vec<Item>,
 }
 
-impl DocVisitor<'_> for SyntheticImplCollector<'_, '_> {
+impl<'a, 'tcx> DocVisitor for SyntheticImplCollector<'a, 'tcx> {
     fn visit_item(&mut self, i: &Item) {
         if i.is_struct() || i.is_enum() || i.is_union() {
             // FIXME(eddyb) is this `doc(hidden)` check needed?
@@ -250,11 +254,11 @@ impl<'cache> ItemAndAliasCollector<'cache> {
     }
 }
 
-impl DocVisitor<'_> for ItemAndAliasCollector<'_> {
+impl<'cache> DocVisitor for ItemAndAliasCollector<'cache> {
     fn visit_item(&mut self, i: &Item) {
         self.items.insert(i.item_id);
 
-        if let TypeAliasItem(alias) = &i.inner.kind
+        if let TypeAliasItem(alias) = &*i.kind
             && let Some(did) = alias.type_.def_id(self.cache)
         {
             self.items.insert(ItemId::DefId(did));
@@ -270,7 +274,7 @@ struct BadImplStripper<'a> {
     cache: &'a Cache,
 }
 
-impl BadImplStripper<'_> {
+impl<'a> BadImplStripper<'a> {
     fn keep_impl(&self, ty: &Type, is_deref: bool) -> bool {
         if let Generic(_) = ty {
             // keep impls made on generics

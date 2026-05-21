@@ -3,7 +3,7 @@
 //@ compile-flags: -Zmir-opt-level=0
 
 fn main() {
-    Bug::V([0; !0]); //~ ERROR are too big for the target
+    Bug::V([0; !0]); //~ ERROR are too big for the current
 }
 
 enum Bug {

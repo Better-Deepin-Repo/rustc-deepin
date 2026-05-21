@@ -1,50 +1,52 @@
-error: `#[marker]` attribute cannot be used on structs
+error: attribute should be applied to a trait
   --> $DIR/marker-attribute-on-non-trait.rs:3:1
    |
 LL | #[marker]
    | ^^^^^^^^^
-   |
-   = help: `#[marker]` can only be applied to traits
+LL | struct Struct {}
+   | ---------------- not a trait
 
-error: `#[marker]` attribute cannot be used on inherent impl blocks
+error: attribute should be applied to a trait
   --> $DIR/marker-attribute-on-non-trait.rs:6:1
    |
 LL | #[marker]
    | ^^^^^^^^^
-   |
-   = help: `#[marker]` can only be applied to traits
+LL | impl Struct {}
+   | -------------- not a trait
 
-error: `#[marker]` attribute cannot be used on unions
+error: attribute should be applied to a trait
   --> $DIR/marker-attribute-on-non-trait.rs:9:1
    |
-LL | #[marker]
-   | ^^^^^^^^^
-   |
-   = help: `#[marker]` can only be applied to traits
+LL |   #[marker]
+   |   ^^^^^^^^^
+LL | / union Union {
+LL | |     x: i32,
+LL | | }
+   | |_- not a trait
 
-error: `#[marker]` attribute cannot be used on constants
+error: attribute should be applied to a trait
   --> $DIR/marker-attribute-on-non-trait.rs:14:1
    |
 LL | #[marker]
    | ^^^^^^^^^
-   |
-   = help: `#[marker]` can only be applied to traits
+LL | const CONST: usize = 10;
+   | ------------------------ not a trait
 
-error: `#[marker]` attribute cannot be used on functions
+error: attribute should be applied to a trait
   --> $DIR/marker-attribute-on-non-trait.rs:17:1
    |
 LL | #[marker]
    | ^^^^^^^^^
-   |
-   = help: `#[marker]` can only be applied to traits
+LL | fn function() {}
+   | ---------------- not a trait
 
-error: `#[marker]` attribute cannot be used on type aliases
+error: attribute should be applied to a trait
   --> $DIR/marker-attribute-on-non-trait.rs:20:1
    |
 LL | #[marker]
    | ^^^^^^^^^
-   |
-   = help: `#[marker]` can only be applied to traits
+LL | type Type = ();
+   | --------------- not a trait
 
 error: aborting due to 6 previous errors
 

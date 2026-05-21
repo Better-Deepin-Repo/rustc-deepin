@@ -3,7 +3,7 @@
 `rustc` supports doing profile-guided optimization (PGO).
 This chapter describes what PGO is, what it is good for, and how it can be used.
 
-## What Is Profile-Guided Optimization?
+## What Is Profiled-Guided Optimization?
 
 The basic concept of PGO is to collect data about the typical execution of
 a program (e.g. which branches it is likely to take) and then use this data
@@ -151,9 +151,7 @@ to use PGO with Rust.
 As an alternative to directly using the compiler for Profile-Guided Optimization,
 you may choose to go with `cargo-pgo`, which has an intuitive command-line API
 and saves you the trouble of doing all the manual work. You can read more about
-it in [cargo-pgo repository][cargo-pgo].
-
-[cargo-pgo]: https://github.com/Kobzol/cargo-pgo
+it in their repository accessible from this link: https://github.com/Kobzol/cargo-pgo
 
 For the sake of completeness, here are the corresponding steps using `cargo-pgo`:
 

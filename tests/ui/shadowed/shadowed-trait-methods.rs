@@ -1,4 +1,3 @@
-//@ edition:2015
 // Test that methods from shadowed traits cannot be used
 
 mod foo {
@@ -6,7 +5,7 @@ mod foo {
     impl T for () {}
 }
 
-mod bar { pub use crate::foo::T; }
+mod bar { pub use foo::T; }
 
 fn main() {
     pub use bar::*;

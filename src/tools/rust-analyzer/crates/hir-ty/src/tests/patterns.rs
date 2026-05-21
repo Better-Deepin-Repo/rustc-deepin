@@ -6,18 +6,18 @@ use super::{check, check_infer, check_infer_with_mismatches, check_no_mismatches
 fn infer_pattern() {
     check_infer(
         r#"
-        //- minicore: iterator, add, builtin_impls
+        //- minicore: iterator
         fn test(x: &i32) {
             let y = x;
             let &z = x;
             let a = z;
             let (c, d) = (1, "hello");
 
-            for (e, f) in [(0, 1)] {
+            for (e, f) in some_iter {
                 let g = e;
             }
 
-            if let [val] = [y] {
+            if let [val] = opt {
                 let h = val;
             }
 
@@ -33,7 +33,7 @@ fn infer_pattern() {
         "#,
         expect![[r#"
             8..9 'x': &'? i32
-            17..399 '{     ...o_x; }': ()
+            17..400 '{     ...o_x; }': ()
             27..28 'y': &'? i32
             31..32 'x': &'? i32
             42..44 '&z': &'? i32
@@ -41,68 +41,63 @@ fn infer_pattern() {
             47..48 'x': &'? i32
             58..59 'a': i32
             62..63 'z': i32
-            73..79 '(c, d)': (i32, &'? str)
+            73..79 '(c, d)': (i32, &'static str)
             74..75 'c': i32
-            77..78 'd': &'? str
-            82..94 '(1, "hello")': (i32, &'? str)
+            77..78 'd': &'static str
+            82..94 '(1, "hello")': (i32, &'static str)
             83..84 '1': i32
             86..93 '"hello"': &'static str
-            101..150 'for (e...     }': fn into_iter<[(i32, i32); 1]>([(i32, i32); 1]) -> <[(i32, i32); 1] as IntoIterator>::IntoIter
-            101..150 'for (e...     }': IntoIter<(i32, i32), 1>
-            101..150 'for (e...     }': !
-            101..150 'for (e...     }': IntoIter<(i32, i32), 1>
-            101..150 'for (e...     }': &'? mut IntoIter<(i32, i32), 1>
-            101..150 'for (e...     }': fn next<IntoIter<(i32, i32), 1>>(&'? mut IntoIter<(i32, i32), 1>) -> Option<<IntoIter<(i32, i32), 1> as Iterator>::Item>
-            101..150 'for (e...     }': Option<(i32, i32)>
-            101..150 'for (e...     }': ()
-            101..150 'for (e...     }': ()
-            101..150 'for (e...     }': ()
-            101..150 'for (e...     }': ()
-            105..111 '(e, f)': (i32, i32)
-            106..107 'e': i32
-            109..110 'f': i32
-            115..123 '[(0, 1)]': [(i32, i32); 1]
-            116..122 '(0, 1)': (i32, i32)
-            117..118 '0': i32
-            120..121 '1': i32
-            124..150 '{     ...     }': ()
-            138..139 'g': i32
-            142..143 'e': i32
-            156..203 'if let...     }': ()
-            159..174 'let [val] = [y]': bool
-            163..168 '[val]': [&'? i32; 1]
-            164..167 'val': &'? i32
-            171..174 '[y]': [&'? i32; 1]
-            172..173 'y': &'? i32
-            175..203 '{     ...     }': ()
-            189..190 'h': &'? i32
-            193..196 'val': &'? i32
-            209..235 'if let...rue {}': ()
-            212..232 'let x ... &true': bool
-            216..224 'x @ true': &'? bool
-            220..224 'true': bool
-            220..224 'true': bool
-            227..232 '&true': &'? bool
-            228..232 'true': bool
-            233..235 '{}': ()
-            245..251 'lambda': impl Fn(u64, u64, i32) -> i32
-            254..286 '|a: u6...b; c }': impl Fn(u64, u64, i32) -> i32
-            255..256 'a': u64
-            263..264 'b': u64
-            266..267 'c': i32
-            274..286 '{ a + b; c }': i32
-            276..277 'a': u64
-            276..281 'a + b': u64
-            280..281 'b': u64
-            283..284 'c': i32
-            297..309 'ref ref_to_x': &'? &'? i32
-            312..313 'x': &'? i32
-            323..332 'mut mut_x': &'? i32
-            335..336 'x': &'? i32
-            346..366 'ref mu...f_to_x': &'? mut &'? i32
-            369..370 'x': &'? i32
-            380..381 'k': &'? mut &'? i32
-            384..396 'mut_ref_to_x': &'? mut &'? i32
+            101..151 'for (e...     }': fn into_iter<{unknown}>({unknown}) -> <{unknown} as IntoIterator>::IntoIter
+            101..151 'for (e...     }': {unknown}
+            101..151 'for (e...     }': !
+            101..151 'for (e...     }': {unknown}
+            101..151 'for (e...     }': &'? mut {unknown}
+            101..151 'for (e...     }': fn next<{unknown}>(&'? mut {unknown}) -> Option<<{unknown} as Iterator>::Item>
+            101..151 'for (e...     }': Option<({unknown}, {unknown})>
+            101..151 'for (e...     }': ()
+            101..151 'for (e...     }': ()
+            101..151 'for (e...     }': ()
+            105..111 '(e, f)': ({unknown}, {unknown})
+            106..107 'e': {unknown}
+            109..110 'f': {unknown}
+            115..124 'some_iter': {unknown}
+            125..151 '{     ...     }': ()
+            139..140 'g': {unknown}
+            143..144 'e': {unknown}
+            157..204 'if let...     }': ()
+            160..175 'let [val] = opt': bool
+            164..169 '[val]': [{unknown}]
+            165..168 'val': {unknown}
+            172..175 'opt': [{unknown}]
+            176..204 '{     ...     }': ()
+            190..191 'h': {unknown}
+            194..197 'val': {unknown}
+            210..236 'if let...rue {}': ()
+            213..233 'let x ... &true': bool
+            217..225 'x @ true': &'? bool
+            221..225 'true': bool
+            221..225 'true': bool
+            228..233 '&true': &'? bool
+            229..233 'true': bool
+            234..236 '{}': ()
+            246..252 'lambda': impl Fn(u64, u64, i32) -> i32
+            255..287 '|a: u6...b; c }': impl Fn(u64, u64, i32) -> i32
+            256..257 'a': u64
+            264..265 'b': u64
+            267..268 'c': i32
+            275..287 '{ a + b; c }': i32
+            277..278 'a': u64
+            277..282 'a + b': u64
+            281..282 'b': u64
+            284..285 'c': i32
+            298..310 'ref ref_to_x': &'? &'? i32
+            313..314 'x': &'? i32
+            324..333 'mut mut_x': &'? i32
+            336..337 'x': &'? i32
+            347..367 'ref mu...f_to_x': &'? mut &'? i32
+            370..371 'x': &'? i32
+            381..382 'k': &'? mut &'? i32
+            385..397 'mut_ref_to_x': &'? mut &'? i32
         "#]],
     );
 }
@@ -193,44 +188,25 @@ fn infer_literal_pattern() {
 fn infer_range_pattern() {
     check_infer_with_mismatches(
         r#"
-//- minicore: range
-fn test(x..y: &core::ops::Range<u32>) {
-    if let 1..76 = 2u32 {}
-    if let 1..=76 = 2u32 {}
-}
+        fn test(x: &i32) {
+            if let 1..76 = 2u32 {}
+            if let 1..=76 = 2u32 {}
+        }
         "#,
         expect![[r#"
-            8..9 'x': Range<u32>
-            8..12 'x..y': Range<u32>
-            11..12 'y': Range<u32>
-            38..96 '{     ...2 {} }': ()
-            44..66 'if let...u32 {}': ()
-            47..63 'let 1....= 2u32': bool
-            51..52 '1': u32
-            51..56 '1..76': u32
-            54..56 '76': u32
-            59..63 '2u32': u32
-            64..66 '{}': ()
-            71..94 'if let...u32 {}': ()
-            74..91 'let 1....= 2u32': bool
-            78..79 '1': u32
-            78..84 '1..=76': u32
-            82..84 '76': u32
-            87..91 '2u32': u32
-            92..94 '{}': ()
+            8..9 'x': &'? i32
+            17..75 '{     ...2 {} }': ()
+            23..45 'if let...u32 {}': ()
+            26..42 'let 1....= 2u32': bool
+            30..35 '1..76': u32
+            38..42 '2u32': u32
+            43..45 '{}': ()
+            50..73 'if let...u32 {}': ()
+            53..70 'let 1....= 2u32': bool
+            57..63 '1..=76': u32
+            66..70 '2u32': u32
+            71..73 '{}': ()
         "#]],
-    );
-    check_no_mismatches(
-        r#"
-//- minicore: range
-fn main() {
-    let byte: u8 = 0u8;
-    let b = match byte {
-        b'0'..=b'9' => true,
-        _ => false,
-    };
-}
-    "#,
     );
 }
 
@@ -250,13 +226,13 @@ fn infer_pattern_match_ergonomics() {
             37..41 'A(n)': A<i32>
             39..40 'n': &'? i32
             44..49 '&A(1)': &'? A<i32>
-            45..46 'A': fn A<i32>(i32) -> A<i32>
+            45..46 'A': extern "rust-call" A<i32>(i32) -> A<i32>
             45..49 'A(1)': A<i32>
             47..48 '1': i32
             59..63 'A(n)': A<i32>
             61..62 'n': &'? mut i32
             66..75 '&mut A(1)': &'? mut A<i32>
-            71..72 'A': fn A<i32>(i32) -> A<i32>
+            71..72 'A': extern "rust-call" A<i32>(i32) -> A<i32>
             71..75 'A(1)': A<i32>
             73..74 '1': i32
         "#]],
@@ -384,7 +360,7 @@ fn infer_pattern_match_string_literal() {
 fn infer_pattern_match_byte_string_literal() {
     check_infer_with_mismatches(
         r#"
-        //- minicore: index, range
+        //- minicore: index
         struct S;
         impl<T, const N: usize> core::ops::Index<S> for [T; N] {
             type Output = [u8];
@@ -399,7 +375,7 @@ fn infer_pattern_match_byte_string_literal() {
         "#,
         expect![[r#"
             105..109 'self': &'? [T; N]
-            111..116 'index': RangeFull
+            111..116 'index': {unknown}
             157..180 '{     ...     }': &'? [u8]
             167..174 'loop {}': !
             172..174 '{}': ()
@@ -571,18 +547,18 @@ impl Foo {
             56..64 'Self(s,)': Foo
             61..62 's': &'? usize
             67..75 '&Foo(0,)': &'? Foo
-            68..71 'Foo': fn Foo(usize) -> Foo
+            68..71 'Foo': extern "rust-call" Foo(usize) -> Foo
             68..75 'Foo(0,)': Foo
             72..73 '0': usize
             89..97 'Self(s,)': Foo
             94..95 's': &'? mut usize
             100..112 '&mut Foo(0,)': &'? mut Foo
-            105..108 'Foo': fn Foo(usize) -> Foo
+            105..108 'Foo': extern "rust-call" Foo(usize) -> Foo
             105..112 'Foo(0,)': Foo
             109..110 '0': usize
             126..134 'Self(s,)': Foo
             131..132 's': usize
-            137..140 'Foo': fn Foo(usize) -> Foo
+            137..140 'Foo': extern "rust-call" Foo(usize) -> Foo
             137..144 'Foo(0,)': Foo
             141..142 '0': usize
         "#]],
@@ -676,7 +652,7 @@ fn infer_generics_in_patterns() {
 fn infer_const_pattern() {
     check(
         r#"
-enum Option<T> { None, Some(T) }
+enum Option<T> { None }
 use Option::None;
 struct Foo;
 const Bar: usize = 1;
@@ -744,8 +720,8 @@ fn test() {
             72..171 '{     ... x); }': ()
             78..81 'foo': fn foo<&'? (i32, &'? str), i32, impl FnOnce(&'? (i32, &'? str)) -> i32>(&'? (i32, &'? str), impl FnOnce(&'? (i32, &'? str)) -> i32) -> i32
             78..105 'foo(&(...y)| x)': i32
-            82..91 '&(1, "a")': &'? (i32, &'? str)
-            83..91 '(1, "a")': (i32, &'? str)
+            82..91 '&(1, "a")': &'? (i32, &'static str)
+            83..91 '(1, "a")': (i32, &'static str)
             84..85 '1': i32
             87..90 '"a"': &'static str
             93..104 '|&(x, y)| x': impl FnOnce(&'? (i32, &'? str)) -> i32
@@ -756,8 +732,8 @@ fn test() {
             103..104 'x': i32
             142..145 'foo': fn foo<&'? (i32, &'? str), &'? i32, impl FnOnce(&'? (i32, &'? str)) -> &'? i32>(&'? (i32, &'? str), impl FnOnce(&'? (i32, &'? str)) -> &'? i32) -> &'? i32
             142..168 'foo(&(...y)| x)': &'? i32
-            146..155 '&(1, "a")': &'? (i32, &'? str)
-            147..155 '(1, "a")': (i32, &'? str)
+            146..155 '&(1, "a")': &'? (i32, &'static str)
+            147..155 '(1, "a")': (i32, &'static str)
             148..149 '1': i32
             151..154 '"a"': &'static str
             157..167 '|(x, y)| x': impl FnOnce(&'? (i32, &'? str)) -> &'? i32
@@ -798,8 +774,6 @@ fn slice_tail_pattern() {
 fn box_pattern() {
     check_infer(
         r#"
-        #![feature(lang_items)]
-
         pub struct Global;
         #[lang = "owned_box"]
         pub struct Box<T, A = Global>(T);
@@ -811,13 +785,13 @@ fn box_pattern() {
         }
         "#,
         expect![[r#"
-            108..114 'params': Box<i32, Global>
-            126..180 '{     ...   } }': ()
-            132..178 'match ...     }': ()
-            138..144 'params': Box<i32, Global>
-            155..166 'box integer': Box<i32, Global>
-            159..166 'integer': i32
-            170..172 '{}': ()
+            83..89 'params': Box<i32, Global>
+            101..155 '{     ...   } }': ()
+            107..153 'match ...     }': ()
+            113..119 'params': Box<i32, Global>
+            130..141 'box integer': Box<i32, Global>
+            134..141 'integer': i32
+            145..147 '{}': ()
         "#]],
     );
     check_infer(
@@ -837,6 +811,7 @@ fn box_pattern() {
             76..122 'match ...     }': ()
             82..88 'params': Box<i32>
             99..110 'box integer': Box<i32>
+            103..110 'integer': i32
             114..116 '{}': ()
         "#]],
     );
@@ -957,7 +932,7 @@ fn foo(foo: Foo) {
             48..51 'foo': Foo
             62..84 'const ... 32) }': Foo
             68..84 '{ Foo(... 32) }': Foo
-            70..73 'Foo': fn Foo(usize) -> Foo
+            70..73 'Foo': extern "rust-call" Foo(usize) -> Foo
             70..82 'Foo(15 + 32)': Foo
             74..76 '15': usize
             74..81 '15 + 32': usize
@@ -1147,7 +1122,6 @@ fn my_fn(#[cfg(feature = "feature")] u8: u8, u32: u32) {}
 fn var_args() {
     check_types(
         r#"
-#![feature(lang_items)]
 #[lang = "va_list"]
 pub struct VaListImpl<'f>;
 fn my_fn(foo: ...) {}
@@ -1162,7 +1136,6 @@ fn my_fn2(bar: u32, foo: ...) {}
 fn var_args_cond() {
     check_types(
         r#"
-#![feature(lang_items)]
 #[lang = "va_list"]
 pub struct VaListImpl<'f>;
 fn my_fn(bar: u32, #[cfg(FALSE)] foo: ..., #[cfg(not(FALSE))] foo: u32) {
@@ -1283,24 +1256,5 @@ fn main() {
 }
 
             "#,
-    );
-}
-
-#[test]
-fn destructuring_assign_ref() {
-    check_no_mismatches(
-        r#"
-struct Foo;
-
-fn foo() -> (&'static Foo, u32) {
-    (&Foo, 0)
-}
-
-fn bar() {
-    let ext: &Foo;
-    let v;
-    (ext, v) = foo();
-}
-    "#,
     );
 }

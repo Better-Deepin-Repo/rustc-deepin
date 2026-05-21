@@ -18,21 +18,17 @@ impl Debug for Foo {
         static WORKS_WITH_NESTED_ITEMS: bool = true;
 
         print!("{}", 1);
-        //~^ print_in_format_impl
-
+        //~^ ERROR: use of `print!` in `Debug` impl
+        //~| NOTE: `-D clippy::print-in-format-impl` implied by `-D warnings`
         println!("{}", 2);
-        //~^ print_in_format_impl
-
+        //~^ ERROR: use of `println!` in `Debug` impl
         eprint!("{}", 3);
-        //~^ print_in_format_impl
-
+        //~^ ERROR: use of `eprint!` in `Debug` impl
         eprintln!("{}", 4);
-        //~^ print_in_format_impl
-
+        //~^ ERROR: use of `eprintln!` in `Debug` impl
         nested! {
             println!("nested");
-            //~^ print_in_format_impl
-
+            //~^ ERROR: use of `println!` in `Debug` impl
         };
 
         write!(f, "{}", 5);
@@ -46,8 +42,7 @@ impl Debug for Foo {
 impl Display for Foo {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
         print!("Display");
-        //~^ print_in_format_impl
-
+        //~^ ERROR: use of `print!` in `Display` impl
         write!(f, "Display");
 
         Ok(())
@@ -58,8 +53,7 @@ struct UnnamedFormatter;
 impl Debug for UnnamedFormatter {
     fn fmt(&self, _: &mut Formatter) -> Result<(), Error> {
         println!("UnnamedFormatter");
-        //~^ print_in_format_impl
-
+        //~^ ERROR: use of `println!` in `Debug` impl
         Ok(())
     }
 }

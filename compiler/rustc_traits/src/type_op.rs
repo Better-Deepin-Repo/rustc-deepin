@@ -1,15 +1,14 @@
 use std::fmt;
 
+use rustc_infer::infer::canonical::{Canonical, QueryResponse};
 use rustc_infer::infer::TyCtxtInferExt;
-use rustc_infer::infer::canonical::{Canonical, CanonicalQueryInput, QueryResponse};
 use rustc_middle::query::Providers;
 use rustc_middle::traits::query::NoSolution;
 use rustc_middle::ty::{Clause, FnSig, ParamEnvAnd, PolyFnSig, Ty, TyCtxt, TypeFoldable};
-use rustc_span::DUMMY_SP;
 use rustc_trait_selection::infer::InferCtxtBuilderExt;
 use rustc_trait_selection::traits::query::normalize::QueryNormalizeExt;
 use rustc_trait_selection::traits::query::type_op::ascribe_user_type::{
-    AscribeUserType, type_op_ascribe_user_type_with_span,
+    type_op_ascribe_user_type_with_span, AscribeUserType,
 };
 use rustc_trait_selection::traits::query::type_op::normalize::Normalize;
 use rustc_trait_selection::traits::query::type_op::prove_predicate::ProvePredicate;
@@ -29,10 +28,10 @@ pub(crate) fn provide(p: &mut Providers) {
 
 fn type_op_ascribe_user_type<'tcx>(
     tcx: TyCtxt<'tcx>,
-    canonicalized: CanonicalQueryInput<'tcx, ParamEnvAnd<'tcx, AscribeUserType<'tcx>>>,
+    canonicalized: Canonical<'tcx, ParamEnvAnd<'tcx, AscribeUserType<'tcx>>>,
 ) -> Result<&'tcx Canonical<'tcx, QueryResponse<'tcx, ()>>, NoSolution> {
     tcx.infer_ctxt().enter_canonical_trait_query(&canonicalized, |ocx, key| {
-        type_op_ascribe_user_type_with_span(ocx, key, DUMMY_SP)
+        type_op_ascribe_user_type_with_span(ocx, key, None)
     })
 }
 
@@ -43,7 +42,7 @@ fn type_op_normalize<'tcx, T>(
 where
     T: fmt::Debug + TypeFoldable<TyCtxt<'tcx>>,
 {
-    let ParamEnvAnd { param_env, value: Normalize { value } } = key;
+    let (param_env, Normalize { value }) = key.into_parts();
     let Normalized { value, obligations } =
         ocx.infcx.at(&ObligationCause::dummy(), param_env).query_normalize(value)?;
     ocx.register_obligations(obligations);
@@ -52,35 +51,35 @@ where
 
 fn type_op_normalize_ty<'tcx>(
     tcx: TyCtxt<'tcx>,
-    canonicalized: CanonicalQueryInput<'tcx, ParamEnvAnd<'tcx, Normalize<Ty<'tcx>>>>,
+    canonicalized: Canonical<'tcx, ParamEnvAnd<'tcx, Normalize<Ty<'tcx>>>>,
 ) -> Result<&'tcx Canonical<'tcx, QueryResponse<'tcx, Ty<'tcx>>>, NoSolution> {
     tcx.infer_ctxt().enter_canonical_trait_query(&canonicalized, type_op_normalize)
 }
 
 fn type_op_normalize_clause<'tcx>(
     tcx: TyCtxt<'tcx>,
-    canonicalized: CanonicalQueryInput<'tcx, ParamEnvAnd<'tcx, Normalize<Clause<'tcx>>>>,
+    canonicalized: Canonical<'tcx, ParamEnvAnd<'tcx, Normalize<Clause<'tcx>>>>,
 ) -> Result<&'tcx Canonical<'tcx, QueryResponse<'tcx, Clause<'tcx>>>, NoSolution> {
     tcx.infer_ctxt().enter_canonical_trait_query(&canonicalized, type_op_normalize)
 }
 
 fn type_op_normalize_fn_sig<'tcx>(
     tcx: TyCtxt<'tcx>,
-    canonicalized: CanonicalQueryInput<'tcx, ParamEnvAnd<'tcx, Normalize<FnSig<'tcx>>>>,
+    canonicalized: Canonical<'tcx, ParamEnvAnd<'tcx, Normalize<FnSig<'tcx>>>>,
 ) -> Result<&'tcx Canonical<'tcx, QueryResponse<'tcx, FnSig<'tcx>>>, NoSolution> {
     tcx.infer_ctxt().enter_canonical_trait_query(&canonicalized, type_op_normalize)
 }
 
 fn type_op_normalize_poly_fn_sig<'tcx>(
     tcx: TyCtxt<'tcx>,
-    canonicalized: CanonicalQueryInput<'tcx, ParamEnvAnd<'tcx, Normalize<PolyFnSig<'tcx>>>>,
+    canonicalized: Canonical<'tcx, ParamEnvAnd<'tcx, Normalize<PolyFnSig<'tcx>>>>,
 ) -> Result<&'tcx Canonical<'tcx, QueryResponse<'tcx, PolyFnSig<'tcx>>>, NoSolution> {
     tcx.infer_ctxt().enter_canonical_trait_query(&canonicalized, type_op_normalize)
 }
 
 fn type_op_prove_predicate<'tcx>(
     tcx: TyCtxt<'tcx>,
-    canonicalized: CanonicalQueryInput<'tcx, ParamEnvAnd<'tcx, ProvePredicate<'tcx>>>,
+    canonicalized: Canonical<'tcx, ParamEnvAnd<'tcx, ProvePredicate<'tcx>>>,
 ) -> Result<&'tcx Canonical<'tcx, QueryResponse<'tcx, ()>>, NoSolution> {
     tcx.infer_ctxt().enter_canonical_trait_query(&canonicalized, |ocx, key| {
         type_op_prove_predicate_with_cause(ocx, key, ObligationCause::dummy());
@@ -96,6 +95,6 @@ pub fn type_op_prove_predicate_with_cause<'tcx>(
     key: ParamEnvAnd<'tcx, ProvePredicate<'tcx>>,
     cause: ObligationCause<'tcx>,
 ) {
-    let ParamEnvAnd { param_env, value: ProvePredicate { predicate } } = key;
+    let (param_env, ProvePredicate { predicate }) = key.into_parts();
     ocx.register_obligation(Obligation::new(ocx.infcx.tcx, cause, param_env, predicate));
 }

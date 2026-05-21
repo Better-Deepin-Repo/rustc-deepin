@@ -7,11 +7,11 @@ LL |
 LL | fn together_we_will_rule_the_galaxy(son: &dyn A) {}
    |                                               ^
    |
-   = note: because the parameter default references `Self`, the parameter must be specified on the trait object type
-help: explicitly specify the type parameter
+   = note: because of the default `Self` reference, type parameters must be specified on object types
+help: set the type parameter to the desired type
    |
-LL | fn together_we_will_rule_the_galaxy(son: &dyn A</* T */>) {}
-   |                                                +++++++++
+LL | fn together_we_will_rule_the_galaxy(son: &dyn A<T>) {}
+   |                                                +++
 
 error: aborting due to 1 previous error
 

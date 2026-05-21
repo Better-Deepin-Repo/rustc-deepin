@@ -4,11 +4,7 @@ pub mod foo {
     type MainFn = impl Fn();
 
     fn bar() {}
-    #[define_opaque(MainFn)]
-    const fn def() -> MainFn {
-        bar
-    }
-    pub const BAR: MainFn = def();
+    pub const BAR: MainFn = bar;
 }
 
 use foo::BAR as main; //~ ERROR `main` function not found in crate

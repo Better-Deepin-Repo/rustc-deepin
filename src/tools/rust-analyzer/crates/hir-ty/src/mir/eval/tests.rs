@@ -1,136 +1,83 @@
-use hir_def::{HasModule, db::DefDatabase};
-use hir_expand::EditionedFileId;
-use span::Edition;
+use hir_def::db::DefDatabase;
+use span::{Edition, EditionedFileId};
 use syntax::{TextRange, TextSize};
 use test_fixture::WithFixture;
 
-use crate::{
-    db::HirDatabase,
-    display::DisplayTarget,
-    mir::MirLowerError,
-    next_solver::{DbInterner, GenericArgs},
-    setup_tracing,
-    test_db::TestDB,
-};
+use crate::{db::HirDatabase, test_db::TestDB, Interner, Substitution};
 
-use super::{MirEvalError, interpret_mir};
+use super::{interpret_mir, MirEvalError};
 
 fn eval_main(db: &TestDB, file_id: EditionedFileId) -> Result<(String, String), MirEvalError> {
-    crate::attach_db(db, || {
-        let interner = DbInterner::new_no_crate(db);
-        let module_id = db.module_for_file(file_id.file_id(db));
-        let def_map = module_id.def_map(db);
-        let scope = &def_map[module_id].scope;
-        let func_id = scope
-            .declarations()
-            .find_map(|x| match x {
-                hir_def::ModuleDefId::FunctionId(x) => {
-                    if db.function_signature(x).name.display(db, Edition::CURRENT).to_string()
-                        == "main"
-                    {
-                        Some(x)
-                    } else {
-                        None
-                    }
+    let module_id = db.module_for_file(file_id);
+    let def_map = module_id.def_map(db);
+    let scope = &def_map[module_id.local_id].scope;
+    let func_id = scope
+        .declarations()
+        .find_map(|x| match x {
+            hir_def::ModuleDefId::FunctionId(x) => {
+                if db.function_data(x).name.display(db, Edition::CURRENT).to_string() == "main" {
+                    Some(x)
+                } else {
+                    None
                 }
-                _ => None,
-            })
-            .expect("no main function found");
-        let body = db
-            .monomorphized_mir_body(
-                func_id.into(),
-                GenericArgs::empty(interner).store(),
-                crate::ParamEnvAndCrate {
-                    param_env: db.trait_environment(func_id.into()),
-                    krate: func_id.krate(db),
-                }
-                .store(),
-            )
-            .map_err(|e| MirEvalError::MirLowerError(func_id, e))?;
+            }
+            _ => None,
+        })
+        .expect("no main function found");
+    let body = db
+        .monomorphized_mir_body(
+            func_id.into(),
+            Substitution::empty(Interner),
+            db.trait_environment(func_id.into()),
+        )
+        .map_err(|e| MirEvalError::MirLowerError(func_id, e))?;
 
-        let (result, output) = interpret_mir(db, body, false, None)?;
-        result?;
-        Ok((output.stdout().into_owned(), output.stderr().into_owned()))
-    })
+    let (result, output) = interpret_mir(db, body, false, None);
+    result?;
+    Ok((output.stdout().into_owned(), output.stderr().into_owned()))
 }
 
-fn check_pass(#[rust_analyzer::rust_fixture] ra_fixture: &str) {
+fn check_pass(ra_fixture: &str) {
     check_pass_and_stdio(ra_fixture, "", "");
 }
 
-fn check_pass_and_stdio(
-    #[rust_analyzer::rust_fixture] ra_fixture: &str,
-    expected_stdout: &str,
-    expected_stderr: &str,
-) {
-    let _tracing = setup_tracing();
+fn check_pass_and_stdio(ra_fixture: &str, expected_stdout: &str, expected_stderr: &str) {
     let (db, file_ids) = TestDB::with_many_files(ra_fixture);
-    crate::attach_db(&db, || {
-        let file_id = *file_ids.last().unwrap();
-        let x = eval_main(&db, file_id);
-        match x {
-            Err(e) => {
-                let mut err = String::new();
-                let line_index = |size: TextSize| {
-                    let mut size = u32::from(size) as usize;
-                    let lines = ra_fixture.lines().enumerate();
-                    for (i, l) in lines {
-                        if let Some(x) = size.checked_sub(l.len()) {
-                            size = x;
-                        } else {
-                            return (i, size);
-                        }
+    let file_id = *file_ids.last().unwrap();
+    let x = eval_main(&db, file_id);
+    match x {
+        Err(e) => {
+            let mut err = String::new();
+            let line_index = |size: TextSize| {
+                let mut size = u32::from(size) as usize;
+                let lines = ra_fixture.lines().enumerate();
+                for (i, l) in lines {
+                    if let Some(x) = size.checked_sub(l.len()) {
+                        size = x;
+                    } else {
+                        return (i, size);
                     }
-                    (usize::MAX, size)
-                };
-                let span_formatter = |file, range: TextRange| {
-                    format!(
-                        "{:?} {:?}..{:?}",
-                        file,
-                        line_index(range.start()),
-                        line_index(range.end())
-                    )
-                };
-                let krate = db.module_for_file(file_id.file_id(&db)).krate(&db);
-                e.pretty_print(
-                    &mut err,
-                    &db,
-                    span_formatter,
-                    DisplayTarget::from_crate(&db, krate),
-                )
-                .unwrap();
-                panic!("Error in interpreting: {err}");
-            }
-            Ok((stdout, stderr)) => {
-                assert_eq!(stdout, expected_stdout);
-                assert_eq!(stderr, expected_stderr);
-            }
+                }
+                (usize::MAX, size)
+            };
+            let span_formatter = |file, range: TextRange| {
+                format!("{:?} {:?}..{:?}", file, line_index(range.start()), line_index(range.end()))
+            };
+            e.pretty_print(&mut err, &db, span_formatter, Edition::CURRENT).unwrap();
+            panic!("Error in interpreting: {err}");
         }
-    })
+        Ok((stdout, stderr)) => {
+            assert_eq!(stdout, expected_stdout);
+            assert_eq!(stderr, expected_stderr);
+        }
+    }
 }
 
-fn check_panic(#[rust_analyzer::rust_fixture] ra_fixture: &str, expected_panic: &str) {
+fn check_panic(ra_fixture: &str, expected_panic: &str) {
     let (db, file_ids) = TestDB::with_many_files(ra_fixture);
-    crate::attach_db(&db, || {
-        let file_id = *file_ids.last().unwrap();
-        let e = eval_main(&db, file_id).unwrap_err();
-        assert_eq!(
-            e.is_panic().unwrap_or_else(|| panic!("unexpected error: {e:?}")),
-            expected_panic
-        );
-    })
-}
-
-fn check_error_with(
-    #[rust_analyzer::rust_fixture] ra_fixture: &str,
-    expect_err: impl FnOnce(MirEvalError) -> bool,
-) {
-    let (db, file_ids) = TestDB::with_many_files(ra_fixture);
-    crate::attach_db(&db, || {
-        let file_id = *file_ids.last().unwrap();
-        let e = eval_main(&db, file_id).unwrap_err();
-        assert!(expect_err(e));
-    })
+    let file_id = *file_ids.last().unwrap();
+    let e = eval_main(&db, file_id).unwrap_err();
+    assert_eq!(e.is_panic().unwrap_or_else(|| panic!("unexpected error: {e:?}")), expected_panic);
 }
 
 #[test]
@@ -452,7 +399,7 @@ extern "C" {
     fn memcmp(s1: *const u8, s2: *const u8, n: usize) -> i32;
 }
 
-fn my_cmp(x: &[u8; 3], y: &[u8; 3]) -> i32 {
+fn my_cmp(x: &[u8], y: &[u8]) -> i32 {
     memcmp(x as *const u8, y as *const u8, x.len())
 }
 
@@ -523,7 +470,7 @@ fn main() {
 fn from_fn() {
     check_pass(
         r#"
-//- minicore: fn, iterator, sized
+//- minicore: fn, iterator
 struct FromFn<F>(F);
 
 impl<T, F: FnMut() -> Option<T>> Iterator for FromFn<F> {
@@ -548,7 +495,7 @@ fn main() {
 fn for_loop() {
     check_pass(
         r#"
-//- minicore: iterator, add, builtin_impls
+//- minicore: iterator, add
 fn should_not_reach() {
     _ // FIXME: replace this function with panic when that works
 }
@@ -644,9 +591,7 @@ fn main() {
 fn specialization_array_clone() {
     check_pass(
         r#"
-//- minicore: copy, derive, slice, index, coerce_unsized, panic
-#![feature(min_specialization)]
-
+//- minicore: copy, derive, slice, index, coerce_unsized
 impl<T: Clone, const N: usize> Clone for [T; N] {
     #[inline]
     fn clone(&self) -> Self {
@@ -661,7 +606,8 @@ trait SpecArrayClone: Clone {
 impl<T: Clone> SpecArrayClone for T {
     #[inline]
     default fn clone<const N: usize>(array: &[T; N]) -> [T; N] {
-        panic!("should go to the specialized impl")
+        // FIXME: panic here when we actually implement specialization.
+        from_slice(array)
     }
 }
 
@@ -710,7 +656,7 @@ fn main() {
 fn closure_state() {
     check_pass(
         r#"
-//- minicore: fn, add, copy, builtin_impls
+//- minicore: fn, add, copy
 fn should_not_reach() {
     _ // FIXME: replace this function with panic when that works
 }
@@ -833,7 +779,6 @@ fn main() {
 fn posix_getenv() {
     check_pass(
         r#"
-//- minicore: sized
 //- /main.rs env:foo=bar
 
 type c_char = u8;
@@ -904,7 +849,7 @@ fn main() {
 fn regression_14966() {
     check_pass(
         r#"
-//- minicore: fn, copy, coerce_unsized, dispatch_from_dyn
+//- minicore: fn, copy, coerce_unsized
 trait A<T> {
     fn a(&self) {}
 }
@@ -929,106 +874,6 @@ impl C {
 
 fn main() {
     C::c(&());
-}
-"#,
-    );
-}
-
-#[test]
-fn long_str_eq_same_prefix() {
-    check_pass_and_stdio(
-        r#"
-//- minicore: slice, index, coerce_unsized
-
-type pthread_key_t = u32;
-type c_void = u8;
-type c_int = i32;
-
-extern "C" {
-    pub fn write(fd: i32, buf: *const u8, count: usize) -> usize;
-}
-
-fn main() {
-    // More than 16 bytes, the size of `i128`.
-    let long_str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab";
-    let output = match long_str {
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" => b"true" as &[u8],
-        _ => b"false",
-    };
-    write(1, &output[0], output.len());
-}
-        "#,
-        "false",
-        "",
-    );
-}
-
-#[test]
-fn regression_19021() {
-    check_pass(
-        r#"
-//- minicore: deref
-use core::ops::Deref;
-
-#[lang = "owned_box"]
-struct Box<T>(T);
-
-impl<T> Deref for Box<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-struct Foo;
-
-fn main() {
-    let x = Box(Foo);
-    let y = &Foo;
-
-    || match x {
-        ref x => x,
-        _ => y,
-    };
-}
-"#,
-    );
-}
-
-#[test]
-fn regression_19177() {
-    check_error_with(
-        r#"
-//- minicore: copy
-trait Foo {}
-trait Bar {}
-trait Baz {}
-trait Qux {
-    type Assoc;
-}
-
-fn main<'a, T: Foo + Bar + Baz>(
-    x: &T,
-    y: (),
-    z: &'a dyn Qux<Assoc = T>,
-    w: impl Foo + Bar,
-) {
-}
-"#,
-        |e| matches!(e, MirEvalError::MirLowerError(_, MirLowerError::GenericArgNotProvided(..))),
-    );
-}
-
-#[test]
-fn format_args_pass() {
-    check_pass(
-        r#"
-//- minicore: fmt
-fn main() {
-    let x1 = format_args!("");
-    let x2 = format_args!("{}", x1);
-    let x3 = format_args!("{} {}", x1, x2);
 }
 "#,
     );

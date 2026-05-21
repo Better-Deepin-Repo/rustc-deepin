@@ -1,63 +1,52 @@
-//@ edition:2015
-// Checks that the #[unsafe(naked)] attribute can be placed on function definitions only.
+// Checks that #[naked] attribute can be placed on function definitions only.
 //
 //@ needs-asm-support
-#![unsafe(naked)] //~ ERROR attribute cannot be used on
+#![feature(naked_functions)]
+#![naked] //~ ERROR should be applied to a function definition
 
-use std::arch::naked_asm;
+use std::arch::asm;
 
 extern "C" {
-    #[unsafe(naked)] //~ ERROR attribute cannot be used on
+    #[naked] //~ ERROR should be applied to a function definition
     fn f();
 }
 
-#[unsafe(naked)] //~ ERROR attribute cannot be used on
+#[naked] //~ ERROR should be applied to a function definition
 #[repr(C)]
 struct S {
-    #[unsafe(naked)] //~ ERROR attribute cannot be used on
     a: u32,
     b: u32,
 }
 
 trait Invoke {
-    #[unsafe(naked)] //~ ERROR attribute cannot be used on
+    #[naked] //~ ERROR should be applied to a function definition
     extern "C" fn invoke(&self);
 }
 
 impl Invoke for S {
-    #[unsafe(naked)]
+    #[naked]
     extern "C" fn invoke(&self) {
-        naked_asm!("")
+        unsafe { asm!("", options(noreturn)) }
     }
 }
 
-#[unsafe(naked)]
+#[naked]
 extern "C" fn ok() {
-    naked_asm!("")
+    unsafe { asm!("", options(noreturn)) }
 }
 
 impl S {
-    #[unsafe(naked)]
+    #[naked]
     extern "C" fn g() {
-        naked_asm!("")
+        unsafe { asm!("", options(noreturn)) }
     }
 
-    #[unsafe(naked)]
+    #[naked]
     extern "C" fn h(&self) {
-        naked_asm!("")
+        unsafe { asm!("", options(noreturn)) }
     }
 }
 
 fn main() {
-    #[unsafe(naked)] //~ ERROR attribute cannot be used on
-    || {};
-}
-
-// Check that the path of an attribute without a name is printed correctly (issue #140082)
-#[::a]
-//~^ ERROR attribute incompatible with `#[unsafe(naked)]`
-//~| ERROR cannot find module or crate `a` in the crate root
-#[unsafe(naked)]
-extern "C" fn issue_140082() {
-    naked_asm!("")
+    #[naked] || {}; //~ ERROR should be applied to a function definition
 }

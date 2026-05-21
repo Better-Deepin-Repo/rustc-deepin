@@ -3,6 +3,6 @@
 //@ compile-flags: --emit=dep-info,metadata
 
 const FOO: i32 = [][0];
-//~^ ERROR index out of bounds
+//~^ ERROR evaluation of constant value failed
 
 fn main() {}

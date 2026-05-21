@@ -1,12 +1,13 @@
 use clippy_utils::diagnostics::{span_lint_hir, span_lint_hir_and_then};
-use clippy_utils::higher::{VecInitKind, get_vec_init_kind};
-use clippy_utils::source::{indent_of, snippet};
-use clippy_utils::{get_enclosing_block, sym};
+use clippy_utils::get_enclosing_block;
+use clippy_utils::higher::{get_vec_init_kind, VecInitKind};
+use clippy_utils::source::snippet;
 
+use hir::{Expr, ExprKind, HirId, LetStmt, PatKind, PathSegment, QPath, StmtKind};
 use rustc_errors::Applicability;
+use rustc_hir as hir;
 use rustc_hir::def::Res;
-use rustc_hir::intravisit::{Visitor, walk_expr};
-use rustc_hir::{self as hir, Expr, ExprKind, HirId, LetStmt, PatKind, PathSegment, QPath, StmtKind};
+use rustc_hir::intravisit::{walk_expr, Visitor};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::declare_lint_pass;
 
@@ -83,18 +84,16 @@ impl<'tcx> LateLintPass<'tcx> for ReadZeroByteVec {
                             expr.span,
                             "reading zero byte data to `Vec`",
                             |diag| {
-                                let span = first_stmt_containing_expr(cx, expr).map_or(expr.span, |stmt| stmt.span);
-                                let indent = indent_of(cx, span).unwrap_or(0);
                                 diag.span_suggestion(
-                                    span.shrink_to_lo(),
+                                    expr.span,
                                     "try",
-                                    format!("{ident}.resize({len}, 0);\n{}", " ".repeat(indent)),
+                                    format!("{}.resize({len}, 0); {}", ident.as_str(), snippet(cx, expr.span, "..")),
                                     applicability,
                                 );
                             },
                         ),
                         VecInitKind::WithExprCapacity(hir_id) => {
-                            let e = cx.tcx.hir_expect_expr(hir_id);
+                            let e = cx.tcx.hir().expect_expr(hir_id);
                             span_lint_hir_and_then(
                                 cx,
                                 READ_ZERO_BYTE_VEC,
@@ -102,15 +101,14 @@ impl<'tcx> LateLintPass<'tcx> for ReadZeroByteVec {
                                 expr.span,
                                 "reading zero byte data to `Vec`",
                                 |diag| {
-                                    let span = first_stmt_containing_expr(cx, expr).map_or(expr.span, |stmt| stmt.span);
-                                    let indent = indent_of(cx, span).unwrap_or(0);
                                     diag.span_suggestion(
-                                        span.shrink_to_lo(),
+                                        expr.span,
                                         "try",
                                         format!(
-                                            "{ident}.resize({}, 0);\n{}",
+                                            "{}.resize({}, 0); {}",
+                                            ident.as_str(),
                                             snippet(cx, e.span, ".."),
-                                            " ".repeat(indent)
+                                            snippet(cx, expr.span, "..")
                                         ),
                                         applicability,
                                     );
@@ -133,16 +131,6 @@ impl<'tcx> LateLintPass<'tcx> for ReadZeroByteVec {
     }
 }
 
-fn first_stmt_containing_expr<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) -> Option<&'tcx hir::Stmt<'tcx>> {
-    cx.tcx.hir_parent_iter(expr.hir_id).find_map(|(_, node)| {
-        if let hir::Node::Stmt(stmt) = node {
-            Some(stmt)
-        } else {
-            None
-        }
-    })
-}
-
 struct ReadVecVisitor<'tcx> {
     local_id: HirId,
     read_zero_expr: Option<&'tcx Expr<'tcx>>,
@@ -154,8 +142,8 @@ impl<'tcx> Visitor<'tcx> for ReadVecVisitor<'tcx> {
         if let ExprKind::MethodCall(path, receiver, args, _) = e.kind {
             let PathSegment { ident, .. } = *path;
 
-            match ident.name {
-                sym::read | sym::read_exact => {
+            match ident.as_str() {
+                "read" | "read_exact" => {
                     let [arg] = args else { return };
                     if let ExprKind::AddrOf(_, hir::Mutability::Mut, inner) = arg.kind
                         && let ExprKind::Path(QPath::Resolved(None, inner_path)) = inner.kind
@@ -167,7 +155,7 @@ impl<'tcx> Visitor<'tcx> for ReadVecVisitor<'tcx> {
                         return;
                     }
                 },
-                sym::resize => {
+                "resize" => {
                     // If the Vec is resized, then it's a valid read
                     if let ExprKind::Path(QPath::Resolved(_, inner_path)) = receiver.kind
                         && let Res::Local(res_id) = inner_path.res

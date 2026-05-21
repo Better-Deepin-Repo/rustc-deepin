@@ -1,7 +1,8 @@
 #![feature(intrinsics)]
+extern "rust-intrinsic" {
+    fn foo();
+    //~^ ERROR E0093
+}
 
-#[rustc_intrinsic]
-unsafe fn foo();
-//~^ ERROR E0093
-
-fn main() {}
+fn main() {
+}

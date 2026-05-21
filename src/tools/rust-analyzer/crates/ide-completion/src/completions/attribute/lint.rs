@@ -1,8 +1,8 @@
 //! Completion for lints
-use ide_db::{SymbolKind, documentation::Documentation, generated::lints::Lint};
+use ide_db::{documentation::Documentation, generated::lints::Lint, SymbolKind};
 use syntax::ast;
 
-use crate::{Completions, context::CompletionContext, item::CompletionItem};
+use crate::{context::CompletionContext, item::CompletionItem, Completions};
 
 pub(super) fn complete_lint(
     acc: &mut Completions,
@@ -11,7 +11,7 @@ pub(super) fn complete_lint(
     existing_lints: &[ast::Path],
     lints_completions: &[Lint],
 ) {
-    for &Lint { label, description, .. } in lints_completions {
+    for &Lint { label, description } in lints_completions {
         let (qual, name) = {
             // FIXME: change `Lint`'s label to not store a path in it but split the prefix off instead?
             let mut parts = label.split("::");
@@ -56,7 +56,7 @@ pub(super) fn complete_lint(
         };
         let mut item =
             CompletionItem::new(SymbolKind::Attribute, ctx.source_range(), label, ctx.edition);
-        item.documentation(Documentation::new_owned(description.to_owned()));
+        item.documentation(Documentation::new(description.to_owned()));
         item.add_to(acc, ctx.db)
     }
 }

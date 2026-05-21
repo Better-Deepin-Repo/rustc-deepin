@@ -3,43 +3,24 @@
 use either::Either;
 use hir::{InFile, Semantics, Type};
 use parser::T;
-use span::TextSize;
 use syntax::{
-    AstNode, NodeOrToken, SyntaxKind, SyntaxNode, SyntaxToken,
-    ast::{self, AstChildren, HasArgList, HasAttrs, HasName},
-    match_ast,
+    ast::{self, HasArgList, HasName},
+    match_ast, AstNode, NodeOrToken, SyntaxToken,
 };
 
 use crate::RootDatabase;
 
 #[derive(Debug)]
-pub struct ActiveParameter<'db> {
-    pub ty: Type<'db>,
+pub struct ActiveParameter {
+    pub ty: Type,
     pub src: Option<InFile<Either<ast::SelfParam, ast::Param>>>,
 }
 
-impl<'db> ActiveParameter<'db> {
+impl ActiveParameter {
     /// Returns information about the call argument this token is part of.
-    pub fn at_token(sema: &Semantics<'db, RootDatabase>, token: SyntaxToken) -> Option<Self> {
+    pub fn at_token(sema: &Semantics<'_, RootDatabase>, token: SyntaxToken) -> Option<Self> {
         let (signature, active_parameter) = callable_for_token(sema, token)?;
-        Self::from_signature_and_active_parameter(sema, signature, active_parameter)
-    }
 
-    /// Returns information about the call argument this token is part of.
-    pub fn at_arg(
-        sema: &'db Semantics<'db, RootDatabase>,
-        list: ast::ArgList,
-        at: TextSize,
-    ) -> Option<Self> {
-        let (signature, active_parameter) = callable_for_arg_list(sema, list, at)?;
-        Self::from_signature_and_active_parameter(sema, signature, active_parameter)
-    }
-
-    fn from_signature_and_active_parameter(
-        sema: &Semantics<'db, RootDatabase>,
-        signature: hir::Callable<'db>,
-        active_parameter: Option<usize>,
-    ) -> Option<Self> {
         let idx = active_parameter?;
         let mut params = signature.params();
         if idx >= params.len() {
@@ -56,44 +37,28 @@ impl<'db> ActiveParameter<'db> {
             _ => None,
         })
     }
-
-    pub fn attrs(&self) -> Option<AstChildren<ast::Attr>> {
-        self.src.as_ref().and_then(|param| Some(param.value.as_ref().right()?.attrs()))
-    }
 }
 
 /// Returns a [`hir::Callable`] this token is a part of and its argument index of said callable.
-pub fn callable_for_token<'db>(
-    sema: &Semantics<'db, RootDatabase>,
+pub fn callable_for_token(
+    sema: &Semantics<'_, RootDatabase>,
     token: SyntaxToken,
-) -> Option<(hir::Callable<'db>, Option<usize>)> {
-    let offset = token.text_range().start();
+) -> Option<(hir::Callable, Option<usize>)> {
     // Find the calling expression and its NameRef
     let parent = token.parent()?;
-    let calling_node = parent
-        .ancestors()
-        .filter_map(ast::CallableExpr::cast)
-        .find(|it| it.arg_list().is_some_and(|it| it.syntax().text_range().contains(offset)))?;
+    let calling_node = parent.ancestors().filter_map(ast::CallableExpr::cast).find(|it| {
+        it.arg_list()
+            .map_or(false, |it| it.syntax().text_range().contains(token.text_range().start()))
+    })?;
 
-    callable_for_node(sema, &calling_node, offset)
+    callable_for_node(sema, &calling_node, &token)
 }
 
-/// Returns a [`hir::Callable`] this token is a part of and its argument index of said callable.
-pub fn callable_for_arg_list<'db>(
-    sema: &Semantics<'db, RootDatabase>,
-    arg_list: ast::ArgList,
-    at: TextSize,
-) -> Option<(hir::Callable<'db>, Option<usize>)> {
-    debug_assert!(arg_list.syntax().text_range().contains(at));
-    let callable = arg_list.syntax().parent().and_then(ast::CallableExpr::cast)?;
-    callable_for_node(sema, &callable, at)
-}
-
-pub fn callable_for_node<'db>(
-    sema: &Semantics<'db, RootDatabase>,
+pub fn callable_for_node(
+    sema: &Semantics<'_, RootDatabase>,
     calling_node: &ast::CallableExpr,
-    offset: TextSize,
-) -> Option<(hir::Callable<'db>, Option<usize>)> {
+    token: &SyntaxToken,
+) -> Option<(hir::Callable, Option<usize>)> {
     let callable = match calling_node {
         ast::CallableExpr::Call(call) => sema.resolve_expr_as_callable(&call.expr()?),
         ast::CallableExpr::MethodCall(call) => sema.resolve_method_call_as_callable(call),
@@ -102,8 +67,9 @@ pub fn callable_for_node<'db>(
         arg_list
             .syntax()
             .children_with_tokens()
-            .filter_map(into_comma)
-            .take_while(|t| t.text_range().start() <= offset)
+            .filter_map(NodeOrToken::into_token)
+            .filter(|t| t.kind() == T![,])
+            .take_while(|t| t.text_range().start() <= token.text_range().start())
             .count()
     });
     Some((callable, active_param))
@@ -124,6 +90,7 @@ pub fn generic_def_for_node(
                     hir::PathResolution::Def(hir::ModuleDef::Adt(it)) => it.into(),
                     hir::PathResolution::Def(hir::ModuleDef::Function(it)) => it.into(),
                     hir::PathResolution::Def(hir::ModuleDef::Trait(it)) => it.into(),
+                    hir::PathResolution::Def(hir::ModuleDef::TraitAlias(it)) => it.into(),
                     hir::PathResolution::Def(hir::ModuleDef::TypeAlias(it)) => it.into(),
                     hir::PathResolution::Def(hir::ModuleDef::Variant(it)) => {
                         variant = Some(it);
@@ -161,23 +128,15 @@ pub fn generic_def_for_node(
     let active_param = generic_arg_list
         .syntax()
         .children_with_tokens()
-        .filter_map(into_comma)
+        .filter_map(NodeOrToken::into_token)
+        .filter(|t| t.kind() == T![,])
         .take_while(|t| t.text_range().start() <= token.text_range().start())
         .count();
 
     let first_arg_is_non_lifetime = generic_arg_list
         .generic_args()
         .next()
-        .is_some_and(|arg| !matches!(arg, ast::GenericArg::LifetimeArg(_)));
+        .map_or(false, |arg| !matches!(arg, ast::GenericArg::LifetimeArg(_)));
 
     Some((def, active_param, first_arg_is_non_lifetime, variant))
-}
-
-fn into_comma(it: NodeOrToken<SyntaxNode, SyntaxToken>) -> Option<SyntaxToken> {
-    let token = match it {
-        NodeOrToken::Token(it) => it,
-        NodeOrToken::Node(node) if node.kind() == SyntaxKind::ERROR => node.first_token()?,
-        NodeOrToken::Node(_) => return None,
-    };
-    (token.kind() == T![,]).then_some(token)
 }

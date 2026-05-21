@@ -19,33 +19,33 @@ mod packed;
 pub use packed::*;
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.nvvm.barrier0"]
     fn syncthreads() -> ();
     #[link_name = "llvm.nvvm.read.ptx.sreg.ntid.x"]
-    fn block_dim_x() -> u32;
+    fn block_dim_x() -> i32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.ntid.y"]
-    fn block_dim_y() -> u32;
+    fn block_dim_y() -> i32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.ntid.z"]
-    fn block_dim_z() -> u32;
+    fn block_dim_z() -> i32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.ctaid.x"]
-    fn block_idx_x() -> u32;
+    fn block_idx_x() -> i32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.ctaid.y"]
-    fn block_idx_y() -> u32;
+    fn block_idx_y() -> i32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.ctaid.z"]
-    fn block_idx_z() -> u32;
+    fn block_idx_z() -> i32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.nctaid.x"]
-    fn grid_dim_x() -> u32;
+    fn grid_dim_x() -> i32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.nctaid.y"]
-    fn grid_dim_y() -> u32;
+    fn grid_dim_y() -> i32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.nctaid.z"]
-    fn grid_dim_z() -> u32;
+    fn grid_dim_z() -> i32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.tid.x"]
-    fn thread_idx_x() -> u32;
+    fn thread_idx_x() -> i32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.tid.y"]
-    fn thread_idx_y() -> u32;
+    fn thread_idx_y() -> i32;
     #[link_name = "llvm.nvvm.read.ptx.sreg.tid.z"]
-    fn thread_idx_z() -> u32;
+    fn thread_idx_z() -> i32;
 }
 
 /// Synchronizes all threads in the block.
@@ -58,84 +58,84 @@ pub unsafe fn _syncthreads() -> () {
 /// x-th thread-block dimension.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _block_dim_x() -> u32 {
+pub unsafe fn _block_dim_x() -> i32 {
     block_dim_x()
 }
 
 /// y-th thread-block dimension.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _block_dim_y() -> u32 {
+pub unsafe fn _block_dim_y() -> i32 {
     block_dim_y()
 }
 
 /// z-th thread-block dimension.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _block_dim_z() -> u32 {
+pub unsafe fn _block_dim_z() -> i32 {
     block_dim_z()
 }
 
 /// x-th thread-block index.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _block_idx_x() -> u32 {
+pub unsafe fn _block_idx_x() -> i32 {
     block_idx_x()
 }
 
 /// y-th thread-block index.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _block_idx_y() -> u32 {
+pub unsafe fn _block_idx_y() -> i32 {
     block_idx_y()
 }
 
 /// z-th thread-block index.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _block_idx_z() -> u32 {
+pub unsafe fn _block_idx_z() -> i32 {
     block_idx_z()
 }
 
 /// x-th block-grid dimension.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _grid_dim_x() -> u32 {
+pub unsafe fn _grid_dim_x() -> i32 {
     grid_dim_x()
 }
 
 /// y-th block-grid dimension.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _grid_dim_y() -> u32 {
+pub unsafe fn _grid_dim_y() -> i32 {
     grid_dim_y()
 }
 
 /// z-th block-grid dimension.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _grid_dim_z() -> u32 {
+pub unsafe fn _grid_dim_z() -> i32 {
     grid_dim_z()
 }
 
 /// x-th thread index.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _thread_idx_x() -> u32 {
+pub unsafe fn _thread_idx_x() -> i32 {
     thread_idx_x()
 }
 
 /// y-th thread index.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _thread_idx_y() -> u32 {
+pub unsafe fn _thread_idx_y() -> i32 {
     thread_idx_y()
 }
 
 /// z-th thread index.
 #[inline]
 #[unstable(feature = "stdarch_nvptx", issue = "111199")]
-pub unsafe fn _thread_idx_z() -> u32 {
+pub unsafe fn _thread_idx_z() -> i32 {
     thread_idx_z()
 }
 
@@ -147,7 +147,7 @@ pub unsafe fn trap() -> ! {
 }
 
 // Basic CUDA syscall declarations.
-unsafe extern "C" {
+extern "C" {
     /// Print formatted output from a kernel to a host-side output stream.
     ///
     /// Syscall arguments:

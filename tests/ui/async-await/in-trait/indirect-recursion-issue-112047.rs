@@ -1,5 +1,8 @@
 //@ edition: 2021
 
+// Test doesn't fail until monomorphization time, unfortunately.
+//@ build-fail
+
 fn main() {
     let _ = async {
         A.first().await.second().await;

@@ -1,4 +1,3 @@
-//@ edition:2015
 mod glob_ok {
     pub mod something {
         pub mod something_else {}

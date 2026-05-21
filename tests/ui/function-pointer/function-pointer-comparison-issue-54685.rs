@@ -1,8 +1,6 @@
 //@ compile-flags: -C opt-level=3
 //@ run-pass
 
-#![allow(unpredictable_function_pointer_comparisons)]
-
 fn foo(_i: i32) -> i32 {
     1
 }

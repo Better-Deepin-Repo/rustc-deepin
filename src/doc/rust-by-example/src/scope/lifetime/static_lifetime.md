@@ -3,7 +3,7 @@
 Rust has a few reserved lifetime names. One of those is `'static`. You
 might encounter it in two situations:
 
-```rust, ignore
+```rust, editable
 // A reference with 'static lifetime:
 let s: &'static str = "hello world";
 
@@ -67,22 +67,22 @@ a program's life, they can be created while the program is executed. Just to
 demonstrate, the below example uses
 [`Box::leak`](https://doc.rust-lang.org/std/boxed/struct.Box.html#method.leak)
 to dynamically create `'static` references. In that case it definitely doesn't
-live for the entire duration, but only from the leaking point onward.
+live for the entire duration, but only for the leaking point onward.
 
 ```rust,editable,compile_fail
 extern crate rand;
 use rand::Fill;
 
-fn random_vec() -> &'static [u64; 100] {
-    let mut rng = rand::rng();
+fn random_vec() -> &'static [usize; 100] {
+    let mut rng = rand::thread_rng();
     let mut boxed = Box::new([0; 100]);
-    boxed.fill(&mut rng);
+    boxed.try_fill(&mut rng).unwrap();
     Box::leak(boxed)
 }
 
 fn main() {
-    let first: &'static [u64; 100] = random_vec();
-    let second: &'static [u64; 100] = random_vec();
+    let first: &'static [usize; 100] = random_vec();
+    let second: &'static [usize; 100] = random_vec();
     assert_ne!(first, second)
 }
 ```
@@ -100,8 +100,8 @@ does not:
 ```rust,editable,compile_fail
 use std::fmt::Debug;
 
-fn print_it(input: impl Debug + 'static) {
-    println!("'static value passed in is: {:?}", input);
+fn print_it( input: impl Debug + 'static ) {
+    println!( "'static value passed in is: {:?}", input );
 }
 
 fn main() {
@@ -114,9 +114,7 @@ fn main() {
     print_it(&i);
 }
 ```
-
 The compiler will tell you:
-
 ```ignore
 error[E0597]: `i` does not live long enough
   --> src/lib.rs:15:15

@@ -2,16 +2,15 @@
 //!
 //! [`--unit-graph`]: https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#unit-graph
 
-use cargo_util_schemas::core::PackageIdSpec;
-
-use crate::GlobalContext;
-use crate::core::Target;
 use crate::core::compiler::Unit;
 use crate::core::compiler::{CompileKind, CompileMode};
 use crate::core::profiles::{Profile, UnitFor};
-use crate::util::CargoResult;
+use crate::core::{PackageId, Target};
 use crate::util::interning::InternedString;
+use crate::util::CargoResult;
+use crate::GlobalContext;
 use std::collections::HashMap;
+use std::io::Write;
 
 /// The dependency graph of Units.
 pub type UnitGraph = HashMap<Unit, Vec<UnitDep>>;
@@ -26,15 +25,11 @@ pub struct UnitDep {
     pub unit_for: UnitFor,
     /// The name the parent uses to refer to this dependency.
     pub extern_crate_name: InternedString,
-    /// The dependency name as written in the manifest (including a rename).
-    ///
-    /// `None` means this edge does not carry a manifest dep name. For example,
-    /// std edges in build-std or synthetic edges for build script executions.
-    /// When `None`, the package name is typically used by callers as a fallback.
-    ///
-    /// This is mainly for Cargo-synthesized outputs
-    /// (artifact env vars and `CARGO_DEP_*` metadata env)
-    /// and is distinct from `extern_crate_name`.
+    /// If `Some`, the name of the dependency if renamed in toml.
+    /// It's particularly interesting to artifact dependencies which rely on it
+    /// for naming their environment variables. Note that the `extern_crate_name`
+    /// cannot be used for this as it also may be the build target itself,
+    /// which isn't always the renamed dependency name.
     pub dep_name: Option<InternedString>,
     /// Whether or not this is a public dependency.
     pub public: bool,
@@ -53,7 +48,7 @@ struct SerializedUnitGraph<'a> {
 
 #[derive(serde::Serialize)]
 struct SerializedUnit<'a> {
-    pkg_id: PackageIdSpec,
+    pkg_id: PackageId,
     target: &'a Target,
     profile: &'a Profile,
     platform: CompileKind,
@@ -115,7 +110,7 @@ pub fn emit_serialized_unit_graph(
                 })
                 .collect();
             SerializedUnit {
-                pkg_id: unit.pkg.package_id().to_spec(),
+                pkg_id: unit.pkg.package_id(),
                 target: &unit.target,
                 profile: &unit.profile,
                 platform: unit.kind,
@@ -126,10 +121,15 @@ pub fn emit_serialized_unit_graph(
             }
         })
         .collect();
-
-    gctx.shell().print_json(&SerializedUnitGraph {
+    let s = SerializedUnitGraph {
         version: VERSION,
         units: ser_units,
         roots,
-    })
+    };
+
+    let stdout = std::io::stdout();
+    let mut lock = stdout.lock();
+    serde_json::to_writer(&mut lock, &s)?;
+    drop(writeln!(lock));
+    Ok(())
 }

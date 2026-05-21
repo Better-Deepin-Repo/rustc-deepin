@@ -5,11 +5,11 @@
 //!
 //! * :benchmark/:profile/:scenario/:metric => [cid => u64]
 //! * :crate/:profile/:scenario/:self_profile_query/:stat (SelfProfileTime, SelfProfileCacheHits, ...)
-//!   :stat = time => Duration,
-//!   :stat = cache hits => u32,
-//!   :stat = invocation count => u32,
-//!   :stat = blocked time => Duration,
-//!   :stat = incremental load time => Duration,
+//!     :stat = time => Duration,
+//!     :stat = cache hits => u32,
+//!     :stat = invocation count => u32,
+//!     :stat = blocked time => Duration,
+//!     :stat = incremental load time => Duration,
 //!
 //! Note that the returned series always have a "simple" type of a small set --
 //! things like arrays, integers. We aggregate into higher level types above the
@@ -29,7 +29,7 @@ use std::{
 
 use crate::{
     interpolate::Interpolate, metric::Metric, ArtifactId, ArtifactIdIter, Benchmark,
-    CodegenBackend, Connection, Index, Lookup, Profile, Scenario, Target,
+    CodegenBackend, Connection, Index, Lookup, Profile, Scenario,
 };
 
 #[derive(Debug)]
@@ -193,7 +193,6 @@ pub struct CompileBenchmarkQuery {
     profile: Selector<Profile>,
     backend: Selector<CodegenBackend>,
     metric: Selector<crate::Metric>,
-    target: Selector<Target>,
 }
 
 impl CompileBenchmarkQuery {
@@ -224,7 +223,6 @@ impl CompileBenchmarkQuery {
             scenario: Selector::All,
             backend: Selector::All,
             metric: Selector::One(metric.as_str().into()),
-            target: Selector::All,
         }
     }
 }
@@ -237,7 +235,6 @@ impl Default for CompileBenchmarkQuery {
             profile: Selector::All,
             backend: Selector::All,
             metric: Selector::All,
-            target: Selector::All,
         }
     }
 }
@@ -253,29 +250,25 @@ impl BenchmarkQuery for CompileBenchmarkQuery {
     ) -> Result<Vec<SeriesResponse<Self::TestCase, StatisticSeries>>, String> {
         let mut statistic_descriptions: Vec<_> = index
             .compile_statistic_descriptions()
-            .filter(|(&(b, p, s, backend, target, metric), _)| {
+            .filter(|(&(b, p, s, backend, m), _)| {
                 self.benchmark.matches(b)
                     && self.profile.matches(p)
                     && self.scenario.matches(s)
                     && self.backend.matches(backend)
-                    && self.target.matches(target)
-                    && self.metric.matches(metric)
+                    && self.metric.matches(m)
             })
-            .map(
-                |(&(benchmark, profile, scenario, backend, target, metric), sid)| {
-                    (
-                        CompileTestCase {
-                            benchmark,
-                            profile,
-                            scenario,
-                            backend,
-                            target,
-                        },
-                        metric,
-                        sid,
-                    )
-                },
-            )
+            .map(|(&(benchmark, profile, scenario, backend, metric), sid)| {
+                (
+                    CompileTestCase {
+                        benchmark,
+                        profile,
+                        scenario,
+                        backend,
+                    },
+                    metric,
+                    sid,
+                )
+            })
             .collect();
 
         statistic_descriptions.sort_unstable();
@@ -325,7 +318,6 @@ pub struct CompileTestCase {
     pub profile: Profile,
     pub scenario: Scenario,
     pub backend: CodegenBackend,
-    pub target: Target,
 }
 
 impl TestCase for CompileTestCase {}

@@ -3,9 +3,11 @@
 //@ run-pass
 //@ check-run-results
 
+#![feature(async_closure)]
+
 extern crate block_on;
 
-async fn for_each(f: impl AsyncFnOnce(&str) + Clone) {
+async fn for_each(f: impl async FnOnce(&str) + Clone) {
     f.clone()("world").await;
     f.clone()("world2").await;
 }

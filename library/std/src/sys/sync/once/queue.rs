@@ -23,7 +23,7 @@
 // You'll find a few more details in the implementation, but that's the gist of
 // it!
 //
-// Futex orderings:
+// Atomic orderings:
 // When running `Once` we deal with multiple atomics:
 // `Once.state_and_queue` and an unknown number of `Waiter.signaled`.
 // * `state_and_queue` is used (1) as a state flag, (2) for synchronizing the
@@ -57,15 +57,15 @@
 
 use crate::cell::Cell;
 use crate::sync::atomic::Ordering::{AcqRel, Acquire, Release};
-use crate::sync::atomic::{Atomic, AtomicBool, AtomicPtr};
-use crate::sync::once::OnceExclusiveState;
+use crate::sync::atomic::{AtomicBool, AtomicPtr};
+use crate::sync::once::ExclusiveState;
 use crate::thread::{self, Thread};
 use crate::{fmt, ptr, sync as public};
 
 type StateAndQueue = *mut ();
 
 pub struct Once {
-    state_and_queue: Atomic<*mut ()>,
+    state_and_queue: AtomicPtr<()>,
 }
 
 pub struct OnceState {
@@ -74,12 +74,11 @@ pub struct OnceState {
 }
 
 // Four states that a Once can be in, encoded into the lower bits of
-// `state_and_queue` in the Once structure. By choosing COMPLETE as the all-zero
-// state the `is_completed` check can be a bit faster on some platforms.
-const INCOMPLETE: usize = 0x3;
-const POISONED: usize = 0x2;
-const RUNNING: usize = 0x1;
-const COMPLETE: usize = 0x0;
+// `state_and_queue` in the Once structure.
+const INCOMPLETE: usize = 0x0;
+const POISONED: usize = 0x1;
+const RUNNING: usize = 0x2;
+const COMPLETE: usize = 0x3;
 
 // Mask to learn about the state. All other bits are the queue of waiters if
 // this is in the RUNNING state.
@@ -94,8 +93,8 @@ const QUEUE_MASK: usize = !STATE_MASK;
 // use interior mutability.
 #[repr(align(4))] // Ensure the two lower bits are free to use as state bits.
 struct Waiter {
-    thread: Thread,
-    signaled: Atomic<bool>,
+    thread: Cell<Option<Thread>>,
+    signaled: AtomicBool,
     next: Cell<*const Waiter>,
 }
 
@@ -103,7 +102,7 @@ struct Waiter {
 // Every node is a struct on the stack of a waiting thread.
 // Will wake up the waiters when it gets dropped, i.e. also on panic.
 struct WaiterQueue<'a> {
-    state_and_queue: &'a Atomic<*mut ()>,
+    state_and_queue: &'a AtomicPtr<()>,
     set_state_on_drop_to: StateAndQueue,
 }
 
@@ -117,6 +116,7 @@ fn to_state(current: StateAndQueue) -> usize {
 
 impl Once {
     #[inline]
+    #[rustc_const_stable(feature = "const_once_new", since = "1.32.0")]
     pub const fn new() -> Once {
         Once { state_and_queue: AtomicPtr::new(ptr::without_provenance_mut(INCOMPLETE)) }
     }
@@ -131,22 +131,13 @@ impl Once {
     }
 
     #[inline]
-    pub(crate) fn state(&mut self) -> OnceExclusiveState {
+    pub(crate) fn state(&mut self) -> ExclusiveState {
         match self.state_and_queue.get_mut().addr() {
-            INCOMPLETE => OnceExclusiveState::Incomplete,
-            POISONED => OnceExclusiveState::Poisoned,
-            COMPLETE => OnceExclusiveState::Complete,
+            INCOMPLETE => ExclusiveState::Incomplete,
+            POISONED => ExclusiveState::Poisoned,
+            COMPLETE => ExclusiveState::Complete,
             _ => unreachable!("invalid Once state"),
         }
-    }
-
-    #[inline]
-    pub(crate) fn set_state(&mut self, new_state: OnceExclusiveState) {
-        *self.state_and_queue.get_mut() = match new_state {
-            OnceExclusiveState::Incomplete => ptr::without_provenance_mut(INCOMPLETE),
-            OnceExclusiveState::Poisoned => ptr::without_provenance_mut(POISONED),
-            OnceExclusiveState::Complete => ptr::without_provenance_mut(COMPLETE),
-        };
     }
 
     #[cold]
@@ -233,12 +224,12 @@ impl Once {
 }
 
 fn wait(
-    state_and_queue: &Atomic<*mut ()>,
+    state_and_queue: &AtomicPtr<()>,
     mut current: StateAndQueue,
     return_on_poisoned: bool,
 ) -> StateAndQueue {
     let node = &Waiter {
-        thread: thread::current_or_unnamed(),
+        thread: Cell::new(Some(thread::current())),
         signaled: AtomicBool::new(false),
         next: Cell::new(ptr::null()),
     };
@@ -276,11 +267,8 @@ fn wait(
             // If the managing thread happens to signal and unpark us before we
             // can park ourselves, the result could be this thread never gets
             // unparked. Luckily `park` comes with the guarantee that if it got
-            // an `unpark` just before on an unparked thread it does not park. Crucially, we know
-            // the `unpark` must have happened between the `compare_exchange_weak` above and here,
-            // and there's no other `park` in that code that could steal our token.
-            // SAFETY: we retrieved this handle on the current thread above.
-            unsafe { node.thread.park() }
+            // an `unpark` just before on an unparked thread it does not park.
+            thread::park();
         }
 
         return state_and_queue.load(Acquire);
@@ -312,7 +300,7 @@ impl Drop for WaiterQueue<'_> {
             let mut queue = to_queue(current);
             while !queue.is_null() {
                 let next = (*queue).next.get();
-                let thread = (*queue).thread.clone();
+                let thread = (*queue).thread.take().unwrap();
                 (*queue).signaled.store(true, Release);
                 thread.unpark();
                 queue = next;

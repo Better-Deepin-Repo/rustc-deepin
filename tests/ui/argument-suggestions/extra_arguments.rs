@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 fn empty() {}
 fn one_arg<T>(_a: T) {}
 fn two_arg_same(_a: i32, _b: i32) {}

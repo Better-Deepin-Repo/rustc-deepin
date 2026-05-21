@@ -1,17 +1,15 @@
 #![allow(
     clippy::if_same_then_else,
     clippy::no_effect,
-    clippy::ptr_arg,
     clippy::redundant_closure_call,
-    clippy::uninlined_format_args
+    clippy::ptr_arg
 )]
 #![warn(clippy::needless_pass_by_ref_mut)]
 //@no-rustfix
 use std::ptr::NonNull;
 
 fn foo(s: &mut Vec<u32>, b: &u32, x: &mut u32) {
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     *x += *b + s.len() as u32;
 }
 
@@ -36,8 +34,7 @@ fn foo5(s: &mut Vec<u32>) {
 }
 
 fn foo6(s: &mut Vec<u32>) {
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     non_mut_ref(s);
 }
 
@@ -47,11 +44,10 @@ struct Bar;
 
 impl Bar {
     fn bar(&mut self) {}
-    //~^ needless_pass_by_ref_mut
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
 
     fn mushroom(&self, vec: &mut Vec<i32>) -> usize {
-        //~^ needless_pass_by_ref_mut
-
+        //~^ ERROR: this argument is a mutable reference, but not used mutably
         vec.len()
     }
 }
@@ -128,44 +124,35 @@ async fn f7(x: &mut i32, y: i32, z: &mut i32, a: i32) {
 }
 
 async fn a1(x: &mut i32) {
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     println!("{:?}", x);
 }
 async fn a2(x: &mut i32, y: String) {
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     println!("{:?}", x);
 }
 async fn a3(x: &mut i32, y: String, z: String) {
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     println!("{:?}", x);
 }
 async fn a4(x: &mut i32, y: i32) {
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     println!("{:?}", x);
 }
 async fn a5(x: i32, y: &mut i32) {
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     println!("{:?}", x);
 }
 async fn a6(x: i32, y: &mut i32) {
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     println!("{:?}", x);
 }
 async fn a7(x: i32, y: i32, z: &mut i32) {
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     println!("{:?}", z);
 }
 async fn a8(x: i32, a: &mut i32, y: i32, z: &mut i32) {
-    //~^ needless_pass_by_ref_mut
-    //~| needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     println!("{:?}", z);
 }
 
@@ -199,12 +186,14 @@ fn lint_attr(s: &mut u32) {}
 
 #[cfg(not(feature = "a"))]
 fn cfg_warn(s: &mut u32) {}
-//~^ needless_pass_by_ref_mut
+//~^ ERROR: this argument is a mutable reference, but not used mutably
+//~| NOTE: this is cfg-gated and may require further changes
 
 #[cfg(not(feature = "a"))]
 mod foo {
     fn cfg_warn(s: &mut u32) {}
-    //~^ needless_pass_by_ref_mut
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
+    //~| NOTE: this is cfg-gated and may require further changes
 }
 
 // Should not warn.
@@ -217,8 +206,7 @@ async fn inner_async(x: &mut i32, y: &mut u32) {
 }
 
 async fn inner_async2(x: &mut i32, y: &mut u32) {
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     async {
         *x += 1;
     }
@@ -226,8 +214,7 @@ async fn inner_async2(x: &mut i32, y: &mut u32) {
 }
 
 async fn inner_async3(x: &mut i32, y: &mut u32) {
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     async {
         *y += 1;
     }
@@ -246,7 +233,6 @@ async fn async_vec2(b: &mut Vec<bool>) {
 fn non_mut(n: &str) {}
 //Should warn
 async fn call_in_closure1(n: &mut str) {
-    //~^ needless_pass_by_ref_mut
     (|| non_mut(n))()
 }
 fn str_mut(str: &mut String) -> bool {
@@ -266,8 +252,7 @@ async fn closure(n: &mut usize) -> impl '_ + FnMut() {
 
 // Should warn.
 fn closure2(n: &mut usize) -> impl '_ + FnMut() -> usize {
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     || *n + 1
 }
 
@@ -278,8 +263,7 @@ async fn closure3(n: &mut usize) {
 
 // Should warn.
 async fn closure4(n: &mut usize) {
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     (|| {
         let _x = *n + 1;
     })();
@@ -301,7 +285,7 @@ struct Data<T: ?Sized> {
 }
 // Unsafe functions should not warn.
 unsafe fn get_mut_unchecked<T>(ptr: &mut NonNull<Data<T>>) -> &mut T {
-    unsafe { &mut (*ptr.as_ptr()).value }
+    &mut (*ptr.as_ptr()).value
 }
 // Unsafe blocks should not warn.
 fn get_mut_unchecked2<T>(ptr: &mut NonNull<Data<T>>) -> &mut T {
@@ -333,20 +317,17 @@ struct MutSelf {
 
 impl MutSelf {
     fn bar(&mut self) {}
-    //~^ needless_pass_by_ref_mut
-
+    //~^ ERROR: this argument is a mutable reference, but not used mutably
     async fn foo(&mut self, u: &mut i32, v: &mut u32) {
-        //~^ needless_pass_by_ref_mut
-        //~| needless_pass_by_ref_mut
-
+        //~^ ERROR: this argument is a mutable reference, but not used mutably
+        //~| ERROR: this argument is a mutable reference, but not used mutably
         async {
             *u += 1;
         }
         .await;
     }
     async fn foo2(&mut self, u: &mut i32, v: &mut u32) {
-        //~^ needless_pass_by_ref_mut
-
+        //~^ ERROR: this argument is a mutable reference, but not used mutably
         async {
             self.a += 1;
             *u += 1;
@@ -362,26 +343,16 @@ impl MutSelfTrait for MutSelf {
 
 // `is_from_proc_macro` stress tests
 fn _empty_tup(x: &mut (())) {}
-//~^ needless_pass_by_ref_mut
 fn _single_tup(x: &mut ((i32,))) {}
-//~^ needless_pass_by_ref_mut
 fn _multi_tup(x: &mut ((i32, u32))) {}
-//~^ needless_pass_by_ref_mut
 fn _fn(x: &mut (fn())) {}
-//~^ needless_pass_by_ref_mut
 #[rustfmt::skip]
 fn _extern_rust_fn(x: &mut extern "Rust" fn()) {}
-//~^ needless_pass_by_ref_mut
 fn _extern_c_fn(x: &mut extern "C" fn()) {}
-//~^ needless_pass_by_ref_mut
 fn _unsafe_fn(x: &mut unsafe fn()) {}
-//~^ needless_pass_by_ref_mut
 fn _unsafe_extern_fn(x: &mut unsafe extern "C" fn()) {}
-//~^ needless_pass_by_ref_mut
 fn _fn_with_arg(x: &mut unsafe extern "C" fn(i32)) {}
-//~^ needless_pass_by_ref_mut
 fn _fn_with_ret(x: &mut unsafe extern "C" fn() -> (i32)) {}
-//~^ needless_pass_by_ref_mut
 
 fn main() {
     let mut u = 0;

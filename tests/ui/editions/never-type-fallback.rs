@@ -2,6 +2,7 @@
 //
 //@[e2021] edition: 2021
 //@[e2024] edition: 2024
+//@[e2024] compile-flags: -Zunstable-options
 //
 //@ run-pass
 //@ check-run-results

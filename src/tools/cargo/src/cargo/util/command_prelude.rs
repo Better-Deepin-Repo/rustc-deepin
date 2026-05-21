@@ -1,43 +1,36 @@
-use crate::CargoResult;
-use crate::core::Dependency;
-use crate::core::compiler::{BuildConfig, CompileKind, MessageFormat, RustcTargetData};
-use crate::core::resolver::{CliFeatures, ForceAllTargets, HasDevUnits};
-use crate::core::{Edition, Package, TargetKind, Workspace, profiles::Profiles, shell};
+use crate::core::compiler::{BuildConfig, MessageFormat, TimingOutput};
+use crate::core::resolver::CliFeatures;
+use crate::core::{Edition, Workspace};
+use crate::ops::lockfile::LOCKFILE_NAME;
 use crate::ops::registry::RegistryOrIndex;
-use crate::ops::{self, CompileFilter, CompileOptions, NewOptions, Packages, VersionControl};
+use crate::ops::{CompileFilter, CompileOptions, NewOptions, Packages, VersionControl};
 use crate::util::important_paths::find_root_manifest_for_wd;
 use crate::util::interning::InternedString;
 use crate::util::is_rustup;
 use crate::util::restricted_names;
-use crate::util::toml::is_embedded;
 use crate::util::{
     print_available_benches, print_available_binaries, print_available_examples,
     print_available_packages, print_available_tests,
 };
+use crate::CargoResult;
 use anyhow::bail;
 use cargo_util::paths;
 use cargo_util_schemas::manifest::ProfileName;
 use cargo_util_schemas::manifest::RegistryName;
 use cargo_util_schemas::manifest::StringOrVec;
 use clap::builder::UnknownArgumentValueParser;
-use clap_complete::ArgValueCandidates;
-use home::cargo_home_with_cwd;
-use indexmap::IndexSet;
-use itertools::Itertools;
-use semver::Version;
-use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::path::PathBuf;
 
-pub use crate::core::compiler::UserIntent;
+pub use crate::core::compiler::CompileMode;
 pub use crate::{CliError, CliResult, GlobalContext};
-pub use clap::{Arg, ArgAction, ArgMatches, value_parser};
+pub use clap::{value_parser, Arg, ArgAction, ArgMatches};
 
 pub use clap::Command;
 
-use super::IntoUrl;
 use super::context::JobsConfig;
+use super::IntoUrl;
 
 pub mod heading {
     pub const PACKAGE_SELECTION: &str = "Package Selection";
@@ -58,19 +51,13 @@ pub trait CommandExt: Sized {
         all: &'static str,
         exclude: &'static str,
     ) -> Self {
-        self.arg_package_spec_no_all(
-            package,
-            all,
-            exclude,
-            ArgValueCandidates::new(get_ws_member_candidates),
-        )
-        ._arg(
+        self.arg_package_spec_no_all(package, all, exclude)._arg(
             flag("all", "Alias for --workspace (deprecated)")
                 .help_heading(heading::PACKAGE_SELECTION),
         )
     }
 
-    /// Variant of `arg_package_spec` that does not include the `--all` flag
+    /// Variant of arg_package_spec that does not include the `--all` flag
     /// (but does include `--workspace`). Used to avoid confusion with
     /// historical uses of `--all`.
     fn arg_package_spec_no_all(
@@ -78,7 +65,6 @@ pub trait CommandExt: Sized {
         package: &'static str,
         all: &'static str,
         exclude: &'static str,
-        package_completion: ArgValueCandidates,
     ) -> Self {
         let unsupported_short_arg = {
             let value_parser = UnknownArgumentValueParser::suggest_arg("--exclude");
@@ -89,28 +75,17 @@ pub trait CommandExt: Sized {
                 .action(ArgAction::SetTrue)
                 .hide(true)
         };
-        self.arg_package_spec_simple(package, package_completion)
+        self.arg_package_spec_simple(package)
             ._arg(flag("workspace", all).help_heading(heading::PACKAGE_SELECTION))
-            ._arg(
-                multi_opt("exclude", "SPEC", exclude)
-                    .help_heading(heading::PACKAGE_SELECTION)
-                    .add(clap_complete::ArgValueCandidates::new(
-                        get_ws_member_candidates,
-                    )),
-            )
+            ._arg(multi_opt("exclude", "SPEC", exclude).help_heading(heading::PACKAGE_SELECTION))
             ._arg(unsupported_short_arg)
     }
 
-    fn arg_package_spec_simple(
-        self,
-        package: &'static str,
-        package_completion: ArgValueCandidates,
-    ) -> Self {
+    fn arg_package_spec_simple(self, package: &'static str) -> Self {
         self._arg(
             optional_multi_opt("package", "SPEC", package)
                 .short('p')
-                .help_heading(heading::PACKAGE_SELECTION)
-                .add(package_completion),
+                .help_heading(heading::PACKAGE_SELECTION),
         )
     }
 
@@ -119,10 +94,7 @@ pub trait CommandExt: Sized {
             optional_opt("package", package)
                 .short('p')
                 .value_name("SPEC")
-                .help_heading(heading::PACKAGE_SELECTION)
-                .add(clap_complete::ArgValueCandidates::new(|| {
-                    get_ws_member_candidates()
-                })),
+                .help_heading(heading::PACKAGE_SELECTION),
         )
     }
 
@@ -158,9 +130,7 @@ pub trait CommandExt: Sized {
         command: &'static str,
         supported_mode: &'static str,
     ) -> Self {
-        let msg = format!(
-            "`--{default_mode}` is the default for `cargo {command}`; instead `--{supported_mode}` is supported"
-        );
+        let msg = format!("`--{default_mode}` is the default for `cargo {command}`; instead `--{supported_mode}` is supported");
         let value_parser = UnknownArgumentValueParser::suggest(msg);
         self._arg(
             flag(default_mode, "")
@@ -185,20 +155,10 @@ pub trait CommandExt: Sized {
     ) -> Self {
         self.arg_targets_lib_bin_example(lib, bin, bins, example, examples)
             ._arg(flag("tests", tests).help_heading(heading::TARGET_SELECTION))
-            ._arg(
-                optional_multi_opt("test", "NAME", test)
-                    .help_heading(heading::TARGET_SELECTION)
-                    .add(clap_complete::ArgValueCandidates::new(|| {
-                        get_crate_candidates(TargetKind::Test).unwrap_or_default()
-                    })),
-            )
+            ._arg(optional_multi_opt("test", "NAME", test).help_heading(heading::TARGET_SELECTION))
             ._arg(flag("benches", benches).help_heading(heading::TARGET_SELECTION))
             ._arg(
-                optional_multi_opt("bench", "NAME", bench)
-                    .help_heading(heading::TARGET_SELECTION)
-                    .add(clap_complete::ArgValueCandidates::new(|| {
-                        get_crate_candidates(TargetKind::Bench).unwrap_or_default()
-                    })),
+                optional_multi_opt("bench", "NAME", bench).help_heading(heading::TARGET_SELECTION),
             )
             ._arg(flag("all-targets", all).help_heading(heading::TARGET_SELECTION))
     }
@@ -213,20 +173,11 @@ pub trait CommandExt: Sized {
     ) -> Self {
         self._arg(flag("lib", lib).help_heading(heading::TARGET_SELECTION))
             ._arg(flag("bins", bins).help_heading(heading::TARGET_SELECTION))
-            ._arg(
-                optional_multi_opt("bin", "NAME", bin)
-                    .help_heading(heading::TARGET_SELECTION)
-                    .add(clap_complete::ArgValueCandidates::new(|| {
-                        get_crate_candidates(TargetKind::Bin).unwrap_or_default()
-                    })),
-            )
+            ._arg(optional_multi_opt("bin", "NAME", bin).help_heading(heading::TARGET_SELECTION))
             ._arg(flag("examples", examples).help_heading(heading::TARGET_SELECTION))
             ._arg(
                 optional_multi_opt("example", "NAME", example)
-                    .help_heading(heading::TARGET_SELECTION)
-                    .add(clap_complete::ArgValueCandidates::new(|| {
-                        get_crate_candidates(TargetKind::ExampleBin).unwrap_or_default()
-                    })),
+                    .help_heading(heading::TARGET_SELECTION),
             )
     }
 
@@ -237,39 +188,21 @@ pub trait CommandExt: Sized {
         example: &'static str,
         examples: &'static str,
     ) -> Self {
-        self._arg(
-            optional_multi_opt("bin", "NAME", bin)
-                .help_heading(heading::TARGET_SELECTION)
-                .add(clap_complete::ArgValueCandidates::new(|| {
-                    get_crate_candidates(TargetKind::Bin).unwrap_or_default()
-                })),
-        )
-        ._arg(flag("bins", bins).help_heading(heading::TARGET_SELECTION))
-        ._arg(
-            optional_multi_opt("example", "NAME", example)
-                .help_heading(heading::TARGET_SELECTION)
-                .add(clap_complete::ArgValueCandidates::new(|| {
-                    get_crate_candidates(TargetKind::ExampleBin).unwrap_or_default()
-                })),
-        )
-        ._arg(flag("examples", examples).help_heading(heading::TARGET_SELECTION))
+        self._arg(optional_multi_opt("bin", "NAME", bin).help_heading(heading::TARGET_SELECTION))
+            ._arg(flag("bins", bins).help_heading(heading::TARGET_SELECTION))
+            ._arg(
+                optional_multi_opt("example", "NAME", example)
+                    .help_heading(heading::TARGET_SELECTION),
+            )
+            ._arg(flag("examples", examples).help_heading(heading::TARGET_SELECTION))
     }
 
     fn arg_targets_bin_example(self, bin: &'static str, example: &'static str) -> Self {
-        self._arg(
-            optional_multi_opt("bin", "NAME", bin)
-                .help_heading(heading::TARGET_SELECTION)
-                .add(clap_complete::ArgValueCandidates::new(|| {
-                    get_crate_candidates(TargetKind::Bin).unwrap_or_default()
-                })),
-        )
-        ._arg(
-            optional_multi_opt("example", "NAME", example)
-                .help_heading(heading::TARGET_SELECTION)
-                .add(clap_complete::ArgValueCandidates::new(|| {
-                    get_crate_candidates(TargetKind::ExampleBin).unwrap_or_default()
-                })),
-        )
+        self._arg(optional_multi_opt("bin", "NAME", bin).help_heading(heading::TARGET_SELECTION))
+            ._arg(
+                optional_multi_opt("example", "NAME", example)
+                    .help_heading(heading::TARGET_SELECTION),
+            )
     }
 
     fn arg_features(self) -> Self {
@@ -280,10 +213,7 @@ pub trait CommandExt: Sized {
                 "Space or comma separated list of features to activate",
             )
             .short('F')
-            .help_heading(heading::FEATURE_SELECTION)
-            .add(clap_complete::ArgValueCandidates::new(|| {
-                get_feature_candidates().unwrap_or_default()
-            })),
+            .help_heading(heading::FEATURE_SELECTION),
         )
         ._arg(
             flag("all-features", "Activate all available features")
@@ -311,11 +241,7 @@ pub trait CommandExt: Sized {
         self._arg(
             opt("profile", profile)
                 .value_name("PROFILE-NAME")
-                .help_heading(heading::COMPILATION_OPTIONS)
-                .add(clap_complete::ArgValueCandidates::new(|| {
-                    let candidates = get_profile_candidates();
-                    candidates
-                })),
+                .help_heading(heading::COMPILATION_OPTIONS),
         )
     }
 
@@ -324,14 +250,6 @@ pub trait CommandExt: Sized {
     }
 
     fn arg_target_triple(self, target: &'static str) -> Self {
-        self.arg_target_triple_with_candidates(target, ArgValueCandidates::new(get_target_triples))
-    }
-
-    fn arg_target_triple_with_candidates(
-        self,
-        target: &'static str,
-        target_completion: ArgValueCandidates,
-    ) -> Self {
         let unsupported_short_arg = {
             let value_parser = UnknownArgumentValueParser::suggest_arg("--target");
             Arg::new("unsupported-short-target-flag")
@@ -343,8 +261,7 @@ pub trait CommandExt: Sized {
         };
         self._arg(
             optional_multi_opt("target", "TRIPLE", target)
-                .help_heading(heading::COMPILATION_OPTIONS)
-                .add(target_completion),
+                .help_heading(heading::COMPILATION_OPTIONS),
         )
         ._arg(unsupported_short_arg)
     }
@@ -375,34 +292,26 @@ pub trait CommandExt: Sized {
         self._arg(
             opt("manifest-path", "Path to Cargo.toml")
                 .value_name("PATH")
-                .help_heading(heading::MANIFEST_OPTIONS)
-                .add(clap_complete::engine::ArgValueCompleter::new(
-                    clap_complete::engine::PathCompleter::any().filter(|path: &Path| {
-                        if path.file_name() == Some(OsStr::new("Cargo.toml")) {
-                            return true;
-                        }
-                        if is_embedded(path) {
-                            return true;
-                        }
-                        false
-                    }),
-                )),
+                .help_heading(heading::MANIFEST_OPTIONS),
+        )
+    }
+
+    fn arg_lockfile_path(self) -> Self {
+        self._arg(
+            opt("lockfile-path", "Path to Cargo.lock (unstable)")
+                .value_name("PATH")
+                .help_heading(heading::MANIFEST_OPTIONS),
         )
     }
 
     fn arg_message_format(self) -> Self {
+        self._arg(multi_opt("message-format", "FMT", "Error format"))
+    }
+
+    fn arg_build_plan(self) -> Self {
         self._arg(
-            multi_opt("message-format", "FMT", "Error format")
-                .value_parser([
-                    "human",
-                    "short",
-                    "json",
-                    "json-diagnostic-short",
-                    "json-diagnostic-rendered-ansi",
-                    "json-render-diagnostics",
-                ])
-                .value_delimiter(',')
-                .ignore_case(true),
+            flag("build-plan", "Output the build plan in JSON (unstable)")
+                .help_heading(heading::COMPILATION_OPTIONS),
         )
     }
 
@@ -441,12 +350,7 @@ pub trait CommandExt: Sized {
     }
 
     fn arg_registry(self, help: &'static str) -> Self {
-        self._arg(opt("registry", help).value_name("REGISTRY").add(
-            clap_complete::ArgValueCandidates::new(|| {
-                let candidates = get_registry_candidates();
-                candidates.unwrap_or_default()
-            }),
-        ))
+        self._arg(opt("registry", help).value_name("REGISTRY"))
     }
 
     fn arg_index(self, help: &'static str) -> Self {
@@ -494,10 +398,12 @@ pub trait CommandExt: Sized {
 
     fn arg_timings(self) -> Self {
         self._arg(
-            flag(
+            optional_opt(
                 "timings",
-                "Output a build timing report at the end of the build",
+                "Timing output formats (unstable) (comma separated): html, json",
             )
+            .value_name("FMTS")
+            .require_equals(true)
             .help_heading(heading::COMPILATION_OPTIONS),
         )
     }
@@ -522,20 +428,15 @@ pub trait CommandExt: Sized {
             .help_heading(heading::COMPILATION_OPTIONS),
         )
         ._arg(unsupported_short_arg)
-        ._arg({
-            let value_parser = UnknownArgumentValueParser::suggest_arg("--artifact-dir");
-            Arg::new("unsupported-out-dir-flag")
-                .help("")
-                .long("out-dir")
-                .value_name("PATH")
-                .value_parser(value_parser)
-                .action(ArgAction::SetTrue)
-                .hide(true)
-        })
-    }
-
-    fn arg_compile_time_deps(self) -> Self {
-        self._arg(flag("compile-time-deps", "").hide(true))
+        ._arg(
+            opt(
+                "out-dir",
+                "Copy final artifacts to this directory (deprecated; use --artifact-dir instead)",
+            )
+            .value_name("PATH")
+            .conflicts_with("artifact-dir")
+            .hide(true),
+        )
     }
 }
 
@@ -596,7 +497,7 @@ pub trait ArgMatchesExt {
             Some(arg) => Some(arg.parse::<u32>().map_err(|_| {
                 clap::Error::raw(
                     clap::error::ErrorKind::ValueValidation,
-                    format!("invalid value: could not parse `{}` as a number", arg),
+                    format!("Invalid value: could not parse `{}` as a number", arg),
                 )
             })?),
         };
@@ -609,7 +510,7 @@ pub trait ArgMatchesExt {
             Some(arg) => Some(arg.parse::<i32>().map_err(|_| {
                 clap::Error::raw(
                     clap::error::ErrorKind::ValueValidation,
-                    format!("invalid value: could not parse `{}` as a number", arg),
+                    format!("Invalid value: could not parse `{}` as a number", arg),
                 )
             })?),
         };
@@ -625,14 +526,20 @@ pub trait ArgMatchesExt {
         root_manifest(self._value_of("manifest-path").map(Path::new), gctx)
     }
 
+    fn lockfile_path(&self, gctx: &GlobalContext) -> CargoResult<Option<PathBuf>> {
+        lockfile_path(self._value_of("lockfile-path").map(Path::new), gctx)
+    }
+
     #[tracing::instrument(skip_all)]
     fn workspace<'a>(&self, gctx: &'a GlobalContext) -> CargoResult<Workspace<'a>> {
         let root = self.root_manifest(gctx)?;
+        let lockfile_path = self.lockfile_path(gctx)?;
         let mut ws = Workspace::new(&root, gctx)?;
         ws.set_resolve_honors_rust_version(self.honor_rust_version());
         if gctx.cli_unstable().avoid_dev_deps {
             ws.set_require_optional_deps(false);
         }
+        ws.set_requested_lockfile_path(lockfile_path);
         Ok(ws)
     }
 
@@ -694,7 +601,7 @@ Run `{cmd}` to see possible targets."
             (Some(name @ ("dev" | "test" | "bench" | "check")), ProfileChecking::LegacyRustc)
             // `cargo fix` and `cargo check` has legacy handling of this profile name
             | (Some(name @ "test"), ProfileChecking::LegacyTestOnly) => {
-                return Ok(name.into());
+                return Ok(InternedString::new(name));
             }
             _ => {}
         }
@@ -721,7 +628,7 @@ Run `{cmd}` to see possible targets."
             }
         };
 
-        Ok(name.into())
+        Ok(InternedString::new(name))
     }
 
     fn packages_from_flags(&self) -> CargoResult<Packages> {
@@ -736,7 +643,7 @@ Run `{cmd}` to see possible targets."
     fn compile_options(
         &self,
         gctx: &GlobalContext,
-        intent: UserIntent,
+        mode: CompileMode,
         workspace: Option<&Workspace<'_>>,
         profile_checking: ProfileChecking,
     ) -> CargoResult<CompileOptions> {
@@ -809,22 +716,46 @@ Run `{cmd}` to see possible targets."
             self.jobs()?,
             self.keep_going(),
             &self.targets()?,
-            intent,
+            mode,
         )?;
         build_config.message_format = message_format.unwrap_or(MessageFormat::Human);
         build_config.requested_profile = self.get_profile_name("dev", profile_checking)?;
+        build_config.build_plan = self.flag("build-plan");
         build_config.unit_graph = self.flag("unit-graph");
         build_config.future_incompat_report = self.flag("future-incompat-report");
-        build_config.compile_time_deps_only = self.flag("compile-time-deps");
-        build_config.timing_report = self.flag("timings");
 
+        if self._contains("timings") {
+            for timing_output in self._values_of("timings") {
+                for timing_output in timing_output.split(',') {
+                    let timing_output = timing_output.to_ascii_lowercase();
+                    let timing_output = match timing_output.as_str() {
+                        "html" => {
+                            gctx.cli_unstable()
+                                .fail_if_stable_opt("--timings=html", 7405)?;
+                            TimingOutput::Html
+                        }
+                        "json" => {
+                            gctx.cli_unstable()
+                                .fail_if_stable_opt("--timings=json", 7405)?;
+                            TimingOutput::Json
+                        }
+                        s => bail!("invalid timings output specifier: `{}`", s),
+                    };
+                    build_config.timing_outputs.push(timing_output);
+                }
+            }
+            if build_config.timing_outputs.is_empty() {
+                build_config.timing_outputs.push(TimingOutput::Html);
+            }
+        }
+
+        if build_config.build_plan {
+            gctx.cli_unstable()
+                .fail_if_stable_opt("--build-plan", 5579)?;
+        };
         if build_config.unit_graph {
             gctx.cli_unstable()
                 .fail_if_stable_opt("--unit-graph", 8002)?;
-        }
-        if build_config.compile_time_deps_only {
-            gctx.cli_unstable()
-                .fail_if_stable_opt("--compile-time-deps", 14434)?;
         }
 
         let opts = CompileOptions {
@@ -876,14 +807,14 @@ Run `{cmd}` to see possible targets."
     fn compile_options_for_single_package(
         &self,
         gctx: &GlobalContext,
-        intent: UserIntent,
+        mode: CompileMode,
         workspace: Option<&Workspace<'_>>,
         profile_checking: ProfileChecking,
     ) -> CargoResult<CompileOptions> {
-        let mut compile_opts = self.compile_options(gctx, intent, workspace, profile_checking)?;
+        let mut compile_opts = self.compile_options(gctx, mode, workspace, profile_checking)?;
         let spec = self._values_of("package");
         if spec.iter().any(restricted_names::is_glob_pattern) {
-            anyhow::bail!("glob patterns on package selection are not supported.")
+            anyhow::bail!("Glob patterns on package selection are not supported.")
         }
         compile_opts.spec = Packages::Packages(spec);
         Ok(compile_opts)
@@ -1049,31 +980,17 @@ pub fn root_manifest(manifest_path: Option<&Path>, gctx: &GlobalContext) -> Carg
         // In general, we try to avoid normalizing paths in Cargo,
         // but in this particular case we need it to fix #3586.
         let path = paths::normalize_path(&path);
+        if !path.ends_with("Cargo.toml") && !crate::util::toml::is_embedded(&path) {
+            anyhow::bail!("the manifest-path must be a path to a Cargo.toml file")
+        }
         if !path.exists() {
             anyhow::bail!("manifest path `{}` does not exist", manifest_path.display())
-        } else if path.is_dir() {
-            let child_path = path.join("Cargo.toml");
-            let suggested_path = if child_path.exists() {
-                format!("\nhelp: {} exists", child_path.display())
-            } else {
-                "".to_string()
-            };
+        }
+        if path.is_dir() {
             anyhow::bail!(
-                "manifest path `{}` is a directory but expected a file{suggested_path}",
+                "manifest path `{}` is a directory but expected a file",
                 manifest_path.display()
             )
-        } else if !path.ends_with("Cargo.toml") && !crate::util::toml::is_embedded(&path) {
-            if gctx.cli_unstable().script {
-                anyhow::bail!(
-                    "the manifest-path must be a path to a Cargo.toml or script file: `{}`",
-                    path.display()
-                )
-            } else {
-                anyhow::bail!(
-                    "the manifest-path must be a path to a Cargo.toml file: `{}`",
-                    path.display()
-                )
-            }
         }
         if crate::util::toml::is_embedded(&path) && !gctx.cli_unstable().script {
             anyhow::bail!("embedded manifest `{}` requires `-Zscript`", path.display())
@@ -1084,432 +1001,30 @@ pub fn root_manifest(manifest_path: Option<&Path>, gctx: &GlobalContext) -> Carg
     }
 }
 
-pub fn get_registry_candidates() -> CargoResult<Vec<clap_complete::CompletionCandidate>> {
-    let gctx = new_gctx_for_completions()?;
-
-    if let Ok(Some(registries)) =
-        gctx.get::<Option<HashMap<String, HashMap<String, String>>>>("registries")
-    {
-        Ok(registries
-            .keys()
-            .map(|name| clap_complete::CompletionCandidate::new(name.to_owned()))
-            .collect())
-    } else {
-        Ok(vec![])
-    }
-}
-
-fn get_profile_candidates() -> Vec<clap_complete::CompletionCandidate> {
-    match get_workspace_profile_candidates() {
-        Ok(candidates) if !candidates.is_empty() => candidates,
-        // fallback to default profile candidates
-        _ => default_profile_candidates(),
-    }
-}
-
-fn get_workspace_profile_candidates() -> CargoResult<Vec<clap_complete::CompletionCandidate>> {
-    let gctx = new_gctx_for_completions()?;
-    let ws = Workspace::new(&find_root_manifest_for_wd(gctx.cwd())?, &gctx)?;
-    let profiles = Profiles::new(&ws, "dev".into())?;
-
-    let mut candidates = Vec::new();
-    for name in profiles.profile_names() {
-        let Ok(profile_instance) = Profiles::new(&ws, name) else {
-            continue;
-        };
-        let base_profile = profile_instance.base_profile();
-
-        let mut description = String::from(if base_profile.opt_level.as_str() == "0" {
-            "unoptimized"
-        } else {
-            "optimized"
-        });
-
-        if base_profile.debuginfo.is_turned_on() {
-            description.push_str(" + debuginfo");
-        }
-
-        candidates
-            .push(clap_complete::CompletionCandidate::new(&name).help(Some(description.into())));
-    }
-
-    Ok(candidates)
-}
-
-fn default_profile_candidates() -> Vec<clap_complete::CompletionCandidate> {
-    vec![
-        clap_complete::CompletionCandidate::new("dev").help(Some("unoptimized + debuginfo".into())),
-        clap_complete::CompletionCandidate::new("release").help(Some("optimized".into())),
-        clap_complete::CompletionCandidate::new("test")
-            .help(Some("unoptimized + debuginfo".into())),
-        clap_complete::CompletionCandidate::new("bench").help(Some("optimized".into())),
-    ]
-}
-
-fn get_feature_candidates() -> CargoResult<Vec<clap_complete::CompletionCandidate>> {
-    let gctx = new_gctx_for_completions()?;
-
-    let ws = Workspace::new(&find_root_manifest_for_wd(gctx.cwd())?, &gctx)?;
-    let mut feature_candidates = Vec::new();
-
-    // Process all packages in the workspace
-    for package in ws.members() {
-        let package_name = package.name();
-
-        // Add direct features with package info
-        for feature_name in package.summary().features().keys() {
-            let order = if ws.current_opt().map(|p| p.name()) == Some(package_name) {
-                0
-            } else {
-                1
-            };
-            feature_candidates.push(
-                clap_complete::CompletionCandidate::new(feature_name)
-                    .display_order(Some(order))
-                    .help(Some(format!("from {}", package_name).into())),
-            );
-        }
-    }
-
-    Ok(feature_candidates)
-}
-
-fn get_crate_candidates(kind: TargetKind) -> CargoResult<Vec<clap_complete::CompletionCandidate>> {
-    let gctx = new_gctx_for_completions()?;
-
-    let ws = Workspace::new(&find_root_manifest_for_wd(gctx.cwd())?, &gctx)?;
-
-    let targets = ws
-        .members()
-        .flat_map(|pkg| pkg.targets().into_iter().cloned().map(|t| (pkg.name(), t)))
-        .filter(|(_, target)| *target.kind() == kind)
-        .map(|(pkg_name, target)| {
-            let order = if ws.current_opt().map(|p| p.name()) == Some(pkg_name) {
-                0
-            } else {
-                1
-            };
-            clap_complete::CompletionCandidate::new(target.name())
-                .display_order(Some(order))
-                .help(Some(format!("from {}", pkg_name).into()))
-        })
-        .collect::<Vec<_>>();
-
-    Ok(targets)
-}
-
-fn get_target_triples() -> Vec<clap_complete::CompletionCandidate> {
-    let mut candidates = Vec::new();
-
-    if let Ok(targets) = get_target_triples_from_rustup() {
-        candidates = targets;
-    }
-
-    if candidates.is_empty() {
-        if let Ok(targets) = get_target_triples_from_rustc() {
-            candidates = targets;
-        }
-    }
-
-    // Allow tab-completion for `host-tuple` as the desired target.
-    candidates.insert(
-        0,
-        clap_complete::CompletionCandidate::new("host-tuple").help(Some(
-            concat!("alias for: ", env!("RUST_HOST_TARGET")).into(),
-        )),
-    );
-
-    candidates
-}
-
-pub fn get_target_triples_with_all() -> Vec<clap_complete::CompletionCandidate> {
-    let mut candidates = vec![
-        clap_complete::CompletionCandidate::new("all").help(Some("Include all targets".into())),
-    ];
-    candidates.extend(get_target_triples());
-    candidates
-}
-
-fn get_target_triples_from_rustup() -> CargoResult<Vec<clap_complete::CompletionCandidate>> {
-    let output = std::process::Command::new("rustup")
-        .arg("target")
-        .arg("list")
-        .output()?;
-
-    if !output.status.success() {
-        return Ok(vec![]);
-    }
-
-    let stdout = String::from_utf8(output.stdout)?;
-
-    Ok(stdout
-        .lines()
-        .map(|line| {
-            let target = line.split_once(' ');
-            match target {
-                None => clap_complete::CompletionCandidate::new(line.to_owned()).hide(true),
-                Some((target, _installed)) => clap_complete::CompletionCandidate::new(target),
-            }
-        })
-        .collect())
-}
-
-fn get_target_triples_from_rustc() -> CargoResult<Vec<clap_complete::CompletionCandidate>> {
-    let gctx = new_gctx_for_completions()?;
-
-    let ws = Workspace::new(&find_root_manifest_for_wd(gctx.cwd())?, &gctx);
-
-    let rustc = gctx.load_global_rustc(ws.as_ref().ok())?;
-
-    let (stdout, _stderr) =
-        rustc.cached_output(rustc.process().arg("--print").arg("target-list"), 0)?;
-
-    Ok(stdout
-        .lines()
-        .map(|line| clap_complete::CompletionCandidate::new(line.to_owned()))
-        .collect())
-}
-
-pub fn get_ws_member_candidates() -> Vec<clap_complete::CompletionCandidate> {
-    get_ws_member_packages()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|pkg| {
-            clap_complete::CompletionCandidate::new(pkg.name().as_str()).help(
-                pkg.manifest()
-                    .metadata()
-                    .description
-                    .to_owned()
-                    .map(From::from),
-            )
-        })
-        .collect::<Vec<_>>()
-}
-
-fn get_ws_member_packages() -> CargoResult<Vec<Package>> {
-    let gctx = new_gctx_for_completions()?;
-    let ws = Workspace::new(&find_root_manifest_for_wd(gctx.cwd())?, &gctx)?;
-    let packages = ws.members().map(Clone::clone).collect::<Vec<_>>();
-    Ok(packages)
-}
-
-pub fn get_pkg_id_spec_candidates() -> Vec<clap_complete::CompletionCandidate> {
-    let mut candidates = vec![];
-
-    let package_map = HashMap::<&str, Vec<Package>>::new();
-    let package_map =
-        get_packages()
-            .unwrap_or_default()
-            .into_iter()
-            .fold(package_map, |mut map, package| {
-                map.entry(package.name().as_str())
-                    .or_insert_with(Vec::new)
-                    .push(package);
-                map
-            });
-
-    let unique_name_candidates = package_map
-        .iter()
-        .filter(|(_name, packages)| packages.len() == 1)
-        .map(|(name, packages)| {
-            clap_complete::CompletionCandidate::new(name.to_string()).help(
-                packages[0]
-                    .manifest()
-                    .metadata()
-                    .description
-                    .to_owned()
-                    .map(From::from),
-            )
-        })
-        .collect::<Vec<_>>();
-
-    let duplicate_name_pairs = package_map
-        .iter()
-        .filter(|(_name, packages)| packages.len() > 1)
-        .collect::<Vec<_>>();
-
-    let mut duplicate_name_candidates = vec![];
-    for (name, packages) in duplicate_name_pairs {
-        let mut version_count: HashMap<&Version, usize> = HashMap::new();
-
-        for package in packages {
-            *version_count.entry(package.version()).or_insert(0) += 1;
-        }
-
-        for package in packages {
-            if let Some(&count) = version_count.get(package.version()) {
-                if count == 1 {
-                    duplicate_name_candidates.push(
-                        clap_complete::CompletionCandidate::new(format!(
-                            "{}@{}",
-                            name,
-                            package.version()
-                        ))
-                        .help(
-                            package
-                                .manifest()
-                                .metadata()
-                                .description
-                                .to_owned()
-                                .map(From::from),
-                        ),
-                    );
-                } else {
-                    duplicate_name_candidates.push(
-                        clap_complete::CompletionCandidate::new(format!(
-                            "{}",
-                            package.package_id().to_spec()
-                        ))
-                        .help(
-                            package
-                                .manifest()
-                                .metadata()
-                                .description
-                                .to_owned()
-                                .map(From::from),
-                        ),
-                    )
-                }
-            }
-        }
-    }
-
-    candidates.extend(unique_name_candidates);
-    candidates.extend(duplicate_name_candidates);
-
-    candidates
-}
-
-pub fn get_pkg_name_candidates() -> Vec<clap_complete::CompletionCandidate> {
-    let packages: BTreeMap<_, _> = get_packages()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|package| {
-            (
-                package.name(),
-                package.manifest().metadata().description.clone(),
-            )
-        })
-        .collect();
-
-    packages
-        .into_iter()
-        .map(|(name, description)| {
-            clap_complete::CompletionCandidate::new(name.as_str()).help(description.map(From::from))
-        })
-        .collect()
-}
-
-fn get_packages() -> CargoResult<Vec<Package>> {
-    let gctx = new_gctx_for_completions()?;
-
-    let ws = Workspace::new(&find_root_manifest_for_wd(gctx.cwd())?, &gctx)?;
-
-    let requested_kinds = CompileKind::from_requested_targets(ws.gctx(), &[])?;
-    let mut target_data = RustcTargetData::new(&ws, &requested_kinds)?;
-    // `cli_features.all_features` must be true in case that `specs` is empty.
-    let cli_features = CliFeatures::new_all(true);
-    let has_dev_units = HasDevUnits::Yes;
-    let force_all_targets = ForceAllTargets::No;
-    let dry_run = true;
-
-    let ws_resolve = ops::resolve_ws_with_opts(
-        &ws,
-        &mut target_data,
-        &requested_kinds,
-        &cli_features,
-        &[],
-        has_dev_units,
-        force_all_targets,
-        dry_run,
-    )?;
-
-    let packages = ws_resolve
-        .pkg_set
-        .packages()
-        .map(Clone::clone)
-        .collect::<Vec<_>>();
-
-    Ok(packages)
-}
-
-pub fn get_direct_dependencies_pkg_name_candidates() -> Vec<clap_complete::CompletionCandidate> {
-    let (current_package_deps, all_package_deps) = match get_dependencies_from_metadata() {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
+pub fn lockfile_path(
+    lockfile_path: Option<&Path>,
+    gctx: &GlobalContext,
+) -> CargoResult<Option<PathBuf>> {
+    let Some(lockfile_path) = lockfile_path else {
+        return Ok(None);
     };
 
-    let current_package_deps_package_names = current_package_deps
-        .into_iter()
-        .map(|dep| dep.package_name().to_string())
-        .sorted();
-    let all_package_deps_package_names = all_package_deps
-        .into_iter()
-        .map(|dep| dep.package_name().to_string())
-        .sorted();
+    gctx.cli_unstable()
+        .fail_if_stable_opt("--lockfile-path", 14421)?;
 
-    let mut package_names_set = IndexSet::new();
-    package_names_set.extend(current_package_deps_package_names);
-    package_names_set.extend(all_package_deps_package_names);
+    let path = gctx.cwd().join(lockfile_path);
 
-    package_names_set
-        .into_iter()
-        .map(|name| name.into())
-        .collect_vec()
-}
+    if !path.ends_with(LOCKFILE_NAME) {
+        bail!("the lockfile-path must be a path to a {LOCKFILE_NAME} file (please rename your lock file to {LOCKFILE_NAME})")
+    }
+    if path.is_dir() {
+        bail!(
+            "lockfile path `{}` is a directory but expected a file",
+            lockfile_path.display()
+        )
+    }
 
-fn get_dependencies_from_metadata() -> CargoResult<(Vec<Dependency>, Vec<Dependency>)> {
-    let cwd = std::env::current_dir()?;
-    let gctx = GlobalContext::new(shell::Shell::new(), cwd.clone(), cargo_home_with_cwd(&cwd)?);
-    let ws = Workspace::new(&find_root_manifest_for_wd(&cwd)?, &gctx)?;
-    let current_package = ws.current().ok();
-
-    let current_package_dependencies = ws
-        .current()
-        .map(|current| current.dependencies())
-        .unwrap_or_default()
-        .to_vec();
-    let all_other_packages_dependencies = ws
-        .members()
-        .filter(|&member| Some(member) != current_package)
-        .flat_map(|pkg| pkg.dependencies().into_iter().cloned())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-
-    Ok((
-        current_package_dependencies,
-        all_other_packages_dependencies,
-    ))
-}
-
-pub fn new_gctx_for_completions() -> CargoResult<GlobalContext> {
-    let cwd = std::env::current_dir()?;
-    let mut gctx = GlobalContext::new(shell::Shell::new(), cwd.clone(), cargo_home_with_cwd(&cwd)?);
-
-    let verbose = 0;
-    let quiet = true;
-    let color = None;
-    let frozen = false;
-    let locked = true;
-    let offline = false;
-    let target_dir = None;
-    let unstable_flags = &[];
-    let cli_config = &[];
-
-    gctx.configure(
-        verbose,
-        quiet,
-        color,
-        frozen,
-        locked,
-        offline,
-        &target_dir,
-        unstable_flags,
-        cli_config,
-    )?;
-
-    Ok(gctx)
+    return Ok(Some(path));
 }
 
 #[track_caller]

@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 // rust-lang/rust#55492: errors detected during MIR-borrowck's
 // analysis of a closure body may only be caught when AST-borrowck
 // looks at some parent.
@@ -11,6 +10,7 @@ mod borrowck_closures_unique {
         //~^ ERROR is not declared as mutable
         unsafe {
             c1(&mut Y);
+            //~^ WARN mutable reference to mutable static is discouraged [static_mut_refs]
         }
     }
 }
@@ -25,6 +25,7 @@ mod borrowck_closures_unique_grandparent {
         };
         unsafe {
             c1(&mut Z);
+            //~^ WARN mutable reference to mutable static is discouraged [static_mut_refs]
         }
     }
 }
@@ -61,6 +62,7 @@ fn main() {
     static mut X: isize = 2;
     unsafe {
         borrowck_closures_unique::e(&mut X);
+        //~^ WARN mutable reference to mutable static is discouraged [static_mut_refs]
     }
 
     mutability_errors::capture_assign_whole((1000,));

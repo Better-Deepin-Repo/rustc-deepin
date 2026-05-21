@@ -10,7 +10,7 @@ pub mod a {
 
 pub mod b {
     #[repr(transparent)]
-    pub struct TransparentType(crate::a::StartFn);
+    pub struct TransparentType(::a::StartFn);
     extern "C" {
         pub static start: TransparentType;
     }
@@ -18,7 +18,7 @@ pub mod b {
 
 pub mod c {
     #[repr(C)]
-    pub struct CType(u32, crate::b::TransparentType);
+    pub struct CType(u32, ::b::TransparentType);
     extern "C" {
         pub static start: CType;
     }

@@ -70,11 +70,6 @@ fn underscore_with_initializer() {
     //~^ ERROR temporary value dropped while borrowed [E0716]
 }
 
-fn issue_47184() {
-    let _vec: Vec<&'static String> = vec![&String::new()];
-    //~^ ERROR temporary value dropped while borrowed [E0716]
-}
-
 fn pair_underscores_with_initializer() {
     let x = 22;
     let (_, _): (&'static u32, u32) = (&x, 44); //~ ERROR

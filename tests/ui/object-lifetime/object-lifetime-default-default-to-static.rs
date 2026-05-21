@@ -2,8 +2,9 @@
 // Test that `Box<Test>` is equivalent to `Box<Test+'static>`, both in
 // fields and fn arguments.
 
+//@ pretty-expanded FIXME #23616
 
-#![allow(dead_code, unused)]
+#![allow(dead_code)]
 
 trait Test {
     fn foo(&self) { }

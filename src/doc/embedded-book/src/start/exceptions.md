@@ -81,7 +81,7 @@ use cortex_m::peripheral::syst::SystClkSource;
 use cortex_m_rt::{entry, exception};
 use cortex_m_semihosting::{
     debug,
-    hio::{self, HostStream},
+    hio::{self, HStdout},
 };
 
 #[entry]
@@ -103,7 +103,7 @@ fn main() -> ! {
 #[exception]
 fn SysTick() {
     static mut COUNT: u32 = 0;
-    static mut STDOUT: Option<HostStream> = None;
+    static mut STDOUT: Option<HStdout> = None;
 
     *COUNT += 1;
 

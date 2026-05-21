@@ -4,7 +4,7 @@
 
 fn main() {}
 
-#[cfg(false)]
+#[cfg(FALSE)]
 extern "C" {
     static X: u8;
     type X;
@@ -14,7 +14,7 @@ extern "C" {
     pub fn foo();
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 trait T {
     const X: u8;
     type X;
@@ -30,7 +30,7 @@ trait T {
     pub default fn foo();
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 impl T for S {
     const X: u8;
     type X;

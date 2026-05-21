@@ -1,4 +1,3 @@
-//@require-annotations-for-level: WARN
 #![allow(unused)]
 
 #[cfg(all())]

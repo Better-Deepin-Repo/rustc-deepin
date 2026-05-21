@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 fn inside_closure(x: &mut i32) {
 }
 

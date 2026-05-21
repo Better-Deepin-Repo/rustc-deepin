@@ -1,17 +1,13 @@
 use ide_db::{famous_defs::FamousDefs, source_change::SourceChangeBuilder};
 use stdx::{format_to, to_lower_snake_case};
 use syntax::{
-    TextRange,
-    ast::{
-        self, AstNode, HasGenericParams, HasName, HasVisibility, edit::AstNodeEdit,
-        syntax_factory::SyntaxFactory,
-    },
-    syntax_editor::Position,
+    ast::{self, edit_in_place::Indent, make, AstNode, HasName, HasVisibility},
+    ted, TextRange,
 };
 
 use crate::{
-    AssistContext, AssistId, Assists, GroupLabel,
-    utils::{convert_reference_type, find_struct_impl, is_selected},
+    utils::{convert_reference_type, find_struct_impl, generate_impl},
+    AssistContext, AssistId, AssistKind, Assists, GroupLabel,
 };
 
 // Assist: generate_setter
@@ -66,7 +62,7 @@ pub(crate) fn generate_setter(acc: &mut Assists, ctx: &AssistContext<'_>) -> Opt
 
     acc.add_group(
         &GroupLabel("Generate getter/setter".to_owned()),
-        AssistId::generate("generate_setter"),
+        AssistId("generate_setter", AssistKind::Generate),
         "Generate a setter method",
         target,
         |builder| build_source_change(builder, ctx, info_of_record_fields, setter_info),
@@ -207,7 +203,7 @@ pub(crate) fn generate_getter_impl(
 
     acc.add_group(
         &GroupLabel("Generate getter/setter".to_owned()),
-        AssistId::generate(id),
+        AssistId(id, AssistKind::Generate),
         label,
         target,
         |builder| build_source_change(builder, ctx, info_of_record_fields, getter_info),
@@ -218,42 +214,35 @@ fn generate_getter_from_info(
     ctx: &AssistContext<'_>,
     info: &AssistInfo,
     record_field_info: &RecordFieldInfo,
-    syntax_factory: &SyntaxFactory,
 ) -> ast::Fn {
     let (ty, body) = if matches!(info.assist_type, AssistType::MutGet) {
-        let self_expr = syntax_factory.expr_path(syntax_factory.ident_path("self"));
         (
-            syntax_factory.ty_ref(record_field_info.field_ty.clone(), true),
-            syntax_factory.expr_ref(
-                syntax_factory.expr_field(self_expr, &record_field_info.field_name.text()).into(),
+            make::ty_ref(record_field_info.field_ty.clone(), true),
+            make::expr_ref(
+                make::expr_field(make::ext::expr_self(), &record_field_info.field_name.text()),
                 true,
             ),
         )
     } else {
         (|| {
-            let module = ctx.sema.scope(record_field_info.field_ty.syntax())?.module();
-            let famous_defs = &FamousDefs(&ctx.sema, module.krate(ctx.db()));
+            let krate = ctx.sema.scope(record_field_info.field_ty.syntax())?.krate();
+            let famous_defs = &FamousDefs(&ctx.sema, krate);
             ctx.sema
                 .resolve_type(&record_field_info.field_ty)
                 .and_then(|ty| convert_reference_type(ty, ctx.db(), famous_defs))
                 .map(|conversion| {
                     cov_mark::hit!(convert_reference_type);
                     (
-                        conversion.convert_type(ctx.db(), module),
+                        conversion.convert_type(ctx.db(), krate.edition(ctx.db())),
                         conversion.getter(record_field_info.field_name.to_string()),
                     )
                 })
         })()
         .unwrap_or_else(|| {
             (
-                syntax_factory.ty_ref(record_field_info.field_ty.clone(), false),
-                syntax_factory.expr_ref(
-                    syntax_factory
-                        .expr_field(
-                            syntax_factory.expr_path(syntax_factory.ident_path("self")),
-                            &record_field_info.field_name.text(),
-                        )
-                        .into(),
+                make::ty_ref(record_field_info.field_ty.clone(), false),
+                make::expr_ref(
+                    make::expr_field(make::ext::expr_self(), &record_field_info.field_name.text()),
                     false,
                 ),
             )
@@ -261,19 +250,18 @@ fn generate_getter_from_info(
     };
 
     let self_param = if matches!(info.assist_type, AssistType::MutGet) {
-        syntax_factory.mut_self_param()
+        make::mut_self_param()
     } else {
-        syntax_factory.self_param()
+        make::self_param()
     };
 
     let strukt = &info.strukt;
-    let fn_name = syntax_factory.name(&record_field_info.fn_name);
-    let params = syntax_factory.param_list(Some(self_param), []);
-    let ret_type = Some(syntax_factory.ret_type(ty));
-    let body = syntax_factory.block_expr([], Some(body));
+    let fn_name = make::name(&record_field_info.fn_name);
+    let params = make::param_list(Some(self_param), []);
+    let ret_type = Some(make::ret_type(ty));
+    let body = make::block_expr([], Some(body));
 
-    syntax_factory.fn_(
-        None,
+    make::fn_(
         strukt.visibility(),
         fn_name,
         None,
@@ -288,36 +276,28 @@ fn generate_getter_from_info(
     )
 }
 
-fn generate_setter_from_info(
-    info: &AssistInfo,
-    record_field_info: &RecordFieldInfo,
-    syntax_factory: &SyntaxFactory,
-) -> ast::Fn {
+fn generate_setter_from_info(info: &AssistInfo, record_field_info: &RecordFieldInfo) -> ast::Fn {
     let strukt = &info.strukt;
     let field_name = &record_field_info.fn_name;
-    let fn_name = syntax_factory.name(&format!("set_{field_name}"));
+    let fn_name = make::name(&format!("set_{field_name}"));
     let field_ty = &record_field_info.field_ty;
 
     // Make the param list
     // `(&mut self, $field_name: $field_ty)`
-    let field_param = syntax_factory.param(
-        syntax_factory.ident_pat(false, false, syntax_factory.name(field_name)).into(),
-        field_ty.clone(),
-    );
-    let params = syntax_factory.param_list(Some(syntax_factory.mut_self_param()), [field_param]);
+    let field_param =
+        make::param(make::ident_pat(false, false, make::name(field_name)).into(), field_ty.clone());
+    let params = make::param_list(Some(make::mut_self_param()), [field_param]);
 
     // Make the assignment body
     // `self.$field_name = $field_name`
-    let self_expr = syntax_factory.expr_path(syntax_factory.ident_path("self"));
-    let lhs = syntax_factory.expr_field(self_expr, field_name);
-    let rhs = syntax_factory.expr_path(syntax_factory.ident_path(field_name));
-    let assign_stmt =
-        syntax_factory.expr_stmt(syntax_factory.expr_assignment(lhs.into(), rhs).into());
-    let body = syntax_factory.block_expr([assign_stmt.into()], None);
+    let self_expr = make::ext::expr_self();
+    let lhs = make::expr_field(self_expr, field_name);
+    let rhs = make::expr_path(make::ext::ident_path(field_name));
+    let assign_stmt = make::expr_stmt(make::expr_assignment(lhs, rhs));
+    let body = make::block_expr([assign_stmt.into()], None);
 
     // Make the setter fn
-    syntax_factory.fn_(
-        None,
+    make::fn_(
         strukt.visibility(),
         fn_name,
         None,
@@ -377,7 +357,7 @@ fn extract_and_parse_record_fields(
             let info_of_record_fields_in_selection = ele
                 .fields()
                 .filter_map(|record_field| {
-                    if is_selected(&record_field, selection_range, false) {
+                    if selection_range.contains_range(record_field.syntax().text_range()) {
                         let record_field_info = parse_record_field(record_field, assist_type)?;
                         field_names.push(record_field_info.fn_name.clone());
                         return Some(record_field_info);
@@ -420,69 +400,48 @@ fn build_source_change(
     info_of_record_fields: Vec<RecordFieldInfo>,
     assist_info: AssistInfo,
 ) {
-    let syntax_factory = SyntaxFactory::without_mappings();
+    let record_fields_count = info_of_record_fields.len();
 
-    let items: Vec<ast::AssocItem> = info_of_record_fields
-        .iter()
-        .map(|record_field_info| {
-            let method = match assist_info.assist_type {
-                AssistType::Set => {
-                    generate_setter_from_info(&assist_info, record_field_info, &syntax_factory)
-                }
-                _ => {
-                    generate_getter_from_info(ctx, &assist_info, record_field_info, &syntax_factory)
-                }
-            };
-            let new_fn = method.clone_for_update();
-            let new_fn = new_fn.indent(1.into());
-            new_fn.into()
-        })
-        .collect();
-
-    if let Some(impl_def) = &assist_info.impl_def {
+    let impl_def = if let Some(impl_def) = &assist_info.impl_def {
         // We have an existing impl to add to
-        let mut editor = builder.make_editor(impl_def.syntax());
-        impl_def.assoc_item_list().unwrap().add_items(&mut editor, items.clone());
+        builder.make_mut(impl_def.clone())
+    } else {
+        // Generate a new impl to add the methods to
+        let impl_def = generate_impl(&ast::Adt::Struct(assist_info.strukt.clone()));
 
-        if let Some(cap) = ctx.config.snippet_cap
-            && let Some(ast::AssocItem::Fn(fn_)) = items.last()
-            && let Some(name) = fn_.name()
-        {
-            let tabstop = builder.make_tabstop_before(cap);
-            editor.add_annotation(name.syntax(), tabstop);
+        // Insert it after the adt
+        let strukt = builder.make_mut(assist_info.strukt.clone());
+
+        ted::insert_all_raw(
+            ted::Position::after(strukt.syntax()),
+            vec![make::tokens::blank_line().into(), impl_def.syntax().clone().into()],
+        );
+
+        impl_def
+    };
+
+    let assoc_item_list = impl_def.get_or_create_assoc_item_list();
+
+    for (i, record_field_info) in info_of_record_fields.iter().enumerate() {
+        // Make the new getter or setter fn
+        let new_fn = match assist_info.assist_type {
+            AssistType::Set => generate_setter_from_info(&assist_info, record_field_info),
+            _ => generate_getter_from_info(ctx, &assist_info, record_field_info),
+        }
+        .clone_for_update();
+        new_fn.indent(1.into());
+
+        // Insert a tabstop only for last method we generate
+        if i == record_fields_count - 1 {
+            if let Some(cap) = ctx.config.snippet_cap {
+                if let Some(name) = new_fn.name() {
+                    builder.add_tabstop_before(cap, name);
+                }
+            }
         }
 
-        builder.add_file_edits(ctx.vfs_file_id(), editor);
-        return;
+        assoc_item_list.add_item(new_fn.clone().into());
     }
-    let ty_params = assist_info.strukt.generic_param_list();
-    let ty_args = ty_params.as_ref().map(|it| it.to_generic_args());
-    let impl_def = syntax_factory.impl_(
-        None,
-        ty_params,
-        ty_args,
-        syntax_factory
-            .ty_path(syntax_factory.ident_path(&assist_info.strukt.name().unwrap().to_string()))
-            .into(),
-        None,
-        Some(syntax_factory.assoc_item_list(items)),
-    );
-    let mut editor = builder.make_editor(assist_info.strukt.syntax());
-    editor.insert_all(
-        Position::after(assist_info.strukt.syntax()),
-        vec![syntax_factory.whitespace("\n\n").into(), impl_def.syntax().clone().into()],
-    );
-
-    if let Some(cap) = ctx.config.snippet_cap
-        && let Some(assoc_list) = impl_def.assoc_item_list()
-        && let Some(ast::AssocItem::Fn(fn_)) = assoc_list.assoc_items().last()
-        && let Some(name) = fn_.name()
-    {
-        let tabstop = builder.make_tabstop_before(cap);
-        editor.add_annotation(name.syntax().clone(), tabstop);
-    }
-
-    builder.add_file_edits(ctx.vfs_file_id(), editor);
 }
 
 #[cfg(test)]
@@ -948,37 +907,6 @@ impl Context {
     }
 
     #[test]
-    fn test_generate_multiple_getters_from_partial_selection() {
-        check_assist(
-            generate_getter,
-            r#"
-struct Context {
-    data$0: Data,
-    count$0: usize,
-    other: usize,
-}
-    "#,
-            r#"
-struct Context {
-    data: Data,
-    count: usize,
-    other: usize,
-}
-
-impl Context {
-    fn data(&self) -> &Data {
-        &self.data
-    }
-
-    fn $0count(&self) -> &usize {
-        &self.count
-    }
-}
-    "#,
-        );
-    }
-
-    #[test]
     fn test_generate_multiple_getters_from_selection_one_already_exists() {
         // As impl for one of the fields already exist, skip it
         check_assist_not_applicable(
@@ -1005,7 +933,7 @@ mod tests_setter {
 
     use super::*;
 
-    fn check_not_applicable(#[rust_analyzer::rust_fixture] ra_fixture: &str) {
+    fn check_not_applicable(ra_fixture: &str) {
         check_assist_not_applicable(generate_setter, ra_fixture)
     }
 

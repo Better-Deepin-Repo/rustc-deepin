@@ -2,7 +2,8 @@
 //@no-rustfix
 fn main() {
     let _ = std::ptr::null() as *const u8;
-    //~^ unnecessary_cast
+    //~^ ERROR: casting raw pointers to the same type and constness is unnecessary (`*cons
+    //~| NOTE: `-D clippy::unnecessary-cast` implied by `-D warnings`
 }
 
 mod issue11113 {
@@ -17,10 +18,8 @@ mod issue11113 {
 
     impl TearOff {
         unsafe fn query(&self) {
-            unsafe {
-                ((*(*(self.object as *mut *mut _) as *mut Vtbl)).query)()
-                //~^ unnecessary_cast
-            }
+            ((*(*(self.object as *mut *mut _) as *mut Vtbl)).query)()
+            //~^ ERROR: casting raw pointers to the same type and constness is unnecessary
         }
     }
 }

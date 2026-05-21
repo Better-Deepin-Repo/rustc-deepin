@@ -6,9 +6,8 @@ LL |     unbound_drop(|| -> _ { [] });
    |
 help: try giving this closure an explicit return type
    |
-LL -     unbound_drop(|| -> _ { [] });
-LL +     unbound_drop(|| -> [_; 0] { [] });
-   |
+LL |     unbound_drop(|| -> [_; 0] { [] });
+   |                        ~~~~~~
 
 error: aborting due to 1 previous error
 

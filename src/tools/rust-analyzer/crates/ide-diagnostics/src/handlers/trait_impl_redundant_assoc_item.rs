@@ -1,11 +1,11 @@
-use hir::{HasSource, HirDisplay, db::ExpandDatabase};
-use ide_db::text_edit::TextRange;
+use hir::{db::ExpandDatabase, HasSource, HirDisplay};
 use ide_db::{
-    assists::{Assist, AssistId},
+    assists::{Assist, AssistId, AssistKind},
     label::Label,
     source_change::SourceChangeBuilder,
 };
 use syntax::ToSmolStr;
+use text_edit::TextRange;
 
 use crate::{Diagnostic, DiagnosticCode, DiagnosticsContext};
 
@@ -30,7 +30,7 @@ pub(crate) fn trait_impl_redundant_assoc_item(
             (
                 format!("`fn {redundant_assoc_item_name}`"),
                 function.source(db).map(|it| it.syntax().text_range()).unwrap_or(default_range),
-                format!("\n    {};", function.display(db, ctx.display_target)),
+                format!("\n    {};", function.display(db, ctx.edition)),
             )
         }
         hir::AssocItem::Const(id) => {
@@ -38,7 +38,7 @@ pub(crate) fn trait_impl_redundant_assoc_item(
             (
                 format!("`const {redundant_assoc_item_name}`"),
                 constant.source(db).map(|it| it.syntax().text_range()).unwrap_or(default_range),
-                format!("\n    {};", constant.display(db, ctx.display_target)),
+                format!("\n    {};", constant.display(db, ctx.edition)),
             )
         }
         hir::AssocItem::TypeAlias(id) => {
@@ -54,14 +54,11 @@ pub(crate) fn trait_impl_redundant_assoc_item(
         }
     };
 
-    let hir::FileRange { file_id, range } =
-        hir::InFile::new(d.file_id, diagnostic_range).original_node_file_range_rooted(db);
     Diagnostic::new(
         DiagnosticCode::RustcHardError("E0407"),
         format!("{redundant_item_name} is not a member of trait `{trait_name}`"),
-        ide_db::FileRange { file_id: file_id.file_id(ctx.sema.db), range },
+        hir::InFile::new(d.file_id, diagnostic_range).original_node_file_range_rooted(db),
     )
-    .stable()
     .with_fixes(quickfix_for_redundant_assoc_item(
         ctx,
         d,
@@ -77,13 +74,12 @@ fn quickfix_for_redundant_assoc_item(
     redundant_item_def: String,
     range: TextRange,
 ) -> Option<Vec<Assist>> {
-    let file_id = d.file_id.file_id()?;
     let add_assoc_item_def = |builder: &mut SourceChangeBuilder| -> Option<()> {
         let db = ctx.sema.db;
         let root = db.parse_or_expand(d.file_id);
         // don't modify trait def in outer crate
         let current_crate = ctx.sema.scope(&d.impl_.syntax_node_ptr().to_node(&root))?.krate();
-        let trait_def_crate = d.trait_.module(db).krate(db);
+        let trait_def_crate = d.trait_.module(db).krate();
         if trait_def_crate != current_crate {
             return None;
         }
@@ -91,19 +87,17 @@ fn quickfix_for_redundant_assoc_item(
         let trait_def = d.trait_.source(db)?.value;
         let l_curly = trait_def.assoc_item_list()?.l_curly_token()?.text_range();
         let where_to_insert =
-            hir::InFile::new(d.file_id, l_curly).original_node_file_range_rooted_opt(db)?;
-        if where_to_insert.file_id != file_id {
-            return None;
-        }
+            hir::InFile::new(d.file_id, l_curly).original_node_file_range_rooted(db).range;
 
-        builder.insert(where_to_insert.range.end(), redundant_item_def);
+        builder.insert(where_to_insert.end(), redundant_item_def);
         Some(())
     };
-    let mut source_change_builder = SourceChangeBuilder::new(file_id.file_id(ctx.sema.db));
+    let file_id = d.file_id.file_id()?;
+    let mut source_change_builder = SourceChangeBuilder::new(file_id);
     add_assoc_item_def(&mut source_change_builder)?;
 
     Some(vec![Assist {
-        id: AssistId::quick_fix("add assoc item def into trait def"),
+        id: AssistId("add assoc item def into trait def", AssistKind::QuickFix),
         label: Label::new("Add assoc item def into trait def".to_owned()),
         group: None,
         target: range,

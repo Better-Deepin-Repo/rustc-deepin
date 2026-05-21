@@ -1,3 +1,0 @@
-[submodule "rfc9535/test_suite/jsonpath-compliance-test-suite"]
-	path = rfc9535/test_suite/jsonpath-compliance-test-suite
-	url = https://github.com/jsonpath-standard/jsonpath-compliance-test-suite.git

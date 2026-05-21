@@ -1,6 +1,5 @@
-//@ proc-macro: expand-expr.rs
-//@ ignore-backends: gcc
-// No `remap-src-base`, since `check_expand_expr_file!()` fails when enabled.
+//@ aux-build:expand-expr.rs
+// no-remap-src-base: check_expand_expr_file!() fails when enabled.
 
 #![feature(concat_bytes)]
 extern crate expand_expr;
@@ -11,7 +10,7 @@ use expand_expr::{
 
 // Check builtin macros can be expanded.
 
-expand_expr_is!(14u32, line!());
+expand_expr_is!(13u32, line!());
 expand_expr_is!(24u32, column!());
 
 expand_expr_is!("Hello, World!", concat!("Hello, ", "World", "!"));
@@ -115,8 +114,8 @@ expand_expr_fail!(echo_pm!($)); //~ ERROR: expected expression, found `$`
 
 // We get errors reported and recover during macro expansion if the macro
 // doesn't produce a valid expression.
-expand_expr_is!("string", echo_tts!("string"; hello)); //~ ERROR: macro expansion ignores `hello` and any tokens following
-expand_expr_is!("string", echo_pm!("string"; hello)); //~ ERROR: macro expansion ignores `;` and any tokens following
+expand_expr_is!("string", echo_tts!("string"; hello)); //~ ERROR: macro expansion ignores token `hello` and any following
+expand_expr_is!("string", echo_pm!("string"; hello)); //~ ERROR: macro expansion ignores token `;` and any following
 
 // For now, fail if a non-literal expression is expanded.
 expand_expr_fail!(arbitrary_expression() + "etc");

@@ -67,9 +67,9 @@ impl_lint_pass!(DisallowedScriptIdents => [DISALLOWED_SCRIPT_IDENTS]);
 impl EarlyLintPass for DisallowedScriptIdents {
     fn check_crate(&mut self, cx: &EarlyContext<'_>, _: &ast::Crate) {
         // Implementation is heavily inspired by the implementation of [`non_ascii_idents`] lint:
-        // https://github.com/rust-lang/rust/blob/HEAD/compiler/rustc_lint/src/non_ascii_idents.rs
+        // https://github.com/rust-lang/rust/blob/master/compiler/rustc_lint/src/non_ascii_idents.rs
 
-        let check_disallowed_script_idents = cx.builder.lint_level(DISALLOWED_SCRIPT_IDENTS).level != Level::Allow;
+        let check_disallowed_script_idents = cx.builder.lint_level(DISALLOWED_SCRIPT_IDENTS).0 != Level::Allow;
         if !check_disallowed_script_idents {
             return;
         }
@@ -80,7 +80,7 @@ impl EarlyLintPass for DisallowedScriptIdents {
         let mut symbols: Vec<_> = symbols.iter().collect();
         symbols.sort_unstable_by_key(|k| k.1);
 
-        for &(symbol, &span) in &symbols {
+        for (symbol, &span) in &symbols {
             // Note: `symbol.as_str()` is an expensive operation, thus should not be called
             // more than once for a single symbol.
             let symbol_str = symbol.as_str();
@@ -89,10 +89,6 @@ impl EarlyLintPass for DisallowedScriptIdents {
             // Fast path for ascii-only idents.
             if !symbol_str.is_ascii()
                 && let Some(script) = symbol_str.chars().find_map(|c| {
-                    if c.is_ascii() {
-                        return None;
-                    }
-
                     c.script_extension()
                         .iter()
                         .find(|script| !self.whitelist.contains(script))

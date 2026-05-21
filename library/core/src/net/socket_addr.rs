@@ -8,14 +8,10 @@ use crate::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 /// as possibly some version-dependent additional information. See [`SocketAddrV4`]'s and
 /// [`SocketAddrV6`]'s respective documentation for more details.
 ///
+/// The size of a `SocketAddr` instance may vary depending on the target operating
+/// system.
+///
 /// [IP address]: IpAddr
-///
-/// # Portability
-///
-/// `SocketAddr` is intended to be a portable representation of socket addresses and is likely not
-/// the same as the internal socket address type used by the target operating system's API. Like all
-/// `repr(Rust)` structs, however, its exact layout remains undefined and should not be relied upon
-/// between builds.
 ///
 /// # Examples
 ///
@@ -46,24 +42,12 @@ pub enum SocketAddr {
 ///
 /// See [`SocketAddr`] for a type encompassing both IPv4 and IPv6 socket addresses.
 ///
+/// The size of a `SocketAddrV4` struct may vary depending on the target operating
+/// system. Do not assume that this type has the same memory layout as the underlying
+/// system representation.
+///
 /// [IETF RFC 793]: https://tools.ietf.org/html/rfc793
 /// [`IPv4` address]: Ipv4Addr
-///
-/// # Portability
-///
-/// `SocketAddrV4` is intended to be a portable representation of socket addresses and is likely not
-/// the same as the internal socket address type used by the target operating system's API. Like all
-/// `repr(Rust)` structs, however, its exact layout remains undefined and should not be relied upon
-/// between builds.
-///
-/// # Textual representation
-///
-/// `SocketAddrV4` provides a [`FromStr`](crate::str::FromStr) implementation.
-/// It accepts an IPv4 address in its [textual representation], followed by a
-/// single `:`, followed by the port encoded as a decimal integer.  Other
-/// formats are not accepted.
-///
-/// [textual representation]: Ipv4Addr#textual-representation
 ///
 /// # Examples
 ///
@@ -91,41 +75,12 @@ pub struct SocketAddrV4 {
 ///
 /// See [`SocketAddr`] for a type encompassing both IPv4 and IPv6 socket addresses.
 ///
+/// The size of a `SocketAddrV6` struct may vary depending on the target operating
+/// system. Do not assume that this type has the same memory layout as the underlying
+/// system representation.
+///
 /// [IETF RFC 2553, Section 3.3]: https://tools.ietf.org/html/rfc2553#section-3.3
 /// [`IPv6` address]: Ipv6Addr
-///
-/// # Portability
-///
-/// `SocketAddrV6` is intended to be a portable representation of socket addresses and is likely not
-/// the same as the internal socket address type used by the target operating system's API. Like all
-/// `repr(Rust)` structs, however, its exact layout remains undefined and should not be relied upon
-/// between builds.
-///
-/// # Textual representation
-///
-/// `SocketAddrV6` provides a [`FromStr`](crate::str::FromStr) implementation,
-/// based on the bracketed format recommended by [IETF RFC 5952],
-/// with scope identifiers based on those specified in [IETF RFC 4007].
-///
-/// It accepts addresses consisting of the following elements, in order:
-///   - A left square bracket (`[`)
-///   - The [textual representation] of an IPv6 address
-///   - _Optionally_, a percent sign (`%`) followed by the scope identifier
-///     encoded as a decimal integer
-///   - A right square bracket (`]`)
-///   - A colon (`:`)
-///   - The port, encoded as a decimal integer.
-///
-/// For example, the string `[2001:db8::413]:443` represents a `SocketAddrV6`
-/// with the address `2001:db8::413` and port `443`.  The string
-/// `[2001:db8::413%612]:443` represents the same address and port, with a
-/// scope identifier of `612`.
-///
-/// Other formats are not accepted.
-///
-/// [IETF RFC 5952]: https://tools.ietf.org/html/rfc5952#section-6
-/// [IETF RFC 4007]: https://tools.ietf.org/html/rfc4007#section-11
-/// [textual representation]: Ipv6Addr#textual-representation
 ///
 /// # Examples
 ///
@@ -137,10 +92,6 @@ pub struct SocketAddrV4 {
 /// assert_eq!("[2001:db8::1]:8080".parse(), Ok(socket));
 /// assert_eq!(socket.ip(), &Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
 /// assert_eq!(socket.port(), 8080);
-///
-/// let mut with_scope = socket.clone();
-/// with_scope.set_scope_id(3);
-/// assert_eq!("[2001:db8::1%3]:8080".parse(), Ok(with_scope));
 /// ```
 #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -208,10 +159,9 @@ impl SocketAddr {
     /// socket.set_ip(IpAddr::V4(Ipv4Addr::new(10, 10, 0, 1)));
     /// assert_eq!(socket.ip(), IpAddr::V4(Ipv4Addr::new(10, 10, 0, 1)));
     /// ```
-    #[inline]
     #[stable(feature = "sockaddr_setters", since = "1.9.0")]
-    #[rustc_const_stable(feature = "const_sockaddr_setters", since = "1.87.0")]
-    pub const fn set_ip(&mut self, new_ip: IpAddr) {
+    #[inline]
+    pub fn set_ip(&mut self, new_ip: IpAddr) {
         // `match (*self, new_ip)` would have us mutate a copy of self only to throw it away.
         match (self, new_ip) {
             (&mut SocketAddr::V4(ref mut a), IpAddr::V4(new_ip)) => a.set_ip(new_ip),
@@ -252,10 +202,9 @@ impl SocketAddr {
     /// socket.set_port(1025);
     /// assert_eq!(socket.port(), 1025);
     /// ```
-    #[inline]
     #[stable(feature = "sockaddr_setters", since = "1.9.0")]
-    #[rustc_const_stable(feature = "const_sockaddr_setters", since = "1.87.0")]
-    pub const fn set_port(&mut self, new_port: u16) {
+    #[inline]
+    pub fn set_port(&mut self, new_port: u16) {
         match *self {
             SocketAddr::V4(ref mut a) => a.set_port(new_port),
             SocketAddr::V6(ref mut a) => a.set_port(new_port),
@@ -358,10 +307,9 @@ impl SocketAddrV4 {
     /// socket.set_ip(Ipv4Addr::new(192, 168, 0, 1));
     /// assert_eq!(socket.ip(), &Ipv4Addr::new(192, 168, 0, 1));
     /// ```
-    #[inline]
     #[stable(feature = "sockaddr_setters", since = "1.9.0")]
-    #[rustc_const_stable(feature = "const_sockaddr_setters", since = "1.87.0")]
-    pub const fn set_ip(&mut self, new_ip: Ipv4Addr) {
+    #[inline]
+    pub fn set_ip(&mut self, new_ip: Ipv4Addr) {
         self.ip = new_ip;
     }
 
@@ -394,10 +342,9 @@ impl SocketAddrV4 {
     /// socket.set_port(4242);
     /// assert_eq!(socket.port(), 4242);
     /// ```
-    #[inline]
     #[stable(feature = "sockaddr_setters", since = "1.9.0")]
-    #[rustc_const_stable(feature = "const_sockaddr_setters", since = "1.87.0")]
-    pub const fn set_port(&mut self, new_port: u16) {
+    #[inline]
+    pub fn set_port(&mut self, new_port: u16) {
         self.port = new_port;
     }
 }
@@ -456,10 +403,9 @@ impl SocketAddrV6 {
     /// socket.set_ip(Ipv6Addr::new(76, 45, 0, 0, 0, 0, 0, 0));
     /// assert_eq!(socket.ip(), &Ipv6Addr::new(76, 45, 0, 0, 0, 0, 0, 0));
     /// ```
-    #[inline]
     #[stable(feature = "sockaddr_setters", since = "1.9.0")]
-    #[rustc_const_stable(feature = "const_sockaddr_setters", since = "1.87.0")]
-    pub const fn set_ip(&mut self, new_ip: Ipv6Addr) {
+    #[inline]
+    pub fn set_ip(&mut self, new_ip: Ipv6Addr) {
         self.ip = new_ip;
     }
 
@@ -492,10 +438,9 @@ impl SocketAddrV6 {
     /// socket.set_port(4242);
     /// assert_eq!(socket.port(), 4242);
     /// ```
-    #[inline]
     #[stable(feature = "sockaddr_setters", since = "1.9.0")]
-    #[rustc_const_stable(feature = "const_sockaddr_setters", since = "1.87.0")]
-    pub const fn set_port(&mut self, new_port: u16) {
+    #[inline]
+    pub fn set_port(&mut self, new_port: u16) {
         self.port = new_port;
     }
 
@@ -540,10 +485,9 @@ impl SocketAddrV6 {
     /// socket.set_flowinfo(56);
     /// assert_eq!(socket.flowinfo(), 56);
     /// ```
-    #[inline]
     #[stable(feature = "sockaddr_setters", since = "1.9.0")]
-    #[rustc_const_stable(feature = "const_sockaddr_setters", since = "1.87.0")]
-    pub const fn set_flowinfo(&mut self, new_flowinfo: u32) {
+    #[inline]
+    pub fn set_flowinfo(&mut self, new_flowinfo: u32) {
         self.flowinfo = new_flowinfo;
     }
 
@@ -583,17 +527,15 @@ impl SocketAddrV6 {
     /// socket.set_scope_id(42);
     /// assert_eq!(socket.scope_id(), 42);
     /// ```
-    #[inline]
     #[stable(feature = "sockaddr_setters", since = "1.9.0")]
-    #[rustc_const_stable(feature = "const_sockaddr_setters", since = "1.87.0")]
-    pub const fn set_scope_id(&mut self, new_scope_id: u32) {
+    #[inline]
+    pub fn set_scope_id(&mut self, new_scope_id: u32) {
         self.scope_id = new_scope_id;
     }
 }
 
 #[stable(feature = "ip_from_ip", since = "1.16.0")]
-#[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl const From<SocketAddrV4> for SocketAddr {
+impl From<SocketAddrV4> for SocketAddr {
     /// Converts a [`SocketAddrV4`] into a [`SocketAddr::V4`].
     #[inline]
     fn from(sock4: SocketAddrV4) -> SocketAddr {
@@ -602,8 +544,7 @@ impl const From<SocketAddrV4> for SocketAddr {
 }
 
 #[stable(feature = "ip_from_ip", since = "1.16.0")]
-#[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl const From<SocketAddrV6> for SocketAddr {
+impl From<SocketAddrV6> for SocketAddr {
     /// Converts a [`SocketAddrV6`] into a [`SocketAddr::V6`].
     #[inline]
     fn from(sock6: SocketAddrV6) -> SocketAddr {
@@ -612,8 +553,7 @@ impl const From<SocketAddrV6> for SocketAddr {
 }
 
 #[stable(feature = "addr_from_into_ip", since = "1.17.0")]
-#[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl<I: [const] Into<IpAddr>> const From<(I, u16)> for SocketAddr {
+impl<I: Into<IpAddr>> From<(I, u16)> for SocketAddr {
     /// Converts a tuple struct (Into<[`IpAddr`]>, `u16`) into a [`SocketAddr`].
     ///
     /// This conversion creates a [`SocketAddr::V4`] for an [`IpAddr::V4`]

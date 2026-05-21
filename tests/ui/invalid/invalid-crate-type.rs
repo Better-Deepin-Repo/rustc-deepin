@@ -26,7 +26,7 @@
 #![crate_type="dlib"]
 //~^ ERROR invalid `crate_type` value
 //~| HELP did you mean
-//~| SUGGESTION lib
+//~| SUGGESTION rlib
 
 #![crate_type="lob"]
 //~^ ERROR invalid `crate_type` value

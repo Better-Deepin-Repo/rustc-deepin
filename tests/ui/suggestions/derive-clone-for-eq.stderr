@@ -1,10 +1,8 @@
 error[E0277]: the trait bound `T: Clone` is not satisfied
-  --> $DIR/derive-clone-for-eq.rs:5:12
+  --> $DIR/derive-clone-for-eq.rs:4:17
    |
 LL | #[derive(Clone, Eq)]
-   |                 -- in this derive macro expansion
-LL | pub struct Struct<T>(T);
-   |            ^^^^^^ the trait `Clone` is not implemented for `T`
+   |                 ^^ the trait `Clone` is not implemented for `T`, which is required by `Struct<T>: PartialEq`
    |
 note: required for `Struct<T>` to implement `PartialEq`
   --> $DIR/derive-clone-for-eq.rs:7:19
@@ -15,7 +13,8 @@ LL | impl<T: Clone, U> PartialEq<U> for Struct<T>
    |         unsatisfied trait bound introduced here
 note: required by a bound in `Eq`
   --> $SRC_DIR/core/src/cmp.rs:LL:COL
-help: consider restricting type parameter `T` with trait `Clone`
+   = note: this error originates in the derive macro `Eq` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: consider restricting type parameter `T`
    |
 LL | pub struct Struct<T: std::clone::Clone>(T);
    |                    +++++++++++++++++++

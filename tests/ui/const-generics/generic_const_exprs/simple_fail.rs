@@ -2,12 +2,12 @@
 #![allow(incomplete_features)]
 
 type Arr<const N: usize> = [u8; N - 1];
-//~^ ERROR overflow
+//~^ ERROR evaluation of `Arr::<0>::{constant#0}` failed
 
 fn test<const N: usize>() -> Arr<N>
 where
     [u8; N - 1]: Sized,
-    //~^ ERROR overflow
+    //~^ ERROR evaluation of `test::<0>::{constant#0}` failed
 {
     todo!()
 }

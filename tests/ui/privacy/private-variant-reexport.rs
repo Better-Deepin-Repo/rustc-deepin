@@ -1,4 +1,3 @@
-//@ edition:2015
 mod m1 {
     pub use ::E::V; //~ ERROR `V` is only public within the crate, and cannot be re-exported outside
 }

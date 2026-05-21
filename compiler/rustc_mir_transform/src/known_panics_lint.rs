@@ -1,32 +1,35 @@
-//! A lint that checks for known panics like overflows, division by zero,
-//! out-of-bound access etc. Uses const propagation to determine the values of
-//! operands during checks.
+//! A lint that checks for known panics like
+//! overflows, division by zero,
+//! out-of-bound access etc.
+//! Uses const propagation to determine the
+//! values of operands during checks.
 
 use std::fmt::Debug;
 
-use rustc_abi::{BackendRepr, FieldIdx, HasDataLayout, Size, TargetDataLayout, VariantIdx};
 use rustc_const_eval::const_eval::DummyMachine;
 use rustc_const_eval::interpret::{
-    ImmTy, InterpCx, InterpResult, Projectable, Scalar, format_interp_error, interp_ok,
+    format_interp_error, ImmTy, InterpCx, InterpResult, Projectable, Scalar,
 };
 use rustc_data_structures::fx::FxHashSet;
-use rustc_hir::HirId;
 use rustc_hir::def::DefKind;
+use rustc_hir::HirId;
+use rustc_index::bit_set::BitSet;
 use rustc_index::IndexVec;
-use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::bug;
 use rustc_middle::mir::visit::{MutatingUseContext, NonMutatingUseContext, PlaceContext, Visitor};
 use rustc_middle::mir::*;
 use rustc_middle::ty::layout::{LayoutError, LayoutOf, LayoutOfHelpers, TyAndLayout};
-use rustc_middle::ty::{self, ConstInt, ScalarInt, Ty, TyCtxt, TypeVisitableExt};
+use rustc_middle::ty::{self, ConstInt, ParamEnv, ScalarInt, Ty, TyCtxt, TypeVisitableExt};
 use rustc_span::Span;
+use rustc_target::abi::{Abi, FieldIdx, HasDataLayout, Size, TargetDataLayout, VariantIdx};
 use tracing::{debug, instrument, trace};
 
 use crate::errors::{AssertLint, AssertLintKind};
+use crate::MirLint;
 
-pub(super) struct KnownPanicsLint;
+pub struct KnownPanicsLint;
 
-impl<'tcx> crate::MirLint<'tcx> for KnownPanicsLint {
+impl<'tcx> MirLint<'tcx> for KnownPanicsLint {
     fn run_lint(&self, tcx: TyCtxt<'tcx>, body: &Body<'tcx>) {
         if body.tainted_by_errors.is_some() {
             return;
@@ -65,9 +68,9 @@ impl<'tcx> crate::MirLint<'tcx> for KnownPanicsLint {
 struct ConstPropagator<'mir, 'tcx> {
     ecx: InterpCx<'tcx, DummyMachine>,
     tcx: TyCtxt<'tcx>,
-    typing_env: ty::TypingEnv<'tcx>,
+    param_env: ParamEnv<'tcx>,
     worklist: Vec<BasicBlock>,
-    visited_blocks: DenseBitSet<BasicBlock>,
+    visited_blocks: BitSet<BasicBlock>,
     locals: IndexVec<Local, Value<'tcx>>,
     body: &'mir Body<'tcx>,
     written_only_inside_own_block_locals: FxHashSet<Local>,
@@ -101,7 +104,7 @@ impl<'tcx> Value<'tcx> {
                 }
                 (PlaceElem::Index(idx), Value::Aggregate { fields, .. }) => {
                     let idx = prop.get_const(idx.into())?.immediate()?;
-                    let idx = prop.ecx.read_target_usize(idx).discard_err()?.try_into().ok()?;
+                    let idx = prop.ecx.read_target_usize(idx).ok()?.try_into().ok()?;
                     if idx <= FieldIdx::MAX_AS_U32 {
                         fields.get(FieldIdx::from_u32(idx)).unwrap_or(&Value::Uninit)
                     } else {
@@ -169,28 +172,27 @@ impl<'tcx> ty::layout::HasTyCtxt<'tcx> for ConstPropagator<'_, 'tcx> {
     }
 }
 
-impl<'tcx> ty::layout::HasTypingEnv<'tcx> for ConstPropagator<'_, 'tcx> {
+impl<'tcx> ty::layout::HasParamEnv<'tcx> for ConstPropagator<'_, 'tcx> {
     #[inline]
-    fn typing_env(&self) -> ty::TypingEnv<'tcx> {
-        self.typing_env
+    fn param_env(&self) -> ty::ParamEnv<'tcx> {
+        self.param_env
     }
 }
 
 impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
     fn new(body: &'mir Body<'tcx>, tcx: TyCtxt<'tcx>) -> ConstPropagator<'mir, 'tcx> {
         let def_id = body.source.def_id();
-        // FIXME(#132279): This is used during the phase transition from analysis
-        // to runtime, so we have to manually specify the correct typing mode.
-        let typing_env = ty::TypingEnv::post_analysis(tcx, body.source.def_id());
-        let can_const_prop = CanConstProp::check(tcx, typing_env, body);
-        let ecx = InterpCx::new(tcx, tcx.def_span(def_id), typing_env, DummyMachine);
+        let param_env = tcx.param_env_reveal_all_normalized(def_id);
+
+        let can_const_prop = CanConstProp::check(tcx, param_env, body);
+        let ecx = InterpCx::new(tcx, tcx.def_span(def_id), param_env, DummyMachine);
 
         ConstPropagator {
             ecx,
             tcx,
-            typing_env,
+            param_env,
             worklist: vec![START_BLOCK],
-            visited_blocks: DenseBitSet::new_empty(body.basic_blocks.len()),
+            visited_blocks: BitSet::new_empty(body.basic_blocks.len()),
             locals: IndexVec::from_elem_n(Value::Uninit, body.local_decls.len()),
             body,
             can_const_prop,
@@ -232,20 +234,21 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
     where
         F: FnOnce(&mut Self) -> InterpResult<'tcx, T>,
     {
-        f(self)
-            .map_err_info(|err| {
-                trace!("InterpCx operation failed: {:?}", err);
+        match f(self) {
+            Ok(val) => Some(val),
+            Err(error) => {
+                trace!("InterpCx operation failed: {:?}", error);
                 // Some errors shouldn't come up because creating them causes
                 // an allocation, which we should avoid. When that happens,
                 // dedicated error variants should be introduced instead.
                 assert!(
-                    !err.kind().formatted_string(),
+                    !error.kind().formatted_string(),
                     "known panics lint encountered formatting error: {}",
-                    format_interp_error(self.ecx.tcx.dcx(), err),
+                    format_interp_error(self.ecx.tcx.dcx(), error),
                 );
-                err
-            })
-            .discard_err()
+                None
+            }
+        }
     }
 
     /// Returns the value, if any, of evaluating `c`.
@@ -258,10 +261,10 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
         // Normalization needed b/c known panics lint runs in
         // `mir_drops_elaborated_and_const_checked`, which happens before
         // optimized MIR. Only after optimizing the MIR can we guarantee
-        // that the `PostAnalysisNormalize` pass has happened and that the body's consts
+        // that the `RevealAll` pass has happened and that the body's consts
         // are normalized, so any call to resolve before that needs to be
         // manually normalized.
-        let val = self.tcx.try_normalize_erasing_regions(self.typing_env, c.const_).ok()?;
+        let val = self.tcx.try_normalize_erasing_regions(self.param_env, c.const_).ok()?;
 
         self.use_ecx(|this| this.ecx.eval_mir_constant(&val, c.span, None))?
             .as_mplace_or_imm()
@@ -282,7 +285,6 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
     /// or `eval_place`, depending on the variant of `Operand` used.
     fn eval_operand(&mut self, op: &Operand<'tcx>) -> Option<ImmTy<'tcx>> {
         match *op {
-            Operand::RuntimeChecks(_) => None,
             Operand::Constant(ref c) => self.eval_constant(c),
             Operand::Move(place) | Operand::Copy(place) => self.eval_place(place),
         }
@@ -317,7 +319,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
                     .ecx
                     .binary_op(BinOp::SubWithOverflow, &ImmTy::from_int(0, arg.layout), &arg)?
                     .to_scalar_pair();
-                interp_ok((arg, overflow.to_bool()?))
+                Ok((arg, overflow.to_bool()?))
             })?;
             if overflow {
                 self.report_assert_as_lint(
@@ -351,7 +353,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
             let left_ty = left.ty(self.local_decls(), self.tcx);
             let left_size = self.ecx.layout_of(left_ty).ok()?.size;
             let right_size = r.layout.size;
-            let r_bits = r.to_scalar().to_bits(right_size).discard_err();
+            let r_bits = r.to_scalar().to_bits(right_size).ok();
             if r_bits.is_some_and(|b| b >= left_size.bits() as u128) {
                 debug!("check_binary_op: reporting assert for {:?}", location);
                 let panic = AssertKind::Overflow(
@@ -379,19 +381,19 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
         if let (Some(l), Some(r)) = (l, r)
             && l.layout.ty.is_integral()
             && op.is_overflowing()
-            && self.use_ecx(|this| {
+        {
+            if self.use_ecx(|this| {
                 let (_res, overflow) = this.ecx.binary_op(op, &l, &r)?.to_scalar_pair();
                 overflow.to_bool()
-            })?
-        {
-            self.report_assert_as_lint(
-                location,
-                AssertLintKind::ArithmeticOverflow,
-                AssertKind::Overflow(op, l.to_const_int(), r.to_const_int()),
-            );
-            return None;
+            })? {
+                self.report_assert_as_lint(
+                    location,
+                    AssertLintKind::ArithmeticOverflow,
+                    AssertKind::Overflow(op, l.to_const_int(), r.to_const_int()),
+                );
+                return None;
+            }
         }
-
         Some(())
     }
 
@@ -442,16 +444,18 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
             | Rvalue::Use(..)
             | Rvalue::CopyForDeref(..)
             | Rvalue::Repeat(..)
+            | Rvalue::Len(..)
             | Rvalue::Cast(..)
+            | Rvalue::ShallowInitBox(..)
             | Rvalue::Discriminant(..)
-            | Rvalue::WrapUnsafeBinder(..) => {}
+            | Rvalue::NullaryOp(..) => {}
         }
 
         // FIXME we need to revisit this for #67176
         if rvalue.has_param() {
             return None;
         }
-        if !rvalue.ty(self.local_decls(), self.tcx).is_sized(self.tcx, self.typing_env) {
+        if !rvalue.ty(self.local_decls(), self.tcx).is_sized(self.tcx, self.param_env) {
             // the interpreter doesn't support unsized locals (only unsized arguments),
             // but rustc does (in a kinda broken way), so we have to skip them here
             return None;
@@ -496,7 +500,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
                 // This can be `None` if the lhs wasn't const propagated and we just
                 // triggered the assert on the value of the rhs.
                 self.eval_operand(op)
-                    .and_then(|op| self.ecx.read_immediate(&op).discard_err())
+                    .and_then(|op| self.ecx.read_immediate(&op).ok())
                     .map_or(DbgVal::Underscore, |op| DbgVal::Val(op.to_const_int()))
             };
             let msg = match msg {
@@ -507,7 +511,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
                     // other overflow checks.
                     AssertKind::Overflow(*bin_op, eval_to_int(op1), eval_to_int(op2))
                 }
-                AssertKind::BoundsCheck { len, index } => {
+                AssertKind::BoundsCheck { ref len, ref index } => {
                     let len = eval_to_int(len);
                     let index = eval_to_int(index);
                     AssertKind::BoundsCheck { len, index }
@@ -546,9 +550,7 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
         let val: Value<'_> = match *rvalue {
             ThreadLocalRef(_) => return None,
 
-            Use(ref operand) | WrapUnsafeBinder(ref operand, _) => {
-                self.eval_operand(operand)?.into()
-            }
+            Use(ref operand) => self.eval_operand(operand)?.into(),
 
             CopyForDeref(place) => self.eval_place(place)?.into(),
 
@@ -560,9 +562,8 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
                 let right = self.use_ecx(|this| this.ecx.read_immediate(&right))?;
 
                 let val = self.use_ecx(|this| this.ecx.binary_op(bin_op, &left, &right))?;
-                if matches!(val.layout.backend_repr, BackendRepr::ScalarPair(..)) {
-                    // FIXME `Value` should properly support pairs in `Immediate`... but currently
-                    // it does not.
+                if matches!(val.layout.abi, Abi::ScalarPair(..)) {
+                    // FIXME `Value` should properly support pairs in `Immediate`... but currently it does not.
                     let (val, overflow) = val.to_pair(&self.ecx);
                     Value::Aggregate {
                         variant: VariantIdx::ZERO,
@@ -602,35 +603,63 @@ impl<'mir, 'tcx> ConstPropagator<'mir, 'tcx> {
                 return None;
             }
 
+            Len(place) => {
+                let len = match self.get_const(place)? {
+                    Value::Immediate(src) => src.len(&self.ecx).ok()?,
+                    Value::Aggregate { fields, .. } => fields.len() as u64,
+                    Value::Uninit => match place.ty(self.local_decls(), self.tcx).ty.kind() {
+                        ty::Array(_, n) => n.try_eval_target_usize(self.tcx, self.param_env)?,
+                        _ => return None,
+                    },
+                };
+                ImmTy::from_scalar(Scalar::from_target_usize(len, self), layout).into()
+            }
+
             Ref(..) | RawPtr(..) => return None,
+
+            NullaryOp(ref null_op, ty) => {
+                let op_layout = self.use_ecx(|this| this.ecx.layout_of(ty))?;
+                let val = match null_op {
+                    NullOp::SizeOf => op_layout.size.bytes(),
+                    NullOp::AlignOf => op_layout.align.abi.bytes(),
+                    NullOp::OffsetOf(fields) => self
+                        .tcx
+                        .offset_of_subfield(self.param_env, op_layout, fields.iter())
+                        .bytes(),
+                    NullOp::UbChecks => return None,
+                };
+                ImmTy::from_scalar(Scalar::from_target_usize(val, self), layout).into()
+            }
+
+            ShallowInitBox(..) => return None,
 
             Cast(ref kind, ref value, to) => match kind {
                 CastKind::IntToInt | CastKind::IntToFloat => {
                     let value = self.eval_operand(value)?;
-                    let value = self.ecx.read_immediate(&value).discard_err()?;
+                    let value = self.ecx.read_immediate(&value).ok()?;
                     let to = self.ecx.layout_of(to).ok()?;
-                    let res = self.ecx.int_to_int_or_float(&value, to).discard_err()?;
+                    let res = self.ecx.int_to_int_or_float(&value, to).ok()?;
                     res.into()
                 }
                 CastKind::FloatToFloat | CastKind::FloatToInt => {
                     let value = self.eval_operand(value)?;
-                    let value = self.ecx.read_immediate(&value).discard_err()?;
+                    let value = self.ecx.read_immediate(&value).ok()?;
                     let to = self.ecx.layout_of(to).ok()?;
-                    let res = self.ecx.float_to_float_or_int(&value, to).discard_err()?;
+                    let res = self.ecx.float_to_float_or_int(&value, to).ok()?;
                     res.into()
                 }
-                CastKind::Transmute | CastKind::Subtype => {
+                CastKind::Transmute => {
                     let value = self.eval_operand(value)?;
                     let to = self.ecx.layout_of(to).ok()?;
                     // `offset` for immediates only supports scalar/scalar-pair ABIs,
                     // so bail out if the target is not one.
-                    match (value.layout.backend_repr, to.backend_repr) {
-                        (BackendRepr::Scalar(..), BackendRepr::Scalar(..)) => {}
-                        (BackendRepr::ScalarPair(..), BackendRepr::ScalarPair(..)) => {}
+                    match (value.layout.abi, to.abi) {
+                        (Abi::Scalar(..), Abi::Scalar(..)) => {}
+                        (Abi::ScalarPair(..), Abi::ScalarPair(..)) => {}
                         _ => return None,
                     }
 
-                    value.offset(Size::ZERO, to, &self.ecx).discard_err()?.into()
+                    value.offset(Size::ZERO, to, &self.ecx).ok()?.into()
                 }
                 _ => return None,
             },
@@ -749,13 +778,13 @@ impl<'tcx> Visitor<'tcx> for ConstPropagator<'_, 'tcx> {
     fn visit_terminator(&mut self, terminator: &Terminator<'tcx>, location: Location) {
         self.super_terminator(terminator, location);
         match &terminator.kind {
-            TerminatorKind::Assert { expected, msg, cond, .. } => {
+            TerminatorKind::Assert { expected, ref msg, ref cond, .. } => {
                 self.check_assertion(*expected, msg, cond, location);
             }
-            TerminatorKind::SwitchInt { discr, targets } => {
+            TerminatorKind::SwitchInt { ref discr, ref targets } => {
                 if let Some(ref value) = self.eval_operand(discr)
                     && let Some(value_const) = self.use_ecx(|this| this.ecx.read_scalar(value))
-                    && let Some(constant) = value_const.to_bits(value_const.size()).discard_err()
+                    && let Ok(constant) = value_const.to_bits(value_const.size())
                 {
                     // We managed to evaluate the discriminant, so we know we only need to visit
                     // one target.
@@ -824,7 +853,7 @@ const MAX_ALLOC_LIMIT: u64 = 1024;
 
 /// The mode that `ConstProp` is allowed to run in for a given `Local`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum ConstPropMode {
+pub enum ConstPropMode {
     /// The `Local` can be propagated into and reads of this `Local` can also be propagated.
     FullConstProp,
     /// The `Local` can only be propagated into and from its own block.
@@ -836,39 +865,32 @@ enum ConstPropMode {
 
 /// A visitor that determines locals in a MIR body
 /// that can be const propagated
-struct CanConstProp {
+pub struct CanConstProp {
     can_const_prop: IndexVec<Local, ConstPropMode>,
     // False at the beginning. Once set, no more assignments are allowed to that local.
-    found_assignment: DenseBitSet<Local>,
+    found_assignment: BitSet<Local>,
 }
 
 impl CanConstProp {
     /// Returns true if `local` can be propagated
-    fn check<'tcx>(
+    pub fn check<'tcx>(
         tcx: TyCtxt<'tcx>,
-        typing_env: ty::TypingEnv<'tcx>,
+        param_env: ParamEnv<'tcx>,
         body: &Body<'tcx>,
     ) -> IndexVec<Local, ConstPropMode> {
         let mut cpv = CanConstProp {
             can_const_prop: IndexVec::from_elem(ConstPropMode::FullConstProp, &body.local_decls),
-            found_assignment: DenseBitSet::new_empty(body.local_decls.len()),
+            found_assignment: BitSet::new_empty(body.local_decls.len()),
         };
         for (local, val) in cpv.can_const_prop.iter_enumerated_mut() {
             let ty = body.local_decls[local].ty;
-            if ty.is_async_drop_in_place_coroutine(tcx) {
-                // No const propagation for async drop coroutine (AsyncDropGlue).
-                // Otherwise, tcx.layout_of(typing_env.as_query_input(ty)) will be called
-                // (early layout request for async drop coroutine) to calculate layout size.
-                // Layout for `async_drop_in_place<T>::{closure}` may only be known with known T.
-                *val = ConstPropMode::NoPropagation;
-                continue;
-            } else if ty.is_union() {
+            if ty.is_union() {
                 // Unions are incompatible with the current implementation of
                 // const prop because Rust has no concept of an active
                 // variant of a union
                 *val = ConstPropMode::NoPropagation;
             } else {
-                match tcx.layout_of(typing_env.as_query_input(ty)) {
+                match tcx.layout_of(param_env.and(ty)) {
                     Ok(layout) if layout.size < Size::from_bytes(MAX_ALLOC_LIMIT) => {}
                     // Either the layout fails to compute, then we can't use this local anyway
                     // or the local is too large, then we don't want to.
@@ -892,7 +914,7 @@ impl<'tcx> Visitor<'tcx> for CanConstProp {
     fn visit_place(&mut self, place: &Place<'tcx>, mut context: PlaceContext, loc: Location) {
         use rustc_middle::mir::visit::PlaceContext::*;
 
-        // Dereferencing just read the address of `place.local`.
+        // Dereferencing just read the addess of `place.local`.
         if place.projection.first() == Some(&PlaceElem::Deref) {
             context = NonMutatingUse(NonMutatingUseContext::Copy);
         }
@@ -908,6 +930,7 @@ impl<'tcx> Visitor<'tcx> for CanConstProp {
             // mutations of the same local via `Store`
             | MutatingUse(MutatingUseContext::Call)
             | MutatingUse(MutatingUseContext::AsmOutput)
+            | MutatingUse(MutatingUseContext::Deinit)
             // Actual store that can possibly even propagate a value
             | MutatingUse(MutatingUseContext::Store)
             | MutatingUse(MutatingUseContext::SetDiscriminant) => {

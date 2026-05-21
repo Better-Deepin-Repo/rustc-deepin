@@ -1,5 +1,7 @@
 //@ run-pass
+#![allow(stable_features)]
 //@ needs-threads
+#![feature(thread_local_try_with)]
 
 use std::thread;
 

@@ -9,5 +9,5 @@ fn main() {}
 enum E { A, B }
 use E::*;
 
-#[cfg(false)]
-fn fun1(A | B: E) {} //~ ERROR function parameters require top-level or-patterns in parentheses
+#[cfg(FALSE)]
+fn fun1(A | B: E) {} //~ ERROR top-level or-patterns are not allowed

@@ -1,6 +1,6 @@
 //@ run-fail
 //@ error-pattern:squirrelcupcake
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 fn cmp() -> isize {
     match (Some('a'), None::<char>) {

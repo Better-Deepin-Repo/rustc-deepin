@@ -1,9 +1,7 @@
-#![feature(lang_items, no_core)]
+#![feature(lang_items, start, no_core)]
 #![no_core] // makes debugging this test *a lot* easier (during resolve)
 
-#[lang = "sized"] pub trait Sized: MetaSized {}
-#[lang = "meta_sized"] pub trait MetaSized: PointeeSized {}
-#[lang = "pointee_sized"] pub trait PointeeSized {}
+#[lang = "sized"] pub trait Sized {}
 #[lang="copy"] pub trait Copy {}
 
 // Test to make sure that private items imported through globs remain private
@@ -24,4 +22,4 @@ fn test2() {
     gpriv();
 }
 
-fn main() {}
+#[start] fn main(_: isize, _: *const *const u8) -> isize { 3 }

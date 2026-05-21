@@ -1,5 +1,3 @@
-//@ check-pass
-
 #[cfg(test)]
 mod tests {
     #[test]

@@ -1,24 +1,25 @@
+use std::{cmp, iter};
+
 use clippy_config::Conf;
 use clippy_utils::diagnostics::span_lint_and_sugg;
 use clippy_utils::source::snippet;
 use clippy_utils::ty::{for_each_top_level_late_bound_region, is_copy};
 use clippy_utils::{is_self, is_self_ty};
 use core::ops::ControlFlow;
-use rustc_abi::ExternAbi;
+use rustc_ast::attr;
 use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::Applicability;
 use rustc_hir as hir;
-use rustc_hir::attrs::InlineAttr;
 use rustc_hir::intravisit::FnKind;
-use rustc_hir::{BindingMode, Body, FnDecl, Impl, ItemKind, MutTy, Mutability, Node, PatKind, find_attr};
+use rustc_hir::{BindingMode, Body, FnDecl, Impl, ItemKind, MutTy, Mutability, Node, PatKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::adjustment::{Adjust, PointerCoercion};
 use rustc_middle::ty::layout::LayoutOf;
-use rustc_middle::ty::{self, BoundVarIndexKind, RegionKind, TyCtxt};
+use rustc_middle::ty::{self, RegionKind, TyCtxt};
 use rustc_session::impl_lint_pass;
 use rustc_span::def_id::LocalDefId;
-use rustc_span::{Span, sym};
-use std::iter;
+use rustc_span::{sym, Span};
+use rustc_target::spec::abi::Abi;
 
 declare_clippy_lint! {
     /// ### What it does
@@ -32,8 +33,10 @@ declare_clippy_lint! {
     /// registers.
     ///
     /// ### Known problems
-    /// This lint is target dependent, some cases will lint on 64-bit targets but
-    /// not 32-bit or lower targets.
+    /// This lint is target register size dependent, it is
+    /// limited to 32-bit to try and reduce portability problems between 32 and
+    /// 64-bit, but if you are compiling for 8 or 16-bit targets then the limit
+    /// will be different.
     ///
     /// The configuration option `trivial_copy_size_limit` can be set to override
     /// this limit for a project.
@@ -107,11 +110,18 @@ pub struct PassByRefOrValue {
     avoid_breaking_exported_api: bool,
 }
 
-impl PassByRefOrValue {
+impl<'tcx> PassByRefOrValue {
     pub fn new(tcx: TyCtxt<'_>, conf: &'static Conf) -> Self {
-        let ref_min_size = conf
-            .trivial_copy_size_limit
-            .unwrap_or_else(|| u64::from(tcx.sess.target.pointer_width / 8));
+        let ref_min_size = conf.trivial_copy_size_limit.unwrap_or_else(|| {
+            let bit_width = u64::from(tcx.sess.target.pointer_width);
+            // Cap the calculated bit width at 32-bits to reduce
+            // portability problems between 32 and 64-bit targets
+            let bit_width = cmp::min(bit_width, 32);
+            #[expect(clippy::integer_division)]
+            let byte_width = bit_width / 8;
+            // Use a limit of 2 times the register byte width
+            byte_width * 2
+        });
 
         Self {
             ref_min_size,
@@ -120,18 +130,18 @@ impl PassByRefOrValue {
         }
     }
 
-    fn check_poly_fn(&self, cx: &LateContext<'_>, def_id: LocalDefId, decl: &FnDecl<'_>, span: Option<Span>) {
+    fn check_poly_fn(&mut self, cx: &LateContext<'tcx>, def_id: LocalDefId, decl: &FnDecl<'_>, span: Option<Span>) {
         if self.avoid_breaking_exported_api && cx.effective_visibilities.is_exported(def_id) {
             return;
         }
 
         let fn_sig = cx.tcx.fn_sig(def_id).instantiate_identity();
-        let fn_body = cx.enclosing_body.map(|id| cx.tcx.hir_body(id));
+        let fn_body = cx.enclosing_body.map(|id| cx.tcx.hir().body(id));
 
         // Gather all the lifetimes found in the output type which may affect whether
         // `TRIVIALLY_COPY_PASS_BY_REF` should be linted.
         let mut output_regions = FxHashSet::default();
-        let _ = for_each_top_level_late_bound_region(fn_sig.skip_binder().output(), |region| -> ControlFlow<!> {
+        for_each_top_level_late_bound_region(fn_sig.skip_binder().output(), |region| -> ControlFlow<!> {
             output_regions.insert(region);
             ControlFlow::Continue(())
         });
@@ -151,7 +161,7 @@ impl PassByRefOrValue {
             match *ty.skip_binder().kind() {
                 ty::Ref(lt, ty, Mutability::Not) => {
                     match lt.kind() {
-                        RegionKind::ReBound(BoundVarIndexKind::Bound(index), region)
+                        RegionKind::ReBound(index, region)
                             if index.as_u32() == 0 && output_regions.contains(&region) =>
                         {
                             continue;
@@ -168,20 +178,21 @@ impl PassByRefOrValue {
                         && size <= self.ref_min_size
                         && let hir::TyKind::Ref(_, MutTy { ty: decl_ty, .. }) = input.kind
                     {
-                        if let Some(typeck) = cx.maybe_typeck_results()
-                            // Don't lint if a raw pointer is created.
-                            // TODO: Limit the check only to raw pointers to the argument (or part of the argument)
+                        if let Some(typeck) = cx.maybe_typeck_results() {
+                            // Don't lint if an unsafe pointer is created.
+                            // TODO: Limit the check only to unsafe pointers to the argument (or part of the argument)
                             //       which escape the current function.
-                            && (typeck.node_types().items().any(|(_, &ty)| ty.is_raw_ptr())
+                            if typeck.node_types().items().any(|(_, &ty)| ty.is_unsafe_ptr())
                                 || typeck
                                     .adjustments()
                                     .items()
                                     .flat_map(|(_, a)| a)
-                                    .any(|a| matches!(a.kind, Adjust::Pointer(PointerCoercion::UnsafeFnPointer))))
-                        {
-                            continue;
+                                    .any(|a| matches!(a.kind, Adjust::Pointer(PointerCoercion::UnsafeFnPointer)))
+                            {
+                                continue;
+                            }
                         }
-                        let value_type = if fn_body.and_then(|body| body.params.get(index)).is_some_and(is_self) {
+                        let value_type = if fn_body.and_then(|body| body.params.get(index)).map_or(false, is_self) {
                             "self".into()
                         } else {
                             snippet(cx, decl_ty.span, "_").into()
@@ -266,18 +277,17 @@ impl<'tcx> LateLintPass<'tcx> for PassByRefOrValue {
         let hir_id = cx.tcx.local_def_id_to_hir_id(def_id);
         match kind {
             FnKind::ItemFn(.., header) => {
-                if header.abi != ExternAbi::Rust {
+                if header.abi != Abi::Rust {
                     return;
                 }
-                let attrs = cx.tcx.hir_attrs(hir_id);
-                if find_attr!(attrs, Inline(InlineAttr::Always, _)) {
-                    return;
-                }
-
+                let attrs = cx.tcx.hir().attrs(hir_id);
                 for a in attrs {
-                    // FIXME(jdonszelmann): make part of the find_attr above
-                    if a.has_name(sym::proc_macro_derive) {
-                        return;
+                    if let Some(meta_items) = a.meta_item_list() {
+                        if a.has_name(sym::proc_macro_derive)
+                            || (a.has_name(sym::inline) && attr::list_contains_name(&meta_items, sym::always))
+                        {
+                            return;
+                        }
                     }
                 }
             },
@@ -286,13 +296,13 @@ impl<'tcx> LateLintPass<'tcx> for PassByRefOrValue {
         }
 
         // Exclude non-inherent impls
-        if let Node::Item(item) = cx.tcx.parent_hir_node(hir_id)
-            && matches!(
+        if let Node::Item(item) = cx.tcx.parent_hir_node(hir_id) {
+            if matches!(
                 item.kind,
                 ItemKind::Impl(Impl { of_trait: Some(_), .. }) | ItemKind::Trait(..)
-            )
-        {
-            return;
+            ) {
+                return;
+            }
         }
 
         self.check_poly_fn(cx, def_id, decl, Some(span));

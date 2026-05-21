@@ -90,9 +90,8 @@ LL |     let _ = "\u8f";
    |
 help: format of unicode escape sequences uses braces
    |
-LL -     let _ = "\u8f";
-LL +     let _ = "\u{8f}";
-   |
+LL |     let _ = "\u{8f}";
+   |              ~~~~~~
 
 error: aborting due to 13 previous errors
 

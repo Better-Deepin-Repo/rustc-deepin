@@ -1,4 +1,3 @@
-//@ edition:2015
 trait Foo {
     fn dummy(&self) {}
 }

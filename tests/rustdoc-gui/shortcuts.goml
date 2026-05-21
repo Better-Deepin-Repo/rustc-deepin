@@ -8,24 +8,24 @@ press-key: "Escape"
 assert-false: "input.search-input:focus"
 // We now check for the help popup.
 press-key: "?"
-assert-css: ("rustdoc-toolbar .help-menu .popover", {"display": "block"})
+assert-css: ("#help-button .popover", {"display": "block"})
 press-key: "Escape"
-assert-false: "rustdoc-toolbar .help-menu .popover"
+assert-css: ("#help-button .popover", {"display": "none"})
 // Checking doc collapse and expand.
 // It should be displaying a "-":
-assert-text: ("#toggle-all-docs", "Summary")
+assert-text: ("#toggle-all-docs", "[−]")
 press-key: "-"
-wait-for-text: ("#toggle-all-docs", "Show all")
+wait-for-text: ("#toggle-all-docs", "[+]")
 assert-attribute: ("#toggle-all-docs", {"class": "will-expand"})
 // Pressing it again shouldn't do anything.
 press-key: "-"
-assert-text: ("#toggle-all-docs", "Show all")
+assert-text: ("#toggle-all-docs", "[+]")
 assert-attribute: ("#toggle-all-docs", {"class": "will-expand"})
 // Expanding now.
 press-key: "+"
-wait-for-text: ("#toggle-all-docs", "Summary")
+wait-for-text: ("#toggle-all-docs", "[−]")
 assert-attribute: ("#toggle-all-docs", {"class": ""})
 // Pressing it again shouldn't do anything.
 press-key: "+"
-assert-text: ("#toggle-all-docs", "Summary")
+assert-text: ("#toggle-all-docs", "[−]")
 assert-attribute: ("#toggle-all-docs", {"class": ""})

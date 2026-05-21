@@ -1,7 +1,6 @@
 //@ run-pass
 //@ needs-unwind
-//@ needs-threads
-//@ ignore-backends: gcc
+//@ ignore-emscripten no threads support
 
 // Check that the destructors of simple enums are run on unwinding
 

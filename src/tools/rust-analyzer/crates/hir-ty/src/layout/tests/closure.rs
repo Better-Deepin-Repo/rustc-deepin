@@ -166,9 +166,6 @@ fn capture_specific_fields() {
             *a + x + (*b as i64)
         }
     }
-    // FIXME: These tests currently fail, because rust-analyzer hasn't yet implemented the changes
-    // introduced in rust-lang/rust#138961. See rust-lang/rust-analyzer#21274 for more discussion.
-    /*
     size_and_align_expr! {
         struct X(i64, i32, (u8, i128));
         let y: X = X(2, 5, (7, 3));
@@ -186,7 +183,6 @@ fn capture_specific_fields() {
             a + x + (b as i64)
         }
     }
-    */
 }
 
 #[test]
@@ -198,9 +194,6 @@ fn match_pattern() {
             x
         }
     }
-    // FIXME: These tests currently fail, because rust-analyzer hasn't yet implemented the changes
-    // introduced in rust-lang/rust#138961. See rust-lang/rust-analyzer#21274 for more discussion.
-    /*
     size_and_align_expr! {
         minicore: copy;
         stmts: [
@@ -213,7 +206,6 @@ fn match_pattern() {
             }
         }
     }
-    */
     size_and_align_expr! {
         minicore: copy;
         stmts: [

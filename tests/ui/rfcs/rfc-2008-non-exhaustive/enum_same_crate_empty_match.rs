@@ -1,24 +1,22 @@
-//@ dont-require-annotations: NOTE
-
 #![deny(unreachable_patterns)]
 
 #[non_exhaustive]
 pub enum NonExhaustiveEnum {
     Unit,
-    //~^ NOTE not covered
+    //~^ not covered
     Tuple(u32),
-    //~^ NOTE not covered
+    //~^ not covered
     Struct { field: u32 }
-    //~^ NOTE not covered
+    //~^ not covered
 }
 
 pub enum NormalEnum {
     Unit,
-    //~^ NOTE not covered
+    //~^ not covered
     Tuple(u32),
-    //~^ NOTE not covered
+    //~^ not covered
     Struct { field: u32 }
-    //~^ NOTE not covered
+    //~^ not covered
 }
 
 #[non_exhaustive]

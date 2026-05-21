@@ -1,9 +1,11 @@
 mod foo {
     use self::{self};
-    //~^ ERROR imports need to be explicitly named
+    //~^ ERROR unresolved import `self` [E0432]
+    //~| no `self` in the root
 
     use super::{self};
-    //~^ ERROR imports need to be explicitly named
+    //~^ ERROR unresolved import `super` [E0432]
+    //~| no `super` in the root
 }
 
 fn main() {}

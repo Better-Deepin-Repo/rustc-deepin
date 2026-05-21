@@ -1,5 +1,5 @@
 //@ run-pass
-#![feature(arbitrary_self_types_pointers)]
+#![feature(arbitrary_self_types)]
 
 use std::ptr;
 

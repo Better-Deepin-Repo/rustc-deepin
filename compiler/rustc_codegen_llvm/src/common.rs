@@ -1,26 +1,22 @@
 //! Code that is useful in various codegen modules.
 
-use std::borrow::Borrow;
-
 use libc::{c_char, c_uint};
-use rustc_abi::Primitive::Pointer;
-use rustc_abi::{self as abi, HasDataLayout as _};
 use rustc_ast::Mutability;
-use rustc_codegen_ssa::common::TypeKind;
 use rustc_codegen_ssa::traits::*;
-use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
-use rustc_hashes::Hash128;
+use rustc_data_structures::stable_hasher::{Hash128, HashStable, StableHasher};
 use rustc_hir::def_id::DefId;
 use rustc_middle::bug;
-use rustc_middle::mir::interpret::{ConstAllocation, GlobalAlloc, PointerArithmetic, Scalar};
+use rustc_middle::mir::interpret::{ConstAllocation, GlobalAlloc, Scalar};
 use rustc_middle::ty::TyCtxt;
 use rustc_session::cstore::DllImport;
+use rustc_target::abi::{self, AddressSpace, HasDataLayout, Pointer};
 use tracing::debug;
 
 use crate::consts::const_alloc_to_llvm;
 pub(crate) use crate::context::CodegenCx;
-use crate::context::{GenericCx, SCx};
-use crate::llvm::{self, BasicBlock, ConstantInt, FALSE, Metadata, TRUE, ToLlvmBool, Type, Value};
+use crate::llvm::{self, BasicBlock, Bool, ConstantInt, False, OperandBundleDef, True};
+use crate::type_::Type;
+use crate::value::Value;
 
 /*
 * A note on nomenclature of linking: "extern", "foreign", and "upcall".
@@ -64,26 +60,25 @@ use crate::llvm::{self, BasicBlock, ConstantInt, FALSE, Metadata, TRUE, ToLlvmBo
 /// the `OperandBundleDef` value created for MSVC landing pads.
 pub(crate) struct Funclet<'ll> {
     cleanuppad: &'ll Value,
-    operand: llvm::OperandBundleBox<'ll>,
+    operand: OperandBundleDef<'ll>,
 }
 
 impl<'ll> Funclet<'ll> {
     pub(crate) fn new(cleanuppad: &'ll Value) -> Self {
-        Funclet { cleanuppad, operand: llvm::OperandBundleBox::new("funclet", &[cleanuppad]) }
+        Funclet { cleanuppad, operand: OperandBundleDef::new("funclet", &[cleanuppad]) }
     }
 
     pub(crate) fn cleanuppad(&self) -> &'ll Value {
         self.cleanuppad
     }
 
-    pub(crate) fn bundle(&self) -> &llvm::OperandBundle<'ll> {
-        self.operand.as_ref()
+    pub(crate) fn bundle(&self) -> &OperandBundleDef<'ll> {
+        &self.operand
     }
 }
 
-impl<'ll, CX: Borrow<SCx<'ll>>> BackendTypes for GenericCx<'ll, CX> {
+impl<'ll> BackendTypes for CodegenCx<'ll, '_> {
     type Value = &'ll Value;
-    type Metadata = &'ll Metadata;
     // FIXME(eddyb) replace this with a `Function` "subclass" of `Value`.
     type Function = &'ll Value;
 
@@ -96,18 +91,14 @@ impl<'ll, CX: Borrow<SCx<'ll>>> BackendTypes for GenericCx<'ll, CX> {
     type DIVariable = &'ll llvm::debuginfo::DIVariable;
 }
 
-impl<'ll, CX: Borrow<SCx<'ll>>> GenericCx<'ll, CX> {
+impl<'ll> CodegenCx<'ll, '_> {
     pub(crate) fn const_array(&self, ty: &'ll Type, elts: &[&'ll Value]) -> &'ll Value {
         let len = u64::try_from(elts.len()).expect("LLVMConstArray2 elements len overflow");
         unsafe { llvm::LLVMConstArray2(ty, elts.as_ptr(), len) }
     }
 
     pub(crate) fn const_bytes(&self, bytes: &[u8]) -> &'ll Value {
-        bytes_in_context(self.llcx(), bytes)
-    }
-
-    pub(crate) fn null_terminate_const_bytes(&self, bytes: &[u8]) -> &'ll Value {
-        null_terminate_bytes_in_context(self.llcx(), bytes)
+        bytes_in_context(self.llcx, bytes)
     }
 
     pub(crate) fn const_get_elt(&self, v: &'ll Value, idx: u64) -> &'ll Value {
@@ -120,17 +111,9 @@ impl<'ll, CX: Borrow<SCx<'ll>>> GenericCx<'ll, CX> {
             r
         }
     }
-
-    pub(crate) fn const_null(&self, t: &'ll Type) -> &'ll Value {
-        unsafe { llvm::LLVMConstNull(t) }
-    }
-
-    pub(crate) fn const_struct(&self, elts: &[&'ll Value], packed: bool) -> &'ll Value {
-        struct_in_context(self.llcx(), elts, packed)
-    }
 }
 
-impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
+impl<'ll, 'tcx> ConstMethods<'tcx> for CodegenCx<'ll, 'tcx> {
     fn const_null(&self, t: &'ll Type) -> &'ll Value {
         unsafe { llvm::LLVMConstNull(t) }
     }
@@ -143,12 +126,23 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
         unsafe { llvm::LLVMGetPoison(t) }
     }
 
-    fn const_bool(&self, val: bool) -> &'ll Value {
-        self.const_uint(self.type_i1(), val as u64)
+    fn const_int(&self, t: &'ll Type, i: i64) -> &'ll Value {
+        unsafe { llvm::LLVMConstInt(t, i as u64, True) }
     }
 
-    fn const_i8(&self, i: i8) -> &'ll Value {
-        self.const_int(self.type_i8(), i as i64)
+    fn const_uint(&self, t: &'ll Type, i: u64) -> &'ll Value {
+        unsafe { llvm::LLVMConstInt(t, i, False) }
+    }
+
+    fn const_uint_big(&self, t: &'ll Type, u: u128) -> &'ll Value {
+        unsafe {
+            let words = [u as u64, (u >> 64) as u64];
+            llvm::LLVMConstIntOfArbitraryPrecision(t, 2, words.as_ptr())
+        }
+    }
+
+    fn const_bool(&self, val: bool) -> &'ll Value {
+        self.const_uint(self.type_i1(), val as u64)
     }
 
     fn const_i16(&self, i: i16) -> &'ll Value {
@@ -159,16 +153,8 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
         self.const_int(self.type_i32(), i as i64)
     }
 
-    fn const_int(&self, t: &'ll Type, i: i64) -> &'ll Value {
-        debug_assert!(
-            self.type_kind(t) == TypeKind::Integer,
-            "only allows integer types in const_int"
-        );
-        unsafe { llvm::LLVMConstInt(t, i as u64, TRUE) }
-    }
-
-    fn const_u8(&self, i: u8) -> &'ll Value {
-        self.const_uint(self.type_i8(), i as u64)
+    fn const_i8(&self, i: i8) -> &'ll Value {
+        self.const_int(self.type_i8(), i as i64)
     }
 
     fn const_u32(&self, i: u32) -> &'ll Value {
@@ -184,7 +170,7 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_usize(&self, i: u64) -> &'ll Value {
-        let bit_size = self.data_layout().pointer_size().bits();
+        let bit_size = self.data_layout().pointer_size.bits();
         if bit_size < 64 {
             // make sure it doesn't overflow
             assert!(i < (1 << bit_size));
@@ -193,23 +179,8 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
         self.const_uint(self.isize_ty, i)
     }
 
-    fn const_uint(&self, t: &'ll Type, i: u64) -> &'ll Value {
-        debug_assert!(
-            self.type_kind(t) == TypeKind::Integer,
-            "only allows integer types in const_uint"
-        );
-        unsafe { llvm::LLVMConstInt(t, i, FALSE) }
-    }
-
-    fn const_uint_big(&self, t: &'ll Type, u: u128) -> &'ll Value {
-        debug_assert!(
-            self.type_kind(t) == TypeKind::Integer,
-            "only allows integer types in const_uint_big"
-        );
-        unsafe {
-            let words = [u as u64, (u >> 64) as u64];
-            llvm::LLVMConstIntOfArbitraryPrecision(t, 2, words.as_ptr())
-        }
+    fn const_u8(&self, i: u8) -> &'ll Value {
+        self.const_uint(self.type_i8(), i as u64)
     }
 
     fn const_real(&self, t: &'ll Type, val: f64) -> &'ll Value {
@@ -217,24 +188,26 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
     }
 
     fn const_str(&self, s: &str) -> (&'ll Value, &'ll Value) {
-        let mut const_str_cache = self.const_str_cache.borrow_mut();
-        let str_global = const_str_cache.get(s).copied().unwrap_or_else(|| {
-            let sc = self.const_bytes(s.as_bytes());
-            let sym = self.generate_local_symbol_name("str");
-            let g = self.define_global(&sym, self.val_ty(sc)).unwrap_or_else(|| {
-                bug!("symbol `{}` is already defined", sym);
-            });
-            llvm::set_initializer(g, sc);
-
-            llvm::set_global_constant(g, true);
-            llvm::set_unnamed_address(g, llvm::UnnamedAddr::Global);
-
-            llvm::set_linkage(g, llvm::Linkage::InternalLinkage);
-            // Cast to default address space if globals are in a different addrspace
-            let g = self.const_pointercast(g, self.type_ptr());
-            const_str_cache.insert(s.to_owned(), g);
-            g
-        });
+        let str_global = *self
+            .const_str_cache
+            .borrow_mut()
+            .raw_entry_mut()
+            .from_key(s)
+            .or_insert_with(|| {
+                let sc = self.const_bytes(s.as_bytes());
+                let sym = self.generate_local_symbol_name("str");
+                let g = self.define_global(&sym, self.val_ty(sc)).unwrap_or_else(|| {
+                    bug!("symbol `{}` is already defined", sym);
+                });
+                unsafe {
+                    llvm::LLVMSetInitializer(g, sc);
+                    llvm::LLVMSetGlobalConstant(g, True);
+                    llvm::LLVMSetUnnamedAddress(g, llvm::UnnamedAddr::Global);
+                    llvm::LLVMRustSetLinkage(g, llvm::Linkage::InternalLinkage);
+                }
+                (s.to_owned(), g)
+            })
+            .1;
         let len = s.len();
         (str_global, self.const_usize(len as u64))
     }
@@ -277,28 +250,26 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
                 }
             }
             Scalar::Ptr(ptr, _size) => {
-                let (prov, offset) = ptr.prov_and_relative_offset();
-                let global_alloc = self.tcx.global_alloc(prov.alloc_id());
-                let base_addr = match global_alloc {
+                let (prov, offset) = ptr.into_parts();
+                let (base_addr, base_addr_space) = match self.tcx.global_alloc(prov.alloc_id()) {
                     GlobalAlloc::Memory(alloc) => {
                         // For ZSTs directly codegen an aligned pointer.
                         // This avoids generating a zero-sized constant value and actually needing a
                         // real address at runtime.
                         if alloc.inner().len() == 0 {
-                            let val = alloc.inner().align.bytes().wrapping_add(offset.bytes());
-                            let llval = self.const_usize(self.tcx.truncate_to_target_usize(val));
+                            assert_eq!(offset.bytes(), 0);
+                            let llval = self.const_usize(alloc.inner().align.bytes());
                             return if matches!(layout.primitive(), Pointer(_)) {
                                 unsafe { llvm::LLVMConstIntToPtr(llval, llty) }
                             } else {
                                 self.const_bitcast(llval, llty)
                             };
                         } else {
-                            let init =
-                                const_alloc_to_llvm(self, alloc.inner(), /*static*/ false);
+                            let init = const_alloc_to_llvm(self, alloc, /*static*/ false);
                             let alloc = alloc.inner();
                             let value = match alloc.mutability {
                                 Mutability::Mut => self.static_addr_of_mut(init, alloc.align, None),
-                                _ => self.static_addr_of_impl(init, alloc.align, None),
+                                _ => self.static_addr_of(init, alloc.align, None),
                             };
                             if !self.sess().fewer_names() && llvm::get_value_name(value).is_empty()
                             {
@@ -312,40 +283,32 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
                                     format!("alloc_{hash:032x}").as_bytes(),
                                 );
                             }
-                            value
+                            (value, AddressSpace::DATA)
                         }
                     }
-                    GlobalAlloc::Function { instance, .. } => self.get_fn_addr(instance),
-                    GlobalAlloc::VTable(ty, dyn_ty) => {
+                    GlobalAlloc::Function { instance, .. } => (
+                        self.get_fn_addr(instance.polymorphize(self.tcx)),
+                        self.data_layout().instruction_address_space,
+                    ),
+                    GlobalAlloc::VTable(ty, trait_ref) => {
                         let alloc = self
                             .tcx
-                            .global_alloc(self.tcx.vtable_allocation((
-                                ty,
-                                dyn_ty.principal().map(|principal| {
-                                    self.tcx.instantiate_bound_regions_with_erased(principal)
-                                }),
-                            )))
+                            .global_alloc(self.tcx.vtable_allocation((ty, trait_ref)))
                             .unwrap_memory();
-                        let init = const_alloc_to_llvm(self, alloc.inner(), /*static*/ false);
-                        self.static_addr_of_impl(init, alloc.inner().align, None)
+                        let init = const_alloc_to_llvm(self, alloc, /*static*/ false);
+                        let value = self.static_addr_of(init, alloc.inner().align, None);
+                        (value, AddressSpace::DATA)
                     }
                     GlobalAlloc::Static(def_id) => {
                         assert!(self.tcx.is_static(def_id));
                         assert!(!self.tcx.is_thread_local_static(def_id));
-                        self.get_static(def_id)
-                    }
-                    GlobalAlloc::TypeId { .. } => {
-                        // Drop the provenance, the offset contains the bytes of the hash
-                        let llval = self.const_usize(offset.bytes());
-                        return unsafe { llvm::LLVMConstIntToPtr(llval, llty) };
+                        (self.get_static(def_id), AddressSpace::DATA)
                     }
                 };
-                let base_addr_space = global_alloc.address_space(self);
                 let llval = unsafe {
                     llvm::LLVMConstInBoundsGEP2(
                         self.type_i8(),
-                        // Cast to the required address space if necessary
-                        self.const_pointercast(base_addr, self.type_ptr_ext(base_addr_space)),
+                        self.const_bitcast(base_addr, self.type_ptr_ext(base_addr_space)),
                         &self.const_usize(offset.bytes()),
                         1,
                     )
@@ -359,8 +322,8 @@ impl<'ll, 'tcx> ConstCodegenMethods for CodegenCx<'ll, 'tcx> {
         }
     }
 
-    fn const_data_from_alloc(&self, alloc: ConstAllocation<'_>) -> Self::Value {
-        const_alloc_to_llvm(self, alloc.inner(), /*static*/ false)
+    fn const_data_from_alloc(&self, alloc: ConstAllocation<'tcx>) -> Self::Value {
+        const_alloc_to_llvm(self, alloc, /*static*/ false)
     }
 
     fn const_ptr_byte_offset(&self, base_addr: Self::Value, offset: abi::Size) -> Self::Value {
@@ -383,23 +346,8 @@ pub(crate) fn val_ty(v: &Value) -> &Type {
 pub(crate) fn bytes_in_context<'ll>(llcx: &'ll llvm::Context, bytes: &[u8]) -> &'ll Value {
     unsafe {
         let ptr = bytes.as_ptr() as *const c_char;
-        llvm::LLVMConstStringInContext2(llcx, ptr, bytes.len(), TRUE)
+        llvm::LLVMConstStringInContext2(llcx, ptr, bytes.len(), True)
     }
-}
-
-pub(crate) fn null_terminate_bytes_in_context<'ll>(
-    llcx: &'ll llvm::Context,
-    bytes: &[u8],
-) -> &'ll Value {
-    unsafe {
-        let ptr = bytes.as_ptr() as *const c_char;
-        llvm::LLVMConstStringInContext2(llcx, ptr, bytes.len(), FALSE)
-    }
-}
-
-pub(crate) fn named_struct<'ll>(ty: &'ll Type, elts: &[&'ll Value]) -> &'ll Value {
-    let len = c_uint::try_from(elts.len()).expect("LLVMConstStructInContext elements len overflow");
-    unsafe { llvm::LLVMConstNamedStruct(ty, elts.as_ptr(), len) }
 }
 
 fn struct_in_context<'ll>(
@@ -408,7 +356,7 @@ fn struct_in_context<'ll>(
     packed: bool,
 ) -> &'ll Value {
     let len = c_uint::try_from(elts.len()).expect("LLVMConstStructInContext elements len overflow");
-    unsafe { llvm::LLVMConstStructInContext(llcx, elts.as_ptr(), len, packed.to_llvm_bool()) }
+    unsafe { llvm::LLVMConstStructInContext(llcx, elts.as_ptr(), len, packed as Bool) }
 }
 
 #[inline]
@@ -427,22 +375,4 @@ pub(crate) fn get_dllimport<'tcx>(
 ) -> Option<&'tcx DllImport> {
     tcx.native_library(id)
         .and_then(|lib| lib.dll_imports.iter().find(|di| di.name.as_str() == name))
-}
-
-/// Extension trait for explicit casts to `*const c_char`.
-pub(crate) trait AsCCharPtr {
-    /// Equivalent to `self.as_ptr().cast()`, but only casts to `*const c_char`.
-    fn as_c_char_ptr(&self) -> *const c_char;
-}
-
-impl AsCCharPtr for str {
-    fn as_c_char_ptr(&self) -> *const c_char {
-        self.as_ptr().cast()
-    }
-}
-
-impl AsCCharPtr for [u8] {
-    fn as_c_char_ptr(&self) -> *const c_char {
-        self.as_ptr().cast()
-    }
 }

@@ -6,11 +6,12 @@ trait Qux {
 
 pub struct Lint {
     pub desc: &'static dyn Qux,
-    //~^ ERROR is not dyn compatible
+    //~^ ERROR cannot be made into an object
 }
 
 static FOO: &Lint = &Lint { desc: "desc" };
 //~^ ERROR cannot be shared between threads safely
-//~| ERROR is not dyn compatible
+//~| ERROR cannot be made into an object
+//~| ERROR cannot be made into an object
 
 fn main() {}

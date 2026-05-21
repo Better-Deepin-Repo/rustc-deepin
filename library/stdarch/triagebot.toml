@@ -1,7 +1,7 @@
 [assign]
 
 [assign.owners]
-"*" = ["@Amanieu", "@folkertdev", "@sayantn"]
+"*" = ["@Amanieu"]
 
 [ping.windows]
 message = """\
@@ -43,16 +43,10 @@ resolved/implemented on Fuchsia. Could one of you weigh in please?
 Thanks!
 """
 
-[ping.apple]
-alias = ["macos", "ios", "tvos", "watchos", "visionos"]
+[ping.macos]
 message = """\
-Hey Apple Group! This issue or PR could use some Darwin-specific guidance. Could
+Hey MacOS Group! This issue or PR could use some MacOS-specific guidance. Could
 one of you weigh in please?
 Thanks!
 """
 
-# Canonicalize issue numbers to avoid closing the wrong issue
-# when commits are included in subtrees, as well as warning links in commits.
-# Documentation at: https://forge.rust-lang.org/triagebot/issue-links.html
-[issue-links]
-check-commits = false

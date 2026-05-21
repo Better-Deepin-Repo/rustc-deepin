@@ -8,9 +8,8 @@ LL |         1 | 2 || 3 => (),
    |
 help: use a single `|` to separate multiple alternative patterns
    |
-LL -         1 | 2 || 3 => (),
-LL +         1 | 2 | 3 => (),
-   |
+LL |         1 | 2 | 3 => (),
+   |               ~
 
 error: unexpected token `||` in pattern
   --> $DIR/multiple-pattern-typo.rs:12:16
@@ -22,9 +21,8 @@ LL |         (1 | 2 || 3) => (),
    |
 help: use a single `|` to separate multiple alternative patterns
    |
-LL -         (1 | 2 || 3) => (),
-LL +         (1 | 2 | 3) => (),
-   |
+LL |         (1 | 2 | 3) => (),
+   |                ~
 
 error: unexpected token `||` in pattern
   --> $DIR/multiple-pattern-typo.rs:17:16
@@ -36,9 +34,8 @@ LL |         (1 | 2 || 3,) => (),
    |
 help: use a single `|` to separate multiple alternative patterns
    |
-LL -         (1 | 2 || 3,) => (),
-LL +         (1 | 2 | 3,) => (),
-   |
+LL |         (1 | 2 | 3,) => (),
+   |                ~
 
 error: unexpected token `||` in pattern
   --> $DIR/multiple-pattern-typo.rs:24:18
@@ -50,9 +47,8 @@ LL |         TS(1 | 2 || 3) => (),
    |
 help: use a single `|` to separate multiple alternative patterns
    |
-LL -         TS(1 | 2 || 3) => (),
-LL +         TS(1 | 2 | 3) => (),
-   |
+LL |         TS(1 | 2 | 3) => (),
+   |                  ~
 
 error: unexpected token `||` in pattern
   --> $DIR/multiple-pattern-typo.rs:31:23
@@ -64,9 +60,8 @@ LL |         NS { f: 1 | 2 || 3 } => (),
    |
 help: use a single `|` to separate multiple alternative patterns
    |
-LL -         NS { f: 1 | 2 || 3 } => (),
-LL +         NS { f: 1 | 2 | 3 } => (),
-   |
+LL |         NS { f: 1 | 2 | 3 } => (),
+   |                       ~
 
 error: unexpected token `||` in pattern
   --> $DIR/multiple-pattern-typo.rs:36:16
@@ -78,9 +73,8 @@ LL |         [1 | 2 || 3] => (),
    |
 help: use a single `|` to separate multiple alternative patterns
    |
-LL -         [1 | 2 || 3] => (),
-LL +         [1 | 2 | 3] => (),
-   |
+LL |         [1 | 2 | 3] => (),
+   |                ~
 
 error: unexpected token `||` in pattern
   --> $DIR/multiple-pattern-typo.rs:41:9
@@ -90,9 +84,8 @@ LL |         || 1 | 2 | 3 => (),
    |
 help: use a single `|` to separate multiple alternative patterns
    |
-LL -         || 1 | 2 | 3 => (),
-LL +         | 1 | 2 | 3 => (),
-   |
+LL |         | 1 | 2 | 3 => (),
+   |         ~
 
 error: aborting due to 7 previous errors
 

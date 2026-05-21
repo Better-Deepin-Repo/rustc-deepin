@@ -4,10 +4,10 @@
 
 #![stable(feature = "stable_test_feature", since = "1.0.0")]
 
-#[stable(feature = "a", feature = "b", since = "1.0.0")] //~ ERROR malformed `stable` attribute input [E0538]
+#[stable(feature = "a", feature = "b", since = "1.0.0")] //~ ERROR multiple 'feature' items
 fn f1() { }
 
-#[stable(feature = "a", sinse = "1.0.0")] //~ ERROR malformed `stable` attribute input [E0539]
+#[stable(feature = "a", sinse = "1.0.0")] //~ ERROR unknown meta item 'sinse'
 fn f2() { }
 
 #[unstable(feature = "a", issue = "no")]

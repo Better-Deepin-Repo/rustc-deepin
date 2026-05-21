@@ -1,8 +1,7 @@
 // skip-filecheck
 //@ compile-flags: -Z mir-opt-level=0 -C panic=abort
 
-#![feature(deref_patterns)]
-#![expect(incomplete_features)]
+#![feature(string_deref_patterns)]
 #![crate_type = "lib"]
 
 // EMIT_MIR string.foo.PreCodegen.after.mir

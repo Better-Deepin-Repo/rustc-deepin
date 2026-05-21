@@ -18,7 +18,7 @@ accept_pat!([p | q]);
 
 // Non-macro tests:
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn or_patterns() {
     // Top level of `let`:
     let (| A | B);

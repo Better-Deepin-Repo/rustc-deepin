@@ -1,24 +1,21 @@
-use crate::spec::{
-    Arch, Cc, LinkerFlavor, Lld, Os, PanicStrategy, RelocModel, Target, TargetMetadata,
-    TargetOptions, cvs,
-};
+use crate::spec::{cvs, Cc, LinkerFlavor, Lld, PanicStrategy, RelocModel, Target, TargetOptions};
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     Target {
         data_layout: "e-m:e-p:32:32-i64:64-n32-S128".into(),
         llvm_target: "riscv32".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: None,
-            tier: Some(3),
+            tier: None,
             host_tools: None,
-            std: Some(true),
+            std: None,
         },
         pointer_width: 32,
-        arch: Arch::RiscV32,
+        arch: "riscv32".into(),
 
         options: TargetOptions {
             families: cvs!["unix"],
-            os: Os::NuttX,
+            os: "nuttx".into(),
             linker_flavor: LinkerFlavor::Gnu(Cc::No, Lld::Yes),
             linker: Some("rust-lld".into()),
             cpu: "generic-rv32".into(),

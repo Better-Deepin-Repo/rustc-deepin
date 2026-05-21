@@ -1,12 +1,13 @@
 //! Helper routines for higher-ranked things. See the `doc` module at
 //! the end of the file for details.
 
-use rustc_middle::ty::{self, FnMutDelegate, Ty, TyCtxt, TypeFoldable, TypeVisitableExt};
+use rustc_middle::ty::fold::FnMutDelegate;
+use rustc_middle::ty::{self, Ty, TyCtxt, TypeFoldable};
 use tracing::{debug, instrument};
 
 use super::RelateResult;
-use crate::infer::InferCtxt;
 use crate::infer::snapshot::CombinedSnapshot;
+use crate::infer::InferCtxt;
 
 impl<'tcx> InferCtxt<'tcx> {
     /// Replaces all bound variables (lifetimes, types, and constants) bound by
@@ -23,26 +24,31 @@ impl<'tcx> InferCtxt<'tcx> {
     #[instrument(level = "debug", skip(self), ret)]
     pub fn enter_forall_and_leak_universe<T>(&self, binder: ty::Binder<'tcx, T>) -> T
     where
-        T: TypeFoldable<TyCtxt<'tcx>>,
+        T: TypeFoldable<TyCtxt<'tcx>> + Copy,
     {
-        // Inlined `no_bound_vars`.
-        if !binder.as_ref().skip_binder().has_escaping_bound_vars() {
-            return binder.skip_binder();
+        if let Some(inner) = binder.no_bound_vars() {
+            return inner;
         }
 
         let next_universe = self.create_next_universe();
 
         let delegate = FnMutDelegate {
-            regions: &mut |br: ty::BoundRegion<'tcx>| {
-                ty::Region::new_placeholder(self.tcx, ty::PlaceholderRegion::new(next_universe, br))
+            regions: &mut |br: ty::BoundRegion| {
+                ty::Region::new_placeholder(
+                    self.tcx,
+                    ty::PlaceholderRegion { universe: next_universe, bound: br },
+                )
             },
-            types: &mut |bound_ty: ty::BoundTy<'tcx>| {
-                Ty::new_placeholder(self.tcx, ty::PlaceholderType::new(next_universe, bound_ty))
+            types: &mut |bound_ty: ty::BoundTy| {
+                Ty::new_placeholder(
+                    self.tcx,
+                    ty::PlaceholderType { universe: next_universe, bound: bound_ty },
+                )
             },
-            consts: &mut |bound_const: ty::BoundConst<'tcx>| {
+            consts: &mut |bound_var: ty::BoundVar| {
                 ty::Const::new_placeholder(
                     self.tcx,
-                    ty::PlaceholderConst::new(next_universe, bound_const),
+                    ty::PlaceholderConst { universe: next_universe, bound: bound_var },
                 )
             },
         };
@@ -65,7 +71,7 @@ impl<'tcx> InferCtxt<'tcx> {
     #[instrument(level = "debug", skip(self, f))]
     pub fn enter_forall<T, U>(&self, forall: ty::Binder<'tcx, T>, f: impl FnOnce(T) -> U) -> U
     where
-        T: TypeFoldable<TyCtxt<'tcx>>,
+        T: TypeFoldable<TyCtxt<'tcx>> + Copy,
     {
         // FIXME: currently we do nothing to prevent placeholders with the new universe being
         // used after exiting `f`. For example region subtyping can result in outlives constraints

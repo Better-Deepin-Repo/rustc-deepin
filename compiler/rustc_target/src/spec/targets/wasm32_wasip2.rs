@@ -1,6 +1,6 @@
 //! The `wasm32-wasip2` target is the next evolution of the
-//! wasm32-wasip1 target. While the wasi specification is still under
-//! active development, the preview 2 iteration is considered an "island
+//! wasm32-wasi target. While the wasi specification is still under
+//! active development, the {review 2 iteration is considered an "island
 //! of stability" that should allow users to rely on it indefinitely.
 //!
 //! The `wasi` target is a proposal to define a standardized set of WebAssembly
@@ -16,15 +16,13 @@
 //! You can see more about wasi at <https://wasi.dev> and the component model at
 //! <https://github.com/WebAssembly/component-model>.
 
-use crate::spec::{
-    Arch, Env, LinkSelfContainedDefault, Os, RelocModel, Target, TargetMetadata, base, crt_objects,
-};
+use crate::spec::{base, crt_objects, LinkSelfContainedDefault, RelocModel, Target};
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     let mut options = base::wasm::options();
 
-    options.os = Os::Wasi;
-    options.env = Env::P2;
+    options.os = "wasi".into();
+    options.env = "p2".into();
     options.linker = Some("wasm-component-ld".into());
 
     options.pre_link_objects_self_contained = crt_objects::pre_wasi_self_contained();
@@ -55,21 +53,21 @@ pub(crate) fn target() -> Target {
     options.entry_name = "__main_void".into();
 
     // Default to PIC unlike base wasm. This makes precompiled objects such as
-    // the standard library more suitable to be used with shared libraries a la
+    // the standard library more suitable to be used with shared libaries a la
     // emscripten's dynamic linking convention.
     options.relocation_model = RelocModel::Pic;
 
     Target {
         llvm_target: "wasm32-wasip2".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: Some("WebAssembly".into()),
-            tier: Some(2),
+            tier: Some(3),
             host_tools: Some(false),
             std: Some(true),
         },
         pointer_width: 32,
-        data_layout: "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-i128:128-n32:64-S128-ni:1:10:20".into(),
-        arch: Arch::Wasm32,
+        data_layout: "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20".into(),
+        arch: "wasm32".into(),
         options,
     }
 }

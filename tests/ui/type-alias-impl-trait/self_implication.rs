@@ -20,10 +20,11 @@ struct Foo<'a> {
     x: &'a mut u8,
 }
 // desugared
-pub type FooX = impl Sized;
-impl<'a> Foo<'a> {
-    #[define_opaque(FooX)]
-    pub fn foo(&self) -> FooX {}
+mod foo {
+    pub type FooX = impl Sized;
+    impl<'a> super::Foo<'a> {
+        pub fn foo(&self) -> FooX {}
+    }
 }
 
 fn bar() {

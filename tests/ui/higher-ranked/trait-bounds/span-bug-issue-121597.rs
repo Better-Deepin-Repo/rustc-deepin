@@ -12,7 +12,9 @@ fn needs_bar(_: *mut Type2) {}
 
 fn main() {
     let x: &dyn Foo = &();
-    //~^ ERROR the trait `Foo` is not dyn compatible
+    //~^ ERROR the trait `Foo` cannot be made into an object
+    //~| ERROR the trait `Foo` cannot be made into an object
 
     needs_bar(x);
+    //~^ ERROR mismatched types
 }

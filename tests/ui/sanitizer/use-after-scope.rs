@@ -2,10 +2,9 @@
 //@ needs-sanitizer-address
 //@ ignore-cross-compile
 //
-//@ compile-flags: -Zsanitizer=address -C unsafe-allow-abi-mismatch=sanitizer
-//@ run-fail-or-crash
+//@ compile-flags: -Zsanitizer=address
+//@ run-fail
 //@ error-pattern: ERROR: AddressSanitizer: stack-use-after-scope
-//@ ignore-backends: gcc
 
 static mut P: *mut usize = std::ptr::null_mut();
 

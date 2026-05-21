@@ -1,4 +1,4 @@
-#![deny(dead_code)] //~ NOTE the lint level is defined here
+#![deny(dead_code)]
 
 #[derive(Default)]
 struct T; //~ ERROR struct `T` is never constructed
@@ -7,7 +7,7 @@ struct T; //~ ERROR struct `T` is never constructed
 struct Used;
 
 #[derive(Default)]
-enum E { //~ NOTE variant in this enum
+enum E {
     #[default]
     A,
     B, //~ ERROR variant `B` is never constructed
@@ -22,5 +22,4 @@ pub struct T2 {
 
 fn main() {
     let _x: Used = Default::default();
-    let _e: E = Default::default();
 }

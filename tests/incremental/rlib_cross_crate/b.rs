@@ -7,7 +7,6 @@
 //@ revisions:rpass1 rpass2 rpass3
 //@ no-prefer-dynamic
 //@ compile-flags: -Z query-dep-graph
-//@ ignore-backends: gcc
 
 #![feature(rustc_attrs)]
 

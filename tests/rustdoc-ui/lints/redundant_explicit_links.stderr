@@ -15,9 +15,8 @@ LL | #![deny(rustdoc::redundant_explicit_links)]
    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 help: remove explicit link target
    |
-LL - /// [dummy_target](dummy_target)
-LL + /// [dummy_target]
-   |
+LL | /// [dummy_target]
+   |     ~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:9:22
@@ -31,9 +30,8 @@ LL | /// [`dummy_target`](dummy_target)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`dummy_target`](dummy_target)
-LL + /// [`dummy_target`]
-   |
+LL | /// [`dummy_target`]
+   |     ~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:12:11
@@ -47,9 +45,8 @@ LL | /// [Vec](Vec)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [Vec](Vec)
-LL + /// [Vec]
-   |
+LL | /// [Vec]
+   |     ~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:14:13
@@ -63,9 +60,8 @@ LL | /// [`Vec`](Vec)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`Vec`](Vec)
-LL + /// [`Vec`]
-   |
+LL | /// [`Vec`]
+   |     ~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:16:11
@@ -79,9 +75,8 @@ LL | /// [Vec](std::vec::Vec)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [Vec](std::vec::Vec)
-LL + /// [Vec]
-   |
+LL | /// [Vec]
+   |     ~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:18:13
@@ -95,9 +90,8 @@ LL | /// [`Vec`](std::vec::Vec)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`Vec`](std::vec::Vec)
-LL + /// [`Vec`]
-   |
+LL | /// [`Vec`]
+   |     ~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:20:21
@@ -111,9 +105,8 @@ LL | /// [std::vec::Vec](Vec)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [std::vec::Vec](Vec)
-LL + /// [std::vec::Vec]
-   |
+LL | /// [std::vec::Vec]
+   |     ~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:22:23
@@ -127,9 +120,8 @@ LL | /// [`std::vec::Vec`](Vec)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`std::vec::Vec`](Vec)
-LL + /// [`std::vec::Vec`]
-   |
+LL | /// [`std::vec::Vec`]
+   |     ~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:24:21
@@ -143,9 +135,8 @@ LL | /// [std::vec::Vec](std::vec::Vec)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [std::vec::Vec](std::vec::Vec)
-LL + /// [std::vec::Vec]
-   |
+LL | /// [std::vec::Vec]
+   |     ~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:26:23
@@ -159,9 +150,8 @@ LL | /// [`std::vec::Vec`](std::vec::Vec)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`std::vec::Vec`](std::vec::Vec)
-LL + /// [`std::vec::Vec`]
-   |
+LL | /// [`std::vec::Vec`]
+   |     ~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:29:13
@@ -175,9 +165,8 @@ LL | /// [usize](usize)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [usize](usize)
-LL + /// [usize]
-   |
+LL | /// [usize]
+   |     ~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:31:15
@@ -191,9 +180,8 @@ LL | /// [`usize`](usize)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`usize`](usize)
-LL + /// [`usize`]
-   |
+LL | /// [`usize`]
+   |     ~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:33:13
@@ -207,9 +195,8 @@ LL | /// [usize](std::primitive::usize)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [usize](std::primitive::usize)
-LL + /// [usize]
-   |
+LL | /// [usize]
+   |     ~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:35:15
@@ -223,9 +210,8 @@ LL | /// [`usize`](std::primitive::usize)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`usize`](std::primitive::usize)
-LL + /// [`usize`]
-   |
+LL | /// [`usize`]
+   |     ~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:37:29
@@ -239,9 +225,8 @@ LL | /// [std::primitive::usize](usize)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [std::primitive::usize](usize)
-LL + /// [std::primitive::usize]
-   |
+LL | /// [std::primitive::usize]
+   |     ~~~~~~~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:39:31
@@ -255,9 +240,8 @@ LL | /// [`std::primitive::usize`](usize)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`std::primitive::usize`](usize)
-LL + /// [`std::primitive::usize`]
-   |
+LL | /// [`std::primitive::usize`]
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:41:29
@@ -271,9 +255,8 @@ LL | /// [std::primitive::usize](std::primitive::usize)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [std::primitive::usize](std::primitive::usize)
-LL + /// [std::primitive::usize]
-   |
+LL | /// [std::primitive::usize]
+   |     ~~~~~~~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:43:31
@@ -287,9 +270,8 @@ LL | /// [`std::primitive::usize`](std::primitive::usize)
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`std::primitive::usize`](std::primitive::usize)
-LL + /// [`std::primitive::usize`]
-   |
+LL | /// [`std::primitive::usize`]
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:46:20
@@ -303,9 +285,8 @@ LL | /// [dummy_target](dummy_target) TEXT
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [dummy_target](dummy_target) TEXT
-LL + /// [dummy_target] TEXT
-   |
+LL | /// [dummy_target] TEXT
+   |     ~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:48:22
@@ -319,9 +300,8 @@ LL | /// [`dummy_target`](dummy_target) TEXT
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`dummy_target`](dummy_target) TEXT
-LL + /// [`dummy_target`] TEXT
-   |
+LL | /// [`dummy_target`] TEXT
+   |     ~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:56:20
@@ -335,9 +315,8 @@ LL | /// [dummy_target][dummy_target]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [dummy_target][dummy_target]
-LL + /// [dummy_target]
-   |
+LL | /// [dummy_target]
+   |     ~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:58:22
@@ -351,9 +330,8 @@ LL | /// [`dummy_target`][dummy_target]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`dummy_target`][dummy_target]
-LL + /// [`dummy_target`]
-   |
+LL | /// [`dummy_target`]
+   |     ~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:61:11
@@ -367,9 +345,8 @@ LL | /// [Vec][Vec]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [Vec][Vec]
-LL + /// [Vec]
-   |
+LL | /// [Vec]
+   |     ~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:63:13
@@ -383,9 +360,8 @@ LL | /// [`Vec`][Vec]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`Vec`][Vec]
-LL + /// [`Vec`]
-   |
+LL | /// [`Vec`]
+   |     ~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:65:11
@@ -399,9 +375,8 @@ LL | /// [Vec][std::vec::Vec]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [Vec][std::vec::Vec]
-LL + /// [Vec]
-   |
+LL | /// [Vec]
+   |     ~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:67:13
@@ -415,9 +390,8 @@ LL | /// [`Vec`][std::vec::Vec]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`Vec`][std::vec::Vec]
-LL + /// [`Vec`]
-   |
+LL | /// [`Vec`]
+   |     ~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:69:21
@@ -431,9 +405,8 @@ LL | /// [std::vec::Vec][Vec]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [std::vec::Vec][Vec]
-LL + /// [std::vec::Vec]
-   |
+LL | /// [std::vec::Vec]
+   |     ~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:71:23
@@ -447,9 +420,8 @@ LL | /// [`std::vec::Vec`][Vec]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`std::vec::Vec`][Vec]
-LL + /// [`std::vec::Vec`]
-   |
+LL | /// [`std::vec::Vec`]
+   |     ~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:73:21
@@ -463,9 +435,8 @@ LL | /// [std::vec::Vec][std::vec::Vec]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [std::vec::Vec][std::vec::Vec]
-LL + /// [std::vec::Vec]
-   |
+LL | /// [std::vec::Vec]
+   |     ~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:75:23
@@ -479,9 +450,8 @@ LL | /// [`std::vec::Vec`][std::vec::Vec]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`std::vec::Vec`][std::vec::Vec]
-LL + /// [`std::vec::Vec`]
-   |
+LL | /// [`std::vec::Vec`]
+   |     ~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:78:13
@@ -495,9 +465,8 @@ LL | /// [usize][usize]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [usize][usize]
-LL + /// [usize]
-   |
+LL | /// [usize]
+   |     ~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:80:15
@@ -511,9 +480,8 @@ LL | /// [`usize`][usize]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`usize`][usize]
-LL + /// [`usize`]
-   |
+LL | /// [`usize`]
+   |     ~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:82:13
@@ -527,9 +495,8 @@ LL | /// [usize][std::primitive::usize]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [usize][std::primitive::usize]
-LL + /// [usize]
-   |
+LL | /// [usize]
+   |     ~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:84:15
@@ -543,9 +510,8 @@ LL | /// [`usize`][std::primitive::usize]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`usize`][std::primitive::usize]
-LL + /// [`usize`]
-   |
+LL | /// [`usize`]
+   |     ~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:86:29
@@ -559,9 +525,8 @@ LL | /// [std::primitive::usize][usize]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [std::primitive::usize][usize]
-LL + /// [std::primitive::usize]
-   |
+LL | /// [std::primitive::usize]
+   |     ~~~~~~~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:88:31
@@ -575,9 +540,8 @@ LL | /// [`std::primitive::usize`][usize]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`std::primitive::usize`][usize]
-LL + /// [`std::primitive::usize`]
-   |
+LL | /// [`std::primitive::usize`]
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:90:29
@@ -591,9 +555,8 @@ LL | /// [std::primitive::usize][std::primitive::usize]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [std::primitive::usize][std::primitive::usize]
-LL + /// [std::primitive::usize]
-   |
+LL | /// [std::primitive::usize]
+   |     ~~~~~~~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:92:31
@@ -607,9 +570,8 @@ LL | /// [`std::primitive::usize`][std::primitive::usize]
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`std::primitive::usize`][std::primitive::usize]
-LL + /// [`std::primitive::usize`]
-   |
+LL | /// [`std::primitive::usize`]
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:95:20
@@ -623,9 +585,8 @@ LL | /// [dummy_target][dummy_target] TEXT
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [dummy_target][dummy_target] TEXT
-LL + /// [dummy_target] TEXT
-   |
+LL | /// [dummy_target] TEXT
+   |     ~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:97:22
@@ -639,9 +600,8 @@ LL | /// [`dummy_target`][dummy_target] TEXT
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`dummy_target`][dummy_target] TEXT
-LL + /// [`dummy_target`] TEXT
-   |
+LL | /// [`dummy_target`] TEXT
+   |     ~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:105:20
@@ -660,9 +620,8 @@ LL | /// [dummy_target]: dummy_target
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [dummy_target][dummy_target]
-LL + /// [dummy_target]
-   |
+LL | /// [dummy_target]
+   |     ~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:107:22
@@ -681,9 +640,8 @@ LL | /// [dummy_target]: dummy_target
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`dummy_target`][dummy_target]
-LL + /// [`dummy_target`]
-   |
+LL | /// [`dummy_target`]
+   |     ~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:110:11
@@ -702,9 +660,8 @@ LL | /// [Vec]: Vec
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [Vec][Vec]
-LL + /// [Vec]
-   |
+LL | /// [Vec]
+   |     ~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:112:13
@@ -723,9 +680,8 @@ LL | /// [Vec]: Vec
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`Vec`][Vec]
-LL + /// [`Vec`]
-   |
+LL | /// [`Vec`]
+   |     ~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:114:11
@@ -744,9 +700,8 @@ LL | /// [std::vec::Vec]: Vec
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [Vec][std::vec::Vec]
-LL + /// [Vec]
-   |
+LL | /// [Vec]
+   |     ~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:116:13
@@ -765,9 +720,8 @@ LL | /// [std::vec::Vec]: Vec
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`Vec`][std::vec::Vec]
-LL + /// [`Vec`]
-   |
+LL | /// [`Vec`]
+   |     ~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:118:21
@@ -786,9 +740,8 @@ LL | /// [Vec]: Vec
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [std::vec::Vec][Vec]
-LL + /// [std::vec::Vec]
-   |
+LL | /// [std::vec::Vec]
+   |     ~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:120:23
@@ -807,9 +760,8 @@ LL | /// [Vec]: Vec
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`std::vec::Vec`][Vec]
-LL + /// [`std::vec::Vec`]
-   |
+LL | /// [`std::vec::Vec`]
+   |     ~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:122:21
@@ -828,9 +780,8 @@ LL | /// [std::vec::Vec]: Vec
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [std::vec::Vec][std::vec::Vec]
-LL + /// [std::vec::Vec]
-   |
+LL | /// [std::vec::Vec]
+   |     ~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:124:23
@@ -849,9 +800,8 @@ LL | /// [std::vec::Vec]: Vec
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`std::vec::Vec`][std::vec::Vec]
-LL + /// [`std::vec::Vec`]
-   |
+LL | /// [`std::vec::Vec`]
+   |     ~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:127:13
@@ -870,9 +820,8 @@ LL | /// [usize]: usize
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [usize][usize]
-LL + /// [usize]
-   |
+LL | /// [usize]
+   |     ~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:129:15
@@ -891,9 +840,8 @@ LL | /// [usize]: usize
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`usize`][usize]
-LL + /// [`usize`]
-   |
+LL | /// [`usize`]
+   |     ~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:131:13
@@ -912,9 +860,8 @@ LL | /// [std::primitive::usize]: usize
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [usize][std::primitive::usize]
-LL + /// [usize]
-   |
+LL | /// [usize]
+   |     ~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:133:15
@@ -933,9 +880,8 @@ LL | /// [std::primitive::usize]: usize
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`usize`][std::primitive::usize]
-LL + /// [`usize`]
-   |
+LL | /// [`usize`]
+   |     ~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:135:29
@@ -954,9 +900,8 @@ LL | /// [usize]: usize
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [std::primitive::usize][usize]
-LL + /// [std::primitive::usize]
-   |
+LL | /// [std::primitive::usize]
+   |     ~~~~~~~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:137:31
@@ -975,9 +920,8 @@ LL | /// [usize]: usize
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`std::primitive::usize`][usize]
-LL + /// [`std::primitive::usize`]
-   |
+LL | /// [`std::primitive::usize`]
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:139:29
@@ -996,9 +940,8 @@ LL | /// [std::primitive::usize]: usize
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [std::primitive::usize][std::primitive::usize]
-LL + /// [std::primitive::usize]
-   |
+LL | /// [std::primitive::usize]
+   |     ~~~~~~~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:141:31
@@ -1017,9 +960,8 @@ LL | /// [std::primitive::usize]: usize
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`std::primitive::usize`][std::primitive::usize]
-LL + /// [`std::primitive::usize`]
-   |
+LL | /// [`std::primitive::usize`]
+   |     ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:144:20
@@ -1038,9 +980,8 @@ LL | /// [dummy_target]: dummy_target
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [dummy_target][dummy_target] TEXT
-LL + /// [dummy_target] TEXT
-   |
+LL | /// [dummy_target] TEXT
+   |     ~~~~~~~~~~~~~~
 
 error: redundant explicit link target
   --> $DIR/redundant_explicit_links.rs:146:22
@@ -1059,9 +1000,8 @@ LL | /// [dummy_target]: dummy_target
            the label is used to resolve intra-doc links
 help: remove explicit link target
    |
-LL - /// [`dummy_target`][dummy_target] TEXT
-LL + /// [`dummy_target`] TEXT
-   |
+LL | /// [`dummy_target`] TEXT
+   |     ~~~~~~~~~~~~~~~~
 
 error: aborting due to 60 previous errors
 

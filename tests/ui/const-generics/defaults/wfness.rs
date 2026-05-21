@@ -1,5 +1,5 @@
 struct Ooopsies<const N: u8 = { u8::MAX + 1 }>;
-//~^ error: overflow
+//~^ error: evaluation of constant value failed
 
 trait Trait<const N: u8> {}
 impl Trait<3> for () {}

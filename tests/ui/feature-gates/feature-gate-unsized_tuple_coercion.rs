@@ -1,4 +1,4 @@
 fn main() {
     let _ : &(dyn Send,) = &((),);
-    //~^ ERROR mismatched types [E0308]
+    //~^ ERROR unsized tuple coercion is not stable enough
 }

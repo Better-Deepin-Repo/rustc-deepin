@@ -191,12 +191,12 @@ impl Table for Error {
     }
 
     fn postgres_select_statement(&self, since_weeks_ago: Option<u32>) -> String {
-        let s = "select context, aid, message from ".to_string() + self.name();
+        let s = "select benchmark, aid, error from ".to_string() + self.name();
         with_filter_clause_maybe(s, ARTIFACT_JOIN_AND_WHERE, since_weeks_ago)
     }
 
     fn sqlite_insert_statement(&self) -> &'static str {
-        "insert into error (context, aid, message) VALUES (?, ?, ?)"
+        "insert into error (benchmark, aid, error) VALUES (?, ?, ?)"
     }
 
     fn sqlite_execute_insert(&self, statement: &mut rusqlite::Statement, row: tokio_postgres::Row) {
@@ -246,12 +246,11 @@ impl Table for PstatSeries {
     }
 
     fn postgres_select_statement(&self, _since_weeks_ago: Option<u32>) -> String {
-        "select id, crate, profile, scenario, backend, target, metric from ".to_string()
-            + self.name()
+        "select id, crate, profile, scenario, backend, metric from ".to_string() + self.name()
     }
 
     fn sqlite_insert_statement(&self) -> &'static str {
-        "insert into pstat_series (id, crate, profile, scenario, backend, target, metric) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        "insert into pstat_series (id, crate, profile, scenario, backend, metric) VALUES (?, ?, ?, ?, ?, ?)"
     }
 
     fn sqlite_execute_insert(&self, statement: &mut rusqlite::Statement, row: tokio_postgres::Row) {
@@ -263,7 +262,6 @@ impl Table for PstatSeries {
                 row.get::<_, &str>(3),
                 row.get::<_, &str>(4),
                 row.get::<_, &str>(5),
-                row.get::<_, &str>(6),
             ])
             .unwrap();
     }
@@ -277,13 +275,13 @@ impl Table for PullRequestBuild {
     }
 
     fn postgres_select_statement(&self, _since_weeks_ago: Option<u32>) -> String {
-        "select bors_sha, pr, parent_sha, complete, requested, include, exclude, runs, backends from "
+        "select bors_sha, pr, parent_sha, complete, requested, include, exclude, runs from "
             .to_string()
             + self.name()
     }
 
     fn sqlite_insert_statement(&self) -> &'static str {
-        "insert into pull_request_build (bors_sha, pr, parent_sha, complete, requested, include, exclude, runs, backends) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        "insert into pull_request_build (bors_sha, pr, parent_sha, complete, requested, include, exclude, runs) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     }
 
     fn sqlite_execute_insert(&self, statement: &mut rusqlite::Statement, row: tokio_postgres::Row) {
@@ -298,7 +296,6 @@ impl Table for PullRequestBuild {
                 row.get::<_, Option<&str>>(5),
                 row.get::<_, Option<&str>>(6),
                 row.get::<_, Option<i32>>(7),
-                row.get::<_, Option<&str>>(8),
             ])
             .unwrap();
     }

@@ -1,13 +1,14 @@
 use std::fmt;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 
-use rustc_data_structures::AtomicRef;
 use rustc_data_structures::fingerprint::Fingerprint;
-use rustc_data_structures::stable_hasher::{HashStable, StableHasher, StableOrd, ToStableHashKey};
+use rustc_data_structures::stable_hasher::{
+    Hash64, HashStable, StableHasher, StableOrd, ToStableHashKey,
+};
 use rustc_data_structures::unhash::Unhasher;
-use rustc_hashes::Hash64;
+use rustc_data_structures::AtomicRef;
 use rustc_index::Idx;
-use rustc_macros::{BlobDecodable, Decodable, Encodable, HashStable_Generic};
+use rustc_macros::{Decodable, Encodable, HashStable_Generic};
 use rustc_serialize::{Decodable, Encodable};
 
 use crate::{HashStableContext, SpanDecoder, SpanEncoder, Symbol};
@@ -81,7 +82,7 @@ impl fmt::Display for CrateNum {
 /// because it depends on the set of crates in the entire crate graph of a
 /// compilation session. Again, using the same crate with a different version
 /// number would fix the issue with a high probability -- but that might be
-/// easier said than done if the crates in questions are dependencies of
+/// easier said then done if the crates in questions are dependencies of
 /// third-party crates.
 ///
 /// That being said, given a high quality hash function, the collision
@@ -110,7 +111,6 @@ impl DefPathHash {
 
     /// Builds a new [DefPathHash] with the given [StableCrateId] and
     /// `local_hash`, where `local_hash` must be unique within its crate.
-    #[inline]
     pub fn new(stable_crate_id: StableCrateId, local_hash: Hash64) -> DefPathHash {
         DefPathHash(Fingerprint::new(stable_crate_id.0, local_hash))
     }
@@ -141,7 +141,7 @@ impl StableOrd for DefPathHash {
 /// For more information on the possibility of hash collisions in rustc,
 /// see the discussion in [`DefId`].
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
-#[derive(Hash, HashStable_Generic, Encodable, BlobDecodable)]
+#[derive(Hash, HashStable_Generic, Encodable, Decodable)]
 pub struct StableCrateId(pub(crate) Hash64);
 
 impl StableCrateId {
@@ -405,21 +405,21 @@ rustc_data_structures::define_id_collections!(
 impl<CTX: HashStableContext> HashStable<CTX> for DefId {
     #[inline]
     fn hash_stable(&self, hcx: &mut CTX, hasher: &mut StableHasher) {
-        hcx.def_path_hash(*self).hash_stable(hcx, hasher);
+        self.to_stable_hash_key(hcx).hash_stable(hcx, hasher);
     }
 }
 
 impl<CTX: HashStableContext> HashStable<CTX> for LocalDefId {
     #[inline]
     fn hash_stable(&self, hcx: &mut CTX, hasher: &mut StableHasher) {
-        hcx.def_path_hash(self.to_def_id()).local_hash().hash_stable(hcx, hasher);
+        self.to_stable_hash_key(hcx).hash_stable(hcx, hasher);
     }
 }
 
 impl<CTX: HashStableContext> HashStable<CTX> for CrateNum {
     #[inline]
     fn hash_stable(&self, hcx: &mut CTX, hasher: &mut StableHasher) {
-        self.as_def_id().to_stable_hash_key(hcx).stable_crate_id().hash_stable(hcx, hasher);
+        self.to_stable_hash_key(hcx).hash_stable(hcx, hasher);
     }
 }
 
@@ -465,36 +465,30 @@ macro_rules! typed_def_id {
         pub struct $Name(DefId);
 
         impl $Name {
-            #[inline]
             pub const fn new_unchecked(def_id: DefId) -> Self {
                 Self(def_id)
             }
 
-            #[inline]
             pub fn to_def_id(self) -> DefId {
                 self.into()
             }
 
-            #[inline]
             pub fn is_local(self) -> bool {
                 self.0.is_local()
             }
 
-            #[inline]
             pub fn as_local(self) -> Option<$LocalName> {
                 self.0.as_local().map($LocalName::new_unchecked)
             }
         }
 
         impl From<$LocalName> for $Name {
-            #[inline]
             fn from(local: $LocalName) -> Self {
                 Self(local.0.to_def_id())
             }
         }
 
         impl From<$Name> for DefId {
-            #[inline]
             fn from(typed: $Name) -> Self {
                 typed.0
             }
@@ -507,31 +501,26 @@ macro_rules! typed_def_id {
         impl !PartialOrd for $LocalName {}
 
         impl $LocalName {
-            #[inline]
             pub const fn new_unchecked(def_id: LocalDefId) -> Self {
                 Self(def_id)
             }
 
-            #[inline]
             pub fn to_def_id(self) -> DefId {
                 self.0.into()
             }
 
-            #[inline]
             pub fn to_local_def_id(self) -> LocalDefId {
                 self.0
             }
         }
 
         impl From<$LocalName> for LocalDefId {
-            #[inline]
             fn from(typed: $LocalName) -> Self {
                 typed.0
             }
         }
 
         impl From<$LocalName> for DefId {
-            #[inline]
             fn from(typed: $LocalName) -> Self {
                 typed.0.into()
             }
@@ -540,7 +529,7 @@ macro_rules! typed_def_id {
 }
 
 // N.B.: when adding new typed `DefId`s update the corresponding trait impls in
-// `rustc_middle::dep_graph::dep_node_key` for `DepNodeKey`.
+// `rustc_middle::dep_graph::def_node` for `DepNodeParams`.
 typed_def_id! { ModDefId, LocalModDefId }
 
 impl LocalModDefId {

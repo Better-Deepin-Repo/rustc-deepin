@@ -1,13 +1,13 @@
-use clippy_utils::diagnostics::{span_lint, span_lint_and_help};
-use clippy_utils::higher::{VecInitKind, get_vec_init_kind};
-use clippy_utils::res::{MaybeDef, MaybeResPath};
-use clippy_utils::ty::is_uninit_value_valid_for_ty;
-use clippy_utils::{SpanlessEq, is_integer_literal, is_lint_allowed, peel_hir_expr_while, sym};
+use clippy_utils::diagnostics::{span_lint, span_lint_and_then};
+use clippy_utils::higher::{get_vec_init_kind, VecInitKind};
+use clippy_utils::ty::{is_type_diagnostic_item, is_uninit_value_valid_for_ty};
+use clippy_utils::{is_integer_literal, is_lint_allowed, path_to_local_id, peel_hir_expr_while, SpanlessEq};
 use rustc_hir::{Block, Expr, ExprKind, HirId, PatKind, PathSegment, Stmt, StmtKind};
 use rustc_lint::{LateContext, LateLintPass};
+use rustc_middle::lint::in_external_macro;
 use rustc_middle::ty;
 use rustc_session::declare_lint_pass;
-use rustc_span::Span;
+use rustc_span::{sym, Span};
 
 // TODO: add `ReadBuf` (RFC 2930) in "How to fix" once it is available in std
 declare_clippy_lint! {
@@ -64,7 +64,7 @@ declare_lint_pass!(UninitVec => [UNINIT_VEC]);
 // Threads: https://github.com/rust-lang/rust-clippy/pull/7682#discussion_r710998368
 impl<'tcx> LateLintPass<'tcx> for UninitVec {
     fn check_block(&mut self, cx: &LateContext<'tcx>, block: &'tcx Block<'_>) {
-        if !block.span.in_external_macro(cx.tcx.sess.source_map()) {
+        if !in_external_macro(cx.tcx.sess, block.span) {
             for w in block.stmts.windows(2) {
                 if let StmtKind::Expr(expr) | StmtKind::Semi(expr) = w[1].kind {
                     handle_uninit_vec_pair(cx, &w[0], expr);
@@ -96,13 +96,16 @@ fn handle_uninit_vec_pair<'tcx>(
 
             // Check T of Vec<T>
             if !is_uninit_value_valid_for_ty(cx, args.type_at(0)) {
-                span_lint_and_help(
+                // FIXME: #7698, false positive of the internal lints
+                #[expect(clippy::collapsible_span_lint_calls)]
+                span_lint_and_then(
                     cx,
                     UNINIT_VEC,
                     vec![call_span, maybe_init_or_reserve.span],
                     "calling `set_len()` immediately after reserving a buffer creates uninitialized values",
-                    None,
-                    "initialize the buffer or wrap the content in `MaybeUninit`",
+                    |diag| {
+                        diag.help("initialize the buffer or wrap the content in `MaybeUninit`");
+                    },
                 );
             }
         } else {
@@ -140,7 +143,7 @@ enum VecLocation<'tcx> {
 impl<'tcx> VecLocation<'tcx> {
     pub fn eq_expr(self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) -> bool {
         match self {
-            VecLocation::Local(hir_id) => expr.res_local_id() == Some(hir_id),
+            VecLocation::Local(hir_id) => path_to_local_id(expr, hir_id),
             VecLocation::Expr(self_expr) => SpanlessEq::new(cx).eq_expr(self_expr, expr),
         }
     }
@@ -184,11 +187,8 @@ fn extract_init_or_reserve_target<'tcx>(cx: &LateContext<'tcx>, stmt: &'tcx Stmt
 }
 
 fn is_reserve(cx: &LateContext<'_>, path: &PathSegment<'_>, self_expr: &Expr<'_>) -> bool {
-    cx.typeck_results()
-        .expr_ty(self_expr)
-        .peel_refs()
-        .is_diag_item(cx, sym::Vec)
-        && path.ident.name == sym::reserve
+    is_type_diagnostic_item(cx, cx.typeck_results().expr_ty(self_expr).peel_refs(), sym::Vec)
+        && path.ident.name.as_str() == "reserve"
 }
 
 /// Returns self if the expression is `Vec::set_len()`
@@ -209,7 +209,10 @@ fn extract_set_len_self<'tcx>(cx: &LateContext<'_>, expr: &'tcx Expr<'_>) -> Opt
     match expr.kind {
         ExprKind::MethodCall(path, self_expr, [arg], _) => {
             let self_type = cx.typeck_results().expr_ty(self_expr).peel_refs();
-            if self_type.is_diag_item(cx, sym::Vec) && path.ident.name == sym::set_len && !is_integer_literal(arg, 0) {
+            if is_type_diagnostic_item(cx, self_type, sym::Vec)
+                && path.ident.name.as_str() == "set_len"
+                && !is_integer_literal(arg, 0)
+            {
                 Some((self_expr, expr.span))
             } else {
                 None

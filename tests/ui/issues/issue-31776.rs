@@ -8,7 +8,7 @@ struct S;
 
 mod m {
     fn f() {
-        impl crate::S {
+        impl ::S {
             pub fn s(&self) {}
         }
     }
@@ -24,7 +24,7 @@ pub struct S1;
 fn f() {
     pub struct Z;
 
-    impl crate::Tr for crate::S1 {
+    impl ::Tr for ::S1 {
         type A = Z; // Private-in-public error unless `struct Z` is pub
     }
 }
@@ -43,7 +43,7 @@ mod m1 {
             pub field: u8
         }
 
-        impl crate::Tr1 for crate::S2 {
+        impl ::Tr1 for ::S2 {
             type A = Z;
             fn pull(&self) -> Self::A { Z{field: 10} }
         }

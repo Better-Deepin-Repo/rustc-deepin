@@ -1,8 +1,7 @@
-use either::Either;
 use hir::HirDisplay;
-use syntax::{AstNode, SyntaxKind, SyntaxToken, TextRange, TextSize, ast, match_ast};
+use syntax::{ast, match_ast, AstNode, SyntaxKind, SyntaxToken, TextRange, TextSize};
 
-use crate::{AssistContext, AssistId, Assists};
+use crate::{AssistContext, AssistId, AssistKind, Assists};
 
 // Assist: add_return_type
 //
@@ -19,14 +18,14 @@ use crate::{AssistContext, AssistId, Assists};
 pub(crate) fn add_return_type(acc: &mut Assists, ctx: &AssistContext<'_>) -> Option<()> {
     let (fn_type, tail_expr, builder_edit_pos) = extract_tail(ctx)?;
     let module = ctx.sema.scope(tail_expr.syntax())?.module();
-    let ty = ctx.sema.type_of_expr(&peel_blocks(tail_expr.clone()))?.adjusted();
+    let ty = ctx.sema.type_of_expr(&peel_blocks(tail_expr.clone()))?.original();
     if ty.is_unit() {
         return None;
     }
     let ty = ty.display_source_code(ctx.db(), module.into(), true).ok()?;
 
     acc.add(
-        AssistId::refactor_rewrite("add_return_type"),
+        AssistId("add_return_type", AssistKind::RefactorRewrite),
         match fn_type {
             FnType::Function => "Add this function's return type",
             FnType::Closure { .. } => "Add this closure's return type",
@@ -134,9 +133,8 @@ fn peel_blocks(mut expr: ast::Expr) -> ast::Expr {
 }
 
 fn extract_tail(ctx: &AssistContext<'_>) -> Option<(FnType, ast::Expr, InsertOrReplace)> {
-    let node = ctx.find_node_at_offset::<Either<ast::ClosureExpr, ast::Fn>>()?;
-    let (fn_type, tail_expr, return_type_range, action) = match node {
-        Either::Left(closure) => {
+    let (fn_type, tail_expr, return_type_range, action) =
+        if let Some(closure) = ctx.find_node_at_offset::<ast::ClosureExpr>() {
             let rpipe = closure.param_list()?.syntax().last_token()?;
             let rpipe_pos = rpipe.text_range().end();
 
@@ -151,8 +149,9 @@ fn extract_tail(ctx: &AssistContext<'_>) -> Option<(FnType, ast::Expr, InsertOrR
 
             let ret_range = TextRange::new(rpipe_pos, body_start);
             (FnType::Closure { wrap_expr }, tail_expr, ret_range, action)
-        }
-        Either::Right(func) => {
+        } else {
+            let func = ctx.find_node_at_offset::<ast::Fn>()?;
+
             let rparen = func.param_list()?.r_paren_token()?;
             let rparen_pos = rparen.text_range().end();
             let action = ret_ty_to_action(func.ret_type(), rparen)?;
@@ -164,8 +163,7 @@ fn extract_tail(ctx: &AssistContext<'_>) -> Option<(FnType, ast::Expr, InsertOrR
             let ret_range_end = stmt_list.l_curly_token()?.text_range().start();
             let ret_range = TextRange::new(rparen_pos, ret_range_end);
             (FnType::Function, tail_expr, ret_range, action)
-        }
-    };
+        };
     let range = ctx.selection_trimmed();
     if return_type_range.contains_range(range) {
         cov_mark::hit!(cursor_in_ret_position);
@@ -238,24 +236,6 @@ mod tests {
             r#"fn foo() {
     || -> i32 {45}
 }"#,
-        );
-    }
-
-    #[test]
-    fn infer_return_type_cursor_at_return_type_pos_fn_inside_closure() {
-        cov_mark::check!(cursor_in_ret_position);
-        check_assist(
-            add_return_type,
-            r#"const _: fn() = || {
-    fn foo() $0{
-        45
-    }
-};"#,
-            r#"const _: fn() = || {
-    fn foo() -> i32 {
-        45
-    }
-};"#,
         );
     }
 
@@ -437,21 +417,6 @@ mod tests {
             5
         }
     }
-}"#,
-        );
-    }
-
-    #[test]
-    fn infer_coerced_return_type_closure() {
-        check_assist(
-            add_return_type,
-            r#"fn foo() {
-    let f = ||$0 {loop {}};
-    let _: fn() -> i8 = f;
-}"#,
-            r#"fn foo() {
-    let f = || -> i8 {loop {}};
-    let _: fn() -> i8 = f;
 }"#,
         );
     }

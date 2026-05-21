@@ -1,92 +1,60 @@
-error: const function that might be (indirectly) exposed to stable cannot use `#[feature(foo)]`
-  --> $DIR/min_const_fn_libstd_stability.rs:17:25
+error: `foo` is not yet stable as a const fn
+  --> $DIR/min_const_fn_libstd_stability.rs:16:25
    |
 LL | const fn bar() -> u32 { foo() }
    |                         ^^^^^
    |
-   = help: mark the callee as `#[rustc_const_stable_indirect]` if it does not itself require any unstable features
-help: if the caller is not (yet) meant to be exposed to stable const contexts, add `#[rustc_const_unstable]`
-   |
-LL + #[rustc_const_unstable(feature = "...", issue = "...")]
-LL | const fn bar() -> u32 { foo() }
-   |
+   = help: const-stable functions can only call other const-stable functions
 
-error: const function that might be (indirectly) exposed to stable cannot use `#[feature(foo2)]`
-  --> $DIR/min_const_fn_libstd_stability.rs:26:26
+error: `foo2` is not yet stable as a const fn
+  --> $DIR/min_const_fn_libstd_stability.rs:24:26
    |
 LL | const fn bar2() -> u32 { foo2() }
    |                          ^^^^^^
    |
-   = help: mark the callee as `#[rustc_const_stable_indirect]` if it does not itself require any unstable features
-help: if the caller is not (yet) meant to be exposed to stable const contexts, add `#[rustc_const_unstable]`
-   |
-LL + #[rustc_const_unstable(feature = "...", issue = "...")]
-LL | const fn bar2() -> u32 { foo2() }
-   |
+   = help: const-stable functions can only call other const-stable functions
 
-error: const function that might be (indirectly) exposed to stable cannot use `#[feature(const_async_blocks)]`
-  --> $DIR/min_const_fn_libstd_stability.rs:32:13
+error: const-stable function cannot use `#[feature(const_refs_to_cell)]`
+  --> $DIR/min_const_fn_libstd_stability.rs:31:5
    |
-LL |     let x = async { 13 };
-   |             ^^^^^^^^^^^^
+LL |     x.get();
+   |     ^
    |
-help: if the function is not (yet) meant to be exposed to stable const contexts, add `#[rustc_const_unstable]`
+help: if the function is not (yet) meant to be stable, make this function unstably const
    |
 LL + #[rustc_const_unstable(feature = "...", issue = "...")]
 LL | const fn bar3() -> u32 {
    |
+help: otherwise, as a last resort `#[rustc_allow_const_fn_unstable]` can be used to bypass stability checks (but requires team approval)
+   |
+LL + #[rustc_allow_const_fn_unstable(const_refs_to_cell)]
+LL | const fn bar3() -> u32 {
+   |
 
-error: const function that might be (indirectly) exposed to stable cannot use `#[feature(foo)]`
+error[E0015]: cannot call non-const fn `Cell::<u32>::get` in constant functions
+  --> $DIR/min_const_fn_libstd_stability.rs:31:7
+   |
+LL |     x.get();
+   |       ^^^^^
+   |
+   = note: calls in constant functions are limited to constant functions, tuple structs and tuple variants
+
+error: `foo` is not yet stable as a const fn
   --> $DIR/min_const_fn_libstd_stability.rs:34:5
    |
 LL |     foo()
    |     ^^^^^
    |
-   = help: mark the callee as `#[rustc_const_stable_indirect]` if it does not itself require any unstable features
-help: if the caller is not (yet) meant to be exposed to stable const contexts, add `#[rustc_const_unstable]`
-   |
-LL + #[rustc_const_unstable(feature = "...", issue = "...")]
-LL | const fn bar3() -> u32 {
-   |
+   = help: const-stable functions can only call other const-stable functions
 
-error: const function that might be (indirectly) exposed to stable cannot use `#[feature(foo2)]`
-  --> $DIR/min_const_fn_libstd_stability.rs:46:32
+error: `foo2_gated` is not yet stable as a const fn
+  --> $DIR/min_const_fn_libstd_stability.rs:45:32
    |
 LL | const fn bar2_gated() -> u32 { foo2_gated() }
    |                                ^^^^^^^^^^^^
    |
-   = help: mark the callee as `#[rustc_const_stable_indirect]` if it does not itself require any unstable features
-help: if the caller is not (yet) meant to be exposed to stable const contexts, add `#[rustc_const_unstable]`
-   |
-LL + #[rustc_const_unstable(feature = "...", issue = "...")]
-LL | const fn bar2_gated() -> u32 { foo2_gated() }
-   |
+   = help: const-stable functions can only call other const-stable functions
 
-error: const function that might be (indirectly) exposed to stable cannot use `#[feature(foo2)]`
-  --> $DIR/min_const_fn_libstd_stability.rs:53:63
-   |
-LL |     pub(crate) const fn bar2_gated_stable_indirect() -> u32 { super::foo2_gated() }
-   |                                                               ^^^^^^^^^^^^^^^^^^^
-   |
-   = help: mark the callee as `#[rustc_const_stable_indirect]` if it does not itself require any unstable features
-help: if the caller is not (yet) meant to be exposed to stable const contexts, add `#[rustc_const_unstable]`
-   |
-LL +     #[rustc_const_unstable(feature = "...", issue = "...")]
-LL |     pub(crate) const fn bar2_gated_stable_indirect() -> u32 { super::foo2_gated() }
-   |
+error: aborting due to 6 previous errors
 
-error: const function that might be (indirectly) exposed to stable cannot use `#[feature(foo2)]`
-  --> $DIR/min_const_fn_libstd_stability.rs:59:37
-   |
-LL | const fn stable_indirect() -> u32 { foo2_gated() }
-   |                                     ^^^^^^^^^^^^
-   |
-   = help: mark the callee as `#[rustc_const_stable_indirect]` if it does not itself require any unstable features
-help: if the caller is not (yet) meant to be exposed to stable const contexts, add `#[rustc_const_unstable]`
-   |
-LL + #[rustc_const_unstable(feature = "...", issue = "...")]
-LL | const fn stable_indirect() -> u32 { foo2_gated() }
-   |
-
-error: aborting due to 7 previous errors
-
+For more information about this error, try `rustc --explain E0015`.

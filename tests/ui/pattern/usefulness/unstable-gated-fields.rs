@@ -8,10 +8,10 @@ use unstable::UnstableStruct;
 
 fn main() {
     let UnstableStruct { stable, stable2, } = UnstableStruct::default();
-    //~^ ERROR pattern does not mention field `unstable`
+    //~^ pattern does not mention field `unstable`
 
     let UnstableStruct { stable, unstable, } = UnstableStruct::default();
-    //~^ ERROR pattern does not mention field `stable2`
+    //~^ pattern does not mention field `stable2`
 
     // OK: stable field is matched
     let UnstableStruct { stable, stable2, unstable } = UnstableStruct::default();

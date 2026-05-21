@@ -8,7 +8,7 @@
 //@ only-linux
 //@ ignore-cross-compile
 
-use run_make_support::{Rustc, llvm_readobj, run_in_tmpdir};
+use run_make_support::{llvm_readobj, run_in_tmpdir, Rustc};
 
 fn check_compression(compression: &str, to_find: &str) {
     // check compressed debug sections via rustc flag
@@ -26,7 +26,7 @@ fn prepare_and_check<F: FnOnce(&mut Rustc) -> &mut Rustc>(to_find: &str, prepare
     run_in_tmpdir(|| {
         let mut rustc = Rustc::new();
         rustc
-            .arg("-Clinker-features=+lld")
+            .arg("-Zlinker-features=+lld")
             .arg("-Clink-self-contained=+linker")
             .arg("-Zunstable-options")
             .arg("-Cdebuginfo=full")

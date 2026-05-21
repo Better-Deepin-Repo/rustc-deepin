@@ -9,8 +9,7 @@ use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::Path;
 
-use crate::core::builder::{Builder, RunConfig, ShouldRun, Step, crate_description};
-use crate::utils::build_stamp::BuildStamp;
+use crate::core::builder::{crate_description, Builder, RunConfig, ShouldRun, Step};
 use crate::utils::helpers::t;
 use crate::{Build, Compiler, Kind, Mode, Subcommand};
 
@@ -18,16 +17,8 @@ use crate::{Build, Compiler, Kind, Mode, Subcommand};
 pub struct CleanAll {}
 
 impl Step for CleanAll {
+    const DEFAULT: bool = true;
     type Output = ();
-
-    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
-        // Only runs as the default `./x clean` step; cannot be selected explicitly.
-        run.never()
-    }
-
-    fn is_default_step(_builder: &Builder<'_>) -> bool {
-        true
-    }
 
     fn make_run(run: RunConfig<'_>) {
         run.builder.ensure(CleanAll {})
@@ -43,6 +34,10 @@ impl Step for CleanAll {
         }
 
         clean(builder.build, all, stage)
+    }
+
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
+        run.never() // handled by DEFAULT
     }
 }
 
@@ -133,7 +128,7 @@ fn clean_specific_stage(build: &Build, stage: u32) {
 
         for entry in entries {
             let entry = t!(entry);
-            let stage_prefix = format!("stage{}", stage + 1);
+            let stage_prefix = format!("stage{}", stage);
 
             // if current entry is not related with the target stage, continue
             if !entry.file_name().to_str().unwrap_or("").contains(&stage_prefix) {
@@ -151,7 +146,7 @@ fn clean_default(build: &Build) {
     rm_rf(&build.out.join("dist"));
     rm_rf(&build.out.join("bootstrap").join(".last-warned-change-id"));
     rm_rf(&build.out.join("bootstrap-shims-dump"));
-    rm_rf(BuildStamp::new(&build.out).with_prefix("rustfmt").path());
+    rm_rf(&build.out.join("rustfmt.stamp"));
 
     let mut hosts: Vec<_> = build.hosts.iter().map(|t| build.out.join(t)).collect();
     // After cross-compilation, artifacts of the host architecture (which may differ from build.host)
@@ -185,7 +180,7 @@ fn rm_rf(path: &Path) {
             panic!("failed to get metadata for file {}: {}", path.display(), e);
         }
         Ok(metadata) => {
-            if !metadata.file_type().is_dir() {
+            if metadata.file_type().is_file() || metadata.file_type().is_symlink() {
                 do_op(path, "remove file", |p| match fs::remove_file(p) {
                     #[cfg(windows)]
                     Err(e)
@@ -208,8 +203,10 @@ fn rm_rf(path: &Path) {
 
             do_op(path, "remove dir", |p| match fs::remove_dir(p) {
                 // Check for dir not empty on Windows
+                // FIXME: Once `ErrorKind::DirectoryNotEmpty` is stabilized,
+                // match on `e.kind()` instead.
                 #[cfg(windows)]
-                Err(e) if e.kind() == ErrorKind::DirectoryNotEmpty => Ok(()),
+                Err(e) if e.raw_os_error() == Some(145) => Ok(()),
                 r => r,
             });
         }
@@ -229,8 +226,6 @@ where
         Err(ref e) if e.kind() == ErrorKind::PermissionDenied => {
             let m = t!(path.symlink_metadata());
             let mut p = m.permissions();
-            // this os not unix, so clippy gives FP
-            #[expect(clippy::permissions_set_readonly_false)]
             p.set_readonly(false);
             t!(fs::set_permissions(path, p));
             f(path).unwrap_or_else(|e| {

@@ -1,6 +1,4 @@
-//@ ignore-cross-compile
-
-// The rlib produced by a no_builtins crate should be explicitly linked
+// The rlib produced by a no_builtins crate should be explicitely linked
 // during compilation, and as a result be present in the linker arguments.
 // See the comments inside this file for more details.
 // See https://github.com/rust-lang/rust/pull/35637

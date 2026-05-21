@@ -1,4 +1,4 @@
-// rustfmt-style_edition: 2024
+// rustfmt-version: Two
 // rustfmt-format_macro_matchers: true
 
 // From original issue example - Line length 101

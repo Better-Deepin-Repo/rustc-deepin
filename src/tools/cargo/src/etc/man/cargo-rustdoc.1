@@ -95,7 +95,7 @@ multiple times and supports common Unix glob patterns.
 .sp
 \fB\-\-tests\fR
 .RS 4
-Document all targets that have the \fBtest = true\fR manifest
+Document all targets in test mode that have the \fBtest = true\fR manifest
 flag set. By default this includes the library and binaries built as
 unittests, and integration tests. Be aware that this will also build any
 required dependencies, so the lib target may be built twice (once as a
@@ -112,7 +112,7 @@ times and supports common Unix glob patterns.
 .sp
 \fB\-\-benches\fR
 .RS 4
-Document all targets that have the \fBbench = true\fR
+Document all targets in benchmark mode that have the \fBbench = true\fR
 manifest flag set. By default this includes the library and binaries built
 as benchmarks, and bench targets. Be aware that this will also build any
 required dependencies, so the lib target may be built twice (once as a
@@ -154,28 +154,16 @@ Do not activate the \fBdefault\fR feature of the selected packages.
 .sp
 \fB\-\-target\fR \fItriple\fR
 .RS 4
-Document for the specified target architecture. Flag may be specified multiple times. The default is the host architecture. The general format of the triple is
-\fB<arch><sub>\-<vendor>\-<sys>\-<abi>\fR\&.
+Document for the given architecture. The default is the host architecture. The general format of the triple is
+\fB<arch><sub>\-<vendor>\-<sys>\-<abi>\fR\&. Run \fBrustc \-\-print target\-list\fR for a
+list of supported targets. This flag may be specified multiple times.
 .sp
-Possible values:
-.sp
-.RS 4
-\h'-04'\(bu\h'+03'Any supported target in \fBrustc \-\-print target\-list\fR\&.
-.RE
-.sp
-.RS 4
-\h'-04'\(bu\h'+03'\fB"host\-tuple"\fR, which will internally be substituted by the host\[cq]s target. This can be particularly useful if you\[cq]re cross\-compiling some crates, and don\[cq]t want to specify your host\[cq]s machine as a target (for instance, an \fBxtask\fR in a shared project that may be worked on by many hosts).
-.RE
-.sp
-.RS 4
-\h'-04'\(bu\h'+03'A path to a custom target specification. See \fICustom Target Lookup Path\fR <https://doc.rust\-lang.org/rustc/targets/custom.html#custom\-target\-lookup\-path> for more information.
-.RE
-.sp
-This may also be specified with the \fBbuild.target\fR \fIconfig value\fR <https://doc.rust\-lang.org/cargo/reference/config.html>\&.
+This may also be specified with the \fBbuild.target\fR
+\fIconfig value\fR <https://doc.rust\-lang.org/cargo/reference/config.html>\&.
 .sp
 Note that specifying this flag makes Cargo run in a different mode where the
 target artifacts are placed in a separate directory. See the
-\fIbuild cache\fR <https://doc.rust\-lang.org/cargo/reference/build\-cache.html> documentation for more details.
+\fIbuild cache\fR <https://doc.rust\-lang.org/cargo/guide/build\-cache.html> documentation for more details.
 .RE
 .sp
 \fB\-r\fR, 
@@ -191,16 +179,26 @@ Document with the given profile.
 See \fIthe reference\fR <https://doc.rust\-lang.org/cargo/reference/profiles.html> for more details on profiles.
 .RE
 .sp
-\fB\-\-timings\fR
+\fB\-\-timings=\fR\fIfmts\fR
 .RS 4
 Output information how long each compilation takes, and track concurrency
-information over time.
+information over time. Accepts an optional comma\-separated list of output
+formats; \fB\-\-timings\fR without an argument will default to \fB\-\-timings=html\fR\&.
+Specifying an output format (rather than the default) is unstable and requires
+\fB\-Zunstable\-options\fR\&. Valid output formats:
 .sp
-A file \fBcargo\-timing.html\fR will be written to the \fBtarget/cargo\-timings\fR
-directory at the end of the build. An additional report with a timestamp
-in its filename is also written if you want to look at a previous run.
-These reports are suitable for human consumption only, and do not provide
-machine\-readable timing data.
+.RS 4
+\h'-04'\(bu\h'+02'\fBhtml\fR (unstable, requires \fB\-Zunstable\-options\fR): Write a human\-readable file \fBcargo\-timing.html\fR to the
+\fBtarget/cargo\-timings\fR directory with a report of the compilation. Also write
+a report to the same directory with a timestamp in the filename if you want
+to look at older runs. HTML output is suitable for human consumption only,
+and does not provide machine\-readable timing data.
+.RE
+.sp
+.RS 4
+\h'-04'\(bu\h'+02'\fBjson\fR (unstable, requires \fB\-Zunstable\-options\fR): Emit machine\-readable JSON
+information about timing information.
+.RE
 .RE
 .SS "Output Options"
 .sp
@@ -235,16 +233,16 @@ May also be specified with the \fBterm.quiet\fR
 Control when colored output is used. Valid values:
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'\fBauto\fR (default): Automatically detect if color support is available on the
+\h'-04'\(bu\h'+02'\fBauto\fR (default): Automatically detect if color support is available on the
 terminal.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'\fBalways\fR: Always display colors.
+\h'-04'\(bu\h'+02'\fBalways\fR: Always display colors.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'\fBnever\fR: Never display colors.
+\h'-04'\(bu\h'+02'\fBnever\fR: Never display colors.
 .RE
 .sp
 May also be specified with the \fBterm.color\fR
@@ -257,34 +255,34 @@ The output format for diagnostic messages. Can be specified multiple times
 and consists of comma\-separated values. Valid values:
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'\fBhuman\fR (default): Display in a human\-readable text format. Conflicts with
+\h'-04'\(bu\h'+02'\fBhuman\fR (default): Display in a human\-readable text format. Conflicts with
 \fBshort\fR and \fBjson\fR\&.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'\fBshort\fR: Emit shorter, human\-readable text messages. Conflicts with \fBhuman\fR
+\h'-04'\(bu\h'+02'\fBshort\fR: Emit shorter, human\-readable text messages. Conflicts with \fBhuman\fR
 and \fBjson\fR\&.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'\fBjson\fR: Emit JSON messages to stdout. See
+\h'-04'\(bu\h'+02'\fBjson\fR: Emit JSON messages to stdout. See
 \fIthe reference\fR <https://doc.rust\-lang.org/cargo/reference/external\-tools.html#json\-messages>
 for more details. Conflicts with \fBhuman\fR and \fBshort\fR\&.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'\fBjson\-diagnostic\-short\fR: Ensure the \fBrendered\fR field of JSON messages contains
+\h'-04'\(bu\h'+02'\fBjson\-diagnostic\-short\fR: Ensure the \fBrendered\fR field of JSON messages contains
 the \[lq]short\[rq] rendering from rustc. Cannot be used with \fBhuman\fR or \fBshort\fR\&.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'\fBjson\-diagnostic\-rendered\-ansi\fR: Ensure the \fBrendered\fR field of JSON messages
+\h'-04'\(bu\h'+02'\fBjson\-diagnostic\-rendered\-ansi\fR: Ensure the \fBrendered\fR field of JSON messages
 contains embedded ANSI color codes for respecting rustc\[cq]s default color
 scheme. Cannot be used with \fBhuman\fR or \fBshort\fR\&.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'\fBjson\-render\-diagnostics\fR: Instruct Cargo to not include rustc diagnostics
+\h'-04'\(bu\h'+02'\fBjson\-render\-diagnostics\fR: Instruct Cargo to not include rustc diagnostics
 in JSON messages printed, but instead Cargo itself should render the
 JSON diagnostics coming from rustc. Cargo\[cq]s own JSON diagnostics and others
 coming from rustc are still emitted. Cannot be used with \fBhuman\fR or \fBshort\fR\&.
@@ -310,11 +308,11 @@ existing \fBCargo.lock\fR file was originally generated. Cargo will exit with an
 error when either of the following scenarios arises:
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'The lock file is missing.
+\h'-04'\(bu\h'+02'The lock file is missing.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'Cargo attempted to change the lock file due to a different dependency resolution.
+\h'-04'\(bu\h'+02'Cargo attempted to change the lock file due to a different dependency resolution.
 .RE
 .sp
 It may be used in environments where deterministic builds are desired,
@@ -340,6 +338,20 @@ May also be specified with the \fBnet.offline\fR \fIconfig value\fR <https://doc
 \fB\-\-frozen\fR
 .RS 4
 Equivalent to specifying both \fB\-\-locked\fR and \fB\-\-offline\fR\&.
+.RE
+.sp
+\fB\-\-lockfile\-path\fR \fIPATH\fR
+.RS 4
+Changes the path of the lockfile from the default (\fB<workspace_root>/Cargo.lock\fR) to \fIPATH\fR\&. \fIPATH\fR must end with
+\fBCargo.lock\fR (e.g. \fB\-\-lockfile\-path /tmp/temporary\-lockfile/Cargo.lock\fR). Note that providing
+\fB\-\-lockfile\-path\fR will ignore existing lockfile at the default path, and instead will
+either use the lockfile from \fIPATH\fR, or write a new lockfile into the provided \fIPATH\fR if it doesn\[cq]t exist.
+This flag can be used to run most commands in read\-only directories, writing lockfile into the provided \fIPATH\fR\&.
+.sp
+This option is only available on the \fInightly
+channel\fR <https://doc.rust\-lang.org/book/appendix\-07\-nightly\-rust.html> and
+requires the \fB\-Z unstable\-options\fR flag to enable (see
+\fI#14421\fR <https://github.com/rust\-lang/cargo/issues/14421>).
 .RE
 .SS "Common Options"
 .sp
@@ -412,11 +424,11 @@ builds, even if the one run first fails.
 The output type for the documentation emitted. Valid values:
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'\fBhtml\fR (default): Emit the documentation in HTML format.
+\h'-04'\(bu\h'+02'\fBhtml\fR (default): Emit the documentation in HTML format.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'\fBjson\fR: Emit the documentation in the \fIexperimental JSON format\fR <https://doc.rust\-lang.org/nightly/nightly\-rustc/rustdoc_json_types>\&.
+\h'-04'\(bu\h'+02'\fBjson\fR: Emit the documentation in the \fIexperimental JSON format\fR <https://doc.rust\-lang.org/nightly/nightly\-rustc/rustdoc_json_types>\&.
 .RE
 .sp
 This option is only available on the \fInightly channel\fR <https://doc.rust\-lang.org/book/appendix\-07\-nightly\-rust.html>
@@ -428,11 +440,11 @@ details on environment variables that Cargo reads.
 .SH "EXIT STATUS"
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'\fB0\fR: Cargo succeeded.
+\h'-04'\(bu\h'+02'\fB0\fR: Cargo succeeded.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+03'\fB101\fR: Cargo failed to complete.
+\h'-04'\(bu\h'+02'\fB101\fR: Cargo failed to complete.
 .RE
 .SH "EXAMPLES"
 .sp

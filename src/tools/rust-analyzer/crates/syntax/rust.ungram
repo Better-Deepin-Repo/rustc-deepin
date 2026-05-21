@@ -37,12 +37,9 @@ Path =
 PathSegment =
   '::'? NameRef
 | NameRef GenericArgList?
-| NameRef ParenthesizedArgList RetType?
+| NameRef ParamList RetType?
 | NameRef ReturnTypeSyntax
-| TypeAnchor
-
-TypeAnchor =
-  '<' Type ('as' PathType)? '>'
+| '<' Type ('as' PathType)? '>'
 
 ReturnTypeSyntax =
   '(' '..' ')'
@@ -51,9 +48,6 @@ ReturnTypeSyntax =
 //*************************//
 //        Generics         //
 //*************************//
-
-ParenthesizedArgList =
-  '::'? '(' (TypeArg (',' TypeArg)* ','?)? ')'
 
 GenericArgList =
   '::'? '<' (GenericArg (',' GenericArg)* ','?)? '>'
@@ -101,7 +95,7 @@ WhereClause =
   'where' predicates:(WherePred (',' WherePred)* ','?)
 
 WherePred =
-  ForBinder? (Lifetime | Type) ':' TypeBoundList?
+  ('for' GenericParamList)?  (Lifetime | Type) ':' TypeBoundList?
 
 
 //*************************//
@@ -136,7 +130,6 @@ Meta =
 
 SourceFile =
   '#shebang'?
-  '#frontmatter'?
   Attr*
   Item*
 
@@ -154,10 +147,10 @@ Item =
 | Static
 | Struct
 | Trait
+| TraitAlias
 | TypeAlias
 | Union
 | Use
-| AsmExpr
 
 MacroRules =
   Attr* Visibility?
@@ -197,7 +190,7 @@ UseTreeList =
 
 Fn =
  Attr* Visibility?
- 'default'? 'const'? 'async'? 'gen'? 'unsafe'? 'safe'? Abi?
+ 'default'? 'const'? 'async'? 'gen'? 'unsafe'? Abi?
  'fn' Name GenericParamList? ParamList RetType? WhereClause?
  (body:BlockExpr | ';')
 
@@ -244,8 +237,8 @@ RecordFieldList =
  '{' fields:(RecordField (',' RecordField)* ','?)? '}'
 
 RecordField =
-  Attr* Visibility? 'unsafe'?
-  Name ':' Type ('=' Expr)?
+  Attr* Visibility?
+  Name ':' Type
 
 TupleFieldList =
   '(' fields:(TupleField (',' TupleField)* ','?)? ')'
@@ -283,21 +276,14 @@ Adt =
 | Struct
 | Union
 
-VariantDef =
-  Struct
-| Union
-| Variant
-
 Const =
   Attr* Visibility?
   'default'?
-  'const' (Name | '_') GenericParamList? ':' Type
-  ('=' body:Expr)?
-  WhereClause? ';'
+  'const' (Name | '_') ':' Type
+  ('=' body:Expr)? ';'
 
 Static =
   Attr* Visibility?
-  'unsafe'? 'safe'?
   'static' 'mut'? Name ':' Type
   ('=' body:Expr)? ';'
 
@@ -305,8 +291,11 @@ Trait =
   Attr* Visibility?
   'unsafe'? 'auto'?
   'trait' Name GenericParamList?
-  (((':' TypeBoundList?)? WhereClause? AssocItemList) |
-  ('=' TypeBoundList? WhereClause? ';'))
+  (':' TypeBoundList?)? WhereClause? AssocItemList
+
+TraitAlias =
+  Attr* Visibility?
+  'trait' Name GenericParamList? '=' TypeBoundList? WhereClause? ';'
 
 AssocItemList =
   '{' Attr* AssocItem* '}'
@@ -350,7 +339,7 @@ Stmt =
 | LetStmt
 
 LetStmt =
-  Attr* 'super'? 'let' Pat (':' Type)?
+  Attr* 'let' Pat (':' Type)?
   '=' initializer:Expr
   LetElse?
   ';'
@@ -402,34 +391,8 @@ Expr =
 OffsetOfExpr =
   Attr* 'builtin' '#' 'offset_of' '(' Type ',' fields:(NameRef ('.' NameRef)* ) ')'
 
-// asm := "asm!(" format_string *("," format_string) *("," operand) [","] ")"
-// global_asm := "global_asm!(" format_string *("," format_string) *("," operand) [","] ")"
-// format_string := STRING_LITERAL / RAW_STRING_LITERAL
 AsmExpr =
-  Attr* 'builtin' '#' ( 'asm' | 'global_asm' | 'naked_asm' )
-  '(' template:(Expr (',' Expr)*) (AsmPiece (',' AsmPiece)*)? ','? ')'
-
-// operand_expr := expr / "_" / expr "=>" expr / expr "=>" "_"
-AsmOperandExpr = in_expr:Expr ('=>' out_expr:Expr)?
-// dir_spec := "in" / "out" / "lateout" / "inout" / "inlateout"
-AsmDirSpec = 'in' | 'out' | 'lateout' | 'inout' | 'inlateout'
-// reg_spec := <register class> / "\"" <explicit register> "\""
-AsmRegSpec = '@string' | NameRef
-// reg_operand := [ident "="] dir_spec "(" reg_spec ")" operand_expr
-AsmRegOperand = AsmDirSpec '(' AsmRegSpec ')' AsmOperandExpr
-// clobber_abi := "clobber_abi(" <abi> *("," <abi>) [","] ")"
-AsmClobberAbi = 'clobber_abi' '(' ('@string' (',' '@string')* ','?) ')'
-// option := "pure" / "nomem" / "readonly" / "preserves_flags" / "noreturn" / "nostack" / "att_syntax" / "raw"
-AsmOption = 'pure' | 'nomem' | 'readonly' | 'preserves_flags' | 'noreturn' | 'nostack' | 'att_syntax' | 'raw' | 'may_unwind'
-// options := "options(" option *("," option) [","] ")"
-AsmOptions = 'options' '(' (AsmOption (',' AsmOption)*) ','? ')'
-AsmLabel = 'label' BlockExpr
-AsmSym = 'sym' Path
-AsmConst = 'const' Expr
-// operand := reg_operand / clobber_abi / options
-AsmOperand = AsmRegOperand | AsmLabel | AsmSym | AsmConst
-AsmOperandNamed = (Name '=')? AsmOperand
-AsmPiece = AsmOperandNamed | AsmClobberAbi | AsmOptions
+  Attr* 'builtin' '#' 'asm' '(' Expr ')'
 
 FormatArgsExpr =
   Attr* 'builtin' '#' 'format_args' '('
@@ -438,10 +401,7 @@ FormatArgsExpr =
   ')'
 
 FormatArgsArg =
-  arg_name:FormatArgsArgName? Expr
-
-FormatArgsArgName =
-  '=' // This also has a name, but it's any token and we can't put it here
+  (Name '=')? Expr
 
 MacroExpr =
   MacroCall
@@ -449,9 +409,9 @@ MacroExpr =
 Literal =
   Attr* value:(
     '@int_number' | '@float_number'
-  | '@string'
-  | '@byte_string'
-  | '@c_string'
+  | '@string' | '@raw_string'
+  | '@byte_string' | '@raw_byte_string'
+  | '@c_string' | '@raw_c_string'
   | '@char' | '@byte'
   | 'true' | 'false'
   )
@@ -472,11 +432,8 @@ RefExpr =
 TryExpr =
   Attr* Expr '?'
 
-TryBlockModifier =
-  'try' ('bikeshed' Type)?
-
 BlockExpr =
-  Attr* Label? (TryBlockModifier | 'unsafe' | ('async' 'move'?) | ('gen' 'move'?) | 'const') StmtList
+  Attr* Label? ('try' | 'unsafe' | ('async' 'move'?) | ('gen' 'move'?) | 'const') StmtList
 
 PrefixExpr =
   Attr* op:('-' | '!' | '*') Expr
@@ -536,10 +493,10 @@ FieldExpr =
   Attr* Expr '.' NameRef
 
 ClosureExpr =
-  Attr* ForBinder? 'const'? 'static'? 'async'? 'gen'? 'move'?  ParamList RetType?
+  Attr* ClosureBinder? 'const'? 'static'? 'async'? 'gen'? 'move'?  ParamList RetType?
   body:Expr
 
-ForBinder =
+ClosureBinder =
   'for' GenericParamList
 
 IfExpr =
@@ -660,7 +617,7 @@ FnPtrType =
   'const'? 'async'? 'unsafe'? Abi? 'fn' ParamList RetType?
 
 ForType =
-  ForBinder Type
+  'for' GenericParamList Type
 
 ImplTraitType =
   'impl' TypeBoundList
@@ -673,15 +630,8 @@ TypeBoundList =
 
 TypeBound =
   Lifetime
-| ForBinder? ('~' 'const' | '[' 'const' ']' | 'const')? 'async'? '?'? Type
-| 'use' UseBoundGenericArgs
-
-UseBoundGenericArgs =
- '<' (UseBoundGenericArg (',' UseBoundGenericArg)* ','?)? '>'
-
-UseBoundGenericArg =
-  Lifetime
-| NameRef
+| ('~' 'const' | 'const')? 'async'? '?'? Type
+| 'use' GenericParamList
 
 //************************//
 //        Patterns        //
@@ -753,7 +703,7 @@ PathPat =
   Path
 
 OrPat =
-  '|'? (Pat ('|' Pat)*)
+  (Pat ('|' Pat)* '|'?)
 
 BoxPat =
   'box' Pat

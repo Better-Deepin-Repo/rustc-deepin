@@ -1,3 +1,3 @@
-//@ ignore-auxiliary (used by `../../macro-expanded-mod.rs`)
+//@ ignore-test not a test, auxiliary
 
 mod_decl!(bar);

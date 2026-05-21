@@ -1,52 +1,57 @@
 //! Errors emitted by `rustc_hir_analysis`.
 
-use rustc_abi::ExternAbi;
 use rustc_errors::codes::*;
 use rustc_errors::{
-    Applicability, Diag, DiagCtxtHandle, DiagSymbolList, Diagnostic, EmissionGuarantee, Level,
-    MultiSpan, listify, msg,
+    Applicability, Diag, DiagCtxtHandle, Diagnostic, EmissionGuarantee, Level, MultiSpan,
 };
-use rustc_hir::limit::Limit;
-use rustc_macros::{Diagnostic, Subdiagnostic};
-use rustc_middle::ty::{self, Ty};
-use rustc_span::{Ident, Span, Symbol};
+use rustc_macros::{Diagnostic, LintDiagnostic, Subdiagnostic};
+use rustc_middle::ty::Ty;
+use rustc_span::symbol::Ident;
+use rustc_span::{Span, Symbol};
+
+use crate::fluent_generated as fluent;
+mod pattern_types;
+pub(crate) use pattern_types::*;
 pub(crate) mod wrong_number_of_generic_args;
 
 mod precise_captures;
 pub(crate) use precise_captures::*;
 
 #[derive(Diagnostic)]
-#[diag("ambiguous associated {$assoc_kind} `{$assoc_ident}` in bounds of `{$qself}`")]
+#[diag(hir_analysis_ambiguous_assoc_item)]
 pub(crate) struct AmbiguousAssocItem<'a> {
     #[primary_span]
-    #[label("ambiguous associated {$assoc_kind} `{$assoc_ident}`")]
+    #[label]
     pub span: Span,
     pub assoc_kind: &'static str,
-    pub assoc_ident: Ident,
+    pub assoc_name: Ident,
     pub qself: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("expected {$expected}, found {$got}")]
+#[diag(hir_analysis_assoc_kind_mismatch)]
 pub(crate) struct AssocKindMismatch {
     #[primary_span]
-    #[label("unexpected {$got}")]
+    #[label]
     pub span: Span,
     pub expected: &'static str,
     pub got: &'static str,
-    #[label("expected a {$expected} because of this associated {$expected}")]
+    #[label(hir_analysis_expected_because_label)]
     pub expected_because_label: Option<Span>,
     pub assoc_kind: &'static str,
-    #[note("the associated {$assoc_kind} is defined here")]
+    #[note]
     pub def_span: Span,
-    #[label("bounds are not allowed on associated constants")]
+    #[label(hir_analysis_bound_on_assoc_const_label)]
     pub bound_on_assoc_const_label: Option<Span>,
     #[subdiagnostic]
     pub wrap_in_braces_sugg: Option<AssocKindMismatchWrapInBracesSugg>,
 }
 
 #[derive(Subdiagnostic)]
-#[multipart_suggestion("consider adding braces here", applicability = "maybe-incorrect")]
+#[multipart_suggestion(
+    hir_analysis_assoc_kind_mismatch_wrap_in_braces_sugg,
+    applicability = "maybe-incorrect"
+)]
 pub(crate) struct AssocKindMismatchWrapInBracesSugg {
     #[suggestion_part(code = "{{ ")]
     pub lo: Span,
@@ -55,46 +60,39 @@ pub(crate) struct AssocKindMismatchWrapInBracesSugg {
 }
 
 #[derive(Diagnostic)]
-#[diag("{$kind} `{$name}` is private", code = E0624)]
+#[diag(hir_analysis_assoc_item_is_private, code = E0624)]
 pub(crate) struct AssocItemIsPrivate {
     #[primary_span]
-    #[label("private {$kind}")]
+    #[label]
     pub span: Span,
     pub kind: &'static str,
     pub name: Ident,
-    #[label("the {$kind} is defined here")]
+    #[label(hir_analysis_defined_here_label)]
     pub defined_here_label: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("associated {$assoc_kind} `{$assoc_ident}` not found for `{$qself}`", code = E0220)]
+#[diag(hir_analysis_assoc_item_not_found, code = E0220)]
 pub(crate) struct AssocItemNotFound<'a> {
     #[primary_span]
     pub span: Span,
-    pub assoc_ident: Ident,
+    pub assoc_name: Ident,
     pub assoc_kind: &'static str,
     pub qself: &'a str,
     #[subdiagnostic]
     pub label: Option<AssocItemNotFoundLabel<'a>>,
     #[subdiagnostic]
     pub sugg: Option<AssocItemNotFoundSugg<'a>>,
-    #[label("due to this macro variable")]
-    pub within_macro_span: Option<Span>,
 }
 
 #[derive(Subdiagnostic)]
 pub(crate) enum AssocItemNotFoundLabel<'a> {
-    #[label("associated {$assoc_kind} `{$assoc_ident}` not found")]
+    #[label(hir_analysis_assoc_item_not_found_label)]
     NotFound {
         #[primary_span]
         span: Span,
     },
-    #[label(
-        "there is {$identically_named ->
-            [true] an
-            *[false] a similarly named
-            } associated {$assoc_kind} `{$suggested_name}` in the trait `{$trait_name}`"
-    )]
+    #[label(hir_analysis_assoc_item_not_found_found_in_other_trait_label)]
     FoundInOtherTrait {
         #[primary_span]
         span: Span,
@@ -109,7 +107,7 @@ pub(crate) enum AssocItemNotFoundLabel<'a> {
 
 pub(crate) enum AssocItemNotFoundSugg<'a> {
     #[suggestion(
-        "there is an associated {$assoc_kind} with a similar name",
+        hir_analysis_assoc_item_not_found_similar_sugg,
         code = "{suggested_name}",
         applicability = "maybe-incorrect"
     )]
@@ -120,7 +118,7 @@ pub(crate) enum AssocItemNotFoundSugg<'a> {
         suggested_name: Symbol,
     },
     #[suggestion(
-        "change the associated {$assoc_kind} name to use `{$suggested_name}` from `{$trait_name}`",
+        hir_analysis_assoc_item_not_found_similar_in_other_trait_sugg,
         code = "{suggested_name}",
         style = "verbose",
         applicability = "maybe-incorrect"
@@ -128,15 +126,11 @@ pub(crate) enum AssocItemNotFoundSugg<'a> {
     SimilarInOtherTrait {
         #[primary_span]
         span: Span,
-        trait_name: &'a str,
         assoc_kind: &'static str,
         suggested_name: Symbol,
     },
     #[multipart_suggestion(
-        "consider fully qualifying{$identically_named ->
-            [true] {\"\"}
-            *[false] {\" \"}and renaming
-        } the associated {$assoc_kind}",
+        hir_analysis_assoc_item_not_found_similar_in_other_trait_qpath_sugg,
         style = "verbose"
     )]
     SimilarInOtherTraitQPath {
@@ -153,7 +147,7 @@ pub(crate) enum AssocItemNotFoundSugg<'a> {
         applicability: Applicability,
     },
     #[suggestion(
-        "`{$qself}` has the following associated {$assoc_kind}",
+        hir_analysis_assoc_item_not_found_other_sugg,
         code = "{suggested_name}",
         applicability = "maybe-incorrect"
     )]
@@ -167,15 +161,19 @@ pub(crate) enum AssocItemNotFoundSugg<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("intrinsic has wrong number of {$descr} parameters: found {$found}, expected {$expected}", code = E0094)]
+#[diag(hir_analysis_unrecognized_atomic_operation, code = E0092)]
+pub(crate) struct UnrecognizedAtomicOperation<'a> {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+    pub op: &'a str,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_wrong_number_of_generic_arguments_to_intrinsic, code = E0094)]
 pub(crate) struct WrongNumberOfGenericArgumentsToIntrinsic<'a> {
     #[primary_span]
-    #[label(
-        "expected {$expected} {$descr} {$expected ->
-            [one] parameter
-            *[other] parameters
-        }"
-    )]
+    #[label]
     pub span: Span,
     pub found: usize,
     pub expected: usize,
@@ -183,90 +181,89 @@ pub(crate) struct WrongNumberOfGenericArgumentsToIntrinsic<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("unrecognized intrinsic function: `{$name}`", code = E0093)]
-#[help("if you're adding an intrinsic, be sure to update `check_intrinsic_type`")]
+#[diag(hir_analysis_unrecognized_intrinsic_function, code = E0093)]
+#[help]
 pub(crate) struct UnrecognizedIntrinsicFunction {
     #[primary_span]
-    #[label("unrecognized intrinsic")]
+    #[label]
     pub span: Span,
     pub name: Symbol,
 }
 
 #[derive(Diagnostic)]
-#[diag("lifetime parameters or bounds on {$item_kind} `{$ident}` do not match the trait declaration", code = E0195)]
+#[diag(hir_analysis_lifetimes_or_bounds_mismatch_on_trait, code = E0195)]
 pub(crate) struct LifetimesOrBoundsMismatchOnTrait {
     #[primary_span]
-    #[label("lifetimes do not match {$item_kind} in trait")]
+    #[label]
     pub span: Span,
-    #[label("lifetimes in impl do not match this {$item_kind} in trait")]
-    pub generics_span: Span,
-    #[label("this `where` clause might not match the one in the trait")]
+    #[label(hir_analysis_generics_label)]
+    pub generics_span: Option<Span>,
+    #[label(hir_analysis_where_label)]
     pub where_span: Option<Span>,
-    #[label("this bound might be missing in the impl")]
+    #[label(hir_analysis_bounds_label)]
     pub bounds_span: Vec<Span>,
     pub item_kind: &'static str,
     pub ident: Ident,
 }
 
 #[derive(Diagnostic)]
-#[diag("the `{$trait_}` trait may only be implemented for local structs, enums, and unions", code = E0120)]
+#[diag(hir_analysis_drop_impl_on_wrong_item, code = E0120)]
 pub(crate) struct DropImplOnWrongItem {
     #[primary_span]
-    #[label("must be a struct, enum, or union in the current crate")]
+    #[label]
     pub span: Span,
-    pub trait_: Symbol,
 }
 
 #[derive(Diagnostic)]
 pub(crate) enum FieldAlreadyDeclared {
-    #[diag("field `{$field_name}` is already declared", code = E0124)]
+    #[diag(hir_analysis_field_already_declared, code = E0124)]
     NotNested {
-        field_name: Ident,
+        field_name: Symbol,
         #[primary_span]
-        #[label("field already declared")]
+        #[label]
         span: Span,
-        #[label("`{$field_name}` first declared here")]
+        #[label(hir_analysis_previous_decl_label)]
         prev_span: Span,
     },
-    #[diag("field `{$field_name}` is already declared")]
+    #[diag(hir_analysis_field_already_declared_current_nested)]
     CurrentNested {
-        field_name: Ident,
+        field_name: Symbol,
         #[primary_span]
-        #[label("field `{$field_name}` declared in this unnamed field")]
+        #[label]
         span: Span,
-        #[note("field `{$field_name}` declared here")]
+        #[note(hir_analysis_nested_field_decl_note)]
         nested_field_span: Span,
         #[subdiagnostic]
         help: FieldAlreadyDeclaredNestedHelp,
-        #[label("`{$field_name}` first declared here")]
+        #[label(hir_analysis_previous_decl_label)]
         prev_span: Span,
     },
-    #[diag("field `{$field_name}` is already declared")]
+    #[diag(hir_analysis_field_already_declared_previous_nested)]
     PreviousNested {
-        field_name: Ident,
+        field_name: Symbol,
         #[primary_span]
-        #[label("field already declared")]
+        #[label]
         span: Span,
-        #[label("`{$field_name}` first declared here in this unnamed field")]
+        #[label(hir_analysis_previous_decl_label)]
         prev_span: Span,
-        #[note("field `{$field_name}` first declared here")]
+        #[note(hir_analysis_previous_nested_field_decl_note)]
         prev_nested_field_span: Span,
         #[subdiagnostic]
         prev_help: FieldAlreadyDeclaredNestedHelp,
     },
-    #[diag("field `{$field_name}` is already declared")]
+    #[diag(hir_analysis_field_already_declared_both_nested)]
     BothNested {
-        field_name: Ident,
+        field_name: Symbol,
         #[primary_span]
-        #[label("field `{$field_name}` declared in this unnamed field")]
+        #[label]
         span: Span,
-        #[note("field `{$field_name}` declared here")]
+        #[note(hir_analysis_nested_field_decl_note)]
         nested_field_span: Span,
         #[subdiagnostic]
         help: FieldAlreadyDeclaredNestedHelp,
-        #[label("`{$field_name}` first declared here in this unnamed field")]
+        #[label(hir_analysis_previous_decl_label)]
         prev_span: Span,
-        #[note("field `{$field_name}` first declared here")]
+        #[note(hir_analysis_previous_nested_field_decl_note)]
         prev_nested_field_span: Span,
         #[subdiagnostic]
         prev_help: FieldAlreadyDeclaredNestedHelp,
@@ -274,67 +271,72 @@ pub(crate) enum FieldAlreadyDeclared {
 }
 
 #[derive(Subdiagnostic)]
-#[help("fields from the type of this unnamed field are considered fields of the outer type")]
+#[help(hir_analysis_field_already_declared_nested_help)]
 pub(crate) struct FieldAlreadyDeclaredNestedHelp {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("the trait `Copy` cannot be implemented for this type; the type has a destructor", code = E0184)]
+#[diag(hir_analysis_copy_impl_on_type_with_dtor, code = E0184)]
 pub(crate) struct CopyImplOnTypeWithDtor {
     #[primary_span]
-    #[label("`Copy` not allowed on types with destructors")]
+    #[label]
     pub span: Span,
-    #[note("destructor declared here")]
-    pub impl_: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("the trait `Copy` cannot be implemented for this type", code = E0206)]
+#[diag(hir_analysis_multiple_relaxed_default_bounds, code = E0203)]
+pub(crate) struct MultipleRelaxedDefaultBounds {
+    #[primary_span]
+    pub spans: Vec<Span>,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_copy_impl_on_non_adt, code = E0206)]
 pub(crate) struct CopyImplOnNonAdt {
     #[primary_span]
-    #[label("type is not a structure or enumeration")]
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("the trait `ConstParamTy` may not be implemented for this type")]
+#[diag(hir_analysis_const_param_ty_impl_on_unsized)]
 pub(crate) struct ConstParamTyImplOnUnsized {
     #[primary_span]
-    #[label("type is not `Sized`")]
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("the trait `ConstParamTy` may not be implemented for this type")]
+#[diag(hir_analysis_const_param_ty_impl_on_non_adt)]
 pub(crate) struct ConstParamTyImplOnNonAdt {
     #[primary_span]
-    #[label("type is not a structure or enumeration")]
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("at least one trait is required for an object type", code = E0224)]
+#[diag(hir_analysis_trait_object_declared_with_no_traits, code = E0224)]
 pub(crate) struct TraitObjectDeclaredWithNoTraits {
     #[primary_span]
     pub span: Span,
-    #[label("this alias does not contain a trait")]
+    #[label(hir_analysis_alias_span)]
     pub trait_alias_span: Option<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("ambiguous lifetime bound, explicit lifetime bound required", code = E0227)]
+#[diag(hir_analysis_ambiguous_lifetime_bound, code = E0227)]
 pub(crate) struct AmbiguousLifetimeBound {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("associated item constraints are not allowed here", code = E0229)]
+#[diag(hir_analysis_assoc_item_constraints_not_allowed_here, code = E0229)]
 pub(crate) struct AssocItemConstraintsNotAllowedHere {
     #[primary_span]
-    #[label("associated item constraint not allowed here")]
+    #[label]
     pub span: Span,
 
     #[subdiagnostic]
@@ -342,64 +344,45 @@ pub(crate) struct AssocItemConstraintsNotAllowedHere {
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "the type of the associated constant `{$assoc_const}` must not depend on {$param_category ->
-        [self] `Self`
-        [synthetic] `impl Trait`
-        *[normal] generic parameters
-    }"
-)]
+#[diag(hir_analysis_param_in_ty_of_assoc_const_binding)]
 pub(crate) struct ParamInTyOfAssocConstBinding<'tcx> {
     #[primary_span]
-    #[label(
-        "its type must not depend on {$param_category ->
-            [self] `Self`
-            [synthetic] `impl Trait`
-            *[normal] the {$param_def_kind} `{$param_name}`
-        }"
-    )]
+    #[label]
     pub span: Span,
     pub assoc_const: Ident,
     pub param_name: Symbol,
     pub param_def_kind: &'static str,
     pub param_category: &'static str,
-    #[label(
-        "{$param_category ->
-            [synthetic] the `impl Trait` is specified here
-            *[normal] the {$param_def_kind} `{$param_name}` is defined here
-        }"
-    )]
+    #[label(hir_analysis_param_defined_here_label)]
     pub param_defined_here_label: Option<Span>,
     #[subdiagnostic]
     pub ty_note: Option<TyOfAssocConstBindingNote<'tcx>>,
 }
 
 #[derive(Subdiagnostic, Clone, Copy)]
-#[note("`{$assoc_const}` has type `{$ty}`")]
+#[note(hir_analysis_ty_of_assoc_const_binding_note)]
 pub(crate) struct TyOfAssocConstBindingNote<'tcx> {
     pub assoc_const: Ident,
     pub ty: Ty<'tcx>,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "the type of the associated constant `{$assoc_const}` cannot capture late-bound generic parameters"
-)]
+#[diag(hir_analysis_escaping_bound_var_in_ty_of_assoc_const_binding)]
 pub(crate) struct EscapingBoundVarInTyOfAssocConstBinding<'tcx> {
     #[primary_span]
-    #[label("its type cannot capture the late-bound {$var_def_kind} `{$var_name}`")]
+    #[label]
     pub span: Span,
     pub assoc_const: Ident,
     pub var_name: Symbol,
     pub var_def_kind: &'static str,
-    #[label("the late-bound {$var_def_kind} `{$var_name}` is defined here")]
+    #[label(hir_analysis_var_defined_here_label)]
     pub var_defined_here_label: Span,
     #[subdiagnostic]
     pub ty_note: Option<TyOfAssocConstBindingNote<'tcx>>,
 }
 
 #[derive(Subdiagnostic)]
-#[help("parenthesized trait syntax expands to `{$expanded_type}`")]
+#[help(hir_analysis_parenthesized_fn_trait_expansion)]
 pub(crate) struct ParenthesizedFnTraitExpansion {
     #[primary_span]
     pub span: Span,
@@ -408,96 +391,88 @@ pub(crate) struct ParenthesizedFnTraitExpansion {
 }
 
 #[derive(Diagnostic)]
-#[diag("the value of the associated type `{$item_name}` in trait `{$def_path}` is already specified", code = E0719)]
+#[diag(hir_analysis_typeof_reserved_keyword_used, code = E0516)]
+pub(crate) struct TypeofReservedKeywordUsed<'tcx> {
+    pub ty: Ty<'tcx>,
+    #[primary_span]
+    #[label]
+    pub span: Span,
+    #[suggestion(style = "verbose", code = "{ty}")]
+    pub opt_sugg: Option<(Span, Applicability)>,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_value_of_associated_struct_already_specified, code = E0719)]
 pub(crate) struct ValueOfAssociatedStructAlreadySpecified {
     #[primary_span]
-    #[label("re-bound here")]
+    #[label]
     pub span: Span,
-    #[label("`{$item_name}` bound here first")]
+    #[label(hir_analysis_previous_bound_label)]
     pub prev_span: Span,
     pub item_name: Ident,
     pub def_path: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("unconstrained opaque type")]
-#[note("`{$name}` must be used in combination with a concrete type within the same {$what}")]
+#[diag(hir_analysis_unconstrained_opaque_type)]
+#[note]
 pub(crate) struct UnconstrainedOpaqueType {
     #[primary_span]
     pub span: Span,
-    pub name: Ident,
+    pub name: Symbol,
     pub what: &'static str,
 }
 
-pub(crate) struct MissingGenericParams {
+#[derive(Diagnostic)]
+#[diag(hir_analysis_tait_forward_compat)]
+#[note]
+pub(crate) struct TaitForwardCompat {
+    #[primary_span]
+    pub span: Span,
+    #[note]
+    pub item_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_tait_forward_compat2)]
+#[note]
+pub(crate) struct TaitForwardCompat2 {
+    #[primary_span]
+    pub span: Span,
+    #[note(hir_analysis_opaque)]
+    pub opaque_type_span: Span,
+    pub opaque_type: String,
+}
+
+pub(crate) struct MissingTypeParams {
     pub span: Span,
     pub def_span: Span,
     pub span_snippet: Option<String>,
-    pub missing_generic_params: Vec<(Symbol, ty::GenericParamDefKind)>,
+    pub missing_type_params: Vec<Symbol>,
     pub empty_generic_args: bool,
 }
 
-// FIXME: This doesn't need to be a manual impl!
-impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for MissingGenericParams {
+// Manual implementation of `Diagnostic` to be able to call `span_to_snippet`.
+impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for MissingTypeParams {
     #[track_caller]
     fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, G> {
-        let mut err = Diag::new(
-            dcx,
-            level,
-            msg!(
-                "the {$descr} {$parameterCount ->
-                    [one] parameter
-                    *[other] parameters
-                } {$parameters} must be explicitly specified"
-            ),
-        );
+        let mut err = Diag::new(dcx, level, fluent::hir_analysis_missing_type_params);
         err.span(self.span);
         err.code(E0393);
-        err.span_label(
-            self.def_span,
-            msg!(
-                "{$descr} {$parameterCount ->
-                    [one] parameter
-                    *[other] parameters
-                } {$parameters} must be specified for this"
-            ),
-        );
-
-        enum Descr {
-            Generic,
-            Type,
-            Const,
-        }
-
-        let mut descr = None;
-        for (_, kind) in &self.missing_generic_params {
-            descr = match (&descr, kind) {
-                (None, ty::GenericParamDefKind::Type { .. }) => Some(Descr::Type),
-                (None, ty::GenericParamDefKind::Const { .. }) => Some(Descr::Const),
-                (Some(Descr::Type), ty::GenericParamDefKind::Const { .. })
-                | (Some(Descr::Const), ty::GenericParamDefKind::Type { .. }) => {
-                    Some(Descr::Generic)
-                }
-                _ => continue,
-            }
-        }
-
-        err.arg(
-            "descr",
-            match descr.unwrap() {
-                Descr::Generic => "generic",
-                Descr::Type => "type",
-                Descr::Const => "const",
-            },
-        );
-        err.arg("parameterCount", self.missing_generic_params.len());
+        err.arg("parameterCount", self.missing_type_params.len());
         err.arg(
             "parameters",
-            listify(&self.missing_generic_params, |(n, _)| format!("`{n}`")).unwrap(),
+            self.missing_type_params
+                .iter()
+                .map(|n| format!("`{n}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
         );
 
+        err.span_label(self.def_span, fluent::hir_analysis_label);
+
         let mut suggested = false;
-        // Don't suggest setting the generic params if there are some already: The order is
+        // Don't suggest setting the type params if there are some already: the order is
         // tricky to get right and the user will already know what the syntax is.
         if let Some(snippet) = self.span_snippet
             && self.empty_generic_args
@@ -507,21 +482,16 @@ impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for MissingGenericParams {
                 // we would have to preserve the right order. For now, as clearly the user is
                 // aware of the syntax, we do nothing.
             } else {
-                // The user wrote `Trait`, so we don't have a type we can suggest, but at
-                // least we can clue them to the correct syntax `Trait</* Term */>`.
+                // The user wrote `Iterator`, so we don't have a type we can suggest, but at
+                // least we can clue them to the correct syntax `Iterator<Type>`.
                 err.span_suggestion_verbose(
                     self.span.shrink_to_hi(),
-                    msg!(
-                        "explicitly specify the {$descr} {$parameterCount ->
-                            [one] parameter
-                            *[other] parameters
-                        }"
-                    ),
+                    fluent::hir_analysis_suggestion,
                     format!(
                         "<{}>",
-                        self.missing_generic_params
+                        self.missing_type_params
                             .iter()
-                            .map(|(n, _)| format!("/* {n} */"))
+                            .map(|n| n.to_string())
                             .collect::<Vec<_>>()
                             .join(", ")
                     ),
@@ -531,209 +501,214 @@ impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for MissingGenericParams {
             }
         }
         if !suggested {
-            err.span_label(
-                self.span,
-                msg!(
-                    "missing {$parameterCount ->
-                        [one] reference
-                        *[other] references
-                    } to {$parameters}"
-                ),
-            );
+            err.span_label(self.span, fluent::hir_analysis_no_suggestion_label);
         }
 
-        err.note(msg!(
-            "because the parameter {$parameterCount ->
-                [one] default references
-                *[other] defaults reference
-            } `Self`, the {$parameterCount ->
-                [one] parameter
-                *[other] parameters
-            } must be specified on the trait object type"
-        ));
+        err.note(fluent::hir_analysis_note);
         err
     }
 }
 
 #[derive(Diagnostic)]
-#[diag("manual implementations of `{$trait_name}` are experimental", code = E0183)]
-#[help("add `#![feature(unboxed_closures)]` to the crate attributes to enable")]
+#[diag(hir_analysis_manual_implementation, code = E0183)]
+#[help]
 pub(crate) struct ManualImplementation {
     #[primary_span]
-    #[label("manual implementations of `{$trait_name}` are experimental")]
+    #[label]
     pub span: Span,
     pub trait_name: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("could not resolve generic parameters on overridden impl")]
+#[diag(hir_analysis_generic_args_on_overridden_impl)]
 pub(crate) struct GenericArgsOnOverriddenImpl {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("const `impl` for trait `{$trait_name}` which is not `const`")]
+#[diag(hir_analysis_const_impl_for_non_const_trait)]
 pub(crate) struct ConstImplForNonConstTrait {
     #[primary_span]
-    #[label("this trait is not `const`")]
     pub trait_ref_span: Span,
     pub trait_name: String,
-    #[suggestion(
-        "{$suggestion_pre}mark `{$trait_name}` as `const` to allow it to have `const` implementations",
-        applicability = "machine-applicable",
-        code = "const ",
-        style = "verbose"
-    )]
-    pub suggestion: Option<Span>,
-    pub suggestion_pre: &'static str,
-    #[note("marking a trait with `const` ensures all default method bodies are `const`")]
+    #[suggestion(applicability = "machine-applicable", code = "#[const_trait]")]
+    pub local_trait_span: Option<Span>,
+    #[note]
     pub marking: (),
-    #[note("adding a non-const method body in the future would be a breaking change")]
+    #[note(hir_analysis_adding)]
     pub adding: (),
 }
 
 #[derive(Diagnostic)]
-#[diag("`{$modifier}` can only be applied to `const` traits")]
+#[diag(hir_analysis_const_bound_for_non_const_trait)]
 pub(crate) struct ConstBoundForNonConstTrait {
     #[primary_span]
-    #[label("can't be applied to `{$trait_name}`")]
     pub span: Span,
     pub modifier: &'static str,
-    #[note("`{$trait_name}` can't be used with `{$modifier}` because it isn't `const`")]
-    pub def_span: Option<Span>,
-    #[suggestion(
-        "{$suggestion_pre}mark `{$trait_name}` as `const` to allow it to have `const` implementations",
-        applicability = "machine-applicable",
-        code = "const ",
-        style = "verbose"
-    )]
-    pub suggestion: Option<Span>,
-    pub suggestion_pre: &'static str,
-    pub trait_name: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("`Self` is not valid in the self type of an impl block")]
+#[diag(hir_analysis_self_in_impl_self)]
 pub(crate) struct SelfInImplSelf {
     #[primary_span]
     pub span: MultiSpan,
-    #[note("replace `Self` with a different type")]
+    #[note]
     pub note: (),
 }
 
 #[derive(Diagnostic)]
-#[diag("invalid type for variable with `#[linkage]` attribute", code = E0791)]
+#[diag(hir_analysis_linkage_type, code = E0791)]
 pub(crate) struct LinkageType {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[help(
-    "consider increasing the recursion limit by adding a `#![recursion_limit = \"{$suggested_limit}\"]` attribute to your crate (`{$crate_name}`)"
-)]
-#[diag("reached the recursion limit while auto-dereferencing `{$ty}`", code = E0055)]
+#[help]
+#[diag(hir_analysis_auto_deref_reached_recursion_limit, code = E0055)]
 pub(crate) struct AutoDerefReachedRecursionLimit<'a> {
     #[primary_span]
-    #[label("deref recursion limit reached")]
+    #[label]
     pub span: Span,
     pub ty: Ty<'a>,
-    pub suggested_limit: Limit,
+    pub suggested_limit: rustc_session::Limit,
     pub crate_name: Symbol,
 }
 
 #[derive(Diagnostic)]
-#[diag("`main` function is not allowed to have a `where` clause", code = E0646)]
+#[diag(hir_analysis_where_clause_on_main, code = E0646)]
 pub(crate) struct WhereClauseOnMain {
     #[primary_span]
     pub span: Span,
-    #[label("`main` cannot have a `where` clause")]
+    #[label]
     pub generics_span: Option<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("`main` function is not allowed to be `#[track_caller]`")]
+#[diag(hir_analysis_track_caller_on_main)]
 pub(crate) struct TrackCallerOnMain {
     #[primary_span]
-    #[suggestion("remove this annotation", applicability = "maybe-incorrect", code = "")]
+    #[suggestion(applicability = "maybe-incorrect", code = "")]
     pub span: Span,
-    #[label("`main` function is not allowed to be `#[track_caller]`")]
+    #[label(hir_analysis_track_caller_on_main)]
     pub annotated: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`main` function is not allowed to have `#[target_feature]`")]
+#[diag(hir_analysis_target_feature_on_main)]
 pub(crate) struct TargetFeatureOnMain {
     #[primary_span]
-    #[label("`main` function is not allowed to have `#[target_feature]`")]
+    #[label(hir_analysis_target_feature_on_main)]
     pub main: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`main` function return type is not allowed to have generic parameters", code = E0131)]
+#[diag(hir_analysis_start_not_track_caller)]
+pub(crate) struct StartTrackCaller {
+    #[primary_span]
+    pub span: Span,
+    #[label]
+    pub start: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_start_not_target_feature)]
+pub(crate) struct StartTargetFeature {
+    #[primary_span]
+    pub span: Span,
+    #[label]
+    pub start: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_start_not_async, code = E0752)]
+pub(crate) struct StartAsync {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_start_function_where, code = E0647)]
+pub(crate) struct StartFunctionWhere {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_start_function_parameters, code = E0132)]
+pub(crate) struct StartFunctionParameters {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_main_function_return_type_generic, code = E0131)]
 pub(crate) struct MainFunctionReturnTypeGeneric {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`main` function is not allowed to be `async`", code = E0752)]
+#[diag(hir_analysis_main_function_async, code = E0752)]
 pub(crate) struct MainFunctionAsync {
     #[primary_span]
     pub span: Span,
-    #[label("`main` function is not allowed to be `async`")]
+    #[label]
     pub asyncness: Option<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("`main` function is not allowed to have generic parameters", code = E0131)]
+#[diag(hir_analysis_main_function_generic_parameters, code = E0131)]
 pub(crate) struct MainFunctionGenericParameters {
     #[primary_span]
     pub span: Span,
-    #[label("`main` cannot have generic parameters")]
+    #[label]
     pub label_span: Option<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("C-variadic functions with the {$convention} calling convention are not supported", code = E0045)]
+#[diag(hir_analysis_variadic_function_compatible_convention, code = E0045)]
 pub(crate) struct VariadicFunctionCompatibleConvention<'a> {
     #[primary_span]
-    #[label("C-variadic function must have a compatible calling convention")]
+    #[label]
     pub span: Span,
-    pub convention: &'a str,
+    pub conventions: &'a str,
 }
 
 #[derive(Diagnostic)]
 pub(crate) enum CannotCaptureLateBound {
-    #[diag("cannot capture late-bound type parameter in {$what}")]
+    #[diag(hir_analysis_cannot_capture_late_bound_ty)]
     Type {
         #[primary_span]
         use_span: Span,
-        #[label("parameter defined here")]
+        #[label]
         def_span: Span,
         what: &'static str,
     },
-    #[diag("cannot capture late-bound const parameter in {$what}")]
+    #[diag(hir_analysis_cannot_capture_late_bound_const)]
     Const {
         #[primary_span]
         use_span: Span,
-        #[label("parameter defined here")]
+        #[label]
         def_span: Span,
         what: &'static str,
     },
-    #[diag("cannot capture late-bound lifetime in {$what}")]
+    #[diag(hir_analysis_cannot_capture_late_bound_lifetime)]
     Lifetime {
         #[primary_span]
         use_span: Span,
-        #[label("lifetime defined here")]
+        #[label]
         def_span: Span,
         what: &'static str,
     },
 }
 
 #[derive(Diagnostic)]
-#[diag("{$variances}")]
+#[diag(hir_analysis_variances_of)]
 pub(crate) struct VariancesOf {
     #[primary_span]
     pub span: Span,
@@ -741,7 +716,7 @@ pub(crate) struct VariancesOf {
 }
 
 #[derive(Diagnostic)]
-#[diag("{$ty}")]
+#[diag(hir_analysis_type_of)]
 pub(crate) struct TypeOf<'tcx> {
     #[primary_span]
     pub span: Span,
@@ -749,37 +724,37 @@ pub(crate) struct TypeOf<'tcx> {
 }
 
 #[derive(Diagnostic)]
-#[diag("field must implement `Copy` or be wrapped in `ManuallyDrop<...>` to be used in a union", code = E0740)]
+#[diag(hir_analysis_invalid_union_field, code = E0740)]
 pub(crate) struct InvalidUnionField {
     #[primary_span]
     pub field_span: Span,
     #[subdiagnostic]
     pub sugg: InvalidUnionFieldSuggestion,
-    #[note(
-        "union fields must not have drop side-effects, which is currently enforced via either `Copy` or `ManuallyDrop<...>`"
-    )]
+    #[note]
     pub note: (),
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "return type notation used on function that is not `async` and does not return `impl Trait`"
-)]
+#[diag(hir_analysis_invalid_unnamed_field_ty)]
+pub(crate) struct InvalidUnnamedFieldTy {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_return_type_notation_on_non_rpitit)]
 pub(crate) struct ReturnTypeNotationOnNonRpitit<'tcx> {
     #[primary_span]
     pub span: Span,
     pub ty: Ty<'tcx>,
-    #[label("this function must be `async` or return `impl Trait`")]
+    #[label]
     pub fn_span: Option<Span>,
-    #[note("function returns `{$ty}`, which is not compatible with associated type return bounds")]
+    #[note]
     pub note: (),
 }
 
 #[derive(Subdiagnostic)]
-#[multipart_suggestion(
-    "wrap the field type in `ManuallyDrop<...>`",
-    applicability = "machine-applicable"
-)]
+#[multipart_suggestion(hir_analysis_invalid_union_field_sugg, applicability = "machine-applicable")]
 pub(crate) struct InvalidUnionFieldSuggestion {
     #[suggestion_part(code = "std::mem::ManuallyDrop<")]
     pub lo: Span,
@@ -788,45 +763,39 @@ pub(crate) struct InvalidUnionFieldSuggestion {
 }
 
 #[derive(Diagnostic)]
-#[diag("return type notation is not allowed to use type equality")]
+#[diag(hir_analysis_return_type_notation_equality_bound)]
 pub(crate) struct ReturnTypeNotationEqualityBound {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("the placeholder `_` is not allowed within types on item signatures for {$kind}", code = E0121)]
+#[diag(hir_analysis_placeholder_not_allowed_item_signatures, code = E0121)]
 pub(crate) struct PlaceholderNotAllowedItemSignatures {
     #[primary_span]
-    #[label("not allowed in type signatures")]
+    #[label]
     pub spans: Vec<Span>,
     pub kind: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("cannot use the {$what} of a trait with uninferred generic parameters", code = E0212)]
-pub(crate) struct AssociatedItemTraitUninferredGenericParams {
+#[diag(hir_analysis_associated_type_trait_uninferred_generic_params, code = E0212)]
+pub(crate) struct AssociatedTypeTraitUninferredGenericParams {
     #[primary_span]
     pub span: Span,
-    #[suggestion(
-        "use a fully qualified path with inferred lifetimes",
-        style = "verbose",
-        applicability = "maybe-incorrect",
-        code = "{bound}"
-    )]
+    #[suggestion(style = "verbose", applicability = "maybe-incorrect", code = "{bound}")]
     pub inferred_sugg: Option<Span>,
     pub bound: String,
     #[subdiagnostic]
-    pub mpart_sugg: Option<AssociatedItemTraitUninferredGenericParamsMultipartSuggestion>,
-    pub what: &'static str,
+    pub mpart_sugg: Option<AssociatedTypeTraitUninferredGenericParamsMultipartSuggestion>,
 }
 
 #[derive(Subdiagnostic)]
 #[multipart_suggestion(
-    "use a fully qualified path with explicit lifetimes",
+    hir_analysis_associated_type_trait_uninferred_generic_params_multipart_suggestion,
     applicability = "maybe-incorrect"
 )]
-pub(crate) struct AssociatedItemTraitUninferredGenericParamsMultipartSuggestion {
+pub(crate) struct AssociatedTypeTraitUninferredGenericParamsMultipartSuggestion {
     #[suggestion_part(code = "{first}")]
     pub fspan: Span,
     pub first: String,
@@ -836,30 +805,88 @@ pub(crate) struct AssociatedItemTraitUninferredGenericParamsMultipartSuggestion 
 }
 
 #[derive(Diagnostic)]
-#[diag("enum discriminant overflowed", code = E0370)]
-#[note("explicitly set `{$item_name} = {$wrapped_discr}` if that is desired outcome")]
+#[diag(hir_analysis_enum_discriminant_overflowed, code = E0370)]
+#[note]
 pub(crate) struct EnumDiscriminantOverflowed {
     #[primary_span]
-    #[label("overflowed on value after {$discr}")]
+    #[label]
     pub span: Span,
     pub discr: String,
-    pub item_name: Ident,
+    pub item_name: Symbol,
     pub wrapped_discr: String,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "the `#[rustc_paren_sugar]` attribute is a temporary means of controlling which traits can use parenthetical notation"
-)]
-#[help("add `#![feature(unboxed_closures)]` to the crate attributes to use it")]
+#[diag(hir_analysis_paren_sugar_attribute)]
+#[help]
 pub(crate) struct ParenSugarAttribute {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("use of SIMD type{$snip} in FFI is highly experimental and may result in invalid code")]
-#[help("add `#![feature(simd_ffi)]` to the crate attributes to enable")]
+#[diag(hir_analysis_must_implement_one_of_attribute)]
+pub(crate) struct MustImplementOneOfAttribute {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_must_be_name_of_associated_function)]
+pub(crate) struct MustBeNameOfAssociatedFunction {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_function_not_have_default_implementation)]
+pub(crate) struct FunctionNotHaveDefaultImplementation {
+    #[primary_span]
+    pub span: Span,
+    #[note]
+    pub note_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_must_implement_not_function)]
+pub(crate) struct MustImplementNotFunction {
+    #[primary_span]
+    pub span: Span,
+    #[subdiagnostic]
+    pub span_note: MustImplementNotFunctionSpanNote,
+    #[subdiagnostic]
+    pub note: MustImplementNotFunctionNote,
+}
+
+#[derive(Subdiagnostic)]
+#[note(hir_analysis_must_implement_not_function_span_note)]
+pub(crate) struct MustImplementNotFunctionSpanNote {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Subdiagnostic)]
+#[note(hir_analysis_must_implement_not_function_note)]
+pub(crate) struct MustImplementNotFunctionNote {}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_function_not_found_in_trait)]
+pub(crate) struct FunctionNotFoundInTrait {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_functions_names_duplicated)]
+#[note]
+pub(crate) struct FunctionNamesDuplicated {
+    #[primary_span]
+    pub spans: Vec<Span>,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_simd_ffi_highly_experimental)]
+#[help]
 pub(crate) struct SIMDFFIHighlyExperimental {
     #[primary_span]
     pub span: Span,
@@ -868,45 +895,31 @@ pub(crate) struct SIMDFFIHighlyExperimental {
 
 #[derive(Diagnostic)]
 pub(crate) enum ImplNotMarkedDefault {
-    #[diag("`{$ident}` specializes an item from a parent `impl`, but that item is not marked `default`", code = E0520)]
-    #[note("to specialize, `{$ident}` in the parent `impl` must be marked `default`")]
+    #[diag(hir_analysis_impl_not_marked_default, code = E0520)]
+    #[note]
     Ok {
         #[primary_span]
-        #[label("cannot specialize default item `{$ident}`")]
+        #[label]
         span: Span,
-        #[label("parent `impl` is here")]
+        #[label(hir_analysis_ok_label)]
         ok_label: Span,
-        ident: Ident,
+        ident: Symbol,
     },
-    #[diag("`{$ident}` specializes an item from a parent `impl`, but that item is not marked `default`", code = E0520)]
-    #[note("parent implementation is in crate `{$cname}`")]
+    #[diag(hir_analysis_impl_not_marked_default_err, code = E0520)]
+    #[note]
     Err {
         #[primary_span]
         span: Span,
         cname: Symbol,
-        ident: Ident,
+        ident: Symbol,
     },
 }
 
 #[derive(Diagnostic)]
-#[diag("this item cannot be used as its where bounds are not satisfied for the `Self` type")]
-pub(crate) struct UselessImplItem;
-
-#[derive(Diagnostic)]
-#[diag("cannot override `{$ident}` because it already has a `final` definition in the trait")]
-pub(crate) struct OverridingFinalTraitFunction {
-    #[primary_span]
-    pub impl_span: Span,
-    #[note("`{$ident}` is marked final here")]
-    pub trait_span: Span,
-    pub ident: Ident,
-}
-
-#[derive(Diagnostic)]
-#[diag("not all trait items implemented, missing: `{$missing_items_msg}`", code = E0046)]
+#[diag(hir_analysis_missing_trait_item, code = E0046)]
 pub(crate) struct MissingTraitItem {
     #[primary_span]
-    #[label("missing `{$missing_items_msg}` in implementation")]
+    #[label]
     pub span: Span,
     #[subdiagnostic]
     pub missing_trait_item_label: Vec<MissingTraitItemLabel>,
@@ -918,7 +931,7 @@ pub(crate) struct MissingTraitItem {
 }
 
 #[derive(Subdiagnostic)]
-#[label("`{$item}` from trait")]
+#[label(hir_analysis_missing_trait_item_label)]
 pub(crate) struct MissingTraitItemLabel {
     #[primary_span]
     pub span: Span,
@@ -927,7 +940,7 @@ pub(crate) struct MissingTraitItemLabel {
 
 #[derive(Subdiagnostic)]
 #[suggestion(
-    "implement the missing item: `{$snippet}`",
+    hir_analysis_missing_trait_item_suggestion,
     style = "tool-only",
     applicability = "has-placeholders",
     code = "{code}"
@@ -941,7 +954,7 @@ pub(crate) struct MissingTraitItemSuggestion {
 
 #[derive(Subdiagnostic)]
 #[suggestion(
-    "implement the missing item: `{$snippet}`",
+    hir_analysis_missing_trait_item_suggestion,
     style = "hidden",
     applicability = "has-placeholders",
     code = "{code}"
@@ -954,104 +967,111 @@ pub(crate) struct MissingTraitItemSuggestionNone {
 }
 
 #[derive(Diagnostic)]
-#[diag("not all trait items implemented, missing one of: `{$missing_items_msg}`", code = E0046)]
+#[diag(hir_analysis_missing_one_of_trait_item, code = E0046)]
 pub(crate) struct MissingOneOfTraitItem {
     #[primary_span]
-    #[label("missing one of `{$missing_items_msg}` in implementation")]
+    #[label]
     pub span: Span,
-    #[note("required because of this annotation")]
+    #[note]
     pub note: Option<Span>,
     pub missing_items_msg: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("not all trait items implemented, missing: `{$missing_item_name}`", code = E0046)]
-#[note("default implementation of `{$missing_item_name}` is unstable")]
+#[diag(hir_analysis_missing_trait_item_unstable, code = E0046)]
+#[note]
 pub(crate) struct MissingTraitItemUnstable {
     #[primary_span]
     pub span: Span,
-    #[note("use of unstable library feature `{$feature}`: {$reason}")]
+    #[note(hir_analysis_some_note)]
     pub some_note: bool,
-    #[note("use of unstable library feature `{$feature}`")]
+    #[note(hir_analysis_none_note)]
     pub none_note: bool,
-    pub missing_item_name: Ident,
+    pub missing_item_name: Symbol,
     pub feature: Symbol,
     pub reason: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("transparent enum needs exactly one variant, but has {$number}", code = E0731)]
+#[diag(hir_analysis_transparent_enum_variant, code = E0731)]
 pub(crate) struct TransparentEnumVariant {
     #[primary_span]
-    #[label("needs exactly one variant, but has {$number}")]
+    #[label]
     pub span: Span,
-    #[label("variant here")]
+    #[label(hir_analysis_multi_label)]
     pub spans: Vec<Span>,
-    #[label("too many variants in `{$path}`")]
+    #[label(hir_analysis_many_label)]
     pub many: Option<Span>,
     pub number: usize,
     pub path: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("the variant of a transparent {$desc} needs at most one field with non-trivial size or alignment, but has {$field_count}", code = E0690)]
+#[diag(hir_analysis_transparent_non_zero_sized_enum, code = E0690)]
 pub(crate) struct TransparentNonZeroSizedEnum<'a> {
     #[primary_span]
-    #[label("needs at most one field with non-trivial size or alignment, but has {$field_count}")]
+    #[label]
     pub span: Span,
-    #[label("this field has non-zero size or requires alignment")]
+    #[label(hir_analysis_labels)]
     pub spans: Vec<Span>,
     pub field_count: usize,
     pub desc: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("transparent {$desc} needs at most one field with non-trivial size or alignment, but has {$field_count}", code = E0690)]
+#[diag(hir_analysis_transparent_non_zero_sized, code = E0690)]
 pub(crate) struct TransparentNonZeroSized<'a> {
     #[primary_span]
-    #[label("needs at most one field with non-trivial size or alignment, but has {$field_count}")]
+    #[label]
     pub span: Span,
-    #[label("this field has non-zero size or requires alignment")]
+    #[label(hir_analysis_labels)]
     pub spans: Vec<Span>,
     pub field_count: usize,
     pub desc: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("extern static is too large for the target architecture")]
+#[diag(hir_analysis_too_large_static)]
 pub(crate) struct TooLargeStatic {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("implementing `rustc_specialization_trait` traits is unstable")]
-#[help("add `#![feature(min_specialization)]` to the crate attributes to enable")]
+#[diag(hir_analysis_specialization_trait)]
+#[help]
 pub(crate) struct SpecializationTrait {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("implicit types in closure signatures are forbidden when `for<...>` is present")]
+#[diag(hir_analysis_closure_implicit_hrtb)]
 pub(crate) struct ClosureImplicitHrtb {
     #[primary_span]
     pub spans: Vec<Span>,
-    #[label("`for<...>` is here")]
+    #[label]
     pub for_sp: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("specialization impl does not specialize any associated items")]
+#[diag(hir_analysis_empty_specialization)]
 pub(crate) struct EmptySpecialization {
     #[primary_span]
     pub span: Span,
-    #[note("impl is a specialization of this impl")]
+    #[note]
     pub base_impl_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("cannot specialize on `'static` lifetime")]
+#[diag(hir_analysis_const_specialize)]
+pub(crate) struct ConstSpecialize {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_static_specialize)]
 pub(crate) struct StaticSpecialize {
     #[primary_span]
     pub span: Span,
@@ -1059,12 +1079,12 @@ pub(crate) struct StaticSpecialize {
 
 #[derive(Diagnostic)]
 pub(crate) enum DropImplPolarity {
-    #[diag("negative `Drop` impls are not supported")]
+    #[diag(hir_analysis_drop_impl_negative)]
     Negative {
         #[primary_span]
         span: Span,
     },
-    #[diag("reservation `Drop` impls are not supported")]
+    #[diag(hir_analysis_drop_impl_reservation)]
     Reservation {
         #[primary_span]
         span: Span,
@@ -1073,202 +1093,132 @@ pub(crate) enum DropImplPolarity {
 
 #[derive(Diagnostic)]
 pub(crate) enum ReturnTypeNotationIllegalParam {
-    #[diag("return type notation is not allowed for functions that have type parameters")]
+    #[diag(hir_analysis_return_type_notation_illegal_param_type)]
     Type {
         #[primary_span]
         span: Span,
-        #[label("type parameter declared here")]
+        #[label]
         param_span: Span,
     },
-    #[diag("return type notation is not allowed for functions that have const parameters")]
+    #[diag(hir_analysis_return_type_notation_illegal_param_const)]
     Const {
         #[primary_span]
         span: Span,
-        #[label("const parameter declared here")]
+        #[label]
         param_span: Span,
     },
 }
 
 #[derive(Diagnostic)]
 pub(crate) enum LateBoundInApit {
-    #[diag("`impl Trait` can only mention type parameters from an fn or impl")]
+    #[diag(hir_analysis_late_bound_type_in_apit)]
     Type {
         #[primary_span]
         span: Span,
-        #[label("type parameter declared here")]
+        #[label]
         param_span: Span,
     },
-    #[diag("`impl Trait` can only mention const parameters from an fn or impl")]
+    #[diag(hir_analysis_late_bound_const_in_apit)]
     Const {
         #[primary_span]
         span: Span,
-        #[label("const parameter declared here")]
+        #[label]
         param_span: Span,
     },
-    #[diag("`impl Trait` can only mention lifetimes from an fn or impl")]
+    #[diag(hir_analysis_late_bound_lifetime_in_apit)]
     Lifetime {
         #[primary_span]
         span: Span,
-        #[label("lifetime declared here")]
+        #[label]
         param_span: Span,
     },
 }
 
-#[derive(Diagnostic)]
-#[diag("unnecessary associated type bound for dyn-incompatible associated type")]
-#[note(
-    "this associated type has a `where Self: Sized` bound, and while the associated type can be specified, it cannot be used because trait objects are never `Sized`"
-)]
+#[derive(LintDiagnostic)]
+#[diag(hir_analysis_unused_associated_type_bounds)]
+#[note]
 pub(crate) struct UnusedAssociatedTypeBounds {
-    #[suggestion("remove this bound", code = "")]
+    #[suggestion(code = "")]
     pub span: Span,
 }
 
-#[derive(Diagnostic)]
-#[diag("impl trait in impl method signature does not match trait method signature")]
-#[note(
-    "add `#[allow(refining_impl_trait)]` if it is intended for this to be part of the public API of this crate"
-)]
-#[note(
-    "we are soliciting feedback, see issue #121718 <https://github.com/rust-lang/rust/issues/121718> for more information"
-)]
-pub(crate) struct ReturnPositionImplTraitInTraitRefined {
-    #[suggestion(
-        "replace the return type so that it matches the trait",
-        applicability = "maybe-incorrect",
-        code = "{pre}{return_ty}{post}"
-    )]
+#[derive(LintDiagnostic)]
+#[diag(hir_analysis_rpitit_refined)]
+#[note]
+#[note(hir_analysis_feedback_note)]
+pub(crate) struct ReturnPositionImplTraitInTraitRefined<'tcx> {
+    #[suggestion(applicability = "maybe-incorrect", code = "{pre}{return_ty}{post}")]
     pub impl_return_span: Span,
-    #[label("return type from trait method defined here")]
+    #[label]
     pub trait_return_span: Option<Span>,
-    #[label("this bound is stronger than that defined on the trait")]
+    #[label(hir_analysis_unmatched_bound_label)]
     pub unmatched_bound: Option<Span>,
 
     pub pre: &'static str,
     pub post: &'static str,
-    pub return_ty: String,
+    pub return_ty: Ty<'tcx>,
 }
 
 #[derive(Diagnostic)]
-#[diag("impl trait in impl method captures fewer lifetimes than in trait")]
-#[note(
-    "add `#[allow(refining_impl_trait)]` if it is intended for this to be part of the public API of this crate"
-)]
-#[note(
-    "we are soliciting feedback, see issue #121718 <https://github.com/rust-lang/rust/issues/121718> for more information"
-)]
-pub(crate) struct ReturnPositionImplTraitInTraitRefinedLifetimes {
-    #[suggestion(
-        "modify the `use<..>` bound to capture the same lifetimes that the trait does",
-        applicability = "maybe-incorrect",
-        code = "{suggestion}"
-    )]
-    pub suggestion_span: Span,
-    pub suggestion: String,
-}
-
-#[derive(Diagnostic)]
-#[diag("cannot define inherent `impl` for a type outside of the crate where the type is defined", code = E0390)]
-#[help("consider moving this inherent impl into the crate defining the type if possible")]
+#[diag(hir_analysis_inherent_ty_outside, code = E0390)]
+#[help]
 pub(crate) struct InherentTyOutside {
     #[primary_span]
-    #[help(
-        "alternatively add `#[rustc_has_incoherent_inherent_impls]` to the type and `#[rustc_allow_incoherent_impl]` to the relevant impl items"
-    )]
+    #[help(hir_analysis_span_help)]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("structs implementing `DispatchFromDyn` may not have `#[repr(packed)]` or `#[repr(C)]`", code = E0378)]
+#[diag(hir_analysis_coerce_unsized_may, code = E0378)]
+pub(crate) struct DispatchFromDynCoercion<'a> {
+    #[primary_span]
+    pub span: Span,
+    pub trait_name: &'a str,
+    #[note(hir_analysis_coercion_between_struct_same_note)]
+    pub note: bool,
+    pub source_path: String,
+    pub target_path: String,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_dispatch_from_dyn_repr, code = E0378)]
 pub(crate) struct DispatchFromDynRepr {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`derive(CoercePointee)` is only applicable to `struct`, instead of `{$kind}`", code = E0802)]
-pub(crate) struct CoercePointeeNotStruct {
-    #[primary_span]
-    pub span: Span,
-    pub kind: String,
-}
-
-#[derive(Diagnostic)]
-#[diag("`derive(CoercePointee)` is only applicable to `struct`", code = E0802)]
-pub(crate) struct CoercePointeeNotConcreteType {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("asserting applicability of `derive(CoercePointee)` on a target data is forbidden", code = E0802)]
-pub(crate) struct CoercePointeeNoUserValidityAssertion {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`derive(CoercePointee)` is only applicable to `struct` with `repr(transparent)` layout", code = E0802)]
-pub(crate) struct CoercePointeeNotTransparent {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`CoercePointee` can only be derived on `struct`s with at least one field", code = E0802)]
-pub(crate) struct CoercePointeeNoField {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("cannot define inherent `impl` for a type outside of the crate where the type is defined", code = E0390)]
-#[help("consider moving this inherent impl into the crate defining the type if possible")]
+#[diag(hir_analysis_inherent_ty_outside_relevant, code = E0390)]
+#[help]
 pub(crate) struct InherentTyOutsideRelevant {
     #[primary_span]
     pub span: Span,
-    #[help("alternatively add `#[rustc_allow_incoherent_impl]` to the relevant impl items")]
+    #[help(hir_analysis_span_help)]
     pub help_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("cannot define inherent `impl` for a type outside of the crate where the type is defined", code = E0116)]
-#[help(
-    "consider defining a trait and implementing it for the type or using a newtype wrapper like `struct MyType(ExternalType);` and implement it"
-)]
-#[note(
-    "for more details about the orphan rules, see <https://doc.rust-lang.org/reference/items/implementations.html?highlight=orphan#orphan-rules>"
-)]
+#[diag(hir_analysis_inherent_ty_outside_new, code = E0116)]
+#[note]
 pub(crate) struct InherentTyOutsideNew {
     #[primary_span]
-    #[label("impl for type defined outside of crate")]
+    #[label]
     pub span: Span,
-    #[subdiagnostic]
-    pub note: Option<InherentTyOutsideNewAliasNote>,
-}
-
-#[derive(Subdiagnostic)]
-#[note("`{$ty_name}` does not define a new type, only an alias of `{$alias_ty_name}` defined here")]
-pub(crate) struct InherentTyOutsideNewAliasNote {
-    #[primary_span]
-    pub span: Span,
-    pub ty_name: String,
-    pub alias_ty_name: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("cannot define inherent `impl` for primitive types outside of `core`", code = E0390)]
-#[help("consider moving this inherent impl into `core` if possible")]
+#[diag(hir_analysis_inherent_ty_outside_primitive, code = E0390)]
+#[help]
 pub(crate) struct InherentTyOutsidePrimitive {
     #[primary_span]
     pub span: Span,
-    #[help("alternatively add `#[rustc_allow_incoherent_impl]` to the relevant impl items")]
+    #[help(hir_analysis_span_help)]
     pub help_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("cannot define inherent `impl` for primitive types", code = E0390)]
-#[help("consider using an extension trait instead")]
+#[diag(hir_analysis_inherent_primitive_ty, code = E0390)]
+#[help]
 pub(crate) struct InherentPrimitiveTy<'a> {
     #[primary_span]
     pub span: Span,
@@ -1277,126 +1227,126 @@ pub(crate) struct InherentPrimitiveTy<'a> {
 }
 
 #[derive(Subdiagnostic)]
-#[note(
-    "you could also try moving the reference to uses of `{$subty}` (such as `self`) within the implementation"
-)]
+#[note(hir_analysis_inherent_primitive_ty_note)]
 pub(crate) struct InherentPrimitiveTyNote<'a> {
     pub subty: Ty<'a>,
 }
 
 #[derive(Diagnostic)]
-#[diag("cannot define inherent `impl` for a dyn auto trait", code = E0785)]
-#[note("define and implement a new trait or type instead")]
+#[diag(hir_analysis_inherent_dyn, code = E0785)]
+#[note]
 pub(crate) struct InherentDyn {
     #[primary_span]
-    #[label("impl requires at least one non-auto trait")]
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("no nominal type found for inherent implementation", code = E0118)]
-#[note("either implement a trait on it or create a newtype to wrap it instead")]
+#[diag(hir_analysis_inherent_nominal, code = E0118)]
+#[note]
 pub(crate) struct InherentNominal {
     #[primary_span]
-    #[label("impl requires a nominal type")]
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("the trait `DispatchFromDyn` may only be implemented for structs containing the field being coerced, ZST fields with 1 byte alignment that don't mention type/const generics, and nothing else", code = E0378)]
-#[note("extra field `{$name}` of type `{$ty}` is not allowed")]
+#[diag(hir_analysis_dispatch_from_dyn_zst, code = E0378)]
+#[note]
 pub(crate) struct DispatchFromDynZST<'a> {
     #[primary_span]
     pub span: Span,
-    pub name: Ident,
+    pub name: Symbol,
     pub ty: Ty<'a>,
 }
 
 #[derive(Diagnostic)]
-#[diag("implementing `{$trait_name}` requires a field to be coerced", code = E0374)]
-pub(crate) struct CoerceNoField {
+#[diag(hir_analysis_coerce_unsized_may, code = E0378)]
+pub(crate) struct DispatchFromDynSingle<'a> {
     #[primary_span]
     pub span: Span,
-    pub trait_name: &'static str,
-    #[note("expected a single field to be coerced, none found")]
+    pub trait_name: &'a str,
+    #[note(hir_analysis_coercion_between_struct_single_note)]
     pub note: bool,
 }
 
 #[derive(Diagnostic)]
-#[diag("implementing `{$trait_name}` does not allow multiple fields to be coerced", code = E0375)]
-pub(crate) struct CoerceMulti {
-    pub trait_name: &'static str,
+#[diag(hir_analysis_dispatch_from_dyn_multi, code = E0378)]
+#[note]
+pub(crate) struct DispatchFromDynMulti {
     #[primary_span]
     pub span: Span,
+    #[note(hir_analysis_coercions_note)]
+    pub coercions_note: bool,
     pub number: usize,
-    #[note(
-        "the trait `{$trait_name}` may only be implemented when a single field is being coerced"
-    )]
-    pub fields: MultiSpan,
+    pub coercions: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("the trait `{$trait_name}` may only be implemented for a coercion between structures", code = E0377)]
-pub(crate) struct CoerceUnsizedNonStruct {
+#[diag(hir_analysis_coerce_unsized_may, code = E0376)]
+pub(crate) struct DispatchFromDynStruct<'a> {
     #[primary_span]
     pub span: Span,
-    pub trait_name: &'static str,
+    pub trait_name: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("only pattern types with the same pattern can be coerced between each other")]
-pub(crate) struct CoerceSamePatKind {
+#[diag(hir_analysis_coerce_unsized_may, code = E0377)]
+pub(crate) struct DispatchFromDynSame<'a> {
     #[primary_span]
     pub span: Span,
-    pub trait_name: &'static str,
-    pub pat_a: String,
-    pub pat_b: String,
-}
-
-#[derive(Diagnostic)]
-#[diag("the trait `{$trait_name}` may only be implemented for a coercion between structures", code = E0377)]
-pub(crate) struct CoerceSameStruct {
-    #[primary_span]
-    pub span: Span,
-    pub trait_name: &'static str,
-    #[note(
-        "expected coercion between the same definition; expected `{$source_path}`, found `{$target_path}`"
-    )]
+    pub trait_name: &'a str,
+    #[note(hir_analysis_coercion_between_struct_same_note)]
     pub note: bool,
     pub source_path: String,
     pub target_path: String,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "for `{$ty}` to have a valid implementation of `{$trait_name}`, it must be possible to coerce the field of type `{$field_ty}`"
-)]
-pub(crate) struct CoerceFieldValidity<'tcx> {
+#[diag(hir_analysis_coerce_unsized_may, code = E0374)]
+pub(crate) struct CoerceUnsizedOneField<'a> {
     #[primary_span]
     pub span: Span,
-    pub ty: Ty<'tcx>,
-    pub trait_name: &'static str,
-    #[label(
-        "`{$field_ty}` must be a pointer, reference, or smart pointer that is allowed to be unsized"
-    )]
-    pub field_span: Span,
-    pub field_ty: Ty<'tcx>,
+    pub trait_name: &'a str,
+    #[note(hir_analysis_coercion_between_struct_single_note)]
+    pub note: bool,
 }
 
 #[derive(Diagnostic)]
-#[diag("the trait `{$trait_name}` cannot be implemented for this type", code = E0204)]
+#[diag(hir_analysis_coerce_unsized_multi, code = E0375)]
+#[note]
+pub(crate) struct CoerceUnsizedMulti {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+    #[note(hir_analysis_coercions_note)]
+    pub coercions_note: bool,
+    pub number: usize,
+    pub coercions: String,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_coerce_unsized_may, code = E0378)]
+pub(crate) struct CoerceUnsizedMay<'a> {
+    #[primary_span]
+    pub span: Span,
+    pub trait_name: &'a str,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_trait_cannot_impl_for_ty, code = E0204)]
 pub(crate) struct TraitCannotImplForTy {
     #[primary_span]
     pub span: Span,
     pub trait_name: String,
-    #[label("this field does not implement `{$trait_name}`")]
+    #[label]
     pub label_spans: Vec<Span>,
     #[subdiagnostic]
     pub notes: Vec<ImplForTyRequires>,
 }
 
 #[derive(Subdiagnostic)]
-#[note("the `{$trait_name}` impl for `{$ty}` requires that `{$error_predicate}`")]
+#[note(hir_analysis_requires_note)]
 pub(crate) struct ImplForTyRequires {
     #[primary_span]
     pub span: MultiSpan,
@@ -1406,10 +1356,8 @@ pub(crate) struct ImplForTyRequires {
 }
 
 #[derive(Diagnostic)]
-#[diag("traits with a default impl, like `{$traits}`, cannot be implemented for {$problematic_kind} `{$self_ty}`", code = E0321)]
-#[note(
-    "a trait object implements `{$traits}` if and only if `{$traits}` is one of the trait object's trait bounds"
-)]
+#[diag(hir_analysis_traits_with_defualt_impl, code = E0321)]
+#[note]
 pub(crate) struct TraitsWithDefaultImpl<'a> {
     #[primary_span]
     pub span: Span,
@@ -1419,153 +1367,117 @@ pub(crate) struct TraitsWithDefaultImpl<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("cross-crate traits with a default impl, like `{$traits}`, can only be implemented for a struct/enum type, not `{$self_ty}`", code = E0321)]
+#[diag(hir_analysis_cross_crate_traits, code = E0321)]
 pub(crate) struct CrossCrateTraits<'a> {
     #[primary_span]
-    #[label("can't implement cross-crate trait with a default impl for non-struct/enum type")]
+    #[label]
     pub span: Span,
     pub traits: String,
     pub self_ty: Ty<'a>,
 }
 
 #[derive(Diagnostic)]
-#[diag("cross-crate traits with a default impl, like `{$traits}`, can only be implemented for a struct/enum type defined in the current crate", code = E0321)]
+#[diag(hir_analysis_cross_crate_traits_defined, code = E0321)]
 pub(crate) struct CrossCrateTraitsDefined {
     #[primary_span]
-    #[label("can't implement cross-crate trait for type in another crate")]
+    #[label]
     pub span: Span,
     pub traits: String,
-}
-
-#[derive(Diagnostic)]
-#[diag("no variant named `{$ident}` found for enum `{$ty}`", code = E0599)]
-pub struct NoVariantNamed<'tcx> {
-    #[primary_span]
-    pub span: Span,
-    pub ident: Ident,
-    pub ty: Ty<'tcx>,
 }
 
 // FIXME(fmease): Deduplicate:
 
 #[derive(Diagnostic)]
-#[diag("type parameter `{$param}` must be covered by another type when it appears before the first local type (`{$local_type}`)", code = E0210)]
-#[note(
-    "implementing a foreign trait is only possible if at least one of the types for which it is implemented is local, and no uncovered type parameters appear before that first local type"
-)]
+#[diag(hir_analysis_ty_param_first_local, code = E0210)]
+#[note]
 pub(crate) struct TyParamFirstLocal<'tcx> {
     #[primary_span]
-    #[label(
-        "type parameter `{$param}` must be covered by another type when it appears before the first local type (`{$local_type}`)"
-    )]
+    #[label]
     pub span: Span,
-    #[note(
-        "in this case, 'before' refers to the following order: `impl<..> ForeignTrait<T1, ..., Tn> for T0`, where `T0` is the first and `Tn` is the last"
-    )]
+    #[note(hir_analysis_case_note)]
     pub note: (),
-    pub param: Ident,
+    pub param: Symbol,
     pub local_type: Ty<'tcx>,
 }
 
-#[derive(Diagnostic)]
-#[diag("type parameter `{$param}` must be covered by another type when it appears before the first local type (`{$local_type}`)", code = E0210)]
-#[note(
-    "implementing a foreign trait is only possible if at least one of the types for which it is implemented is local, and no uncovered type parameters appear before that first local type"
-)]
+#[derive(LintDiagnostic)]
+#[diag(hir_analysis_ty_param_first_local, code = E0210)]
+#[note]
 pub(crate) struct TyParamFirstLocalLint<'tcx> {
-    #[label(
-        "type parameter `{$param}` must be covered by another type when it appears before the first local type (`{$local_type}`)"
-    )]
+    #[label]
     pub span: Span,
-    #[note(
-        "in this case, 'before' refers to the following order: `impl<..> ForeignTrait<T1, ..., Tn> for T0`, where `T0` is the first and `Tn` is the last"
-    )]
+    #[note(hir_analysis_case_note)]
     pub note: (),
-    pub param: Ident,
+    pub param: Symbol,
     pub local_type: Ty<'tcx>,
 }
 
 #[derive(Diagnostic)]
-#[diag("type parameter `{$param}` must be used as the type parameter for some local type (e.g., `MyStruct<{$param}>`)", code = E0210)]
-#[note(
-    "implementing a foreign trait is only possible if at least one of the types for which it is implemented is local"
-)]
+#[diag(hir_analysis_ty_param_some, code = E0210)]
+#[note]
 pub(crate) struct TyParamSome {
     #[primary_span]
-    #[label("type parameter `{$param}` must be used as the type parameter for some local type")]
+    #[label]
     pub span: Span,
-    #[note("only traits defined in the current crate can be implemented for a type parameter")]
+    #[note(hir_analysis_only_note)]
     pub note: (),
-    pub param: Ident,
+    pub param: Symbol,
 }
 
-#[derive(Diagnostic)]
-#[diag("type parameter `{$param}` must be used as the type parameter for some local type (e.g., `MyStruct<{$param}>`)", code = E0210)]
-#[note(
-    "implementing a foreign trait is only possible if at least one of the types for which it is implemented is local"
-)]
+#[derive(LintDiagnostic)]
+#[diag(hir_analysis_ty_param_some, code = E0210)]
+#[note]
 pub(crate) struct TyParamSomeLint {
-    #[label("type parameter `{$param}` must be used as the type parameter for some local type")]
+    #[label]
     pub span: Span,
-    #[note("only traits defined in the current crate can be implemented for a type parameter")]
+    #[note(hir_analysis_only_note)]
     pub note: (),
-    pub param: Ident,
+    pub param: Symbol,
 }
 
 #[derive(Diagnostic)]
 pub(crate) enum OnlyCurrentTraits {
-    #[diag("only traits defined in the current crate can be implemented for types defined outside of the crate", code = E0117)]
+    #[diag(hir_analysis_only_current_traits_outside, code = E0117)]
     Outside {
         #[primary_span]
+        #[label(hir_analysis_only_current_traits_label)]
         span: Span,
-        #[note("impl doesn't have any local type before any uncovered type parameters")]
-        #[note(
-            "for more information see https://doc.rust-lang.org/reference/items/implementations.html#orphan-rules"
-        )]
-        #[note("define and implement a trait or new type instead")]
+        #[note(hir_analysis_only_current_traits_note)]
         note: (),
     },
-    #[diag("only traits defined in the current crate can be implemented for primitive types", code = E0117)]
+    #[diag(hir_analysis_only_current_traits_primitive, code = E0117)]
     Primitive {
         #[primary_span]
+        #[label(hir_analysis_only_current_traits_label)]
         span: Span,
-        #[note("impl doesn't have any local type before any uncovered type parameters")]
-        #[note(
-            "for more information see https://doc.rust-lang.org/reference/items/implementations.html#orphan-rules"
-        )]
-        #[note("define and implement a trait or new type instead")]
+        #[note(hir_analysis_only_current_traits_note)]
         note: (),
     },
-    #[diag("only traits defined in the current crate can be implemented for arbitrary types", code = E0117)]
+    #[diag(hir_analysis_only_current_traits_arbitrary, code = E0117)]
     Arbitrary {
         #[primary_span]
+        #[label(hir_analysis_only_current_traits_label)]
         span: Span,
-        #[note("impl doesn't have any local type before any uncovered type parameters")]
-        #[note(
-            "for more information see https://doc.rust-lang.org/reference/items/implementations.html#orphan-rules"
-        )]
-        #[note("define and implement a trait or new type instead")]
+        #[note(hir_analysis_only_current_traits_note)]
         note: (),
     },
 }
 
 #[derive(Subdiagnostic)]
-#[label(
-    "type alias impl trait is treated as if it were foreign, because its hidden type could be from a foreign crate"
-)]
+#[label(hir_analysis_only_current_traits_opaque)]
 pub(crate) struct OnlyCurrentTraitsOpaque {
     #[primary_span]
     pub span: Span,
 }
 #[derive(Subdiagnostic)]
-#[label("this is not defined in the current crate because this is a foreign trait")]
+#[label(hir_analysis_only_current_traits_foreign)]
 pub(crate) struct OnlyCurrentTraitsForeign {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Subdiagnostic)]
-#[label("this is not defined in the current crate because {$name} are always foreign")]
+#[label(hir_analysis_only_current_traits_name)]
 pub(crate) struct OnlyCurrentTraitsName<'a> {
     #[primary_span]
     pub span: Span,
@@ -1573,7 +1485,7 @@ pub(crate) struct OnlyCurrentTraitsName<'a> {
 }
 
 #[derive(Subdiagnostic)]
-#[label("`{$pointer}` is not defined in the current crate because raw pointers are always foreign")]
+#[label(hir_analysis_only_current_traits_pointer)]
 pub(crate) struct OnlyCurrentTraitsPointer<'a> {
     #[primary_span]
     pub span: Span,
@@ -1581,7 +1493,7 @@ pub(crate) struct OnlyCurrentTraitsPointer<'a> {
 }
 
 #[derive(Subdiagnostic)]
-#[label("`{$ty}` is not defined in the current crate")]
+#[label(hir_analysis_only_current_traits_ty)]
 pub(crate) struct OnlyCurrentTraitsTy<'a> {
     #[primary_span]
     pub span: Span,
@@ -1589,7 +1501,7 @@ pub(crate) struct OnlyCurrentTraitsTy<'a> {
 }
 
 #[derive(Subdiagnostic)]
-#[label("`{$name}` is not defined in the current crate")]
+#[label(hir_analysis_only_current_traits_adt)]
 pub(crate) struct OnlyCurrentTraitsAdt {
     #[primary_span]
     pub span: Span,
@@ -1598,7 +1510,7 @@ pub(crate) struct OnlyCurrentTraitsAdt {
 
 #[derive(Subdiagnostic)]
 #[multipart_suggestion(
-    "consider introducing a new wrapper type",
+    hir_analysis_only_current_traits_pointer_sugg,
     applicability = "maybe-incorrect"
 )]
 pub(crate) struct OnlyCurrentTraitsPointerSugg<'a> {
@@ -1611,296 +1523,224 @@ pub(crate) struct OnlyCurrentTraitsPointerSugg<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("{$descr}")]
+#[diag(hir_analysis_static_mut_ref, code = E0796)]
+#[note]
+pub(crate) struct StaticMutRef<'a> {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+    #[subdiagnostic]
+    pub sugg: MutRefSugg,
+    pub shared: &'a str,
+}
+
+#[derive(Subdiagnostic)]
+pub(crate) enum MutRefSugg {
+    #[multipart_suggestion(
+        hir_analysis_suggestion,
+        style = "verbose",
+        applicability = "maybe-incorrect"
+    )]
+    Shared {
+        #[suggestion_part(code = "addr_of!(")]
+        lo: Span,
+        #[suggestion_part(code = ")")]
+        hi: Span,
+    },
+    #[multipart_suggestion(
+        hir_analysis_suggestion_mut,
+        style = "verbose",
+        applicability = "maybe-incorrect"
+    )]
+    Mut {
+        #[suggestion_part(code = "addr_of_mut!(")]
+        lo: Span,
+        #[suggestion_part(code = ")")]
+        hi: Span,
+    },
+}
+
+// STATIC_MUT_REF lint
+#[derive(LintDiagnostic)]
+#[diag(hir_analysis_static_mut_refs_lint)]
+#[note]
+#[note(hir_analysis_why_note)]
+pub(crate) struct RefOfMutStatic<'a> {
+    #[label]
+    pub span: Span,
+    #[subdiagnostic]
+    pub sugg: MutRefSugg,
+    pub shared: &'a str,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_not_supported_delegation)]
 pub(crate) struct UnsupportedDelegation<'a> {
     #[primary_span]
     pub span: Span,
     pub descr: &'a str,
-    #[label("callee defined here")]
+    #[label]
     pub callee_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("method should be `async` or return a future, but it is synchronous")]
+#[diag(hir_analysis_method_should_return_future)]
 pub(crate) struct MethodShouldReturnFuture {
     #[primary_span]
     pub span: Span,
-    pub method_name: Ident,
-    #[note("this method is `async` so it expects a future to be returned")]
+    pub method_name: Symbol,
+    #[note]
     pub trait_item_span: Option<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("{$param_def_kind} `{$param_name}` is never used")]
+#[diag(hir_analysis_unused_generic_parameter)]
 pub(crate) struct UnusedGenericParameter {
     #[primary_span]
-    #[label("unused {$param_def_kind}")]
+    #[label]
     pub span: Span,
     pub param_name: Ident,
     pub param_def_kind: &'static str,
-    #[label("`{$param_name}` is named here, but is likely unused in the containing type")]
+    #[label(hir_analysis_usage_spans)]
     pub usage_spans: Vec<Span>,
     #[subdiagnostic]
     pub help: UnusedGenericParameterHelp,
-    #[help(
-        "if you intended `{$param_name}` to be a const parameter, use `const {$param_name}: /* Type */` instead"
-    )]
+    #[help(hir_analysis_const_param_help)]
     pub const_param_help: bool,
 }
 
 #[derive(Diagnostic)]
-#[diag("{$param_def_kind} `{$param_name}` is only used recursively")]
+#[diag(hir_analysis_recursive_generic_parameter)]
 pub(crate) struct RecursiveGenericParameter {
     #[primary_span]
     pub spans: Vec<Span>,
-    #[label("{$param_def_kind} must be used non-recursively in the definition")]
+    #[label]
     pub param_span: Span,
     pub param_name: Ident,
     pub param_def_kind: &'static str,
     #[subdiagnostic]
     pub help: UnusedGenericParameterHelp,
-    #[note(
-        "all type parameters must be used in a non-recursive way in order to constrain their variance"
-    )]
+    #[note]
     pub note: (),
 }
 
 #[derive(Subdiagnostic)]
 pub(crate) enum UnusedGenericParameterHelp {
-    #[help(
-        "consider removing `{$param_name}`, referring to it in a field, or using a marker such as `{$phantom_data}`"
-    )]
+    #[help(hir_analysis_unused_generic_parameter_adt_help)]
     Adt { param_name: Ident, phantom_data: String },
-    #[help("consider removing `{$param_name}` or referring to it in a field")]
+    #[help(hir_analysis_unused_generic_parameter_adt_no_phantom_data_help)]
     AdtNoPhantomData { param_name: Ident },
-    #[help("consider removing `{$param_name}` or referring to it in the body of the type alias")]
+    #[help(hir_analysis_unused_generic_parameter_ty_alias_help)]
     TyAlias { param_name: Ident },
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "the {$param_def_kind} `{$param_name}` is not constrained by the impl trait, self type, or predicates"
-)]
+#[diag(hir_analysis_unconstrained_generic_parameter)]
 pub(crate) struct UnconstrainedGenericParameter {
     #[primary_span]
-    #[label("unconstrained {$param_def_kind}")]
+    #[label]
     pub span: Span,
-    pub param_name: Ident,
+    pub param_name: Symbol,
     pub param_def_kind: &'static str,
-    #[note("expressions using a const parameter must map each value to a distinct output value")]
+    #[note(hir_analysis_const_param_note)]
     pub const_param_note: bool,
-    #[note(
-        "proving the result of expressions other than the parameter are unique is not supported"
-    )]
+    #[note(hir_analysis_const_param_note2)]
     pub const_param_note2: bool,
 }
 
 #[derive(Diagnostic)]
-#[diag("`impl Trait` cannot capture {$bad_place}", code = E0657)]
-pub(crate) struct OpaqueCapturesHigherRankedLifetime {
-    #[primary_span]
-    pub span: MultiSpan,
-    #[label("`impl Trait` implicitly captures all lifetimes in scope")]
-    pub label: Option<Span>,
-    #[note("lifetime declared here")]
-    pub decl_span: MultiSpan,
-    pub bad_place: &'static str,
+pub(crate) enum UnnamedFieldsRepr<'a> {
+    #[diag(hir_analysis_unnamed_fields_repr_missing_repr_c)]
+    MissingReprC {
+        #[primary_span]
+        #[label]
+        span: Span,
+        adt_kind: &'static str,
+        adt_name: Symbol,
+        #[subdiagnostic]
+        unnamed_fields: Vec<UnnamedFieldsReprFieldDefined>,
+        #[suggestion(code = "#[repr(C)]\n")]
+        sugg_span: Span,
+    },
+    #[diag(hir_analysis_unnamed_fields_repr_field_missing_repr_c)]
+    FieldMissingReprC {
+        #[primary_span]
+        #[label]
+        span: Span,
+        #[label(hir_analysis_field_ty_label)]
+        field_ty_span: Span,
+        field_ty: Ty<'a>,
+        field_adt_kind: &'static str,
+        #[suggestion(code = "#[repr(C)]\n")]
+        sugg_span: Span,
+    },
 }
 
 #[derive(Subdiagnostic)]
-pub(crate) enum InvalidReceiverTyHint {
-    #[note(
-        "`Weak` does not implement `Receiver` because it has methods that may shadow the referent; consider wrapping your `Weak` in a newtype wrapper for which you implement `Receiver`"
-    )]
-    Weak,
-    #[note(
-        "`NonNull` does not implement `Receiver` because it has methods that may shadow the referent; consider wrapping your `NonNull` in a newtype wrapper for which you implement `Receiver`"
-    )]
-    NonNull,
-}
-
-#[derive(Diagnostic)]
-#[diag("invalid `self` parameter type: `{$receiver_ty}`", code = E0307)]
-#[note("type of `self` must be `Self` or a type that dereferences to it")]
-#[help(
-    "consider changing to `self`, `&self`, `&mut self`, `self: Box<Self>`, `self: Rc<Self>`, `self: Arc<Self>`, or `self: Pin<P>` (where P is one of the previous types except `Self`)"
-)]
-pub(crate) struct InvalidReceiverTyNoArbitrarySelfTypes<'tcx> {
+#[note(hir_analysis_unnamed_fields_repr_field_defined)]
+pub(crate) struct UnnamedFieldsReprFieldDefined {
     #[primary_span]
     pub span: Span,
-    pub receiver_ty: Ty<'tcx>,
 }
 
 #[derive(Diagnostic)]
-#[diag("invalid `self` parameter type: `{$receiver_ty}`", code = E0307)]
-#[note("type of `self` must be `Self` or some type implementing `Receiver`")]
-#[help(
-    "consider changing to `self`, `&self`, `&mut self`, or a type implementing `Receiver` such as `self: Box<Self>`, `self: Rc<Self>`, or `self: Arc<Self>`"
-)]
+#[diag(hir_analysis_opaque_captures_higher_ranked_lifetime, code = E0657)]
+pub(crate) struct OpaqueCapturesHigherRankedLifetime {
+    #[primary_span]
+    pub span: Span,
+    #[label]
+    pub label: Option<Span>,
+    #[note]
+    pub decl_span: Span,
+    pub bad_place: &'static str,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_pattern_type_non_const_range)]
+pub(crate) struct NonConstRange {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_invalid_receiver_ty, code = E0307)]
+#[note]
+#[help(hir_analysis_invalid_receiver_ty_help)]
 pub(crate) struct InvalidReceiverTy<'tcx> {
     #[primary_span]
     pub span: Span,
     pub receiver_ty: Ty<'tcx>,
-    #[subdiagnostic]
-    pub hint: Option<InvalidReceiverTyHint>,
 }
 
 #[derive(Diagnostic)]
-#[diag("invalid generic `self` parameter type: `{$receiver_ty}`", code = E0801)]
-#[note("type of `self` must not be a method generic parameter type")]
-#[help(
-    "use a concrete type such as `self`, `&self`, `&mut self`, `self: Box<Self>`, `self: Rc<Self>`, `self: Arc<Self>`, or `self: Pin<P>` (where P is one of the previous types except `Self`)"
-)]
-pub(crate) struct InvalidGenericReceiverTy<'tcx> {
+#[diag(hir_analysis_effects_without_next_solver)]
+#[note]
+#[help]
+pub(crate) struct EffectsWithoutNextSolver;
+
+#[derive(Diagnostic)]
+#[diag(hir_analysis_cmse_call_inputs_stack_spill, code = E0798)]
+#[note]
+pub(crate) struct CmseCallInputsStackSpill {
     #[primary_span]
+    #[label]
     pub span: Span,
-    pub receiver_ty: Ty<'tcx>,
+    pub plural: bool,
 }
 
 #[derive(Diagnostic)]
-#[diag("arguments for `{$abi}` function too large to pass via registers", code = E0798)]
-#[note(
-    "functions with the `{$abi}` ABI must pass all their arguments via the 4 32-bit argument registers"
-)]
-pub(crate) struct CmseInputsStackSpill {
+#[diag(hir_analysis_cmse_call_output_stack_spill, code = E0798)]
+#[note(hir_analysis_note1)]
+#[note(hir_analysis_note2)]
+pub(crate) struct CmseCallOutputStackSpill {
     #[primary_span]
-    #[label("does not fit in the available registers")]
-    pub spans: Vec<Span>,
-    pub abi: ExternAbi,
-}
-
-#[derive(Diagnostic)]
-#[diag("return value of `{$abi}` function too large to pass via registers", code = E0798)]
-#[note("functions with the `{$abi}` ABI must pass their result via the available return registers")]
-#[note(
-    "the result must either be a (transparently wrapped) i64, u64 or f64, or be at most 4 bytes in size"
-)]
-pub(crate) struct CmseOutputStackSpill {
-    #[primary_span]
-    #[label("this type doesn't fit in the available registers")]
-    pub span: Span,
-    pub abi: ExternAbi,
-}
-
-#[derive(Diagnostic)]
-#[diag("generics are not allowed in `extern {$abi}` signatures", code = E0798)]
-pub(crate) struct CmseGeneric {
-    #[primary_span]
-    pub span: Span,
-    pub abi: ExternAbi,
-}
-
-#[derive(Diagnostic)]
-#[diag("`impl Trait` is not allowed in `extern {$abi}` signatures", code = E0798)]
-pub(crate) struct CmseImplTrait {
-    #[primary_span]
-    pub span: Span,
-    pub abi: ExternAbi,
-}
-
-#[derive(Diagnostic)]
-#[diag("return type notation not allowed in this position yet")]
-pub(crate) struct BadReturnTypeNotation {
-    #[primary_span]
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("trait item `{$item}` from `{$subtrait}` shadows identically named item from supertrait")]
-pub(crate) struct SupertraitItemShadowing {
-    pub item: Symbol,
-    pub subtrait: Symbol,
-    #[subdiagnostic]
-    pub shadowee: SupertraitItemShadowee,
-}
-
-#[derive(Subdiagnostic)]
-pub(crate) enum SupertraitItemShadowee {
-    #[note("item from `{$supertrait}` is shadowed by a subtrait item")]
-    Labeled {
-        #[primary_span]
-        span: Span,
-        supertrait: Symbol,
-    },
-    #[note("items from several supertraits are shadowed: {$traits}")]
-    Several {
-        #[primary_span]
-        spans: MultiSpan,
-        traits: DiagSymbolList,
-    },
-}
-
-#[derive(Diagnostic)]
-#[diag("{$kind} binding in trait object type mentions `Self`")]
-pub(crate) struct DynTraitAssocItemBindingMentionsSelf {
-    #[primary_span]
-    #[label("contains a mention of `Self`")]
-    pub span: Span,
-    pub kind: &'static str,
-    #[label("this binding mentions `Self`")]
-    pub binding: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(
-    "items with the \"custom\" ABI can only be declared externally or defined via naked functions"
-)]
-pub(crate) struct AbiCustomClothedFunction {
+#[diag(hir_analysis_cmse_call_generic, code = E0798)]
+pub(crate) struct CmseCallGeneric {
     #[primary_span]
     pub span: Span,
-    #[suggestion(
-        "convert this to an `#[unsafe(naked)]` function",
-        applicability = "maybe-incorrect",
-        code = "#[unsafe(naked)]\n",
-        style = "short"
-    )]
-    pub naked_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`AsyncDrop` impl without `Drop` impl")]
-#[help(
-    "type implementing `AsyncDrop` trait must also implement `Drop` trait to be used in sync context and unwinds"
-)]
-pub(crate) struct AsyncDropWithoutSyncDrop {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("lifetime parameters or bounds of `{$ident}` do not match the declaration")]
-pub(crate) struct LifetimesOrBoundsMismatchOnEii {
-    #[primary_span]
-    #[label("lifetimes do not match")]
-    pub span: Span,
-    #[label("lifetimes in impl do not match this signature")]
-    pub generics_span: Span,
-    #[label("this `where` clause might not match the one in the trait")]
-    pub where_span: Option<Span>,
-    #[label("this bound might be missing in the impl")]
-    pub bounds_span: Vec<Span>,
-    pub ident: Symbol,
-}
-
-#[derive(Diagnostic)]
-#[diag("`{$impl_name}` cannot have generic parameters other than lifetimes")]
-#[help("`#[{$eii_name}]` marks the implementation of an \"externally implementable item\"")]
-pub(crate) struct EiiWithGenerics {
-    #[primary_span]
-    pub span: Span,
-    #[label("required by this attribute")]
-    pub attr: Span,
-    pub eii_name: Symbol,
-    pub impl_name: Symbol,
-}
-
-#[derive(Diagnostic)]
-#[diag("explicit impls for the `Unpin` trait are not permitted for structurally pinned types")]
-pub(crate) struct ImplUnpinForPinProjectedType {
-    #[primary_span]
-    #[label("impl of `Unpin` not allowed")]
-    pub span: Span,
-    #[help("`{$adt_name}` is structurally pinned because it is marked as `#[pin_v2]`")]
-    pub adt_span: Span,
-    pub adt_name: Symbol,
 }

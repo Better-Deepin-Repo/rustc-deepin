@@ -1,7 +1,3 @@
-//@ revisions: current next
-//@[next] compile-flags: -Znext-solver
-//@ ignore-compare-mode-next-solver (explicit revisions)
-
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::Index;
@@ -25,8 +21,7 @@ fn index<'a, K, V>(map: &'a HashMap<K, V>, k: K) -> &'a V {
     //~^ ERROR the trait bound `K: Hash` is not satisfied
     //~| ERROR the trait bound `V: Copy` is not satisfied
     //~| ERROR mismatched types
-    //[current]~| ERROR mismatched types
-    //[next]~^^^^^ ERROR the trait bound `K: Hash` is not satisfied
+    //~| ERROR mismatched types
 }
 
 fn main() {}

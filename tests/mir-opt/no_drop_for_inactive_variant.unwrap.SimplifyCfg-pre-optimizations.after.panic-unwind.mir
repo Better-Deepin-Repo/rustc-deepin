@@ -24,7 +24,7 @@ fn unwrap(_1: Option<T>) -> T {
 
     bb2: {
         StorageLive(_4);
-        _4 = std::rt::begin_panic::<&str>(const "explicit panic") -> bb4;
+        _4 = begin_panic::<&str>(const "explicit panic") -> bb4;
     }
 
     bb3: {
@@ -40,8 +40,4 @@ fn unwrap(_1: Option<T>) -> T {
         _7 = discriminant(_1);
         resume;
     }
-}
-
-ALLOC0 (size: 14, align: 1) {
-    65 78 70 6c 69 63 69 74 20 70 61 6e 69 63       │ explicit panic
 }

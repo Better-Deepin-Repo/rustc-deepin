@@ -1,7 +1,6 @@
 //! Defines [`SyntaxKind`] -- a fieldless enum of all possible syntactic
 //! constructs of the Rust language.
 
-#[rustfmt::skip]
 mod generated;
 
 use crate::Edition;

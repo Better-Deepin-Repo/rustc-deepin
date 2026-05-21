@@ -5,7 +5,7 @@
 // We previously wrongly instantiated binders during trait upcasting,
 // allowing the super trait to be more generic than the sub trait.
 // This was unsound.
-
+#![feature(trait_upcasting)]
 trait Supertrait<'a, 'b> {
     fn cast(&self, x: &'a str) -> &'b str;
 }
@@ -19,10 +19,8 @@ impl<'a> Supertrait<'a, 'a> for () {
 }
 impl<'a> Subtrait<'a, 'a> for () {}
 fn unsound(x: &dyn for<'a> Subtrait<'a, 'a>) -> &dyn for<'a, 'b> Supertrait<'a, 'b> {
-    x
+    x //~ ERROR mismatched types
     //[current]~^ ERROR mismatched types
-    //[current]~| ERROR mismatched types
-    //[next]~^^^ ERROR the trait bound `&dyn for<'a> Subtrait<'a, 'a>: CoerceUnsized<&dyn for<'a, 'b> Supertrait<'a, 'b>>` is not satisfied
 }
 
 fn transmute<'a, 'b>(x: &'a str) -> &'b str {

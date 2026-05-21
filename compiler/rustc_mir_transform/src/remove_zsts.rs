@@ -4,9 +4,9 @@ use rustc_middle::mir::visit::*;
 use rustc_middle::mir::*;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 
-pub(super) struct RemoveZsts;
+pub struct RemoveZsts;
 
-impl<'tcx> crate::MirPass<'tcx> for RemoveZsts {
+impl<'tcx> MirPass<'tcx> for RemoveZsts {
     fn is_enabled(&self, sess: &rustc_session::Session) -> bool {
         sess.mir_opt_level() > 0
     }
@@ -17,9 +17,13 @@ impl<'tcx> crate::MirPass<'tcx> for RemoveZsts {
             return;
         }
 
-        let typing_env = body.typing_env(tcx);
+        if !tcx.consider_optimizing(|| format!("RemoveZsts - {:?}", body.source.def_id())) {
+            return;
+        }
+
+        let param_env = tcx.param_env_reveal_all_normalized(body.source.def_id());
         let local_decls = &body.local_decls;
-        let mut replacer = Replacer { tcx, typing_env, local_decls };
+        let mut replacer = Replacer { tcx, param_env, local_decls };
         for var_debug_info in &mut body.var_debug_info {
             replacer.visit_var_debug_info(var_debug_info);
         }
@@ -27,57 +31,40 @@ impl<'tcx> crate::MirPass<'tcx> for RemoveZsts {
             replacer.visit_basic_block_data(bb, data);
         }
     }
-
-    fn is_required(&self) -> bool {
-        true
-    }
 }
 
 struct Replacer<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
-    typing_env: ty::TypingEnv<'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
     local_decls: &'a LocalDecls<'tcx>,
 }
 
 /// A cheap, approximate check to avoid unnecessary `layout_of` calls.
-///
-/// `Some(true)` is definitely ZST; `Some(false)` is definitely *not* ZST.
-///
-/// `None` may or may not be, and must check `layout_of` to be sure.
-fn trivially_zst<'tcx>(ty: Ty<'tcx>, tcx: TyCtxt<'tcx>) -> Option<bool> {
+fn maybe_zst(ty: Ty<'_>) -> bool {
     match ty.kind() {
+        // maybe ZST (could be more precise)
+        ty::Adt(..)
+        | ty::Array(..)
+        | ty::Closure(..)
+        | ty::CoroutineClosure(..)
+        | ty::Tuple(..)
+        | ty::Alias(ty::Opaque, ..) => true,
         // definitely ZST
-        ty::FnDef(..) | ty::Never => Some(true),
-        ty::Tuple(fields) if fields.is_empty() => Some(true),
-        ty::Array(_ty, len) if let Some(0) = len.try_to_target_usize(tcx) => Some(true),
-        // clearly not ZST
-        ty::Bool
-        | ty::Char
-        | ty::Int(..)
-        | ty::Uint(..)
-        | ty::Float(..)
-        | ty::RawPtr(..)
-        | ty::Ref(..)
-        | ty::FnPtr(..) => Some(false),
-        ty::Coroutine(def_id, _) => {
-            // For async_drop_in_place::{closure} this is load bearing, not just a perf fix,
-            // because we don't want to compute the layout before mir analysis is done
-            if tcx.is_async_drop_in_place_coroutine(*def_id) { Some(false) } else { None }
-        }
-        // check `layout_of` to see (including unreachable things we won't actually see)
-        _ => None,
+        ty::FnDef(..) | ty::Never => true,
+        // unreachable or can't be ZST
+        _ => false,
     }
 }
 
 impl<'tcx> Replacer<'_, 'tcx> {
     fn known_to_be_zst(&self, ty: Ty<'tcx>) -> bool {
-        if let Some(is_zst) = trivially_zst(ty, self.tcx) {
-            is_zst
-        } else {
-            self.tcx
-                .layout_of(self.typing_env.as_query_input(ty))
-                .is_ok_and(|layout| layout.is_zst())
+        if !maybe_zst(ty) {
+            return false;
         }
+        let Ok(layout) = self.tcx.layout_of(self.param_env.and(ty)) else {
+            return false;
+        };
+        layout.is_zst()
     }
 
     fn make_zst(&self, ty: Ty<'tcx>) -> ConstOperand<'tcx> {
@@ -107,12 +94,16 @@ impl<'tcx> MutVisitor<'tcx> for Replacer<'_, 'tcx> {
         }
     }
 
-    fn visit_operand(&mut self, operand: &mut Operand<'tcx>, _: Location) {
+    fn visit_operand(&mut self, operand: &mut Operand<'tcx>, loc: Location) {
         if let Operand::Constant(_) = operand {
             return;
         }
         let op_ty = operand.ty(self.local_decls, self.tcx);
-        if self.known_to_be_zst(op_ty) {
+        if self.known_to_be_zst(op_ty)
+            && self.tcx.consider_optimizing(|| {
+                format!("RemoveZsts - Operand: {operand:?} Location: {loc:?}")
+            })
+        {
             *operand = Operand::Constant(Box::new(self.make_zst(op_ty)))
         }
     }
@@ -122,7 +113,8 @@ impl<'tcx> MutVisitor<'tcx> for Replacer<'_, 'tcx> {
             StatementKind::Assign(box (place, ref rvalue)) => {
                 rvalue.is_safe_to_remove().then_some(place)
             }
-            StatementKind::SetDiscriminant { box place, variant_index: _ }
+            StatementKind::Deinit(box place)
+            | StatementKind::SetDiscriminant { box place, variant_index: _ }
             | StatementKind::AscribeUserType(box (place, _), _)
             | StatementKind::Retag(_, box place)
             | StatementKind::PlaceMention(box place)
@@ -133,14 +125,13 @@ impl<'tcx> MutVisitor<'tcx> for Replacer<'_, 'tcx> {
             StatementKind::Coverage(_)
             | StatementKind::Intrinsic(_)
             | StatementKind::Nop
-            | StatementKind::BackwardIncompatibleDropHint { .. }
             | StatementKind::ConstEvalCounter => None,
         };
         if let Some(place_for_ty) = place_for_ty
             && let ty = place_for_ty.ty(self.local_decls, self.tcx).ty
             && self.known_to_be_zst(ty)
         {
-            statement.make_nop(true);
+            statement.make_nop();
         } else {
             self.super_statement(statement, loc);
         }

@@ -1,4 +1,3 @@
-//@ ignore-backends: gcc
 //@ build-pass
 //@ compile-flags: -Copt-level=s -Clto=fat
 //@ no-prefer-dynamic

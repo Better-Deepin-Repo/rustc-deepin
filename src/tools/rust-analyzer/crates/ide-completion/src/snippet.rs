@@ -8,7 +8,8 @@
 //
 // A custom snippet can be defined by adding it to the `rust-analyzer.completion.snippets.custom` object respectively.
 //
-// ```json
+// [source,json]
+// ----
 // {
 //   "rust-analyzer.completion.snippets.custom": {
 //     "thread spawn": {
@@ -24,7 +25,7 @@
 //     }
 //   }
 // }
-// ```
+// ----
 //
 // In the example above:
 //
@@ -38,7 +39,6 @@
 // * `description` is an optional description of the snippet, if unset the snippet name will be used.
 //
 // * `requires` is an optional list of item paths that have to be resolvable in the current crate where the completion is rendered.
-
 // On failure of resolution the snippet won't be applicable, otherwise the snippet will insert an import for the items on insertion if
 // the items aren't yet in scope.
 //
@@ -55,8 +55,8 @@
 //
 // For the VSCode editor, rust-analyzer also ships with a small set of defaults which can be removed
 // by overwriting the settings object mentioned above, the defaults are:
-//
-// ```json
+// [source,json]
+// ----
 // {
 //     "Arc::new": {
 //         "postfix": "arc",
@@ -98,11 +98,11 @@
 //         "scope": "expr"
 //     }
 // }
-// ````
+// ----
 
-use hir::{ModPath, Name, Symbol};
 use ide_db::imports::import_assets::LocatedImport;
 use itertools::Itertools;
+use syntax::{ast, AstNode, GreenNode, SyntaxNode};
 
 use crate::context::CompletionContext;
 
@@ -123,7 +123,10 @@ pub struct Snippet {
     pub scope: SnippetScope,
     pub description: Option<Box<str>>,
     snippet: String,
-    requires: Box<[ModPath]>,
+    // These are `ast::Path`'s but due to SyntaxNodes not being Send we store these
+    // and reconstruct them on demand instead. This is cheaper than reparsing them
+    // from strings
+    requires: Box<[GreenNode]>,
 }
 
 impl Snippet {
@@ -140,6 +143,7 @@ impl Snippet {
         }
         let (requires, snippet, description) = validate_snippet(snippet, description, requires)?;
         Some(Snippet {
+            // Box::into doesn't work as that has a Copy bound 😒
             postfix_triggers: postfix_triggers.iter().map(String::as_str).map(Into::into).collect(),
             prefix_triggers: prefix_triggers.iter().map(String::as_str).map(Into::into).collect(),
             scope,
@@ -163,18 +167,22 @@ impl Snippet {
     }
 }
 
-fn import_edits(ctx: &CompletionContext<'_>, requires: &[ModPath]) -> Option<Vec<LocatedImport>> {
-    let import_cfg = ctx.config.find_path_config(ctx.is_nightly);
+fn import_edits(ctx: &CompletionContext<'_>, requires: &[GreenNode]) -> Option<Vec<LocatedImport>> {
+    let import_cfg = ctx.config.import_path_config();
 
-    let resolve = |import| {
-        let item = ctx.scope.resolve_mod_path(import).next()?;
+    let resolve = |import: &GreenNode| {
+        let path = ast::Path::cast(SyntaxNode::new_root(import.clone()))?;
+        let item = match ctx.scope.speculative_resolve(&path)? {
+            hir::PathResolution::Def(def) => def.into(),
+            _ => return None,
+        };
         let path = ctx.module.find_use_path(
             ctx.db,
             item,
             ctx.config.insert_use.prefix_kind,
             import_cfg,
         )?;
-        Some((path.len() > 1).then(|| LocatedImport::new_no_completion(path.clone(), item, item)))
+        Some((path.len() > 1).then(|| LocatedImport::new(path.clone(), item, item)))
     };
     let mut res = Vec::with_capacity(requires.len());
     for import in requires {
@@ -190,14 +198,19 @@ fn validate_snippet(
     snippet: &[String],
     description: &str,
     requires: &[String],
-) -> Option<(Box<[ModPath]>, String, Option<Box<str>>)> {
+) -> Option<(Box<[GreenNode]>, String, Option<Box<str>>)> {
     let mut imports = Vec::with_capacity(requires.len());
     for path in requires.iter() {
-        let use_path = ModPath::from_segments(
-            hir::PathKind::Plain,
-            path.split("::").map(Symbol::intern).map(Name::new_symbol_root),
-        );
-        imports.push(use_path);
+        let use_path =
+            ast::SourceFile::parse(&format!("use {path};"), syntax::Edition::CURRENT_FIXME)
+                .syntax_node()
+                .descendants()
+                .find_map(ast::Path::cast)?;
+        if use_path.syntax().text() != path.as_str() {
+            return None;
+        }
+        let green = use_path.syntax().green().into_owned();
+        imports.push(green);
     }
     let snippet = snippet.iter().join("\n");
     let description = (!description.is_empty())

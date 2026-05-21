@@ -5,7 +5,8 @@
 use super::raw::{AsRawHandle, FromRawHandle, IntoRawHandle, RawHandle};
 use crate::marker::PhantomData;
 use crate::mem::ManuallyDrop;
-use crate::sys::{AsInner, FromInner, IntoInner, cvt};
+use crate::sys::cvt;
+use crate::sys_common::{AsInner, FromInner, IntoInner};
 use crate::{fmt, fs, io, ptr, sys};
 
 /// A borrowed handle.
@@ -184,7 +185,7 @@ impl OwnedHandle {
     /// Creates a new `OwnedHandle` instance that shares the same underlying
     /// object as the existing `OwnedHandle` instance.
     #[stable(feature = "io_safety", since = "1.63.0")]
-    pub fn try_clone(&self) -> io::Result<Self> {
+    pub fn try_clone(&self) -> crate::io::Result<Self> {
         self.as_handle().try_clone_to_owned()
     }
 }
@@ -193,7 +194,7 @@ impl BorrowedHandle<'_> {
     /// Creates a new `OwnedHandle` instance that shares the same underlying
     /// object as the existing `BorrowedHandle` instance.
     #[stable(feature = "io_safety", since = "1.63.0")]
-    pub fn try_clone_to_owned(&self) -> io::Result<OwnedHandle> {
+    pub fn try_clone_to_owned(&self) -> crate::io::Result<OwnedHandle> {
         self.duplicate(0, false, sys::c::DUPLICATE_SAME_ACCESS)
     }
 
@@ -409,7 +410,7 @@ macro_rules! impl_is_terminal {
         impl crate::sealed::Sealed for $t {}
 
         #[stable(feature = "is_terminal", since = "1.70.0")]
-        impl io::IsTerminal for $t {
+        impl crate::io::IsTerminal for $t {
             #[inline]
             fn is_terminal(&self) -> bool {
                 crate::sys::io::is_terminal(self)
@@ -484,14 +485,6 @@ impl<T: AsHandle + ?Sized> AsHandle for crate::rc::Rc<T> {
     }
 }
 
-#[unstable(feature = "unique_rc_arc", issue = "112566")]
-impl<T: AsHandle + ?Sized> AsHandle for crate::rc::UniqueRc<T> {
-    #[inline]
-    fn as_handle(&self) -> BorrowedHandle<'_> {
-        (**self).as_handle()
-    }
-}
-
 #[stable(feature = "as_windows_ptrs", since = "1.71.0")]
 impl<T: AsHandle + ?Sized> AsHandle for Box<T> {
     #[inline]
@@ -546,7 +539,7 @@ impl From<OwnedHandle> for fs::File {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-impl AsHandle for io::Stdin {
+impl AsHandle for crate::io::Stdin {
     #[inline]
     fn as_handle(&self) -> BorrowedHandle<'_> {
         unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
@@ -554,7 +547,7 @@ impl AsHandle for io::Stdin {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-impl<'a> AsHandle for io::StdinLock<'a> {
+impl<'a> AsHandle for crate::io::StdinLock<'a> {
     #[inline]
     fn as_handle(&self) -> BorrowedHandle<'_> {
         unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
@@ -562,7 +555,7 @@ impl<'a> AsHandle for io::StdinLock<'a> {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-impl AsHandle for io::Stdout {
+impl AsHandle for crate::io::Stdout {
     #[inline]
     fn as_handle(&self) -> BorrowedHandle<'_> {
         unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
@@ -570,7 +563,7 @@ impl AsHandle for io::Stdout {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-impl<'a> AsHandle for io::StdoutLock<'a> {
+impl<'a> AsHandle for crate::io::StdoutLock<'a> {
     #[inline]
     fn as_handle(&self) -> BorrowedHandle<'_> {
         unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
@@ -578,7 +571,7 @@ impl<'a> AsHandle for io::StdoutLock<'a> {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-impl AsHandle for io::Stderr {
+impl AsHandle for crate::io::Stderr {
     #[inline]
     fn as_handle(&self) -> BorrowedHandle<'_> {
         unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
@@ -586,7 +579,7 @@ impl AsHandle for io::Stderr {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-impl<'a> AsHandle for io::StderrLock<'a> {
+impl<'a> AsHandle for crate::io::StderrLock<'a> {
     #[inline]
     fn as_handle(&self) -> BorrowedHandle<'_> {
         unsafe { BorrowedHandle::borrow_raw(self.as_raw_handle()) }
@@ -657,47 +650,5 @@ impl<T> From<crate::thread::JoinHandle<T>> for OwnedHandle {
     #[inline]
     fn from(join_handle: crate::thread::JoinHandle<T>) -> OwnedHandle {
         join_handle.into_inner().into_handle().into_inner()
-    }
-}
-
-#[stable(feature = "anonymous_pipe", since = "1.87.0")]
-impl AsHandle for io::PipeReader {
-    fn as_handle(&self) -> BorrowedHandle<'_> {
-        self.0.as_handle()
-    }
-}
-
-#[stable(feature = "anonymous_pipe", since = "1.87.0")]
-impl From<io::PipeReader> for OwnedHandle {
-    fn from(pipe: io::PipeReader) -> Self {
-        pipe.into_inner().into_inner()
-    }
-}
-
-#[stable(feature = "anonymous_pipe", since = "1.87.0")]
-impl AsHandle for io::PipeWriter {
-    fn as_handle(&self) -> BorrowedHandle<'_> {
-        self.0.as_handle()
-    }
-}
-
-#[stable(feature = "anonymous_pipe", since = "1.87.0")]
-impl From<io::PipeWriter> for OwnedHandle {
-    fn from(pipe: io::PipeWriter) -> Self {
-        pipe.into_inner().into_inner()
-    }
-}
-
-#[stable(feature = "anonymous_pipe", since = "1.87.0")]
-impl From<OwnedHandle> for io::PipeReader {
-    fn from(owned_handle: OwnedHandle) -> Self {
-        Self::from_inner(FromInner::from_inner(owned_handle))
-    }
-}
-
-#[stable(feature = "anonymous_pipe", since = "1.87.0")]
-impl From<OwnedHandle> for io::PipeWriter {
-    fn from(owned_handle: OwnedHandle) -> Self {
-        Self::from_inner(FromInner::from_inner(owned_handle))
     }
 }

@@ -213,7 +213,7 @@
 //!  - All other locals need to be declared with `let` somewhere and then can be accessed by name.
 //!
 //! #### Places
-//!  - Locals implicitly convert to places.
+//!  - Locals implicit convert to places.
 //!  - Field accesses, derefs, and indexing work normally.
 //!  - Fields in variants can be accessed via the [`Variant`] and [`Field`] associated functions,
 //!    see their documentation for details.
@@ -227,14 +227,13 @@
 //!
 //! #### Statements
 //!  - Assign statements work via normal Rust assignment.
-//!  - [`Retag`], [`StorageLive`], [`StorageDead`] statements have an associated function.
+//!  - [`Retag`], [`StorageLive`], [`StorageDead`], [`Deinit`] statements have an associated function.
 //!
 //! #### Rvalues
 //!
 //!  - Operands implicitly convert to `Use` rvalues.
 //!  - `&`, `&mut`, `addr_of!`, and `addr_of_mut!` all work to create their associated rvalue.
-//!  - [`CastTransmute`], [`CastPtrToPtr`], [`CastUnsize`], and [`Discriminant`]
-//!    have associated functions.
+//!  - [`Discriminant`], [`Len`], and [`CopyForDeref`] have associated functions.
 //!  - Unary and binary operations use their normal Rust syntax - `a * b`, `!c`, etc.
 //!  - The binary operation `Offset` can be created via [`Offset`].
 //!  - Checked binary operations are represented by wrapping the associated binop in [`Checked`].
@@ -250,46 +249,13 @@
 //!    `Call(ret_val = function(arg1, arg2, ...), ReturnTo(next_block), UnwindContinue())`.
 //!  - [`TailCall`] does not have a return destination or next block, so its syntax is just
 //!    `TailCall(function(arg1, arg2, ...))`.
-//!
-//! #### Debuginfo
-//!
-//! Debuginfo associates source code variable names (of variables that may not exist any more) with
-//! MIR expressions that indicate where the value of that variable is stored. The syntax to do so
-//! is:
-//! ```text
-//! debug source_var_name => expression;
-//! ```
-//! Both places and constants are supported in the `expression`.
-//!
-//! ```rust
-//! #![allow(internal_features)]
-//! #![feature(core_intrinsics, custom_mir)]
-//!
-//! use core::intrinsics::mir::*;
-//!
-//! #[custom_mir(dialect = "built")]
-//! fn debuginfo(arg: Option<&i32>) {
-//!     mir!(
-//!         // Debuginfo for a source variable `plain_local` that just duplicates `arg`.
-//!         debug plain_local => arg;
-//!         // Debuginfo for a source variable `projection` that can be computed by dereferencing
-//!         // a field of `arg`.
-//!         debug projection => *Field::<&i32>(Variant(arg, 1), 0);
-//!         // Debuginfo for a source variable `constant` that always holds the value `5`.
-//!         debug constant => 5_usize;
-//!         {
-//!             Return()
-//!         }
-//!     )
-//! }
-//! ```
 
 #![unstable(
     feature = "custom_mir",
     reason = "MIR is an implementation detail and extremely unstable",
     issue = "none"
 )]
-#![allow(unused_variables, non_snake_case, missing_debug_implementations, missing_docs)]
+#![allow(unused_variables, non_snake_case, missing_debug_implementations)]
 
 /// Type representing basic blocks.
 ///
@@ -332,7 +298,7 @@ define!(
 );
 define!(
     "mir_unwind_unreachable",
-    /// An unwind action that triggers undefined behavior.
+    /// An unwind action that triggers undefined behaviour.
     fn UnwindUnreachable() -> UnwindActionArg
 );
 define!(
@@ -344,7 +310,7 @@ define!(
 );
 define!(
     "mir_unwind_cleanup",
-    /// An unwind action that continues execution in a given basic block.
+    /// An unwind action that continues execution in a given basic blok.
     fn UnwindCleanup(goto: BasicBlock) -> UnwindActionArg
 );
 
@@ -400,11 +366,14 @@ define!("mir_unwind_resume",
 define!("mir_storage_live", fn StorageLive<T>(local: T));
 define!("mir_storage_dead", fn StorageDead<T>(local: T));
 define!("mir_assume", fn Assume(operand: bool));
+define!("mir_deinit", fn Deinit<T>(place: T));
 define!("mir_checked", fn Checked<T>(binop: T) -> (T, bool));
+define!("mir_len", fn Len<T>(place: T) -> usize);
 define!(
     "mir_ptr_metadata",
     fn PtrMetadata<P: ?Sized>(place: *const P) -> <P as ::core::ptr::Pointee>::Metadata
 );
+define!("mir_copy_for_deref", fn CopyForDeref<T>(place: T) -> T);
 define!("mir_retag", fn Retag<T>(place: T));
 define!("mir_move", fn Move<T>(place: T) -> T);
 define!("mir_static", fn Static<T>(s: T) -> &'static T);
@@ -488,13 +457,6 @@ define!(
     ///
     /// This allows bypassing normal validation to generate strange casts.
     fn CastPtrToPtr<T, U>(operand: T) -> U
-);
-define!(
-    "mir_cast_unsize",
-    /// Emits a `CastKind::PointerCoercion(Unsize)` cast.
-    ///
-    /// This allows bypassing normal validation to generate strange casts.
-    fn CastUnsize<T, U>(operand: T) -> U
 );
 define!(
     "mir_make_place",

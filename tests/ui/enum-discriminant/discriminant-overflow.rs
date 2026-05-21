@@ -1,8 +1,7 @@
 // Issue 23030: Detect overflowing discriminant
+
 // See also run-pass/discrim-explicit-23030.rs where the suggested
 // workaround is tested.
-
-//@ dont-require-annotations: NOTE
 
 fn f_i8() {
     #[repr(i8)]
@@ -43,7 +42,7 @@ fn f_u16() {
         Ok = u16::MAX - 1,
         Ok2,
         OhNo, //~ ERROR enum discriminant overflowed [E0370]
-              //~| NOTE overflowed on value after 65535
+              //~| overflowed on value after 65535
     }
 
     let x = A::Ok;
@@ -55,7 +54,7 @@ fn f_i32() {
         Ok = i32::MAX - 1,
         Ok2,
         OhNo, //~ ERROR enum discriminant overflowed [E0370]
-              //~| NOTE overflowed on value after 2147483647
+              //~| overflowed on value after 2147483647
     }
 
     let x = A::Ok;
@@ -67,7 +66,7 @@ fn f_u32() {
         Ok = u32::MAX - 1,
         Ok2,
         OhNo, //~ ERROR enum discriminant overflowed [E0370]
-              //~| NOTE overflowed on value after 4294967295
+              //~| overflowed on value after 4294967295
     }
 
     let x = A::Ok;
@@ -79,7 +78,7 @@ fn f_i64() {
         Ok = i64::MAX - 1,
         Ok2,
         OhNo, //~ ERROR enum discriminant overflowed [E0370]
-              //~| NOTE overflowed on value after 9223372036854775807
+              //~| overflowed on value after 9223372036854775807
     }
 
     let x = A::Ok;
@@ -91,7 +90,7 @@ fn f_u64() {
         Ok = u64::MAX - 1,
         Ok2,
         OhNo, //~ ERROR enum discriminant overflowed [E0370]
-              //~| NOTE overflowed on value after 18446744073709551615
+              //~| overflowed on value after 18446744073709551615
     }
 
     let x = A::Ok;

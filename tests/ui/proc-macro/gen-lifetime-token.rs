@@ -1,5 +1,5 @@
 //@ run-pass
-//@ proc-macro: gen-lifetime-token.rs
+//@ aux-build:gen-lifetime-token.rs
 
 extern crate gen_lifetime_token as bar;
 

@@ -1,14 +1,13 @@
-use crate::core::compiler::{Compilation, Doctest, Unit, UnitHash, UnitOutput};
+use crate::core::compiler::{Compilation, CompileKind, Doctest, Metadata, Unit, UnitOutput};
 use crate::core::profiles::PanicStrategy;
 use crate::core::shell::ColorChoice;
 use crate::core::shell::Verbosity;
 use crate::core::{TargetKind, Workspace};
 use crate::ops;
 use crate::util::errors::CargoResult;
-use crate::util::{CliError, CliResult, GlobalContext, add_path_args};
+use crate::util::{add_path_args, CliError, CliResult, GlobalContext};
 use anyhow::format_err;
 use cargo_util::{ProcessBuilder, ProcessError};
-use std::collections::HashMap;
 use std::ffi::OsString;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
@@ -104,7 +103,7 @@ pub fn run_benches(ws: &Workspace<'_>, options: &TestOptions, args: &[&str]) -> 
 
 fn compile_tests<'a>(ws: &Workspace<'a>, options: &TestOptions) -> CargoResult<Compilation<'a>> {
     let mut compilation = ops::compile(ws, &options.compile_opts)?;
-    compilation.tests.sort_by_key(|u| u.unit.clone());
+    compilation.tests.sort();
     Ok(compilation)
 }
 
@@ -126,8 +125,7 @@ fn run_unit_tests(
     for UnitOutput {
         unit,
         path,
-        script_metas,
-        env,
+        script_meta,
     } in compilation.tests.iter()
     {
         let (exe_display, mut cmd) = cmd_builds(
@@ -135,8 +133,7 @@ fn run_unit_tests(
             cwd,
             unit,
             path,
-            script_metas.as_ref(),
-            env,
+            script_meta,
             test_args,
             compilation,
             "unittests",
@@ -179,6 +176,7 @@ fn run_doc_tests(
 ) -> Result<Vec<UnitTestError>, CliError> {
     let gctx = ws.gctx();
     let mut errors = Vec::new();
+    let doctest_xcompile = gctx.cli_unstable().doctest_xcompile;
     let color = gctx.shell().color_choice();
 
     for doctest_info in &compilation.to_doc_test {
@@ -187,12 +185,34 @@ fn run_doc_tests(
             unstable_opts,
             unit,
             linker,
-            script_metas,
+            script_meta,
             env,
         } = doctest_info;
 
+        if !doctest_xcompile {
+            match unit.kind {
+                CompileKind::Host => {}
+                CompileKind::Target(target) => {
+                    if target.short_name() != compilation.host {
+                        // Skip doctests, -Zdoctest-xcompile not enabled.
+                        gctx.shell().verbose(|shell| {
+                            shell.note(format!(
+                                "skipping doctests for {} ({}), \
+                                 cross-compilation doctests are not yet supported\n\
+                                 See https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#doctest-xcompile \
+                                 for more information.",
+                                unit.pkg,
+                                unit.target.description_named()
+                            ))
+                        })?;
+                        continue;
+                    }
+                }
+            }
+        }
+
         gctx.shell().status("Doc-tests", unit.target.name())?;
-        let mut p = compilation.rustdoc_process(unit, script_metas.as_ref())?;
+        let mut p = compilation.rustdoc_process(unit, *script_meta)?;
 
         for (var, value) in env {
             p.env(var, value);
@@ -209,24 +229,41 @@ fn run_doc_tests(
         p.arg("--test");
 
         add_path_args(ws, unit, &mut p);
-        p.arg("--test-run-directory").arg(unit.pkg.root());
+        p.arg("--test-run-directory")
+            .arg(unit.pkg.root().to_path_buf());
 
-        unit.kind.add_target_arg(&mut p);
-
-        if let Some((runtool, runtool_args)) = compilation.target_runner(unit.kind) {
-            p.arg("--test-runtool").arg(runtool);
-            for arg in runtool_args {
-                p.arg("--test-runtool-arg").arg(arg);
-            }
+        if let CompileKind::Target(target) = unit.kind {
+            // use `rustc_target()` to properly handle JSON target paths
+            p.arg("--target").arg(target.rustc_target());
         }
-        if let Some(linker) = linker {
-            let mut joined = OsString::from("linker=");
-            joined.push(linker);
-            p.arg("-C").arg(joined);
+
+        if doctest_xcompile {
+            p.arg("-Zunstable-options");
+            p.arg("--enable-per-target-ignores");
+            if let Some((runtool, runtool_args)) = compilation.target_runner(unit.kind) {
+                p.arg("--runtool").arg(runtool);
+                for arg in runtool_args {
+                    p.arg("--runtool-arg").arg(arg);
+                }
+            }
+            if let Some(linker) = linker {
+                let mut joined = OsString::from("linker=");
+                joined.push(linker);
+                p.arg("-C").arg(joined);
+            }
         }
 
         if unit.profile.panic != PanicStrategy::Unwind {
             p.arg("-C").arg(format!("panic={}", unit.profile.panic));
+        }
+
+        for &rust_dep in &[
+            &compilation.deps_output[&unit.kind],
+            &compilation.deps_output[&CompileKind::Host],
+        ] {
+            let mut arg = OsString::from("dependency=");
+            arg.push(rust_dep);
+            p.arg("-L").arg(arg);
         }
 
         for native_dep in compilation.native_dirs.iter() {
@@ -286,8 +323,7 @@ fn display_no_run_information(
     for UnitOutput {
         unit,
         path,
-        script_metas,
-        env,
+        script_meta,
     } in compilation.tests.iter()
     {
         let (exe_display, cmd) = cmd_builds(
@@ -295,8 +331,7 @@ fn display_no_run_information(
             cwd,
             unit,
             path,
-            script_metas.as_ref(),
-            env,
+            script_meta,
             test_args,
             compilation,
             exec_type,
@@ -320,8 +355,7 @@ fn cmd_builds(
     cwd: &Path,
     unit: &Unit,
     path: &PathBuf,
-    script_metas: Option<&Vec<UnitHash>>,
-    env: &HashMap<String, OsString>,
+    script_meta: &Option<Metadata>,
     test_args: &[&str],
     compilation: &Compilation<'_>,
     exec_type: &str,
@@ -346,13 +380,10 @@ fn cmd_builds(
         ),
     };
 
-    let mut cmd = compilation.target_process(path, unit.kind, &unit.pkg, script_metas)?;
+    let mut cmd = compilation.target_process(path, unit.kind, &unit.pkg, *script_meta)?;
     cmd.args(test_args);
     if unit.target.harness() && gctx.shell().verbosity() == Verbosity::Quiet {
         cmd.arg("--quiet");
-    }
-    for (key, val) in env.iter() {
-        cmd.env(key, val);
     }
 
     Ok((exe_display, cmd))
@@ -424,11 +455,11 @@ fn report_test_error(
     crate::display_error(&err, &mut ws.gctx().shell());
 
     let harness: bool = unit_err.unit.target.harness();
-    let nocapture: bool = test_args.contains(&"--nocapture") || test_args.contains(&"--no-capture");
+    let nocapture: bool = test_args.contains(&"--nocapture");
 
     if !is_simple && executed && harness && !nocapture {
         drop(ws.gctx().shell().note(
-            "test exited abnormally; to see the full output pass --no-capture to the harness.",
+            "test exited abnormally; to see the full output pass --nocapture to the harness.",
         ));
     }
 }

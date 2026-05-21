@@ -1,9 +1,7 @@
-//@ edition: 2015
-
 type A0 = dyn;
 //~^ ERROR cannot find type `dyn` in this scope
 type A1 = dyn::dyn;
-//~^ ERROR cannot find module or crate `dyn` in this scope
+//~^ ERROR use of undeclared crate or module `dyn`
 type A2 = dyn<dyn, dyn>;
 //~^ ERROR cannot find type `dyn` in this scope
 //~| ERROR cannot find type `dyn` in this scope

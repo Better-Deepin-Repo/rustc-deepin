@@ -10,37 +10,32 @@ struct A {
 
 impl A {
     fn a(&self) -> &u8 {
-        //~^ misnamed_getters
-
+        //~^ ERROR: getter function appears to return the wrong field
+        //~| NOTE: `-D clippy::misnamed-getters` implied by `-D warnings`
         &self.a
     }
     fn a_mut(&mut self) -> &mut u8 {
-        //~^ misnamed_getters
-
+        //~^ ERROR: getter function appears to return the wrong field
         &mut self.a
     }
 
     fn b(self) -> u8 {
-        //~^ misnamed_getters
-
+        //~^ ERROR: getter function appears to return the wrong field
         self.b
     }
 
     fn b_mut(&mut self) -> &mut u8 {
-        //~^ misnamed_getters
-
+        //~^ ERROR: getter function appears to return the wrong field
         &mut self.b
     }
 
     fn c(&self) -> &u8 {
-        //~^ misnamed_getters
-
+        //~^ ERROR: getter function appears to return the wrong field
         &self.c
     }
 
     fn c_mut(&mut self) -> &mut u8 {
-        //~^ misnamed_getters
-
+        //~^ ERROR: getter function appears to return the wrong field
         &mut self.c
     }
 }
@@ -52,65 +47,57 @@ union B {
 
 impl B {
     unsafe fn a(&self) -> &u8 {
-        //~^ misnamed_getters
-
-        unsafe { &self.a }
+        //~^ ERROR: getter function appears to return the wrong field
+        &self.a
     }
     unsafe fn a_mut(&mut self) -> &mut u8 {
-        //~^ misnamed_getters
-
-        unsafe { &mut self.a }
+        //~^ ERROR: getter function appears to return the wrong field
+        &mut self.a
     }
 
     unsafe fn b(self) -> u8 {
-        //~^ misnamed_getters
-
-        unsafe { self.b }
+        //~^ ERROR: getter function appears to return the wrong field
+        self.b
     }
 
     unsafe fn b_mut(&mut self) -> &mut u8 {
-        //~^ misnamed_getters
-
-        unsafe { &mut self.b }
+        //~^ ERROR: getter function appears to return the wrong field
+        &mut self.b
     }
 
     unsafe fn c(&self) -> &u8 {
-        unsafe { &self.b }
+        &self.b
     }
 
     unsafe fn c_mut(&mut self) -> &mut u8 {
-        unsafe { &mut self.a }
+        &mut self.a
     }
 
     unsafe fn a_unchecked(&self) -> &u8 {
-        //~^ misnamed_getters
-
-        unsafe { &self.a }
+        //~^ ERROR: getter function appears to return the wrong field
+        &self.a
     }
     unsafe fn a_unchecked_mut(&mut self) -> &mut u8 {
-        //~^ misnamed_getters
-
-        unsafe { &mut self.a }
+        //~^ ERROR: getter function appears to return the wrong field
+        &mut self.a
     }
 
     unsafe fn b_unchecked(self) -> u8 {
-        //~^ misnamed_getters
-
-        unsafe { self.b }
+        //~^ ERROR: getter function appears to return the wrong field
+        self.b
     }
 
     unsafe fn b_unchecked_mut(&mut self) -> &mut u8 {
-        //~^ misnamed_getters
-
-        unsafe { &mut self.b }
+        //~^ ERROR: getter function appears to return the wrong field
+        &mut self.b
     }
 
     unsafe fn c_unchecked(&self) -> &u8 {
-        unsafe { &self.b }
+        &self.b
     }
 
     unsafe fn c_unchecked_mut(&mut self) -> &mut u8 {
-        unsafe { &mut self.a }
+        &mut self.a
     }
 }
 
@@ -134,24 +121,20 @@ impl core::ops::DerefMut for D {
 
 impl D {
     fn a(&self) -> &u8 {
-        //~^ misnamed_getters
-
+        //~^ ERROR: getter function appears to return the wrong field
         &self.a
     }
     fn a_mut(&mut self) -> &mut u8 {
-        //~^ misnamed_getters
-
+        //~^ ERROR: getter function appears to return the wrong field
         &mut self.a
     }
 
     fn d(&self) -> &u8 {
-        //~^ misnamed_getters
-
+        //~^ ERROR: getter function appears to return the wrong field
         &self.d
     }
     fn d_mut(&mut self) -> &mut u8 {
-        //~^ misnamed_getters
-
+        //~^ ERROR: getter function appears to return the wrong field
         &mut self.d
     }
 }

@@ -1,4 +1,4 @@
-//@ ignore-auxiliary (used by `./move-error-snippets.rs`)
+//@ ignore-test (auxiliary, used by other tests)
 
 macro_rules! aaa {
     ($c:ident) => {{

@@ -59,10 +59,7 @@ error: unreachable pattern
   --> $DIR/explain-unreachable-pats.rs:52:9
    |
 LL |         Err(_) => {}
-   |         ^^^^^^------
-   |         |
-   |         matches no values because `!` is uninhabited
-   |         help: remove the match arm
+   |         ^^^^^^ matches no values because `!` is uninhabited
    |
    = note: to learn more about uninhabited types, see https://doc.rust-lang.org/nomicon/exotic-sizes.html#empty-types
 
@@ -70,10 +67,7 @@ error: unreachable pattern
   --> $DIR/explain-unreachable-pats.rs:66:9
    |
 LL |         (Err(_), Err(_)) => {}
-   |         ^^^^^^^^^^^^^^^^------
-   |         |
-   |         matches no values because `Void2` is uninhabited
-   |         help: remove the match arm
+   |         ^^^^^^^^^^^^^^^^ matches no values because `Void2` is uninhabited
    |
    = note: to learn more about uninhabited types, see https://doc.rust-lang.org/nomicon/exotic-sizes.html#empty-types
 
@@ -81,10 +75,7 @@ error: unreachable pattern
   --> $DIR/explain-unreachable-pats.rs:73:9
    |
 LL |         (Err(_), Err(_)) => {}
-   |         ^^^^^^^^^^^^^^^^------
-   |         |
-   |         matches no values because `Void1` is uninhabited
-   |         help: remove the match arm
+   |         ^^^^^^^^^^^^^^^^ matches no values because `Void1` is uninhabited
    |
    = note: to learn more about uninhabited types, see https://doc.rust-lang.org/nomicon/exotic-sizes.html#empty-types
 

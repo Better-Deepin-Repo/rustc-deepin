@@ -6,11 +6,10 @@ LL |     let _: &i32 = & { Box::new(1i32) };
    |
    = note: expected type `i32`
             found struct `Box<i32>`
-help: consider removing the Box
+help: consider unboxing the value
    |
-LL -     let _: &i32 = & { Box::new(1i32) };
-LL +     let _: &i32 = & { 1i32 };
-   |
+LL |     let _: &i32 = & { *Box::new(1i32) };
+   |                       +
 
 error: aborting due to 1 previous error
 

@@ -3,11 +3,11 @@
 // because it would require stack allocation of an unsized temporary (*g in the
 // test).
 
-struct Fat<T: ?Sized>(T);
+#![feature(unsized_tuple_coercion)]
 
 pub fn main() {
-    let f: Fat<[isize; 3]> = Fat([5, 6, 7]);
-    let g: &Fat<[isize]> = &f;
-    let h: &Fat<Fat<[isize]>> = &Fat(*g);
+    let f: ([isize; 3],) = ([5, 6, 7],);
+    let g: &([isize],) = &f;
+    let h: &(([isize],),) = &(*g,);
     //~^ ERROR the size for values of type
 }

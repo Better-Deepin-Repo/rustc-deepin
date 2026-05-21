@@ -1,5 +1,5 @@
 #![feature(rustc_attrs)]
-#![pattern_complexity_limit = "61"]
+#![pattern_complexity = "61"]
 
 //@ check-pass
 struct BaseCommand {

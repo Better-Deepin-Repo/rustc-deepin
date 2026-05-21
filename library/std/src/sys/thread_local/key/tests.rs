@@ -1,4 +1,4 @@
-use super::{LazyKey, get, set};
+use super::{get, set, LazyKey};
 use crate::ptr;
 
 #[test]

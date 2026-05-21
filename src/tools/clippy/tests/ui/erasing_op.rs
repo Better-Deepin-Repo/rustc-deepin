@@ -33,20 +33,19 @@ impl core::ops::Mul<i32> for Vec1 {
 #[warn(clippy::erasing_op)]
 fn test(x: u8) {
     x * 0;
-    //~^ erasing_op
-
+    //~^ ERROR: this operation will always return zero. This is likely not the intended ou
+    //~| NOTE: `-D clippy::erasing-op` implied by `-D warnings`
     0 & x;
-    //~^ erasing_op
-
+    //~^ ERROR: this operation will always return zero. This is likely not the intended ou
     0 / x;
-    //~^ erasing_op
-
+    //~^ ERROR: this operation will always return zero. This is likely not the intended ou
     0 * Meter; // no error: Output type is different from the non-zero argument
     0 * Vec1 { x: 5 };
-    //~^ erasing_op
-
+    //~^ ERROR: this operation will always return zero. This is likely not the intended ou
     Vec1 { x: 5 } * 0;
-    //~^ erasing_op
+    //~^ ERROR: this operation will always return zero. This is likely not the intended ou
 }
 
-fn main() {}
+fn main() {
+    test(0)
+}

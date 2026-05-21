@@ -1,51 +1,51 @@
 //! Code for applying replacement templates for matches that have previously been found.
 
-use ide_db::text_edit::TextEdit;
 use ide_db::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 use parser::Edition;
 use syntax::{
-    SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken, TextRange, TextSize,
     ast::{self, AstNode, AstToken},
+    SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken, TextRange, TextSize,
 };
+use text_edit::TextEdit;
 
-use crate::{Match, SsrMatches, fragments, resolving::ResolvedRule};
+use crate::{fragments, resolving::ResolvedRule, Match, SsrMatches};
 
 /// Returns a text edit that will replace each match in `matches` with its corresponding replacement
 /// template. Placeholders in the template will have been substituted with whatever they matched to
 /// in the original code.
-pub(crate) fn matches_to_edit<'db>(
-    db: &'db dyn hir::db::ExpandDatabase,
+pub(crate) fn matches_to_edit(
+    db: &dyn hir::db::ExpandDatabase,
     matches: &SsrMatches,
     file_src: &str,
-    rules: &[ResolvedRule<'db>],
+    rules: &[ResolvedRule],
 ) -> TextEdit {
     matches_to_edit_at_offset(db, matches, file_src, 0.into(), rules)
 }
 
-fn matches_to_edit_at_offset<'db>(
-    db: &'db dyn hir::db::ExpandDatabase,
+fn matches_to_edit_at_offset(
+    db: &dyn hir::db::ExpandDatabase,
     matches: &SsrMatches,
     file_src: &str,
     relative_start: TextSize,
-    rules: &[ResolvedRule<'db>],
+    rules: &[ResolvedRule],
 ) -> TextEdit {
     let mut edit_builder = TextEdit::builder();
     for m in &matches.matches {
         edit_builder.replace(
             m.range.range.checked_sub(relative_start).unwrap(),
-            render_replace(db, m, file_src, rules, m.range.file_id.edition(db)),
+            render_replace(db, m, file_src, rules, m.range.file_id.edition()),
         );
     }
     edit_builder.finish()
 }
 
-struct ReplacementRenderer<'a, 'db> {
-    db: &'db dyn hir::db::ExpandDatabase,
+struct ReplacementRenderer<'a> {
+    db: &'a dyn hir::db::ExpandDatabase,
     match_info: &'a Match,
     file_src: &'a str,
-    rules: &'a [ResolvedRule<'db>],
-    rule: &'a ResolvedRule<'db>,
+    rules: &'a [ResolvedRule],
+    rule: &'a ResolvedRule,
     out: String,
     // Map from a range within `out` to a token in `template` that represents a placeholder. This is
     // used to validate that the generated source code doesn't split any placeholder expansions (see
@@ -58,11 +58,11 @@ struct ReplacementRenderer<'a, 'db> {
     edition: Edition,
 }
 
-fn render_replace<'db>(
-    db: &'db dyn hir::db::ExpandDatabase,
+fn render_replace(
+    db: &dyn hir::db::ExpandDatabase,
     match_info: &Match,
     file_src: &str,
-    rules: &[ResolvedRule<'db>],
+    rules: &[ResolvedRule],
     edition: Edition,
 ) -> String {
     let rule = &rules[match_info.rule_index];
@@ -89,7 +89,7 @@ fn render_replace<'db>(
     renderer.out
 }
 
-impl<'db> ReplacementRenderer<'_, 'db> {
+impl ReplacementRenderer<'_> {
     fn render_node_children(&mut self, node: &SyntaxNode) {
         for node_or_token in node.children_with_tokens() {
             self.render_node_or_token(&node_or_token);
@@ -112,12 +112,12 @@ impl<'db> ReplacementRenderer<'_, 'db> {
             self.out.push_str(&mod_path.display(self.db, self.edition).to_string());
             // Emit everything except for the segment's name-ref, since we already effectively
             // emitted that as part of `mod_path`.
-            if let Some(path) = ast::Path::cast(node.clone())
-                && let Some(segment) = path.segment()
-            {
-                for node_or_token in segment.syntax().children_with_tokens() {
-                    if node_or_token.kind() != SyntaxKind::NAME_REF {
-                        self.render_node_or_token(&node_or_token);
+            if let Some(path) = ast::Path::cast(node.clone()) {
+                if let Some(segment) = path.segment() {
+                    for node_or_token in segment.syntax().children_with_tokens() {
+                        if node_or_token.kind() != SyntaxKind::NAME_REF {
+                            self.render_node_or_token(&node_or_token);
+                        }
                     }
                 }
             }
@@ -242,15 +242,15 @@ fn token_is_method_call_receiver(token: &SyntaxToken) -> bool {
 }
 
 fn parse_as_kind(code: &str, kind: SyntaxKind) -> Option<SyntaxNode> {
-    if ast::Expr::can_cast(kind)
-        && let Ok(expr) = fragments::expr(code)
-    {
-        return Some(expr);
+    if ast::Expr::can_cast(kind) {
+        if let Ok(expr) = fragments::expr(code) {
+            return Some(expr);
+        }
     }
-    if ast::Item::can_cast(kind)
-        && let Ok(item) = fragments::item(code)
-    {
-        return Some(item);
+    if ast::Item::can_cast(kind) {
+        if let Ok(item) = fragments::item(code) {
+            return Some(item);
+        }
     }
     None
 }

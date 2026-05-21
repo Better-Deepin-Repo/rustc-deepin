@@ -65,7 +65,6 @@
 //! [`IndexSummary::parse`]: super::IndexSummary::parse
 //! [`RemoteRegistry`]: crate::sources::registry::remote::RemoteRegistry
 
-use std::cell::RefCell;
 use std::fs;
 use std::io;
 use std::path::PathBuf;
@@ -75,13 +74,13 @@ use anyhow::bail;
 use cargo_util::registry::make_dep_path;
 use semver::Version;
 
+use crate::util::cache_lock::CacheLockMode;
+use crate::util::Filesystem;
 use crate::CargoResult;
 use crate::GlobalContext;
-use crate::util::Filesystem;
-use crate::util::cache_lock::CacheLockMode;
 
-use super::INDEX_V_MAX;
 use super::split;
+use super::INDEX_V_MAX;
 
 /// The current version of [`SummariesCache`].
 const CURRENT_CACHE_VERSION: u8 = 3;
@@ -204,7 +203,7 @@ impl<'a> SummariesCache<'a> {
         let size = self
             .versions
             .iter()
-            .map(|(_version, data)| 10 + data.len())
+            .map(|(_version, data)| (10 + data.len()))
             .sum();
         let mut contents = Vec::with_capacity(size);
         contents.push(CURRENT_CACHE_VERSION);
@@ -227,9 +226,6 @@ pub struct CacheManager<'gctx> {
     cache_root: Filesystem,
     /// [`GlobalContext`] reference for convenience.
     gctx: &'gctx GlobalContext,
-    /// Keeps track of if we have sent a warning message if there was an error updating the cache.
-    /// The motivation is to avoid warning spam if the cache is not writable.
-    has_warned: RefCell<bool>,
 }
 
 impl<'gctx> CacheManager<'gctx> {
@@ -237,11 +233,7 @@ impl<'gctx> CacheManager<'gctx> {
     ///
     /// `root` --- The root path where caches are located.
     pub fn new(cache_root: Filesystem, gctx: &'gctx GlobalContext) -> CacheManager<'gctx> {
-        CacheManager {
-            cache_root,
-            gctx,
-            has_warned: Default::default(),
-        }
+        CacheManager { cache_root, gctx }
     }
 
     /// Gets the cache associated with the key.
@@ -259,26 +251,14 @@ impl<'gctx> CacheManager<'gctx> {
     /// Associates the value with the key.
     pub fn put(&self, key: &str, value: &[u8]) {
         let cache_path = &self.cache_path(key);
-        if let Err(e) = self.put_inner(cache_path, value) {
-            tracing::info!(?cache_path, "failed to write cache: {e}");
-
-            if !*self.has_warned.borrow() {
-                let _ = self.gctx.shell().warn(format!(
-                    "failed to write cache, path: {}, error: {e}",
-                    cache_path.to_str().unwrap_or_default()
-                ));
-                *self.has_warned.borrow_mut() = true;
+        if fs::create_dir_all(cache_path.parent().unwrap()).is_ok() {
+            let path = Filesystem::new(cache_path.clone());
+            self.gctx
+                .assert_package_cache_locked(CacheLockMode::DownloadExclusive, &path);
+            if let Err(e) = fs::write(cache_path, value) {
+                tracing::info!(?cache_path, "failed to write cache: {e}");
             }
         }
-    }
-
-    fn put_inner(&self, cache_path: &PathBuf, value: &[u8]) -> std::io::Result<()> {
-        fs::create_dir_all(cache_path.parent().unwrap())?;
-        let path = Filesystem::new(cache_path.clone());
-        self.gctx
-            .assert_package_cache_locked(CacheLockMode::DownloadExclusive, &path);
-        fs::write(cache_path, value)?;
-        Ok(())
     }
 
     /// Invalidates the cache associated with the key.

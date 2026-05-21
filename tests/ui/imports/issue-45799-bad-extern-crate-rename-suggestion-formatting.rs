@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ run-rustfix
 
 extern crate std;

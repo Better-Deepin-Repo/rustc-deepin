@@ -39,9 +39,8 @@ SOURCE_FILE
                                         IDENT "lol"
                               R_ANGLE ">"
                         COLON2 "::"
-                        PATH_SEGMENT
-                          ERROR
-                            L_ANGLE "<"
+                        ERROR
+                          L_ANGLE "<"
                   TYPE_ARG
                     PATH_TYPE
                       PATH
@@ -92,9 +91,8 @@ SOURCE_FILE
                               IDENT "lol"
                     R_ANGLE ">"
               COLON2 "::"
-              PATH_SEGMENT
-                ERROR
-                  L_ANGLE "<"
+              ERROR
+                L_ANGLE "<"
         EXPR_STMT
           BIN_EXPR
             PATH_EXPR
@@ -115,10 +113,10 @@ SOURCE_FILE
         WHITESPACE "\n"
         R_CURLY "}"
   WHITESPACE "\n"
-error 30: expected identifier, `self`, `super`, `crate`, or `Self`
+error 30: expected identifier
 error 31: expected COMMA
 error 37: expected expression
-error 75: expected identifier, `self`, `super`, `crate`, or `Self`
+error 75: expected identifier
 error 76: expected SEMICOLON
 error 82: expected expression
 error 83: expected SEMICOLON

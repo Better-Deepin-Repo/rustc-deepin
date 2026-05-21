@@ -1,5 +1,5 @@
 //@ run-pass
-//@ proc-macro: not-joint.rs
+//@ aux-build:not-joint.rs
 
 extern crate not_joint as bar;
 use bar::{tokens, nothing};

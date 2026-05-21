@@ -45,12 +45,12 @@ fn main() {
 
     let blubx: i32;
     let bluby: i32;
-    //~^ similar_names
+    //~^ ERROR: binding's name is too similar to existing binding
 
     let cake: i32;
     let cakes: i32;
     let coke: i32;
-    //~^ similar_names
+    //~^ ERROR: binding's name is too similar to existing binding
 
     match 5 {
         cheese @ 1 => {},
@@ -69,12 +69,12 @@ fn main() {
     let xyz1abc: i32;
     let xyz2abc: i32;
     let xyzeabc: i32;
-    //~^ similar_names
+    //~^ ERROR: binding's name is too similar to existing binding
 
     let parser: i32;
     let parsed: i32;
     let parsee: i32;
-    //~^ similar_names
+    //~^ ERROR: binding's name is too similar to existing binding
 
     let setter: i32;
     let getter: i32;
@@ -89,10 +89,6 @@ fn main() {
 
     let iter: i32;
     let item: i32;
-
-    // 3 letter names are allowed to be similar
-    let kta: i32;
-    let ktv: i32;
 }
 
 fn foo() {
@@ -100,7 +96,7 @@ fn foo() {
     let Foo {
         apple: spring,
         bpple: sprang,
-        //~^ similar_names
+        //~^ ERROR: binding's name is too similar to existing binding
     } = unimplemented!();
 }
 

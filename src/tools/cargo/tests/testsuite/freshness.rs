@@ -9,8 +9,8 @@ use std::process::Stdio;
 use std::thread;
 use std::time::SystemTime;
 
-use crate::prelude::*;
 use cargo_test_support::paths;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::{
     basic_lib_manifest, basic_manifest, is_coarse_mtime, project, rustc_host, rustc_host_env,
@@ -146,7 +146,7 @@ fn rebuild_sub_package_then_while_package() {
 
     p.cargo("build")
         .with_stderr_data(str![[r#"
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 3 packages to latest compatible versions
 [COMPILING] b v0.0.1 ([ROOT]/foo/b)
 [COMPILING] a v0.0.1 ([ROOT]/foo/a)
 [COMPILING] foo v0.0.1 ([ROOT]/foo)
@@ -178,10 +178,10 @@ fn rebuild_sub_package_then_while_package() {
     p.cargo("build -v")
         .with_stderr_data(str![[r#"
 [FRESH] b v0.0.1 ([ROOT]/foo/b)
-[DIRTY] a v0.0.1 ([ROOT]/foo/a): the dependency `b` was rebuilt ([TIME_DIFF_AFTER_LAST_BUILD])
+[DIRTY] a v0.0.1 ([ROOT]/foo/a): the dependency b was rebuilt ([TIME_DIFF_AFTER_LAST_BUILD])
 [COMPILING] a v0.0.1 ([ROOT]/foo/a)
 [RUNNING] `rustc --crate-name a [..]
-[DIRTY] foo v0.0.1 ([ROOT]/foo): the dependency `b` was rebuilt ([TIME_DIFF_AFTER_LAST_BUILD])
+[DIRTY] foo v0.0.1 ([ROOT]/foo): the dependency b was rebuilt ([TIME_DIFF_AFTER_LAST_BUILD])
 [COMPILING] foo v0.0.1 ([ROOT]/foo)
 [RUNNING] `rustc --crate-name foo [..] src/lib.rs [..]
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -400,7 +400,7 @@ ftest off
 
 "#]])
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [COMPILING] dep_crate v0.0.1 ([ROOT]/foo/dep_crate)
 [COMPILING] a v0.0.1 ([ROOT]/foo/a)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -431,7 +431,7 @@ ftest on
 
 "#]])
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [COMPILING] dep_crate v0.0.1 ([ROOT]/foo/dep_crate)
 [COMPILING] b v0.0.1 ([ROOT]/foo/b)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -601,7 +601,14 @@ feature on
 fn rebuild_tests_if_lib_changes() {
     let p = project()
         .file("src/lib.rs", "pub fn foo() {}")
-        .file("tests/foo-test.rs", "extern crate foo;")
+        .file(
+            "tests/foo.rs",
+            r#"
+                extern crate foo;
+                #[test]
+                fn test() { foo::foo(); }
+            "#,
+        )
         .build();
 
     p.cargo("build").run();
@@ -610,15 +617,18 @@ fn rebuild_tests_if_lib_changes() {
     sleep_ms(1000);
     p.change_file("src/lib.rs", "");
 
-    p.cargo("build").run();
-    p.cargo("test -v --test foo-test")
+    p.cargo("build -v").run();
+    p.cargo("test -v")
+        .with_status(101)
         .with_stderr_data(str![[r#"
-[DIRTY] foo v0.0.1 ([ROOT]/foo): the dependency `foo` was rebuilt ([TIME_DIFF_AFTER_LAST_BUILD])
+[DIRTY] foo v0.0.1 ([ROOT]/foo): the dependency foo was rebuilt ([TIME_DIFF_AFTER_LAST_BUILD])
 [COMPILING] foo v0.0.1 ([ROOT]/foo)
-[RUNNING] `rustc --crate-name foo_test [..]`
-[FINISHED] `test` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-[RUNNING] `[ROOT]/foo/target/debug/deps/foo_test-[HASH][EXE]`
-
+[RUNNING] `rustc --crate-name foo [..]
+[RUNNING] `rustc --crate-name foo [..]
+error[E0425]: cannot find function `foo` in crate `foo`
+...
+[ERROR] could not compile `foo` (test "foo") due to 1 previous error
+...
 "#]])
         .run();
 }
@@ -807,7 +817,7 @@ fn same_build_dir_cached_packages() {
     p.cargo("build")
         .cwd("a1")
         .with_stderr_data(str![[r#"
-[LOCKING] 3 packages to latest compatible versions
+[LOCKING] 4 packages to latest compatible versions
 [COMPILING] d v0.0.1 ([ROOT]/foo/d)
 [COMPILING] c v0.0.1 ([ROOT]/foo/c)
 [COMPILING] b v0.0.1 ([ROOT]/foo/b)
@@ -819,7 +829,7 @@ fn same_build_dir_cached_packages() {
     p.cargo("build")
         .cwd("a2")
         .with_stderr_data(str![[r#"
-[LOCKING] 3 packages to latest compatible versions
+[LOCKING] 4 packages to latest compatible versions
 [COMPILING] a2 v0.0.1 ([ROOT]/foo/a2)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -953,7 +963,7 @@ new desc
 
 "#]])
         .with_stderr_data(str![[r#"
-[DIRTY] foo v0.0.1 ([ROOT]/foo): the environment variable CARGO_PKG_DESCRIPTION changed
+[DIRTY] foo v0.0.1 ([ROOT]/foo): the metadata changed
 [COMPILING] foo v0.0.1 ([ROOT]/foo)
 [RUNNING] `rustc [..]
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -1337,6 +1347,7 @@ fn changing_rustflags_is_cached() {
     p.cargo("build -v")
         .env("RUSTFLAGS", "-C linker=cc")
         .with_stderr_data(str![[r#"
+[DIRTY] foo v0.0.1 ([ROOT]/foo): the rustflags changed
 [COMPILING] foo v0.0.1 ([ROOT]/foo)
 [RUNNING] `rustc [..]
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -1346,7 +1357,9 @@ fn changing_rustflags_is_cached() {
 
     p.cargo("build -v")
         .with_stderr_data(str![[r#"
-[FRESH] foo v0.0.1 ([ROOT]/foo)
+[DIRTY] foo v0.0.1 ([ROOT]/foo): the rustflags changed
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[RUNNING] `rustc [..] src/lib.rs [..]
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
@@ -1354,44 +1367,9 @@ fn changing_rustflags_is_cached() {
     p.cargo("build -v")
         .env("RUSTFLAGS", "-C linker=cc")
         .with_stderr_data(str![[r#"
-[FRESH] foo v0.0.1 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn changing_rustc_extra_flags_is_cached() {
-    let p = project().file("src/lib.rs", "").build();
-
-    // This isn't ever cached, we always have to recompile
-    p.cargo("rustc")
-        .with_stderr_data(str![[r#"
-[COMPILING] foo v0.0.1 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-    p.cargo("rustc -v -- -C linker=cc")
-        .with_stderr_data(str![[r#"
+[DIRTY] foo v0.0.1 ([ROOT]/foo): the rustflags changed
 [COMPILING] foo v0.0.1 ([ROOT]/foo)
 [RUNNING] `rustc [..]
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-
-    p.cargo("rustc -v")
-        .with_stderr_data(str![[r#"
-[FRESH] foo v0.0.1 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-    p.cargo("rustc -v -- -C linker=cc")
-        .with_stderr_data(str![[r#"
-[FRESH] foo v0.0.1 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
@@ -1422,7 +1400,7 @@ fn update_dependency_mtime_does_not_rebuild() {
         .masquerade_as_nightly_cargo(&["mtime-on-use"])
         .env("RUSTFLAGS", "-C linker=cc")
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [COMPILING] bar v0.0.1 ([ROOT]/foo/bar)
 [COMPILING] foo v0.0.1 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -1459,16 +1437,16 @@ fn fingerprint_cleaner(mut dir: PathBuf, timestamp: filetime::FileTime) {
     // effecting any builds that happened since that time stamp.
     let mut cleaned = false;
     dir.push(".fingerprint");
-    for fingerprint in fs::read_dir(&dir).unwrap() {
-        let fingerprint = fingerprint.unwrap();
+    for fing in fs::read_dir(&dir).unwrap() {
+        let fing = fing.unwrap();
 
         let outdated = |f: io::Result<fs::DirEntry>| {
             filetime::FileTime::from_last_modification_time(&f.unwrap().metadata().unwrap())
                 <= timestamp
         };
-        if fs::read_dir(fingerprint.path()).unwrap().all(outdated) {
-            fs::remove_dir_all(fingerprint.path()).unwrap();
-            println!("remove: {:?}", fingerprint.path());
+        if fs::read_dir(fing.path()).unwrap().all(outdated) {
+            fs::remove_dir_all(fing.path()).unwrap();
+            println!("remove: {:?}", fing.path());
             // a real cleaner would remove the big files in deps and build as well
             // but fingerprint is sufficient for our tests
             cleaned = true;
@@ -1580,7 +1558,7 @@ fn reuse_panic_build_dep_test() {
     // Check that `bar` is not built twice. It is only needed once (without `panic`).
     p.cargo("test --lib --no-run -v")
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [COMPILING] bar v0.0.1 ([ROOT]/foo/bar)
 [RUNNING] `rustc --crate-name bar [..]
 [COMPILING] foo v0.0.1 ([ROOT]/foo)
@@ -1638,21 +1616,21 @@ fn reuse_panic_pm() {
 
     // bar is built once without panic (for proc-macro) and once with (for the
     // normal dependency).
+    // TODO: Migrating to Snapbox might cause flakyness here. See https://github.com/rust-lang/cargo/pull/14161/files#r1660071433
+    #[allow(deprecated)]
     p.cargo("build -v")
-        .with_stderr_data(
-            str![[r#"
-[LOCKING] 2 packages to latest compatible versions
-[COMPILING] bar v0.0.1 ([ROOT]/foo/bar)
-[RUNNING] `rustc --crate-name bar [..] -C panic=abort [..]
-[RUNNING] `rustc --crate-name bar [..]
-[COMPILING] somepm v0.0.1 ([ROOT]/foo/somepm)
+            .with_stderr_unordered(
+                "\
+[LOCKING] 3 packages to latest compatible versions
+[COMPILING] bar [..]
+[RUNNING] `rustc --crate-name bar --edition=2015 bar/src/lib.rs [..]--crate-type lib --emit=[..]link[..]
+[RUNNING] `rustc --crate-name bar --edition=2015 bar/src/lib.rs [..]--crate-type lib --emit=[..]link -C panic=abort[..]-C debuginfo=2 [..]
+[COMPILING] somepm [..]
 [RUNNING] `rustc --crate-name somepm [..]
-[COMPILING] foo v0.0.1 ([ROOT]/foo)
-[RUNNING] `rustc --crate-name foo [..] -C panic=abort [..]
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]]
-            .unordered(),
+[COMPILING] foo [..]
+[RUNNING] `rustc --crate-name foo --edition=2015 src/lib.rs [..]-C panic=abort[..]
+[FINISHED] [..]
+",
         )
         .run();
 }
@@ -1699,10 +1677,10 @@ fn bust_patched_dep() {
 [DIRTY] registry1 v0.1.0 ([ROOT]/foo/reg1new): the file `reg1new/src/lib.rs` has changed ([TIME_DIFF_AFTER_LAST_BUILD])
 [COMPILING] registry1 v0.1.0 ([ROOT]/foo/reg1new)
 [RUNNING] `rustc --crate-name registry1 [..]
-[DIRTY] registry2 v0.1.0: the dependency `registry1` was rebuilt
+[DIRTY] registry2 v0.1.0: the dependency registry1 was rebuilt
 [COMPILING] registry2 v0.1.0
 [RUNNING] `rustc --crate-name registry2 [..]
-[DIRTY] foo v0.0.1 ([ROOT]/foo): the dependency `registry2` was rebuilt
+[DIRTY] foo v0.0.1 ([ROOT]/foo): the dependency registry2 was rebuilt
 [COMPILING] foo v0.0.1 ([ROOT]/foo)
 [RUNNING] `rustc --crate-name foo [..]
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -1809,6 +1787,7 @@ fn rebuild_on_mid_build_file_modification() {
 
     p.cargo("build")
         .with_stderr_data(str![[r#"
+[LOCKING] 2 packages to latest compatible versions
 [COMPILING] proc_macro_dep v0.1.0 ([ROOT]/foo/proc_macro_dep)
 [COMPILING] root v0.1.0 ([ROOT]/foo/root)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -1905,7 +1884,28 @@ fn dirty_both_lib_and_test() {
     // 2 != 1
     p.cargo("test --lib")
         .with_status(101)
-        .with_stdout_data("...\n[..]doit assert failure[..]\n...")
+        .with_stdout_data(str![[r#"
+
+running 1 test
+test t1 ... FAILED
+
+failures:
+
+---- t1 stdout ----
+thread 't1' panicked at src/lib.rs:8:21:
+assertion `left == right` failed: doit assert failure
+  left: 2
+ right: 1
+[NOTE] run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    t1
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in [ELAPSED]s
+
+
+"#]])
         .run();
 
     if is_coarse_mtime() {
@@ -1949,12 +1949,40 @@ fn script_fails_stay_dirty() {
     }
     p.change_file("helper.rs", r#"pub fn doit() {panic!("Crash!");}"#);
     p.cargo("build")
-        .with_stderr_data("...\n[..]Crash![..]\n...")
+        .with_stderr_data(str![[r#"
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[ERROR] failed to run custom build command for `foo v0.0.1 ([ROOT]/foo)`
+
+Caused by:
+  process didn't exit successfully: `[ROOT]/foo/target/debug/build/foo-[HASH]/build-script-build` ([EXIT_STATUS]: 101)
+  --- stdout
+  cargo::rerun-if-changed=build.rs
+
+  --- stderr
+  thread 'main' panicked at helper.rs:1:16:
+  Crash!
+  [NOTE] run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+"#]])
         .with_status(101)
         .run();
     // There was a bug where this second call would be "fresh".
     p.cargo("build")
-        .with_stderr_data("...\n[..]Crash![..]\n...")
+        .with_stderr_data(str![[r#"
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[ERROR] failed to run custom build command for `foo v0.0.1 ([ROOT]/foo)`
+
+Caused by:
+  process didn't exit successfully: `[ROOT]/foo/target/debug/build/foo-[HASH]/build-script-build` ([EXIT_STATUS]: 101)
+  --- stdout
+  cargo::rerun-if-changed=build.rs
+
+  --- stderr
+  thread 'main' panicked at helper.rs:1:16:
+  Crash!
+  [NOTE] run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+"#]])
         .with_status(101)
         .run();
 }
@@ -2113,114 +2141,49 @@ fn simulated_docker_deps_stay_cached() {
 
 #[cargo_test]
 fn metadata_change_invalidates() {
-    // (key, value, value-updated, env-var-name)
-    let scenarios = [
-        (
-            "description",
-            r#""foo""#,
-            r#""foo_updated""#,
-            "CARGO_PKG_DESCRIPTION",
-        ),
-        (
-            "homepage",
-            r#""foo""#,
-            r#""foo_updated""#,
-            "CARGO_PKG_HOMEPAGE",
-        ),
-        (
-            "repository",
-            r#""foo""#,
-            r#""foo_updated""#,
-            "CARGO_PKG_REPOSITORY",
-        ),
-        (
-            "license",
-            r#""foo""#,
-            r#""foo_updated""#,
-            "CARGO_PKG_LICENSE",
-        ),
-        (
-            "license-file",
-            r#""foo""#,
-            r#""foo_updated""#,
-            "CARGO_PKG_LICENSE_FILE",
-        ),
-        (
-            "authors",
-            r#"["foo"]"#,
-            r#"["foo_updated"]"#,
-            "CARGO_PKG_AUTHORS",
-        ),
-        (
-            "rust-version",
-            r#""1.0.0""#,
-            r#""1.0.1""#,
-            "CARGO_PKG_RUST_VERSION",
-        ),
-        ("readme", r#""foo""#, r#""foo_updated""#, "CARGO_PKG_README"),
-    ];
-    let base_cargo_toml = r#"
-                [package]
-                name = "foo"
-                version = "0.1.0"
-                edition = "2015"
-                "#;
-
-    let p = project().build();
-    for (key, value, value_updated, env_var) in scenarios {
-        p.change_file("Cargo.toml", base_cargo_toml);
-        p.change_file(
-            "src/main.rs",
-            &format!(
-                r#"
-            fn main() {{
-                let output = env!("{env_var}");
-                println!("{{output}}");
-            }}
-            "#
-            ),
-        );
-
-        // Compile the first time
-        p.cargo("build").run();
-
-        // Update the manifest, rebuild, and verify the build was invalided
-        p.change_file("Cargo.toml", &format!("{base_cargo_toml}\n{key} = {value}"));
-        p.cargo("build -v")
-            .with_stderr_data(format!(
-                r#"[DIRTY] foo v0.1.0 ([ROOT]/foo): the environment variable {env_var} changed
-[COMPILING] foo v0.1.0 ([ROOT]/foo)
-[RUNNING] `rustc [..]
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-"#
-            ))
-            .run();
-
-        // Remove references to the metadata and rebuild
-        p.change_file(
-            "src/main.rs",
-            r#"
-            fn main() {
-                println!("foo");
-            }
-            "#,
-        );
-        p.cargo("build").run();
-
-        // Update the manifest value and verify the build is NOT invalidated.
-        p.change_file(
+    let p = project()
+        .file(
             "Cargo.toml",
-            &format!("{base_cargo_toml}\n{key} = {value_updated}"),
-        );
+            r#"
+            [package]
+            name = "foo"
+            version = "0.1.0"
+            edition = "2015"
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
 
-        p.cargo("build -v")
+    p.cargo("build").run();
+
+    for attr in &[
+        "authors = [\"foo\"]",
+        "description = \"desc\"",
+        "homepage = \"https://example.com\"",
+        "repository =\"https://example.com\"",
+    ] {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(p.root().join("Cargo.toml"))
+            .unwrap();
+        writeln!(file, "{}", attr).unwrap();
+        p.cargo("build")
             .with_stderr_data(str![[r#"
-[FRESH] foo v0.1.0 ([ROOT]/foo)
+[COMPILING] foo v0.1.0 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
             .run();
     }
+    p.cargo("build -v")
+        .with_stderr_data(str![[r#"
+[FRESH] foo v0.1.0 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .run();
+    assert_eq!(p.glob("target/debug/deps/libfoo-*.rlib").count(), 1);
 }
 
 #[cargo_test]
@@ -2255,7 +2218,6 @@ fn edition_change_invalidates() {
     );
     p.cargo("build")
         .with_stderr_data(str![[r#"
-[WARNING] `edition` is set on library `foo` which is deprecated
 [COMPILING] foo v0.1.0 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -2263,7 +2225,6 @@ fn edition_change_invalidates() {
         .run();
     p.cargo("build -v")
         .with_stderr_data(str![[r#"
-[WARNING] `edition` is set on library `foo` which is deprecated
 [FRESH] foo v0.1.0 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -2616,7 +2577,8 @@ LLVM version: 9.0
         let output = p
             .cargo("check --message-format=json")
             .env("RUSTC", compiler.bin(version))
-            .run();
+            .exec_with_output()
+            .unwrap();
         // Collect the filenames generated.
         let mut artifacts: Vec<_> = std::str::from_utf8(&output.stdout)
             .unwrap()
@@ -2801,6 +2763,7 @@ fn lld_is_fresh() {
             r#"
                 [target.x86_64-pc-windows-msvc]
                 linker = "rust-lld"
+                rustflags = ["-C", "link-arg=-fuse-ld=lld"]
             "#,
         )
         .file(
@@ -2986,7 +2949,7 @@ fn cargo_env_changes() {
         )
         .build();
 
-    let cargo_exe = crate::utils::cargo_exe();
+    let cargo_exe = cargo_test_support::cargo_exe();
     let other_cargo_path = p.root().join(cargo_exe.file_name().unwrap());
     std::fs::hard_link(&cargo_exe, &other_cargo_path).unwrap();
     let other_cargo = || {
@@ -3181,134 +3144,6 @@ fn use_mtime_cache_in_cargo_home() {
 ...
 [ERROR] could not compile `foo` (lib) due to 1 previous error
 ...
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn incremental_build_script_execution_got_new_mtime_and_cargo_check() {
-    // See https://github.com/rust-lang/cargo/issues/16104
-    let p = project()
-        .file("src/lib.rs", "")
-        .file("touch-me", "")
-        .file(
-            "build.rs",
-            r#"fn main() { println!("cargo::rerun-if-changed=touch-me") }"#,
-        )
-        .build();
-
-    p.cargo("check")
-        .env("CARGO_INCREMENTAL", "1")
-        .with_stderr_data(str![[r#"
-[COMPILING] foo v0.0.1 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-
-    if is_coarse_mtime() {
-        sleep_ms(1000);
-    }
-
-    p.change_file("touch-me", "oops");
-
-    // The first one is expected to rerun build script
-    p.cargo("check -v")
-        .env("CARGO_INCREMENTAL", "1")
-        .with_stderr_data(str![[r#"
-[DIRTY] foo v0.0.1 ([ROOT]/foo): the file `touch-me` has changed ([TIME_DIFF_AFTER_LAST_BUILD])
-[COMPILING] foo v0.0.1 ([ROOT]/foo)
-[RUNNING] `[ROOT]/foo/target/debug/build/foo-[HASH]/build-script-build`
-[RUNNING] `rustc --crate-name foo [..]`
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-
-    // subsequent cargo check gets stuck...
-    p.cargo("check -v")
-        .env("CARGO_INCREMENTAL", "1")
-        .with_stderr_data(str![[r#"
-[FRESH] foo v0.0.1 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-
-    p.cargo("check -v")
-        .env("CARGO_INCREMENTAL", "1")
-        .with_stderr_data(str![[r#"
-[FRESH] foo v0.0.1 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn symlink_to_package() {
-    // Illustrates what happens when the path is a symlink, and the symlink
-    // target changes.
-    if !cargo_test_support::symlink_supported() {
-        return;
-    }
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "foo"
-                edition = "2015"
-
-                [dependencies]
-                bar = { path = "bar" }
-            "#,
-        )
-        .file(
-            "src/main.rs",
-            r#"
-                fn main() {
-                    bar::bar();
-                }
-            "#,
-        )
-        .file("bar1/Cargo.toml", &basic_manifest("bar", "1.0.0"))
-        .file(
-            "bar1/src/lib.rs",
-            r#"
-                pub fn bar() {
-                    println!("one");
-                }
-            "#,
-        )
-        .file("bar2/Cargo.toml", &basic_manifest("bar", "1.0.0"))
-        .file(
-            "bar2/src/lib.rs",
-            r#"
-                pub fn bar() {
-                    println!("two");
-                }
-            "#,
-        )
-        .symlink_dir("bar1", "bar")
-        .build();
-    p.cargo("check")
-        .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
-[CHECKING] bar v1.0.0 ([ROOT]/foo/bar)
-[CHECKING] foo v0.0.0 ([ROOT]/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-    let bar_path = p.root().join("bar");
-    cargo_util::paths::remove_file(&bar_path).unwrap();
-    p.symlink("bar2", "bar");
-    // FIXME: This is not rebuilding when it should.
-    p.cargo("check")
-        .with_stderr_data(str![[r#"
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
 "#]])
         .run();
 }

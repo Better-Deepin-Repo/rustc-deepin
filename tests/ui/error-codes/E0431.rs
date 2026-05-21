@@ -1,4 +1,4 @@
-use {self}; //~ ERROR imports need to be explicitly named
+use {self}; //~ ERROR E0431
 
 fn main () {
 }

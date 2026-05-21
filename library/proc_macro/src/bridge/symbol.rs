@@ -11,6 +11,7 @@
 
 use std::cell::RefCell;
 use std::num::NonZero;
+use std::str;
 
 use super::*;
 
@@ -32,7 +33,7 @@ impl Symbol {
     /// Validates and normalizes before converting it to a symbol.
     pub(crate) fn new_ident(string: &str, is_raw: bool) -> Self {
         // Fast-path: check if this is a valid ASCII identifier
-        if Self::is_valid_ascii_ident(string.as_bytes()) || string == "$crate" {
+        if Self::is_valid_ascii_ident(string.as_bytes()) {
             if is_raw && !Self::can_be_raw(string) {
                 panic!("`{}` cannot be a raw identifier", string);
             }
@@ -46,7 +47,7 @@ impl Symbol {
         if string.is_ascii() {
             Err(())
         } else {
-            client::Methods::symbol_normalize_and_validate_ident(string)
+            client::Symbol::normalize_and_validate_ident(string)
         }
         .unwrap_or_else(|_| panic!("`{:?}` is not a valid identifier", string))
     }
@@ -75,15 +76,24 @@ impl Symbol {
                 .all(|b| matches!(b, b'_' | b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9'))
     }
 
-    // Mimics the behavior of `Symbol::can_be_raw` from `rustc_span`
+    // Mimics the behaviour of `Symbol::can_be_raw` from `rustc_span`
     fn can_be_raw(string: &str) -> bool {
-        !matches!(string, "_" | "super" | "self" | "Self" | "crate" | "$crate")
+        match string {
+            "_" | "super" | "self" | "Self" | "crate" => false,
+            _ => true,
+        }
     }
 }
 
 impl fmt::Debug for Symbol {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.with(|s| fmt::Debug::fmt(s, f))
+    }
+}
+
+impl ToString for Symbol {
+    fn to_string(&self) -> String {
+        self.with(|s| s.to_owned())
     }
 }
 
@@ -94,25 +104,29 @@ impl fmt::Display for Symbol {
 }
 
 impl<S> Encode<S> for Symbol {
-    fn encode(self, w: &mut Buffer, s: &mut S) {
+    fn encode(self, w: &mut Writer, s: &mut S) {
         self.with(|sym| sym.encode(w, s))
     }
 }
 
-impl<S: server::Server> Decode<'_, '_, server::HandleStore<S>> for server::MarkedSymbol<S> {
-    fn decode(r: &mut &[u8], s: &mut server::HandleStore<S>) -> Self {
+impl<S: server::Server> DecodeMut<'_, '_, server::HandleStore<server::MarkedTypes<S>>>
+    for Marked<S::Symbol, Symbol>
+{
+    fn decode(r: &mut Reader<'_>, s: &mut server::HandleStore<server::MarkedTypes<S>>) -> Self {
         Mark::mark(S::intern_symbol(<&str>::decode(r, s)))
     }
 }
 
-impl<S: server::Server> Encode<server::HandleStore<S>> for server::MarkedSymbol<S> {
-    fn encode(self, w: &mut Buffer, s: &mut server::HandleStore<S>) {
+impl<S: server::Server> Encode<server::HandleStore<server::MarkedTypes<S>>>
+    for Marked<S::Symbol, Symbol>
+{
+    fn encode(self, w: &mut Writer, s: &mut server::HandleStore<server::MarkedTypes<S>>) {
         S::with_symbol_string(&self.unmark(), |sym| sym.encode(w, s))
     }
 }
 
-impl<S> Decode<'_, '_, S> for Symbol {
-    fn decode(r: &mut &[u8], s: &mut S) -> Self {
+impl<S> DecodeMut<'_, '_, S> for Symbol {
+    fn decode(r: &mut Reader<'_>, s: &mut S) -> Self {
         Symbol::new(<&str>::decode(r, s))
     }
 }

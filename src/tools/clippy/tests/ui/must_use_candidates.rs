@@ -1,26 +1,19 @@
 #![feature(never_type)]
-#![allow(
-    unused_mut,
-    clippy::redundant_allocation,
-    clippy::needless_pass_by_ref_mut,
-    static_mut_refs
-)]
+#![allow(unused_mut, clippy::redundant_allocation, clippy::needless_pass_by_ref_mut)]
 #![warn(clippy::must_use_candidate)]
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 pub struct MyAtomic(AtomicBool);
 pub struct MyPure;
 
 pub fn pure(i: u8) -> u8 {
-    //~^ must_use_candidate
     i
 }
 
 impl MyPure {
     pub fn inherent_pure(&self) -> u8 {
-        //~^ must_use_candidate
         0
     }
 }
@@ -52,7 +45,6 @@ pub fn with_callback<F: Fn(u32) -> bool>(f: &F) -> bool {
 }
 
 pub fn with_marker(_d: std::marker::PhantomData<&mut u32>) -> bool {
-    //~^ must_use_candidate
     true
 }
 
@@ -65,7 +57,6 @@ pub fn atomics(b: &AtomicBool) -> bool {
 }
 
 pub fn rcd(_x: Rc<u32>) -> bool {
-    //~^ must_use_candidate
     true
 }
 
@@ -74,7 +65,6 @@ pub fn rcmut(_x: Rc<&mut u32>) -> bool {
 }
 
 pub fn arcd(_x: Arc<u32>) -> bool {
-    //~^ must_use_candidate
     false
 }
 
@@ -88,28 +78,15 @@ static mut COUNTER: usize = 0;
 ///
 /// Don't ever call this from multiple threads
 pub unsafe fn mutates_static() -> usize {
-    unsafe {
-        COUNTER += 1;
-        COUNTER
-    }
+    COUNTER += 1;
+    COUNTER
 }
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub extern "C" fn unmangled(i: bool) -> bool {
     !i
 }
 
-pub fn main() -> std::process::ExitCode {
+fn main() {
     assert_eq!(1, pure(1));
-    std::process::ExitCode::SUCCESS
-}
-
-//~v must_use_candidate
-pub fn result_uninhabited() -> Result<i32, std::convert::Infallible> {
-    todo!()
-}
-
-//~v must_use_candidate
-pub fn controlflow_uninhabited() -> std::ops::ControlFlow<std::convert::Infallible, i32> {
-    todo!()
 }

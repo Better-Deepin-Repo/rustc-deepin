@@ -1,7 +1,7 @@
 // This test ensures that all items from `foo` are correctly generated into the `redirect-map.json`
 // file with `--generate-redirect-map` rustdoc option.
 
-//@ needs-target-std
+use std::path::Path;
 
 use run_make_support::rfs::read_to_string;
 use run_make_support::{path, rustdoc, serde_json};

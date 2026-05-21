@@ -1,24 +1,22 @@
-//! Generates `diagnostics_generated.md` documentation.
+//! Generates `assists.md` documentation.
 
 use std::{fmt, fs, io, path::PathBuf};
 
 use crate::{
-    codegen::{CommentBlock, Location, add_preamble},
+    codegen::{add_preamble, CommentBlock, Location},
     project_root,
     util::list_rust_files,
 };
 
 pub(crate) fn generate(check: bool) {
     let diagnostics = Diagnostic::collect().unwrap();
-    // Do not generate docs when run with `--check`
-    if check {
-        return;
+    if !check {
+        let contents =
+            diagnostics.into_iter().map(|it| it.to_string()).collect::<Vec<_>>().join("\n\n");
+        let contents = add_preamble(crate::flags::CodegenType::DiagnosticsDocs, contents);
+        let dst = project_root().join("docs/user/generated_diagnostic.adoc");
+        fs::write(dst, contents).unwrap();
     }
-    let contents =
-        diagnostics.into_iter().map(|it| it.to_string()).collect::<Vec<_>>().join("\n\n");
-    let contents = add_preamble(crate::flags::CodegenType::DiagnosticsDocs, contents);
-    let dst = project_root().join("docs/book/src/diagnostics_generated.md");
-    fs::write(dst, contents).unwrap();
 }
 
 #[derive(Debug)]
@@ -75,6 +73,6 @@ fn is_valid_diagnostic_name(diagnostic: &str) -> Result<(), String> {
 
 impl fmt::Display for Diagnostic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "#### {}\n\nSource: {}\n\n{}\n\n", self.id, self.location, self.doc)
+        writeln!(f, "=== {}\n**Source:** {}\n{}", self.id, self.location, self.doc)
     }
 }

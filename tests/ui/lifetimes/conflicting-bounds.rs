@@ -1,4 +1,4 @@
-//~ ERROR type annotations needed: cannot satisfy `Self: Gen<'source>`
+//~ type annotations needed: cannot satisfy `Self: Gen<'source>`
 
 pub trait Gen<'source> {
     type Output;

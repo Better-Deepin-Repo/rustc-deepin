@@ -39,9 +39,3 @@ function openTrace(arrayBuffer: ArrayBuffer, title: string) {
 
   window.addEventListener("message", onMessageHandler);
 }
-
-export async function checkIsEmbeddedPerfettoEnabled(): Promise<boolean> {
-  const result = await fetch(`/perfetto/index.html`);
-
-  return result.status === 200;
-}

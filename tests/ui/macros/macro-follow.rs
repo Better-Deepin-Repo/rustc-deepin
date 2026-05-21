@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 //
 // Check the macro follow sets (see corresponding rpass test).
 

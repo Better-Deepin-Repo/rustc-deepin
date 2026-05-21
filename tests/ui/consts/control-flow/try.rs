@@ -1,12 +1,11 @@
-//@ check-pass
-
-#![allow(dead_code)]
-#![feature(const_trait_impl)]
-#![feature(const_try)]
+// The `?` operator is still not const-evaluatable because it calls `From::from` on the error
+// variant.
 
 const fn opt() -> Option<i32> {
     let x = Some(2);
-    x?;
+    x?; //~ ERROR `?` is not allowed in a `const fn`
+    //~^ ERROR: cannot convert
+    //~| ERROR: cannot determine
     None
 }
 

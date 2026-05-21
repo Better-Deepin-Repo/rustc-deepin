@@ -1,6 +1,6 @@
 # Coercion
 
-A longer lifetime can be coerced into a shorter one
+A longer lifetime can be coerced into a shorter one 
 so that it works inside a scope it normally wouldn't work in.
 This comes in the form of inferred coercion by the Rust compiler,
 and also in the form of declaring a lifetime difference:
@@ -20,10 +20,10 @@ fn choose_first<'a: 'b, 'b>(first: &'a i32, _: &'b i32) -> &'b i32 {
 
 fn main() {
     let first = 2; // Longer lifetime
-
+    
     {
         let second = 3; // Shorter lifetime
-
+        
         println!("The product is {}", multiply(&first, &second));
         println!("{} is the first", choose_first(&first, &second));
     };

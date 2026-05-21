@@ -9,8 +9,8 @@ use rustc_hir::{Item, ItemKind, PathSegment, UseKind};
 use rustc_lint::{LateContext, LateLintPass, LintContext};
 use rustc_middle::ty;
 use rustc_session::impl_lint_pass;
-use rustc_span::BytePos;
 use rustc_span::symbol::kw;
+use rustc_span::{sym, BytePos};
 
 declare_clippy_lint! {
     /// ### What it does
@@ -68,8 +68,6 @@ declare_clippy_lint! {
     /// (including the standard library) provide modules named "prelude" specifically designed
     /// for wildcard import.
     ///
-    /// Wildcard imports reexported through `pub use` are also allowed.
-    ///
     /// `use super::*` is allowed in test modules. This is defined as any module with "test" in the name.
     ///
     /// These exceptions can be disabled using the `warn-on-all-wildcard-imports` configuration flag.
@@ -118,19 +116,17 @@ impl_lint_pass!(WildcardImports => [ENUM_GLOB_USE, WILDCARD_IMPORTS]);
 
 impl LateLintPass<'_> for WildcardImports {
     fn check_item(&mut self, cx: &LateContext<'_>, item: &Item<'_>) {
-        if cx.sess().is_test_crate() || item.span.in_external_macro(cx.sess().source_map()) {
+        if cx.sess().is_test_crate() {
             return;
         }
 
         let module = cx.tcx.parent_module_from_def_id(item.owner_id.def_id);
-        if cx.tcx.visibility(item.owner_id.def_id) != ty::Visibility::Restricted(module.to_def_id())
-            && !self.warn_on_all
-        {
+        if cx.tcx.visibility(item.owner_id.def_id) != ty::Visibility::Restricted(module.to_def_id()) {
             return;
         }
         if let ItemKind::Use(use_path, UseKind::Glob) = &item.kind
             && (self.warn_on_all || !self.check_exceptions(cx, item, use_path.segments))
-            && let Some(used_imports) = cx.tcx.resolutions(()).glob_map.get(&item.owner_id.def_id)
+            && let used_imports = cx.tcx.names_imported_by_glob_use(item.owner_id.def_id)
             && !used_imports.is_empty() // Already handled by `unused_imports`
             && !used_imports.contains(&kw::Underscore)
         {
@@ -154,7 +150,7 @@ impl LateLintPass<'_> for WildcardImports {
                 (span, false)
             };
 
-            let mut imports: Vec<_> = used_imports.iter().map(ToString::to_string).collect();
+            let mut imports = used_imports.items().map(ToString::to_string).into_sorted_stable_ord();
             let imports_string = if imports.len() == 1 {
                 imports.pop().unwrap()
             } else if braced_glob {
@@ -169,8 +165,8 @@ impl LateLintPass<'_> for WildcardImports {
                 format!("{import_source_snippet}::{imports_string}")
             };
 
-            // Glob imports always have a single resolution. Enums are in the value namespace.
-            let (lint, message) = if let Some(Res::Def(DefKind::Enum, _)) = use_path.res.value_ns {
+            // Glob imports always have a single resolution.
+            let (lint, message) = if let Res::Def(DefKind::Enum, _) = use_path.res[0] {
                 (ENUM_GLOB_USE, "usage of wildcard import for enum variants")
             } else {
                 (WILDCARD_IMPORTS, "usage of wildcard import")
@@ -193,7 +189,9 @@ impl WildcardImports {
 // Allow "...prelude::..::*" imports.
 // Many crates have a prelude, and it is imported as a glob by design.
 fn is_prelude_import(segments: &[PathSegment<'_>]) -> bool {
-    segments.iter().any(|ps| ps.ident.as_str().contains("prelude"))
+    segments
+        .iter()
+        .any(|ps| ps.ident.as_str().contains(sym::prelude.as_str()))
 }
 
 // Allow "super::*" imports in tests.

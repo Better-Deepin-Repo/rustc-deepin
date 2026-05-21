@@ -12,12 +12,19 @@
 #![allow(internal_features)]
 #![cfg_attr(test, feature(test))]
 #![deny(unsafe_op_in_unsafe_fn)]
-#![doc(test(no_crate_inject, attr(deny(warnings), allow(internal_features))))]
+#![doc(
+    html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/",
+    test(no_crate_inject, attr(deny(warnings)))
+)]
+#![doc(rust_logo)]
+#![feature(core_intrinsics)]
 #![feature(decl_macro)]
 #![feature(dropck_eyepatch)]
-#![feature(never_type)]
+#![feature(maybe_uninit_slice)]
 #![feature(rustc_attrs)]
-#![feature(unwrap_infallible)]
+#![feature(rustdoc_internals)]
+#![feature(strict_provenance)]
+#![warn(unreachable_pub)]
 // tidy-alphabetical-end
 
 use std::alloc::Layout;
@@ -25,7 +32,7 @@ use std::cell::{Cell, RefCell};
 use std::marker::PhantomData;
 use std::mem::{self, MaybeUninit};
 use std::ptr::{self, NonNull};
-use std::{cmp, hint, slice};
+use std::{cmp, intrinsics, slice};
 
 use smallvec::SmallVec;
 
@@ -72,7 +79,7 @@ impl<T> ArenaChunk<T> {
             // been initialized.
             unsafe {
                 let slice = self.storage.as_mut();
-                slice[..len].assume_init_drop();
+                ptr::drop_in_place(MaybeUninit::slice_assume_init_mut(&mut slice[..len]));
             }
         }
     }
@@ -87,7 +94,7 @@ impl<T> ArenaChunk<T> {
     #[inline]
     fn end(&mut self) -> *mut T {
         unsafe {
-            if size_of::<T>() == 0 {
+            if mem::size_of::<T>() == 0 {
                 // A pointer as large as possible for zero-sized elements.
                 ptr::without_provenance_mut(!0)
             } else {
@@ -145,7 +152,7 @@ impl<T> TypedArena<T> {
         }
 
         unsafe {
-            if size_of::<T>() == 0 {
+            if mem::size_of::<T>() == 0 {
                 self.ptr.set(self.ptr.get().wrapping_byte_add(1));
                 let ptr = ptr::NonNull::<T>::dangling().as_ptr();
                 // Don't drop the object. This `write` is equivalent to `forget`.
@@ -167,27 +174,13 @@ impl<T> TypedArena<T> {
         // FIXME: this should *likely* use `offset_from`, but more
         // investigation is needed (including running tests in miri).
         let available_bytes = self.end.get().addr() - self.ptr.get().addr();
-        let additional_bytes = additional.checked_mul(size_of::<T>()).unwrap();
+        let additional_bytes = additional.checked_mul(mem::size_of::<T>()).unwrap();
         available_bytes >= additional_bytes
     }
 
-    /// Allocates storage for `len >= 1` values in this arena, and returns a
-    /// raw pointer to the first value's storage.
-    ///
-    /// # Safety
-    ///
-    /// Caller must initialize each of the `len` slots to a droppable value
-    /// before the arena is dropped.
-    ///
-    /// In practice, this typically means that the caller must be able to
-    /// raw-copy `len` already-initialized values into the slice without any
-    /// possibility of panicking.
-    ///
-    /// FIXME(Zalathar): This is *very* fragile; perhaps we need a different
-    /// approach to arena-allocating slices of droppable values.
     #[inline]
-    unsafe fn alloc_raw_slice(&self, len: usize) -> *mut T {
-        assert!(size_of::<T>() != 0);
+    fn alloc_raw_slice(&self, len: usize) -> *mut T {
+        assert!(mem::size_of::<T>() != 0);
         assert!(len != 0);
 
         // Ensure the current chunk can fit `len` objects.
@@ -209,19 +202,7 @@ impl<T> TypedArena<T> {
     /// storing the elements in the arena.
     #[inline]
     pub fn alloc_from_iter<I: IntoIterator<Item = T>>(&self, iter: I) -> &mut [T] {
-        self.try_alloc_from_iter(iter.into_iter().map(Ok::<T, !>)).into_ok()
-    }
-
-    /// Allocates the elements of this iterator into a contiguous slice in the `TypedArena`.
-    ///
-    /// Note: for reasons of reentrancy and panic safety we collect into a `SmallVec<[_; 8]>` before
-    /// storing the elements in the arena.
-    #[inline]
-    pub fn try_alloc_from_iter<E>(
-        &self,
-        iter: impl IntoIterator<Item = Result<T, E>>,
-    ) -> Result<&mut [T], E> {
-        // Despite the similarity with `DroplessArena`, we cannot reuse their fast case. The reason
+        // Despite the similarlty with `DroplessArena`, we cannot reuse their fast case. The reason
         // is subtle: these arenas are reentrant. In other words, `iter` may very well be holding a
         // reference to `self` and adding elements to the arena during iteration.
         //
@@ -233,27 +214,20 @@ impl<T> TypedArena<T> {
         // So we collect all the elements beforehand, which takes care of reentrancy and panic
         // safety. This function is much less hot than `DroplessArena::alloc_from_iter`, so it
         // doesn't need to be hyper-optimized.
-        assert!(size_of::<T>() != 0);
+        assert!(mem::size_of::<T>() != 0);
 
-        let vec: Result<SmallVec<[T; 8]>, E> = iter.into_iter().collect();
-        let mut vec = vec?;
+        let mut vec: SmallVec<[_; 8]> = iter.into_iter().collect();
         if vec.is_empty() {
-            return Ok(&mut []);
+            return &mut [];
         }
         // Move the content to the arena by copying and then forgetting it.
         let len = vec.len();
-
-        // SAFETY: After allocating raw storage for exactly `len` values, we
-        // must fully initialize the storage without panicking, and we must
-        // also prevent the stale values in the vec from being dropped.
-        Ok(unsafe {
-            let start_ptr = self.alloc_raw_slice(len);
-            // Initialize the newly-allocated storage without panicking.
+        let start_ptr = self.alloc_raw_slice(len);
+        unsafe {
             vec.as_ptr().copy_to_nonoverlapping(start_ptr, len);
-            // Prevent the stale values in the vec from being dropped.
             vec.set_len(0);
             slice::from_raw_parts_mut(start_ptr, len)
-        })
+        }
     }
 
     /// Grows the arena.
@@ -263,7 +237,7 @@ impl<T> TypedArena<T> {
         unsafe {
             // We need the element size to convert chunk sizes (ranging from
             // PAGE to HUGE_PAGE bytes) to element counts.
-            let elem_size = cmp::max(1, size_of::<T>());
+            let elem_size = cmp::max(1, mem::size_of::<T>());
             let mut chunks = self.chunks.borrow_mut();
             let mut new_cap;
             if let Some(last_chunk) = chunks.last_mut() {
@@ -273,7 +247,7 @@ impl<T> TypedArena<T> {
                     // FIXME: this should *likely* use `offset_from`, but more
                     // investigation is needed (including running tests in miri).
                     let used_bytes = self.ptr.get().addr() - last_chunk.start().addr();
-                    last_chunk.entries = used_bytes / size_of::<T>();
+                    last_chunk.entries = used_bytes / mem::size_of::<T>();
                 }
 
                 // If the previous chunk's len is less than HUGE_PAGE
@@ -303,7 +277,7 @@ impl<T> TypedArena<T> {
         let end = self.ptr.get().addr();
         // We then calculate the number of elements to be dropped in the last chunk,
         // which is the filled area's length.
-        let diff = if size_of::<T>() == 0 {
+        let diff = if mem::size_of::<T>() == 0 {
             // `T` is ZST. It can't have a drop flag, so the value here doesn't matter. We get
             // the number of zero-sized values in the last and only chunk, just out of caution.
             // Recall that `end` was incremented for each allocated value.
@@ -311,7 +285,7 @@ impl<T> TypedArena<T> {
         } else {
             // FIXME: this should *likely* use `offset_from`, but more
             // investigation is needed (including running tests in miri).
-            (end - start) / size_of::<T>()
+            (end - start) / mem::size_of::<T>()
         };
         // Pass that to the `destroy` method.
         unsafe {
@@ -356,7 +330,7 @@ fn align_up(val: usize, align: usize) -> usize {
 
 // Pointer alignment is common in compiler types, so keep `DroplessArena` aligned to them
 // to optimize away alignment code.
-const DROPLESS_ALIGNMENT: usize = align_of::<usize>();
+const DROPLESS_ALIGNMENT: usize = mem::align_of::<usize>();
 
 /// An arena that can hold objects of multiple different types that impl `Copy`
 /// and/or satisfy `!mem::needs_drop`.
@@ -451,7 +425,7 @@ impl DroplessArena {
             let bytes = align_up(layout.size(), DROPLESS_ALIGNMENT);
 
             // Tell LLVM that `end` is aligned to DROPLESS_ALIGNMENT.
-            unsafe { hint::assert_unchecked(end == align_down(end, DROPLESS_ALIGNMENT)) };
+            unsafe { intrinsics::assume(end == align_down(end, DROPLESS_ALIGNMENT)) };
 
             if let Some(sub) = end.checked_sub(bytes) {
                 let new_end = align_down(sub, layout.align());
@@ -474,7 +448,7 @@ impl DroplessArena {
     #[inline]
     pub fn alloc<T>(&self, object: T) -> &mut T {
         assert!(!mem::needs_drop::<T>());
-        assert!(size_of::<T>() != 0);
+        assert!(mem::size_of::<T>() != 0);
 
         let mem = self.alloc_raw(Layout::new::<T>()) as *mut T;
 
@@ -498,7 +472,7 @@ impl DroplessArena {
         T: Copy,
     {
         assert!(!mem::needs_drop::<T>());
-        assert!(size_of::<T>() != 0);
+        assert!(mem::size_of::<T>() != 0);
         assert!(!slice.is_empty());
 
         let mem = self.alloc_raw(Layout::for_value::<[T]>(slice)) as *mut T;
@@ -507,6 +481,19 @@ impl DroplessArena {
             mem.copy_from_nonoverlapping(slice.as_ptr(), slice.len());
             slice::from_raw_parts_mut(mem, slice.len())
         }
+    }
+
+    /// Used by `Lift` to check whether this slice is allocated
+    /// in this arena.
+    #[inline]
+    pub fn contains_slice<T>(&self, slice: &[T]) -> bool {
+        for chunk in self.chunks.borrow_mut().iter_mut() {
+            let ptr = slice.as_ptr().cast::<u8>().cast_mut();
+            if chunk.start() <= ptr && chunk.end() >= ptr {
+                return true;
+            }
+        }
+        false
     }
 
     /// Allocates a string slice that is copied into the `DroplessArena`, returning a
@@ -560,7 +547,7 @@ impl DroplessArena {
         // Warning: this function is reentrant: `iter` could hold a reference to `&self` and
         // allocate additional elements while we're iterating.
         let iter = iter.into_iter();
-        assert!(size_of::<T>() != 0);
+        assert!(mem::size_of::<T>() != 0);
         assert!(!mem::needs_drop::<T>());
 
         let size_hint = iter.size_hint();
@@ -581,33 +568,26 @@ impl DroplessArena {
                 // `drop`.
                 unsafe { self.write_from_iter(iter, len, mem) }
             }
-            (_, _) => outline(move || self.try_alloc_from_iter(iter.map(Ok::<T, !>)).into_ok()),
+            (_, _) => {
+                outline(move || -> &mut [T] {
+                    // Takes care of reentrancy.
+                    let mut vec: SmallVec<[_; 8]> = iter.collect();
+                    if vec.is_empty() {
+                        return &mut [];
+                    }
+                    // Move the content to the arena by copying it and then forgetting
+                    // the content of the SmallVec
+                    unsafe {
+                        let len = vec.len();
+                        let start_ptr =
+                            self.alloc_raw(Layout::for_value::<[T]>(vec.as_slice())) as *mut T;
+                        vec.as_ptr().copy_to_nonoverlapping(start_ptr, len);
+                        vec.set_len(0);
+                        slice::from_raw_parts_mut(start_ptr, len)
+                    }
+                })
+            }
         }
-    }
-
-    #[inline]
-    pub fn try_alloc_from_iter<T, E>(
-        &self,
-        iter: impl IntoIterator<Item = Result<T, E>>,
-    ) -> Result<&mut [T], E> {
-        // Despite the similarity with `alloc_from_iter`, we cannot reuse their fast case, as we
-        // cannot know the minimum length of the iterator in this case.
-        assert!(size_of::<T>() != 0);
-
-        // Takes care of reentrancy.
-        let vec: Result<SmallVec<[T; 8]>, E> = iter.into_iter().collect();
-        let mut vec = vec?;
-        if vec.is_empty() {
-            return Ok(&mut []);
-        }
-        // Move the content to the arena by copying and then forgetting it.
-        let len = vec.len();
-        Ok(unsafe {
-            let start_ptr = self.alloc_raw(Layout::for_value::<[T]>(vec.as_slice())) as *mut T;
-            vec.as_ptr().copy_to_nonoverlapping(start_ptr, len);
-            vec.set_len(0);
-            slice::from_raw_parts_mut(start_ptr, len)
-        })
     }
 }
 
@@ -624,7 +604,7 @@ impl DroplessArena {
 /// - Types that are `!Copy` and `Drop`: these must be specified in the
 ///   arguments. The `TypedArena` will be used for them.
 ///
-#[rustc_macro_transparency = "semiopaque"]
+#[rustc_macro_transparency = "semitransparent"]
 pub macro declare_arena([$($a:tt $name:ident: $ty:ty,)*]) {
     #[derive(Default)]
     pub struct Arena<'tcx> {
@@ -634,34 +614,34 @@ pub macro declare_arena([$($a:tt $name:ident: $ty:ty,)*]) {
 
     pub trait ArenaAllocatable<'tcx, C = rustc_arena::IsNotCopy>: Sized {
         #[allow(clippy::mut_from_ref)]
-        fn allocate_on(self, arena: &'tcx Arena<'tcx>) -> &'tcx mut Self;
+        fn allocate_on<'a>(self, arena: &'a Arena<'tcx>) -> &'a mut Self;
         #[allow(clippy::mut_from_ref)]
-        fn allocate_from_iter(
-            arena: &'tcx Arena<'tcx>,
+        fn allocate_from_iter<'a>(
+            arena: &'a Arena<'tcx>,
             iter: impl ::std::iter::IntoIterator<Item = Self>,
-        ) -> &'tcx mut [Self];
+        ) -> &'a mut [Self];
     }
 
     // Any type that impls `Copy` can be arena-allocated in the `DroplessArena`.
     impl<'tcx, T: Copy> ArenaAllocatable<'tcx, rustc_arena::IsCopy> for T {
         #[inline]
         #[allow(clippy::mut_from_ref)]
-        fn allocate_on(self, arena: &'tcx Arena<'tcx>) -> &'tcx mut Self {
+        fn allocate_on<'a>(self, arena: &'a Arena<'tcx>) -> &'a mut Self {
             arena.dropless.alloc(self)
         }
         #[inline]
         #[allow(clippy::mut_from_ref)]
-        fn allocate_from_iter(
-            arena: &'tcx Arena<'tcx>,
+        fn allocate_from_iter<'a>(
+            arena: &'a Arena<'tcx>,
             iter: impl ::std::iter::IntoIterator<Item = Self>,
-        ) -> &'tcx mut [Self] {
+        ) -> &'a mut [Self] {
             arena.dropless.alloc_from_iter(iter)
         }
     }
     $(
         impl<'tcx> ArenaAllocatable<'tcx, rustc_arena::IsNotCopy> for $ty {
             #[inline]
-            fn allocate_on(self, arena: &'tcx Arena<'tcx>) -> &'tcx mut Self {
+            fn allocate_on<'a>(self, arena: &'a Arena<'tcx>) -> &'a mut Self {
                 if !::std::mem::needs_drop::<Self>() {
                     arena.dropless.alloc(self)
                 } else {
@@ -671,10 +651,10 @@ pub macro declare_arena([$($a:tt $name:ident: $ty:ty,)*]) {
 
             #[inline]
             #[allow(clippy::mut_from_ref)]
-            fn allocate_from_iter(
-                arena: &'tcx Arena<'tcx>,
+            fn allocate_from_iter<'a>(
+                arena: &'a Arena<'tcx>,
                 iter: impl ::std::iter::IntoIterator<Item = Self>,
-            ) -> &'tcx mut [Self] {
+            ) -> &'a mut [Self] {
                 if !::std::mem::needs_drop::<Self>() {
                     arena.dropless.alloc_from_iter(iter)
                 } else {
@@ -687,7 +667,7 @@ pub macro declare_arena([$($a:tt $name:ident: $ty:ty,)*]) {
     impl<'tcx> Arena<'tcx> {
         #[inline]
         #[allow(clippy::mut_from_ref)]
-        pub fn alloc<T: ArenaAllocatable<'tcx, C>, C>(&'tcx self, value: T) -> &mut T {
+        pub fn alloc<T: ArenaAllocatable<'tcx, C>, C>(&self, value: T) -> &mut T {
             value.allocate_on(self)
         }
 
@@ -711,7 +691,7 @@ pub macro declare_arena([$($a:tt $name:ident: $ty:ty,)*]) {
 
         #[allow(clippy::mut_from_ref)]
         pub fn alloc_from_iter<T: ArenaAllocatable<'tcx, C>, C>(
-            &'tcx self,
+            &self,
             iter: impl ::std::iter::IntoIterator<Item = T>,
         ) -> &mut [T] {
             T::allocate_from_iter(self, iter)

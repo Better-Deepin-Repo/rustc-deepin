@@ -41,9 +41,9 @@ pub fn cli() -> Command {
             "Test only the specified example",
             "Test all examples",
             "Test only the specified test target",
-            "Test all targets that have `test = true` set",
+            "Test all test targets",
             "Test only the specified bench target",
-            "Test all targets that have `bench = true` set",
+            "Test all bench targets",
             "Test all targets (does not include doctests)",
         )
         .arg(
@@ -60,10 +60,11 @@ pub fn cli() -> Command {
         .arg_unit_graph()
         .arg_timings()
         .arg_manifest_path()
+        .arg_lockfile_path()
         .arg_ignore_rust_version()
         .after_help(color_print::cstr!(
-            "Run `<bright-cyan,bold>cargo help test</>` for more detailed information.\n\
-             Run `<bright-cyan,bold>cargo test -- --help</>` for test binary options.\n",
+            "Run `<cyan,bold>cargo help test</>` for more detailed information.\n\
+             Run `<cyan,bold>cargo test -- --help</>` for test binary options.\n",
         ))
 }
 
@@ -71,7 +72,7 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
     let ws = args.workspace(gctx)?;
 
     let mut compile_opts =
-        args.compile_options(gctx, UserIntent::Test, Some(&ws), ProfileChecking::Custom)?;
+        args.compile_options(gctx, CompileMode::Test, Some(&ws), ProfileChecking::Custom)?;
 
     compile_opts.build_config.requested_profile =
         args.get_profile_name("test", ProfileChecking::Custom)?;
@@ -88,13 +89,13 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
     if doc {
         if compile_opts.filter.is_specific() {
             return Err(
-                anyhow::format_err!("can't mix --doc with other target selecting options").into(),
+                anyhow::format_err!("Can't mix --doc with other target selecting options").into(),
             );
         }
         if no_run {
-            return Err(anyhow::format_err!("can't skip running doc tests with --no-run").into());
+            return Err(anyhow::format_err!("Can't skip running doc tests with --no-run").into());
         }
-        compile_opts.build_config.intent = UserIntent::Doctest;
+        compile_opts.build_config.mode = CompileMode::Doctest;
         compile_opts.filter = ops::CompileFilter::lib_only();
     } else if test_name.is_some() && !compile_opts.filter.is_specific() {
         // If arg `TESTNAME` is provided, assumed that the user knows what

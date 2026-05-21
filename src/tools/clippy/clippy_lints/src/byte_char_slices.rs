@@ -22,7 +22,7 @@ declare_clippy_lint! {
     /// ```ignore
     /// b"Hello"
     /// ```
-    #[clippy::version = "1.81.0"]
+    #[clippy::version = "1.68.0"]
     pub BYTE_CHAR_SLICES,
     style,
     "hard to read byte char slice"
@@ -31,8 +31,8 @@ declare_lint_pass!(ByteCharSlice => [BYTE_CHAR_SLICES]);
 
 impl EarlyLintPass for ByteCharSlice {
     fn check_expr(&mut self, cx: &EarlyContext<'_>, expr: &Expr) {
-        if !expr.span.from_expansion()
-            && let Some(slice) = is_byte_char_slices(expr)
+        if let Some(slice) = is_byte_char_slices(expr)
+            && !expr.span.from_expansion()
         {
             span_lint_and_sugg(
                 cx,
@@ -41,34 +41,39 @@ impl EarlyLintPass for ByteCharSlice {
                 "can be more succinctly written as a byte str",
                 "try",
                 format!("b\"{slice}\""),
-                Applicability::MachineApplicable,
+                Applicability::MaybeIncorrect,
             );
         }
     }
 }
 
-/// Checks whether the slice is that of byte chars, and if so, builds a byte-string out of it
 fn is_byte_char_slices(expr: &Expr) -> Option<String> {
-    if let ExprKind::AddrOf(BorrowKind::Ref, Mutability::Not, expr) = &expr.kind
-        && let ExprKind::Array(members) = &expr.kind
-        && !members.is_empty()
-    {
-        members
-            .iter()
-            .map(|member| match &member.kind {
-                ExprKind::Lit(Lit {
-                    kind: LitKind::Byte,
-                    symbol,
-                    ..
-                }) => Some(symbol.as_str()),
-                _ => None,
-            })
-            .map(|maybe_quote| match maybe_quote {
-                Some("\"") => Some("\\\""),
-                Some("\\'") => Some("'"),
-                other => other,
-            })
-            .collect::<Option<String>>()
+    if let ExprKind::AddrOf(BorrowKind::Ref, Mutability::Not, expr) = &expr.kind {
+        match &expr.kind {
+            ExprKind::Array(members) => {
+                if members.is_empty() {
+                    return None;
+                }
+
+                members
+                    .iter()
+                    .map(|member| match &member.kind {
+                        ExprKind::Lit(Lit {
+                            kind: LitKind::Byte,
+                            symbol,
+                            ..
+                        }) => Some(symbol.as_str()),
+                        _ => None,
+                    })
+                    .map(|maybe_quote| match maybe_quote {
+                        Some("\"") => Some("\\\""),
+                        Some("\\'") => Some("'"),
+                        other => other,
+                    })
+                    .collect::<Option<String>>()
+            },
+            _ => None,
+        }
     } else {
         None
     }

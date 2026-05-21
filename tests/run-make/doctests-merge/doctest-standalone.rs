@@ -1,11 +1,11 @@
 #![crate_name = "foo"]
 #![crate_type = "lib"]
 
-//! ```standalone_crate
+//! ```standalone
 //! foo::init();
 //! ```
 
-/// ```standalone_crate
+/// ```standalone
 /// foo::init();
 /// ```
 pub fn init() {

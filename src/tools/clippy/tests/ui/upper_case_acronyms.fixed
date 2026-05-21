@@ -7,21 +7,22 @@ struct CString; // not linted
 enum Flags {
     NS, // not linted
     Cwr,
-    //~^ upper_case_acronyms
+    //~^ ERROR: name `CWR` contains a capitalized acronym
+    //~| NOTE: `-D clippy::upper-case-acronyms` implied by `-D warnings`
     Ece,
-    //~^ upper_case_acronyms
+    //~^ ERROR: name `ECE` contains a capitalized acronym
     Urg,
-    //~^ upper_case_acronyms
+    //~^ ERROR: name `URG` contains a capitalized acronym
     Ack,
-    //~^ upper_case_acronyms
+    //~^ ERROR: name `ACK` contains a capitalized acronym
     Psh,
-    //~^ upper_case_acronyms
+    //~^ ERROR: name `PSH` contains a capitalized acronym
     Rst,
-    //~^ upper_case_acronyms
+    //~^ ERROR: name `RST` contains a capitalized acronym
     Syn,
-    //~^ upper_case_acronyms
+    //~^ ERROR: name `SYN` contains a capitalized acronym
     Fin,
-    //~^ upper_case_acronyms
+    //~^ ERROR: name `FIN` contains a capitalized acronym
 }
 
 // linted with cfg option, beware that lint suggests `GccllvmSomething` instead of
@@ -42,18 +43,18 @@ pub enum ParseError<T> {
 // private, do lint here
 enum ParseErrorPrivate<T> {
     Wasd(u8),
-    //~^ upper_case_acronyms
+    //~^ ERROR: name `WASD` contains a capitalized acronym
     Utf8(std::string::FromUtf8Error),
     Parse(T, String),
 }
 
 // do lint here
 struct Json;
-//~^ upper_case_acronyms
+//~^ ERROR: name `JSON` contains a capitalized acronym
 
 // do lint here
 enum Yaml {
-    //~^ upper_case_acronyms
+    //~^ ERROR: name `YAML` contains a capitalized acronym
     Num(u32),
     Str(String),
 }
@@ -61,7 +62,7 @@ enum Yaml {
 // test for issue #7708
 enum AllowOnField {
     Disallow,
-    //~^ upper_case_acronyms
+    //~^ ERROR: name `DISALLOW` contains a capitalized acronym
     #[allow(clippy::upper_case_acronyms)]
     ALLOW,
 }

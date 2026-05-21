@@ -5,7 +5,7 @@
 //! The reference is [Intel 64 and IA-32 Architectures Software Developer's
 //! Manual Volume 2: Instruction Set Reference, A-Z][intel64_ref].
 //!
-//! [intel64_ref]: https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-instruction-set-reference-manual-325383.pdf
+//! [intel64_ref]: http://www.intel.de/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-instruction-set-reference-manual-325383.pdf
 
 use crate::core_arch::simd::i8x16;
 use crate::core_arch::simd::i8x32;
@@ -16,6 +16,12 @@ use crate::core_arch::x86::__m512i;
 use crate::core_arch::x86::__mmask16;
 use crate::core_arch::x86::__mmask32;
 use crate::core_arch::x86::__mmask64;
+use crate::core_arch::x86::_mm256_setzero_si256;
+use crate::core_arch::x86::_mm512_setzero_si512;
+use crate::core_arch::x86::_mm_setzero_si128;
+use crate::core_arch::x86::m128iExt;
+use crate::core_arch::x86::m256iExt;
+use crate::core_arch::x86::m512iExt;
 use crate::intrinsics::simd::simd_select_bitmask;
 use crate::mem::transmute;
 
@@ -23,7 +29,7 @@ use crate::mem::transmute;
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.vgf2p8affineinvqb.512"]
     fn vgf2p8affineinvqb_512(x: i8x64, a: i8x64, imm8: u8) -> i8x64;
     #[link_name = "llvm.x86.vgf2p8affineinvqb.256"]
@@ -60,10 +66,10 @@ unsafe extern "C" {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_gf2p8mul_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512f")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8mulb))]
-pub fn _mm512_gf2p8mul_epi8(a: __m512i, b: __m512i) -> __m512i {
-    unsafe { transmute(vgf2p8mulb_512(a.as_i8x64(), b.as_i8x64())) }
+pub unsafe fn _mm512_gf2p8mul_epi8(a: __m512i, b: __m512i) -> __m512i {
+    transmute(vgf2p8mulb_512(a.as_i8x64(), b.as_i8x64()))
 }
 
 /// Performs a multiplication in GF(2^8) on the packed bytes.
@@ -76,16 +82,19 @@ pub fn _mm512_gf2p8mul_epi8(a: __m512i, b: __m512i) -> __m512i {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_mask_gf2p8mul_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512f")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8mulb))]
-pub fn _mm512_mask_gf2p8mul_epi8(src: __m512i, k: __mmask64, a: __m512i, b: __m512i) -> __m512i {
-    unsafe {
-        transmute(simd_select_bitmask(
-            k,
-            vgf2p8mulb_512(a.as_i8x64(), b.as_i8x64()),
-            src.as_i8x64(),
-        ))
-    }
+pub unsafe fn _mm512_mask_gf2p8mul_epi8(
+    src: __m512i,
+    k: __mmask64,
+    a: __m512i,
+    b: __m512i,
+) -> __m512i {
+    transmute(simd_select_bitmask(
+        k,
+        vgf2p8mulb_512(a.as_i8x64(), b.as_i8x64()),
+        src.as_i8x64(),
+    ))
 }
 
 /// Performs a multiplication in GF(2^8) on the packed bytes.
@@ -98,17 +107,15 @@ pub fn _mm512_mask_gf2p8mul_epi8(src: __m512i, k: __mmask64, a: __m512i, b: __m5
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_maskz_gf2p8mul_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512f")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8mulb))]
-pub fn _mm512_maskz_gf2p8mul_epi8(k: __mmask64, a: __m512i, b: __m512i) -> __m512i {
-    let zero = i8x64::ZERO;
-    unsafe {
-        transmute(simd_select_bitmask(
-            k,
-            vgf2p8mulb_512(a.as_i8x64(), b.as_i8x64()),
-            zero,
-        ))
-    }
+pub unsafe fn _mm512_maskz_gf2p8mul_epi8(k: __mmask64, a: __m512i, b: __m512i) -> __m512i {
+    let zero = _mm512_setzero_si512().as_i8x64();
+    transmute(simd_select_bitmask(
+        k,
+        vgf2p8mulb_512(a.as_i8x64(), b.as_i8x64()),
+        zero,
+    ))
 }
 
 /// Performs a multiplication in GF(2^8) on the packed bytes.
@@ -118,10 +125,10 @@ pub fn _mm512_maskz_gf2p8mul_epi8(k: __mmask64, a: __m512i, b: __m512i) -> __m51
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_gf2p8mul_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8mulb))]
-pub fn _mm256_gf2p8mul_epi8(a: __m256i, b: __m256i) -> __m256i {
-    unsafe { transmute(vgf2p8mulb_256(a.as_i8x32(), b.as_i8x32())) }
+pub unsafe fn _mm256_gf2p8mul_epi8(a: __m256i, b: __m256i) -> __m256i {
+    transmute(vgf2p8mulb_256(a.as_i8x32(), b.as_i8x32()))
 }
 
 /// Performs a multiplication in GF(2^8) on the packed bytes.
@@ -134,16 +141,19 @@ pub fn _mm256_gf2p8mul_epi8(a: __m256i, b: __m256i) -> __m256i {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_mask_gf2p8mul_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512vl")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8mulb))]
-pub fn _mm256_mask_gf2p8mul_epi8(src: __m256i, k: __mmask32, a: __m256i, b: __m256i) -> __m256i {
-    unsafe {
-        transmute(simd_select_bitmask(
-            k,
-            vgf2p8mulb_256(a.as_i8x32(), b.as_i8x32()),
-            src.as_i8x32(),
-        ))
-    }
+pub unsafe fn _mm256_mask_gf2p8mul_epi8(
+    src: __m256i,
+    k: __mmask32,
+    a: __m256i,
+    b: __m256i,
+) -> __m256i {
+    transmute(simd_select_bitmask(
+        k,
+        vgf2p8mulb_256(a.as_i8x32(), b.as_i8x32()),
+        src.as_i8x32(),
+    ))
 }
 
 /// Performs a multiplication in GF(2^8) on the packed bytes.
@@ -156,17 +166,15 @@ pub fn _mm256_mask_gf2p8mul_epi8(src: __m256i, k: __mmask32, a: __m256i, b: __m2
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_maskz_gf2p8mul_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512vl")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8mulb))]
-pub fn _mm256_maskz_gf2p8mul_epi8(k: __mmask32, a: __m256i, b: __m256i) -> __m256i {
-    let zero = i8x32::ZERO;
-    unsafe {
-        transmute(simd_select_bitmask(
-            k,
-            vgf2p8mulb_256(a.as_i8x32(), b.as_i8x32()),
-            zero,
-        ))
-    }
+pub unsafe fn _mm256_maskz_gf2p8mul_epi8(k: __mmask32, a: __m256i, b: __m256i) -> __m256i {
+    let zero = _mm256_setzero_si256().as_i8x32();
+    transmute(simd_select_bitmask(
+        k,
+        vgf2p8mulb_256(a.as_i8x32(), b.as_i8x32()),
+        zero,
+    ))
 }
 
 /// Performs a multiplication in GF(2^8) on the packed bytes.
@@ -176,10 +184,10 @@ pub fn _mm256_maskz_gf2p8mul_epi8(k: __mmask32, a: __m256i, b: __m256i) -> __m25
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_gf2p8mul_epi8)
 #[inline]
 #[target_feature(enable = "gfni")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(gf2p8mulb))]
-pub fn _mm_gf2p8mul_epi8(a: __m128i, b: __m128i) -> __m128i {
-    unsafe { transmute(vgf2p8mulb_128(a.as_i8x16(), b.as_i8x16())) }
+pub unsafe fn _mm_gf2p8mul_epi8(a: __m128i, b: __m128i) -> __m128i {
+    transmute(vgf2p8mulb_128(a.as_i8x16(), b.as_i8x16()))
 }
 
 /// Performs a multiplication in GF(2^8) on the packed bytes.
@@ -192,16 +200,19 @@ pub fn _mm_gf2p8mul_epi8(a: __m128i, b: __m128i) -> __m128i {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_mask_gf2p8mul_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512vl")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8mulb))]
-pub fn _mm_mask_gf2p8mul_epi8(src: __m128i, k: __mmask16, a: __m128i, b: __m128i) -> __m128i {
-    unsafe {
-        transmute(simd_select_bitmask(
-            k,
-            vgf2p8mulb_128(a.as_i8x16(), b.as_i8x16()),
-            src.as_i8x16(),
-        ))
-    }
+pub unsafe fn _mm_mask_gf2p8mul_epi8(
+    src: __m128i,
+    k: __mmask16,
+    a: __m128i,
+    b: __m128i,
+) -> __m128i {
+    transmute(simd_select_bitmask(
+        k,
+        vgf2p8mulb_128(a.as_i8x16(), b.as_i8x16()),
+        src.as_i8x16(),
+    ))
 }
 
 /// Performs a multiplication in GF(2^8) on the packed bytes.
@@ -214,17 +225,15 @@ pub fn _mm_mask_gf2p8mul_epi8(src: __m128i, k: __mmask16, a: __m128i, b: __m128i
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_maskz_gf2p8mul_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512vl")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8mulb))]
-pub fn _mm_maskz_gf2p8mul_epi8(k: __mmask16, a: __m128i, b: __m128i) -> __m128i {
-    unsafe {
-        let zero = i8x16::ZERO;
-        transmute(simd_select_bitmask(
-            k,
-            vgf2p8mulb_128(a.as_i8x16(), b.as_i8x16()),
-            zero,
-        ))
-    }
+pub unsafe fn _mm_maskz_gf2p8mul_epi8(k: __mmask16, a: __m128i, b: __m128i) -> __m128i {
+    let zero = _mm_setzero_si128().as_i8x16();
+    transmute(simd_select_bitmask(
+        k,
+        vgf2p8mulb_128(a.as_i8x16(), b.as_i8x16()),
+        zero,
+    ))
 }
 
 /// Performs an affine transformation on the packed bytes in x.
@@ -235,18 +244,16 @@ pub fn _mm_maskz_gf2p8mul_epi8(k: __mmask16, a: __m128i, b: __m128i) -> __m128i 
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_gf2p8affine_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512f")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineqb, B = 0))]
 #[rustc_legacy_const_generics(2)]
-pub fn _mm512_gf2p8affine_epi64_epi8<const B: i32>(x: __m512i, a: __m512i) -> __m512i {
+pub unsafe fn _mm512_gf2p8affine_epi64_epi8<const B: i32>(x: __m512i, a: __m512i) -> __m512i {
     static_assert_uimm_bits!(B, 8);
     let b = B as u8;
     let x = x.as_i8x64();
     let a = a.as_i8x64();
-    unsafe {
-        let r = vgf2p8affineqb_512(x, a, b);
-        transmute(r)
-    }
+    let r = vgf2p8affineqb_512(x, a, b);
+    transmute(r)
 }
 
 /// Performs an affine transformation on the packed bytes in x.
@@ -260,23 +267,21 @@ pub fn _mm512_gf2p8affine_epi64_epi8<const B: i32>(x: __m512i, a: __m512i) -> __
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_maskz_gf2p8affine_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512f")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineqb, B = 0))]
 #[rustc_legacy_const_generics(3)]
-pub fn _mm512_maskz_gf2p8affine_epi64_epi8<const B: i32>(
+pub unsafe fn _mm512_maskz_gf2p8affine_epi64_epi8<const B: i32>(
     k: __mmask64,
     x: __m512i,
     a: __m512i,
 ) -> __m512i {
     static_assert_uimm_bits!(B, 8);
     let b = B as u8;
-    let zero = i8x64::ZERO;
+    let zero = _mm512_setzero_si512().as_i8x64();
     let x = x.as_i8x64();
     let a = a.as_i8x64();
-    unsafe {
-        let r = vgf2p8affineqb_512(x, a, b);
-        transmute(simd_select_bitmask(k, r, zero))
-    }
+    let r = vgf2p8affineqb_512(x, a, b);
+    transmute(simd_select_bitmask(k, r, zero))
 }
 
 /// Performs an affine transformation on the packed bytes in x.
@@ -290,10 +295,10 @@ pub fn _mm512_maskz_gf2p8affine_epi64_epi8<const B: i32>(
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_mask_gf2p8affine_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512f")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineqb, B = 0))]
 #[rustc_legacy_const_generics(4)]
-pub fn _mm512_mask_gf2p8affine_epi64_epi8<const B: i32>(
+pub unsafe fn _mm512_mask_gf2p8affine_epi64_epi8<const B: i32>(
     src: __m512i,
     k: __mmask64,
     x: __m512i,
@@ -303,10 +308,8 @@ pub fn _mm512_mask_gf2p8affine_epi64_epi8<const B: i32>(
     let b = B as u8;
     let x = x.as_i8x64();
     let a = a.as_i8x64();
-    unsafe {
-        let r = vgf2p8affineqb_512(x, a, b);
-        transmute(simd_select_bitmask(k, r, src.as_i8x64()))
-    }
+    let r = vgf2p8affineqb_512(x, a, b);
+    transmute(simd_select_bitmask(k, r, src.as_i8x64()))
 }
 
 /// Performs an affine transformation on the packed bytes in x.
@@ -317,18 +320,16 @@ pub fn _mm512_mask_gf2p8affine_epi64_epi8<const B: i32>(
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_gf2p8affine_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineqb, B = 0))]
 #[rustc_legacy_const_generics(2)]
-pub fn _mm256_gf2p8affine_epi64_epi8<const B: i32>(x: __m256i, a: __m256i) -> __m256i {
+pub unsafe fn _mm256_gf2p8affine_epi64_epi8<const B: i32>(x: __m256i, a: __m256i) -> __m256i {
     static_assert_uimm_bits!(B, 8);
     let b = B as u8;
     let x = x.as_i8x32();
     let a = a.as_i8x32();
-    unsafe {
-        let r = vgf2p8affineqb_256(x, a, b);
-        transmute(r)
-    }
+    let r = vgf2p8affineqb_256(x, a, b);
+    transmute(r)
 }
 
 /// Performs an affine transformation on the packed bytes in x.
@@ -342,23 +343,21 @@ pub fn _mm256_gf2p8affine_epi64_epi8<const B: i32>(x: __m256i, a: __m256i) -> __
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_maskz_gf2p8affine_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512vl")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineqb, B = 0))]
 #[rustc_legacy_const_generics(3)]
-pub fn _mm256_maskz_gf2p8affine_epi64_epi8<const B: i32>(
+pub unsafe fn _mm256_maskz_gf2p8affine_epi64_epi8<const B: i32>(
     k: __mmask32,
     x: __m256i,
     a: __m256i,
 ) -> __m256i {
     static_assert_uimm_bits!(B, 8);
     let b = B as u8;
-    let zero = i8x32::ZERO;
+    let zero = _mm256_setzero_si256().as_i8x32();
     let x = x.as_i8x32();
     let a = a.as_i8x32();
-    unsafe {
-        let r = vgf2p8affineqb_256(x, a, b);
-        transmute(simd_select_bitmask(k, r, zero))
-    }
+    let r = vgf2p8affineqb_256(x, a, b);
+    transmute(simd_select_bitmask(k, r, zero))
 }
 
 /// Performs an affine transformation on the packed bytes in x.
@@ -372,10 +371,10 @@ pub fn _mm256_maskz_gf2p8affine_epi64_epi8<const B: i32>(
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_mask_gf2p8affine_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512vl")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineqb, B = 0))]
 #[rustc_legacy_const_generics(4)]
-pub fn _mm256_mask_gf2p8affine_epi64_epi8<const B: i32>(
+pub unsafe fn _mm256_mask_gf2p8affine_epi64_epi8<const B: i32>(
     src: __m256i,
     k: __mmask32,
     x: __m256i,
@@ -385,10 +384,8 @@ pub fn _mm256_mask_gf2p8affine_epi64_epi8<const B: i32>(
     let b = B as u8;
     let x = x.as_i8x32();
     let a = a.as_i8x32();
-    unsafe {
-        let r = vgf2p8affineqb_256(x, a, b);
-        transmute(simd_select_bitmask(k, r, src.as_i8x32()))
-    }
+    let r = vgf2p8affineqb_256(x, a, b);
+    transmute(simd_select_bitmask(k, r, src.as_i8x32()))
 }
 
 /// Performs an affine transformation on the packed bytes in x.
@@ -399,18 +396,16 @@ pub fn _mm256_mask_gf2p8affine_epi64_epi8<const B: i32>(
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_gf2p8affine_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(gf2p8affineqb, B = 0))]
 #[rustc_legacy_const_generics(2)]
-pub fn _mm_gf2p8affine_epi64_epi8<const B: i32>(x: __m128i, a: __m128i) -> __m128i {
+pub unsafe fn _mm_gf2p8affine_epi64_epi8<const B: i32>(x: __m128i, a: __m128i) -> __m128i {
     static_assert_uimm_bits!(B, 8);
     let b = B as u8;
     let x = x.as_i8x16();
     let a = a.as_i8x16();
-    unsafe {
-        let r = vgf2p8affineqb_128(x, a, b);
-        transmute(r)
-    }
+    let r = vgf2p8affineqb_128(x, a, b);
+    transmute(r)
 }
 
 /// Performs an affine transformation on the packed bytes in x.
@@ -424,23 +419,21 @@ pub fn _mm_gf2p8affine_epi64_epi8<const B: i32>(x: __m128i, a: __m128i) -> __m12
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_maskz_gf2p8affine_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512vl")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineqb, B = 0))]
 #[rustc_legacy_const_generics(3)]
-pub fn _mm_maskz_gf2p8affine_epi64_epi8<const B: i32>(
+pub unsafe fn _mm_maskz_gf2p8affine_epi64_epi8<const B: i32>(
     k: __mmask16,
     x: __m128i,
     a: __m128i,
 ) -> __m128i {
     static_assert_uimm_bits!(B, 8);
     let b = B as u8;
-    let zero = i8x16::ZERO;
+    let zero = _mm_setzero_si128().as_i8x16();
     let x = x.as_i8x16();
     let a = a.as_i8x16();
-    unsafe {
-        let r = vgf2p8affineqb_128(x, a, b);
-        transmute(simd_select_bitmask(k, r, zero))
-    }
+    let r = vgf2p8affineqb_128(x, a, b);
+    transmute(simd_select_bitmask(k, r, zero))
 }
 
 /// Performs an affine transformation on the packed bytes in x.
@@ -454,10 +447,10 @@ pub fn _mm_maskz_gf2p8affine_epi64_epi8<const B: i32>(
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_mask_gf2p8affine_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512vl")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineqb, B = 0))]
 #[rustc_legacy_const_generics(4)]
-pub fn _mm_mask_gf2p8affine_epi64_epi8<const B: i32>(
+pub unsafe fn _mm_mask_gf2p8affine_epi64_epi8<const B: i32>(
     src: __m128i,
     k: __mmask16,
     x: __m128i,
@@ -467,10 +460,8 @@ pub fn _mm_mask_gf2p8affine_epi64_epi8<const B: i32>(
     let b = B as u8;
     let x = x.as_i8x16();
     let a = a.as_i8x16();
-    unsafe {
-        let r = vgf2p8affineqb_128(x, a, b);
-        transmute(simd_select_bitmask(k, r, src.as_i8x16()))
-    }
+    let r = vgf2p8affineqb_128(x, a, b);
+    transmute(simd_select_bitmask(k, r, src.as_i8x16()))
 }
 
 /// Performs an affine transformation on the inverted packed bytes in x.
@@ -483,18 +474,16 @@ pub fn _mm_mask_gf2p8affine_epi64_epi8<const B: i32>(
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_gf2p8affineinv_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512f")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineinvqb, B = 0))]
 #[rustc_legacy_const_generics(2)]
-pub fn _mm512_gf2p8affineinv_epi64_epi8<const B: i32>(x: __m512i, a: __m512i) -> __m512i {
+pub unsafe fn _mm512_gf2p8affineinv_epi64_epi8<const B: i32>(x: __m512i, a: __m512i) -> __m512i {
     static_assert_uimm_bits!(B, 8);
     let b = B as u8;
     let x = x.as_i8x64();
     let a = a.as_i8x64();
-    unsafe {
-        let r = vgf2p8affineinvqb_512(x, a, b);
-        transmute(r)
-    }
+    let r = vgf2p8affineinvqb_512(x, a, b);
+    transmute(r)
 }
 
 /// Performs an affine transformation on the inverted packed bytes in x.
@@ -510,23 +499,21 @@ pub fn _mm512_gf2p8affineinv_epi64_epi8<const B: i32>(x: __m512i, a: __m512i) ->
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_maskz_gf2p8affineinv_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512f")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineinvqb, B = 0))]
 #[rustc_legacy_const_generics(3)]
-pub fn _mm512_maskz_gf2p8affineinv_epi64_epi8<const B: i32>(
+pub unsafe fn _mm512_maskz_gf2p8affineinv_epi64_epi8<const B: i32>(
     k: __mmask64,
     x: __m512i,
     a: __m512i,
 ) -> __m512i {
     static_assert_uimm_bits!(B, 8);
     let b = B as u8;
-    let zero = i8x64::ZERO;
+    let zero = _mm512_setzero_si512().as_i8x64();
     let x = x.as_i8x64();
     let a = a.as_i8x64();
-    unsafe {
-        let r = vgf2p8affineinvqb_512(x, a, b);
-        transmute(simd_select_bitmask(k, r, zero))
-    }
+    let r = vgf2p8affineinvqb_512(x, a, b);
+    transmute(simd_select_bitmask(k, r, zero))
 }
 
 /// Performs an affine transformation on the inverted packed bytes in x.
@@ -542,10 +529,10 @@ pub fn _mm512_maskz_gf2p8affineinv_epi64_epi8<const B: i32>(
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm512_mask_gf2p8affineinv_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512f")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineinvqb, B = 0))]
 #[rustc_legacy_const_generics(4)]
-pub fn _mm512_mask_gf2p8affineinv_epi64_epi8<const B: i32>(
+pub unsafe fn _mm512_mask_gf2p8affineinv_epi64_epi8<const B: i32>(
     src: __m512i,
     k: __mmask64,
     x: __m512i,
@@ -555,10 +542,8 @@ pub fn _mm512_mask_gf2p8affineinv_epi64_epi8<const B: i32>(
     let b = B as u8;
     let x = x.as_i8x64();
     let a = a.as_i8x64();
-    unsafe {
-        let r = vgf2p8affineinvqb_512(x, a, b);
-        transmute(simd_select_bitmask(k, r, src.as_i8x64()))
-    }
+    let r = vgf2p8affineinvqb_512(x, a, b);
+    transmute(simd_select_bitmask(k, r, src.as_i8x64()))
 }
 
 /// Performs an affine transformation on the inverted packed bytes in x.
@@ -571,18 +556,16 @@ pub fn _mm512_mask_gf2p8affineinv_epi64_epi8<const B: i32>(
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_gf2p8affineinv_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineinvqb, B = 0))]
 #[rustc_legacy_const_generics(2)]
-pub fn _mm256_gf2p8affineinv_epi64_epi8<const B: i32>(x: __m256i, a: __m256i) -> __m256i {
+pub unsafe fn _mm256_gf2p8affineinv_epi64_epi8<const B: i32>(x: __m256i, a: __m256i) -> __m256i {
     static_assert_uimm_bits!(B, 8);
     let b = B as u8;
     let x = x.as_i8x32();
     let a = a.as_i8x32();
-    unsafe {
-        let r = vgf2p8affineinvqb_256(x, a, b);
-        transmute(r)
-    }
+    let r = vgf2p8affineinvqb_256(x, a, b);
+    transmute(r)
 }
 
 /// Performs an affine transformation on the inverted packed bytes in x.
@@ -598,23 +581,21 @@ pub fn _mm256_gf2p8affineinv_epi64_epi8<const B: i32>(x: __m256i, a: __m256i) ->
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_maskz_gf2p8affineinv_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512vl")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineinvqb, B = 0))]
 #[rustc_legacy_const_generics(3)]
-pub fn _mm256_maskz_gf2p8affineinv_epi64_epi8<const B: i32>(
+pub unsafe fn _mm256_maskz_gf2p8affineinv_epi64_epi8<const B: i32>(
     k: __mmask32,
     x: __m256i,
     a: __m256i,
 ) -> __m256i {
     static_assert_uimm_bits!(B, 8);
     let b = B as u8;
-    let zero = i8x32::ZERO;
+    let zero = _mm256_setzero_si256().as_i8x32();
     let x = x.as_i8x32();
     let a = a.as_i8x32();
-    unsafe {
-        let r = vgf2p8affineinvqb_256(x, a, b);
-        transmute(simd_select_bitmask(k, r, zero))
-    }
+    let r = vgf2p8affineinvqb_256(x, a, b);
+    transmute(simd_select_bitmask(k, r, zero))
 }
 
 /// Performs an affine transformation on the inverted packed bytes in x.
@@ -630,10 +611,10 @@ pub fn _mm256_maskz_gf2p8affineinv_epi64_epi8<const B: i32>(
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm256_mask_gf2p8affineinv_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512vl")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineinvqb, B = 0))]
 #[rustc_legacy_const_generics(4)]
-pub fn _mm256_mask_gf2p8affineinv_epi64_epi8<const B: i32>(
+pub unsafe fn _mm256_mask_gf2p8affineinv_epi64_epi8<const B: i32>(
     src: __m256i,
     k: __mmask32,
     x: __m256i,
@@ -643,10 +624,8 @@ pub fn _mm256_mask_gf2p8affineinv_epi64_epi8<const B: i32>(
     let b = B as u8;
     let x = x.as_i8x32();
     let a = a.as_i8x32();
-    unsafe {
-        let r = vgf2p8affineinvqb_256(x, a, b);
-        transmute(simd_select_bitmask(k, r, src.as_i8x32()))
-    }
+    let r = vgf2p8affineinvqb_256(x, a, b);
+    transmute(simd_select_bitmask(k, r, src.as_i8x32()))
 }
 
 /// Performs an affine transformation on the inverted packed bytes in x.
@@ -659,18 +638,16 @@ pub fn _mm256_mask_gf2p8affineinv_epi64_epi8<const B: i32>(
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_gf2p8affineinv_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(gf2p8affineinvqb, B = 0))]
 #[rustc_legacy_const_generics(2)]
-pub fn _mm_gf2p8affineinv_epi64_epi8<const B: i32>(x: __m128i, a: __m128i) -> __m128i {
+pub unsafe fn _mm_gf2p8affineinv_epi64_epi8<const B: i32>(x: __m128i, a: __m128i) -> __m128i {
     static_assert_uimm_bits!(B, 8);
     let b = B as u8;
     let x = x.as_i8x16();
     let a = a.as_i8x16();
-    unsafe {
-        let r = vgf2p8affineinvqb_128(x, a, b);
-        transmute(r)
-    }
+    let r = vgf2p8affineinvqb_128(x, a, b);
+    transmute(r)
 }
 
 /// Performs an affine transformation on the inverted packed bytes in x.
@@ -686,23 +663,21 @@ pub fn _mm_gf2p8affineinv_epi64_epi8<const B: i32>(x: __m128i, a: __m128i) -> __
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_maskz_gf2p8affineinv_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512vl")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineinvqb, B = 0))]
 #[rustc_legacy_const_generics(3)]
-pub fn _mm_maskz_gf2p8affineinv_epi64_epi8<const B: i32>(
+pub unsafe fn _mm_maskz_gf2p8affineinv_epi64_epi8<const B: i32>(
     k: __mmask16,
     x: __m128i,
     a: __m128i,
 ) -> __m128i {
     static_assert_uimm_bits!(B, 8);
     let b = B as u8;
-    let zero = i8x16::ZERO;
+    let zero = _mm_setzero_si128().as_i8x16();
     let x = x.as_i8x16();
     let a = a.as_i8x16();
-    unsafe {
-        let r = vgf2p8affineinvqb_128(x, a, b);
-        transmute(simd_select_bitmask(k, r, zero))
-    }
+    let r = vgf2p8affineinvqb_128(x, a, b);
+    transmute(simd_select_bitmask(k, r, zero))
 }
 
 /// Performs an affine transformation on the inverted packed bytes in x.
@@ -718,10 +693,10 @@ pub fn _mm_maskz_gf2p8affineinv_epi64_epi8<const B: i32>(
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_mask_gf2p8affineinv_epi64_epi8)
 #[inline]
 #[target_feature(enable = "gfni,avx512bw,avx512vl")]
-#[stable(feature = "stdarch_x86_avx512", since = "1.89")]
+#[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
 #[cfg_attr(test, assert_instr(vgf2p8affineinvqb, B = 0))]
 #[rustc_legacy_const_generics(4)]
-pub fn _mm_mask_gf2p8affineinv_epi64_epi8<const B: i32>(
+pub unsafe fn _mm_mask_gf2p8affineinv_epi64_epi8<const B: i32>(
     src: __m128i,
     k: __mmask16,
     x: __m128i,
@@ -731,10 +706,8 @@ pub fn _mm_mask_gf2p8affineinv_epi64_epi8<const B: i32>(
     let b = B as u8;
     let x = x.as_i8x16();
     let a = a.as_i8x16();
-    unsafe {
-        let r = vgf2p8affineinvqb_128(x, a, b);
-        transmute(simd_select_bitmask(k, r, src.as_i8x16()))
-    }
+    let r = vgf2p8affineinvqb_128(x, a, b);
+    transmute(simd_select_bitmask(k, r, src.as_i8x16()))
 }
 
 #[cfg(test)]
@@ -745,6 +718,7 @@ mod tests {
     #![allow(overflowing_literals)]
 
     use core::hint::black_box;
+    use core::intrinsics::size_of;
     use stdarch_test::simd_test;
 
     use crate::core_arch::x86::*;
@@ -880,43 +854,49 @@ mod tests {
     }
 
     #[target_feature(enable = "sse2")]
+    #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
     unsafe fn load_m128i_word<T>(data: &[T], word_index: usize) -> __m128i {
-        let pointer = data.as_ptr().byte_add(word_index * 16) as *const __m128i;
+        let byte_offset = word_index * 16 / size_of::<T>();
+        let pointer = data.as_ptr().add(byte_offset) as *const __m128i;
         _mm_loadu_si128(black_box(pointer))
     }
 
     #[target_feature(enable = "avx")]
+    #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
     unsafe fn load_m256i_word<T>(data: &[T], word_index: usize) -> __m256i {
-        let pointer = data.as_ptr().byte_add(word_index * 32) as *const __m256i;
+        let byte_offset = word_index * 32 / size_of::<T>();
+        let pointer = data.as_ptr().add(byte_offset) as *const __m256i;
         _mm256_loadu_si256(black_box(pointer))
     }
 
     #[target_feature(enable = "avx512f")]
+    #[unstable(feature = "stdarch_x86_avx512", issue = "111137")]
     unsafe fn load_m512i_word<T>(data: &[T], word_index: usize) -> __m512i {
-        let pointer = data.as_ptr().byte_add(word_index * 64) as *const __m512i;
+        let byte_offset = word_index * 64 / size_of::<T>();
+        let pointer = data.as_ptr().add(byte_offset) as *const i32;
         _mm512_loadu_si512(black_box(pointer))
     }
 
     #[simd_test(enable = "gfni,avx512f")]
-    fn test_mm512_gf2p8mul_epi8() {
+    unsafe fn test_mm512_gf2p8mul_epi8() {
         let (left, right, expected) = generate_byte_mul_test_data();
 
         for i in 0..NUM_TEST_WORDS_512 {
-            let left = unsafe { load_m512i_word(&left, i) };
-            let right = unsafe { load_m512i_word(&right, i) };
-            let expected = unsafe { load_m512i_word(&expected, i) };
+            let left = load_m512i_word(&left, i);
+            let right = load_m512i_word(&right, i);
+            let expected = load_m512i_word(&expected, i);
             let result = _mm512_gf2p8mul_epi8(left, right);
             assert_eq_m512i(result, expected);
         }
     }
 
     #[simd_test(enable = "gfni,avx512bw")]
-    fn test_mm512_maskz_gf2p8mul_epi8() {
+    unsafe fn test_mm512_maskz_gf2p8mul_epi8() {
         let (left, right, _expected) = generate_byte_mul_test_data();
 
         for i in 0..NUM_TEST_WORDS_512 {
-            let left = unsafe { load_m512i_word(&left, i) };
-            let right = unsafe { load_m512i_word(&right, i) };
+            let left = load_m512i_word(&left, i);
+            let right = load_m512i_word(&right, i);
             let result_zero = _mm512_maskz_gf2p8mul_epi8(0, left, right);
             assert_eq_m512i(result_zero, _mm512_setzero_si512());
             let mask_bytes: __mmask64 = 0x0F_0F_0F_0F_FF_FF_00_00;
@@ -930,12 +910,12 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512bw")]
-    fn test_mm512_mask_gf2p8mul_epi8() {
+    unsafe fn test_mm512_mask_gf2p8mul_epi8() {
         let (left, right, _expected) = generate_byte_mul_test_data();
 
         for i in 0..NUM_TEST_WORDS_512 {
-            let left = unsafe { load_m512i_word(&left, i) };
-            let right = unsafe { load_m512i_word(&right, i) };
+            let left = load_m512i_word(&left, i);
+            let right = load_m512i_word(&right, i);
             let result_left = _mm512_mask_gf2p8mul_epi8(left, 0, left, right);
             assert_eq_m512i(result_left, left);
             let mask_bytes: __mmask64 = 0x0F_0F_0F_0F_FF_FF_00_00;
@@ -948,25 +928,25 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx")]
-    fn test_mm256_gf2p8mul_epi8() {
+    unsafe fn test_mm256_gf2p8mul_epi8() {
         let (left, right, expected) = generate_byte_mul_test_data();
 
         for i in 0..NUM_TEST_WORDS_256 {
-            let left = unsafe { load_m256i_word(&left, i) };
-            let right = unsafe { load_m256i_word(&right, i) };
-            let expected = unsafe { load_m256i_word(&expected, i) };
+            let left = load_m256i_word(&left, i);
+            let right = load_m256i_word(&right, i);
+            let expected = load_m256i_word(&expected, i);
             let result = _mm256_gf2p8mul_epi8(left, right);
             assert_eq_m256i(result, expected);
         }
     }
 
     #[simd_test(enable = "gfni,avx512bw,avx512vl")]
-    fn test_mm256_maskz_gf2p8mul_epi8() {
+    unsafe fn test_mm256_maskz_gf2p8mul_epi8() {
         let (left, right, _expected) = generate_byte_mul_test_data();
 
         for i in 0..NUM_TEST_WORDS_256 {
-            let left = unsafe { load_m256i_word(&left, i) };
-            let right = unsafe { load_m256i_word(&right, i) };
+            let left = load_m256i_word(&left, i);
+            let right = load_m256i_word(&right, i);
             let result_zero = _mm256_maskz_gf2p8mul_epi8(0, left, right);
             assert_eq_m256i(result_zero, _mm256_setzero_si256());
             let mask_bytes: __mmask32 = 0x0F_F0_FF_00;
@@ -980,12 +960,12 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512bw,avx512vl")]
-    fn test_mm256_mask_gf2p8mul_epi8() {
+    unsafe fn test_mm256_mask_gf2p8mul_epi8() {
         let (left, right, _expected) = generate_byte_mul_test_data();
 
         for i in 0..NUM_TEST_WORDS_256 {
-            let left = unsafe { load_m256i_word(&left, i) };
-            let right = unsafe { load_m256i_word(&right, i) };
+            let left = load_m256i_word(&left, i);
+            let right = load_m256i_word(&right, i);
             let result_left = _mm256_mask_gf2p8mul_epi8(left, 0, left, right);
             assert_eq_m256i(result_left, left);
             let mask_bytes: __mmask32 = 0x0F_F0_FF_00;
@@ -998,25 +978,25 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni")]
-    fn test_mm_gf2p8mul_epi8() {
+    unsafe fn test_mm_gf2p8mul_epi8() {
         let (left, right, expected) = generate_byte_mul_test_data();
 
         for i in 0..NUM_TEST_WORDS_128 {
-            let left = unsafe { load_m128i_word(&left, i) };
-            let right = unsafe { load_m128i_word(&right, i) };
-            let expected = unsafe { load_m128i_word(&expected, i) };
+            let left = load_m128i_word(&left, i);
+            let right = load_m128i_word(&right, i);
+            let expected = load_m128i_word(&expected, i);
             let result = _mm_gf2p8mul_epi8(left, right);
             assert_eq_m128i(result, expected);
         }
     }
 
     #[simd_test(enable = "gfni,avx512bw,avx512vl")]
-    fn test_mm_maskz_gf2p8mul_epi8() {
+    unsafe fn test_mm_maskz_gf2p8mul_epi8() {
         let (left, right, _expected) = generate_byte_mul_test_data();
 
         for i in 0..NUM_TEST_WORDS_128 {
-            let left = unsafe { load_m128i_word(&left, i) };
-            let right = unsafe { load_m128i_word(&right, i) };
+            let left = load_m128i_word(&left, i);
+            let right = load_m128i_word(&right, i);
             let result_zero = _mm_maskz_gf2p8mul_epi8(0, left, right);
             assert_eq_m128i(result_zero, _mm_setzero_si128());
             let mask_bytes: __mmask16 = 0x0F_F0;
@@ -1030,12 +1010,12 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512bw,avx512vl")]
-    fn test_mm_mask_gf2p8mul_epi8() {
+    unsafe fn test_mm_mask_gf2p8mul_epi8() {
         let (left, right, _expected) = generate_byte_mul_test_data();
 
         for i in 0..NUM_TEST_WORDS_128 {
-            let left = unsafe { load_m128i_word(&left, i) };
-            let right = unsafe { load_m128i_word(&right, i) };
+            let left = load_m128i_word(&left, i);
+            let right = load_m128i_word(&right, i);
             let result_left = _mm_mask_gf2p8mul_epi8(left, 0, left, right);
             assert_eq_m128i(result_left, left);
             let mask_bytes: __mmask16 = 0x0F_F0;
@@ -1048,7 +1028,7 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512f")]
-    fn test_mm512_gf2p8affine_epi64_epi8() {
+    unsafe fn test_mm512_gf2p8affine_epi64_epi8() {
         let identity: i64 = 0x01_02_04_08_10_20_40_80;
         const IDENTITY_BYTE: i32 = 0;
         let constant: i64 = 0;
@@ -1061,20 +1041,20 @@ mod tests {
         let (matrices, vectors, references) = generate_affine_mul_test_data(IDENTITY_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_512 {
-            let data = unsafe { load_m512i_word(&bytes, i) };
+            let data = load_m512i_word(&bytes, i);
             let result = _mm512_gf2p8affine_epi64_epi8::<IDENTITY_BYTE>(data, identity);
             assert_eq_m512i(result, data);
             let result = _mm512_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(data, constant);
             assert_eq_m512i(result, constant_reference);
-            let data = unsafe { load_m512i_word(&more_bytes, i) };
+            let data = load_m512i_word(&more_bytes, i);
             let result = _mm512_gf2p8affine_epi64_epi8::<IDENTITY_BYTE>(data, identity);
             assert_eq_m512i(result, data);
             let result = _mm512_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(data, constant);
             assert_eq_m512i(result, constant_reference);
 
-            let matrix = unsafe { load_m512i_word(&matrices, i) };
-            let vector = unsafe { load_m512i_word(&vectors, i) };
-            let reference = unsafe { load_m512i_word(&references, i) };
+            let matrix = load_m512i_word(&matrices, i);
+            let vector = load_m512i_word(&vectors, i);
+            let reference = load_m512i_word(&references, i);
 
             let result = _mm512_gf2p8affine_epi64_epi8::<IDENTITY_BYTE>(vector, matrix);
             assert_eq_m512i(result, reference);
@@ -1082,13 +1062,13 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512bw")]
-    fn test_mm512_maskz_gf2p8affine_epi64_epi8() {
+    unsafe fn test_mm512_maskz_gf2p8affine_epi64_epi8() {
         const CONSTANT_BYTE: i32 = 0x63;
         let (matrices, vectors, _expected) = generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_512 {
-            let matrix = unsafe { load_m512i_word(&matrices, i) };
-            let vector = unsafe { load_m512i_word(&vectors, i) };
+            let matrix = load_m512i_word(&matrices, i);
+            let vector = load_m512i_word(&vectors, i);
             let result_zero =
                 _mm512_maskz_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(0, vector, matrix);
             assert_eq_m512i(result_zero, _mm512_setzero_si512());
@@ -1104,13 +1084,13 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512bw")]
-    fn test_mm512_mask_gf2p8affine_epi64_epi8() {
+    unsafe fn test_mm512_mask_gf2p8affine_epi64_epi8() {
         const CONSTANT_BYTE: i32 = 0x63;
         let (matrices, vectors, _expected) = generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_512 {
-            let left = unsafe { load_m512i_word(&vectors, i) };
-            let right = unsafe { load_m512i_word(&matrices, i) };
+            let left = load_m512i_word(&vectors, i);
+            let right = load_m512i_word(&matrices, i);
             let result_left =
                 _mm512_mask_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(left, 0, left, right);
             assert_eq_m512i(result_left, left);
@@ -1125,7 +1105,7 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx")]
-    fn test_mm256_gf2p8affine_epi64_epi8() {
+    unsafe fn test_mm256_gf2p8affine_epi64_epi8() {
         let identity: i64 = 0x01_02_04_08_10_20_40_80;
         const IDENTITY_BYTE: i32 = 0;
         let constant: i64 = 0;
@@ -1138,20 +1118,20 @@ mod tests {
         let (matrices, vectors, references) = generate_affine_mul_test_data(IDENTITY_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_256 {
-            let data = unsafe { load_m256i_word(&bytes, i) };
+            let data = load_m256i_word(&bytes, i);
             let result = _mm256_gf2p8affine_epi64_epi8::<IDENTITY_BYTE>(data, identity);
             assert_eq_m256i(result, data);
             let result = _mm256_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(data, constant);
             assert_eq_m256i(result, constant_reference);
-            let data = unsafe { load_m256i_word(&more_bytes, i) };
+            let data = load_m256i_word(&more_bytes, i);
             let result = _mm256_gf2p8affine_epi64_epi8::<IDENTITY_BYTE>(data, identity);
             assert_eq_m256i(result, data);
             let result = _mm256_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(data, constant);
             assert_eq_m256i(result, constant_reference);
 
-            let matrix = unsafe { load_m256i_word(&matrices, i) };
-            let vector = unsafe { load_m256i_word(&vectors, i) };
-            let reference = unsafe { load_m256i_word(&references, i) };
+            let matrix = load_m256i_word(&matrices, i);
+            let vector = load_m256i_word(&vectors, i);
+            let reference = load_m256i_word(&references, i);
 
             let result = _mm256_gf2p8affine_epi64_epi8::<IDENTITY_BYTE>(vector, matrix);
             assert_eq_m256i(result, reference);
@@ -1159,13 +1139,13 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512bw,avx512vl")]
-    fn test_mm256_maskz_gf2p8affine_epi64_epi8() {
+    unsafe fn test_mm256_maskz_gf2p8affine_epi64_epi8() {
         const CONSTANT_BYTE: i32 = 0x63;
         let (matrices, vectors, _expected) = generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_256 {
-            let matrix = unsafe { load_m256i_word(&matrices, i) };
-            let vector = unsafe { load_m256i_word(&vectors, i) };
+            let matrix = load_m256i_word(&matrices, i);
+            let vector = load_m256i_word(&vectors, i);
             let result_zero =
                 _mm256_maskz_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(0, vector, matrix);
             assert_eq_m256i(result_zero, _mm256_setzero_si256());
@@ -1181,13 +1161,13 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512bw,avx512vl")]
-    fn test_mm256_mask_gf2p8affine_epi64_epi8() {
+    unsafe fn test_mm256_mask_gf2p8affine_epi64_epi8() {
         const CONSTANT_BYTE: i32 = 0x63;
         let (matrices, vectors, _expected) = generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_256 {
-            let left = unsafe { load_m256i_word(&vectors, i) };
-            let right = unsafe { load_m256i_word(&matrices, i) };
+            let left = load_m256i_word(&vectors, i);
+            let right = load_m256i_word(&matrices, i);
             let result_left =
                 _mm256_mask_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(left, 0, left, right);
             assert_eq_m256i(result_left, left);
@@ -1202,7 +1182,7 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni")]
-    fn test_mm_gf2p8affine_epi64_epi8() {
+    unsafe fn test_mm_gf2p8affine_epi64_epi8() {
         let identity: i64 = 0x01_02_04_08_10_20_40_80;
         const IDENTITY_BYTE: i32 = 0;
         let constant: i64 = 0;
@@ -1215,20 +1195,20 @@ mod tests {
         let (matrices, vectors, references) = generate_affine_mul_test_data(IDENTITY_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_128 {
-            let data = unsafe { load_m128i_word(&bytes, i) };
+            let data = load_m128i_word(&bytes, i);
             let result = _mm_gf2p8affine_epi64_epi8::<IDENTITY_BYTE>(data, identity);
             assert_eq_m128i(result, data);
             let result = _mm_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(data, constant);
             assert_eq_m128i(result, constant_reference);
-            let data = unsafe { load_m128i_word(&more_bytes, i) };
+            let data = load_m128i_word(&more_bytes, i);
             let result = _mm_gf2p8affine_epi64_epi8::<IDENTITY_BYTE>(data, identity);
             assert_eq_m128i(result, data);
             let result = _mm_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(data, constant);
             assert_eq_m128i(result, constant_reference);
 
-            let matrix = unsafe { load_m128i_word(&matrices, i) };
-            let vector = unsafe { load_m128i_word(&vectors, i) };
-            let reference = unsafe { load_m128i_word(&references, i) };
+            let matrix = load_m128i_word(&matrices, i);
+            let vector = load_m128i_word(&vectors, i);
+            let reference = load_m128i_word(&references, i);
 
             let result = _mm_gf2p8affine_epi64_epi8::<IDENTITY_BYTE>(vector, matrix);
             assert_eq_m128i(result, reference);
@@ -1236,13 +1216,13 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512bw,avx512vl")]
-    fn test_mm_maskz_gf2p8affine_epi64_epi8() {
+    unsafe fn test_mm_maskz_gf2p8affine_epi64_epi8() {
         const CONSTANT_BYTE: i32 = 0x63;
         let (matrices, vectors, _expected) = generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_128 {
-            let matrix = unsafe { load_m128i_word(&matrices, i) };
-            let vector = unsafe { load_m128i_word(&vectors, i) };
+            let matrix = load_m128i_word(&matrices, i);
+            let vector = load_m128i_word(&vectors, i);
             let result_zero = _mm_maskz_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(0, vector, matrix);
             assert_eq_m128i(result_zero, _mm_setzero_si128());
             let mask_bytes: __mmask16 = 0x0F_F0;
@@ -1257,13 +1237,13 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512bw,avx512vl")]
-    fn test_mm_mask_gf2p8affine_epi64_epi8() {
+    unsafe fn test_mm_mask_gf2p8affine_epi64_epi8() {
         const CONSTANT_BYTE: i32 = 0x63;
         let (matrices, vectors, _expected) = generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_128 {
-            let left = unsafe { load_m128i_word(&vectors, i) };
-            let right = unsafe { load_m128i_word(&matrices, i) };
+            let left = load_m128i_word(&vectors, i);
+            let right = load_m128i_word(&matrices, i);
             let result_left =
                 _mm_mask_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(left, 0, left, right);
             assert_eq_m128i(result_left, left);
@@ -1278,7 +1258,7 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512f")]
-    fn test_mm512_gf2p8affineinv_epi64_epi8() {
+    unsafe fn test_mm512_gf2p8affineinv_epi64_epi8() {
         let identity: i64 = 0x01_02_04_08_10_20_40_80;
         const IDENTITY_BYTE: i32 = 0;
         const CONSTANT_BYTE: i32 = 0x63;
@@ -1288,8 +1268,8 @@ mod tests {
         let (inputs, results) = generate_inv_tests_data();
 
         for i in 0..NUM_BYTES_WORDS_512 {
-            let input = unsafe { load_m512i_word(&inputs, i) };
-            let reference = unsafe { load_m512i_word(&results, i) };
+            let input = load_m512i_word(&inputs, i);
+            let reference = load_m512i_word(&results, i);
             let result = _mm512_gf2p8affineinv_epi64_epi8::<IDENTITY_BYTE>(input, identity);
             let remultiplied = _mm512_gf2p8mul_epi8(result, input);
             assert_eq_m512i(remultiplied, reference);
@@ -1300,8 +1280,8 @@ mod tests {
             generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_512 {
-            let vector = unsafe { load_m512i_word(&vectors, i) };
-            let matrix = unsafe { load_m512i_word(&matrices, i) };
+            let vector = load_m512i_word(&vectors, i);
+            let matrix = load_m512i_word(&matrices, i);
 
             let inv_vec = _mm512_gf2p8affineinv_epi64_epi8::<IDENTITY_BYTE>(vector, identity);
             let reference = _mm512_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(inv_vec, matrix);
@@ -1314,21 +1294,21 @@ mod tests {
         let sbox_matrix = _mm512_set1_epi64(AES_S_BOX_MATRIX);
 
         for i in 0..NUM_BYTES_WORDS_512 {
-            let reference = unsafe { load_m512i_word(&AES_S_BOX, i) };
-            let input = unsafe { load_m512i_word(&inputs, i) };
+            let reference = load_m512i_word(&AES_S_BOX, i);
+            let input = load_m512i_word(&inputs, i);
             let result = _mm512_gf2p8affineinv_epi64_epi8::<CONSTANT_BYTE>(input, sbox_matrix);
             assert_eq_m512i(result, reference);
         }
     }
 
     #[simd_test(enable = "gfni,avx512bw")]
-    fn test_mm512_maskz_gf2p8affineinv_epi64_epi8() {
+    unsafe fn test_mm512_maskz_gf2p8affineinv_epi64_epi8() {
         const CONSTANT_BYTE: i32 = 0x63;
         let (matrices, vectors, _expected) = generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_512 {
-            let matrix = unsafe { load_m512i_word(&matrices, i) };
-            let vector = unsafe { load_m512i_word(&vectors, i) };
+            let matrix = load_m512i_word(&matrices, i);
+            let vector = load_m512i_word(&vectors, i);
             let result_zero =
                 _mm512_maskz_gf2p8affineinv_epi64_epi8::<CONSTANT_BYTE>(0, vector, matrix);
             assert_eq_m512i(result_zero, _mm512_setzero_si512());
@@ -1344,13 +1324,13 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512bw")]
-    fn test_mm512_mask_gf2p8affineinv_epi64_epi8() {
+    unsafe fn test_mm512_mask_gf2p8affineinv_epi64_epi8() {
         const CONSTANT_BYTE: i32 = 0x63;
         let (matrices, vectors, _expected) = generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_512 {
-            let left = unsafe { load_m512i_word(&vectors, i) };
-            let right = unsafe { load_m512i_word(&matrices, i) };
+            let left = load_m512i_word(&vectors, i);
+            let right = load_m512i_word(&matrices, i);
             let result_left =
                 _mm512_mask_gf2p8affineinv_epi64_epi8::<CONSTANT_BYTE>(left, 0, left, right);
             assert_eq_m512i(result_left, left);
@@ -1366,7 +1346,7 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx")]
-    fn test_mm256_gf2p8affineinv_epi64_epi8() {
+    unsafe fn test_mm256_gf2p8affineinv_epi64_epi8() {
         let identity: i64 = 0x01_02_04_08_10_20_40_80;
         const IDENTITY_BYTE: i32 = 0;
         const CONSTANT_BYTE: i32 = 0x63;
@@ -1376,8 +1356,8 @@ mod tests {
         let (inputs, results) = generate_inv_tests_data();
 
         for i in 0..NUM_BYTES_WORDS_256 {
-            let input = unsafe { load_m256i_word(&inputs, i) };
-            let reference = unsafe { load_m256i_word(&results, i) };
+            let input = load_m256i_word(&inputs, i);
+            let reference = load_m256i_word(&results, i);
             let result = _mm256_gf2p8affineinv_epi64_epi8::<IDENTITY_BYTE>(input, identity);
             let remultiplied = _mm256_gf2p8mul_epi8(result, input);
             assert_eq_m256i(remultiplied, reference);
@@ -1388,8 +1368,8 @@ mod tests {
             generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_256 {
-            let vector = unsafe { load_m256i_word(&vectors, i) };
-            let matrix = unsafe { load_m256i_word(&matrices, i) };
+            let vector = load_m256i_word(&vectors, i);
+            let matrix = load_m256i_word(&matrices, i);
 
             let inv_vec = _mm256_gf2p8affineinv_epi64_epi8::<IDENTITY_BYTE>(vector, identity);
             let reference = _mm256_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(inv_vec, matrix);
@@ -1402,21 +1382,21 @@ mod tests {
         let sbox_matrix = _mm256_set1_epi64x(AES_S_BOX_MATRIX);
 
         for i in 0..NUM_BYTES_WORDS_256 {
-            let reference = unsafe { load_m256i_word(&AES_S_BOX, i) };
-            let input = unsafe { load_m256i_word(&inputs, i) };
+            let reference = load_m256i_word(&AES_S_BOX, i);
+            let input = load_m256i_word(&inputs, i);
             let result = _mm256_gf2p8affineinv_epi64_epi8::<CONSTANT_BYTE>(input, sbox_matrix);
             assert_eq_m256i(result, reference);
         }
     }
 
     #[simd_test(enable = "gfni,avx512bw,avx512vl")]
-    fn test_mm256_maskz_gf2p8affineinv_epi64_epi8() {
+    unsafe fn test_mm256_maskz_gf2p8affineinv_epi64_epi8() {
         const CONSTANT_BYTE: i32 = 0x63;
         let (matrices, vectors, _expected) = generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_256 {
-            let matrix = unsafe { load_m256i_word(&matrices, i) };
-            let vector = unsafe { load_m256i_word(&vectors, i) };
+            let matrix = load_m256i_word(&matrices, i);
+            let vector = load_m256i_word(&vectors, i);
             let result_zero =
                 _mm256_maskz_gf2p8affineinv_epi64_epi8::<CONSTANT_BYTE>(0, vector, matrix);
             assert_eq_m256i(result_zero, _mm256_setzero_si256());
@@ -1432,13 +1412,13 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512bw,avx512vl")]
-    fn test_mm256_mask_gf2p8affineinv_epi64_epi8() {
+    unsafe fn test_mm256_mask_gf2p8affineinv_epi64_epi8() {
         const CONSTANT_BYTE: i32 = 0x63;
         let (matrices, vectors, _expected) = generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_256 {
-            let left = unsafe { load_m256i_word(&vectors, i) };
-            let right = unsafe { load_m256i_word(&matrices, i) };
+            let left = load_m256i_word(&vectors, i);
+            let right = load_m256i_word(&matrices, i);
             let result_left =
                 _mm256_mask_gf2p8affineinv_epi64_epi8::<CONSTANT_BYTE>(left, 0, left, right);
             assert_eq_m256i(result_left, left);
@@ -1454,7 +1434,7 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni")]
-    fn test_mm_gf2p8affineinv_epi64_epi8() {
+    unsafe fn test_mm_gf2p8affineinv_epi64_epi8() {
         let identity: i64 = 0x01_02_04_08_10_20_40_80;
         const IDENTITY_BYTE: i32 = 0;
         const CONSTANT_BYTE: i32 = 0x63;
@@ -1464,8 +1444,8 @@ mod tests {
         let (inputs, results) = generate_inv_tests_data();
 
         for i in 0..NUM_BYTES_WORDS_128 {
-            let input = unsafe { load_m128i_word(&inputs, i) };
-            let reference = unsafe { load_m128i_word(&results, i) };
+            let input = load_m128i_word(&inputs, i);
+            let reference = load_m128i_word(&results, i);
             let result = _mm_gf2p8affineinv_epi64_epi8::<IDENTITY_BYTE>(input, identity);
             let remultiplied = _mm_gf2p8mul_epi8(result, input);
             assert_eq_m128i(remultiplied, reference);
@@ -1476,8 +1456,8 @@ mod tests {
             generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_128 {
-            let vector = unsafe { load_m128i_word(&vectors, i) };
-            let matrix = unsafe { load_m128i_word(&matrices, i) };
+            let vector = load_m128i_word(&vectors, i);
+            let matrix = load_m128i_word(&matrices, i);
 
             let inv_vec = _mm_gf2p8affineinv_epi64_epi8::<IDENTITY_BYTE>(vector, identity);
             let reference = _mm_gf2p8affine_epi64_epi8::<CONSTANT_BYTE>(inv_vec, matrix);
@@ -1490,21 +1470,21 @@ mod tests {
         let sbox_matrix = _mm_set1_epi64x(AES_S_BOX_MATRIX);
 
         for i in 0..NUM_BYTES_WORDS_128 {
-            let reference = unsafe { load_m128i_word(&AES_S_BOX, i) };
-            let input = unsafe { load_m128i_word(&inputs, i) };
+            let reference = load_m128i_word(&AES_S_BOX, i);
+            let input = load_m128i_word(&inputs, i);
             let result = _mm_gf2p8affineinv_epi64_epi8::<CONSTANT_BYTE>(input, sbox_matrix);
             assert_eq_m128i(result, reference);
         }
     }
 
     #[simd_test(enable = "gfni,avx512bw,avx512vl")]
-    fn test_mm_maskz_gf2p8affineinv_epi64_epi8() {
+    unsafe fn test_mm_maskz_gf2p8affineinv_epi64_epi8() {
         const CONSTANT_BYTE: i32 = 0x63;
         let (matrices, vectors, _expected) = generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_128 {
-            let matrix = unsafe { load_m128i_word(&matrices, i) };
-            let vector = unsafe { load_m128i_word(&vectors, i) };
+            let matrix = load_m128i_word(&matrices, i);
+            let vector = load_m128i_word(&vectors, i);
             let result_zero =
                 _mm_maskz_gf2p8affineinv_epi64_epi8::<CONSTANT_BYTE>(0, vector, matrix);
             assert_eq_m128i(result_zero, _mm_setzero_si128());
@@ -1520,13 +1500,13 @@ mod tests {
     }
 
     #[simd_test(enable = "gfni,avx512bw,avx512vl")]
-    fn test_mm_mask_gf2p8affineinv_epi64_epi8() {
+    unsafe fn test_mm_mask_gf2p8affineinv_epi64_epi8() {
         const CONSTANT_BYTE: i32 = 0x63;
         let (matrices, vectors, _expected) = generate_affine_mul_test_data(CONSTANT_BYTE as u8);
 
         for i in 0..NUM_TEST_WORDS_128 {
-            let left = unsafe { load_m128i_word(&vectors, i) };
-            let right = unsafe { load_m128i_word(&matrices, i) };
+            let left = load_m128i_word(&vectors, i);
+            let right = load_m128i_word(&matrices, i);
             let result_left =
                 _mm_mask_gf2p8affineinv_epi64_epi8::<CONSTANT_BYTE>(left, 0, left, right);
             assert_eq_m128i(result_left, left);

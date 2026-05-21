@@ -1,5 +1,4 @@
 //@ ignore-cross-compile because aux-bin does not yet support it
-//@ ignore-remote because aux-bin does not yet support it
 //@ only-unix because SIGPIPE is a unix thing
 //@ aux-bin: assert-inherit-sig_dfl.rs
 //@ aux-bin: assert-inherit-sig_ign.rs

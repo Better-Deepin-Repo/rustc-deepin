@@ -3,7 +3,7 @@ mod notes;
 use crate::flags;
 use anyhow::bail;
 use std::env;
-use xshell::{Shell, cmd};
+use xshell::{cmd, Shell};
 
 impl flags::PublishReleaseNotes {
     pub(crate) fn run(self, sh: &Shell) -> anyhow::Result<()> {
@@ -73,9 +73,7 @@ fn create_original_changelog_url(file_name: &str) -> String {
 fn update_release(sh: &Shell, tag_name: &str, release_notes: &str) -> anyhow::Result<()> {
     let token = match env::var("GITHUB_TOKEN") {
         Ok(token) => token,
-        Err(_) => bail!(
-            "Please obtain a personal access token from https://github.com/settings/tokens and set the `GITHUB_TOKEN` environment variable."
-        ),
+        Err(_) => bail!("Please obtain a personal access token from https://github.com/settings/tokens and set the `GITHUB_TOKEN` environment variable."),
     };
     let accept = "Accept: application/vnd.github+json";
     let authorization = format!("Authorization: Bearer {token}");

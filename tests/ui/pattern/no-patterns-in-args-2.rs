@@ -1,4 +1,3 @@
-//@ edition:2015
 #![deny(patterns_in_fns_without_body)]
 
 trait Tr {

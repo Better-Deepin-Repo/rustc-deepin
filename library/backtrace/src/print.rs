@@ -43,9 +43,8 @@ impl<'a, 'b> BacktraceFmt<'a, 'b> {
     pub fn new(
         fmt: &'a mut fmt::Formatter<'b>,
         format: PrintFmt,
-        print_path: &'a mut (
-                    dyn FnMut(&mut fmt::Formatter<'_>, BytesOrWideString<'_>) -> fmt::Result + 'b
-                ),
+        print_path: &'a mut (dyn FnMut(&mut fmt::Formatter<'_>, BytesOrWideString<'_>) -> fmt::Result
+                     + 'b),
     ) -> Self {
         BacktraceFmt {
             fmt,
@@ -289,7 +288,7 @@ impl BacktraceFrameFmt<'_, '_, '_> {
             write!(self.fmt.fmt, ":{colno}")?;
         }
 
-        writeln!(self.fmt.fmt)?;
+        write!(self.fmt.fmt, "\n")?;
         Ok(())
     }
 

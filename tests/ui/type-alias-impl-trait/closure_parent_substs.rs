@@ -15,7 +15,6 @@ mod test1 {
     // Hidden type = Closure['?0]
     type Opaque = impl Sized;
 
-    #[define_opaque(Opaque)]
     fn define<'a: 'a>() -> Opaque {
         || {}
     }
@@ -32,7 +31,6 @@ mod test2 {
         &'a (): Trait,
     = impl Sized + 'a;
 
-    #[define_opaque(Opaque)]
     fn define<'a, 'x, 'y>() -> Opaque<'a>
     where
         &'a (): Trait,
@@ -54,7 +52,6 @@ mod test3 {
         (&'a (), &'b ()): Trait,
     = impl Sized + 'a + 'b;
 
-    #[define_opaque(Opaque)]
     fn define<'a, 'b, 'x>() -> Opaque<'a, 'b>
     where
         (&'a (), &'b ()): Trait,

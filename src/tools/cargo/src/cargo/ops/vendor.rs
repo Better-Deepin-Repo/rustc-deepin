@@ -1,26 +1,18 @@
-use crate::core::SourceId;
 use crate::core::shell::Verbosity;
 use crate::core::{GitReference, Package, Workspace};
 use crate::ops;
-use crate::sources::CRATES_IO_REGISTRY;
-use crate::sources::RegistrySource;
-use crate::sources::SourceConfigMap;
 use crate::sources::path::PathSource;
+use crate::sources::CRATES_IO_REGISTRY;
 use crate::util::cache_lock::CacheLockMode;
-use crate::util::{CargoResult, GlobalContext, try_canonicalize};
-
-use anyhow::{Context as _, bail};
-use cargo_util::{Sha256, paths};
-use cargo_util_schemas::core::SourceKind;
-use cargo_util_schemas::manifest::TomlPackageBuild;
+use crate::util::{try_canonicalize, CargoResult, GlobalContext};
+use anyhow::{bail, Context as _};
+use cargo_util::{paths, Sha256};
 use serde::Serialize;
-use walkdir::WalkDir;
-
 use std::collections::HashSet;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 pub struct VendorOptions<'a> {
@@ -28,7 +20,6 @@ pub struct VendorOptions<'a> {
     pub versioned_dirs: bool,
     pub destination: &'a Path,
     pub extra: Vec<PathBuf>,
-    pub respect_source_config: bool,
 }
 
 pub fn vendor(ws: &Workspace<'_>, opts: &VendorOptions<'_>) -> CargoResult<()> {
@@ -40,7 +31,7 @@ pub fn vendor(ws: &Workspace<'_>, opts: &VendorOptions<'_>) -> CargoResult<()> {
         extra_workspaces.push(ws);
     }
     let workspaces = extra_workspaces.iter().chain(Some(ws)).collect::<Vec<_>>();
-    let _lock = gctx.acquire_package_cache_lock(CacheLockMode::DownloadExclusive)?;
+    let _lock = gctx.acquire_package_cache_lock(CacheLockMode::MutateExclusive)?;
     let vendor_config = sync(gctx, &workspaces, opts).context("failed to sync")?;
 
     if gctx.shell().verbosity() != Verbosity::Quiet {
@@ -84,53 +75,20 @@ enum VendorSource {
     },
 }
 
-/// Cache for mapping replaced sources to replacements.
-struct SourceReplacementCache<'gctx> {
-    map: SourceConfigMap<'gctx>,
-    cache: HashMap<SourceId, SourceId>,
-}
-
-impl SourceReplacementCache<'_> {
-    fn new(
-        gctx: &GlobalContext,
-        respect_source_config: bool,
-    ) -> CargoResult<SourceReplacementCache<'_>> {
-        Ok(SourceReplacementCache {
-            map: if respect_source_config {
-                SourceConfigMap::new(gctx)
-            } else {
-                SourceConfigMap::empty(gctx)
-            }?,
-            cache: Default::default(),
-        })
-    }
-
-    fn get(&mut self, id: SourceId) -> CargoResult<SourceId> {
-        use std::collections::hash_map::Entry;
-        match self.cache.entry(id) {
-            Entry::Occupied(e) => Ok(e.get().clone()),
-            Entry::Vacant(e) => {
-                let replaced = self.map.load(id, &HashSet::new())?.replaced_source_id();
-                Ok(e.insert(replaced).clone())
-            }
-        }
-    }
-}
-
 fn sync(
     gctx: &GlobalContext,
     workspaces: &[&Workspace<'_>],
     opts: &VendorOptions<'_>,
 ) -> CargoResult<VendorConfig> {
     let dry_run = false;
-    let vendor_dir = try_canonicalize(opts.destination);
-    let vendor_dir = vendor_dir.as_deref().unwrap_or(opts.destination);
-    let vendor_dir_already_exists = vendor_dir.exists();
+    let canonical_destination = try_canonicalize(opts.destination);
+    let canonical_destination = canonical_destination.as_deref().unwrap_or(opts.destination);
+    let dest_dir_already_exists = canonical_destination.exists();
 
-    paths::create_dir_all(&vendor_dir)?;
+    paths::create_dir_all(&canonical_destination)?;
     let mut to_remove = HashSet::new();
     if !opts.no_delete {
-        for entry in vendor_dir.read_dir()? {
+        for entry in canonical_destination.read_dir()? {
             let entry = entry?;
             if !entry
                 .file_name()
@@ -142,35 +100,63 @@ fn sync(
         }
     }
 
-    let mut source_replacement_cache =
-        SourceReplacementCache::new(gctx, opts.respect_source_config)?;
-
-    let mut checksums = HashMap::new();
-    let mut ids = BTreeMap::new();
-
-    // Let's download all crates and start storing internal tables about them.
+    // First up attempt to work around rust-lang/cargo#5956. Apparently build
+    // artifacts sprout up in Cargo's global cache for whatever reason, although
+    // it's unsure what tool is causing these issues at this time. For now we
+    // apply a heavy-hammer approach which is to delete Cargo's unpacked version
+    // of each crate to start off with. After we do this we'll re-resolve and
+    // redownload again, which should trigger Cargo to re-extract all the
+    // crates.
+    //
+    // Note that errors are largely ignored here as this is a best-effort
+    // attempt. If anything fails here we basically just move on to the next
+    // crate to work with.
     for ws in workspaces {
-        let (packages, resolve) = ops::resolve_ws(ws, dry_run)
-            .with_context(|| format!("failed to load lockfile for {}", ws.root().display()))?;
+        let (packages, resolve) =
+            ops::resolve_ws(ws, dry_run).context("failed to load pkg lockfile")?;
 
         packages
             .get_many(resolve.iter())
-            .with_context(|| format!("failed to download packages for {}", ws.root().display()))?;
+            .context("failed to download packages")?;
 
         for pkg in resolve.iter() {
-            let sid = source_replacement_cache.get(pkg.source_id())?;
-
-            // Don't vendor path crates since they're already in the repository
-            if sid.is_path() {
-                // And don't delete actual source code!
-                if let Ok(path) = sid.url().to_file_path() {
+            // Don't delete actual source code!
+            if pkg.source_id().is_path() {
+                if let Ok(path) = pkg.source_id().url().to_file_path() {
                     if let Ok(path) = try_canonicalize(path) {
                         to_remove.remove(&path);
                     }
                 }
                 continue;
             }
+            if pkg.source_id().is_git() {
+                continue;
+            }
+            if let Ok(pkg) = packages.get_one(pkg) {
+                drop(fs::remove_dir_all(pkg.root()));
+            }
+        }
+    }
 
+    let mut checksums = HashMap::new();
+    let mut ids = BTreeMap::new();
+
+    // Next up let's actually download all crates and start storing internal
+    // tables about them.
+    for ws in workspaces {
+        let (packages, resolve) =
+            ops::resolve_ws(ws, dry_run).context("failed to load pkg lockfile")?;
+
+        packages
+            .get_many(resolve.iter())
+            .context("failed to download packages")?;
+
+        for pkg in resolve.iter() {
+            // No need to vendor path crates since they're already in the
+            // repository
+            if pkg.source_id().is_path() {
+                continue;
+            }
             ids.insert(
                 pkg,
                 packages
@@ -218,13 +204,11 @@ fn sync(
         };
 
         sources.insert(id.source_id());
-        let dst = vendor_dir.join(&dst_name);
+        let dst = canonical_destination.join(&dst_name);
         to_remove.remove(&dst);
         let cksum = dst.join(".cargo-checksum.json");
-        // Registries are the only immutable sources,
-        // path and git dependencies' versions cannot be trusted to mean "no change"
-        if dir_has_version_suffix && id.source_id().is_registry() && cksum.exists() {
-            // Don't re-copy directory with version suffix in case it comes from a registry
+        if dir_has_version_suffix && cksum.exists() {
+            // Always re-copy directory without version suffix in case the version changed
             continue;
         }
 
@@ -234,112 +218,16 @@ fn sync(
         )?;
 
         let _ = fs::remove_dir_all(&dst);
-
-        let mut file_cksums = BTreeMap::new();
-
-        // Need this mapping anyway because we will directly consult registry sources,
-        // otherwise builtin source replacement (sparse registry) won't be respected.
-        let sid = source_replacement_cache.get(id.source_id())?;
-
-        if sid.is_registry() {
-            // To keep the unpacked source from registry in a pristine state,
-            // we'll do a direct extraction into the vendor directory.
-            let registry = match sid.kind() {
-                SourceKind::Registry | SourceKind::SparseRegistry => {
-                    RegistrySource::remote(sid, &Default::default(), gctx)?
-                }
-                SourceKind::LocalRegistry => {
-                    let path = sid.url().to_file_path().expect("local path");
-                    RegistrySource::local(sid, &path, &Default::default(), gctx)
-                }
-                _ => unreachable!("not registry source: {sid}"),
-            };
-
-            let walkdir = |root| {
-                WalkDir::new(root)
-                    .into_iter()
-                    // It is safe to skip errors,
-                    // since we'll hit them during copying/reading later anyway.
-                    .filter_map(|e| e.ok())
-                    // There should be no symlink in tarballs on crates.io,
-                    // but might be wrong for local registries.
-                    // Hence here be conservative and include symlinks.
-                    .filter(|e| e.file_type().is_file() || e.file_type().is_symlink())
-            };
-            let mut compute_file_cksums = |root| {
-                for e in walkdir(root) {
-                    let path = e.path();
-                    let relative = path.strip_prefix(&dst).unwrap();
-                    let cksum = Sha256::new()
-                        .update_path(path)
-                        .map(Sha256::finish_hex)
-                        .with_context(|| format!("failed to checksum `{}`", path.display()))?;
-                    file_cksums.insert(relative.to_str().unwrap().replace("\\", "/"), cksum);
-                }
-                Ok::<_, anyhow::Error>(())
-            };
-            if dir_has_version_suffix {
-                registry.unpack_package_in(id, &vendor_dir, &vendor_this)?;
-                compute_file_cksums(&dst)?;
-            } else {
-                // Due to the extra sanity check in registry unpack
-                // (ensure it contain only one top-level directory with name `pkg-version`),
-                // we can only unpack a directory with version suffix,
-                // and move it to the no suffix directory.
-                let staging_dir = tempfile::Builder::new()
-                    .prefix(".vendor-staging")
-                    .tempdir_in(vendor_dir)?;
-                let unpacked_src =
-                    registry.unpack_package_in(id, staging_dir.path(), &vendor_this)?;
-
-                let rename_result = if gctx
-                    .get_env_os("__CARGO_TEST_VENDOR_FALLBACK_CP_SOURCES")
-                    .is_some()
-                {
-                    Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "simulated rename error for testing",
-                    ))
-                } else {
-                    fs::rename(&unpacked_src, &dst)
-                };
-
-                if let Err(e) = rename_result {
-                    // This fallback is worked for sometimes `fs::rename` failed in a specific situation, such as:
-                    // - In Windows 10 versions earlier than 1607, the destination of `fs::rename` can't be a directory in older versions.
-                    // - `from` and `to` are on separate filesystems.
-                    // - AntiVirus or our system indexer are doing stuf simultaneously.
-                    // - Any other reasons documented in std::fs::rename.
-                    tracing::warn!("failed to `mv {unpacked_src:?} {dst:?}`: {e}");
-                    let paths: Vec<_> = walkdir(&unpacked_src).map(|e| e.into_path()).collect();
-                    cp_sources(
-                        pkg,
-                        &unpacked_src,
-                        &paths,
-                        &dst,
-                        &mut file_cksums,
-                        &mut tmp_buf,
-                        gctx,
-                    )
-                    .with_context(|| format!("failed to copy vendored sources for {id}"))?;
-                } else {
-                    compute_file_cksums(&dst)?;
-                }
-            }
-        } else {
-            let paths = PathSource::new(src, sid, gctx)
-                .list_files(pkg)?
-                .into_iter()
-                .map(|p| p.into_path_buf())
-                .collect::<Vec<_>>();
-            cp_sources(pkg, src, &paths, &dst, &mut file_cksums, &mut tmp_buf, gctx)
-                .with_context(|| format!("failed to copy vendored sources for {id}"))?;
-        }
+        let pathsource = PathSource::new(src, id.source_id(), gctx);
+        let paths = pathsource.list_files(pkg)?;
+        let mut map = BTreeMap::new();
+        cp_sources(pkg, src, &paths, &dst, &mut map, &mut tmp_buf, gctx)
+            .with_context(|| format!("failed to copy over vendored sources for: {}", id))?;
 
         // Finally, emit the metadata about this package
         let json = serde_json::json!({
             "package": checksums.get(id),
-            "files": file_cksums,
+            "files": map,
         });
 
         paths::write(&cksum, json.to_string())?;
@@ -414,9 +302,9 @@ fn sync(
                 directory: opts.destination.to_string_lossy().replace("\\", "/"),
             },
         );
-    } else if !vendor_dir_already_exists {
+    } else if !dest_dir_already_exists {
         // Nothing to vendor. Remove the destination dir we've just created.
-        paths::remove_dir(vendor_dir)?;
+        paths::remove_dir(canonical_destination)?;
     }
 
     Ok(VendorConfig { source: config })
@@ -434,9 +322,26 @@ fn cp_sources(
     for p in paths {
         let relative = p.strip_prefix(&src).unwrap();
 
-        if !vendor_this(relative) {
-            continue;
-        }
+        match relative.to_str() {
+            // Skip git config files as they're not relevant to builds most of
+            // the time and if we respect them (e.g.  in git) then it'll
+            // probably mess with the checksums when a vendor dir is checked
+            // into someone else's source control
+            Some(".gitattributes" | ".gitignore" | ".git") => continue,
+
+            // Temporary Cargo files
+            Some(".cargo-ok") => continue,
+
+            // Skip patch-style orig/rej files. Published crates on crates.io
+            // have `Cargo.toml.orig` which we don't want to use here and
+            // otherwise these are rarely used as part of the build process.
+            Some(filename) => {
+                if filename.ends_with(".orig") || filename.ends_with(".rej") {
+                    continue;
+                }
+            }
+            _ => {}
+        };
 
         // Join pathname components individually to make sure that the joined
         // path uses the correct directory separators everywhere, since
@@ -466,7 +371,7 @@ fn cp_sources(
                 &dst,
                 &mut dst_opts,
                 &mut contents.as_bytes(),
-                Path::new("Generated Cargo.toml"),
+                "Generated Cargo.toml",
                 tmp_buf,
             )?
         } else {
@@ -479,7 +384,13 @@ fn cp_sources(
                     .with_context(|| format!("failed to stat {:?}", p))?;
                 dst_opts.mode(src_metadata.mode());
             }
-            copy_and_checksum(&dst, &mut dst_opts, &mut src, &p, tmp_buf)?
+            copy_and_checksum(
+                &dst,
+                &mut dst_opts,
+                &mut src,
+                &p.display().to_string(),
+                tmp_buf,
+            )?
         };
 
         cksums.insert(relative.to_str().unwrap().replace("\\", "/"), cksum);
@@ -511,15 +422,14 @@ fn prepare_for_vendor(
     let mut warnings = Default::default();
     let mut errors = Default::default();
     let manifest = crate::util::toml::to_real_manifest(
-        contents.map(|c| c.to_owned()),
-        document.cloned(),
+        contents.to_owned(),
+        document.clone(),
         original_toml,
         normalized_toml,
         features,
         workspace_config,
         source_id,
         me.manifest_path(),
-        me.manifest().is_embedded(),
         gctx,
         &mut warnings,
         &mut errors,
@@ -537,31 +447,24 @@ fn prepare_toml_for_vendor(
         .package
         .as_mut()
         .expect("venedored manifests must have packages");
-    // Validates if build script file is included in package. If not, warn and ignore.
-    if let Some(custom_build_scripts) = package.normalized_build().expect("previously normalized") {
-        let mut included_scripts = Vec::new();
-        for script in custom_build_scripts {
-            let path = paths::normalize_path(Path::new(script));
-            let included = packaged_files.contains(&path);
-            if included {
-                let path = path
-                    .into_os_string()
-                    .into_string()
-                    .map_err(|_err| anyhow::format_err!("non-UTF8 `package.build`"))?;
-                let path = crate::util::toml::normalize_path_string_sep(path);
-                included_scripts.push(path);
-            } else {
-                gctx.shell().warn(format!(
-                    "ignoring `package.build` entry `{}` as it is not included in the published package",
-                    path.display()
-                ))?;
-            }
-        }
-        package.build = Some(match included_scripts.len() {
-            0 => TomlPackageBuild::Auto(false),
-            1 => TomlPackageBuild::SingleScript(included_scripts[0].clone()),
-            _ => TomlPackageBuild::MultipleScript(included_scripts),
-        });
+    if let Some(cargo_util_schemas::manifest::StringOrBool::String(path)) = &package.build {
+        let path = paths::normalize_path(Path::new(path));
+        let included = packaged_files.contains(&path);
+        let build = if included {
+            let path = path
+                .into_os_string()
+                .into_string()
+                .map_err(|_err| anyhow::format_err!("non-UTF8 `package.build`"))?;
+            let path = crate::util::toml::normalize_path_string_sep(path);
+            cargo_util_schemas::manifest::StringOrBool::String(path)
+        } else {
+            gctx.shell().warn(format!(
+                "ignoring `package.build` as `{}` is not included in the published package",
+                path.display()
+            ))?;
+            cargo_util_schemas::manifest::StringOrBool::Bool(false)
+        };
+        package.build = Some(build);
     }
 
     let lib = if let Some(target) = &me.lib {
@@ -612,7 +515,7 @@ fn copy_and_checksum<T: Read>(
     dst_path: &Path,
     dst_opts: &mut OpenOptions,
     contents: &mut T,
-    contents_path: &Path,
+    contents_path: &str,
     buf: &mut [u8],
 ) -> CargoResult<String> {
     let mut dst = dst_opts
@@ -632,35 +535,5 @@ fn copy_and_checksum<T: Read>(
         cksum.update(data);
         dst.write_all(data)
             .with_context(|| format!("failed to write to {:?}", dst_path))?;
-    }
-}
-
-/// Filters files we want to vendor.
-///
-/// `relative` is a path relative to the package root.
-
-fn vendor_this(relative: &Path) -> bool {
-    // Skip git config files as they're not relevant to builds most of
-    // the time and if we respect them (e.g. in git) then it'll
-    // probably mess with the checksums when a vendor dir is checked
-    // into someone else's source control
-    for component in relative.components() {
-        if let Some(name) = component.as_os_str().to_str() {
-            if name == ".git" {
-                return false;
-            }
-        }
-    }
-
-    if let Some(file_name) = relative.file_name().and_then(|s| s.to_str()) {
-        if matches!(file_name, ".gitattributes" | ".gitignore") {
-            return false;
-        }
-    }
-
-    // Temporary Cargo files
-    match relative.to_str() {
-        Some(".cargo-ok") => false,
-        _ => true,
     }
 }

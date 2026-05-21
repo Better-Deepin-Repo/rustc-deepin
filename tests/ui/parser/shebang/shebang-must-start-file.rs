@@ -1,7 +1,5 @@
 // something on the first line for tidy
-#!/bin/bash  //~ ERROR expected `[`, found `/`
-
-//@ reference: input.shebang
+#!/bin/bash  //~ expected `[`, found `/`
 
 fn main() {
     println!("ok!");

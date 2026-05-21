@@ -2,10 +2,11 @@
 
 fn main() {}
 
-pub type Boo = impl ::std::fmt::Debug;
-#[define_opaque(Boo)]
-fn define() -> Boo {
-    ""
+mod boo {
+    pub type Boo = impl ::std::fmt::Debug;
+    fn bomp() -> Boo {
+        ""
+    }
 }
 
 // We don't actually know the type here.
@@ -14,10 +15,10 @@ fn bomp2() {
     let _: &str = bomp(); //~ ERROR mismatched types
 }
 
-fn bomp() -> Boo {
+fn bomp() -> boo::Boo {
     "" //~ ERROR mismatched types
 }
 
-fn bomp_loop() -> Boo {
+fn bomp_loop() -> boo::Boo {
     loop {}
 }

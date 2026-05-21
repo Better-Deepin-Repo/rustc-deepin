@@ -4,5 +4,6 @@ const FOO: *const u32 = {
 };
 
 fn main() {
-    let FOO = FOO; // ok, the `const` already emitted an error
+    let FOO = FOO;
+    //~^ ERROR could not evaluate constant pattern
 }

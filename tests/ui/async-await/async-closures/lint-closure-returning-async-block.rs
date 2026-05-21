@@ -1,5 +1,6 @@
 //@ edition: 2021
 
+#![feature(async_closure)]
 #![deny(closure_returning_async_block)]
 
 fn main() {

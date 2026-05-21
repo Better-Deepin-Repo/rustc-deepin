@@ -1,7 +1,11 @@
 use std::env;
+use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use tracing::*;
+
+use crate::common::Config;
 
 #[cfg(test)]
 mod tests;
@@ -23,21 +27,28 @@ fn path_div() -> &'static str {
     ";"
 }
 
-pub trait Utf8PathBufExt {
-    /// Append an extension to the path, even if it already has one.
-    fn with_extra_extension(&self, extension: &str) -> Utf8PathBuf;
+pub fn logv(config: &Config, s: String) {
+    debug!("{}", s);
+    if config.verbose {
+        println!("{}", s);
+    }
 }
 
-impl Utf8PathBufExt for Utf8PathBuf {
-    fn with_extra_extension(&self, extension: &str) -> Utf8PathBuf {
-        if extension.is_empty() {
+pub trait PathBufExt {
+    /// Append an extension to the path, even if it already has one.
+    fn with_extra_extension<S: AsRef<OsStr>>(&self, extension: S) -> PathBuf;
+}
+
+impl PathBufExt for PathBuf {
+    fn with_extra_extension<S: AsRef<OsStr>>(&self, extension: S) -> PathBuf {
+        if extension.as_ref().is_empty() {
             self.clone()
         } else {
-            let mut fname = self.file_name().unwrap().to_string();
-            if !extension.starts_with('.') {
-                fname.push_str(".");
+            let mut fname = self.file_name().unwrap().to_os_string();
+            if !extension.as_ref().to_str().unwrap().starts_with('.') {
+                fname.push(".");
             }
-            fname.push_str(extension);
+            fname.push(extension);
             self.with_file_name(fname)
         }
     }
@@ -45,7 +56,7 @@ impl Utf8PathBufExt for Utf8PathBuf {
 
 /// The name of the environment variable that holds dynamic library locations.
 pub fn dylib_env_var() -> &'static str {
-    if cfg!(any(windows, target_os = "cygwin")) {
+    if cfg!(windows) {
         "PATH"
     } else if cfg!(target_vendor = "apple") {
         "DYLD_LIBRARY_PATH"
@@ -60,27 +71,22 @@ pub fn dylib_env_var() -> &'static str {
 
 /// Adds a list of lookup paths to `cmd`'s dynamic library lookup path.
 /// If the dylib_path_var is already set for this cmd, the old value will be overwritten!
-pub fn add_dylib_path(
-    cmd: &mut Command,
-    paths: impl Iterator<Item = impl Into<std::path::PathBuf>>,
-) {
+pub fn add_dylib_path(cmd: &mut Command, paths: impl Iterator<Item = impl Into<PathBuf>>) {
     let path_env = env::var_os(dylib_env_var());
     let old_paths = path_env.as_ref().map(env::split_paths);
     let new_paths = paths.map(Into::into).chain(old_paths.into_iter().flatten());
     cmd.env(dylib_env_var(), env::join_paths(new_paths).unwrap());
 }
 
-pub fn copy_dir_all(src: &Utf8Path, dst: &Utf8Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst.as_std_path())?;
-    for entry in std::fs::read_dir(src.as_std_path())? {
+pub fn copy_dir_all(src: impl AsRef<Path>, dst: impl AsRef<Path>) -> std::io::Result<()> {
+    std::fs::create_dir_all(&dst)?;
+    for entry in std::fs::read_dir(src)? {
         let entry = entry?;
-        let path = Utf8PathBuf::try_from(entry.path()).unwrap();
-        let file_name = path.file_name().unwrap();
         let ty = entry.file_type()?;
         if ty.is_dir() {
-            copy_dir_all(&path, &dst.join(file_name))?;
+            copy_dir_all(entry.path(), dst.as_ref().join(entry.file_name()))?;
         } else {
-            std::fs::copy(path.as_std_path(), dst.join(file_name).as_std_path())?;
+            std::fs::copy(entry.path(), dst.as_ref().join(entry.file_name()))?;
         }
     }
     Ok(())
@@ -93,44 +99,3 @@ macro_rules! static_regex {
     }};
 }
 pub(crate) use static_regex;
-
-macro_rules! string_enum {
-    ($(#[$meta:meta])* $vis:vis enum $name:ident { $($variant:ident => $repr:expr,)* }) => {
-        $(#[$meta])*
-        $vis enum $name {
-            $($variant,)*
-        }
-
-        impl $name {
-            #[allow(dead_code)]
-            $vis const VARIANTS: &'static [Self] = &[$(Self::$variant,)*];
-            #[allow(dead_code)]
-            $vis const STR_VARIANTS: &'static [&'static str] = &[$(Self::$variant.to_str(),)*];
-
-            $vis const fn to_str(&self) -> &'static str {
-                match self {
-                    $(Self::$variant => $repr,)*
-                }
-            }
-        }
-
-        impl ::std::fmt::Display for $name {
-            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                ::std::fmt::Display::fmt(self.to_str(), f)
-            }
-        }
-
-        impl ::std::str::FromStr for $name {
-            type Err = String;
-
-            fn from_str(s: &str) -> Result<Self, Self::Err> {
-                match s {
-                    $($repr => Ok(Self::$variant),)*
-                    _ => Err(format!(concat!("unknown `", stringify!($name), "` variant: `{}`"), s)),
-                }
-            }
-        }
-    }
-}
-
-pub(crate) use string_enum;

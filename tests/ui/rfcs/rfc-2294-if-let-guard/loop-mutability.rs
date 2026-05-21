@@ -1,5 +1,7 @@
 //@ check-pass
 
+#![feature(if_let_guard)]
+
 fn split_last(_: &()) -> Option<(&i32, &i32)> {
     None
 }

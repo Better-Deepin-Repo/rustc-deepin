@@ -16,8 +16,6 @@ cargo-doc --- Build a package's documentation
 Build the documentation for the local package and all dependencies. The output
 is placed in `target/doc` in rustdoc's usual format.
 
-**Note:** Documentation generation is cumulative: existing doc files in the target directory are preserved across different `cargo doc` invocations. To remove existing generated docs, pass `--doc` to {{man "cargo-clean" 1}}.
-
 ## OPTIONS
 
 ### Documentation Options
@@ -107,6 +105,7 @@ and supports common Unix glob patterns.
 
 {{> options-locked }}
 
+{{> options-lockfile-path }}
 {{/options}}
 
 {{> section-options-common }}

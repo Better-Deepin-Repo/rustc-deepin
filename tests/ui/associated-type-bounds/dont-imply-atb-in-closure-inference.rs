@@ -11,8 +11,10 @@ impl<T> IsPtr for T {
 
 type Tait = impl IsPtr<Assoc: Fn(i32)> + Fn(u32);
 
-#[define_opaque(Tait)]
-fn hello() {
+fn hello()
+where
+    Tait:,
+{
     let _: Tait = |x| {};
 }
 

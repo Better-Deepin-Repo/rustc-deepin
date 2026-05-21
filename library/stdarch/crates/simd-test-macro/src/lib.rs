@@ -7,9 +7,13 @@
 #[macro_use]
 extern crate quote;
 
-use proc_macro2::{Ident, Span, TokenStream, TokenTree};
+use proc_macro2::{Ident, Literal, Span, TokenStream, TokenTree};
 use quote::ToTokens;
 use std::env;
+
+fn string(s: &str) -> TokenTree {
+    Literal::string(s).into()
+}
 
 #[proc_macro_attribute]
 pub fn simd_test(
@@ -17,119 +21,84 @@ pub fn simd_test(
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let tokens = TokenStream::from(attr).into_iter().collect::<Vec<_>>();
-
-    let target = env::var("TARGET").expect(
-        "TARGET environment variable should be set for rustc (e.g. TARGET=x86_64-apple-darwin cargo test)"
-    );
-    let target_arch = target
-        .split('-')
-        .next()
-        .unwrap_or_else(|| panic!("target triple contained no \"-\": {target}"));
-
-    let (target_features, target_feature_attr) = match &tokens[..] {
-        [] => (Vec::new(), TokenStream::new()),
-        [
-            TokenTree::Ident(enable),
-            TokenTree::Punct(equals),
-            TokenTree::Literal(literal),
-        ] if enable == "enable" && equals.as_char() == '=' => {
-            let mut enable_feature = literal
-                .to_string()
-                .trim_start_matches('"')
-                .trim_end_matches('"')
-                .to_string();
-            let target_features: Vec<_> = enable_feature
-                .replace('+', "")
-                .split(',')
-                .map(String::from)
-                .collect();
-            // Allows using `#[simd_test(enable = "neon")]` on aarch64/armv7 shared tests.
-            if target_arch == "armv7" && target_features.iter().any(|feat| feat == "neon") {
-                enable_feature.push_str(",v7");
-            }
-
-            (
-                target_features,
-                quote! {
-                    #[target_feature(enable = #enable_feature)]
-                },
-            )
-        }
-        _ => panic!("expected #[simd_test(enable = \"feature\")] or #[simd_test]"),
+    if tokens.len() != 3 {
+        panic!("expected #[simd_test(enable = \"feature\")]");
+    }
+    match &tokens[0] {
+        TokenTree::Ident(tt) if *tt == "enable" => {}
+        _ => panic!("expected #[simd_test(enable = \"feature\")]"),
+    }
+    match &tokens[1] {
+        TokenTree::Punct(tt) if tt.as_char() == '=' => {}
+        _ => panic!("expected #[simd_test(enable = \"feature\")]"),
+    }
+    let enable_feature = match &tokens[2] {
+        TokenTree::Literal(tt) => tt.to_string(),
+        _ => panic!("expected #[simd_test(enable = \"feature\")]"),
     };
+    let enable_feature = enable_feature.trim_start_matches('"').trim_end_matches('"');
+    let target_features: Vec<String> = enable_feature
+        .replace('+', "")
+        .split(',')
+        .map(String::from)
+        .collect();
 
+    let enable_feature = string(enable_feature);
     let mut item = syn::parse_macro_input!(item as syn::ItemFn);
     let item_attrs = std::mem::take(&mut item.attrs);
     let name = &item.sig.ident;
 
-    let macro_test = match target_arch {
+    let target = env::var("TARGET").expect(
+        "TARGET environment variable should be set for rustc (e.g. TARGET=x86_64-apple-darwin cargo test)"
+    );
+    let mut force_test = false;
+    let macro_test = match target
+        .split('-')
+        .next()
+        .unwrap_or_else(|| panic!("target triple contained no \"-\": {target}"))
+    {
         "i686" | "x86_64" | "i586" => "is_x86_feature_detected",
-        "arm" | "armv7" | "thumbv7neon" => "is_arm_feature_detected",
-        "aarch64" | "arm64ec" | "aarch64_be" => "is_aarch64_feature_detected",
+        "arm" | "armv7" => "is_arm_feature_detected",
+        "aarch64" | "arm64ec" => "is_aarch64_feature_detected",
         maybe_riscv if maybe_riscv.starts_with("riscv") => "is_riscv_feature_detected",
         "powerpc" | "powerpcle" => "is_powerpc_feature_detected",
         "powerpc64" | "powerpc64le" => "is_powerpc64_feature_detected",
-        "loongarch32" | "loongarch64" => "is_loongarch_feature_detected",
-        "s390x" => "is_s390x_feature_detected",
+        "mips" | "mipsel" | "mipsisa32r6" | "mipsisa32r6el" => {
+            // FIXME:
+            // On MIPS CI run-time feature detection always returns false due
+            // to this qemu bug: https://bugs.launchpad.net/qemu/+bug/1754372
+            //
+            // This is a workaround to force the MIPS tests to always run on
+            // CI.
+            force_test = true;
+            "is_mips_feature_detected"
+        }
+        "mips64" | "mips64el" | "mipsisa64r6" | "mipsisa64r6el" => {
+            // FIXME: see above
+            force_test = true;
+            "is_mips64_feature_detected"
+        }
+        "loongarch64" => "is_loongarch_feature_detected",
         t => panic!("unknown target: {t}"),
     };
     let macro_test = Ident::new(macro_test, Span::call_site());
 
-    let skipped_functions = env::var("STDARCH_TEST_SKIP_FUNCTION").unwrap_or_default();
-    let skipped_features = env::var("STDARCH_TEST_SKIP_FEATURE").unwrap_or_default();
-
-    let mut name_str = &*name.to_string();
-    if name_str.starts_with("test_") {
-        name_str = &name_str[5..];
-    }
-
-    let skip_this = skipped_functions
-        .split(',')
-        .map(str::trim)
-        .any(|s| s == name_str)
-        || skipped_features
-            .split(',')
-            .map(str::trim)
-            .any(|s| target_features.iter().any(|feature| s == feature));
-
     let mut detect_missing_features = TokenStream::new();
     for feature in target_features {
-        let q = if target_arch == "armv7" && feature == "fp16" {
-            // "fp16" cannot be checked at runtime
-            quote_spanned! {
-                proc_macro2::Span::call_site() =>
-                if !cfg!(target_feature = #feature) {
-                    missing_features.push(#feature);
-                }
-            }
-        } else {
-            quote_spanned! {
-                proc_macro2::Span::call_site() =>
-                if !::std::arch::#macro_test!(#feature) {
-                    missing_features.push(#feature);
-                }
+        let q = quote_spanned! {
+            proc_macro2::Span::call_site() =>
+            if !#macro_test!(#feature) {
+                missing_features.push(#feature);
             }
         };
         q.to_tokens(&mut detect_missing_features);
     }
 
-    let maybe_ignore = if skip_this {
+    let test_norun = std::env::var("STDSIMD_TEST_NORUN").is_ok();
+    let maybe_ignore = if test_norun {
         quote! { #[ignore] }
     } else {
         TokenStream::new()
-    };
-
-    let (const_test, const_stability) = if item.sig.constness.is_some() {
-        (
-            quote! {
-                const _: () = unsafe { #name() };
-            },
-            quote! {
-                #[rustc_const_unstable(feature = "stdarch_const_helpers", issue = "none")]
-            },
-        )
-    } else {
-        (TokenStream::new(), TokenStream::new())
     };
 
     let ret: TokenStream = quote_spanned! {
@@ -139,19 +108,16 @@ pub fn simd_test(
         #maybe_ignore
         #(#item_attrs)*
         fn #name() {
-            #const_test
-
             let mut missing_features = ::std::vec::Vec::new();
             #detect_missing_features
-            if missing_features.is_empty() {
+            if #force_test || missing_features.is_empty() {
                 let v = unsafe { #name() };
                 return v;
             } else {
                 ::stdarch_test::assert_skip_test_ok(stringify!(#name), &missing_features);
             }
 
-            #target_feature_attr
-            #const_stability
+            #[target_feature(enable = #enable_feature)]
             #item
         }
     };

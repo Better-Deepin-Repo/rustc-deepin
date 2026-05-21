@@ -6,7 +6,7 @@ use std::cell::UnsafeCell;
 static mut FOO: u32 = 42;
 static BOO: () = unsafe {
     FOO = 5;
-    //~^ ERROR modifying a static's initial value
+    //~^ could not evaluate static initializer [E0080]
 };
 
 fn main() {}

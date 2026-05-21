@@ -1,5 +1,9 @@
 //@ run-pass
+#![allow(stable_features)]
+
 // A very basic test of const fn functionality.
+
+#![feature(const_indexing)]
 
 const fn add(x: u32, y: u32) -> u32 {
     x + y

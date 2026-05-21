@@ -1,5 +1,5 @@
-use crate::prelude::*;
-use cargo_test_support::{Project, compare::assert_ui, current_dir, file};
+use cargo_test_support::prelude::*;
+use cargo_test_support::{compare::assert_ui, current_dir, file, Project};
 
 use super::init_registry_without_token;
 
@@ -48,7 +48,7 @@ fn case() {
         .current_dir(transitive1_directory)
         .assert()
         .stdout_eq(file!["transitive1-stdout.term.svg"])
-        .stderr_eq(file!["transitive1-stderr.term.svg"]);
+        .stderr_eq("");
     snapbox::cmd::Command::cargo_ui()
         .arg("info")
         .arg("my-package")
@@ -56,7 +56,7 @@ fn case() {
         .current_dir(transitive2_directory)
         .assert()
         .stdout_eq(file!["transitive2-stdout.term.svg"])
-        .stderr_eq(file!["transitive2-stderr.term.svg"]);
+        .stderr_eq("");
     snapbox::cmd::Command::cargo_ui()
         .arg("info")
         .arg("my-package")
@@ -72,7 +72,7 @@ fn case() {
         .current_dir(direct2_directory)
         .assert()
         .stdout_eq(file!["direct2-stdout.term.svg"])
-        .stderr_eq(file!["direct2-stderr.term.svg"]);
+        .stderr_eq("");
 
     assert_ui().subset_matches(current_dir!().join("out"), &project_root);
 }

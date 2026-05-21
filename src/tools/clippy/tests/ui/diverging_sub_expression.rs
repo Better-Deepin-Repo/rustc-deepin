@@ -18,10 +18,10 @@ impl A {
 fn main() {
     let b = true;
     b || diverge();
-    //~^ diverging_sub_expression
-
+    //~^ ERROR: sub-expression diverges
+    //~| NOTE: `-D clippy::diverging-sub-expression` implied by `-D warnings`
     b || A.foo();
-    //~^ diverging_sub_expression
+    //~^ ERROR: sub-expression diverges
 }
 
 #[allow(dead_code, unused_variables)]
@@ -32,36 +32,28 @@ fn foobar() {
             4 => return,
             5 => continue,
             6 => true || return,
-            //~^ diverging_sub_expression
-
+            //~^ ERROR: sub-expression diverges
             7 => true || continue,
-            //~^ diverging_sub_expression
-
+            //~^ ERROR: sub-expression diverges
             8 => break,
             9 => diverge(),
             3 => true || diverge(),
-            //~^ diverging_sub_expression
-
+            //~^ ERROR: sub-expression diverges
             10 => match 42 {
                 99 => return,
                 _ => true || panic!("boo"),
-                //~^ diverging_sub_expression
-
+                //~^ ERROR: sub-expression diverges
             },
             // lint blocks as well
             15 => true || { return; },
-            //~^ diverging_sub_expression
-
+            //~^ ERROR: sub-expression diverges
             16 => false || { return; },
-            //~^ diverging_sub_expression
-
+            //~^ ERROR: sub-expression diverges
             // ... and when it's a single expression
             17 => true || { return },
-            //~^ diverging_sub_expression
-
+            //~^ ERROR: sub-expression diverges
             18 => false || { return },
-            //~^ diverging_sub_expression
-
+            //~^ ERROR: sub-expression diverges
             // ... but not when there's both an expression and a statement
             19 => true || { _ = 1; return },
             20 => false || { _ = 1; return },
@@ -71,14 +63,7 @@ fn foobar() {
             23 => true || { return; true },
             24 => true || { return; true },
             _ => true || break,
-            //~^ diverging_sub_expression
-
+            //~^ ERROR: sub-expression diverges
         };
     }
-}
-
-#[allow(unused)]
-fn ignore_todo() {
-    let x: u32 = todo!();
-    println!("{x}");
 }

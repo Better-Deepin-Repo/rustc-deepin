@@ -2,7 +2,7 @@
 
 fn main() {}
 
-#[cfg(false)]
+#[cfg(FALSE)]
 extern "C" {
     type A: Ord;
     type A<'a> where 'a: 'static;

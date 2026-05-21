@@ -26,26 +26,16 @@
 //! Here the block (`{ return; }`) has the return type `char`, rather than `()`, but the MIR we
 //! naively generate still contains the `_a = ()` write in the unreachable block "after" the
 //! return.
-//!
-//! **WARNING**: This is one of the few optimizations that runs on built and analysis MIR, and
-//! so its effects may affect the type-checking, borrow-checking, and other analysis of MIR.
-//! We must be extremely careful to only apply optimizations that preserve UB and all
-//! non-determinism, since changes here can affect which programs compile in an insta-stable way.
-//! The normal logic that a program with UB can be changed to do anything does not apply to
-//! pre-"runtime" MIR!
 
-use itertools::Itertools as _;
-use rustc_index::bit_set::DenseBitSet;
 use rustc_index::{Idx, IndexSlice, IndexVec};
 use rustc_middle::mir::visit::{MutVisitor, MutatingUseContext, PlaceContext, Visitor};
 use rustc_middle::mir::*;
 use rustc_middle::ty::TyCtxt;
-use rustc_mir_dataflow::debuginfo::debuginfo_locals;
 use rustc_span::DUMMY_SP;
 use smallvec::SmallVec;
 use tracing::{debug, trace};
 
-pub(super) enum SimplifyCfg {
+pub enum SimplifyCfg {
     Initial,
     PromoteConsts,
     RemoveFalseEdges,
@@ -60,7 +50,7 @@ pub(super) enum SimplifyCfg {
 }
 
 impl SimplifyCfg {
-    fn name(&self) -> &'static str {
+    pub fn name(&self) -> &'static str {
         match self {
             SimplifyCfg::Initial => "SimplifyCfg-initial",
             SimplifyCfg::PromoteConsts => "SimplifyCfg-promote-consts",
@@ -76,41 +66,32 @@ impl SimplifyCfg {
     }
 }
 
-pub(super) fn simplify_cfg<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
-    if CfgSimplifier::new(tcx, body).simplify() {
-        // `simplify` returns that it changed something. We must invalidate the CFG caches as they
-        // are not consistent with the modified CFG any more.
-        body.basic_blocks.invalidate_cfg_cache();
-    }
+pub(crate) fn simplify_cfg(body: &mut Body<'_>) {
+    CfgSimplifier::new(body).simplify();
     remove_dead_blocks(body);
 
     // FIXME: Should probably be moved into some kind of pass manager
-    body.basic_blocks.as_mut_preserves_cfg().shrink_to_fit();
+    body.basic_blocks_mut().raw.shrink_to_fit();
 }
 
-impl<'tcx> crate::MirPass<'tcx> for SimplifyCfg {
+impl<'tcx> MirPass<'tcx> for SimplifyCfg {
     fn name(&self) -> &'static str {
         self.name()
     }
 
-    fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
+    fn run_pass(&self, _: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         debug!("SimplifyCfg({:?}) - simplifying {:?}", self.name(), body.source);
-        simplify_cfg(tcx, body);
-    }
-
-    fn is_required(&self) -> bool {
-        false
+        simplify_cfg(body);
     }
 }
 
-struct CfgSimplifier<'a, 'tcx> {
-    preserve_switch_reads: bool,
+pub struct CfgSimplifier<'a, 'tcx> {
     basic_blocks: &'a mut IndexSlice<BasicBlock, BasicBlockData<'tcx>>,
     pred_count: IndexVec<BasicBlock, u32>,
 }
 
 impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
-    fn new(tcx: TyCtxt<'tcx>, body: &'a mut Body<'tcx>) -> Self {
+    pub fn new(body: &'a mut Body<'tcx>) -> Self {
         let mut pred_count = IndexVec::from_elem(0u32, &body.basic_blocks);
 
         // we can't use mir.predecessors() here because that counts
@@ -125,27 +106,19 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
             }
         }
 
-        // Preserve `SwitchInt` reads on built and analysis MIR, or if `-Zmir-preserve-ub`.
-        let preserve_switch_reads = matches!(body.phase, MirPhase::Built | MirPhase::Analysis(_))
-            || tcx.sess.opts.unstable_opts.mir_preserve_ub;
-        // Do not clear caches yet. The caller to `simplify` will do it if anything changed.
-        let basic_blocks = body.basic_blocks.as_mut_preserves_cfg();
+        let basic_blocks = body.basic_blocks_mut();
 
-        CfgSimplifier { preserve_switch_reads, basic_blocks, pred_count }
+        CfgSimplifier { basic_blocks, pred_count }
     }
 
-    /// Returns whether we actually simplified anything. In that case, the caller *must* invalidate
-    /// the CFG caches of the MIR body.
-    #[must_use]
-    fn simplify(mut self) -> bool {
+    pub fn simplify(mut self) {
         self.strip_nops();
 
         // Vec of the blocks that should be merged. We store the indices here, instead of the
         // statements itself to avoid moving the (relatively) large statements twice.
         // We do not push the statements directly into the target block (`bb`) as that is slower
         // due to additional reallocations
-        let mut merged_blocks: Vec<BasicBlock> = Vec::new();
-        let mut outer_changed = false;
+        let mut merged_blocks = Vec::new();
         loop {
             let mut changed = false;
 
@@ -159,9 +132,9 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
                 let mut terminator =
                     self.basic_blocks[bb].terminator.take().expect("invalid terminator state");
 
-                terminator.successors_mut(|successor| {
+                for successor in terminator.successors_mut() {
                     self.collapse_goto_chain(successor, &mut changed);
-                });
+                }
 
                 let mut inner_changed = true;
                 merged_blocks.clear();
@@ -178,18 +151,10 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
                 if statements_to_merge > 0 {
                     let mut statements = std::mem::take(&mut self.basic_blocks[bb].statements);
                     statements.reserve(statements_to_merge);
-                    let mut parent_bb_last_debuginfos =
-                        std::mem::take(&mut self.basic_blocks[bb].after_last_stmt_debuginfos);
                     for &from in &merged_blocks {
-                        if let Some(stmt) = self.basic_blocks[from].statements.first_mut() {
-                            stmt.debuginfos.prepend(&mut parent_bb_last_debuginfos);
-                        }
                         statements.append(&mut self.basic_blocks[from].statements);
-                        parent_bb_last_debuginfos =
-                            std::mem::take(&mut self.basic_blocks[from].after_last_stmt_debuginfos);
                     }
                     self.basic_blocks[bb].statements = statements;
-                    self.basic_blocks[bb].after_last_stmt_debuginfos = parent_bb_last_debuginfos;
                 }
 
                 self.basic_blocks[bb].terminator = Some(terminator);
@@ -198,11 +163,7 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
             if !changed {
                 break;
             }
-
-            outer_changed = true;
         }
-
-        outer_changed
     }
 
     /// This function will return `None` if
@@ -229,36 +190,20 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
         // goto chains. We should probably benchmark different sizes.
         let mut terminators: SmallVec<[_; 1]> = Default::default();
         let mut current = *start;
-        // If each successor has only one predecessor, it's a trivial goto chain.
-        // We can move all debuginfos to the last basic block.
-        let mut trivial_goto_chain = true;
         while let Some(terminator) = self.take_terminator_if_simple_goto(current) {
             let Terminator { kind: TerminatorKind::Goto { target }, .. } = terminator else {
                 unreachable!();
             };
-            trivial_goto_chain &= self.pred_count[target] == 1;
             terminators.push((current, terminator));
             current = target;
         }
         let last = current;
-        *changed |= *start != last;
         *start = last;
         while let Some((current, mut terminator)) = terminators.pop() {
             let Terminator { kind: TerminatorKind::Goto { ref mut target }, .. } = terminator
             else {
                 unreachable!();
             };
-            if trivial_goto_chain {
-                let mut pred_debuginfos =
-                    std::mem::take(&mut self.basic_blocks[current].after_last_stmt_debuginfos);
-                let debuginfos = if let Some(stmt) = self.basic_blocks[last].statements.first_mut()
-                {
-                    &mut stmt.debuginfos
-                } else {
-                    &mut self.basic_blocks[last].after_last_stmt_debuginfos
-                };
-                debuginfos.prepend(&mut pred_debuginfos);
-            }
             *changed |= *target != last;
             *target = last;
             debug!("collapsing goto chain from {:?} to {:?}", current, target);
@@ -304,23 +249,24 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
 
     // turn a branch with all successors identical to a goto
     fn simplify_branch(&mut self, terminator: &mut Terminator<'tcx>) -> bool {
-        // Removing a `SwitchInt` terminator may remove reads that result in UB,
-        // so we must not apply this optimization before borrowck or when
-        // `-Zmir-preserve-ub` is set.
-        if self.preserve_switch_reads {
-            return false;
-        }
-
-        let TerminatorKind::SwitchInt { .. } = terminator.kind else {
-            return false;
+        match terminator.kind {
+            TerminatorKind::SwitchInt { .. } => {}
+            _ => return false,
         };
 
-        let Ok(first_succ) = terminator.successors().all_equal_value() else {
-            return false;
+        let first_succ = {
+            if let Some(first_succ) = terminator.successors().next() {
+                if terminator.successors().all(|s| s == first_succ) {
+                    let count = terminator.successors().count();
+                    self.pred_count[first_succ] -= (count - 1) as u32;
+                    first_succ
+                } else {
+                    return false;
+                }
+            } else {
+                return false;
+            }
         };
-
-        let count = terminator.successors().count();
-        self.pred_count[first_succ] -= (count - 1) as u32;
 
         debug!("simplifying branch {:?}", terminator);
         terminator.kind = TerminatorKind::Goto { target: first_succ };
@@ -329,12 +275,12 @@ impl<'a, 'tcx> CfgSimplifier<'a, 'tcx> {
 
     fn strip_nops(&mut self) {
         for blk in self.basic_blocks.iter_mut() {
-            blk.strip_nops();
+            blk.statements.retain(|stmt| !matches!(stmt.kind, StatementKind::Nop))
         }
     }
 }
 
-pub(super) fn simplify_duplicate_switch_targets(terminator: &mut Terminator<'_>) {
+pub fn simplify_duplicate_switch_targets(terminator: &mut Terminator<'_>) {
     if let TerminatorKind::SwitchInt { targets, .. } = &mut terminator.kind {
         let otherwise = targets.otherwise();
         if targets.iter().any(|t| t.1 == otherwise) {
@@ -346,7 +292,7 @@ pub(super) fn simplify_duplicate_switch_targets(terminator: &mut Terminator<'_>)
     }
 }
 
-pub(super) fn remove_dead_blocks(body: &mut Body<'_>) {
+pub(crate) fn remove_dead_blocks(body: &mut Body<'_>) {
     let should_deduplicate_unreachable = |bbdata: &BasicBlockData<'_>| {
         // CfgSimplifier::simplify leaves behind some unreachable basic blocks without a
         // terminator. Those blocks will be deleted by remove_dead_blocks, but we run just
@@ -408,17 +354,19 @@ pub(super) fn remove_dead_blocks(body: &mut Body<'_>) {
     }
 
     for block in basic_blocks {
-        block.terminator_mut().successors_mut(|target| *target = replacements[target.index()]);
+        for target in block.terminator_mut().successors_mut() {
+            *target = replacements[target.index()];
+        }
     }
 }
 
-pub(super) enum SimplifyLocals {
+pub enum SimplifyLocals {
     BeforeConstProp,
     AfterGVN,
     Final,
 }
 
-impl<'tcx> crate::MirPass<'tcx> for SimplifyLocals {
+impl<'tcx> MirPass<'tcx> for SimplifyLocals {
     fn name(&self) -> &'static str {
         match &self {
             SimplifyLocals::BeforeConstProp => "SimplifyLocals-before-const-prop",
@@ -433,37 +381,11 @@ impl<'tcx> crate::MirPass<'tcx> for SimplifyLocals {
 
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         trace!("running SimplifyLocals on {:?}", body.source);
-
-        // First, we're going to get a count of *actual* uses for every `Local`.
-        let mut used_locals = UsedLocals::new(body);
-
-        // Next, we're going to remove any `Local` with zero actual uses. When we remove those
-        // `Locals`, we're also going to subtract any uses of other `Locals` from the `used_locals`
-        // count. For example, if we removed `_2 = discriminant(_1)`, then we'll subtract one from
-        // `use_counts[_1]`. That in turn might make `_1` unused, so we loop until we hit a
-        // fixedpoint where there are no more unused locals.
-        remove_unused_definitions_helper(&mut used_locals, body);
-
-        // Finally, we'll actually do the work of shrinking `body.local_decls` and remapping the
-        // `Local`s.
-        let map = make_local_map(&mut body.local_decls, &used_locals);
-
-        // Only bother running the `LocalUpdater` if we actually found locals to remove.
-        if map.iter().any(Option::is_none) {
-            // Update references to all vars and tmps now
-            let mut updater = LocalUpdater { map, tcx };
-            updater.visit_body_preserves_cfg(body);
-
-            body.local_decls.shrink_to_fit();
-        }
-    }
-
-    fn is_required(&self) -> bool {
-        false
+        simplify_locals(body, tcx);
     }
 }
 
-pub(super) fn remove_unused_definitions<'tcx>(body: &mut Body<'tcx>) {
+pub fn remove_unused_definitions<'tcx>(body: &mut Body<'tcx>) {
     // First, we're going to get a count of *actual* uses for every `Local`.
     let mut used_locals = UsedLocals::new(body);
 
@@ -473,6 +395,30 @@ pub(super) fn remove_unused_definitions<'tcx>(body: &mut Body<'tcx>) {
     // `use_counts[_1]`. That in turn might make `_1` unused, so we loop until we hit a
     // fixedpoint where there are no more unused locals.
     remove_unused_definitions_helper(&mut used_locals, body);
+}
+
+pub fn simplify_locals<'tcx>(body: &mut Body<'tcx>, tcx: TyCtxt<'tcx>) {
+    // First, we're going to get a count of *actual* uses for every `Local`.
+    let mut used_locals = UsedLocals::new(body);
+
+    // Next, we're going to remove any `Local` with zero actual uses. When we remove those
+    // `Locals`, we're also going to subtract any uses of other `Locals` from the `used_locals`
+    // count. For example, if we removed `_2 = discriminant(_1)`, then we'll subtract one from
+    // `use_counts[_1]`. That in turn might make `_1` unused, so we loop until we hit a
+    // fixedpoint where there are no more unused locals.
+    remove_unused_definitions_helper(&mut used_locals, body);
+
+    // Finally, we'll actually do the work of shrinking `body.local_decls` and remapping the `Local`s.
+    let map = make_local_map(&mut body.local_decls, &used_locals);
+
+    // Only bother running the `LocalUpdater` if we actually found locals to remove.
+    if map.iter().any(Option::is_none) {
+        // Update references to all vars and tmps now
+        let mut updater = LocalUpdater { map, tcx };
+        updater.visit_body_preserves_cfg(body);
+
+        body.local_decls.shrink_to_fit();
+    }
 }
 
 /// Construct the mapping while swapping out unused stuff out from the `vec`.
@@ -502,22 +448,17 @@ fn make_local_map<V>(
 /// Keeps track of used & unused locals.
 struct UsedLocals {
     increment: bool,
+    arg_count: u32,
     use_count: IndexVec<Local, u32>,
-    always_used: DenseBitSet<Local>,
 }
 
 impl UsedLocals {
     /// Determines which locals are used & unused in the given body.
     fn new(body: &Body<'_>) -> Self {
-        let mut always_used = debuginfo_locals(body);
-        always_used.insert(RETURN_PLACE);
-        for arg in body.args_iter() {
-            always_used.insert(arg);
-        }
         let mut this = Self {
             increment: true,
+            arg_count: body.arg_count.try_into().unwrap(),
             use_count: IndexVec::from_elem(0, &body.local_decls),
-            always_used,
         };
         this.visit_body(body);
         this
@@ -525,16 +466,10 @@ impl UsedLocals {
 
     /// Checks if local is used.
     ///
-    /// Return place, arguments, var debuginfo are always considered used.
+    /// Return place and arguments are always considered used.
     fn is_used(&self, local: Local) -> bool {
-        trace!(
-            "is_used({:?}): use_count: {:?}, always_used: {}",
-            local,
-            self.use_count[local],
-            self.always_used.contains(local)
-        );
-        // To keep things simple, we don't handle debugging information here, these are in DSE.
-        self.always_used.contains(local) || self.use_count[local] != 0
+        trace!("is_used({:?}): use_count: {:?}", local, self.use_count[local]);
+        local.as_u32() <= self.arg_count || self.use_count[local] != 0
     }
 
     /// Updates the use counts to reflect the removal of given statement.
@@ -576,10 +511,10 @@ impl<'tcx> Visitor<'tcx> for UsedLocals {
                 self.super_statement(statement, location);
             }
 
-            StatementKind::ConstEvalCounter
-            | StatementKind::Nop
-            | StatementKind::StorageLive(..)
-            | StatementKind::StorageDead(..) => {}
+            StatementKind::ConstEvalCounter | StatementKind::Nop => {}
+
+            StatementKind::StorageLive(_local) | StatementKind::StorageDead(_local) => {}
+
             StatementKind::Assign(box (ref place, ref rvalue)) => {
                 if rvalue.is_safe_to_remove() {
                     self.visit_lhs(place, location);
@@ -590,16 +525,13 @@ impl<'tcx> Visitor<'tcx> for UsedLocals {
             }
 
             StatementKind::SetDiscriminant { ref place, variant_index: _ }
-            | StatementKind::BackwardIncompatibleDropHint { ref place, reason: _ } => {
+            | StatementKind::Deinit(ref place) => {
                 self.visit_lhs(place, location);
             }
         }
     }
 
-    fn visit_local(&mut self, local: Local, ctx: PlaceContext, _location: Location) {
-        if matches!(ctx, PlaceContext::NonUse(_)) {
-            return;
-        }
+    fn visit_local(&mut self, local: Local, _ctx: PlaceContext, _location: Location) {
         if self.increment {
             self.use_count[local] += 1;
         } else {
@@ -622,27 +554,27 @@ fn remove_unused_definitions_helper(used_locals: &mut UsedLocals, body: &mut Bod
 
         for data in body.basic_blocks.as_mut_preserves_cfg() {
             // Remove unnecessary StorageLive and StorageDead annotations.
-            for statement in data.statements.iter_mut() {
-                let keep_statement = match &statement.kind {
+            data.statements.retain(|statement| {
+                let keep = match &statement.kind {
                     StatementKind::StorageLive(local) | StatementKind::StorageDead(local) => {
                         used_locals.is_used(*local)
                     }
-                    StatementKind::Assign(box (place, _))
-                    | StatementKind::SetDiscriminant { box place, .. }
-                    | StatementKind::BackwardIncompatibleDropHint { box place, .. } => {
-                        used_locals.is_used(place.local)
-                    }
-                    _ => continue,
+                    StatementKind::Assign(box (place, _)) => used_locals.is_used(place.local),
+
+                    StatementKind::SetDiscriminant { ref place, .. }
+                    | StatementKind::Deinit(ref place) => used_locals.is_used(place.local),
+                    StatementKind::Nop => false,
+                    _ => true,
                 };
-                if keep_statement {
-                    continue;
+
+                if !keep {
+                    trace!("removing statement {:?}", statement);
+                    modified = true;
+                    used_locals.statement_removed(statement);
                 }
-                trace!("removing statement {:?}", statement);
-                modified = true;
-                used_locals.statement_removed(statement);
-                statement.make_nop(true);
-            }
-            data.strip_nops();
+
+                keep
+            });
         }
     }
 }
@@ -657,62 +589,7 @@ impl<'tcx> MutVisitor<'tcx> for LocalUpdater<'tcx> {
         self.tcx
     }
 
-    fn visit_statement_debuginfo(
-        &mut self,
-        stmt_debuginfo: &mut StmtDebugInfo<'tcx>,
-        location: Location,
-    ) {
-        match stmt_debuginfo {
-            StmtDebugInfo::AssignRef(local, place) => {
-                if place.as_ref().accessed_locals().any(|local| self.map[local].is_none()) {
-                    *stmt_debuginfo = StmtDebugInfo::InvalidAssign(*local);
-                }
-            }
-            StmtDebugInfo::InvalidAssign(_) => {}
-        }
-        self.super_statement_debuginfo(stmt_debuginfo, location);
-    }
-
     fn visit_local(&mut self, l: &mut Local, _: PlaceContext, _: Location) {
         *l = self.map[*l].unwrap();
-    }
-}
-
-pub(crate) struct UsedInStmtLocals {
-    pub(crate) locals: DenseBitSet<Local>,
-}
-
-impl UsedInStmtLocals {
-    pub(crate) fn new(body: &Body<'_>) -> Self {
-        let mut this = Self { locals: DenseBitSet::new_empty(body.local_decls.len()) };
-        this.visit_body(body);
-        this
-    }
-
-    pub(crate) fn remove_unused_storage_annotations<'tcx>(&self, body: &mut Body<'tcx>) {
-        for data in body.basic_blocks.as_mut_preserves_cfg() {
-            // Remove unnecessary StorageLive and StorageDead annotations.
-            for statement in data.statements.iter_mut() {
-                let keep_statement = match &statement.kind {
-                    StatementKind::StorageLive(local) | StatementKind::StorageDead(local) => {
-                        self.locals.contains(*local)
-                    }
-                    _ => continue,
-                };
-                if keep_statement {
-                    continue;
-                }
-                statement.make_nop(true);
-            }
-        }
-    }
-}
-
-impl<'tcx> Visitor<'tcx> for UsedInStmtLocals {
-    fn visit_local(&mut self, local: Local, context: PlaceContext, _: Location) {
-        if matches!(context, PlaceContext::NonUse(_)) {
-            return;
-        }
-        self.locals.insert(local);
     }
 }

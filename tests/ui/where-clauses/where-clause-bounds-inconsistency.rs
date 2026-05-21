@@ -1,4 +1,5 @@
 //@ check-pass
+//@ pretty-expanded FIXME #23616
 
 trait Bound {
     fn dummy(&self) { }

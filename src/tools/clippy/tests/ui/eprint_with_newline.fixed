@@ -3,19 +3,16 @@
 
 fn main() {
     eprintln!("Hello");
-    //~^ print_with_newline
-
+    //~^ ERROR: using `eprint!()` with a format string that ends in a single newline
+    //~| NOTE: `-D clippy::print-with-newline` implied by `-D warnings`
     eprintln!("Hello {}", "world");
-    //~^ print_with_newline
-
+    //~^ ERROR: using `eprint!()` with a format string that ends in a single newline
     eprintln!("Hello {} {}", "world", "#2");
-    //~^ print_with_newline
-
+    //~^ ERROR: using `eprint!()` with a format string that ends in a single newline
     eprintln!("{}", 1265);
-    //~^ print_with_newline
-
+    //~^ ERROR: using `eprint!()` with a format string that ends in a single newline
     eprintln!();
-    //~^ print_with_newline
+    //~^ ERROR: using `eprint!()` with a format string that ends in a single newline
 
     // these are all fine
     eprint!("");
@@ -38,8 +35,7 @@ fn main() {
     // #3514
     eprint!("\\n");
     eprintln!("\\");
-    //~^ print_with_newline
-
+    //~^ ERROR: using `eprint!()` with a format string that ends in a single newline
     eprint!("\\\\n");
 
     // Raw strings
@@ -48,11 +44,11 @@ fn main() {
 
     // Literal newlines should also fail
     eprintln!(
-        //~^ print_with_newline
+        //~^ ERROR: using `eprint!()` with a format string that ends in a single newline
         
     );
     eprintln!(
-        //~^ print_with_newline
+        //~^ ERROR: using `eprint!()` with a format string that ends in a single newline
         
     );
 
@@ -60,8 +56,7 @@ fn main() {
     eprint!("\r\n");
     eprint!("foo\r\n");
     eprintln!("\\r");
-    //~^ print_with_newline
-
+    //~^ ERROR: using `eprint!()` with a format string that ends in a single newline
     eprint!("foo\rbar\n");
 
     // Ignore expanded format strings

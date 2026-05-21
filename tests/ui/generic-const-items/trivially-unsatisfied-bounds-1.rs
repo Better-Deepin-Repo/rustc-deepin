@@ -7,6 +7,6 @@
 const UNUSED: () = ()
 where
     String: Copy;
-//~^^^ ERROR unreachable code
+//~^^^ ERROR evaluation of constant value failed
 
 fn main() {}

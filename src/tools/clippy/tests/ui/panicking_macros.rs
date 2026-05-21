@@ -20,86 +20,61 @@ fn inline_const() {
 fn panic() {
     let a = 2;
     panic!();
-    //~^ panic
-
+    //~^ ERROR: `panic` should not be present in production code
+    //~| NOTE: `-D clippy::panic` implied by `-D warnings`
     panic!("message");
-    //~^ panic
-
+    //~^ ERROR: `panic` should not be present in production code
     panic!("{} {}", "panic with", "multiple arguments");
-    //~^ panic
-
-    let b = a + 2;
-}
-
-const fn panic_const() {
-    let a = 2;
-    panic!();
-    //~^ panic
-
-    panic!("message");
-    //~^ panic
-
-    panic!("{} {}", "panic with", "multiple arguments");
-    //~^ panic
-
+    //~^ ERROR: `panic` should not be present in production code
     let b = a + 2;
 }
 
 fn todo() {
     let a = 2;
     todo!();
-    //~^ todo
-
+    //~^ ERROR: `todo` should not be present in production code
+    //~| NOTE: `-D clippy::todo` implied by `-D warnings`
     todo!("message");
-    //~^ todo
-
+    //~^ ERROR: `todo` should not be present in production code
     todo!("{} {}", "panic with", "multiple arguments");
-    //~^ todo
-
+    //~^ ERROR: `todo` should not be present in production code
     let b = a + 2;
 }
 
 fn unimplemented() {
     let a = 2;
     unimplemented!();
-    //~^ unimplemented
-
+    //~^ ERROR: `unimplemented` should not be present in production code
+    //~| NOTE: `-D clippy::unimplemented` implied by `-D warnings`
     unimplemented!("message");
-    //~^ unimplemented
-
+    //~^ ERROR: `unimplemented` should not be present in production code
     unimplemented!("{} {}", "panic with", "multiple arguments");
-    //~^ unimplemented
-
+    //~^ ERROR: `unimplemented` should not be present in production code
     let b = a + 2;
 }
 
 fn unreachable() {
     let a = 2;
     unreachable!();
-    //~^ unreachable
-
+    //~^ ERROR: usage of the `unreachable!` macro
+    //~| NOTE: `-D clippy::unreachable` implied by `-D warnings`
     unreachable!("message");
-    //~^ unreachable
-
+    //~^ ERROR: usage of the `unreachable!` macro
     unreachable!("{} {}", "panic with", "multiple arguments");
-    //~^ unreachable
-
+    //~^ ERROR: usage of the `unreachable!` macro
     let b = a + 2;
 }
 
 fn core_versions() {
     use core::{panic, todo, unimplemented, unreachable};
     panic!();
-    //~^ panic
-
+    //~^ ERROR: `panic` should not be present in production code
     todo!();
-    //~^ todo
-
+    //~^ ERROR: `todo` should not be present in production code
     unimplemented!();
-    //~^ unimplemented
-
+    //~^ ERROR: `unimplemented` should not be present in production code
     unreachable!();
-    //~^ unreachable
+    //~^ ERROR: usage of the `unreachable!` macro
 }
 
 fn assert() {
@@ -126,4 +101,14 @@ fn debug_assert_msg() {
     debug_assert_ne!(true, false, "test");
 }
 
-fn main() {}
+fn main() {
+    panic();
+    todo();
+    unimplemented();
+    unreachable();
+    core_versions();
+    assert();
+    assert_msg();
+    debug_assert();
+    debug_assert_msg();
+}

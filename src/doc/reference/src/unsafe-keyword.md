@@ -1,47 +1,26 @@
-r[unsafe]
 # The `unsafe` keyword
 
-r[unsafe.intro]
-The `unsafe` keyword is used to create or discharge the obligation to prove something safe. Specifically:
-
-- It is used to mark code that *defines* extra safety conditions that must be upheld elsewhere.
-  - This includes `unsafe fn`, `unsafe static`, and `unsafe trait`.
-- It is used to mark code that the programmer *asserts* satisfies safety conditions defined elsewhere.
-  - This includes `unsafe {}`, `unsafe impl`, `unsafe fn` without [`unsafe_op_in_unsafe_fn`], `unsafe extern`, and `#[unsafe(attr)]`.
+The `unsafe` keyword can occur in several different contexts:
+unsafe functions (`unsafe fn`), unsafe blocks (`unsafe {}`), unsafe traits (`unsafe trait`), unsafe trait implementations (`unsafe impl`), unsafe external blocks (`unsafe extern`), and unsafe attributes (`#[unsafe(attr)]`).
+It plays several different roles, depending on where it is used and whether the `unsafe_op_in_unsafe_fn` lint is enabled:
+- it is used to mark code that *defines* extra safety conditions (`unsafe fn`, `unsafe trait`)
+- it is used to mark code that needs to *satisfy* extra safety conditions (`unsafe {}`, `unsafe impl`, `unsafe fn` without [`unsafe_op_in_unsafe_fn`], `unsafe extern`, `#[unsafe(attr)]`)
 
 The following discusses each of these cases.
 See the [keyword documentation][keyword] for some illustrative examples.
 
-r[unsafe.positions]
-The `unsafe` keyword can occur in several different contexts:
-
-- unsafe functions (`unsafe fn`)
-- unsafe blocks (`unsafe {}`)
-- unsafe traits (`unsafe trait`)
-- unsafe trait implementations (`unsafe impl`)
-- unsafe external blocks (`unsafe extern`)
-- unsafe external statics (`unsafe static`)
-- unsafe attributes (`#[unsafe(attr)]`)
-
-r[unsafe.fn]
 ## Unsafe functions (`unsafe fn`)
 
-r[unsafe.fn.intro]
 Unsafe functions are functions that are not safe in all contexts and/or for all possible inputs.
 We say they have *extra safety conditions*, which are requirements that must be upheld by all callers and that the compiler does not check.
 For example, [`get_unchecked`] has the extra safety condition that the index must be in-bounds.
 The unsafe function should come with documentation explaining what those extra safety conditions are.
 
-r[unsafe.fn.safety]
 Such a function must be prefixed with the keyword `unsafe` and can only be called from inside an `unsafe` block, or inside `unsafe fn` without the [`unsafe_op_in_unsafe_fn`] lint.
 
-r[unsafe.block]
 ## Unsafe blocks (`unsafe {}`)
 
-r[unsafe.block.intro]
-A block of code can be prefixed with the `unsafe` keyword to permit using the unsafe actions as defined in the [Unsafety] chapter, such as calling other unsafe functions or dereferencing raw pointers.
-
-r[unsafe.block.fn-body]
+A block of code can be prefixed with the `unsafe` keyword, to permit calling `unsafe` functions or dereferencing raw pointers.
 By default, the body of an unsafe function is also considered to be an unsafe block;
 this can be changed by enabling the [`unsafe_op_in_unsafe_fn`] lint.
 
@@ -60,19 +39,13 @@ For example, a doubly-linked list is not a tree structure and can only be repres
 By using `unsafe` blocks to represent the reverse links as raw pointers, it can be implemented without reference counting.
 (See ["Learn Rust With Entirely Too Many Linked Lists"](https://rust-unofficial.github.io/too-many-lists/) for a more in-depth exploration of this particular example.)
 
-[Unsafety]: unsafety.md
-
-r[unsafe.trait]
 ## Unsafe traits (`unsafe trait`)
 
-r[unsafe.trait.intro]
 An unsafe trait is a trait that comes with extra safety conditions that must be upheld by *implementations* of the trait.
 The unsafe trait should come with documentation explaining what those extra safety conditions are.
 
-r[unsafe.trait.safety]
 Such a trait must be prefixed with the keyword `unsafe` and can only be implemented by `unsafe impl` blocks.
 
-r[unsafe.impl]
 ## Unsafe trait implementations (`unsafe impl`)
 
 When implementing an unsafe trait, the implementation needs to be prefixed with the `unsafe` keyword.
@@ -84,18 +57,12 @@ Unsafe trait implementations are the logical dual to unsafe traits: where unsafe
 [`get_unchecked`]: slice::get_unchecked
 [`unsafe_op_in_unsafe_fn`]: ../rustc/lints/listing/allowed-by-default.html#unsafe-op-in-unsafe-fn
 
-r[unsafe.extern]
 ## Unsafe external blocks (`unsafe extern`)
 
 The programmer who declares an [external block] must assure that the signatures of the items contained within are correct. Failing to do so may lead to undefined behavior.  That this obligation has been met is indicated by writing `unsafe extern`.
 
-r[unsafe.extern.edition2024]
-> [!EDITION-2024]
-> Prior to edition 2024, `extern` blocks were allowed without being qualified as `unsafe`.
-
 [external block]: items/external-blocks.md
 
-r[unsafe.attribute]
 ## Unsafe attributes (`#[unsafe(attr)]`)
 
 An [unsafe attribute] is one that has extra safety conditions that must be upheld when using the attribute. The compiler cannot check whether these conditions have been upheld.  To assert that they have been, these attributes must be wrapped in `unsafe(..)`, e.g. `#[unsafe(no_mangle)]`.

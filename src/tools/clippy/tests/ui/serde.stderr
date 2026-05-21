@@ -3,9 +3,12 @@ error: you should not implement `visit_string` without also implementing `visit_
    |
 LL | /     fn visit_string<E>(self, _v: String) -> Result<Self::Value, E>
 LL | |
+LL | |
 LL | |     where
-LL | |         E: serde::de::Error,
-   | |____________________________^
+...  |
+LL | |         unimplemented!()
+LL | |     }
+   | |_____^
    |
    = note: `-D clippy::serde-api-misuse` implied by `-D warnings`
    = help: to override `-D warnings` add `#[allow(clippy::serde_api_misuse)]`

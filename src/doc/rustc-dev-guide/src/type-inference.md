@@ -1,5 +1,7 @@
 # Type inference
 
+<!-- toc -->
+
 Type inference is the process of automatic detection of the type of an
 expression.
 
@@ -17,7 +19,7 @@ Here, the type of `things` is *inferred* to be `Vec<&str>` because of the value
 we push into `things`.
 
 The type inference is based on the standard Hindley-Milner (HM) type inference
-algorithm, but extended in various ways to accommodate subtyping, region
+algorithm, but extended in various way to accommodate subtyping, region
 inference, and higher-ranked types.
 
 ## A note on terminology
@@ -49,7 +51,7 @@ The `tcx.infer_ctxt` method actually returns a builder, which means
 there are some kinds of configuration you can do before the `infcx` is
 created. See `InferCtxtBuilder` for more information.
 
-<a id="vars"></a>
+<a name="vars"></a>
 
 ## Inference variables
 
@@ -239,13 +241,13 @@ differently. It uses canonical queries for trait solving which use
 [`take_and_reset_region_constraints`] at the end. This extracts all of the
 outlives constraints added during the canonical query. This is required
 as the NLL solver must not only know *what* regions outlive each other,
-but also *where*. Finally, the NLL solver invokes [`get_region_var_infos`],
+but also *where*. Finally, the NLL solver invokes [`take_region_var_origins`],
 providing all region variables to the solver.
 
-[`resolve_regions_and_report_errors`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_trait_selection/traits/struct.ObligationCtxt.html#method.resolve_regions_and_report_errors
+[`resolve_regions_and_report_errors`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_infer/infer/struct.InferCtxt.html#method.resolve_regions_and_report_errors
 [`lexical_region_resolve`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_infer/infer/lexical_region_resolve/index.html
 [`take_and_reset_region_constraints`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_infer/infer/struct.InferCtxt.html#method.take_and_reset_region_constraints
-[`get_region_var_infos`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_infer/infer/struct.InferCtxt.html#method.get_region_var_infos
+[`take_region_var_origins`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_infer/infer/struct.InferCtxt.html#method.take_region_var_origins
 
 ## Lexical region resolution
 

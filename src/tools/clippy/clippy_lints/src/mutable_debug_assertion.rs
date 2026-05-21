@@ -1,7 +1,6 @@
 use clippy_utils::diagnostics::span_lint;
-use clippy_utils::macros::{MacroCall, find_assert_args, find_assert_eq_args, root_macro_call_first_node};
-use clippy_utils::sym;
-use rustc_hir::intravisit::{Visitor, walk_expr};
+use clippy_utils::macros::{find_assert_eq_args, root_macro_call_first_node};
+use rustc_hir::intravisit::{walk_expr, Visitor};
 use rustc_hir::{BorrowKind, Expr, ExprKind, MatchSource, Mutability};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::hir::nested_filter;
@@ -43,36 +42,28 @@ impl<'tcx> LateLintPass<'tcx> for DebugAssertWithMutCall {
         let Some(macro_call) = root_macro_call_first_node(cx, e) else {
             return;
         };
-        match cx.tcx.get_diagnostic_name(macro_call.def_id) {
-            Some(sym::debug_assert_macro) => {
-                if let Some((arg, _)) = find_assert_args(cx, e, macro_call.expn) {
-                    check_arg(cx, arg, &macro_call);
-                }
-            },
-            Some(sym::debug_assert_ne_macro | sym::debug_assert_eq_macro) => {
-                if let Some((lhs, rhs, _)) = find_assert_eq_args(cx, e, macro_call.expn) {
-                    check_arg(cx, lhs, &macro_call);
-                    check_arg(cx, rhs, &macro_call);
-                }
-            },
-            _ => {},
+        let macro_name = cx.tcx.item_name(macro_call.def_id);
+        if !matches!(
+            macro_name.as_str(),
+            "debug_assert" | "debug_assert_eq" | "debug_assert_ne"
+        ) {
+            return;
         }
-    }
-}
-
-fn check_arg<'tcx>(cx: &LateContext<'tcx>, arg: &'tcx Expr<'tcx>, macro_call: &MacroCall) {
-    let mut visitor = MutArgVisitor::new(cx);
-    visitor.visit_expr(arg);
-    if let Some(span) = visitor.expr_span() {
-        span_lint(
-            cx,
-            DEBUG_ASSERT_WITH_MUT_CALL,
-            span,
-            format!(
-                "do not call a function with mutable arguments inside of `{}!`",
-                cx.tcx.item_name(macro_call.def_id)
-            ),
-        );
+        let Some((lhs, rhs, _)) = find_assert_eq_args(cx, e, macro_call.expn) else {
+            return;
+        };
+        for arg in [lhs, rhs] {
+            let mut visitor = MutArgVisitor::new(cx);
+            visitor.visit_expr(arg);
+            if let Some(span) = visitor.expr_span() {
+                span_lint(
+                    cx,
+                    DEBUG_ASSERT_WITH_MUT_CALL,
+                    span,
+                    format!("do not call a function with mutable arguments inside of `{macro_name}!`"),
+                );
+            }
+        }
     }
 }
 
@@ -96,7 +87,7 @@ impl<'a, 'tcx> MutArgVisitor<'a, 'tcx> {
     }
 }
 
-impl<'tcx> Visitor<'tcx> for MutArgVisitor<'_, 'tcx> {
+impl<'a, 'tcx> Visitor<'tcx> for MutArgVisitor<'a, 'tcx> {
     type NestedFilter = nested_filter::OnlyBodies;
 
     fn visit_expr(&mut self, expr: &'tcx Expr<'_>) {
@@ -110,13 +101,14 @@ impl<'tcx> Visitor<'tcx> for MutArgVisitor<'_, 'tcx> {
                 return;
             },
             ExprKind::Path(_) => {
-                if let Some(adj) = self.cx.typeck_results().adjustments().get(expr.hir_id)
-                    && adj
+                if let Some(adj) = self.cx.typeck_results().adjustments().get(expr.hir_id) {
+                    if adj
                         .iter()
                         .any(|a| matches!(a.target.kind(), ty::Ref(_, _, Mutability::Mut)))
-                {
-                    self.found = true;
-                    return;
+                    {
+                        self.found = true;
+                        return;
+                    }
                 }
             },
             // Don't check await desugars
@@ -127,7 +119,7 @@ impl<'tcx> Visitor<'tcx> for MutArgVisitor<'_, 'tcx> {
         walk_expr(self, expr);
     }
 
-    fn maybe_tcx(&mut self) -> Self::MaybeTyCtxt {
-        self.cx.tcx
+    fn nested_visit_map(&mut self) -> Self::Map {
+        self.cx.tcx.hir()
     }
 }

@@ -2,7 +2,7 @@
 import {TestCaseComparison} from "../../data";
 import Tooltip from "../../tooltip.vue";
 import {ArtifactDescription} from "../../types";
-import {formatTarget, percentClass} from "../../shared";
+import {percentClass} from "../../shared";
 import {CompileBenchmarkMap, CompileTestCase} from "../common";
 import {computed} from "vue";
 import {testCaseKey} from "../common";
@@ -18,7 +18,6 @@ const props = defineProps<{
   commitA: ArtifactDescription;
   commitB: ArtifactDescription;
   stat: string;
-  showBackend: boolean;
 }>();
 
 function prettifyRawNumber(number: number): string {
@@ -48,11 +47,7 @@ const unit = computed(() => {
   <div class="bench-table" :id="id">
     <slot name="header"></slot>
     <div v-if="comparisons.length === 0" style="text-align: center">
-      {{
-        hasNonRelevant
-          ? "No relevant results (enable Filters -> Show non-relevant results to see all)"
-          : "No results"
-      }}
+      {{ hasNonRelevant ? "No relevant results" : "No results" }}
     </div>
     <table v-else class="benches compare">
       <thead>
@@ -61,8 +56,7 @@ const unit = computed(() => {
           <th>Benchmark</th>
           <th>Profile</th>
           <th>Scenario</th>
-          <th v-if="showBackend">Backend</th>
-          <th>Target</th>
+          <th>Backend</th>
           <th>% Change</th>
           <th class="narrow">
             Significance Threshold
@@ -101,10 +95,7 @@ const unit = computed(() => {
                 {{ comparison.testCase.profile }}
               </td>
               <td>{{ comparison.testCase.scenario }}</td>
-              <td v-if="showBackend">{{ comparison.testCase.backend }}</td>
-              <td :title="comparison.testCase.target">
-                {{ formatTarget(comparison.testCase.target) }}
-              </td>
+              <td>{{ comparison.testCase.backend }}</td>
               <td>
                 <div class="numeric-aligned">
                   <span v-bind:class="percentClass(comparison.percent)">

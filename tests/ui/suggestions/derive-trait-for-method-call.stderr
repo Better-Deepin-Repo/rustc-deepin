@@ -25,14 +25,11 @@ LL | impl<X: Clone + Default + , Y: Clone + Default> Foo<X, Y> {
    |         |       |                      unsatisfied trait bound introduced here
    |         |       unsatisfied trait bound introduced here
    |         unsatisfied trait bound introduced here
-help: consider annotating `CloneEnum` with `#[derive(Default)]`
+note: the trait `Default` must be implemented
+  --> $SRC_DIR/core/src/default.rs:LL:COL
+help: consider annotating `Enum` with `#[derive(Clone)]`
    |
-LL + #[derive(Default)]
-LL | enum CloneEnum {
-   |
-help: consider annotating `Enum` with `#[derive(Clone, Default)]`
-   |
-LL + #[derive(Clone, Default)]
+LL + #[derive(Clone)]
 LL | enum Enum {
    |
 

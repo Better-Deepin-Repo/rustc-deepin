@@ -54,6 +54,7 @@ where the workspace's `Cargo.toml` is located.
 [package]
 name = "hello_world" # the name of the package
 version = "0.1.0"    # the current version, obeying semver
+authors = ["Alice <a@example.com>", "Bob <b@example.com>"]
 ```
 
 ### Virtual workspace
@@ -67,7 +68,7 @@ you want to keep all the packages organized in separate directories.
 # [PROJECT_DIR]/Cargo.toml
 [workspace]
 members = ["hello_world"]
-resolver = "3"
+resolver = "2"
 ```
 
 ```toml
@@ -75,7 +76,8 @@ resolver = "3"
 [package]
 name = "hello_world" # the name of the package
 version = "0.1.0"    # the current version, obeying semver
-edition = "2024"     # the edition, will have no effect on a resolver used in the workspace
+edition = "2021"     # the edition, will have no effect on a resolver used in the workspace
+authors = ["Alice <a@example.com>", "Bob <b@example.com>"]
 ```
 
 By having a workspace without a root package,
@@ -288,7 +290,7 @@ if that makes sense for the tool in question.
 [`Cargo.lock`]: ../guide/cargo-toml-vs-cargo-lock.md
 [package-metadata]: manifest.md#the-metadata-table
 [package-edition]: manifest.md#the-edition-field
-[output directory]: build-cache.md
+[output directory]: ../guide/build-cache.md
 [patch]: overriding-dependencies.md#the-patch-section
 [replace]: overriding-dependencies.md#the-replace-section
 [profiles]: profiles.md
@@ -299,3 +301,17 @@ if that makes sense for the tool in question.
 [specifying-dependencies]: specifying-dependencies.md
 [features]: features.md
 [inheriting-a-dependency-from-a-workspace]: specifying-dependencies.md#inheriting-a-dependency-from-a-workspace
+
+<script>
+(function() {
+    var fragments = {
+        "#virtual-manifest": "workspaces.html#virtual-workspace",
+    };
+    var target = fragments[window.location.hash];
+    if (target) {
+        var url = window.location.toString();
+        var base = url.substring(0, url.lastIndexOf('/'));
+        window.location.replace(base + "/" + target);
+    }
+})();
+</script>

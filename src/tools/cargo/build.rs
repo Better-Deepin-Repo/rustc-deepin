@@ -8,19 +8,15 @@ fn main() {
     commit_info();
     compress_man();
     windows_manifest();
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "not `cargo`, not needing to load from config"
-    )]
+    // ALLOWED: Accessing environment during build time shouldn't be prohibited.
+    #[allow(clippy::disallowed_methods)]
     let target = std::env::var("TARGET").unwrap();
     println!("cargo:rustc-env=RUST_HOST_TARGET={target}");
 }
 
 fn compress_man() {
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "not `cargo`, not needing to load from config"
-    )]
+    // ALLOWED: Accessing environment during build time shouldn't be prohibited.
+    #[allow(clippy::disallowed_methods)]
     let out_path = Path::new(&std::env::var("OUT_DIR").unwrap()).join("man.tgz");
     let dst = fs::File::create(out_path).unwrap();
     let encoder = GzBuilder::new()
@@ -118,10 +114,8 @@ fn commit_info_from_rustc_source_tarball() -> Option<CommitInfo> {
 fn commit_info() {
     // Var set by bootstrap whenever omit-git-hash is enabled in rust-lang/rust's config.toml.
     println!("cargo:rerun-if-env-changed=CFG_OMIT_GIT_HASH");
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "not `cargo`, not needing to load from config"
-    )]
+    // ALLOWED: Accessing environment during build time shouldn't be prohibited.
+    #[allow(clippy::disallowed_methods)]
     if std::env::var_os("CFG_OMIT_GIT_HASH").is_some() {
         return;
     }
@@ -135,10 +129,7 @@ fn commit_info() {
     println!("cargo:rustc-env=CARGO_COMMIT_DATE={}", git.date);
 }
 
-#[expect(
-    clippy::disallowed_methods,
-    reason = "not `cargo`, not needing to load from config"
-)]
+#[allow(clippy::disallowed_methods)]
 fn windows_manifest() {
     use std::env;
     let target_os = env::var("CARGO_CFG_TARGET_OS");

@@ -28,8 +28,6 @@ static U32: Type = Type::PrimUnsigned(32);
 static U64: Type = Type::PrimUnsigned(64);
 static U8: Type = Type::PrimUnsigned(8);
 static NEVER: Type = Type::Never;
-static GENERICT: Type = Type::GenericParam("T");
-static GENERICU: Type = Type::GenericParam("U");
 
 static F16X4: Type = Type::F(16, 4, 1);
 static F16X4X2: Type = Type::F(16, 4, 2);
@@ -159,7 +157,6 @@ enum Type {
     PrimPoly(u8),
     MutPtr(&'static Type),
     ConstPtr(&'static Type),
-    GenericParam(&'static str),
     I(u8, u8, u8),
     U(u8, u8, u8),
     P(u8, u8, u8),
@@ -407,6 +404,20 @@ fn verify_all_signatures() {
                 "__clrex",
                 "__dbg",
             ];
+            if !skip.contains(&rust.name) {
+                println!(
+                    "missing run-time test named `test_{}` for `{}`",
+                    {
+                        let mut id = rust.name;
+                        while id.starts_with('_') {
+                            id = &id[1..];
+                        }
+                        id
+                    },
+                    rust.name
+                );
+                all_valid = false;
+            }
         }
 
         // Skip some intrinsics that aren't NEON and are located in different
@@ -444,7 +455,7 @@ fn verify_all_signatures() {
                     && !rust.file.ends_with("v6.rs\"")
                     && !rust.file.ends_with("v7.rs\"")
                     && !rust.file.ends_with("v8.rs\"")
-                    && !rust.file.ends_with("mte.rs\"")
+                    && !rust.file.ends_with("tme.rs\"")
                     && !rust.file.ends_with("ex.rs\"")
                     && !skip_intrinsic_verify.contains(&rust.name)
                 {

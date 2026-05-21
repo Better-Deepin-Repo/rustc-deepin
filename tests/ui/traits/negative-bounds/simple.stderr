@@ -26,35 +26,36 @@ error[E0277]: the trait bound `Copyable: !Copy` is not satisfied
   --> $DIR/simple.rs:30:16
    |
 LL |     not_copy::<Copyable>();
-   |                ^^^^^^^^ unsatisfied trait bound
+   |                ^^^^^^^^ the trait bound `Copyable: !Copy` is not satisfied
    |
-help: the trait bound `Copyable: !Copy` is not satisfied
-  --> $DIR/simple.rs:27:1
-   |
-LL | struct Copyable;
-   | ^^^^^^^^^^^^^^^
+   = help: the trait `Copy` is implemented for `Copyable`
 note: required by a bound in `not_copy`
   --> $DIR/simple.rs:3:16
    |
 LL | fn not_copy<T: !Copy>() {}
    |                ^^^^^ required by this bound in `not_copy`
+help: consider annotating `Copyable` with `#[derive(Copy)]`
+   |
+LL + #[derive(Copy)]
+LL | struct Copyable;
+   |
 
 error[E0277]: the trait bound `NotNecessarilyCopyable: !Copy` is not satisfied
   --> $DIR/simple.rs:37:16
    |
 LL |     not_copy::<NotNecessarilyCopyable>();
-   |                ^^^^^^^^^^^^^^^^^^^^^^ unsatisfied trait bound
+   |                ^^^^^^^^^^^^^^^^^^^^^^ the trait bound `NotNecessarilyCopyable: !Copy` is not satisfied
    |
-help: the trait bound `NotNecessarilyCopyable: !Copy` is not satisfied
-  --> $DIR/simple.rs:34:1
-   |
-LL | struct NotNecessarilyCopyable;
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 note: required by a bound in `not_copy`
   --> $DIR/simple.rs:3:16
    |
 LL | fn not_copy<T: !Copy>() {}
    |                ^^^^^ required by this bound in `not_copy`
+help: consider annotating `NotNecessarilyCopyable` with `#[derive(Copy)]`
+   |
+LL + #[derive(Copy)]
+LL | struct NotNecessarilyCopyable;
+   |
 
 error: aborting due to 4 previous errors
 

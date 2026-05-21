@@ -1,7 +1,3 @@
-// ignore-tidy-linelength
-//@ normalize-stderr: "values of the type `[^`]+` are too big" -> "values of the type $$REALLY_TOO_BIG are too big"
-
-
 #![feature(transmute_generic_consts)]
 #![feature(generic_const_exprs)]
 #![allow(incomplete_features)]
@@ -15,6 +11,8 @@ fn foo<const W: usize, const H: usize>(v: [[u32; H + 1]; W]) -> [[u32; W + 1]; H
 
 fn bar<const W: bool, const H: usize>(v: [[u32; H]; W]) -> [[u32; W]; H] {
     //~^ ERROR: the constant `W` is not of type `usize`
+    //~| ERROR: mismatched types
+    //~| ERROR: mismatched types
     unsafe {
         std::mem::transmute(v)
         //~^ ERROR: the constant `W` is not of type `usize`
@@ -34,11 +32,6 @@ fn overflow(v: [[[u32; 8888888]; 9999999]; 777777777]) -> [[[u32; 9999999]; 7777
         //~^ ERROR cannot transmute
     }
 }
-
-fn overflow_more(v: [[[u32; 8888888]; 9999999]; 777777777]) -> [[[u32; 9999999]; 777777777]; 239] {
-    unsafe { std::mem::transmute(v) } //~ ERROR cannot transmute between types of different sizes
-}
-
 
 fn transpose<const W: usize, const H: usize>(v: [[u32; H]; W]) -> [[u32; W]; H] {
     unsafe {

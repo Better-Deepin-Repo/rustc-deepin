@@ -5,6 +5,7 @@ use rustc_span::Span;
 
 use crate::error_reporting::TypeErrCtxt;
 use crate::infer::RegionResolutionError;
+use crate::infer::RegionResolutionError::*;
 
 mod different_lifetimes;
 pub mod find_anon_type;
@@ -18,7 +19,7 @@ mod util;
 
 pub use different_lifetimes::suggest_adding_lifetime_params;
 pub use find_anon_type::find_anon_type;
-pub use static_impl_trait::{HirTraitObjectVisitor, TraitObjectVisitor, suggest_new_region_bound};
+pub use static_impl_trait::{suggest_new_region_bound, HirTraitObjectVisitor, TraitObjectVisitor};
 pub use util::find_param_with_region;
 
 impl<'cx, 'tcx> TypeErrCtxt<'cx, 'tcx> {
@@ -82,10 +83,8 @@ impl<'cx, 'tcx> NiceRegionError<'cx, 'tcx> {
 
     pub(super) fn regions(&self) -> Option<(Span, ty::Region<'tcx>, ty::Region<'tcx>)> {
         match (&self.error, self.regions) {
-            (Some(RegionResolutionError::ConcreteFailure(origin, sub, sup)), None) => {
-                Some((origin.span(), *sub, *sup))
-            }
-            (Some(RegionResolutionError::SubSupConflict(_, _, origin, sub, _, sup, _)), None) => {
+            (Some(ConcreteFailure(origin, sub, sup)), None) => Some((origin.span(), *sub, *sup)),
+            (Some(SubSupConflict(_, _, origin, sub, _, sup, _)), None) => {
                 Some((origin.span(), *sub, *sup))
             }
             (None, Some((span, sub, sup))) => Some((span, sub, sup)),

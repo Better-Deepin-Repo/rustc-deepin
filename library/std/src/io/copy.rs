@@ -1,10 +1,9 @@
-use super::{BorrowedBuf, BufReader, BufWriter, DEFAULT_BUF_SIZE, Read, Result, Write};
+use super::{BorrowedBuf, BufReader, BufWriter, Read, Result, Write, DEFAULT_BUF_SIZE};
 use crate::alloc::Allocator;
 use crate::cmp;
 use crate::collections::VecDeque;
 use crate::io::IoSlice;
 use crate::mem::MaybeUninit;
-use crate::sys::io::{CopyState, kernel_copy};
 
 #[cfg(test)]
 mod tests;
@@ -64,17 +63,18 @@ where
     R: Read,
     W: Write,
 {
-    match kernel_copy(reader, writer)? {
-        CopyState::Ended(copied) => Ok(copied),
-        CopyState::Fallback(copied) => {
-            generic_copy(reader, writer).map(|additional| copied + additional)
+    cfg_if::cfg_if! {
+        if #[cfg(any(target_os = "linux", target_os = "android"))] {
+            crate::sys::kernel_copy::copy_spec(reader, writer)
+        } else {
+            generic_copy(reader, writer)
         }
     }
 }
 
 /// The userspace read-write-loop implementation of `io::copy` that is used when
 /// OS-specific specializations for copy offloading are not available or not applicable.
-fn generic_copy<R: ?Sized, W: ?Sized>(reader: &mut R, writer: &mut W) -> Result<u64>
+pub(crate) fn generic_copy<R: ?Sized, W: ?Sized>(reader: &mut R, writer: &mut W) -> Result<u64>
 where
     R: Read,
     W: Write,
@@ -248,11 +248,8 @@ impl<I: Write + ?Sized> BufferedWriterSpec for BufWriter<I> {
                     Err(e) => return Err(e),
                 }
             } else {
-                // All the bytes that were already in the buffer are initialized,
-                // treat them as such when the buffer is flushed.
-                init += buf.len();
-
                 self.flush_buf()?;
+                init = 0;
             }
         }
     }
@@ -268,7 +265,7 @@ impl BufferedWriterSpec for Vec<u8> {
     }
 }
 
-fn stack_buffer_copy<R: Read + ?Sized, W: Write + ?Sized>(
+pub fn stack_buffer_copy<R: Read + ?Sized, W: Write + ?Sized>(
     reader: &mut R,
     writer: &mut W,
 ) -> Result<u64> {

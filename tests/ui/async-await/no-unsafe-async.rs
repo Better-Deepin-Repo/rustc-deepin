@@ -3,11 +3,11 @@
 struct S;
 
 impl S {
-    #[cfg(false)]
+    #[cfg(FALSE)]
     unsafe async fn g() {} //~ ERROR expected one of `extern` or `fn`, found keyword `async`
 }
 
-#[cfg(false)]
+#[cfg(FALSE)]
 unsafe async fn f() {} //~ ERROR expected one of `extern` or `fn`, found keyword `async`
 
 fn main() {}

@@ -1,3 +1,5 @@
+#![feature(const_mut_refs)]
+
 use std::marker::PhantomData;
 
 #[derive(PartialEq, Eq)]

@@ -1,8 +1,6 @@
 use std::collections::hash_map::Entry;
-use std::marker::PhantomData;
 use std::ops::Range;
 
-use rustc_abi::{BackendRepr, FieldIdx, FieldsShape, Size, VariantIdx};
 use rustc_data_structures::fx::FxHashMap;
 use rustc_index::IndexVec;
 use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrFlags;
@@ -10,11 +8,13 @@ use rustc_middle::ty::layout::{LayoutOf, TyAndLayout};
 use rustc_middle::ty::{Instance, Ty};
 use rustc_middle::{bug, mir, ty};
 use rustc_session::config::DebugInfo;
-use rustc_span::{BytePos, Span, Symbol, hygiene, sym};
+use rustc_span::symbol::{kw, Symbol};
+use rustc_span::{hygiene, BytePos, Span};
+use rustc_target::abi::{Abi, FieldIdx, FieldsShape, Size, VariantIdx};
 
 use super::operand::{OperandRef, OperandValue};
 use super::place::{PlaceRef, PlaceValue};
-use super::{FunctionCx, LocalRef, PerLocalVarDebugInfoIndexVec};
+use super::{FunctionCx, LocalRef};
 use crate::traits::*;
 
 pub struct FunctionDebugContext<'tcx, S, L> {
@@ -24,7 +24,6 @@ pub struct FunctionDebugContext<'tcx, S, L> {
     /// Maps from an inlined function to its debug info declaration.
     pub inlined_function_scopes: FxHashMap<Instance<'tcx>, S>,
 }
-
 #[derive(Copy, Clone)]
 pub enum VariableKind {
     ArgumentVariable(usize /*index*/),
@@ -46,17 +45,6 @@ pub struct PerLocalVarDebugInfo<'tcx, D> {
 
     /// `.place.projection` from `mir::VarDebugInfo`.
     pub projection: &'tcx ty::List<mir::PlaceElem<'tcx>>,
-}
-
-/// Information needed to emit a constant.
-pub struct ConstDebugInfo<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> {
-    pub name: String,
-    pub source_info: mir::SourceInfo,
-    pub operand: OperandRef<'tcx, Bx::Value>,
-    pub dbg_var: Bx::DIVariable,
-    pub dbg_loc: Bx::DILocation,
-    pub fragment: Option<Range<Size>>,
-    pub _phantom: PhantomData<&'a ()>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -253,56 +241,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         spill_slot
     }
 
-    // Indicates that local is set to a new value. The `layout` and `projection` are used to
-    // calculate the offset.
-    pub(crate) fn debug_new_val_to_local(
-        &self,
-        bx: &mut Bx,
-        local: mir::Local,
-        base: PlaceRef<'tcx, Bx::Value>,
-        projection: &[mir::PlaceElem<'tcx>],
-    ) {
-        let full_debug_info = bx.sess().opts.debuginfo == DebugInfo::Full;
-        if !full_debug_info {
-            return;
-        }
-
-        let vars = match &self.per_local_var_debug_info {
-            Some(per_local) => &per_local[local],
-            None => return,
-        };
-
-        let DebugInfoOffset { direct_offset, indirect_offsets, result: _ } =
-            calculate_debuginfo_offset(bx, projection, base.layout);
-        for var in vars.iter() {
-            let Some(dbg_var) = var.dbg_var else {
-                continue;
-            };
-            let Some(dbg_loc) = self.dbg_loc(var.source_info) else {
-                continue;
-            };
-            bx.dbg_var_value(
-                dbg_var,
-                dbg_loc,
-                base.val.llval,
-                direct_offset,
-                &indirect_offsets,
-                &var.fragment,
-            );
-        }
-    }
-
-    pub(crate) fn debug_poison_to_local(&self, bx: &mut Bx, local: mir::Local) {
-        let ty = self.monomorphize(self.mir.local_decls[local].ty);
-        let layout = bx.cx().layout_of(ty);
-        let to_backend_ty = bx.cx().immediate_backend_type(layout);
-        let place_ref = PlaceRef::new_sized(bx.cx().const_poison(to_backend_ty), layout);
-        self.debug_new_val_to_local(bx, local, place_ref, &[]);
-    }
-
     /// Apply debuginfo and/or name, after creating the `alloca` for a local,
     /// or initializing the local with an operand (whichever applies).
-    pub(crate) fn debug_introduce_local(&self, bx: &mut Bx, local: mir::Local) {
+    pub fn debug_introduce_local(&self, bx: &mut Bx, local: mir::Local) {
         let full_debug_info = bx.sess().opts.debuginfo == DebugInfo::Full;
 
         let vars = match &self.per_local_var_debug_info {
@@ -330,7 +271,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 // (after #67586 gets fixed).
                 None
             } else {
-                let name = sym::empty;
+                let name = kw::Empty;
                 let decl = &self.mir.local_decls[local];
                 let dbg_var = if full_debug_info {
                     self.adjusted_span_and_dbg_scope(decl.source_info).map(
@@ -364,8 +305,8 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         let name = if bx.sess().fewer_names() {
             None
         } else {
-            Some(match whole_local_var.or_else(|| fallback_var.clone()) {
-                Some(var) if var.name != sym::empty => var.name.to_string(),
+            Some(match whole_local_var.or(fallback_var.clone()) {
+                Some(var) if var.name != kw::Empty => var.name.to_string(),
                 _ => format!("{local:?}"),
             })
         };
@@ -403,47 +344,9 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
             LocalRef::Operand(operand) => {
                 // Don't spill operands onto the stack in naked functions.
                 // See: https://github.com/rust-lang/rust/issues/42779
-                let attrs = bx.tcx().codegen_instance_attrs(self.instance.def);
+                let attrs = bx.tcx().codegen_fn_attrs(self.instance.def_id());
                 if attrs.flags.contains(CodegenFnAttrFlags::NAKED) {
                     return;
-                }
-
-                // Don't spill `<vscale x N x i1>` for `N != 16`:
-                //
-                // SVE predicates are only one bit for each byte in an SVE vector (which makes
-                // sense, the predicate only needs to keep track of whether a lane is
-                // enabled/disabled). i.e. a `<vscale x 16 x i8>` vector has a `<vscale x 16 x i1>`
-                // predicate type. `<vscale x 16 x i1>` corresponds to two bytes of storage,
-                // multiplied by the `vscale`, with one bit for each of the sixteen lanes.
-                //
-                // For a vector with fewer elements, such as `svint32_t`/`<vscale x 4 x i32>`,
-                // while only a `<vscale x 4 x i1>` predicate type would be strictly necessary,
-                // relevant intrinsics still take a `svbool_t`/`<vscale x 16 x i1>` - this is
-                // because a `<vscale x 4 x i1>` is only half of a byte (for `vscale=1`), and with
-                // memory being byte-addressable, it's unclear how to store that.
-                //
-                // Due to this, LLVM ultimately decided not to support stores of `<vscale x N x i1>`
-                // for `N != 16`. As for `vscale=1` and `N` fewer than sixteen, partial bytes would
-                // need to be stored (except for `N=8`, but that also isn't supported). `N` can
-                // never be greater than sixteen as that ends up larger than the 128-bit increment
-                // size.
-                //
-                // Internally, with an intrinsic operating on a `svint32_t`/`<vscale x 4 x i32>`
-                // (for example), the intrinsic takes the `svbool_t`/`<vscale x 16 x i1>` predicate
-                // and casts it to a `svbool4_t`/`<vscale x 4 x i1>`. Therefore, it's important that
-                // the `<vscale x 4 x i1>` never spills because that'll cause errors during
-                // instruction selection. Spilling to the stack to create debuginfo for these
-                // intermediate values must be avoided and doing so won't affect the
-                // debugging experience anyway.
-                if operand.layout.ty.is_scalable_vector()
-                    && bx.sess().target.arch == rustc_target::spec::Arch::AArch64
-                {
-                    let (count, element_ty) =
-                        operand.layout.ty.scalable_vector_element_count_and_type(bx.tcx());
-                    // i.e. `<vscale x N x i1>` when `N != 16`
-                    if element_ty.is_bool() && count != 16 {
-                        return;
-                    }
                 }
 
                 Self::spill_operand_to_stack(*operand, name, bx)
@@ -509,7 +412,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 alloca.val.llval,
                 Size::ZERO,
                 &[Size::ZERO],
-                &var.fragment,
+                var.fragment,
             );
         } else {
             bx.dbg_var_addr(
@@ -518,41 +421,24 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                 base.val.llval,
                 direct_offset,
                 &indirect_offsets,
-                &var.fragment,
+                var.fragment,
             );
         }
     }
 
-    pub(crate) fn debug_introduce_locals(
-        &self,
-        bx: &mut Bx,
-        consts: Vec<ConstDebugInfo<'a, 'tcx, Bx>>,
-    ) {
+    pub fn debug_introduce_locals(&self, bx: &mut Bx) {
         if bx.sess().opts.debuginfo == DebugInfo::Full || !bx.sess().fewer_names() {
             for local in self.locals.indices() {
                 self.debug_introduce_local(bx, local);
-            }
-
-            for ConstDebugInfo { name, source_info, operand, dbg_var, dbg_loc, fragment, .. } in
-                consts.into_iter()
-            {
-                self.set_debug_loc(bx, source_info);
-                let base = FunctionCx::spill_operand_to_stack(operand, Some(name), bx);
-                bx.clear_dbg_loc();
-
-                bx.dbg_var_addr(dbg_var, dbg_loc, base.val.llval, Size::ZERO, &[], &fragment);
             }
         }
     }
 
     /// Partition all `VarDebugInfo` in `self.mir`, by their base `Local`.
-    pub(crate) fn compute_per_local_var_debug_info(
+    pub fn compute_per_local_var_debug_info(
         &self,
         bx: &mut Bx,
-    ) -> Option<(
-        PerLocalVarDebugInfoIndexVec<'tcx, Bx::DIVariable>,
-        Vec<ConstDebugInfo<'a, 'tcx, Bx>>,
-    )> {
+    ) -> Option<IndexVec<mir::Local, Vec<PerLocalVarDebugInfo<'tcx, Bx::DIVariable>>>> {
         let full_debug_info = self.cx.sess().opts.debuginfo == DebugInfo::Full;
 
         let target_is_msvc = self.cx.sess().target.is_like_msvc;
@@ -562,7 +448,6 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
         }
 
         let mut per_local = IndexVec::from_elem(vec![], &self.mir.local_decls);
-        let mut constants = vec![];
         let mut params_seen: FxHashMap<_, Bx::DIVariable> = Default::default();
         for var in &self.mir.var_debug_info {
             let dbg_scope_and_span = if full_debug_info {
@@ -594,7 +479,7 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         // be marked as a `LocalVariable` for MSVC debuggers to visualize
                         // their data correctly. (See #81894 & #88625)
                         let var_ty_layout = self.cx.layout_of(var_ty);
-                        if let BackendRepr::ScalarPair(_, _) = var_ty_layout.backend_repr {
+                        if let Abi::ScalarPair(_, _) = var_ty_layout.abi {
                             VariableKind::LocalVariable
                         } else {
                             VariableKind::ArgumentVariable(arg_index)
@@ -659,19 +544,22 @@ impl<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>> FunctionCx<'a, 'tcx, Bx> {
                         let Some(dbg_loc) = self.dbg_loc(var.source_info) else { continue };
 
                         let operand = self.eval_mir_constant_to_operand(bx, &c);
-                        constants.push(ConstDebugInfo {
-                            name: var.name.to_string(),
-                            source_info: var.source_info,
-                            operand,
+                        self.set_debug_loc(bx, var.source_info);
+                        let base =
+                            Self::spill_operand_to_stack(operand, Some(var.name.to_string()), bx);
+
+                        bx.dbg_var_addr(
                             dbg_var,
                             dbg_loc,
+                            base.val.llval,
+                            Size::ZERO,
+                            &[],
                             fragment,
-                            _phantom: PhantomData,
-                        });
+                        );
                     }
                 }
             }
         }
-        Some((per_local, constants))
+        Some(per_local)
     }
 }

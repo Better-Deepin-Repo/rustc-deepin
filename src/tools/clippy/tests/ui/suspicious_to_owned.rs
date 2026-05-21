@@ -1,8 +1,9 @@
+//@no-rustfix: overlapping suggestions
 #![warn(clippy::suspicious_to_owned)]
 #![warn(clippy::implicit_clone)]
 #![allow(clippy::redundant_clone)]
 use std::borrow::Cow;
-use std::ffi::{CStr, c_char};
+use std::ffi::{c_char, CStr};
 
 fn main() {
     let moo = "Moooo";
@@ -14,8 +15,8 @@ fn main() {
     // we expect this to be linted
     let cow = Cow::Borrowed(moo);
     let _ = cow.to_owned();
-    //~^ suspicious_to_owned
-
+    //~^ ERROR: this `to_owned` call clones the Cow<'_, str> itself and does not cause the
+    //~| NOTE: `-D clippy::suspicious-to-owned` implied by `-D warnings`
     // we expect no lints for this
     let cow = Cow::Borrowed(moo);
     let _ = cow.into_owned();
@@ -26,8 +27,7 @@ fn main() {
     // we expect this to be linted
     let cow = Cow::Borrowed(&moos);
     let _ = cow.to_owned();
-    //~^ suspicious_to_owned
-
+    //~^ ERROR: this `to_owned` call clones the Cow<'_, [char; 3]> itself and does not cau
     // we expect no lints for this
     let cow = Cow::Borrowed(&moos);
     let _ = cow.into_owned();
@@ -38,8 +38,7 @@ fn main() {
     // we expect this to be linted
     let cow = Cow::Borrowed(&moos_vec);
     let _ = cow.to_owned();
-    //~^ suspicious_to_owned
-
+    //~^ ERROR: this `to_owned` call clones the Cow<'_, Vec<char>> itself and does not cau
     // we expect no lints for this
     let cow = Cow::Borrowed(&moos_vec);
     let _ = cow.into_owned();
@@ -50,8 +49,7 @@ fn main() {
     // we expect this to be linted
     let cow = unsafe { CStr::from_ptr(c_moo_ptr) }.to_string_lossy();
     let _ = cow.to_owned();
-    //~^ suspicious_to_owned
-
+    //~^ ERROR: this `to_owned` call clones the Cow<'_, str> itself and does not cause the
     // we expect no lints for this
     let cow = unsafe { CStr::from_ptr(c_moo_ptr) }.to_string_lossy();
     let _ = cow.into_owned();
@@ -66,8 +64,8 @@ fn main() {
 
     // we expect implicit_clone lints for these
     let _ = String::from(moo).to_owned();
-    //~^ implicit_clone
-
+    //~^ ERROR: implicitly cloning a `String` by calling `to_owned` on its dereferenced ty
+    //~| NOTE: `-D clippy::implicit-clone` implied by `-D warnings`
     let _ = moos_vec.to_owned();
-    //~^ implicit_clone
+    //~^ ERROR: implicitly cloning a `Vec` by calling `to_owned` on its dereferenced type
 }

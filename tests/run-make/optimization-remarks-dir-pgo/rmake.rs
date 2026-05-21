@@ -4,7 +4,7 @@
 // the output remark files.
 // See https://github.com/rust-lang/rust/pull/114439
 
-//@ needs-profiler-runtime
+//@ needs-profiler-support
 //@ ignore-cross-compile
 
 use run_make_support::{

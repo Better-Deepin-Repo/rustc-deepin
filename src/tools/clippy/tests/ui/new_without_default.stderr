@@ -24,7 +24,6 @@ error: you should consider adding a `Default` implementation for `Bar`
    |
 LL | /     pub fn new() -> Self {
 LL | |
-LL | |
 LL | |         Bar
 LL | |     }
    | |_____^
@@ -39,10 +38,9 @@ LL + }
    |
 
 error: you should consider adding a `Default` implementation for `LtKo<'c>`
-  --> tests/ui/new_without_default.rs:88:5
+  --> tests/ui/new_without_default.rs:87:5
    |
 LL | /     pub fn new() -> LtKo<'c> {
-LL | |
 LL | |
 LL | |         unimplemented!()
 LL | |     }
@@ -58,10 +56,9 @@ LL + }
    |
 
 error: you should consider adding a `Default` implementation for `Const`
-  --> tests/ui/new_without_default.rs:122:5
+  --> tests/ui/new_without_default.rs:120:5
    |
 LL | /     pub const fn new() -> Const {
-LL | |
 LL | |         Const
 LL | |     } // While Default is not const, it can still call const functions, so we should lint this
    | |_____^
@@ -76,10 +73,9 @@ LL + }
    |
 
 error: you should consider adding a `Default` implementation for `NewNotEqualToDerive`
-  --> tests/ui/new_without_default.rs:183:5
+  --> tests/ui/new_without_default.rs:180:5
    |
 LL | /     pub fn new() -> Self {
-LL | |
 LL | |
 LL | |         NewNotEqualToDerive { foo: 1 }
 LL | |     }
@@ -95,10 +91,9 @@ LL + }
    |
 
 error: you should consider adding a `Default` implementation for `FooGenerics<T>`
-  --> tests/ui/new_without_default.rs:193:5
+  --> tests/ui/new_without_default.rs:189:5
    |
 LL | /     pub fn new() -> Self {
-LL | |
 LL | |
 LL | |         Self(Default::default())
 LL | |     }
@@ -114,10 +109,9 @@ LL + }
    |
 
 error: you should consider adding a `Default` implementation for `BarGenerics<T>`
-  --> tests/ui/new_without_default.rs:202:5
+  --> tests/ui/new_without_default.rs:197:5
    |
 LL | /     pub fn new() -> Self {
-LL | |
 LL | |
 LL | |         Self(Default::default())
 LL | |     }
@@ -133,10 +127,9 @@ LL + }
    |
 
 error: you should consider adding a `Default` implementation for `Foo<T>`
-  --> tests/ui/new_without_default.rs:215:9
+  --> tests/ui/new_without_default.rs:209:9
    |
 LL | /         pub fn new() -> Self {
-LL | |
 LL | |
 LL | |             todo!()
 LL | |         }
@@ -154,10 +147,9 @@ LL ~     impl<T> Foo<T> {
    |
 
 error: you should consider adding a `Default` implementation for `MyStruct<K, V>`
-  --> tests/ui/new_without_default.rs:262:5
+  --> tests/ui/new_without_default.rs:255:5
    |
 LL | /     pub fn new() -> Self {
-LL | |
 LL | |         Self { _kv: None }
 LL | |     }
    | |_____^
@@ -174,134 +166,5 @@ LL +     }
 LL + }
    |
 
-error: you should consider adding a `Default` implementation for `NewWithCfg`
-  --> tests/ui/new_without_default.rs:273:5
-   |
-LL | /     pub fn new() -> Self {
-LL | |
-LL | |         unimplemented!()
-LL | |     }
-   | |_____^
-   |
-help: try adding this
-   |
-LL + #[cfg(not(test))]
-LL + impl Default for NewWithCfg {
-LL +     fn default() -> Self {
-LL +         Self::new()
-LL +     }
-LL + }
-   |
-
-error: you should consider adding a `Default` implementation for `NewWith2Cfgs`
-  --> tests/ui/new_without_default.rs:283:5
-   |
-LL | /     pub fn new() -> Self {
-LL | |
-LL | |         unimplemented!()
-LL | |     }
-   | |_____^
-   |
-help: try adding this
-   |
-LL + #[cfg(not(test))]
-LL + #[cfg(panic = "unwind")]
-LL + impl Default for NewWith2Cfgs {
-LL +     fn default() -> Self {
-LL +         Self::new()
-LL +     }
-LL + }
-   |
-
-error: you should consider adding a `Default` implementation for `NewWithExtraneous`
-  --> tests/ui/new_without_default.rs:292:5
-   |
-LL | /     pub fn new() -> Self {
-LL | |
-LL | |         unimplemented!()
-LL | |     }
-   | |_____^
-   |
-help: try adding this
-   |
-LL + impl Default for NewWithExtraneous {
-LL +     fn default() -> Self {
-LL +         Self::new()
-LL +     }
-LL + }
-   |
-
-error: you should consider adding a `Default` implementation for `NewWithCfgAndExtraneous`
-  --> tests/ui/new_without_default.rs:302:5
-   |
-LL | /     pub fn new() -> Self {
-LL | |
-LL | |         unimplemented!()
-LL | |     }
-   | |_____^
-   |
-help: try adding this
-   |
-LL + #[cfg(not(test))]
-LL + impl Default for NewWithCfgAndExtraneous {
-LL +     fn default() -> Self {
-LL +         Self::new()
-LL +     }
-LL + }
-   |
-
-error: you should consider adding a `Default` implementation for `Foo<T>`
-  --> tests/ui/new_without_default.rs:340:9
-   |
-LL | /         pub fn new() -> Self
-LL | |
-LL | |         where
-LL | |             T: Clone,
-LL | |         {
-LL | |             Self { marker: PhantomData }
-LL | |         }
-   | |_________^
-   |
-help: try adding this
-   |
-LL ~     impl<T> Default for Foo<T>
-LL +     where
-LL +         T: Display,
-LL +         T: Clone,
-LL +      {
-LL +         fn default() -> Self {
-LL +             Self::new()
-LL +         }
-LL +     }
-LL + 
-LL ~     impl<T> Foo<T>
-   |
-
-error: you should consider adding a `Default` implementation for `Bar<T>`
-  --> tests/ui/new_without_default.rs:354:9
-   |
-LL | /         pub fn new() -> Self
-LL | |
-LL | |         where
-LL | |             T: Clone,
-LL | |         {
-LL | |             Self { marker: PhantomData }
-LL | |         }
-   | |_________^
-   |
-help: try adding this
-   |
-LL ~     impl<T> Default for Bar<T>
-LL +     where
-LL +         T: Clone,
-LL +      {
-LL +         fn default() -> Self {
-LL +             Self::new()
-LL +         }
-LL +     }
-LL + 
-LL ~     impl<T> Bar<T> {
-   |
-
-error: aborting due to 15 previous errors
+error: aborting due to 9 previous errors
 

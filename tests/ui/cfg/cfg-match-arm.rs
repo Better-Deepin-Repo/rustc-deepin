@@ -1,5 +1,6 @@
 //@ run-pass
 #![allow(dead_code)]
+//@ pretty-expanded FIXME #23616
 
 enum Foo {
     Bar,
@@ -11,7 +12,7 @@ fn foo(f: Foo) {
         Foo::Bar => {},
         #[cfg(not(FALSE))]
         Foo::Baz => {},
-        #[cfg(false)]
+        #[cfg(FALSE)]
         Basdfwe => {}
     }
 }

@@ -19,7 +19,7 @@ SOURCE_FILE
             ASM_KW "asm"
             L_PAREN "("
             LITERAL
-              STRING "\"\""
+              INT_NUMBER "0"
             R_PAREN ")"
           SEMICOLON ";"
         WHITESPACE "\n    "
@@ -44,10 +44,10 @@ SOURCE_FILE
             COMMA ","
             WHITESPACE " "
             FORMAT_ARGS_ARG
-              FORMAT_ARGS_ARG_NAME
+              NAME
                 IDENT "a"
-                WHITESPACE " "
-                EQ "="
+              WHITESPACE " "
+              EQ "="
               WHITESPACE " "
               BIN_EXPR
                 LITERAL

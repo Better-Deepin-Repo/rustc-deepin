@@ -1,5 +1,5 @@
-use std::io;
 use std::io::prelude::Write;
+use std::io::{self};
 use std::time::Duration;
 
 use super::OutputFormatter;
@@ -8,13 +8,13 @@ use crate::test_result::TestResult;
 use crate::time;
 use crate::types::{TestDesc, TestType};
 
-pub(crate) struct JunitFormatter<T> {
+pub struct JunitFormatter<T> {
     out: OutputLocation<T>,
     results: Vec<(TestDesc, TestResult, Duration, Vec<u8>)>,
 }
 
 impl<T: Write> JunitFormatter<T> {
-    pub(crate) fn new(out: OutputLocation<T>) -> Self {
+    pub fn new(out: OutputLocation<T>) -> Self {
         Self { out, results: Vec::new() }
     }
 
@@ -39,15 +39,15 @@ fn str_to_cdata(s: &str) -> String {
 
 impl<T: Write> OutputFormatter for JunitFormatter<T> {
     fn write_discovery_start(&mut self) -> io::Result<()> {
-        Err(io::const_error!(io::ErrorKind::NotFound, "not yet implemented!"))
+        Err(io::Error::new(io::ErrorKind::NotFound, "Not yet implemented!"))
     }
 
     fn write_test_discovered(&mut self, _desc: &TestDesc, _test_type: &str) -> io::Result<()> {
-        Err(io::const_error!(io::ErrorKind::NotFound, "not yet implemented!"))
+        Err(io::Error::new(io::ErrorKind::NotFound, "Not yet implemented!"))
     }
 
     fn write_discovery_finish(&mut self, _state: &ConsoleTestDiscoveryState) -> io::Result<()> {
-        Err(io::const_error!(io::ErrorKind::NotFound, "not yet implemented!"))
+        Err(io::Error::new(io::ErrorKind::NotFound, "Not yet implemented!"))
     }
 
     fn write_run_start(
@@ -181,18 +181,6 @@ impl<T: Write> OutputFormatter for JunitFormatter<T> {
         self.out.write_all(b"\n")?;
 
         Ok(state.failed == 0)
-    }
-
-    fn write_merged_doctests_times(
-        &mut self,
-        total_time: f64,
-        compilation_time: f64,
-    ) -> io::Result<()> {
-        self.write_message(&format!(
-            "<report total_time=\"{total_time}\" compilation_time=\"{compilation_time}\"></report>",
-        ))?;
-        self.out.write_all(b"\n")?;
-        Ok(())
     }
 }
 

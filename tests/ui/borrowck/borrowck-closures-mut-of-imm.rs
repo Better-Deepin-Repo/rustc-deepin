@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 // Tests that two closures cannot simultaneously have mutable
 // and immutable access to the variable. Issue #6801.
 

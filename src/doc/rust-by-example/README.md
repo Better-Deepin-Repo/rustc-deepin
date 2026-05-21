@@ -26,8 +26,9 @@ read all content offline, however!
 
 **The following warnings can be ignored safely.**
 
-```text
- WARN The command `mdbook-gettext` for preprocessor `gettext` was not found, but is marked as optional.
+```
+[WARN] (mdbook::preprocess::cmd): The command wasn't found, is the "gettext" preprocessor installed?
+[WARN] (mdbook::preprocess::cmd):   Command: mdbook-gettext
 ```
 
 ### Using translated version
@@ -60,13 +61,10 @@ Please see the [TRANSLATING.md] file for more details.
 
 [TRANSLATING_JA.md]: https://github.com/rust-lang/rust-by-example/blob/master/TRANSLATING_JA.md
 
-* Chinese/中文: [TRANSLATING_ZH.md]
-
-[TRANSLATING_ZH.md]: https://github.com/rust-lang/rust-by-example/blob/master/TRANSLATING_ZH.md
-
 ## Translations to other languages
 
 * [Bulgarian](https://github.com/kberov/rust-by-example-bg)
+* [Chinese](https://github.com/rust-lang-cn/rust-by-example-cn)
 * [French](https://github.com/Songbird0/FR_RBE)
 * [Russian](https://github.com/ruRust/rust-by-example)
 * [Vietnamese](https://github.com/EyesCrypto-Insights/rust-by-example-vn)

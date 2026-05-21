@@ -231,7 +231,6 @@ mod arch {
 }
 
 #[cfg(any(
-    target_arch = "loongarch32",
     target_arch = "loongarch64",
     target_arch = "mips64",
     target_arch = "mips64r6",

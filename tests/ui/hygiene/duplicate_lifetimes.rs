@@ -3,7 +3,7 @@
 
 #![feature(decl_macro, rustc_attrs)]
 
-#[rustc_macro_transparency = "semiopaque"]
+#[rustc_macro_transparency = "semitransparent"]
 macro m($a:lifetime) {
     fn g<$a, 'a>() {} //~ ERROR the name `'a` is already used for a generic parameter
 }

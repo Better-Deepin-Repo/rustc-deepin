@@ -9,7 +9,26 @@
 
 #![stable(feature = "core_prelude", since = "1.4.0")]
 
-pub mod v1;
+mod common;
+
+/// The first version of the prelude of The Rust Standard Library.
+///
+/// See the [module-level documentation](self) for more.
+#[stable(feature = "rust1", since = "1.0.0")]
+pub mod v1 {
+    #[stable(feature = "rust1", since = "1.0.0")]
+    pub use super::common::*;
+
+    // Do not `doc(inline)` these `doc(hidden)` items.
+    #[unstable(
+        feature = "rustc_encodable_decodable",
+        issue = "none",
+        soft,
+        reason = "derive macro for `rustc-serialize`; should not be used in new code"
+    )]
+    #[allow(deprecated)]
+    pub use crate::macros::builtin::{RustcDecodable, RustcEncodable};
+}
 
 /// The 2015 version of the core prelude.
 ///
@@ -52,11 +71,10 @@ pub mod rust_2021 {
 /// The 2024 version of the core prelude.
 ///
 /// See the [module-level documentation](self) for more.
-#[stable(feature = "prelude_2024", since = "1.85.0")]
+#[unstable(feature = "prelude_2024", issue = "121042")]
 pub mod rust_2024 {
     #[stable(feature = "rust1", since = "1.0.0")]
-    #[doc(no_inline)]
-    pub use super::v1::*;
+    pub use super::common::*;
 
     #[stable(feature = "prelude_2021", since = "1.55.0")]
     #[doc(no_inline)]
@@ -66,30 +84,7 @@ pub mod rust_2024 {
     #[doc(no_inline)]
     pub use crate::convert::{TryFrom, TryInto};
 
-    #[stable(feature = "prelude_2024", since = "1.85.0")]
-    #[doc(no_inline)]
-    pub use crate::future::{Future, IntoFuture};
-}
-
-/// The Future version of the core prelude.
-///
-/// See the [module-level documentation](self) for more.
-#[doc(hidden)]
-#[unstable(feature = "prelude_future", issue = "none")]
-pub mod rust_future {
-    #[stable(feature = "rust1", since = "1.0.0")]
-    #[doc(no_inline)]
-    pub use super::v1::*;
-
-    #[stable(feature = "prelude_2021", since = "1.55.0")]
-    #[doc(no_inline)]
-    pub use crate::iter::FromIterator;
-
-    #[stable(feature = "prelude_2021", since = "1.55.0")]
-    #[doc(no_inline)]
-    pub use crate::convert::{TryFrom, TryInto};
-
-    #[stable(feature = "prelude_2024", since = "1.85.0")]
+    #[unstable(feature = "prelude_2024", issue = "121042")]
     #[doc(no_inline)]
     pub use crate::future::{Future, IntoFuture};
 }

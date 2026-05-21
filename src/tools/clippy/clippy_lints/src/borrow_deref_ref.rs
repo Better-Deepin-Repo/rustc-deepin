@@ -2,12 +2,9 @@ use crate::reference::DEREF_ADDROF;
 use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::source::SpanRangeExt;
 use clippy_utils::ty::implements_trait;
-use clippy_utils::{
-    get_enclosing_closure, get_parent_expr, is_expr_temporary_value, is_from_proc_macro, is_lint_allowed, is_mutable,
-    is_upvar_in_closure, path_to_local_with_projections,
-};
+use clippy_utils::{get_parent_expr, is_from_proc_macro, is_lint_allowed};
 use rustc_errors::Applicability;
-use rustc_hir::{BorrowKind, Expr, ExprKind, Node, UnOp};
+use rustc_hir::{ExprKind, UnOp};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::mir::Mutability;
 use rustc_middle::ty;
@@ -51,8 +48,8 @@ declare_clippy_lint! {
 declare_lint_pass!(BorrowDerefRef => [BORROW_DEREF_REF]);
 
 impl<'tcx> LateLintPass<'tcx> for BorrowDerefRef {
-    fn check_expr(&mut self, cx: &LateContext<'tcx>, e: &'tcx Expr<'tcx>) {
-        if let ExprKind::AddrOf(BorrowKind::Ref, Mutability::Not, addrof_target) = e.kind
+    fn check_expr(&mut self, cx: &LateContext<'tcx>, e: &rustc_hir::Expr<'tcx>) {
+        if let ExprKind::AddrOf(_, Mutability::Not, addrof_target) = e.kind
             && let ExprKind::Unary(UnOp::Deref, deref_target) = addrof_target.kind
             && !matches!(deref_target.kind, ExprKind::Unary(UnOp::Deref, ..))
             && !e.span.from_expansion()
@@ -60,7 +57,7 @@ impl<'tcx> LateLintPass<'tcx> for BorrowDerefRef {
             && !addrof_target.span.from_expansion()
             && let ref_ty = cx.typeck_results().expr_ty(deref_target)
             && let ty::Ref(_, inner_ty, Mutability::Not) = ref_ty.kind()
-            && get_parent_expr(cx, e).is_none_or(|parent| {
+            && get_parent_expr(cx, e).map_or(true, |parent| {
                 match parent.kind {
                     // `*&*foo` should lint `deref_addrof` instead.
                     ExprKind::Unary(UnOp::Deref, _) => is_lint_allowed(cx, DEREF_ADDROF, parent.hir_id),
@@ -76,24 +73,8 @@ impl<'tcx> LateLintPass<'tcx> for BorrowDerefRef {
                 }
             })
             && !is_from_proc_macro(cx, e)
-            && let e_ty = cx.typeck_results().expr_ty_adjusted(e)
-            // check if the reference is coercing to a mutable reference
-            && (!matches!(e_ty.kind(), ty::Ref(_, _, Mutability::Mut)) || is_mutable(cx, deref_target))
-            // If the new borrow might be itself borrowed mutably and the original reference is not a temporary
-            // value, do not propose to use it directly.
-            && (is_expr_temporary_value(cx, deref_target) || !potentially_bound_to_mutable_ref(cx, e))
             && let Some(deref_text) = deref_target.span.get_source_text(cx)
         {
-            // `&*x` can be needed to shorten the borrow of `x`. Replacing it with `x` can be
-            // incorrect when `x` is a closure-captured upvar (e.g. a closure returning another
-            // closure that captures `x`).
-            if let Some(closure) = get_enclosing_closure(cx, e.hir_id)
-                && let Some(local_id) = path_to_local_with_projections(deref_target)
-                && is_upvar_in_closure(cx, closure, local_id)
-            {
-                return;
-            }
-
             span_lint_and_then(
                 cx,
                 BORROW_DEREF_REF,
@@ -109,10 +90,10 @@ impl<'tcx> LateLintPass<'tcx> for BorrowDerefRef {
 
                     // has deref trait -> give 2 help
                     // doesn't have deref trait -> give 1 help
-                    if let Some(deref_trait_id) = cx.tcx.lang_items().deref_trait()
-                        && !implements_trait(cx, *inner_ty, deref_trait_id, &[])
-                    {
-                        return;
+                    if let Some(deref_trait_id) = cx.tcx.lang_items().deref_trait() {
+                        if !implements_trait(cx, *inner_ty, deref_trait_id, &[]) {
+                            return;
+                        }
                     }
 
                     diag.span_suggestion(
@@ -125,10 +106,4 @@ impl<'tcx> LateLintPass<'tcx> for BorrowDerefRef {
             );
         }
     }
-}
-
-/// Checks if `expr` is used as part of a `let` statement containing a `ref mut` binding.
-fn potentially_bound_to_mutable_ref<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) -> bool {
-    matches!(cx.tcx.parent_hir_node(expr.hir_id), Node::LetStmt(let_stmt)
-             if let_stmt.pat.contains_explicit_ref_binding() == Some(Mutability::Mut))
 }

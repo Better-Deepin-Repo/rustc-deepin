@@ -76,9 +76,8 @@ if [ -f "$docker_dir/$image/Dockerfile" ]; then
     # Include cache version. Can be used to manually bust the Docker cache.
     echo "2" >> $hash_key
 
-    echo "::group::Image checksum input"
+    echo "Image input"
     cat $hash_key
-    echo "::endgroup::"
 
     cksum=$(sha512sum $hash_key | \
     awk '{print $1}')
@@ -97,24 +96,13 @@ if [ -f "$docker_dir/$image/Dockerfile" ]; then
     docker --version
 
     REGISTRY=ghcr.io
-    # Default to `rust-lang` to allow reusing the cache for local builds
-    REGISTRY_USERNAME=${GITHUB_REPOSITORY_OWNER:-rust-lang}
+    REGISTRY_USERNAME=${GITHUB_REPOSITORY_OWNER:-rust-lang-ci}
     # Tag used to push the final Docker image, so that it can be pulled by e.g. rustup
     IMAGE_TAG=${REGISTRY}/${REGISTRY_USERNAME}/rust-ci:${cksum}
     # Tag used to cache the Docker build
     # It seems that it cannot be the same as $IMAGE_TAG, otherwise it overwrites the cache
     CACHE_IMAGE_TAG=${REGISTRY}/${REGISTRY_USERNAME}/rust-ci-cache:${cksum}
 
-    # Docker build arguments.
-    build_args=(
-        "build"
-        "--rm"
-        "-t" "rust-ci"
-        "-f" "$dockerfile"
-        "$context"
-    )
-
-    GHCR_BUILDKIT_IMAGE="ghcr.io/rust-lang/buildkit:buildx-stable-1"
     # On non-CI jobs, we try to download a pre-built image from the rust-lang-ci
     # ghcr.io registry. If it is not possible, we fall back to building the image
     # locally.
@@ -125,23 +113,25 @@ if [ -f "$docker_dir/$image/Dockerfile" ]; then
             docker tag "${IMAGE_TAG}" rust-ci
         else
             echo "Building local Docker image"
-            retry docker "${build_args[@]}"
+            retry docker build --rm -t rust-ci -f "$dockerfile" "$context"
         fi
     # On PR CI jobs, we don't have permissions to write to the registry cache,
     # but we can still read from it.
     elif [[ "$PR_CI_JOB" == "1" ]];
     then
         # Enable a new Docker driver so that --cache-from works with a registry backend
-        # Use a custom image to avoid DockerHub rate limits
-        docker buildx create --use --driver docker-container \
-          --driver-opt image=${GHCR_BUILDKIT_IMAGE}
+        docker buildx create --use --driver docker-container
 
         # Build the image using registry caching backend
         retry docker \
           buildx \
-          "${build_args[@]}" \
+          build \
+          --rm \
+          -t rust-ci \
+          -f "$dockerfile" \
           --cache-from type=registry,ref=${CACHE_IMAGE_TAG} \
-          --output=type=docker
+          --output=type=docker \
+          "$context"
     # On auto/try builds, we can also write to the cache.
     else
         # Log into the Docker registry, so that we can read/write cache and the final image
@@ -150,17 +140,19 @@ if [ -f "$docker_dir/$image/Dockerfile" ]; then
             --password-stdin
 
         # Enable a new Docker driver so that --cache-from/to works with a registry backend
-        # Use a custom image to avoid DockerHub rate limits
-        docker buildx create --use --driver docker-container \
-          --driver-opt image=${GHCR_BUILDKIT_IMAGE}
+        docker buildx create --use --driver docker-container
 
         # Build the image using registry caching backend
         retry docker \
           buildx \
-          "${build_args[@]}" \
+          build \
+          --rm \
+          -t rust-ci \
+          -f "$dockerfile" \
           --cache-from type=registry,ref=${CACHE_IMAGE_TAG} \
           --cache-to type=registry,ref=${CACHE_IMAGE_TAG},compression=zstd \
-          --output=type=docker
+          --output=type=docker \
+          "$context"
 
         # Print images for debugging purposes
         docker images
@@ -227,15 +219,9 @@ args=
 if [ "$SCCACHE_BUCKET" != "" ]; then
     args="$args --env SCCACHE_BUCKET"
     args="$args --env SCCACHE_REGION"
+    args="$args --env AWS_ACCESS_KEY_ID"
+    args="$args --env AWS_SECRET_ACCESS_KEY"
     args="$args --env AWS_REGION"
-
-    # Disable S3 authentication for PR builds, because the access keys are missing
-    if [ "$PR_CI_JOB" != "" ]; then
-      args="$args --env SCCACHE_S3_NO_CREDENTIALS=1"
-    else
-      args="$args --env AWS_ACCESS_KEY_ID"
-      args="$args --env AWS_SECRET_ACCESS_KEY"
-    fi
 else
     mkdir -p $HOME/.cache/sccache
     args="$args --env SCCACHE_DIR=/sccache --volume $HOME/.cache/sccache:/sccache"
@@ -279,7 +265,7 @@ args="$args --privileged"
 # `LOCAL_USER_ID` (recognized in `src/ci/run.sh`) to ensure that files are all
 # read/written as the same user as the bare-metal user.
 if [ -f /.dockerenv ]; then
-  docker create -v /checkout --name checkout ghcr.io/rust-lang/alpine:3.4 /bin/true
+  docker create -v /checkout --name checkout alpine:3.4 /bin/true
   docker cp . checkout:/checkout
   args="$args --volumes-from checkout"
 else
@@ -312,6 +298,16 @@ else
   command=(/checkout/src/ci/run.sh)
 fi
 
+if isCI; then
+  # Get some needed information for $BASE_COMMIT
+  #
+  # This command gets the last merge commit which we'll use as base to list
+  # deleted files since then.
+  BASE_COMMIT="$(git log --author=bors@rust-lang.org -n 2 --pretty=format:%H | tail -n 1)"
+else
+  BASE_COMMIT=""
+fi
+
 SUMMARY_FILE=github-summary.md
 touch $objdir/${SUMMARY_FILE}
 
@@ -321,10 +317,6 @@ if [ "$ENABLE_GCC_CODEGEN" = "1" ]; then
   # Fix rustc_codegen_gcc lto issues.
   extra_env="$extra_env --env GCC_EXEC_PREFIX=/usr/lib/gcc/"
   echo "Setting extra environment values for docker: $extra_env"
-fi
-
-if [ -n "${DOCKER_SCRIPT}" ]; then
-  extra_env="$extra_env --env SCRIPT=\"/scripts/${DOCKER_SCRIPT}\""
 fi
 
 docker \
@@ -337,34 +329,30 @@ docker \
   --env DEPLOY \
   --env DEPLOY_ALT \
   --env CI \
-  --env GIT_DISCOVERY_ACROSS_FILESYSTEM=1 \
   --env GITHUB_ACTIONS \
   --env GITHUB_REF \
   --env GITHUB_STEP_SUMMARY="/checkout/obj/${SUMMARY_FILE}" \
-  --env GITHUB_WORKFLOW_RUN_ID \
-  --env GITHUB_REPOSITORY \
   --env RUST_BACKTRACE \
   --env TOOLSTATE_REPO_ACCESS_TOKEN \
   --env TOOLSTATE_REPO \
   --env TOOLSTATE_PUBLISH \
   --env RUST_CI_OVERRIDE_RELEASE_CHANNEL \
-  --env CI_JOB_NAME="${CI_JOB_NAME-$image}" \
-  --env CI_JOB_DOC_URL="${CI_JOB_DOC_URL}" \
+  --env CI_JOB_NAME="${CI_JOB_NAME-$IMAGE}" \
+  --env BASE_COMMIT="$BASE_COMMIT" \
   --env DIST_TRY_BUILD \
   --env PR_CI_JOB \
   --env OBJDIR_ON_HOST="$objdir" \
   --env CODEGEN_BACKENDS \
-  --env DISABLE_CI_RUSTC_IF_INCOMPATIBLE="$DISABLE_CI_RUSTC_IF_INCOMPATIBLE" \
   --init \
   --rm \
   rust-ci \
   "${command[@]}"
 
+if isCI; then
+    cat $objdir/${SUMMARY_FILE} >> "${GITHUB_STEP_SUMMARY}"
+fi
+
 if [ -f /.dockerenv ]; then
   rm -rf $objdir
   docker cp checkout:/checkout/obj $objdir
-fi
-
-if isCI; then
-    cat $objdir/${SUMMARY_FILE} >> "${GITHUB_STEP_SUMMARY}"
 fi

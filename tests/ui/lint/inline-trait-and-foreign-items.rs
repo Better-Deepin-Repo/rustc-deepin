@@ -4,33 +4,33 @@
 #![warn(unused_attributes)]
 
 trait Trait {
-    #[inline] //~ WARN attribute cannot be used on
-//~| WARN previously accepted
+    #[inline] //~ WARN `#[inline]` is ignored on constants
+    //~^ WARN this was previously accepted
     const X: u32;
 
-    #[inline] //~ ERROR attribute cannot be used on
+    #[inline] //~ ERROR attribute should be applied to function or closure
     type T;
 
     type U;
 }
 
 impl Trait for () {
-    #[inline] //~ WARN attribute cannot be used on
-//~| WARN previously accepted
+    #[inline] //~ WARN `#[inline]` is ignored on constants
+    //~^ WARN this was previously accepted
     const X: u32 = 0;
 
-    #[inline] //~ ERROR attribute cannot be used on
+    #[inline] //~ ERROR attribute should be applied to function or closure
     type T = Self;
 
-    #[inline] //~ ERROR attribute cannot be used on
+    #[inline] //~ ERROR attribute should be applied to function or closure
     type U = impl Trait; //~ ERROR unconstrained opaque type
 }
 
 extern "C" {
-    #[inline] //~ ERROR attribute cannot be used on
+    #[inline] //~ ERROR attribute should be applied to function or closure
     static X: u32;
 
-    #[inline] //~ ERROR attribute cannot be used on
+    #[inline] //~ ERROR attribute should be applied to function or closure
     type T;
 }
 

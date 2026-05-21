@@ -10,19 +10,13 @@ fn unnecessary_sort_by() {
     let mut vec: Vec<isize> = vec![3, 6, 1, 2, 5];
     // Forward examples
     vec.sort_by(|a, b| a.cmp(b));
-    //~^ unnecessary_sort_by
     vec.sort_unstable_by(|a, b| a.cmp(b));
-    //~^ unnecessary_sort_by
     vec.sort_by(|a, b| (a + 5).abs().cmp(&(b + 5).abs()));
-    //~^ unnecessary_sort_by
     vec.sort_unstable_by(|a, b| id(-a).cmp(&id(-b)));
-    //~^ unnecessary_sort_by
     // Reverse examples
     vec.sort_by(|a, b| b.cmp(a)); // not linted to avoid suggesting `Reverse(b)` which would borrow
     vec.sort_by(|a, b| (b + 5).abs().cmp(&(a + 5).abs()));
-    //~^ unnecessary_sort_by
     vec.sort_unstable_by(|a, b| id(-b).cmp(&id(-a)));
-    //~^ unnecessary_sort_by
     // Negative examples (shouldn't be changed)
     let c = &7;
     vec.sort_by(|a, b| (b - a).cmp(&(a - b)));
@@ -33,9 +27,7 @@ fn unnecessary_sort_by() {
     // Vectors of references are fine as long as the resulting key does not borrow
     let mut vec: Vec<&&&isize> = vec![&&&3, &&&6, &&&1, &&&2, &&&5];
     vec.sort_by(|a, b| (***a).abs().cmp(&(***b).abs()));
-    //~^ unnecessary_sort_by
     vec.sort_unstable_by(|a, b| (***a).abs().cmp(&(***b).abs()));
-    //~^ unnecessary_sort_by
     // `Reverse(b)` would borrow in the following cases, don't lint
     vec.sort_by(|a, b| b.cmp(a));
     vec.sort_unstable_by(|a, b| b.cmp(a));
@@ -95,77 +87,15 @@ mod issue_6001 {
 
         // Forward
         args.sort_by(|a, b| a.name().cmp(&b.name()));
-        //~^ unnecessary_sort_by
         args.sort_unstable_by(|a, b| a.name().cmp(&b.name()));
-        //~^ unnecessary_sort_by
         // Reverse
         args.sort_by(|a, b| b.name().cmp(&a.name()));
-        //~^ unnecessary_sort_by
         args.sort_unstable_by(|a, b| b.name().cmp(&a.name()));
-        //~^ unnecessary_sort_by
     }
 }
 
-fn main() {}
-
-fn issue16405() {
-    let mut v: Vec<(i32, &str)> = vec![(1, "foo"), (2, "bar")];
-
-    v.sort_by(|a, b| a.0.cmp(&b.0));
-    //~^ unnecessary_sort_by
-
-    struct Item {
-        key: i32,
-        value: String,
-    }
-
-    let mut items = vec![
-        Item {
-            key: 2,
-            value: "b".to_string(),
-        },
-        Item {
-            key: 1,
-            value: "a".to_string(),
-        },
-    ];
-    items.sort_by(|item1, item2| item1.key.cmp(&item2.key));
-    //~^ unnecessary_sort_by
-
-    items.sort_by(|item1, item2| item1.value.cmp(&item2.value));
-
-    items.sort_by(|item1, item2| item1.value.clone().cmp(&item2.value.clone()));
-    //~^ unnecessary_sort_by
-}
-
-fn issue16348() {
-    let mut v: Vec<(i32, &str)> = vec![(1, "foo"), (2, "bar")];
-    v.sort_by(|(_, s1), (_, s2)| s1.cmp(s2));
-    //~^ unnecessary_sort_by
-
-    struct Foo {
-        bar: i32,
-    }
-    let mut v: Vec<Foo> = vec![Foo { bar: 1 }, Foo { bar: 2 }];
-    v.sort_by(|Foo { bar: b1 }, Foo { bar: b2 }| b1.cmp(b2));
-    //~^ unnecessary_sort_by
-
-    struct Baz(i32);
-    let mut v: Vec<Baz> = vec![Baz(1), Baz(2)];
-    v.sort_by(|Baz(b1), Baz(b2)| b1.cmp(b2));
-    //~^ unnecessary_sort_by
-
-    v.sort_by(|&Baz(b1), &Baz(b2)| b1.cmp(&b2));
-    //~^ unnecessary_sort_by
-
-    let mut v: Vec<&i32> = vec![&1, &2];
-    v.sort_by(|&&b1, &&b2| b1.cmp(&b2));
-    //~^ unnecessary_sort_by
-
-    let mut v: Vec<[i32; 2]> = vec![[1, 2], [3, 4]];
-    v.sort_by(|[a1, b1], [a2, b2]| a1.cmp(a2));
-    //~^ unnecessary_sort_by
-
-    v.sort_by(|[a1, b1], [a2, b2]| (a1 - b1).cmp(&(a2 - b2)));
-    //~^ unnecessary_sort_by
+fn main() {
+    unnecessary_sort_by();
+    issue_5754::test();
+    issue_6001::test();
 }

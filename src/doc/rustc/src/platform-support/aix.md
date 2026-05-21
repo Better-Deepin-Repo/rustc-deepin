@@ -6,9 +6,8 @@ Rust for AIX operating system, currently only 64-bit PowerPC is supported.
 
 ## Target maintainers
 
-[@daltenty](https://github.com/daltenty)
-[@gilamn5tr](https://github.com/gilamn5tr)
-[@amy-kwan](https://github.com/amy-kwan)
+- QIU Chaofan `qiucofan@cn.ibm.com`, https://github.com/ecnelises
+- Kai LUO, `lkail@cn.ibm.com`, https://github.com/bzEq
 
 ## Requirements
 

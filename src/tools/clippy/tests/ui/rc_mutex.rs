@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 pub struct MyStructWithPrivItem {
     foo: Rc<Mutex<i32>>,
-    //~^ rc_mutex
+    //~^ ERROR: usage of `Rc<Mutex<_>>`
 }
 
 pub struct MyStructWithPubItem {
@@ -25,13 +25,11 @@ pub enum MyEnum {
 // All of these test should be trigger the lint because they are not
 // part of the public api
 fn test1<T>(foo: Rc<Mutex<T>>) {}
-//~^ rc_mutex
-
+//~^ ERROR: usage of `Rc<Mutex<_>>`
 fn test2(foo: Rc<Mutex<MyEnum>>) {}
-//~^ rc_mutex
-
+//~^ ERROR: usage of `Rc<Mutex<_>>`
 fn test3(foo: Rc<Mutex<SubT<usize>>>) {}
-//~^ rc_mutex
+//~^ ERROR: usage of `Rc<Mutex<_>>`
 
 // All of these test should be allowed because they are part of the
 // public api and `avoid_breaking_exported_api` is `false` by default.

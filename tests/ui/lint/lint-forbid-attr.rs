@@ -1,7 +1,6 @@
-#![forbid(deprecated)] //~ NOTE `forbid` level set here
+#![forbid(deprecated)]
 
 #[allow(deprecated)]
-//~^ ERROR allow(deprecated) incompatible with previous forbid [E0453]
-//~^^ NOTE overruled by previous forbid
+//~^ ERROR allow(deprecated) incompatible
 fn main() {
 }

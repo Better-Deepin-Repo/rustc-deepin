@@ -1,12 +1,10 @@
 use clippy_utils::diagnostics::span_lint_and_sugg;
-use clippy_utils::res::MaybeResPath;
 use clippy_utils::source::snippet;
 use clippy_utils::ty::is_copy;
-use clippy_utils::{get_parent_expr, is_mutable};
-use rustc_hir::{Expr, ExprField, ExprKind, Path, QPath, StructTailExpr, UnOp};
+use clippy_utils::{get_parent_expr, path_to_local};
+use rustc_hir::{BindingMode, Expr, ExprField, ExprKind, Node, PatKind, Path, QPath, UnOp};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::declare_lint_pass;
-use rustc_span::{DesugaringKind, Ident};
 
 declare_clippy_lint! {
     /// ### What it does
@@ -53,8 +51,7 @@ impl LateLintPass<'_> for UnnecessaryStruct {
             return;
         };
 
-        let expr_span = expr.range_span().unwrap_or(expr.span);
-        if expr_span.from_expansion() {
+        if expr.span.from_expansion() {
             // Prevent lint from hitting inside macro code
             return;
         }
@@ -62,17 +59,15 @@ impl LateLintPass<'_> for UnnecessaryStruct {
         let field_path = same_path_in_all_fields(cx, expr, fields);
 
         let sugg = match (field_path, base) {
-            (Some(&path), StructTailExpr::None | StructTailExpr::DefaultFields(_)) => {
+            (Some(&path), None) => {
                 // all fields match, no base given
                 path.span
             },
-            (Some(path), StructTailExpr::Base(base))
-                if base_is_suitable(cx, expr, base) && path_matches_base(path, base) =>
-            {
+            (Some(path), Some(base)) if base_is_suitable(cx, expr, base) && path_matches_base(path, base) => {
                 // all fields match, has base: ensure that the path of the base matches
                 base.span
             },
-            (None, StructTailExpr::Base(base)) if fields.is_empty() && base_is_suitable(cx, expr, base) => {
+            (None, Some(base)) if fields.is_empty() && base_is_suitable(cx, expr, base) => {
                 // just the base, no explicit fields
                 base.span
             },
@@ -82,7 +77,7 @@ impl LateLintPass<'_> for UnnecessaryStruct {
         span_lint_and_sugg(
             cx,
             UNNECESSARY_STRUCT_INITIALIZATION,
-            expr_span,
+            expr.span,
             "unnecessary struct building",
             "replace with",
             snippet(cx, sugg, "..").into_owned(),
@@ -132,7 +127,7 @@ fn same_path_in_all_fields<'tcx>(
             // expression type matches
             && ty == cx.typeck_results().expr_ty(src_expr)
             // field name matches
-            && ident_without_range_desugaring(f.ident) == ident
+            && f.ident == ident
             // assigned from a path expression
             && let ExprKind::Path(QPath::Resolved(None, src_path)) = src_expr.kind
         {
@@ -160,12 +155,22 @@ fn same_path_in_all_fields<'tcx>(
     }
 }
 
+fn is_mutable(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
+    if let Some(hir_id) = path_to_local(expr)
+        && let Node::Pat(pat) = cx.tcx.hir_node(hir_id)
+    {
+        matches!(pat.kind, PatKind::Binding(BindingMode::MUT, ..))
+    } else {
+        true
+    }
+}
+
 fn check_references(cx: &LateContext<'_>, expr_a: &Expr<'_>, expr_b: &Expr<'_>) -> bool {
     if let Some(parent) = get_parent_expr(cx, expr_a)
         && let parent_ty = cx.typeck_results().expr_ty_adjusted(parent)
         && parent_ty.is_any_ptr()
     {
-        if is_copy(cx, cx.typeck_results().expr_ty(expr_a)) && expr_b.res_local_id().is_some() {
+        if is_copy(cx, cx.typeck_results().expr_ty(expr_a)) && path_to_local(expr_b).is_some() {
             // When the type implements `Copy`, a reference to the new struct works on the
             // copy. Using the original would borrow it.
             return false;
@@ -198,15 +203,4 @@ fn path_matches_base(path: &Path<'_>, base: &Expr<'_>) -> bool {
         _ => return false,
     };
     path.res == base_path.res
-}
-
-fn ident_without_range_desugaring(ident: Ident) -> Ident {
-    if ident.span.desugaring_kind() == Some(DesugaringKind::RangeExpr) {
-        Ident {
-            span: ident.span.parent_callsite().unwrap(),
-            ..ident
-        }
-    } else {
-        ident
-    }
 }

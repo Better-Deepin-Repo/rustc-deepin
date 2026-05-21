@@ -8,9 +8,6 @@ usr/lib/rustlib/uninstall.sh
 # redundant copy of llvm-dwp, we already link it in rustc.links
 usr/lib/rustlib/*/bin/rust-llvm-dwp
 
-# redundant copy of llvm-objcopy, we already link it in rustc.links
-usr/lib/rustlib/*/bin/rust-objcopy
-
 # docs, we already install into /usr/share/doc/rustc
 usr/share/doc/docs/*
 
@@ -18,14 +15,9 @@ usr/share/doc/docs/*
 usr/share/doc/*/LICENSE-*
 usr/share/doc/*/README.md
 usr/share/doc/rustc/COPYRIGHT
-usr/share/doc/rustc/COPYRIGHT*.html
-usr/share/doc/rustc/licenses/*
 
 # should be claimed by dh_bash-completion
 etc/bash_completion.d/cargo
-
-# should we install this somewhere?
-etc/target-spec-json-schema.json
 
 # backup files from the previous stages
 usr/bin/*.old

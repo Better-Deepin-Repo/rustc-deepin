@@ -109,16 +109,6 @@
 //! parameters (corresponding to `format_spec` in [the syntax](#syntax)). These
 //! parameters affect the string representation of what's being formatted.
 //!
-//! The colon `:` in format syntax divides identifier of the input data and
-//! the formatting options, the colon itself does not change anything, only
-//! introduces the options.
-//!
-//! ```
-//! let a = 5;
-//! let b = &a;
-//! println!("{a:e} {b:p}"); // => 5e0 0x7ffe37b7273c
-//! ```
-//!
 //! ## Width
 //!
 //! ```
@@ -136,10 +126,9 @@
 //! padding specified by fill/alignment will be used to take up the required
 //! space (see below).
 //!
-//! The width can also be provided dynamically by referencing another argument
-//! with a `$` suffix. Use `{:N$}` to reference the Nth positional argument
-//! (where N is an integer), or `{:name$}` to reference a named argument. The
-//! referenced argument must be of type [`usize`].
+//! The value for the width can also be provided as a [`usize`] in the list of
+//! parameters by adding a postfix `$`, indicating that the second argument is
+//! a [`usize`] specifying the width.
 //!
 //! Referring to an argument with the dollar syntax does not affect the "next
 //! argument" counter, so it's usually a good idea to refer to arguments by
@@ -237,8 +226,7 @@
 //!
 //! 2. An integer or name followed by dollar sign `.N$`:
 //!
-//!    use the value of format *argument* `N` (which must be a `usize`) as the precision.
-//!    An integer refers to a positional argument, and a name refers to a named argument.
+//!    use format *argument* `N` (which must be a `usize`) as the precision.
 //!
 //! 3. An asterisk `.*`:
 //!
@@ -350,13 +338,13 @@
 //! format := '{' [ argument ] [ ':' format_spec ] [ ws ] * '}'
 //! argument := integer | identifier
 //!
-//! format_spec := [[fill]align][sign]['#']['0'][width]['.' precision][type]
+//! format_spec := [[fill]align][sign]['#']['0'][width]['.' precision]type
 //! fill := character
 //! align := '<' | '^' | '>'
 //! sign := '+' | '-'
 //! width := count
 //! precision := count | '*'
-//! type := '?' | 'x?' | 'X?' | 'o' | 'x' | 'X' | 'p' | 'b' | 'e' | 'E'
+//! type := '' | '?' | 'x?' | 'X?' | identifier
 //! count := parameter | integer
 //! parameter := argument '$'
 //! ```
@@ -365,10 +353,7 @@
 //! - `ws` is any character for which [`char::is_whitespace`] returns `true`, has no semantic
 //!   meaning and is completely optional,
 //! - `integer` is a decimal integer that may contain leading zeroes and must fit into an `usize` and
-//! - `identifier` is an `IDENTIFIER_OR_KEYWORD` (not an `IDENTIFIER`) as
-//!   defined by the [Rust language
-//!   reference](https://doc.rust-lang.org/reference/identifiers.html), except
-//!   for a bare `_`.
+//! - `identifier` is an `IDENTIFIER_OR_KEYWORD` (not an `IDENTIFIER`) as defined by the [Rust language reference](https://doc.rust-lang.org/reference/identifiers.html).
 //!
 //! # Formatting traits
 //!
@@ -595,20 +580,18 @@
 pub use core::fmt::Alignment;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::fmt::Error;
+#[unstable(feature = "debug_closure_helpers", issue = "117729")]
+pub use core::fmt::{from_fn, FromFn};
 #[stable(feature = "rust1", since = "1.0.0")]
-pub use core::fmt::{Arguments, write};
+pub use core::fmt::{write, Arguments};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::fmt::{Binary, Octal};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::fmt::{Debug, Display};
-#[unstable(feature = "formatting_options", issue = "118117")]
-pub use core::fmt::{DebugAsHex, FormattingOptions, Sign};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::fmt::{DebugList, DebugMap, DebugSet, DebugStruct, DebugTuple};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::fmt::{Formatter, Result, Write};
-#[stable(feature = "fmt_from_fn", since = "1.93.0")]
-pub use core::fmt::{FromFn, from_fn};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::fmt::{LowerExp, UpperExp};
 #[stable(feature = "rust1", since = "1.0.0")]

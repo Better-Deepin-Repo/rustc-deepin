@@ -5,7 +5,6 @@
 
 //@ revisions:rpass1 rpass2
 //@ compile-flags: -Z query-dep-graph
-//@ ignore-backends: gcc
 
 use std::sync::Arc;
 

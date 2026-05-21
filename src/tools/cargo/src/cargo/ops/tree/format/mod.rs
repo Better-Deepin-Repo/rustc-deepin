@@ -1,9 +1,9 @@
 use std::fmt;
 
-use anyhow::{Error, bail};
+use anyhow::{bail, Error};
 
 use self::parse::{Parser, RawChunk};
-use super::{Graph, Node, NodeId};
+use super::{Graph, Node};
 
 mod parse;
 
@@ -25,10 +25,10 @@ impl Pattern {
         for raw in Parser::new(format) {
             let chunk = match raw {
                 RawChunk::Text(text) => Chunk::Raw(text.to_owned()),
-                RawChunk::Argument("package") | RawChunk::Argument("p") => Chunk::Package,
-                RawChunk::Argument("license") | RawChunk::Argument("l") => Chunk::License,
-                RawChunk::Argument("repository") | RawChunk::Argument("r") => Chunk::Repository,
-                RawChunk::Argument("features") | RawChunk::Argument("f") => Chunk::Features,
+                RawChunk::Argument("p") => Chunk::Package,
+                RawChunk::Argument("l") => Chunk::License,
+                RawChunk::Argument("r") => Chunk::Repository,
+                RawChunk::Argument("f") => Chunk::Features,
                 RawChunk::Argument("lib") => Chunk::LibName,
                 RawChunk::Argument(a) => {
                     bail!("unsupported pattern `{}`", a);
@@ -41,7 +41,7 @@ impl Pattern {
         Ok(Pattern(chunks))
     }
 
-    pub fn display<'a>(&'a self, graph: &'a Graph<'a>, node_index: NodeId) -> Display<'a> {
+    pub fn display<'a>(&'a self, graph: &'a Graph<'a>, node_index: usize) -> Display<'a> {
         Display {
             pattern: self,
             graph,
@@ -53,7 +53,7 @@ impl Pattern {
 pub struct Display<'a> {
     pattern: &'a Pattern,
     graph: &'a Graph<'a>,
-    node_index: NodeId,
+    node_index: usize,
 }
 
 impl<'a> fmt::Display for Display<'a> {

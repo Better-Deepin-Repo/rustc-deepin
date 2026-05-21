@@ -3,7 +3,7 @@
 use std::env;
 use std::fs;
 
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
 use cargo_test_support::{basic_lib_manifest, basic_manifest, git, project, sleep_ms};
@@ -114,6 +114,7 @@ fn non_virtual_default_members_build_other_member() {
 
     p.cargo("check")
         .with_stderr_data(str![[r#"
+[LOCKING] 3 packages to latest compatible versions
 [CHECKING] baz v0.1.0 ([ROOT]/foo/baz)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -153,6 +154,7 @@ fn non_virtual_default_members_build_root_project() {
 
     p.cargo("check")
         .with_stderr_data(str![[r#"
+[LOCKING] 2 packages to latest compatible versions
 [CHECKING] foo v0.1.0 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -696,8 +698,8 @@ fn share_dependencies() {
     p.cargo("check")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 1 package to latest compatible version
-[ADDING] dep1 v0.1.3 (available: v0.1.8)
+[LOCKING] 3 packages to latest compatible versions
+[ADDING] dep1 v0.1.3 (latest: v0.1.8)
 [DOWNLOADING] crates ...
 [DOWNLOADED] dep1 v0.1.3 (registry `dummy-registry`)
 [CHECKING] dep1 v0.1.3
@@ -746,7 +748,7 @@ fn fetch_fetches_all() {
     p.cargo("fetch")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 3 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] dep1 v0.1.3 (registry `dummy-registry`)
 
@@ -796,7 +798,7 @@ fn lock_works_for_everyone() {
     p.cargo("generate-lockfile")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 2 packages to latest compatible versions
+[LOCKING] 4 packages to latest compatible versions
 
 "#]])
         .run();
@@ -948,7 +950,7 @@ fn virtual_default_member_is_not_a_member() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [ERROR] package `[ROOT]/foo/something-else` is listed in default-members but is not a member
-for workspace at `[ROOT]/foo/Cargo.toml`.
+for workspace at [ROOT]/foo/Cargo.toml.
 
 "#]])
         .run();
@@ -973,6 +975,7 @@ fn virtual_default_members_build_other_member() {
 
     p.cargo("check --manifest-path bar/Cargo.toml")
         .with_stderr_data(str![[r#"
+[LOCKING] 2 packages to latest compatible versions
 [CHECKING] bar v0.1.0 ([ROOT]/foo/bar)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -1114,11 +1117,12 @@ fn new_warning_with_corrupt_ws() {
     let p = project().file("Cargo.toml", "asdf").build();
     p.cargo("new bar").with_stderr_data(str![[r#"
 [CREATING] binary (application) `bar` package
-[ERROR] key with no value, expected `=`
+[ERROR] expected `.`, `=`
  --> Cargo.toml:1:5
   |
 1 | asdf
   |     ^
+  |
 [WARNING] compiling this new package may not work due to invalid workspace configuration
 
 [NOTE] see more `Cargo.toml` keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -1394,11 +1398,12 @@ fn error_if_parent_cargo_toml_is_invalid() {
         .cwd("bar")
         .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] key with no value, expected `=`
+[ERROR] expected `.`, `=`
  --> ../Cargo.toml:1:9
   |
 1 | Totally not a TOML file
   |         ^
+  |
 
 "#]])
         .run();
@@ -1729,7 +1734,7 @@ fn excluded_default_members_still_must_be_members() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [ERROR] package `[ROOT]/foo/bar` is listed in default-members but is not a member
-for workspace at `[ROOT]/foo/Cargo.toml`.
+for workspace at [ROOT]/foo/Cargo.toml.
 
 "#]])
         .run();
@@ -1966,7 +1971,7 @@ fn glob_syntax_invalid_members() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [ERROR] failed to load manifest for workspace member `[ROOT]/foo/crates/bar`
-referenced via `crates/*` by workspace at `[ROOT]/foo/Cargo.toml`
+referenced by workspace at `[ROOT]/foo/Cargo.toml`
 
 Caused by:
   failed to read `[ROOT]/foo/crates/bar/Cargo.toml`
@@ -2046,6 +2051,7 @@ fn dep_used_with_separate_features() {
     // Build the entire workspace.
     p.cargo("build --workspace")
         .with_stderr_data(str![[r#"
+[LOCKING] 3 packages to latest compatible versions
 [COMPILING] feat_lib v0.1.0 ([ROOT]/foo/feat_lib)
 [COMPILING] caller1 v0.1.0 ([ROOT]/foo/caller1)
 [COMPILING] caller2 v0.1.0 ([ROOT]/foo/caller2)
@@ -2433,7 +2439,7 @@ Caused by:
   failed to load source for dependency `x`
 
 Caused by:
-  unable to update [ROOT]/foo/x
+  Unable to update [ROOT]/foo/x
 
 Caused by:
   failed to read `[ROOT]/foo/x/Cargo.toml`
@@ -2618,262 +2624,6 @@ fn ensure_correct_workspace_when_nested() {
         .with_stdout_data(str![[r#"
 foo v0.1.0 ([ROOT]/foo/sub/foo)
 └── bar v0.1.0 ([ROOT]/foo)
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn nonexistence_package_together_with_workspace() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-            [package]
-            name = "foo"
-            version = "0.1.0"
-            authors = []
-            edition = "2021"
-
-            [workspace]
-            members = ["baz"]
-        "#,
-        )
-        .file("src/lib.rs", "")
-        .file("baz/Cargo.toml", &basic_manifest("baz", "0.1.0"))
-        .file("baz/src/lib.rs", "");
-
-    let p = p.build();
-
-    p.cargo("check --package nonexistence --workspace")
-        .with_status(101)
-        .with_stderr_data(
-            str![[r#"
-[ERROR] package(s) `nonexistence` not found in workspace `[ROOT]/foo`
-
-"#]]
-            .unordered(),
-        )
-        .run();
-    // With pattern *
-    p.cargo("check --package nonpattern* --workspace")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] package pattern(s) `nonpattern*` not found in workspace `[ROOT]/foo`
-
-"#]])
-        .run();
-
-    p.cargo("package --package nonexistence --workspace")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] package(s) `nonexistence` not found in workspace `[ROOT]/foo`
-
-"#]])
-        .run();
-    // With pattern *
-    p.cargo("package --package nonpattern* --workspace")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] package pattern(s) `nonpattern*` not found in workspace `[ROOT]/foo`
-
-"#]])
-        .run();
-
-    p.cargo("publish --dry-run --package nonexistence --workspace")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] package(s) `nonexistence` not found in workspace `[ROOT]/foo`
-
-"#]])
-        .run();
-    // With pattern *
-    p.cargo("publish --dry-run --package nonpattern* --workspace")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] package pattern(s) `nonpattern*` not found in workspace `[ROOT]/foo`
-
-"#]])
-        .run();
-
-    p.cargo("tree --package nonexistence  --workspace")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] package(s) `nonexistence` not found in workspace `[ROOT]/foo`
-
-"#]])
-        .run();
-    // With pattern *
-    p.cargo("tree --package nonpattern*  --workspace")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] package pattern(s) `nonpattern*` not found in workspace `[ROOT]/foo`
-
-"#]])
-        .run();
-}
-
-// A failing case from <https://github.com/rust-lang/cargo/issues/15625>
-#[cargo_test]
-fn fix_only_check_manifest_path_member() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-            [workspace]
-            members = ["foo", "bar"]
-            resolver = "3"
-            "#,
-        )
-        .file(
-            "foo/Cargo.toml",
-            r#"
-            [package]
-            name = "foo"
-            version = "0.1.0"
-            edition = "2021"
-            "#,
-        )
-        .file("foo/src/main.rs", "fn main() {}")
-        .file(
-            "bar/Cargo.toml",
-            r#"
-            [package]
-            name = "bar"
-            version = "0.1.0"
-            edition = "2021"
-            "#,
-        )
-        .file("bar/src/main.rs", "fn main() {}")
-        .build();
-
-    p.cargo("fix --manifest-path foo/Cargo.toml --allow-no-vcs")
-        .with_stderr_data(str![[r#"
-[CHECKING] foo v0.1.0 ([ROOT]/foo/foo)
-[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn error_if_member_is_outside_root() {
-    // This test ensures that if a member is physically outside the workspace root,
-    // we get a helpful error message.
-    //
-    // Setup:
-    // root/Cargo.toml     (workspace, members = [])
-    // member/Cargo.toml   (package, workspace = "../root")
-
-    let _root = project()
-        .at("root")
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "root"
-                version = "0.1.0"
-                edition = "2015"
-
-                [workspace]
-                members = []
-            "#,
-        )
-        .file("src/main.rs", "fn main() {}")
-        .build();
-
-    let member = project()
-        .at("member")
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "member"
-                version = "0.1.0"
-                edition = "2015"
-                workspace = "../root"
-            "#,
-        )
-        .file("src/main.rs", "fn main() {}")
-        .build();
-
-    // The error message should reflect that these paths are unrelated (Old Behavior)
-    member.cargo("build")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] current package believes it's in a workspace when it's not:
-current:   [ROOT]/member/Cargo.toml
-workspace: [ROOT]/root/Cargo.toml
-
-this may be fixable by adding `../member` to the `workspace.members` array of the manifest located at: [ROOT]/root/Cargo.toml
-Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn error_if_manifest_path_is_relative() {
-    // This test simulates running cargo usage with a relative --manifest-path
-    // that includes `..` to verify normalization and suggestions.
-    //
-    // Directory structure:
-    // root/Cargo.toml
-    // root/subdir/
-    // outside/Cargo.toml  (workspace = "../root")
-
-    let root = project()
-        .at("root")
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "root"
-                version = "0.1.0"
-                edition = "2015"
-
-                [workspace]
-                members = []
-            "#,
-        )
-        .file("src/main.rs", "fn main() {}")
-        .file("subdir/file", "")
-        .build();
-
-    let _outside = project()
-        .at("outside")
-        .file(
-            "Cargo.toml",
-            r#"
-                [package]
-                name = "outside"
-                version = "0.1.0"
-                edition = "2015"
-                workspace = "../root"
-            "#,
-        )
-        .file("src/main.rs", "fn main() {}")
-        .build();
-
-    // Run from `root/subdir` pointing to `../../outside/Cargo.toml`
-    // The workspace root is at `root`.
-    // The package is at `outside`.
-    // Relative path from root to outside is `../outside`.
-
-    // We execute inside `root`, but targeting the outside package.
-    root.cargo("build")
-        .cwd(root.root().join("subdir"))
-        .arg("-v")
-        .arg("--manifest-path")
-        .arg("../../outside/Cargo.toml")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] current package believes it's in a workspace when it's not:
-current:   [ROOT]/outside/Cargo.toml
-workspace: [ROOT]/root/Cargo.toml
-
-this may be fixable by adding `../outside` to the `workspace.members` array of the manifest located at: [ROOT]/root/Cargo.toml
-Alternatively, to keep it out of the workspace, add the package to the `workspace.exclude` array, or add an empty `[workspace]` table to the package's manifest.
 
 "#]])
         .run();

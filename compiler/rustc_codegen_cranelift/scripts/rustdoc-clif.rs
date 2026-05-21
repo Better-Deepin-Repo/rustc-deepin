@@ -11,16 +11,14 @@ fn main() {
         sysroot = sysroot.parent().unwrap();
     }
 
-    let cg_clif_dylib_path = sysroot.join("lib").join(
+    let cg_clif_dylib_path = sysroot.join(if cfg!(windows) { "bin" } else { "lib" }).join(
         env::consts::DLL_PREFIX.to_string() + "rustc_codegen_cranelift" + env::consts::DLL_SUFFIX,
     );
 
     let passed_args = std::env::args_os().skip(1).collect::<Vec<_>>();
     let mut args = vec![];
-    if !cfg!(support_panic_unwind) {
-        args.push(OsString::from("-Cpanic=abort"));
-        args.push(OsString::from("-Zpanic-abort-tests"));
-    }
+    args.push(OsString::from("-Cpanic=abort"));
+    args.push(OsString::from("-Zpanic-abort-tests"));
     if let Some(name) = option_env!("BUILTIN_BACKEND") {
         args.push(OsString::from(format!("-Zcodegen-backend={name}")))
     } else {

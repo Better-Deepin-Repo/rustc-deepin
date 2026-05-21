@@ -3,12 +3,8 @@ use std::hash::Hash;
 
 use derive_where::derive_where;
 #[cfg(feature = "nightly")]
-use rustc_macros::{
-    Decodable, Decodable_NoContext, Encodable, Encodable_NoContext, HashStable_NoContext,
-};
-use rustc_type_ir_macros::{
-    GenericTypeVisitable, Lift_Generic, TypeFoldable_Generic, TypeVisitable_Generic,
-};
+use rustc_macros::{Decodable, Encodable, HashStable_NoContext, TyDecodable, TyEncodable};
+use rustc_type_ir_macros::{Lift_Generic, TypeFoldable_Generic, TypeVisitable_Generic};
 
 use crate::inherent::*;
 use crate::lift::Lift;
@@ -17,16 +13,15 @@ use crate::visit::TypeVisitableExt as _;
 use crate::{self as ty, Interner};
 
 /// `A: 'region`
-#[derive_where(Clone, Hash, PartialEq, Debug; I: Interner, A)]
+#[derive_where(Clone; I: Interner, A: Clone)]
 #[derive_where(Copy; I: Interner, A: Copy)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, HashStable_NoContext)
-)]
+#[derive_where(Hash; I: Interner, A: Hash)]
+#[derive_where(PartialEq; I: Interner, A: PartialEq)]
+#[derive_where(Eq; I: Interner, A: Eq)]
+#[derive_where(Debug; I: Interner, A: fmt::Debug)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
+#[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub struct OutlivesPredicate<I: Interner, A>(pub A, pub I::Region);
-
-impl<I: Interner, A: Eq> Eq for OutlivesPredicate<I, A> {}
 
 // FIXME: We manually derive `Lift` because the `derive(Lift_Generic)` doesn't
 // understand how to turn `A` to `A::Lifted` in the output `type Lifted`.
@@ -42,9 +37,7 @@ where
     }
 }
 
-/// A complete reference to a trait.
-///
-/// These take numerous guises in syntax,
+/// A complete reference to a trait. These take numerous guises in syntax,
 /// but perhaps the most recognizable form is in a where-clause:
 /// ```ignore (illustrative)
 /// T: Foo<U>
@@ -55,53 +48,48 @@ where
 ///
 /// Trait references also appear in object types like `Foo<U>`, but in
 /// that case the `Self` parameter is absent from the generic parameters.
-#[derive_where(Clone, Copy, Hash, PartialEq; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic, Lift_Generic)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, HashStable_NoContext)
-)]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq; I: Interner)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
+#[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub struct TraitRef<I: Interner> {
-    pub def_id: I::TraitId,
+    pub def_id: I::DefId,
     pub args: I::GenericArgs,
     /// This field exists to prevent the creation of `TraitRef` without
     /// calling [`TraitRef::new_from_args`].
     _use_trait_ref_new_instead: (),
 }
 
-impl<I: Interner> Eq for TraitRef<I> {}
-
 impl<I: Interner> TraitRef<I> {
-    pub fn new_from_args(interner: I, trait_def_id: I::TraitId, args: I::GenericArgs) -> Self {
-        interner.debug_assert_args_compatible(trait_def_id.into(), args);
+    pub fn new_from_args(interner: I, trait_def_id: I::DefId, args: I::GenericArgs) -> Self {
+        interner.debug_assert_args_compatible(trait_def_id, args);
         Self { def_id: trait_def_id, args, _use_trait_ref_new_instead: () }
     }
 
     pub fn new(
         interner: I,
-        trait_def_id: I::TraitId,
+        trait_def_id: I::DefId,
         args: impl IntoIterator<Item: Into<I::GenericArg>>,
     ) -> Self {
         let args = interner.mk_args_from_iter(args.into_iter().map(Into::into));
         Self::new_from_args(interner, trait_def_id, args)
     }
 
-    pub fn from_assoc(interner: I, trait_id: I::TraitId, args: I::GenericArgs) -> TraitRef<I> {
-        let generics = interner.generics_of(trait_id.into());
+    pub fn from_method(interner: I, trait_id: I::DefId, args: I::GenericArgs) -> TraitRef<I> {
+        let generics = interner.generics_of(trait_id);
         TraitRef::new(interner, trait_id, args.iter().take(generics.count()))
     }
 
     /// Returns a `TraitRef` of the form `P0: Foo<P1..Pn>` where `Pi`
     /// are the parameters defined on trait.
-    pub fn identity(interner: I, def_id: I::TraitId) -> TraitRef<I> {
+    pub fn identity(interner: I, def_id: I::DefId) -> TraitRef<I> {
         TraitRef::new_from_args(
             interner,
             def_id,
-            I::GenericArgs::identity_for_item(interner, def_id.into()),
+            I::GenericArgs::identity_for_item(interner, def_id),
         )
     }
 
-    pub fn with_replaced_self_ty(self, interner: I, self_ty: I::Ty) -> Self {
+    pub fn with_self_ty(self, interner: I, self_ty: I::Ty) -> Self {
         TraitRef::new(
             interner,
             self.def_id,
@@ -120,24 +108,14 @@ impl<I: Interner> ty::Binder<I, TraitRef<I>> {
         self.map_bound_ref(|tr| tr.self_ty())
     }
 
-    pub fn def_id(&self) -> I::TraitId {
+    pub fn def_id(&self) -> I::DefId {
         self.skip_binder().def_id
-    }
-
-    pub fn to_host_effect_clause(self, cx: I, constness: BoundConstness) -> I::Clause {
-        self.map_bound(|trait_ref| {
-            ty::ClauseKind::HostEffect(HostEffectPredicate { trait_ref, constness })
-        })
-        .upcast(cx)
     }
 }
 
-#[derive_where(Clone, Copy, Hash, PartialEq; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic, Lift_Generic)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, HashStable_NoContext)
-)]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq; I: Interner)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
+#[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub struct TraitPredicate<I: Interner> {
     pub trait_ref: TraitRef<I>,
 
@@ -146,20 +124,17 @@ pub struct TraitPredicate<I: Interner> {
     /// If polarity is Negative: we are proving that a negative impl of this trait
     /// exists. (Note that coherence also checks whether negative impls of supertraits
     /// exist via a series of predicates.)
+    ///
+    /// If polarity is Reserved: that's a bug.
     pub polarity: PredicatePolarity,
 }
 
-impl<I: Interner> Eq for TraitPredicate<I> {}
-
 impl<I: Interner> TraitPredicate<I> {
-    pub fn with_replaced_self_ty(self, interner: I, self_ty: I::Ty) -> Self {
-        Self {
-            trait_ref: self.trait_ref.with_replaced_self_ty(interner, self_ty),
-            polarity: self.polarity,
-        }
+    pub fn with_self_ty(self, interner: I, self_ty: I::Ty) -> Self {
+        Self { trait_ref: self.trait_ref.with_self_ty(interner, self_ty), polarity: self.polarity }
     }
 
-    pub fn def_id(self) -> I::TraitId {
+    pub fn def_id(self) -> I::DefId {
         self.trait_ref.def_id
     }
 
@@ -169,7 +144,7 @@ impl<I: Interner> TraitPredicate<I> {
 }
 
 impl<I: Interner> ty::Binder<I, TraitPredicate<I>> {
-    pub fn def_id(self) -> I::TraitId {
+    pub fn def_id(self) -> I::DefId {
         // Ok to skip binder since trait `DefId` does not care about regions.
         self.skip_binder().def_id()
     }
@@ -190,26 +165,15 @@ impl<I: Interner> UpcastFrom<I, TraitRef<I>> for TraitPredicate<I> {
     }
 }
 
-impl<I: Interner> UpcastFrom<I, ty::Binder<I, TraitRef<I>>> for ty::Binder<I, TraitPredicate<I>> {
-    fn upcast_from(from: ty::Binder<I, TraitRef<I>>, _tcx: I) -> Self {
-        from.map_bound(|trait_ref| TraitPredicate {
-            trait_ref,
-            polarity: PredicatePolarity::Positive,
-        })
-    }
-}
-
 impl<I: Interner> fmt::Debug for TraitPredicate<I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // FIXME(effects) printing?
         write!(f, "TraitPredicate({:?}, polarity:{:?})", self.trait_ref, self.polarity)
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, HashStable_NoContext)
-)]
+#[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub enum ImplPolarity {
     /// `impl Trait for Type`
     Positive,
@@ -232,27 +196,11 @@ impl fmt::Display for ImplPolarity {
     }
 }
 
-impl ImplPolarity {
-    /// The polarity marker in front of the impl trait ref if applicable.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Positive => "",
-            Self::Negative => "!",
-            Self::Reservation => "",
-        }
-    }
-}
-
-/// Polarity for a trait predicate.
-///
-/// May either be negative or positive.
+/// Polarity for a trait predicate. May either be negative or positive.
 /// Distinguished from [`ImplPolarity`] since we never compute goals with
 /// "reservation" level.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, HashStable_NoContext)
-)]
+#[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub enum PredicatePolarity {
     /// `Type: Trait`
     Positive,
@@ -279,31 +227,19 @@ impl fmt::Display for PredicatePolarity {
     }
 }
 
-#[derive_where(Clone, Copy, Hash, PartialEq, Debug; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic, Lift_Generic)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, HashStable_NoContext)
-)]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
+#[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub enum ExistentialPredicate<I: Interner> {
     /// E.g., `Iterator`.
     Trait(ExistentialTraitRef<I>),
     /// E.g., `Iterator::Item = T`.
     Projection(ExistentialProjection<I>),
     /// E.g., `Send`.
-    AutoTrait(I::TraitId),
+    AutoTrait(I::DefId),
 }
 
-impl<I: Interner> Eq for ExistentialPredicate<I> {}
-
 impl<I: Interner> ty::Binder<I, ExistentialPredicate<I>> {
-    pub fn def_id(&self) -> I::DefId {
-        match self.skip_binder() {
-            ExistentialPredicate::Trait(tr) => tr.def_id.into(),
-            ExistentialPredicate::Projection(p) => p.def_id.into(),
-            ExistentialPredicate::AutoTrait(did) => did.into(),
-        }
-    }
     /// Given an existential predicate like `?Self: PartialEq<u32>` (e.g., derived from `dyn PartialEq<u32>`),
     /// and a concrete type `self_ty`, returns a full predicate where the existentially quantified variable `?Self`
     /// has been replaced with `self_ty` (e.g., `self_ty: PartialEq<u32>`, in our example).
@@ -314,14 +250,13 @@ impl<I: Interner> ty::Binder<I, ExistentialPredicate<I>> {
                 self.rebind(p.with_self_ty(cx, self_ty)).upcast(cx)
             }
             ExistentialPredicate::AutoTrait(did) => {
-                let generics = cx.generics_of(did.into());
+                let generics = cx.generics_of(did);
                 let trait_ref = if generics.count() == 1 {
                     ty::TraitRef::new(cx, did, [self_ty])
                 } else {
                     // If this is an ill-formed auto trait, then synthesize
                     // new error args for the missing generics.
-                    let err_args =
-                        GenericArgs::extend_with_error(cx, did.into(), &[self_ty.into()]);
+                    let err_args = GenericArgs::extend_with_error(cx, did, &[self_ty.into()]);
                     ty::TraitRef::new_from_args(cx, did, err_args)
                 };
                 self.rebind(trait_ref).upcast(cx)
@@ -331,44 +266,21 @@ impl<I: Interner> ty::Binder<I, ExistentialPredicate<I>> {
 }
 
 /// An existential reference to a trait, where `Self` is erased.
-///
 /// For example, the trait object `Trait<'a, 'b, X, Y>` is:
 /// ```ignore (illustrative)
 /// exists T. T: Trait<'a, 'b, X, Y>
 /// ```
 /// The generic parameters don't include the erased `Self`, only trait
 /// type and lifetime parameters (`[X, Y]` and `['a, 'b]` above).
-#[derive_where(Clone, Copy, Hash, PartialEq; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic, Lift_Generic)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, HashStable_NoContext)
-)]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq; I: Interner)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
+#[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub struct ExistentialTraitRef<I: Interner> {
-    pub def_id: I::TraitId,
+    pub def_id: I::DefId,
     pub args: I::GenericArgs,
-    /// This field exists to prevent the creation of `ExistentialTraitRef` without
-    /// calling [`ExistentialTraitRef::new_from_args`].
-    _use_existential_trait_ref_new_instead: (),
 }
 
-impl<I: Interner> Eq for ExistentialTraitRef<I> {}
-
 impl<I: Interner> ExistentialTraitRef<I> {
-    pub fn new_from_args(interner: I, trait_def_id: I::TraitId, args: I::GenericArgs) -> Self {
-        interner.debug_assert_existential_args_compatible(trait_def_id.into(), args);
-        Self { def_id: trait_def_id, args, _use_existential_trait_ref_new_instead: () }
-    }
-
-    pub fn new(
-        interner: I,
-        trait_def_id: I::TraitId,
-        args: impl IntoIterator<Item: Into<I::GenericArg>>,
-    ) -> Self {
-        let args = interner.mk_args_from_iter(args.into_iter().map(Into::into));
-        Self::new_from_args(interner, trait_def_id, args)
-    }
-
     pub fn erase_self_ty(interner: I, trait_ref: TraitRef<I>) -> ExistentialTraitRef<I> {
         // Assert there is a Self.
         trait_ref.args.type_at(0);
@@ -376,7 +288,6 @@ impl<I: Interner> ExistentialTraitRef<I> {
         ExistentialTraitRef {
             def_id: trait_ref.def_id,
             args: interner.mk_args(&trait_ref.args.as_slice()[1..]),
-            _use_existential_trait_ref_new_instead: (),
         }
     }
 
@@ -393,7 +304,7 @@ impl<I: Interner> ExistentialTraitRef<I> {
 }
 
 impl<I: Interner> ty::Binder<I, ExistentialTraitRef<I>> {
-    pub fn def_id(&self) -> I::TraitId {
+    pub fn def_id(&self) -> I::DefId {
         self.skip_binder().def_id
     }
 
@@ -407,48 +318,17 @@ impl<I: Interner> ty::Binder<I, ExistentialTraitRef<I>> {
 }
 
 /// A `ProjectionPredicate` for an `ExistentialTraitRef`.
-#[derive_where(Clone, Copy, Hash, PartialEq, Debug; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic, Lift_Generic)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, HashStable_NoContext)
-)]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq; I: Interner)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
+#[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub struct ExistentialProjection<I: Interner> {
     pub def_id: I::DefId,
     pub args: I::GenericArgs,
     pub term: I::Term,
-
-    /// This field exists to prevent the creation of `ExistentialProjection`
-    /// without using [`ExistentialProjection::new_from_args`].
-    #[derive_where(skip(Debug))]
-    use_existential_projection_new_instead: (),
 }
 
-impl<I: Interner> Eq for ExistentialProjection<I> {}
-
 impl<I: Interner> ExistentialProjection<I> {
-    pub fn new_from_args(
-        interner: I,
-        def_id: I::DefId,
-        args: I::GenericArgs,
-        term: I::Term,
-    ) -> ExistentialProjection<I> {
-        interner.debug_assert_existential_args_compatible(def_id, args);
-        Self { def_id, args, term, use_existential_projection_new_instead: () }
-    }
-
-    pub fn new(
-        interner: I,
-        def_id: I::DefId,
-        args: impl IntoIterator<Item: Into<I::GenericArg>>,
-        term: I::Term,
-    ) -> ExistentialProjection<I> {
-        let args = interner.mk_args_from_iter(args.into_iter().map(Into::into));
-        Self::new_from_args(interner, def_id, args, term)
-    }
-
     /// Extracts the underlying existential trait reference from this projection.
-    ///
     /// For example, if this is a projection of `exists T. <T as Iterator>::Item == X`,
     /// then this function would return an `exists T. T: Iterator` existential trait
     /// reference.
@@ -456,7 +336,7 @@ impl<I: Interner> ExistentialProjection<I> {
         let def_id = interner.parent(self.def_id);
         let args_count = interner.generics_of(def_id).count() - 1;
         let args = interner.mk_args(&self.args.as_slice()[..args_count]);
-        ExistentialTraitRef::new_from_args(interner, def_id.try_into().unwrap(), args)
+        ExistentialTraitRef { def_id, args }
     }
 
     pub fn with_self_ty(&self, interner: I, self_ty: I::Ty) -> ProjectionPredicate<I> {
@@ -481,7 +361,6 @@ impl<I: Interner> ExistentialProjection<I> {
             def_id: projection_predicate.projection_term.def_id,
             args: interner.mk_args(&projection_predicate.projection_term.args.as_slice()[1..]),
             term: projection_predicate.term,
-            use_existential_projection_new_instead: (),
         }
     }
 }
@@ -500,29 +379,21 @@ impl<I: Interner> ty::Binder<I, ExistentialProjection<I>> {
 #[cfg_attr(feature = "nightly", derive(Encodable, Decodable, HashStable_NoContext))]
 pub enum AliasTermKind {
     /// A projection `<Type as Trait>::AssocType`.
-    ///
     /// Can get normalized away if monomorphic enough.
     ProjectionTy,
     /// An associated type in an inherent `impl`
     InherentTy,
     /// An opaque type (usually from `impl Trait` in type aliases or function return types)
-    ///
-    /// Can only be normalized away in PostAnalysis mode or its defining scope.
+    /// Can only be normalized away in RevealAll mode
     OpaqueTy,
-    /// A free type alias that actually checks its trait bounds.
-    ///
+    /// A type alias that actually checks its trait bounds.
     /// Currently only used if the type alias references opaque types.
     /// Can always be normalized away.
-    FreeTy,
-
-    /// An unevaluated anonymous constants.
+    WeakTy,
+    /// An unevaluated const coming from a generic const expression.
     UnevaluatedConst,
     /// An unevaluated const coming from an associated const.
     ProjectionConst,
-    /// A top level const item not part of a trait or impl.
-    FreeConst,
-    /// An associated const in an inherent `impl`
-    InherentConst,
 }
 
 impl AliasTermKind {
@@ -531,36 +402,9 @@ impl AliasTermKind {
             AliasTermKind::ProjectionTy => "associated type",
             AliasTermKind::ProjectionConst => "associated const",
             AliasTermKind::InherentTy => "inherent associated type",
-            AliasTermKind::InherentConst => "inherent associated const",
             AliasTermKind::OpaqueTy => "opaque type",
-            AliasTermKind::FreeTy => "type alias",
-            AliasTermKind::FreeConst => "unevaluated constant",
+            AliasTermKind::WeakTy => "type alias",
             AliasTermKind::UnevaluatedConst => "unevaluated constant",
-        }
-    }
-
-    pub fn is_type(self) -> bool {
-        match self {
-            AliasTermKind::ProjectionTy
-            | AliasTermKind::InherentTy
-            | AliasTermKind::OpaqueTy
-            | AliasTermKind::FreeTy => true,
-
-            AliasTermKind::UnevaluatedConst
-            | AliasTermKind::ProjectionConst
-            | AliasTermKind::InherentConst
-            | AliasTermKind::FreeConst => false,
-        }
-    }
-}
-
-impl From<ty::AliasTyKind> for AliasTermKind {
-    fn from(value: ty::AliasTyKind) -> Self {
-        match value {
-            ty::Projection => AliasTermKind::ProjectionTy,
-            ty::Opaque => AliasTermKind::OpaqueTy,
-            ty::Free => AliasTermKind::FreeTy,
-            ty::Inherent => AliasTermKind::InherentTy,
         }
     }
 }
@@ -570,12 +414,9 @@ impl From<ty::AliasTyKind> for AliasTermKind {
 /// * For a projection, this would be `<Ty as Trait<...>>::N<...>`.
 /// * For an inherent projection, this would be `Ty::N<...>`.
 /// * For an opaque type, there is no explicit syntax.
-#[derive_where(Clone, Copy, Hash, PartialEq, Debug; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic, Lift_Generic)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, HashStable_NoContext)
-)]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
+#[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub struct AliasTerm<I: Interner> {
     /// The parameters of the associated or opaque item.
     ///
@@ -606,8 +447,6 @@ pub struct AliasTerm<I: Interner> {
     _use_alias_term_new_instead: (),
 }
 
-impl<I: Interner> Eq for AliasTerm<I> {}
-
 impl<I: Interner> AliasTerm<I> {
     pub fn new_from_args(interner: I, def_id: I::DefId, args: I::GenericArgs) -> AliasTerm<I> {
         interner.debug_assert_args_compatible(def_id, args);
@@ -628,11 +467,8 @@ impl<I: Interner> AliasTerm<I> {
             AliasTermKind::ProjectionTy
             | AliasTermKind::InherentTy
             | AliasTermKind::OpaqueTy
-            | AliasTermKind::FreeTy => {}
-            AliasTermKind::InherentConst
-            | AliasTermKind::FreeConst
-            | AliasTermKind::UnevaluatedConst
-            | AliasTermKind::ProjectionConst => {
+            | AliasTermKind::WeakTy => {}
+            AliasTermKind::UnevaluatedConst | AliasTermKind::ProjectionConst => {
                 panic!("Cannot turn `UnevaluatedConst` into `AliasTy`")
             }
         }
@@ -663,31 +499,30 @@ impl<I: Interner> AliasTerm<I> {
                 ty::AliasTy { def_id: self.def_id, args: self.args, _use_alias_ty_new_instead: () },
             )
             .into(),
-            AliasTermKind::FreeTy => Ty::new_alias(
+            AliasTermKind::WeakTy => Ty::new_alias(
                 interner,
-                ty::AliasTyKind::Free,
+                ty::AliasTyKind::Weak,
                 ty::AliasTy { def_id: self.def_id, args: self.args, _use_alias_ty_new_instead: () },
             )
             .into(),
-            AliasTermKind::FreeConst
-            | AliasTermKind::InherentConst
-            | AliasTermKind::UnevaluatedConst
-            | AliasTermKind::ProjectionConst => I::Const::new_unevaluated(
-                interner,
-                ty::UnevaluatedConst::new(self.def_id.try_into().unwrap(), self.args),
-            )
-            .into(),
+            AliasTermKind::UnevaluatedConst | AliasTermKind::ProjectionConst => {
+                I::Const::new_unevaluated(
+                    interner,
+                    ty::UnevaluatedConst::new(self.def_id, self.args),
+                )
+                .into()
+            }
         }
     }
 }
 
-/// The following methods work only with (trait) associated term projections.
+/// The following methods work only with (trait) associated type projections.
 impl<I: Interner> AliasTerm<I> {
     pub fn self_ty(self) -> I::Ty {
         self.args.type_at(0)
     }
 
-    pub fn with_replaced_self_ty(self, interner: I, self_ty: I::Ty) -> Self {
+    pub fn with_self_ty(self, interner: I, self_ty: I::Ty) -> Self {
         AliasTerm::new(
             interner,
             self.def_id,
@@ -695,7 +530,7 @@ impl<I: Interner> AliasTerm<I> {
         )
     }
 
-    pub fn trait_def_id(self, interner: I) -> I::TraitId {
+    pub fn trait_def_id(self, interner: I) -> I::DefId {
         assert!(
             matches!(
                 self.kind(interner),
@@ -703,7 +538,7 @@ impl<I: Interner> AliasTerm<I> {
             ),
             "expected a projection"
         );
-        interner.parent(self.def_id).try_into().unwrap()
+        interner.parent(self.def_id)
     }
 
     /// Extracts the underlying trait reference and own args from this projection.
@@ -724,38 +559,6 @@ impl<I: Interner> AliasTerm<I> {
     pub fn trait_ref(self, interner: I) -> TraitRef<I> {
         self.trait_ref_and_own_args(interner).0
     }
-
-    /// Extract the own args from this projection.
-    /// For example, if this is a projection of `<T as StreamingIterator>::Item<'a>`,
-    /// then this function would return the slice `['a]` as the own args.
-    pub fn own_args(self, interner: I) -> I::GenericArgsSlice {
-        self.trait_ref_and_own_args(interner).1
-    }
-}
-
-/// The following methods work only with inherent associated term projections.
-impl<I: Interner> AliasTerm<I> {
-    /// Transform the generic parameters to have the given `impl` args as the base and the GAT args on top of that.
-    ///
-    /// Does the following transformation:
-    ///
-    /// ```text
-    /// [Self, P_0...P_m] -> [I_0...I_n, P_0...P_m]
-    ///
-    ///     I_i impl args
-    ///     P_j GAT args
-    /// ```
-    pub fn rebase_inherent_args_onto_impl(
-        self,
-        impl_args: I::GenericArgs,
-        interner: I,
-    ) -> I::GenericArgs {
-        debug_assert!(matches!(
-            self.kind(interner),
-            AliasTermKind::InherentTy | AliasTermKind::InherentConst
-        ));
-        interner.mk_args_from_iter(impl_args.iter().chain(self.args.iter().skip(1)))
-    }
 }
 
 impl<I: Interner> From<ty::AliasTy<I>> for AliasTerm<I> {
@@ -766,7 +569,7 @@ impl<I: Interner> From<ty::AliasTy<I>> for AliasTerm<I> {
 
 impl<I: Interner> From<ty::UnevaluatedConst<I>> for AliasTerm<I> {
     fn from(ct: ty::UnevaluatedConst<I>) -> Self {
-        AliasTerm { args: ct.args, def_id: ct.def.into(), _use_alias_term_new_instead: () }
+        AliasTerm { args: ct.args, def_id: ct.def, _use_alias_term_new_instead: () }
     }
 }
 
@@ -782,32 +585,24 @@ impl<I: Interner> From<ty::UnevaluatedConst<I>> for AliasTerm<I> {
 /// equality between arbitrary types. Processing an instance of
 /// Form #2 eventually yields one of these `ProjectionPredicate`
 /// instances to normalize the LHS.
-#[derive_where(Clone, Copy, Hash, PartialEq; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic, Lift_Generic)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, HashStable_NoContext)
-)]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq; I: Interner)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
+#[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub struct ProjectionPredicate<I: Interner> {
     pub projection_term: AliasTerm<I>,
     pub term: I::Term,
 }
-
-impl<I: Interner> Eq for ProjectionPredicate<I> {}
 
 impl<I: Interner> ProjectionPredicate<I> {
     pub fn self_ty(self) -> I::Ty {
         self.projection_term.self_ty()
     }
 
-    pub fn with_replaced_self_ty(self, interner: I, self_ty: I::Ty) -> ProjectionPredicate<I> {
-        Self {
-            projection_term: self.projection_term.with_replaced_self_ty(interner, self_ty),
-            ..self
-        }
+    pub fn with_self_ty(self, interner: I, self_ty: I::Ty) -> ProjectionPredicate<I> {
+        Self { projection_term: self.projection_term.with_self_ty(interner, self_ty), ..self }
     }
 
-    pub fn trait_def_id(self, interner: I) -> I::TraitId {
+    pub fn trait_def_id(self, interner: I) -> I::DefId {
         self.projection_term.trait_def_id(interner)
     }
 
@@ -819,8 +614,21 @@ impl<I: Interner> ProjectionPredicate<I> {
 impl<I: Interner> ty::Binder<I, ProjectionPredicate<I>> {
     /// Returns the `DefId` of the trait of the associated item being projected.
     #[inline]
-    pub fn trait_def_id(&self, cx: I) -> I::TraitId {
+    pub fn trait_def_id(&self, cx: I) -> I::DefId {
         self.skip_binder().projection_term.trait_def_id(cx)
+    }
+
+    /// Get the trait ref required for this projection to be well formed.
+    /// Note that for generic associated types the predicates of the associated
+    /// type also need to be checked.
+    #[inline]
+    pub fn required_poly_trait_ref(&self, cx: I) -> ty::Binder<I, TraitRef<I>> {
+        // Note: unlike with `TraitRef::to_poly_trait_ref()`,
+        // `self.0.trait_ref` is permitted to have escaping regions.
+        // This is because here `self` has a `Binder` and so does our
+        // return value, so we are preserving the number of binding
+        // levels.
+        self.map_bound(|predicate| predicate.projection_term.trait_ref(cx))
     }
 
     pub fn term(&self) -> ty::Binder<I, I::Term> {
@@ -831,7 +639,7 @@ impl<I: Interner> ty::Binder<I, ProjectionPredicate<I>> {
     ///
     /// Note that this is not the `DefId` of the `TraitRef` containing this
     /// associated type, which is in `tcx.associated_item(projection_def_id()).container`.
-    pub fn item_def_id(&self) -> I::DefId {
+    pub fn projection_def_id(&self) -> I::DefId {
         // Ok to skip binder since trait `DefId` does not care about regions.
         self.skip_binder().projection_term.def_id
     }
@@ -843,31 +651,26 @@ impl<I: Interner> fmt::Debug for ProjectionPredicate<I> {
     }
 }
 
-/// Used by the new solver to normalize an alias. This always expects the `term` to
-/// be an unconstrained inference variable which is used as the output.
-#[derive_where(Clone, Copy, Hash, PartialEq; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic, Lift_Generic)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, HashStable_NoContext)
-)]
+/// Used by the new solver. Unlike a `ProjectionPredicate` this can only be
+/// proven by actually normalizing `alias`.
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq; I: Interner)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
+#[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub struct NormalizesTo<I: Interner> {
     pub alias: AliasTerm<I>,
     pub term: I::Term,
 }
-
-impl<I: Interner> Eq for NormalizesTo<I> {}
 
 impl<I: Interner> NormalizesTo<I> {
     pub fn self_ty(self) -> I::Ty {
         self.alias.self_ty()
     }
 
-    pub fn with_replaced_self_ty(self, interner: I, self_ty: I::Ty) -> NormalizesTo<I> {
-        Self { alias: self.alias.with_replaced_self_ty(interner, self_ty), ..self }
+    pub fn with_self_ty(self, interner: I, self_ty: I::Ty) -> NormalizesTo<I> {
+        Self { alias: self.alias.with_self_ty(interner, self_ty), ..self }
     }
 
-    pub fn trait_def_id(self, interner: I) -> I::TraitId {
+    pub fn trait_def_id(self, interner: I) -> I::DefId {
         self.alias.trait_def_id(interner)
     }
 
@@ -882,109 +685,46 @@ impl<I: Interner> fmt::Debug for NormalizesTo<I> {
     }
 }
 
-#[derive_where(Clone, Copy, Hash, PartialEq, Debug; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic, Lift_Generic)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Encodable_NoContext, Decodable_NoContext, HashStable_NoContext)
-)]
-pub struct HostEffectPredicate<I: Interner> {
-    pub trait_ref: ty::TraitRef<I>,
-    pub constness: BoundConstness,
-}
-
-impl<I: Interner> Eq for HostEffectPredicate<I> {}
-
-impl<I: Interner> HostEffectPredicate<I> {
-    pub fn self_ty(self) -> I::Ty {
-        self.trait_ref.self_ty()
-    }
-
-    pub fn with_replaced_self_ty(self, interner: I, self_ty: I::Ty) -> Self {
-        Self { trait_ref: self.trait_ref.with_replaced_self_ty(interner, self_ty), ..self }
-    }
-
-    pub fn def_id(self) -> I::TraitId {
-        self.trait_ref.def_id
-    }
-}
-
-impl<I: Interner> ty::Binder<I, HostEffectPredicate<I>> {
-    pub fn def_id(self) -> I::TraitId {
-        // Ok to skip binder since trait `DefId` does not care about regions.
-        self.skip_binder().def_id()
-    }
-
-    pub fn self_ty(self) -> ty::Binder<I, I::Ty> {
-        self.map_bound(|trait_ref| trait_ref.self_ty())
-    }
-
-    #[inline]
-    pub fn constness(self) -> BoundConstness {
-        self.skip_binder().constness
-    }
-}
-
 /// Encodes that `a` must be a subtype of `b`. The `a_is_expected` flag indicates
 /// whether the `a` type is the type that we should label as "expected" when
 /// presenting user diagnostics.
-#[derive_where(Clone, Copy, Hash, PartialEq, Debug; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic, Lift_Generic)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, HashStable_NoContext)
-)]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
+#[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub struct SubtypePredicate<I: Interner> {
     pub a_is_expected: bool,
     pub a: I::Ty,
     pub b: I::Ty,
 }
 
-impl<I: Interner> Eq for SubtypePredicate<I> {}
-
 /// Encodes that we have to coerce *from* the `a` type to the `b` type.
-#[derive_where(Clone, Copy, Hash, PartialEq, Debug; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic, Lift_Generic)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Decodable_NoContext, Encodable_NoContext, HashStable_NoContext)
-)]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq, Debug; I: Interner)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
+#[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub struct CoercePredicate<I: Interner> {
     pub a: I::Ty,
     pub b: I::Ty,
 }
 
-impl<I: Interner> Eq for CoercePredicate<I> {}
-
-#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
-#[cfg_attr(
-    feature = "nightly",
-    derive(Encodable_NoContext, Decodable_NoContext, HashStable_NoContext)
-)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "nightly", derive(HashStable_NoContext, TyEncodable, TyDecodable))]
 pub enum BoundConstness {
+    /// `Type: Trait`
+    NotConst,
     /// `Type: const Trait`
-    ///
-    /// A bound is required to be unconditionally const, even in a runtime function.
     Const,
-    /// `Type: [const] Trait`
+    /// `Type: ~const Trait`
     ///
     /// Requires resolving to const only when we are in a const context.
-    Maybe,
+    ConstIfConst,
 }
 
 impl BoundConstness {
-    pub fn satisfies(self, goal: BoundConstness) -> bool {
-        match (self, goal) {
-            (BoundConstness::Const, BoundConstness::Const | BoundConstness::Maybe) => true,
-            (BoundConstness::Maybe, BoundConstness::Maybe) => true,
-            (BoundConstness::Maybe, BoundConstness::Const) => false,
-        }
-    }
-
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::NotConst => "",
             Self::Const => "const",
-            Self::Maybe => "[const]",
+            Self::ConstIfConst => "~const",
         }
     }
 }
@@ -992,8 +732,9 @@ impl BoundConstness {
 impl fmt::Display for BoundConstness {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::NotConst => f.write_str("normal"),
             Self::Const => f.write_str("const"),
-            Self::Maybe => f.write_str("[const]"),
+            Self::ConstIfConst => f.write_str("~const"),
         }
     }
 }

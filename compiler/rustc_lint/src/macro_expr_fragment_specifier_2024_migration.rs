@@ -2,14 +2,14 @@
 
 use rustc_ast::token::{Token, TokenKind};
 use rustc_ast::tokenstream::{TokenStream, TokenTree};
-use rustc_session::lint::fcw;
+use rustc_session::lint::FutureIncompatibilityReason;
 use rustc_session::{declare_lint, declare_lint_pass};
 use rustc_span::edition::Edition;
 use rustc_span::sym;
 use tracing::debug;
 
-use crate::EarlyLintPass;
 use crate::lints::MacroExprFragment2024;
+use crate::EarlyLintPass;
 
 declare_lint! {
     /// The `edition_2024_expr_fragment_specifier` lint detects the use of
@@ -65,14 +65,15 @@ declare_lint! {
     /// to ensure the macros implement the desired behavior.
     ///
     /// [editions]: https://doc.rust-lang.org/edition-guide/
-    /// [macro matcher fragment specifiers]: https://doc.rust-lang.org/edition-guide/rust-2024/macro-fragment-specifiers.html
+    /// [macro matcher fragment specifiers]: https://doc.rust-lang.org/nightly/edition-guide/rust-2024/macro-fragment-specifiers.html
     /// [`cargo fix`]: https://doc.rust-lang.org/cargo/commands/cargo-fix.html
     pub EDITION_2024_EXPR_FRAGMENT_SPECIFIER,
     Allow,
     "The `expr` fragment specifier will accept more expressions in the 2024 edition. \
     To keep the existing behavior, use the `expr_2021` fragment specifier.",
     @future_incompatible = FutureIncompatibleInfo {
-        reason: fcw!(EditionSemanticsChange 2024 "macro-fragment-specifiers"),
+        reason: FutureIncompatibilityReason::EditionSemanticsChange(Edition::Edition2024),
+        reference: "Migration Guide <https://doc.rust-lang.org/nightly/edition-guide/rust-2024/macro-fragment-specifiers.html>",
     };
 }
 
@@ -83,7 +84,7 @@ impl Expr2024 {
         let mut prev_colon = false;
         let mut prev_identifier = false;
         let mut prev_dollar = false;
-        for tt in tokens.iter() {
+        for tt in tokens.trees() {
             debug!(
                 "check_tokens: {:?} - colon {prev_dollar} - ident {prev_identifier} - colon {prev_colon}",
                 tt
@@ -120,8 +121,10 @@ impl Expr2024 {
 
     fn check_ident_token(&mut self, cx: &crate::EarlyContext<'_>, token: &Token) {
         debug!("check_ident_token: {:?}", token);
-        let TokenKind::Ident(sym, _) = token.kind else { return };
-        let edition = Edition::Edition2024;
+        let (sym, edition) = match token.kind {
+            TokenKind::Ident(sym, _) => (sym, Edition::Edition2024),
+            _ => return,
+        };
 
         debug!("token.span.edition(): {:?}", token.span.edition());
         if token.span.edition() >= edition {

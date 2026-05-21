@@ -3,8 +3,8 @@
 //! [yank]: https://doc.rust-lang.org/nightly/cargo/reference/registry-web-api.html#yank
 //! [unyank]: https://doc.rust-lang.org/nightly/cargo/reference/registry-web-api.html#unyank
 
-use anyhow::Context as _;
 use anyhow::bail;
+use anyhow::Context as _;
 use cargo_credential::Operation;
 use cargo_credential::Secret;
 
@@ -47,7 +47,7 @@ pub fn yank(
         }
     };
     let source_ids = super::get_source_id(gctx, reg_or_index.as_ref())?;
-    let (mut registry, _) = super::registry(
+    let mut registry = super::registry(
         gctx,
         &source_ids,
         token.as_ref().map(Secret::as_deref),

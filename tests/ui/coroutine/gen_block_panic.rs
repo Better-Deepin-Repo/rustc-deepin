@@ -1,7 +1,6 @@
-//@ edition: 2024
+//@compile-flags: --edition 2024 -Zunstable-options
 //@ run-pass
 //@ needs-unwind
-//@ ignore-backends: gcc
 #![feature(gen_blocks)]
 
 fn main() {

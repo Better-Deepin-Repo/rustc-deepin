@@ -9,19 +9,19 @@ const EXPECTED = [
 
     // ML-style higher-order function notation
     {
-        'query': 'bool, (first<u32> -> !) -> ()',
+        'query': 'bool, (u32 -> !) -> ()',
         'others': [
             {"path": "hof", "name": "fn_ptr"},
         ],
     },
     {
-        'query': 'u8, (second<u32> -> !) -> ()',
+        'query': 'u8, (u32 -> !) -> ()',
         'others': [
             {"path": "hof", "name": "fn_once"},
         ],
     },
     {
-        'query': 'i8, (third<u32> -> !) -> ()',
+        'query': 'i8, (u32 -> !) -> ()',
         'others': [
             {"path": "hof", "name": "fn_mut"},
         ],
@@ -54,6 +54,9 @@ const EXPECTED = [
         'query': '(u32 -> !) -> ()',
         'others': [
             {"path": "hof", "name": "fn_"},
+            {"path": "hof", "name": "fn_ptr"},
+            {"path": "hof", "name": "fn_mut"},
+            {"path": "hof", "name": "fn_once"},
         ],
     },
     {
@@ -92,30 +95,30 @@ const EXPECTED = [
 
     // Rust-style higher-order function notation
     {
-        'query': 'bool, fn(first<u32>) -> ! -> ()',
+        'query': 'bool, fn(u32) -> ! -> ()',
         'others': [
             {"path": "hof", "name": "fn_ptr"},
         ],
     },
     {
-        'query': 'u8, fnonce(second<u32>) -> ! -> ()',
+        'query': 'u8, fnonce(u32) -> ! -> ()',
         'others': [
             {"path": "hof", "name": "fn_once"},
         ],
     },
     {
-        'query': 'u8, fn(second<u32>) -> ! -> ()',
+        'query': 'u8, fn(u32) -> ! -> ()',
         // fnonce != fn
         'others': [],
     },
     {
-        'query': 'i8, fnmut(third<u32>) -> ! -> ()',
+        'query': 'i8, fnmut(u32) -> ! -> ()',
         'others': [
             {"path": "hof", "name": "fn_mut"},
         ],
     },
     {
-        'query': 'i8, fn(third<u32>) -> ! -> ()',
+        'query': 'i8, fn(u32) -> ! -> ()',
         // fnmut != fn
         'others': [],
     },
@@ -149,7 +152,7 @@ const EXPECTED = [
         ],
     },
     {
-        'query': 'fn() -> ! -> ()',
+        'query': 'fn(u32) -> ! -> ()',
         'others': [
             // fn matches primitive:fn and trait:Fn
             {"path": "hof", "name": "fn_"},
@@ -157,14 +160,14 @@ const EXPECTED = [
         ],
     },
     {
-        'query': 'trait:fn() -> ! -> ()',
+        'query': 'trait:fn(u32) -> ! -> ()',
         'others': [
             // fn matches primitive:fn and trait:Fn
             {"path": "hof", "name": "fn_"},
         ],
     },
     {
-        'query': 'primitive:fn() -> ! -> ()',
+        'query': 'primitive:fn(u32) -> ! -> ()',
         'others': [
             // fn matches primitive:fn and trait:Fn
             {"path": "hof", "name": "fn_ptr"},

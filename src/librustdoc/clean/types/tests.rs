@@ -1,5 +1,4 @@
-use rustc_ast::token::{CommentKind, DocFragmentKind};
-use rustc_resolve::rustdoc::unindent_doc_fragments;
+use rustc_resolve::rustdoc::{unindent_doc_fragments, DocFragmentKind};
 use rustc_span::create_default_session_globals_then;
 
 use super::*;
@@ -9,9 +8,8 @@ fn create_doc_fragment(s: &str) -> Vec<DocFragment> {
         span: DUMMY_SP,
         item_id: None,
         doc: Symbol::intern(s),
-        kind: DocFragmentKind::Sugared(CommentKind::Line),
+        kind: DocFragmentKind::SugaredDoc,
         indent: 0,
-        from_expansion: false,
     }]
 }
 
@@ -73,11 +71,9 @@ fn should_not_trim() {
 fn is_same_generic() {
     use crate::clean::types::{PrimitiveType, Type};
     use crate::formats::cache::Cache;
-    create_default_session_globals_then(|| {
-        let cache = Cache::new(false, false);
-        let generic = Type::Generic(Symbol::intern("T"));
-        let unit = Type::Primitive(PrimitiveType::Unit);
-        assert!(!generic.is_doc_subtype_of(&unit, &cache));
-        assert!(unit.is_doc_subtype_of(&generic, &cache));
-    })
+    let cache = Cache::new(false, false);
+    let generic = Type::Generic(rustc_span::symbol::sym::Any);
+    let unit = Type::Primitive(PrimitiveType::Unit);
+    assert!(!generic.is_doc_subtype_of(&unit, &cache));
+    assert!(unit.is_doc_subtype_of(&generic, &cache));
 }

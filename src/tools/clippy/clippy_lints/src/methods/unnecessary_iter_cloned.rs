@@ -1,18 +1,16 @@
 use super::utils::clone_or_copy_needed;
 use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::higher::ForLoop;
-use clippy_utils::res::MaybeResPath;
 use clippy_utils::source::SpanRangeExt;
 use clippy_utils::ty::{get_iterator_item_ty, implements_trait};
 use clippy_utils::visitors::for_each_expr_without_closures;
-use clippy_utils::{can_mut_borrow_both, fn_def_id, get_parent_expr};
+use clippy_utils::{can_mut_borrow_both, fn_def_id, get_parent_expr, path_to_local};
 use core::ops::ControlFlow;
-use itertools::Itertools;
 use rustc_errors::Applicability;
 use rustc_hir::def_id::DefId;
 use rustc_hir::{BindingMode, Expr, ExprKind, Node, PatKind};
 use rustc_lint::LateContext;
-use rustc_span::{Symbol, sym};
+use rustc_span::{sym, Symbol};
 
 use super::UNNECESSARY_TO_OWNED;
 
@@ -51,7 +49,7 @@ pub fn check_for_loop_iter(
 
         // check whether `expr` is mutable
         fn is_mutable(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
-            if let Some(hir_id) = expr.res_local_id()
+            if let Some(hir_id) = path_to_local(expr)
                 && let Node::Pat(pat) = cx.tcx.hir_node(hir_id)
             {
                 matches!(pat.kind, PatKind::Binding(BindingMode::MUT, ..))
@@ -88,7 +86,7 @@ pub fn check_for_loop_iter(
                 // skip lint
                 return true;
             }
-        }
+        };
 
         // the lint should not be executed if no violation happens
         let snippet = if let ExprKind::MethodCall(maybe_iter_method_name, collection, [], _) = receiver.kind
@@ -100,7 +98,7 @@ pub fn check_for_loop_iter(
             && let Some(into_iterator_trait_id) = cx.tcx.get_diagnostic_item(sym::IntoIterator)
             && let collection_ty = cx.typeck_results().expr_ty(collection)
             && implements_trait(cx, collection_ty, into_iterator_trait_id, &[])
-            && let Some(into_iter_item_ty) = cx.get_associated_type(collection_ty, into_iterator_trait_id, sym::Item)
+            && let Some(into_iter_item_ty) = cx.get_associated_type(collection_ty, into_iterator_trait_id, "Item")
             && iter_item_ty == into_iter_item_ty
             && let Some(collection_snippet) = collection.span.get_source_text(cx)
         {
@@ -124,13 +122,14 @@ pub fn check_for_loop_iter(
                 } else {
                     Applicability::MachineApplicable
                 };
-
-                let combined = references_to_binding
-                    .into_iter()
-                    .chain(vec![(expr.span, snippet.to_owned())])
-                    .collect_vec();
-
-                diag.multipart_suggestion("remove any references to the binding", combined, applicability);
+                diag.span_suggestion(expr.span, "use", snippet.to_owned(), applicability);
+                if !references_to_binding.is_empty() {
+                    diag.multipart_suggestion(
+                        "remove any references to the binding",
+                        references_to_binding,
+                        applicability,
+                    );
+                }
             },
         );
         return true;

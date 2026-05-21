@@ -1,4 +1,4 @@
-//@ normalize-stderr: "loaded from .*liballoc-.*.rmeta" -> "loaded from SYSROOT/liballoc-*.rmeta"
+//@ normalize-stderr-test: "loaded from .*liballoc-.*.rlib" -> "loaded from SYSROOT/liballoc-*.rlib"
 #![feature(lang_items)]
 
 #[lang = "owned_box"]

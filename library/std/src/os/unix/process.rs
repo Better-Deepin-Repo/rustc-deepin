@@ -4,27 +4,25 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
+use cfg_if::cfg_if;
+
 use crate::ffi::OsStr;
 use crate::os::unix::io::{AsFd, AsRawFd, BorrowedFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
-use crate::path::Path;
 use crate::sealed::Sealed;
-use crate::sys::process::ChildPipe;
-use crate::sys::{AsInner, AsInnerMut, FromInner, IntoInner};
+use crate::sys_common::{AsInner, AsInnerMut, FromInner, IntoInner};
 use crate::{io, process, sys};
 
-cfg_select! {
-    any(target_os = "vxworks", target_os = "espidf", target_os = "horizon", target_os = "vita") => {
+cfg_if! {
+    if #[cfg(any(target_os = "vxworks", target_os = "espidf", target_os = "horizon", target_os = "vita"))] {
         type UserId = u16;
         type GroupId = u16;
-    }
-    target_os = "nto" => {
+    } else if #[cfg(target_os = "nto")] {
         // Both IDs are signed, see `sys/target_nto.h` of the QNX Neutrino SDP.
         // Only positive values should be used, see e.g.
         // https://www.qnx.com/developers/docs/7.1/#com.qnx.doc.neutrino.lib_ref/topic/s/setuid.html
         type UserId = i32;
         type GroupId = i32;
-    }
-    _ => {
+    } else {
         type UserId = u32;
         type GroupId = u32;
     }
@@ -81,9 +79,6 @@ pub trait CommandExt: Sealed {
     /// or acquiring a mutex are not guaranteed to work (due to
     /// other threads perhaps still running when the `fork` was run).
     ///
-    /// Note that the list of allocating functions includes [`Error::new`] and
-    /// [`Error::other`]. To signal a non-trivial error, prefer [`panic!`].
-    ///
     /// For further details refer to the [POSIX fork() specification]
     /// and the equivalent documentation for any targeted
     /// platform, especially the requirements around *async-signal-safety*.
@@ -106,8 +101,6 @@ pub trait CommandExt: Sealed {
     /// [POSIX fork() specification]:
     ///     https://pubs.opengroup.org/onlinepubs/9699919799/functions/fork.html
     /// [`std::env`]: mod@crate::env
-    /// [`Error::new`]: crate::io::Error::new
-    /// [`Error::other`]: crate::io::Error::other
     #[stable(feature = "process_pre_exec", since = "1.34.0")]
     unsafe fn pre_exec<F>(&mut self, f: F) -> &mut process::Command
     where
@@ -125,7 +118,11 @@ pub trait CommandExt: Sealed {
     /// [`pre_exec`]: CommandExt::pre_exec
     #[stable(feature = "process_exec", since = "1.15.0")]
     #[deprecated(since = "1.37.0", note = "should be unsafe, use `pre_exec` instead")]
-    #[rustc_deprecated_safe_2024(audit_that = "the closure is async-signal-safe")]
+    #[cfg_attr(bootstrap, rustc_deprecated_safe_2024)]
+    #[cfg_attr(
+        not(bootstrap),
+        rustc_deprecated_safe_2024(audit_that = "the closure is async-signal-safe")
+    )]
     unsafe fn before_exec<F>(&mut self, f: F) -> &mut process::Command
     where
         F: FnMut() -> io::Result<()> + Send + Sync + 'static,
@@ -150,7 +147,7 @@ pub trait CommandExt: Sealed {
     ///
     /// This function, unlike `spawn`, will **not** `fork` the process to create
     /// a new child. Like spawn, however, the default behavior for the stdio
-    /// descriptors will be to inherit them from the current process.
+    /// descriptors will be to inherited from the current process.
     ///
     /// # Notes
     ///
@@ -161,7 +158,6 @@ pub trait CommandExt: Sealed {
     /// required to gracefully handle errors it is recommended to use the
     /// cross-platform `spawn` instead.
     #[stable(feature = "process_exec2", since = "1.9.0")]
-    #[must_use]
     fn exec(&mut self) -> io::Error;
 
     /// Set executable argument
@@ -204,21 +200,6 @@ pub trait CommandExt: Sealed {
     /// ```
     #[stable(feature = "process_set_process_group", since = "1.64.0")]
     fn process_group(&mut self, pgroup: i32) -> &mut process::Command;
-
-    /// Set the root of the child process. This calls `chroot` in the child process before executing
-    /// the command.
-    ///
-    /// This happens before changing to the directory specified with
-    /// [`process::Command::current_dir`], and that directory will be relative to the new root.
-    ///
-    /// If no directory has been specified with [`process::Command::current_dir`], this will set the
-    /// directory to `/`, to avoid leaving the current directory outside the chroot. (This is an
-    /// intentional difference from the underlying `chroot` system call.)
-    #[unstable(feature = "process_chroot", issue = "141298")]
-    fn chroot<P: AsRef<Path>>(&mut self, dir: P) -> &mut process::Command;
-
-    #[unstable(feature = "process_setsid", issue = "105376")]
-    fn setsid(&mut self, setsid: bool) -> &mut process::Command;
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -262,16 +243,6 @@ impl CommandExt for process::Command {
 
     fn process_group(&mut self, pgroup: i32) -> &mut process::Command {
         self.as_inner_mut().pgroup(pgroup);
-        self
-    }
-
-    fn chroot<P: AsRef<Path>>(&mut self, dir: P) -> &mut process::Command {
-        self.as_inner_mut().chroot(dir.as_ref());
-        self
-    }
-
-    fn setsid(&mut self, setsid: bool) -> &mut process::Command {
-        self.as_inner_mut().setsid(setsid);
         self
     }
 }
@@ -392,43 +363,6 @@ impl ExitStatusExt for process::ExitStatusError {
     }
 }
 
-#[unstable(feature = "unix_send_signal", issue = "141975")]
-pub trait ChildExt: Sealed {
-    /// Sends a signal to a child process.
-    ///
-    /// # Errors
-    ///
-    /// This function will return an error if the signal is invalid. The integer values associated
-    /// with signals are implementation-specific, so it's encouraged to use a crate that provides
-    /// posix bindings.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// #![feature(unix_send_signal)]
-    ///
-    /// use std::{io, os::unix::process::ChildExt, process::{Command, Stdio}};
-    ///
-    /// use libc::SIGTERM;
-    ///
-    /// fn main() -> io::Result<()> {
-    ///     # if cfg!(not(all(target_vendor = "apple", not(target_os = "macos")))) {
-    ///     let child = Command::new("cat").stdin(Stdio::piped()).spawn()?;
-    ///     child.send_signal(SIGTERM)?;
-    ///     # }
-    ///     Ok(())
-    /// }
-    /// ```
-    fn send_signal(&self, signal: i32) -> io::Result<()>;
-}
-
-#[unstable(feature = "unix_send_signal", issue = "141975")]
-impl ChildExt for process::Child {
-    fn send_signal(&self, signal: i32) -> io::Result<()> {
-        self.handle.send_signal(signal)
-    }
-}
-
 #[stable(feature = "process_extensions", since = "1.2.0")]
 impl FromRawFd for process::Stdio {
     #[inline]
@@ -512,7 +446,7 @@ impl From<crate::process::ChildStdin> for OwnedFd {
     /// Takes ownership of a [`ChildStdin`](crate::process::ChildStdin)'s file descriptor.
     #[inline]
     fn from(child_stdin: crate::process::ChildStdin) -> OwnedFd {
-        child_stdin.into_inner().into_inner()
+        child_stdin.into_inner().into_inner().into_inner()
     }
 }
 
@@ -524,7 +458,8 @@ impl From<crate::process::ChildStdin> for OwnedFd {
 impl From<OwnedFd> for process::ChildStdin {
     #[inline]
     fn from(fd: OwnedFd) -> process::ChildStdin {
-        let pipe = ChildPipe::from_inner(fd);
+        let fd = sys::fd::FileDesc::from_inner(fd);
+        let pipe = sys::pipe::AnonPipe::from_inner(fd);
         process::ChildStdin::from_inner(pipe)
     }
 }
@@ -542,7 +477,7 @@ impl From<crate::process::ChildStdout> for OwnedFd {
     /// Takes ownership of a [`ChildStdout`](crate::process::ChildStdout)'s file descriptor.
     #[inline]
     fn from(child_stdout: crate::process::ChildStdout) -> OwnedFd {
-        child_stdout.into_inner().into_inner()
+        child_stdout.into_inner().into_inner().into_inner()
     }
 }
 
@@ -554,7 +489,8 @@ impl From<crate::process::ChildStdout> for OwnedFd {
 impl From<OwnedFd> for process::ChildStdout {
     #[inline]
     fn from(fd: OwnedFd) -> process::ChildStdout {
-        let pipe = ChildPipe::from_inner(fd);
+        let fd = sys::fd::FileDesc::from_inner(fd);
+        let pipe = sys::pipe::AnonPipe::from_inner(fd);
         process::ChildStdout::from_inner(pipe)
     }
 }
@@ -572,7 +508,7 @@ impl From<crate::process::ChildStderr> for OwnedFd {
     /// Takes ownership of a [`ChildStderr`](crate::process::ChildStderr)'s file descriptor.
     #[inline]
     fn from(child_stderr: crate::process::ChildStderr) -> OwnedFd {
-        child_stderr.into_inner().into_inner()
+        child_stderr.into_inner().into_inner().into_inner()
     }
 }
 
@@ -584,7 +520,8 @@ impl From<crate::process::ChildStderr> for OwnedFd {
 impl From<OwnedFd> for process::ChildStderr {
     #[inline]
     fn from(fd: OwnedFd) -> process::ChildStderr {
-        let pipe = ChildPipe::from_inner(fd);
+        let fd = sys::fd::FileDesc::from_inner(fd);
+        let pipe = sys::pipe::AnonPipe::from_inner(fd);
         process::ChildStderr::from_inner(pipe)
     }
 }

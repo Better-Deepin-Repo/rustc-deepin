@@ -1,7 +1,6 @@
 //! Attributes producing expressions in invalid locations
 
-//@ proc-macro: attr-stmt-expr.rs
-//@ ignore-backends: gcc
+//@ aux-build:attr-stmt-expr.rs
 
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
@@ -14,7 +13,7 @@ fn main() {
     //~^ ERROR expected expression, found end of macro arguments
 
     let _ = #[duplicate] "Hello, world!";
-    //~^ ERROR macro expansion ignores `,` and any tokens following
+    //~^ ERROR macro expansion ignores token `,` and any following
 
     let _ = {
         #[no_output]
@@ -23,7 +22,7 @@ fn main() {
 
     let _ = {
         #[duplicate]
-        //~^ ERROR macro expansion ignores `,` and any tokens following
+        //~^ ERROR macro expansion ignores token `,` and any following
         "Hello, world!"
     };
 }

@@ -5,29 +5,28 @@ error: fn_abi_of(pass_zst) = FnAbi {
                        ty: (),
                        layout: Layout {
                            size: Size(0 bytes),
-                           align: AbiAlign {
+                           align: AbiAndPrefAlign {
                                abi: $SOME_ALIGN,
+                               pref: $SOME_ALIGN,
                            },
-                           backend_repr: Memory {
+                           abi: Aggregate {
                                sized: true,
                            },
                            fields: Arbitrary {
                                offsets: [],
-                               in_memory_order: [],
+                               memory_index: [],
                            },
                            largest_niche: None,
-                           uninhabited: false,
                            variants: Single {
                                index: 0,
                            },
                            max_repr_align: None,
                            unadjusted_abi_align: $SOME_ALIGN,
-                           randomization_seed: 0,
                        },
                    },
                    mode: Indirect {
                        attrs: ArgAttributes {
-                           regular: CapturesAddress | NoAlias | NonNull | NoUndef,
+                           regular: NoAlias | NoCapture | NonNull | NoUndef,
                            arg_ext: None,
                            pointee_size: Size(0 bytes),
                            pointee_align: Some(
@@ -44,24 +43,23 @@ error: fn_abi_of(pass_zst) = FnAbi {
                    ty: (),
                    layout: Layout {
                        size: Size(0 bytes),
-                       align: AbiAlign {
+                       align: AbiAndPrefAlign {
                            abi: $SOME_ALIGN,
+                           pref: $SOME_ALIGN,
                        },
-                       backend_repr: Memory {
+                       abi: Aggregate {
                            sized: true,
                        },
                        fields: Arbitrary {
                            offsets: [],
-                           in_memory_order: [],
+                           memory_index: [],
                        },
                        largest_niche: None,
-                       uninhabited: false,
                        variants: Single {
                            index: 0,
                        },
                        max_repr_align: None,
                        unadjusted_abi_align: $SOME_ALIGN,
-                       randomization_seed: 0,
                    },
                },
                mode: Ignore,
@@ -71,7 +69,7 @@ error: fn_abi_of(pass_zst) = FnAbi {
            conv: C,
            can_unwind: false,
        }
-  --> $DIR/c-zst.rs:65:1
+  --> $DIR/c-zst.rs:27:1
    |
 LL | extern "C" fn pass_zst(_: ()) {}
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

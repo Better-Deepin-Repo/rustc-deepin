@@ -20,7 +20,7 @@ struct Y(usize);
 #[derive(Debug, Default)]
 #[repr(packed)]
 struct X(Y);
-//~^ ERROR cannot move out of a shared reference [E0507]
+//~^ ERROR cannot move out of `self` which is behind a shared reference
 
 #[derive(Debug)]
 #[repr(packed)]

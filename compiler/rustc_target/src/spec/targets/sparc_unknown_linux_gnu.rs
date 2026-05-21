@@ -1,21 +1,19 @@
-use rustc_abi::Endian;
+use crate::abi::Endian;
+use crate::spec::{base, Cc, LinkerFlavor, Lld, Target, TargetOptions};
 
-use crate::spec::{Arch, Cc, LinkerFlavor, Lld, Target, TargetMetadata, TargetOptions, base};
-
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     Target {
         llvm_target: "sparc-unknown-linux-gnu".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: Some("32-bit SPARC Linux".into()),
             tier: Some(3),
             host_tools: Some(false),
             std: Some(true),
         },
         pointer_width: 32,
-        data_layout: "E-m:e-p:32:32-i64:64-i128:128-f128:64-n32-S64".into(),
-        arch: Arch::Sparc,
+        data_layout: "E-m:e-p:32:32-i64:64-f128:64-n32-S64".into(),
+        arch: "sparc".into(),
         options: TargetOptions {
-            features: "+v8plus".into(),
             cpu: "v9".into(),
             endian: Endian::Big,
             late_link_args: TargetOptions::link_args(

@@ -6,7 +6,7 @@ fn foo2<T: fn(i32)>(_: T) {}
 
 fn main() {
     foo(|| ());
-    //~^ ERROR mismatched types
+    //~^ mismatched types
     foo2(|_: ()| {});
-    //~^ ERROR type mismatch in closure arguments
+    //~^ type mismatch in closure arguments
 }

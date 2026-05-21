@@ -17,10 +17,15 @@
 //!
 //! [canonicalized]: https://rustc-dev-guide.rust-lang.org/solve/canonicalization.html
 
-use derive_where::derive_where;
-use rustc_type_ir_macros::{GenericTypeVisitable, TypeFoldable_Generic, TypeVisitable_Generic};
+use std::fmt::Debug;
+use std::hash::Hash;
 
-use crate::solve::{CandidateSource, Certainty, Goal, GoalSource, QueryResult};
+use derive_where::derive_where;
+use rustc_type_ir_macros::{TypeFoldable_Generic, TypeVisitable_Generic};
+
+use crate::solve::{
+    CandidateSource, CanonicalInput, Certainty, Goal, GoalSource, QueryInput, QueryResult,
+};
 use crate::{Canonical, CanonicalVarValues, Interner};
 
 /// Some `data` together with information about how they relate to the input
@@ -29,15 +34,17 @@ use crate::{Canonical, CanonicalVarValues, Interner};
 /// This is only ever used as [CanonicalState]. Any type information in proof
 /// trees used mechanically has to be canonicalized as we otherwise leak
 /// inference variables from a nested `InferCtxt`.
-#[derive_where(Clone, PartialEq, Hash, Debug; I: Interner, T)]
+#[derive_where(Clone; I: Interner, T: Clone)]
 #[derive_where(Copy; I: Interner, T: Copy)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic)]
+#[derive_where(PartialEq; I: Interner, T: PartialEq)]
+#[derive_where(Eq; I: Interner, T: Eq)]
+#[derive_where(Hash; I: Interner, T: Hash)]
+#[derive_where(Debug; I: Interner, T: Debug)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 pub struct State<I: Interner, T> {
     pub var_values: CanonicalVarValues<I>,
     pub data: T,
 }
-
-impl<I: Interner, T: Eq> Eq for State<I, T> {}
 
 pub type CanonicalState<I, T> = Canonical<I, State<I, T>>;
 
@@ -49,8 +56,28 @@ pub type CanonicalState<I, T> = Canonical<I, State<I, T>>;
 pub struct GoalEvaluation<I: Interner> {
     pub uncanonicalized_goal: Goal<I, I::Predicate>,
     pub orig_values: Vec<I::GenericArg>,
-    pub final_revision: I::Probe,
+    pub evaluation: CanonicalGoalEvaluation<I>,
+}
+
+#[derive_where(PartialEq, Eq, Hash, Debug; I: Interner)]
+pub struct CanonicalGoalEvaluation<I: Interner> {
+    pub goal: CanonicalInput<I>,
+    pub kind: CanonicalGoalEvaluationKind<I>,
     pub result: QueryResult<I>,
+}
+
+#[derive_where(PartialEq, Eq, Hash, Debug; I: Interner)]
+pub enum CanonicalGoalEvaluationKind<I: Interner> {
+    Overflow,
+    Evaluation { final_revision: CanonicalGoalEvaluationStep<I> },
+}
+
+#[derive_where(PartialEq, Eq, Hash, Debug; I: Interner)]
+pub struct CanonicalGoalEvaluationStep<I: Interner> {
+    pub instantiated_goal: QueryInput<I, I::Predicate>,
+
+    /// The actual evaluation of the goal, always `ProbeKind::Root`.
+    pub evaluation: Probe<I>,
 }
 
 /// A self-contained computation during trait solving. This either
@@ -87,10 +114,12 @@ pub enum ProbeStep<I: Interner> {
 /// the final result of the current goal - via [ProbeKind::Root] - we also
 /// store the [QueryResult].
 #[derive_where(Clone, Copy, PartialEq, Eq, Hash, Debug; I: Interner)]
-#[derive(TypeVisitable_Generic, GenericTypeVisitable, TypeFoldable_Generic)]
+#[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 pub enum ProbeKind<I: Interner> {
     /// The root inference context while proving a goal.
     Root { result: QueryResult<I> },
+    /// Trying to normalize an alias by at least one step in `NormalizesTo`.
+    TryNormalizeNonRigid { result: QueryResult<I> },
     /// Probe entered when normalizing the self ty during candidate assembly
     NormalizedSelfTyAssembly,
     /// A candidate for proving a trait or alias-relate goal.
@@ -98,16 +127,12 @@ pub enum ProbeKind<I: Interner> {
     /// Used in the probe that wraps normalizing the non-self type for the unsize
     /// trait, which is also structurally matched on.
     UnsizeAssembly,
-    /// Used to do a probe to find out what projection type(s) match a given
-    /// alias bound or projection predicate. For trait upcasting, this is used
-    /// to prove that the source type upholds all of the target type's object
-    /// bounds. For object type bounds, this is used when eagerly replacing
-    /// supertrait aliases.
-    ProjectionCompatibility,
+    /// During upcasting from some source object to target object type, used to
+    /// do a probe to find out what projection type(s) may be used to prove that
+    /// the source type upholds all of the target type's object bounds.
+    UpcastProjectionCompatibility,
     /// Looking for param-env candidates that satisfy the trait ref for a projection.
     ShadowedEnvProbing,
     /// Try to unify an opaque type with an existing key in the storage.
     OpaqueTypeStorageLookup { result: QueryResult<I> },
-    /// Checking that a rigid alias is well-formed.
-    RigidAlias { result: QueryResult<I> },
 }

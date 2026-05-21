@@ -17,7 +17,6 @@ const MIN_ALIGN: usize = if cfg!(any(
     target_arch = "arm",
     target_arch = "m68k",
     target_arch = "csky",
-    target_arch = "loongarch32",
     target_arch = "mips",
     target_arch = "mips32r6",
     target_arch = "powerpc",
@@ -68,43 +67,28 @@ unsafe fn realloc_fallback(
     }
 }
 
-cfg_select! {
-    any(
+cfg_if::cfg_if! {
+    if #[cfg(any(
         target_family = "unix",
         target_os = "wasi",
         target_os = "teeos",
-        target_os = "trusty",
-    ) => {
+    ))] {
         mod unix;
-    }
-    target_os = "windows" => {
+    } else if #[cfg(target_os = "windows")] {
         mod windows;
-    }
-    target_os = "hermit" => {
+    } else if #[cfg(target_os = "hermit")] {
         mod hermit;
-    }
-    target_os = "motor" => {
-        mod motor;
-    }
-    all(target_vendor = "fortanix", target_env = "sgx") => {
+    } else if #[cfg(all(target_vendor = "fortanix", target_env = "sgx"))] {
         mod sgx;
-    }
-    target_os = "solid_asp3" => {
+    } else if #[cfg(target_os = "solid_asp3")] {
         mod solid;
-    }
-    target_os = "uefi" => {
+    } else if #[cfg(target_os = "uefi")] {
         mod uefi;
-    }
-    target_os = "vexos" => {
-        mod vexos;
-    }
-    target_family = "wasm" => {
+    } else if #[cfg(target_family = "wasm")] {
         mod wasm;
-    }
-    target_os = "xous" => {
+    } else if #[cfg(target_os = "xous")] {
         mod xous;
-    }
-    target_os = "zkvm" => {
+    } else if #[cfg(target_os = "zkvm")] {
         mod zkvm;
     }
 }

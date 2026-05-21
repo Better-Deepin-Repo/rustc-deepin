@@ -1,14 +1,15 @@
 //! This test ensures we do not ICE for unimplemented
-//! patterns even if the feature gate is enabled.
+//! patterns unless the feature gate is enabled.
 
-#![feature(pattern_type_macro, pattern_types)]
+#![feature(core_pattern_type)]
+#![feature(core_pattern_types)]
 
 use std::pat::pattern_type;
 
 type Always = pattern_type!(Option<u32> is Some(_));
-//~^ ERROR: pattern not supported
+//~^ ERROR: pattern types are unstable
 
 type Binding = pattern_type!(Option<u32> is x);
-//~^ ERROR: pattern not supported
+//~^ ERROR: pattern types are unstable
 
 fn main() {}

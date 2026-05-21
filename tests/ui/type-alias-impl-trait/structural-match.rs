@@ -1,21 +1,22 @@
 #![feature(type_alias_impl_trait)]
 
-pub type Foo = impl Send;
+mod foo {
+    pub type Foo = impl Send;
 
-// This is not structural-match
-struct A;
+    // This is not structural-match
+    struct A;
 
-#[define_opaque(Foo)]
-pub const fn value() -> Foo {
-    A
+    pub const fn value() -> Foo {
+        A
+    }
 }
-
+use foo::*;
 const VALUE: Foo = value();
 
 fn test() {
     match VALUE {
         VALUE => (),
-        //~^ ERROR `Foo` cannot be used in patterns
+        //~^ `foo::Foo` cannot be used in patterns
         _ => (),
     }
 }

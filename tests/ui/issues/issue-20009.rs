@@ -1,6 +1,7 @@
 //@ check-pass
 // Check that associated types are `Sized`
 
+//@ pretty-expanded FIXME #23616
 
 trait Trait {
     type Output;

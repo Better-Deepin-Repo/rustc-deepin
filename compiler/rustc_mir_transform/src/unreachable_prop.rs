@@ -2,18 +2,17 @@
 //! when all of their successors are unreachable. This is achieved through a
 //! post-order traversal of the blocks.
 
-use rustc_abi::Size;
 use rustc_data_structures::fx::FxHashSet;
 use rustc_middle::bug;
 use rustc_middle::mir::interpret::Scalar;
+use rustc_middle::mir::patch::MirPatch;
 use rustc_middle::mir::*;
 use rustc_middle::ty::{self, TyCtxt};
+use rustc_target::abi::Size;
 
-use crate::patch::MirPatch;
+pub struct UnreachablePropagation;
 
-pub(super) struct UnreachablePropagation;
-
-impl crate::MirPass<'_> for UnreachablePropagation {
+impl MirPass<'_> for UnreachablePropagation {
     fn is_enabled(&self, sess: &rustc_session::Session) -> bool {
         // Enable only under -Zmir-opt-level=2 as this can make programs less debuggable.
         sess.mir_opt_level() >= 2
@@ -27,23 +26,26 @@ impl crate::MirPass<'_> for UnreachablePropagation {
             let terminator = bb_data.terminator();
             let is_unreachable = match &terminator.kind {
                 TerminatorKind::Unreachable => true,
-                // This will unconditionally run into an unreachable and is therefore unreachable
-                // as well.
+                // This will unconditionally run into an unreachable and is therefore unreachable as well.
                 TerminatorKind::Goto { target } if unreachable_blocks.contains(target) => {
                     patch.patch_terminator(bb, TerminatorKind::Unreachable);
                     true
                 }
                 // Try to remove unreachable targets from the switch.
                 TerminatorKind::SwitchInt { .. } => {
-                    remove_successors_from_switch(tcx, bb, body, &mut patch, |bb| {
-                        unreachable_blocks.contains(&bb)
-                    })
+                    remove_successors_from_switch(tcx, bb, &unreachable_blocks, body, &mut patch)
                 }
                 _ => false,
             };
             if is_unreachable {
                 unreachable_blocks.insert(bb);
             }
+        }
+
+        if !tcx
+            .consider_optimizing(|| format!("UnreachablePropagation {:?} ", body.source.def_id()))
+        {
+            return;
         }
 
         patch.apply(body);
@@ -55,27 +57,25 @@ impl crate::MirPass<'_> for UnreachablePropagation {
             body.basic_blocks_mut()[bb].statements.clear();
         }
     }
-
-    fn is_required(&self) -> bool {
-        false
-    }
 }
 
 /// Return whether the current terminator is fully unreachable.
-pub(crate) fn remove_successors_from_switch<'tcx>(
+fn remove_successors_from_switch<'tcx>(
     tcx: TyCtxt<'tcx>,
     bb: BasicBlock,
+    unreachable_blocks: &FxHashSet<BasicBlock>,
     body: &Body<'tcx>,
     patch: &mut MirPatch<'tcx>,
-    is_unreachable_block: impl Fn(BasicBlock) -> bool,
 ) -> bool {
     let terminator = body.basic_blocks[bb].terminator();
     let TerminatorKind::SwitchInt { discr, targets } = &terminator.kind else { bug!() };
     let source_info = terminator.source_info;
     let location = body.terminator_loc(bb);
 
+    let is_unreachable = |bb| unreachable_blocks.contains(&bb);
+
     // If there are multiple targets, we want to keep information about reachability for codegen.
-    // For example (see tests/codegen-llvm/match-optimizes-away.rs)
+    // For example (see tests/codegen/match-optimizes-away.rs)
     //
     // pub enum Two { A, B }
     // pub fn identity(x: Two) -> Two {
@@ -85,9 +85,8 @@ pub(crate) fn remove_successors_from_switch<'tcx>(
     //     }
     // }
     //
-    // This generates a `switchInt() -> [0: 0, 1: 1, otherwise: unreachable]`, which allows us or
-    // LLVM to turn it into just `x` later. Without the unreachable, such a transformation would be
-    // illegal.
+    // This generates a `switchInt() -> [0: 0, 1: 1, otherwise: unreachable]`, which allows us or LLVM to
+    // turn it into just `x` later. Without the unreachable, such a transformation would be illegal.
     //
     // In order to preserve this information, we record reachable and unreachable targets as
     // `Assume` statements in MIR.
@@ -116,10 +115,10 @@ pub(crate) fn remove_successors_from_switch<'tcx>(
     };
 
     let otherwise = targets.otherwise();
-    let otherwise_unreachable = is_unreachable_block(otherwise);
+    let otherwise_unreachable = is_unreachable(otherwise);
 
     let reachable_iter = targets.iter().filter(|&(value, bb)| {
-        let is_unreachable = is_unreachable_block(bb);
+        let is_unreachable = is_unreachable(bb);
         // We remove this target from the switch, so record the inequality using `Assume`.
         if is_unreachable && !otherwise_unreachable {
             add_assumption(BinOp::Ne, value);

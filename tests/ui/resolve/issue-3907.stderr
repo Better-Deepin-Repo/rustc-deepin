@@ -6,8 +6,7 @@ LL | impl Foo for S {
    |
 help: you might have meant to use `#![feature(trait_alias)]` instead of a `type` alias
    |
-LL - type Foo = dyn issue_3907::Foo;
-LL + trait Foo = dyn issue_3907::Foo;
+LL | trait Foo = dyn issue_3907::Foo;
    |
 help: consider importing this trait instead
    |

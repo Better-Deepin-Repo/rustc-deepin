@@ -1,7 +1,7 @@
-//@ compile-flags:-Clink-dead-code -Zinline-mir=no -Copt-level=0
+//@ compile-flags:-Zprint-mono-items=eager -Zinline-mir=no -Copt-level=0
 
 #![deny(dead_code)]
-#![crate_type = "lib"]
+#![feature(start)]
 
 //@ aux-build:cgu_export_trait_method.rs
 extern crate cgu_export_trait_method;
@@ -9,8 +9,8 @@ extern crate cgu_export_trait_method;
 use cgu_export_trait_method::Trait;
 
 //~ MONO_ITEM fn start
-#[no_mangle]
-pub fn start(_: isize, _: *const *const u8) -> isize {
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
     // The object code of these methods is contained in the external crate, so
     // calling them should *not* introduce codegen items in the current crate.
     let _: (u32, u32) = Trait::without_default_impl(0);

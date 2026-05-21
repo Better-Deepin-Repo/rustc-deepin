@@ -1,3 +1,7 @@
+//@ force-host
+//@ no-prefer-dynamic
+
+#![crate_type = "proc-macro"]
 #![deny(warnings)]
 
 extern crate proc_macro;

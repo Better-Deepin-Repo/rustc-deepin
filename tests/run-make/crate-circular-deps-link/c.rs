@@ -1,5 +1,5 @@
 #![crate_type = "bin"]
-#![no_main]
+#![feature(start)]
 #![no_std]
 
 extern crate a;
@@ -24,8 +24,8 @@ unsafe impl GlobalAlloc for Allocator {
 #[global_allocator]
 static ALLOCATOR: Allocator = Allocator;
 
-#[no_mangle]
-extern "C" fn main(argc: core::ffi::c_int, _argv: *const *const u8) -> core::ffi::c_int {
+#[start]
+fn main(argc: isize, _argv: *const *const u8) -> isize {
     let mut v = Vec::new();
     for i in 0..argc {
         v.push(i);

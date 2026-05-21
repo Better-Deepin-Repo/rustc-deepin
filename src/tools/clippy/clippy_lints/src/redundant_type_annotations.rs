@@ -97,6 +97,7 @@ fn extract_fn_ty<'tcx>(
         // let a: String = String::new();
         // let a: String = String::get_string();
         hir::QPath::TypeRelative(..) => func_hir_id_to_func_ty(cx, call.hir_id),
+        hir::QPath::LangItem(..) => None,
     }
 }
 
@@ -214,6 +215,6 @@ impl LateLintPass<'_> for RedundantTypeAnnotations {
                 },
                 _ => (),
             }
-        }
+        };
     }
 }

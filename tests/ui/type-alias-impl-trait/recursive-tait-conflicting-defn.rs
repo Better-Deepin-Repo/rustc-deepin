@@ -14,22 +14,24 @@ struct B<T> {
 
 impl<T: Test> Test for B<T> {}
 
-pub type TestImpl = impl Test;
+mod helper {
+    use super::*;
+    pub type TestImpl = impl Test;
 
-#[define_opaque(TestImpl)]
-pub fn test() -> TestImpl {
-    A
+    pub fn test() -> TestImpl {
+        A
+    }
+
+    fn make_option2() -> Option<TestImpl> {
+        let inner = make_option().unwrap();
+
+        Some(B { inner })
+        //~^ ERROR concrete type differs from previous defining opaque type use
+    }
 }
 
-#[define_opaque(TestImpl)]
-fn make_option2() -> Option<TestImpl> {
-    //~^ ERROR cannot resolve opaque type
-    let inner = make_option().unwrap();
-    Some(B { inner })
-}
-
-fn make_option() -> Option<TestImpl> {
-    Some(test())
+fn make_option() -> Option<helper::TestImpl> {
+    Some(helper::test())
 }
 
 fn main() {}

@@ -17,17 +17,14 @@
 //!
 //! # Test history
 //!
-//! The previous rmake.rs iteration of this test was flaky for unknown reason on
-//! `i686-pc-windows-gnu`, so assertion failures in this test was made extremely verbose to help
-//! diagnose why the ICE messages was different. It appears that backtraces on `i686-pc-windows-gnu`
-//! specifically are quite unpredictable in how many backtrace frames are involved.
-//!
-//! Disabled on `i686-pc-windows-msvc` as well, because sometimes the middle portion of the ICE
-//! backtrace becomes `<unknown>`.
+//! - The previous rmake.rs iteration of this test was flakey for unknown reason on `i686-mingw`
+//!   *specifically*, so assertion failures in this test was made extremely verbose to help
+//!   diagnose why the ICE messages was different *specifically* on `i686-mingw`.
+//! - An attempt is made to re-enable this test on `i686-mingw` (by removing `ignore-windows`). If
+//!   this test is still flakey, please restore the `ignore-windows` directive.
 
-//@ ignore-cross-compile (exercising ICE dump on host)
-//@ ignore-i686-pc-windows-gnu (unwind mechanism produces unpredictable backtraces)
-//@ ignore-i686-pc-windows-msvc (sometimes partial backtrace becomes `<unknown>`)
+//@ ignore-windows
+//FIXME(#128911): still flakey on i686-mingw.
 
 use std::cell::OnceCell;
 use std::path::{Path, PathBuf};
@@ -86,7 +83,7 @@ fn extract_exactly_one_ice_file<P: AsRef<Path>>(name: &'static str, dir: P) -> I
 
 fn main() {
     // Establish baseline ICE message.
-    let default_ice_dump = OnceCell::new();
+    let mut default_ice_dump = OnceCell::new();
     run_in_tmpdir(|| {
         rustc().env("RUSTC_ICE", cwd()).input("lib.rs").arg("-Ztreat-err-as-bug=1").run_fail();
         let dump = extract_exactly_one_ice_file("baseline", cwd());

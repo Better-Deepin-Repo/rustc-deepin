@@ -1,4 +1,4 @@
-# Closure Capture Inference
+# Closure Expansion in rustc
 
 This section describes how rustc handles closures. Closures in Rust are
 effectively "desugared" into structs that contain the values they use (or
@@ -157,7 +157,7 @@ The other option is to step through the code using lldb or gdb.
 
 1. `rust-lldb build/host/stage1/bin/rustc test.rs`
 2. In lldb:
-    1. `b upvar.rs:134`  // Setting the breakpoint on a certain line in the upvar.rs file
+    1. `b upvar.rs:134`  // Setting the breakpoint on a certain line in the upvar.rs file`
     2. `r`  // Run the program until it hits the breakpoint
 
 Let's start with [`upvar.rs`][upvar]. This file has something called

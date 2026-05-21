@@ -1,3 +1,4 @@
+//@ aux-build:issue-49482-macro-def.rs
 //@ aux-build:issue-49482-reexport.rs
 //@ revisions: rpass1
 

@@ -1,27 +1,21 @@
 #![warn(clippy::double_must_use)]
 #![allow(clippy::result_unit_err)]
-#![feature(never_type)]
-
-use std::ops::ControlFlow;
 
 #[must_use]
 pub fn must_use_result() -> Result<(), ()> {
-    //~^ double_must_use
-
+    //~^ ERROR: this function has a `#[must_use]` attribute with no message, but returns a type already
     unimplemented!();
 }
 
 #[must_use]
 pub fn must_use_tuple() -> (Result<(), ()>, u8) {
-    //~^ double_must_use
-
+    //~^ ERROR: this function has a `#[must_use]` attribute with no message, but returns a type already
     unimplemented!();
 }
 
 #[must_use]
 pub fn must_use_array() -> [Result<(), ()>; 1] {
-    //~^ double_must_use
-
+    //~^ ERROR: this function has a `#[must_use]` attribute with no message, but returns a type already
     unimplemented!();
 }
 
@@ -38,34 +32,12 @@ async fn async_must_use() -> usize {
 
 #[must_use]
 async fn async_must_use_result() -> Result<(), ()> {
-    //~^ double_must_use
-
+    //~^ ERROR: this function has a `#[must_use]` attribute with no message, but returns a type already
     Ok(())
 }
 
-#[must_use]
-pub fn must_use_result_with_uninhabited() -> Result<(), !> {
-    unimplemented!();
+fn main() {
+    must_use_result();
+    must_use_tuple();
+    must_use_with_note();
 }
-
-#[must_use]
-pub struct T;
-
-#[must_use]
-pub fn must_use_result_with_uninhabited_2() -> Result<T, !> {
-    //~^ double_must_use
-    unimplemented!();
-}
-
-#[must_use]
-pub fn must_use_controlflow_with_uninhabited() -> ControlFlow<std::convert::Infallible> {
-    unimplemented!();
-}
-
-#[must_use]
-pub fn must_use_controlflow_with_uninhabited_2() -> ControlFlow<std::convert::Infallible, T> {
-    //~^ double_must_use
-    unimplemented!();
-}
-
-fn main() {}

@@ -1,11 +1,11 @@
 //@ run-pass
-//@ only-unix (this is a unix-specific test)
-//@ needs-subprocess
-//@ ignore-fuchsia no execvp syscall
-//@ ignore-tvos execvp is prohibited
-//@ ignore-watchos execvp is prohibited
 
-#![feature(rustc_private)]
+#![allow(stable_features)]
+//@ ignore-windows - this is a unix-specific test
+//@ ignore-wasm32 no processes
+//@ ignore-sgx no processes
+//@ ignore-fuchsia no execvp syscall
+#![feature(process_exec, rustc_private)]
 
 extern crate libc;
 

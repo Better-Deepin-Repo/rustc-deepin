@@ -1,7 +1,7 @@
 //@ run-fail
-//@ regex-error-pattern: thread 'main' \(\d+\) panicked
-//@ error-pattern: foobar
-//@ needs-subprocess
+//@ error-pattern:thread 'main' panicked
+//@ error-pattern:foobar
+//@ ignore-emscripten no processes
 
 use std::panic;
 

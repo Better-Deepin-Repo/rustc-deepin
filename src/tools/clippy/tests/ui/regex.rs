@@ -1,4 +1,3 @@
-//@require-annotations-for-level: WARN
 #![allow(
     unused,
     clippy::needless_raw_strings,
@@ -6,7 +5,7 @@
     clippy::needless_borrow,
     clippy::needless_borrows_for_generic_args
 )]
-#![warn(clippy::invalid_regex, clippy::trivial_regex, clippy::regex_creation_in_loops)]
+#![warn(clippy::invalid_regex, clippy::trivial_regex)]
 
 extern crate regex;
 
@@ -28,14 +27,11 @@ fn syntax_error() {
     //~^ ERROR: regex syntax error: invalid character class range, the start must be <= th
 
     let some_regex = Regex::new(OPENING_PAREN);
-    //~^ invalid_regex
 
     let binary_pipe_in_wrong_position = BRegex::new("|");
     //~^ ERROR: trivial regex
     let some_binary_regex = BRegex::new(OPENING_PAREN);
-    //~^ invalid_regex
     let some_binary_regex_builder = BRegexBuilder::new(OPENING_PAREN);
-    //~^ invalid_regex
 
     let closing_paren = ")";
     let not_linted = Regex::new(closing_paren);
@@ -48,9 +44,7 @@ fn syntax_error() {
     ]);
 
     let set_error = RegexSet::new(&[OPENING_PAREN, r"[a-z]+\.(com|org|net)"]);
-    //~^ invalid_regex
     let bset_error = BRegexSet::new(&[OPENING_PAREN, r"[a-z]+\.(com|org|net)"]);
-    //~^ invalid_regex
 
     // These following three cases are considering valid since regex-1.8.0
     let raw_string_error = Regex::new(r"[...\/...]");
@@ -58,7 +52,6 @@ fn syntax_error() {
     let _ = Regex::new(r"(?<hi>hi)").unwrap();
 
     let escaped_string_span = Regex::new("\\b\\c");
-    //~^ invalid_regex
 
     let aux_span = Regex::new("(?ixi)");
     //~^ ERROR: regex syntax error: duplicate flag
@@ -125,31 +118,7 @@ fn trivial_regex() {
     let _ = BRegex::new(r"\b{start}word\b{end}");
 }
 
-fn regex_creation_in_loops() {
-    loop {
-        static STATIC_REGEX: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| Regex::new("a.b").unwrap());
-
-        let regex = Regex::new("a.b");
-        //~^ ERROR: compiling a regex in a loop
-        let regex = BRegex::new("a.b");
-        //~^ ERROR: compiling a regex in a loop
-        #[allow(clippy::regex_creation_in_loops)]
-        let allowed_regex = Regex::new("a.b");
-
-        if true {
-            let regex = Regex::new("a.b");
-            //~^ ERROR: compiling a regex in a loop
-        }
-
-        for _ in 0..10 {
-            let nested_regex = Regex::new("a.b");
-            //~^ ERROR: compiling a regex in a loop
-        }
-    }
-
-    for i in 0..10 {
-        let dependant_regex = Regex::new(&format!("{i}"));
-    }
+fn main() {
+    syntax_error();
+    trivial_regex();
 }
-
-fn main() {}

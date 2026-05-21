@@ -1,20 +1,23 @@
 //@ run-pass
+#![allow(non_camel_case_types)]
 
 use std::cell::Cell;
 
 // This test should behave exactly like issue-2735-2
-struct Defer<'a> {
+struct defer<'a> {
     b: &'a Cell<bool>,
 }
 
-impl<'a> Drop for Defer<'a> {
+impl<'a> Drop for defer<'a> {
     fn drop(&mut self) {
         self.b.set(true);
     }
 }
 
-fn defer(b: &Cell<bool>) -> Defer<'_> {
-    Defer { b }
+fn defer(b: &Cell<bool>) -> defer {
+    defer {
+        b: b
+    }
 }
 
 pub fn main() {

@@ -1,9 +1,10 @@
 #![feature(const_for)]
+#![feature(const_mut_refs)]
 
 const _: () = {
     for _ in 0..5 {}
-    //~^ ERROR cannot use `for`
-    //~| ERROR cannot use `for`
+    //~^ error: cannot call
+    //~| error: cannot convert
 };
 
 fn main() {}

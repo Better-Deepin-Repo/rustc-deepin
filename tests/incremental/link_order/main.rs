@@ -1,7 +1,7 @@
 //@ aux-build:my_lib.rs
+//@ error-pattern: error: linking with
 //@ revisions:cfail1 cfail2
 //@ compile-flags:-Z query-dep-graph
-//@ ignore-backends: gcc
 
 // Tests that re-ordering the `-l` arguments used
 // when compiling an external dependency does not lead to
@@ -10,5 +10,3 @@
 extern crate my_lib;
 
 fn main() {}
-
-//~? ERROR linking with

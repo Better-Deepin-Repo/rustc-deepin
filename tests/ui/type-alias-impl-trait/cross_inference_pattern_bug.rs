@@ -1,4 +1,4 @@
-//@ edition: 2021
+//@ compile-flags: --edition=2021
 //@ build-pass
 #![feature(type_alias_impl_trait)]
 

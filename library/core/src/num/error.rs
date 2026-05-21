@@ -11,25 +11,29 @@ pub struct TryFromIntError(pub(crate) ());
 
 #[stable(feature = "try_from", since = "1.34.0")]
 impl fmt::Display for TryFromIntError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        "out of range integral type conversion attempted".fmt(f)
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #[allow(deprecated)]
+        self.description().fmt(fmt)
     }
 }
 
 #[stable(feature = "try_from", since = "1.34.0")]
-impl Error for TryFromIntError {}
+impl Error for TryFromIntError {
+    #[allow(deprecated)]
+    fn description(&self) -> &str {
+        "out of range integral type conversion attempted"
+    }
+}
 
 #[stable(feature = "try_from", since = "1.34.0")]
-#[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl const From<Infallible> for TryFromIntError {
+impl From<Infallible> for TryFromIntError {
     fn from(x: Infallible) -> TryFromIntError {
         match x {}
     }
 }
 
 #[unstable(feature = "never_type", issue = "35121")]
-#[rustc_const_unstable(feature = "const_convert", issue = "143773")]
-impl const From<!> for TryFromIntError {
+impl From<!> for TryFromIntError {
     #[inline]
     fn from(never: !) -> TryFromIntError {
         // Match rather than coerce to make sure that code like
@@ -41,11 +45,8 @@ impl const From<!> for TryFromIntError {
 
 /// An error which can be returned when parsing an integer.
 ///
-/// For example, this error is returned by the `from_str_radix()` functions
-/// on the primitive integer types (such as [`i8::from_str_radix`])
-/// and is used as the error type in their [`FromStr`] implementations.
-///
-/// [`FromStr`]: crate::str::FromStr
+/// This error is used as the error type for the `from_str_radix()` functions
+/// on the primitive integer types, such as [`i8::from_str_radix`].
 ///
 /// # Potential causes
 ///
@@ -78,7 +79,7 @@ pub struct ParseIntError {
 /// # }
 /// ```
 #[stable(feature = "int_error_matching", since = "1.55.0")]
-#[derive(Debug, Clone, PartialEq, Eq, Copy, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum IntErrorKind {
     /// Value being parsed is empty.
@@ -122,6 +123,15 @@ impl ParseIntError {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl fmt::Display for ParseIntError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        #[allow(deprecated)]
+        self.description().fmt(f)
+    }
+}
+
+#[stable(feature = "rust1", since = "1.0.0")]
+impl Error for ParseIntError {
+    #[allow(deprecated)]
+    fn description(&self) -> &str {
         match self.kind {
             IntErrorKind::Empty => "cannot parse integer from empty string",
             IntErrorKind::InvalidDigit => "invalid digit found in string",
@@ -129,9 +139,5 @@ impl fmt::Display for ParseIntError {
             IntErrorKind::NegOverflow => "number too small to fit in target type",
             IntErrorKind::Zero => "number would be zero for non-zero type",
         }
-        .fmt(f)
     }
 }
-
-#[stable(feature = "rust1", since = "1.0.0")]
-impl Error for ParseIntError {}

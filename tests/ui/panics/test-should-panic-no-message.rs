@@ -1,7 +1,7 @@
 //@ run-fail
 //@ compile-flags: --test
 //@ check-stdout
-//@ needs-subprocess
+//@ ignore-wasm32 no processes
 
 #[test]
 #[should_panic(expected = "foo")]

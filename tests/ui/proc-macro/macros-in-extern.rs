@@ -1,5 +1,5 @@
 //@ run-pass
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 
 #[macro_use]
 extern crate test_macros;

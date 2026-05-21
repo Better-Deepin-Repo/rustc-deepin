@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use std::str;
 use std::task::Poll;
 
-use anyhow::{Context as _, bail, format_err};
+use anyhow::{bail, format_err, Context as _};
 use cargo_credential::{Operation, Secret};
 use crates_io::Registry;
 use url::Url;
@@ -31,10 +31,10 @@ use crate::util::network::http::http_handle;
 pub use self::info::info;
 pub use self::login::registry_login;
 pub use self::logout::registry_logout;
-pub use self::owner::OwnersOptions;
 pub use self::owner::modify_owners;
-pub use self::publish::PublishOpts;
+pub use self::owner::OwnersOptions;
 pub use self::publish::publish;
+pub use self::publish::PublishOpts;
 pub use self::search::search;
 pub use self::yank::yank;
 
@@ -120,14 +120,14 @@ impl RegistryCredentialConfig {
 ///   `registry`, or `index` are set, then uses `crates-io`.
 /// * `force_update`: If `true`, forces the index to be updated.
 /// * `token_required`: If `true`, the token will be set.
-fn registry<'gctx>(
-    gctx: &'gctx GlobalContext,
+fn registry(
+    gctx: &GlobalContext,
     source_ids: &RegistrySourceIds,
     token_from_cmdline: Option<Secret<&str>>,
     reg_or_index: Option<&RegistryOrIndex>,
     force_update: bool,
     token_required: Option<Operation<'_>>,
-) -> CargoResult<(Registry, RegistrySource<'gctx>)> {
+) -> CargoResult<Registry> {
     let is_index = reg_or_index.map(|v| v.is_index()).unwrap_or_default();
     if is_index && token_required.is_some() && token_from_cmdline.is_none() {
         bail!("command-line argument --index requires --token to be specified");
@@ -136,9 +136,9 @@ fn registry<'gctx>(
         auth::cache_token_from_commandline(gctx, &source_ids.original, token);
     }
 
-    let mut src = RegistrySource::remote(source_ids.replacement, &HashSet::new(), gctx)?;
     let cfg = {
         let _lock = gctx.acquire_package_cache_lock(CacheLockMode::DownloadExclusive)?;
+        let mut src = RegistrySource::remote(source_ids.replacement, &HashSet::new(), gctx)?;
         // Only update the index if `force_update` is set.
         if force_update {
             src.invalidate_cache()
@@ -170,13 +170,15 @@ fn registry<'gctx>(
         None
     };
     let handle = http_handle(gctx)?;
-    Ok((
-        Registry::new_handle(api_host, token, handle, cfg.auth_required),
-        src,
+    Ok(Registry::new_handle(
+        api_host,
+        token,
+        handle,
+        cfg.auth_required,
     ))
 }
 
-/// Gets the `SourceId` for an index or registry setting.
+/// Gets the SourceId for an index or registry setting.
 ///
 /// The `index` and `reg` values are from the command-line or config settings.
 /// If both are None, and no source-replacement is configured, returns the source for crates.io.
@@ -314,7 +316,7 @@ pub(crate) struct RegistrySourceIds {
     /// Use when interacting with the source (querying / publishing , etc)
     ///
     /// The source for crates.io may be replaced by a built-in source for accessing crates.io with
-    /// the sparse protocol, or a source for the testing framework (when the `replace_crates_io`
+    /// the sparse protocol, or a source for the testing framework (when the replace_crates_io
     /// function is used)
     ///
     /// User-defined source replacement is not applied.

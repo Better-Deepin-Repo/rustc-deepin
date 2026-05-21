@@ -1,9 +1,7 @@
-//@ dont-require-annotations: NOTE
-
 macro_rules! log {
     ( $ctx:expr, $( $args:expr),* ) => {
         if $ctx.trace {
-        //~^ ERROR no field `trace` on type `&T`
+        //~^ no field `trace` on type `&T`
             println!( $( $args, )* );
         }
     }
@@ -18,7 +16,7 @@ struct Foo {
 fn wrap<T>(context: &T) -> ()
 {
     log!(context, "entered wrapper");
-    //~^ NOTE in this expansion of log!
+    //~^ in this expansion of log!
 }
 
 fn main() {

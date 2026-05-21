@@ -9,7 +9,6 @@
 //! within the `SourceMap`, which upon request can be converted to line and column
 //! information, source code snippets, etc.
 
-use std::fs::File;
 use std::io::{self, BorrowedBuf, Read};
 use std::{fs, path};
 
@@ -103,11 +102,8 @@ pub trait FileLoader {
     fn read_file(&self, path: &Path) -> io::Result<String>;
 
     /// Read the contents of a potentially non-UTF-8 file into memory.
-    /// We don't normalize binary files, so we can start in an Arc.
-    fn read_binary_file(&self, path: &Path) -> io::Result<Arc<[u8]>>;
-
-    /// Current working directory
-    fn current_directory(&self) -> io::Result<PathBuf>;
+    /// We don't normalize binary files, so we can start in an Lrc.
+    fn read_binary_file(&self, path: &Path) -> io::Result<Lrc<[u8]>>;
 }
 
 /// A FileLoader that uses std::fs to load real files.
@@ -119,26 +115,15 @@ impl FileLoader for RealFileLoader {
     }
 
     fn read_file(&self, path: &Path) -> io::Result<String> {
-        let mut file = File::open(path)?;
-        let size = file.metadata().map(|metadata| metadata.len()).ok().unwrap_or(0);
-
-        if size > SourceFile::MAX_FILE_SIZE.into() {
-            return Err(io::Error::other(format!(
-                "text files larger than {} bytes are unsupported",
-                SourceFile::MAX_FILE_SIZE
-            )));
-        }
-        let mut contents = String::new();
-        file.read_to_string(&mut contents)?;
-        Ok(contents)
+        fs::read_to_string(path)
     }
 
-    fn read_binary_file(&self, path: &Path) -> io::Result<Arc<[u8]>> {
+    fn read_binary_file(&self, path: &Path) -> io::Result<Lrc<[u8]>> {
         let mut file = fs::File::open(path)?;
         let len = file.metadata()?.len();
 
-        let mut bytes = Arc::new_uninit_slice(len as usize);
-        let mut buf = BorrowedBuf::from(Arc::get_mut(&mut bytes).unwrap());
+        let mut bytes = Lrc::new_uninit_slice(len as usize);
+        let mut buf = BorrowedBuf::from(Lrc::get_mut(&mut bytes).unwrap());
         match file.read_buf_exact(buf.unfilled()) {
             Ok(()) => {}
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
@@ -155,9 +140,9 @@ impl FileLoader for RealFileLoader {
         // But we are not guaranteed to be at the end of the file, because we did not attempt to do
         // a read with a non-zero-sized buffer and get Ok(0).
         // So we do small read to a fixed-size buffer. If the read returns no bytes then we're
-        // already done, and we just return the Arc we built above.
+        // already done, and we just return the Lrc we built above.
         // If the read returns bytes however, we just fall back to reading into a Vec then turning
-        // that into an Arc, losing our nice peak memory behavior. This fallback code path should
+        // that into an Lrc, losing our nice peak memory behavior. This fallback code path should
         // be rarely exercised.
 
         let mut probe = [0u8; 32];
@@ -173,10 +158,6 @@ impl FileLoader for RealFileLoader {
         file.read_to_end(&mut bytes)?;
         Ok(bytes.into())
     }
-
-    fn current_directory(&self) -> io::Result<PathBuf> {
-        std::env::current_dir()
-    }
 }
 
 // _____________________________________________________________________________
@@ -185,8 +166,8 @@ impl FileLoader for RealFileLoader {
 
 #[derive(Default)]
 struct SourceMapFiles {
-    source_files: monotonic::MonotonicVec<Arc<SourceFile>>,
-    stable_id_to_source_file: UnhashMap<StableSourceFileId, Arc<SourceFile>>,
+    source_files: monotonic::MonotonicVec<Lrc<SourceFile>>,
+    stable_id_to_source_file: UnhashMap<StableSourceFileId, Lrc<SourceFile>>,
 }
 
 /// Used to construct a `SourceMap` with `SourceMap::with_inputs`.
@@ -194,7 +175,6 @@ pub struct SourceMapInputs {
     pub file_loader: Box<dyn FileLoader + Send + Sync>,
     pub path_mapping: FilePathMapping,
     pub hash_kind: SourceFileHashAlgorithm,
-    pub checksum_hash_kind: Option<SourceFileHashAlgorithm>,
 }
 
 pub struct SourceMap {
@@ -205,17 +185,8 @@ pub struct SourceMap {
     // `--remap-path-prefix` to all `SourceFile`s allocated within this `SourceMap`.
     path_mapping: FilePathMapping,
 
-    /// Current working directory
-    working_dir: RealFileName,
-
     /// The algorithm used for hashing the contents of each source file.
     hash_kind: SourceFileHashAlgorithm,
-
-    /// Similar to `hash_kind`, however this algorithm is used for checksums to determine if a crate is fresh.
-    /// `cargo` is the primary user of these.
-    ///
-    /// If this is equal to `hash_kind` then the checksum won't be computed twice.
-    checksum_hash_kind: Option<SourceFileHashAlgorithm>,
 }
 
 impl SourceMap {
@@ -224,25 +195,17 @@ impl SourceMap {
             file_loader: Box::new(RealFileLoader),
             path_mapping,
             hash_kind: SourceFileHashAlgorithm::Md5,
-            checksum_hash_kind: None,
         })
     }
 
     pub fn with_inputs(
-        SourceMapInputs { file_loader, path_mapping, hash_kind, checksum_hash_kind }: SourceMapInputs,
+        SourceMapInputs { file_loader, path_mapping, hash_kind }: SourceMapInputs,
     ) -> SourceMap {
-        let cwd = file_loader
-            .current_directory()
-            .expect("expecting a current working directory to exist");
-        let working_dir = path_mapping.to_real_filename(&RealFileName::empty(), &cwd);
-        debug!(?working_dir);
         SourceMap {
             files: Default::default(),
-            working_dir,
             file_loader: IntoDynSyncSend(file_loader),
             path_mapping,
             hash_kind,
-            checksum_hash_kind,
         }
     }
 
@@ -250,17 +213,13 @@ impl SourceMap {
         &self.path_mapping
     }
 
-    pub fn working_dir(&self) -> &RealFileName {
-        &self.working_dir
-    }
-
     pub fn file_exists(&self, path: &Path) -> bool {
         self.file_loader.file_exists(path)
     }
 
-    pub fn load_file(&self, path: &Path) -> io::Result<Arc<SourceFile>> {
+    pub fn load_file(&self, path: &Path) -> io::Result<Lrc<SourceFile>> {
         let src = self.file_loader.read_file(path)?;
-        let filename = FileName::Real(self.path_mapping.to_real_filename(&self.working_dir, path));
+        let filename = path.to_owned().into();
         Ok(self.new_source_file(filename, src))
     }
 
@@ -268,7 +227,7 @@ impl SourceMap {
     ///
     /// Unlike `load_file`, guarantees that no normalization like BOM-removal
     /// takes place.
-    pub fn load_binary_file(&self, path: &Path) -> io::Result<(Arc<[u8]>, Span)> {
+    pub fn load_binary_file(&self, path: &Path) -> io::Result<(Lrc<[u8]>, Span)> {
         let bytes = self.file_loader.read_binary_file(path)?;
 
         // We need to add file to the `SourceMap`, so that it is present
@@ -277,13 +236,12 @@ impl SourceMap {
         // via `mod`, so we try to use real file contents and not just an
         // empty string.
         let text = std::str::from_utf8(&bytes).unwrap_or("").to_string();
-        let filename = FileName::Real(self.path_mapping.to_real_filename(&self.working_dir, path));
-        let file = self.new_source_file(filename, text);
+        let file = self.new_source_file(path.to_owned().into(), text);
         Ok((
             bytes,
             Span::new(
                 file.start_pos,
-                BytePos(file.start_pos.0 + file.normalized_source_len.0),
+                BytePos(file.start_pos.0 + file.source_len.0),
                 SyntaxContext::root(),
                 None,
             ),
@@ -292,14 +250,14 @@ impl SourceMap {
 
     // By returning a `MonotonicVec`, we ensure that consumers cannot invalidate
     // any existing indices pointing into `files`.
-    pub fn files(&self) -> MappedReadGuard<'_, monotonic::MonotonicVec<Arc<SourceFile>>> {
+    pub fn files(&self) -> MappedReadGuard<'_, monotonic::MonotonicVec<Lrc<SourceFile>>> {
         ReadGuard::map(self.files.borrow(), |files| &files.source_files)
     }
 
     pub fn source_file_by_stable_id(
         &self,
         stable_id: StableSourceFileId,
-    ) -> Option<Arc<SourceFile>> {
+    ) -> Option<Lrc<SourceFile>> {
         self.files.borrow().stable_id_to_source_file.get(&stable_id).cloned()
     }
 
@@ -307,7 +265,7 @@ impl SourceMap {
         &self,
         file_id: StableSourceFileId,
         mut file: SourceFile,
-    ) -> Result<Arc<SourceFile>, OffsetOverflowError> {
+    ) -> Result<Lrc<SourceFile>, OffsetOverflowError> {
         let mut files = self.files.borrow_mut();
 
         file.start_pos = BytePos(if let Some(last_file) = files.source_files.last() {
@@ -318,9 +276,9 @@ impl SourceMap {
             0
         });
 
-        let file = Arc::new(file);
-        files.source_files.push(Arc::clone(&file));
-        files.stable_id_to_source_file.insert(file_id, Arc::clone(&file));
+        let file = Lrc::new(file);
+        files.source_files.push(file.clone());
+        files.stable_id_to_source_file.insert(file_id, file.clone());
 
         Ok(file)
     }
@@ -328,12 +286,9 @@ impl SourceMap {
     /// Creates a new `SourceFile`.
     /// If a file already exists in the `SourceMap` with the same ID, that file is returned
     /// unmodified.
-    pub fn new_source_file(&self, filename: FileName, src: String) -> Arc<SourceFile> {
+    pub fn new_source_file(&self, filename: FileName, src: String) -> Lrc<SourceFile> {
         self.try_new_source_file(filename, src).unwrap_or_else(|OffsetOverflowError| {
-            eprintln!(
-                "fatal error: rustc does not support text files larger than {} bytes",
-                SourceFile::MAX_FILE_SIZE
-            );
+            eprintln!("fatal error: rustc does not support files larger than 4GB");
             crate::fatal_error::FatalError.raise()
         })
     }
@@ -342,17 +297,17 @@ impl SourceMap {
         &self,
         filename: FileName,
         src: String,
-    ) -> Result<Arc<SourceFile>, OffsetOverflowError> {
+    ) -> Result<Lrc<SourceFile>, OffsetOverflowError> {
         // Note that filename may not be a valid path, eg it may be `<anon>` etc,
         // but this is okay because the directory determined by `path.pop()` will
         // be empty, so the working directory will be used.
+        let (filename, _) = self.path_mapping.map_filename_prefix(&filename);
 
         let stable_id = StableSourceFileId::from_filename_in_current_crate(&filename);
         match self.source_file_by_stable_id(stable_id) {
             Some(lrc_sf) => Ok(lrc_sf),
             None => {
-                let source_file =
-                    SourceFile::new(filename, src, self.hash_kind, self.checksum_hash_kind)?;
+                let source_file = SourceFile::new(filename, src, self.hash_kind)?;
 
                 // Let's make sure the file_id we generated above actually matches
                 // the ID we generate for the SourceFile we just created.
@@ -371,30 +326,26 @@ impl SourceMap {
         &self,
         filename: FileName,
         src_hash: SourceFileHash,
-        checksum_hash: Option<SourceFileHash>,
         stable_id: StableSourceFileId,
-        normalized_source_len: u32,
-        unnormalized_source_len: u32,
+        source_len: u32,
         cnum: CrateNum,
         file_local_lines: FreezeLock<SourceFileLines>,
         multibyte_chars: Vec<MultiByteChar>,
         normalized_pos: Vec<NormalizedPos>,
         metadata_index: u32,
-    ) -> Arc<SourceFile> {
-        let normalized_source_len = RelativeBytePos::from_u32(normalized_source_len);
+    ) -> Lrc<SourceFile> {
+        let source_len = RelativeBytePos::from_u32(source_len);
 
         let source_file = SourceFile {
             name: filename,
             src: None,
             src_hash,
-            checksum_hash,
             external_src: FreezeLock::new(ExternalSource::Foreign {
                 kind: ExternalSourceKind::AbsentOk,
                 metadata_index,
             }),
             start_pos: BytePos(0),
-            normalized_source_len,
-            unnormalized_source_len,
+            source_len,
             lines: file_local_lines,
             multibyte_chars,
             normalized_pos,
@@ -421,9 +372,9 @@ impl SourceMap {
     }
 
     /// Return the SourceFile that contains the given `BytePos`
-    pub fn lookup_source_file(&self, pos: BytePos) -> Arc<SourceFile> {
+    pub fn lookup_source_file(&self, pos: BytePos) -> Lrc<SourceFile> {
         let idx = self.lookup_source_file_idx(pos);
-        Arc::clone(&(*self.files.borrow().source_files)[idx])
+        (*self.files.borrow().source_files)[idx].clone()
     }
 
     /// Looks up source information about a `BytePos`.
@@ -434,7 +385,7 @@ impl SourceMap {
     }
 
     /// If the corresponding `SourceFile` is empty, does not return a line number.
-    pub fn lookup_line(&self, pos: BytePos) -> Result<SourceFileAndLine, Arc<SourceFile>> {
+    pub fn lookup_line(&self, pos: BytePos) -> Result<SourceFileAndLine, Lrc<SourceFile>> {
         let f = self.lookup_source_file(pos);
 
         let pos = f.relative_position(pos);
@@ -444,43 +395,32 @@ impl SourceMap {
         }
     }
 
-    pub fn span_to_string(&self, sp: Span, display_scope: RemapPathScopeComponents) -> String {
-        self.span_to_string_ext(sp, display_scope, false)
-    }
-
-    pub fn span_to_short_string(
+    pub fn span_to_string(
         &self,
         sp: Span,
-        display_scope: RemapPathScopeComponents,
-    ) -> String {
-        self.span_to_string_ext(sp, display_scope, true)
-    }
-
-    fn span_to_string_ext(
-        &self,
-        sp: Span,
-        display_scope: RemapPathScopeComponents,
-        short: bool,
+        filename_display_pref: FileNameDisplayPreference,
     ) -> String {
         let (source_file, lo_line, lo_col, hi_line, hi_col) = self.span_to_location_info(sp);
 
         let file_name = match source_file {
-            Some(sf) => {
-                if short { sf.name.short() } else { sf.name.display(display_scope) }.to_string()
-            }
+            Some(sf) => sf.name.display(filename_display_pref).to_string(),
             None => return "no-location".to_string(),
         };
 
         format!(
             "{file_name}:{lo_line}:{lo_col}{}",
-            if short { String::new() } else { format!(": {hi_line}:{hi_col}") }
+            if let FileNameDisplayPreference::Short = filename_display_pref {
+                String::new()
+            } else {
+                format!(": {hi_line}:{hi_col}")
+            }
         )
     }
 
     pub fn span_to_location_info(
         &self,
         sp: Span,
-    ) -> (Option<Arc<SourceFile>>, usize, usize, usize, usize) {
+    ) -> (Option<Lrc<SourceFile>>, usize, usize, usize, usize) {
         if self.files.borrow().source_files.is_empty() || sp.is_dummy() {
             return (None, 0, 0, 0, 0);
         }
@@ -490,11 +430,16 @@ impl SourceMap {
         (Some(lo.file), lo.line, lo.col.to_usize() + 1, hi.line, hi.col.to_usize() + 1)
     }
 
+    /// Format the span location suitable for embedding in build artifacts
+    pub fn span_to_embeddable_string(&self, sp: Span) -> String {
+        self.span_to_string(sp, FileNameDisplayPreference::Remapped)
+    }
+
     /// Format the span location to be printed in diagnostics. Must not be emitted
     /// to build artifacts as this may leak local file paths. Use span_to_embeddable_string
     /// for string suitable for embedding.
     pub fn span_to_diagnostic_string(&self, sp: Span) -> String {
-        self.span_to_string(sp, RemapPathScopeComponents::DIAGNOSTICS)
+        self.span_to_string(sp, self.path_mapping.filename_display_for_diagnostics)
     }
 
     pub fn span_to_filename(&self, sp: Span) -> FileName {
@@ -502,7 +447,7 @@ impl SourceMap {
     }
 
     pub fn filename_for_diagnostics<'a>(&self, filename: &'a FileName) -> FileNameDisplay<'a> {
-        filename.display(RemapPathScopeComponents::DIAGNOSTICS)
+        filename.display(self.path_mapping.filename_display_for_diagnostics)
     }
 
     pub fn is_multiline(&self, sp: Span) -> bool {
@@ -511,7 +456,7 @@ impl SourceMap {
         if lo != hi {
             return true;
         }
-        let f = Arc::clone(&(*self.files.borrow().source_files)[lo]);
+        let f = (*self.files.borrow().source_files)[lo].clone();
         let lo = f.relative_position(sp.lo());
         let hi = f.relative_position(sp.hi());
         f.lookup_line(lo) != f.lookup_line(hi)
@@ -577,7 +522,7 @@ impl SourceMap {
     /// Extracts the source surrounding the given `Span` using the `extract_source` function. The
     /// extract function takes three arguments: a string slice containing the source, an index in
     /// the slice for the beginning of the span and an index in the slice for the end of the span.
-    pub fn span_to_source<F, T>(&self, sp: Span, extract_source: F) -> Result<T, SpanSnippetError>
+    fn span_to_source<F, T>(&self, sp: Span, extract_source: F) -> Result<T, SpanSnippetError>
     where
         F: Fn(&str, usize, usize) -> Result<T, SpanSnippetError>,
     {
@@ -594,7 +539,7 @@ impl SourceMap {
 
             let start_index = local_begin.pos.to_usize();
             let end_index = local_end.pos.to_usize();
-            let source_len = local_begin.sf.normalized_source_len.to_usize();
+            let source_len = local_begin.sf.source_len.to_usize();
 
             if start_index > end_index || end_index > source_len {
                 return Err(SpanSnippetError::MalformedForSourcemap(MalformedSourceMapPositions {
@@ -661,24 +606,6 @@ impl SourceMap {
             let prev_source = prev_source.rsplit(c).next().unwrap_or("");
             if !prev_source.is_empty() && (accept_newlines || !prev_source.contains('\n')) {
                 return sp.with_lo(BytePos(sp.lo().0 - prev_source.len() as u32));
-            }
-        }
-
-        sp
-    }
-
-    /// Extends the given `Span` to just before the previous occurrence of `c`. Return the same span
-    /// if an error occurred while retrieving the code snippet.
-    pub fn span_extend_to_prev_char_before(
-        &self,
-        sp: Span,
-        c: char,
-        accept_newlines: bool,
-    ) -> Span {
-        if let Ok(prev_source) = self.span_to_prev_source(sp) {
-            let prev_source = prev_source.rsplit(c).next().unwrap_or("");
-            if accept_newlines || !prev_source.contains('\n') {
-                return sp.with_lo(BytePos(sp.lo().0 - prev_source.len() as u32 - 1_u32));
             }
         }
 
@@ -852,7 +779,7 @@ impl SourceMap {
                     return Ok(false);
                 }
             }
-            Ok(true)
+            return Ok(true);
         })
         .is_ok_and(|is_accessible| is_accessible)
     }
@@ -860,10 +787,10 @@ impl SourceMap {
     /// Given a `Span`, tries to get a shorter span ending just after the first occurrence of `char`
     /// `c`.
     pub fn span_through_char(&self, sp: Span, c: char) -> Span {
-        if let Ok(snippet) = self.span_to_snippet(sp)
-            && let Some(offset) = snippet.find(c)
-        {
-            return sp.with_hi(BytePos(sp.lo().0 + (offset + c.len_utf8()) as u32));
+        if let Ok(snippet) = self.span_to_snippet(sp) {
+            if let Some(offset) = snippet.find(c) {
+                return sp.with_hi(BytePos(sp.lo().0 + (offset + c.len_utf8()) as u32));
+            }
         }
         sp
     }
@@ -945,13 +872,12 @@ impl SourceMap {
 
     /// Returns a new span representing just the last character of this span.
     pub fn end_point(&self, sp: Span) -> Span {
-        let sp = sp.data();
-        let pos = sp.hi.0;
+        let pos = sp.hi().0;
 
         let width = self.find_width_of_character_at_span(sp, false);
         let corrected_end_position = pos.checked_sub(width).unwrap_or(pos);
 
-        let end_point = BytePos(cmp::max(corrected_end_position, sp.lo.0));
+        let end_point = BytePos(cmp::max(corrected_end_position, sp.lo().0));
         sp.with_lo(end_point)
     }
 
@@ -965,9 +891,8 @@ impl SourceMap {
         if sp.is_dummy() {
             return sp;
         }
+        let start_of_next_point = sp.hi().0;
 
-        let sp = sp.data();
-        let start_of_next_point = sp.hi.0;
         let width = self.find_width_of_character_at_span(sp, true);
         // If the width is 1, then the next span should only contain the next char besides current ending.
         // However, in the case of a multibyte character, where the width != 1, the next span should
@@ -976,7 +901,7 @@ impl SourceMap {
             start_of_next_point.checked_add(width).unwrap_or(start_of_next_point);
 
         let end_of_next_point = BytePos(cmp::max(start_of_next_point + 1, end_of_next_point));
-        Span::new(BytePos(start_of_next_point), end_of_next_point, sp.ctxt, None)
+        Span::new(BytePos(start_of_next_point), end_of_next_point, sp.ctxt(), None)
     }
 
     /// Check whether span is followed by some specified expected string in limit scope
@@ -999,7 +924,9 @@ impl SourceMap {
     /// Finds the width of the character, either before or after the end of provided span,
     /// depending on the `forwards` parameter.
     #[instrument(skip(self, sp))]
-    fn find_width_of_character_at_span(&self, sp: SpanData, forwards: bool) -> u32 {
+    fn find_width_of_character_at_span(&self, sp: Span, forwards: bool) -> u32 {
+        let sp = sp.data();
+
         if sp.lo == sp.hi && !forwards {
             debug!("early return empty span");
             return 1;
@@ -1025,7 +952,7 @@ impl SourceMap {
             return 1;
         }
 
-        let source_len = local_begin.sf.normalized_source_len.to_usize();
+        let source_len = local_begin.sf.source_len.to_usize();
         debug!("source_len=`{:?}`", source_len);
         // Ensure indexes are also not malformed.
         if start_index > end_index || end_index > source_len - 1 {
@@ -1050,10 +977,12 @@ impl SourceMap {
         }
     }
 
-    pub fn get_source_file(&self, filename: &FileName) -> Option<Arc<SourceFile>> {
+    pub fn get_source_file(&self, filename: &FileName) -> Option<Lrc<SourceFile>> {
+        // Remap filename before lookup
+        let filename = self.path_mapping().map_filename_prefix(filename).0;
         for sf in self.files.borrow().source_files.iter() {
-            if *filename == sf.name {
-                return Some(Arc::clone(&sf));
+            if filename == sf.name {
+                return Some(sf.clone());
             }
         }
         None
@@ -1062,7 +991,7 @@ impl SourceMap {
     /// For a global `BytePos`, computes the local offset within the containing `SourceFile`.
     pub fn lookup_byte_offset(&self, bpos: BytePos) -> SourceFileAndBytePos {
         let idx = self.lookup_source_file_idx(bpos);
-        let sf = Arc::clone(&(*self.files.borrow().source_files)[idx]);
+        let sf = (*self.files.borrow().source_files)[idx].clone();
         let offset = bpos - sf.start_pos;
         SourceFileAndBytePos { sf, pos: offset }
     }
@@ -1084,20 +1013,16 @@ impl SourceMap {
                 return None;
             };
 
-            let local_path: Cow<'_, Path> = match name.local_path() {
-                Some(local) => local.into(),
-                None => {
+            let local_path: Cow<'_, Path> = match name {
+                RealFileName::LocalPath(local_path) => local_path.into(),
+                RealFileName::Remapped { local_path: Some(local_path), .. } => local_path.into(),
+                RealFileName::Remapped { local_path: None, virtual_name } => {
                     // The compiler produces better error messages if the sources of dependencies
                     // are available. Attempt to undo any path mapping so we can find remapped
                     // dependencies.
-                    //
                     // We can only use the heuristic because `add_external_src` checks the file
                     // content hash.
-                    let maybe_remapped_path = name.path(RemapPathScopeComponents::DIAGNOSTICS);
-                    self.path_mapping
-                        .reverse_map_prefix_heuristically(maybe_remapped_path)
-                        .map(Cow::from)
-                        .unwrap_or(maybe_remapped_path.into())
+                    self.path_mapping.reverse_map_prefix_heuristically(virtual_name)?.into()
                 }
             };
 
@@ -1136,32 +1061,32 @@ impl SourceMap {
     }
 }
 
-pub fn get_source_map() -> Option<Arc<SourceMap>> {
+pub fn get_source_map() -> Option<Lrc<SourceMap>> {
     with_session_globals(|session_globals| session_globals.source_map.clone())
 }
 
 #[derive(Clone)]
 pub struct FilePathMapping {
     mapping: Vec<(PathBuf, PathBuf)>,
-    filename_remapping_scopes: RemapPathScopeComponents,
+    filename_display_for_diagnostics: FileNameDisplayPreference,
 }
 
 impl FilePathMapping {
     pub fn empty() -> FilePathMapping {
-        FilePathMapping::new(Vec::new(), RemapPathScopeComponents::empty())
+        FilePathMapping::new(Vec::new(), FileNameDisplayPreference::Local)
     }
 
     pub fn new(
         mapping: Vec<(PathBuf, PathBuf)>,
-        filename_remapping_scopes: RemapPathScopeComponents,
+        filename_display_for_diagnostics: FileNameDisplayPreference,
     ) -> FilePathMapping {
-        FilePathMapping { mapping, filename_remapping_scopes }
+        FilePathMapping { mapping, filename_display_for_diagnostics }
     }
 
     /// Applies any path prefix substitution as defined by the mapping.
     /// The return value is the remapped path and a boolean indicating whether
     /// the path was affected by the mapping.
-    fn map_prefix<'a>(&'a self, path: impl Into<Cow<'a, Path>>) -> (Cow<'a, Path>, bool) {
+    pub fn map_prefix<'a>(&'a self, path: impl Into<Cow<'a, Path>>) -> (Cow<'a, Path>, bool) {
         let path = path.into();
         if path.as_os_str().is_empty() {
             // Exit early if the path is empty and therefore there's nothing to remap.
@@ -1207,69 +1132,141 @@ impl FilePathMapping {
         }
     }
 
-    /// Applies any path prefix substitution as defined by the mapping.
-    ///
-    /// The returned filename contains the a remapped path representing the remapped
-    /// part if any remapping was performed.
-    pub fn to_real_filename<'a>(
-        &self,
-        working_directory: &RealFileName,
-        local_path: impl Into<Cow<'a, Path>>,
-    ) -> RealFileName {
-        let local_path = local_path.into();
-
-        let (remapped_path, mut was_remapped) = self.map_prefix(&*local_path);
-        debug!(?local_path, ?remapped_path, ?was_remapped, ?self.filename_remapping_scopes);
-
-        // Always populate the local part, even if we just remapped it and the scopes are
-        // total, so that places that load the file from disk still have access to it.
-        let local = InnerRealFileName {
-            name: local_path.to_path_buf(),
-            working_directory: working_directory
-                .local_path()
-                .expect("working directory should be local")
-                .to_path_buf(),
-            embeddable_name: if local_path.is_absolute() {
-                local_path.to_path_buf()
-            } else {
-                working_directory
-                    .local_path()
-                    .expect("working directory should be local")
-                    .to_path_buf()
-                    .join(&local_path)
-            },
-        };
-
-        RealFileName {
-            maybe_remapped: InnerRealFileName {
-                working_directory: working_directory.maybe_remapped.name.clone(),
-                embeddable_name: if remapped_path.is_absolute() || was_remapped {
-                    // The current directory may have been remapped so we take that
-                    // into account, otherwise we'll forget to include the scopes
-                    was_remapped = was_remapped || working_directory.was_remapped();
-
-                    remapped_path.to_path_buf()
+    fn map_filename_prefix(&self, file: &FileName) -> (FileName, bool) {
+        match file {
+            FileName::Real(realfile) if let RealFileName::LocalPath(local_path) = realfile => {
+                let (mapped_path, mapped) = self.map_prefix(local_path);
+                let realfile = if mapped {
+                    RealFileName::Remapped {
+                        local_path: Some(local_path.clone()),
+                        virtual_name: mapped_path.into_owned(),
+                    }
                 } else {
-                    // Create an absolute path and remap it as well.
-                    let (abs_path, abs_was_remapped) = self.map_prefix(
-                        working_directory.maybe_remapped.name.clone().join(&remapped_path),
-                    );
-
-                    // If either the embeddable name or the working directory was
-                    // remapped, then the filename was remapped
-                    was_remapped = abs_was_remapped || working_directory.was_remapped();
-
-                    abs_path.to_path_buf()
-                },
-                name: remapped_path.to_path_buf(),
-            },
-            local: Some(local),
-            scopes: if was_remapped {
-                self.filename_remapping_scopes
-            } else {
-                RemapPathScopeComponents::empty()
-            },
+                    realfile.clone()
+                };
+                (FileName::Real(realfile), mapped)
+            }
+            FileName::Real(_) => unreachable!("attempted to remap an already remapped filename"),
+            other => (other.clone(), false),
         }
+    }
+
+    /// Applies any path prefix substitution as defined by the mapping.
+    /// The return value is the local path with a "virtual path" representing the remapped
+    /// part if any remapping was performed.
+    pub fn to_real_filename<'a>(&self, local_path: impl Into<Cow<'a, Path>>) -> RealFileName {
+        let local_path = local_path.into();
+        if let (remapped_path, true) = self.map_prefix(&*local_path) {
+            RealFileName::Remapped {
+                virtual_name: remapped_path.into_owned(),
+                local_path: Some(local_path.into_owned()),
+            }
+        } else {
+            RealFileName::LocalPath(local_path.into_owned())
+        }
+    }
+
+    /// Expand a relative path to an absolute path with remapping taken into account.
+    /// Use this when absolute paths are required (e.g. debuginfo or crate metadata).
+    ///
+    /// The resulting `RealFileName` will have its `local_path` portion erased if
+    /// possible (i.e. if there's also a remapped path).
+    pub fn to_embeddable_absolute_path(
+        &self,
+        file_path: RealFileName,
+        working_directory: &RealFileName,
+    ) -> RealFileName {
+        match file_path {
+            // Anything that's already remapped we don't modify, except for erasing
+            // the `local_path` portion.
+            RealFileName::Remapped { local_path: _, virtual_name } => {
+                RealFileName::Remapped {
+                    // We do not want any local path to be exported into metadata
+                    local_path: None,
+                    // We use the remapped name verbatim, even if it looks like a relative
+                    // path. The assumption is that the user doesn't want us to further
+                    // process paths that have gone through remapping.
+                    virtual_name,
+                }
+            }
+
+            RealFileName::LocalPath(unmapped_file_path) => {
+                // If no remapping has been applied yet, try to do so
+                let (new_path, was_remapped) = self.map_prefix(unmapped_file_path);
+                if was_remapped {
+                    // It was remapped, so don't modify further
+                    return RealFileName::Remapped {
+                        local_path: None,
+                        virtual_name: new_path.into_owned(),
+                    };
+                }
+
+                if new_path.is_absolute() {
+                    // No remapping has applied to this path and it is absolute,
+                    // so the working directory cannot influence it either, so
+                    // we are done.
+                    return RealFileName::LocalPath(new_path.into_owned());
+                }
+
+                debug_assert!(new_path.is_relative());
+                let unmapped_file_path_rel = new_path;
+
+                match working_directory {
+                    RealFileName::LocalPath(unmapped_working_dir_abs) => {
+                        let file_path_abs = unmapped_working_dir_abs.join(unmapped_file_path_rel);
+
+                        // Although neither `working_directory` nor the file name were subject
+                        // to path remapping, the concatenation between the two may be. Hence
+                        // we need to do a remapping here.
+                        let (file_path_abs, was_remapped) = self.map_prefix(file_path_abs);
+                        if was_remapped {
+                            RealFileName::Remapped {
+                                // Erase the actual path
+                                local_path: None,
+                                virtual_name: file_path_abs.into_owned(),
+                            }
+                        } else {
+                            // No kind of remapping applied to this path, so
+                            // we leave it as it is.
+                            RealFileName::LocalPath(file_path_abs.into_owned())
+                        }
+                    }
+                    RealFileName::Remapped {
+                        local_path: _,
+                        virtual_name: remapped_working_dir_abs,
+                    } => {
+                        // If working_directory has been remapped, then we emit
+                        // Remapped variant as the expanded path won't be valid
+                        RealFileName::Remapped {
+                            local_path: None,
+                            virtual_name: Path::new(remapped_working_dir_abs)
+                                .join(unmapped_file_path_rel),
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Expand a relative path to an absolute path **without** remapping taken into account.
+    ///
+    /// The resulting `RealFileName` will have its `virtual_path` portion erased if
+    /// possible (i.e. if there's also a remapped path).
+    pub fn to_local_embeddable_absolute_path(
+        &self,
+        file_path: RealFileName,
+        working_directory: &RealFileName,
+    ) -> RealFileName {
+        let file_path = file_path.local_path_if_available();
+        if file_path.is_absolute() {
+            // No remapping has applied to this path and it is absolute,
+            // so the working directory cannot influence it either, so
+            // we are done.
+            return RealFileName::LocalPath(file_path.to_path_buf());
+        }
+        debug_assert!(file_path.is_relative());
+        let working_directory = working_directory.local_path_if_available();
+        RealFileName::LocalPath(Path::new(working_directory).join(file_path))
     }
 
     /// Attempts to (heuristically) reverse a prefix mapping.

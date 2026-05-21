@@ -23,8 +23,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
 
         for region in self.regions() {
             if let NllRegionVariableOrigin::FreeRegion = self.definitions[region].origin {
-                let classification =
-                    self.universal_regions().region_classification(region).unwrap();
+                let classification = self.universal_regions.region_classification(region).unwrap();
                 let outlived_by = self.universal_region_relations.regions_outlived_by(region);
                 writeln!(
                     out,
@@ -46,7 +45,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
                 "| {r:rw$?} | {ui:4?} | {v}",
                 r = region,
                 rw = REGION_WIDTH,
-                ui = self.max_nameable_universe(self.constraint_sccs.scc(region)),
+                ui = self.region_universe(region),
                 v = self.region_value_str(region),
             )?;
         }
@@ -80,7 +79,7 @@ impl<'tcx> RegionInferenceContext<'tcx> {
             let OutlivesConstraint { sup, sub, locations, category, span, .. } = constraint;
             let (name, arg) = match locations {
                 Locations::All(span) => {
-                    ("All", tcx.sess.source_map().span_to_diagnostic_string(*span))
+                    ("All", tcx.sess.source_map().span_to_embeddable_string(*span))
                 }
                 Locations::Single(loc) => ("Single", format!("{loc:?}")),
             };

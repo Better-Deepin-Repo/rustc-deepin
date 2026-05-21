@@ -3,7 +3,6 @@ use std::io::Read;
 use std::sync::Arc;
 use std::time::Instant;
 
-use brotli::enc::BrotliEncoderParams;
 use bytes::Buf;
 use database::selector;
 use database::ArtifactId;
@@ -15,13 +14,11 @@ use crate::api::self_profile::ArtifactSizeDelta;
 use crate::api::{self_profile, self_profile_processed, self_profile_raw, ServerResult};
 use crate::load::SiteCtxt;
 use crate::self_profile::{get_or_download_self_profile, get_self_profile_raw_data};
-use crate::server::maybe_compressed_response;
 use crate::server::{Response, ResponseHeaders};
 
 pub async fn handle_self_profile_processed_download(
     body: self_profile_processed::Request,
     ctxt: &SiteCtxt,
-    allow_compression: bool,
 ) -> http::Response<hyper::Body> {
     log::info!("handle_self_profile_processed_download({:?})", body);
     let mut params = body.params.clone();
@@ -118,7 +115,7 @@ pub async fn handle_self_profile_processed_download(
             Ok(c) => c,
             Err(e) => {
                 log::error!("Failed to generate json {:?}", e);
-                let mut resp = http::Response::new(format!("{e:?}").into());
+                let mut resp = http::Response::new(format!("{:?}", e).into());
                 *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
                 return resp;
             }
@@ -151,18 +148,7 @@ pub async fn handle_self_profile_processed_download(
         hyper::header::HeaderValue::from_static("https://profiler.firefox.com"),
     );
 
-    if output.filename.ends_with("json") && allow_compression {
-        maybe_compressed_response(
-            builder,
-            output.data,
-            &Some(BrotliEncoderParams {
-                quality: 4,
-                ..Default::default()
-            }),
-        )
-    } else {
-        builder.body(hyper::Body::from(output.data)).unwrap()
-    }
+    builder.body(hyper::Body::from(output.data)).unwrap()
 }
 
 // Add query data entries to `profile` for any queries in `base_profile` which are not present in
@@ -214,8 +200,6 @@ fn get_self_profile_delta(
         self_time: profile.totals.self_time as i64 - base_profile.totals.self_time as i64,
         invocation_count: profile.totals.invocation_count as i32
             - base_profile.totals.invocation_count as i32,
-        number_of_cache_hits: profile.totals.number_of_cache_hits as i32
-            - base_profile.totals.number_of_cache_hits as i32,
         incremental_load_time: profile.totals.incremental_load_time as i64
             - base_profile.totals.incremental_load_time as i64,
     };
@@ -232,8 +216,6 @@ fn get_self_profile_delta(
                 let delta = self_profile::QueryDataDelta {
                     self_time: qd.self_time as i64 - base_qd.self_time as i64,
                     invocation_count: qd.invocation_count as i32 - base_qd.invocation_count as i32,
-                    number_of_cache_hits: qd.number_of_cache_hits as i32
-                        - base_qd.number_of_cache_hits as i32,
                     incremental_load_time: qd.incremental_load_time as i64
                         - base_qd.incremental_load_time as i64,
                 };
@@ -244,7 +226,6 @@ fn get_self_profile_delta(
                 let delta = self_profile::QueryDataDelta {
                     self_time: qd.self_time as i64,
                     invocation_count: qd.invocation_count as i32,
-                    number_of_cache_hits: qd.number_of_cache_hits as i32,
                     incremental_load_time: qd.incremental_load_time as i64,
                 };
 
@@ -272,6 +253,66 @@ fn get_self_profile_delta(
     })
 }
 
+fn sort_self_profile(
+    profile: &mut self_profile::SelfProfile,
+    base_profile_delta: &mut Option<self_profile::SelfProfileDelta>,
+    sort_idx: i32,
+) {
+    let qd = &mut profile.query_data;
+    let qd_deltas = base_profile_delta.as_mut().map(|bpd| &mut bpd.query_data);
+    let mut indices: Vec<_> = (0..qd.len()).collect();
+
+    match sort_idx.abs() {
+        1 => indices.sort_by_key(|&i| qd[i].label),
+        2 => indices.sort_by_key(|&i| qd[i].self_time),
+        3 => indices.sort_by_key(|&i| qd[i].number_of_cache_misses),
+        4 => indices.sort_by_key(|&i| qd[i].number_of_cache_hits),
+        5 => indices.sort_by_key(|&i| qd[i].invocation_count),
+        6 => indices.sort_by_key(|&i| qd[i].blocked_time),
+        7 => indices.sort_by_key(|&i| qd[i].incremental_load_time),
+        9 => indices.sort_by_key(|&i| {
+            // convert to displayed percentage
+            ((qd[i].number_of_cache_hits as f64 / qd[i].invocation_count as f64) * 10_000.0) as u64
+        }),
+        10 => indices.sort_by(|&a, &b| {
+            qd[a]
+                .percent_total_time
+                .partial_cmp(&qd[b].percent_total_time)
+                .unwrap()
+        }),
+        11 => {
+            if let Some(ref deltas) = qd_deltas {
+                indices.sort_by_key(|&i| deltas[i].self_time);
+            }
+        }
+        12 => {
+            if let Some(ref deltas) = qd_deltas {
+                indices.sort_by_key(|&i| deltas[i].invocation_count);
+            }
+        }
+        13 => {
+            if let Some(ref deltas) = qd_deltas {
+                indices.sort_by_key(|&i| deltas[i].incremental_load_time);
+            }
+        }
+        _ => return,
+    }
+
+    profile.query_data = if sort_idx < 0 {
+        indices.iter().map(|&i| qd[i].clone()).rev().collect()
+    } else {
+        indices.iter().map(|&i| qd[i].clone()).collect()
+    };
+
+    if let Some(deltas) = qd_deltas {
+        base_profile_delta.as_mut().unwrap().query_data = if sort_idx < 0 {
+            indices.iter().map(|&i| deltas[i].clone()).rev().collect()
+        } else {
+            indices.iter().map(|&i| deltas[i].clone()).collect()
+        };
+    }
+}
+
 pub async fn handle_self_profile_raw_download(
     body: self_profile_raw::Request,
     ctxt: &SiteCtxt,
@@ -290,7 +331,7 @@ pub async fn handle_self_profile_raw_download(
     let resp = match reqwest::get(&url).await {
         Ok(r) => r,
         Err(e) => {
-            let mut resp = http::Response::new(format!("{e:?}").into());
+            let mut resp = http::Response::new(format!("{:?}", e).into());
             *resp.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
             return resp;
         }
@@ -371,7 +412,7 @@ pub async fn handle_self_profile_raw(
     let scenario = body
         .scenario
         .parse::<database::Scenario>()
-        .map_err(|e| format!("invalid run name: {e:?}"))?;
+        .map_err(|e| format!("invalid run name: {:?}", e))?;
 
     let conn = ctxt.conn().await;
 
@@ -397,7 +438,7 @@ pub async fn handle_self_profile_raw(
             if aids_and_cids.iter().any(|(_, v)| *v == cid) {
                 cid
             } else {
-                return Err(format!("{cid} is not a collection ID at this artifact"));
+                return Err(format!("{} is not a collection ID at this artifact", cid));
             }
         }
         _ => first_cid,
@@ -417,9 +458,9 @@ pub async fn handle_self_profile_raw(
         cid,
     );
 
-    return match fetch(&cids, cid, format!("{url_prefix}.mm_profdata.sz")).await {
+    return match fetch(&cids, cid, format!("{}.mm_profdata.sz", url_prefix)).await {
         Ok(fetched) => Ok(fetched),
-        Err(new_error) => Err(format!("mm_profdata download failed: {new_error:?}",)),
+        Err(new_error) => Err(format!("mm_profdata download failed: {:?}", new_error,)),
     };
 
     async fn fetch(
@@ -431,7 +472,7 @@ pub async fn handle_self_profile_raw(
             .head(&url)
             .send()
             .await
-            .map_err(|e| format!("fetching artifact: {e:?}"))?;
+            .map_err(|e| format!("fetching artifact: {:?}", e))?;
         if !resp.status().is_success() {
             return Err(format!(
                 "Artifact did not resolve successfully: {:?} received",
@@ -458,8 +499,14 @@ pub async fn handle_self_profile(
     let scenario = body
         .scenario
         .parse::<database::Scenario>()
-        .map_err(|e| format!("invalid run name: {e:?}"))?;
+        .map_err(|e| format!("invalid run name: {:?}", e))?;
     let index = ctxt.index.load();
+
+    let sort_idx = body
+        .sort_idx
+        .parse::<i32>()
+        .ok()
+        .ok_or("sort_idx needs to be i32".to_string())?;
 
     let query = selector::CompileBenchmarkQuery::default()
         .benchmark(selector::Selector::One(bench_name.to_string()))
@@ -471,7 +518,7 @@ pub async fn handle_self_profile(
     let find_aid = |commit: &str| {
         index
             .artifact_id_for_commit(commit)
-            .ok_or(format!("could not find artifact {commit}"))
+            .ok_or(format!("could not find artifact {}", commit))
     };
 
     let mut commits = vec![find_aid(&body.commit)?];
@@ -512,12 +559,13 @@ pub async fn handle_self_profile(
         base_self_profile.as_ref().map(|p| &p.profile),
     );
 
-    let base_profile_delta = get_self_profile_delta(
+    let mut base_profile_delta = get_self_profile_delta(
         &self_profile.profile,
         base_self_profile.as_ref().map(|p| &p.profile),
         &self_profile.profiling_data,
         base_self_profile.as_ref().map(|p| &p.profiling_data),
     );
+    sort_self_profile(&mut self_profile.profile, &mut base_profile_delta, sort_idx);
 
     Ok(self_profile::Response {
         base_profile_delta,

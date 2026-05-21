@@ -1,31 +1,37 @@
-r[type.fn-pointer]
 # Function pointer types
 
-r[type.fn-pointer.syntax]
-```grammar,types
-BareFunctionType ->
-    ForLifetimes? FunctionTypeQualifiers `fn`
-       `(` FunctionParametersMaybeNamedVariadic? `)` BareFunctionReturnType?
+> **<sup>Syntax</sup>**\
+> _BareFunctionType_ :\
+> &nbsp;&nbsp; [_ForLifetimes_]<sup>?</sup> _FunctionTypeQualifiers_ `fn`\
+> &nbsp;&nbsp; &nbsp;&nbsp;  `(` _FunctionParametersMaybeNamedVariadic_<sup>?</sup> `)` _BareFunctionReturnType_<sup>?</sup>
+>
+> _FunctionTypeQualifiers_:\
+> &nbsp;&nbsp; `unsafe`<sup>?</sup> (`extern` [_Abi_]<sup>?</sup>)<sup>?</sup>
+>
+> _BareFunctionReturnType_:\
+> &nbsp;&nbsp; `->` [_TypeNoBounds_]
+>
+> _FunctionParametersMaybeNamedVariadic_ :\
+> &nbsp;&nbsp; _MaybeNamedFunctionParameters_ | _MaybeNamedFunctionParametersVariadic_
+>
+> _MaybeNamedFunctionParameters_ :\
+> &nbsp;&nbsp; _MaybeNamedParam_ ( `,` _MaybeNamedParam_ )<sup>\*</sup> `,`<sup>?</sup>
+>
+> _MaybeNamedParam_ :\
+> &nbsp;&nbsp; [_OuterAttribute_]<sup>\*</sup> ( ( [IDENTIFIER] | `_` ) `:` )<sup>?</sup> [_Type_]
+>
+> _MaybeNamedFunctionParametersVariadic_ :\
+> &nbsp;&nbsp; ( _MaybeNamedParam_ `,` )<sup>\*</sup> _MaybeNamedParam_ `,` [_OuterAttribute_]<sup>\*</sup> `...`
 
-FunctionTypeQualifiers -> `unsafe`? (`extern` Abi?)?
+Function pointer types, written using the `fn` keyword, refer to a function
+whose identity is not necessarily known at compile-time. They can be created
+via a coercion from both [function items] and non-capturing [closures].
 
-BareFunctionReturnType -> `->` TypeNoBounds
+The `unsafe` qualifier indicates that the type's value is an [unsafe
+function], and the `extern` qualifier indicates it is an [extern function].
 
-FunctionParametersMaybeNamedVariadic ->
-    MaybeNamedFunctionParameters | MaybeNamedFunctionParametersVariadic
-
-MaybeNamedFunctionParameters ->
-    MaybeNamedParam ( `,` MaybeNamedParam )* `,`?
-
-MaybeNamedParam ->
-    OuterAttribute* ( ( IDENTIFIER | `_` ) `:` )? Type
-
-MaybeNamedFunctionParametersVariadic ->
-    ( MaybeNamedParam `,` )* MaybeNamedParam `,` OuterAttribute* `...`
-```
-
-r[type.fn-pointer.intro]
-A function pointer type, written using the `fn` keyword, refers to a function whose identity is not necessarily known at compile-time.
+Variadic parameters can only be specified with [`extern`] function types with
+the `"C"` or `"cdecl"` calling convention.
 
 An example where `Binop` is defined as a function pointer type:
 
@@ -41,20 +47,17 @@ let bo: Binop = add;
 x = bo(5,7);
 ```
 
-r[type.fn-pointer.coercion]
-Function pointers can be created via a coercion from both [function items] and non-capturing, non-async [closures].
-
-r[type.fn-pointer.qualifiers]
-The `unsafe` qualifier indicates that the type's value is an [unsafe function], and the `extern` qualifier indicates it is an [extern function].
-
-r[type.fn-pointer.constraint-variadic]
-For the function to be variadic, its `extern` ABI must be one of those listed in [items.extern.variadic.conventions].
-
-r[type.fn-pointer.attributes]
 ## Attributes on function pointer parameters
 
-Attributes on function pointer parameters follow the same rules and restrictions as [regular function parameters].
+Attributes on function pointer parameters follow the same rules and
+restrictions as [regular function parameters].
 
+[IDENTIFIER]: ../identifiers.md
+[_Abi_]: ../items/functions.md
+[_ForLifetimes_]: ../trait-bounds.md#higher-ranked-trait-bounds
+[_TypeNoBounds_]: ../types.md#type-expressions
+[_Type_]: ../types.md#type-expressions
+[_OuterAttribute_]: ../attributes.md
 [`extern`]: ../items/external-blocks.md
 [closures]: closure.md
 [extern function]: ../items/functions.md#extern-function-qualifier

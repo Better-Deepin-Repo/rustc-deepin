@@ -1,6 +1,6 @@
 //! See [`FamousDefs`].
 
-use base_db::{CrateOrigin, LangCrateOrigin};
+use base_db::{CrateOrigin, LangCrateOrigin, SourceDatabase};
 use hir::{Crate, Enum, Function, Macro, Module, ScopeDef, Semantics, Trait};
 
 use crate::RootDatabase;
@@ -46,24 +46,12 @@ impl FamousDefs<'_, '_> {
         self.find_trait("core:cmp:Ord")
     }
 
-    pub fn core_convert_FromStr(&self) -> Option<Trait> {
-        self.find_trait("core:str:FromStr")
-    }
-
     pub fn core_convert_From(&self) -> Option<Trait> {
         self.find_trait("core:convert:From")
     }
 
     pub fn core_convert_Into(&self) -> Option<Trait> {
         self.find_trait("core:convert:Into")
-    }
-
-    pub fn core_convert_TryFrom(&self) -> Option<Trait> {
-        self.find_trait("core:convert:TryFrom")
-    }
-
-    pub fn core_convert_TryInto(&self) -> Option<Trait> {
-        self.find_trait("core:convert:TryInto")
     }
 
     pub fn core_convert_Index(&self) -> Option<Trait> {
@@ -106,18 +94,6 @@ impl FamousDefs<'_, '_> {
         self.find_trait("core:convert:AsRef")
     }
 
-    pub fn core_convert_AsMut(&self) -> Option<Trait> {
-        self.find_trait("core:convert:AsMut")
-    }
-
-    pub fn core_borrow_Borrow(&self) -> Option<Trait> {
-        self.find_trait("core:borrow:Borrow")
-    }
-
-    pub fn core_borrow_BorrowMut(&self) -> Option<Trait> {
-        self.find_trait("core:borrow:BorrowMut")
-    }
-
     pub fn core_ops_ControlFlow(&self) -> Option<Enum> {
         self.find_enum("core:ops:ControlFlow")
     }
@@ -128,10 +104,6 @@ impl FamousDefs<'_, '_> {
 
     pub fn core_marker_Copy(&self) -> Option<Trait> {
         self.find_trait("core:marker:Copy")
-    }
-
-    pub fn core_marker_Sized(&self) -> Option<Trait> {
-        self.find_trait("core:marker:Sized")
     }
 
     pub fn core_future_Future(&self) -> Option<Trait> {
@@ -154,13 +126,6 @@ impl FamousDefs<'_, '_> {
         self.find_macro("core:unimplemented")
     }
 
-    pub fn core_fmt_Display(&self) -> Option<Trait> {
-        self.find_trait("core:fmt:Display")
-    }
-
-    pub fn alloc_string_ToString(&self) -> Option<Trait> {
-        self.find_trait("alloc:string:ToString")
-    }
     pub fn builtin_crates(&self) -> impl Iterator<Item = Crate> {
         IntoIterator::into_iter([
             self.std(),
@@ -210,14 +175,11 @@ impl FamousDefs<'_, '_> {
     fn find_lang_crate(&self, origin: LangCrateOrigin) -> Option<Crate> {
         let krate = self.1;
         let db = self.0.db;
-        if krate.origin(db) == CrateOrigin::Lang(origin) {
-            return Some(krate);
-        }
-
+        let crate_graph = self.0.db.crate_graph();
         let res = krate
             .dependencies(db)
             .into_iter()
-            .find(|dep| dep.krate.origin(db) == CrateOrigin::Lang(origin))?
+            .find(|dep| crate_graph[dep.krate.into()].origin == CrateOrigin::Lang(origin))?
             .krate;
         Some(res)
     }
@@ -232,15 +194,18 @@ impl FamousDefs<'_, '_> {
             lang_crate => lang_crate,
         };
         let std_crate = self.find_lang_crate(lang_crate)?;
-        let mut module = std_crate.root_module(db);
+        let mut module = std_crate.root_module();
         for segment in path {
             module = module.children(db).find_map(|child| {
                 let name = child.name(db)?;
-                if name.as_str() == segment { Some(child) } else { None }
+                if name.eq_ident(segment) {
+                    Some(child)
+                } else {
+                    None
+                }
             })?;
         }
-        let def =
-            module.scope(db, None).into_iter().find(|(name, _def)| name.as_str() == trait_)?.1;
+        let def = module.scope(db, None).into_iter().find(|(name, _def)| name.eq_ident(trait_))?.1;
         Some(def)
     }
 }

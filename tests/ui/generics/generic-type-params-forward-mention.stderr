@@ -1,8 +1,8 @@
-error[E0128]: generic parameter defaults cannot reference parameters before they are declared
+error[E0128]: generic parameters with a default cannot use forward declared identifiers
   --> $DIR/generic-type-params-forward-mention.rs:2:23
    |
 LL | struct Foo<T = Option<U>, U = bool>(T, U);
-   |                       ^ cannot reference `U` before it is declared
+   |                       ^ defaulted generic parameters cannot be forward declared
 
 error: aborting due to 1 previous error
 

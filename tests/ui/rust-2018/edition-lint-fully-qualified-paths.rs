@@ -1,4 +1,3 @@
-//@ edition: 2015
 //@ run-rustfix
 
 #![deny(absolute_paths_not_starting_with_crate)]

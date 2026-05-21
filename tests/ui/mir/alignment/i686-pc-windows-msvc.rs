@@ -7,6 +7,8 @@
 // that will fail on dereferencing of a pointer to u64 which is not 8-byte-aligned but is
 // 4-byte-aligned.
 
+#![feature(strict_provenance)]
+
 fn main() {
     let mut x = [0u64; 2];
     let ptr = x.as_mut_ptr();

@@ -9,6 +9,7 @@
 // wrong path. The new algorithm avoids this problem and hence this
 // example typechecks correctly.
 
+//@ pretty-expanded FIXME #23616
 
 enum ScopeChain<'a> {
     Link(Scope<'a>),

@@ -1,7 +1,7 @@
 use ide_db::{famous_defs::FamousDefs, helpers::mod_path_to_ast, traits::resolve_target_trait};
 use syntax::ast::{self, AstNode, HasGenericArgs, HasName};
 
-use crate::{AssistContext, AssistId, Assists};
+use crate::{AssistContext, AssistId, AssistKind, Assists};
 
 // FIXME: this should be a diagnostic
 
@@ -39,11 +39,11 @@ pub(crate) fn convert_into_to_from(acc: &mut Assists, ctx: &AssistContext<'_>) -
     let module = ctx.sema.scope(impl_.syntax())?.module();
 
     let trait_ = resolve_target_trait(&ctx.sema, &impl_)?;
-    if trait_ != FamousDefs(&ctx.sema, module.krate(ctx.db())).core_convert_Into()? {
+    if trait_ != FamousDefs(&ctx.sema, module.krate()).core_convert_Into()? {
         return None;
     }
 
-    let cfg = ctx.config.find_path_config(ctx.sema.is_nightly(module.krate(ctx.sema.db)));
+    let cfg = ctx.config.import_path_config();
 
     let src_type_path = {
         let src_type_path = src_type.syntax().descendants().find_map(ast::Path::cast)?;
@@ -53,7 +53,7 @@ pub(crate) fn convert_into_to_from(acc: &mut Assists, ctx: &AssistContext<'_>) -
         };
         mod_path_to_ast(
             &module.find_path(ctx.db(), src_type_def, cfg)?,
-            module.krate(ctx.db()).edition(ctx.db()),
+            module.krate().edition(ctx.db()),
         )
     };
 
@@ -65,10 +65,10 @@ pub(crate) fn convert_into_to_from(acc: &mut Assists, ctx: &AssistContext<'_>) -
     };
 
     let into_fn = impl_.assoc_item_list()?.assoc_items().find_map(|item| {
-        if let ast::AssocItem::Fn(f) = item
-            && f.name()?.text() == "into"
-        {
-            return Some(f);
+        if let ast::AssocItem::Fn(f) = item {
+            if f.name()?.text() == "into" {
+                return Some(f);
+            }
         };
         None
     })?;
@@ -85,7 +85,7 @@ pub(crate) fn convert_into_to_from(acc: &mut Assists, ctx: &AssistContext<'_>) -
         .filter(|name| name.text() == "self" || name.text() == "Self");
 
     acc.add(
-        AssistId::refactor_rewrite("convert_into_to_from"),
+        AssistId("convert_into_to_from", AssistKind::RefactorRewrite),
         "Convert Into to From",
         impl_.syntax().text_range(),
         |builder| {

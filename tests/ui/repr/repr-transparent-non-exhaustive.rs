@@ -1,4 +1,4 @@
-#![deny(repr_transparent_non_zst_fields)]
+#![deny(repr_transparent_external_private_fields)]
 
 //@ aux-build: repr-transparent-non-exhaustive.rs
 extern crate repr_transparent_non_exhaustive;
@@ -24,13 +24,6 @@ pub struct InternalIndirection<T> {
 
 pub type Sized = i32;
 
-pub trait Trait {
-    type Assoc;
-}
-impl Trait for i32 {
-    type Assoc = NonExhaustive;
-}
-
 #[repr(transparent)]
 pub struct T1(Sized, InternalPrivate);
 #[repr(transparent)]
@@ -42,16 +35,11 @@ pub struct T4(Sized, ExternalIndirection<(InternalPrivate, InternalNonExhaustive
 
 #[repr(transparent)]
 pub struct T5(Sized, Private);
-//~^ ERROR zero-sized fields in `repr(transparent)` cannot contain external types with private fields
-//~| WARN this was previously accepted by the compiler
-
-#[repr(transparent)]
-pub struct T6(Sized, NonExhaustive);
 //~^ ERROR zero-sized fields in `repr(transparent)` cannot contain external non-exhaustive types
 //~| WARN this was previously accepted by the compiler
 
 #[repr(transparent)]
-pub struct T6a(Sized, <i32 as Trait>::Assoc); // normalizes to `NonExhaustive`
+pub struct T6(Sized, NonExhaustive);
 //~^ ERROR zero-sized fields in `repr(transparent)` cannot contain external non-exhaustive types
 //~| WARN this was previously accepted by the compiler
 
@@ -67,7 +55,7 @@ pub struct T8(Sized, NonExhaustiveVariant);
 
 #[repr(transparent)]
 pub struct T9(Sized, InternalIndirection<Private>);
-//~^ ERROR zero-sized fields in `repr(transparent)` cannot contain external types with private fields
+//~^ ERROR zero-sized fields in `repr(transparent)` cannot contain external non-exhaustive types
 //~| WARN this was previously accepted by the compiler
 
 #[repr(transparent)]
@@ -87,7 +75,7 @@ pub struct T12(Sized, InternalIndirection<NonExhaustiveVariant>);
 
 #[repr(transparent)]
 pub struct T13(Sized, ExternalIndirection<Private>);
-//~^ ERROR zero-sized fields in `repr(transparent)` cannot contain external types with private fields
+//~^ ERROR zero-sized fields in `repr(transparent)` cannot contain external non-exhaustive types
 //~| WARN this was previously accepted by the compiler
 
 #[repr(transparent)]
@@ -117,7 +105,7 @@ pub struct T18(NonExhaustive, NonExhaustive);
 
 #[repr(transparent)]
 pub struct T19(NonExhaustive, Private);
-//~^ ERROR zero-sized fields in `repr(transparent)` cannot contain external types with private fields
+//~^ ERROR zero-sized fields in `repr(transparent)` cannot contain external non-exhaustive types
 //~| WARN this was previously accepted by the compiler
 
 #[repr(transparent)]

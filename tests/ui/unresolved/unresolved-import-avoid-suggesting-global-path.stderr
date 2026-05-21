@@ -6,9 +6,8 @@ LL |     use module::SomeUsefulType;
    |
 help: consider importing this struct instead
    |
-LL -     use module::SomeUsefulType;
-LL +     use library::SomeUsefulType;
-   |
+LL |     use library::SomeUsefulType;
+   |         ~~~~~~~~~~~~~~~~~~~~~~~
 
 error[E0432]: unresolved import `module::SomeUsefulType`
   --> $DIR/unresolved-import-avoid-suggesting-global-path.rs:28:9
@@ -18,9 +17,8 @@ LL |     use module::SomeUsefulType;
    |
 help: consider importing this struct instead
    |
-LL -     use module::SomeUsefulType;
-LL +     use library::SomeUsefulType;
-   |
+LL |     use library::SomeUsefulType;
+   |         ~~~~~~~~~~~~~~~~~~~~~~~
 
 error: aborting due to 2 previous errors
 

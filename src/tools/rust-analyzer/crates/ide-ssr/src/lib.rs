@@ -33,10 +33,12 @@
 //
 // Supported constraints:
 //
-// | Constraint    | Restricts placeholder |
-// |---------------|------------------------|
-// | kind(literal) | Is a literal (e.g. `42` or `"forty two"`) |
-// | not(a)        | Negates the constraint `a` |
+// |===
+// | Constraint    | Restricts placeholder
+//
+// | kind(literal) | Is a literal (e.g. `42` or `"forty two"`)
+// | not(a)        | Negates the constraint `a`
+// |===
 //
 // Available via the command `rust-analyzer.ssr`.
 //
@@ -50,9 +52,11 @@
 // String::from((y + 5).foo(z))
 // ```
 //
-// | Editor  | Action Name |
-// |---------|--------------|
-// | VS Code | **rust-analyzer: Structural Search Replace** |
+// |===
+// | Editor  | Action Name
+//
+// | VS Code | **rust-analyzer: Structural Search Replace**
+// |===
 //
 // Also available as an assist, by writing a comment containing the structural
 // search and replace rule. You will only see the assist if the comment can
@@ -62,11 +66,6 @@
 // // Place the cursor on the line below to see the assist 💡.
 // // foo($a, $b) ==>> ($a).foo($b)
 // ```
-
-#![cfg_attr(feature = "in-rust-tree", feature(rustc_private))]
-
-#[cfg(feature = "in-rust-tree")]
-extern crate rustc_driver as _;
 
 mod fragments;
 mod from_comment;
@@ -85,11 +84,10 @@ pub use crate::{errors::SsrError, from_comment::ssr_from_comment, matching::Matc
 
 use crate::{errors::bail, matching::MatchFailureReason};
 use hir::{FileRange, Semantics};
-use ide_db::LocalRoots;
-use ide_db::text_edit::TextEdit;
-use ide_db::{EditionedFileId, FileId, FxHashMap, RootDatabase, base_db::SourceDatabase};
+use ide_db::{base_db::SourceDatabase, EditionedFileId, FileId, FxHashMap, RootDatabase};
 use resolving::ResolvedRule;
-use syntax::{AstNode, SyntaxNode, TextRange, ast};
+use syntax::{ast, AstNode, SyntaxNode, TextRange};
+use text_edit::TextEdit;
 
 // A structured search replace rule. Create by calling `parse` on a str.
 #[derive(Debug)]
@@ -115,7 +113,7 @@ pub struct SsrMatches {
 pub struct MatchFinder<'db> {
     /// Our source of information about the user's code.
     sema: Semantics<'db, ide_db::RootDatabase>,
-    rules: Vec<ResolvedRule<'db>>,
+    rules: Vec<ResolvedRule>,
     resolution_scope: resolving::ResolutionScope<'db>,
     restrict_ranges: Vec<ide_db::FileRange>,
 }
@@ -130,7 +128,9 @@ impl<'db> MatchFinder<'db> {
     ) -> Result<MatchFinder<'db>, SsrError> {
         restrict_ranges.retain(|range| !range.range.is_empty());
         let sema = Semantics::new(db);
-        let file_id = sema.attach_first_edition(lookup_context.file_id);
+        let file_id = sema
+            .attach_first_edition(lookup_context.file_id)
+            .unwrap_or_else(|| EditionedFileId::current_edition(lookup_context.file_id));
         let resolution_scope = resolving::ResolutionScope::new(
             &sema,
             hir::FilePosition { file_id, offset: lookup_context.offset },
@@ -141,11 +141,10 @@ impl<'db> MatchFinder<'db> {
 
     /// Constructs an instance using the start of the first file in `db` as the lookup context.
     pub fn at_first_file(db: &'db ide_db::RootDatabase) -> Result<MatchFinder<'db>, SsrError> {
-        if let Some(first_file_id) = LocalRoots::get(db)
-            .roots(db)
-            .iter()
-            .next()
-            .and_then(|root| db.source_root(*root).source_root(db).iter().next())
+        use ide_db::base_db::SourceRootDatabase;
+        use ide_db::symbol_index::SymbolsDatabase;
+        if let Some(first_file_id) =
+            db.local_roots().iter().next().and_then(|root| db.source_root(*root).iter().next())
         {
             MatchFinder::in_context(
                 db,
@@ -176,7 +175,7 @@ impl<'db> MatchFinder<'db> {
         let mut matches_by_file = FxHashMap::default();
         for m in self.matches().matches {
             matches_by_file
-                .entry(m.range.file_id.file_id(self.sema.db))
+                .entry(m.range.file_id.file_id())
                 .or_insert_with(SsrMatches::default)
                 .matches
                 .push(m);
@@ -189,7 +188,7 @@ impl<'db> MatchFinder<'db> {
                     replacing::matches_to_edit(
                         self.sema.db,
                         &matches,
-                        self.sema.db.file_text(file_id).text(self.sema.db),
+                        &self.sema.db.file_text(file_id),
                         &self.rules,
                     ),
                 )
@@ -230,8 +229,8 @@ impl<'db> MatchFinder<'db> {
     ) -> Vec<MatchDebugInfo> {
         let file = self.sema.parse(file_id);
         let mut res = Vec::new();
-        let file_text = self.sema.db.file_text(file_id.file_id(self.sema.db)).text(self.sema.db);
-        let mut remaining_text = &**file_text;
+        let file_text = self.sema.db.file_text(file_id.into());
+        let mut remaining_text = &*file_text;
         let mut base = 0;
         let len = snippet.len() as u32;
         while let Some(offset) = remaining_text.find(snippet) {
@@ -286,16 +285,17 @@ impl<'db> MatchFinder<'db> {
                         node: node.clone(),
                     });
                 }
-            } else if let Some(macro_call) = ast::MacroCall::cast(node.clone())
-                && let Some(expanded) = self.sema.expand_macro_call(&macro_call)
-                && let Some(tt) = macro_call.token_tree()
-            {
-                self.output_debug_for_nodes_at_range(
-                    &expanded.value,
-                    range,
-                    &Some(self.sema.original_range(tt.syntax())),
-                    out,
-                );
+            } else if let Some(macro_call) = ast::MacroCall::cast(node.clone()) {
+                if let Some(expanded) = self.sema.expand(&macro_call) {
+                    if let Some(tt) = macro_call.token_tree() {
+                        self.output_debug_for_nodes_at_range(
+                            &expanded,
+                            range,
+                            &Some(self.sema.original_range(tt.syntax())),
+                            out,
+                        );
+                    }
+                }
             }
             self.output_debug_for_nodes_at_range(&node, range, restrict_range, out);
         }

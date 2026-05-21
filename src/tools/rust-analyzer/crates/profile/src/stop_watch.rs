@@ -11,7 +11,7 @@ use crate::MemoryUsage;
 
 pub struct StopWatch {
     time: Instant,
-    #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
+    #[cfg(target_os = "linux")]
     counter: Option<perf_event::Counter>,
     memory: MemoryUsage,
 }
@@ -24,7 +24,7 @@ pub struct StopWatchSpan {
 
 impl StopWatch {
     pub fn start() -> StopWatch {
-        #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
+        #[cfg(target_os = "linux")]
         let counter = {
             // When debugging rust-analyzer using rr, the perf-related syscalls cause it to abort.
             // We allow disabling perf by setting the env var `RA_DISABLE_PERF`.
@@ -37,10 +37,10 @@ impl StopWatch {
                     .build()
                     .map_err(|err| eprintln!("Failed to create perf counter: {err}"))
                     .ok();
-                if let Some(counter) = &mut counter
-                    && let Err(err) = counter.enable()
-                {
-                    eprintln!("Failed to start perf counter: {err}")
+                if let Some(counter) = &mut counter {
+                    if let Err(err) = counter.enable() {
+                        eprintln!("Failed to start perf counter: {err}")
+                    }
                 }
                 counter
             } else {
@@ -51,7 +51,7 @@ impl StopWatch {
         let time = Instant::now();
         StopWatch {
             time,
-            #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
+            #[cfg(target_os = "linux")]
             counter,
             memory,
         }
@@ -60,12 +60,10 @@ impl StopWatch {
     pub fn elapsed(&mut self) -> StopWatchSpan {
         let time = self.time.elapsed();
 
-        #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
+        #[cfg(target_os = "linux")]
         let instructions = self.counter.as_mut().and_then(|it| {
             it.read().map_err(|err| eprintln!("Failed to read perf counter: {err}")).ok()
         });
-        #[cfg(all(target_os = "linux", target_env = "ohos"))]
-        let instructions = None;
         #[cfg(not(target_os = "linux"))]
         let instructions = None;
 

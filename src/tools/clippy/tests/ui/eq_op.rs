@@ -5,96 +5,80 @@
 fn main() {
     // simple values and comparisons
     let _ = 1 == 1;
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `==`
+    //~| NOTE: `-D clippy::eq-op` implied by `-D warnings`
     let _ = "no" == "no";
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `==`
     // even though I agree that no means no ;-)
     let _ = false != false;
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `!=`
     let _ = 1.5 < 1.5;
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `<`
     let _ = 1u64 >= 1u64;
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `>=`
     let x = f32::NAN;
     let _ = x != x;
-    //~^ eq_op
+    //~^ ERROR: equal expressions as operands to `!=`
+    //~| NOTE: if you intended to check if the operand is NaN, use `.is_nan()` instead
 
     // casts, methods, parentheses
     let _ = (1u32 as u64) & (1u32 as u64);
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `&`
     #[rustfmt::skip]
     {
         let _ = 1 ^ ((((((1))))));
-        //~^ eq_op
-
+        //~^ ERROR: equal expressions as operands to `^`
     };
 
     // unary and binary operators
     let _ = (-(2) < -(2));
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `<`
     let _ = ((1 + 1) & (1 + 1) == (1 + 1) & (1 + 1));
-    //~^ eq_op
-    //~| eq_op
-    //~| eq_op
-
+    //~^ ERROR: equal expressions as operands to `==`
+    //~| ERROR: equal expressions as operands to `&`
+    //~| ERROR: equal expressions as operands to `&`
     let _ = (1 * 2) + (3 * 4) == 1 * 2 + 3 * 4;
-    //~^ eq_op
+    //~^ ERROR: equal expressions as operands to `==`
 
     // various other things
     let _ = ([1] != [1]);
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `!=`
     let _ = ((1, 2) != (1, 2));
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `!=`
     let _ = vec![1, 2, 3] == vec![1, 2, 3]; //no error yet, as we don't match macros
 
     // const folding
     let _ = 1 + 1 == 2;
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `==`
     let _ = 1 - 1 == 0;
-    //~^ eq_op
-    //~| eq_op
+    //~^ ERROR: equal expressions as operands to `==`
+    //~| ERROR: equal expressions as operands to `-`
 
     let _ = 1 - 1;
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `-`
     let _ = 1 / 1;
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `/`
     let _ = true && true;
-    //~^ eq_op
+    //~^ ERROR: equal expressions as operands to `&&`
 
     let _ = true || true;
-    //~^ eq_op
+    //~^ ERROR: equal expressions as operands to `||`
 
     let a: u32 = 0;
     let b: u32 = 0;
 
     let _ = a == b && b == a;
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `&&`
     let _ = a != b && b != a;
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `&&`
     let _ = a < b && b > a;
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `&&`
     let _ = a <= b && b >= a;
-    //~^ eq_op
+    //~^ ERROR: equal expressions as operands to `&&`
 
     let mut a = vec![1];
     let _ = a == a;
-    //~^ eq_op
-
+    //~^ ERROR: equal expressions as operands to `==`
     let _ = 2 * a.len() == 2 * a.len(); // ok, functions
     let _ = a.pop() == a.pop(); // ok, functions
 
@@ -105,7 +89,7 @@ fn main() {
     const B: u32 = 10;
     const C: u32 = A / B; // ok, different named constants
     const D: u32 = A / A;
-    //~^ eq_op
+    //~^ ERROR: equal expressions as operands to `/`
 }
 
 macro_rules! check_if_named_foo {
@@ -137,7 +121,7 @@ struct Nested {
 fn check_nested(n1: &Nested, n2: &Nested) -> bool {
     // `n2.inner.0.0` mistyped as `n1.inner.0.0`
     (n1.inner.0).0 == (n1.inner.0).0 && (n1.inner.1).0 == (n2.inner.1).0 && (n1.inner.2).0 == (n2.inner.2).0
-    //~^ eq_op
+    //~^ ERROR: equal expressions as operands to `==`
 }
 
 #[test]

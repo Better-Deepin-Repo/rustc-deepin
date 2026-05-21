@@ -1,5 +1,7 @@
 //@ run-pass
-//@ needs-subprocess
+#![allow(unused_mut)]
+//@ ignore-wasm32 no processes
+//@ ignore-sgx no processes
 
 use std::env;
 use std::io::prelude::*;
@@ -30,7 +32,7 @@ fn parent() {
 }
 
 fn child() {
-    let stdin = io::stdin();
+    let mut stdin = io::stdin();
     for line in stdin.lock().lines() {
         println!("{}", line.unwrap());
     }

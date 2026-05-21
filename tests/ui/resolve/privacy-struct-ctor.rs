@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ aux-build:privacy-struct-ctor.rs
 
 extern crate privacy_struct_ctor as xcrate;
@@ -10,10 +9,10 @@ mod m {
     }
 
     pub mod n {
-        pub(in crate::m) struct Z(pub(in crate::m::n) u8);
+        pub(in m) struct Z(pub(in m::n) u8);
     }
 
-    use crate::m::n::Z; // OK, only the type is imported
+    use m::n::Z; // OK, only the type is imported
 
     fn f() {
         n::Z;

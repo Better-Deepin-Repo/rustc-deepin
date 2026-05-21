@@ -12,8 +12,8 @@
 extern crate proc_macros;
 use proc_macros::{external, inline_macros};
 
-fn fun(x: &mut &mut u32) {
-    //~^ mut_mut
+fn fun(x: &mut &mut u32) -> bool {
+    **x > 0
 }
 
 fn less_fun(x: *mut *mut u32) {
@@ -30,22 +30,18 @@ macro_rules! mut_ptr {
 #[inline_macros]
 fn main() {
     let mut x = &mut &mut 1u32;
-    //~^ mut_mut
     {
         let mut y = &mut x;
-        //~^ mut_mut
     }
 
-    {
+    if fun(x) {
         let y: &mut &mut u32 = &mut &mut 2;
-        //~^ mut_mut
-        //~| mut_mut
+        **y + **x;
     }
 
-    {
+    if fun(x) {
         let y: &mut &mut &mut u32 = &mut &mut &mut 2;
-        //~^ mut_mut
-        //~| mut_mut
+        ***y + **x;
     }
 
     let mut z = inline!(&mut $(&mut 3u32));

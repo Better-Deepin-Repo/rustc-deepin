@@ -1,5 +1,6 @@
-// https://github.com/rust-lang/rust/pull/113099
 //@ check-pass
+// https://github.com/rust-lang/rust/pull/113099
+
 mod framing {
     mod public_message {
         use super::*;
@@ -20,7 +21,7 @@ mod framing {
 }
 
 use crate::framing::ConfirmedTranscriptHashInput;
-//~^ WARN `ConfirmedTranscriptHashInput` is ambiguous
+//~^ WARNING `ConfirmedTranscriptHashInput` is ambiguous
 //~| WARNING this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
 
 fn main() { }

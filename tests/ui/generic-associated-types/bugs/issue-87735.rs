@@ -1,5 +1,5 @@
 //@ check-fail
-//@ known-bug: unknown
+//@ known-bug: #87735, #88526
 
 // This should pass, but we need an extension of implied bounds (probably).
 

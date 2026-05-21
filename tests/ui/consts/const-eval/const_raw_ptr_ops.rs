@@ -1,6 +1,3 @@
-//@revisions: stable gated
-#![cfg_attr(gated, feature(const_trait_impl))]
-
 fn main() {}
 
 // unconst and bad, will thus error in miri

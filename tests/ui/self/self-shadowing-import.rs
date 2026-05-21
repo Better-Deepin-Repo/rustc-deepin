@@ -9,7 +9,7 @@ mod a {
 }
 
 mod c {
-    use crate::a::b::a;
+    use a::b::a;
     pub fn bar() { assert_eq!(a::foo(), 1); }
 }
 

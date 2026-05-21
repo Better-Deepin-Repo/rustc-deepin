@@ -1,8 +1,6 @@
-//@ check-pass
+#![allow(clippy::all)]
 
-#![expect(clippy::no_effect)]
-
-// Test for https://github.com/rust-lang/rust-clippy/issues/1588
+/// Test for https://github.com/rust-lang/rust-clippy/issues/1588
 
 fn main() {
     match 1 {

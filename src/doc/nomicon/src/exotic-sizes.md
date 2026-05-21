@@ -8,7 +8,7 @@ This isn't always the case in Rust.
 Rust supports Dynamically Sized Types (DSTs): types without a statically
 known size or alignment. On the surface, this is a bit nonsensical: Rust *must*
 know the size and alignment of something in order to correctly work with it! In
-this regard, DSTs are not normal types. Since they lack a statically known
+this regard, DSTs are not normal types. Because they lack a statically known
 size, these types can only exist behind a pointer. Any pointer to a
 DST consequently becomes a *wide* pointer consisting of the pointer and the
 information that "completes" them (more on this below).
@@ -40,7 +40,7 @@ struct MySuperSlice {
 }
 ```
 
-Unfortunately, such a type is largely useless without a way to construct it. Currently the
+Although such a type is largely useless without a way to construct it. Currently the
 only properly supported way to create a custom DST is by making your type generic
 and performing an *unsizing coercion*:
 
@@ -106,9 +106,9 @@ consequence of types with no size. In particular, pointer offsets are no-ops,
 and allocators typically [require a non-zero size][alloc].
 
 Note that references to ZSTs (including empty slices), just like all other
-references, must be non-null and suitably aligned. However, loading or storing
-through a null pointer to a ZST is not [undefined behavior][ub], unlike
-pointers to other types.
+references, must be non-null and suitably aligned. Dereferencing a null or
+unaligned pointer to a ZST is [undefined behavior][ub], just like for any other
+type.
 
 [alloc]: ../std/alloc/trait.GlobalAlloc.html#tymethod.alloc
 [ub]: what-unsafe-does.html

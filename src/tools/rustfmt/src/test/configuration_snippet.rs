@@ -4,9 +4,9 @@ use std::io::{BufRead, BufReader, Write};
 use std::iter::Enumerate;
 use std::path::{Path, PathBuf};
 
-use super::{DIFF_CONTEXT_SIZE, print_mismatches, write_message};
+use super::{print_mismatches, write_message, DIFF_CONTEXT_SIZE};
 use crate::config::{Config, EmitMode, Verbosity};
-use crate::rustfmt_diff::{Mismatch, make_diff};
+use crate::rustfmt_diff::{make_diff, Mismatch};
 use crate::{Input, Session};
 
 const CONFIGURATIONS_FILE_NAME: &str = "Configurations.md";

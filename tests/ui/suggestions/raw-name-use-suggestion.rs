@@ -1,4 +1,3 @@
-//@ edition:2015
 mod foo {
     pub fn r#let() {}
     pub fn break() {} //~ ERROR expected identifier, found keyword `break`

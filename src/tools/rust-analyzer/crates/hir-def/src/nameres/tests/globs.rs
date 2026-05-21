@@ -18,18 +18,18 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - Baz : type (glob) value (glob)
-            - Foo : type (glob) value (glob)
-            - bar : type (glob)
-            - foo : type
+            Baz: t v
+            Foo: t v
+            bar: t
+            foo: t
 
             crate::foo
-            - Baz : type (import) value (import)
-            - Foo : type value
-            - bar : type
+            Baz: ti vi
+            Foo: t v
+            bar: t
 
             crate::foo::bar
-            - Baz : type value
+            Baz: t v
         "#]],
     );
 }
@@ -53,20 +53,20 @@ pub use super::*;
 "#,
         expect![[r#"
             crate
-            - Baz : type (glob) value (glob)
-            - Foo : type (glob) value (glob)
-            - bar : type (glob)
-            - foo : type
+            Baz: t v
+            Foo: t v
+            bar: t
+            foo: t
 
             crate::foo
-            - Baz : type (glob) value (glob)
-            - Foo : type value
-            - bar : type
+            Baz: t v
+            Foo: t v
+            bar: t
 
             crate::foo::bar
-            - Baz : type value
-            - Foo : type (glob) value (glob)
-            - bar : type (glob)
+            Baz: t v
+            Foo: t v
+            bar: t
         "#]],
     );
 }
@@ -91,20 +91,20 @@ pub use super::*;
 ",
         expect![[r#"
             crate
-            - Baz : type (glob) value (glob)
-            - bar : type (glob)
-            - foo : type
+            Baz: t v
+            bar: t
+            foo: t
 
             crate::foo
-            - Baz : type (glob) value (glob)
-            - PrivateStructFoo : type value
-            - bar : type
+            Baz: t v
+            PrivateStructFoo: t v
+            bar: t
 
             crate::foo::bar
-            - Baz : type value
-            - PrivateStructBar : type value
-            - PrivateStructFoo : type (glob) value (glob)
-            - bar : type (glob)
+            Baz: t v
+            PrivateStructBar: t v
+            PrivateStructFoo: t v
+            bar: t
         "#]],
     );
 }
@@ -130,19 +130,19 @@ pub(crate) struct PubCrateStruct;
 ",
         expect![[r#"
             crate
-            - Foo : type (glob)
-            - PubCrateStruct : type (glob) value (glob)
-            - bar : type (glob)
-            - foo : type
+            Foo: t
+            PubCrateStruct: t v
+            bar: t
+            foo: t
 
             crate::foo
-            - Foo : type value
-            - bar : type
+            Foo: t v
+            bar: t
 
             crate::foo::bar
-            - PrivateBar : type value
-            - PrivateBaz : type value
-            - PubCrateStruct : type value
+            PrivateBar: t v
+            PrivateBaz: t v
+            PubCrateStruct: t v
         "#]],
     );
 }
@@ -160,7 +160,7 @@ pub struct Baz;
 "#,
         expect![[r#"
             crate
-            - Baz : type (glob) value (glob)
+            Baz: t v
         "#]],
     );
 }
@@ -178,7 +178,7 @@ struct Foo;
 "#,
         expect![[r#"
             crate
-            - Baz : type (glob) value (glob)
+            Baz: t v
         "#]],
     );
 }
@@ -193,9 +193,9 @@ use self::Foo::*;
 "#,
         expect![[r#"
             crate
-            - Bar : type (glob) value (glob)
-            - Baz : type (glob) value (glob)
-            - Foo : type
+            Bar: t v
+            Baz: t v
+            Foo: t
         "#]],
     );
 }
@@ -210,9 +210,9 @@ use self::Foo::{*};
 "#,
         expect![[r#"
             crate
-            - Bar : type (glob) value (glob)
-            - Baz : type (glob) value (glob)
-            - Foo : type
+            Bar: t v
+            Baz: t v
+            Foo: t
         "#]],
     );
 }
@@ -237,22 +237,22 @@ pub mod baz { pub struct Bar; }
 "#,
         expect![[r#"
             crate
-            - Bar : type (import) value (import)
-            - bar : type
-            - baz : type (import)
-            - foo : type
+            Bar: ti vi
+            bar: t
+            baz: ti
+            foo: t
 
             crate::bar
-            - baz : type
+            baz: t
 
             crate::bar::baz
-            - Bar : type value
+            Bar: t v
 
             crate::foo
-            - baz : type
+            baz: t
 
             crate::foo::baz
-            - Foo : type value
+            Foo: t v
         "#]],
     );
 }
@@ -276,22 +276,22 @@ pub mod baz { pub struct Bar; }
 "#,
         expect![[r#"
             crate
-            - Bar : type (import) value (import)
-            - bar : type
-            - baz : type (import)
-            - foo : type
+            Bar: ti vi
+            bar: t
+            baz: ti
+            foo: t
 
             crate::bar
-            - baz : type
+            baz: t
 
             crate::bar::baz
-            - Bar : type value
+            Bar: t v
 
             crate::foo
-            - baz : type
+            baz: t
 
             crate::foo::baz
-            - Foo : type value
+            Foo: t v
         "#]],
     );
 }
@@ -311,29 +311,29 @@ mod d {
 "#,
         expect![[r#"
             crate
-            - a : type
-            - b : type
-            - c : type
-            - d : type
+            a: t
+            b: t
+            c: t
+            d: t
 
             crate::a
-            - foo : type
+            foo: t
 
             crate::a::foo
-            - X : type value
+            X: t v
 
             crate::b
-            - foo : type (import)
+            foo: ti
 
             crate::c
-            - foo : type
+            foo: t
 
             crate::c::foo
-            - Y : type value
+            Y: t v
 
             crate::d
-            - Y : type (import) value (import)
-            - foo : type (import)
+            Y: ti vi
+            foo: ti
         "#]],
     );
 }
@@ -355,15 +355,15 @@ use event::Event;
         "#,
         expect![[r#"
             crate
-            - Event : type (import)
-            - event : type
+            Event: ti
+            event: t
 
             crate::event
-            - Event : type value (glob)
-            - serenity : type
+            Event: t v
+            serenity: t
 
             crate::event::serenity
-            - Event : value
+            Event: v
         "#]],
     );
 }
@@ -388,105 +388,27 @@ use reexport::*;
 "#,
         expect![[r#"
             crate
-            - Trait : type (glob)
-            - defs : type
-            - function : value (glob)
-            - makro : macro! (glob)
-            - reexport : type
+            Trait: t
+            defs: t
+            function: v
+            makro: m
+            reexport: t
 
             crate::defs
-            - Trait : type
-            - function : value
-            - makro : macro!
+            Trait: t
+            function: v
+            makro: m
 
             crate::reexport
-            - Trait : type (glob)
-            - function : value (glob)
-            - inner : type
-            - makro : macro! (glob)
+            Trait: t
+            function: v
+            inner: t
+            makro: m
 
             crate::reexport::inner
-            - Trait : type (import)
-            - function : value (import)
-            - makro : macro! (import)
-        "#]],
-    );
-}
-
-#[test]
-fn regression_18308() {
-    check(
-        r#"
-use outer::*;
-
-mod outer {
-    mod inner_superglob {
-        pub use super::*;
-    }
-
-    // The importing order matters!
-    pub use inner_superglob::*;
-    use super::glob_target::*;
-}
-
-mod glob_target {
-    pub struct ShouldBePrivate;
-}
-"#,
-        expect![[r#"
-            crate
-            - glob_target : type
-            - outer : type
-
-            crate::glob_target
-            - ShouldBePrivate : type value
-
-            crate::outer
-            - ShouldBePrivate : type (glob) value (glob)
-            - inner_superglob : type
-
-            crate::outer::inner_superglob
-            - ShouldBePrivate : type (glob) value (glob)
-            - inner_superglob : type (glob)
-        "#]],
-    );
-}
-
-#[test]
-fn regression_18580() {
-    check(
-        r#"
-pub mod libs {
-    pub struct Placeholder;
-}
-
-pub mod reexport_2 {
-    use reexport_1::*;
-    pub use reexport_1::*;
-
-    pub mod reexport_1 {
-        pub use crate::libs::*;
-    }
-}
-
-use reexport_2::*;
-"#,
-        expect![[r#"
-            crate
-            - Placeholder : type (glob) value (glob)
-            - libs : type
-            - reexport_1 : type (glob)
-            - reexport_2 : type
-
-            crate::libs
-            - Placeholder : type value
-
-            crate::reexport_2
-            - Placeholder : type (glob) value (glob)
-            - reexport_1 : type
-
-            crate::reexport_2::reexport_1
-            - Placeholder : type (glob) value (glob)
+            Trait: ti
+            function: vi
+            makro: mi
         "#]],
     );
 }

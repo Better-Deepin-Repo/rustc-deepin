@@ -1,8 +1,10 @@
 //@ revisions: edition2021 edition2024
-//@ needs-subprocess
+//@ ignore-wasm no panic or subprocess support
+//@ [edition2024] compile-flags: -Zunstable-options
 //@ [edition2024] edition: 2024
 //@ run-pass
 //@ needs-unwind
+#![cfg_attr(edition2024, feature(shorter_tail_lifetimes))]
 
 use std::sync::Mutex;
 

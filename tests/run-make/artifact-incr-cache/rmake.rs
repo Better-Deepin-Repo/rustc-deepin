@@ -1,5 +1,3 @@
-//@ needs-target-std
-//
 // rustc should be able to emit required files (asm, llvm-*, etc) during incremental
 // compilation on the first pass by running the code gen as well as on subsequent runs -
 // extracting them from the cache

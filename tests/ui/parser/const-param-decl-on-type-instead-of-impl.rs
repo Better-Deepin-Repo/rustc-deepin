@@ -11,5 +11,5 @@ fn banana(a: <T<const N: usize>>::BAR) {}
 fn chaenomeles() {
     path::path::Struct::<const N: usize>()
     //~^ ERROR unexpected `const` parameter declaration
-    //~| ERROR cannot find module or crate `path`
+    //~| ERROR failed to resolve: use of undeclared crate or module `path`
 }

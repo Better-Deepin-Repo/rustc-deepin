@@ -1,6 +1,8 @@
 //@ check-pass
 //@ edition:2021
 
+#![warn(non_local_definitions)]
+
 use std::fmt::Debug;
 
 trait GlobalTrait {}
@@ -49,12 +51,5 @@ fn bitflags() {
 
     const _: () = {
         impl Flags {}
-    };
-}
-
-fn bitflags_internal() {
-    const _: () = {
-        struct InternalFlags;
-        impl InternalFlags {}
     };
 }

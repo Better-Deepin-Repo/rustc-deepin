@@ -21,9 +21,8 @@ LL |     T: I<U>,
    |        ---- unsatisfied trait bound introduced here
 help: try using a fully qualified path to specify the expected types
    |
-LL -     a.method();
-LL +     <A<B> as V<U>>::method(a);
-   |
+LL |     <A<B> as V<U>>::method(a);
+   |     +++++++++++++++++++++++ ~
 
 error: aborting due to 1 previous error
 

@@ -1,5 +1,6 @@
 //@ run-pass
 #![allow(unused_imports, overlapping_range_endpoints)]
+//@ pretty-expanded FIXME #23616
 
 use m::{START, END};
 

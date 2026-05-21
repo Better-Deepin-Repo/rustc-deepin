@@ -1,8 +1,10 @@
-//@ needs-target-std
 //@ ignore-windows
 //@ ignore-apple
-//@ ignore-wasm (`object` doesn't handle wasm object files)
-//@ ignore-cross-compile
+
+// LLVM 17's embed-source implementation requires that source code is attached
+// for all files in the output DWARF debug info. This restriction was lifted in
+// LLVM 18 (87e22bdd2bd6d77d782f9d64b3e3ae5bdcd5080d).
+//@ min-llvm-version: 18
 
 // This test should be replaced with one in tests/debuginfo once we can easily
 // tell via GDB or LLDB if debuginfo contains source code. Cheap tricks in LLDB
@@ -13,7 +15,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use gimli::{EndianRcSlice, Reader, RunTimeEndian};
+use gimli::{AttributeValue, EndianRcSlice, Reader, RunTimeEndian};
 use object::{Object, ObjectSection};
 use run_make_support::{gimli, object, rfs, rustc};
 
@@ -24,7 +26,7 @@ fn main() {
         .output(&output)
         .arg("-g")
         .arg("-Zembed-source=yes")
-        .arg("-Cdwarf-version=5")
+        .arg("-Zdwarf-version=5")
         .run();
     let output = rfs::read(output);
     let obj = object::File::parse(output.as_slice()).unwrap();

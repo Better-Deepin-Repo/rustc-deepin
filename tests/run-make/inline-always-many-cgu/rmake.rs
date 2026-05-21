@@ -1,4 +1,3 @@
-//@ needs-target-std
 use std::ffi::OsStr;
 
 use run_make_support::regex::Regex;

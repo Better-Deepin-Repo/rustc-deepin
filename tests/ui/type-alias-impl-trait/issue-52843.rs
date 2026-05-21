@@ -3,7 +3,6 @@
 type Foo<T> = impl Default;
 
 #[allow(unused)]
-#[define_opaque(Foo)]
 fn foo<T: Default>(t: T) -> Foo<T> {
     t
     //~^ ERROR: the trait bound `T: Default` is not satisfied

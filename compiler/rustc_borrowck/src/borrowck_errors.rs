@@ -1,11 +1,14 @@
+#![allow(rustc::diagnostic_outside_of_impl)]
+#![allow(rustc::untranslatable_diagnostic)]
+
 use rustc_errors::codes::*;
-use rustc_errors::{Applicability, Diag, DiagCtxtHandle, struct_span_code_err};
+use rustc_errors::{struct_span_code_err, Applicability, Diag, DiagCtxtHandle};
 use rustc_hir as hir;
 use rustc_middle::span_bug;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_span::Span;
 
-impl<'infcx, 'tcx> crate::MirBorrowckCtxt<'_, 'infcx, 'tcx> {
+impl<'infcx, 'tcx> crate::MirBorrowckCtxt<'_, '_, 'infcx, 'tcx> {
     pub(crate) fn dcx(&self) -> DiagCtxtHandle<'infcx> {
         self.infcx.dcx()
     }
@@ -400,7 +403,6 @@ impl<'infcx, 'tcx> crate::MirBorrowckCtxt<'_, 'infcx, 'tcx> {
                 .expect_closure();
             let span = match capture_clause {
                 rustc_hir::CaptureBy::Value { move_kw } => move_kw.shrink_to_lo(),
-                rustc_hir::CaptureBy::Use { use_kw } => use_kw.shrink_to_lo(),
                 rustc_hir::CaptureBy::Ref => fn_decl_span.shrink_to_lo(),
             };
             diag.span_suggestion_verbose(
@@ -423,7 +425,7 @@ impl<'infcx, 'tcx> crate::MirBorrowckCtxt<'_, 'infcx, 'tcx> {
     }
 
     pub(crate) fn path_does_not_live_long_enough(&self, span: Span, path: &str) -> Diag<'infcx> {
-        struct_span_code_err!(self.dcx(), span, E0597, "{} does not live long enough", path)
+        struct_span_code_err!(self.dcx(), span, E0597, "{} does not live long enough", path,)
     }
 
     pub(crate) fn cannot_return_reference_to_local(
@@ -477,7 +479,7 @@ impl<'infcx, 'tcx> crate::MirBorrowckCtxt<'_, 'infcx, 'tcx> {
     }
 
     pub(crate) fn temporary_value_borrowed_for_too_long(&self, span: Span) -> Diag<'infcx> {
-        struct_span_code_err!(self.dcx(), span, E0716, "temporary value dropped while borrowed")
+        struct_span_code_err!(self.dcx(), span, E0716, "temporary value dropped while borrowed",)
     }
 }
 

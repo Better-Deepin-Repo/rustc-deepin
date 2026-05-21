@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ compile-flags: --test
 //@ run-rustfix
 // Checks that the `use` suggestion appears *below* this inner attribute.

@@ -1,5 +1,6 @@
 //@ compile-flags: --crate-type=lib
 //@ check-pass
+#![feature(const_mut_refs)]
 #![feature(const_precise_live_drops)]
 
 // Mutable reference allows only mutation of !Drop place.

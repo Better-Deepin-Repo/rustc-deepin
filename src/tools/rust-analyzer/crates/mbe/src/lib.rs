@@ -6,31 +6,20 @@
 //! The tests for this functionality live in another crate:
 //! `hir_def::macro_expansion_tests::mbe`.
 
-#![cfg_attr(feature = "in-rust-tree", feature(rustc_private))]
-
-#[cfg(not(feature = "in-rust-tree"))]
-extern crate ra_ap_rustc_lexer as rustc_lexer;
-#[cfg(feature = "in-rust-tree")]
-extern crate rustc_lexer;
-
 mod expander;
-mod macro_call_style;
 mod parser;
 
 #[cfg(test)]
 mod benchmark;
-#[cfg(test)]
-mod tests;
 
-use span::{Edition, Span, SyntaxContext};
+use span::{Edition, Span, SyntaxContextId};
 use syntax_bridge::to_parser_input;
-use tt::DelimSpan;
 use tt::iter::TtIter;
+use tt::DelimSpan;
 
 use std::fmt;
 use std::sync::Arc;
 
-pub use crate::macro_call_style::{MacroCallStyle, MacroCallStyles};
 use crate::parser::{MetaTemplate, MetaVarKind, Op};
 
 pub use tt::{Delimiter, DelimiterKind, Punct};
@@ -139,8 +128,6 @@ pub struct DeclarativeMacro {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Rule {
-    /// Is this a normal fn-like rule, an `attr()` rule, or a `derive()` rule?
-    style: MacroCallStyle,
     lhs: MetaTemplate,
     rhs: MetaTemplate,
 }
@@ -152,17 +139,17 @@ impl DeclarativeMacro {
 
     /// The old, `macro_rules! m {}` flavor.
     pub fn parse_macro_rules(
-        tt: &tt::TopSubtree,
-        ctx_edition: impl Copy + Fn(SyntaxContext) -> Edition,
+        tt: &tt::Subtree<Span>,
+        ctx_edition: impl Copy + Fn(SyntaxContextId) -> Edition,
     ) -> DeclarativeMacro {
         // Note: this parsing can be implemented using mbe machinery itself, by
         // matching against `$($lhs:tt => $rhs:tt);*` pattern, but implementing
         // manually seems easier.
-        let mut src = tt.iter();
+        let mut src = TtIter::new(tt);
         let mut rules = Vec::new();
         let mut err = None;
 
-        while !src.is_empty() {
+        while src.len() > 0 {
             let rule = match Rule::parse(ctx_edition, &mut src) {
                 Ok(it) => it,
                 Err(e) => {
@@ -172,7 +159,7 @@ impl DeclarativeMacro {
             };
             rules.push(rule);
             if let Err(()) = src.expect_char(';') {
-                if !src.is_empty() {
+                if src.len() > 0 {
                     err = Some(Box::new(ParseError::expected("expected `;`")));
                 }
                 break;
@@ -191,26 +178,21 @@ impl DeclarativeMacro {
 
     /// The new, unstable `macro m {}` flavor.
     pub fn parse_macro2(
-        args: Option<&tt::TopSubtree>,
-        body: &tt::TopSubtree,
-        ctx_edition: impl Copy + Fn(SyntaxContext) -> Edition,
+        args: Option<&tt::Subtree<Span>>,
+        body: &tt::Subtree<Span>,
+        ctx_edition: impl Copy + Fn(SyntaxContextId) -> Edition,
     ) -> DeclarativeMacro {
         let mut rules = Vec::new();
         let mut err = None;
 
         if let Some(args) = args {
-            // The presence of an argument list means that this macro uses the
-            // "simple" syntax, where the body is the RHS of a single rule.
             cov_mark::hit!(parse_macro_def_simple);
 
             let rule = (|| {
-                let lhs = MetaTemplate::parse_pattern(ctx_edition, args.iter())?;
-                let rhs = MetaTemplate::parse_template(ctx_edition, body.iter())?;
+                let lhs = MetaTemplate::parse_pattern(ctx_edition, args)?;
+                let rhs = MetaTemplate::parse_template(ctx_edition, body)?;
 
-                // In the "simple" syntax, there is apparently no way to specify
-                // that the single rule is an attribute or derive rule, so it
-                // must be a function-like rule.
-                Ok(crate::Rule { style: MacroCallStyle::FnLike, lhs, rhs })
+                Ok(crate::Rule { lhs, rhs })
             })();
 
             match rule {
@@ -218,11 +200,9 @@ impl DeclarativeMacro {
                 Err(e) => err = Some(Box::new(e)),
             }
         } else {
-            // There was no top-level argument list, so this macro uses the
-            // list-of-rules syntax, similar to `macro_rules!`.
             cov_mark::hit!(parse_macro_def_rules);
-            let mut src = body.iter();
-            while !src.is_empty() {
+            let mut src = TtIter::new(body);
+            while src.len() > 0 {
                 let rule = match Rule::parse(ctx_edition, &mut src) {
                     Ok(it) => it,
                     Err(e) => {
@@ -232,7 +212,7 @@ impl DeclarativeMacro {
                 };
                 rules.push(rule);
                 if let Err(()) = src.expect_any_char(&[';', ',']) {
-                    if !src.is_empty() {
+                    if src.len() > 0 {
                         err = Some(Box::new(ParseError::expected(
                             "expected `;` or `,` to delimit rules",
                         )));
@@ -260,50 +240,31 @@ impl DeclarativeMacro {
         self.rules.len()
     }
 
-    pub fn rule_styles(&self) -> MacroCallStyles {
-        if self.rules.is_empty() {
-            // No rules could be parsed, so fall back to assuming that this
-            // is intended to be a function-like macro.
-            MacroCallStyles::FN_LIKE
-        } else {
-            self.rules
-                .iter()
-                .map(|rule| MacroCallStyles::from(rule.style))
-                .fold(MacroCallStyles::empty(), |a, b| a | b)
-        }
-    }
-
     pub fn expand(
         &self,
-        db: &dyn salsa::Database,
-        tt: &tt::TopSubtree,
+        tt: &tt::Subtree<Span>,
         marker: impl Fn(&mut Span) + Copy,
-        call_style: MacroCallStyle,
         call_site: Span,
-    ) -> ExpandResult<(tt::TopSubtree, MatchedArmIndex)> {
-        expander::expand_rules(db, &self.rules, tt, marker, call_style, call_site)
+        def_site_edition: Edition,
+    ) -> ExpandResult<(tt::Subtree<Span>, MatchedArmIndex)> {
+        expander::expand_rules(&self.rules, tt, marker, call_site, def_site_edition)
     }
 }
 
 impl Rule {
     fn parse(
-        edition: impl Copy + Fn(SyntaxContext) -> Edition,
-        src: &mut TtIter<'_>,
+        edition: impl Copy + Fn(SyntaxContextId) -> Edition,
+        src: &mut TtIter<'_, Span>,
     ) -> Result<Self, ParseError> {
-        // Parse an optional `attr()` or `derive()` prefix before the LHS pattern.
-        let style = parser::parse_rule_style(src)?;
-
-        let (_, lhs) =
-            src.expect_subtree().map_err(|()| ParseError::expected("expected subtree"))?;
+        let lhs = src.expect_subtree().map_err(|()| ParseError::expected("expected subtree"))?;
         src.expect_char('=').map_err(|()| ParseError::expected("expected `=`"))?;
         src.expect_char('>').map_err(|()| ParseError::expected("expected `>`"))?;
-        let (_, rhs) =
-            src.expect_subtree().map_err(|()| ParseError::expected("expected subtree"))?;
+        let rhs = src.expect_subtree().map_err(|()| ParseError::expected("expected subtree"))?;
 
         let lhs = MetaTemplate::parse_pattern(edition, lhs)?;
         let rhs = MetaTemplate::parse_template(edition, rhs)?;
 
-        Ok(crate::Rule { style, lhs, rhs })
+        Ok(crate::Rule { lhs, rhs })
     }
 }
 
@@ -389,17 +350,17 @@ impl<T: Default, E> From<Result<T, E>> for ValueResult<T, E> {
     }
 }
 
-pub fn expect_fragment<'t>(
-    db: &dyn salsa::Database,
-    tt_iter: &mut TtIter<'t>,
+pub fn expect_fragment(
+    tt_iter: &mut TtIter<'_, Span>,
     entry_point: ::parser::PrefixEntryPoint,
-    delim_span: DelimSpan,
-) -> ExpandResult<tt::TokenTreesView<'t>> {
+    edition: ::parser::Edition,
+    delim_span: DelimSpan<Span>,
+) -> ExpandResult<Option<tt::TokenTree<Span>>> {
     use ::parser;
-    let buffer = tt_iter.remaining();
-    let parser_input = to_parser_input(buffer, &mut |ctx| ctx.edition(db));
-    let tree_traversal = entry_point.parse(&parser_input);
-    let mut cursor = buffer.cursor();
+    let buffer = tt::buffer::TokenBuffer::from_tokens(tt_iter.as_slice());
+    let parser_input = to_parser_input(edition, &buffer);
+    let tree_traversal = entry_point.parse(&parser_input, edition);
+    let mut cursor = buffer.begin();
     let mut error = false;
     for step in tree_traversal.iter() {
         match step {
@@ -408,13 +369,13 @@ pub fn expect_fragment<'t>(
                     n_input_tokens = 2;
                 }
                 for _ in 0..n_input_tokens {
-                    cursor.bump_or_end();
+                    cursor = cursor.bump_subtree();
                 }
             }
             parser::Step::FloatSplit { .. } => {
                 // FIXME: We need to split the tree properly here, but mutating the token trees
                 // in the buffer is somewhat tricky to pull off.
-                cursor.bump_or_end();
+                cursor = cursor.bump_subtree();
             }
             parser::Step::Enter { .. } | parser::Step::Exit => (),
             parser::Step::Error { .. } => error = true,
@@ -423,19 +384,29 @@ pub fn expect_fragment<'t>(
 
     let err = if error || !cursor.is_root() {
         Some(ExpandError::binding_error(
-            buffer.cursor().token_tree().map_or(delim_span.close, |tt| tt.first_span()),
+            buffer.begin().token_tree().map_or(delim_span.close, |tt| tt.span()),
             format!("expected {entry_point:?}"),
         ))
     } else {
         None
     };
 
-    while !cursor.is_root() {
-        cursor.bump_or_end();
+    let mut curr = buffer.begin();
+    let mut res = vec![];
+
+    while curr != cursor {
+        let Some(token) = curr.token_tree() else { break };
+        res.push(token.cloned());
+        curr = curr.bump();
     }
 
-    let res = cursor.crossed();
-    tt_iter.flat_advance(res.len());
-
+    *tt_iter = TtIter::new_iter(tt_iter.as_slice()[res.len()..].iter());
+    let res = match &*res {
+        [] | [_] => res.pop(),
+        [first, ..] => Some(tt::TokenTree::Subtree(tt::Subtree {
+            delimiter: Delimiter::invisible_spanned(first.first_span()),
+            token_trees: res.into_boxed_slice(),
+        })),
+    };
     ExpandResult { value: res, err }
 }

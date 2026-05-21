@@ -23,7 +23,7 @@ struct WontChange {
 
 // these are valid dependencies
 mod signatures {
-    use crate::WillChange;
+    use WillChange;
 
     #[rustc_then_this_would_need(type_of)] //~ ERROR no path
     #[rustc_then_this_would_need(associated_item)] //~ ERROR no path
@@ -70,7 +70,7 @@ mod signatures {
 }
 
 mod invalid_signatures {
-    use crate::WontChange;
+    use WontChange;
 
     #[rustc_then_this_would_need(type_of)] //~ ERROR no path
     trait A {

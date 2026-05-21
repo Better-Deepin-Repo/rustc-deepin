@@ -1,3 +1,5 @@
+#![feature(if_let_guard)]
+
 #![deny(irrefutable_let_patterns)]
 
 fn main() {

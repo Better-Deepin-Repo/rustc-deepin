@@ -46,17 +46,15 @@ pub unsafe fn _rdtsc() -> u64 {
 #[cfg_attr(test, assert_instr(rdtscp))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
 pub unsafe fn __rdtscp(aux: *mut u32) -> u64 {
-    let (tsc, auxval) = rdtscp();
-    *aux = auxval;
-    tsc
+    rdtscp(aux as *mut _)
 }
 
 #[allow(improper_ctypes)]
-unsafe extern "unadjusted" {
+extern "C" {
     #[link_name = "llvm.x86.rdtsc"]
     fn rdtsc() -> u64;
     #[link_name = "llvm.x86.rdtscp"]
-    fn rdtscp() -> (u64, u32);
+    fn rdtscp(aux: *mut u8) -> u64;
 }
 
 #[cfg(test)]
@@ -64,16 +62,16 @@ mod tests {
     use crate::core_arch::x86::*;
     use stdarch_test::simd_test;
 
-    #[test]
-    fn test_rdtsc() {
-        let r = unsafe { _rdtsc() };
+    #[simd_test(enable = "sse2")]
+    unsafe fn _rdtsc() {
+        let r = rdtsc::_rdtsc();
         assert_ne!(r, 0); // The chances of this being 0 are infinitesimal
     }
 
-    #[test]
-    fn test_rdtscp() {
+    #[simd_test(enable = "sse2")]
+    unsafe fn _rdtscp() {
         let mut aux = 0;
-        let r = unsafe { __rdtscp(&mut aux) };
+        let r = rdtsc::__rdtscp(&mut aux);
         assert_ne!(r, 0); // The chances of this being 0 are infinitesimal
     }
 }

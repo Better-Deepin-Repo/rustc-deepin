@@ -1,5 +1,3 @@
-//@ needs-target-std
-//
 // In this test, the static library foo is made blank, which used to cause
 // a compilation error. As the compiler now returns Ok upon encountering a blank
 // staticlib as of #12379, this test checks that compilation is successful despite

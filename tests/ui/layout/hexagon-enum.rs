@@ -1,8 +1,5 @@
-//@ add-minicore
 //@ compile-flags: --target hexagon-unknown-linux-musl
-//@ normalize-stderr: "randomization_seed: \d+" -> "randomization_seed: $$SEED"
 //@ needs-llvm-components: hexagon
-//@ ignore-backends: gcc
 //
 // Verify that the hexagon targets implement the repr(C) for enums correctly.
 //
@@ -11,8 +8,8 @@
 #![crate_type = "lib"]
 #![no_core]
 
-extern crate minicore;
-use minicore::*;
+#[lang="sized"]
+trait Sized {}
 
 #[rustc_layout(debug)]
 #[repr(C)]

@@ -4,34 +4,18 @@
 fn expect_option() {
     let opt = Some(0);
     let _ = opt.expect("");
-    //~^ expect_used
+    //~^ ERROR: used `expect()` on an `Option` value
 }
 
 fn expect_result() {
     let res: Result<u8, u8> = Ok(0);
     let _ = res.expect("");
-    //~^ expect_used
-
+    //~^ ERROR: used `expect()` on a `Result` value
     let _ = res.expect_err("");
-    //~^ expect_used
+    //~^ ERROR: used `expect_err()` on a `Result` value
 }
 
-#[allow(clippy::ok_expect)]
-#[allow(clippy::err_expect)]
-fn issue_15247() {
-    let x: Result<u8, u8> = Err(0);
-    x.ok().expect("Huh");
-    //~^ expect_used
-
-    { x.ok() }.expect("...");
-    //~^ expect_used
-
-    let y: Result<u8, u8> = Ok(0);
-    y.err().expect("Huh");
-    //~^ expect_used
-
-    { y.err() }.expect("...");
-    //~^ expect_used
+fn main() {
+    expect_option();
+    expect_result();
 }
-
-fn main() {}

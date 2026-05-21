@@ -10,5 +10,3 @@ const fn bar(x: usize) -> usize {
 }
 
 fn main() {}
-
-//~? WARN skipping const checks

@@ -1,8 +1,12 @@
+//@ force-host
+//@ no-prefer-dynamic
+
+#![crate_type = "proc-macro"]
 #![feature(proc_macro_quote)]
 
 extern crate proc_macro;
 
-use proc_macro::{TokenStream, quote};
+use proc_macro::{quote, TokenStream};
 
 #[proc_macro_derive(AnotherMacro, attributes(pointee))]
 pub fn derive(_input: TokenStream) -> TokenStream {

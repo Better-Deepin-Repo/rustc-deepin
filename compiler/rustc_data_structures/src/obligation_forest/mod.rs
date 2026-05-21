@@ -75,7 +75,6 @@ use std::fmt::Debug;
 use std::hash;
 use std::marker::PhantomData;
 
-use thin_vec::ThinVec;
 use tracing::debug;
 
 use crate::fx::{FxHashMap, FxHashSet};
@@ -142,7 +141,7 @@ pub trait ObligationProcessor {
 #[derive(Debug)]
 pub enum ProcessResult<O, E> {
     Unchanged,
-    Changed(ThinVec<O>),
+    Changed(Vec<O>),
     Error(E),
 }
 
@@ -313,9 +312,8 @@ pub struct Error<O, E> {
 
 mod helper {
     use super::*;
-    pub(super) type ObligationTreeIdGenerator = impl Iterator<Item = ObligationTreeId>;
+    pub type ObligationTreeIdGenerator = impl Iterator<Item = ObligationTreeId>;
     impl<O: ForestObligation> ObligationForest<O> {
-        #[define_opaque(ObligationTreeIdGenerator)]
         pub fn new() -> ObligationForest<O> {
             ObligationForest {
                 nodes: vec![],
@@ -404,20 +402,15 @@ impl<O: ForestObligation> ObligationForest<O> {
     }
 
     /// Returns the set of obligations that are in a pending state.
-    pub fn map_pending_obligations<P, F, R>(&self, f: F) -> R
+    pub fn map_pending_obligations<P, F>(&self, f: F) -> Vec<P>
     where
         F: Fn(&O) -> P,
-        R: FromIterator<P>,
     {
         self.nodes
             .iter()
             .filter(|node| node.state.get() == NodeState::Pending)
             .map(|node| f(&node.obligation))
             .collect()
-    }
-
-    pub fn has_pending_obligations(&self) -> bool {
-        self.nodes.iter().any(|node| node.state.get() == NodeState::Pending)
     }
 
     fn insert_into_error_cache(&mut self, index: usize) {

@@ -10,11 +10,19 @@ fn main() {
     }
 }
 
+struct A;
+
+impl Drop for A {
+    fn drop(&mut self) {}
+}
+
 extern "C" fn test_middle() {
+    let _a = A;
     foo();
 }
 
 fn foo() {
+    let _a = A;
     unsafe {
         test_end();
     }

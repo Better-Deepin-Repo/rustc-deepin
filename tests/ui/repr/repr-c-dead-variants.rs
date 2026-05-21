@@ -1,17 +1,12 @@
-#![feature(no_core, rustc_attrs)]
+#![feature(no_core, rustc_attrs, lang_items)]
 #![allow(dead_code)]
 #![crate_type = "lib"]
 #![no_std]
 #![no_core]
 
-extern crate minicore;
-use minicore::*;
-
 // See also: repr-c-int-dead-variants.rs
 
-//@ add-minicore
-//@ normalize-stderr: "pref: Align\([1-8] bytes\)" -> "pref: $$SOME_ALIGN"
-//@ normalize-stderr: "randomization_seed: \d+" -> "randomization_seed: $$SEED"
+//@ normalize-stderr-test: "pref: Align\([1-8] bytes\)" -> "pref: $$SOME_ALIGN"
 
 // This test depends on the value of the `c_enum_min_bits` target option.
 // As there's no way to actually check it from UI test, we only run this test on a subset of archs.
@@ -33,7 +28,6 @@ use minicore::*;
 //@ revisions: armebv7r-none-eabi
 //@[armebv7r-none-eabi] compile-flags: --target armebv7r-none-eabi
 //@[armebv7r-none-eabi] needs-llvm-components: arm
-//@ ignore-backends: gcc
 
 // A simple uninhabited type.
 enum Void {}
@@ -64,3 +58,6 @@ enum DeadBranchHasOtherField { //~ ERROR layout_of
     Variant1(Void, Align8U64),
     Variant2(u8),
 }
+
+#[lang = "sized"]
+trait Sized {}

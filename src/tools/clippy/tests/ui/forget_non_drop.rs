@@ -11,7 +11,7 @@ fn main() {
     struct Foo;
     // Lint
     forget(Foo);
-    //~^ forget_non_drop
+    //~^ ERROR: call to `std::mem::forget` with a value that does not implement `Drop`. Fo
 
     struct Bar;
     impl Drop for Bar {
@@ -23,8 +23,7 @@ fn main() {
     struct Baz<T>(T);
     // Lint
     forget(Baz(Foo));
-    //~^ forget_non_drop
-
+    //~^ ERROR: call to `std::mem::forget` with a value that does not implement `Drop`. Fo
     // Don't lint
     forget(Baz(Bar));
 }

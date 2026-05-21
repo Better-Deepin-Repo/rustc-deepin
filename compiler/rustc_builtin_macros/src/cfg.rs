@@ -2,19 +2,13 @@
 //! a literal `true` or `false` based on whether the given cfg matches the
 //! current compilation environment.
 
+use rustc_ast::token;
 use rustc_ast::tokenstream::TokenStream;
-use rustc_ast::{AttrStyle, token};
-use rustc_attr_parsing as attr;
-use rustc_attr_parsing::parser::MetaItemOrLitParser;
-use rustc_attr_parsing::{
-    AttributeParser, CFG_TEMPLATE, ParsedDescription, ShouldEmit, parse_cfg_entry,
-};
+use rustc_errors::PResult;
 use rustc_expand::base::{DummyResult, ExpandResult, ExtCtxt, MacEager, MacroExpanderResult};
-use rustc_hir::attrs::CfgEntry;
-use rustc_hir::{AttrPath, Target};
-use rustc_parse::exp;
-use rustc_parse::parser::Recovery;
-use rustc_span::{ErrorGuaranteed, Span, sym};
+use rustc_parse::parser::attr::AllowLeadingUnsafe;
+use rustc_span::Span;
+use {rustc_ast as ast, rustc_attr as attr};
 
 use crate::errors;
 
@@ -27,48 +21,34 @@ pub(crate) fn expand_cfg(
 
     ExpandResult::Ready(match parse_cfg(cx, sp, tts) {
         Ok(cfg) => {
-            let matches_cfg = attr::eval_config_entry(cx.sess, &cfg).as_bool();
-
+            let matches_cfg = attr::cfg_matches(
+                &cfg,
+                &cx.sess,
+                cx.current_expansion.lint_node_id,
+                Some(cx.ecfg.features),
+            );
             MacEager::expr(cx.expr_bool(sp, matches_cfg))
         }
-        Err(guar) => DummyResult::any(sp, guar),
+        Err(err) => {
+            let guar = err.emit();
+            DummyResult::any(sp, guar)
+        }
     })
 }
 
-fn parse_cfg(cx: &ExtCtxt<'_>, span: Span, tts: TokenStream) -> Result<CfgEntry, ErrorGuaranteed> {
-    let mut parser = cx.new_parser_from_tts(tts);
-    if parser.token == token::Eof {
-        return Err(cx.dcx().emit_err(errors::RequiresCfgPattern { span }));
+fn parse_cfg<'a>(cx: &ExtCtxt<'a>, span: Span, tts: TokenStream) -> PResult<'a, ast::MetaItem> {
+    let mut p = cx.new_parser_from_tts(tts);
+
+    if p.token == token::Eof {
+        return Err(cx.dcx().create_err(errors::RequiresCfgPattern { span }));
     }
 
-    let meta = MetaItemOrLitParser::parse_single(
-        &mut parser,
-        ShouldEmit::ErrorsAndLints { recovery: Recovery::Allowed },
-    )
-    .map_err(|diag| diag.emit())?;
-    let cfg = AttributeParser::parse_single_args(
-        cx.sess,
-        span,
-        span,
-        AttrStyle::Inner,
-        AttrPath { segments: vec![sym::cfg].into_boxed_slice(), span },
-        None,
-        ParsedDescription::Macro,
-        span,
-        cx.current_expansion.lint_node_id,
-        // Doesn't matter what the target actually is here.
-        Target::Crate,
-        Some(cx.ecfg.features),
-        ShouldEmit::ErrorsAndLints { recovery: Recovery::Allowed },
-        &meta,
-        parse_cfg_entry,
-        &CFG_TEMPLATE,
-    )?;
+    let cfg = p.parse_meta_item(AllowLeadingUnsafe::No)?;
 
-    let _ = parser.eat(exp!(Comma));
+    let _ = p.eat(&token::Comma);
 
-    if !parser.eat(exp!(Eof)) {
-        return Err(cx.dcx().emit_err(errors::OneCfgPattern { span }));
+    if !p.eat(&token::Eof) {
+        return Err(cx.dcx().create_err(errors::OneCfgPattern { span }));
     }
 
     Ok(cfg)

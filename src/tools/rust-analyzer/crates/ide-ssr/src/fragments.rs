@@ -6,7 +6,7 @@
 //! needs to determine it somehow. We do this in a stupid way -- by pasting SSR
 //! rule into different contexts and checking what works.
 
-use syntax::{AstNode, SyntaxNode, ast};
+use syntax::{ast, AstNode, SyntaxNode};
 
 pub(crate) fn ty(s: &str) -> Result<SyntaxNode, ()> {
     fragment::<ast::Type>("type T = {};", s)

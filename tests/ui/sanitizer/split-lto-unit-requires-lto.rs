@@ -6,5 +6,3 @@
 #![feature(no_core)]
 #![no_core]
 #![no_main]
-
-//~? ERROR `-Zsplit-lto-unit` requires `-Clto`, `-Clto=thin`, or `-Clinker-plugin-lto`

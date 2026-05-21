@@ -25,7 +25,19 @@ LL |     fn b<'a, T: AsRef<[u8]>>(a: &'a T) -> &'a [u8] {
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error: missing trait method provided by default: `one`
-  --> tests/ui/missing_trait_methods.rs:59:1
+  --> tests/ui/missing_trait_methods.rs:58:1
+   |
+LL | impl MissingMultiple for Partial {}
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: implement the method
+  --> tests/ui/missing_trait_methods.rs:53:5
+   |
+LL |     fn one() {}
+   |     ^^^^^^^^
+
+error: missing trait method provided by default: `two`
+  --> tests/ui/missing_trait_methods.rs:58:1
    |
 LL | impl MissingMultiple for Partial {}
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -33,11 +45,11 @@ LL | impl MissingMultiple for Partial {}
 help: implement the method
   --> tests/ui/missing_trait_methods.rs:54:5
    |
-LL |     fn one() {}
+LL |     fn two() {}
    |     ^^^^^^^^
 
-error: missing trait method provided by default: `two`
-  --> tests/ui/missing_trait_methods.rs:59:1
+error: missing trait method provided by default: `three`
+  --> tests/ui/missing_trait_methods.rs:58:1
    |
 LL | impl MissingMultiple for Partial {}
    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -45,28 +57,8 @@ LL | impl MissingMultiple for Partial {}
 help: implement the method
   --> tests/ui/missing_trait_methods.rs:55:5
    |
-LL |     fn two() {}
-   |     ^^^^^^^^
-
-error: missing trait method provided by default: `three`
-  --> tests/ui/missing_trait_methods.rs:59:1
-   |
-LL | impl MissingMultiple for Partial {}
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-help: implement the method
-  --> tests/ui/missing_trait_methods.rs:56:5
-   |
 LL |     fn three() {}
    |     ^^^^^^^^^^
 
-error: missing trait method provided by default: `ne`
-  --> tests/ui/missing_trait_methods.rs:67:1
-   |
-LL | impl PartialEq<Partial> for Partial {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-   = help: implement the missing `ne` method of the `PartialEq<Partial>` trait
-
-error: aborting due to 6 previous errors
+error: aborting due to 5 previous errors
 

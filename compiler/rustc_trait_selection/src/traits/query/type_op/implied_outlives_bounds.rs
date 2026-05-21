@@ -1,19 +1,23 @@
-use std::ops::ControlFlow;
-
-use rustc_infer::infer::TypeOutlivesConstraint;
-use rustc_infer::infer::canonical::CanonicalQueryInput;
+use rustc_infer::infer::canonical::Canonical;
+use rustc_infer::infer::resolve::OpportunisticRegionResolver;
 use rustc_infer::traits::query::OutlivesBound;
-use rustc_infer::traits::query::type_op::ImpliedOutlivesBounds;
+use rustc_macros::{HashStable, TypeFoldable, TypeVisitable};
 use rustc_middle::infer::canonical::CanonicalQueryResponse;
 use rustc_middle::traits::ObligationCause;
-use rustc_middle::ty::outlives::{Component, push_outlives_components};
-use rustc_middle::ty::{self, ParamEnvAnd, Ty, TyCtxt, TypeVisitable, TypeVisitor};
+use rustc_middle::ty::{self, ParamEnvAnd, Ty, TyCtxt, TypeFolder, TypeVisitableExt};
 use rustc_span::def_id::CRATE_DEF_ID;
-use rustc_span::{DUMMY_SP, Span, sym};
-use smallvec::{SmallVec, smallvec};
+use rustc_span::DUMMY_SP;
+use rustc_type_ir::outlives::{push_outlives_components, Component};
+use smallvec::{smallvec, SmallVec};
+use tracing::debug;
 
 use crate::traits::query::NoSolution;
-use crate::traits::{ObligationCtxt, wf};
+use crate::traits::{wf, ObligationCtxt};
+
+#[derive(Copy, Clone, Debug, HashStable, TypeFoldable, TypeVisitable)]
+pub struct ImpliedOutlivesBounds<'tcx> {
+    pub ty: Ty<'tcx>,
+}
 
 impl<'tcx> super::QueryTypeOp<'tcx> for ImpliedOutlivesBounds<'tcx> {
     type QueryResponse = Vec<OutlivesBound<'tcx>>;
@@ -34,17 +38,32 @@ impl<'tcx> super::QueryTypeOp<'tcx> for ImpliedOutlivesBounds<'tcx> {
 
     fn perform_query(
         tcx: TyCtxt<'tcx>,
-        canonicalized: CanonicalQueryInput<'tcx, ParamEnvAnd<'tcx, Self>>,
+        canonicalized: Canonical<'tcx, ParamEnvAnd<'tcx, Self>>,
     ) -> Result<CanonicalQueryResponse<'tcx, Self::QueryResponse>, NoSolution> {
-        tcx.implied_outlives_bounds((canonicalized, false))
+        // FIXME this `unchecked_map` is only necessary because the
+        // query is defined as taking a `ParamEnvAnd<Ty>`; it should
+        // take an `ImpliedOutlivesBounds` instead
+        let canonicalized = canonicalized.unchecked_map(|ParamEnvAnd { param_env, value }| {
+            let ImpliedOutlivesBounds { ty } = value;
+            param_env.and(ty)
+        });
+
+        if tcx.sess.opts.unstable_opts.no_implied_bounds_compat {
+            tcx.implied_outlives_bounds(canonicalized)
+        } else {
+            tcx.implied_outlives_bounds_compat(canonicalized)
+        }
     }
 
     fn perform_locally_with_next_solver(
         ocx: &ObligationCtxt<'_, 'tcx>,
         key: ParamEnvAnd<'tcx, Self>,
-        span: Span,
     ) -> Result<Self::QueryResponse, NoSolution> {
-        compute_implied_outlives_bounds_inner(ocx, key.param_env, key.value.ty, span, false)
+        if ocx.infcx.tcx.sess.opts.unstable_opts.no_implied_bounds_compat {
+            compute_implied_outlives_bounds_inner(ocx, key.param_env, key.value.ty)
+        } else {
+            compute_implied_outlives_bounds_compat_inner(ocx, key.param_env, key.value.ty)
+        }
     }
 }
 
@@ -52,29 +71,16 @@ pub fn compute_implied_outlives_bounds_inner<'tcx>(
     ocx: &ObligationCtxt<'_, 'tcx>,
     param_env: ty::ParamEnv<'tcx>,
     ty: Ty<'tcx>,
-    span: Span,
-    disable_implied_bounds_hack: bool,
 ) -> Result<Vec<OutlivesBound<'tcx>>, NoSolution> {
-    // Inside mir borrowck, each computation starts with an empty list.
-    assert!(
-        ocx.infcx.inner.borrow().region_obligations().is_empty(),
-        "compute_implied_outlives_bounds assumes region obligations are empty before starting"
-    );
-
-    // FIXME: This doesn't seem right. All call sites already normalize `ty`:
-    // - `Ty`s from the `DefiningTy` in Borrowck: we have to normalize in the caller
-    //      in order to get implied bounds involving any unconstrained region vars
-    //      created as part of normalizing the sig. See #136547
-    // - `Ty`s from impl headers in Borrowck and in Non-Borrowck contexts: we have
-    //      to normalize in the caller as computing implied bounds from unnormalized
-    //      types would be unsound. See #100989
-    //
-    // We must normalize the type so we can compute the right outlives components.
-    // for example, if we have some constrained param type like `T: Trait<Out = U>`,
-    // and we know that `&'a T::Out` is WF, then we want to imply `U: 'a`.
-    let normalized_ty = ocx
-        .deeply_normalize(&ObligationCause::dummy_with_span(span), param_env, ty)
-        .map_err(|_| NoSolution)?;
+    let normalize_op = |ty| {
+        let ty = ocx.normalize(&ObligationCause::dummy(), param_env, ty);
+        if !ocx.select_all_or_error().is_empty() {
+            return Err(NoSolution);
+        }
+        let ty = ocx.infcx.resolve_vars_if_possible(ty);
+        let ty = OpportunisticRegionResolver::new(&ocx.infcx).fold_ty(ty);
+        Ok(ty)
+    };
 
     // Sometimes when we ask what it takes for T: WF, we get back that
     // U: WF is required; in that case, we push U onto this stack and
@@ -82,7 +88,7 @@ pub fn compute_implied_outlives_bounds_inner<'tcx>(
     // guaranteed to be a subset of the original type, so we need to store the
     // WF args we've computed in a set.
     let mut checked_wf_args = rustc_data_structures::fx::FxHashSet::default();
-    let mut wf_args = vec![ty.into(), normalized_ty.into()];
+    let mut wf_args = vec![ty.into(), normalize_op(ty)?.into()];
 
     let mut outlives_bounds: Vec<OutlivesBound<'tcx>> = vec![];
 
@@ -93,40 +99,30 @@ pub fn compute_implied_outlives_bounds_inner<'tcx>(
 
         // From the full set of obligations, just filter down to the region relationships.
         for obligation in
-            wf::unnormalized_obligations(ocx.infcx, param_env, arg, DUMMY_SP, CRATE_DEF_ID)
-                .into_iter()
-                .flatten()
+            wf::unnormalized_obligations(ocx.infcx, param_env, arg).into_iter().flatten()
         {
-            let pred = ocx
-                .deeply_normalize(
-                    &ObligationCause::dummy_with_span(span),
-                    param_env,
-                    obligation.predicate,
-                )
-                .map_err(|_| NoSolution)?;
-            let Some(pred) = pred.kind().no_bound_vars() else {
+            assert!(!obligation.has_escaping_bound_vars());
+            let Some(pred) = obligation.predicate.kind().no_bound_vars() else {
                 continue;
             };
             match pred {
-                // FIXME(generic_const_parameter_types): Make sure that `<'a, 'b, const N: &'a &'b u32>`
-                // is sound if we ever support that
+                // FIXME(const_generics): Make sure that `<'a, 'b, const N: &'a &'b u32>` is sound
+                // if we ever support that
                 ty::PredicateKind::Clause(ty::ClauseKind::Trait(..))
-                | ty::PredicateKind::Clause(ty::ClauseKind::HostEffect(..))
                 | ty::PredicateKind::Clause(ty::ClauseKind::ConstArgHasType(..))
                 | ty::PredicateKind::Subtype(..)
                 | ty::PredicateKind::Coerce(..)
                 | ty::PredicateKind::Clause(ty::ClauseKind::Projection(..))
-                | ty::PredicateKind::DynCompatible(..)
+                | ty::PredicateKind::ObjectSafe(..)
                 | ty::PredicateKind::Clause(ty::ClauseKind::ConstEvaluatable(..))
                 | ty::PredicateKind::ConstEquate(..)
                 | ty::PredicateKind::Ambiguous
                 | ty::PredicateKind::NormalizesTo(..)
-                | ty::PredicateKind::Clause(ty::ClauseKind::UnstableFeature(_))
                 | ty::PredicateKind::AliasRelate(..) => {}
 
                 // We need to search through *all* WellFormed predicates
-                ty::PredicateKind::Clause(ty::ClauseKind::WellFormed(term)) => {
-                    wf_args.push(term);
+                ty::PredicateKind::Clause(ty::ClauseKind::WellFormed(arg)) => {
+                    wf_args.push(arg);
                 }
 
                 // We need to register region relationships
@@ -138,6 +134,7 @@ pub fn compute_implied_outlives_bounds_inner<'tcx>(
                     ty_a,
                     r_b,
                 ))) => {
+                    let ty_a = normalize_op(ty_a)?;
                     let mut components = smallvec![];
                     push_outlives_components(ocx.infcx.tcx, ty_a, &mut components);
                     outlives_bounds.extend(implied_bounds_from_components(r_b, components))
@@ -146,48 +143,139 @@ pub fn compute_implied_outlives_bounds_inner<'tcx>(
         }
     }
 
-    // If we detect `bevy_ecs::*::ParamSet` in the WF args list (and `disable_implied_bounds_hack`
-    // or `-Zno-implied-bounds-compat` are not set), then use the registered outlives obligations
-    // as implied bounds.
-    if !disable_implied_bounds_hack
-        && !ocx.infcx.tcx.sess.opts.unstable_opts.no_implied_bounds_compat
-        && ty.visit_with(&mut ContainsBevyParamSet { tcx: ocx.infcx.tcx }).is_break()
-    {
-        for TypeOutlivesConstraint { sup_type, sub_region, .. } in
-            ocx.infcx.clone_registered_region_obligations()
-        {
-            let mut components = smallvec![];
-            push_outlives_components(ocx.infcx.tcx, sup_type, &mut components);
-            outlives_bounds.extend(implied_bounds_from_components(sub_region, components));
-        }
-    }
-
     Ok(outlives_bounds)
 }
 
-struct ContainsBevyParamSet<'tcx> {
-    tcx: TyCtxt<'tcx>,
-}
+pub fn compute_implied_outlives_bounds_compat_inner<'tcx>(
+    ocx: &ObligationCtxt<'_, 'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
+    ty: Ty<'tcx>,
+) -> Result<Vec<OutlivesBound<'tcx>>, NoSolution> {
+    let tcx = ocx.infcx.tcx;
 
-impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for ContainsBevyParamSet<'tcx> {
-    type Result = ControlFlow<()>;
+    // Sometimes when we ask what it takes for T: WF, we get back that
+    // U: WF is required; in that case, we push U onto this stack and
+    // process it next. Because the resulting predicates aren't always
+    // guaranteed to be a subset of the original type, so we need to store the
+    // WF args we've computed in a set.
+    let mut checked_wf_args = rustc_data_structures::fx::FxHashSet::default();
+    let mut wf_args = vec![ty.into()];
 
-    fn visit_ty(&mut self, t: Ty<'tcx>) -> Self::Result {
-        // We only care to match `ParamSet<T>` or `&ParamSet<T>`.
-        match t.kind() {
-            ty::Adt(def, _) => {
-                if self.tcx.item_name(def.did()) == sym::ParamSet
-                    && self.tcx.crate_name(def.did().krate) == sym::bevy_ecs
-                {
-                    return ControlFlow::Break(());
-                }
-            }
-            ty::Ref(_, ty, _) => ty.visit_with(self)?,
-            _ => {}
+    let mut outlives_bounds: Vec<ty::OutlivesPredicate<'tcx, ty::GenericArg<'tcx>>> = vec![];
+
+    while let Some(arg) = wf_args.pop() {
+        if !checked_wf_args.insert(arg) {
+            continue;
         }
 
-        ControlFlow::Continue(())
+        // Compute the obligations for `arg` to be well-formed. If `arg` is
+        // an unresolved inference variable, just instantiated an empty set
+        // -- because the return type here is going to be things we *add*
+        // to the environment, it's always ok for this set to be smaller
+        // than the ultimate set. (Note: normally there won't be
+        // unresolved inference variables here anyway, but there might be
+        // during typeck under some circumstances.)
+        //
+        // FIXME(@lcnr): It's not really "always fine", having fewer implied
+        // bounds can be backward incompatible, e.g. #101951 was caused by
+        // us not dealing with inference vars in `TypeOutlives` predicates.
+        let obligations = wf::obligations(ocx.infcx, param_env, CRATE_DEF_ID, 0, arg, DUMMY_SP)
+            .unwrap_or_default();
+
+        for obligation in obligations {
+            debug!(?obligation);
+            assert!(!obligation.has_escaping_bound_vars());
+
+            // While these predicates should all be implied by other parts of
+            // the program, they are still relevant as they may constrain
+            // inference variables, which is necessary to add the correct
+            // implied bounds in some cases, mostly when dealing with projections.
+            //
+            // Another important point here: we only register `Projection`
+            // predicates, since otherwise we might register outlives
+            // predicates containing inference variables, and we don't
+            // learn anything new from those.
+            if obligation.predicate.has_non_region_infer() {
+                match obligation.predicate.kind().skip_binder() {
+                    ty::PredicateKind::Clause(ty::ClauseKind::Projection(..))
+                    | ty::PredicateKind::AliasRelate(..) => {
+                        ocx.register_obligation(obligation.clone());
+                    }
+                    _ => {}
+                }
+            }
+
+            let pred = match obligation.predicate.kind().no_bound_vars() {
+                None => continue,
+                Some(pred) => pred,
+            };
+            match pred {
+                // FIXME(const_generics): Make sure that `<'a, 'b, const N: &'a &'b u32>` is sound
+                // if we ever support that
+                ty::PredicateKind::Clause(ty::ClauseKind::Trait(..))
+                | ty::PredicateKind::Clause(ty::ClauseKind::ConstArgHasType(..))
+                | ty::PredicateKind::Subtype(..)
+                | ty::PredicateKind::Coerce(..)
+                | ty::PredicateKind::Clause(ty::ClauseKind::Projection(..))
+                | ty::PredicateKind::ObjectSafe(..)
+                | ty::PredicateKind::Clause(ty::ClauseKind::ConstEvaluatable(..))
+                | ty::PredicateKind::ConstEquate(..)
+                | ty::PredicateKind::Ambiguous
+                | ty::PredicateKind::NormalizesTo(..)
+                | ty::PredicateKind::AliasRelate(..) => {}
+
+                // We need to search through *all* WellFormed predicates
+                ty::PredicateKind::Clause(ty::ClauseKind::WellFormed(arg)) => {
+                    wf_args.push(arg);
+                }
+
+                // We need to register region relationships
+                ty::PredicateKind::Clause(ty::ClauseKind::RegionOutlives(
+                    ty::OutlivesPredicate(r_a, r_b),
+                )) => outlives_bounds.push(ty::OutlivesPredicate(r_a.into(), r_b)),
+
+                ty::PredicateKind::Clause(ty::ClauseKind::TypeOutlives(ty::OutlivesPredicate(
+                    ty_a,
+                    r_b,
+                ))) => outlives_bounds.push(ty::OutlivesPredicate(ty_a.into(), r_b)),
+            }
+        }
     }
+
+    // This call to `select_all_or_error` is necessary to constrain inference variables, which we
+    // use further down when computing the implied bounds.
+    match ocx.select_all_or_error().as_slice() {
+        [] => (),
+        _ => return Err(NoSolution),
+    }
+
+    // We lazily compute the outlives components as
+    // `select_all_or_error` constrains inference variables.
+    let mut implied_bounds = Vec::new();
+    for ty::OutlivesPredicate(a, r_b) in outlives_bounds {
+        match a.unpack() {
+            ty::GenericArgKind::Lifetime(r_a) => {
+                implied_bounds.push(OutlivesBound::RegionSubRegion(r_b, r_a))
+            }
+            ty::GenericArgKind::Type(ty_a) => {
+                let mut ty_a = ocx.infcx.resolve_vars_if_possible(ty_a);
+                // Need to manually normalize in the new solver as `wf::obligations` does not.
+                if ocx.infcx.next_trait_solver() {
+                    ty_a = ocx
+                        .deeply_normalize(&ObligationCause::dummy(), param_env, ty_a)
+                        .map_err(|_| NoSolution)?;
+                }
+                let mut components = smallvec![];
+                push_outlives_components(tcx, ty_a, &mut components);
+                implied_bounds.extend(implied_bounds_from_components(r_b, components))
+            }
+            ty::GenericArgKind::Const(_) => {
+                unreachable!("consts do not participate in outlives bounds")
+            }
+        }
+    }
+
+    Ok(implied_bounds)
 }
 
 /// When we have an implied bound that `T: 'a`, we can further break

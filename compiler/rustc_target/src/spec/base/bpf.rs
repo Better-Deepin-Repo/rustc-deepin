@@ -1,8 +1,7 @@
-use rustc_abi::Endian;
-
+use crate::abi::Endian;
 use crate::spec::{LinkerFlavor, MergeFunctions, PanicStrategy, TargetOptions};
 
-pub(crate) fn opts(endian: Endian) -> TargetOptions {
+pub fn opts(endian: Endian) -> TargetOptions {
     TargetOptions {
         allow_asm: true,
         endian,

@@ -21,16 +21,17 @@ fn test() {
 }
 EOF
 
+cargo add 'anyhow@^1'
+cargo vendor
+
 mkdir -p .cargo
 cat <<EOF > .cargo/config.toml
 [source.crates-io]
-replace-with = "packaged-sources"
+replace-with = "vendored-sources"
 
-[source.packaged-sources]
-directory = "/usr/share/cargo/registry"
+[source.vendored-sources]
+directory = "vendor"
 EOF
-
-cargo add 'anyhow@^1'
 
 cargo check
 cargo build

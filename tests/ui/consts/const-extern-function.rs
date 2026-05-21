@@ -1,7 +1,5 @@
 //@ run-pass
-
 #![allow(non_upper_case_globals)]
-#![allow(unpredictable_function_pointer_comparisons)]
 
 extern "C" fn foopy() {}
 

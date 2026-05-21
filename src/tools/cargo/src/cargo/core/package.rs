@@ -1,4 +1,3 @@
-use std::cell::OnceCell;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -10,9 +9,11 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
-use cargo_util_schemas::manifest::{Hints, RustVersion};
+use bytesize::ByteSize;
+use cargo_util_schemas::manifest::RustVersion;
 use curl::easy::Easy;
 use curl::multi::{EasyHandle, Multi};
+use lazycell::LazyCell;
 use semver::Version;
 use serde::Serialize;
 use tracing::debug;
@@ -21,21 +22,17 @@ use crate::core::compiler::{CompileKind, RustcTargetData};
 use crate::core::dependency::DepKind;
 use crate::core::resolver::features::ForceAllTargets;
 use crate::core::resolver::{HasDevUnits, Resolve};
-use crate::core::{
-    CliUnstable, Dependency, Features, Manifest, PackageId, PackageIdSpec, SerializedDependency,
-    SourceId, Target,
-};
+use crate::core::{Dependency, Manifest, PackageId, PackageIdSpec, SourceId, Target};
 use crate::core::{Summary, Workspace};
 use crate::sources::source::{MaybePackage, SourceMap};
-use crate::util::HumanBytes;
 use crate::util::cache_lock::{CacheLock, CacheLockMode};
 use crate::util::errors::{CargoResult, HttpNotSuccessful};
 use crate::util::interning::InternedString;
-use crate::util::network::http::HttpTimeout;
 use crate::util::network::http::http_handle_and_timeout;
+use crate::util::network::http::HttpTimeout;
 use crate::util::network::retry::{Retry, RetryResult};
 use crate::util::network::sleep::SleepTracker;
-use crate::util::{self, GlobalContext, Progress, ProgressStyle, internal};
+use crate::util::{self, internal, GlobalContext, Progress, ProgressStyle};
 
 /// Information about a package that is available somewhere in the file system.
 ///
@@ -76,7 +73,7 @@ pub struct SerializedPackage {
     license_file: Option<String>,
     description: Option<String>,
     source: SourceId,
-    dependencies: Vec<SerializedDependency>,
+    dependencies: Vec<Dependency>,
     targets: Vec<Target>,
     features: BTreeMap<InternedString, Vec<InternedString>>,
     manifest_path: PathBuf,
@@ -95,8 +92,6 @@ pub struct SerializedPackage {
     metabuild: Option<Vec<String>>,
     default_run: Option<String>,
     rust_version: Option<RustVersion>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hints: Option<Hints>,
 }
 
 impl Package {
@@ -174,11 +169,6 @@ impl Package {
         self.manifest().rust_version()
     }
 
-    /// Gets the package's hints.
-    pub fn hints(&self) -> Option<&Hints> {
-        self.manifest().hints()
-    }
-
     /// Returns `true` if the package uses a custom build script for any target.
     pub fn has_custom_build(&self) -> bool {
         self.targets().iter().any(|t| t.is_custom_build())
@@ -193,11 +183,12 @@ impl Package {
         }
     }
 
-    pub fn serialized(
-        &self,
-        unstable_flags: &CliUnstable,
-        cargo_features: &Features,
-    ) -> SerializedPackage {
+    /// Returns if package should include `Cargo.lock`.
+    pub fn include_lockfile(&self) -> bool {
+        self.targets().iter().any(|t| t.is_example() || t.is_bin())
+    }
+
+    pub fn serialized(&self) -> SerializedPackage {
         let summary = self.manifest().summary();
         let package_id = summary.package_id();
         let manmeta = self.manifest().metadata();
@@ -212,10 +203,17 @@ impl Package {
             .cloned()
             .collect();
         // Convert Vec<FeatureValue> to Vec<InternedString>
-        let crate_features = summary
+        let features = summary
             .features()
             .iter()
-            .map(|(k, v)| (*k, v.iter().map(|fv| fv.to_string().into()).collect()))
+            .map(|(k, v)| {
+                (
+                    *k,
+                    v.iter()
+                        .map(|fv| InternedString::new(&fv.to_string()))
+                        .collect(),
+                )
+            })
             .collect();
 
         SerializedPackage {
@@ -226,13 +224,9 @@ impl Package {
             license_file: manmeta.license_file.clone(),
             description: manmeta.description.clone(),
             source: summary.source_id(),
-            dependencies: summary
-                .dependencies()
-                .iter()
-                .map(|dep| dep.serialized(unstable_flags, cargo_features))
-                .collect(),
+            dependencies: summary.dependencies().to_vec(),
             targets,
-            features: crate_features,
+            features,
             manifest_path: self.manifest_path().to_path_buf(),
             metadata: self.manifest().custom_metadata().cloned(),
             authors: manmeta.authors.clone(),
@@ -248,7 +242,6 @@ impl Package {
             publish: self.publish().as_ref().cloned(),
             default_run: self.manifest().default_run().map(|s| s.to_owned()),
             rust_version: self.rust_version().cloned(),
-            hints: self.hints().cloned(),
         }
     }
 }
@@ -287,11 +280,11 @@ impl hash::Hash for Package {
 /// This is primarily used to convert a set of `PackageId`s to `Package`s. It
 /// will download as needed, or used the cached download if available.
 pub struct PackageSet<'gctx> {
-    packages: HashMap<PackageId, OnceCell<Package>>,
+    packages: HashMap<PackageId, LazyCell<Package>>,
     sources: RefCell<SourceMap<'gctx>>,
     gctx: &'gctx GlobalContext,
     multi: Multi,
-    /// Used to prevent reusing the `PackageSet` to download twice.
+    /// Used to prevent reusing the PackageSet to download twice.
     downloading: Cell<bool>,
     /// Whether or not to use curl HTTP/2 multiplexing.
     multiplexing: bool,
@@ -408,7 +401,7 @@ impl<'gctx> PackageSet<'gctx> {
         Ok(PackageSet {
             packages: package_ids
                 .iter()
-                .map(|&id| (id, OnceCell::new()))
+                .map(|&id| (id, LazyCell::new()))
                 .collect(),
             sources: RefCell::new(sources),
             gctx,
@@ -423,7 +416,7 @@ impl<'gctx> PackageSet<'gctx> {
     }
 
     pub fn packages(&self) -> impl Iterator<Item = &Package> {
-        self.packages.values().filter_map(|p| p.get())
+        self.packages.values().filter_map(|p| p.borrow())
     }
 
     pub fn enable_download<'a>(&'a self) -> CargoResult<Downloads<'a, 'gctx>> {
@@ -444,7 +437,7 @@ impl<'gctx> PackageSet<'gctx> {
             ))),
             downloads_finished: 0,
             downloaded_bytes: 0,
-            largest: (0, "".into()),
+            largest: (0, InternedString::new("")),
             success: false,
             updated_at: Cell::new(Instant::now()),
             timeout,
@@ -457,7 +450,7 @@ impl<'gctx> PackageSet<'gctx> {
     }
 
     pub fn get_one(&self, id: PackageId) -> CargoResult<&Package> {
-        if let Some(pkg) = self.packages.get(&id).and_then(|slot| slot.get()) {
+        if let Some(pkg) = self.packages.get(&id).and_then(|slot| slot.borrow()) {
             return Ok(pkg);
         }
         Ok(self.get_many(Some(id))?.remove(0))
@@ -495,18 +488,17 @@ impl<'gctx> PackageSet<'gctx> {
         force_all_targets: ForceAllTargets,
     ) -> CargoResult<()> {
         fn collect_used_deps(
-            used: &mut BTreeSet<(PackageId, CompileKind)>,
+            used: &mut BTreeSet<PackageId>,
             resolve: &Resolve,
             pkg_id: PackageId,
             has_dev_units: HasDevUnits,
-            requested_kind: CompileKind,
+            requested_kinds: &[CompileKind],
             target_data: &RustcTargetData<'_>,
             force_all_targets: ForceAllTargets,
         ) -> CargoResult<()> {
-            if !used.insert((pkg_id, requested_kind)) {
+            if !used.insert(pkg_id) {
                 return Ok(());
             }
-            let requested_kinds = &[requested_kind];
             let filtered_deps = PackageSet::filter_deps(
                 pkg_id,
                 resolve,
@@ -515,34 +507,16 @@ impl<'gctx> PackageSet<'gctx> {
                 target_data,
                 force_all_targets,
             );
-            for (pkg_id, deps) in filtered_deps {
+            for (pkg_id, _dep) in filtered_deps {
                 collect_used_deps(
                     used,
                     resolve,
                     pkg_id,
                     has_dev_units,
-                    requested_kind,
+                    requested_kinds,
                     target_data,
                     force_all_targets,
                 )?;
-                let artifact_kinds = deps.iter().filter_map(|dep| {
-                    Some(
-                        dep.artifact()?
-                            .target()?
-                            .to_resolved_compile_kind(*requested_kinds.iter().next().unwrap()),
-                    )
-                });
-                for artifact_kind in artifact_kinds {
-                    collect_used_deps(
-                        used,
-                        resolve,
-                        pkg_id,
-                        has_dev_units,
-                        artifact_kind,
-                        target_data,
-                        force_all_targets,
-                    )?;
-                }
             }
             Ok(())
         }
@@ -553,22 +527,16 @@ impl<'gctx> PackageSet<'gctx> {
         let mut to_download = BTreeSet::new();
 
         for id in root_ids {
-            for requested_kind in requested_kinds {
-                collect_used_deps(
-                    &mut to_download,
-                    resolve,
-                    *id,
-                    has_dev_units,
-                    *requested_kind,
-                    target_data,
-                    force_all_targets,
-                )?;
-            }
+            collect_used_deps(
+                &mut to_download,
+                resolve,
+                *id,
+                has_dev_units,
+                requested_kinds,
+                target_data,
+                force_all_targets,
+            )?;
         }
-        let to_download = to_download
-            .into_iter()
-            .map(|(p, _)| p)
-            .collect::<BTreeSet<_>>();
         self.get_many(to_download.into_iter())?;
         Ok(())
     }
@@ -629,7 +597,7 @@ impl<'gctx> PackageSet<'gctx> {
         Ok(())
     }
 
-    pub fn filter_deps<'a>(
+    fn filter_deps<'a>(
         pkg_id: PackageId,
         resolve: &'a Resolve,
         has_dev_units: HasDevUnits,
@@ -700,7 +668,7 @@ impl<'a, 'gctx> Downloads<'a, 'gctx> {
             .packages
             .get(&id)
             .ok_or_else(|| internal(format!("couldn't find `{}` in package set", id)))?;
-        if let Some(pkg) = slot.get() {
+        if let Some(pkg) = slot.borrow() {
             return Ok(Some(pkg));
         }
 
@@ -717,8 +685,8 @@ impl<'a, 'gctx> Downloads<'a, 'gctx> {
         let (url, descriptor, authorization) = match pkg {
             MaybePackage::Ready(pkg) => {
                 debug!("{} doesn't need a download", id);
-                assert!(slot.set(pkg).is_ok());
-                return Ok(Some(slot.get().unwrap()));
+                assert!(slot.fill(pkg).is_ok());
+                return Ok(Some(slot.borrow().unwrap()));
             }
             MaybePackage::Download {
                 url,
@@ -889,7 +857,7 @@ impl<'a, 'gctx> Downloads<'a, 'gctx> {
             match ret {
                 RetryResult::Success(data) => break (dl, data),
                 RetryResult::Err(e) => {
-                    return Err(e.context(format!("failed to download from `{}`", dl.url)));
+                    return Err(e.context(format!("failed to download from `{}`", dl.url)))
                 }
                 RetryResult::Retry(sleep) => {
                     debug!(target: "network", "download retry {} for {sleep}ms", dl.url);
@@ -915,8 +883,7 @@ impl<'a, 'gctx> Downloads<'a, 'gctx> {
         // have a great view into the progress of the extraction. Let's prepare
         // the user for this CPU-heavy step if it looks like it'll take some
         // time to do so.
-        let kib_400 = 1024 * 400;
-        if dl.total.get() < kib_400 {
+        if dl.total.get() < ByteSize::kb(400).0 {
             self.tick(WhyTick::DownloadFinished)?;
         } else {
             self.tick(WhyTick::Extracting(&dl.id.name()))?;
@@ -941,8 +908,8 @@ impl<'a, 'gctx> Downloads<'a, 'gctx> {
             .set(self.next_speed_check.get() + finish_dur);
 
         let slot = &self.set.packages[&dl.id];
-        assert!(slot.set(pkg).is_ok());
-        Ok(slot.get().unwrap())
+        assert!(slot.fill(pkg).is_ok());
+        Ok(slot.borrow().unwrap())
     }
 
     fn enqueue(&mut self, dl: Download<'gctx>, handle: Easy) -> CargoResult<()> {
@@ -1115,7 +1082,7 @@ impl<'a, 'gctx> Downloads<'a, 'gctx> {
                     }
                 }
                 if remaining > 0 && dur > Duration::from_millis(500) {
-                    msg.push_str(&format!(", remaining bytes: {:.1}", HumanBytes(remaining)));
+                    msg.push_str(&format!(", remaining bytes: {}", ByteSize(remaining)));
                 }
             }
         }
@@ -1155,21 +1122,20 @@ impl<'a, 'gctx> Drop for Downloads<'a, 'gctx> {
             "crates"
         };
         let mut status = format!(
-            "{} {} ({:.1}) in {}",
+            "{} {} ({}) in {}",
             self.downloads_finished,
             crate_string,
-            HumanBytes(self.downloaded_bytes),
+            ByteSize(self.downloaded_bytes),
             util::elapsed(self.start.elapsed())
         );
         // print the size of largest crate if it was >1mb
         // however don't print if only a single crate was downloaded
         // because it is obvious that it will be the largest then
-        let mib_1 = 1024 * 1024;
-        if self.largest.0 > mib_1 && self.downloads_finished > 1 {
+        if self.largest.0 > ByteSize::mb(1).0 && self.downloads_finished > 1 {
             status.push_str(&format!(
-                " (largest was `{}` at {:.1})",
+                " (largest was `{}` at {})",
                 self.largest.1,
-                HumanBytes(self.largest.0),
+                ByteSize(self.largest.0),
             ));
         }
         // Clear progress before displaying final summary.
@@ -1183,7 +1149,7 @@ mod tls {
 
     use super::Downloads;
 
-    thread_local!(static PTR: Cell<usize> = const { Cell::new(0) });
+    thread_local!(static PTR: Cell<usize> = Cell::new(0));
 
     pub(crate) fn with<R>(f: impl FnOnce(Option<&Downloads<'_, '_>>) -> R) -> R {
         let ptr = PTR.with(|p| p.get());

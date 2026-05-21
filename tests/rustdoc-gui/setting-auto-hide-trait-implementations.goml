@@ -1,13 +1,12 @@
 // Checks that the setting "auto hide trait implementations" is working as expected.
 
-include: "utils.goml"
-
 define-function: (
     "check-setting",
     [storage_value, setting_attribute_value, toggle_attribute_value],
     block {
         assert-local-storage: {"rustdoc-auto-hide-trait-implementations": |storage_value|}
-        call-function: ("open-settings-menu", {})
+        click: "#settings-menu"
+        wait-for: "#settings"
         assert-property: ("#auto-hide-trait-implementations", {"checked": |setting_attribute_value|})
         assert-attribute: ("#trait-implementations-list > details", {"open": |toggle_attribute_value|}, ALL)
     }

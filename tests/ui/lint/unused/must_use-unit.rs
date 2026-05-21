@@ -10,7 +10,7 @@ fn bar() -> ! {
 }
 
 fn main() {
-    foo(); //~ ERROR unused return value of `foo`
+    foo(); //~ unused return value of `foo`
 
-    bar(); //~ ERROR unused return value of `bar`
+    bar(); //~ unused return value of `bar`
 }

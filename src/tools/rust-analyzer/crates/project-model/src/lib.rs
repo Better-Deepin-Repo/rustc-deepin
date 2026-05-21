@@ -1,7 +1,7 @@
 //! In rust-analyzer, we maintain a strict separation between pure abstract
 //! semantic project model and a concrete model of a particular build system.
 //!
-//! Pure model is represented by the `base_db::CrateGraph` from another crate.
+//! Pure model is represented by the [`base_db::CrateGraph`] from another crate.
 //!
 //! In this crate, we are concerned with "real world" project models.
 //!
@@ -13,42 +13,16 @@
 //! * Project discovery (where's the relevant Cargo.toml for the current dir).
 //! * Custom build steps (`build.rs` code generation and compilation of
 //!   procedural macros).
-//! * Lowering of concrete model to a `base_db::CrateGraph`
-
-// It's useful to refer to code that is private in doc comments.
-#![allow(rustdoc::private_intra_doc_links)]
-#![cfg_attr(feature = "in-rust-tree", feature(rustc_private))]
-
-#[cfg(feature = "in-rust-tree")]
-extern crate rustc_driver as _;
-
-pub mod project_json;
-pub mod toolchain_info {
-    pub mod rustc_cfg;
-    pub mod target_data;
-    pub mod target_tuple;
-    pub mod version;
-
-    use std::path::Path;
-
-    use crate::{ManifestPath, Sysroot, cargo_config_file::CargoConfigFile};
-
-    #[derive(Copy, Clone)]
-    pub enum QueryConfig<'a> {
-        /// Directly invoke `rustc` to query the desired information.
-        Rustc(&'a Sysroot, &'a Path),
-        /// Attempt to use cargo to query the desired information, honoring cargo configurations.
-        /// If this fails, falls back to invoking `rustc` directly.
-        Cargo(&'a Sysroot, &'a ManifestPath, &'a Option<CargoConfigFile>),
-    }
-}
+//! * Lowering of concrete model to a [`base_db::CrateGraph`]
 
 mod build_dependencies;
-mod cargo_config_file;
 mod cargo_workspace;
 mod env;
 mod manifest_path;
+pub mod project_json;
+mod rustc_cfg;
 mod sysroot;
+pub mod target_data_layout;
 mod workspace;
 
 #[cfg(test)]
@@ -56,20 +30,20 @@ mod tests;
 
 use std::{
     fmt,
-    fs::{self, ReadDir, read_dir},
+    fs::{self, read_dir, ReadDir},
     io,
     process::Command,
 };
 
-use anyhow::{Context, bail, format_err};
+use anyhow::{bail, format_err, Context};
 use paths::{AbsPath, AbsPathBuf, Utf8PathBuf};
 use rustc_hash::FxHashSet;
 
 pub use crate::{
-    build_dependencies::{ProcMacroDylibPath, WorkspaceBuildScripts},
+    build_dependencies::WorkspaceBuildScripts,
     cargo_workspace::{
-        CargoConfig, CargoFeatures, CargoMetadataConfig, CargoWorkspace, Package, PackageData,
-        PackageDependency, RustLibSource, Target, TargetData, TargetDirectoryConfig, TargetKind,
+        CargoConfig, CargoFeatures, CargoWorkspace, Package, PackageData, PackageDependency,
+        RustLibSource, Target, TargetData, TargetKind,
     },
     manifest_path::ManifestPath,
     project_json::{ProjectJson, ProjectJsonData},
@@ -77,15 +51,6 @@ pub use crate::{
     workspace::{FileLoader, PackageRoot, ProjectWorkspace, ProjectWorkspaceKind},
 };
 pub use cargo_metadata::Metadata;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProjectJsonFromCommand {
-    /// The data describing this project, such as its dependencies.
-    pub data: ProjectJsonData,
-    /// The build system specific file that describes this project,
-    /// such as a `my-project/BUCK` file.
-    pub buildfile: AbsPathBuf,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub enum ProjectManifest {
@@ -110,9 +75,7 @@ impl ProjectManifest {
         if path.extension().unwrap_or_default() == "rs" {
             return Ok(ProjectManifest::CargoScript(path));
         }
-        bail!(
-            "project root must point to a Cargo.toml, rust-project.json or <script>.rs file: {path}"
-        );
+        bail!("project root must point to a Cargo.toml, rust-project.json or <script>.rs file: {path}");
     }
 
     pub fn discover_single(path: &AbsPath) -> anyhow::Result<ProjectManifest> {
@@ -146,22 +109,21 @@ impl ProjectManifest {
         }
 
         fn find_in_parent_dirs(path: &AbsPath, target_file_name: &str) -> Option<ManifestPath> {
-            if path.file_name().unwrap_or_default() == target_file_name
-                && let Ok(manifest) = ManifestPath::try_from(path.to_path_buf())
-            {
-                return Some(manifest);
+            if path.file_name().unwrap_or_default() == target_file_name {
+                if let Ok(manifest) = ManifestPath::try_from(path.to_path_buf()) {
+                    return Some(manifest);
+                }
             }
 
             let mut curr = Some(path);
 
             while let Some(path) = curr {
                 let candidate = path.join(target_file_name);
-                if fs::metadata(&candidate).is_ok()
-                    && let Ok(manifest) = ManifestPath::try_from(candidate)
-                {
-                    return Some(manifest);
+                if fs::metadata(&candidate).is_ok() {
+                    if let Ok(manifest) = ManifestPath::try_from(candidate) {
+                        return Some(manifest);
+                    }
                 }
-
                 curr = path.parent();
             }
 
@@ -210,7 +172,7 @@ impl fmt::Display for ProjectManifest {
     }
 }
 
-fn utf8_stdout(cmd: &mut Command) -> anyhow::Result<String> {
+fn utf8_stdout(mut cmd: Command) -> anyhow::Result<String> {
     let output = cmd.output().with_context(|| format!("{cmd:?} failed"))?;
     if !output.status.success() {
         match String::from_utf8(output.stderr) {
@@ -268,22 +230,4 @@ fn parse_cfg(s: &str) -> Result<cfg::CfgAtom, String> {
         None => cfg::CfgAtom::Flag(intern::Symbol::intern(s)),
     };
     Ok(res)
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum RustSourceWorkspaceConfig {
-    CargoMetadata(CargoMetadataConfig),
-    Json(ProjectJson),
-}
-
-impl Default for RustSourceWorkspaceConfig {
-    fn default() -> Self {
-        RustSourceWorkspaceConfig::default_cargo()
-    }
-}
-
-impl RustSourceWorkspaceConfig {
-    pub fn default_cargo() -> Self {
-        RustSourceWorkspaceConfig::CargoMetadata(Default::default())
-    }
 }

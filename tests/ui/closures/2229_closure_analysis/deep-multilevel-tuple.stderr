@@ -16,20 +16,21 @@ LL | |
 LL | |
 LL | |         let x = &t.0.0.0;
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
-note: Capturing t[(0, 0),(0, 0),(0, 0)] -> Immutable
+note: Capturing t[(0, 0),(0, 0),(0, 0)] -> ImmBorrow
   --> $DIR/deep-multilevel-tuple.rs:15:18
    |
 LL |         let x = &t.0.0.0;
    |                  ^^^^^^^
-note: Capturing t[(1, 0),(1, 0),(1, 0)] -> Mutable
+note: Capturing t[(1, 0),(1, 0),(1, 0)] -> MutBorrow
   --> $DIR/deep-multilevel-tuple.rs:17:9
    |
 LL |         t.1.1.1 = 9;
    |         ^^^^^^^
-note: Capturing t[] -> Immutable
+note: Capturing t[] -> ImmBorrow
   --> $DIR/deep-multilevel-tuple.rs:20:26
    |
 LL |         println!("{:?}", t);
@@ -43,14 +44,15 @@ LL | |
 LL | |
 LL | |         let x = &t.0.0.0;
 ...  |
+LL | |
 LL | |     };
    | |_____^
    |
-note: Min Capture t[] -> Mutable
+note: Min Capture t[] -> MutBorrow
   --> $DIR/deep-multilevel-tuple.rs:17:9
    |
 LL |         t.1.1.1 = 9;
-   |         ^^^^^^^ t[] captured as Mutable here
+   |         ^^^^^^^ t[] captured as MutBorrow here
 ...
 LL |         println!("{:?}", t);
    |                          ^ t[] used here

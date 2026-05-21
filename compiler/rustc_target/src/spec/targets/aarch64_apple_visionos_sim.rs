@@ -1,25 +1,27 @@
-use crate::spec::base::apple::{Arch, TargetEnv, base};
-use crate::spec::{Os, SanitizerSet, Target, TargetMetadata, TargetOptions};
+use crate::spec::base::apple::{opts, visionos_sim_llvm_target, Arch, TargetAbi};
+use crate::spec::{FramePointer, SanitizerSet, Target, TargetOptions};
 
-pub(crate) fn target() -> Target {
-    let (opts, llvm_target, arch) = base(Os::VisionOs, Arch::Arm64, TargetEnv::Simulator);
+pub fn target() -> Target {
+    let arch = Arch::Arm64;
+    let mut base = opts("visionos", arch, TargetAbi::Simulator);
+    base.supported_sanitizers = SanitizerSet::ADDRESS | SanitizerSet::THREAD;
+
     Target {
-        llvm_target,
-        metadata: TargetMetadata {
+        llvm_target: visionos_sim_llvm_target(arch).into(),
+        metadata: crate::spec::TargetMetadata {
             description: Some("ARM64 Apple visionOS simulator".into()),
-            tier: Some(2),
+            tier: Some(3),
             host_tools: Some(false),
-            std: Some(true),
+            std: Some(false),
         },
         pointer_width: 64,
-        data_layout: "e-m:o-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-n32:64-S128-Fn32"
-            .into(),
-        arch,
+        data_layout: "e-m:o-i64:64-i128:128-n32:64-S128-Fn32".into(),
+        arch: arch.target_arch(),
         options: TargetOptions {
-            features: "+neon,+apple-a16".into(),
+            features: "+neon,+fp-armv8,+apple-a16".into(),
             max_atomic_width: Some(128),
-            supported_sanitizers: SanitizerSet::ADDRESS | SanitizerSet::THREAD,
-            ..opts
+            frame_pointer: FramePointer::NonLeaf,
+            ..base
         },
     }
 }

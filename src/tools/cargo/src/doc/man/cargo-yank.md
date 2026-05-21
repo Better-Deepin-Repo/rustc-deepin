@@ -51,7 +51,7 @@ requirements, following a given release being yanked:
 ### When to yank
 
 Crates should only be yanked in exceptional circumstances, for example, an
-accidental publish, unintentional SemVer breakages, or a significantly
+accidental publish, an unintentional SemVer breakages, or a significantly
 broken and unusable crate. In the case of security vulnerabilities, [RustSec]
 is typically a less disruptive mechanism to inform users and encourage them
 to upgrade, and avoids the possibility of significant downstream disruption
@@ -68,10 +68,9 @@ them at <help@crates.io>.
 
 If credentials have been leaked, the recommended course of action is to revoke
 them immediately. Once a crate has been published, it is impossible to determine
-if the leaked credentials have been copied. Yanking only prevents Cargo from
-selecting this version when resolving dependencies by default. Existing lock
-files or direct downloads are not affected, so yanking cannot stop further
-spreading of the leaked credentials.
+if the leaked credentials have been copied. Yanking the crate only prevents new
+users from downloading it, but cannot stop those who have already downloaded it
+from keeping or even spreading the leaked credentials.
 
 [RustSec]: https://rustsec.org/
 [policies]: https://crates.io/policies

@@ -4,5 +4,5 @@
 
 fn main() {}
 
-#[cfg(false)]
+#[cfg(FALSE)]
 const X: u8;

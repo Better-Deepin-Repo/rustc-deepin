@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ run-rustfix
 #![allow(unused_imports)]
 fn main() {

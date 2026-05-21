@@ -33,6 +33,7 @@ while getopts ':vieh' OPTION; do
     case "$OPTION" in
         v)
             INVERT=1
+            ERROR_MSG='should not be found'
             ;;
         i)
             GREPFLAGS="i$GREPFLAGS"

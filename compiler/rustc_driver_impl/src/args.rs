@@ -1,6 +1,7 @@
 use std::{env, error, fmt, fs, io};
 
 use rustc_session::EarlyDiagCtxt;
+use rustc_span::ErrorGuaranteed;
 
 /// Expands argfiles in command line arguments.
 #[derive(Default)]
@@ -97,7 +98,11 @@ impl Expander {
 /// **Note:** This function doesn't interpret argument 0 in any special way.
 /// If this function is intended to be used with command line arguments,
 /// `argv[0]` must be removed prior to calling it manually.
-pub fn arg_expand_all(early_dcx: &EarlyDiagCtxt, at_args: &[String]) -> Vec<String> {
+#[allow(rustc::untranslatable_diagnostic)] // FIXME: make this translatable
+pub fn arg_expand_all(
+    early_dcx: &EarlyDiagCtxt,
+    at_args: &[String],
+) -> Result<Vec<String>, ErrorGuaranteed> {
     let mut expander = Expander::default();
     let mut result = Ok(());
     for arg in at_args {
@@ -105,10 +110,7 @@ pub fn arg_expand_all(early_dcx: &EarlyDiagCtxt, at_args: &[String]) -> Vec<Stri
             result = Err(early_dcx.early_err(format!("failed to load argument file: {err}")));
         }
     }
-    if let Err(guar) = result {
-        guar.raise_fatal();
-    }
-    expander.finish()
+    result.map(|()| expander.finish())
 }
 
 /// Gets the raw unprocessed command-line arguments as Unicode strings, without doing any further
@@ -116,22 +118,22 @@ pub fn arg_expand_all(early_dcx: &EarlyDiagCtxt, at_args: &[String]) -> Vec<Stri
 ///
 /// This function is identical to [`env::args()`] except that it emits an error when it encounters
 /// non-Unicode arguments instead of panicking.
-pub fn raw_args(early_dcx: &EarlyDiagCtxt) -> Vec<String> {
-    let mut args = Vec::new();
-    let mut guar = Ok(());
+pub fn raw_args(early_dcx: &EarlyDiagCtxt) -> Result<Vec<String>, ErrorGuaranteed> {
+    let mut res = Ok(Vec::new());
     for (i, arg) in env::args_os().enumerate() {
         match arg.into_string() {
-            Ok(arg) => args.push(arg),
+            Ok(arg) => {
+                if let Ok(args) = &mut res {
+                    args.push(arg);
+                }
+            }
             Err(arg) => {
-                guar =
+                res =
                     Err(early_dcx.early_err(format!("argument {i} is not valid Unicode: {arg:?}")))
             }
         }
     }
-    if let Err(guar) = guar {
-        guar.raise_fatal();
-    }
-    args
+    res
 }
 
 #[derive(Debug)]

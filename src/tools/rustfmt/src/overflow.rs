@@ -3,28 +3,28 @@
 use std::cmp::min;
 
 use itertools::Itertools;
-use rustc_ast::ast;
 use rustc_ast::token::Delimiter;
+use rustc_ast::{ast, ptr};
 use rustc_span::Span;
 use tracing::debug;
 
 use crate::closures;
-use crate::config::StyleEdition;
-use crate::config::{Config, lists::*};
+use crate::config::Version;
+use crate::config::{lists::*, Config};
 use crate::expr::{
     can_be_overflowed_expr, is_every_expr_simple, is_method_call, is_nested_call, is_simple_expr,
     rewrite_cond,
 };
 use crate::lists::{
-    ListFormatting, ListItem, Separator, definitive_tactic, itemize_list, write_list,
+    definitive_tactic, itemize_list, write_list, ListFormatting, ListItem, Separator,
 };
 use crate::macros::MacroArg;
-use crate::patterns::{TuplePatField, can_be_overflowed_pat};
-use crate::rewrite::{Rewrite, RewriteContext, RewriteError, RewriteErrorExt, RewriteResult};
+use crate::patterns::{can_be_overflowed_pat, TuplePatField};
+use crate::rewrite::{Rewrite, RewriteContext};
 use crate::shape::Shape;
 use crate::source_map::SpanUtils;
 use crate::spanned::Spanned;
-use crate::types::{SegmentParam, can_be_overflowed_type};
+use crate::types::{can_be_overflowed_type, SegmentParam};
 use crate::utils::{count_newlines, extra_offset, first_line_width, last_line_width, mk_sp};
 
 /// A list of `format!`-like macros, that take a long format string and a list of arguments to
@@ -78,7 +78,7 @@ pub(crate) enum OverflowableItem<'a> {
     Expr(&'a ast::Expr),
     GenericParam(&'a ast::GenericParam),
     MacroArg(&'a MacroArg),
-    MetaItemInner(&'a ast::MetaItemInner),
+    NestedMetaItem(&'a ast::NestedMetaItem),
     SegmentParam(&'a SegmentParam<'a>),
     FieldDef(&'a ast::FieldDef),
     TuplePatField(&'a TuplePatField<'a>),
@@ -90,10 +90,6 @@ pub(crate) enum OverflowableItem<'a> {
 impl<'a> Rewrite for OverflowableItem<'a> {
     fn rewrite(&self, context: &RewriteContext<'_>, shape: Shape) -> Option<String> {
         self.map(|item| item.rewrite(context, shape))
-    }
-
-    fn rewrite_result(&self, context: &RewriteContext<'_>, shape: Shape) -> RewriteResult {
-        self.map(|item| item.rewrite_result(context, shape))
     }
 }
 
@@ -123,7 +119,7 @@ impl<'a> OverflowableItem<'a> {
             OverflowableItem::Expr(expr) => f(*expr),
             OverflowableItem::GenericParam(gp) => f(*gp),
             OverflowableItem::MacroArg(macro_arg) => f(*macro_arg),
-            OverflowableItem::MetaItemInner(nmi) => f(*nmi),
+            OverflowableItem::NestedMetaItem(nmi) => f(*nmi),
             OverflowableItem::SegmentParam(sp) => f(*sp),
             OverflowableItem::FieldDef(sf) => f(*sf),
             OverflowableItem::TuplePatField(pat) => f(*pat),
@@ -138,9 +134,9 @@ impl<'a> OverflowableItem<'a> {
             OverflowableItem::Expr(expr) => is_simple_expr(expr),
             OverflowableItem::MacroArg(MacroArg::Keyword(..)) => true,
             OverflowableItem::MacroArg(MacroArg::Expr(expr)) => is_simple_expr(expr),
-            OverflowableItem::MetaItemInner(meta_item_inner) => match meta_item_inner {
-                ast::MetaItemInner::Lit(..) => true,
-                ast::MetaItemInner::MetaItem(ref meta_item) => {
+            OverflowableItem::NestedMetaItem(nested_meta_item) => match nested_meta_item {
+                ast::NestedMetaItem::Lit(..) => true,
+                ast::NestedMetaItem::MetaItem(ref meta_item) => {
                     matches!(meta_item.kind, ast::MetaItemKind::Word)
                 }
             },
@@ -184,10 +180,12 @@ impl<'a> OverflowableItem<'a> {
                 MacroArg::Item(..) => len == 1,
                 MacroArg::Keyword(..) => false,
             },
-            OverflowableItem::MetaItemInner(meta_item_inner) if len == 1 => match meta_item_inner {
-                ast::MetaItemInner::Lit(..) => false,
-                ast::MetaItemInner::MetaItem(..) => true,
-            },
+            OverflowableItem::NestedMetaItem(nested_meta_item) if len == 1 => {
+                match nested_meta_item {
+                    ast::NestedMetaItem::Lit(..) => false,
+                    ast::NestedMetaItem::MetaItem(..) => true,
+                }
+            }
             OverflowableItem::SegmentParam(SegmentParam::Type(ty)) => {
                 can_be_overflowed_type(context, ty, len)
             }
@@ -200,15 +198,11 @@ impl<'a> OverflowableItem<'a> {
     fn special_cases(&self, config: &Config) -> impl Iterator<Item = &(&'static str, usize)> {
         let base_cases = match self {
             OverflowableItem::MacroArg(..) => SPECIAL_CASE_MACROS,
-            OverflowableItem::MetaItemInner(..) => SPECIAL_CASE_ATTR,
+            OverflowableItem::NestedMetaItem(..) => SPECIAL_CASE_ATTR,
             _ => &[],
         };
-        let additional_cases = match self {
-            OverflowableItem::MacroArg(..)
-                if config.style_edition() >= StyleEdition::Edition2024 =>
-            {
-                SPECIAL_CASE_MACROS_V2
-            }
+        let additional_cases = match (self, config.version()) {
+            (OverflowableItem::MacroArg(..), Version::Two) => SPECIAL_CASE_MACROS_V2,
             _ => &[],
         };
         base_cases.iter().chain(additional_cases)
@@ -219,7 +213,7 @@ pub(crate) trait IntoOverflowableItem<'a>: Rewrite + Spanned {
     fn into_overflowable_item(&'a self) -> OverflowableItem<'a>;
 }
 
-impl<'a, T: 'a + IntoOverflowableItem<'a>> IntoOverflowableItem<'a> for Box<T> {
+impl<'a, T: 'a + IntoOverflowableItem<'a>> IntoOverflowableItem<'a> for ptr::P<T> {
     fn into_overflowable_item(&'a self) -> OverflowableItem<'a> {
         (**self).into_overflowable_item()
     }
@@ -259,7 +253,7 @@ macro_rules! impl_into_overflowable_item_for_rustfmt_types {
 impl_into_overflowable_item_for_ast_node!(
     Expr,
     GenericParam,
-    MetaItemInner,
+    NestedMetaItem,
     FieldDef,
     Ty,
     Pat,
@@ -284,7 +278,7 @@ pub(crate) fn rewrite_with_parens<'a, T: 'a + IntoOverflowableItem<'a>>(
     span: Span,
     item_max_width: usize,
     force_separator_tactic: Option<SeparatorTactic>,
-) -> RewriteResult {
+) -> Option<String> {
     Context::new(
         context,
         items,
@@ -306,7 +300,7 @@ pub(crate) fn rewrite_with_angle_brackets<'a, T: 'a + IntoOverflowableItem<'a>>(
     items: impl Iterator<Item = &'a T>,
     shape: Shape,
     span: Span,
-) -> RewriteResult {
+) -> Option<String> {
     Context::new(
         context,
         items,
@@ -330,7 +324,7 @@ pub(crate) fn rewrite_with_square_brackets<'a, T: 'a + IntoOverflowableItem<'a>>
     span: Span,
     force_separator_tactic: Option<SeparatorTactic>,
     delim_token: Option<Delimiter>,
-) -> RewriteResult {
+) -> Option<String> {
     let (lhs, rhs) = match delim_token {
         Some(Delimiter::Parenthesis) => ("(", ")"),
         Some(Delimiter::Brace) => ("{", "}"),
@@ -385,8 +379,8 @@ impl<'a> Context<'a> {
 
         // 1 = "(" or ")"
         let one_line_shape = shape
-            .offset_left_opt(last_line_width(ident) + 1)
-            .and_then(|shape| shape.sub_width_opt(1))
+            .offset_left(last_line_width(ident) + 1)
+            .and_then(|shape| shape.sub_width(1))
             .unwrap_or(Shape { width: 0, ..shape });
         let nested_shape = shape_from_indent_style(context, shape, used_width + 2, used_width + 1);
         Context {
@@ -434,7 +428,7 @@ impl<'a> Context<'a> {
                         if closures::args_have_many_closure(&self.items) {
                             None
                         } else {
-                            closures::rewrite_last_closure(self.context, expr, shape).ok()
+                            closures::rewrite_last_closure(self.context, expr, shape)
                         }
                     }
 
@@ -463,7 +457,7 @@ impl<'a> Context<'a> {
 
         if let Some(rewrite) = rewrite {
             // splitn(2, *).next().unwrap() is always safe.
-            let rewrite_first_line = Ok(rewrite.splitn(2, '\n').next().unwrap().to_owned());
+            let rewrite_first_line = Some(rewrite.splitn(2, '\n').next().unwrap().to_owned());
             last_list_item.item = rewrite_first_line;
             Some(rewrite)
         } else {
@@ -501,7 +495,7 @@ impl<'a> Context<'a> {
                 Some(OverflowableItem::MacroArg(MacroArg::Expr(expr)))
                     if !combine_arg_with_callee
                         && is_method_call(expr)
-                        && self.context.config.style_edition() >= StyleEdition::Edition2024 =>
+                        && self.context.config.version() == Version::Two =>
                 {
                     self.context.force_one_line_chain.replace(true);
                 }
@@ -551,23 +545,22 @@ impl<'a> Context<'a> {
                         .and_then(|last_item| last_item.rewrite(self.context, self.nested_shape));
                     let no_newline = rw.as_ref().map_or(false, |s| !s.contains('\n'));
                     if no_newline {
-                        list_items[self.items.len() - 1].item = rw.unknown_error();
+                        list_items[self.items.len() - 1].item = rw;
                     } else {
-                        list_items[self.items.len() - 1].item = Ok(overflowed.to_owned());
+                        list_items[self.items.len() - 1].item = Some(overflowed.to_owned());
                     }
                 } else {
-                    list_items[self.items.len() - 1].item = Ok(overflowed.to_owned());
+                    list_items[self.items.len() - 1].item = Some(overflowed.to_owned());
                 }
             }
             (true, DefinitiveListTactic::Horizontal, placeholder @ Some(..)) => {
-                list_items[self.items.len() - 1].item = placeholder.unknown_error();
+                list_items[self.items.len() - 1].item = placeholder;
             }
             _ if !self.items.is_empty() => {
                 list_items[self.items.len() - 1].item = self
                     .items
                     .last()
-                    .and_then(|last_item| last_item.rewrite(self.context, self.nested_shape))
-                    .unknown_error();
+                    .and_then(|last_item| last_item.rewrite(self.context, self.nested_shape));
 
                 // Use horizontal layout for a function with a single argument as long as
                 // everything fits in a single line.
@@ -620,7 +613,7 @@ impl<'a> Context<'a> {
         tactic
     }
 
-    fn rewrite_items(&self) -> Result<(bool, String), RewriteError> {
+    fn rewrite_items(&self) -> Option<(bool, String)> {
         let span = self.items_span();
         debug!("items: {:?}", self.items);
 
@@ -631,7 +624,7 @@ impl<'a> Context<'a> {
             ",",
             |item| item.span().lo(),
             |item| item.span().hi(),
-            |item| item.rewrite_result(self.context, self.nested_shape),
+            |item| item.rewrite(self.context, self.nested_shape),
             span.lo(),
             span.hi(),
             true,
@@ -696,8 +689,7 @@ impl<'a> Context<'a> {
         );
         result.push_str(self.ident);
         result.push_str(prefix);
-        let force_single_line = if self.context.config.style_edition() >= StyleEdition::Edition2024
-        {
+        let force_single_line = if self.context.config.version() == Version::Two {
             !self.context.use_block_indent() || (is_extendable && extend_width <= shape.width)
         } else {
             // 2 = `()`
@@ -719,7 +711,7 @@ impl<'a> Context<'a> {
         result
     }
 
-    fn rewrite(&self, shape: Shape) -> RewriteResult {
+    fn rewrite(&self, shape: Shape) -> Option<String> {
         let (extendable, items_str) = self.rewrite_items()?;
 
         // If we are using visual indent style and failed to format, retry with block indent.
@@ -733,7 +725,7 @@ impl<'a> Context<'a> {
             return result;
         }
 
-        Ok(self.wrap_items(&items_str, shape, extendable))
+        Some(self.wrap_items(&items_str, shape, extendable))
     }
 }
 
@@ -772,7 +764,7 @@ fn last_item_shape(
         width: min(args_max_width, shape.width),
         ..shape
     }
-    .offset_left_opt(offset)
+    .offset_left(offset)
 }
 
 fn shape_from_indent_style(

@@ -24,21 +24,17 @@ fn attr(p: &mut Parser<'_>, inner: bool) {
         p.bump(T![!]);
     }
 
-    if p.expect(T!['[']) {
+    if p.eat(T!['[']) {
         meta(p);
-        p.expect(T![']']);
-    }
 
+        if !p.eat(T![']']) {
+            p.error("expected `]`");
+        }
+    } else {
+        p.error("expected `[`");
+    }
     attr.complete(p, ATTR);
 }
-
-// test_err meta_recovery
-// #![]
-// #![p = ]
-// #![p::]
-// #![p:: =]
-// #![unsafe]
-// #![unsafe =]
 
 // test metas
 // #![simple_ident]
@@ -67,10 +63,10 @@ pub(super) fn meta(p: &mut Parser<'_>) {
     if is_unsafe {
         p.expect(T!['(']);
     }
-    paths::attr_path(p);
+    paths::use_path(p);
 
     match p.current() {
-        T![=] if !p.at(T![=>]) && !p.at(T![==]) => {
+        T![=] => {
             p.bump(T![=]);
             if expressions::expr(p).is_none() {
                 p.error("expected expression");

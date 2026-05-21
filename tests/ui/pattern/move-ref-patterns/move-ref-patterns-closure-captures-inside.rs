@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 fn main() {
     struct S; // Not `Copy`.
 

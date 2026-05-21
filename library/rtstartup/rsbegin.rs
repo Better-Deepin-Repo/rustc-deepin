@@ -19,17 +19,9 @@
 #![no_core]
 #![allow(non_camel_case_types)]
 #![allow(internal_features)]
-#![warn(unreachable_pub)]
-
-#[lang = "pointee_sized"]
-pub trait PointeeSized {}
-
-#[lang = "meta_sized"]
-pub trait MetaSized: PointeeSized {}
 
 #[lang = "sized"]
-pub trait Sized: MetaSized {}
-
+trait Sized {}
 #[lang = "sync"]
 auto trait Sync {}
 #[lang = "copy"]
@@ -37,12 +29,12 @@ trait Copy {}
 #[lang = "freeze"]
 auto trait Freeze {}
 
-impl<T: PointeeSized> Copy for *mut T {}
+impl<T: ?Sized> Copy for *mut T {}
 
 #[lang = "drop_in_place"]
 #[inline]
 #[allow(unconditional_recursion)]
-pub unsafe fn drop_in_place<T: PointeeSized>(to_drop: *mut T) {
+pub unsafe fn drop_in_place<T: ?Sized>(to_drop: *mut T) {
     drop_in_place(to_drop);
 }
 
@@ -59,7 +51,7 @@ pub unsafe fn drop_in_place<T: PointeeSized>(to_drop: *mut T) {
 #[cfg(all(target_os = "windows", target_arch = "x86", target_env = "gnu"))]
 pub mod eh_frames {
     #[no_mangle]
-    #[unsafe(link_section = ".eh_frame")]
+    #[link_section = ".eh_frame"]
     // Marks beginning of the stack frame unwind info section
     pub static __EH_FRAME_BEGIN__: [u8; 0] = [];
 
@@ -83,19 +75,19 @@ pub mod eh_frames {
     }
 
     // Unwind info registration/deregistration routines.
-    unsafe extern "C" {
+    extern "C" {
         fn __register_frame_info(eh_frame_begin: *const u8, object: *mut u8);
         fn __deregister_frame_info(eh_frame_begin: *const u8, object: *mut u8);
     }
 
     unsafe extern "C" fn init() {
         // register unwind info on module startup
-        __register_frame_info(&__EH_FRAME_BEGIN__ as *const u8, &raw mut OBJ as *mut u8);
+        __register_frame_info(&__EH_FRAME_BEGIN__ as *const u8, &mut OBJ as *mut _ as *mut u8);
     }
 
     unsafe extern "C" fn uninit() {
         // unregister on shutdown
-        __deregister_frame_info(&__EH_FRAME_BEGIN__ as *const u8, &raw mut OBJ as *mut u8);
+        __deregister_frame_info(&__EH_FRAME_BEGIN__ as *const u8, &mut OBJ as *mut _ as *mut u8);
     }
 
     // MinGW-specific init/uninit routine registration
@@ -108,10 +100,10 @@ pub mod eh_frames {
         // end of the list. Since constructors are run in reverse order, this ensures that our
         // callbacks are the first and last ones executed.
 
-        #[unsafe(link_section = ".ctors.65535")] // .ctors.* : C initialization callbacks
+        #[link_section = ".ctors.65535"] // .ctors.* : C initialization callbacks
         pub static P_INIT: unsafe extern "C" fn() = super::init;
 
-        #[unsafe(link_section = ".dtors.65535")] // .dtors.* : C termination callbacks
+        #[link_section = ".dtors.65535"] // .dtors.* : C termination callbacks
         pub static P_UNINIT: unsafe extern "C" fn() = super::uninit;
     }
 }

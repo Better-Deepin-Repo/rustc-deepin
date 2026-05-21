@@ -13,11 +13,15 @@ fn f(g: impl Fn()) {
 #[inline(always)]
 fn g() {
     // CHECK-LABEL: fn g(
-    // CHECK-NOT: inlined
+    // CHECK-NOT: (inlined f::<fn() {main}>)
     f(main);
 }
 
 // EMIT_MIR cycle.main.Inline.diff
 fn main() {
+    // CHECK-LABEL: fn main(
+    // CHECK-NOT: inlined
+    // CHECK: (inlined f::<fn() {g}>)
+    // CHECK-NOT: inlined
     f(g);
 }

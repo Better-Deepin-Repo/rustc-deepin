@@ -19,7 +19,6 @@ fn fn_mut() -> _ {
     let x = String::new();
     //~^ HELP: consider changing this to be mutable
     //~| NOTE binding `x` declared here
-    //~| SUGGESTION mut
     |c| { //~ NOTE: value captured here
         x.push(c);
         //~^ ERROR: does not live long enough

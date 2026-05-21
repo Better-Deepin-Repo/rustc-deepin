@@ -1,10 +1,10 @@
 //! Network tests for https transport.
 //!
-//! Note that these tests will generally require setting `CARGO_CONTAINER_TESTS`
-//! or `CARGO_PUBLIC_NETWORK_TESTS`.
+//! Note that these tests will generally require setting CARGO_CONTAINER_TESTS
+//! or CARGO_PUBLIC_NETWORK_TESTS.
 
-use crate::prelude::*;
 use cargo_test_support::containers::Container;
+use cargo_test_support::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::str;
 
@@ -33,7 +33,7 @@ fn self_signed_should_fail() {
         .build();
     // I think the text here depends on the curl backend.
     let err_msg = if cfg!(target_os = "macos") {
-        "untrusted connection error; class=Ssl (16)[..]"
+        "untrusted connection error; class=Ssl (16); code=Certificate (-17)"
     } else if cfg!(unix) {
         "the SSL certificate is invalid; class=Ssl (16)[..]"
     } else if cfg!(windows) {
@@ -52,7 +52,7 @@ Caused by:
   failed to load source for dependency `bar`
 
 Caused by:
-  unable to update https://127.0.0.1:[..]/repos/bar.git
+  Unable to update https://127.0.0.1:[..]/repos/bar.git
 
 Caused by:
   failed to clone into: [ROOT]/home/.cargo/git/db/bar-[HASH]
@@ -131,7 +131,7 @@ fn self_signed_with_cacert() {
     p.cargo("fetch")
         .with_stderr_data(str![[r#"
 [UPDATING] git repository `https://127.0.0.1:[..]/repos/bar.git`
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 
 "#]])
         .run();
@@ -158,7 +158,7 @@ fn github_works() {
     p.cargo("fetch")
         .with_stderr_data(str![[r#"
 [UPDATING] git repository `https://github.com/rust-lang/bitflags.git`
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 
 "#]])
         .run();

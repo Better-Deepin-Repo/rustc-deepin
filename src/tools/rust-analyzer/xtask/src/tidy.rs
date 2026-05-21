@@ -4,7 +4,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use itertools::Itertools;
 use xshell::Shell;
 
 use xshell::cmd;
@@ -28,9 +27,8 @@ fn check_lsp_extensions_docs(sh: &Shell) {
     };
 
     let actual_hash = {
-        let lsp_extensions_md = sh
-            .read_file(project_root().join("docs/book/src/contributing/lsp-extensions.md"))
-            .unwrap();
+        let lsp_extensions_md =
+            sh.read_file(project_root().join("docs/dev/lsp-extensions.md")).unwrap();
         let text = lsp_extensions_md
             .lines()
             .find_map(|line| line.strip_prefix("lsp/ext.rs hash:"))
@@ -47,7 +45,7 @@ lsp/ext.rs was changed without touching lsp-extensions.md.
 Expected hash: {expected_hash:x}
 Actual hash:   {actual_hash:x}
 
-Please adjust docs/book/src/contributing/lsp-extensions.md.
+Please adjust docs/dev/lsp-extensions.md.
 "
         )
     }
@@ -127,31 +125,33 @@ fn check_cargo_toml(path: &Path, text: String) {
 }
 
 fn check_licenses(sh: &Shell) {
-    const EXPECTED: &[&str] = &[
-        "(MIT OR Apache-2.0) AND Unicode-3.0",
-        "0BSD OR MIT OR Apache-2.0",
-        "Apache-2.0 / MIT",
-        "Apache-2.0 OR BSL-1.0",
-        "Apache-2.0 OR MIT",
-        "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
-        "Apache-2.0 WITH LLVM-exception",
-        "Apache-2.0",
-        "Apache-2.0/MIT",
-        "BSD-2-Clause OR Apache-2.0 OR MIT",
-        "CC0-1.0",
-        "ISC",
-        "MIT / Apache-2.0",
-        "MIT OR Apache-2.0 OR LGPL-2.1-or-later",
-        "MIT OR Apache-2.0",
-        "MIT OR Zlib OR Apache-2.0",
-        "MIT",
-        "MIT/Apache-2.0",
-        "MPL-2.0",
-        "Unicode-3.0",
-        "Unlicense OR MIT",
-        "Unlicense/MIT",
-        "Zlib",
-    ];
+    let expected = "
+(MIT OR Apache-2.0) AND Unicode-DFS-2016
+0BSD OR MIT OR Apache-2.0
+Apache-2.0
+Apache-2.0 OR BSL-1.0
+Apache-2.0 OR MIT
+Apache-2.0 WITH LLVM-exception
+Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+Apache-2.0/MIT
+BSD-2-Clause OR Apache-2.0 OR MIT
+BSD-3-Clause
+CC0-1.0
+ISC
+MIT
+MIT / Apache-2.0
+MIT OR Apache-2.0
+MIT OR Apache-2.0 OR Zlib
+MIT OR Zlib OR Apache-2.0
+MIT/Apache-2.0
+MPL-2.0
+Unlicense OR MIT
+Unlicense/MIT
+Zlib OR Apache-2.0 OR MIT
+"
+    .lines()
+    .filter(|it| !it.is_empty())
+    .collect::<Vec<_>>();
 
     let meta = cmd!(sh, "cargo metadata --format-version 1").read().unwrap();
     let mut licenses = meta
@@ -162,8 +162,6 @@ fn check_licenses(sh: &Shell) {
         .collect::<Vec<_>>();
     licenses.sort_unstable();
     licenses.dedup();
-    let mut expected = EXPECTED.to_vec();
-    expected.sort_unstable();
     if licenses != expected {
         let mut diff = String::new();
 
@@ -175,7 +173,7 @@ fn check_licenses(sh: &Shell) {
         }
 
         diff.push_str("\nMissing Licenses:\n");
-        for l in expected {
+        for &l in expected.iter() {
             if !licenses.contains(&l) {
                 diff += &format!("  {l}\n")
             }
@@ -187,26 +185,18 @@ fn check_licenses(sh: &Shell) {
 }
 
 fn check_test_attrs(path: &Path, text: &str) {
-    let panic_rule = "https://github.com/rust-lang/rust-analyzer/blob/master/docs/book/src/contributing/style.md#should_panic";
+    let panic_rule =
+        "https://github.com/rust-lang/rust-analyzer/blob/master/docs/dev/style.md#should_panic";
     let need_panic: &[&str] = &[
         // This file.
         "slow-tests/tidy.rs",
         "test-utils/src/fixture.rs",
         // Generated code from lints contains doc tests in string literals.
         "ide-db/src/generated/lints.rs",
-        "proc-macro-srv/src/tests/mod.rs",
     ];
-    if need_panic.iter().any(|p| path.ends_with(p)) {
-        return;
-    }
-    if let Some((line, _)) = text
-        .lines()
-        .tuple_windows()
-        .enumerate()
-        .find(|(_, (a, b))| b.contains("#[should_panic") && !a.contains("FIXME"))
-    {
+    if text.contains("#[should_panic") && !need_panic.iter().any(|p| path.ends_with(p)) {
         panic!(
-            "\ndon't add `#[should_panic]` tests, see:\n\n    {}\n\n   {}:{line}\n",
+            "\ndon't add `#[should_panic]` tests, see:\n\n    {}\n\n   {}\n",
             panic_rule,
             path.display(),
         )
@@ -233,15 +223,11 @@ struct TidyDocs {
 impl TidyDocs {
     fn visit(&mut self, path: &Path, text: &str) {
         // Tests and diagnostic fixes don't need module level comments.
-        if is_exclude_dir(path, &["tests", "test_data", "fixes", "grammar", "stdx"]) {
+        if is_exclude_dir(path, &["tests", "test_data", "fixes", "grammar", "salsa"]) {
             return;
         }
 
         if is_exclude_file(path) {
-            return;
-        }
-
-        if is_ported_from_rustc(path, &["crates/hir-ty/src/next_solver"]) {
             return;
         }
 
@@ -265,12 +251,12 @@ impl TidyDocs {
         }
 
         fn is_exclude_file(d: &Path) -> bool {
-            let file_names = ["tests.rs", "famous_defs_fixture.rs", "frontmatter.rs"];
+            let file_names = ["tests.rs", "famous_defs_fixture.rs"];
 
             d.file_name()
                 .unwrap_or_default()
                 .to_str()
-                .map(|f_n| file_names.contains(&f_n))
+                .map(|f_n| file_names.iter().any(|name| *name == f_n))
                 .unwrap_or(false)
         }
     }
@@ -298,11 +284,6 @@ fn is_exclude_dir(p: &Path, dirs_to_exclude: &[&str]) -> bool {
         .skip(1)
         .filter_map(|it| it.as_os_str().to_str())
         .any(|it| dirs_to_exclude.contains(&it))
-}
-
-fn is_ported_from_rustc(p: &Path, dirs_to_exclude: &[&str]) -> bool {
-    let p = p.strip_prefix(project_root()).unwrap();
-    dirs_to_exclude.iter().any(|exclude| p.starts_with(exclude))
 }
 
 #[derive(Default)]

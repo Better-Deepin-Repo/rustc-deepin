@@ -3,6 +3,6 @@
 const _: () = assert!(true);
 
 const _: () = assert!(false);
-//~^ ERROR assertion failed
+//~^ ERROR evaluation of constant value failed
 
 fn main() {}

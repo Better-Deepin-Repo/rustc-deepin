@@ -1,6 +1,6 @@
 //@ run-fail
 //@ error-pattern:custom message
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 fn main() {
     assert!(false, "custom message");

@@ -1,8 +1,8 @@
-use crate::spec::{FramePointer, Os, TargetOptions};
+use crate::spec::{FramePointer, TargetOptions};
 
-pub(crate) fn opts() -> TargetOptions {
+pub fn opts(kernel: &str) -> TargetOptions {
     TargetOptions {
-        os: Os::SolidAsp3,
+        os: format!("solid_{kernel}").into(),
         vendor: "kmc".into(),
         executables: false,
         frame_pointer: FramePointer::NonLeaf,

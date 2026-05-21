@@ -9,9 +9,6 @@
 //! Consider the following code, operating on some global static variables:
 //!
 //! ```rust
-//! // FIXME(static_mut_refs): Do not allow `static_mut_refs` lint
-//! #![allow(static_mut_refs)]
-//!
 //! static mut A: u32 = 0;
 //! static mut B: u32 = 0;
 //! static mut C: u32 = 0;
@@ -133,16 +130,11 @@
 //!   inter-thread synchronisation mechanism, at the cost of some
 //!   extra memory.
 //!
-//! - [`mpmc`]: Multi-producer, multi-consumer queues, used for
-//!   message-based communication. Can provide a lightweight
-//!   inter-thread synchronisation mechanism, at the cost of some
-//!   extra memory.
-//!
 //! - [`Mutex`]: Mutual Exclusion mechanism, which ensures that at
 //!   most one thread at a time is able to access some data.
 //!
 //! - [`Once`]: Used for a thread-safe, one-time global initialization routine.
-//!   Mostly useful for implementing other types like [`OnceLock`].
+//!   Mostly useful for implementing other types like `OnceLock`.
 //!
 //! - [`OnceLock`]: Used for thread-safe, one-time initialization of a
 //!   variable, with potentially different initializers based on the caller.
@@ -158,7 +150,6 @@
 //! [`Arc`]: crate::sync::Arc
 //! [`Barrier`]: crate::sync::Barrier
 //! [`Condvar`]: crate::sync::Condvar
-//! [`mpmc`]: crate::sync::mpmc
 //! [`mpsc`]: crate::sync::mpsc
 //! [`Mutex`]: crate::sync::Mutex
 //! [`Once`]: crate::sync::Once
@@ -167,141 +158,47 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-// No formatting: this file is just re-exports, and their order is worth preserving.
-#![cfg_attr(rustfmt, rustfmt::skip)]
-
-// These come from `core` & `alloc` and only in one flavor: no poisoning.
-#[unstable(feature = "exclusive_wrapper", issue = "98407")]
-pub use core::sync::Exclusive;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::sync::atomic;
+#[unstable(feature = "exclusive_wrapper", issue = "98407")]
+pub use core::sync::Exclusive;
 
-#[unstable(feature = "unique_rc_arc", issue = "112566")]
-pub use alloc_crate::sync::UniqueArc;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use alloc_crate::sync::{Arc, Weak};
 
-#[unstable(feature = "mpmc_channel", issue = "126840")]
-pub mod mpmc;
-pub mod mpsc;
-#[unstable(feature = "oneshot_channel", issue = "143674")]
-pub mod oneshot;
-
-pub(crate) mod once; // `pub(crate)` for the `sys::sync::once` implementations and `LazyLock`.
-
-#[stable(feature = "rust1", since = "1.0.0")]
-pub use self::once::{Once, OnceState};
-
-#[stable(feature = "rust1", since = "1.0.0")]
-#[doc(inline)]
-#[expect(deprecated)]
-pub use self::once::ONCE_INIT;
-
-mod barrier;
-mod lazy_lock;
-mod once_lock;
-mod reentrant_lock;
-
-// These exist only in one flavor: no poisoning.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::barrier::{Barrier, BarrierWaitResult};
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use self::condvar::{Condvar, WaitTimeoutResult};
 #[stable(feature = "lazy_cell", since = "1.80.0")]
 pub use self::lazy_lock::LazyLock;
+#[unstable(feature = "mapped_lock_guards", issue = "117108")]
+pub use self::mutex::MappedMutexGuard;
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use self::mutex::{Mutex, MutexGuard};
+#[stable(feature = "rust1", since = "1.0.0")]
+#[allow(deprecated)]
+pub use self::once::{Once, OnceState, ONCE_INIT};
 #[stable(feature = "once_cell", since = "1.70.0")]
 pub use self::once_lock::OnceLock;
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use self::poison::{LockResult, PoisonError, TryLockError, TryLockResult};
 #[unstable(feature = "reentrant_lock", issue = "121440")]
 pub use self::reentrant_lock::{ReentrantLock, ReentrantLockGuard};
-
-// Note: in the future we will change the default version in `std::sync` to the non-poisoning
-// version over an edition.
-// See https://github.com/rust-lang/rust/issues/134645#issuecomment-3324577500 for more details.
-
-#[unstable(feature = "sync_nonpoison", issue = "134645")]
-pub mod nonpoison;
-#[unstable(feature = "sync_poison_mod", issue = "134646")]
-pub mod poison;
-
-// FIXME(sync_poison_mod): remove all `#[doc(inline)]` once the modules are stabilized.
-
-// These exist only with poisoning.
-#[stable(feature = "rust1", since = "1.0.0")]
-#[doc(inline)]
-pub use self::poison::{LockResult, PoisonError};
-
-// These exist in both flavors: with and without poisoning.
-// The historical default is the version with poisoning.
-#[stable(feature = "rust1", since = "1.0.0")]
-#[doc(inline)]
-pub use self::poison::{
-    TryLockError, TryLockResult,
-    Mutex, MutexGuard,
-    RwLock, RwLockReadGuard, RwLockWriteGuard,
-    Condvar,
-};
-
 #[unstable(feature = "mapped_lock_guards", issue = "117108")]
-#[doc(inline)]
-pub use self::poison::{MappedMutexGuard, MappedRwLockReadGuard, MappedRwLockWriteGuard};
+pub use self::rwlock::{MappedRwLockReadGuard, MappedRwLockWriteGuard};
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use self::rwlock::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
-/// A type indicating whether a timed wait on a condition variable returned
-/// due to a time out or not.
-///
-/// It is returned by the [`wait_timeout`] method.
-///
-/// [`wait_timeout`]: Condvar::wait_timeout
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-#[stable(feature = "wait_timeout", since = "1.5.0")]
-pub struct WaitTimeoutResult(bool);
+pub mod mpsc;
 
-impl WaitTimeoutResult {
-    /// Returns `true` if the wait was known to have timed out.
-    ///
-    /// # Examples
-    ///
-    /// This example spawns a thread which will sleep 20 milliseconds before
-    /// updating a boolean value and then notifying the condvar.
-    ///
-    /// The main thread will wait with a 10 millisecond timeout on the condvar
-    /// and will leave the loop upon timeout.
-    ///
-    /// ```
-    /// use std::sync::{Arc, Condvar, Mutex};
-    /// use std::thread;
-    /// use std::time::Duration;
-    ///
-    /// let pair = Arc::new((Mutex::new(false), Condvar::new()));
-    /// let pair2 = Arc::clone(&pair);
-    ///
-    /// # let handle =
-    /// thread::spawn(move || {
-    ///     let (lock, cvar) = &*pair2;
-    ///
-    ///     // Let's wait 20 milliseconds before notifying the condvar.
-    ///     thread::sleep(Duration::from_millis(20));
-    ///
-    ///     let mut started = lock.lock().unwrap();
-    ///     // We update the boolean value.
-    ///     *started = true;
-    ///     cvar.notify_one();
-    /// });
-    ///
-    /// // Wait for the thread to start up.
-    /// let (lock, cvar) = &*pair;
-    /// loop {
-    ///     // Let's put a timeout on the condvar's wait.
-    ///     let result = cvar.wait_timeout(lock.lock().unwrap(), Duration::from_millis(10)).unwrap();
-    ///     // 10 milliseconds have passed.
-    ///     if result.1.timed_out() {
-    ///         // timed out now and we can leave.
-    ///         break
-    ///     }
-    /// }
-    /// # // Prevent leaks for Miri.
-    /// # let _ = handle.join();
-    /// ```
-    #[must_use]
-    #[stable(feature = "wait_timeout", since = "1.5.0")]
-    pub fn timed_out(&self) -> bool {
-        self.0
-    }
-}
+mod barrier;
+mod condvar;
+mod lazy_lock;
+mod mpmc;
+mod mutex;
+pub(crate) mod once;
+mod once_lock;
+mod poison;
+mod reentrant_lock;
+mod rwlock;

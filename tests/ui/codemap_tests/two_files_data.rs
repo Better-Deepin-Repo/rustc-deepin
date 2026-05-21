@@ -1,4 +1,4 @@
-//@ ignore-auxiliary (used by `./two_files.rs`)
+//@ ignore-test (auxiliary, used by other tests)
 
 trait Foo { }
 

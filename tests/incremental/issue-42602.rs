@@ -9,7 +9,6 @@
 //@ revisions:cfail1 cfail2 cfail3
 //@ compile-flags:-Zquery-dep-graph
 //@ build-pass (FIXME(62277): could be check-pass?)
-//@ ignore-backends: gcc
 
 #![feature(rustc_attrs)]
 

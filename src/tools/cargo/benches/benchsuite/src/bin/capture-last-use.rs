@@ -1,7 +1,7 @@
 //! Utility for capturing a global cache last-use database based on the files
 //! on a real-world system.
 //!
-//! This will look in the `CARGO_HOME` of the current system and record last-use
+//! This will look in the CARGO_HOME of the current system and record last-use
 //! data for all files in the cache. This is intended to provide a real-world
 //! example for a benchmark that should be close to what a real set of data
 //! should look like.
@@ -12,10 +12,11 @@
 //! The database is kept in git. It usually shouldn't need to be re-generated
 //! unless there is a change in the schema or the benchmark.
 
-use cargo::GlobalContext;
 use cargo::core::global_cache_tracker::{self, DeferredGlobalLastUse, GlobalCacheTracker};
 use cargo::util::cache_lock::CacheLockMode;
-use rand::prelude::*;
+use cargo::util::interning::InternedString;
+use cargo::GlobalContext;
+use rand::prelude::SliceRandom;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
@@ -56,7 +57,7 @@ fn main() {
     let cache_dir = real_home.join("registry/cache");
     for dir_ent in fs::read_dir(cache_dir).unwrap() {
         let registry = dir_ent.unwrap();
-        let encoded_registry_name = registry.file_name().to_string_lossy().into();
+        let encoded_registry_name = InternedString::new(&registry.file_name().to_string_lossy());
         for krate in fs::read_dir(registry.path()).unwrap() {
             let krate = krate.unwrap();
             let meta = krate.metadata().unwrap();
@@ -76,7 +77,7 @@ fn main() {
     let cache_dir = real_home.join("registry/src");
     for dir_ent in fs::read_dir(cache_dir).unwrap() {
         let registry = dir_ent.unwrap();
-        let encoded_registry_name = registry.file_name().to_string_lossy().into();
+        let encoded_registry_name = InternedString::new(&registry.file_name().to_string_lossy());
         for krate in fs::read_dir(registry.path()).unwrap() {
             let krate = krate.unwrap();
             let meta = krate.metadata().unwrap();
@@ -94,7 +95,7 @@ fn main() {
     let git_co_dir = real_home.join("git/checkouts");
     for dir_ent in fs::read_dir(git_co_dir).unwrap() {
         let git_source = dir_ent.unwrap();
-        let encoded_git_name = git_source.file_name().to_string_lossy().into();
+        let encoded_git_name = InternedString::new(&git_source.file_name().to_string_lossy());
         for co in fs::read_dir(git_source.path()).unwrap() {
             let co = co.unwrap();
             let meta = co.metadata().unwrap();
@@ -130,7 +131,7 @@ fn main() {
     let biggest = counts.last().unwrap().1;
 
     src_entries.retain(|src| src.encoded_registry_name == biggest);
-    let mut rng = &mut rand::rng();
+    let mut rng = &mut rand::thread_rng();
     let sample: Vec<_> = src_entries.choose_multiple(&mut rng, 500).collect();
     let mut f = File::create(homedir.join("random-sample")).unwrap();
     for src in sample {

@@ -3,13 +3,15 @@
 
 #![feature(type_alias_impl_trait)]
 
-pub type X<T> = impl Clone;
+mod foo {
+    pub type X<T> = impl Clone;
 
-#[define_opaque(X)]
-fn f<T: Clone>(t: T) -> X<T> {
-    t
-    //~^ ERROR the trait bound `T: Clone` is not satisfied
+    fn f<T: Clone>(t: T) -> X<T> {
+        t
+        //~^ ERROR the trait bound `T: Clone` is not satisfied
+    }
 }
+use foo::X;
 
 fn g<T>(o: Option<X<T>>) -> Option<X<T>> {
     o.clone()

@@ -1,11 +1,9 @@
-#![allow(
-    unused,
-    clippy::identity_op,
-    clippy::manual_range_contains,
-    clippy::no_effect,
-    clippy::short_circuit_statement
-)]
-#![warn(clippy::impossible_comparisons, clippy::redundant_comparisons)]
+#![allow(unused)]
+#![warn(clippy::impossible_comparisons)]
+#![warn(clippy::redundant_comparisons)]
+#![allow(clippy::no_effect)]
+#![allow(clippy::short_circuit_statement)]
+#![allow(clippy::manual_range_contains)]
 
 const STATUS_BAD_REQUEST: u16 = 400;
 const STATUS_SERVER_ERROR: u16 = 500;
@@ -45,39 +43,42 @@ fn main() {
     // Correct
     status_code >= 400 && status_code < 500;
     status_code <= 400 && status_code > 500;
-    //~^ impossible_comparisons
-
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `400` < `500`, the expression evaluates to false for any value of `st
     status_code > 500 && status_code < 400;
-    //~^ impossible_comparisons
-
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `500` > `400`, the expression evaluates to false for any value of `st
     status_code < 500 && status_code > 500;
-    //~^ impossible_comparisons
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: `status_code` cannot simultaneously be greater than and less than `500`
 
     // More complex expressions
     status_code < { 400 } && status_code > { 500 };
-    //~^ impossible_comparisons
-
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `{ 400 }` < `{ 500 }`, the expression evaluates to false for any valu
     status_code < STATUS_BAD_REQUEST && status_code > STATUS_SERVER_ERROR;
-    //~^ impossible_comparisons
-
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `STATUS_BAD_REQUEST` < `STATUS_SERVER_ERROR`, the expression evaluate
     status_code <= u16::MIN + 1 && status_code > STATUS_SERVER_ERROR;
-    //~^ impossible_comparisons
-
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `u16::MIN + 1` < `STATUS_SERVER_ERROR`, the expression evaluates to f
     status_code < STATUS_SERVER_ERROR && status_code > STATUS_SERVER_ERROR;
-    //~^ impossible_comparisons
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: `status_code` cannot simultaneously be greater than and less than `STATUS_S
 
     // Comparing two different types, via the `impl PartialOrd<u16> for Status`
     status < { 400 } && status > { 500 };
-    //~^ impossible_comparisons
-
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `{ 400 }` < `{ 500 }`, the expression evaluates to false for any valu
     status < STATUS_BAD_REQUEST && status > STATUS_SERVER_ERROR;
-    //~^ impossible_comparisons
-
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `STATUS_BAD_REQUEST` < `STATUS_SERVER_ERROR`, the expression evaluate
     status <= u16::MIN + 1 && status > STATUS_SERVER_ERROR;
-    //~^ impossible_comparisons
-
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `u16::MIN + 1` < `STATUS_SERVER_ERROR`, the expression evaluates to f
     status < STATUS_SERVER_ERROR && status > STATUS_SERVER_ERROR;
-    //~^ impossible_comparisons
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: `status` cannot simultaneously be greater than and less than `STATUS_SERVER
 
     // Yoda conditions
     // Correct
@@ -86,11 +87,12 @@ fn main() {
     500 <= status_code && status_code <= 600;
     // Incorrect
     500 >= status_code && 600 < status_code;
-    //~^ impossible_comparisons
-
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `500` < `600`, the expression evaluates to false for any value of `st
     // Incorrect
     500 >= status_code && status_code > 600;
-    //~^ impossible_comparisons
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `500` < `600`, the expression evaluates to false for any value of `st
 
     // Yoda conditions, comparing two different types
     // Correct
@@ -99,49 +101,50 @@ fn main() {
     500 <= status && status <= 600;
     // Incorrect
     500 >= status && 600 < status;
-    //~^ impossible_comparisons
-
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `500` < `600`, the expression evaluates to false for any value of `st
     // Incorrect
     500 >= status && status > 600;
-    //~^ impossible_comparisons
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `500` < `600`, the expression evaluates to false for any value of `st
 
     // Expressions where one of the sides has no effect
     status_code < 200 && status_code <= 299;
-    //~^ redundant_comparisons
-
+    //~^ ERROR: right-hand side of `&&` operator has no effect
     status_code > 200 && status_code >= 299;
-    //~^ redundant_comparisons
+    //~^ ERROR: left-hand side of `&&` operator has no effect
 
     // Useless left
     status_code >= 500 && status_code > 500;
-    //~^ redundant_comparisons
-
+    //~^ ERROR: left-hand side of `&&` operator has no effect
     // Useless right
     status_code > 500 && status_code >= 500;
-    //~^ redundant_comparisons
-
+    //~^ ERROR: right-hand side of `&&` operator has no effect
     // Useless left
     status_code <= 500 && status_code < 500;
-    //~^ redundant_comparisons
-
+    //~^ ERROR: left-hand side of `&&` operator has no effect
     // Useless right
     status_code < 500 && status_code <= 500;
-    //~^ redundant_comparisons
+    //~^ ERROR: right-hand side of `&&` operator has no effect
 
     // Other types
     let name = "Steve";
     name < "Jennifer" && name > "Shannon";
-    //~^ impossible_comparisons
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `"Jennifer"` < `"Shannon"`, the expression evaluates to false for any
 
     let numbers = [1, 2];
     numbers < [3, 4] && numbers > [5, 6];
-    //~^ impossible_comparisons
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `[3, 4]` < `[5, 6]`, the expression evaluates to false for any value
 
     let letter = 'a';
     letter < 'b' && letter > 'c';
-    //~^ impossible_comparisons
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `'b'` < `'c'`, the expression evaluates to false for any value of `le
 
     let area = 42.0;
     area < std::f32::consts::E && area > std::f32::consts::PI;
-    //~^ impossible_comparisons
+    //~^ ERROR: boolean expression will never evaluate to 'true'
+    //~| NOTE: since `std::f32::consts::E` < `std::f32::consts::PI`, the expression evalua
 }

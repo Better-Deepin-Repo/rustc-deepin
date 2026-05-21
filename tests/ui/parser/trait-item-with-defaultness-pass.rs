@@ -2,7 +2,7 @@
 
 fn main() {}
 
-#[cfg(false)]
+#[cfg(FALSE)]
 trait X {
     default const A: u8;
     default const B: u8 = 0;

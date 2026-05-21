@@ -95,7 +95,7 @@ Rc<?T>: Clone
 
 After all, `Rc<?T>` is true **no matter what type `?T` is**.
 
-<a id="query-response"></a>
+<a name="query-response"></a>
 
 ## A trait query in rustc
 
@@ -214,7 +214,7 @@ As a result of this assignment, the type of `u` is forced to be
 `Option<Vec<?V>>`, where `?V` represents the element type of the
 vector. This in turn implies that `?U` is [unified] to `Vec<?V>`.
 
-[unified]: ../hir-typeck/summary.md
+[unified]: ../type-checking.html
 
 Let's suppose that the type checker decides to revisit the
 "as-yet-unproven" trait obligation we saw before, `Vec<?T>:

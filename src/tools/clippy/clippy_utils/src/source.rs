@@ -2,19 +2,17 @@
 
 #![allow(clippy::module_name_repetitions)]
 
-use std::sync::Arc;
-
 use rustc_ast::{LitKind, StrStyle};
+use rustc_data_structures::sync::Lrc;
 use rustc_errors::Applicability;
 use rustc_hir::{BlockCheckMode, Expr, ExprKind, UnsafeSource};
-use rustc_lexer::{FrontmatterAllowed, LiteralKind, TokenKind, tokenize};
 use rustc_lint::{EarlyContext, LateContext};
 use rustc_middle::ty::TyCtxt;
 use rustc_session::Session;
-use rustc_span::source_map::{SourceMap, original_sp};
+use rustc_span::source_map::{original_sp, SourceMap};
 use rustc_span::{
-    BytePos, DUMMY_SP, DesugaringKind, Pos, RelativeBytePos, SourceFile, SourceFileAndLine, Span, SpanData,
-    SyntaxContext, hygiene,
+    hygiene, BytePos, FileNameDisplayPreference, Pos, SourceFile, SourceFileAndLine, Span, SpanData, SyntaxContext,
+    DUMMY_SP,
 };
 use std::borrow::Cow;
 use std::fmt;
@@ -138,24 +136,12 @@ pub trait SpanRangeExt: SpanRange {
     fn map_range(
         self,
         cx: &impl HasSession,
-        f: impl for<'a> FnOnce(&'a SourceFile, &'a str, Range<usize>) -> Option<Range<usize>>,
+        f: impl for<'a> FnOnce(&'a str, Range<usize>) -> Option<Range<usize>>,
     ) -> Option<Range<BytePos>> {
         map_range(cx.sess().source_map(), self.into_range(), f)
     }
 
     /// Extends the range to include all preceding whitespace characters.
-    ///
-    /// The range will not be expanded if it would cross a line boundary, the line the range would
-    /// be extended to ends with a line comment and the text after the range contains a
-    /// non-whitespace character on the same line. e.g.
-    ///
-    /// ```ignore
-    /// ( // Some comment
-    /// foo)
-    /// ```
-    ///
-    /// When the range points to `foo`, suggesting to remove the range after it's been extended will
-    /// cause the `)` to be placed inside the line comment as `( // Some comment)`.
     fn with_leading_whitespace(self, cx: &impl HasSession) -> Range<BytePos> {
         with_leading_whitespace(cx.sess().source_map(), self.into_range())
     }
@@ -214,16 +200,11 @@ impl fmt::Display for SourceText {
         self.as_str().fmt(f)
     }
 }
-impl fmt::Debug for SourceText {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.as_str().fmt(f)
-    }
-}
 
 fn get_source_range(sm: &SourceMap, sp: Range<BytePos>) -> Option<SourceFileRange> {
     let start = sm.lookup_byte_offset(sp.start);
     let end = sm.lookup_byte_offset(sp.end);
-    if !Arc::ptr_eq(&start.sf, &end.sf) || start.pos > end.pos {
+    if !Lrc::ptr_eq(&start.sf, &end.sf) || start.pos > end.pos {
         return None;
     }
     sm.ensure_source_file_source_present(&start.sf);
@@ -259,16 +240,16 @@ fn with_source_text_and_range<T>(
 fn map_range(
     sm: &SourceMap,
     sp: Range<BytePos>,
-    f: impl for<'a> FnOnce(&'a SourceFile, &'a str, Range<usize>) -> Option<Range<usize>>,
+    f: impl for<'a> FnOnce(&'a str, Range<usize>) -> Option<Range<usize>>,
 ) -> Option<Range<BytePos>> {
     if let Some(src) = get_source_range(sm, sp.clone())
         && let Some(text) = &src.sf.src
-        && let Some(range) = f(&src.sf, text, src.range.clone())
+        && let Some(range) = f(text, src.range.clone())
     {
         debug_assert!(
             range.start <= text.len() && range.end <= text.len(),
             "Range `{range:?}` is outside the source file (file `{}`, length `{}`)",
-            src.sf.name.prefer_local_unconditionally(),
+            src.sf.name.display(FileNameDisplayPreference::Local),
             text.len(),
         );
         debug_assert!(range.start <= range.end, "Range `{range:?}` has overlapping bounds");
@@ -280,58 +261,15 @@ fn map_range(
     }
 }
 
-fn ends_with_line_comment_or_broken(text: &str) -> bool {
-    let Some(last) = tokenize(text, FrontmatterAllowed::No).last() else {
-        return false;
-    };
-    match last.kind {
-        // Will give the wrong result on text like `" // "` where the first quote ends a string
-        // started earlier. The only workaround is to lex the whole file which we don't really want
-        // to do.
-        TokenKind::LineComment { .. } | TokenKind::BlockComment { terminated: false, .. } => true,
-        TokenKind::Literal { kind, .. } => matches!(
-            kind,
-            LiteralKind::Byte { terminated: false }
-                | LiteralKind::ByteStr { terminated: false }
-                | LiteralKind::CStr { terminated: false }
-                | LiteralKind::Char { terminated: false }
-                | LiteralKind::RawByteStr { n_hashes: None }
-                | LiteralKind::RawCStr { n_hashes: None }
-                | LiteralKind::RawStr { n_hashes: None }
-        ),
-        _ => false,
-    }
-}
-
-fn with_leading_whitespace_inner(lines: &[RelativeBytePos], src: &str, range: Range<usize>) -> Option<usize> {
-    debug_assert!(lines.is_empty() || lines[0].to_u32() == 0);
-
-    let start = src.get(..range.start)?.trim_end();
-    let next_line = lines.partition_point(|&pos| pos.to_usize() <= start.len());
-    if let Some(line_end) = lines.get(next_line)
-        && line_end.to_usize() <= range.start
-        && let prev_start = lines.get(next_line - 1).map_or(0, |&x| x.to_usize())
-        && ends_with_line_comment_or_broken(&start[prev_start..])
-        && let next_line = lines.partition_point(|&pos| pos.to_usize() < range.end)
-        && let next_start = lines.get(next_line).map_or(src.len(), |&x| x.to_usize())
-        && tokenize(src.get(range.end..next_start)?, FrontmatterAllowed::No)
-            .any(|t| !matches!(t.kind, TokenKind::Whitespace))
-    {
-        Some(range.start)
-    } else {
-        Some(start.len())
-    }
-}
-
 fn with_leading_whitespace(sm: &SourceMap, sp: Range<BytePos>) -> Range<BytePos> {
-    map_range(sm, sp.clone(), |sf, src, range| {
-        Some(with_leading_whitespace_inner(sf.lines(), src, range.clone())?..range.end)
+    map_range(sm, sp.clone(), |src, range| {
+        Some(src.get(..range.start)?.trim_end().len()..range.end)
     })
     .unwrap_or(sp)
 }
 
 fn trim_start(sm: &SourceMap, sp: Range<BytePos>) -> Range<BytePos> {
-    map_range(sm, sp.clone(), |_, src, range| {
+    map_range(sm, sp.clone(), |src, range| {
         let src = src.get(range.clone())?;
         Some(range.start + (src.len() - src.trim_start().len())..range.end)
     })
@@ -339,20 +277,22 @@ fn trim_start(sm: &SourceMap, sp: Range<BytePos>) -> Range<BytePos> {
 }
 
 pub struct SourceFileRange {
-    pub sf: Arc<SourceFile>,
+    pub sf: Lrc<SourceFile>,
     pub range: Range<usize>,
 }
 impl SourceFileRange {
     /// Attempts to get the text from the source file. This can fail if the source text isn't
     /// loaded.
     pub fn as_str(&self) -> Option<&str> {
-        (self.sf.src.as_ref().map(|src| src.as_str()))
-            .or_else(|| self.sf.external_src.get()?.get_source())
+        self.sf
+            .src
+            .as_ref()
+            .or_else(|| self.sf.external_src.get().and_then(|src| src.get_source()))
             .and_then(|x| x.get(self.range.clone()))
     }
 }
 
-/// Like `snippet_block`, but add braces if the expr is not an `ExprKind::Block` with no label.
+/// Like `snippet_block`, but add braces if the expr is not an `ExprKind::Block`.
 pub fn expr_block(
     sess: &impl HasSession,
     expr: &Expr<'_>,
@@ -363,10 +303,10 @@ pub fn expr_block(
 ) -> String {
     let (code, from_macro) = snippet_block_with_context(sess, expr.span, outer, default, indent_relative_to, app);
     if !from_macro
-        && let ExprKind::Block(block, None) = expr.kind
+        && let ExprKind::Block(block, _) = expr.kind
         && block.rules != BlockCheckMode::UnsafeBlock(UnsafeSource::UserProvided)
     {
-        code
+        format!("{code}")
     } else {
         // FIXME: add extra indent for the unsafe blocks:
         //     original code:   unsafe { ... }
@@ -442,10 +382,10 @@ pub fn snippet_indent(sess: &impl HasSession, span: Span) -> Option<String> {
 // For some reason these attributes don't have any expansion info on them, so
 // we have to check it this way until there is a better way.
 pub fn is_present_in_source(sess: &impl HasSession, span: Span) -> bool {
-    if let Some(snippet) = snippet_opt(sess, span)
-        && snippet.is_empty()
-    {
-        return false;
+    if let Some(snippet) = snippet_opt(sess, span) {
+        if snippet.is_empty() {
+            return false;
+        }
     }
     true
 }
@@ -466,11 +406,11 @@ pub fn position_before_rarrow(s: &str) -> Option<usize> {
         let mut rpos = rpos;
         let chars: Vec<char> = s.chars().collect();
         while rpos > 1 {
-            if let Some(c) = chars.get(rpos - 1)
-                && c.is_whitespace()
-            {
-                rpos -= 1;
-                continue;
+            if let Some(c) = chars.get(rpos - 1) {
+                if c.is_whitespace() {
+                    rpos -= 1;
+                    continue;
+                }
             }
             break;
         }
@@ -479,10 +419,11 @@ pub fn position_before_rarrow(s: &str) -> Option<usize> {
 }
 
 /// Reindent a multiline string with possibility of ignoring the first line.
-pub fn reindent_multiline(s: &str, ignore_first: bool, indent: Option<usize>) -> String {
-    let s_space = reindent_multiline_inner(s, ignore_first, indent, ' ');
+#[expect(clippy::needless_pass_by_value)]
+pub fn reindent_multiline(s: Cow<'_, str>, ignore_first: bool, indent: Option<usize>) -> Cow<'_, str> {
+    let s_space = reindent_multiline_inner(&s, ignore_first, indent, ' ');
     let s_tab = reindent_multiline_inner(&s_space, ignore_first, indent, '\t');
-    reindent_multiline_inner(&s_tab, ignore_first, indent, ' ')
+    reindent_multiline_inner(&s_tab, ignore_first, indent, ' ').into()
 }
 
 fn reindent_multiline_inner(s: &str, ignore_first: bool, indent: Option<usize>, ch: char) -> String {
@@ -610,37 +551,42 @@ pub fn snippet_opt(sess: &impl HasSession, span: Span) -> Option<String> {
 ///     } // aligned with `if`
 /// ```
 /// Note that the first line of the snippet always has 0 indentation.
-pub fn snippet_block(sess: &impl HasSession, span: Span, default: &str, indent_relative_to: Option<Span>) -> String {
+pub fn snippet_block<'a>(
+    sess: &impl HasSession,
+    span: Span,
+    default: &'a str,
+    indent_relative_to: Option<Span>,
+) -> Cow<'a, str> {
     let snip = snippet(sess, span, default);
     let indent = indent_relative_to.and_then(|s| indent_of(sess, s));
-    reindent_multiline(&snip, true, indent)
+    reindent_multiline(snip, true, indent)
 }
 
 /// Same as `snippet_block`, but adapts the applicability level by the rules of
 /// `snippet_with_applicability`.
-pub fn snippet_block_with_applicability(
+pub fn snippet_block_with_applicability<'a>(
     sess: &impl HasSession,
     span: Span,
-    default: &str,
+    default: &'a str,
     indent_relative_to: Option<Span>,
     applicability: &mut Applicability,
-) -> String {
+) -> Cow<'a, str> {
     let snip = snippet_with_applicability(sess, span, default, applicability);
     let indent = indent_relative_to.and_then(|s| indent_of(sess, s));
-    reindent_multiline(&snip, true, indent)
+    reindent_multiline(snip, true, indent)
 }
 
-pub fn snippet_block_with_context(
+pub fn snippet_block_with_context<'a>(
     sess: &impl HasSession,
     span: Span,
     outer: SyntaxContext,
-    default: &str,
+    default: &'a str,
     indent_relative_to: Option<Span>,
     app: &mut Applicability,
-) -> (String, bool) {
+) -> (Cow<'a, str>, bool) {
     let (snip, from_macro) = snippet_with_context(sess, span, outer, default, app);
     let indent = indent_relative_to.and_then(|s| indent_of(sess, s));
-    (reindent_multiline(&snip, true, indent), from_macro)
+    (reindent_multiline(snip, true, indent), from_macro)
 }
 
 /// Same as `snippet_with_applicability`, but first walks the span up to the given context.
@@ -670,14 +616,6 @@ fn snippet_with_context_sess<'a>(
     default: &'a str,
     applicability: &mut Applicability,
 ) -> (Cow<'a, str>, bool) {
-    // If it is just range desugaring, use the desugaring span since it may include parenthesis.
-    if span.desugaring_kind() == Some(DesugaringKind::RangeExpr) && span.parent_callsite().unwrap().ctxt() == outer {
-        return (
-            snippet_with_applicability_sess(sess, span, default, applicability),
-            false,
-        );
-    }
-
     let (span, is_macro_call) = walk_span_to_context(span, outer).map_or_else(
         || {
             // The span is from a macro argument, and the outer context is the macro using the argument
@@ -726,6 +664,39 @@ fn snippet_with_context_sess<'a>(
 pub fn walk_span_to_context(span: Span, outer: SyntaxContext) -> Option<Span> {
     let outer_span = hygiene::walk_chain(span, outer);
     (outer_span.ctxt() == outer).then_some(outer_span)
+}
+
+/// Removes block comments from the given `Vec` of lines.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// without_block_comments(vec!["/*", "foo", "*/"]);
+/// // => vec![]
+///
+/// without_block_comments(vec!["bar", "/*", "foo", "*/"]);
+/// // => vec!["bar"]
+/// ```
+pub fn without_block_comments(lines: Vec<&str>) -> Vec<&str> {
+    let mut without = vec![];
+
+    let mut nest_level = 0;
+
+    for line in lines {
+        if line.contains("/*") {
+            nest_level += 1;
+            continue;
+        } else if line.contains("*/") {
+            nest_level -= 1;
+            continue;
+        }
+
+        if nest_level == 0 {
+            without.push(line);
+        }
+    }
+
+    without
 }
 
 /// Trims the whitespace from the start and the end of the span.
@@ -805,15 +776,15 @@ pub fn str_literal_to_char_literal(
 
 #[cfg(test)]
 mod test {
-    use super::reindent_multiline;
+    use super::{reindent_multiline, without_block_comments};
 
     #[test]
     fn test_reindent_multiline_single_line() {
-        assert_eq!("", reindent_multiline("", false, None));
-        assert_eq!("...", reindent_multiline("...", false, None));
-        assert_eq!("...", reindent_multiline("    ...", false, None));
-        assert_eq!("...", reindent_multiline("\t...", false, None));
-        assert_eq!("...", reindent_multiline("\t\t...", false, None));
+        assert_eq!("", reindent_multiline("".into(), false, None));
+        assert_eq!("...", reindent_multiline("...".into(), false, None));
+        assert_eq!("...", reindent_multiline("    ...".into(), false, None));
+        assert_eq!("...", reindent_multiline("\t...".into(), false, None));
+        assert_eq!("...", reindent_multiline("\t\t...".into(), false, None));
     }
 
     #[test]
@@ -828,7 +799,7 @@ mod test {
             y
         } else {
             z
-        }", false, None));
+        }".into(), false, None));
         assert_eq!("\
     if x {
     \ty
@@ -838,7 +809,7 @@ mod test {
         \ty
         } else {
         \tz
-        }", false, None));
+        }".into(), false, None));
     }
 
     #[test]
@@ -855,7 +826,7 @@ mod test {
 
         } else {
             z
-        }", false, None));
+        }".into(), false, None));
     }
 
     #[test]
@@ -871,6 +842,31 @@ mod test {
         y
     } else {
         z
-    }", true, Some(8)));
+    }".into(), true, Some(8)));
+    }
+
+    #[test]
+    fn test_without_block_comments_lines_without_block_comments() {
+        let result = without_block_comments(vec!["/*", "", "*/"]);
+        println!("result: {result:?}");
+        assert!(result.is_empty());
+
+        let result = without_block_comments(vec!["", "/*", "", "*/", "#[crate_type = \"lib\"]", "/*", "", "*/", ""]);
+        assert_eq!(result, vec!["", "#[crate_type = \"lib\"]", ""]);
+
+        let result = without_block_comments(vec!["/* rust", "", "*/"]);
+        assert!(result.is_empty());
+
+        let result = without_block_comments(vec!["/* one-line comment */"]);
+        assert!(result.is_empty());
+
+        let result = without_block_comments(vec!["/* nested", "/* multi-line", "comment", "*/", "test", "*/"]);
+        assert!(result.is_empty());
+
+        let result = without_block_comments(vec!["/* nested /* inline /* comment */ test */ */"]);
+        assert!(result.is_empty());
+
+        let result = without_block_comments(vec!["foo", "bar", "baz"]);
+        assert_eq!(result, vec!["foo", "bar", "baz"]);
     }
 }

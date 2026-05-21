@@ -1,5 +1,6 @@
 //@ check-pass
 #![allow(dead_code)]
+//@ pretty-expanded FIXME #23616
 
 struct TestStruct {
     x: *const [isize; 2]

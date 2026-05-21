@@ -5,8 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use anyhow::Context as _;
-use cargo_util::{ProcessBuilder, ProcessError, paths};
-use filetime::FileTime;
+use cargo_util::{paths, ProcessBuilder, ProcessError};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info, warn};
 
@@ -26,9 +25,9 @@ pub struct Rustc {
     pub workspace_wrapper: Option<PathBuf>,
     /// Verbose version information (the output of `rustc -vV`)
     pub verbose_version: String,
-    /// The rustc version (`1.23.4-beta.2`), this comes from `verbose_version`.
+    /// The rustc version (`1.23.4-beta.2`), this comes from verbose_version.
     pub version: semver::Version,
-    /// The host triple (arch-platform-OS), this comes from `verbose_version`.
+    /// The host triple (arch-platform-OS), this comes from verbose_version.
     pub host: InternedString,
     /// The rustc full commit hash, this comes from `verbose_version`.
     pub commit_hash: Option<String>,
@@ -79,7 +78,7 @@ impl Rustc {
                 })
         };
 
-        let host = extract("host: ")?.into();
+        let host = InternedString::new(extract("host: ")?);
         let version = semver::Version::parse(extract("release: ")?).with_context(|| {
             format!(
                 "rustc version does not appear to be a valid semver version, from:\n{}",
@@ -258,7 +257,9 @@ impl Cache {
         extra_fingerprint: u64,
     ) -> CargoResult<(String, String)> {
         let key = process_fingerprint(cmd, extra_fingerprint);
-        if let std::collections::hash_map::Entry::Vacant(e) = self.data.outputs.entry(key) {
+        if self.data.outputs.contains_key(&key) {
+            debug!("rustc info cache hit");
+        } else {
             debug!("rustc info cache miss");
             debug!("running {}", cmd);
             let output = cmd.output()?;
@@ -268,20 +269,21 @@ impl Cache {
             let stderr = String::from_utf8(output.stderr)
                 .map_err(|e| anyhow::anyhow!("{}: {:?}", e, e.as_bytes()))
                 .with_context(|| format!("`{}` didn't return utf8 output", cmd))?;
-            e.insert(Output {
-                success: output.status.success(),
-                status: if output.status.success() {
-                    String::new()
-                } else {
-                    cargo_util::exit_status_to_string(output.status)
+            self.data.outputs.insert(
+                key,
+                Output {
+                    success: output.status.success(),
+                    status: if output.status.success() {
+                        String::new()
+                    } else {
+                        cargo_util::exit_status_to_string(output.status)
+                    },
+                    code: output.status.code(),
+                    stdout,
+                    stderr,
                 },
-                code: output.status.code(),
-                stdout,
-                stderr,
-            });
+            );
             self.dirty = true;
-        } else {
-            debug!("rustc info cache hit");
         }
         let output = &self.data.outputs[&key];
         if output.success {
@@ -327,13 +329,7 @@ fn rustc_fingerprint(
         let path = paths::resolve_executable(path)?;
         path.hash(hasher);
 
-        let meta = paths::metadata(&path)?;
-        meta.len().hash(hasher);
-
-        // Often created and modified are the same, but not all filesystems support the former,
-        // and distro reproducible builds may clamp the latter, so we try to use both.
-        FileTime::from_creation_time(&meta).hash(hasher);
-        FileTime::from_last_modification_time(&meta).hash(hasher);
+        paths::mtime(&path)?.hash(hasher);
         Ok(())
     };
 
@@ -378,7 +374,7 @@ fn rustc_fingerprint(
         _ => (),
     }
 
-    Ok(Hasher::finish(&hasher))
+    Ok(hasher.finish())
 }
 
 fn process_fingerprint(cmd: &ProcessBuilder, extra_fingerprint: u64) -> u64 {
@@ -388,5 +384,5 @@ fn process_fingerprint(cmd: &ProcessBuilder, extra_fingerprint: u64) -> u64 {
     let mut env = cmd.get_envs().iter().collect::<Vec<_>>();
     env.sort_unstable();
     env.hash(&mut hasher);
-    Hasher::finish(&hasher)
+    hasher.finish()
 }

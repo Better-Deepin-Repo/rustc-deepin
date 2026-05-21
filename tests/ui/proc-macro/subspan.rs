@@ -1,4 +1,4 @@
-//@ proc-macro: subspan.rs
+//@ aux-build:subspan.rs
 
 extern crate subspan;
 

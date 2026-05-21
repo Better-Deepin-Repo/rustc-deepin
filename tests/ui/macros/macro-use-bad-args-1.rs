@@ -1,6 +1,6 @@
 #![no_std]
 
-#[macro_use(foo(bar))]  //~ ERROR malformed `macro_use` attribute input
+#[macro_use(foo(bar))]  //~ ERROR bad macro import
 extern crate std;
 
 fn main() {}

@@ -1,4 +1,3 @@
-//@ edition:2015
 // Tests that lint levels can be set for early lints.
 #![allow(non_camel_case_types, unsafe_code, while_true, unused_parens)]
 
@@ -41,7 +40,7 @@ struct Associated;
 impl Associated {
     #![deny(unsafe_code)]
 
-    fn inherent_denied_from_inner() { unsafe {} } //~ ERROR usage of an `unsafe` block
+    fn inherent_denied_from_inner() { unsafe {} } //~ usage of an `unsafe` block
 
     #[deny(while_true)]
     fn inherent_fn() { while true {} } //~ ERROR denote infinite loops with

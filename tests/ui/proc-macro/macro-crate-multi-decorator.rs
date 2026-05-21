@@ -1,9 +1,7 @@
-//@ edition:2015
 // The duplicate macro will create a copy of the item with the given identifier.
 
 //@ check-pass
-//@ proc-macro: duplicate.rs
-//@ ignore-backends: gcc
+//@ aux-build:duplicate.rs
 
 #[macro_use]
 extern crate duplicate;

@@ -132,7 +132,7 @@ However, this determinism can give a false sense of security because
 `Cargo.lock` does not affect the consumers of your package, only `Cargo.toml` does that.
 For example:
 - [`cargo install`] will select the latest dependencies unless
-[`--locked`](commands/cargo.html#option-cargo---locked) is passed in.
+ `[--locked`](commands/cargo.html#option-cargo---locked) is passed in.
 - New dependencies, like those added with [`cargo add`], will be locked to the latest version
 
 The lockfile can also be a source of merge conflicts.
@@ -255,8 +255,8 @@ issue](https://github.com/rust-lang/cargo/issues/new)!
 
 Have you seen the error message above?
 
-This is one of the most annoying error messages for Cargo users. There are several
-situations which may lead to a version conflict. Below we'll walk through possible
+This is one of the most annoying error message for Cargo users. There are several
+situations may lead us to a version conflict. Below we'll walk through possible
 causes and provide diagnostic techniques to help you out there:
 
 - The project and its dependencies use [links] to repeatedly link the local
@@ -290,20 +290,7 @@ causes and provide diagnostic techniques to help you out there:
   and `Cargo.toml` using a [custom merge tool].
 
 
-[links]: reference/resolver.md#links
-[conventions in place]: reference/build-scripts.md#-sys-packages
+[links]: https://doc.rust-lang.org/cargo/reference/resolver.html#links
+[conventions in place]: https://doc.rust-lang.org/cargo/reference/build-scripts.html#-sys-packages
 [`direct-minimal-versions`]: https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#direct-minimal-versions
 [custom merge tool]: https://github.com/rust-lang/cargo/issues/1818
-
-## Why does my build take up so much space?
-
-Cargo trades off disk space for faster builds including:
-- Maintaining a [cache] of intermediate build artifacts to avoid rebuilding everything when making changes to one package
-- Maintaining distinct [cache] entries for different combinations of toolchain versions, package versions, features, etc to avoid rebuilding packages when switching back and forth between configurations
-- Enabling [incremental compilation] for local packages for faster rebuilds for the package that changed
-- Enabling [debuginfo] in the [`dev` profile] in case you use a debugger
-
-[incremental compilation]: reference/profiles.md#incremental
-[debuginfo]: reference/profiles.md#debug
-[`dev` profile]: reference/profiles.md#dev
-[cache]: reference/build-cache.md

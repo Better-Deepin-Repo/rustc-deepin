@@ -34,15 +34,11 @@ impl LoongArchInlineAsmRegClass {
 
     pub fn supported_types(
         self,
-        arch: InlineAsmArch,
+        _arch: InlineAsmArch,
     ) -> &'static [(InlineAsmType, Option<Symbol>)] {
-        match (self, arch) {
-            (Self::reg, InlineAsmArch::LoongArch64) => {
-                types! { _: I8, I16, I32, I64, F16, F32, F64; }
-            }
-            (Self::reg, InlineAsmArch::LoongArch32) => types! { _: I8, I16, I32, F16, F32; },
-            (Self::freg, _) => types! { f: F16, F32; d: F64; },
-            _ => unreachable!("unsupported register class"),
+        match self {
+            Self::reg => types! { _: I8, I16, I32, I64, F32, F64; },
+            Self::freg => types! { _: F32, F64; },
         }
     }
 }

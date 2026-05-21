@@ -1,4 +1,3 @@
-//@ edition:2015
 // Non-builtin attributes do not mess with field visibility resolution (issue #67006).
 
 mod internal {
@@ -15,12 +14,12 @@ mod internal {
 
 struct S {
     #[rustfmt::skip]
-    pub(in nonexistent) field: u8 //~ ERROR cannot find
+    pub(in nonexistent) field: u8 //~ ERROR failed to resolve
 }
 
 struct Z(
     #[rustfmt::skip]
-    pub(in nonexistent) u8 //~ ERROR cannot find
+    pub(in nonexistent) u8 //~ ERROR failed to resolve
 );
 
 fn main() {}

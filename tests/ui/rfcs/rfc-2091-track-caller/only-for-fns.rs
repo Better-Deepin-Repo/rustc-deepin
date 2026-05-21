@@ -1,5 +1,5 @@
 #[track_caller]
 struct S;
-//~^^ ERROR attribute cannot be used on
+//~^^ ERROR attribute should be applied to a function definition
 
 fn main() {}

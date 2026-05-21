@@ -8,7 +8,7 @@ const CONSTANT: S = S(0);
 enum E {
     V = CONSTANT,
     //~^ ERROR mismatched types
-    //~| NOTE expected `isize`, found `S`
+    //~| expected `isize`, found `S`
 }
 
 fn main() {}

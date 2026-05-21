@@ -12,15 +12,16 @@ fn step1<'a, 'b: 'a>() -> impl Sized + Captures<'b> + 'a {
     MyTy::<'a, 'b>(None)
 }
 
-type Tait<'a> = impl Sized + 'a;
-#[define_opaque(Tait)]
-fn step2<'a, 'b: 'a>() -> Tait<'a> {
-    step1::<'a, 'b>()
-    //~^ ERROR hidden type for `Tait<'a>` captures lifetime that does not appear in bounds
+mod tait {
+    type Tait<'a> = impl Sized + 'a;
+    pub(super) fn step2<'a, 'b: 'a>() -> Tait<'a> {
+        super::step1::<'a, 'b>()
+        //~^ ERROR hidden type for `Tait<'a>` captures lifetime that does not appear in bounds
+    }
 }
 
 fn step3<'a, 'b: 'a>() -> impl Send + 'a {
-    step2::<'a, 'b>()
+    tait::step2::<'a, 'b>()
     // This should not be Send unless `'b: 'static`
 }
 

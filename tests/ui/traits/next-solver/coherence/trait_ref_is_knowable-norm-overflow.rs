@@ -6,11 +6,9 @@
 trait Overflow {
     type Assoc;
 }
-impl<T> Overflow for T
-where
-    (T,): Overflow
-{
-    type Assoc = <(T,) as Overflow>::Assoc;
+impl<T> Overflow for T {
+    type Assoc = <T as Overflow>::Assoc;
+    //~^ ERROR: overflow
 }
 
 

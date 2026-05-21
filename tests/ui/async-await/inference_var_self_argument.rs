@@ -3,7 +3,7 @@
 
 trait Foo {
     async fn foo(self: &dyn Foo) {
-        //~^ ERROR: `Foo` is not dyn compatible
+        //~^ ERROR: `Foo` cannot be made into an object
         //~| ERROR invalid `self` parameter type: `&dyn Foo`
         todo!()
     }

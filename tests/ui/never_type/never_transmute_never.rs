@@ -1,9 +1,11 @@
 //@ check-pass
 
+#![crate_type="lib"]
+
 #![feature(never_type)]
 #![allow(dead_code)]
-#![expect(unreachable_code)]
-#![expect(unused_variables)]
+#![allow(unreachable_code)]
+#![allow(unused_variables)]
 
 struct Foo;
 
@@ -19,5 +21,3 @@ pub fn ub() {
     };
     f(x)
 }
-
-fn main() {}

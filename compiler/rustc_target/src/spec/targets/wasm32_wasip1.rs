@@ -10,17 +10,14 @@
 //! was since renamed to `wasm32-wasip1` after the preview2 target was
 //! introduced.
 
-use crate::spec::{
-    Arch, Cc, Env, LinkSelfContainedDefault, LinkerFlavor, Os, Target, TargetMetadata, base,
-    crt_objects,
-};
+use crate::spec::{base, crt_objects, Cc, LinkSelfContainedDefault, LinkerFlavor, Target};
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     let mut options = base::wasm::options();
 
-    options.os = Os::Wasi;
-    options.env = Env::P1;
-    options.add_pre_link_args(LinkerFlavor::WasmLld(Cc::Yes), &["--target=wasm32-wasip1"]);
+    options.os = "wasi".into();
+    options.env = "p1".into();
+    options.add_pre_link_args(LinkerFlavor::WasmLld(Cc::Yes), &["--target=wasm32-wasi"]);
 
     options.pre_link_objects_self_contained = crt_objects::pre_wasi_self_contained();
     options.post_link_objects_self_contained = crt_objects::post_wasi_self_contained();
@@ -50,16 +47,16 @@ pub(crate) fn target() -> Target {
     options.entry_name = "__main_void".into();
 
     Target {
-        llvm_target: "wasm32-wasip1".into(),
-        metadata: TargetMetadata {
+        llvm_target: "wasm32-wasi".into(),
+        metadata: crate::spec::TargetMetadata {
             description: Some("WebAssembly with WASI".into()),
             tier: Some(2),
             host_tools: Some(false),
             std: Some(true),
         },
         pointer_width: 32,
-        data_layout: "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-i128:128-n32:64-S128-ni:1:10:20".into(),
-        arch: Arch::Wasm32,
+        data_layout: "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-n32:64-S128-ni:1:10:20".into(),
+        arch: "wasm32".into(),
         options,
     }
 }

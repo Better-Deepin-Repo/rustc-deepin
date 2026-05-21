@@ -1,8 +1,8 @@
 //@ edition:2018
 
-extern "C" {
+extern {
     async fn L() { //~ ERROR: incorrect function inside `extern` block
-        //~^ ERROR: functions in `extern` blocks cannot have `async` qualifier
+        //~^ ERROR: functions in `extern` blocks cannot have qualifiers
         async fn M() {}
     }
 }

@@ -3,27 +3,13 @@
 #![stable(feature = "io_safety", since = "1.63.0")]
 #![deny(unsafe_op_in_unsafe_fn)]
 
-#[cfg(target_os = "motor")]
-use moto_rt::libc;
-
 use super::raw::{AsRawFd, FromRawFd, IntoRawFd, RawFd};
-#[cfg(not(target_os = "trusty"))]
-use crate::fs;
 use crate::marker::PhantomData;
 use crate::mem::ManuallyDrop;
-#[cfg(not(any(
-    target_arch = "wasm32",
-    target_env = "sgx",
-    target_os = "hermit",
-    target_os = "trusty",
-    target_os = "motor"
-)))]
+#[cfg(not(any(target_arch = "wasm32", target_env = "sgx", target_os = "hermit")))]
 use crate::sys::cvt;
-#[cfg(not(target_os = "trusty"))]
-use crate::sys::{AsInner, FromInner, IntoInner};
-use crate::{fmt, io};
-
-type ValidRawFd = core::num::niche_types::NotAllOnes<RawFd>;
+use crate::sys_common::{AsInner, FromInner, IntoInner};
+use crate::{fmt, fs, io};
 
 /// A borrowed file descriptor.
 ///
@@ -46,10 +32,15 @@ type ValidRawFd = core::num::niche_types::NotAllOnes<RawFd>;
 /// instead, but this is not supported on all platforms.
 #[derive(Copy, Clone)]
 #[repr(transparent)]
+#[rustc_layout_scalar_valid_range_start(0)]
+// libstd/os/raw/mod.rs assures me that every libstd-supported platform has a
+// 32-bit c_int. Below is -2, in two's complement, but that only works out
+// because c_int is 32 bits.
+#[rustc_layout_scalar_valid_range_end(0xFF_FF_FF_FE)]
 #[rustc_nonnull_optimization_guaranteed]
 #[stable(feature = "io_safety", since = "1.63.0")]
 pub struct BorrowedFd<'fd> {
-    fd: ValidRawFd,
+    fd: RawFd,
     _phantom: PhantomData<&'fd OwnedFd>,
 }
 
@@ -65,10 +56,15 @@ pub struct BorrowedFd<'fd> {
 ///
 /// You can use [`AsFd::as_fd`] to obtain a [`BorrowedFd`].
 #[repr(transparent)]
+#[rustc_layout_scalar_valid_range_start(0)]
+// libstd/os/raw/mod.rs assures me that every libstd-supported platform has a
+// 32-bit c_int. Below is -2, in two's complement, but that only works out
+// because c_int is 32 bits.
+#[rustc_layout_scalar_valid_range_end(0xFF_FF_FF_FE)]
 #[rustc_nonnull_optimization_guaranteed]
 #[stable(feature = "io_safety", since = "1.63.0")]
 pub struct OwnedFd {
-    fd: ValidRawFd,
+    fd: RawFd,
 }
 
 impl BorrowedFd<'_> {
@@ -77,17 +73,14 @@ impl BorrowedFd<'_> {
     /// # Safety
     ///
     /// The resource pointed to by `fd` must remain open for the duration of
-    /// the returned `BorrowedFd`.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the raw file descriptor has the value `-1`.
+    /// the returned `BorrowedFd`, and it must not have the value `-1`.
     #[inline]
-    #[track_caller]
     #[rustc_const_stable(feature = "io_safety", since = "1.63.0")]
     #[stable(feature = "io_safety", since = "1.63.0")]
     pub const unsafe fn borrow_raw(fd: RawFd) -> Self {
-        Self { fd: ValidRawFd::new(fd).expect("fd != -1"), _phantom: PhantomData }
+        assert!(fd != u32::MAX as RawFd);
+        // SAFETY: we just asserted that the value is in the valid range and isn't `-1` (the only value bigger than `0xFF_FF_FF_FE` unsigned)
+        unsafe { Self { fd, _phantom: PhantomData } }
     }
 }
 
@@ -95,7 +88,7 @@ impl OwnedFd {
     /// Creates a new `OwnedFd` instance that shares the same underlying file
     /// description as the existing `OwnedFd` instance.
     #[stable(feature = "io_safety", since = "1.63.0")]
-    pub fn try_clone(&self) -> io::Result<Self> {
+    pub fn try_clone(&self) -> crate::io::Result<Self> {
         self.as_fd().try_clone_to_owned()
     }
 }
@@ -103,14 +96,9 @@ impl OwnedFd {
 impl BorrowedFd<'_> {
     /// Creates a new `OwnedFd` instance that shares the same underlying file
     /// description as the existing `BorrowedFd` instance.
-    #[cfg(not(any(
-        target_arch = "wasm32",
-        target_os = "hermit",
-        target_os = "trusty",
-        target_os = "motor"
-    )))]
+    #[cfg(not(any(target_arch = "wasm32", target_os = "hermit")))]
     #[stable(feature = "io_safety", since = "1.63.0")]
-    pub fn try_clone_to_owned(&self) -> io::Result<OwnedFd> {
+    pub fn try_clone_to_owned(&self) -> crate::io::Result<OwnedFd> {
         // We want to atomically duplicate this file descriptor and set the
         // CLOEXEC flag, and currently that's done via F_DUPFD_CLOEXEC. This
         // is a POSIX flag that was added to Linux in 2.6.24.
@@ -131,19 +119,10 @@ impl BorrowedFd<'_> {
 
     /// Creates a new `OwnedFd` instance that shares the same underlying file
     /// description as the existing `BorrowedFd` instance.
-    #[cfg(any(target_arch = "wasm32", target_os = "hermit", target_os = "trusty"))]
+    #[cfg(any(target_arch = "wasm32", target_os = "hermit"))]
     #[stable(feature = "io_safety", since = "1.63.0")]
-    pub fn try_clone_to_owned(&self) -> io::Result<OwnedFd> {
-        Err(io::Error::UNSUPPORTED_PLATFORM)
-    }
-
-    /// Creates a new `OwnedFd` instance that shares the same underlying file
-    /// description as the existing `BorrowedFd` instance.
-    #[cfg(target_os = "motor")]
-    #[stable(feature = "io_safety", since = "1.63.0")]
-    pub fn try_clone_to_owned(&self) -> io::Result<OwnedFd> {
-        let fd = moto_rt::fs::duplicate(self.as_raw_fd()).map_err(crate::sys::map_motor_error)?;
-        Ok(unsafe { OwnedFd::from_raw_fd(fd) })
+    pub fn try_clone_to_owned(&self) -> crate::io::Result<OwnedFd> {
+        Err(crate::io::Error::UNSUPPORTED_PLATFORM)
     }
 }
 
@@ -151,7 +130,7 @@ impl BorrowedFd<'_> {
 impl AsRawFd for BorrowedFd<'_> {
     #[inline]
     fn as_raw_fd(&self) -> RawFd {
-        self.fd.as_inner()
+        self.fd
     }
 }
 
@@ -159,7 +138,7 @@ impl AsRawFd for BorrowedFd<'_> {
 impl AsRawFd for OwnedFd {
     #[inline]
     fn as_raw_fd(&self) -> RawFd {
-        self.fd.as_inner()
+        self.fd
     }
 }
 
@@ -167,7 +146,7 @@ impl AsRawFd for OwnedFd {
 impl IntoRawFd for OwnedFd {
     #[inline]
     fn into_raw_fd(self) -> RawFd {
-        ManuallyDrop::new(self).fd.as_inner()
+        ManuallyDrop::new(self).fd
     }
 }
 
@@ -181,14 +160,11 @@ impl FromRawFd for OwnedFd {
     /// [ownership][io-safety]. The resource must not require any cleanup other than `close`.
     ///
     /// [io-safety]: io#io-safety
-    ///
-    /// # Panics
-    ///
-    /// Panics if the raw file descriptor has the value `-1`.
     #[inline]
-    #[track_caller]
     unsafe fn from_raw_fd(fd: RawFd) -> Self {
-        Self { fd: ValidRawFd::new(fd).expect("fd != -1") }
+        assert_ne!(fd, u32::MAX as RawFd);
+        // SAFETY: we just asserted that the value is in the valid range and isn't `-1` (the only value bigger than `0xFF_FF_FF_FE` unsigned)
+        unsafe { Self { fd } }
     }
 }
 
@@ -197,26 +173,25 @@ impl Drop for OwnedFd {
     #[inline]
     fn drop(&mut self) {
         unsafe {
-            // Note that errors are ignored when closing a file descriptor. According to POSIX 2024,
-            // we can and indeed should retry `close` on `EINTR`
-            // (https://pubs.opengroup.org/onlinepubs/9799919799.2024edition/functions/close.html),
-            // but it is not clear yet how well widely-used implementations are conforming with this
-            // mandate since older versions of POSIX left the state of the FD after an `EINTR`
-            // unspecified. Ignoring errors is "fine" because some of the major Unices (in
-            // particular, Linux) do make sure to always close the FD, even when `close()` is
-            // interrupted, and the scenario is rare to begin with. If we retried on a
-            // not-POSIX-compliant implementation, the consequences could be really bad since we may
-            // close the wrong FD. Helpful link to an epic discussion by POSIX workgroup that led to
-            // the latest POSIX wording: http://austingroupbugs.net/view.php?id=529
+            // Note that errors are ignored when closing a file descriptor. The
+            // reason for this is that if an error occurs we don't actually know if
+            // the file descriptor was closed or not, and if we retried (for
+            // something like EINTR), we might close another valid file descriptor
+            // opened after we closed ours.
+            // However, this is usually justified, as some of the major Unices
+            // do make sure to always close the FD, even when `close()` is interrupted,
+            // and the scenario is rare to begin with.
+            // Helpful link to an epic discussion by POSIX workgroup:
+            // http://austingroupbugs.net/view.php?id=529
             #[cfg(not(target_os = "hermit"))]
             {
                 #[cfg(unix)]
-                crate::sys::fs::debug_assert_fd_is_open(self.fd.as_inner());
+                crate::sys::fs::debug_assert_fd_is_open(self.fd);
 
-                let _ = libc::close(self.fd.as_inner());
+                let _ = libc::close(self.fd);
             }
             #[cfg(target_os = "hermit")]
-            let _ = hermit_abi::close(self.fd.as_inner());
+            let _ = hermit_abi::close(self.fd);
         }
     }
 }
@@ -241,7 +216,7 @@ macro_rules! impl_is_terminal {
         impl crate::sealed::Sealed for $t {}
 
         #[stable(feature = "is_terminal", since = "1.70.0")]
-        impl io::IsTerminal for $t {
+        impl crate::io::IsTerminal for $t {
             #[inline]
             fn is_terminal(&self) -> bool {
                 crate::sys::io::is_terminal(self)
@@ -314,7 +289,6 @@ impl AsFd for OwnedFd {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
 impl AsFd for fs::File {
     #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
@@ -323,7 +297,6 @@ impl AsFd for fs::File {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
 impl From<fs::File> for OwnedFd {
     /// Takes ownership of a [`File`](fs::File)'s underlying file descriptor.
     #[inline]
@@ -333,7 +306,6 @@ impl From<fs::File> for OwnedFd {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
 impl From<OwnedFd> for fs::File {
     /// Returns a [`File`](fs::File) that takes ownership of the given
     /// file descriptor.
@@ -344,7 +316,6 @@ impl From<OwnedFd> for fs::File {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
 impl AsFd for crate::net::TcpStream {
     #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
@@ -353,7 +324,6 @@ impl AsFd for crate::net::TcpStream {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
 impl From<crate::net::TcpStream> for OwnedFd {
     /// Takes ownership of a [`TcpStream`](crate::net::TcpStream)'s socket file descriptor.
     #[inline]
@@ -363,7 +333,6 @@ impl From<crate::net::TcpStream> for OwnedFd {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
 impl From<OwnedFd> for crate::net::TcpStream {
     #[inline]
     fn from(owned_fd: OwnedFd) -> Self {
@@ -374,7 +343,6 @@ impl From<OwnedFd> for crate::net::TcpStream {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
 impl AsFd for crate::net::TcpListener {
     #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
@@ -383,7 +351,6 @@ impl AsFd for crate::net::TcpListener {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
 impl From<crate::net::TcpListener> for OwnedFd {
     /// Takes ownership of a [`TcpListener`](crate::net::TcpListener)'s socket file descriptor.
     #[inline]
@@ -393,7 +360,6 @@ impl From<crate::net::TcpListener> for OwnedFd {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
 impl From<OwnedFd> for crate::net::TcpListener {
     #[inline]
     fn from(owned_fd: OwnedFd) -> Self {
@@ -404,7 +370,6 @@ impl From<OwnedFd> for crate::net::TcpListener {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
 impl AsFd for crate::net::UdpSocket {
     #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
@@ -413,7 +378,6 @@ impl AsFd for crate::net::UdpSocket {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
 impl From<crate::net::UdpSocket> for OwnedFd {
     /// Takes ownership of a [`UdpSocket`](crate::net::UdpSocket)'s file descriptor.
     #[inline]
@@ -423,7 +387,6 @@ impl From<crate::net::UdpSocket> for OwnedFd {
 }
 
 #[stable(feature = "io_safety", since = "1.63.0")]
-#[cfg(not(target_os = "trusty"))]
 impl From<OwnedFd> for crate::net::UdpSocket {
     #[inline]
     fn from(owned_fd: OwnedFd) -> Self {
@@ -458,14 +421,6 @@ impl<T: AsFd + ?Sized> AsFd for crate::sync::Arc<T> {
 
 #[stable(feature = "asfd_rc", since = "1.69.0")]
 impl<T: AsFd + ?Sized> AsFd for crate::rc::Rc<T> {
-    #[inline]
-    fn as_fd(&self) -> BorrowedFd<'_> {
-        (**self).as_fd()
-    }
-}
-
-#[unstable(feature = "unique_rc_arc", issue = "112566")]
-impl<T: AsFd + ?Sized> AsFd for crate::rc::UniqueRc<T> {
     #[inline]
     fn as_fd(&self) -> BorrowedFd<'_> {
         (**self).as_fd()
@@ -528,53 +483,5 @@ impl<'a> AsFd for io::StderrLock<'a> {
     fn as_fd(&self) -> BorrowedFd<'_> {
         // SAFETY: user code should not close stderr out from under the standard library
         unsafe { BorrowedFd::borrow_raw(2) }
-    }
-}
-
-#[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
-impl AsFd for io::PipeReader {
-    fn as_fd(&self) -> BorrowedFd<'_> {
-        self.0.as_fd()
-    }
-}
-
-#[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
-impl From<io::PipeReader> for OwnedFd {
-    fn from(pipe: io::PipeReader) -> Self {
-        pipe.0.into_inner()
-    }
-}
-
-#[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
-impl AsFd for io::PipeWriter {
-    fn as_fd(&self) -> BorrowedFd<'_> {
-        self.0.as_fd()
-    }
-}
-
-#[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
-impl From<io::PipeWriter> for OwnedFd {
-    fn from(pipe: io::PipeWriter) -> Self {
-        pipe.0.into_inner()
-    }
-}
-
-#[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
-impl From<OwnedFd> for io::PipeReader {
-    fn from(owned_fd: OwnedFd) -> Self {
-        Self(FromInner::from_inner(owned_fd))
-    }
-}
-
-#[stable(feature = "anonymous_pipe", since = "1.87.0")]
-#[cfg(not(target_os = "trusty"))]
-impl From<OwnedFd> for io::PipeWriter {
-    fn from(owned_fd: OwnedFd) -> Self {
-        Self(FromInner::from_inner(owned_fd))
     }
 }

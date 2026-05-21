@@ -1,22 +1,15 @@
-r[attributes.limits]
 # Limits
 
 The following [attributes] affect compile-time limits.
 
-r[attributes.limits.recursion_limit]
 ## The `recursion_limit` attribute
 
-r[attributes.limits.recursion_limit.intro]
 The *`recursion_limit` attribute* may be applied at the [crate] level to set the
 maximum depth for potentially infinitely-recursive compile-time operations
-like macro expansion or auto-dereference.
-
-r[attributes.limits.recursion_limit.syntax]
-It uses the [MetaNameValueStr]
+like macro expansion or auto-dereference. It uses the [_MetaNameValueStr_]
 syntax to specify the recursion depth.
 
-> [!NOTE]
-> The default in `rustc` is 128.
+> Note: The default in `rustc` is 128.
 
 ```rust,compile_fail
 #![recursion_limit = "4"]
@@ -40,48 +33,29 @@ a!{}
 (|_: &u8| {})(&&&1);
 ```
 
-<!-- template:attributes -->
-r[attributes.limits.type_length_limit]
 ## The `type_length_limit` attribute
 
-r[attributes.limits.type_length_limit.intro]
-The *`type_length_limit` [attribute][attributes]* sets the maximum number of type substitutions allowed when constructing a concrete type during monomorphization.
-
-> [!NOTE]
-> `rustc` only enforces the limit when the nightly `-Zenforce-type-length-limit` flag is active.
+> **Note**: This limit is only enforced when the nightly `-Zenforce-type-length-limit` flag is active.
 >
-> For more information, see [Rust PR #127670](https://github.com/rust-lang/rust/pull/127670).
+> For more information, see <https://github.com/rust-lang/rust/pull/127670>.
 
-> [!EXAMPLE]
-> <!-- ignore: not enforced without nightly flag -->
-> ```rust,ignore
-> #![type_length_limit = "4"]
->
-> fn f<T>(x: T) {}
->
-> // This fails to compile because monomorphizing to
-> // `f::<((((i32,), i32), i32), i32)>` requires more
-> // than 4 type elements.
-> f(((((1,), 2), 3), 4));
-> ```
+The *`type_length_limit` attribute* limits the maximum number of type
+substitutions made when constructing a concrete type during monomorphization.
+It is applied at the [crate] level, and uses the [_MetaNameValueStr_] syntax
+to set the limit based on the number of type substitutions.
 
-> [!NOTE]
-> The default value in `rustc` is `1048576`.
+> Note: The default in `rustc` is 1048576.
 
-r[attributes.limits.type_length_limit.syntax]
-The `type_length_limit` attribute uses the [MetaNameValueStr] syntax. The value in the string must be a non-negative number.
+```rust,ignore
+#![type_length_limit = "4"]
 
-r[attributes.limits.type_length_limit.allowed-positions]
-The `type_length_limit` attribute may only be applied to the crate root.
+fn f<T>(x: T) {}
 
-> [!NOTE]
-> `rustc` ignores use in other positions but lints against it. This may become an error in the future.
+// This fails to compile because monomorphizing to
+// `f::<((((i32,), i32), i32), i32)>` requires more than 4 type elements.
+f(((((1,), 2), 3), 4));
+```
 
-r[attributes.limits.type_length_limit.duplicates]
-Only the first use of `type_length_limit` on an item has effect.
-
-> [!NOTE]
-> `rustc` lints against any use following the first. This may become an error in the future.
-
+[_MetaNameValueStr_]: ../attributes.md#meta-item-attribute-syntax
 [attributes]: ../attributes.md
 [crate]: ../crates-and-source-files.md

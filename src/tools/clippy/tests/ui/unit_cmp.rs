@@ -3,7 +3,7 @@
     clippy::no_effect,
     clippy::unnecessary_operation,
     clippy::derive_partial_eq_without_eq,
-    clippy::needless_ifs
+    clippy::needless_if
 )]
 
 #[derive(PartialEq)]
@@ -15,23 +15,22 @@ fn main() {
 
     // this warns
     if {
-        //~^ unit_cmp
-
+        //~^ ERROR: ==-comparison of unit values detected. This will always be true
+        //~| NOTE: `-D clippy::unit-cmp` implied by `-D warnings`
         true;
     } == {
         false;
     } {}
 
     if {
-        //~^ unit_cmp
-
+        //~^ ERROR: >-comparison of unit values detected. This will always be false
         true;
     } > {
         false;
     } {}
 
     assert_eq!(
-        //~^ unit_cmp
+        //~^ ERROR: `assert_eq` of unit values detected. This will always succeed
         {
             true;
         },
@@ -40,7 +39,7 @@ fn main() {
         }
     );
     debug_assert_eq!(
-        //~^ unit_cmp
+        //~^ ERROR: `debug_assert_eq` of unit values detected. This will always succeed
         {
             true;
         },
@@ -50,7 +49,7 @@ fn main() {
     );
 
     assert_ne!(
-        //~^ unit_cmp
+        //~^ ERROR: `assert_ne` of unit values detected. This will always fail
         {
             true;
         },
@@ -59,7 +58,7 @@ fn main() {
         }
     );
     debug_assert_ne!(
-        //~^ unit_cmp
+        //~^ ERROR: `debug_assert_ne` of unit values detected. This will always fail
         {
             true;
         },
@@ -67,21 +66,4 @@ fn main() {
             false;
         }
     );
-}
-
-fn issue15559() {
-    fn foo() {}
-    assert_eq!(
-        //~^ unit_cmp
-        {
-            1;
-        },
-        foo()
-    );
-    assert_eq!(foo(), foo());
-    //~^ unit_cmp
-
-    // don't lint on explicitly written unit expr
-    assert_eq!(foo(), ());
-    assert_ne!((), ContainsUnit(()).0);
 }

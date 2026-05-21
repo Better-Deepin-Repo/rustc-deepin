@@ -20,13 +20,11 @@ use crate::core::{
     Dependency, FeatureValue, PackageId, PackageIdSpec, PackageIdSpecQuery, Registry, Summary,
 };
 use crate::sources::source::QueryKind;
-use crate::util::closest_msg;
 use crate::util::errors::CargoResult;
-use crate::util::interning::{INTERNED_DEFAULT, InternedString};
+use crate::util::interning::{InternedString, INTERNED_DEFAULT};
 
 use anyhow::Context as _;
 use std::collections::{BTreeSet, HashMap, HashSet};
-use std::fmt::Write;
 use std::rc::Rc;
 use std::task::Poll;
 use tracing::debug;
@@ -209,6 +207,7 @@ impl<'a> RegistryQueryer<'a> {
             }
         }
 
+        let first_version = first_version;
         self.version_prefs.sort_summaries(&mut ret, first_version);
 
         let out = Poll::Ready(Rc::new(ret));
@@ -516,53 +515,25 @@ impl RequirementError {
                     .collect();
                 if deps.is_empty() {
                     return match parent {
-                        None => {
-                            let closest = closest_msg(
-                                &feat.as_str(),
-                                summary.features().keys(),
-                                |key| &key,
-                                "feature",
-                            );
-                            ActivateError::Fatal(anyhow::format_err!(
-                                "package `{}` does not have the feature `{}`{}",
-                                summary.package_id(),
-                                feat,
-                                closest
-                            ))
+                        None => ActivateError::Fatal(anyhow::format_err!(
+                            "Package `{}` does not have the feature `{}`",
+                            summary.package_id(),
+                            feat
+                        )),
+                        Some(p) => {
+                            ActivateError::Conflict(p, ConflictReason::MissingFeatures(feat))
                         }
-                        Some(p) => ActivateError::Conflict(p, ConflictReason::MissingFeature(feat)),
                     };
                 }
                 if deps.iter().any(|dep| dep.is_optional()) {
                     match parent {
-                        None => {
-                            let mut features =
-                                features_enabling_dependency_sorted(summary, feat).peekable();
-                            let mut suggestion = String::new();
-                            if features.peek().is_some() {
-                                suggestion = format!(
-                                    "\nDependency `{}` would be enabled by these features:",
-                                    feat
-                                );
-                                for feature in (&mut features).take(3) {
-                                    let _ = write!(&mut suggestion, "\n\t- `{}`", feature);
-                                }
-                                if features.peek().is_some() {
-                                    suggestion.push_str("\n\t  ...");
-                                }
-                            }
-                            ActivateError::Fatal(anyhow::format_err!(
-                                "\
-package `{}` does not have feature `{}`
-
-help: an optional dependency \
-with that name exists, but the `features` table includes it with the \"dep:\" \
-syntax so it does not have an implicit feature with that name{}",
-                                summary.package_id(),
-                                feat,
-                                suggestion
-                            ))
-                        }
+                        None => ActivateError::Fatal(anyhow::format_err!(
+                            "Package `{}` does not have feature `{}`. It has an optional dependency \
+                             with that name, but that dependency uses the \"dep:\" \
+                             syntax in the features table, so it does not have an implicit feature with that name.",
+                            summary.package_id(),
+                            feat
+                        )),
                         Some(p) => ActivateError::Conflict(
                             p,
                             ConflictReason::NonImplicitDependencyAsFeature(feat),
@@ -571,11 +542,10 @@ syntax so it does not have an implicit feature with that name{}",
                 } else {
                     match parent {
                         None => ActivateError::Fatal(anyhow::format_err!(
-                            "package `{}` does not have feature `{}`
-
-help: a dependency with that name exists but it is required dependency and only optional dependencies can be used as features.",
+                            "Package `{}` does not have feature `{}`. It has a required dependency \
+                             with that name, but only optional dependencies can be used as features.",
                             summary.package_id(),
-                            feat,
+                            feat
                         )),
                         Some(p) => ActivateError::Conflict(
                             p,
@@ -593,7 +563,9 @@ help: a dependency with that name exists but it is required dependency and only 
                     )),
                     // This code path currently isn't used, since `foo/bar`
                     // and `dep:` syntax is not allowed in a dependency.
-                    Some(p) => ActivateError::Conflict(p, ConflictReason::MissingFeature(dep_name)),
+                    Some(p) => {
+                        ActivateError::Conflict(p, ConflictReason::MissingFeatures(dep_name))
+                    }
                 }
             }
             RequirementError::Cycle(feat) => ActivateError::Fatal(anyhow::format_err!(
@@ -602,33 +574,4 @@ help: a dependency with that name exists but it is required dependency and only 
             )),
         }
     }
-}
-
-/// Collect any features which enable the optional dependency "target_dep".
-///
-/// The returned value will be sorted.
-fn features_enabling_dependency_sorted(
-    summary: &Summary,
-    target_dep: InternedString,
-) -> impl Iterator<Item = InternedString> + '_ {
-    let iter = summary
-        .features()
-        .iter()
-        .filter(move |(_, values)| {
-            for value in *values {
-                match value {
-                    FeatureValue::Dep { dep_name }
-                    | FeatureValue::DepFeature {
-                        dep_name,
-                        weak: false,
-                        ..
-                    } if dep_name == &target_dep => return true,
-                    _ => (),
-                }
-            }
-            false
-        })
-        .map(|(name, _)| *name);
-    // iter is already sorted because it was constructed from a BTreeMap.
-    iter
 }

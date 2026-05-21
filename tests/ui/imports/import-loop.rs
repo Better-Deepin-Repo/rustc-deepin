@@ -1,7 +1,9 @@
+//@ error-pattern:import
+
 use y::x;
 
 mod y {
-    pub use crate::y::x; //~ ERROR unresolved import `crate::y::x`
+    pub use y::x;
 }
 
 fn main() { }

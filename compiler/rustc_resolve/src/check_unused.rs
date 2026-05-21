@@ -29,14 +29,15 @@ use rustc_data_structures::fx::{FxHashMap, FxIndexMap, FxIndexSet};
 use rustc_data_structures::unord::UnordSet;
 use rustc_errors::MultiSpan;
 use rustc_hir::def::{DefKind, Res};
-use rustc_session::lint::BuiltinLintDiag;
 use rustc_session::lint::builtin::{
     MACRO_USE_EXTERN_CRATE, UNUSED_EXTERN_CRATES, UNUSED_IMPORTS, UNUSED_QUALIFICATIONS,
 };
-use rustc_span::{DUMMY_SP, Ident, Span, kw};
+use rustc_session::lint::BuiltinLintDiag;
+use rustc_span::symbol::{kw, Ident};
+use rustc_span::{Span, DUMMY_SP};
 
 use crate::imports::{Import, ImportKind};
-use crate::{DeclKind, IdentKey, LateDecl, Resolver, module_to_string};
+use crate::{module_to_string, LexicalScopeBinding, NameBindingKind, Resolver};
 
 struct UnusedImport {
     use_tree: ast::UseTree,
@@ -51,8 +52,8 @@ impl UnusedImport {
     }
 }
 
-struct UnusedImportCheckVisitor<'a, 'ra, 'tcx> {
-    r: &'a mut Resolver<'ra, 'tcx>,
+struct UnusedImportCheckVisitor<'a, 'b, 'tcx> {
+    r: &'a mut Resolver<'b, 'tcx>,
     /// All the (so far) unused imports, grouped path list
     unused_imports: FxIndexMap<ast::NodeId, UnusedImport>,
     extern_crate_items: Vec<ExternCrateToLint>,
@@ -77,7 +78,7 @@ struct ExternCrateToLint {
     renames: bool,
 }
 
-impl<'a, 'ra, 'tcx> UnusedImportCheckVisitor<'a, 'ra, 'tcx> {
+impl<'a, 'b, 'tcx> UnusedImportCheckVisitor<'a, 'b, 'tcx> {
     // We have information about whether `use` (import) items are actually
     // used now. If an import is not used at all, we signal a lint error.
     fn check_import(&mut self, id: ast::NodeId) {
@@ -100,21 +101,6 @@ impl<'a, 'ra, 'tcx> UnusedImportCheckVisitor<'a, 'ra, 'tcx> {
         }
     }
 
-    fn check_use_tree(&mut self, use_tree: &'a ast::UseTree, id: ast::NodeId) {
-        if self.r.effective_visibilities.is_exported(self.r.local_def_id(id)) {
-            self.check_import_as_underscore(use_tree, id);
-            return;
-        }
-
-        if let ast::UseTreeKind::Nested { ref items, .. } = use_tree.kind {
-            if items.is_empty() {
-                self.unused_import(self.base_id).add(id);
-            }
-        } else {
-            self.check_import(id);
-        }
-    }
-
     fn unused_import(&mut self, id: ast::NodeId) -> &mut UnusedImport {
         let use_tree_id = self.base_id;
         let use_tree = self.base_use_tree.unwrap().clone();
@@ -133,10 +119,9 @@ impl<'a, 'ra, 'tcx> UnusedImportCheckVisitor<'a, 'ra, 'tcx> {
             ast::UseTreeKind::Simple(Some(ident)) => {
                 if ident.name == kw::Underscore
                     && !self.r.import_res_map.get(&id).is_some_and(|per_ns| {
-                        matches!(
-                            per_ns.type_ns,
-                            Some(Res::Def(DefKind::Trait | DefKind::TraitAlias, _))
-                        )
+                        per_ns.iter().filter_map(|res| res.as_ref()).any(|res| {
+                            matches!(res, Res::Def(DefKind::Trait | DefKind::TraitAlias, _))
+                        })
                     })
                 {
                     self.unused_import(self.base_id).add(id);
@@ -169,8 +154,7 @@ impl<'a, 'ra, 'tcx> UnusedImportCheckVisitor<'a, 'ra, 'tcx> {
                         UNUSED_EXTERN_CRATES,
                         extern_crate.id,
                         span,
-                        crate::errors::UnusedExternCrate {
-                            span: extern_crate.span,
+                        BuiltinLintDiag::UnusedExternCrate {
                             removal_span: extern_crate.span_with_attributes,
                         },
                     );
@@ -200,22 +184,12 @@ impl<'a, 'ra, 'tcx> UnusedImportCheckVisitor<'a, 'ra, 'tcx> {
 
             // If the extern crate isn't in the extern prelude,
             // there is no way it can be written as a `use`.
-            if self
+            if !self
                 .r
                 .extern_prelude
-                .get(&IdentKey::new(extern_crate.ident))
-                .is_none_or(|entry| entry.introduced_by_item())
+                .get(&extern_crate.ident)
+                .is_some_and(|entry| !entry.introduced_by_item)
             {
-                continue;
-            }
-
-            let module = self
-                .r
-                .get_nearest_non_block_module(self.r.local_def_id(extern_crate.id).to_def_id());
-            if module.no_implicit_prelude {
-                // If the module has `no_implicit_prelude`, then we don't suggest
-                // replacing the extern crate with a use, as it would not be
-                // inserted into the prelude. User writes `extern` style deliberately.
                 continue;
             }
 
@@ -228,56 +202,64 @@ impl<'a, 'ra, 'tcx> UnusedImportCheckVisitor<'a, 'ra, 'tcx> {
                 .span
                 .find_ancestor_inside(extern_crate.span)
                 .unwrap_or(extern_crate.ident.span);
-
             self.r.lint_buffer.buffer_lint(
                 UNUSED_EXTERN_CRATES,
                 extern_crate.id,
                 extern_crate.span,
-                crate::errors::ExternCrateNotIdiomatic {
-                    span: vis_span.between(ident_span),
-                    code: if vis_span.is_empty() { "use " } else { " use " },
-                },
+                BuiltinLintDiag::ExternCrateNotIdiomatic { vis_span, ident_span },
             );
         }
     }
 }
 
-impl<'a, 'ra, 'tcx> Visitor<'a> for UnusedImportCheckVisitor<'a, 'ra, 'tcx> {
+impl<'a, 'b, 'tcx> Visitor<'a> for UnusedImportCheckVisitor<'a, 'b, 'tcx> {
     fn visit_item(&mut self, item: &'a ast::Item) {
-        self.item_span = item.span_with_attributes();
-        match &item.kind {
+        match item.kind {
             // Ignore is_public import statements because there's no way to be sure
             // whether they're used or not. Also ignore imports with a dummy span
             // because this means that they were generated in some fashion by the
             // compiler and we don't need to consider them.
             ast::ItemKind::Use(..) if item.span.is_dummy() => return,
-            // Use the base UseTree's NodeId as the item id
-            // This allows the grouping of all the lints in the same item
-            ast::ItemKind::Use(use_tree) => {
-                self.base_id = item.id;
-                self.base_use_tree = Some(use_tree);
-                self.check_use_tree(use_tree, item.id);
-            }
-            &ast::ItemKind::ExternCrate(orig_name, ident) => {
+            ast::ItemKind::ExternCrate(orig_name) => {
                 self.extern_crate_items.push(ExternCrateToLint {
                     id: item.id,
                     span: item.span,
                     vis_span: item.vis.span,
                     span_with_attributes: item.span_with_attributes(),
                     has_attrs: !item.attrs.is_empty(),
-                    ident,
+                    ident: item.ident,
                     renames: orig_name.is_some(),
                 });
             }
             _ => {}
         }
 
+        self.item_span = item.span_with_attributes();
         visit::walk_item(self, item);
     }
 
-    fn visit_nested_use_tree(&mut self, use_tree: &'a ast::UseTree, id: ast::NodeId) {
-        self.check_use_tree(use_tree, id);
-        visit::walk_use_tree(self, use_tree);
+    fn visit_use_tree(&mut self, use_tree: &'a ast::UseTree, id: ast::NodeId, nested: bool) {
+        // Use the base UseTree's NodeId as the item id
+        // This allows the grouping of all the lints in the same item
+        if !nested {
+            self.base_id = id;
+            self.base_use_tree = Some(use_tree);
+        }
+
+        if self.r.effective_visibilities.is_exported(self.r.local_def_id(id)) {
+            self.check_import_as_underscore(use_tree, id);
+            return;
+        }
+
+        if let ast::UseTreeKind::Nested { ref items, .. } = use_tree.kind {
+            if items.is_empty() {
+                self.unused_import(self.base_id).add(id);
+            }
+        } else {
+            self.check_import(id);
+        }
+
+        visit::walk_use_tree(self, use_tree, id);
     }
 }
 
@@ -356,8 +338,7 @@ fn calc_unused_spans(
                     }
                 }
                 contains_self |= use_tree.prefix == kw::SelfLower
-                    && matches!(use_tree.kind, ast::UseTreeKind::Simple(_))
-                    && !unused_import.unused.contains(&use_tree_id);
+                    && matches!(use_tree.kind, ast::UseTreeKind::Simple(None));
                 previous_unused = remove.is_some();
             }
             if unused_spans.is_empty() {
@@ -410,19 +391,18 @@ impl Resolver<'_, '_> {
                                 MACRO_USE_EXTERN_CRATE,
                                 import.root_id,
                                 import.span,
-                                crate::errors::MacroUseDeprecated,
+                                BuiltinLintDiag::MacroUseDeprecated,
                             );
                         }
                     }
                 }
                 ImportKind::ExternCrate { id, .. } => {
                     let def_id = self.local_def_id(id);
-                    if self.extern_crate_map.get(&def_id).is_none_or(|&cnum| {
+                    if self.extern_crate_map.get(&def_id).map_or(true, |&cnum| {
                         !tcx.is_compiler_builtins(cnum)
                             && !tcx.is_panic_runtime(cnum)
                             && !tcx.has_global_allocator(cnum)
                             && !tcx.has_panic_handler(cnum)
-                            && tcx.externally_implementable_items(cnum).is_empty()
                     }) {
                         maybe_unused_extern_crates.insert(id, import.span);
                     }
@@ -432,7 +412,7 @@ impl Resolver<'_, '_> {
                         UNUSED_IMPORTS,
                         import.root_id,
                         import.span,
-                        crate::errors::UnusedMacroUse,
+                        BuiltinLintDiag::UnusedMacroUse,
                     );
                 }
                 _ => {}
@@ -512,10 +492,12 @@ impl Resolver<'_, '_> {
 
         let unused_imports = visitor.unused_imports;
         let mut check_redundant_imports = FxIndexSet::default();
-        for module in &self.local_modules {
+        for module in self.arenas.local_modules().iter() {
             for (_key, resolution) in self.resolutions(*module).borrow().iter() {
-                if let Some(decl) = resolution.borrow().best_decl()
-                    && let DeclKind::Import { import, .. } = decl.kind
+                let resolution = resolution.borrow();
+
+                if let Some(binding) = resolution.binding
+                    && let NameBindingKind::Import { import, .. } = binding.kind
                     && let ImportKind::Single { id, .. } = import.kind
                 {
                     if let Some(unused_import) = unused_imports.get(&import.root_id)
@@ -542,8 +524,8 @@ impl Resolver<'_, '_> {
         // Deleting both unused imports and unnecessary segments of an item may result
         // in the item not being found.
         for unn_qua in &self.potentially_unnecessary_qualifications {
-            if let LateDecl::Decl(decl) = unn_qua.decl
-                && let DeclKind::Import { import, .. } = decl.kind
+            if let LexicalScopeBinding::Item(name_binding) = unn_qua.binding
+                && let NameBindingKind::Import { import, .. } = name_binding.kind
                 && (is_unused_import(import, &unused_imports)
                     || is_redundant_import(import, &redundant_imports))
             {

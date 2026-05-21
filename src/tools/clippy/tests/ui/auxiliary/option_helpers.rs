@@ -25,10 +25,6 @@ impl IteratorFalsePositives {
         self
     }
 
-    pub fn next_back(self) -> IteratorFalsePositives {
-        self
-    }
-
     pub fn find(self) -> Option<u32> {
         Some(self.foo)
     }

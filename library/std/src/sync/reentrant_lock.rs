@@ -1,9 +1,14 @@
+#[cfg(all(test, not(target_os = "emscripten")))]
+mod tests;
+
+use cfg_if::cfg_if;
+
 use crate::cell::UnsafeCell;
 use crate::fmt;
 use crate::ops::Deref;
 use crate::panic::{RefUnwindSafe, UnwindSafe};
 use crate::sys::sync as sys;
-use crate::thread::{ThreadId, current_id};
+use crate::thread::{current_id, ThreadId};
 
 /// A re-entrant mutual exclusion lock
 ///
@@ -85,11 +90,11 @@ pub struct ReentrantLock<T: ?Sized> {
     data: T,
 }
 
-cfg_select!(
-    target_has_atomic = "64" => {
-        use crate::sync::atomic::{Atomic, AtomicU64, Ordering::Relaxed};
+cfg_if!(
+    if #[cfg(target_has_atomic = "64")] {
+        use crate::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
-        struct Tid(Atomic<u64>);
+        struct Tid(AtomicU64);
 
         impl Tid {
             const fn new() -> Self {
@@ -108,8 +113,7 @@ cfg_select!(
                 self.0.store(value, Relaxed);
             }
         }
-    }
-    _ => {
+    } else {
         /// Returns the address of a TLS variable. This is guaranteed to
         /// be unique across all currently alive threads.
         fn tls_addr() -> usize {
@@ -119,7 +123,6 @@ cfg_select!(
         }
 
         use crate::sync::atomic::{
-            Atomic,
             AtomicUsize,
             Ordering,
         };
@@ -133,11 +136,11 @@ cfg_select!(
             // match do we read out the actual TID.
             // Note also that we can use relaxed atomic operations here, because
             // we only ever read from the tid if `tls_addr` matches the current
-            // TLS address. In that case, either the tid has been set by
+            // TLS address. In that case, either the the tid has been set by
             // the current thread, or by a thread that has terminated before
-            // the current thread's `tls_addr` was allocated. In either case, no further
+            // the current thread was created. In either case, no further
             // synchronization is needed (as per <https://github.com/rust-lang/miri/issues/3450>)
-            tls_addr: Atomic<usize>,
+            tls_addr: AtomicUsize,
             tid: UnsafeCell<u64>,
         }
 
@@ -153,12 +156,8 @@ cfg_select!(
             // NOTE: This assumes that `owner` is the ID of the current
             // thread, and may spuriously return `false` if that's not the case.
             fn contains(&self, owner: ThreadId) -> bool {
-                // We must call `tls_addr()` *before* doing the load to ensure that if we reuse an
-                // earlier thread's address, the `tls_addr.load()` below happens-after everything
-                // that thread did.
-                let tls_addr = tls_addr();
                 // SAFETY: See the comments in the struct definition.
-                self.tls_addr.load(Ordering::Relaxed) == tls_addr
+                self.tls_addr.load(Ordering::Relaxed) == tls_addr()
                     && unsafe { *self.tid.get() } == owner.as_u64().get()
             }
 
@@ -325,10 +324,7 @@ impl<T: ?Sized> ReentrantLock<T> {
     /// Otherwise, an RAII guard is returned.
     ///
     /// This function does not block.
-    // FIXME maybe make it a public part of the API?
-    #[unstable(issue = "none", feature = "std_internals")]
-    #[doc(hidden)]
-    pub fn try_lock(&self) -> Option<ReentrantLockGuard<'_, T>> {
+    pub(crate) fn try_lock(&self) -> Option<ReentrantLockGuard<'_, T>> {
         let this_thread = current_id();
         // Safety: We only touch lock_count when we own the inner mutex.
         // Additionally, we only call `self.owner.set()` while holding
@@ -346,17 +342,6 @@ impl<T: ?Sized> ReentrantLock<T> {
                 None
             }
         }
-    }
-
-    /// Returns a raw pointer to the underlying data.
-    ///
-    /// The returned pointer is always non-null and properly aligned, but it is
-    /// the user's responsibility to ensure that any reads through it are
-    /// properly synchronized to avoid data races, and that it is not read
-    /// through after the lock is dropped.
-    #[unstable(feature = "reentrant_lock_data_ptr", issue = "140368")]
-    pub const fn data_ptr(&self) -> *const T {
-        &raw const self.data
     }
 
     unsafe fn increment_lock_count(&self) -> Option<()> {

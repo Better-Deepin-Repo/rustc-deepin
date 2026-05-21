@@ -1,6 +1,6 @@
 //@ check-pass
 //@ compile-flags: -Z span-debug --error-format human
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 
 #![feature(rustc_attrs)]
 #![feature(stmt_expr_attributes)]
@@ -14,15 +14,17 @@ extern crate test_macros;
 macro_rules! produce_it {
     ($expr:expr) => {
         #[derive(Print)]
-        struct Foo(
-            [bool; #[cfg_attr(not(FALSE), rustc_dummy(first))] $expr]
-        );
+        struct Foo {
+            val: [bool; {
+                let a = #[cfg_attr(not(FALSE), rustc_dummy(first))] $expr;
+                0
+            }]
+        }
     }
 }
 
 produce_it!(#[cfg_attr(not(FALSE), rustc_dummy(second))] {
-    #![cfg_attr(not(FALSE), rustc_dummy(third))]
-    #[cfg_attr(not(FALSE), rustc_dummy(fourth))]
+    #![cfg_attr(not(FALSE), allow(unused))]
     30
 });
 

@@ -1,8 +1,6 @@
 //@ run-pass
 //@ aux-build:extern-take-value.rs
 
-#![allow(unpredictable_function_pointer_comparisons)]
-
 extern crate extern_take_value;
 
 pub fn main() {

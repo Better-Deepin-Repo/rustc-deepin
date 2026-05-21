@@ -1,10 +1,10 @@
 use syntax::{
-    Direction, T,
     algo::non_trivia_sibling,
     ast::{self, AstNode},
+    Direction, T,
 };
 
-use crate::{AssistContext, AssistId, Assists};
+use crate::{AssistContext, AssistId, AssistKind, Assists};
 
 // Assist: flip_trait_bound
 //
@@ -18,25 +18,26 @@ use crate::{AssistContext, AssistId, Assists};
 // fn foo<T: Copy + Clone>() { }
 // ```
 pub(crate) fn flip_trait_bound(acc: &mut Assists, ctx: &AssistContext<'_>) -> Option<()> {
-    // Only flip on the `+` token
+    // We want to replicate the behavior of `flip_binexpr` by only suggesting
+    // the assist when the cursor is on a `+`
     let plus = ctx.find_token_syntax_at_offset(T![+])?;
 
     // Make sure we're in a `TypeBoundList`
-    let parent = ast::TypeBoundList::cast(plus.parent()?)?;
+    ast::TypeBoundList::cast(plus.parent()?)?;
 
-    let before = non_trivia_sibling(plus.clone().into(), Direction::Prev)?.into_node()?;
-    let after = non_trivia_sibling(plus.clone().into(), Direction::Next)?.into_node()?;
+    let (before, after) = (
+        non_trivia_sibling(plus.clone().into(), Direction::Prev)?,
+        non_trivia_sibling(plus.clone().into(), Direction::Next)?,
+    );
 
     let target = plus.text_range();
     acc.add(
-        AssistId::refactor_rewrite("flip_trait_bound"),
+        AssistId("flip_trait_bound", AssistKind::RefactorRewrite),
         "Flip trait bounds",
         target,
-        |builder| {
-            let mut editor = builder.make_editor(parent.syntax());
-            editor.replace(before.clone(), after.clone());
-            editor.replace(after, before);
-            builder.add_file_edits(ctx.vfs_file_id(), editor);
+        |edit| {
+            edit.replace(before.text_range(), after.to_string());
+            edit.replace(after.text_range(), before.to_string());
         },
     )
 }

@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ aux-build:issue-30535.rs
 
 extern crate issue_30535 as foo;

@@ -1,18 +1,14 @@
-#![feature(no_core, lang_items)]
+//@ignore-target-apple
+
+#![feature(no_core, lang_items, start)]
 #![no_core]
 #![allow(clippy::missing_safety_doc)]
 
 #[link(name = "c")]
-unsafe extern "C" {}
-
-#[lang = "pointee_sized"]
-pub trait PointeeSized {}
-
-#[lang = "meta_sized"]
-pub trait MetaSized: PointeeSized {}
+extern "C" {}
 
 #[lang = "sized"]
-pub trait Sized: MetaSized {}
+pub trait Sized {}
 #[lang = "copy"]
 pub trait Copy {}
 #[lang = "freeze"]

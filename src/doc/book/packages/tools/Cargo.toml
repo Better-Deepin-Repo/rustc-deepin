@@ -2,7 +2,7 @@
 name = "rust-book-tools"
 version = "0.0.1"
 description = "The Rust Book"
-edition = "2024"
+edition = "2021"
 
 [[bin]]
 name = "concat_chapters"
@@ -35,11 +35,6 @@ path = "src/bin/remove_links.rs"
 [[bin]]
 name = "remove_markup"
 path = "src/bin/remove_markup.rs"
-
-[[bin]]
-name = "cleanup_blockquotes"
-path = "src/bin/cleanup_blockquotes.rs"
-
 
 [dependencies]
 walkdir = { workspace = true }

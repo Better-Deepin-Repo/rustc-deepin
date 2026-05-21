@@ -59,15 +59,3 @@ Box<
     + Debug
 >
 ```
-
-## Precise capturing bounds
-
-A `use<'a, T>` precise capturing bound is formatted as if it were a single path segment with non-turbofished angle-bracketed args, like a trait bound whose identifier is `use`.
-
-```rust
-fn foo() -> impl Sized + use<'a> {}
-
-// is formatted analogously to:
-
-fn foo() -> impl Sized + Use<'a> {}
-```

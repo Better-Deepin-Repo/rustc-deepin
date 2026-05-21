@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 //@ run-pass
 #![allow(unused_macros)]
 // Check the macro follow sets (see corresponding cfail test).

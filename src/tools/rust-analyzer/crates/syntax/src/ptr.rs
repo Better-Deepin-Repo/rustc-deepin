@@ -16,7 +16,7 @@ use std::{
 
 use rowan::TextRange;
 
-use crate::{AstNode, SyntaxNode, syntax_node::RustLanguage};
+use crate::{syntax_node::RustLanguage, AstNode, SyntaxNode};
 
 /// A "pointer" to a [`SyntaxNode`], via location in the source code.
 pub type SyntaxNodePtr = rowan::ast::SyntaxNodePtr<RustLanguage>;
@@ -27,7 +27,7 @@ pub struct AstPtr<N: AstNode> {
     _ty: PhantomData<fn() -> N>,
 }
 
-impl<N: AstNode> std::fmt::Debug for AstPtr<N> {
+impl<N: AstNode + std::fmt::Debug> std::fmt::Debug for AstPtr<N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("AstPtr").field(&self.raw).finish()
     }
@@ -68,7 +68,7 @@ impl<N: AstNode> AstPtr<N> {
         self.raw
     }
 
-    pub fn text_range(self) -> TextRange {
+    pub fn text_range(&self) -> TextRange {
         self.raw.text_range()
     }
 
@@ -118,7 +118,7 @@ impl<N: AstNode> From<AstPtr<N>> for SyntaxNodePtr {
 
 #[test]
 fn test_local_syntax_ptr() {
-    use crate::{AstNode, SourceFile, ast};
+    use crate::{ast, AstNode, SourceFile};
 
     let file = SourceFile::parse("struct Foo { f: u32, }", parser::Edition::CURRENT).ok().unwrap();
     let field = file.syntax().descendants().find_map(ast::RecordField::cast).unwrap();

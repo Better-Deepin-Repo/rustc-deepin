@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 // Regression test for #25954: detect and reject a closure type that
 // references itself.
 

@@ -1,41 +1,135 @@
 use r_efi::efi::protocols::{device_path, loaded_image_device_path};
+use r_efi::efi::Status;
 
-use super::{helpers, unsupported_err};
+use super::{helpers, unsupported, RawOsError};
+use crate::error::Error as StdError;
 use crate::ffi::{OsStr, OsString};
 use crate::marker::PhantomData;
-use crate::os::uefi::ffi::{OsStrExt, OsStringExt};
+use crate::os::uefi;
 use crate::path::{self, PathBuf};
+use crate::ptr::NonNull;
 use crate::{fmt, io};
 
-const PATHS_SEP: u16 = b';' as u16;
+pub fn errno() -> RawOsError {
+    0
+}
 
-pub fn getcwd() -> io::Result<PathBuf> {
-    match helpers::open_shell() {
-        Some(shell) => {
-            // SAFETY: path_ptr is managed by UEFI shell and should not be deallocated
-            let path_ptr = unsafe { ((*shell.as_ptr()).get_cur_dir)(crate::ptr::null_mut()) };
-            helpers::os_string_from_raw(path_ptr)
-                .map(PathBuf::from)
-                .ok_or(io::const_error!(io::ErrorKind::InvalidData, "invalid path"))
+pub fn error_string(errno: RawOsError) -> String {
+    // Keep the List in Alphabetical Order
+    // The Messages are taken from UEFI Specification Appendix D - Status Codes
+    match r_efi::efi::Status::from_usize(errno) {
+        Status::ABORTED => "The operation was aborted.".to_owned(),
+        Status::ACCESS_DENIED => "Access was denied.".to_owned(),
+        Status::ALREADY_STARTED => "The protocol has already been started.".to_owned(),
+        Status::BAD_BUFFER_SIZE => "The buffer was not the proper size for the request.".to_owned(),
+        Status::BUFFER_TOO_SMALL => {
+                "The buffer is not large enough to hold the requested data. The required buffer size is returned in the appropriate parameter when this error occurs.".to_owned()
         }
-        None => {
-            let mut t = current_exe()?;
-            // SAFETY: This should never fail since the disk prefix will be present even for root
-            // executables
-            assert!(t.pop());
-            Ok(t)
+        Status::COMPROMISED_DATA => {
+                "The security status of the data is unknown or compromised and the data must be updated or replaced to restore a valid security status.".to_owned()
         }
+        Status::CONNECTION_FIN => {
+                "The receiving operation fails because the communication peer has closed the connection and there is no more data in the receive buffer of the instance.".to_owned()
+        }
+        Status::CONNECTION_REFUSED => {
+                "The receiving or transmission operation fails because this connection is refused.".to_owned()
+        }
+        Status::CONNECTION_RESET => {
+                "The connect fails because the connection is reset either by instance itself or the communication peer.".to_owned()
+        }
+        Status::CRC_ERROR => "A CRC error was detected.".to_owned(),
+        Status::DEVICE_ERROR =>             "The physical device reported an error while attempting the operation.".to_owned()
+        ,
+        Status::END_OF_FILE => {
+            "The end of the file was reached.".to_owned()
+        }
+        Status::END_OF_MEDIA => {
+            "Beginning or end of media was reached".to_owned()
+        }
+        Status::HOST_UNREACHABLE => {
+            "The remote host is not reachable.".to_owned()
+        }
+        Status::HTTP_ERROR => {
+            "A HTTP error occurred during the network operation.".to_owned()
+        }
+        Status::ICMP_ERROR => {
+                "An ICMP error occurred during the network operation.".to_owned()
+        }
+        Status::INCOMPATIBLE_VERSION => {
+                "The function encountered an internal version that was incompatible with a version requested by the caller.".to_owned()
+        }
+        Status::INVALID_LANGUAGE => {
+            "The language specified was invalid.".to_owned()
+        }
+        Status::INVALID_PARAMETER => {
+            "A parameter was incorrect.".to_owned()
+        }
+        Status::IP_ADDRESS_CONFLICT => {
+            "There is an address conflict address allocation".to_owned()
+        }
+        Status::LOAD_ERROR => {
+            "The image failed to load.".to_owned()
+        }
+        Status::MEDIA_CHANGED => {
+                "The medium in the device has changed since the last access.".to_owned()
+        }
+        Status::NETWORK_UNREACHABLE => {
+                "The network containing the remote host is not reachable.".to_owned()
+        }
+        Status::NO_MAPPING => {
+            "A mapping to a device does not exist.".to_owned()
+        }
+        Status::NO_MEDIA => {
+                "The device does not contain any medium to perform the operation.".to_owned()
+        }
+        Status::NO_RESPONSE => {
+                "The server was not found or did not respond to the request.".to_owned()
+        }
+        Status::NOT_FOUND => "The item was not found.".to_owned(),
+        Status::NOT_READY => {
+            "There is no data pending upon return.".to_owned()
+        }
+        Status::NOT_STARTED => {
+            "The protocol has not been started.".to_owned()
+        }
+        Status::OUT_OF_RESOURCES => {
+            "A resource has run out.".to_owned()
+        }
+        Status::PROTOCOL_ERROR => {
+                "A protocol error occurred during the network operation.".to_owned()
+        }
+        Status::PROTOCOL_UNREACHABLE => {
+            "An ICMP protocol unreachable error is received.".to_owned()
+        }
+        Status::SECURITY_VIOLATION => {
+                "The function was not performed due to a security violation.".to_owned()
+        }
+        Status::TFTP_ERROR => {
+            "A TFTP error occurred during the network operation.".to_owned()
+        }
+        Status::TIMEOUT => "The timeout time expired.".to_owned(),
+        Status::UNSUPPORTED => {
+            "The operation is not supported.".to_owned()
+        }
+        Status::VOLUME_FULL => {
+            "There is no more space on the file system.".to_owned()
+        }
+        Status::VOLUME_CORRUPTED => {
+                "An inconstancy was detected on the file system causing the operating to fail.".to_owned()
+        }
+        Status::WRITE_PROTECTED => {
+            "The device cannot be written to.".to_owned()
+        }
+        _ => format!("Status: {}", errno),
     }
 }
 
-pub fn chdir(p: &path::Path) -> io::Result<()> {
-    let shell = helpers::open_shell().ok_or(unsupported_err())?;
+pub fn getcwd() -> io::Result<PathBuf> {
+    unsupported()
+}
 
-    let mut p = helpers::os_string_to_raw(p.as_os_str())
-        .ok_or(io::const_error!(io::ErrorKind::InvalidData, "invalid path"))?;
-
-    let r = unsafe { ((*shell.as_ptr()).set_cur_dir)(crate::ptr::null_mut(), p.as_mut_ptr()) };
-    if r.is_error() { Err(io::Error::from_raw_os_error(r.as_usize())) } else { Ok(()) }
+pub fn chdir(_: &path::Path) -> io::Result<()> {
+    unsupported()
 }
 
 pub struct SplitPaths<'a>(!, PhantomData<&'a ()>);
@@ -54,38 +148,21 @@ impl<'a> Iterator for SplitPaths<'a> {
 #[derive(Debug)]
 pub struct JoinPathsError;
 
-// UEFI Shell Path variable is defined in Section 3.6.1
-// [UEFI Shell Specification](https://uefi.org/sites/default/files/resources/UEFI_Shell_2_2.pdf).
-pub fn join_paths<I, T>(paths: I) -> Result<OsString, JoinPathsError>
+pub fn join_paths<I, T>(_paths: I) -> Result<OsString, JoinPathsError>
 where
     I: Iterator<Item = T>,
     T: AsRef<OsStr>,
 {
-    let mut joined = Vec::new();
-
-    for (i, path) in paths.enumerate() {
-        if i > 0 {
-            joined.push(PATHS_SEP)
-        }
-
-        let v = path.as_ref().encode_wide().collect::<Vec<u16>>();
-        if v.contains(&PATHS_SEP) {
-            return Err(JoinPathsError);
-        }
-
-        joined.extend_from_slice(&v);
-    }
-
-    Ok(OsString::from_wide(&joined))
+    Err(JoinPathsError)
 }
 
 impl fmt::Display for JoinPathsError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        "path segment contains `;`".fmt(f)
+        "not supported on this platform yet".fmt(f)
     }
 }
 
-impl crate::error::Error for JoinPathsError {}
+impl StdError for JoinPathsError {}
 
 pub fn current_exe() -> io::Result<PathBuf> {
     let protocol = helpers::image_handle_protocol::<device_path::Protocol>(
@@ -94,12 +171,69 @@ pub fn current_exe() -> io::Result<PathBuf> {
     helpers::device_path_to_text(protocol).map(PathBuf::from)
 }
 
+pub struct Env(!);
+
+impl Env {
+    // FIXME(https://github.com/rust-lang/rust/issues/114583): Remove this when <OsStr as Debug>::fmt matches <str as Debug>::fmt.
+    pub fn str_debug(&self) -> impl fmt::Debug + '_ {
+        let Self(inner) = self;
+        match *inner {}
+    }
+}
+
+impl Iterator for Env {
+    type Item = (OsString, OsString);
+    fn next(&mut self) -> Option<(OsString, OsString)> {
+        self.0
+    }
+}
+
+impl fmt::Debug for Env {
+    fn fmt(&self, _: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self(inner) = self;
+        match *inner {}
+    }
+}
+
+pub fn env() -> Env {
+    panic!("not supported on this platform")
+}
+
+pub fn getenv(_: &OsStr) -> Option<OsString> {
+    None
+}
+
+pub unsafe fn setenv(_: &OsStr, _: &OsStr) -> io::Result<()> {
+    Err(io::const_io_error!(io::ErrorKind::Unsupported, "cannot set env vars on this platform"))
+}
+
+pub unsafe fn unsetenv(_: &OsStr) -> io::Result<()> {
+    Err(io::const_io_error!(io::ErrorKind::Unsupported, "cannot unset env vars on this platform"))
+}
+
 pub fn temp_dir() -> PathBuf {
     panic!("no filesystem on this platform")
 }
 
 pub fn home_dir() -> Option<PathBuf> {
     None
+}
+
+pub fn exit(code: i32) -> ! {
+    if let (Some(boot_services), Some(handle)) =
+        (uefi::env::boot_services(), uefi::env::try_image_handle())
+    {
+        let boot_services: NonNull<r_efi::efi::BootServices> = boot_services.cast();
+        let _ = unsafe {
+            ((*boot_services.as_ptr()).exit)(
+                handle.as_ptr(),
+                Status::from_usize(code as usize),
+                0,
+                crate::ptr::null_mut(),
+            )
+        };
+    }
+    crate::intrinsics::abort()
 }
 
 pub fn getpid() -> u32 {

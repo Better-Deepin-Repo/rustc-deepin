@@ -1,4 +1,5 @@
 #![feature(return_type_notation)]
+//~^ WARN the feature `return_type_notation` is incomplete
 
 trait Trait {}
 fn needs_trait(_: impl Trait) {}

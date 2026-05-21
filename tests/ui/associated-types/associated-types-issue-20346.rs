@@ -1,4 +1,3 @@
-//@ edition:2015
 // Test that we reliably check the value of the associated type.
 
 #![crate_type = "lib"]

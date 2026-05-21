@@ -28,10 +28,10 @@ impl error::Error for EmptyVec {}
 
 fn double_first(vec: Vec<&str>) -> Result<i32> {
     vec.first()
-        .ok_or_else(|| EmptyVec.into()) // Converts to Box using Into trait.
+        .ok_or_else(|| EmptyVec.into()) // Converts to Box
         .and_then(|s| {
             s.parse::<i32>()
-                .map_err(From::from) // Converts to Box using From::from fn pointer.
+                .map_err(|e| e.into()) // Converts to Box
                 .map(|i| 2 * i)
         })
 }

@@ -3,21 +3,18 @@
 
 use std::fmt;
 
-use rustc_hash::FxHashSet;
-use salsa::{Durability, Setter as _};
+use salsa::Durability;
 use triomphe::Arc;
 use vfs::FileId;
 
-use crate::{
-    CrateGraphBuilder, CratesIdMap, LibraryRoots, LocalRoots, RootQueryDb, SourceRoot, SourceRootId,
-};
+use crate::{CrateGraph, SourceDatabaseFileInputExt, SourceRoot, SourceRootDatabase, SourceRootId};
 
 /// Encapsulate a bunch of raw `.set` calls on the database.
 #[derive(Default)]
 pub struct FileChange {
     pub roots: Option<Vec<SourceRoot>>,
     pub files_changed: Vec<(FileId, Option<String>)>,
-    pub crate_graph: Option<CrateGraphBuilder>,
+    pub crate_graph: Option<CrateGraph>,
 }
 
 impl fmt::Debug for FileChange {
@@ -37,6 +34,10 @@ impl fmt::Debug for FileChange {
 }
 
 impl FileChange {
+    pub fn new() -> Self {
+        FileChange::default()
+    }
+
     pub fn set_roots(&mut self, roots: Vec<SourceRoot>) {
         self.roots = Some(roots);
     }
@@ -45,54 +46,41 @@ impl FileChange {
         self.files_changed.push((file_id, new_text))
     }
 
-    pub fn set_crate_graph(&mut self, graph: CrateGraphBuilder) {
+    pub fn set_crate_graph(&mut self, graph: CrateGraph) {
         self.crate_graph = Some(graph);
     }
 
-    pub fn apply(self, db: &mut dyn RootQueryDb) -> Option<CratesIdMap> {
+    pub fn apply(self, db: &mut dyn SourceRootDatabase) {
         let _p = tracing::info_span!("FileChange::apply").entered();
         if let Some(roots) = self.roots {
-            let mut local_roots = FxHashSet::default();
-            let mut library_roots = FxHashSet::default();
             for (idx, root) in roots.into_iter().enumerate() {
                 let root_id = SourceRootId(idx as u32);
-                if root.is_library {
-                    library_roots.insert(root_id);
-                } else {
-                    local_roots.insert(root_id);
-                }
-                let durability = source_root_durability(&root);
+                let durability = durability(&root);
                 for file_id in root.iter() {
                     db.set_file_source_root_with_durability(file_id, root_id, durability);
                 }
-
                 db.set_source_root_with_durability(root_id, Arc::new(root), durability);
             }
-            LocalRoots::get(db).set_roots(db).to(local_roots);
-            LibraryRoots::get(db).set_roots(db).to(library_roots);
         }
 
         for (file_id, text) in self.files_changed {
             let source_root_id = db.file_source_root(file_id);
-            let source_root = db.source_root(source_root_id.source_root_id(db));
-
-            let durability = file_text_durability(&source_root.source_root(db));
+            let source_root = db.source_root(source_root_id);
+            let durability = durability(&source_root);
             // XXX: can't actually remove the file, just reset the text
             let text = text.unwrap_or_default();
             db.set_file_text_with_durability(file_id, &text, durability)
         }
-
         if let Some(crate_graph) = self.crate_graph {
-            return Some(crate_graph.set_in_db(db));
+            db.set_crate_graph_with_durability(Arc::new(crate_graph), Durability::HIGH);
         }
-        None
     }
 }
 
-fn source_root_durability(source_root: &SourceRoot) -> Durability {
-    if source_root.is_library { Durability::MEDIUM } else { Durability::LOW }
-}
-
-fn file_text_durability(source_root: &SourceRoot) -> Durability {
-    if source_root.is_library { Durability::HIGH } else { Durability::LOW }
+fn durability(source_root: &SourceRoot) -> Durability {
+    if source_root.is_library {
+        Durability::HIGH
+    } else {
+        Durability::LOW
+    }
 }

@@ -15,7 +15,3 @@ fn main() {
         b
     };
 }
-
-// issue: rust-lang/rust#130858 rust-lang/rust#125655
-static FOO: fn() -> bool = || -> bool { 1 };
-//~^ ERROR mismatched types

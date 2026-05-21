@@ -1,7 +1,9 @@
-#![feature(intrinsics)]
+#![feature(intrinsics, rustc_attrs)]
 
-#[rustc_intrinsic]
-fn size_of<T, U>() -> usize;
-//~^ ERROR E0094
+extern "rust-intrinsic" {
+    #[rustc_safe_intrinsic]
+    fn size_of<T, U>() -> usize; //~ ERROR E0094
+}
 
-fn main() {}
+fn main() {
+}

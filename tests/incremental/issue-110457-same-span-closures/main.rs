@@ -1,6 +1,5 @@
-//@ proc-macro: egui_inspect_derive.rs
+//@ aux-build: egui_inspect_derive.rs
 //@ revisions: cpass1 cpass2
-//@ ignore-backends: gcc
 
 extern crate egui_inspect_derive;
 

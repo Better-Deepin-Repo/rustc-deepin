@@ -5,5 +5,4 @@ use std::path::PathBuf;
 fn main() {
     let mut x = PathBuf::from("/foo");
     x.push("/bar");
-    //~^ path_buf_push_overwrite
 }

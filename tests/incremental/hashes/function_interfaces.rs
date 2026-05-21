@@ -11,7 +11,6 @@
 //@ [cfail1]compile-flags: -Zincremental-ignore-spans
 //@ [cfail2]compile-flags: -Zincremental-ignore-spans
 //@ [cfail3]compile-flags: -Zincremental-ignore-spans
-//@ ignore-backends: gcc
 
 #![allow(warnings)]
 #![feature(linkage)]
@@ -279,7 +278,7 @@ pub fn no_mangle() {}
 #[rustc_clean(cfg = "cfail3")]
 #[rustc_clean(cfg = "cfail5")]
 #[rustc_clean(cfg = "cfail6")]
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub fn no_mangle() {}
 
 // Linkage ---------------------------------------------------------------------
@@ -319,9 +318,9 @@ pub fn change_return_impl_trait() -> impl Clone {
 }
 
 #[cfg(not(any(cfail1,cfail4)))]
-#[rustc_clean(cfg = "cfail2", except = "opt_hir_owner_nodes")]
+#[rustc_clean(cfg = "cfail2")]
 #[rustc_clean(cfg = "cfail3")]
-#[rustc_clean(cfg = "cfail5", except = "opt_hir_owner_nodes, typeck")]
+#[rustc_clean(cfg = "cfail5", except = "typeck")]
 #[rustc_clean(cfg = "cfail6")]
 pub fn change_return_impl_trait() -> impl  Copy {
     0u32

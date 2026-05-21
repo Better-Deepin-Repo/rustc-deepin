@@ -4,6 +4,6 @@ macro_rules! outer {
 
 outer! {
     //! Inner
-} //~^ ERROR no rules expected `!`
+} //~^ ERROR no rules expected the token `!`
 
 fn main() { }

@@ -36,8 +36,7 @@ _cargo()
 	local opt_verbose='-v --verbose'
 	local opt_quiet='-q --quiet'
 	local opt_color='--color'
-	local opt_config='--config'
-	local opt_common="$opt_help $opt_verbose $opt_quiet $opt_color $opt_config"
+	local opt_common="$opt_help $opt_verbose $opt_quiet $opt_color"
 	local opt_pkg_spec='-p --package --all --exclude --workspace'
 	local opt_pkg='-p --package'
 	local opt_feat='-F --features --all-features --no-default-features'
@@ -50,7 +49,7 @@ _cargo()
 	local opt_targets="--lib --bin --bins --example --examples --test --tests --bench --benches --all-targets"
 
 	local opt___nocmd="$opt_common -V --version --list --explain"
-	local opt__add="$opt_common -p --package --features --default-features --no-default-features $opt_mani $opt_lock --optional --no-optional --rename --dry-run --path --git --branch --tag --rev --registry --dev --build --target --ignore-rust-version"
+	local opt__add="$opt_common -p --package --features --default-features --no-default-features $opt_mani --optional --no-optional --rename --dry-run --path --git --branch --tag --rev --registry --dev --build --target --ignore-rust-version"
 	local opt__bench="$opt_common $opt_pkg_spec $opt_feat $opt_mani $opt_lock $opt_jobs $opt_targets --message-format --target --no-run --no-fail-fast --target-dir --ignore-rust-version"
 	local opt__build="$opt_common $opt_pkg_spec $opt_feat $opt_mani $opt_lock $opt_parallel $opt_targets --message-format --target --release --profile --target-dir --ignore-rust-version"
 	local opt__b="$opt__build"
@@ -74,7 +73,8 @@ _cargo()
 	local opt__owner="$opt_common $opt_lock -a --add -r --remove -l --list --index --token --registry"
 	local opt__package="$opt_common $opt_mani $opt_feat $opt_lock $opt_parallel --allow-dirty -l --list --no-verify --no-metadata --index --registry --target --target-dir"
 	local opt__pkgid="$opt_common $opt_mani $opt_lock $opt_pkg"
-	local opt__publish="$opt_common $opt_mani $opt_feat $opt_lock $opt_parallel --allow-dirty --dry-run --no-verify --index --registry --target --target-dir"
+	local opt__publish="$opt_common $opt_mani $opt_feat $opt_lock $opt_parallel --allow-dirty --dry-run --token --no-verify --index --registry --target --target-dir"
+	local opt__read_manifest="$opt_help $opt_quiet $opt_verbose $opt_mani $opt_color $opt_lock --no-deps"
 	local opt__remove="$opt_common $opt_pkg $opt_lock $opt_mani --dry-run --dev --build --target"
 	local opt__rm="$opt__remove"
 	local opt__report="$opt_help $opt_verbose $opt_color future-incompat future-incompatibilities"
@@ -90,9 +90,10 @@ _cargo()
 	local opt__uninstall="$opt_common $opt_lock $opt_pkg --bin --root"
 	local opt__update="$opt_common $opt_mani $opt_lock $opt_pkg --aggressive --recursive --precise --dry-run"
 	local opt__vendor="$opt_common $opt_mani $opt_lock $opt_sync --no-delete --respect-source-config --versioned-dirs"
+	local opt__verify_project="$opt_common $opt_mani $opt_lock"
 	local opt__version="$opt_common $opt_lock"
 	local opt__yank="$opt_common $opt_lock --version --undo --index --token --registry"
-	local opt__libtest="--help --include-ignored --ignored --test --bench --list --logfile --no-capture --test-threads --skip -q --quiet --exact --color --format"
+	local opt__libtest="--help --include-ignored --ignored --test --bench --list --logfile --nocapture --test-threads --skip -q --quiet --exact --color --format"
 
 	if [[ $cword -gt $dd_i ]]; then
 		# Completion after -- separator.
@@ -144,9 +145,6 @@ _cargo()
 			--target-dir|--path)
 				_filedir -d
 				;;
-			--config)
-				_filedir
-				;;
 			help)
 				_ensure_cargo_commands_cache_filled
 				COMPREPLY=( $( compgen -W "$__cargo_commands_cache" -- "$cur" ) )
@@ -158,15 +156,8 @@ _cargo()
 					local opt_var=opt__${cmd//-/_}
 				fi
 				if [[ -z "${!opt_var-}" ]]; then
-					# Forward to subcommands completion if bash-completion >= 2.12 is available
-					if [[ $BASH_COMPLETION_VERSINFO && (${BASH_COMPLETION_VERSINFO[0]} -gt 2 || (${BASH_COMPLETION_VERSINFO[0]} -eq 2 && ${BASH_COMPLETION_VERSINFO[1]} -ge 12)) ]]; then
-						COMP_WORDS[cmd_i]="cargo-$cmd"
-						_comp_command_offset "$cmd_i"
-						COMP_WORDS[cmd_i]="$cmd"
-					else
-						# Fallback to filename completion.
-						_filedir
-					fi
+					# Fallback to filename completion.
+					_filedir
 				else
 					COMPREPLY=( $( compgen -W "${!opt_var}" -- "$cur" ) )
 				fi

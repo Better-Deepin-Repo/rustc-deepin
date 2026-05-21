@@ -1,6 +1,6 @@
 //@ run-pass
 //@ needs-threads
-//@ needs-subprocess
+//@ ignore-sgx no processes
 
 use std::process::Command;
 use std::{env, thread};

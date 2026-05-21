@@ -122,7 +122,7 @@ functions.
     issue = "none"
 )]
 
-pub use self::decoder::{DecodableFloat, Decoded, FullDecoded, decode};
+pub use self::decoder::{decode, DecodableFloat, Decoded, FullDecoded};
 use super::fmt::{Formatted, Part};
 use crate::mem::MaybeUninit;
 
@@ -150,18 +150,22 @@ pub fn round_up(d: &mut [u8]) -> Option<u8> {
         Some(i) => {
             // d[i+1..n] is all nines
             d[i] += 1;
-            d[i + 1..].fill(b'0');
+            for j in i + 1..d.len() {
+                d[j] = b'0';
+            }
             None
         }
-        None if d.is_empty() => {
-            // an empty buffer rounds up (a bit strange but reasonable)
-            Some(b'1')
-        }
-        None => {
+        None if d.len() > 0 => {
             // 999..999 rounds to 1000..000 with an increased exponent
             d[0] = b'1';
-            d[1..].fill(b'0');
+            for j in 1..d.len() {
+                d[j] = b'0';
+            }
             Some(b'0')
+        }
+        None => {
+            // an empty buffer rounds up (a bit strange but reasonable)
+            Some(b'1')
         }
     }
 }
@@ -206,10 +210,10 @@ fn digits_to_dec_str<'a>(
         if frac_digits > buf.len() && frac_digits - buf.len() > minus_exp {
             parts[3] = MaybeUninit::new(Part::Zero((frac_digits - buf.len()) - minus_exp));
             // SAFETY: we just initialized the elements `..4`.
-            unsafe { parts[..4].assume_init_ref() }
+            unsafe { MaybeUninit::slice_assume_init_ref(&parts[..4]) }
         } else {
             // SAFETY: we just initialized the elements `..3`.
-            unsafe { parts[..3].assume_init_ref() }
+            unsafe { MaybeUninit::slice_assume_init_ref(&parts[..3]) }
         }
     } else {
         let exp = exp as usize;
@@ -221,10 +225,10 @@ fn digits_to_dec_str<'a>(
             if frac_digits > buf.len() - exp {
                 parts[3] = MaybeUninit::new(Part::Zero(frac_digits - (buf.len() - exp)));
                 // SAFETY: we just initialized the elements `..4`.
-                unsafe { parts[..4].assume_init_ref() }
+                unsafe { MaybeUninit::slice_assume_init_ref(&parts[..4]) }
             } else {
                 // SAFETY: we just initialized the elements `..3`.
-                unsafe { parts[..3].assume_init_ref() }
+                unsafe { MaybeUninit::slice_assume_init_ref(&parts[..3]) }
             }
         } else {
             // the decimal point is after rendered digits: [1234][____0000] or [1234][__][.][__].
@@ -234,10 +238,10 @@ fn digits_to_dec_str<'a>(
                 parts[2] = MaybeUninit::new(Part::Copy(b"."));
                 parts[3] = MaybeUninit::new(Part::Zero(frac_digits));
                 // SAFETY: we just initialized the elements `..4`.
-                unsafe { parts[..4].assume_init_ref() }
+                unsafe { MaybeUninit::slice_assume_init_ref(&parts[..4]) }
             } else {
                 // SAFETY: we just initialized the elements `..2`.
-                unsafe { parts[..2].assume_init_ref() }
+                unsafe { MaybeUninit::slice_assume_init_ref(&parts[..2]) }
             }
         }
     }
@@ -288,7 +292,7 @@ fn digits_to_exp_str<'a>(
         parts[n + 1] = MaybeUninit::new(Part::Num(exp as u16));
     }
     // SAFETY: we just initialized the elements `..n + 2`.
-    unsafe { parts[..n + 2].assume_init_ref() }
+    unsafe { MaybeUninit::slice_assume_init_ref(&parts[..n + 2]) }
 }
 
 /// Sign formatting options.
@@ -362,12 +366,12 @@ where
         FullDecoded::Nan => {
             parts[0] = MaybeUninit::new(Part::Copy(b"NaN"));
             // SAFETY: we just initialized the elements `..1`.
-            Formatted { sign, parts: unsafe { parts[..1].assume_init_ref() } }
+            Formatted { sign, parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..1]) } }
         }
         FullDecoded::Infinite => {
             parts[0] = MaybeUninit::new(Part::Copy(b"inf"));
             // SAFETY: we just initialized the elements `..1`.
-            Formatted { sign, parts: unsafe { parts[..1].assume_init_ref() } }
+            Formatted { sign, parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..1]) } }
         }
         FullDecoded::Zero => {
             if frac_digits > 0 {
@@ -377,14 +381,14 @@ where
                 Formatted {
                     sign,
                     // SAFETY: we just initialized the elements `..2`.
-                    parts: unsafe { parts[..2].assume_init_ref() },
+                    parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..2]) },
                 }
             } else {
                 parts[0] = MaybeUninit::new(Part::Copy(b"0"));
                 Formatted {
                     sign,
                     // SAFETY: we just initialized the elements `..1`.
-                    parts: unsafe { parts[..1].assume_init_ref() },
+                    parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..1]) },
                 }
             }
         }
@@ -438,12 +442,12 @@ where
         FullDecoded::Nan => {
             parts[0] = MaybeUninit::new(Part::Copy(b"NaN"));
             // SAFETY: we just initialized the elements `..1`.
-            Formatted { sign, parts: unsafe { parts[..1].assume_init_ref() } }
+            Formatted { sign, parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..1]) } }
         }
         FullDecoded::Infinite => {
             parts[0] = MaybeUninit::new(Part::Copy(b"inf"));
             // SAFETY: we just initialized the elements `..1`.
-            Formatted { sign, parts: unsafe { parts[..1].assume_init_ref() } }
+            Formatted { sign, parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..1]) } }
         }
         FullDecoded::Zero => {
             parts[0] = if dec_bounds.0 <= 0 && 0 < dec_bounds.1 {
@@ -452,7 +456,7 @@ where
                 MaybeUninit::new(Part::Copy(if upper { b"0E0" } else { b"0e0" }))
             };
             // SAFETY: we just initialized the elements `..1`.
-            Formatted { sign, parts: unsafe { parts[..1].assume_init_ref() } }
+            Formatted { sign, parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..1]) } }
         }
         FullDecoded::Finite(ref decoded) => {
             let (buf, exp) = format_shortest(decoded, buf);
@@ -529,12 +533,12 @@ where
         FullDecoded::Nan => {
             parts[0] = MaybeUninit::new(Part::Copy(b"NaN"));
             // SAFETY: we just initialized the elements `..1`.
-            Formatted { sign, parts: unsafe { parts[..1].assume_init_ref() } }
+            Formatted { sign, parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..1]) } }
         }
         FullDecoded::Infinite => {
             parts[0] = MaybeUninit::new(Part::Copy(b"inf"));
             // SAFETY: we just initialized the elements `..1`.
-            Formatted { sign, parts: unsafe { parts[..1].assume_init_ref() } }
+            Formatted { sign, parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..1]) } }
         }
         FullDecoded::Zero => {
             if ndigits > 1 {
@@ -545,14 +549,14 @@ where
                 Formatted {
                     sign,
                     // SAFETY: we just initialized the elements `..3`.
-                    parts: unsafe { parts[..3].assume_init_ref() },
+                    parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..3]) },
                 }
             } else {
                 parts[0] = MaybeUninit::new(Part::Copy(if upper { b"0E0" } else { b"0e0" }));
                 Formatted {
                     sign,
                     // SAFETY: we just initialized the elements `..1`.
-                    parts: unsafe { parts[..1].assume_init_ref() },
+                    parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..1]) },
                 }
             }
         }
@@ -603,12 +607,12 @@ where
         FullDecoded::Nan => {
             parts[0] = MaybeUninit::new(Part::Copy(b"NaN"));
             // SAFETY: we just initialized the elements `..1`.
-            Formatted { sign, parts: unsafe { parts[..1].assume_init_ref() } }
+            Formatted { sign, parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..1]) } }
         }
         FullDecoded::Infinite => {
             parts[0] = MaybeUninit::new(Part::Copy(b"inf"));
             // SAFETY: we just initialized the elements `..1`.
-            Formatted { sign, parts: unsafe { parts[..1].assume_init_ref() } }
+            Formatted { sign, parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..1]) } }
         }
         FullDecoded::Zero => {
             if frac_digits > 0 {
@@ -618,14 +622,14 @@ where
                 Formatted {
                     sign,
                     // SAFETY: we just initialized the elements `..2`.
-                    parts: unsafe { parts[..2].assume_init_ref() },
+                    parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..2]) },
                 }
             } else {
                 parts[0] = MaybeUninit::new(Part::Copy(b"0"));
                 Formatted {
                     sign,
                     // SAFETY: we just initialized the elements `..1`.
-                    parts: unsafe { parts[..1].assume_init_ref() },
+                    parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..1]) },
                 }
             }
         }
@@ -650,14 +654,14 @@ where
                     Formatted {
                         sign,
                         // SAFETY: we just initialized the elements `..2`.
-                        parts: unsafe { parts[..2].assume_init_ref() },
+                        parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..2]) },
                     }
                 } else {
                     parts[0] = MaybeUninit::new(Part::Copy(b"0"));
                     Formatted {
                         sign,
                         // SAFETY: we just initialized the elements `..1`.
-                        parts: unsafe { parts[..1].assume_init_ref() },
+                        parts: unsafe { MaybeUninit::slice_assume_init_ref(&parts[..1]) },
                     }
                 }
             } else {

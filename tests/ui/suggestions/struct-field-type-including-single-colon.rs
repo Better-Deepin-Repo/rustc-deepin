@@ -8,13 +8,13 @@ mod foo {
 struct Foo {
     a: foo:A,
     //~^ ERROR found single colon in a struct field type path
-    //~| ERROR expected `,`, or `}`, found `:`
+    //~| expected `,`, or `}`, found `:`
 }
 
 struct Bar {
     b: foo::bar:B,
     //~^ ERROR found single colon in a struct field type path
-    //~| ERROR expected `,`, or `}`, found `:`
+    //~| expected `,`, or `}`, found `:`
 }
 
 fn main() {}

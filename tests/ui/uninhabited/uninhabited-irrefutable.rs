@@ -29,10 +29,10 @@ fn main() {
     let x: Foo = Foo::D(123, 456);
     let Foo::D(_y, _z) = x;
     //~^ ERROR refutable pattern in local binding
-    //~| NOTE `Foo::A(_)` not covered
+    //~| `Foo::A(_)` not covered
     //~| NOTE `let` bindings require an "irrefutable pattern"
     //~| NOTE for more information
     //~| NOTE pattern `Foo::A(_)` is currently uninhabited
     //~| NOTE the matched value is of type `Foo`
-    //~| HELP you might want to use `let...else`
+    //~| HELP you might want to use `let else`
 }

@@ -3,62 +3,63 @@
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
 use std::sync::mpsc::SyncSender;
+use std::sync::Mutex;
 
+use build_helper::ci::CiEnv;
 use build_helper::git::get_git_modified_files;
 use ignore::WalkBuilder;
 
-use crate::core::builder::{Builder, Kind};
-use crate::utils::build_stamp::BuildStamp;
+use crate::core::builder::Builder;
 use crate::utils::exec::command;
-use crate::utils::helpers::{self, t};
+use crate::utils::helpers::{self, program_out_of_date, t};
 
-#[must_use]
-enum RustfmtStatus {
-    InProgress,
-    Ok,
-    Failed,
-}
-
-fn rustfmt(
-    src: &Path,
-    rustfmt: &Path,
-    paths: &[PathBuf],
-    check: bool,
-) -> impl FnMut(bool) -> RustfmtStatus + use<> {
+fn rustfmt(src: &Path, rustfmt: &Path, paths: &[PathBuf], check: bool) -> impl FnMut(bool) -> bool {
     let mut cmd = Command::new(rustfmt);
     // Avoid the submodule config paths from coming into play. We only allow a single global config
     // for the workspace for now.
     cmd.arg("--config-path").arg(src.canonicalize().unwrap());
-    cmd.arg("--edition").arg("2024");
+    cmd.arg("--edition").arg("2021");
     cmd.arg("--unstable-features");
     cmd.arg("--skip-children");
     if check {
         cmd.arg("--check");
     }
     cmd.args(paths);
+    let cmd_debug = format!("{cmd:?}");
     let mut cmd = cmd.spawn().expect("running rustfmt");
     // Poor man's async: return a closure that might wait for rustfmt's completion (depending on
     // the value of the `block` argument).
-    move |block: bool| -> RustfmtStatus {
+    move |block: bool| -> bool {
         let status = if !block {
             match cmd.try_wait() {
                 Ok(Some(status)) => Ok(status),
-                Ok(None) => return RustfmtStatus::InProgress,
+                Ok(None) => return false,
                 Err(err) => Err(err),
             }
         } else {
             cmd.wait()
         };
-        if status.unwrap().success() { RustfmtStatus::Ok } else { RustfmtStatus::Failed }
+        if !status.unwrap().success() {
+            eprintln!(
+                "fmt error: Running `{}` failed.\nIf you're running `tidy`, \
+                try again with `--bless`. Or, if you just want to format \
+                code, run `./x.py fmt` instead.",
+                cmd_debug,
+            );
+            crate::exit!(1);
+        }
+        true
     }
 }
 
-fn get_rustfmt_version(build: &Builder<'_>) -> Option<(String, BuildStamp)> {
-    let stamp_file = BuildStamp::new(&build.out).with_prefix("rustfmt");
+fn get_rustfmt_version(build: &Builder<'_>) -> Option<(String, PathBuf)> {
+    let stamp_file = build.out.join("rustfmt.stamp");
 
-    let mut cmd = command(build.config.initial_rustfmt.as_ref()?);
+    let mut cmd = command(match build.initial_rustfmt() {
+        Some(p) => p,
+        None => return None,
+    });
     cmd.arg("--version");
 
     let output = cmd.allow_failure().run_capture(build);
@@ -73,7 +74,7 @@ fn verify_rustfmt_version(build: &Builder<'_>) -> bool {
     let Some((version, stamp_file)) = get_rustfmt_version(build) else {
         return false;
     };
-    stamp_file.add_stamp(version).is_up_to_date()
+    !program_out_of_date(&stamp_file, &version)
 }
 
 /// Updates the last rustfmt version used.
@@ -81,24 +82,19 @@ fn update_rustfmt_version(build: &Builder<'_>) {
     let Some((version, stamp_file)) = get_rustfmt_version(build) else {
         return;
     };
-
-    t!(stamp_file.add_stamp(version).write());
+    t!(std::fs::write(stamp_file, version))
 }
 
-/// Returns the Rust files modified between the last merge commit and what is now on the disk.
-/// Does not include removed files.
+/// Returns the Rust files modified between the `merge-base` of HEAD and
+/// rust-lang/master and what is now on the disk. Does not include removed files.
 ///
 /// Returns `None` if all files should be formatted.
 fn get_modified_rs_files(build: &Builder<'_>) -> Result<Option<Vec<String>>, String> {
-    // In CI `get_git_modified_files` returns something different to normal environment.
-    // This shouldn't be called in CI anyway.
-    assert!(!build.config.is_running_on_ci());
-
     if !verify_rustfmt_version(build) {
         return Ok(None);
     }
 
-    get_git_modified_files(&build.config.git_config(), Some(&build.config.src), &["rs"]).map(Some)
+    get_git_modified_files(&build.config.git_config(), Some(&build.config.src), &["rs"])
 }
 
 #[derive(serde_derive::Deserialize)]
@@ -122,12 +118,6 @@ fn print_paths(verb: &str, adjective: Option<&str>, paths: &[String]) {
 }
 
 pub fn format(build: &Builder<'_>, check: bool, all: bool, paths: &[PathBuf]) {
-    if build.kind == Kind::Format && build.top_stage != 0 {
-        eprintln!("ERROR: `x fmt` only supports stage 0.");
-        eprintln!("HELP: Use `x run rustfmt` to run in-tree rustfmt.");
-        crate::exit!(1);
-    }
-
     if !paths.is_empty() {
         eprintln!(
             "fmt error: path arguments are no longer accepted; use `--all` to format everything"
@@ -142,7 +132,7 @@ pub fn format(build: &Builder<'_>, check: bool, all: bool, paths: &[PathBuf]) {
     // `--all` is specified or we are in CI. We check all files in CI to avoid bugs in
     // `get_modified_rs_files` letting regressions slip through; we also care about CI time less
     // since this is still very fast compared to building the compiler.
-    let all = all || build.config.is_running_on_ci();
+    let all = all || CiEnv::is_ci();
 
     let mut builder = ignore::types::TypesBuilder::new();
     builder.add_defaults();
@@ -211,22 +201,11 @@ pub fn format(build: &Builder<'_>, check: bool, all: bool, paths: &[PathBuf]) {
                 adjective = Some("modified");
                 match get_modified_rs_files(build) {
                     Ok(Some(files)) => {
-                        if files.is_empty() {
-                            println!("fmt info: No modified files detected for formatting.");
-                            return;
-                        }
-
                         for file in files {
                             override_builder.add(&format!("/{file}")).expect(&file);
                         }
                     }
-                    Ok(None) => {
-                        // NOTE: `Ok(None)` signifies that we need to format all files.
-                        // The tricky part here is that if `override_builder` isn't given any white
-                        // list files (i.e. files to be formatted, added without leading `!`), it
-                        // will instead look for *all* files. So, by doing nothing here, we are
-                        // actually making it so we format all files.
-                    }
+                    Ok(None) => {}
                     Err(err) => {
                         eprintln!("fmt warning: Something went wrong running git commands:");
                         eprintln!("fmt warning: {err}");
@@ -243,7 +222,7 @@ pub fn format(build: &Builder<'_>, check: bool, all: bool, paths: &[PathBuf]) {
 
     let override_ = override_builder.build().unwrap(); // `override` is a reserved keyword
 
-    let rustfmt_path = build.config.initial_rustfmt.clone().unwrap_or_else(|| {
+    let rustfmt_path = build.initial_rustfmt().unwrap_or_else(|| {
         eprintln!("fmt error: `x fmt` is not supported on this channel");
         crate::exit!(1);
     });
@@ -259,8 +238,6 @@ pub fn format(build: &Builder<'_>, check: bool, all: bool, paths: &[PathBuf]) {
     // Spawn child processes on a separate thread so we can batch entries we have received from
     // ignore.
     let thread = std::thread::spawn(move || {
-        let mut result = Ok(());
-
         let mut children = VecDeque::new();
         while let Ok(path) = rx.recv() {
             // Try getting more paths from the channel to amortize the overhead of spawning
@@ -272,38 +249,22 @@ pub fn format(build: &Builder<'_>, check: bool, all: bool, paths: &[PathBuf]) {
 
             // Poll completion before waiting.
             for i in (0..children.len()).rev() {
-                match children[i](false) {
-                    RustfmtStatus::InProgress => {}
-                    RustfmtStatus::Failed => {
-                        result = Err(());
-                        children.swap_remove_back(i);
-                        break;
-                    }
-                    RustfmtStatus::Ok => {
-                        children.swap_remove_back(i);
-                        break;
-                    }
+                if children[i](false) {
+                    children.swap_remove_back(i);
+                    break;
                 }
             }
 
             if children.len() >= max_processes {
                 // Await oldest child.
-                match children.pop_front().unwrap()(true) {
-                    RustfmtStatus::InProgress | RustfmtStatus::Ok => {}
-                    RustfmtStatus::Failed => result = Err(()),
-                }
+                children.pop_front().unwrap()(true);
             }
         }
 
         // Await remaining children.
         for mut child in children {
-            match child(true) {
-                RustfmtStatus::InProgress | RustfmtStatus::Ok => {}
-                RustfmtStatus::Failed => result = Err(()),
-            }
+            child(true);
         }
-
-        result
     });
 
     let formatted_paths = Mutex::new(Vec::new());
@@ -313,15 +274,15 @@ pub fn format(build: &Builder<'_>, check: bool, all: bool, paths: &[PathBuf]) {
         Box::new(move |entry| {
             let cwd = std::env::current_dir();
             let entry = t!(entry);
-            if entry.file_type().is_some_and(|t| t.is_file()) {
+            if entry.file_type().map_or(false, |t| t.is_file()) {
                 formatted_paths_ref.lock().unwrap().push({
                     // `into_path` produces an absolute path. Try to strip `cwd` to get a shorter
                     // relative path.
                     let mut path = entry.clone().into_path();
-                    if let Ok(cwd) = cwd
-                        && let Ok(path2) = path.strip_prefix(cwd)
-                    {
-                        path = path2.to_path_buf();
+                    if let Ok(cwd) = cwd {
+                        if let Ok(path2) = path.strip_prefix(cwd) {
+                            path = path2.to_path_buf();
+                        }
                     }
                     path.display().to_string()
                 });
@@ -336,16 +297,8 @@ pub fn format(build: &Builder<'_>, check: bool, all: bool, paths: &[PathBuf]) {
 
     drop(tx);
 
-    let result = thread.join().unwrap();
-
-    if result.is_err() {
-        crate::exit!(1);
+    thread.join().unwrap();
+    if !check {
+        update_rustfmt_version(build);
     }
-
-    // Update `build/.rustfmt-stamp`, allowing this code to ignore files which have not been changed
-    // since last merge.
-    //
-    // NOTE: Because of the exit above, this is only reachable if formatting / format checking
-    // succeeded. So we are not committing the version if formatting was not good.
-    update_rustfmt_version(build);
 }

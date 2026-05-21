@@ -11,7 +11,6 @@
 //@ build-pass (FIXME(62277): could be check-pass?)
 //@ revisions: cfail1 cfail2 cfail3
 //@ compile-flags: -Z query-dep-graph -C debug-assertions -O
-//@ ignore-backends: gcc
 
 #![allow(warnings)]
 #![feature(rustc_attrs)]

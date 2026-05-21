@@ -1,9 +1,10 @@
 //@ compile-flags:-g
-//@ disable-gdb-pretty-printers
-//@ gdb-command:run
-//@ lldb-command:run
+// gdb-command:run
+// lldb-command:run
 
 #![allow(unused_variables)]
+#![feature(omit_gdb_pretty_printer_section)]
+#![omit_gdb_pretty_printer_section]
 
 trait Trait {
     fn method(&self) -> isize { 0 }

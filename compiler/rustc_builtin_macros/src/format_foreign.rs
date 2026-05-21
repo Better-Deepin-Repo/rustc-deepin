@@ -12,16 +12,14 @@ pub(crate) mod printf {
         Escape((usize, usize)),
     }
 
-    impl ToString for Substitution<'_> {
-        fn to_string(&self) -> String {
+    impl<'a> Substitution<'a> {
+        pub(crate) fn as_str(&self) -> &str {
             match self {
-                Substitution::Format(fmt) => fmt.span.into(),
-                Substitution::Escape(_) => "%%".into(),
+                Substitution::Format(fmt) => fmt.span,
+                Substitution::Escape(_) => "%%",
             }
         }
-    }
 
-    impl Substitution<'_> {
         pub(crate) fn position(&self) -> InnerSpan {
             match self {
                 Substitution::Format(fmt) => fmt.position,
@@ -346,18 +344,18 @@ pub(crate) mod printf {
         // ```regex
         // (?x)
         // ^ %
-        // (?: (?Box<parameter> \d+) \$ )?
-        // (?Box<flags> [-+ 0\#']* )
-        // (?Box<width> \d+ | \* (?: (?Box<widtha> \d+) \$ )? )?
-        // (?: \. (?Box<precision> \d+ | \* (?: (?Box<precisiona> \d+) \$ )? ) )?
-        // (?Box<length>
+        // (?: (?P<parameter> \d+) \$ )?
+        // (?P<flags> [-+ 0\#']* )
+        // (?P<width> \d+ | \* (?: (?P<widtha> \d+) \$ )? )?
+        // (?: \. (?P<precision> \d+ | \* (?: (?P<precisiona> \d+) \$ )? ) )?
+        // (?P<length>
         //     # Standard
         //     hh | h | ll | l | L | z | j | t
         //
         //     # Other
         //     | I32 | I64 | I | q
         // )?
-        // (?Box<type> . )
+        // (?P<type> . )
         // ```
 
         // Used to establish the full span at the end.
@@ -416,7 +414,7 @@ pub(crate) mod printf {
                         // Yes, this *is* the parameter.
                         Some(('$', end2)) => {
                             state = Flags;
-                            parameter = at.slice_between(end).unwrap().parse().ok();
+                            parameter = Some(at.slice_between(end).unwrap().parse().unwrap());
                             move_to!(end2);
                         }
                         // Wait, no, actually, it's the width.
@@ -629,17 +627,15 @@ pub(crate) mod shell {
         Escape((usize, usize)),
     }
 
-    impl ToString for Substitution<'_> {
-        fn to_string(&self) -> String {
+    impl Substitution<'_> {
+        pub(crate) fn as_str(&self) -> String {
             match self {
                 Substitution::Ordinal(n, _) => format!("${n}"),
                 Substitution::Name(n, _) => format!("${n}"),
                 Substitution::Escape(_) => "$$".into(),
             }
         }
-    }
 
-    impl Substitution<'_> {
         pub(crate) fn position(&self) -> InnerSpan {
             let (Self::Ordinal(_, pos) | Self::Name(_, pos) | Self::Escape(pos)) = self;
             InnerSpan::new(pos.0, pos.1)

@@ -10,19 +10,19 @@ fn main() {}
 
 // These will not reach typeck:
 
-#[cfg(false)]
+#[cfg(FALSE)]
 const C2 = 42;
 //~^ ERROR missing type for `const` item
 //~| HELP provide a type for the item
 //~| SUGGESTION : <type>
 
-#[cfg(false)]
+#[cfg(FALSE)]
 static S2 = "abc";
 //~^ ERROR missing type for `static` item
 //~| HELP provide a type for the item
 //~| SUGGESTION : <type>
 
-#[cfg(false)]
+#[cfg(FALSE)]
 static mut SM2 = "abc";
 //~^ ERROR missing type for `static mut` item
 //~| HELP provide a type for the item

@@ -1,12 +1,11 @@
 //@ run-pass
 //@ needs-unwind
-//@ needs-threads
-//@ ignore-backends: gcc
-
 #![allow(overflowing_literals)]
 
 // Test that we cleanup a fixed size Box<[D; k]> properly when D has a
 // destructor.
+
+//@ ignore-emscripten no threads support
 
 use std::thread;
 use std::sync::atomic::{AtomicUsize, Ordering};

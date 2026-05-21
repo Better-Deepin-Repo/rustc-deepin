@@ -1,44 +1,30 @@
-r[attributes.diagnostics]
 # Diagnostic attributes
 
 The following [attributes] are used for controlling or generating diagnostic
 messages during compilation.
 
-r[attributes.diagnostics.lint]
 ## Lint check attributes
 
 A lint check names a potentially undesirable coding pattern, such as
-unreachable code or omitted documentation.
-
-r[attributes.diagnostics.lint.level]
-The lint attributes `allow`,
-`expect`, `warn`, `deny`, and `forbid` use the [MetaListPaths] syntax
+unreachable code or omitted documentation. The lint attributes `allow`,
+`expect`, `warn`, `deny`, and `forbid` use the [_MetaListPaths_] syntax
 to specify a list of lint names to change the lint level for the entity
 to which the attribute applies.
 
 For any lint check `C`:
 
-r[attributes.diagnostics.lint.allow]
 * `#[allow(C)]` overrides the check for `C` so that violations will go
    unreported.
-
-r[attributes.diagnostics.lint.expect]
 * `#[expect(C)]` indicates that lint `C` is expected to be emitted. The
   attribute will suppress the emission of `C` or issue a warning, if the
   expectation is unfulfilled.
-
-r[attributes.diagnostics.lint.warn]
 * `#[warn(C)]` warns about violations of `C` but continues compilation.
-
-r[attributes.diagnostics.lint.deny]
 * `#[deny(C)]` signals an error after encountering a violation of `C`,
-
-r[attributes.diagnostics.lint.forbid]
 * `#[forbid(C)]` is the same as `deny(C)`, but also forbids changing the lint
    level afterwards,
 
-> [!NOTE]
-> The lint checks supported by `rustc` can be found via `rustc -W help`, along with their default settings and are documented in the [rustc book].
+> Note: The lint checks supported by `rustc` can be found via `rustc -W help`,
+> along with their default settings and are documented in the [rustc book].
 
 ```rust
 pub mod m1 {
@@ -56,11 +42,9 @@ pub mod m1 {
 }
 ```
 
-r[attributes.diagnostics.lint.override]
 Lint attributes can override the level specified from a previous attribute, as
-long as the level does not attempt to change a forbidden lint
-(except for `deny`, which is allowed inside a `forbid` context, but ignored).
-Previous attributes are those from a higher level in the syntax tree, or from a
+long as the level does not attempt to change a forbidden lint. Previous
+attributes are those from a higher level in the syntax tree, or from a
 previous attribute on the same entity as listed in left-to-right source order.
 
 This example shows how one can use `allow` and `warn` to toggle a particular
@@ -98,11 +82,11 @@ pub mod m3 {
 }
 ```
 
-> [!NOTE]
-> `rustc` allows setting lint levels on the [command-line][rustc-lint-cli], and also supports [setting caps][rustc-lint-caps] on the lints that are reported.
+> Note: `rustc` allows setting lint levels on the
+> [command-line][rustc-lint-cli], and also supports [setting
+> caps][rustc-lint-caps] on the lints that are reported.
 
-r[attributes.diagnostics.lint.reason]
-### Lint reasons
+### Lint Reasons
 
 All lint attributes support an additional `reason` parameter, to give context why
 a certain attribute was added. This reason will be displayed as part of the lint
@@ -138,10 +122,8 @@ pub fn get_path() -> PathBuf {
 }
 ```
 
-r[attributes.diagnostics.expect]
 ### The `#[expect]` attribute
 
-r[attributes.diagnostics.expect.intro]
 The `#[expect(C)]` attribute creates a lint expectation for lint `C`. The
 expectation will be fulfilled, if a `#[warn(C)]` attribute at the same location
 would result in a lint emission. If the expectation is unfulfilled, because
@@ -167,7 +149,6 @@ fn main() {
 }
 ```
 
-r[attributes.diagnostics.expect.fulfillment]
 The lint expectation is only fulfilled by lint emissions which have been suppressed by
 the `expect` attribute. If the lint level is modified in the scope with other level
 attributes like `allow` or `warn`, the lint emission will be handled accordingly and the
@@ -197,7 +178,6 @@ fn select_song() {
 }
 ```
 
-r[attributes.diagnostics.expect.independent]
 If the `expect` attribute contains several lints, each one is expected separately. For a
 lint group it's enough if one lint inside the group has been emitted:
 
@@ -221,10 +201,9 @@ pub fn another_example() {
 }
 ```
 
-> [!NOTE]
-> The behavior of `#[expect(unfulfilled_lint_expectations)]` is currently defined to always generate the `unfulfilled_lint_expectations` lint.
+> Note: The behavior of `#[expect(unfulfilled_lint_expectations)]` is currently
+> defined to always generate the `unfulfilled_lint_expectations` lint.
 
-r[attributes.diagnostics.lint.group]
 ### Lint groups
 
 Lints may be organized into named groups so that the level of related lints
@@ -247,7 +226,6 @@ fn example() {
 }
 ```
 
-r[attributes.diagnostics.lint.group.warnings]
 There is a special group named "warnings" which includes all lints at the
 "warn" level. The "warnings" group ignores attribute order and applies to all
 lints that would otherwise warn within the entity.
@@ -265,14 +243,11 @@ fn example_err() {
 }
 ```
 
-r[attributes.diagnostics.lint.tool]
 ### Tool lint attributes
 
-r[attributes.diagnostics.lint.tool.intro]
 Tool lints allows using scoped lints, to `allow`, `warn`, `deny` or `forbid`
 lints of certain tools.
 
-r[attributes.diagnostics.lint.tool.activation]
 Tool lints only get checked when the associated tool is active. If a lint
 attribute, such as `allow`, references a nonexistent tool lint, the compiler
 will not warn about the nonexistent lint until you use the tool.
@@ -296,24 +271,20 @@ fn foo() {
 }
 ```
 
-> [!NOTE]
-> `rustc` currently recognizes the tool lints for "[clippy]" and "[rustdoc]".
+> Note: `rustc` currently recognizes the tool lints for "[clippy]" and "[rustdoc]".
 
-r[attributes.diagnostics.deprecated]
 ## The `deprecated` attribute
 
-r[attributes.diagnostics.deprecated.intro]
 The *`deprecated` attribute* marks an item as deprecated. `rustc` will issue
 warnings on usage of `#[deprecated]` items. `rustdoc` will show item
 deprecation, including the `since` version and `note`, if available.
 
-r[attributes.diagnostics.deprecated.syntax]
 The `deprecated` attribute has several forms:
 
 - `deprecated` --- Issues a generic message.
 - `deprecated = "message"` --- Includes the given string in the deprecation
   message.
-- [MetaListNameValueStr] syntax with two optional fields:
+- [_MetaListNameValueStr_] syntax with two optional fields:
   - `since` --- Specifies a version number when the item was deprecated. `rustc`
     does not currently interpret the string, but external tools like [Clippy]
     may check the validity of the value.
@@ -321,10 +292,9 @@ The `deprecated` attribute has several forms:
     message. This is typically used to provide an explanation about the
     deprecation and preferred alternatives.
 
-r[attributes.diagnostic.deprecated.allowed-positions]
 The `deprecated` attribute may be applied to any [item], [trait item], [enum
 variant], [struct field], [external block item], or [macro definition]. It
-cannot be applied to [trait implementation items][trait-impl]. When applied to an item
+cannot be applied to [trait implementation items]. When applied to an item
 containing other items, such as a [module] or [implementation], all child
 items inherit the deprecation attribute.
 <!-- NOTE: It is only rejected for trait impl items
@@ -345,24 +315,17 @@ The [RFC][1270-deprecation.md] contains motivations and more details.
 
 [1270-deprecation.md]: https://github.com/rust-lang/rfcs/blob/master/text/1270-deprecation.md
 
-r[attributes.diagnostics.must_use]
 ## The `must_use` attribute
 
-r[attributes.diagnostics.must_use.intro]
 The *`must_use` attribute* is used to issue a diagnostic warning when a value
-is not "used".
-
-r[attributes.diagnostics.must_use.allowed-positions]
-The `must_use` attribute can be applied to user-defined composite types
+is not "used". It can be applied to user-defined composite types
 ([`struct`s][struct], [`enum`s][enum], and [`union`s][union]), [functions],
 and [traits].
 
-r[attributes.diagnostics.must_use.message]
 The `must_use` attribute may include a message by using the
-[MetaNameValueStr] syntax such as `#[must_use = "example message"]`. The
+[_MetaNameValueStr_] syntax such as `#[must_use = "example message"]`. The
 message will be given alongside the warning.
 
-r[attributes.diagnostics.must_use.type]
 When used on user-defined composite types, if the [expression] of an
 [expression statement] has that type, then the `unused_must_use` lint is
 violated.
@@ -381,7 +344,6 @@ struct MustUse {
 MustUse::new();
 ```
 
-r[attributes.diagnostics.must_use.fn]
 When used on a function, if the [expression] of an [expression statement] is a
 [call expression] to that function, then the `unused_must_use` lint is
 violated.
@@ -394,7 +356,6 @@ fn five() -> i32 { 5i32 }
 five();
 ```
 
-r[attributes.diagnostics.must_use.trait]
 When used on a [trait declaration], a [call expression] of an [expression
 statement] to a function that returns an [impl trait] or a [dyn trait] of that trait violates
 the `unused_must_use` lint.
@@ -412,7 +373,6 @@ fn get_critical() -> impl Critical {
 get_critical();
 ```
 
-r[attributes.diagnostics.must_use.trait-function]
 When used on a function in a trait declaration, then the behavior also applies
 when the call expression is a function from an implementation of the trait.
 
@@ -430,11 +390,12 @@ impl Trait for i32 {
 5i32.use_me();
 ```
 
-r[attributes.diagnostics.must_use.trait-impl-function]
 When used on a function in a trait implementation, the attribute does nothing.
 
-> [!NOTE]
-> Trivial no-op expressions containing the value will not violate the lint. Examples include wrapping the value in a type that does not implement [`Drop`] and then not using that type and being the final expression of a [block expression] that is not used.
+> Note: Trivial no-op expressions containing the value will not violate the
+> lint. Examples include wrapping the value in a type that does not implement
+> [`Drop`] and then not using that type and being the final expression of a
+> [block expression] that is not used.
 >
 > ```rust
 > #[must_use]
@@ -450,8 +411,8 @@ When used on a function in a trait implementation, the attribute does nothing.
 > };
 > ```
 
-> [!NOTE]
-> It is idiomatic to use a [let statement] with a pattern of `_` when a must-used value is purposely discarded.
+> Note: It is idiomatic to use a [let statement] with a pattern of `_`
+> when a must-used value is purposely discarded.
 >
 > ```rust
 > #[must_use]
@@ -461,57 +422,38 @@ When used on a function in a trait implementation, the attribute does nothing.
 > let _ = five();
 > ```
 
-r[attributes.diagnostic.namespace]
 ## The `diagnostic` tool attribute namespace
 
-r[attributes.diagnostic.namespace.intro]
 The `#[diagnostic]` attribute namespace is a home for attributes to influence compile-time error messages.
 The hints provided by these attributes are not guaranteed to be used.
-
-r[attributes.diagnostic.namespace.unknown-invalid-syntax]
 Unknown attributes in this namespace are accepted, though they may emit warnings for unused attributes.
 Additionally, invalid inputs to known attributes will typically be a warning (see the attribute definitions for details).
 This is meant to allow adding or discarding attributes and changing inputs in the future to allow changes without the need to keep the non-meaningful attributes or options working.
 
-r[attributes.diagnostic.on_unimplemented]
 ### The `diagnostic::on_unimplemented` attribute
 
-r[attributes.diagnostic.on_unimplemented.intro]
 The `#[diagnostic::on_unimplemented]` attribute is a hint to the compiler to supplement the error message that would normally be generated in scenarios where a trait is required but not implemented on a type.
-
-r[attributes.diagnostic.on_unimplemented.allowed-positions]
 The attribute should be placed on a [trait declaration], though it is not an error to be located in other positions.
-
-r[attributes.diagnostic.on_unimplemented.syntax]
-The attribute uses the [MetaListNameValueStr] syntax to specify its inputs, though any malformed input to the attribute is not considered as an error to provide both forwards and backwards compatibility.
-
-r[attributes.diagnostic.on_unimplemented.keys]
+The attribute uses the [_MetaListNameValueStr_] syntax to specify its inputs, though any malformed input to the attribute is not considered as an error to provide both forwards and backwards compatibility.
 The following keys have the given meaning:
+
 * `message` --- The text for the top level error message.
 * `label` --- The text for the label shown inline in the broken code in the error message.
 * `note` --- Provides additional notes.
 
-r[attributes.diagnostic.on_unimplemented.note-repetition]
 The `note` option can appear several times, which results in several note messages being emitted.
+If any of the other options appears several times the first occurrence of the relevant option specifies the actually used value.
+Any other occurrence generates an lint warning.
+For any other non-existing option a lint-warning is generated.
 
-r[attributes.diagnostic.on_unimplemented.repetition]
-If any of the other options appears several times the first occurrence of the relevant option specifies the actually used value. Subsequent occurrences generates a warning.
-
-r[attributes.diagnostic.on_unimplemented.unknown-keys]
-A warning is generated for any unknown keys.
-
-r[attributes.diagnostic.on_unimplemented.format-string]
 All three options accept a string as an argument, interpreted using the same formatting as a [`std::fmt`] string.
-
-r[attributes.diagnostic.on_unimplemented.format-parameters]
 Format parameters with the given named parameter will be replaced with the following text:
+
 * `{Self}` --- The name of the type implementing the trait.
 * `{` *GenericParameterName* `}` --- The name of the generic argument's type for the given generic parameter.
 
-r[attributes.diagnostic.on_unimplemented.invalid-formats]
 Any other format parameter will generate a warning, but will otherwise be included in the string as-is.
 
-r[attributes.diagnostic.on_unimplemented.invalid-string]
 Invalid format strings may generate a warning, but are otherwise allowed, but may not display as intended.
 Format specifiers may generate a warning, but are otherwise ignored.
 
@@ -549,120 +491,10 @@ error[E0277]: My Message for `ImportantTrait<i32>` implemented for `String`
    = note: Note 2
 ```
 
-r[attributes.diagnostic.do_not_recommend]
-### The `diagnostic::do_not_recommend` attribute
-
-r[attributes.diagnostic.do_not_recommend.intro]
-The `#[diagnostic::do_not_recommend]` attribute is a hint to the compiler to not show the annotated trait implementation as part of a diagnostic message.
-
-> [!NOTE]
-> Suppressing the recommendation can be useful if you know that the recommendation would normally not be useful to the programmer. This often occurs with broad, blanket impls. The recommendation may send the programmer down the wrong path, or the trait implementation may be an internal detail that you don't want to expose, or the bounds may not be able to be satisfied by the programmer.
->
-> For example, in an error message about a type not implementing a required trait, the compiler may find a trait implementation that would satisfy the requirements if it weren't for specific bounds in the trait implementation. The compiler may tell the user that there is an impl, but the problem is the bounds in the trait implementation. The `#[diagnostic::do_not_recommend]` attribute can be used to tell the compiler to *not* tell the user about the trait implementation, and instead simply tell the user the type doesn't implement the required trait.
-
-r[attributes.diagnostic.do_not_recommend.allowed-positions]
-The attribute should be placed on a [trait implementation item][trait-impl], though it is not an error to be located in other positions.
-
-r[attributes.diagnostic.do_not_recommend.syntax]
-The attribute does not accept any arguments, though unexpected arguments are not considered as an error.
-
-In the following example, there is a trait called `AsExpression` which is used for casting arbitrary types to the `Expression` type used in an SQL library. There is a method called `check` which takes an `AsExpression`.
-
-```rust,compile_fail,E0277
-# pub trait Expression {
-#     type SqlType;
-# }
-#
-# pub trait AsExpression<ST> {
-#     type Expression: Expression<SqlType = ST>;
-# }
-#
-# pub struct Text;
-# pub struct Integer;
-#
-# pub struct Bound<T>(T);
-# pub struct SelectInt;
-#
-# impl Expression for SelectInt {
-#     type SqlType = Integer;
-# }
-#
-# impl<T> Expression for Bound<T> {
-#     type SqlType = T;
-# }
-#
-# impl AsExpression<Integer> for i32 {
-#     type Expression = Bound<Integer>;
-# }
-#
-# impl AsExpression<Text> for &'_ str {
-#     type Expression = Bound<Text>;
-# }
-#
-# impl<T> Foo for T where T: Expression {}
-
-// Uncomment this line to change the recommendation.
-// #[diagnostic::do_not_recommend]
-impl<T, ST> AsExpression<ST> for T
-where
-    T: Expression<SqlType = ST>,
-{
-    type Expression = T;
-}
-
-trait Foo: Expression + Sized {
-    fn check<T>(&self, _: T) -> <T as AsExpression<<Self as Expression>::SqlType>>::Expression
-    where
-        T: AsExpression<Self::SqlType>,
-    {
-        todo!()
-    }
-}
-
-fn main() {
-    SelectInt.check("bar");
-}
-```
-
-The `SelectInt` type's `check` method is expecting an `Integer` type. Calling it with an i32 type works, as it gets converted to an `Integer` by the `AsExpression` trait. However, calling it with a string does not, and generates a an error that may look like this:
-
-```text
-error[E0277]: the trait bound `&str: Expression` is not satisfied
-  --> src/main.rs:53:15
-   |
-53 |     SelectInt.check("bar");
-   |               ^^^^^ the trait `Expression` is not implemented for `&str`
-   |
-   = help: the following other types implement trait `Expression`:
-             Bound<T>
-             SelectInt
-note: required for `&str` to implement `AsExpression<Integer>`
-  --> src/main.rs:45:13
-   |
-45 | impl<T, ST> AsExpression<ST> for T
-   |             ^^^^^^^^^^^^^^^^     ^
-46 | where
-47 |     T: Expression<SqlType = ST>,
-   |        ------------------------ unsatisfied trait bound introduced here
-```
-
-By adding the `#[diagnostic::do_not_recommend]` attribute to the blanket `impl` for `AsExpression`, the message changes to:
-
-```text
-error[E0277]: the trait bound `&str: AsExpression<Integer>` is not satisfied
-  --> src/main.rs:53:15
-   |
-53 |     SelectInt.check("bar");
-   |               ^^^^^ the trait `AsExpression<Integer>` is not implemented for `&str`
-   |
-   = help: the trait `AsExpression<Integer>` is not implemented for `&str`
-           but trait `AsExpression<Text>` is implemented for it
-   = help: for that trait implementation, expected `Text`, found `Integer`
-```
-
-The first error message includes a somewhat confusing error message about the relationship of `&str` and `Expression`, as well as the unsatisfied trait bound in the blanket impl. After adding `#[diagnostic::do_not_recommend]`, it no longer considers the blanket impl for the recommendation. The message should be a little clearer, with an indication that a string cannot be converted to an `Integer`.
-
 [Clippy]: https://github.com/rust-lang/rust-clippy
+[_MetaListNameValueStr_]: ../attributes.md#meta-item-attribute-syntax
+[_MetaListPaths_]: ../attributes.md#meta-item-attribute-syntax
+[_MetaNameValueStr_]: ../attributes.md#meta-item-attribute-syntax
 [`Drop`]: ../special-types-and-traits.md#drop
 [attributes]: ../attributes.md
 [block expression]: ../expressions/block-expr.md
@@ -687,7 +519,7 @@ The first error message includes a somewhat confusing error message about the re
 [struct field]: ../items/structs.md
 [struct]: ../items/structs.md
 [trait declaration]: ../items/traits.md
+[trait implementation items]: ../items/implementations.md#trait-implementations
 [trait item]: ../items/traits.md
-[trait-impl]: ../items/implementations.md#trait-implementations
 [traits]: ../items/traits.md
 [union]: ../items/unions.md

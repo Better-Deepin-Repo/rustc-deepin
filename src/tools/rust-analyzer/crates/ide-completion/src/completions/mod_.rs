@@ -2,14 +2,15 @@
 
 use std::iter;
 
-use hir::Module;
+use hir::{HirFileIdExt, Module};
 use ide_db::{
+    base_db::{SourceRootDatabase, VfsPath},
     FxHashSet, RootDatabase, SymbolKind,
-    base_db::{SourceDatabase, VfsPath},
 };
-use syntax::{AstNode, SyntaxKind, ast};
+use stdx::IsNoneOr;
+use syntax::{ast, AstNode, SyntaxKind, ToSmolStr};
 
-use crate::{CompletionItem, Completions, context::CompletionContext};
+use crate::{context::CompletionContext, CompletionItem, Completions};
 
 /// Complete mod declaration, i.e. `mod $0;`
 pub(crate) fn complete_mod(
@@ -26,30 +27,28 @@ pub(crate) fn complete_mod(
     let mut current_module = ctx.module;
     // For `mod $0`, `ctx.module` is its parent, but for `mod f$0`, it's `mod f` itself, but we're
     // interested in its parent.
-    if ctx.original_token.kind() == SyntaxKind::IDENT
-        && let Some(module) =
+    if ctx.original_token.kind() == SyntaxKind::IDENT {
+        if let Some(module) =
             ctx.original_token.parent_ancestors().nth(1).and_then(ast::Module::cast)
-    {
-        match ctx.sema.to_def(&module) {
-            Some(module) if module == current_module => {
-                if let Some(parent) = current_module.parent(ctx.db) {
-                    current_module = parent;
+        {
+            match ctx.sema.to_def(&module) {
+                Some(module) if module == current_module => {
+                    if let Some(parent) = current_module.parent(ctx.db) {
+                        current_module = parent;
+                    }
                 }
+                _ => {}
             }
-            _ => {}
         }
     }
 
     let module_definition_file =
         current_module.definition_source_file_id(ctx.db).original_file(ctx.db);
-    let source_root_id =
-        ctx.db.file_source_root(module_definition_file.file_id(ctx.db)).source_root_id(ctx.db);
-    let source_root = ctx.db.source_root(source_root_id).source_root(ctx.db);
-
+    let source_root = ctx.db.source_root(ctx.db.file_source_root(module_definition_file.file_id()));
     let directory_to_look_for_submodules = directory_to_look_for_submodules(
         current_module,
         ctx.db,
-        source_root.path_for_file(&module_definition_file.file_id(ctx.db))?,
+        source_root.path_for_file(&module_definition_file.file_id())?,
     )?;
 
     let existing_mod_declarations = current_module
@@ -65,11 +64,9 @@ pub(crate) fn complete_mod(
 
     source_root
         .iter()
+        .filter(|&submodule_candidate_file| submodule_candidate_file != module_definition_file)
         .filter(|&submodule_candidate_file| {
-            submodule_candidate_file != module_definition_file.file_id(ctx.db)
-        })
-        .filter(|&submodule_candidate_file| {
-            module_declaration_file.is_none_or(|it| it.file_id(ctx.db) != submodule_candidate_file)
+            IsNoneOr::is_none_or(module_declaration_file, |it| it != submodule_candidate_file)
         })
         .filter_map(|submodule_file| {
             let submodule_path = source_root.path_for_file(&submodule_file)?;
@@ -144,7 +141,9 @@ fn directory_to_look_for_submodules(
     module_chain_to_containing_module_file(module, db)
         .into_iter()
         .filter_map(|module| module.name(db))
-        .try_fold(base_directory, |path, name| path.join(name.as_str()))
+        .try_fold(base_directory, |path, name| {
+            path.join(&name.unescaped().display_no_db().to_smolstr())
+        })
 }
 
 fn module_chain_to_containing_module_file(
@@ -161,9 +160,14 @@ fn module_chain_to_containing_module_file(
 
 #[cfg(test)]
 mod tests {
-    use expect_test::expect;
+    use expect_test::{expect, Expect};
 
-    use crate::tests::check;
+    use crate::tests::completion_list;
+
+    fn check(ra_fixture: &str, expect: Expect) {
+        let actual = completion_list(ra_fixture);
+        expect.assert_eq(&actual);
+    }
 
     #[test]
     fn lib_module_completion() {

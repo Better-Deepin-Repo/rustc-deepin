@@ -17,7 +17,8 @@ pub(crate) fn escape_bytes(bytes: &[u8], opt: EscapeOptions) -> String {
             escape_single_byte(byte, opt, &mut repr);
         }
     } else {
-        for chunk in bytes.utf8_chunks() {
+        let mut chunks = bytes.utf8_chunks();
+        while let Some(chunk) = chunks.next() {
             for ch in chunk.valid().chars() {
                 escape_single_char(ch, opt, &mut repr);
             }

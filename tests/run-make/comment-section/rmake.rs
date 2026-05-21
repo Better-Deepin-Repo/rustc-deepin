@@ -14,7 +14,7 @@ fn main() {
 
     rustc()
         .arg("-")
-        .stdin_buf("fn main() {}")
+        .stdin("fn main() {}")
         .emit("link,obj")
         .arg("-Csave-temps")
         .target(target)

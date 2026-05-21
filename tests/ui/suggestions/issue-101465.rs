@@ -18,7 +18,7 @@ fn foo() -> impl Tr {
     match true {
         true => B,
         false => C,
-        //~^ ERROR `match` arms have incompatible types
+        //~^ `match` arms have incompatible types
     }
 }
 

@@ -5,22 +5,22 @@ use crate::core::{GitReference, PackageId, SourceId};
 use crate::sources::git;
 use crate::sources::git::fetch::RemoteKind;
 use crate::sources::git::resolve_ref;
-use crate::sources::registry::MaybeLock;
 use crate::sources::registry::download;
+use crate::sources::registry::MaybeLock;
 use crate::sources::registry::{LoadResponse, RegistryConfig, RegistryData};
 use crate::util::cache_lock::CacheLockMode;
 use crate::util::errors::CargoResult;
 use crate::util::interning::InternedString;
-use crate::util::{Filesystem, GlobalContext, OnceExt};
+use crate::util::{Filesystem, GlobalContext};
 use anyhow::Context as _;
 use cargo_util::paths;
-use std::cell::OnceCell;
+use lazycell::LazyCell;
 use std::cell::{Cell, Ref, RefCell};
 use std::fs::File;
 use std::mem;
 use std::path::Path;
 use std::str;
-use std::task::{Poll, ready};
+use std::task::{ready, Poll};
 use tracing::{debug, trace};
 
 /// A remote registry is a registry that lives at a remote URL (such as
@@ -71,7 +71,7 @@ pub struct RemoteRegistry<'gctx> {
     /// [tree object]: https://git-scm.com/book/en/v2/Git-Internals-Git-Objects#_tree_objects
     tree: RefCell<Option<git2::Tree<'static>>>,
     /// A Git repository that contains the actual index we want.
-    repo: OnceCell<git2::Repository>,
+    repo: LazyCell<git2::Repository>,
     /// The current HEAD commit of the underlying Git repository.
     head: Cell<Option<git2::Oid>>,
     /// This stores sha value of the current HEAD commit for convenience.
@@ -103,7 +103,7 @@ impl<'gctx> RemoteRegistry<'gctx> {
             gctx,
             index_git_ref: GitReference::DefaultBranch,
             tree: RefCell::new(None),
-            repo: OnceCell::new(),
+            repo: LazyCell::new(),
             head: Cell::new(None),
             current_sha: Cell::new(None),
             needs_update: false,
@@ -198,7 +198,7 @@ impl<'gctx> RemoteRegistry<'gctx> {
         if let Some(sha) = self.current_sha.get() {
             return Some(sha);
         }
-        let sha = self.head().ok()?.to_string().into();
+        let sha = InternedString::new(&self.head().ok()?.to_string());
         self.current_sha.set(Some(sha));
         Some(sha)
     }
@@ -231,10 +231,6 @@ impl<'gctx> RegistryData for RemoteRegistry<'gctx> {
 
     fn index_path(&self) -> &Filesystem {
         &self.index_path
-    }
-
-    fn cache_path(&self) -> &Filesystem {
-        &self.cache_path
     }
 
     fn assert_index_locked<'a>(&self, path: &'a Filesystem) -> &'a Path {
@@ -349,7 +345,7 @@ impl<'gctx> RegistryData for RemoteRegistry<'gctx> {
         }
         self.mark_updated();
 
-        if !self.gctx.network_allowed() {
+        if self.gctx.offline() {
             return Ok(());
         }
         if self.gctx.cli_unstable().no_index_update {
@@ -382,7 +378,7 @@ impl<'gctx> RegistryData for RemoteRegistry<'gctx> {
         // Fetch the latest version of our `index_git_ref` into the index
         // checkout.
         let url = self.source_id.url();
-        let repo = self.repo.get_mut().unwrap();
+        let repo = self.repo.borrow_mut().unwrap();
         git::fetch(
             repo,
             url.as_str(),

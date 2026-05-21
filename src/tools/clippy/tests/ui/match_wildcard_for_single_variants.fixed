@@ -20,7 +20,6 @@ impl Color {
             Self::Green => (),
             Self::Blue => (),
             Self::Rgb(..) => (),
-            //~^ match_wildcard_for_single_variants
         };
     }
 }
@@ -31,7 +30,6 @@ fn main() {
         Foo::A => {},
         Foo::B => {},
         Foo::C => {},
-        //~^ match_wildcard_for_single_variants
     }
 
     let color = Color::Red;
@@ -42,7 +40,6 @@ fn main() {
         Color::Green => {},
         Color::Rgb(_r, _g, _b) => {},
         Color::Blue => {},
-        //~^ match_wildcard_for_single_variants
     }
 
     // check exhaustive wild
@@ -51,14 +48,12 @@ fn main() {
         Color::Green => {},
         Color::Rgb(..) => {},
         Color::Blue => {},
-        //~^ match_wildcard_for_single_variants
     }
     match color {
         Color::Red => {},
         Color::Green => {},
         Color::Rgb(_, _, _) => {},
         Color::Blue => {},
-        //~^ match_wildcard_for_single_variants
     }
 
     // shouldn't lint as there is one missing variant
@@ -76,7 +71,6 @@ fn main() {
         Color::Green => (),
         &Color::Rgb(..) => (),
         Color::Blue => (),
-        //~^ match_wildcard_for_single_variants
     }
 
     use self::Color as C;
@@ -86,7 +80,6 @@ fn main() {
         C::Green => (),
         C::Rgb(..) => (),
         C::Blue => (),
-        //~^ match_wildcard_for_single_variants
     }
 
     match color {
@@ -94,7 +87,6 @@ fn main() {
         Color::Green => (),
         Color::Rgb(..) => (),
         Color::Blue => (),
-        //~^ match_wildcard_for_single_variants
     }
 
     match Some(0) {
@@ -130,7 +122,6 @@ fn main() {
             Enum::B => (),
             Enum::C => (),
             Enum::__Private => (),
-            //~^ match_wildcard_for_single_variants
         }
         match Enum::A {
             Enum::A => (),
@@ -158,7 +149,6 @@ mod issue9993 {
             _ if false => 0,
             Foo::A(_) => 1,
             Foo::B => 2,
-            //~^ match_wildcard_for_single_variants
         };
     }
 }

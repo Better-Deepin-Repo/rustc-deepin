@@ -1,5 +1,5 @@
 //@ check-pass
-//@ edition: 2018
+//@ compile-flags: --edition 2018
 //@ run-rustfix
 
 #![feature(try_blocks)]

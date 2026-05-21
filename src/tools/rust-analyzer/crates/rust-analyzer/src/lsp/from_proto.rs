@@ -1,7 +1,7 @@
 //! Conversion lsp_types types to rust-analyzer specific ones.
 use anyhow::format_err;
 use ide::{Annotation, AnnotationKind, AssistKind, LineCol};
-use ide_db::{FileId, FilePosition, FileRange, line_index::WideLineCol};
+use ide_db::{line_index::WideLineCol, FileId, FilePosition, FileRange};
 use paths::Utf8PathBuf;
 use syntax::{TextRange, TextSize};
 use vfs::AbsPathBuf;
@@ -9,7 +9,7 @@ use vfs::AbsPathBuf;
 use crate::{
     global_state::GlobalStateSnapshot,
     line_index::{LineIndex, PositionEncoding},
-    lsp_ext, try_default,
+    lsp_ext,
 };
 
 pub(crate) fn abs_path(url: &lsp_types::Url) -> anyhow::Result<AbsPathBuf> {
@@ -35,19 +35,10 @@ pub(crate) fn offset(
                 .ok_or_else(|| format_err!("Invalid wide col offset"))?
         }
     };
-    let line_range = line_index.index.line(line_col.line).ok_or_else(|| {
+    let text_size = line_index.index.offset(line_col).ok_or_else(|| {
         format_err!("Invalid offset {line_col:?} (line index length: {:?})", line_index.index.len())
     })?;
-    let col = TextSize::from(line_col.col);
-    let clamped_len = col.min(line_range.len());
-    // FIXME: The cause for this is likely our request retrying. Commented out as this log is just too chatty and very easy to trigger.
-    // if clamped_len < col {
-    //     tracing::error!(
-    //         "Position {line_col:?} column exceeds line length {}, clamping it",
-    //         u32::from(line_range.len()),
-    //     );
-    // }
-    Ok(line_range.start() + clamped_len)
+    Ok(text_size)
 }
 
 pub(crate) fn text_range(
@@ -62,49 +53,42 @@ pub(crate) fn text_range(
     }
 }
 
-/// Returns `None` if the file was excluded.
-pub(crate) fn file_id(
-    snap: &GlobalStateSnapshot,
-    url: &lsp_types::Url,
-) -> anyhow::Result<Option<FileId>> {
+pub(crate) fn file_id(snap: &GlobalStateSnapshot, url: &lsp_types::Url) -> anyhow::Result<FileId> {
     snap.url_to_file_id(url)
 }
 
-/// Returns `None` if the file was excluded.
 pub(crate) fn file_position(
     snap: &GlobalStateSnapshot,
     tdpp: lsp_types::TextDocumentPositionParams,
-) -> anyhow::Result<Option<FilePosition>> {
-    let file_id = try_default!(file_id(snap, &tdpp.text_document.uri)?);
+) -> anyhow::Result<FilePosition> {
+    let file_id = file_id(snap, &tdpp.text_document.uri)?;
     let line_index = snap.file_line_index(file_id)?;
     let offset = offset(&line_index, tdpp.position)?;
-    Ok(Some(FilePosition { file_id, offset }))
+    Ok(FilePosition { file_id, offset })
 }
 
-/// Returns `None` if the file was excluded.
 pub(crate) fn file_range(
     snap: &GlobalStateSnapshot,
     text_document_identifier: &lsp_types::TextDocumentIdentifier,
     range: lsp_types::Range,
-) -> anyhow::Result<Option<FileRange>> {
+) -> anyhow::Result<FileRange> {
     file_range_uri(snap, &text_document_identifier.uri, range)
 }
 
-/// Returns `None` if the file was excluded.
 pub(crate) fn file_range_uri(
     snap: &GlobalStateSnapshot,
     document: &lsp_types::Url,
     range: lsp_types::Range,
-) -> anyhow::Result<Option<FileRange>> {
-    let file_id = try_default!(file_id(snap, document)?);
+) -> anyhow::Result<FileRange> {
+    let file_id = file_id(snap, document)?;
     let line_index = snap.file_line_index(file_id)?;
     let range = text_range(&line_index, range)?;
-    Ok(Some(FileRange { file_id, range }))
+    Ok(FileRange { file_id, range })
 }
 
 pub(crate) fn assist_kind(kind: lsp_types::CodeActionKind) -> Option<AssistKind> {
     let assist_kind = match &kind {
-        k if k == &lsp_types::CodeActionKind::EMPTY => AssistKind::Generate,
+        k if k == &lsp_types::CodeActionKind::EMPTY => AssistKind::None,
         k if k == &lsp_types::CodeActionKind::QUICKFIX => AssistKind::QuickFix,
         k if k == &lsp_types::CodeActionKind::REFACTOR => AssistKind::Refactor,
         k if k == &lsp_types::CodeActionKind::REFACTOR_EXTRACT => AssistKind::RefactorExtract,
@@ -116,7 +100,6 @@ pub(crate) fn assist_kind(kind: lsp_types::CodeActionKind) -> Option<AssistKind>
     Some(assist_kind)
 }
 
-/// Returns `None` if the file was excluded.
 pub(crate) fn annotation(
     snap: &GlobalStateSnapshot,
     range: lsp_types::Range,
@@ -130,7 +113,7 @@ pub(crate) fn annotation(
                 return Ok(None);
             }
             let pos @ FilePosition { file_id, .. } =
-                try_default!(file_position(snap, params.text_document_position_params)?);
+                file_position(snap, params.text_document_position_params)?;
             let line_index = snap.file_line_index(file_id)?;
 
             Ok(Annotation {
@@ -142,7 +125,7 @@ pub(crate) fn annotation(
             if snap.url_file_version(&params.text_document.uri) != Some(data.version) {
                 return Ok(None);
             }
-            let pos @ FilePosition { file_id, .. } = try_default!(file_position(snap, params)?);
+            let pos @ FilePosition { file_id, .. } = file_position(snap, params)?;
             let line_index = snap.file_line_index(file_id)?;
 
             Ok(Annotation {

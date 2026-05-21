@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 // Tests that the compiler does not ICE when const-evaluating a `panic!()` invocation with a
 // non-`&str` argument.
 
@@ -15,9 +14,9 @@ const fn _foo() {
 
 // ensure that conforming panics don't cause an error beyond the failure to const eval
 const _: () = panic!();
-//~^ ERROR: explicit panic
+//~^ ERROR: evaluation of constant value failed
 static _BAR: () = panic!("panic in static");
-//~^ ERROR panic in static
+//~^ ERROR could not evaluate static initializer
 
 const fn _bar() {
     panic!("panic in const fn");

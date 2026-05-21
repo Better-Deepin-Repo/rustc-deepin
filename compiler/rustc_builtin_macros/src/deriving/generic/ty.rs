@@ -1,12 +1,14 @@
 //! A mini version of ast::Ty, which is easier to use, and features an explicit `Self` type to use
 //! when specifying impls to be derived.
 
-pub(crate) use Ty::*;
-use rustc_ast::{self as ast, Expr, GenericArg, GenericParamKind, Generics, SelfKind, TyKind};
+use rustc_ast::ptr::P;
+use rustc_ast::{self as ast, Expr, GenericArg, GenericParamKind, Generics, SelfKind};
 use rustc_expand::base::ExtCtxt;
 use rustc_span::source_map::respan;
-use rustc_span::{DUMMY_SP, Ident, Span, Symbol, kw};
+use rustc_span::symbol::{kw, Ident, Symbol};
+use rustc_span::{Span, DUMMY_SP};
 use thin_vec::ThinVec;
+pub(crate) use Ty::*;
 
 /// A path, e.g., `::std::option::Option::<i32>` (global). Has support
 /// for type parameters.
@@ -20,6 +22,7 @@ pub(crate) struct Path {
 #[derive(Clone)]
 pub(crate) enum PathKind {
     Local,
+    Global,
     Std,
 }
 
@@ -40,7 +43,7 @@ impl Path {
         span: Span,
         self_ty: Ident,
         self_generics: &Generics,
-    ) -> Box<ast::Ty> {
+    ) -> P<ast::Ty> {
         cx.ty_path(self.to_path(cx, span, self_ty, self_generics))
     }
     pub(crate) fn to_path(
@@ -55,6 +58,7 @@ impl Path {
         let params = tys.map(GenericArg::Type).collect();
 
         match self.kind {
+            PathKind::Global => cx.path_all(span, true, idents, params),
             PathKind::Local => cx.path_all(span, false, idents, params),
             PathKind::Std => {
                 let def_site = cx.with_def_site_ctxt(DUMMY_SP);
@@ -65,7 +69,7 @@ impl Path {
     }
 }
 
-/// A type. Supports pointers, Self, literals, unit or an arbitrary AST path.
+/// A type. Supports pointers, Self, and literals.
 #[derive(Clone)]
 pub(crate) enum Ty {
     Self_,
@@ -76,8 +80,6 @@ pub(crate) enum Ty {
     Path(Path),
     /// For () return types.
     Unit,
-    /// An arbitrary type.
-    AstTy(Box<ast::Ty>),
 }
 
 pub(crate) fn self_ref() -> Ty {
@@ -91,7 +93,7 @@ impl Ty {
         span: Span,
         self_ty: Ident,
         self_generics: &Generics,
-    ) -> Box<ast::Ty> {
+    ) -> P<ast::Ty> {
         match self {
             Ref(ty, mutbl) => {
                 let raw_ty = ty.to_ty(cx, span, self_ty, self_generics);
@@ -103,7 +105,6 @@ impl Ty {
                 let ty = ast::TyKind::Tup(ThinVec::new());
                 cx.ty(span, ty)
             }
-            AstTy(ty) => ty.clone(),
         }
     }
 
@@ -135,10 +136,6 @@ impl Ty {
                 cx.path_all(span, false, vec![self_ty], params)
             }
             Path(p) => p.to_path(cx, span, self_ty, generics),
-            AstTy(ty) => match &ty.kind {
-                TyKind::Path(_, path) => path.clone(),
-                _ => cx.dcx().span_bug(span, "non-path in a path in generic `derive`"),
-            },
             Ref(..) => cx.dcx().span_bug(span, "ref in a path in generic `derive`"),
             Unit => cx.dcx().span_bug(span, "unit in a path in generic `derive`"),
         }
@@ -198,7 +195,7 @@ impl Bounds {
     }
 }
 
-pub(crate) fn get_explicit_self(cx: &ExtCtxt<'_>, span: Span) -> (Box<Expr>, ast::ExplicitSelf) {
+pub(crate) fn get_explicit_self(cx: &ExtCtxt<'_>, span: Span) -> (P<Expr>, ast::ExplicitSelf) {
     // This constructs a fresh `self` path.
     let self_path = cx.expr_self(span);
     let self_ty = respan(span, SelfKind::Region(None, ast::Mutability::Not));

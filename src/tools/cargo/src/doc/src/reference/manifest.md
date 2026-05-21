@@ -12,7 +12,7 @@ Every manifest file consists of the following sections:
   * [`version`](#the-version-field) --- The version of the package.
   * [`authors`](#the-authors-field) --- The authors of the package.
   * [`edition`](#the-edition-field) --- The Rust edition.
-  * [`rust-version`](rust-version.md) --- The minimal supported Rust version.
+  * [`rust-version`](#the-rust-version-field) --- The minimal supported Rust version.
   * [`description`](#the-description-field) --- A description of the package.
   * [`documentation`](#the-documentation-field) --- URL of the package documentation.
   * [`readme`](#the-readme-field) --- Path to the package's README file.
@@ -30,7 +30,6 @@ Every manifest file consists of the following sections:
   * [`publish`](#the-publish-field) --- Can be used to prevent publishing the package.
   * [`metadata`](#the-metadata-table) --- Extra settings for external tools.
   * [`default-run`](#the-default-run-field) --- The default binary to run by [`cargo run`].
-  * [`autolib`](cargo-targets.md#target-auto-discovery) --- Disables library auto discovery.
   * [`autobins`](cargo-targets.md#target-auto-discovery) --- Disables binary auto discovery.
   * [`autoexamples`](cargo-targets.md#target-auto-discovery) --- Disables example auto discovery.
   * [`autotests`](cargo-targets.md#target-auto-discovery) --- Disables test auto discovery.
@@ -50,7 +49,6 @@ Every manifest file consists of the following sections:
 * [`[badges]`](#the-badges-section) --- Badges to display on a registry.
 * [`[features]`](features.md) --- Conditional compilation features.
 * [`[lints]`](#the-lints-section) --- Configure linters for this package.
-* [`[hints]`](#the-hints-section) --- Provide hints for compiling this package.
 * [`[patch]`](overriding-dependencies.md#the-patch-section) --- Override dependencies.
 * [`[replace]`](overriding-dependencies.md#the-replace-section) --- Override dependencies (deprecated).
 * [`[profile]`](profiles.md) --- Compiler settings and optimizations.
@@ -64,6 +62,7 @@ The first section in a `Cargo.toml` is `[package]`.
 [package]
 name = "hello_world" # the name of the package
 version = "0.1.0"    # the current version, obeying semver
+authors = ["Alice <a@example.com>", "Bob <b@example.com>"]
 ```
 
 The only field required by Cargo is [`name`](#the-name-field). If publishing to
@@ -92,39 +91,37 @@ a keyword. [crates.io] imposes even more restrictions, such as:
 
 ### The `version` field
 
-The `version` field is formatted according to the [SemVer] specification:
+Cargo bakes in the concept of [Semantic
+Versioning](https://semver.org/), so make sure you follow some basic rules:
 
-Versions must have three numeric parts,
-the major version, the minor version, and the patch version.
+* Before you reach 1.0.0, anything goes, but if you make breaking changes,
+  increment the minor version. In Rust, breaking changes include adding fields to
+  structs or variants to enums.
+* After 1.0.0, only make breaking changes when you increment the major version.
+  Don’t break the build.
+* After 1.0.0, don’t add any new public API (no new `pub` anything) in patch-level
+  versions. Always increment the minor version if you add any new `pub` structs,
+  traits, fields, types, functions, methods or anything else.
+* Use version numbers with three numeric parts such as 1.0.0 rather than 1.0.
 
-A pre-release part can be added after a dash such as `1.0.0-alpha`.
-The pre-release part may be separated with periods to distinguish separate
-components. Numeric components will use numeric comparison while
-everything else will be compared lexicographically.
-For example, `1.0.0-alpha.11` is higher than `1.0.0-alpha.4`.
-
-A metadata part can be added after a plus, such as `1.0.0+21AF26D3`.
-This is for informational purposes only and is generally ignored by Cargo.
-
-Cargo bakes in the concept of [Semantic Versioning](https://semver.org/),
-so versions are considered [compatible](semver.md) if their left-most non-zero major/minor/patch component is the same.
 See the [Resolver] chapter for more information on how Cargo uses versions to
-resolve dependencies.
+resolve dependencies, and for guidelines on setting your own version. See the
+[SemVer compatibility] chapter for more details on exactly what constitutes a
+breaking change.
 
 This field is optional and defaults to `0.0.0`.  The field is required for publishing packages.
 
 > **MSRV:** Before 1.75, this field was required
 
-[SemVer]: https://semver.org
 [Resolver]: resolver.md
 [SemVer compatibility]: semver.md
 
 ### The `authors` field
 
-> **Warning**: This field is deprecated
-
 The optional `authors` field lists in an array the people or organizations that are considered
-the "authors" of the package. An optional email address may be included within angled brackets at
+the "authors" of the package. The exact meaning is open to interpretation --- it
+may list the original or primary authors, current maintainers, or owners of the
+package. An optional email address may be included within angled brackets at
 the end of each author entry.
 
 ```toml
@@ -133,8 +130,13 @@ the end of each author entry.
 authors = ["Graydon Hoare", "Fnu Lnu <no-reply@rust-lang.org>"]
 ```
 
-This field is surfaced in package metadata and in the `CARGO_PKG_AUTHORS`
-environment variable within `build.rs` for backwards compatibility.
+This field is only surfaced in package metadata and in the `CARGO_PKG_AUTHORS`
+environment variable within `build.rs`. It is not displayed in the [crates.io]
+user interface.
+
+> **Warning**: Package manifests cannot be changed once published, so this
+> field cannot be changed or removed in already-published versions of a
+> package.
 
 ### The `edition` field
 
@@ -146,12 +148,12 @@ examples, etc.
 ```toml
 [package]
 # ...
-edition = '2024'
+edition = '2021'
 ```
 
 Most manifests have the `edition` field filled in automatically by [`cargo new`]
 with the latest stable edition. By default `cargo new` creates a manifest with
-the 2024 edition currently.
+the 2021 edition currently.
 
 If the `edition` field is not present in `Cargo.toml`, then the 2015 edition is
 assumed for backwards compatibility. Note that all manifests
@@ -160,9 +162,36 @@ will have `edition` explicitly specified to a newer value.
 
 ### The `rust-version` field
 
-The `rust-version` field tells cargo what version of the
-Rust toolchain you support for your package.
-See [the Rust version chapter](rust-version.md) for more detail.
+The `rust-version` field is an optional key that tells cargo what version of the
+Rust language and compiler your package can be compiled with. If the currently
+selected version of the Rust compiler is older than the stated version, cargo
+will exit with an error, telling the user what version is required.
+
+The first version of Cargo that supports this field was released with Rust 1.56.0.
+In older releases, the field will be ignored, and Cargo will display a warning.
+
+```toml
+[package]
+# ...
+rust-version = "1.56"
+```
+
+The Rust version must be a bare version number with two or three components; it
+cannot include semver operators or pre-release identifiers. Compiler pre-release
+identifiers such as -nightly will be ignored while checking the Rust version.
+The `rust-version` must be equal to or newer than the version that first
+introduced the configured `edition`.
+
+The `rust-version` may be ignored using the `--ignore-rust-version` option.
+
+Setting the `rust-version` key in `[package]` will affect all targets/crates in
+the package, including test suites, benchmarks, binaries, examples, etc.
+
+To find the minimum `rust-version` compatible with your project, you can use third-party tools like [`cargo-msrv`](https://crates.io/crates/cargo-msrv).
+
+When used on packages that get published, we recommend [verifying the `rust-version`](../guide/continuous-integration.md#verifying-rust-version).
+
+> **MSRV:** Respected as of 1.56
 
 ### The `description` field
 
@@ -409,8 +438,8 @@ The following files are always included:
 
 * The `Cargo.toml` file of the package itself is always included, it does not
   need to be listed in `include`.
-* A minimized `Cargo.lock` is automatically included.
-  See [`cargo package`] for more information.
+* A minimized `Cargo.lock` is automatically included if the package contains a
+  binary or example target, see [`cargo package`] for more information.
 * If a [`license-file`](#the-license-and-license-file-fields) is specified, it
   is always included.
 
@@ -566,26 +595,6 @@ As for dependents, Cargo suppresses lints from non-path dependencies with featur
 
 > **MSRV:** Respected as of 1.74
 
-## The `[hints]` section
-
-The `[hints]` section allows specifying hints for compiling this package. Cargo
-will respect these hints by default when compiling this package, though the
-top-level package being built can override these values through the `[profile]`
-mechanism. Hints are, by design, always safe for Cargo to ignore; if Cargo
-encounters a hint it doesn't understand, or a hint it understands but with a
-value it doesn't understand, it will warn, but not error. As a result,
-specifying hints in a crate does not impact the MSRV of the crate.
-
-Individual hints may have an associated unstable feature gate that you need to
-pass in order to apply the configuration they specify, but if you don't specify
-that unstable feature gate, you will again get only a warning, not an error.
-
-There are no stable hints at this time. See the [hint-mostly-unused
-documentation](unstable.md#profile-hint-mostly-unused-option) for information
-on an unstable hint.
-
-> **MSRV:** Respected as of 1.90.
-
 ## The `[badges]` section
 
 The `[badges]` section is for specifying status badges that can be displayed
@@ -647,3 +656,45 @@ more detail.
 [spdx-license-list-3.20]: https://github.com/spdx/license-list-data/tree/v3.20
 [SPDX site]: https://spdx.org
 [TOML]: https://toml.io/
+
+<script>
+(function() {
+    var fragments = {
+        "#the-project-layout": "../guide/project-layout.html",
+        "#examples": "cargo-targets.html#examples",
+        "#tests": "cargo-targets.html#tests",
+        "#integration-tests": "cargo-targets.html#integration-tests",
+        "#configuring-a-target": "cargo-targets.html#configuring-a-target",
+        "#target-auto-discovery": "cargo-targets.html#target-auto-discovery",
+        "#the-required-features-field-optional": "cargo-targets.html#the-required-features-field",
+        "#building-dynamic-or-static-libraries": "cargo-targets.html#the-crate-type-field",
+        "#the-workspace-section": "workspaces.html#the-workspace-section",
+        "#virtual-workspace": "workspaces.html",
+        "#package-selection": "workspaces.html#package-selection",
+        "#the-features-section": "features.html#the-features-section",
+        "#rules": "features.html",
+        "#usage-in-end-products": "features.html",
+        "#usage-in-packages": "features.html",
+        "#the-patch-section": "overriding-dependencies.html#the-patch-section",
+        "#using-patch-with-multiple-versions": "overriding-dependencies.html#using-patch-with-multiple-versions",
+        "#the-replace-section": "overriding-dependencies.html#the-replace-section",
+        "#package-metadata": "manifest.html#the-package-section",
+        "#the-authors-field-optional": "manifest.html#the-authors-field",
+        "#the-edition-field-optional": "manifest.html#the-edition-field",
+        "#the-documentation-field-optional": "manifest.html#the-documentation-field",
+        "#the-workspace--field-optional": "manifest.html#the-workspace-field",
+        "#package-build": "manifest.html#the-build-field",
+        "#the-build-field-optional": "manifest.html#the-build-field",
+        "#the-links-field-optional": "manifest.html#the-links-field",
+        "#the-exclude-and-include-fields-optional": "manifest.html#the-exclude-and-include-fields",
+        "#the-publish--field-optional": "manifest.html#the-publish-field",
+        "#the-metadata-table-optional": "manifest.html#the-metadata-table",
+    };
+    var target = fragments[window.location.hash];
+    if (target) {
+        var url = window.location.toString();
+        var base = url.substring(0, url.lastIndexOf('/'));
+        window.location.replace(base + "/" + target);
+    }
+})();
+</script>

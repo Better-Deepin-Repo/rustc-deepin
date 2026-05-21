@@ -1,9 +1,9 @@
-//@ normalize-stderr: "`: .*" -> "`: $$FILE_NOT_FOUND_MSG"
+//@ normalize-stderr-test: "`: .*" -> "`: $$FILE_NOT_FOUND_MSG"
 
 // test that errors in a (selection) of macros don't kill compilation
 // immediately, so that we get more errors listed at a time.
 
-#![feature(trace_macros)]
+#![feature(trace_macros, concat_idents)]
 #![feature(stmt_expr_attributes)]
 
 use std::arch::asm;
@@ -39,16 +39,10 @@ enum AttrOnInnerExpression {
     Baz,
 }
 
-#[derive(Default)] //~ ERROR `#[derive(Default)]` on enum with no `#[default]`
+#[derive(Default)] //~ ERROR no default declared
 enum NoDeclaredDefault {
     Foo,
     Bar,
-}
-
-#[derive(Default)] //~ ERROR `#[derive(Default)]` on enum with no `#[default]`
-enum NoDeclaredDefaultWithoutUnitVariant {
-    Foo(i32),
-    Bar(i32),
 }
 
 #[derive(Default)] //~ ERROR multiple declared defaults
@@ -103,6 +97,8 @@ enum NonExhaustiveDefault {
 fn main() {
     asm!(invalid); //~ ERROR
     llvm_asm!(invalid); //~ ERROR
+
+    concat_idents!("not", "idents"); //~ ERROR
 
     option_env!(invalid); //~ ERROR
     env!(invalid); //~ ERROR

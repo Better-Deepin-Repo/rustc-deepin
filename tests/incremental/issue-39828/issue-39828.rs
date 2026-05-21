@@ -7,7 +7,6 @@
 
 //@ revisions:rpass1 rpass2
 //@ aux-build:generic.rs
-//@ ignore-backends: gcc
 
 extern crate generic;
 fn main() { }

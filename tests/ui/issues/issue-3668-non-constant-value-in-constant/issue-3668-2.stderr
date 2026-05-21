@@ -6,9 +6,8 @@ LL |     static child: isize = x + 1;
    |
 help: consider using `let` instead of `static`
    |
-LL -     static child: isize = x + 1;
-LL +     let child: isize = x + 1;
-   |
+LL |     let child: isize = x + 1;
+   |     ~~~
 
 error: aborting due to 1 previous error
 

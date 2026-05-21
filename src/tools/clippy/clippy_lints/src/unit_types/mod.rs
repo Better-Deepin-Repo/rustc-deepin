@@ -3,10 +3,9 @@ mod unit_arg;
 mod unit_cmp;
 mod utils;
 
-use clippy_utils::macros::FormatArgsStorage;
 use rustc_hir::{Expr, LetStmt};
 use rustc_lint::{LateContext, LateLintPass};
-use rustc_session::impl_lint_pass;
+use rustc_session::declare_lint_pass;
 
 declare_clippy_lint! {
     /// ### What it does
@@ -97,21 +96,11 @@ declare_clippy_lint! {
     "passing unit to a function"
 }
 
-pub struct UnitTypes {
-    format_args: FormatArgsStorage,
-}
-
-impl_lint_pass!(UnitTypes => [LET_UNIT_VALUE, UNIT_CMP, UNIT_ARG]);
-
-impl UnitTypes {
-    pub fn new(format_args: FormatArgsStorage) -> Self {
-        Self { format_args }
-    }
-}
+declare_lint_pass!(UnitTypes => [LET_UNIT_VALUE, UNIT_CMP, UNIT_ARG]);
 
 impl<'tcx> LateLintPass<'tcx> for UnitTypes {
     fn check_local(&mut self, cx: &LateContext<'tcx>, local: &'tcx LetStmt<'tcx>) {
-        let_unit_value::check(cx, &self.format_args, local);
+        let_unit_value::check(cx, local);
     }
 
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {

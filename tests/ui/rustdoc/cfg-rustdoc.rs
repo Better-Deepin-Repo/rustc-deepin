@@ -1,7 +1,6 @@
-#[cfg(doc)] //~ NOTE the item is gated here
-pub struct Foo; //~ NOTE found an item that was configured out
+#[cfg(doc)]
+pub struct Foo;
 
 fn main() {
-    let f = Foo; //~ ERROR cannot find value `Foo` in this scope
-    //~^ NOTE not found in this scope
+    let f = Foo; //~ ERROR
 }

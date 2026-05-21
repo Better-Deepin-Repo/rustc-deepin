@@ -4,8 +4,8 @@
 //! It determines whether to deref the new expression and/or wrap it in parentheses,
 //! based on the parent of the existing expression.
 use syntax::{
+    ast::{self, make, FieldExpr, MethodCallExpr},
     AstNode, T,
-    ast::{self, FieldExpr, MethodCallExpr, make, syntax_factory::SyntaxFactory},
 };
 
 use crate::AssistContext;
@@ -121,27 +121,11 @@ impl RefData {
     /// Derefs `expr` and wraps it in parens if necessary
     pub(crate) fn wrap_expr(&self, mut expr: ast::Expr) -> ast::Expr {
         if self.needs_deref {
-            expr = make::expr_prefix(T![*], expr).into();
+            expr = make::expr_prefix(T![*], expr);
         }
 
         if self.needs_parentheses {
-            expr = make::expr_paren(expr).into();
-        }
-
-        expr
-    }
-
-    pub(crate) fn wrap_expr_with_factory(
-        &self,
-        mut expr: ast::Expr,
-        syntax_factory: &SyntaxFactory,
-    ) -> ast::Expr {
-        if self.needs_deref {
-            expr = syntax_factory.expr_prefix(T![*], expr).into();
-        }
-
-        if self.needs_parentheses {
-            expr = syntax_factory.expr_paren(expr).into();
+            expr = make::expr_paren(expr);
         }
 
         expr

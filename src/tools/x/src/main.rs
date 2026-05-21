@@ -19,14 +19,15 @@ const PYTHON2: &str = "python2";
 const PYTHON3: &str = "python3";
 
 fn python() -> &'static str {
-    let Some(path) = env::var_os("PATH") else {
-        return PYTHON;
+    let val = match env::var_os("PATH") {
+        Some(val) => val,
+        None => return PYTHON,
     };
 
     let mut python2 = false;
     let mut python3 = false;
 
-    for dir in env::split_paths(&path) {
+    for dir in env::split_paths(&val) {
         // `python` should always take precedence over python2 / python3 if it exists
         if dir.join(PYTHON).with_extension(EXE_EXTENSION).exists() {
             return PYTHON;
@@ -88,7 +89,7 @@ fn exec_or_status(command: &mut Command) -> io::Result<ExitStatus> {
 fn handle_result(result: io::Result<ExitStatus>, cmd: Command) {
     match result {
         Err(error) => {
-            eprintln!("Failed to invoke `{cmd:?}`: {error}");
+            eprintln!("Failed to invoke `{:?}`: {}", cmd, error);
         }
         Ok(status) => {
             process::exit(status.code().unwrap_or(1));
@@ -97,12 +98,14 @@ fn handle_result(result: io::Result<ExitStatus>, cmd: Command) {
 }
 
 fn main() {
-    if env::args().nth(1).is_some_and(|s| s == "--wrapper-version") {
-        let version = env!("CARGO_PKG_VERSION");
-        println!("{version}");
-        return;
+    match env::args().skip(1).next().as_deref() {
+        Some("--wrapper-version") => {
+            let version = env!("CARGO_PKG_VERSION");
+            println!("{}", version);
+            return;
+        }
+        _ => {}
     }
-
     let current = match env::current_dir() {
         Ok(dir) => dir,
         Err(err) => {
@@ -110,6 +113,7 @@ fn main() {
             process::exit(1);
         }
     };
+
     for dir in current.ancestors() {
         let candidate = dir.join("x.py");
         if candidate.exists() {

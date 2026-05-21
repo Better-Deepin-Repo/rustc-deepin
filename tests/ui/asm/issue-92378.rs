@@ -1,15 +1,18 @@
-//@ add-minicore
 //@ compile-flags: --target armv5te-unknown-linux-gnueabi
 //@ needs-llvm-components: arm
+//@ needs-asm-support
 //@ build-pass
-//@ ignore-backends: gcc
 
-#![feature(no_core)]
+#![feature(no_core, lang_items, rustc_attrs)]
 #![no_core]
 #![crate_type = "rlib"]
 
-extern crate minicore;
-use minicore::*;
+#[rustc_builtin_macro]
+macro_rules! asm {
+    () => {};
+}
+#[lang = "sized"]
+trait Sized {}
 
 // ARM uses R11 for the frame pointer, make sure R7 is usable.
 #[instruction_set(arm::a32)]

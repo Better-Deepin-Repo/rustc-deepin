@@ -7,7 +7,7 @@ const _X: () = unsafe {
     let ptr = intrinsics::const_allocate(4, 4);
     intrinsics::const_deallocate(ptr, 4, 4);
     intrinsics::const_deallocate(ptr, 4, 4);
-    //~^ ERROR: dangling
+    //~^ error: evaluation of constant value failed
 };
 
 fn main() {}

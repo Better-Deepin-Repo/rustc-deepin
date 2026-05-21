@@ -90,34 +90,17 @@ macro_rules! types {
         pub struct $name($v [$elem_type; $len]);
 
         impl $name {
-            /// Put the same value in every lane.
+            /// Using `my_simd([x; N])` seemingly fails tests,
+            /// so use this internal helper for it instead.
             #[inline(always)]
             $v fn splat(value: $elem_type) -> $name {
-                unsafe { $crate::intrinsics::simd::simd_splat(value) }
-            }
-
-            /// Returns an array reference containing the entire SIMD vector.
-            $v const fn as_array(&self) -> &[$elem_type; $len] {
-                // SAFETY: this type is just an overaligned `[T; N]` with
-                // potential padding at the end, so pointer casting to a
-                // `&[T; N]` is safe.
-                //
-                // NOTE: This deliberately doesn't just use `&self.0` because it may soon be banned
-                // see https://github.com/rust-lang/compiler-team/issues/838
-                unsafe { &*(self as *const Self as *const [$elem_type; $len]) }
-
-            }
-
-            /// Returns a mutable array reference containing the entire SIMD vector.
-            #[inline]
-            $v fn as_mut_array(&mut self) -> &mut [$elem_type; $len] {
-                // SAFETY: this type is just an overaligned `[T; N]` with
-                // potential padding at the end, so pointer casting to a
-                // `&mut [T; N]` is safe.
-                //
-                // NOTE: This deliberately doesn't just use `&mut self.0` because it may soon be banned
-                // see https://github.com/rust-lang/compiler-team/issues/838
-                unsafe { &mut *(self as *mut Self as *mut [$elem_type; $len]) }
+                #[derive(Copy, Clone)]
+                #[repr(simd)]
+                struct JustOne([$elem_type; 1]);
+                let one = JustOne([value]);
+                // SAFETY: 0 is always in-bounds because we're shuffling
+                // a simd type with exactly one element.
+                unsafe { simd_shuffle!(one, one, [0; $len]) }
             }
         }
 
@@ -125,163 +108,32 @@ macro_rules! types {
         impl crate::fmt::Debug for $name {
             #[inline]
             fn fmt(&self, f: &mut crate::fmt::Formatter<'_>) -> crate::fmt::Result {
-                crate::core_arch::simd::debug_simd_finish(f, stringify!($name), self.as_array())
-            }
-        }
-
-        $(#[$stability])+
-        impl crate::convert::From<crate::core_arch::simd::Simd<$elem_type, $len>> for $name {
-            #[inline(always)]
-            fn from(simd: crate::core_arch::simd::Simd<$elem_type, $len>) -> Self {
-                unsafe { crate::mem::transmute(simd) }
-            }
-        }
-
-        $(#[$stability])+
-        impl crate::convert::From<$name> for crate::core_arch::simd::Simd<$elem_type, $len> {
-            #[inline(always)]
-            fn from(simd: $name) -> Self {
-                unsafe { crate::mem::transmute(simd) }
+                crate::core_arch::simd::debug_simd_finish(f, stringify!($name), self.0)
             }
         }
     )*);
 }
 
 #[allow(unused)]
-#[repr(simd)]
-pub(crate) struct SimdShuffleIdx<const LEN: usize>(pub(crate) [u32; LEN]);
-
-#[allow(unused)]
 macro_rules! simd_shuffle {
     ($x:expr, $y:expr, $idx:expr $(,)?) => {{
-        $crate::intrinsics::simd::simd_shuffle(
-            $x,
-            $y,
-            const { $crate::core_arch::macros::SimdShuffleIdx($idx) },
-        )
+        $crate::intrinsics::simd::simd_shuffle::<_, [u32; _], _>($x, $y, const { $idx })
     }};
 }
 
 #[allow(unused)]
 macro_rules! simd_insert {
-    ($x:expr, $idx:expr, $val:expr $(,)?) => {{ $crate::intrinsics::simd::simd_insert($x, const { $idx }, $val) }};
+    ($x:expr, $idx:expr, $val:expr $(,)?) => {{
+        simd_insert($x, const { $idx }, $val)
+    }};
 }
 
 #[allow(unused)]
 macro_rules! simd_extract {
-    ($x:expr, $idx:expr $(,)?) => {{ $crate::intrinsics::simd::simd_extract($x, const { $idx }) }};
-    ($x:expr, $idx:expr, $ty:ty $(,)?) => {{ $crate::intrinsics::simd::simd_extract::<_, $ty>($x, const { $idx }) }};
-}
-
-#[allow(unused)]
-macro_rules! simd_masked_load {
-    ($align:expr, $mask:expr, $ptr:expr, $default:expr) => {
-        $crate::intrinsics::simd::simd_masked_load::<_, _, _, { $align }>($mask, $ptr, $default)
-    };
-}
-
-#[allow(unused)]
-macro_rules! simd_masked_store {
-    ($align:expr, $mask:expr, $ptr:expr, $default:expr) => {
-        $crate::intrinsics::simd::simd_masked_store::<_, _, _, { $align }>($mask, $ptr, $default)
-    };
-}
-
-/// The first N even indices `[0, 2, 4, ...]`.
-pub(crate) const fn even<const N: usize>() -> [u32; N] {
-    let mut out = [0u32; N];
-    let mut i = 0usize;
-    while i < N {
-        out[i] = (2 * i) as u32;
-        i += 1;
-    }
-    out
-}
-
-/// The first N odd indices `[1, 3, 5, ...]`.
-pub(crate) const fn odd<const N: usize>() -> [u32; N] {
-    let mut out = [0u32; N];
-    let mut i = 0usize;
-    while i < N {
-        out[i] = (2 * i + 1) as u32;
-        i += 1;
-    }
-    out
-}
-
-/// Multiples of N offset by K `[K, K+N, K+2N, ...]`.
-pub(crate) const fn deinterleave_mask<const LANES: usize, const N: usize, const K: usize>()
--> [u32; LANES] {
-    let mut out = [0u32; LANES];
-    let mut i = 0usize;
-    while i < LANES {
-        out[i] = (i * N + K) as u32;
-        i += 1;
-    }
-    out
-}
-
-#[allow(unused)]
-macro_rules! deinterleaving_load {
-    ($elem:ty, $lanes:literal, 2, $ptr:expr) => {{
-        use $crate::core_arch::macros::deinterleave_mask;
-        use $crate::core_arch::simd::Simd;
-        use $crate::mem::transmute;
-
-        type V = Simd<$elem, $lanes>;
-        type W = Simd<$elem, { $lanes * 2 }>;
-
-        let w: W = $crate::ptr::read_unaligned($ptr as *const W);
-
-        let v0: V = simd_shuffle!(w, w, deinterleave_mask::<$lanes, 2, 0>());
-        let v1: V = simd_shuffle!(w, w, deinterleave_mask::<$lanes, 2, 1>());
-
-        transmute((v0, v1))
+    ($x:expr, $idx:expr $(,)?) => {{
+        simd_extract($x, const { $idx })
     }};
-
-    ($elem:ty, $lanes:literal, 3, $ptr:expr) => {{
-        use $crate::core_arch::macros::deinterleave_mask;
-        use $crate::core_arch::simd::Simd;
-        use $crate::mem::{MaybeUninit, transmute};
-
-        type V = Simd<$elem, $lanes>;
-        type W = Simd<$elem, { $lanes * 3 }>;
-
-        // NOTE: repr(simd) adds padding to make the total size a power of two.
-        // Hence reading W from ptr might read out of bounds.
-        let mut mem = MaybeUninit::<W>::uninit();
-        $crate::ptr::copy_nonoverlapping(
-            $ptr.cast::<$elem>(),
-            mem.as_mut_ptr().cast::<$elem>(),
-            $lanes * 3,
-        );
-        let w = mem.assume_init();
-
-        let v0: V = simd_shuffle!(w, w, deinterleave_mask::<$lanes, 3, 0>());
-        let v1: V = simd_shuffle!(w, w, deinterleave_mask::<$lanes, 3, 1>());
-        let v2: V = simd_shuffle!(w, w, deinterleave_mask::<$lanes, 3, 2>());
-
-        transmute((v0, v1, v2))
-    }};
-
-    ($elem:ty, $lanes:literal, 4, $ptr:expr) => {{
-        use $crate::core_arch::macros::deinterleave_mask;
-        use $crate::core_arch::simd::Simd;
-        use $crate::mem::transmute;
-
-        type V = Simd<$elem, $lanes>;
-        type W = Simd<$elem, { $lanes * 4 }>;
-
-        let w: W = $crate::ptr::read_unaligned($ptr as *const W);
-
-        let v0: V = simd_shuffle!(w, w, deinterleave_mask::<$lanes, 4, 0>());
-        let v1: V = simd_shuffle!(w, w, deinterleave_mask::<$lanes, 4, 1>());
-        let v2: V = simd_shuffle!(w, w, deinterleave_mask::<$lanes, 4, 2>());
-        let v3: V = simd_shuffle!(w, w, deinterleave_mask::<$lanes, 4, 3>());
-
-        transmute((v0, v1, v2, v3))
+    ($x:expr, $idx:expr, $ty:ty $(,)?) => {{
+        simd_extract::<_, $ty>($x, const { $idx })
     }};
 }
-
-#[allow(unused)]
-pub(crate) use deinterleaving_load;

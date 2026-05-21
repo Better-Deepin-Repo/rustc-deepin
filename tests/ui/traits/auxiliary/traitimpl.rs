@@ -2,6 +2,6 @@
 
 pub trait Bar<'a> : 'a {}
 
-impl<'a> dyn Bar<'a> {
+impl<'a> Bar<'a> {
     pub fn bar(&self) {}
 }

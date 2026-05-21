@@ -5,18 +5,14 @@ use crate::ops::CompileOptions;
 use crate::util::CargoResult;
 use anyhow::bail;
 use cargo_util::ProcessBuilder;
-use cargo_util::paths::normalize_path;
 use std::fmt::Write;
-use std::path::Path;
 use std::path::PathBuf;
-
-const ITEM_INDENT: &str = "    ";
 
 fn get_available_targets<'a>(
     filter_fn: fn(&Target) -> bool,
     ws: &'a Workspace<'_>,
     options: &'a CompileOptions,
-) -> CargoResult<Vec<(&'a str, &'a Path)>> {
+) -> CargoResult<Vec<&'a str>> {
     let packages = options.spec.get_packages(ws)?;
 
     let mut targets: Vec<_> = packages
@@ -27,12 +23,7 @@ fn get_available_targets<'a>(
                 .iter()
                 .filter(|target| filter_fn(target))
         })
-        .map(|target| {
-            (
-                target.name(),
-                target.src_path().path().expect("Target is not a `Metabuild` but one of `Bin` | `Test` | `Bench` | `ExampleBin`")
-            )
-        })
+        .map(Target::name)
         .collect();
 
     targets.sort();
@@ -56,10 +47,8 @@ fn print_available_targets(
         writeln!(output, "No {} available.", plural_name)?;
     } else {
         writeln!(output, "Available {}:", plural_name)?;
-        let mut shell = ws.gctx().shell();
-        for (name, src_path) in targets {
-            let link = shell.err_file_hyperlink(src_path);
-            writeln!(output, "{ITEM_INDENT}{link}{}{link:#}", name)?;
+        for target in targets {
+            writeln!(output, "    {}", target)?;
         }
     }
     bail!("{}", output)
@@ -68,7 +57,7 @@ fn print_available_targets(
 pub fn print_available_packages(ws: &Workspace<'_>) -> CargoResult<()> {
     let packages = ws
         .members()
-        .map(|pkg| (pkg.name().as_str(), pkg.manifest_path()))
+        .map(|pkg| pkg.name().as_str())
         .collect::<Vec<_>>();
 
     let mut output = "\"--package <SPEC>\" requires a SPEC format value, \
@@ -82,10 +71,8 @@ pub fn print_available_packages(ws: &Workspace<'_>) -> CargoResult<()> {
         writeln!(output, "No packages available.")?;
     } else {
         writeln!(output, "Possible packages/workspace members:")?;
-        let mut shell = ws.gctx().shell();
-        for (name, manifest_path) in packages {
-            let link = shell.err_file_hyperlink(manifest_path);
-            writeln!(output, "{ITEM_INDENT}{link}{}{link:#}", name)?;
+        for package in packages {
+            writeln!(output, "    {}", package)?;
         }
     }
     bail!("{}", output)
@@ -107,8 +94,6 @@ pub fn print_available_tests(ws: &Workspace<'_>, options: &CompileOptions) -> Ca
     print_available_targets(Target::is_test, ws, options, "--test", "test targets")
 }
 
-/// The source path and its current dir for use in compilation.
-///
 /// The path that we pass to rustc is actually fairly important because it will
 /// show up in error messages (important for readability), debug information
 /// (important for caching), etc. As a result we need to be pretty careful how we
@@ -124,20 +109,15 @@ pub fn print_available_tests(ws: &Workspace<'_>, options: &CompileOptions) -> Ca
 /// The first returned value here is the argument to pass to rustc, and the
 /// second is the cwd that rustc should operate in.
 pub fn path_args(ws: &Workspace<'_>, unit: &Unit) -> (PathBuf, PathBuf) {
+    let ws_root = ws.root();
     let src = match unit.target.src_path() {
         TargetSourcePath::Path(path) => path.to_path_buf(),
-        TargetSourcePath::Metabuild => unit.pkg.manifest().metabuild_path(ws.build_dir()),
+        TargetSourcePath::Metabuild => unit.pkg.manifest().metabuild_path(ws.target_dir()),
     };
     assert!(src.is_absolute());
     if unit.pkg.package_id().source_id().is_path() {
-        // Determine which path we make this relative to: usually it's the workspace root,
-        // but this can be overwritten with a `-Z` flag.
-        let root = match &ws.gctx().cli_unstable().root_dir {
-            None => ws.root().to_owned(),
-            Some(root_dir) => normalize_path(&ws.gctx().cwd().join(root_dir)),
-        };
-        if let Ok(path) = src.strip_prefix(&root) {
-            return (path.to_path_buf(), root);
+        if let Ok(path) = src.strip_prefix(ws_root) {
+            return (path.to_path_buf(), ws_root.to_path_buf());
         }
     }
     (src, unit.pkg.root().to_path_buf())

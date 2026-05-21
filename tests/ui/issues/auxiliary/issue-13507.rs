@@ -16,7 +16,7 @@ pub mod testtypes {
             TypeId::of::<FooFnPtr>(),
             TypeId::of::<FooNil>(),
             TypeId::of::<FooTuple>(),
-            TypeId::of::<dyn FooTrait>(),
+            TypeId::of::<FooTrait>(),
             TypeId::of::<FooStruct>(),
             TypeId::of::<FooEnum>()
         ]

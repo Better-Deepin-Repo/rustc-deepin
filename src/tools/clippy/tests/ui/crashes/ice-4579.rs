@@ -1,6 +1,4 @@
-//@ check-pass
-
-#![allow(clippy::single_match, clippy::ptr_offset_by_literal)]
+#![allow(clippy::single_match)]
 
 use std::ptr;
 

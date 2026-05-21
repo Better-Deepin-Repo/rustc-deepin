@@ -5,7 +5,7 @@
 
 use std::marker::Unpin;
 
-// Some arbitrary dyn-compatible traits:
+// Some arbitrary object-safe traits:
 trait ObjA {}
 trait ObjB {}
 

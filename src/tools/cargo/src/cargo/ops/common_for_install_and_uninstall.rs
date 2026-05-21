@@ -1,29 +1,27 @@
-use std::collections::{BTreeMap, BTreeSet, btree_map};
+use std::collections::{btree_map, BTreeMap, BTreeSet};
 use std::env;
-use std::io::SeekFrom;
 use std::io::prelude::*;
+use std::io::SeekFrom;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::task::Poll;
 
-use annotate_snippets::Level;
-use anyhow::{Context as _, bail, format_err};
+use anyhow::{bail, format_err, Context as _};
 use cargo_util::paths;
 use cargo_util_schemas::core::PartialVersion;
 use ops::FilterRule;
 use serde::{Deserialize, Serialize};
 
-use crate::core::Target;
 use crate::core::compiler::{DirtyReason, Freshness};
+use crate::core::Target;
 use crate::core::{Dependency, FeatureValue, Package, PackageId, SourceId};
 use crate::ops::{self, CompileFilter, CompileOptions};
-use crate::sources::PathSource;
 use crate::sources::source::QueryKind;
 use crate::sources::source::Source;
-use crate::util::GlobalContext;
+use crate::sources::PathSource;
 use crate::util::cache_lock::CacheLockMode;
-use crate::util::context::{ConfigRelativePath, Definition};
 use crate::util::errors::CargoResult;
+use crate::util::GlobalContext;
 use crate::util::{FileLock, Filesystem};
 
 /// On-disk tracking for which package installed which binary.
@@ -100,7 +98,7 @@ pub struct CrateListingV1 {
 }
 
 impl InstallTracker {
-    /// Create an `InstallTracker` from information on disk.
+    /// Create an InstallTracker from information on disk.
     pub fn load(gctx: &GlobalContext, root: &Filesystem) -> CargoResult<InstallTracker> {
         let v1_lock =
             root.open_rw_exclusive_create(Path::new(".crates.toml"), gctx, "crate metadata")?;
@@ -155,7 +153,7 @@ impl InstallTracker {
     /// Returns a tuple `(freshness, map)`. `freshness` indicates if the
     /// package should be built (`Dirty`) or if it is already up-to-date
     /// (`Fresh`) and should be skipped. The map maps binary names to the
-    /// `PackageId` that installed it (which is `None` if not known).
+    /// PackageId that installed it (which is None if not known).
     ///
     /// If there are no duplicates, then it will be considered `Dirty` (i.e.,
     /// it is OK to build/install).
@@ -252,7 +250,7 @@ impl InstallTracker {
     /// Check if any executables are already installed.
     ///
     /// Returns a map of duplicates, the key is the executable name and the
-    /// value is the `PackageId` that is already installed. The `PackageId` is
+    /// value is the PackageId that is already installed. The PackageId is
     /// None if it is an untracked executable.
     fn find_duplicates(
         &self,
@@ -547,39 +545,11 @@ impl InstallInfo {
 
 /// Determines the root directory where installation is done.
 pub fn resolve_root(flag: Option<&str>, gctx: &GlobalContext) -> CargoResult<Filesystem> {
-    let config_root = match gctx.get::<Option<ConfigRelativePath>>("install.root")? {
-        Some(p) => {
-            let resolved = p.resolve_program(gctx);
-            if resolved.is_relative() {
-                let definition = p.value().definition.clone();
-                if matches!(definition, Definition::Path(_)) {
-                    let suggested = format!("{}/", resolved.display());
-                    let notes = [
-                        Level::NOTE.message("a future version of Cargo will treat it as relative to the configuration directory"),
-                        Level::HELP.message(format!("add a trailing slash (`{}`) to adopt the correct behavior and silence this warning", suggested)),
-                        Level::NOTE.message("see more at https://doc.rust-lang.org/cargo/reference/config.html#config-relative-paths"),
-                    ];
-                    gctx.shell().print_report(
-                        &[Level::WARNING
-                            .secondary_title(format!(
-                                "the `install.root` value `{}` defined in {} without a trailing slash is deprecated",
-                                resolved.display(),
-                                definition
-                            ))
-                            .elements(notes)],
-                        false,
-                    )?;
-                }
-            }
-            Some(resolved)
-        }
-        None => None,
-    };
-
+    let config_root = gctx.get_path("install.root")?;
     Ok(flag
         .map(PathBuf::from)
         .or_else(|| gctx.get_env_os("CARGO_INSTALL_ROOT").map(PathBuf::from))
-        .or_else(|| config_root)
+        .or_else(move || config_root.map(|v| v.val))
         .map(Filesystem::new)
         .unwrap_or_else(|| gctx.home().clone()))
 }
@@ -667,10 +637,9 @@ where
                     } else {
                         String::new()
                     };
-                    bail!(
-                        "\
+                    bail!("\
 cannot install package `{name} {ver}`, it requires rustc {msrv} or newer, while the currently active rustc version is {current}{extra}"
-                    )
+)
                 }
             }
             let pkg = Box::new(source).download_now(summary.package_id(), gctx)?;
@@ -793,7 +762,7 @@ where
     }
 }
 
-/// Helper to convert features to a `BTreeSet`.
+/// Helper to convert features to a BTreeSet.
 fn feature_set(features: &Rc<BTreeSet<FeatureValue>>) -> BTreeSet<String> {
     features.iter().map(|s| s.to_string()).collect()
 }
@@ -816,7 +785,11 @@ pub fn exe_names(pkg: &Package, filter: &ops::CompileFilter) -> BTreeSet<String>
             .filter(|target| target.is_executable())
             .map(|target| to_exe(target.name()))
             .collect(),
-        CompileFilter::Only { bins, examples, .. } => {
+        CompileFilter::Only {
+            ref bins,
+            ref examples,
+            ..
+        } => {
             let collect = |rule: &_, f: fn(&Target) -> _| match rule {
                 FilterRule::All => pkg
                     .targets()

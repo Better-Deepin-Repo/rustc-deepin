@@ -7,8 +7,8 @@ impl PartialEq for Foo {
         true
     }
     fn ne(&self, _: &Foo) -> bool {
-        //~^ partialeq_ne_impl
-
+        //~^ ERROR: re-implementing `PartialEq::ne` is unnecessary
+        //~| NOTE: `-D clippy::partialeq-ne-impl` implied by `-D warnings`
         false
     }
 }

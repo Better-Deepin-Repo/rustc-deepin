@@ -1,8 +1,9 @@
-use rustc_ast::{self as ast, MetaItem, Safety};
+use rustc_ast::{self as ast, MetaItem};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_expand::base::{Annotatable, ExtCtxt};
-use rustc_span::{Span, sym};
-use thin_vec::{ThinVec, thin_vec};
+use rustc_span::symbol::sym;
+use rustc_span::Span;
+use thin_vec::{thin_vec, ThinVec};
 
 use crate::deriving::generic::ty::*;
 use crate::deriving::generic::*;
@@ -26,14 +27,15 @@ pub(crate) fn expand_deriving_eq(
         additional_bounds: Vec::new(),
         supports_unions: true,
         methods: vec![MethodDef {
-            name: sym::assert_fields_are_eq,
+            name: sym::assert_receiver_is_total_eq,
             generics: Bounds::empty(),
             explicit_self: true,
             nonself_args: vec![],
             ret_ty: Unit,
             attributes: thin_vec![
+                cx.attr_word(sym::inline, span),
                 cx.attr_nested_word(sym::doc, sym::hidden, span),
-                cx.attr_nested_word(sym::coverage, sym::off, span),
+                cx.attr_nested_word(sym::coverage, sym::off, span)
             ],
             fieldless_variants_strategy: FieldlessVariantsStrategy::Unify,
             combine_substructure: combine_substructure(Box::new(|a, b, c| {
@@ -42,9 +44,6 @@ pub(crate) fn expand_deriving_eq(
         }],
         associated_types: Vec::new(),
         is_const,
-        is_staged_api_crate: cx.ecfg.features.staged_api(),
-        safety: Safety::Default,
-        document: true,
     };
     trait_def.expand_ext(cx, mitem, item, push, true)
 }

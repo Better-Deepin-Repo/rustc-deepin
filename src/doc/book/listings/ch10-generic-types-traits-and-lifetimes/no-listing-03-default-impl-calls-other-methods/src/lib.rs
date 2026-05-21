@@ -8,15 +8,15 @@ pub trait Summary {
 }
 // ANCHOR_END: here
 
-pub struct SocialPost {
+pub struct Tweet {
     pub username: String,
     pub content: String,
     pub reply: bool,
-    pub repost: bool,
+    pub retweet: bool,
 }
 
 // ANCHOR: impl
-impl Summary for SocialPost {
+impl Summary for Tweet {
     fn summarize_author(&self) -> String {
         format!("@{}", self.username)
     }

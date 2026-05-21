@@ -10,7 +10,7 @@ apt-get install -y --no-install-recommends \
   g++ \
   git \
   libssl-dev \
-  libncurses-dev \
+  libncurses5 \
   make \
   ninja-build \
   pkg-config \

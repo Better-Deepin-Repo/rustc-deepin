@@ -1,12 +1,8 @@
-use super::Result;
-use super::builder::Builder;
-use super::current::current_or_unnamed;
-use super::lifecycle::{JoinInner, spawn_unchecked};
-use super::thread::Thread;
+use super::{current, park, Builder, JoinInner, Result, Thread};
 use crate::marker::PhantomData;
-use crate::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
+use crate::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+use crate::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use crate::sync::Arc;
-use crate::sync::atomic::{Atomic, AtomicBool, AtomicUsize, Ordering};
 use crate::{fmt, io};
 
 /// A scope to spawn scoped threads in.
@@ -39,8 +35,8 @@ pub struct Scope<'scope, 'env: 'scope> {
 pub struct ScopedJoinHandle<'scope, T>(JoinInner<'scope, T>);
 
 pub(super) struct ScopeData {
-    num_running_threads: Atomic<usize>,
-    a_thread_panicked: Atomic<bool>,
+    num_running_threads: AtomicUsize,
+    a_thread_panicked: AtomicBool,
     main_thread: Thread,
 }
 
@@ -80,9 +76,6 @@ impl ScopeData {
 ///
 /// All threads spawned within the scope that haven't been manually joined
 /// will be automatically joined before this function returns.
-/// However, note that joining will only wait for the main function of these threads to finish; even
-/// when this function returns, destructors of thread-local variables in these threads might still
-/// be running.
 ///
 /// # Panics
 ///
@@ -147,7 +140,7 @@ where
     let scope = Scope {
         data: Arc::new(ScopeData {
             num_running_threads: AtomicUsize::new(0),
-            main_thread: current_or_unnamed(),
+            main_thread: current(),
             a_thread_panicked: AtomicBool::new(false),
         }),
         env: PhantomData,
@@ -159,8 +152,7 @@ where
 
     // Wait until all the threads are finished.
     while scope.data.num_running_threads.load(Ordering::Acquire) != 0 {
-        // SAFETY: this is the main thread, the handle belongs to us.
-        unsafe { scope.data.main_thread.park() };
+        park();
     }
 
     // Throw any panic from `f`, or the return value of `f` if no thread panicked.
@@ -184,12 +176,13 @@ impl<'scope, 'env> Scope<'scope, 'env> {
     /// thread. If the spawned thread panics, [`join`] will return an [`Err`] containing
     /// the panic payload.
     ///
-    /// If the join handle is dropped, the spawned thread will be implicitly joined at the
+    /// If the join handle is dropped, the spawned thread will implicitly joined at the
     /// end of the scope. In that case, if the spawned thread panics, [`scope`] will
     /// panic after all threads are joined.
     ///
-    /// This function creates a thread with the default parameters of [`Builder`].
-    /// To specify the new thread's stack size or the name, use [`Builder::spawn_scoped`].
+    /// This call will create a thread using default parameters of [`Builder`].
+    /// If you want to specify the stack size or the name of the thread, use
+    /// [`Builder::spawn_scoped`] instead.
     ///
     /// # Panics
     ///
@@ -212,6 +205,8 @@ impl Builder {
     ///
     /// Unlike [`Scope::spawn`], this method yields an [`io::Result`] to
     /// capture any failure to create the thread at the OS level.
+    ///
+    /// [`io::Result`]: crate::io::Result
     ///
     /// # Panics
     ///
@@ -262,10 +257,7 @@ impl Builder {
         F: FnOnce() -> T + Send + 'scope,
         T: Send + 'scope,
     {
-        let Builder { name, stack_size, no_hooks } = self;
-        Ok(ScopedJoinHandle(unsafe {
-            spawn_unchecked(name, stack_size, no_hooks, Some(scope.data.clone()), f)
-        }?))
+        Ok(ScopedJoinHandle(unsafe { self.spawn_unchecked_(f, Some(scope.data.clone())) }?))
     }
 }
 
@@ -287,14 +279,12 @@ impl<'scope, T> ScopedJoinHandle<'scope, T> {
     #[must_use]
     #[stable(feature = "scoped_threads", since = "1.63.0")]
     pub fn thread(&self) -> &Thread {
-        self.0.thread()
+        &self.0.thread
     }
 
     /// Waits for the associated thread to finish.
     ///
     /// This function will return immediately if the associated thread has already finished.
-    /// Otherwise, it fully waits for the thread to finish, including all destructors
-    /// for thread-local variables that might be running after the main function of the thread.
     ///
     /// In terms of [atomic memory orderings], the completion of the associated
     /// thread synchronizes with this function returning.
@@ -335,7 +325,7 @@ impl<'scope, T> ScopedJoinHandle<'scope, T> {
     /// to return quickly, without blocking for any significant amount of time.
     #[stable(feature = "scoped_threads", since = "1.63.0")]
     pub fn is_finished(&self) -> bool {
-        self.0.is_finished()
+        Arc::strong_count(&self.0.packet) == 1
     }
 }
 

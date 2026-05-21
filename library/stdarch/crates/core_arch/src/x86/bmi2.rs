@@ -6,7 +6,7 @@
 //! [Wikipedia][wikipedia_bmi] provides a quick overview of the instructions
 //! available.
 //!
-//! [intel64_ref]: https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-instruction-set-reference-manual-325383.pdf
+//! [intel64_ref]: http://www.intel.de/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-instruction-set-reference-manual-325383.pdf
 //! [wikipedia_bmi]:
 //! https://en.wikipedia.org/wiki/Bit_Manipulation_Instruction_Sets#ABM_.28Advanced_Bit_Manipulation.29
 
@@ -25,8 +25,7 @@ use stdarch_test::assert_instr;
 #[cfg_attr(all(test, target_arch = "x86"), assert_instr(mul))]
 #[target_feature(enable = "bmi2")]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mulx_u32(a: u32, b: u32, hi: &mut u32) -> u32 {
+pub unsafe fn _mulx_u32(a: u32, b: u32, hi: &mut u32) -> u32 {
     let result: u64 = (a as u64) * (b as u64);
     *hi = (result >> 32) as u32;
     result as u32
@@ -39,8 +38,8 @@ pub const fn _mulx_u32(a: u32, b: u32, hi: &mut u32) -> u32 {
 #[target_feature(enable = "bmi2")]
 #[cfg_attr(test, assert_instr(bzhi))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _bzhi_u32(a: u32, index: u32) -> u32 {
-    unsafe { x86_bmi2_bzhi_32(a, index) }
+pub unsafe fn _bzhi_u32(a: u32, index: u32) -> u32 {
+    x86_bmi2_bzhi_32(a, index)
 }
 
 /// Scatter contiguous low order bits of `a` to the result at the positions
@@ -51,8 +50,8 @@ pub fn _bzhi_u32(a: u32, index: u32) -> u32 {
 #[target_feature(enable = "bmi2")]
 #[cfg_attr(test, assert_instr(pdep))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _pdep_u32(a: u32, mask: u32) -> u32 {
-    unsafe { x86_bmi2_pdep_32(a, mask) }
+pub unsafe fn _pdep_u32(a: u32, mask: u32) -> u32 {
+    x86_bmi2_pdep_32(a, mask)
 }
 
 /// Gathers the bits of `x` specified by the `mask` into the contiguous low
@@ -63,11 +62,11 @@ pub fn _pdep_u32(a: u32, mask: u32) -> u32 {
 #[target_feature(enable = "bmi2")]
 #[cfg_attr(test, assert_instr(pext))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _pext_u32(a: u32, mask: u32) -> u32 {
-    unsafe { x86_bmi2_pext_32(a, mask) }
+pub unsafe fn _pext_u32(a: u32, mask: u32) -> u32 {
+    x86_bmi2_pext_32(a, mask)
 }
 
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.bmi.bzhi.32"]
     fn x86_bmi2_bzhi_32(x: u32, y: u32) -> u32;
     #[link_name = "llvm.x86.bmi.pdep.32"]
@@ -78,13 +77,12 @@ unsafe extern "C" {
 
 #[cfg(test)]
 mod tests {
-    use crate::core_arch::assert_eq_const as assert_eq;
     use stdarch_test::simd_test;
 
     use crate::core_arch::x86::*;
 
     #[simd_test(enable = "bmi2")]
-    fn test_pext_u32() {
+    unsafe fn test_pext_u32() {
         let n = 0b1011_1110_1001_0011u32;
 
         let m0 = 0b0110_0011_1000_0101u32;
@@ -98,7 +96,7 @@ mod tests {
     }
 
     #[simd_test(enable = "bmi2")]
-    fn test_pdep_u32() {
+    unsafe fn test_pdep_u32() {
         let n = 0b1011_1110_1001_0011u32;
 
         let m0 = 0b0110_0011_1000_0101u32;
@@ -112,14 +110,14 @@ mod tests {
     }
 
     #[simd_test(enable = "bmi2")]
-    fn test_bzhi_u32() {
+    unsafe fn test_bzhi_u32() {
         let n = 0b1111_0010u32;
         let s = 0b0001_0010u32;
         assert_eq!(_bzhi_u32(n, 5), s);
     }
 
     #[simd_test(enable = "bmi2")]
-    const fn test_mulx_u32() {
+    unsafe fn test_mulx_u32() {
         let a: u32 = 4_294_967_200;
         let b: u32 = 2;
         let mut hi = 0;

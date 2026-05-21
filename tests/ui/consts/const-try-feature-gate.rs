@@ -2,10 +2,9 @@
 
 const fn t() -> Option<()> {
     Some(())?;
-    //~^ ERROR `?` is not allowed
-    //~| ERROR `?` is not allowed
-    //~| ERROR `Try` is not yet stable as a const trait
-    //~| ERROR `FromResidual` is not yet stable as a const trait
+    //~^ error: `?` is not allowed in a `const fn`
+    //~| ERROR: cannot convert
+    //~| ERROR: cannot determine
     None
 }
 

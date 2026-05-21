@@ -1,9 +1,9 @@
-use hir::db::ExpandDatabase;
+use hir::{db::ExpandDatabase, HirFileIdExt};
 use ide_db::{assists::Assist, base_db::AnchoredPathBuf, source_change::FileSystemEdit};
 use itertools::Itertools;
 use syntax::AstNode;
 
-use crate::{Diagnostic, DiagnosticCode, DiagnosticsContext, fix};
+use crate::{fix, Diagnostic, DiagnosticCode, DiagnosticsContext};
 
 // Diagnostic: unresolved-module
 //
@@ -28,7 +28,6 @@ pub(crate) fn unresolved_module(
         },
         d.decl.map(|it| it.into()),
     )
-    .stable()
     .with_fixes(fixes(ctx, d))
 }
 
@@ -44,7 +43,7 @@ fn fixes(ctx: &DiagnosticsContext<'_>, d: &hir::UnresolvedModule) -> Option<Vec<
                     &format!("Create module at `{candidate}`"),
                     FileSystemEdit::CreateFile {
                         dst: AnchoredPathBuf {
-                            anchor: d.decl.file_id.original_file(ctx.sema.db).file_id(ctx.sema.db),
+                            anchor: d.decl.file_id.original_file(ctx.sema.db).file_id(),
                             path: candidate.clone(),
                         },
                         initial_contents: "".to_owned(),

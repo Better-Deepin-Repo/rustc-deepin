@@ -25,18 +25,18 @@ fn main() {
     //~| NOTE function or associated item not found in `Struct`
 
     Struc::foo();
-    //~^ ERROR cannot find type `Struc`
+    //~^ ERROR failed to resolve: use of undeclared type `Struc`
     //~| NOTE use of undeclared type `Struc`
 
     modul::foo();
-    //~^ ERROR cannot find module or crate `modul`
-    //~| NOTE use of unresolved module or unlinked crate `modul`
+    //~^ ERROR failed to resolve: use of undeclared crate or module `modul`
+    //~| NOTE use of undeclared crate or module `modul`
 
     module::Struc::foo();
-    //~^ ERROR cannot find `Struc` in `module`
+    //~^ ERROR failed to resolve: could not find `Struc` in `module`
     //~| NOTE could not find `Struc` in `module`
 
     Trai::foo();
-    //~^ ERROR cannot find type `Trai`
+    //~^ ERROR failed to resolve: use of undeclared type `Trai`
     //~| NOTE use of undeclared type `Trai`
 }

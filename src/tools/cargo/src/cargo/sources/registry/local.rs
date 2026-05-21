@@ -1,10 +1,10 @@
-//! Access to a registry on the local filesystem. See [`LocalRegistry`] for more.
+//! Access to a regstiry on the local filesystem. See [`LocalRegistry`] for more.
 
 use crate::core::PackageId;
 use crate::sources::registry::{LoadResponse, MaybeLock, RegistryConfig, RegistryData};
 use crate::util::errors::CargoResult;
 use crate::util::{Filesystem, GlobalContext};
-use cargo_util::{Sha256, paths};
+use cargo_util::{paths, Sha256};
 use std::fs::File;
 use std::io::SeekFrom;
 use std::io::{self, prelude::*};
@@ -93,10 +93,6 @@ impl<'gctx> RegistryData for LocalRegistry<'gctx> {
 
     fn index_path(&self) -> &Filesystem {
         &self.index_path
-    }
-
-    fn cache_path(&self) -> &Filesystem {
-        &self.root
     }
 
     fn assert_index_locked<'a>(&self, path: &'a Filesystem) -> &'a Path {

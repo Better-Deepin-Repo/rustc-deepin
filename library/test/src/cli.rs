@@ -1,7 +1,7 @@
 //! Module converting command-line arguments into test configuration.
 
 use std::env;
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal};
 use std::path::PathBuf;
 
 use super::options::{ColorConfig, Options, OutputFormat, RunIgnored};
@@ -44,7 +44,7 @@ impl TestOpts {
 }
 
 /// Result of parsing the options.
-pub(crate) type OptRes = Result<TestOpts, String>;
+pub type OptRes = Result<TestOpts, String>;
 /// Result of parsing the option part.
 type OptPartRes<T> = Result<T, String>;
 
@@ -57,12 +57,11 @@ fn optgroups() -> getopts::Options {
         .optflag("", "test", "Run tests and not benchmarks")
         .optflag("", "bench", "Run benchmarks instead of tests")
         .optflag("", "list", "List all tests and benchmarks")
-        .optflag("", "fail-fast", "Don't start new tests after the first failure")
         .optflag("h", "help", "Display this message")
-        .optopt("", "logfile", "Write logs to the specified file (deprecated)", "PATH")
+        .optopt("", "logfile", "Write logs to the specified file", "PATH")
         .optflag(
             "",
-            "no-capture",
+            "nocapture",
             "don't capture stdout/stderr of each \
              task, allow printing directly",
         )
@@ -163,17 +162,18 @@ tests whose names contain the filter are run. Multiple filter strings may
 be passed, which will run all tests matching any of the filters.
 
 By default, all tests are run in parallel. This can be altered with the
---test-threads flag when running tests (set it to 1).
+--test-threads flag or the RUST_TEST_THREADS environment variable when running
+tests (set it to 1).
 
-By default, the tests are run in alphabetical order. Use --shuffle to run
-the tests in random order. Pass the generated "shuffle seed" to
---shuffle-seed to run the tests in the same order again. Note that
---shuffle and --shuffle-seed do not affect whether the tests are run in
-parallel.
+By default, the tests are run in alphabetical order. Use --shuffle or set
+RUST_TEST_SHUFFLE to run the tests in random order. Pass the generated
+"shuffle seed" to --shuffle-seed (or set RUST_TEST_SHUFFLE_SEED) to run the
+tests in the same order again. Note that --shuffle and --shuffle-seed do not
+affect whether the tests are run in parallel.
 
 All tests have their standard output and standard error captured by default.
-This can be overridden with the --no-capture flag to a value other than "0".
-Logging is not captured by default.
+This can be overridden with the --nocapture flag or setting RUST_TEST_NOCAPTURE
+environment variable to a value other than "0". Logging is not captured by default.
 
 Test Attributes:
 
@@ -199,10 +199,7 @@ Test Attributes:
 /// otherwise creates a `TestOpts` object and returns it.
 pub fn parse_opts(args: &[String]) -> Option<OptRes> {
     // Parse matches.
-    let mut opts = optgroups();
-    // Flags hidden from `usage`
-    opts.optflag("", "nocapture", "Deprecated, use `--no-capture`");
-
+    let opts = optgroups();
     let binary = args.first().map(|c| &**c).unwrap_or("...");
     let args = args.get(1..).unwrap_or(args);
     let matches = match opts.parse(args) {
@@ -213,7 +210,7 @@ pub fn parse_opts(args: &[String]) -> Option<OptRes> {
     // Check if help was requested.
     if matches.opt_present("h") {
         // Show help and do nothing more.
-        usage(binary, &optgroups());
+        usage(binary, &opts);
         return None;
     }
 
@@ -261,7 +258,6 @@ fn parse_opts_impl(matches: getopts::Matches) -> OptRes {
     // Unstable flags
     let force_run_in_process = unstable_optflag!(matches, allow_unstable, "force-run-in-process");
     let exclude_should_panic = unstable_optflag!(matches, allow_unstable, "exclude-should-panic");
-    let fail_fast = unstable_optflag!(matches, allow_unstable, "fail-fast");
     let time_options = get_time_options(&matches, allow_unstable)?;
     let shuffle = get_shuffle(&matches, allow_unstable)?;
     let shuffle_seed = get_shuffle_seed(&matches, allow_unstable)?;
@@ -285,10 +281,6 @@ fn parse_opts_impl(matches: getopts::Matches) -> OptRes {
 
     let options = Options::new().display_output(matches.opt_present("show-output"));
 
-    if logfile.is_some() {
-        let _ = write!(io::stderr(), "warning: `--logfile` is deprecated");
-    }
-
     let test_opts = TestOpts {
         list,
         filters,
@@ -308,20 +300,21 @@ fn parse_opts_impl(matches: getopts::Matches) -> OptRes {
         skip,
         time_options,
         options,
-        fail_fast,
+        fail_fast: false,
     };
 
     Ok(test_opts)
 }
 
+// FIXME: Copied from librustc_ast until linkage errors are resolved. Issue #47566
 fn is_nightly() -> bool {
-    // Whether the current rustc version should allow unstable features
-    let enable_unstable_features = cfg!(enable_unstable_features);
-
-    // The runtime override for unstable features
+    // Whether this is a feature-staged build, i.e., on the beta or stable channel
+    let disable_unstable_features =
+        option_env!("CFG_DISABLE_UNSTABLE_FEATURES").map(|s| s != "0").unwrap_or(false);
+    // Whether we should enable unstable features for bootstrapping
     let bootstrap = env::var("RUSTC_BOOTSTRAP").is_ok();
 
-    bootstrap || enable_unstable_features
+    bootstrap || !disable_unstable_features
 }
 
 // Gets the CLI options associated with `report-time` feature.
@@ -450,7 +443,7 @@ fn get_color_config(matches: &getopts::Matches) -> OptPartRes<ColorConfig> {
 }
 
 fn get_nocapture(matches: &getopts::Matches) -> OptPartRes<bool> {
-    let mut nocapture = matches.opt_present("nocapture") || matches.opt_present("no-capture");
+    let mut nocapture = matches.opt_present("nocapture");
     if !nocapture {
         nocapture = match env::var("RUST_TEST_NOCAPTURE") {
             Ok(val) => &val != "0",

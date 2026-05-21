@@ -1,17 +1,16 @@
-use rustc_hir::attrs::InlineAttr;
+use rustc_attr::InlineAttr;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::LocalDefId;
-use rustc_hir::find_attr;
-use rustc_middle::bug;
 use rustc_middle::mir::visit::Visitor;
 use rustc_middle::mir::*;
 use rustc_middle::query::Providers;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::config::{InliningThreshold, OptLevel};
+use rustc_span::sym;
 
 use crate::{inline, pass_manager as pm};
 
-pub(super) fn provide(providers: &mut Providers) {
+pub fn provide(providers: &mut Providers) {
     providers.cross_crate_inlinable = cross_crate_inlinable;
 }
 
@@ -25,7 +24,7 @@ fn cross_crate_inlinable(tcx: TyCtxt<'_>, def_id: LocalDefId) -> bool {
 
     // This just reproduces the logic from Instance::requires_inline.
     match tcx.def_kind(def_id) {
-        DefKind::Ctor(..) | DefKind::Closure | DefKind::SyntheticCoroutineBody => return true,
+        DefKind::Ctor(..) | DefKind::Closure => return true,
         DefKind::Fn | DefKind::AssocFn => {}
         _ => return false,
     }
@@ -35,12 +34,7 @@ fn cross_crate_inlinable(tcx: TyCtxt<'_>, def_id: LocalDefId) -> bool {
         return true;
     }
 
-    // FIXME(autodiff): replace this as per discussion in https://github.com/rust-lang/rust/pull/149033#discussion_r2535465880
-    if find_attr!(tcx, def_id, RustcAutodiff(..)) {
-        return true;
-    }
-
-    if find_attr!(tcx, def_id, RustcIntrinsic) {
+    if tcx.has_attr(def_id, sym::rustc_intrinsic) {
         // Intrinsic fallback bodies are always cross-crate inlineable.
         // To ensure that the MIR inliner doesn't cluelessly try to inline fallback
         // bodies even when the backend would implement something better, we stop
@@ -52,25 +46,8 @@ fn cross_crate_inlinable(tcx: TyCtxt<'_>, def_id: LocalDefId) -> bool {
     // #[inline(never)] to force code generation.
     match codegen_fn_attrs.inline {
         InlineAttr::Never => return false,
-        InlineAttr::Hint | InlineAttr::Always | InlineAttr::Force { .. } => return true,
+        InlineAttr::Hint | InlineAttr::Always => return true,
         _ => {}
-    }
-
-    // If the crate is likely to be mostly unused, use cross-crate inlining to defer codegen until
-    // the function is referenced, in order to skip codegen for unused functions. This is
-    // intentionally after the check for `inline(never)`, so that `inline(never)` wins.
-    if tcx.sess.opts.unstable_opts.hint_mostly_unused {
-        return true;
-    }
-
-    let sig = tcx.fn_sig(def_id).instantiate_identity();
-    for ty in sig.inputs().skip_binder().iter().chain(std::iter::once(&sig.output().skip_binder()))
-    {
-        // FIXME(f16_f128): in order to avoid crashes building `core`, always inline to skip
-        // codegen if the function is not used.
-        if ty == &tcx.types.f16 || ty == &tcx.types.f128 {
-            return true;
-        }
     }
 
     // Don't do any inference when incremental compilation is enabled; the additional inlining that
@@ -82,9 +59,8 @@ fn cross_crate_inlinable(tcx: TyCtxt<'_>, def_id: LocalDefId) -> bool {
     // Don't do any inference if codegen optimizations are disabled and also MIR inlining is not
     // enabled. This ensures that we do inference even if someone only passes -Zinline-mir,
     // which is less confusing than having to also enable -Copt-level=1.
-    let inliner_will_run = pm::should_run_pass(tcx, &inline::Inline, pm::Optimizations::Allowed)
-        || inline::ForceInline::should_run_pass_for_callee(tcx, def_id.to_def_id());
-    if matches!(tcx.sess.opts.optimize, OptLevel::No) && !inliner_will_run {
+    if matches!(tcx.sess.opts.optimize, OptLevel::No) && !pm::should_run_pass(tcx, &inline::Inline)
+    {
         return false;
     }
 
@@ -108,15 +84,6 @@ fn cross_crate_inlinable(tcx: TyCtxt<'_>, def_id: LocalDefId) -> bool {
         && checker.statements <= threshold
 }
 
-// The threshold that CostChecker computes is balancing the desire to make more things
-// inlinable cross crates against the growth in incremental CGU size that happens when too many
-// things in the sysroot are made inlinable.
-// Permitting calls causes the size of some incremental CGUs to grow, because more functions are
-// made inlinable out of the sysroot or dependencies.
-// Assert terminators are similar to calls, but do not have the same impact on compile time, so
-// those are just treated as statements.
-// A threshold exists at all because we don't want to blindly mark a huge function as inlinable.
-
 struct CostChecker<'b, 'tcx> {
     tcx: TyCtxt<'tcx>,
     callee_body: &'b Body<'tcx>,
@@ -130,16 +97,18 @@ impl<'tcx> Visitor<'tcx> for CostChecker<'_, 'tcx> {
     fn visit_statement(&mut self, statement: &Statement<'tcx>, _: Location) {
         // Don't count StorageLive/StorageDead in the inlining cost.
         match statement.kind {
-            StatementKind::StorageLive(_) | StatementKind::StorageDead(_) | StatementKind::Nop => {}
+            StatementKind::StorageLive(_)
+            | StatementKind::StorageDead(_)
+            | StatementKind::Deinit(_)
+            | StatementKind::Nop => {}
             _ => self.statements += 1,
         }
     }
 
     fn visit_terminator(&mut self, terminator: &Terminator<'tcx>, _: Location) {
-        self.statements += 1;
         let tcx = self.tcx;
-        match &terminator.kind {
-            TerminatorKind::Drop { place, unwind, .. } => {
+        match terminator.kind {
+            TerminatorKind::Drop { ref place, unwind, .. } => {
                 let ty = place.ty(self.callee_body, tcx).ty;
                 if !ty.is_trivially_pure_clone_copy() {
                     self.calls += 1;
@@ -148,46 +117,27 @@ impl<'tcx> Visitor<'tcx> for CostChecker<'_, 'tcx> {
                     }
                 }
             }
-            TerminatorKind::Call { func, unwind, .. } => {
-                // We track calls because they make our function not a leaf (and in theory, the
-                // number of calls indicates how likely this function is to perturb other CGUs).
-                // But intrinsics don't have a body that gets assigned to a CGU, so they are
-                // ignored.
-                if let Some((fn_def_id, _)) = func.const_fn_def()
-                    && find_attr!(tcx, fn_def_id, RustcIntrinsic)
-                {
-                    return;
-                }
+            TerminatorKind::Call { unwind, .. } => {
                 self.calls += 1;
                 if let UnwindAction::Cleanup(_) = unwind {
                     self.landing_pads += 1;
                 }
             }
-            TerminatorKind::TailCall { .. } => {
-                self.calls += 1;
-            }
             TerminatorKind::Assert { unwind, .. } => {
+                self.calls += 1;
                 if let UnwindAction::Cleanup(_) = unwind {
                     self.landing_pads += 1;
                 }
             }
             TerminatorKind::UnwindResume => self.resumes += 1,
             TerminatorKind::InlineAsm { unwind, .. } => {
+                self.statements += 1;
                 if let UnwindAction::Cleanup(_) = unwind {
                     self.landing_pads += 1;
                 }
             }
-            TerminatorKind::Return
-            | TerminatorKind::Goto { .. }
-            | TerminatorKind::SwitchInt { .. }
-            | TerminatorKind::Unreachable
-            | TerminatorKind::UnwindTerminate(_) => {}
-            kind @ (TerminatorKind::FalseUnwind { .. }
-            | TerminatorKind::FalseEdge { .. }
-            | TerminatorKind::Yield { .. }
-            | TerminatorKind::CoroutineDrop) => {
-                bug!("{kind:?} should not be in runtime MIR");
-            }
+            TerminatorKind::Return => {}
+            _ => self.statements += 1,
         }
     }
 }

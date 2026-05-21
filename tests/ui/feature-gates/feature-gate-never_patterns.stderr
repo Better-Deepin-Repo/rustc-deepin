@@ -8,10 +8,9 @@ help: try adding parentheses to match on a tuple...
    |
 LL |         (Some(_),)
    |         +        +
-help: ...or a vertical bar to match on alternatives
+help: ...or a vertical bar to match on multiple alternatives
    |
-LL -         Some(_),
-LL +         Some(_) |
+LL |         Some(_) |
    |
 
 error[E0658]: `!` patterns are experimental
@@ -58,34 +57,19 @@ error: `match` arm with no body
   --> $DIR/feature-gate-never_patterns.rs:38:9
    |
 LL |         Some(_)
-   |         ^^^^^^^
-   |
-help: add a body after the pattern
-   |
-LL |         Some(_) => { todo!() }
-   |                 ++++++++++++++
+   |         ^^^^^^^- help: add a body after the pattern: `=> todo!(),`
 
 error: `match` arm with no body
   --> $DIR/feature-gate-never_patterns.rs:43:9
    |
 LL |         Some(_) if false,
-   |         ^^^^^^^^^^^^^^^^
-   |
-help: add a body after the pattern
-   |
-LL |         Some(_) if false => { todo!() },
-   |                          ++++++++++++++
+   |         ^^^^^^^- help: add a body after the pattern: `=> todo!(),`
 
 error: `match` arm with no body
   --> $DIR/feature-gate-never_patterns.rs:45:9
    |
 LL |         Some(_) if false
-   |         ^^^^^^^^^^^^^^^^
-   |
-help: add a body after the pattern
-   |
-LL |         Some(_) if false => { todo!() }
-   |                          ++++++++++++++
+   |         ^^^^^^^- help: add a body after the pattern: `=> todo!(),`
 
 error[E0658]: `!` patterns are experimental
   --> $DIR/feature-gate-never_patterns.rs:50:13
@@ -111,23 +95,13 @@ error: `match` arm with no body
   --> $DIR/feature-gate-never_patterns.rs:64:9
    |
 LL |         Some(_)
-   |         ^^^^^^^
-   |
-help: add a body after the pattern
-   |
-LL |         Some(_) => { todo!() }
-   |                 ++++++++++++++
+   |         ^^^^^^^- help: add a body after the pattern: `=> todo!(),`
 
 error: `match` arm with no body
   --> $DIR/feature-gate-never_patterns.rs:70:9
    |
 LL |         Some(_) if false
-   |         ^^^^^^^^^^^^^^^^
-   |
-help: add a body after the pattern
-   |
-LL |         Some(_) if false => { todo!() }
-   |                          ++++++++++++++
+   |         ^^^^^^^- help: add a body after the pattern: `=> todo!(),`
 
 error: a guard on a never pattern will never be run
   --> $DIR/feature-gate-never_patterns.rs:54:19

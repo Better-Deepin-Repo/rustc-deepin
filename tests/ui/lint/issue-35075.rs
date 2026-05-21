@@ -1,4 +1,3 @@
-//@ edition:2015
 struct Bar<T> {
     inner: Foo<T> //~ ERROR cannot find type `Foo` in this scope
 }

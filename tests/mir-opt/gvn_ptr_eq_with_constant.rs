@@ -5,6 +5,8 @@
 
 // Regression for <https://github.com/rust-lang/rust/issues/127089>
 
+#![feature(strict_provenance)]
+
 struct Foo<T>(std::marker::PhantomData<T>);
 
 impl<T> Foo<T> {

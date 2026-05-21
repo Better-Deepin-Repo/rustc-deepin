@@ -1,8 +1,6 @@
 #![deny(rustdoc::broken_intra_doc_links)]
 //~^ NOTE lint level is defined
-pub enum S {
-    A,
-}
+pub enum S {}
 fn S() {}
 
 #[macro_export]
@@ -14,10 +12,6 @@ static s: usize = 0;
 const c: usize = 0;
 
 trait T {}
-
-struct X {
-    y: usize,
-}
 
 /// Link to [struct@S]
 //~^ ERROR incompatible link kind for `S`
@@ -84,14 +78,4 @@ struct X {
 //~^ ERROR unresolved link to `std`
 //~| NOTE this link resolves to the crate `std`
 //~| HELP to link to the crate, prefix with `mod@`
-
-/// Link to [method@X::y]
-//~^ ERROR incompatible link kind for `X::y`
-//~| NOTE this link resolved
-//~| HELP prefix with `field@`
-
-/// Link to [field@S::A]
-//~^ ERROR unresolved link to `S::A`
-//~| NOTE this link resolves
-//~| HELP prefix with `variant@`
 pub fn f() {}

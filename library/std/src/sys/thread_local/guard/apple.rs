@@ -10,7 +10,7 @@ pub fn enable() {
     #[thread_local]
     static REGISTERED: Cell<bool> = Cell::new(false);
 
-    unsafe extern "C" {
+    extern "C" {
         fn _tlv_atexit(dtor: unsafe extern "C" fn(*mut u8), arg: *mut u8);
     }
 
@@ -26,7 +26,6 @@ pub fn enable() {
     unsafe extern "C" fn run_dtors(_: *mut u8) {
         unsafe {
             destructors::run();
-            crate::rt::thread_cleanup();
         }
     }
 }

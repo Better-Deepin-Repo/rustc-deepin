@@ -65,9 +65,9 @@ macro_rules! test_mask_api {
             fn roundtrip_int_conversion() {
                 let values = [true, false, false, true, false, false, true, false];
                 let mask = Mask::<$type, 8>::from_array(values);
-                let int = mask.to_simd();
+                let int = mask.to_int();
                 assert_eq!(int.to_array(), [-1, 0, 0, -1, 0, 0, -1, 0]);
-                assert_eq!(Mask::<$type, 8>::from_simd(int), mask);
+                assert_eq!(Mask::<$type, 8>::from_int(int), mask);
             }
 
             #[test]
@@ -99,6 +99,7 @@ macro_rules! test_mask_api {
                 assert_eq!(Mask::<$type, 2>::from_bitmask(bitmask), mask);
             }
 
+            #[cfg(feature = "all_lane_counts")]
             #[test]
             fn roundtrip_bitmask_conversion_odd() {
                 let values = [
@@ -133,6 +134,48 @@ macro_rules! test_mask_api {
                 cast_impl::<i64>();
                 cast_impl::<isize>();
             }
+
+            #[test]
+            fn roundtrip_bitmask_vector_conversion() {
+                use core_simd::simd::ToBytes;
+                let values = [
+                    true, false, false, true, false, false, true, false,
+                    true, true, false, false, false, false, false, true,
+                ];
+                let mask = Mask::<$type, 16>::from_array(values);
+                let bitmask = mask.to_bitmask_vector();
+                assert_eq!(bitmask.resize::<2>(0).to_ne_bytes()[..2], [0b01001001, 0b10000011]);
+                assert_eq!(Mask::<$type, 16>::from_bitmask_vector(bitmask), mask);
+            }
+
+            // rust-lang/portable-simd#379
+            #[test]
+            fn roundtrip_bitmask_vector_conversion_small() {
+                use core_simd::simd::ToBytes;
+                let values = [
+                    true, false, true, true
+                ];
+                let mask = Mask::<$type, 4>::from_array(values);
+                let bitmask = mask.to_bitmask_vector();
+                assert_eq!(bitmask.resize::<1>(0).to_ne_bytes()[0], 0b00001101);
+                assert_eq!(Mask::<$type, 4>::from_bitmask_vector(bitmask), mask);
+            }
+
+            /* FIXME doesn't work with non-powers-of-two, yet
+            // rust-lang/portable-simd#379
+            #[cfg(feature = "all_lane_counts")]
+            #[test]
+            fn roundtrip_bitmask_vector_conversion_odd() {
+                use core_simd::simd::ToBytes;
+                let values = [
+                    true, false, true, false, true, true, false, false, false, true, true,
+                ];
+                let mask = Mask::<$type, 11>::from_array(values);
+                let bitmask = mask.to_bitmask_vector();
+                assert_eq!(bitmask.resize::<2>(0).to_ne_bytes()[..2], [0b00110101, 0b00000110]);
+                assert_eq!(Mask::<$type, 11>::from_bitmask_vector(bitmask), mask);
+            }
+            */
         }
     }
 }

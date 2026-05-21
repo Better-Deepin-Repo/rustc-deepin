@@ -25,12 +25,8 @@ DESCRIPTION
           and may timeout. In that case, you will need to check for completion
           manually. This timeout does not affect the upload.
 
-       This command requires you to be authenticated using cargo-login(1) or
-       environment variables of the registry.token
-       <https://doc.rust-lang.org/cargo/reference/config.html#registrytoken>
-       and registries.<name>.token
-       <https://doc.rust-lang.org/cargo/reference/config.html#registriesnametoken>
-       config fields.
+       This command requires you to be authenticated with either the --token
+       option or using cargo-login(1).
 
        See the reference
        <https://doc.rust-lang.org/cargo/reference/publishing.html> for more
@@ -40,6 +36,18 @@ OPTIONS
    Publish Options
        --dry-run
            Perform all checks without uploading.
+
+       --token token
+           API token to use when authenticating. This overrides the token
+           stored in the credentials file (which is created by cargo-login(1)).
+
+           Cargo config <https://doc.rust-lang.org/cargo/reference/config.html>
+           environment variables can be used to override the tokens stored in
+           the credentials file. The token for crates.io may be specified with
+           the CARGO_REGISTRY_TOKEN environment variable. Tokens for other
+           registries may be specified with environment variables of the form
+           CARGO_REGISTRIES_NAME_TOKEN where NAME is the name of the registry
+           in all capital letters.
 
        --no-verify
            Don’t verify the contents by building them.
@@ -64,61 +72,19 @@ OPTIONS
            config key which defaults to crates-io.
 
    Package Selection
-       By default, when no package selection options are given, the packages
-       selected depend on the selected manifest file (based on the current
-       working directory if --manifest-path is not given). If the manifest is
-       the root of a workspace then the workspaces default members are
-       selected, otherwise only the package defined by the manifest will be
-       selected.
+       By default, the package in the current working directory is selected.
+       The -p flag can be used to choose a different package in a workspace.
 
-       The default members of a workspace can be set explicitly with the
-       workspace.default-members key in the root manifest. If this is not set,
-       a virtual workspace will include all workspace members (equivalent to
-       passing --workspace), and a non-virtual workspace will include only the
-       root crate itself.
-
-       -p spec…, --package spec…
-           Publish only the specified packages. See cargo-pkgid(1) for the SPEC
-           format. This flag may be specified multiple times and supports
-           common Unix glob patterns like *, ? and []. However, to avoid your
-           shell accidentally expanding glob patterns before Cargo handles
-           them, you must use single quotes or double quotes around each
-           pattern.
-
-       --workspace
-           Publish all members in the workspace.
-
-       --all
-           Deprecated alias for --workspace.
-
-       --exclude SPEC…
-           Exclude the specified packages. Must be used in conjunction with the
-           --workspace flag. This flag may be specified multiple times and
-           supports common Unix glob patterns like *, ? and []. However, to
-           avoid your shell accidentally expanding glob patterns before Cargo
-           handles them, you must use single quotes or double quotes around
-           each pattern.
+       -p spec, --package spec
+           The package to publish. See cargo-pkgid(1) for the SPEC format.
 
    Compilation Options
        --target triple
-           Publish for the specified target architecture. Flag may be specified
-           multiple times. The default is the host architecture. The general
-           format of the triple is <arch><sub>-<vendor>-<sys>-<abi>.
-
-           Possible values:
-
-           o  Any supported target in rustc --print target-list.
-
-           o  "host-tuple", which will internally be substituted by the
-              host’s target. This can be particularly useful if you’re
-              cross-compiling some crates, and don’t want to specify your
-              host’s machine as a target (for instance, an xtask in a shared
-              project that may be worked on by many hosts).
-
-           o  A path to a custom target specification. See Custom Target Lookup
-              Path
-              <https://doc.rust-lang.org/rustc/targets/custom.html#custom-target-lookup-path>
-              for more information.
+           Publish for the given architecture. The default is the host
+           architecture. The general format of the triple is
+           <arch><sub>-<vendor>-<sys>-<abi>. Run rustc --print target-list for
+           a list of supported targets. This flag may be specified multiple
+           times.
 
            This may also be specified with the build.target config value
            <https://doc.rust-lang.org/cargo/reference/config.html>.
@@ -126,7 +92,7 @@ OPTIONS
            Note that specifying this flag makes Cargo run in a different mode
            where the target artifacts are placed in a separate directory. See
            the build cache
-           <https://doc.rust-lang.org/cargo/reference/build-cache.html>
+           <https://doc.rust-lang.org/cargo/guide/build-cache.html>
            documentation for more details.
 
        --target-dir directory
@@ -193,6 +159,21 @@ OPTIONS
 
        --frozen
            Equivalent to specifying both --locked and --offline.
+
+       --lockfile-path PATH
+           Changes the path of the lockfile from the default
+           (<workspace_root>/Cargo.lock) to PATH. PATH must end with Cargo.lock
+           (e.g. --lockfile-path /tmp/temporary-lockfile/Cargo.lock). Note that
+           providing --lockfile-path will ignore existing lockfile at the
+           default path, and instead will either use the lockfile from PATH, or
+           write a new lockfile into the provided PATH if it doesn’t exist.
+           This flag can be used to run most commands in read-only directories,
+           writing lockfile into the provided PATH.
+
+           This option is only available on the nightly channel
+           <https://doc.rust-lang.org/book/appendix-07-nightly-rust.html> and
+           requires the -Z unstable-options flag to enable (see #14421
+           <https://github.com/rust-lang/cargo/issues/14421>).
 
    Miscellaneous Options
        -j N, --jobs N

@@ -2,7 +2,6 @@
 //@ failure-status: 101
 //@ error-pattern: not implemented
 //@ needs-unwind -Cpanic=abort causes abort instead of exit(101)
-//@ ignore-backends: gcc
 
 pub trait Interner {
     type InternedVariableKinds;

@@ -1,12 +1,13 @@
 use rustc_ast as ast;
-use rustc_ast::{GenericParamKind, ItemKind, MetaItemInner, MetaItemKind, StmtKind};
-use rustc_attr_parsing::validate_attr;
+use rustc_ast::{GenericParamKind, ItemKind, MetaItemKind, NestedMetaItem, StmtKind};
 use rustc_expand::base::{
     Annotatable, DeriveResolution, ExpandResult, ExtCtxt, Indeterminate, MultiItemModifier,
 };
 use rustc_feature::AttributeTemplate;
+use rustc_parse::validate_attr;
 use rustc_session::Session;
-use rustc_span::{ErrorGuaranteed, Ident, Span, sym};
+use rustc_span::symbol::{sym, Ident};
+use rustc_span::{ErrorGuaranteed, Span};
 
 use crate::cfg_eval::cfg_eval;
 use crate::errors;
@@ -34,10 +35,8 @@ impl MultiItemModifier for Expander {
         let (sess, features) = (ecx.sess, ecx.ecfg.features);
         let result =
             ecx.resolver.resolve_derives(ecx.current_expansion.id, ecx.force_mode, &|| {
-                let template = AttributeTemplate {
-                    list: Some(&["Trait1, Trait2, ..."]),
-                    ..Default::default()
-                };
+                let template =
+                    AttributeTemplate { list: Some("Trait1, Trait2, ..."), ..Default::default() };
                 validate_attr::check_builtin_meta_item(
                     &sess.psess,
                     meta_item,
@@ -50,9 +49,9 @@ impl MultiItemModifier for Expander {
                 let mut resolutions = match &meta_item.kind {
                     MetaItemKind::List(list) => {
                         list.iter()
-                            .filter_map(|meta_item_inner| match meta_item_inner {
-                                MetaItemInner::MetaItem(meta) => Some(meta),
-                                MetaItemInner::Lit(lit) => {
+                            .filter_map(|nested_meta| match nested_meta {
+                                NestedMetaItem::MetaItem(meta) => Some(meta),
+                                NestedMetaItem::Lit(lit) => {
                                     // Reject `#[derive("Debug")]`.
                                     report_unexpected_meta_item_lit(sess, lit);
                                     None
@@ -105,7 +104,7 @@ impl MultiItemModifier for Expander {
 fn dummy_annotatable() -> Annotatable {
     Annotatable::GenericParam(ast::GenericParam {
         id: ast::DUMMY_NODE_ID,
-        ident: Ident::dummy(),
+        ident: Ident::empty(),
         attrs: Default::default(),
         bounds: Default::default(),
         is_placeholder: false,

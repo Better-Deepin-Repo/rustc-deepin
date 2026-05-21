@@ -9,9 +9,7 @@ const EXPECTED = [
     },
     {
         'query': '__proto__',
-        'others': [
-            {"path": "", "name": "prototype"},
-        ],
+        'others': [],
         'returned': [],
         'in_args': [],
     },

@@ -1,7 +1,6 @@
 use crate::compile::benchmark::codegen_backend::CodegenBackend;
 use crate::compile::benchmark::profile::Profile;
 use crate::compile::benchmark::scenario::Scenario;
-use crate::compile::benchmark::target::Target;
 use crate::compile::benchmark::BenchmarkName;
 use crate::compile::execute;
 use crate::compile::execute::{
@@ -10,7 +9,6 @@ use crate::compile::execute::{
 };
 use crate::toolchain::Toolchain;
 use crate::utils::git::get_rustc_perf_commit;
-use crate::CollectorCtx;
 use anyhow::Context;
 use database::CollectionId;
 use futures::stream::FuturesUnordered;
@@ -43,7 +41,7 @@ pub struct BenchProcessor<'a> {
     benchmark: &'a BenchmarkName,
     conn: &'a mut dyn database::Connection,
     artifact: &'a database::ArtifactId,
-    collector_ctx: &'a CollectorCtx,
+    artifact_row_id: database::ArtifactIdNumber,
     is_first_collection: bool,
     is_self_profile: bool,
     tries: u8,
@@ -55,7 +53,7 @@ impl<'a> BenchProcessor<'a> {
         conn: &'a mut dyn database::Connection,
         benchmark: &'a BenchmarkName,
         artifact: &'a database::ArtifactId,
-        collector_ctx: &'a CollectorCtx,
+        artifact_row_id: database::ArtifactIdNumber,
         is_self_profile: bool,
     ) -> Self {
         // Check we have `perf` or (`xperf.exe` and `tracelog.exe`)  available.
@@ -79,7 +77,7 @@ impl<'a> BenchProcessor<'a> {
             conn,
             benchmark,
             artifact,
-            collector_ctx,
+            artifact_row_id,
             is_first_collection: true,
             is_self_profile,
             tries: 0,
@@ -93,7 +91,6 @@ impl<'a> BenchProcessor<'a> {
         scenario: database::Scenario,
         profile: database::Profile,
         backend: CodegenBackend,
-        target: Target,
         stats: Stats,
     ) {
         let backend = match backend {
@@ -101,20 +98,15 @@ impl<'a> BenchProcessor<'a> {
             CodegenBackend::Cranelift => database::CodegenBackend::Cranelift,
         };
 
-        let target = match target {
-            Target::X86_64UnknownLinuxGnu => database::Target::X86_64UnknownLinuxGnu,
-        };
-
         let mut buf = FuturesUnordered::new();
         for (stat, value) in stats.iter() {
             buf.push(self.conn.record_statistic(
                 collection,
-                self.collector_ctx.artifact_row_id,
+                self.artifact_row_id,
                 self.benchmark.0.as_str(),
                 profile,
                 scenario,
                 backend,
-                target,
                 stat,
                 value,
             ));
@@ -124,17 +116,11 @@ impl<'a> BenchProcessor<'a> {
     }
 
     pub async fn measure_rustc(&mut self, toolchain: &Toolchain) -> anyhow::Result<()> {
-        rustc::measure(
-            self.conn,
-            toolchain,
-            self.artifact,
-            self.collector_ctx.artifact_row_id,
-        )
-        .await
+        rustc::measure(self.conn, toolchain, self.artifact, self.artifact_row_id).await
     }
 }
 
-impl Processor for BenchProcessor<'_> {
+impl<'a> Processor for BenchProcessor<'a> {
     fn perf_tool(&self) -> PerfTool {
         if self.is_first_collection && self.is_self_profile {
             if cfg!(unix) {
@@ -191,7 +177,6 @@ impl Processor for BenchProcessor<'_> {
                         Profile::Check => database::Profile::Check,
                         Profile::Debug => database::Profile::Debug,
                         Profile::Doc => database::Profile::Doc,
-                        Profile::DocJson => database::Profile::DocJson,
                         Profile::Opt => database::Profile::Opt,
                         Profile::Clippy => database::Profile::Clippy,
                     };
@@ -214,15 +199,8 @@ impl Processor for BenchProcessor<'_> {
                         res.0.stats.retain(|key, _| key.starts_with("size:"));
                     }
 
-                    self.insert_stats(
-                        collection,
-                        scenario,
-                        profile,
-                        data.backend,
-                        data.target,
-                        res.0,
-                    )
-                    .await;
+                    self.insert_stats(collection, scenario, profile, data.backend, res.0)
+                        .await;
 
                     Ok(Retry::No)
                 }
@@ -244,7 +222,7 @@ impl Processor for BenchProcessor<'_> {
                     | DeserializeStatError::XperfError(..)
                     | DeserializeStatError::IOError(..)),
                 ) => {
-                    panic!("process_perf_stat_output failed: {e:?}");
+                    panic!("process_perf_stat_output failed: {:?}", e);
                 }
             }
         })
@@ -259,7 +237,7 @@ impl Processor for BenchProcessor<'_> {
                     .map(|profile| {
                         self.conn.record_raw_self_profile(
                             profile.collection,
-                            self.collector_ctx.artifact_row_id,
+                            self.artifact_row_id,
                             self.benchmark.0.as_str(),
                             profile.profile,
                             profile.scenario,
@@ -277,7 +255,7 @@ impl Processor for BenchProcessor<'_> {
 
                     // FIXME: Record codegen backend in the self profile name
                     let prefix = PathBuf::from("self-profile")
-                        .join(self.collector_ctx.artifact_row_id.0.to_string())
+                        .join(self.artifact_row_id.0.to_string())
                         .join(self.benchmark.0.as_str())
                         .join(profile.profile.to_string())
                         .join(profile.scenario.to_id());
@@ -320,7 +298,7 @@ impl SelfProfileS3Upload {
                 data.read_to_end(&mut compressed).expect("compressed");
                 std::fs::write(upload.path(), &compressed).expect("write compressed profile data");
 
-                format!("self-profile-{collection}.mm_profdata.sz")
+                format!("self-profile-{}.mm_profdata.sz", collection)
             }
         };
 
@@ -331,7 +309,7 @@ impl SelfProfileS3Upload {
             .arg("INTELLIGENT_TIERING")
             .arg("--only-show-errors")
             .arg(upload.path())
-            .arg(format!(
+            .arg(&format!(
                 "s3://rustc-perf/{}",
                 &prefix.join(filename).to_str().unwrap()
             ))
@@ -345,7 +323,7 @@ impl SelfProfileS3Upload {
         let start = std::time::Instant::now();
         let status = self.0.wait().expect("waiting for child");
         if !status.success() {
-            panic!("S3 upload failed: {status:?}");
+            panic!("S3 upload failed: {:?}", status);
         }
 
         log::trace!("uploaded to S3, additional wait: {:?}", start.elapsed());

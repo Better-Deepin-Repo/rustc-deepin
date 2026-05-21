@@ -1,5 +1,7 @@
 # Cargo: Table and key name consistency
 
+🚧 The 2024 Edition has not yet been released and hence this section is still "under construction".
+
 ## Summary
 
 - Several table and key names in `Cargo.toml` have been removed where there were previously two ways to specify the same thing.
@@ -38,4 +40,4 @@ Notice that the underscores were changed to dashes for `dev_dependencies` and `d
 
 When using `cargo fix --edition`, Cargo will automatically update your `Cargo.toml` file to use the preferred table and key names.
 
-If you prefer to update your `Cargo.toml` manually, be sure to go through the list above and make sure only the new forms are used.
+If you would prefer to update your `Cargo.toml` manually, be sure to go through the list above and make sure only the new forms are used.

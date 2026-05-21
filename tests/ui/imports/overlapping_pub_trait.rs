@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ aux-build:overlapping_pub_trait_source.rs
 
 /*

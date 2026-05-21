@@ -1,23 +1,25 @@
-//@ add-minicore
 //@ revisions: aarch64 x86-64
 //@ [aarch64] compile-flags: -Ctarget-feature=+neon,+fp16,+fhm --target=aarch64-unknown-linux-gnu
 //@ [aarch64] needs-llvm-components: aarch64
-//@ [aarch64] ignore-backends: gcc
 //@ [x86-64] compile-flags: -Ctarget-feature=+sse4.2,+rdrand --target=x86_64-unknown-linux-gnu
 //@ [x86-64] needs-llvm-components: x86
 //@ build-pass
 #![no_core]
 #![crate_type = "rlib"]
-#![feature(intrinsics, rustc_attrs, no_core, staged_api)]
+#![feature(intrinsics, rustc_attrs, no_core, lang_items, staged_api)]
 #![stable(feature = "test", since = "1.0.0")]
 
-extern crate minicore;
-use minicore::*;
+// Supporting minimal rust core code
+#[lang = "sized"]
+trait Sized {}
+#[lang = "copy"]
+trait Copy {}
+impl Copy for bool {}
 
-#[stable(feature = "test", since = "1.0.0")]
-#[rustc_const_stable(feature = "test", since = "1.0.0")]
-#[rustc_intrinsic]
-const unsafe fn unreachable() -> !;
+extern "rust-intrinsic" {
+    #[rustc_const_stable(feature = "test", since = "1.0.0")]
+    fn unreachable() -> !;
+}
 
 #[rustc_builtin_macro]
 macro_rules! cfg {

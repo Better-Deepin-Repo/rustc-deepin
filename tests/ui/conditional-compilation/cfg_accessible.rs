@@ -1,4 +1,3 @@
-//@ edition:2015
 #![feature(cfg_accessible)]
 
 mod m {

@@ -186,18 +186,18 @@ Afterwards, the line with `extern crate rand;` in `src/lib.rs` will be removed.
 
 We're now more idiomatic, and we didn't have to fix our code manually!
 
-[`cargo check`]: ../../cargo/commands/cargo-check.html
-[`cargo fix`]: ../../cargo/commands/cargo-fix.html
+[`cargo check`]: ../../../../cargo/book/commands/cargo-check.html
+[`cargo fix`]: ../../../../cargo/book/commands/cargo-fix.html
 [`explicit-outlives-requirements`]:  ../../rustc/lints/listing/allowed-by-default.html#explicit-outlives-requirements
 [`keyword-idents`]: ../../rustc/lints/listing/allowed-by-default.html#keyword-idents
 [`rustfix`]: https://crates.io/crates/rustfix
 [`unused-extern-crates`]: ../../rustc/lints/listing/allowed-by-default.html#unused-extern-crates
-[Cargo features]: ../../cargo/reference/features.html
-[Cargo package]: ../../cargo/reference/manifest.html#the-package-section
-[Cargo targets]: ../../cargo/reference/cargo-targets.html
-[Cargo workspace]: ../../cargo/reference/workspaces.html
+[Cargo features]: ../../../../cargo/book/reference/features.html
+[Cargo package]: ../../../../cargo/book/reference/manifest.html#the-package-section
+[Cargo targets]: ../../../../cargo/book/reference/cargo-targets.html
+[Cargo workspace]: ../../../../cargo/book/reference/workspaces.html
 [CLI flag]: ../../rustc/lints/levels.html#via-compiler-flag
-[Code generation]: ../../cargo/reference/build-script-examples.html#code-generation
+[Code generation]: ../../../../cargo/book/reference/build-script-examples.html#code-generation
 [conditional compilation]: ../../reference/conditional-compilation.html
 [documentation tests]: ../../rustdoc/documentation-tests.html
 [JSON messages]: ../../rustc/json.html

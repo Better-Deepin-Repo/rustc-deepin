@@ -4,31 +4,31 @@
 const MSG: &str = "hello";
 
 const A: () = std::panic!("blåhaj");
-//~^ ERROR evaluation panicked
+//~^ ERROR evaluation of constant value failed
 
 const B: () = std::panic!();
-//~^ ERROR evaluation panicked
+//~^ ERROR evaluation of constant value failed
 
 const C: () = std::unreachable!();
-//~^ ERROR evaluation panicked
+//~^ ERROR evaluation of constant value failed
 
 const D: () = std::unimplemented!();
-//~^ ERROR evaluation panicked
+//~^ ERROR evaluation of constant value failed
 
 const E: () = std::panic!("{}", MSG);
-//~^ ERROR evaluation panicked
+//~^ ERROR evaluation of constant value failed
 
 const A_CORE: () = core::panic!("shark");
-//~^ ERROR evaluation panicked
+//~^ ERROR evaluation of constant value failed
 
 const B_CORE: () = core::panic!();
-//~^ ERROR evaluation panicked
+//~^ ERROR evaluation of constant value failed
 
 const C_CORE: () = core::unreachable!();
-//~^ ERROR evaluation panicked
+//~^ ERROR evaluation of constant value failed
 
 const D_CORE: () = core::unimplemented!();
-//~^ ERROR evaluation panicked
+//~^ ERROR evaluation of constant value failed
 
 const E_CORE: () = core::panic!("{}", MSG);
-//~^ ERROR evaluation panicked
+//~^ ERROR evaluation of constant value failed

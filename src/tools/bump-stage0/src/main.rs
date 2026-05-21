@@ -1,10 +1,9 @@
 #![deny(unused_variables)]
 
 use anyhow::{Context, Error};
-use build_helper::stage0_parser::{Stage0Config, VersionMetadata, parse_stage0_file};
+use build_helper::stage0_parser::{parse_stage0_file, Stage0Config, VersionMetadata};
 use curl::easy::Easy;
 use indexmap::IndexMap;
-use sha2::{Digest, Sha256};
 
 const PATH: &str = "src/stage0";
 const COMPILER_COMPONENTS: &[&str] = &["rustc", "rust-std", "cargo", "clippy-preview"];
@@ -14,14 +13,13 @@ struct Tool {
     config: Stage0Config,
 
     channel: Channel,
-    compiler_date: Option<String>,
-    rustfmt_date: Option<String>,
+    date: Option<String>,
     version: [u16; 3],
     checksums: IndexMap<String, String>,
 }
 
 impl Tool {
-    fn new(compiler_date: Option<String>, rustfmt_date: Option<String>) -> Result<Self, Error> {
+    fn new(date: Option<String>) -> Result<Self, Error> {
         let channel = match std::fs::read_to_string("src/ci/channel")?.trim() {
             "stable" => Channel::Stable,
             "beta" => Channel::Beta,
@@ -40,14 +38,7 @@ impl Tool {
 
         let existing = parse_stage0_file();
 
-        Ok(Self {
-            channel,
-            version,
-            compiler_date,
-            rustfmt_date,
-            config: existing.config,
-            checksums: IndexMap::new(),
-        })
+        Ok(Self { channel, version, date, config: existing.config, checksums: IndexMap::new() })
     }
 
     fn update_stage0_file(mut self) -> Result<(), Error> {
@@ -59,7 +50,7 @@ impl Tool {
 #
 # All changes below this comment will be overridden the next time the
 # tool is executed.
-"#;
+            "#;
 
         let mut file_content = String::new();
 
@@ -70,46 +61,36 @@ impl Tool {
             artifacts_server,
             artifacts_with_llvm_assertions_server,
             git_merge_commit_email,
+            git_repository,
             nightly_branch,
         } = &self.config;
 
-        file_content.push_str(&format!("dist_server={}\n", dist_server));
-        file_content.push_str(&format!("artifacts_server={}\n", artifacts_server));
+        file_content.push_str(&format!("dist_server={}", dist_server));
+        file_content.push_str(&format!("\nartifacts_server={}", artifacts_server));
         file_content.push_str(&format!(
-            "artifacts_with_llvm_assertions_server={}\n",
+            "\nartifacts_with_llvm_assertions_server={}",
             artifacts_with_llvm_assertions_server
         ));
-        file_content.push_str(&format!("git_merge_commit_email={}\n", git_merge_commit_email));
-        file_content.push_str(&format!("nightly_branch={}\n", nightly_branch));
+        file_content.push_str(&format!("\ngit_merge_commit_email={}", git_merge_commit_email));
+        file_content.push_str(&format!("\ngit_repository={}", git_repository));
+        file_content.push_str(&format!("\nnightly_branch={}", nightly_branch));
 
-        file_content.push_str("\n");
+        file_content.push_str("\n\n");
         file_content.push_str(COMMENTS);
-        file_content.push_str("\n");
 
         let compiler = self.detect_compiler()?;
-        file_content.push_str(&format!(
-            "compiler_channel_manifest_hash={}\n",
-            compiler.channel_manifest_hash
-        ));
-        file_content.push_str(&format!("compiler_git_commit_hash={}\n", compiler.git_commit_hash));
-        file_content.push_str(&format!("compiler_date={}\n", compiler.date));
-        file_content.push_str(&format!("compiler_version={}\n", compiler.version));
+        file_content.push_str(&format!("\ncompiler_date={}", compiler.date));
+        file_content.push_str(&format!("\ncompiler_version={}", compiler.version));
 
         if let Some(rustfmt) = self.detect_rustfmt()? {
-            file_content.push_str(&format!(
-                "rustfmt_channel_manifest_hash={}\n",
-                rustfmt.channel_manifest_hash
-            ));
-            file_content
-                .push_str(&format!("rustfmt_git_commit_hash={}\n", rustfmt.git_commit_hash));
-            file_content.push_str(&format!("rustfmt_date={}\n", rustfmt.date));
-            file_content.push_str(&format!("rustfmt_version={}\n", rustfmt.version));
+            file_content.push_str(&format!("\nrustfmt_date={}", rustfmt.date));
+            file_content.push_str(&format!("\nrustfmt_version={}", rustfmt.version));
         }
 
         file_content.push_str("\n");
 
         for (key, value) in self.checksums {
-            file_content.push_str(&format!("{}={}\n", key, value));
+            file_content.push_str(&format!("\n{}={}", key, value));
         }
 
         std::fs::write(PATH, file_content)?;
@@ -132,16 +113,9 @@ impl Tool {
             Channel::Nightly => "beta".to_string(),
         };
 
-        let (manifest, manifest_hash) =
-            fetch_manifest(&self.config, &channel, self.compiler_date.as_deref())?;
+        let manifest = fetch_manifest(&self.config, &channel, self.date.as_deref())?;
         self.collect_checksums(&manifest, COMPILER_COMPONENTS)?;
         Ok(VersionMetadata {
-            channel_manifest_hash: manifest_hash,
-            git_commit_hash: manifest.pkg["rust"]
-                .git_commit_hash
-                .as_ref()
-                .expect("invalid git_commit_hash")
-                .into(),
             date: manifest.date,
             version: if self.channel == Channel::Nightly {
                 "beta".to_string()
@@ -165,19 +139,9 @@ impl Tool {
             return Ok(None);
         }
 
-        let (manifest, manifest_hash) =
-            fetch_manifest(&self.config, "nightly", self.rustfmt_date.as_deref())?;
+        let manifest = fetch_manifest(&self.config, "nightly", self.date.as_deref())?;
         self.collect_checksums(&manifest, RUSTFMT_COMPONENTS)?;
-        Ok(Some(VersionMetadata {
-            channel_manifest_hash: manifest_hash,
-            git_commit_hash: manifest.pkg["rust"]
-                .git_commit_hash
-                .as_ref()
-                .expect("invalid git_commit_hash")
-                .into(),
-            date: manifest.date,
-            version: "nightly".into(),
-        }))
+        Ok(Some(VersionMetadata { date: manifest.date, version: "nightly".into() }))
     }
 
     fn collect_checksums(&mut self, manifest: &Manifest, components: &[&str]) -> Result<(), Error> {
@@ -201,29 +165,12 @@ impl Tool {
                 }
             }
         }
-        for artifact in manifest.artifacts.values() {
-            for targets in artifact.target.values() {
-                for target in targets {
-                    let url = target
-                        .url
-                        .strip_prefix(&prefix)
-                        .ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "url doesn't start with dist server base: {}",
-                                target.url
-                            )
-                        })?
-                        .to_string();
-                    self.checksums.insert(url, target.hash_sha256.clone());
-                }
-            }
-        }
         Ok(())
     }
 }
 
 fn main() -> Result<(), Error> {
-    let tool = Tool::new(std::env::args().nth(1), std::env::args().nth(2))?;
+    let tool = Tool::new(std::env::args().nth(1))?;
     tool.update_stage0_file()?;
     Ok(())
 }
@@ -232,24 +179,14 @@ fn fetch_manifest(
     config: &Stage0Config,
     channel: &str,
     date: Option<&str>,
-) -> Result<(Manifest, String), Error> {
+) -> Result<Manifest, Error> {
     let url = if let Some(date) = date {
         format!("{}/dist/{}/channel-rust-{}.toml", config.dist_server, date, channel)
     } else {
         format!("{}/dist/channel-rust-{}.toml", config.dist_server, channel)
     };
 
-    let manifest_bytes = http_get(&url)?;
-
-    let mut sha256 = Sha256::new();
-    sha256.update(&manifest_bytes);
-    let manifest_hash = hex::encode(sha256.finalize());
-
-    // FIXME: on newer `toml` (>= `0.9.*`), use `toml::from_slice`. For now, we use the most recent
-    // `toml` available in-tree which is `0.8.*`, so we have to do an additional dance here.
-    let manifest_str = String::from_utf8(manifest_bytes)?;
-    let manifest = toml::from_str(&manifest_str)?;
-    Ok((manifest, manifest_hash))
+    Ok(toml::from_slice(&http_get(&url)?)?)
 }
 
 fn http_get(url: &str) -> Result<Vec<u8>, Error> {
@@ -279,14 +216,11 @@ enum Channel {
 struct Manifest {
     date: String,
     pkg: IndexMap<String, ManifestPackage>,
-    artifacts: IndexMap<String, ManifestArtifact>,
 }
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct ManifestPackage {
     version: String,
-    #[serde(default)]
-    git_commit_hash: Option<String>,
     target: IndexMap<String, ManifestTargetPackage>,
 }
 
@@ -296,16 +230,4 @@ struct ManifestTargetPackage {
     hash: Option<String>,
     xz_url: Option<String>,
     xz_hash: Option<String>,
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-struct ManifestArtifact {
-    target: IndexMap<String, Vec<ManifestTargetArtifact>>,
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "kebab-case")]
-struct ManifestTargetArtifact {
-    url: String,
-    hash_sha256: String,
 }

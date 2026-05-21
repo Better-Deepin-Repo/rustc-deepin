@@ -2,15 +2,16 @@
 #![allow(incomplete_features)]
 
 type Foo = impl Sized;
+//~^ ERROR: unconstrained opaque type
 
-#[define_opaque(Foo)]
-fn with_bound<const N: usize>()
+fn with_bound<const N: usize>() -> Foo
 where
     [u8; (N / 2) as usize]: Sized,
 {
     let _: [u8; (N / 2) as Foo] = [0; (N / 2) as usize];
     //~^ ERROR mismatched types
     //~| ERROR non-primitive cast: `usize` as `Foo`
+    todo!()
 }
 
 fn main() {

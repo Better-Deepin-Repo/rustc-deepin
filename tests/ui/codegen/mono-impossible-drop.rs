@@ -1,6 +1,3 @@
-//@ revisions: current next
-//@ ignore-compare-mode-next-solver (explicit revisions)
-//@[next] compile-flags: -Znext-solver
 //@ compile-flags: -Clink-dead-code=on --crate-type=lib
 //@ build-pass
 

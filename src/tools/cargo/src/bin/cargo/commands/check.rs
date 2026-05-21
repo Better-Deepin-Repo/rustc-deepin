@@ -22,9 +22,9 @@ pub fn cli() -> Command {
             "Check only the specified example",
             "Check all examples",
             "Check only the specified test target",
-            "Check all targets that have `test = true` set",
+            "Check all test targets",
             "Check only the specified bench target",
-            "Check all targets that have `bench = true` set",
+            "Check all bench targets",
             "Check all targets",
         )
         .arg_features()
@@ -35,11 +35,11 @@ pub fn cli() -> Command {
         .arg_target_dir()
         .arg_unit_graph()
         .arg_timings()
-        .arg_compile_time_deps()
         .arg_manifest_path()
+        .arg_lockfile_path()
         .arg_ignore_rust_version()
         .after_help(color_print::cstr!(
-            "Run `<bright-cyan,bold>cargo help check</>` for more detailed information.\n"
+            "Run `<cyan,bold>cargo help check</>` for more detailed information.\n"
         ))
 }
 
@@ -50,9 +50,9 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
         args.get_one::<String>("profile").map(String::as_str),
         Some("test")
     );
-    let intent = UserIntent::Check { test };
+    let mode = CompileMode::Check { test };
     let compile_opts =
-        args.compile_options(gctx, intent, Some(&ws), ProfileChecking::LegacyTestOnly)?;
+        args.compile_options(gctx, mode, Some(&ws), ProfileChecking::LegacyTestOnly)?;
 
     ops::compile(&ws, &compile_opts)?;
     Ok(())

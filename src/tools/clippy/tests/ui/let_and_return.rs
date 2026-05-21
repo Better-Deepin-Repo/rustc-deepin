@@ -1,7 +1,3 @@
-//@revisions: edition2021 edition2024
-//@[edition2021] edition:2021
-//@[edition2024] edition:2024
-
 #![allow(unused)]
 #![warn(clippy::let_and_return)]
 
@@ -11,14 +7,15 @@ fn test() -> i32 {
     let _y = 0; // no warning
     let x = 5;
     x
-    //~^ let_and_return
+    //~^ ERROR: returning the result of a `let` binding from a block
+    //~| NOTE: `-D clippy::let-and-return` implied by `-D warnings`
 }
 
 fn test_inner() -> i32 {
     if true {
         let x = 5;
         x
-        //~^ let_and_return
+        //~^ ERROR: returning the result of a `let` binding from a block
     } else {
         0
     }
@@ -81,7 +78,7 @@ fn issue_3792() -> String {
     // https://github.com/rust-lang/rust/pull/93965
     let line = stdin.lock().lines().next().unwrap().unwrap();
     line
-    //~^ let_and_return
+    //~^ ERROR: returning the result of a `let` binding from a block
 }
 
 tuple_encode!(T0, T1, T2, T3, T4, T5, T6, T7);
@@ -104,7 +101,6 @@ mod no_lint_if_stmt_borrows {
         let value = value.upgrade().unwrap();
         let ret = value.borrow().baz();
         ret
-        //~[edition2024]^ let_and_return
     }
 
     fn borrows_in_closure(value: Weak<RefCell<Bar>>) -> u32 {
@@ -115,7 +111,6 @@ mod no_lint_if_stmt_borrows {
         let value = value.upgrade().unwrap();
         let ret = f(|| value.borrow().baz())();
         ret
-        //~[edition2024]^ let_and_return
     }
 
     mod free_function {
@@ -147,14 +142,12 @@ mod no_lint_if_stmt_borrows {
             let x = Inner {};
             let value = some_foo(&x).value();
             value
-            //~[edition2024]^ let_and_return
         }
 
         fn test2() -> i32 {
             let x = Inner {};
             let value = Foo::new(&x).value();
             value
-            //~[edition2024]^ let_and_return
         }
     }
 }
@@ -176,7 +169,7 @@ mod issue_5729 {
         fn foo_cloned(&self) -> Arc<dyn Foo> {
             let clone = Arc::clone(&self.foo);
             clone
-            //~^ let_and_return
+            //~^ ERROR: returning the result of a `let` binding from a block
         }
     }
 }
@@ -195,7 +188,7 @@ mod issue_11335 {
             };
 
             result
-            //~^ let_and_return
+            //~^ ERROR: returning the result of a `let` binding from a block
         }
     }
 }
@@ -221,19 +214,19 @@ fn issue12801() {
     fn left_is_if() -> String {
         let s = if true { "a".to_string() } else { "b".to_string() } + "c";
         s
-        //~^ let_and_return
+        //~^ ERROR: returning the result of a `let` binding from a block
     }
 
     fn no_par_needed() -> String {
         let s = "c".to_string() + if true { "a" } else { "b" };
         s
-        //~^ let_and_return
+        //~^ ERROR: returning the result of a `let` binding from a block
     }
 
     fn conjunctive_blocks() -> String {
         let s = { "a".to_string() } + "b" + { "c" } + "d";
         s
-        //~^ let_and_return
+        //~^ ERROR: returning the result of a `let` binding from a block
     }
 
     #[allow(clippy::overly_complex_bool_expr)]
@@ -241,42 +234,14 @@ fn issue12801() {
         let _ = || {
             let s = if true { 2 } else { 3 } << 4;
             s
-            //~^ let_and_return
+            //~^ ERROR: returning the result of a `let` binding from a block
         };
         let _ = || {
             let s = { true } || { false } && { 2 <= 3 };
             s
-            //~^ let_and_return
+            //~^ ERROR: returning the result of a `let` binding from a block
         };
     }
-}
-
-fn issue14164() -> Result<u32, ()> {
-    let v = std::cell::RefCell::new(Some(vec![1]));
-    let r = match &*v.borrow() {
-        Some(v) => Ok(Ok(v[0])),
-        None => Ok(Ok(0)),
-    }?;
-    r
-    //~[edition2024]^ let_and_return
-}
-
-fn issue15987() -> i32 {
-    macro_rules! sample {
-        ( $( $args:expr ),+ ) => {};
-    }
-
-    let r = 5;
-    sample!(r);
-    r
-}
-
-fn has_comment() -> Vec<usize> {
-    let v = Vec::new();
-
-    // TODO: stuff
-
-    v
 }
 
 fn main() {}

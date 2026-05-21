@@ -18,8 +18,9 @@ const EXPECTED = [
         ],
     },
     {
-        // can't put generics out of order
         'query': '-> Out<Second, First>',
-        'others': [],
+        'others': [
+            { 'path': 'generics_nested', 'name': 'bet' },
+        ],
     },
 ];

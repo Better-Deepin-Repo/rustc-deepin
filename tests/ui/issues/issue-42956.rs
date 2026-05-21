@@ -1,5 +1,7 @@
 //@ check-pass
 #![allow(dead_code)]
+#![allow(stable_features)]
+#![feature(associated_consts)]
 
 impl A for i32 {
     type Foo = u32;

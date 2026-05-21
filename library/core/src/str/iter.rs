@@ -3,8 +3,8 @@
 use super::pattern::{DoubleEndedSearcher, Pattern, ReverseSearcher, Searcher};
 use super::validations::{next_code_point, next_code_point_reverse};
 use super::{
-    BytesIsNotEmpty, CharEscapeDebugContinue, CharEscapeDefault, CharEscapeUnicode,
-    IsAsciiWhitespace, IsNotEmpty, IsWhitespace, LinesMap, UnsafeBytesToStr, from_utf8_unchecked,
+    from_utf8_unchecked, BytesIsNotEmpty, CharEscapeDebugContinue, CharEscapeDefault,
+    CharEscapeUnicode, IsAsciiWhitespace, IsNotEmpty, IsWhitespace, LinesMap, UnsafeBytesToStr,
 };
 use crate::fmt::{self, Write};
 use crate::iter::{
@@ -52,7 +52,7 @@ impl<'a> Iterator for Chars<'a> {
         const CHUNK_SIZE: usize = 32;
 
         if remainder >= CHUNK_SIZE {
-            let mut chunks = self.iter.as_slice().as_chunks::<CHUNK_SIZE>().0.iter();
+            let mut chunks = self.iter.as_slice().array_chunks::<CHUNK_SIZE>();
             let mut bytes_skipped: usize = 0;
 
             while remainder > CHUNK_SIZE
@@ -99,7 +99,10 @@ impl<'a> Iterator for Chars<'a> {
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
         let len = self.iter.len();
-        (len.div_ceil(4), Some(len))
+        // `(len + 3)` can't overflow, because we know that the `slice::Iter`
+        // belongs to a slice in memory which has a maximum length of
+        // `isize::MAX` (that's well below `usize::MAX`).
+        ((len + 3) / 4, Some(len))
     }
 
     #[inline]
@@ -1525,12 +1528,15 @@ impl<'a> Iterator for EncodeUtf16<'a> {
         // is therefore determined by assuming the remaining bytes contain as
         // many 3-byte sequences as possible. The highest bytes:code units
         // ratio is for 1-byte sequences, so use this for the upper bound.
+        // `(len + 2)` can't overflow, because we know that the `slice::Iter`
+        // belongs to a slice in memory which has a maximum length of
+        // `isize::MAX` (that's well below `usize::MAX`)
         if self.extra == 0 {
-            (len.div_ceil(3), Some(len))
+            ((len + 2) / 3, Some(len))
         } else {
             // We're in the middle of a surrogate pair, so add the remaining
             // surrogate to the bounds.
-            (len.div_ceil(3) + 1, Some(len + 1))
+            ((len + 2) / 3 + 1, Some(len + 1))
         }
     }
 }

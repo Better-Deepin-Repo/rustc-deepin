@@ -12,7 +12,6 @@ pub(crate) fn undeclared_label(
         format!("use of undeclared label `{}`", name.display(ctx.sema.db, ctx.edition)),
         d.node.map(|it| it.into()),
     )
-    .stable()
 }
 
 #[cfg(test)]
@@ -104,36 +103,6 @@ async fn foo() {
 //- minicore: option, try, future, fn
 async fn foo() {
     || None?;
-}
-"#,
-        );
-    }
-
-    #[test]
-    fn macro_expansion_can_refer_label_defined_before_macro_definition() {
-        check_diagnostics(
-            r#"
-fn foo() {
-    'bar: loop {
-        macro_rules! m {
-            () => { break 'bar };
-        }
-        m!();
-    }
-}
-"#,
-        );
-        check_diagnostics(
-            r#"
-fn foo() {
-    'bar: loop {
-        macro_rules! m {
-            () => { break 'bar };
-        }
-        'bar: loop {
-            m!();
-        }
-    }
 }
 "#,
         );

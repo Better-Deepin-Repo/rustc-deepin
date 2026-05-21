@@ -1,6 +1,6 @@
 //! Tests for progress bar.
 
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
@@ -53,7 +53,7 @@ fn bad_progress_config_missing_width() {
 }
 
 #[cargo_test]
-fn default_progress_is_auto() {
+fn bad_progress_config_missing_when() {
     let p = project()
         .file(
             ".cargo/config.toml",
@@ -65,7 +65,16 @@ fn default_progress_is_auto() {
         .file("src/lib.rs", "")
         .build();
 
-    p.cargo("check").run();
+    p.cargo("check")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] error in [ROOT]/foo/.cargo/config.toml: could not load config key `term.progress`
+
+Caused by:
+  missing field `when`
+
+"#]])
+        .run();
 }
 
 #[cargo_test]
@@ -105,8 +114,8 @@ fn always_shows_progress() {
     p.cargo("check")
         .with_stderr_data(
             str![[r#"
-[DOWNLOADING] [..] crate [..]
-[DOWNLOADED] 3 crates ([..]) in [..]s
+[DOWNLOADING] [..] crate                                                                              
+[DOWNLOADED] 3 crates ([..]KB) in [..]s
 [BUILDING] [..] [..]/4: [..]
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 ...
@@ -116,6 +125,7 @@ fn always_shows_progress() {
         .run();
 }
 
+#[allow(deprecated)]
 #[cargo_test]
 fn never_progress() {
     const N: usize = 3;
@@ -154,28 +164,5 @@ fn never_progress() {
         .with_stderr_does_not_contain("[DOWNLOADING] [..] crates [..]")
         .with_stderr_does_not_contain("[..][DOWNLOADED] 3 crates ([..]) in [..]")
         .with_stderr_does_not_contain("[BUILDING] [..] [..]/4: [..]")
-        .run();
-}
-
-#[cargo_test]
-fn plain_string_when_doesnt_work() {
-    let p = project()
-        .file(
-            ".cargo/config.toml",
-            r#"
-            [term]
-            progress = "never"
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .build();
-
-    p.cargo("check")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] invalid configuration for key `term.progress`
-expected a table, but found a string for `term.progress` in [ROOT]/foo/.cargo/config.toml
-
-"#]])
         .run();
 }

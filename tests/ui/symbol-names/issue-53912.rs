@@ -12,13 +12,13 @@ mod llvm {
 mod foo {
     pub(crate) struct Foo<T>(T);
 
-    impl Foo<crate::llvm::Foo> {
+    impl Foo<::llvm::Foo> {
         pub(crate) fn foo() {
             for _ in 0..0 {
-                for _ in &[crate::dummy()] {
-                    crate::dummy();
-                    crate::dummy();
-                    crate::dummy();
+                for _ in &[::dummy()] {
+                    ::dummy();
+                    ::dummy();
+                    ::dummy();
                 }
             }
         }

@@ -3,8 +3,8 @@ use build_helper::{LLVM_PGO_CRATES, RUSTC_PGO_CRATES};
 use camino::{Utf8Path, Utf8PathBuf};
 use humansize::BINARY;
 
-use crate::environment::{Environment, executable_extension};
-use crate::exec::{CmdBuilder, cmd};
+use crate::environment::{executable_extension, Environment};
+use crate::exec::{cmd, CmdBuilder};
 use crate::utils::io::{count_files, delete_directory};
 use crate::utils::with_log_group;
 
@@ -36,9 +36,10 @@ fn init_compiler_benchmarks(
         profiles.join(",").as_str(),
         "--scenarios",
         scenarios.join(",").as_str(),
-        "--exact-match",
+        "--include",
         crates.join(",").as_str(),
     ])
+    .env("RUST_LOG", "collector=debug")
     .env("RUSTC", env.rustc_stage_0().as_str())
     .env("RUSTC_BOOTSTRAP", "1")
     .workdir(&env.rustc_perf_dir());
@@ -69,9 +70,7 @@ fn merge_llvm_profiles(
     profdata: LlvmProfdata,
 ) -> anyhow::Result<()> {
     let llvm_profdata = match profdata {
-        LlvmProfdata::Host => {
-            env.host_llvm_dir().join(format!("bin/llvm-profdata{}", executable_extension()))
-        }
+        LlvmProfdata::Host => env.host_llvm_dir().join("bin/llvm-profdata"),
         LlvmProfdata::Target => env
             .build_artifacts()
             .join("llvm")
@@ -162,9 +161,7 @@ pub fn gather_rustc_profiles(
     let merged_profile = env.artifact_dir().join("rustc-pgo.profdata");
     log::info!("Merging Rustc PGO profiles to {merged_profile}");
 
-    let llvm_profdata = if env.build_llvm() { LlvmProfdata::Target } else { LlvmProfdata::Host };
-
-    merge_llvm_profiles(env, &merged_profile, profile_root, llvm_profdata)?;
+    merge_llvm_profiles(env, &merged_profile, profile_root, LlvmProfdata::Target)?;
     log_profile_stats("Rustc", &merged_profile, profile_root)?;
 
     // We don't need the individual .profraw files now that they have been merged
@@ -194,8 +191,7 @@ pub fn gather_bolt_profiles(
     let profiles: Vec<_> =
         glob::glob(&format!("{profile_prefix}*"))?.collect::<Result<Vec<_>, _>>()?;
 
-    let fdata = env.merge_fdata();
-    let mut merge_args = vec![fdata.as_str()];
+    let mut merge_args = vec!["merge-fdata"];
     merge_args.extend(profiles.iter().map(|p| p.to_str().unwrap()));
 
     with_log_group("Merging BOLT profiles", || {

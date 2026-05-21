@@ -1,10 +1,8 @@
 //@ check-pass
-//@ revisions: current next
-//@ ignore-compare-mode-next-solver (explicit revisions)
-//@[next] compile-flags: -Znext-solver
 
-#![feature(pattern_types, generic_pattern_types, pattern_type_macro)]
-#![expect(incomplete_features)]
+#![feature(pattern_types)]
+#![feature(core_pattern_types)]
+#![feature(core_pattern_type)]
 
 use std::pat::pattern_type;
 

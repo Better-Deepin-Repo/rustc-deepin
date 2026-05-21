@@ -12,7 +12,7 @@ fn f2<T>()
 where
     T: Copy + Clone + Sync + Send + ?Sized,
     T: Unpin + PartialEq,
-    //~^ type_repetition_in_bounds
+    //~^ ERROR: this type has already been used as a bound predicate
 {
 }
 

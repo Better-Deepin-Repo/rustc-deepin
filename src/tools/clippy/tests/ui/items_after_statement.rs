@@ -11,8 +11,8 @@ fn ok() {
 fn last() {
     foo();
     fn foo() {
-        //~^ items_after_statements
-
+        //~^ ERROR: adding items after statements is confusing, since items exist from the sta
+        //~| NOTE: `-D clippy::items-after-statements` implied by `-D warnings`
         println!("foo");
     }
 }
@@ -20,8 +20,7 @@ fn last() {
 fn main() {
     foo();
     fn foo() {
-        //~^ items_after_statements
-
+        //~^ ERROR: adding items after statements is confusing, since items exist from the sta
         println!("foo");
     }
     foo();
@@ -35,7 +34,6 @@ fn mac() {
         () => {{
             a = 6;
             fn say_something() {
-                //~^ items_after_statements
                 println!("something");
             }
         }};

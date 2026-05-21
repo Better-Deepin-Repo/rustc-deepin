@@ -1,5 +1,4 @@
 //@ edition:2018
-//@ dont-require-annotations: SUGGESTION
 
 fn take_u32(_x: u32) {}
 
@@ -44,7 +43,7 @@ async fn suggest_await_on_previous_match_arms() {
         0 => dummy(), //~ HELP consider `await`ing on the `Future`
         1 => dummy(),
         2 => dummy().await,
-        //~^ ERROR `match` arms have incompatible types [E0308]
+        //~^ `match` arms have incompatible types [E0308]
     };
 }
 

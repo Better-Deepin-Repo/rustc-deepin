@@ -14,7 +14,7 @@ const FOO: () = {
         b: (),
     }
     let x = unsafe { Foo { b: () }.a };
-    //~^ ERROR: value of uninhabited type
+    //~^ ERROR: evaluation of constant value failed
     let x = &x.inner;
 };
 

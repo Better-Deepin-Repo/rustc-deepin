@@ -1,6 +1,8 @@
+#[cfg(test)]
+mod tests;
+
 use crate::fmt;
-use crate::panic::RefUnwindSafe;
-use crate::sync::nonpoison::{Condvar, Mutex};
+use crate::sync::{Condvar, Mutex};
 
 /// A barrier enables multiple threads to synchronize the beginning
 /// of some computation.
@@ -8,22 +10,26 @@ use crate::sync::nonpoison::{Condvar, Mutex};
 /// # Examples
 ///
 /// ```
-/// use std::sync::Barrier;
+/// use std::sync::{Arc, Barrier};
 /// use std::thread;
 ///
 /// let n = 10;
-/// let barrier = Barrier::new(n);
-/// thread::scope(|s| {
-///     for _ in 0..n {
-///         // The same messages will be printed together.
-///         // You will NOT see any interleaving.
-///         s.spawn(|| {
-///             println!("before wait");
-///             barrier.wait();
-///             println!("after wait");
-///         });
-///     }
-/// });
+/// let mut handles = Vec::with_capacity(n);
+/// let barrier = Arc::new(Barrier::new(n));
+/// for _ in 0..n {
+///     let c = Arc::clone(&barrier);
+///     // The same messages will be printed together.
+///     // You will NOT see any interleaving.
+///     handles.push(thread::spawn(move || {
+///         println!("before wait");
+///         c.wait();
+///         println!("after wait");
+///     }));
+/// }
+/// // Wait for other threads to finish.
+/// for handle in handles {
+///     handle.join().unwrap();
+/// }
 /// ```
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct Barrier {
@@ -31,9 +37,6 @@ pub struct Barrier {
     cvar: Condvar,
     num_threads: usize,
 }
-
-#[stable(feature = "unwind_safe_lock_refs", since = "1.12.0")]
-impl RefUnwindSafe for Barrier {}
 
 // The inner state of a double barrier
 struct BarrierState {
@@ -65,8 +68,8 @@ impl fmt::Debug for Barrier {
 impl Barrier {
     /// Creates a new barrier that can block a given number of threads.
     ///
-    /// A barrier will block all threads which call [`wait()`] until the `n`th thread calls [`wait()`],
-    /// and then wake up all threads at once.
+    /// A barrier will block `n`-1 threads which call [`wait()`] and then wake
+    /// up all threads at once when the `n`th thread calls [`wait()`].
     ///
     /// [`wait()`]: Barrier::wait
     ///
@@ -102,30 +105,35 @@ impl Barrier {
     /// # Examples
     ///
     /// ```
-    /// use std::sync::Barrier;
+    /// use std::sync::{Arc, Barrier};
     /// use std::thread;
     ///
     /// let n = 10;
-    /// let barrier = Barrier::new(n);
-    /// thread::scope(|s| {
-    ///     for _ in 0..n {
-    ///         // The same messages will be printed together.
-    ///         // You will NOT see any interleaving.
-    ///         s.spawn(|| {
-    ///             println!("before wait");
-    ///             barrier.wait();
-    ///             println!("after wait");
-    ///         });
-    ///     }
-    /// });
+    /// let mut handles = Vec::with_capacity(n);
+    /// let barrier = Arc::new(Barrier::new(n));
+    /// for _ in 0..n {
+    ///     let c = Arc::clone(&barrier);
+    ///     // The same messages will be printed together.
+    ///     // You will NOT see any interleaving.
+    ///     handles.push(thread::spawn(move || {
+    ///         println!("before wait");
+    ///         c.wait();
+    ///         println!("after wait");
+    ///     }));
+    /// }
+    /// // Wait for other threads to finish.
+    /// for handle in handles {
+    ///     handle.join().unwrap();
+    /// }
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn wait(&self) -> BarrierWaitResult {
-        let mut lock = self.lock.lock();
+        let mut lock = self.lock.lock().unwrap();
         let local_gen = lock.generation_id;
         lock.count += 1;
         if lock.count < self.num_threads {
-            self.cvar.wait_while(&mut lock, |state| local_gen == state.generation_id);
+            let _guard =
+                self.cvar.wait_while(lock, |state| local_gen == state.generation_id).unwrap();
             BarrierWaitResult(false)
         } else {
             lock.count = 0;

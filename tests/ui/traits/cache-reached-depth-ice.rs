@@ -1,5 +1,4 @@
-#![feature(rustc_attrs, sized_hierarchy)]
-use std::marker::PointeeSized;
+#![feature(rustc_attrs)]
 
 // Test for a particular corner case where the evaluation
 // cache can get out of date. The problem here is that
@@ -38,7 +37,7 @@ struct C {
 }
 
 #[rustc_evaluate_where_clauses]
-fn test<X: PointeeSized + Send>() {}
+fn test<X: ?Sized + Send>() {}
 
 fn main() {
     test::<A>();

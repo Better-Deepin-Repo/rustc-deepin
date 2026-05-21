@@ -1,14 +1,14 @@
-error[E0433]: cannot find derive macro `Anything` in trait `Foo`
+error[E0433]: failed to resolve: partially resolved path in a derive macro
   --> $DIR/issue-46101.rs:2:10
    |
 LL | #[derive(Foo::Anything)]
-   |          ^^^^^^^^^^^^^ a derive macro can't exist within a trait
+   |          ^^^^^^^^^^^^^ partially resolved path in a derive macro
 
-error[E0433]: cannot find derive macro `Anything` in trait `Foo`
+error[E0433]: failed to resolve: partially resolved path in a derive macro
   --> $DIR/issue-46101.rs:2:10
    |
 LL | #[derive(Foo::Anything)]
-   |          ^^^^^^^^^^^^^ a derive macro can't exist within a trait
+   |          ^^^^^^^^^^^^^ partially resolved path in a derive macro
    |
    = note: duplicate diagnostic emitted due to `-Z deduplicate-diagnostics=no`
 

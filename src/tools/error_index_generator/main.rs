@@ -1,11 +1,10 @@
 #![feature(rustc_private)]
 
 extern crate rustc_driver;
-extern crate rustc_error_codes;
-extern crate rustc_errors;
 extern crate rustc_log;
 extern crate rustc_session;
 
+extern crate rustc_errors;
 use std::env;
 use std::error::Error;
 use std::fs::{self, File};
@@ -13,26 +12,9 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
-use mdbook_driver::MDBook;
-use mdbook_driver::book::{BookItem, Chapter};
-use mdbook_driver::config::Config;
-use mdbook_summary::parse_summary;
-use rustc_errors::codes::ErrCode;
-
-macro_rules! define_error_codes_table {
-    ($($num:literal,)*) => (
-        static DIAGNOSTICS: &[(ErrCode, &str)] = &[
-            $( (
-                ErrCode::from_u32($num),
-                include_str!(
-                    concat!("../../../compiler/rustc_error_codes/src/error_codes/E", stringify!($num), ".md")
-                )
-            ), )*
-        ];
-    )
-}
-
-rustc_error_codes::error_codes!(define_error_codes_table);
+use mdbook::book::{parse_summary, BookItem, Chapter};
+use mdbook::{Config, MDBook};
+use rustc_errors::codes::DIAGNOSTICS;
 
 enum OutputFormat {
     HTML,
@@ -139,7 +121,7 @@ This page lists all the error codes emitted by the Rust compiler.
         source_path: None,
         parent_names: Vec::new(),
     };
-    book.book.items.push(BookItem::Chapter(chapter));
+    book.book.sections.push(BookItem::Chapter(chapter));
     book.build()?;
 
     // The error-index used to be generated manually (without mdbook), and the

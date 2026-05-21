@@ -1,4 +1,3 @@
-//@ check-pass
 // The test for the ICE 6539: https://github.com/rust-lang/rust-clippy/issues/6539.
 // The cause is that `zero_sized_map_values` used `layout_of` with types from type aliases,
 // which is essentially the same as the ICE 4968.

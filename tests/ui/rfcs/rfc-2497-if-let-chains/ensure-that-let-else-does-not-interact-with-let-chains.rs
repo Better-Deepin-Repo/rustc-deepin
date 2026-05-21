@@ -1,4 +1,4 @@
-//@ edition: 2024
+#![feature(let_chains)]
 
 fn main() {
     let opt = Some(1i32);

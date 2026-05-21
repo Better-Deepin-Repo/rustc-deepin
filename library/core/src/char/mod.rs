@@ -18,7 +18,7 @@
 //! functions that convert various types to `char`.
 
 #![allow(non_snake_case)]
-#![stable(feature = "rust1", since = "1.0.0")]
+#![stable(feature = "core_char", since = "1.2.0")]
 
 mod convert;
 mod decode;
@@ -38,13 +38,13 @@ pub use self::decode::{DecodeUtf16, DecodeUtf16Error};
 #[unstable(feature = "char_internals", reason = "exposed only for libstd", issue = "none")]
 pub use self::methods::encode_utf16_raw; // perma-unstable
 #[unstable(feature = "char_internals", reason = "exposed only for libstd", issue = "none")]
-pub use self::methods::{encode_utf8_raw, encode_utf8_raw_unchecked}; // perma-unstable
+pub use self::methods::encode_utf8_raw; // perma-unstable
 
 #[rustfmt::skip]
 use crate::ascii;
 pub(crate) use self::methods::EscapeDebugExtArgs;
 use crate::error::Error;
-use crate::escape::{AlwaysEscaped, EscapeIterInner, MaybeEscaped};
+use crate::escape;
 use crate::fmt::{self, Write};
 use crate::iter::{FusedIterator, TrustedLen, TrustedRandomAccess, TrustedRandomAccessNoCoerce};
 use crate::num::NonZero;
@@ -95,16 +95,6 @@ const MAX_THREE_B: u32 = 0x10000;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub const MAX: char = char::MAX;
 
-/// The maximum number of bytes required to [encode](char::encode_utf8) a `char` to
-/// UTF-8 encoding.
-#[unstable(feature = "char_max_len", issue = "121714")]
-pub const MAX_LEN_UTF8: usize = char::MAX_LEN_UTF8;
-
-/// The maximum number of two-byte units required to [encode](char::encode_utf16) a `char`
-/// to UTF-16 encoding.
-#[unstable(feature = "char_max_len", issue = "121714")]
-pub const MAX_LEN_UTF16: usize = char::MAX_LEN_UTF16;
-
 /// `U+FFFD REPLACEMENT CHARACTER` (�) is used in Unicode to represent a
 /// decoding error. Use [`char::REPLACEMENT_CHARACTER`] instead.
 #[stable(feature = "decode_utf16", since = "1.9.0")]
@@ -132,7 +122,7 @@ pub const fn from_u32(i: u32) -> Option<char> {
     self::convert::from_u32(i)
 }
 
-/// Converts a `u32` to a `char`, ignoring validity. Use [`char::from_u32_unchecked`]
+/// Converts a `u32` to a `char`, ignoring validity. Use [`char::from_u32_unchecked`].
 /// instead.
 #[stable(feature = "char_from_unchecked", since = "1.5.0")]
 #[rustc_const_stable(feature = "const_char_from_u32_unchecked", since = "1.81.0")]
@@ -161,12 +151,12 @@ pub const fn from_digit(num: u32, radix: u32) -> Option<char> {
 /// [`escape_unicode`]: char::escape_unicode
 #[derive(Clone, Debug)]
 #[stable(feature = "rust1", since = "1.0.0")]
-pub struct EscapeUnicode(EscapeIterInner<10, AlwaysEscaped>);
+pub struct EscapeUnicode(escape::EscapeIterInner<10>);
 
 impl EscapeUnicode {
     #[inline]
     const fn new(c: char) -> Self {
-        Self(EscapeIterInner::unicode(c))
+        Self(escape::EscapeIterInner::unicode(c))
     }
 }
 
@@ -215,7 +205,7 @@ impl FusedIterator for EscapeUnicode {}
 #[stable(feature = "char_struct_display", since = "1.16.0")]
 impl fmt::Display for EscapeUnicode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
+        f.write_str(self.0.as_str())
     }
 }
 
@@ -227,22 +217,22 @@ impl fmt::Display for EscapeUnicode {
 /// [`escape_default`]: char::escape_default
 #[derive(Clone, Debug)]
 #[stable(feature = "rust1", since = "1.0.0")]
-pub struct EscapeDefault(EscapeIterInner<10, AlwaysEscaped>);
+pub struct EscapeDefault(escape::EscapeIterInner<10>);
 
 impl EscapeDefault {
     #[inline]
     const fn printable(c: ascii::Char) -> Self {
-        Self(EscapeIterInner::ascii(c.to_u8()))
+        Self(escape::EscapeIterInner::ascii(c.to_u8()))
     }
 
     #[inline]
     const fn backslash(c: ascii::Char) -> Self {
-        Self(EscapeIterInner::backslash(c))
+        Self(escape::EscapeIterInner::backslash(c))
     }
 
     #[inline]
     const fn unicode(c: char) -> Self {
-        Self(EscapeIterInner::unicode(c))
+        Self(escape::EscapeIterInner::unicode(c))
     }
 }
 
@@ -290,9 +280,8 @@ impl FusedIterator for EscapeDefault {}
 
 #[stable(feature = "char_struct_display", since = "1.16.0")]
 impl fmt::Display for EscapeDefault {
-    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
+        f.write_str(self.0.as_str())
     }
 }
 
@@ -304,22 +293,37 @@ impl fmt::Display for EscapeDefault {
 /// [`escape_debug`]: char::escape_debug
 #[stable(feature = "char_escape_debug", since = "1.20.0")]
 #[derive(Clone, Debug)]
-pub struct EscapeDebug(EscapeIterInner<10, MaybeEscaped>);
+pub struct EscapeDebug(EscapeDebugInner);
+
+#[derive(Clone, Debug)]
+// Note: It’s possible to manually encode the EscapeDebugInner inside of
+// EscapeIterInner (e.g. with alive=254..255 indicating that data[0..4] holds
+// a char) which would likely result in a more optimised code.  For now we use
+// the option easier to implement.
+enum EscapeDebugInner {
+    Bytes(escape::EscapeIterInner<10>),
+    Char(char),
+}
 
 impl EscapeDebug {
     #[inline]
     const fn printable(chr: char) -> Self {
-        Self(EscapeIterInner::printable(chr))
+        Self(EscapeDebugInner::Char(chr))
     }
 
     #[inline]
     const fn backslash(c: ascii::Char) -> Self {
-        Self(EscapeIterInner::backslash(c))
+        Self(EscapeDebugInner::Bytes(escape::EscapeIterInner::backslash(c)))
     }
 
     #[inline]
     const fn unicode(c: char) -> Self {
-        Self(EscapeIterInner::unicode(c))
+        Self(EscapeDebugInner::Bytes(escape::EscapeIterInner::unicode(c)))
+    }
+
+    #[inline]
+    fn clear(&mut self) {
+        self.0 = EscapeDebugInner::Bytes(escape::EscapeIterInner::empty());
     }
 }
 
@@ -329,7 +333,13 @@ impl Iterator for EscapeDebug {
 
     #[inline]
     fn next(&mut self) -> Option<char> {
-        self.0.next()
+        match self.0 {
+            EscapeDebugInner::Bytes(ref mut bytes) => bytes.next().map(char::from),
+            EscapeDebugInner::Char(chr) => {
+                self.clear();
+                Some(chr)
+            }
+        }
     }
 
     #[inline]
@@ -347,7 +357,10 @@ impl Iterator for EscapeDebug {
 #[stable(feature = "char_escape_debug", since = "1.20.0")]
 impl ExactSizeIterator for EscapeDebug {
     fn len(&self) -> usize {
-        self.0.len()
+        match &self.0 {
+            EscapeDebugInner::Bytes(bytes) => bytes.len(),
+            EscapeDebugInner::Char(_) => 1,
+        }
     }
 }
 
@@ -356,9 +369,11 @@ impl FusedIterator for EscapeDebug {}
 
 #[stable(feature = "char_escape_debug", since = "1.20.0")]
 impl fmt::Display for EscapeDebug {
-    #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
+        match &self.0 {
+            EscapeDebugInner::Bytes(bytes) => f.write_str(bytes.as_str()),
+            EscapeDebugInner::Char(chr) => f.write_char(*chr),
+        }
     }
 }
 
@@ -455,7 +470,6 @@ macro_rules! casemappingiter_impls {
 
         #[stable(feature = "char_struct_display", since = "1.16.0")]
         impl fmt::Display for $ITER_NAME {
-            #[inline]
             fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                 fmt::Display::fmt(&self.0, f)
             }

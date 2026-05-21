@@ -1,16 +1,17 @@
-use rustc_ast::ast;
 use rustc_ast::token::{Delimiter, NonterminalKind, NtExprKind::*, NtPatKind::*, TokenKind};
 use rustc_ast::tokenstream::TokenStream;
+use rustc_ast::{ast, ptr};
+use rustc_parse::parser::{ForceCollect, Parser, Recovery};
 use rustc_parse::MACRO_ARGUMENTS;
-use rustc_parse::parser::{AllowConstBlockItems, ForceCollect, Parser, Recovery};
 use rustc_session::parse::ParseSess;
-use rustc_span::symbol;
+use rustc_span::symbol::{self, kw};
+use rustc_span::Symbol;
 
 use crate::macros::MacroArg;
 use crate::rewrite::RewriteContext;
 
+pub(crate) mod asm;
 pub(crate) mod cfg_if;
-pub(crate) mod cfg_match;
 pub(crate) mod lazy_static;
 
 fn build_stream_parser<'a>(psess: &'a ParseSess, tokens: TokenStream) -> Parser<'a> {
@@ -49,26 +50,26 @@ fn parse_macro_arg<'a, 'b: 'a>(parser: &'a mut Parser<'b>) -> Option<MacroArg> {
         Expr,
         NonterminalKind::Expr(Expr),
         |parser: &mut Parser<'b>| parser.parse_expr(),
-        |x: Box<ast::Expr>| Some(x)
+        |x: ptr::P<ast::Expr>| Some(x)
     );
     parse_macro_arg!(
         Ty,
         NonterminalKind::Ty,
         |parser: &mut Parser<'b>| parser.parse_ty(),
-        |x: Box<ast::Ty>| Some(x)
+        |x: ptr::P<ast::Ty>| Some(x)
     );
     parse_macro_arg!(
         Pat,
         NonterminalKind::Pat(PatParam { inferred: false }),
         |parser: &mut Parser<'b>| parser.parse_pat_no_top_alt(None, None),
-        |x: ast::Pat| Some(Box::new(x))
+        |x: ptr::P<ast::Pat>| Some(x)
     );
-    // `parse_item` returns `Option<Box<ast::Item>>`.
+    // `parse_item` returns `Option<ptr::P<ast::Item>>`.
     parse_macro_arg!(
         Item,
         NonterminalKind::Item,
-        |parser: &mut Parser<'b>| parser.parse_item(ForceCollect::No, AllowConstBlockItems::Yes),
-        |x: Option<Box<ast::Item>>| x
+        |parser: &mut Parser<'b>| parser.parse_item(ForceCollect::No),
+        |x: Option<ptr::P<ast::Item>>| x
     );
 
     None
@@ -81,18 +82,18 @@ pub(crate) struct ParsedMacroArgs {
 }
 
 fn check_keyword<'a, 'b: 'a>(parser: &'a mut Parser<'b>) -> Option<MacroArg> {
-    if parser.token.is_reserved_ident()
-        && parser.look_ahead(1, |t| *t == TokenKind::Eof || *t == TokenKind::Comma)
-    {
-        let keyword = parser.token.ident().unwrap().0.name;
-        parser.bump();
-        Some(MacroArg::Keyword(
-            symbol::Ident::with_dummy_span(keyword),
-            parser.prev_token.span,
-        ))
-    } else {
-        None
+    for &keyword in RUST_KW.iter() {
+        if parser.token.is_keyword(keyword)
+            && parser.look_ahead(1, |t| *t == TokenKind::Eof || *t == TokenKind::Comma)
+        {
+            parser.bump();
+            return Some(MacroArg::Keyword(
+                symbol::Ident::with_dummy_span(keyword),
+                parser.prev_token.span,
+            ));
+        }
     }
+    None
 }
 
 pub(crate) fn parse_macro_args(
@@ -164,7 +165,69 @@ pub(crate) fn parse_macro_args(
 pub(crate) fn parse_expr(
     context: &RewriteContext<'_>,
     tokens: TokenStream,
-) -> Option<Box<ast::Expr>> {
+) -> Option<ptr::P<ast::Expr>> {
     let mut parser = build_parser(context, tokens);
     parser.parse_expr().ok()
 }
+
+const RUST_KW: [Symbol; 59] = [
+    kw::PathRoot,
+    kw::DollarCrate,
+    kw::Underscore,
+    kw::As,
+    kw::Box,
+    kw::Break,
+    kw::Const,
+    kw::Continue,
+    kw::Crate,
+    kw::Else,
+    kw::Enum,
+    kw::Extern,
+    kw::False,
+    kw::Fn,
+    kw::For,
+    kw::If,
+    kw::Impl,
+    kw::In,
+    kw::Let,
+    kw::Loop,
+    kw::Match,
+    kw::Mod,
+    kw::Move,
+    kw::Mut,
+    kw::Pub,
+    kw::Ref,
+    kw::Return,
+    kw::SelfLower,
+    kw::SelfUpper,
+    kw::Static,
+    kw::Struct,
+    kw::Super,
+    kw::Trait,
+    kw::True,
+    kw::Type,
+    kw::Unsafe,
+    kw::Use,
+    kw::Where,
+    kw::While,
+    kw::Abstract,
+    kw::Become,
+    kw::Do,
+    kw::Final,
+    kw::Macro,
+    kw::Override,
+    kw::Priv,
+    kw::Typeof,
+    kw::Unsized,
+    kw::Virtual,
+    kw::Yield,
+    kw::Dyn,
+    kw::Async,
+    kw::Try,
+    kw::UnderscoreLifetime,
+    kw::StaticLifetime,
+    kw::Auto,
+    kw::Catch,
+    kw::Default,
+    kw::Union,
+];

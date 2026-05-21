@@ -1,5 +1,5 @@
 error: pattern on wrong side of `@`
-  --> $DIR/intersection-patterns-1.rs:18:9
+  --> $DIR/intersection-patterns-1.rs:17:9
    |
 LL |         Some(x) @ y => {}
    |         -------^^^-
@@ -9,12 +9,11 @@ LL |         Some(x) @ y => {}
    |
 help: switch the order
    |
-LL -         Some(x) @ y => {}
-LL +         y @ Some(x) => {}
-   |
+LL |         y @ Some(x) => {}
+   |         ~~~~~~~~~~~
 
 error: pattern on wrong side of `@`
-  --> $DIR/intersection-patterns-1.rs:28:9
+  --> $DIR/intersection-patterns-1.rs:27:9
    |
 LL |         1 ..= 5 @ e => {}
    |         -------^^^-
@@ -24,9 +23,8 @@ LL |         1 ..= 5 @ e => {}
    |
 help: switch the order
    |
-LL -         1 ..= 5 @ e => {}
-LL +         e @ 1..=5 => {}
-   |
+LL |         e @ 1..=5 => {}
+   |         ~~~~~~~~~
 
 error: aborting due to 2 previous errors
 

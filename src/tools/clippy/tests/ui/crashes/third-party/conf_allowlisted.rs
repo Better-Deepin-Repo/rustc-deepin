@@ -1,3 +1,1 @@
-//@ check-pass
-
 fn main() {}

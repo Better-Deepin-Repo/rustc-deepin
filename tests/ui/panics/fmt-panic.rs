@@ -1,6 +1,6 @@
 //@ run-fail
 //@ error-pattern:meh
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 fn main() {
     let str_var: String = "meh".to_string();

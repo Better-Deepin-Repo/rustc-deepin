@@ -1,14 +1,17 @@
 #![feature(try_blocks)]
-#![expect(clippy::eq_op, clippy::single_match, clippy::while_immutable_condition)]
+#![allow(
+    clippy::eq_op,
+    clippy::single_match,
+    unused_assignments,
+    unused_variables,
+    clippy::while_immutable_condition
+)]
 //@no-rustfix
-
-use std::arch::asm;
-
 fn test1() {
     let mut x = 0;
     loop {
-        //~^ never_loop
-
+        //~^ ERROR: this loop never actually loops
+        //~| NOTE: `#[deny(clippy::never_loop)]` on by default
         // clippy::never_loop
         x += 1;
         if x == 1 {
@@ -31,8 +34,7 @@ fn test2() {
 fn test3() {
     let mut x = 0;
     loop {
-        //~^ never_loop
-
+        //~^ ERROR: this loop never actually loops
         // never loops
         x += 1;
         break;
@@ -53,12 +55,10 @@ fn test4() {
 fn test5() {
     let i = 0;
     loop {
-        //~^ never_loop
-
+        //~^ ERROR: this loop never actually loops
         // never loops
         while i == 0 {
-            //~^ never_loop
-
+            //~^ ERROR: this loop never actually loops
             // never loops
             break;
         }
@@ -71,8 +71,7 @@ fn test6() {
     'outer: loop {
         x += 1;
         loop {
-            //~^ never_loop
-
+            //~^ ERROR: this loop never actually loops
             // never loops
             if x == 5 {
                 break;
@@ -109,8 +108,7 @@ fn test8() {
 fn test9() {
     let x = Some(1);
     while let Some(y) = x {
-        //~^ never_loop
-
+        //~^ ERROR: this loop never actually loops
         // never loops
         return;
     }
@@ -118,8 +116,7 @@ fn test9() {
 
 fn test10() {
     for x in 0..10 {
-        //~^ never_loop
-
+        //~^ ERROR: this loop never actually loops
         // never loops
         match x {
             1 => break,
@@ -168,8 +165,7 @@ pub fn test13() {
 pub fn test14() {
     let mut a = true;
     'outer: while a {
-        //~^ never_loop
-
+        //~^ ERROR: this loop never actually loops
         // never loops
         while a {
             if a {
@@ -185,8 +181,7 @@ pub fn test14() {
 pub fn test15() {
     'label: loop {
         while false {
-            //~^ never_loop
-
+            //~^ ERROR: this loop never actually loops
             break 'label;
         }
     }
@@ -238,8 +233,7 @@ pub fn test18() {
     };
     // never loops
     let _ = loop {
-        //~^ never_loop
-
+        //~^ ERROR: this loop never actually loops
         let Some(x) = x else {
             return;
         };
@@ -261,12 +255,12 @@ pub fn test19() {
 
 pub fn test20() {
     'a: loop {
-        //~^ never_loop
-
+        //~^ ERROR: this loop never actually loops
         'b: {
             break 'b 'c: {
                 break 'a;
-                //~^ diverging_sub_expression
+                //~^ ERROR: sub-expression diverges
+                //~| NOTE: `-D clippy::diverging-sub-expression` implied by `-D warnings`
             };
         }
     }
@@ -298,8 +292,7 @@ pub fn test23() {
     for _ in 0..10 {
         'block: {
             for _ in 0..20 {
-                //~^ never_loop
-
+                //~^ ERROR: this loop never actually loops
                 break 'block;
             }
         }
@@ -383,8 +376,7 @@ pub fn test31(b: bool) {
     'a: loop {
         'b: {
             'c: loop {
-                //~^ never_loop
-
+                //~^ ERROR: this loop never actually loops
                 if b { break 'c } else { break 'b }
             }
             continue 'a;
@@ -395,13 +387,11 @@ pub fn test31(b: bool) {
 
 pub fn test32() {
     loop {
-        //~^ never_loop
-
+        //~^ ERROR: this loop never actually loops
         panic!("oh no");
     }
     loop {
-        //~^ never_loop
-
+        //~^ ERROR: this loop never actually loops
         unimplemented!("not yet");
     }
     loop {
@@ -419,125 +409,19 @@ pub fn issue12205() -> Option<()> {
     }
 }
 
-fn stmt_after_return() {
-    for v in 0..10 {
-        //~^ never_loop
-        break;
-        println!("{v}");
-    }
-}
-
-fn loop_label() {
-    'outer: for v in 0..10 {
-        //~^ never_loop
-        loop {
-            //~^ never_loop
-            break 'outer;
-        }
-        return;
-    }
-
-    for v in 0..10 {
-        //~^ never_loop
-        'inner: loop {
-            //~^ never_loop
-            break 'inner;
-        }
-        return;
-    }
-}
-
-fn main() {}
-
-fn issue15059() {
-    'a: for _ in 0..1 {
-        //~^ never_loop
-        break 'a;
-    }
-
-    let mut b = 1;
-    'a: for i in 0..1 {
-        //~^ never_loop
-        match i {
-            0 => {
-                b *= 2;
-                break 'a;
-            },
-            x => {
-                b += x;
-                break 'a;
-            },
-        }
-    }
-
-    #[allow(clippy::unused_unit)]
-    for v in 0..10 {
-        //~^ never_loop
-        break;
-        println!("{v}");
-        // This is comment and should be kept
-        println!("This is a comment");
-        ()
-    }
-}
-
-fn issue15350() {
-    'bar: for _ in 0..100 {
-        //~^ never_loop
-        loop {
-            //~^ never_loop
-            println!("This will still run");
-            break 'bar;
-        }
-    }
-
-    'foo: for _ in 0..100 {
-        //~^ never_loop
-        loop {
-            //~^ never_loop
-            println!("This will still run");
-            loop {
-                //~^ never_loop
-                println!("This will still run");
-                break 'foo;
-            }
-        }
-    }
-}
-
-fn issue15673() {
-    loop {
-        unsafe {
-            // No lint since we don't analyze the inside of the asm
-            asm! {
-                "/* {} */",
-                label {
-                    break;
-                }
-            }
-        }
-    }
-
-    //~v never_loop
-    loop {
-        unsafe {
-            asm! {
-                "/* {} */",
-                label {
-                    break;
-                }
-            }
-        }
-        return;
-    }
-}
-
-#[expect(clippy::diverging_sub_expression, clippy::short_circuit_statement)]
-fn issue16462() {
-    let mut n = 10;
-    loop {
-        println!("{n}");
-        n -= 1;
-        n >= 0 || break;
-    }
+fn main() {
+    test1();
+    test2();
+    test3();
+    test4();
+    test5();
+    test6();
+    test7();
+    test8();
+    test9();
+    test10();
+    test11(|| 0);
+    test12(true, false);
+    test13();
+    test14();
 }

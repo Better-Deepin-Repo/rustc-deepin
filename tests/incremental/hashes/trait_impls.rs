@@ -11,7 +11,6 @@
 //@ [cfail1]compile-flags: -Zincremental-ignore-spans
 //@ [cfail2]compile-flags: -Zincremental-ignore-spans
 //@ [cfail3]compile-flags: -Zincremental-ignore-spans
-//@ ignore-backends: gcc
 
 #![allow(warnings)]
 #![feature(rustc_attrs)]
@@ -35,7 +34,7 @@ impl ChangeMethodNameTrait for Foo {
 #[cfg(not(any(cfail1,cfail4)))]
 #[rustc_clean(except="opt_hir_owner_nodes,associated_item_def_ids", cfg="cfail2")]
 #[rustc_clean(cfg="cfail3")]
-#[rustc_clean(except="opt_hir_owner_nodes,associated_item_def_ids,predicates_of", cfg="cfail5")]
+#[rustc_clean(except="opt_hir_owner_nodes,associated_item_def_ids", cfg="cfail5")]
 #[rustc_clean(cfg="cfail6")]
 pub trait ChangeMethodNameTrait {
     #[rustc_clean(cfg="cfail3")]
@@ -142,7 +141,7 @@ pub trait ChangeMethodSelfnessTrait {
 }
 
 #[cfg(not(any(cfail1,cfail4)))]
-#[rustc_clean(cfg="cfail2")]
+#[rustc_clean(except="opt_hir_owner_nodes", cfg="cfail2")]
 #[rustc_clean(cfg="cfail3")]
 #[rustc_clean(except="opt_hir_owner_nodes", cfg="cfail5")]
 #[rustc_clean(cfg="cfail6")]
@@ -180,7 +179,7 @@ pub trait RemoveMethodSelfnessTrait {
 }
 
 #[cfg(not(any(cfail1,cfail4)))]
-#[rustc_clean(cfg="cfail2")]
+#[rustc_clean(except="opt_hir_owner_nodes", cfg="cfail2")]
 #[rustc_clean(cfg="cfail3")]
 #[rustc_clean(except="opt_hir_owner_nodes", cfg="cfail5")]
 #[rustc_clean(cfg="cfail6")]
@@ -569,7 +568,7 @@ impl AddNoMangleToMethod for Foo {
     // -------------------------
     // -------------------------
     // -------------------------
-    // -----------------
+    // ---------
     fn add_no_mangle_to_method(&self) { }
 }
 
@@ -583,7 +582,7 @@ impl AddNoMangleToMethod for Foo {
     #[rustc_clean(cfg="cfail3")]
     #[rustc_clean(cfg="cfail5")]
     #[rustc_clean(cfg="cfail6")]
-    #[unsafe(no_mangle)]
+    #[no_mangle]
     fn add_no_mangle_to_method(&self) { }
 }
 

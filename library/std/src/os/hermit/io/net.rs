@@ -1,6 +1,6 @@
-use crate::net;
 use crate::os::hermit::io::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
-use crate::sys::{self, AsInner, FromInner, IntoInner};
+use crate::sys_common::{self, AsInner, FromInner, IntoInner};
+use crate::{net, sys};
 
 macro_rules! impl_as_raw_fd {
     ($($t:ident)*) => {$(
@@ -23,7 +23,7 @@ macro_rules! impl_from_raw_fd {
             unsafe fn from_raw_fd(fd: RawFd) -> net::$t {
                 unsafe {
                     let socket = sys::net::Socket::from_inner(FromInner::from_inner(OwnedFd::from_raw_fd(fd)));
-                    net::$t::from_inner(sys::net::$t::from_inner(socket))
+                    net::$t::from_inner(sys_common::net::$t::from_inner(socket))
                 }
             }
         }

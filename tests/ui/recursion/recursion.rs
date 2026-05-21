@@ -1,5 +1,6 @@
 //@ build-fail
-//@ compile-flags:-C overflow-checks=off --diagnostic-width=100 -Zwrite-long-types-to-disk=yes
+//@ compile-flags:-C overflow-checks=off
+//@ normalize-stderr-test: ".nll/" -> "/"
 
 enum Nil {NilValue}
 struct Cons<T> {head:isize, tail:T}

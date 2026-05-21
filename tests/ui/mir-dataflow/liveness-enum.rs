@@ -20,5 +20,3 @@ fn foo() -> Option<i32> {
 }
 
 fn main() {}
-
-//~? ERROR stop_after_dataflow ended compilation

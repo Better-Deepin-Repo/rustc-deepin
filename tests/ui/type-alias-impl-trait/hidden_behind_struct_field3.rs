@@ -14,7 +14,6 @@ trait Trait: Sized {
 
 impl Trait for Bar {
     type Assoc2 = impl std::fmt::Debug;
-    //~^ ERROR: unconstrained opaque type
     type Assoc = impl Iterator<Item = Foo>;
     fn foo() -> Self::Assoc {
         vec![Foo { field: () }].into_iter()

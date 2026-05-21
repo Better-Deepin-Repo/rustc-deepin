@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 // Some cases with closures that might be problems
 
 // Should have one error per assignment

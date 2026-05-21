@@ -11,7 +11,6 @@ use collector::Bound;
 use database::{
     metric::Metric,
     selector::{self, BenchmarkQuery, CompileBenchmarkQuery, RuntimeBenchmarkQuery, TestCase},
-    Target,
 };
 use database::{ArtifactId, Benchmark, Lookup, Profile, Scenario};
 use serde::Serialize;
@@ -43,17 +42,17 @@ pub async fn handle_triage(
 
     let start_artifact = ctxt
         .artifact_id_for_bound(start.clone(), true)
-        .ok_or(format!("could not find start commit for bound {start:?}"))?;
+        .ok_or(format!("could not find start commit for bound {:?}", start))?;
     let end_artifact = ctxt
         .artifact_id_for_bound(end.clone(), false)
-        .ok_or(format!("could not find end commit for bound {end:?}"))?;
+        .ok_or(format!("could not find end commit for bound {:?}", end))?;
     // This gives a better error, but is still not great -- the common case here
     // is that we've had a 422 error and as such had a fork. It's possible we
     // could diagnose that and give a nicer error here telling the user which
     // commit to use.
     let mut next = next_commit(&start_artifact, master_commits)
         .map(|c| Bound::Commit(c.sha.clone()))
-        .ok_or(format!("no next commit for {start_artifact:?}"))?;
+        .ok_or(format!("no next commit for {:?}", start_artifact))?;
 
     let mut report = HashMap::new();
     let mut before = start.clone();
@@ -66,7 +65,7 @@ pub async fn handle_triage(
         let comparison =
             match compare_given_commits(before.clone(), next.clone(), metric, ctxt, master_commits)
                 .await
-                .map_err(|e| format!("error comparing commits: {e}"))?
+                .map_err(|e| format!("error comparing commits: {}", e))?
             {
                 Some(c) => c,
                 None => {
@@ -109,7 +108,7 @@ pub async fn handle_triage(
     let summary =
         match compare_given_commits(start.clone(), end.clone(), metric, ctxt, master_commits)
             .await
-            .map_err(|e| format!("error comparing beginning and ending commits: {e}"))?
+            .map_err(|e| format!("error comparing beginning and ending commits: {}", e))?
         {
             Some(summary_comparison) => {
                 let (primary, secondary) =
@@ -136,8 +135,8 @@ pub async fn handle_compare(
     let comparison =
         compare_given_commits(body.start, end.clone(), body.stat, ctxt, master_commits)
             .await
-            .map_err(|e| format!("error comparing commits: {e}"))?
-            .ok_or_else(|| format!("could not find end commit for bound {end:?}"))?;
+            .map_err(|e| format!("error comparing commits: {}", e))?
+            .ok_or_else(|| format!("could not find end commit for bound {:?}", end))?;
 
     let conn = ctxt.conn().await;
     let prev = comparison.prev(master_commits);
@@ -153,7 +152,6 @@ pub async fn handle_compare(
             profile: comparison.profile.to_string(),
             scenario: comparison.scenario.to_string(),
             backend: comparison.backend.to_string(),
-            target: comparison.target.to_string(),
             comparison: comparison.comparison.into(),
         })
         .collect();
@@ -506,14 +504,17 @@ async fn write_triage_summary(
 ) -> String {
     let mut result = if let Some(pr) = comparison.b.pr {
         let title = github::pr_title(pr).await;
-        format!("{title} [#{pr}](https://github.com/rust-lang/rust/pull/{pr})")
+        format!(
+            "{} [#{}](https://github.com/rust-lang/rust/pull/{})",
+            title, pr, pr
+        )
     } else {
         String::from("<Unknown Change>")
     };
     let start = &comparison.a.artifact;
     let end = &comparison.b.artifact;
     let link = &compare_link(start, end);
-    write!(&mut result, " [(Comparison Link)]({link})\n\n").unwrap();
+    write!(&mut result, " [(Comparison Link)]({})\n\n", link).unwrap();
 
     write_summary_table(primary, secondary, true, &mut result);
 
@@ -724,7 +725,7 @@ async fn compare_given_commits(
     let idx = ctxt.index.load();
     let a = ctxt
         .artifact_id_for_bound(start.clone(), true)
-        .ok_or(format!("could not find start commit for bound {start:?}"))?;
+        .ok_or(format!("could not find start commit for bound {:?}", start))?;
     let b = match ctxt.artifact_id_for_bound(end.clone(), false) {
         Some(b) => b,
         None => return Ok(None),
@@ -744,7 +745,6 @@ async fn compare_given_commits(
             scenario: test_case.scenario,
             benchmark: test_case.benchmark,
             backend: test_case.backend,
-            target: test_case.target,
             comparison,
         },
     )
@@ -994,7 +994,7 @@ impl ArtifactComparison {
                 if let Some(b) = master_commits.iter().find(|c| c.sha == b.sha) {
                     b.parent_sha == a.sha
                 } else {
-                    conn.parent_of(&b.sha).await.as_ref() == Some(&a.sha)
+                    conn.parent_of(&b.sha).await.map_or(false, |p| p == a.sha)
                 }
             }
             _ => false,
@@ -1318,7 +1318,6 @@ pub struct CompileTestResultComparison {
     profile: Profile,
     scenario: Scenario,
     backend: CodegenBackend,
-    target: Target,
     comparison: TestResultComparison,
 }
 
@@ -1449,11 +1448,17 @@ async fn generate_report(
         Ok(u) => u
             .iter()
             .map(|github::PullRequest { title, number }| {
-                format!("- [#{number} {title}](https://github.com/rust-lang/rust/pull/{number})")
+                format!(
+                    "- [#{} {}](https://github.com/rust-lang/rust/pull/{})",
+                    number, title, number
+                )
             })
             .collect::<Vec<_>>()
             .join("\n"),
-        Err(e) => format!("An **error** occurred when finding the untriaged PRs: {e}"),
+        Err(e) => format!(
+            "An **error** occurred when finding the untriaged PRs: {}",
+            e
+        ),
     };
     let num_regressions = regressions.len();
     let regressions_suffix = if num_regressions == 1 { "" } else { "s" };
@@ -1526,7 +1531,10 @@ fn compare_link(start: &ArtifactId, end: &ArtifactId) -> String {
         ArtifactId::Tag(a) => a,
         ArtifactId::Commit(c) => &c.sha,
     };
-    format!("https://perf.rust-lang.org/compare.html?start={start}&end={end}&stat=instructions:u")
+    format!(
+        "https://perf.rust-lang.org/compare.html?start={}&end={}&stat=instructions:u",
+        start, end
+    )
 }
 
 #[cfg(test)]
@@ -1749,7 +1757,10 @@ mod tests {
         // We don't use `assert_eq!` here because it stringifies the arguments,
         // making the tables hard to read when printed.
         if result != expected {
-            panic!("output mismatch:\nexpected:\n{expected}actual:\n{result}");
+            panic!(
+                "output mismatch:\nexpected:\n{}actual:\n{}",
+                expected, result
+            );
         }
     }
 }

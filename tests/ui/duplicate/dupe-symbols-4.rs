@@ -1,5 +1,7 @@
 //@ build-fail
 
+//
+//@ error-pattern: symbol `fail` is already defined
 #![crate_type="rlib"]
 #![allow(warnings)]
 
@@ -18,5 +20,5 @@ impl A for B {
 
 impl A for C {
     #[no_mangle]
-    fn fail(self) {} //~ ERROR symbol `fail` is already defined
+    fn fail(self) {}
 }

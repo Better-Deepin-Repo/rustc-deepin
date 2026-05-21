@@ -1,7 +1,7 @@
-//@ compile-flags:-Clink-dead-code -Zinline-mir=no
+//@ compile-flags:-Zprint-mono-items=eager -Zinline-mir=no
 
 #![deny(dead_code)]
-#![crate_type = "lib"]
+#![feature(start)]
 
 pub trait SomeTrait {
     fn foo(&self);
@@ -42,8 +42,8 @@ impl<T> SomeGenericTrait<T> for f32 {
 }
 
 //~ MONO_ITEM fn start
-#[no_mangle]
-pub fn start(_: isize, _: *const *const u8) -> isize {
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
     //~ MONO_ITEM fn <i32 as SomeTrait>::bar::<char>
     0i32.bar('x');
 

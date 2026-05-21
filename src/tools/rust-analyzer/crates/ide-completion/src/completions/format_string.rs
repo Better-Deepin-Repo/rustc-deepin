@@ -1,11 +1,11 @@
 //! Completes identifiers in format string literals.
 
 use hir::{ModuleDef, ScopeDef};
-use ide_db::{SymbolKind, syntax_helpers::format_string::is_format_string};
+use ide_db::{syntax_helpers::format_string::is_format_string, SymbolKind};
 use itertools::Itertools;
-use syntax::{AstToken, TextRange, TextSize, ToSmolStr, ast};
+use syntax::{ast, AstToken, TextRange, TextSize, ToSmolStr};
 
-use crate::{CompletionItem, CompletionItemKind, Completions, context::CompletionContext};
+use crate::{context::CompletionContext, CompletionItem, CompletionItemKind, Completions};
 
 /// Complete identifiers in format strings.
 pub(crate) fn format_string(
@@ -22,8 +22,13 @@ pub(crate) fn format_string(
     let cursor_in_lit = cursor - lit_start;
 
     let prefix = &original.text()[..cursor_in_lit.into()];
-    let Some(brace_offset) = unescaped_brace(prefix) else { return };
-    let brace_offset = lit_start + brace_offset + TextSize::of('{');
+    let braces = prefix.char_indices().rev().skip_while(|&(_, c)| c.is_alphanumeric()).next_tuple();
+    let brace_offset = match braces {
+        // escaped brace
+        Some(((_, '{'), (_, '{'))) => return,
+        Some(((idx, '{'), _)) => lit_start + TextSize::from(idx as u32 + 1),
+        _ => return,
+    };
 
     let source_range = TextRange::new(brace_offset, cursor);
     ctx.locals.iter().sorted_by_key(|&(k, _)| k.clone()).for_each(|(name, _)| {
@@ -54,24 +59,20 @@ pub(crate) fn format_string(
     });
 }
 
-fn unescaped_brace(prefix: &str) -> Option<TextSize> {
-    let is_ident_char = |ch: char| ch.is_alphanumeric() || ch == '_';
-    prefix
-        .trim_end_matches(is_ident_char)
-        .strip_suffix('{')
-        .filter(|it| it.chars().rev().take_while(|&ch| ch == '{').count() % 2 == 0)
-        .map(|s| TextSize::new(s.len() as u32))
-}
-
 #[cfg(test)]
 mod tests {
-    use expect_test::expect;
+    use expect_test::{expect, Expect};
 
-    use crate::tests::{check_edit, check_no_kw};
+    use crate::tests::{check_edit, completion_list_no_kw};
+
+    fn check(ra_fixture: &str, expect: Expect) {
+        let actual = completion_list_no_kw(ra_fixture);
+        expect.assert_eq(&actual);
+    }
 
     #[test]
     fn works_when_wrapped() {
-        check_no_kw(
+        check(
             r#"
 //- minicore: fmt
 macro_rules! print {
@@ -88,7 +89,7 @@ fn main() {
 
     #[test]
     fn no_completion_without_brace() {
-        check_no_kw(
+        check(
             r#"
 //- minicore: fmt
 fn main() {
@@ -97,82 +98,6 @@ fn main() {
 }
 "#,
             expect![[]],
-        );
-    }
-
-    #[test]
-    fn no_completion_after_escaped() {
-        check_no_kw(
-            r#"
-//- minicore: fmt
-fn main() {
-    let foobar = 1;
-    format_args!("{{f$0");
-}
-"#,
-            expect![[]],
-        );
-        check_no_kw(
-            r#"
-//- minicore: fmt
-fn main() {
-    let foobar = 1;
-    format_args!("some text {{{{f$0");
-}
-"#,
-            expect![[]],
-        );
-    }
-
-    #[test]
-    fn completes_unescaped_after_escaped() {
-        check_edit(
-            "foobar",
-            r#"
-//- minicore: fmt
-fn main() {
-    let foobar = 1;
-    format_args!("{{{f$0");
-}
-"#,
-            r#"
-fn main() {
-    let foobar = 1;
-    format_args!("{{{foobar");
-}
-"#,
-        );
-        check_edit(
-            "foobar",
-            r#"
-//- minicore: fmt
-fn main() {
-    let foobar = 1;
-    format_args!("{{{{{f$0");
-}
-"#,
-            r#"
-fn main() {
-    let foobar = 1;
-    format_args!("{{{{{foobar");
-}
-"#,
-        );
-        check_edit(
-            "foobar",
-            r#"
-//- minicore: fmt
-fn main() {
-    let foobar = 1;
-    format_args!("}}{f$0");
-}
-"#,
-            r#"
-fn main() {
-    let foobar = 1;
-    format_args!("}}{foobar");
-}
-"#,
         );
     }
 

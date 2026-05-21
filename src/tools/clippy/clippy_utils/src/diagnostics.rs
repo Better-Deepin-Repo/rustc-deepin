@@ -8,66 +8,23 @@
 //! Thank you!
 //! ~The `INTERNAL_METADATA_COLLECTOR` lint
 
-use rustc_errors::{Applicability, Diag, DiagMessage, MultiSpan};
-#[cfg(debug_assertions)]
-use rustc_errors::{EmissionGuarantee, SubstitutionPart, Suggestions};
+use rustc_errors::{Applicability, Diag, DiagMessage, MultiSpan, SubdiagMessage};
 use rustc_hir::HirId;
 use rustc_lint::{LateContext, Lint, LintContext};
 use rustc_span::Span;
 use std::env;
 
 fn docs_link(diag: &mut Diag<'_, ()>, lint: &'static Lint) {
-    if env::var("CLIPPY_DISABLE_DOCS_LINKS").is_err()
-        && let Some(lint) = lint.name_lower().strip_prefix("clippy::")
-    {
-        diag.help(format!(
-            "for further information visit https://rust-lang.github.io/rust-clippy/{}/index.html#{lint}",
-            match option_env!("CFG_RELEASE_CHANNEL") {
-                // Clippy version is 0.1.xx
-                //
-                // Always use .0 because we do not generate separate lint doc pages for rust patch releases
-                Some("stable") => concat!("rust-1.", env!("CARGO_PKG_VERSION_PATCH"), ".0"),
-                Some("beta") => "beta",
-                _ => "master",
-            }
-        ));
-    }
-}
-
-/// Makes sure that a diagnostic is well formed.
-///
-/// rustc debug asserts a few properties about spans,
-/// but the clippy repo uses a distributed rustc build with debug assertions disabled,
-/// so this has historically led to problems during subtree syncs where those debug assertions
-/// only started triggered there.
-///
-/// This function makes sure we also validate them in debug clippy builds.
-#[cfg(debug_assertions)]
-fn validate_diag(diag: &Diag<'_, impl EmissionGuarantee>) {
-    let suggestions = match &diag.suggestions {
-        Suggestions::Enabled(suggs) => &**suggs,
-        Suggestions::Sealed(suggs) => &**suggs,
-        Suggestions::Disabled => return,
-    };
-
-    for substitution in suggestions.iter().flat_map(|s| &s.substitutions) {
-        assert_eq!(
-            substitution
-                .parts
-                .iter()
-                .find(|SubstitutionPart { snippet, span }| snippet.is_empty() && span.is_empty()),
-            None,
-            "span must not be empty and have no suggestion"
-        );
-
-        assert_eq!(
-            substitution
-                .parts
-                .array_windows()
-                .find(|[a, b]| a.span.overlaps(b.span)),
-            None,
-            "suggestion must not have overlapping parts"
-        );
+    if env::var("CLIPPY_DISABLE_DOCS_LINKS").is_err() {
+        if let Some(lint) = lint.name_lower().strip_prefix("clippy::") {
+            diag.help(format!(
+                "for further information visit https://rust-lang.github.io/rust-clippy/{}/index.html#{lint}",
+                &option_env!("RUST_RELEASE_NUM").map_or("master".to_string(), |n| {
+                    // extract just major + minor version and ignore patch versions
+                    format!("rust-{}", n.rsplit_once('.').unwrap().1)
+                })
+            ));
+        }
     }
 }
 
@@ -89,7 +46,7 @@ fn validate_diag(diag: &Diag<'_, impl EmissionGuarantee>) {
 /// This is needed for `#[allow]` and `#[expect]` attributes to work on the node
 /// highlighted in the displayed warning.
 ///
-/// If you're unsure which function you should use, you can test if the `#[expect]` attribute works
+/// If you're unsure which function you should use, you can test if the `#[allow]` attribute works
 /// where you would expect it to.
 /// If it doesn't, you likely need to use [`span_lint_hir`] instead.
 ///
@@ -102,12 +59,15 @@ fn validate_diag(diag: &Diag<'_, impl EmissionGuarantee>) {
 /// 17 |     std::mem::forget(seven);
 ///    |     ^^^^^^^^^^^^^^^^^^^^^^^
 /// ```
-#[track_caller]
 pub fn span_lint<T: LintContext>(cx: &T, lint: &'static Lint, sp: impl Into<MultiSpan>, msg: impl Into<DiagMessage>) {
-    span_lint_and_then(cx, lint, sp, msg, |_| {});
+    #[expect(clippy::disallowed_methods)]
+    cx.span_lint(lint, sp, |diag| {
+        diag.primary_message(msg);
+        docs_link(diag, lint);
+    });
 }
 
-/// Same as [`span_lint`] but with an extra `help` message.
+/// Same as `span_lint` but with an extra `help` message.
 ///
 /// Use this if you want to provide some general help but
 /// can't provide a specific machine applicable suggestion.
@@ -126,7 +86,7 @@ pub fn span_lint<T: LintContext>(cx: &T, lint: &'static Lint, sp: impl Into<Mult
 /// This is needed for `#[allow]` and `#[expect]` attributes to work on the node
 /// highlighted in the displayed warning.
 ///
-/// If you're unsure which function you should use, you can test if the `#[expect]` attribute works
+/// If you're unsure which function you should use, you can test if the `#[allow]` attribute works
 /// where you would expect it to.
 /// If it doesn't, you likely need to use [`span_lint_hir_and_then`] instead.
 ///
@@ -141,25 +101,27 @@ pub fn span_lint<T: LintContext>(cx: &T, lint: &'static Lint, sp: impl Into<Mult
 ///    |
 ///    = help: consider using `f64::NAN` if you would like a constant representing NaN
 /// ```
-#[track_caller]
 pub fn span_lint_and_help<T: LintContext>(
     cx: &T,
     lint: &'static Lint,
     span: impl Into<MultiSpan>,
     msg: impl Into<DiagMessage>,
     help_span: Option<Span>,
-    help: impl Into<DiagMessage>,
+    help: impl Into<SubdiagMessage>,
 ) {
-    span_lint_and_then(cx, lint, span, msg, |diag| {
+    #[expect(clippy::disallowed_methods)]
+    cx.span_lint(lint, span, |diag| {
+        diag.primary_message(msg);
         if let Some(help_span) = help_span {
             diag.span_help(help_span, help.into());
         } else {
             diag.help(help.into());
         }
+        docs_link(diag, lint);
     });
 }
 
-/// Like [`span_lint`] but with a `note` section instead of a `help` message.
+/// Like `span_lint` but with a `note` section instead of a `help` message.
 ///
 /// The `note` message is presented separately from the main lint message
 /// and is attached to a specific span:
@@ -176,7 +138,7 @@ pub fn span_lint_and_help<T: LintContext>(
 /// This is needed for `#[allow]` and `#[expect]` attributes to work on the node
 /// highlighted in the displayed warning.
 ///
-/// If you're unsure which function you should use, you can test if the `#[expect]` attribute works
+/// If you're unsure which function you should use, you can test if the `#[allow]` attribute works
 /// where you would expect it to.
 /// If it doesn't, you likely need to use [`span_lint_hir_and_then`] instead.
 ///
@@ -196,25 +158,27 @@ pub fn span_lint_and_help<T: LintContext>(
 /// 10 |     forget(&SomeStruct);
 ///    |            ^^^^^^^^^^^
 /// ```
-#[track_caller]
 pub fn span_lint_and_note<T: LintContext>(
     cx: &T,
     lint: &'static Lint,
     span: impl Into<MultiSpan>,
     msg: impl Into<DiagMessage>,
     note_span: Option<Span>,
-    note: impl Into<DiagMessage>,
+    note: impl Into<SubdiagMessage>,
 ) {
-    span_lint_and_then(cx, lint, span, msg, |diag| {
+    #[expect(clippy::disallowed_methods)]
+    cx.span_lint(lint, span, |diag| {
+        diag.primary_message(msg);
         if let Some(note_span) = note_span {
             diag.span_note(note_span, note.into());
         } else {
             diag.note(note.into());
         }
+        docs_link(diag, lint);
     });
 }
 
-/// Like [`span_lint`] but allows to add notes, help and suggestions using a closure.
+/// Like `span_lint` but allows to add notes, help and suggestions using a closure.
 ///
 /// If you need to customize your lint output a lot, use this function.
 /// If you change the signature, remember to update the internal lint `CollapsibleCalls`
@@ -229,10 +193,9 @@ pub fn span_lint_and_note<T: LintContext>(
 /// This is needed for `#[allow]` and `#[expect]` attributes to work on the node
 /// highlighted in the displayed warning.
 ///
-/// If you're unsure which function you should use, you can test if the `#[expect]` attribute works
+/// If you're unsure which function you should use, you can test if the `#[allow]` attribute works
 /// where you would expect it to.
 /// If it doesn't, you likely need to use [`span_lint_hir_and_then`] instead.
-#[track_caller]
 pub fn span_lint_and_then<C, S, M, F>(cx: &C, lint: &'static Lint, sp: S, msg: M, f: F)
 where
     C: LintContext,
@@ -245,9 +208,6 @@ where
         diag.primary_message(msg);
         f(diag);
         docs_link(diag, lint);
-
-        #[cfg(debug_assertions)]
-        validate_diag(diag);
     });
 }
 
@@ -275,9 +235,12 @@ where
 /// Instead, use this function and also pass the `HirId` of `<expr_1>`, which will let
 /// the compiler check lint level attributes at the place of the expression and
 /// the `#[allow]` will work.
-#[track_caller]
 pub fn span_lint_hir(cx: &LateContext<'_>, lint: &'static Lint, hir_id: HirId, sp: Span, msg: impl Into<DiagMessage>) {
-    span_lint_hir_and_then(cx, lint, hir_id, sp, msg, |_| {});
+    #[expect(clippy::disallowed_methods)]
+    cx.tcx.node_span_lint(lint, hir_id, sp, |diag| {
+        diag.primary_message(msg);
+        docs_link(diag, lint);
+    });
 }
 
 /// Like [`span_lint_and_then`], but emits the lint at the node identified by the given `HirId`.
@@ -304,7 +267,6 @@ pub fn span_lint_hir(cx: &LateContext<'_>, lint: &'static Lint, hir_id: HirId, s
 /// Instead, use this function and also pass the `HirId` of `<expr_1>`, which will let
 /// the compiler check lint level attributes at the place of the expression and
 /// the `#[allow]` will work.
-#[track_caller]
 pub fn span_lint_hir_and_then(
     cx: &LateContext<'_>,
     lint: &'static Lint,
@@ -318,9 +280,6 @@ pub fn span_lint_hir_and_then(
         diag.primary_message(msg);
         f(diag);
         docs_link(diag, lint);
-
-        #[cfg(debug_assertions)]
-        validate_diag(diag);
     });
 }
 
@@ -342,7 +301,7 @@ pub fn span_lint_hir_and_then(
 /// This is needed for `#[allow]` and `#[expect]` attributes to work on the node
 /// highlighted in the displayed warning.
 ///
-/// If you're unsure which function you should use, you can test if the `#[expect]` attribute works
+/// If you're unsure which function you should use, you can test if the `#[allow]` attribute works
 /// where you would expect it to.
 /// If it doesn't, you likely need to use [`span_lint_hir_and_then`] instead.
 ///
@@ -357,22 +316,17 @@ pub fn span_lint_hir_and_then(
 ///     |
 ///     = note: `-D fold-any` implied by `-D warnings`
 /// ```
-#[track_caller]
+#[expect(clippy::collapsible_span_lint_calls)]
 pub fn span_lint_and_sugg<T: LintContext>(
     cx: &T,
     lint: &'static Lint,
     sp: Span,
     msg: impl Into<DiagMessage>,
-    help: impl Into<DiagMessage>,
+    help: impl Into<SubdiagMessage>,
     sugg: String,
     applicability: Applicability,
 ) {
     span_lint_and_then(cx, lint, sp, msg.into(), |diag| {
         diag.span_suggestion(sp, help.into(), sugg, applicability);
-
-        // This dummy construct is here to prevent the internal `clippy::collapsible_span_lint_calls`
-        // lint from triggering. We don't want to allow/expect it as internal lints might or might
-        // not be activated when linting, and we don't want an unknown lint warning either.
-        std::hint::black_box(());
     });
 }

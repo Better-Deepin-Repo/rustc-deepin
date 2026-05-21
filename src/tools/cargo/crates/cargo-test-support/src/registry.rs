@@ -5,7 +5,6 @@
 //! ```no_run
 //! use cargo_test_support::registry::Package;
 //! use cargo_test_support::project;
-//! use cargo_test_support::str;
 //!
 //! // Publish package "a" depending on "b".
 //! Package::new("a", "1.0.0")
@@ -39,16 +38,16 @@
 //!     "#)
 //!     .build();
 //!
-//! // p.cargo("run").with_stdout_data(str!["24"]).run();
+//! p.cargo("run").with_stdout("24").run();
 //! ```
 
 use crate::git::repo;
 use crate::paths;
 use crate::publish::{create_index_line, write_to_index};
-use cargo_util::Sha256;
 use cargo_util::paths::append;
-use flate2::Compression;
+use cargo_util::Sha256;
 use flate2::write::GzEncoder;
+use flate2::Compression;
 use pasetors::keys::{AsymmetricPublicKey, AsymmetricSecretKey};
 use pasetors::paserk::FormatAsPaserk;
 use pasetors::token::UntrustedToken;
@@ -64,7 +63,7 @@ use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 use url::Url;
 
-/// Path to the local index for pseudo-crates.io.
+/// Path to the local index for psuedo-crates.io.
 ///
 /// This is a Git repo
 /// initialized with a `config.json` file pointing to `dl_path` for downloads
@@ -282,14 +281,14 @@ impl RegistryBuilder {
         self
     }
 
-    /// Initializes as an alternative registry with the given name.
+    /// Sets whether or not to initialize as an alternative registry.
     #[must_use]
     pub fn alternative_named(mut self, alt: &str) -> Self {
         self.alternative = Some(alt.to_string());
         self
     }
 
-    /// Initializes as an alternative registry named "alternative".
+    /// Sets whether or not to initialize as an alternative registry.
     #[must_use]
     pub fn alternative(self) -> Self {
         self.alternative_named("alternative")
@@ -570,15 +569,11 @@ pub struct Package {
     features: FeatureMap,
     local: bool,
     alternative: bool,
-    invalid_index_line: bool,
-    index_line: Option<String>,
-    edition: Option<String>,
-    resolver: Option<String>,
+    invalid_json: bool,
     proc_macro: bool,
     links: Option<String>,
     rust_version: Option<String>,
     cargo_features: Vec<String>,
-    pubtime: Option<String>,
     v: Option<u32>,
 }
 
@@ -607,7 +602,6 @@ pub struct Dependency {
 enum EntryData {
     Regular(String),
     Symlink(PathBuf),
-    Directory,
 }
 
 /// A file to be created in a package.
@@ -624,7 +618,7 @@ struct PackageFile {
 
 const DEFAULT_MODE: u32 = 0o644;
 
-/// Setup a local pseudo-crates.io [`TestRegistry`]
+/// Setup a local psuedo-crates.io [`TestRegistry`]
 ///
 /// This is implicitly called by [`Package::new`].
 ///
@@ -648,15 +642,15 @@ pub struct HttpServerHandle {
 
 impl HttpServerHandle {
     pub fn index_url(&self) -> Url {
-        Url::parse(&format!("sparse+http://{}/index/", self.addr)).unwrap()
+        Url::parse(&format!("sparse+http://{}/index/", self.addr.to_string())).unwrap()
     }
 
     pub fn api_url(&self) -> Url {
-        Url::parse(&format!("http://{}/", self.addr)).unwrap()
+        Url::parse(&format!("http://{}/", self.addr.to_string())).unwrap()
     }
 
     pub fn dl_url(&self) -> Url {
-        Url::parse(&format!("http://{}/dl", self.addr)).unwrap()
+        Url::parse(&format!("http://{}/dl", self.addr.to_string())).unwrap()
     }
 
     fn stop(&self) {
@@ -894,7 +888,7 @@ impl HttpServer {
 
         // - The URL matches the registry base URL
         if footer.url != "https://github.com/rust-lang/crates.io-index"
-            && footer.url != &format!("sparse+http://{}/index/", self.addr)
+            && footer.url != &format!("sparse+http://{}/index/", self.addr.to_string())
         {
             return false;
         }
@@ -1056,19 +1050,6 @@ impl HttpServer {
             code: 500,
             headers: vec![],
             body: br#"internal server error"#.to_vec(),
-        }
-    }
-
-    /// Return too many requests (HTTP 429)
-    pub fn too_many_requests(&self, _req: &Request, delay: std::time::Duration) -> Response {
-        Response {
-            code: 429,
-            headers: vec![format!("Retry-After: {}", delay.as_secs())],
-            body: format!(
-                "too many requests, try again in {} seconds",
-                delay.as_secs()
-            )
-            .into_bytes(),
         }
     }
 
@@ -1245,7 +1226,6 @@ fn save_new_crate(
         new_crate.links,
         new_crate.rust_version.as_deref(),
         None,
-        None,
     );
 
     write_to_index(registry_path, &new_crate.name, line, false);
@@ -1268,15 +1248,11 @@ impl Package {
             features: BTreeMap::new(),
             local: false,
             alternative: false,
-            invalid_index_line: false,
-            index_line: None,
-            edition: None,
-            resolver: None,
+            invalid_json: false,
             proc_macro: false,
             links: None,
             rust_version: None,
             cargo_features: Vec::new(),
-            pubtime: None,
             v: None,
         }
     }
@@ -1326,17 +1302,6 @@ impl Package {
         self.files.push(PackageFile {
             path: dst.to_string(),
             contents: EntryData::Symlink(src.into()),
-            mode: DEFAULT_MODE,
-            extra: false,
-        });
-        self
-    }
-
-    /// Adds an empty directory at the given path.
-    pub fn directory(&mut self, path: &str) -> &mut Package {
-        self.files.push(PackageFile {
-            path: path.to_string(),
-            contents: EntryData::Directory,
             mode: DEFAULT_MODE,
             extra: false,
         });
@@ -1419,18 +1384,6 @@ impl Package {
         self
     }
 
-    /// Specifies `package.edition`
-    pub fn edition(&mut self, edition: &str) -> &mut Package {
-        self.edition = Some(edition.to_owned());
-        self
-    }
-
-    /// Specifies `package.resolver`
-    pub fn resolver(&mut self, resolver: &str) -> &mut Package {
-        self.resolver = Some(resolver.to_owned());
-        self
-    }
-
     /// Specifies whether or not this is a proc macro.
     pub fn proc_macro(&mut self, proc_macro: bool) -> &mut Package {
         self.proc_macro = proc_macro;
@@ -1452,16 +1405,8 @@ impl Package {
 
     /// Causes the JSON line emitted in the index to be invalid, presumably
     /// causing Cargo to skip over this version.
-    pub fn invalid_index_line(&mut self, invalid: bool) -> &mut Package {
-        self.invalid_index_line = invalid;
-        self
-    }
-
-    /// Override the auto-generated index line
-    ///
-    /// This can give more control over error cases than [`Package::invalid_index_line`]
-    pub fn index_line(&mut self, line: &str) -> &mut Package {
-        self.index_line = Some(line.to_owned());
+    pub fn invalid_json(&mut self, invalid: bool) -> &mut Package {
+        self.invalid_json = invalid;
         self
     }
 
@@ -1472,12 +1417,6 @@ impl Package {
 
     pub fn cargo_feature(&mut self, feature: &str) -> &mut Package {
         self.cargo_features.push(feature.to_owned());
-        self
-    }
-
-    /// The publish time for the package in ISO8601 with UTC timezone (e.g. 2025-11-12T19:30:12Z)
-    pub fn pubtime(&mut self, time: &str) -> &mut Package {
-        self.pubtime = Some(time.to_owned());
         self
     }
 
@@ -1540,27 +1479,22 @@ impl Package {
             let c = t!(fs::read(&self.archive_dst()));
             cksum(&c)
         };
-        let line = if let Some(line) = self.index_line.clone() {
-            line
+        let name = if self.invalid_json {
+            serde_json::json!(1)
         } else {
-            let name = if self.invalid_index_line {
-                serde_json::json!(1)
-            } else {
-                serde_json::json!(self.name)
-            };
-            create_index_line(
-                name,
-                &self.vers,
-                deps,
-                &cksum,
-                self.features.clone(),
-                self.yanked,
-                self.links.clone(),
-                self.rust_version.as_deref(),
-                self.pubtime.as_deref(),
-                self.v,
-            )
+            serde_json::json!(self.name)
         };
+        let line = create_index_line(
+            name,
+            &self.vers,
+            deps,
+            &cksum,
+            self.features.clone(),
+            self.yanked,
+            self.links.clone(),
+            self.rust_version.as_deref(),
+            self.v,
+        );
 
         let registry_path = if self.alternative {
             alt_registry_path()
@@ -1578,7 +1512,6 @@ impl Package {
         t!(fs::create_dir_all(dst.parent().unwrap()));
         let f = t!(File::create(&dst));
         let mut a = Builder::new(GzEncoder::new(f, Compression::none()));
-        a.sparse(false);
 
         if !self
             .files
@@ -1635,15 +1568,7 @@ impl Package {
         ));
 
         if let Some(version) = &self.rust_version {
-            manifest.push_str(&format!("rust-version = \"{}\"\n", version));
-        }
-
-        if let Some(edition) = &self.edition {
-            manifest.push_str(&format!("edition = \"{}\"\n", edition));
-        }
-
-        if let Some(resolver) = &self.resolver {
-            manifest.push_str(&format!("resolver = \"{}\"\n", resolver));
+            manifest.push_str(&format!("rust-version = \"{}\"", version));
         }
 
         if !self.features.is_empty() {
@@ -1747,10 +1672,6 @@ impl Package {
         mode: u32,
         contents: &EntryData,
     ) {
-        // Unfortunately we cannot use GNU headers with dynamic extensions for
-        // long paths because that would cause package checksums to change
-        // based on whether or not the tests are running in a long directory
-        // name.
         let mut header = Header::new_ustar();
         let contents = match contents {
             EntryData::Regular(contents) => contents.as_str(),
@@ -1758,10 +1679,6 @@ impl Package {
                 header.set_entry_type(tar::EntryType::Symlink);
                 t!(header.set_link_name(src));
                 "" // Symlink has no contents.
-            }
-            EntryData::Directory => {
-                header.set_entry_type(tar::EntryType::Directory);
-                ""
             }
         };
         header.set_size(contents.len() as u64);

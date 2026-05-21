@@ -13,7 +13,7 @@ pub enum Test {
 pub enum Foo<'a, Y: Baz> where X: Whatever
 { A, }
 
-enum EmptyWithComment {
+enum EmtpyWithComment {
     // Some comment
 }
 
@@ -74,7 +74,7 @@ where I: Iterator<Item = T> {
 }
 
 
-enum EmptyWithComment {
+enum EmtpyWithComment {
     // Some comment
 }
 
@@ -94,7 +94,7 @@ fn nested_enum_test() {
     }
 }
 
-   pub  struct  EmptyWithComment {
+   pub  struct  EmtpyWithComment {
     // FIXME: Implement this struct
 }
 

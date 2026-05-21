@@ -1,6 +1,6 @@
 # `wasm32-wasip2`
 
-**Tier: 2**
+**Tier: 3**
 
 The `wasm32-wasip2` target is a new and still (as of January 2024) an
 experimental target. This target is an extension to `wasm32-wasip1` target,
@@ -13,8 +13,8 @@ WebAssembly binaries with native host capabilities.
 
 ## Target maintainers
 
-[@alexcrichton](https://github.com/alexcrichton)
-[@rylev](https://github.com/rylev)
+- Alex Crichton, https://github.com/alexcrichton
+- Ryan Levick, https://github.com/rylev
 
 ## Requirements
 
@@ -67,9 +67,3 @@ It's recommended to conditionally compile code for this target with:
 The default set of WebAssembly features enabled for compilation is currently the
 same as [`wasm32-unknown-unknown`](./wasm32-unknown-unknown.md). See the
 documentation there for more information.
-
-## Unwinding
-
-This target is compiled with `-Cpanic=abort` by default. For information on
-using `-Cpanic=unwind` see the [documentation about unwinding for
-`wasm32-unknown-unknown`](./wasm32-unknown-unknown.md#unwinding).

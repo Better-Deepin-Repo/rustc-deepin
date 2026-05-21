@@ -1,12 +1,10 @@
 // tidy-alphabetical-start
 #![allow(internal_features)]
-#![feature(default_field_values)]
 #![feature(iter_intersperse)]
-#![feature(macro_derive)]
+#![feature(let_chains)]
+#![feature(map_many_mut)]
+#![feature(option_get_or_insert_default)]
 #![feature(rustc_attrs)]
-// To generate CodegenOptionsTargetModifiers and UnstableOptionsTargetModifiers enums
-// with macro_rules, it is necessary to use recursive mechanic ("Incremental TT Munchers").
-#![recursion_limit = "256"]
 // tidy-alphabetical-end
 
 pub mod errors;
@@ -21,7 +19,6 @@ pub mod code_stats;
 pub mod config;
 pub mod cstore;
 pub mod filesearch;
-mod macros;
 mod options;
 pub mod search_paths;
 
@@ -31,6 +28,11 @@ pub use session::*;
 pub mod output;
 
 pub use getopts;
+
+mod version;
+pub use version::RustcVersion;
+
+rustc_fluent_macro::fluent_messages! { "../messages.ftl" }
 
 /// Requirements for a `StableHashingContext` to be used in this crate.
 /// This is a hack to allow using the `HashStable_Generic` derive macro

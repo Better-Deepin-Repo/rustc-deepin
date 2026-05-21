@@ -4,15 +4,12 @@
     clippy::equatable_if_let,
     clippy::let_unit_value,
     clippy::redundant_locals,
-    clippy::manual_midpoint,
     clippy::manual_unwrap_or_default,
-    clippy::manual_unwrap_or,
-    clippy::unnecessary_option_map_or_else
+    clippy::manual_unwrap_or
 )]
 
 fn bad1(string: Option<&str>) -> (bool, &str) {
     if let Some(x) = string {
-        //~^ option_if_let_else
         (true, x)
     } else {
         (false, "hello")
@@ -31,27 +28,21 @@ fn else_if_option(string: Option<&str>) -> Option<(bool, &str)> {
 
 fn unop_bad(string: &Option<&str>, mut num: Option<i32>) {
     let _ = if let Some(s) = *string { s.len() } else { 0 };
-    //~^ option_if_let_else
     let _ = if let Some(s) = &num { s } else { &0 };
-    //~^ option_if_let_else
     let _ = if let Some(s) = &mut num {
-        //~^ option_if_let_else
         *s += 1;
         s
     } else {
         &0
     };
     let _ = if let Some(ref s) = num { s } else { &0 };
-    //~^ option_if_let_else
     let _ = if let Some(mut s) = num {
-        //~^ option_if_let_else
         s += 1;
         s
     } else {
         0
     };
     let _ = if let Some(ref mut s) = num {
-        //~^ option_if_let_else
         *s += 1;
         s
     } else {
@@ -61,7 +52,6 @@ fn unop_bad(string: &Option<&str>, mut num: Option<i32>) {
 
 fn longer_body(arg: Option<u32>) -> u32 {
     if let Some(x) = arg {
-        //~^ option_if_let_else
         let y = x * x;
         y * y
     } else {
@@ -75,7 +65,6 @@ fn impure_else(arg: Option<i32>) {
         1
     };
     let _ = if let Some(x) = arg {
-        //~^ option_if_let_else
         x
     } else {
         // map_or_else must be suggested
@@ -85,7 +74,6 @@ fn impure_else(arg: Option<i32>) {
 
 fn test_map_or_else(arg: Option<u32>) {
     let _ = if let Some(x) = arg {
-        //~^ option_if_let_else
         x * x * x * x
     } else {
         let mut y = 1;
@@ -119,7 +107,6 @@ fn pattern_to_vec(pattern: &str) -> Vec<String> {
         .split('/')
         .flat_map(|s| {
             if let Some(idx) = s.find('.') {
-                //~^ option_if_let_else
                 vec![s[..idx].to_string(), s[idx..].to_string()]
             } else {
                 vec![s.to_string()]
@@ -131,7 +118,6 @@ fn pattern_to_vec(pattern: &str) -> Vec<String> {
 // #10335
 fn test_result_impure_else(variable: Result<u32, &str>) -> bool {
     if let Ok(binding) = variable {
-        //~^ option_if_let_else
         println!("Ok {binding}");
         true
     } else {
@@ -153,26 +139,9 @@ fn complex_subpat() -> DummyEnum {
     DummyEnum::Two
 }
 
-// #10335
-pub fn test_result_err_ignored_1(r: Result<&[u8], &[u8]>) -> Vec<u8> {
-    match r {
-        //~^ option_if_let_else
-        Ok(s) => s.to_owned(),
-        Err(_) => Vec::new(),
-    }
-}
-
-// #10335
-pub fn test_result_err_ignored_2(r: Result<&[u8], &[u8]>) -> Vec<u8> {
-    if let Ok(s) = r { s.to_owned() }
-    //~^ option_if_let_else
-    else { Vec::new() }
-}
-
 fn main() {
     let optional = Some(5);
     let _ = if let Some(x) = optional { x + 2 } else { 5 };
-    //~^ option_if_let_else
     let _ = bad1(None);
     let _ = else_if_option(None);
     unop_bad(&None, None);
@@ -183,7 +152,6 @@ fn main() {
     let _ = impure_else(None);
 
     let _ = if let Some(x) = Some(0) {
-        //~^ option_if_let_else
         loop {
             if x == 0 {
                 break x;
@@ -212,12 +180,10 @@ fn main() {
     let s = String::new();
     // Lint, both branches immutably borrow `s`.
     let _ = if let Some(x) = Some(0) { s.len() + x } else { s.len() };
-    //~^ option_if_let_else
 
     let s = String::new();
     // Lint, `Some` branch consumes `s`, but else branch doesn't use `s`.
     let _ = if let Some(x) = Some(0) {
-        //~^ option_if_let_else
         let s = s;
         s.len() + x
     } else {
@@ -257,29 +223,24 @@ fn main() {
 
     // issue #8492
     let _ = match s {
-        //~^ option_if_let_else
         Some(string) => string.len(),
         None => 1,
     };
     let _ = match Some(10) {
-        //~^ option_if_let_else
         Some(a) => a + 1,
         None => 5,
     };
 
     let res: Result<i32, i32> = Ok(5);
     let _ = match res {
-        //~^ option_if_let_else
         Ok(a) => a + 1,
         _ => 1,
     };
     let _ = match res {
-        //~^ option_if_let_else
         Err(_) => 1,
         Ok(a) => a + 1,
     };
     let _ = if let Ok(a) = res { a + 1 } else { 5 };
-    //~^ option_if_let_else
 }
 
 #[allow(dead_code)]
@@ -297,7 +258,6 @@ mod issue10729 {
     pub fn reproduce(initial: &Option<String>) {
         // 👇 needs `.as_ref()` because initial is an `&Option<_>`
         let _ = match initial {
-            //~^ option_if_let_else
             Some(value) => do_something(value),
             None => 42,
         };
@@ -305,7 +265,6 @@ mod issue10729 {
 
     pub fn reproduce2(initial: &mut Option<String>) {
         let _ = match initial {
-            //~^ option_if_let_else
             Some(value) => do_something2(value),
             None => 42,
         };
@@ -329,14 +288,12 @@ fn issue11429() {
     let opt: Option<HashMap<u8, u8>> = None;
 
     let mut _hashmap = if let Some(hm) = &opt {
-        //~^ option_if_let_else
         hm.clone()
     } else {
         HashMap::new()
     };
 
     let mut _hm = if let Some(hm) = &opt { hm.clone() } else { new_map!() };
-    //~^ option_if_let_else
 }
 
 fn issue11893() {
@@ -347,54 +304,4 @@ fn issue11893() {
     } else {
         panic!("Haven't thought about this condition.");
     }
-}
-
-mod issue13964 {
-    #[derive(Debug)]
-    struct A(Option<String>);
-
-    fn foo(a: A) {
-        let _ = match a.0 {
-            Some(x) => x,
-            None => panic!("{a:?} is invalid."),
-        };
-    }
-
-    fn bar(a: A) {
-        let _ = if let Some(x) = a.0 {
-            x
-        } else {
-            panic!("{a:?} is invalid.")
-        };
-    }
-}
-
-mod issue11059 {
-    use std::fmt::Debug;
-
-    fn box_coercion_unsize(o: Option<i32>) -> Box<dyn Debug> {
-        if let Some(o) = o { Box::new(o) } else { Box::new("foo") }
-    }
-
-    static S: String = String::new();
-
-    fn deref_with_overload(o: Option<&str>) -> &str {
-        if let Some(o) = o { o } else { &S }
-    }
-}
-
-fn issue15379() {
-    let opt = Some(0usize);
-    let opt_raw_ptr = &opt as *const Option<usize>;
-    let _ = unsafe { if let Some(o) = *opt_raw_ptr { o } else { 1 } };
-    //~^ option_if_let_else
-}
-
-fn issue15002() {
-    let res: Result<String, ()> = Ok("_".to_string());
-    let _ = match res {
-        //~^ option_if_let_else
-        Ok(s) => s.clone(),
-        Err(_) => String::new(),
-    };
 }

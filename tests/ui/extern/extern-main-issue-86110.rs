@@ -2,6 +2,6 @@
 extern "C" {
     fn missing();
     fn main();
-    //~^ ERROR the `main` function cannot be declared in an `extern` block
+    //~^ the `main` function cannot be declared in an `extern` block
     fn missing2();
 }

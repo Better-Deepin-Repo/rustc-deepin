@@ -1,10 +1,10 @@
 //! Tests for registry authentication.
 
-use crate::prelude::*;
 use cargo_test_support::compare::assert_e2e;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::{Package, RegistryBuilder, Token};
 use cargo_test_support::str;
-use cargo_test_support::{Execs, Project, project};
+use cargo_test_support::{project, Execs, Project};
 
 fn cargo(p: &Project, s: &str) -> Execs {
     let mut e = p.cargo(s);
@@ -52,7 +52,7 @@ fn requires_credential_provider() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [ERROR] failed to download `bar v0.0.1 (registry `alternative`)`
 
 Caused by:
@@ -78,7 +78,7 @@ fn simple() {
     cargo(&p, "build")
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.0.1 (registry `alternative`)
 [COMPILING] bar v0.0.1 (registry `alternative`)
@@ -102,7 +102,7 @@ fn simple_with_asymmetric() {
     cargo(&p, "build")
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.0.1 (registry `alternative`)
 [COMPILING] bar v0.0.1 (registry `alternative`)
@@ -131,7 +131,7 @@ fn environment_config() {
         .env("CARGO_REGISTRIES_ALTERNATIVE_TOKEN", registry.token())
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.0.1 (registry `alternative`)
 [COMPILING] bar v0.0.1 (registry `alternative`)
@@ -156,7 +156,7 @@ fn environment_token() {
         .env("CARGO_REGISTRIES_ALTERNATIVE_TOKEN", registry.token())
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.0.1 (registry `alternative`)
 [COMPILING] bar v0.0.1 (registry `alternative`)
@@ -186,7 +186,7 @@ fn environment_token_with_asymmetric() {
         .env("CARGO_REGISTRIES_ALTERNATIVE_SECRET_KEY", registry.key())
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v0.0.1 (registry `alternative`)
 [COMPILING] bar v0.0.1 (registry `alternative`)
@@ -346,7 +346,7 @@ fn missing_token_git() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [ERROR] failed to download `bar v0.0.1 (registry `alternative`)`
 
 Caused by:
@@ -405,7 +405,7 @@ fn incorrect_token_git() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [ERROR] failed to download from `http://127.0.0.1:[..]/dl/bar/0.0.1/download`
 
@@ -497,7 +497,7 @@ fn duplicate_index() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [UPDATING] `alternative` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [ERROR] failed to download `bar v0.0.1 (registry `alternative`)`
 
 Caused by:
@@ -542,7 +542,8 @@ fn token_not_logged() {
         .replace_crates_io(crates_io.index_url())
         .env("CARGO_HTTP_DEBUG", "true")
         .env("CARGO_LOG", "trace")
-        .run();
+        .exec_with_output()
+        .unwrap();
     let log = String::from_utf8(output.stderr).unwrap();
     assert_e2e().eq(
         &log,
@@ -561,15 +562,12 @@ fn token_not_logged() {
     assert!(authorizations.iter().all(|line| line.contains("REDACTED")));
     // Total authorizations:
     // 1. Initial config.json
-    // 2. /index/3/f/foo
-    // 3. config.json again for verification
-    // 4. /index/3/b/bar
-    // 5. config.json again for verification
-    // 6. /index/3/b/bar
-    // 7. /dl/bar/1.0.0/download
-    // 8. /api/v1/crates/new
-    // 9. config.json again for verification
-    // 10. /index/3/f/foo for the "wait for publish"
-    assert_eq!(authorizations.len(), 10);
+    // 2. config.json again for verification
+    // 3. /index/3/b/bar
+    // 4. /dl/bar/1.0.0/download
+    // 5. /api/v1/crates/new
+    // 6. config.json for the "wait for publish"
+    // 7. /index/3/f/foo for the "wait for publish"
+    assert_eq!(authorizations.len(), 7);
     assert!(!log.contains("a-unique_token"));
 }

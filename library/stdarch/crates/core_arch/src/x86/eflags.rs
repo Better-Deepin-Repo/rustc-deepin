@@ -73,7 +73,7 @@ mod tests {
     #[test]
     #[cfg_attr(miri, ignore)] // Uses inline assembly
     #[allow(deprecated)]
-    fn test_readeflags() {
+    fn test_eflags() {
         unsafe {
             // reads eflags, writes them back, reads them again,
             // and compare for equality:

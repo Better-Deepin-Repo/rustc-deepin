@@ -1,4 +1,3 @@
-//@ proc-macro: respan.rs
 //@ revisions: rpass1 rpass2
 
 extern crate respan;

@@ -16,32 +16,70 @@
 #![deny(unsafe_op_in_unsafe_fn)]
 #![allow(missing_docs, nonstandard_style)]
 
-use crate::io;
-use crate::os::hermit::hermit_abi;
 use crate::os::raw::c_char;
-use crate::sys::env;
 
+pub mod args;
+pub mod env;
+pub mod fd;
+pub mod fs;
 pub mod futex;
+pub mod io;
+pub mod net;
 pub mod os;
+#[path = "../unsupported/pipe.rs"]
+pub mod pipe;
+#[path = "../unsupported/process.rs"]
+pub mod process;
+pub mod stdio;
+pub mod thread;
 pub mod time;
 
-pub fn unsupported<T>() -> io::Result<T> {
+use crate::io::ErrorKind;
+use crate::os::hermit::hermit_abi;
+
+pub fn unsupported<T>() -> crate::io::Result<T> {
     Err(unsupported_err())
 }
 
-pub fn unsupported_err() -> io::Error {
-    io::const_error!(io::ErrorKind::Unsupported, "operation not supported on HermitCore yet")
+pub fn unsupported_err() -> crate::io::Error {
+    crate::io::const_io_error!(
+        crate::io::ErrorKind::Unsupported,
+        "operation not supported on HermitCore yet",
+    )
 }
 
 pub fn abort_internal() -> ! {
     unsafe { hermit_abi::abort() }
 }
 
+pub fn hashmap_random_keys() -> (u64, u64) {
+    let mut buf = [0; 16];
+    let mut slice = &mut buf[..];
+    while !slice.is_empty() {
+        let res = cvt(unsafe { hermit_abi::read_entropy(slice.as_mut_ptr(), slice.len(), 0) })
+            .expect("failed to generate random hashmap keys");
+        slice = &mut slice[res as usize..];
+    }
+
+    let key1 = buf[..8].try_into().unwrap();
+    let key2 = buf[8..].try_into().unwrap();
+    (u64::from_ne_bytes(key1), u64::from_ne_bytes(key2))
+}
+
+// This function is needed by the panic runtime. The symbol is named in
+// pre-link args for the target specification, so keep that in sync.
+#[cfg(not(test))]
+#[no_mangle]
+// NB. used by both libunwind and libpanic_abort
+pub extern "C" fn __rust_abort() {
+    abort_internal();
+}
+
 // SAFETY: must be called only once during runtime initialization.
 // NOTE: this is not guaranteed to run, for example when Rust code is called externally.
 pub unsafe fn init(argc: isize, argv: *const *const u8, _sigpipe: u8) {
     unsafe {
-        crate::sys::args::init(argc, argv);
+        args::init(argc, argv);
     }
 }
 
@@ -50,28 +88,50 @@ pub unsafe fn init(argc: isize, argv: *const *const u8, _sigpipe: u8) {
 pub unsafe fn cleanup() {}
 
 #[cfg(not(test))]
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub unsafe extern "C" fn runtime_entry(
     argc: i32,
     argv: *const *const c_char,
     env: *const *const c_char,
 ) -> ! {
-    unsafe extern "C" {
+    extern "C" {
         fn main(argc: isize, argv: *const *const c_char) -> i32;
     }
 
     // initialize environment
-    env::init(env);
+    os::init_environment(env as *const *const i8);
 
     let result = unsafe { main(argc as isize, argv) };
 
     unsafe {
         crate::sys::thread_local::destructors::run();
     }
-    crate::rt::thread_cleanup();
+    unsafe { hermit_abi::exit(result) }
+}
 
-    unsafe {
-        hermit_abi::exit(result);
+#[inline]
+pub(crate) fn is_interrupted(errno: i32) -> bool {
+    errno == hermit_abi::errno::EINTR
+}
+
+pub fn decode_error_kind(errno: i32) -> ErrorKind {
+    match errno {
+        hermit_abi::errno::EACCES => ErrorKind::PermissionDenied,
+        hermit_abi::errno::EADDRINUSE => ErrorKind::AddrInUse,
+        hermit_abi::errno::EADDRNOTAVAIL => ErrorKind::AddrNotAvailable,
+        hermit_abi::errno::EAGAIN => ErrorKind::WouldBlock,
+        hermit_abi::errno::ECONNABORTED => ErrorKind::ConnectionAborted,
+        hermit_abi::errno::ECONNREFUSED => ErrorKind::ConnectionRefused,
+        hermit_abi::errno::ECONNRESET => ErrorKind::ConnectionReset,
+        hermit_abi::errno::EEXIST => ErrorKind::AlreadyExists,
+        hermit_abi::errno::EINTR => ErrorKind::Interrupted,
+        hermit_abi::errno::EINVAL => ErrorKind::InvalidInput,
+        hermit_abi::errno::ENOENT => ErrorKind::NotFound,
+        hermit_abi::errno::ENOTCONN => ErrorKind::NotConnected,
+        hermit_abi::errno::EPERM => ErrorKind::PermissionDenied,
+        hermit_abi::errno::EPIPE => ErrorKind::BrokenPipe,
+        hermit_abi::errno::ETIMEDOUT => ErrorKind::TimedOut,
+        _ => ErrorKind::Uncategorized,
     }
 }
 
@@ -104,11 +164,16 @@ impl IsNegative for i32 {
 }
 impl_is_negative! { i8 i16 i64 isize }
 
-pub fn cvt<T: IsNegative>(t: T) -> io::Result<T> {
-    if t.is_negative() { Err(io::Error::from_raw_os_error(t.negate())) } else { Ok(t) }
+pub fn cvt<T: IsNegative>(t: T) -> crate::io::Result<T> {
+    if t.is_negative() {
+        let e = decode_error_kind(t.negate());
+        Err(crate::io::Error::from(e))
+    } else {
+        Ok(t)
+    }
 }
 
-pub fn cvt_r<T, F>(mut f: F) -> io::Result<T>
+pub fn cvt_r<T, F>(mut f: F) -> crate::io::Result<T>
 where
     T: IsNegative,
     F: FnMut() -> T,

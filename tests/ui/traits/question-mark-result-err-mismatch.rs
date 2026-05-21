@@ -1,4 +1,3 @@
-#![feature(try_trait_v2)]
 fn foo() -> Result<String, String> { //~ NOTE expected `String` because of this
     let test = String::from("one,two");
     let x = test
@@ -9,7 +8,7 @@ fn foo() -> Result<String, String> { //~ NOTE expected `String` because of this
         });
     let one = x
         .map(|s| ())
-        .map_err(|e| { //~ NOTE this has type `Result<_, ()>`
+        .map_err(|e| { //~ NOTE this can't be annotated with `?` because it has type `Result<_, ()>`
             e; //~ HELP remove this semicolon
         })
         .map(|()| "")?; //~ ERROR `?` couldn't convert the error to `String`

@@ -2,9 +2,10 @@ use clippy_config::Conf;
 use clippy_utils::diagnostics::span_lint_and_help;
 use clippy_utils::source::snippet;
 use rustc_ast::node_id::NodeSet;
-use rustc_ast::visit::{Visitor, walk_block, walk_item};
+use rustc_ast::visit::{walk_block, walk_item, Visitor};
 use rustc_ast::{Block, Crate, Inline, Item, ItemKind, ModKind, NodeId};
 use rustc_lint::{EarlyContext, EarlyLintPass, LintContext};
+use rustc_middle::lint::in_external_macro;
 use rustc_session::impl_lint_pass;
 use rustc_span::Span;
 
@@ -124,9 +125,7 @@ struct NestingVisitor<'conf, 'cx> {
 
 impl NestingVisitor<'_, '_> {
     fn check_indent(&mut self, span: Span, id: NodeId) -> bool {
-        if self.nest_level > self.conf.excessive_nesting_threshold
-            && !span.in_external_macro(self.cx.sess().source_map())
-        {
+        if self.nest_level > self.conf.excessive_nesting_threshold && !in_external_macro(self.cx.sess(), span) {
             self.conf.nodes.insert(id);
 
             return true;
@@ -136,7 +135,7 @@ impl NestingVisitor<'_, '_> {
     }
 }
 
-impl Visitor<'_> for NestingVisitor<'_, '_> {
+impl<'conf, 'cx> Visitor<'_> for NestingVisitor<'conf, 'cx> {
     fn visit_block(&mut self, block: &Block) {
         if block.span.from_expansion() {
             return;

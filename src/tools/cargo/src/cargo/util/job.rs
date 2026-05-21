@@ -32,15 +32,11 @@ mod imp {
         // when-cargo-is-killed-subprocesses-are-also-killed, but that requires
         // one cargo spawned to become its own session leader, so we do that
         // here.
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "testing only, no reason for config support"
-        )]
+        //
+        // ALLOWED: For testing cargo itself only.
+        #[allow(clippy::disallowed_methods)]
         if env::var("__CARGO_TEST_SETSID_PLEASE_DONT_USE_ELSEWHERE").is_ok() {
-            // SAFETY: I'm unaware of any safety requirements for this function.
-            unsafe {
-                libc::setsid();
-            }
+            libc::setsid();
         }
         Some(())
     }
@@ -60,10 +56,10 @@ mod imp {
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
     use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
     use windows_sys::Win32::System::JobObjects::CreateJobObjectW;
-    use windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    use windows_sys::Win32::System::JobObjects::JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
     use windows_sys::Win32::System::JobObjects::JobObjectExtendedLimitInformation;
     use windows_sys::Win32::System::JobObjects::SetInformationJobObject;
+    use windows_sys::Win32::System::JobObjects::JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
+    use windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     use windows_sys::Win32::System::Threading::GetCurrentProcess;
 
     pub struct Setup {
@@ -88,7 +84,7 @@ mod imp {
         // use job objects, so we instead just ignore errors and assume that
         // we're otherwise part of someone else's job object in this case.
 
-        let job = unsafe { CreateJobObjectW(ptr::null_mut(), ptr::null()) };
+        let job = CreateJobObjectW(ptr::null_mut(), ptr::null());
         if job == INVALID_HANDLE_VALUE {
             return None;
         }
@@ -99,24 +95,22 @@ mod imp {
         // entire process tree by default because we've added ourselves and
         // our children will reside in the job once we spawn a process.
         let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
-        info = unsafe { mem::zeroed() };
+        info = mem::zeroed();
         info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-        let r = unsafe {
-            SetInformationJobObject(
-                job.inner,
-                JobObjectExtendedLimitInformation,
-                addr_of!(info) as *const _,
-                mem::size_of_val(&info) as u32,
-            )
-        };
+        let r = SetInformationJobObject(
+            job.inner,
+            JobObjectExtendedLimitInformation,
+            addr_of!(info) as *const _,
+            mem::size_of_val(&info) as u32,
+        );
         if r == 0 {
             return None;
         }
 
         // Assign our process to this job object, meaning that our children will
         // now live or die based on our existence.
-        let me = unsafe { GetCurrentProcess() };
-        let r = unsafe { AssignProcessToJobObject(job.inner, me) };
+        let me = GetCurrentProcess();
+        let r = AssignProcessToJobObject(job.inner, me);
         if r == 0 {
             return None;
         }

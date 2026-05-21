@@ -16,7 +16,6 @@
 //! relate them structurally.
 
 use rustc_type_ir::inherent::*;
-use rustc_type_ir::solve::GoalSource;
 use rustc_type_ir::{self as ty, Interner};
 use tracing::{instrument, trace};
 
@@ -35,25 +34,12 @@ where
     ) -> QueryResult<I> {
         let cx = self.cx();
         let Goal { param_env, predicate: (lhs, rhs, direction) } = goal;
-
-        // Check that the alias-relate goal is reasonable. Writeback for
-        // `coroutine_stalled_predicates` can replace alias terms with
-        // `{type error}` if the alias still contains infer vars, so we also
-        // accept alias-relate goals where one of the terms is an error.
-        debug_assert!(
-            lhs.to_alias_term().is_some()
-                || rhs.to_alias_term().is_some()
-                || lhs.is_error()
-                || rhs.is_error()
-        );
+        debug_assert!(lhs.to_alias_term().is_some() || rhs.to_alias_term().is_some());
 
         // Structurally normalize the lhs.
         let lhs = if let Some(alias) = lhs.to_alias_term() {
             let term = self.next_term_infer_of_kind(lhs);
-            self.add_goal(
-                GoalSource::TypeRelating,
-                goal.with(cx, ty::NormalizesTo { alias, term }),
-            );
+            self.add_normalizes_to_goal(goal.with(cx, ty::NormalizesTo { alias, term }));
             term
         } else {
             lhs
@@ -62,10 +48,7 @@ where
         // Structurally normalize the rhs.
         let rhs = if let Some(alias) = rhs.to_alias_term() {
             let term = self.next_term_infer_of_kind(rhs);
-            self.add_goal(
-                GoalSource::TypeRelating,
-                goal.with(cx, ty::NormalizesTo { alias, term }),
-            );
+            self.add_normalizes_to_goal(goal.with(cx, ty::NormalizesTo { alias, term }));
             term
         } else {
             rhs

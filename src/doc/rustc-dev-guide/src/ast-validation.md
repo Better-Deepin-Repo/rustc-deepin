@@ -1,4 +1,4 @@
-# AST validation
+# AST Validation
 
 _AST validation_ is a separate AST pass that visits each
 item in the tree and performs simple checks. This pass
@@ -26,6 +26,7 @@ example, when visiting a function declaration,
 `AstValidator` checks that the function has:
 
 * no more than `u16::MAX` parameters;
+* c-variadic functions are declared with at least one named argument;
 * c-variadic argument goes the last in the declaration;
 * documentation comments aren't applied to function parameters;
 * and other validations.

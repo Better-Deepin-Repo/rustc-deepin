@@ -2,19 +2,19 @@
 #![feature(thread_local)]
 
 #[thread_local]
-//~^ ERROR `#[thread_local]` attribute cannot be used on constants
+//~^ ERROR attribute should be applied to a static
 const A: u32 = 0;
 
 #[thread_local]
-//~^ ERROR `#[thread_local]` attribute cannot be used on functions
+//~^ ERROR attribute should be applied to a static
 fn main() {
     #[thread_local] || {};
-    //~^ ERROR `#[thread_local]` attribute cannot be used on closures
+    //~^ ERROR attribute should be applied to a static
 }
 
 struct S {
     #[thread_local]
-    //~^ ERROR `#[thread_local]` attribute cannot be used on struct fields
+    //~^ ERROR attribute should be applied to a static
     a: String,
     b: String,
 }

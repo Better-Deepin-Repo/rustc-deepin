@@ -1,16 +1,14 @@
-use std::num::Saturating;
-
 use clippy_config::Conf;
 use clippy_utils::diagnostics::span_lint_and_then;
-use clippy_utils::{is_from_proc_macro, sym};
+use clippy_utils::is_from_proc_macro;
 use clippy_utils::macros::macro_backtrace;
 use clippy_utils::source::snippet;
-use rustc_hir::{Expr, ExprKind, Item, ItemKind, Node};
+use rustc_hir::{ArrayLen, Expr, ExprKind, Item, ItemKind, Node};
 use rustc_lint::{LateContext, LateLintPass};
-use rustc_middle::ty;
 use rustc_middle::ty::layout::LayoutOf;
+use rustc_middle::ty::{self, ConstKind};
 use rustc_session::impl_lint_pass;
-use rustc_span::Span;
+use rustc_span::{sym, Span};
 
 declare_clippy_lint! {
     /// ### What it does
@@ -32,7 +30,6 @@ declare_clippy_lint! {
 pub struct LargeStackArrays {
     maximum_allowed_size: u64,
     prev_vec_macro_callsite: Option<Span>,
-    const_item_counter: Saturating<u16>,
 }
 
 impl LargeStackArrays {
@@ -40,7 +37,6 @@ impl LargeStackArrays {
         Self {
             maximum_allowed_size: conf.array_size_threshold,
             prev_vec_macro_callsite: None,
-            const_item_counter: Saturating(0),
         }
     }
 
@@ -64,26 +60,14 @@ impl LargeStackArrays {
 impl_lint_pass!(LargeStackArrays => [LARGE_STACK_ARRAYS]);
 
 impl<'tcx> LateLintPass<'tcx> for LargeStackArrays {
-    fn check_item(&mut self, _: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
-        if matches!(item.kind, ItemKind::Static(..) | ItemKind::Const(..)) {
-            self.const_item_counter += 1;
-        }
-    }
-
-    fn check_item_post(&mut self, _: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
-        if matches!(item.kind, ItemKind::Static(..) | ItemKind::Const(..)) {
-            self.const_item_counter -= 1;
-        }
-    }
-
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &Expr<'tcx>) {
-        if self.const_item_counter.0 == 0
-            && let ExprKind::Repeat(_, _) | ExprKind::Array(_) = expr.kind
+        if let ExprKind::Repeat(_, _) | ExprKind::Array(_) = expr.kind
             && !self.is_from_vec_macro(cx, expr.span)
             && let ty::Array(element_type, cst) = cx.typeck_results().expr_ty(expr).kind()
-            && let Some(element_count) = cst.try_to_target_usize(cx.tcx)
+            && let ConstKind::Value(_, ty::ValTree::Leaf(element_count)) = cst.kind()
+            && let element_count = element_count.to_target_usize(cx.tcx)
             && let Ok(element_size) = cx.layout_of(*element_type).map(|l| l.size.bytes())
-            && !cx.tcx.hir_parent_iter(expr.hir_id).any(|(_, node)| {
+            && !cx.tcx.hir().parent_iter(expr.hir_id).any(|(_, node)| {
                 matches!(
                     node,
                     Node::Item(Item {
@@ -94,15 +78,6 @@ impl<'tcx> LateLintPass<'tcx> for LargeStackArrays {
             })
             && u128::from(self.maximum_allowed_size) < u128::from(element_count) * u128::from(element_size)
         {
-            // libtest might generate a large array containing the test cases, and no span will be associated
-            // to it. In this case it is better not to complain.
-            //
-            // Note that this condition is not checked explicitly by a unit test. Do not remove it without
-            // ensuring that <https://github.com/rust-lang/rust-clippy/issues/13774> stays fixed.
-            if expr.span.is_dummy() {
-                return;
-            }
-
             span_lint_and_then(
                 cx,
                 LARGE_STACK_ARRAYS,
@@ -126,16 +101,16 @@ impl<'tcx> LateLintPass<'tcx> for LargeStackArrays {
 
 /// Only giving help messages if the expr does not contains macro expanded codes.
 fn might_be_expanded<'tcx>(cx: &LateContext<'tcx>, expr: &Expr<'tcx>) -> bool {
-    /// Check if the span of `ConstArg` of a repeat expression is within the expr's span,
+    /// Check if the span of `ArrayLen` of a repeat expression is within the expr's span,
     /// if not, meaning this repeat expr is definitely from some proc-macro.
     ///
     /// This is a fail-safe to a case where even the `is_from_proc_macro` is unable to determain the
     /// correct result.
     fn repeat_expr_might_be_expanded(expr: &Expr<'_>) -> bool {
-        let ExprKind::Repeat(_, len_ct) = expr.kind else {
+        let ExprKind::Repeat(_, ArrayLen::Body(len_ct)) = expr.kind else {
             return false;
         };
-        !expr.span.contains(len_ct.span)
+        !expr.span.contains(len_ct.span())
     }
 
     expr.span.from_expansion() || is_from_proc_macro(cx, expr) || repeat_expr_might_be_expanded(expr)

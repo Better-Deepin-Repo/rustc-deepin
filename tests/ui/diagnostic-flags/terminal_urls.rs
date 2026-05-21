@@ -1,4 +1,4 @@
-//@ compile-flags: -Zterminal-urls=yes --error-format=human --color=always
+//@ compile-flags: -Zterminal-urls=yes
 fn main() {
-    let () = 4;
+    let () = 4; //~ ERROR
 }

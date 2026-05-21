@@ -1,15 +1,13 @@
 //! Types and impls for [`Unit`].
 
-use serde::Deserialize;
-use serde::Serialize;
-
-use crate::core::Package;
 use crate::core::compiler::unit_dependencies::IsArtifact;
 use crate::core::compiler::{CompileKind, CompileMode, CompileTarget, CrateType};
 use crate::core::manifest::{Target, TargetKind};
 use crate::core::profiles::Profile;
-use crate::util::GlobalContext;
+use crate::core::Package;
+use crate::util::hex::short_hash;
 use crate::util::interning::InternedString;
+use crate::util::GlobalContext;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
@@ -18,22 +16,6 @@ use std::ops::Deref;
 use std::rc::Rc;
 
 use super::BuildOutput;
-
-/// Stable identifier for referencing a [`Unit`].
-///
-/// This is an index into the unit graph, assigned when units are registered.
-/// It provides a compact way to reference units.
-#[derive(
-    Serialize, Deserialize, Debug, Default, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord,
-)]
-#[serde(transparent)]
-pub struct UnitIndex(pub u64);
-
-impl fmt::Display for UnitIndex {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
 
 /// All information needed to define a unit.
 ///
@@ -130,13 +112,6 @@ pub struct UnitInner {
     ///
     /// [`FeaturesFor::ArtifactDep`]: crate::core::resolver::features::FeaturesFor::ArtifactDep
     pub artifact_target_for_features: Option<CompileTarget>,
-
-    /// Skip compiling this unit because `--compile-time-deps` flag is set and
-    /// this is not a compile time dependency.
-    ///
-    /// Since dependencies of this unit might be compile time dependencies, we
-    /// set this field instead of completely dropping out this unit from unit graph.
-    pub skip_non_compile_time_dep: bool,
 }
 
 impl UnitInner {
@@ -150,13 +125,6 @@ impl UnitInner {
         self.mode.is_any_test() || self.target.kind().requires_upstream_objects()
     }
 
-    /// Returns whether compilation of this unit could benefit from splitting metadata
-    /// into a .rmeta file.
-    pub fn benefits_from_no_embed_metadata(&self) -> bool {
-        matches!(self.mode, CompileMode::Build)
-            && self.target.kind().benefits_from_no_embed_metadata()
-    }
-
     /// Returns whether or not this is a "local" package.
     ///
     /// A "local" package is one that the user can likely edit, or otherwise
@@ -168,6 +136,15 @@ impl UnitInner {
     /// Returns whether or not warnings should be displayed for this unit.
     pub fn show_warnings(&self, gctx: &GlobalContext) -> bool {
         self.is_local() || gctx.extra_verbose()
+    }
+}
+
+impl Unit {
+    /// Gets the unique key for [`-Zbuild-plan`].
+    ///
+    /// [`-Zbuild-plan`]: https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#build-plan
+    pub fn buildkey(&self) -> String {
+        format!("{}-{}", self.pkg.name(), short_hash(self))
     }
 }
 
@@ -261,7 +238,6 @@ impl UnitInterner {
         dep_hash: u64,
         artifact: IsArtifact,
         artifact_target_for_features: Option<CompileTarget>,
-        skip_non_compile_time_dep: bool,
     ) -> Unit {
         let target = match (is_std, target.kind()) {
             // This is a horrible hack to support build-std. `libstd` declares
@@ -298,7 +274,6 @@ impl UnitInterner {
             dep_hash,
             artifact,
             artifact_target_for_features,
-            skip_non_compile_time_dep,
         });
         Unit { inner }
     }

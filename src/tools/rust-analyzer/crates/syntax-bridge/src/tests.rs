@@ -1,13 +1,15 @@
 use rustc_hash::FxHashMap;
 use span::Span;
-use syntax::{AstNode, ast};
+use syntax::{ast, AstNode};
 use test_utils::extract_annotations;
-use tt::{Leaf, Punct, Spacing, buffer::Cursor};
+use tt::{
+    buffer::{TokenBuffer, TokenTreeRef},
+    Leaf, Punct, Spacing,
+};
 
 use crate::{
-    DocCommentDesugarMode,
-    dummy_test_span_utils::{DUMMY, DummyTestSpanMap},
-    syntax_node_to_token_tree,
+    dummy_test_span_utils::{DummyTestSpanMap, DUMMY},
+    syntax_node_to_token_tree, DocCommentDesugarMode,
 };
 
 fn check_punct_spacing(fixture: &str) {
@@ -30,19 +32,22 @@ fn check_punct_spacing(fixture: &str) {
         })
         .collect();
 
-    let mut cursor = Cursor::new(subtree.as_token_trees());
+    let buf = TokenBuffer::from_subtree(&subtree);
+    let mut cursor = buf.begin();
     while !cursor.eof() {
         while let Some(token_tree) = cursor.token_tree() {
-            if let tt::TokenTree::Leaf(Leaf::Punct(Punct {
-                spacing, span: Span { range, .. }, ..
-            })) = token_tree
-                && let Some(expected) = annotations.remove(&range)
+            if let TokenTreeRef::Leaf(
+                Leaf::Punct(Punct { spacing, span: Span { range, .. }, .. }),
+                _,
+            ) = token_tree
             {
-                assert_eq!(expected, spacing);
+                if let Some(expected) = annotations.remove(range) {
+                    assert_eq!(expected, *spacing);
+                }
             }
-            cursor.bump();
+            cursor = cursor.bump_subtree();
         }
-        cursor.bump_or_end();
+        cursor = cursor.bump();
     }
 
     assert!(annotations.is_empty(), "unchecked annotations: {annotations:?}");

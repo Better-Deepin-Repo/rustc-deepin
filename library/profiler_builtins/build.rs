@@ -9,14 +9,8 @@ use std::path::PathBuf;
 
 fn main() {
     if let Ok(rt) = tracked_env_var("LLVM_PROFILER_RT_LIB") {
-        let rt = PathBuf::from(rt);
-        if let Some(lib) = rt.file_name() {
-            if let Some(dir) = rt.parent() {
-                println!("cargo::rustc-link-search=native={}", dir.display());
-            }
-            println!("cargo::rustc-link-lib=static:+verbatim={}", lib.to_str().unwrap());
-            return;
-        }
+        println!("cargo::rustc-link-lib=static:+verbatim={rt}");
+        return;
     }
 
     let target_os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS was not set");

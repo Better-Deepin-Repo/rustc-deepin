@@ -1,8 +1,8 @@
 //! Tests for caching compiler diagnostics.
 
-use crate::prelude::*;
-use crate::utils::tools;
+use cargo_test_support::prelude::*;
 use cargo_test_support::str;
+use cargo_test_support::tools;
 use cargo_test_support::{basic_manifest, is_coarse_mtime, project, registry::Package, sleep_ms};
 
 use super::messages::raw_rustc_output;
@@ -29,11 +29,17 @@ fn simple() {
     let rustc_output = raw_rustc_output(&p, "src/lib.rs", &[]);
 
     // -q so the output is the same as rustc (no "Compiling" or "Finished").
-    let cargo_output1 = p.cargo("check -q --color=never").run();
+    let cargo_output1 = p
+        .cargo("check -q --color=never")
+        .exec_with_output()
+        .expect("cargo to run");
     assert_eq!(rustc_output, as_str(&cargo_output1.stderr));
     assert!(cargo_output1.stdout.is_empty());
     // Check that the cached version is exactly the same.
-    let cargo_output2 = p.cargo("check -q").run();
+    let cargo_output2 = p
+        .cargo("check -q")
+        .exec_with_output()
+        .expect("cargo to run");
     assert_eq!(rustc_output, as_str(&cargo_output2.stderr));
     assert!(cargo_output2.stdout.is_empty());
 }
@@ -55,10 +61,14 @@ fn simple_short() {
 
     let cargo_output1 = p
         .cargo("check -q --color=never --message-format=short")
-        .run();
+        .exec_with_output()
+        .expect("cargo to run");
     assert_eq!(rustc_output, as_str(&cargo_output1.stderr));
     // assert!(cargo_output1.stdout.is_empty());
-    let cargo_output2 = p.cargo("check -q --message-format=short").run();
+    let cargo_output2 = p
+        .cargo("check -q --message-format=short")
+        .exec_with_output()
+        .expect("cargo to run");
     println!("{}", String::from_utf8_lossy(&cargo_output2.stdout));
     assert_eq!(rustc_output, as_str(&cargo_output2.stderr));
     assert!(cargo_output2.stdout.is_empty());
@@ -92,15 +102,24 @@ fn color() {
     assert!(!rustc_nocolor.contains("\x1b["));
 
     // First pass, non-cached, with color, should be the same.
-    let cargo_output1 = p.cargo("check -q --color=always").run();
+    let cargo_output1 = p
+        .cargo("check -q --color=always")
+        .exec_with_output()
+        .expect("cargo to run");
     compare(&rustc_color, as_str(&cargo_output1.stderr));
 
     // Replay cached, with color.
-    let cargo_output2 = p.cargo("check -q --color=always").run();
+    let cargo_output2 = p
+        .cargo("check -q --color=always")
+        .exec_with_output()
+        .expect("cargo to run");
     compare(&rustc_color, as_str(&cargo_output2.stderr));
 
     // Replay cached, no color.
-    let cargo_output_nocolor = p.cargo("check -q --color=never").run();
+    let cargo_output_nocolor = p
+        .cargo("check -q --color=never")
+        .exec_with_output()
+        .expect("cargo to run");
     compare(&rustc_nocolor, as_str(&cargo_output_nocolor.stderr));
 }
 
@@ -111,17 +130,27 @@ fn cached_as_json() {
 
     // Grab the non-cached output, feature disabled.
     // NOTE: When stabilizing, this will need to be redone.
-    let cargo_output = p.cargo("check --message-format=json").run();
+    let cargo_output = p
+        .cargo("check --message-format=json")
+        .exec_with_output()
+        .expect("cargo to run");
+    assert!(cargo_output.status.success());
     let orig_cargo_out = as_str(&cargo_output.stdout);
     assert!(orig_cargo_out.contains("compiler-message"));
     p.cargo("clean").run();
 
     // Check JSON output, not fresh.
-    let cargo_output1 = p.cargo("check --message-format=json").run();
+    let cargo_output1 = p
+        .cargo("check --message-format=json")
+        .exec_with_output()
+        .expect("cargo to run");
     assert_eq!(as_str(&cargo_output1.stdout), orig_cargo_out);
 
     // Check JSON output, fresh.
-    let cargo_output2 = p.cargo("check --message-format=json").run();
+    let cargo_output2 = p
+        .cargo("check --message-format=json")
+        .exec_with_output()
+        .expect("cargo to run");
     // The only difference should be this field.
     let fix_fresh = as_str(&cargo_output2.stdout).replace("\"fresh\":true", "\"fresh\":false");
     assert_eq!(fix_fresh, orig_cargo_out);
@@ -191,7 +220,11 @@ fn rustdoc() {
         )
         .build();
 
-    let rustdoc_output = p.cargo("doc -q --color=always").run();
+    let rustdoc_output = p
+        .cargo("doc -q --color=always")
+        .exec_with_output()
+        .expect("rustdoc to run");
+    assert!(rustdoc_output.status.success());
     let rustdoc_stderr = as_str(&rustdoc_output.stderr);
     assert!(rustdoc_stderr.contains("missing"));
     assert!(rustdoc_stderr.contains("\x1b["));
@@ -201,7 +234,10 @@ fn rustdoc() {
     );
 
     // Check the cached output.
-    let rustdoc_output = p.cargo("doc -q --color=always").run();
+    let rustdoc_output = p
+        .cargo("doc -q --color=always")
+        .exec_with_output()
+        .expect("rustdoc to run");
     assert_eq!(as_str(&rustdoc_output.stderr), rustdoc_stderr);
 }
 
@@ -241,7 +277,7 @@ fn very_verbose() {
     p.cargo("check -vv")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v1.0.0 (registry `dummy-registry`)
 [CHECKING] bar v1.0.0
@@ -491,6 +527,7 @@ WRAPPER CALLED: rustc [..]
         .run();
 }
 
+#[allow(deprecated)]
 #[cargo_test]
 fn wacky_hashless_fingerprint() {
     // On Windows, executables don't have hashes. This checks for a bad
@@ -507,7 +544,7 @@ fn wacky_hashless_fingerprint() {
 [CHECKING] foo v0.0.1 ([ROOT]/foo)
 [WARNING] unused variable: `unused`
 ...
-[WARNING] `foo` (bin "a") generated 1 warning[..]
+[WARNING] `foo` (bin "a") generated 1 warning
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])

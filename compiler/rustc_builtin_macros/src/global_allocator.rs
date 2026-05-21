@@ -1,13 +1,15 @@
 use rustc_ast::expand::allocator::{
-    ALLOCATOR_METHODS, AllocatorMethod, AllocatorMethodInput, AllocatorTy, global_fn_name,
+    global_fn_name, AllocatorMethod, AllocatorMethodInput, AllocatorTy, ALLOCATOR_METHODS,
 };
+use rustc_ast::ptr::P;
 use rustc_ast::{
     self as ast, AttrVec, Expr, Fn, FnHeader, FnSig, Generics, ItemKind, Mutability, Param, Safety,
     Stmt, StmtKind, Ty, TyKind,
 };
 use rustc_expand::base::{Annotatable, ExtCtxt};
-use rustc_span::{Ident, Span, Symbol, kw, sym};
-use thin_vec::{ThinVec, thin_vec};
+use rustc_span::symbol::{kw, sym, Ident, Symbol};
+use rustc_span::Span;
+use thin_vec::{thin_vec, ThinVec};
 
 use crate::errors;
 use crate::util::check_builtin_macro_attribute;
@@ -24,15 +26,15 @@ pub(crate) fn expand(
 
     // Allow using `#[global_allocator]` on an item statement
     // FIXME - if we get deref patterns, use them to reduce duplication here
-    let (item, ident, is_stmt, ty_span) = if let Annotatable::Item(item) = &item
-        && let ItemKind::Static(box ast::StaticItem { ident, ty, .. }) = &item.kind
+    let (item, is_stmt, ty_span) = if let Annotatable::Item(item) = &item
+        && let ItemKind::Static(box ast::StaticItem { ty, .. }) = &item.kind
     {
-        (item, *ident, false, ecx.with_def_site_ctxt(ty.span))
+        (item, false, ecx.with_def_site_ctxt(ty.span))
     } else if let Annotatable::Stmt(stmt) = &item
         && let StmtKind::Item(item) = &stmt.kind
-        && let ItemKind::Static(box ast::StaticItem { ident, ty, .. }) = &item.kind
+        && let ItemKind::Static(box ast::StaticItem { ty, .. }) = &item.kind
     {
-        (item, *ident, true, ecx.with_def_site_ctxt(ty.span))
+        (item, true, ecx.with_def_site_ctxt(ty.span))
     } else {
         ecx.dcx().emit_err(errors::AllocMustStatics { span: item.span() });
         return vec![orig_item];
@@ -40,17 +42,17 @@ pub(crate) fn expand(
 
     // Generate a bunch of new items using the AllocFnFactory
     let span = ecx.with_def_site_ctxt(item.span);
-    let f = AllocFnFactory { span, ty_span, global: ident, cx: ecx };
+    let f = AllocFnFactory { span, ty_span, global: item.ident, cx: ecx };
 
     // Generate item statements for the allocator methods.
     let stmts = ALLOCATOR_METHODS.iter().map(|method| f.allocator_fn(method)).collect();
 
     // Generate anonymous constant serving as container for the allocator methods.
     let const_ty = ecx.ty(ty_span, TyKind::Tup(ThinVec::new()));
-    let const_body = ast::ConstItemRhsKind::new_body(ecx.expr_block(ecx.block(span, stmts)));
+    let const_body = ecx.expr_block(ecx.block(span, stmts));
     let const_item = ecx.item_const(span, Ident::new(kw::Underscore, span), const_ty, const_body);
     let const_item = if is_stmt {
-        Annotatable::Stmt(Box::new(ecx.stmt_item(span, const_item)))
+        Annotatable::Stmt(P(ecx.stmt_item(span, const_item)))
     } else {
         Annotatable::Item(const_item)
     };
@@ -63,7 +65,7 @@ struct AllocFnFactory<'a, 'b> {
     span: Span,
     ty_span: Span,
     global: Ident,
-    cx: &'a ExtCtxt<'b>,
+    cx: &'b ExtCtxt<'a>,
 }
 
 impl AllocFnFactory<'_, '_> {
@@ -77,20 +79,21 @@ impl AllocFnFactory<'_, '_> {
         let sig = FnSig { decl, header, span: self.span };
         let body = Some(self.cx.block_expr(result));
         let kind = ItemKind::Fn(Box::new(Fn {
-            defaultness: ast::Defaultness::Implicit,
+            defaultness: ast::Defaultness::Final,
             sig,
-            ident: Ident::from_str_and_span(&global_fn_name(method.name), self.span),
             generics: Generics::default(),
-            contract: None,
             body,
-            define_opaque: None,
-            eii_impls: ThinVec::new(),
         }));
-        let item = self.cx.item(self.span, self.attrs(method), kind);
+        let item = self.cx.item(
+            self.span,
+            Ident::from_str_and_span(&global_fn_name(method.name), self.span),
+            self.attrs(),
+            kind,
+        );
         self.cx.stmt_item(self.ty_span, item)
     }
 
-    fn call_allocator(&self, method: Symbol, mut args: ThinVec<Box<Expr>>) -> Box<Expr> {
+    fn call_allocator(&self, method: Symbol, mut args: ThinVec<P<Expr>>) -> P<Expr> {
         let method = self.cx.std_path(&[sym::alloc, sym::GlobalAlloc, method]);
         let method = self.cx.expr_path(self.cx.path(self.ty_span, method));
         let allocator = self.cx.path_ident(self.ty_span, self.global);
@@ -101,21 +104,11 @@ impl AllocFnFactory<'_, '_> {
         self.cx.expr_call(self.ty_span, method, args)
     }
 
-    fn attrs(&self, method: &AllocatorMethod) -> AttrVec {
-        let alloc_attr = match method.name {
-            sym::alloc => sym::rustc_allocator,
-            sym::dealloc => sym::rustc_deallocator,
-            sym::realloc => sym::rustc_reallocator,
-            sym::alloc_zeroed => sym::rustc_allocator_zeroed,
-            _ => unreachable!("Unknown allocator method!"),
-        };
-        thin_vec![
-            self.cx.attr_word(sym::rustc_std_internal_symbol, self.span),
-            self.cx.attr_word(alloc_attr, self.span)
-        ]
+    fn attrs(&self) -> AttrVec {
+        thin_vec![self.cx.attr_word(sym::rustc_std_internal_symbol, self.span)]
     }
 
-    fn arg_ty(&self, input: &AllocatorMethodInput, args: &mut ThinVec<Param>) -> Box<Expr> {
+    fn arg_ty(&self, input: &AllocatorMethodInput, args: &mut ThinVec<Param>) -> P<Expr> {
         match input.ty {
             AllocatorTy::Layout => {
                 // If an allocator method is ever introduced having multiple
@@ -128,15 +121,11 @@ impl AllocFnFactory<'_, '_> {
 
                 let usize = self.cx.path_ident(self.span, Ident::new(sym::usize, self.span));
                 let ty_usize = self.cx.ty_path(usize);
-                args.push(self.cx.param(self.span, size, ty_usize));
-                let ty_align = self.ptr_alignment();
-                args.push(self.cx.param(self.span, align, ty_align));
+                args.push(self.cx.param(self.span, size, ty_usize.clone()));
+                args.push(self.cx.param(self.span, align, ty_usize));
 
-                let layout_new = self.cx.std_path(&[
-                    sym::alloc,
-                    sym::Layout,
-                    sym::from_size_alignment_unchecked,
-                ]);
+                let layout_new =
+                    self.cx.std_path(&[sym::alloc, sym::Layout, sym::from_size_align_unchecked]);
                 let layout_new = self.cx.expr_path(self.cx.path(self.span, layout_new));
                 let size = self.cx.expr_ident(self.span, size);
                 let align = self.cx.expr_ident(self.span, align);
@@ -156,36 +145,30 @@ impl AllocFnFactory<'_, '_> {
                 self.cx.expr_ident(self.span, ident)
             }
 
-            AllocatorTy::Never | AllocatorTy::ResultPtr | AllocatorTy::Unit => {
+            AllocatorTy::ResultPtr | AllocatorTy::Unit => {
                 panic!("can't convert AllocatorTy to an argument")
             }
         }
     }
 
-    fn ret_ty(&self, ty: &AllocatorTy) -> Box<Ty> {
+    fn ret_ty(&self, ty: &AllocatorTy) -> P<Ty> {
         match *ty {
             AllocatorTy::ResultPtr => self.ptr_u8(),
 
             AllocatorTy::Unit => self.cx.ty(self.span, TyKind::Tup(ThinVec::new())),
 
-            AllocatorTy::Layout | AllocatorTy::Never | AllocatorTy::Usize | AllocatorTy::Ptr => {
+            AllocatorTy::Layout | AllocatorTy::Usize | AllocatorTy::Ptr => {
                 panic!("can't convert `AllocatorTy` to an output")
             }
         }
     }
 
-    fn usize(&self) -> Box<Ty> {
+    fn usize(&self) -> P<Ty> {
         let usize = self.cx.path_ident(self.span, Ident::new(sym::usize, self.span));
         self.cx.ty_path(usize)
     }
 
-    fn ptr_alignment(&self) -> Box<Ty> {
-        let path = self.cx.std_path(&[sym::ptr, sym::Alignment]);
-        let path = self.cx.path(self.span, path);
-        self.cx.ty_path(path)
-    }
-
-    fn ptr_u8(&self) -> Box<Ty> {
+    fn ptr_u8(&self) -> P<Ty> {
         let u8 = self.cx.path_ident(self.span, Ident::new(sym::u8, self.span));
         let ty_u8 = self.cx.ty_path(u8);
         self.cx.ty_ptr(self.span, ty_u8, Mutability::Mut)

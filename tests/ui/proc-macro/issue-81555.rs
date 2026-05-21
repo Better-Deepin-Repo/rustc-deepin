@@ -1,5 +1,5 @@
 //@ check-pass
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 #![feature(stmt_expr_attributes, proc_macro_hygiene)]
 
 extern crate test_macros;

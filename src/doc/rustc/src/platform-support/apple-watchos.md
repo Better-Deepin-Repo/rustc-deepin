@@ -2,23 +2,20 @@
 
 Apple watchOS targets.
 
-**Tier: 2 (without Host Tools)**
+**Tier: 3**
 
 - `aarch64-apple-watchos`: Apple WatchOS on ARM64.
 - `aarch64-apple-watchos-sim`: Apple WatchOS Simulator on ARM64.
-
-**Tier: 3**
-
 - `x86_64-apple-watchos-sim`: Apple WatchOS Simulator on 64-bit x86.
 - `arm64_32-apple-watchos`: Apple WatchOS on Arm 64_32.
 - `armv7k-apple-watchos`: Apple WatchOS on Armv7k.
 
 ## Target maintainers
 
-[@deg4uss3r](https://github.com/deg4uss3r)
-[@vladimir-ea](https://github.com/vladimir-ea)
-[@leohowell](https://github.com/leohowell)
-[@madsmtm](https://github.com/madsmtm)
+- [@deg4uss3r](https://github.com/deg4uss3r)
+- [@vladimir-ea](https://github.com/vladimir-ea)
+- [@leohowell](https://github.com/leohowell)
+- [@madsmtm](https://github.com/madsmtm)
 
 ## Requirements
 
@@ -27,8 +24,7 @@ These targets are cross-compiled, and require the corresponding watchOS SDK
 ARM64 targets, Xcode 12 or higher is required.
 
 The path to the SDK can be passed to `rustc` using the common `SDKROOT`
-environment variable, or will be inferred when compiling on host macOS using
-roughly the same logic as `xcrun --sdk watchos --show-sdk-path`.
+environment variable.
 
 ### OS version
 
@@ -40,18 +36,30 @@ case `WATCHOS_DEPLOYMENT_TARGET`.
 
 ## Building the target
 
-The tier 2 targets are distributed through `rustup`, and can be installed using one of:
-```console
-$ rustup target add aarch64-apple-watchos
-$ rustup target add aarch64-apple-watchos-sim
+The targets can be built by enabling them for a `rustc` build in
+`config.toml`, by adding, for example:
+
+```toml
+[build]
+build-stage = 1
+target = ["aarch64-apple-watchos", "aarch64-apple-watchos-sim"]
 ```
 
-See [the instructions for iOS](./apple-ios.md#building-the-target) for how to build the tier 3 targets.
+Using the unstable `-Zbuild-std` with a nightly Cargo may also work.
 
 ## Building Rust programs
 
-See [the instructions for iOS](./apple-ios.md#building-rust-programs).
+Rust programs can be built for these targets by specifying `--target`, if
+`rustc` has been built with support for them. For example:
+
+```console
+$ rustc --target aarch64-apple-watchos-sim your-code.rs
+```
 
 ## Testing
 
-See [the instructions for iOS](./apple-ios.md#testing).
+There is no support for running the Rust or standard library testsuite at the
+moment. Testing has mostly been done manually with builds of static libraries
+embedded into applications called from Xcode or a simulator.
+
+It hopefully will be possible to improve this in the future.

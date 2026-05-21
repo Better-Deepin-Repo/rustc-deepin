@@ -7,7 +7,7 @@
 //! to reimplement all the rendering logic in this module because of that.
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::process::ChildStdout;
+use std::process::{ChildStdout, Stdio};
 use std::time::Duration;
 
 use termcolor::{Color, ColorSpec, WriteColor};
@@ -34,44 +34,51 @@ pub(crate) fn try_run_tests(
     cmd: &mut BootstrapCommand,
     stream: bool,
 ) -> bool {
-    if run_tests(builder, cmd, stream) {
+    if builder.config.dry_run() {
+        cmd.mark_as_executed();
         return true;
     }
 
-    if builder.fail_fast {
-        crate::exit!(1);
+    if !run_tests(builder, cmd, stream) {
+        if builder.fail_fast {
+            crate::exit!(1);
+        } else {
+            let mut failures = builder.delayed_failures.borrow_mut();
+            failures.push(format!("{cmd:?}"));
+            false
+        }
+    } else {
+        true
     }
-
-    builder.config.exec_ctx().add_to_delay_failure(format!("{cmd:?}"));
-
-    false
 }
 
 fn run_tests(builder: &Builder<'_>, cmd: &mut BootstrapCommand, stream: bool) -> bool {
-    builder.do_if_verbose(|| println!("running: {cmd:?}"));
+    let cmd = cmd.as_command_mut();
+    cmd.stdout(Stdio::piped());
 
-    let Some(mut streaming_command) = cmd.stream_capture_stdout(&builder.config.exec_ctx) else {
-        return true;
-    };
+    builder.verbose(|| println!("running: {cmd:?}"));
+
+    let mut process = cmd.spawn().unwrap();
 
     // This runs until the stdout of the child is closed, which means the child exited. We don't
     // run this on another thread since the builder is not Sync.
-    let renderer = Renderer::new(streaming_command.stdout.take().unwrap(), builder);
+    let renderer = Renderer::new(process.stdout.take().unwrap(), builder);
     if stream {
         renderer.stream_all();
     } else {
         renderer.render_all();
     }
 
-    let status = streaming_command.wait(&builder.config.exec_ctx).unwrap();
-    if !status.success() && builder.is_verbose() {
+    let result = process.wait_with_output().unwrap();
+    if !result.status.success() && builder.is_verbose() {
         println!(
             "\n\ncommand did not execute successfully: {cmd:?}\n\
-             expected success, got: {status}",
+             expected success, got: {}",
+            result.status
         );
     }
 
-    status.success()
+    result.status.success()
 }
 
 struct Renderer<'a> {
@@ -81,12 +88,7 @@ struct Renderer<'a> {
     builder: &'a Builder<'a>,
     tests_count: Option<usize>,
     executed_tests: usize,
-    /// Number of tests that were skipped due to already being up-to-date
-    /// (i.e. no relevant changes occurred since they last ran).
-    up_to_date_tests: usize,
-    ignored_tests: usize,
     terse_tests_in_line: usize,
-    ci_latest_logged_percentage: f64,
 }
 
 impl<'a> Renderer<'a> {
@@ -98,10 +100,7 @@ impl<'a> Renderer<'a> {
             builder,
             tests_count: None,
             executed_tests: 0,
-            up_to_date_tests: 0,
-            ignored_tests: 0,
             terse_tests_in_line: 0,
-            ci_latest_logged_percentage: 0.0,
         }
     }
 
@@ -128,12 +127,6 @@ impl<'a> Renderer<'a> {
                 }
             }
         }
-
-        if self.up_to_date_tests > 0 {
-            let n = self.up_to_date_tests;
-            let s = if n > 1 { "s" } else { "" };
-            println!("help: ignored {n} up-to-date test{s}; use `--force-rerun` to prevent this\n");
-        }
     }
 
     /// Renders the stdout characters one by one
@@ -156,14 +149,6 @@ impl<'a> Renderer<'a> {
     fn render_test_outcome(&mut self, outcome: Outcome<'_>, test: &TestOutcome) {
         self.executed_tests += 1;
 
-        if let Outcome::Ignored { reason } = outcome {
-            self.ignored_tests += 1;
-            // Keep this in sync with the "up-to-date" ignore message inserted by compiletest.
-            if reason == Some("up-to-date") {
-                self.up_to_date_tests += 1;
-            }
-        }
-
         #[cfg(feature = "build-metrics")]
         self.builder.metrics.record_test(
             &test.name,
@@ -179,8 +164,6 @@ impl<'a> Renderer<'a> {
 
         if self.builder.config.verbose_tests {
             self.render_test_outcome_verbose(outcome, test);
-        } else if self.builder.config.is_running_on_ci() {
-            self.render_test_outcome_ci(outcome, test);
         } else {
             self.render_test_outcome_terse(outcome, test);
         }
@@ -196,9 +179,7 @@ impl<'a> Renderer<'a> {
     }
 
     fn render_test_outcome_terse(&mut self, outcome: Outcome<'_>, test: &TestOutcome) {
-        if self.terse_tests_in_line != 0
-            && self.terse_tests_in_line.is_multiple_of(TERSE_TESTS_PER_LINE)
-        {
+        if self.terse_tests_in_line != 0 && self.terse_tests_in_line % TERSE_TESTS_PER_LINE == 0 {
             if let Some(total) = self.tests_count {
                 let total = total.to_string();
                 let executed = format!("{:>width$}", self.executed_tests - 1, width = total.len());
@@ -210,31 +191,6 @@ impl<'a> Renderer<'a> {
 
         self.terse_tests_in_line += 1;
         self.builder.colored_stdout(|stdout| outcome.write_short(stdout, &test.name)).unwrap();
-        let _ = std::io::stdout().flush();
-    }
-
-    fn render_test_outcome_ci(&mut self, outcome: Outcome<'_>, test: &TestOutcome) {
-        if let Some(total) = self.tests_count {
-            let percent = self.executed_tests as f64 / total as f64;
-
-            if self.ci_latest_logged_percentage + 0.10 < percent {
-                let total = total.to_string();
-                let executed = format!("{:>width$}", self.executed_tests, width = total.len());
-                let pretty_percent = format!("{:.0}%", percent * 100.0);
-                let passed_tests = self.executed_tests - (self.failures.len() + self.ignored_tests);
-                println!(
-                    "{:<4} -- {executed}/{total}, {:>total_indent$} passed, {} failed, {} ignored",
-                    pretty_percent,
-                    passed_tests,
-                    self.failures.len(),
-                    self.ignored_tests,
-                    total_indent = total.len()
-                );
-                self.ci_latest_logged_percentage += 0.10;
-            }
-        }
-
-        self.builder.colored_stdout(|stdout| outcome.write_ci(stdout, &test.name)).unwrap();
         let _ = std::io::stdout().flush();
     }
 
@@ -250,14 +206,8 @@ impl<'a> Renderer<'a> {
                 if failure.stdout.is_some() || failure.message.is_some() {
                     println!("---- {} stdout ----", failure.name);
                     if let Some(stdout) = &failure.stdout {
-                        // Captured test output normally ends with a newline,
-                        // so only use `println!` if it doesn't.
-                        print!("{stdout}");
-                        if !stdout.ends_with('\n') {
-                            println!("\n\\ (no newline at end of output)");
-                        }
+                        println!("{stdout}");
                     }
-                    println!("---- {} stdout end ----", failure.name);
                     if let Some(message) = &failure.message {
                         println!("NOTE: {message}");
                     }
@@ -277,7 +227,7 @@ impl<'a> Renderer<'a> {
             for bench in &self.benches {
                 rows.push((
                     &bench.name,
-                    format!("{:.2?}ns/iter", bench.median),
+                    format!("{:.2?}/iter", bench.median),
                     format!("+/- {:.2?}", bench.deviation),
                 ));
             }
@@ -306,21 +256,10 @@ impl<'a> Renderer<'a> {
         );
     }
 
-    fn render_report(&self, report: &Report) {
-        let &Report { total_time, compilation_time } = report;
-        // Should match `write_merged_doctest_times` in `library/test/src/formatters/pretty.rs`.
-        println!(
-            "all doctests ran in {total_time:.2}s; merged doctests compilation took {compilation_time:.2}s"
-        );
-    }
-
     fn render_message(&mut self, message: Message) {
         match message {
             Message::Suite(SuiteMessage::Started { test_count }) => {
                 println!("\nrunning {test_count} tests");
-                self.benches = vec![];
-                self.failures = vec![];
-                self.ignored_tests = 0;
                 self.executed_tests = 0;
                 self.terse_tests_in_line = 0;
                 self.tests_count = Some(test_count);
@@ -330,9 +269,6 @@ impl<'a> Renderer<'a> {
             }
             Message::Suite(SuiteMessage::Failed(outcome)) => {
                 self.render_suite_outcome(Outcome::Failed, &outcome);
-            }
-            Message::Report(report) => {
-                self.render_report(&report);
             }
             Message::Bench(outcome) => {
                 // The formatting for benchmarks doesn't replicate 1:1 the formatting libtest
@@ -427,17 +363,6 @@ impl Outcome<'_> {
         }
         writer.reset()
     }
-
-    fn write_ci(&self, writer: &mut dyn WriteColor, name: &str) -> Result<(), std::io::Error> {
-        match self {
-            Outcome::Ok | Outcome::BenchOk | Outcome::Ignored { .. } => {}
-            Outcome::Failed => {
-                writer.set_color(ColorSpec::new().set_fg(Some(Color::Red)))?;
-                writeln!(writer, "   {name} ... FAILED")?;
-            }
-        }
-        writer.reset()
-    }
 }
 
 #[derive(serde_derive::Deserialize)]
@@ -446,7 +371,6 @@ enum Message {
     Suite(SuiteMessage),
     Test(TestMessage),
     Bench(BenchOutcome),
-    Report(Report),
 }
 
 #[derive(serde_derive::Deserialize)]
@@ -492,11 +416,4 @@ struct TestOutcome {
     exec_time: Option<f64>,
     stdout: Option<String>,
     message: Option<String>,
-}
-
-/// Emitted when running doctests.
-#[derive(serde_derive::Deserialize)]
-struct Report {
-    total_time: f64,
-    compilation_time: f64,
 }

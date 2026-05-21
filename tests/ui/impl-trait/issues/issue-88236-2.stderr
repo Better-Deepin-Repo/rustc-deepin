@@ -1,10 +1,8 @@
 error[E0657]: `impl Trait` cannot capture higher-ranked lifetime from outer `impl Trait`
-  --> $DIR/issue-88236-2.rs:15:49
+  --> $DIR/issue-88236-2.rs:15:61
    |
 LL | fn make_impl() -> impl for<'a> Hrtb<'a, Assoc = impl Send + 'a> {}
-   |                                                 ^^^^^^^^^^^^--
-   |                                                 |
-   |                                                 `impl Trait` implicitly captures all lifetimes in scope
+   |                                                             ^^
    |
 note: lifetime declared here
   --> $DIR/issue-88236-2.rs:15:28
@@ -13,12 +11,10 @@ LL | fn make_impl() -> impl for<'a> Hrtb<'a, Assoc = impl Send + 'a> {}
    |                            ^^
 
 error[E0657]: `impl Trait` cannot capture higher-ranked lifetime from outer `impl Trait`
-  --> $DIR/issue-88236-2.rs:18:68
+  --> $DIR/issue-88236-2.rs:18:80
    |
 LL | fn make_weird_impl<'b>(x: &'b ()) -> impl for<'a> Hrtb<'a, Assoc = impl Send + 'a> {
-   |                                                                    ^^^^^^^^^^^^--
-   |                                                                    |
-   |                                                                    `impl Trait` implicitly captures all lifetimes in scope
+   |                                                                                ^^
    |
 note: lifetime declared here
   --> $DIR/issue-88236-2.rs:18:47
@@ -27,12 +23,10 @@ LL | fn make_weird_impl<'b>(x: &'b ()) -> impl for<'a> Hrtb<'a, Assoc = impl Sen
    |                                               ^^
 
 error[E0657]: `impl Trait` cannot capture higher-ranked lifetime from outer `impl Trait`
-  --> $DIR/issue-88236-2.rs:23:66
+  --> $DIR/issue-88236-2.rs:23:78
    |
 LL | fn make_bad_impl<'b>(x: &'b ()) -> impl for<'a> Hrtb<'a, Assoc = impl Send + 'a> {
-   |                                                                  ^^^^^^^^^^^^--
-   |                                                                  |
-   |                                                                  `impl Trait` implicitly captures all lifetimes in scope
+   |                                                                              ^^
    |
 note: lifetime declared here
   --> $DIR/issue-88236-2.rs:23:45

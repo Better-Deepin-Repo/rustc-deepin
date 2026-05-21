@@ -6,9 +6,8 @@ LL |        static childVal: Box<P> = self.child.get();
    |
 help: consider using `let` instead of `static`
    |
-LL -        static childVal: Box<P> = self.child.get();
-LL +        let childVal: Box<P> = self.child.get();
-   |
+LL |        let childVal: Box<P> = self.child.get();
+   |        ~~~
 
 error: aborting due to 1 previous error
 

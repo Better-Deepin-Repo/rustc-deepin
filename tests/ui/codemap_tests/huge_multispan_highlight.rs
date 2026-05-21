@@ -1,7 +1,4 @@
-//@ revisions: ascii unicode
-//@ compile-flags: --color=always
-//@[ascii] compile-flags: --error-format=human
-//@[unicode] compile-flags: -Zunstable-options --error-format=human-unicode
+//@ compile-flags: --error-format=human --color=always
 //@ ignore-windows
 fn main() {
     let _ = match true {

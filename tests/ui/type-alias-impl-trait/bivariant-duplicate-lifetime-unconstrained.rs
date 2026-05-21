@@ -11,7 +11,6 @@
 
 type Opaque<'a> = impl Sized + 'a;
 
-#[define_opaque(Opaque)]
 fn test<'a>() -> Opaque<'a> {
     let _: () = test::<'a>();
 }

@@ -2,12 +2,14 @@
 
 #![feature(type_alias_impl_trait)]
 
-pub type A = impl Iterator;
+mod defining_use_scope {
+    pub type A = impl Iterator;
 
-#[define_opaque(A)]
-pub fn def_a() -> A {
-    0..1
+    pub fn def_a() -> A {
+        0..1
+    }
 }
+use defining_use_scope::*;
 
 pub fn use_a() {
     def_a().map(|x| x);

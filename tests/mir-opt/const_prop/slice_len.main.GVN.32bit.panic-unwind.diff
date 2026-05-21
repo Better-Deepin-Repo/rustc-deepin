@@ -24,13 +24,13 @@
           _9 = const main::promoted[0];
           _4 = copy _9;
 -         _3 = copy _4;
--         _2 = move _3 as &[u32] (PointerCoercion(Unsize, AsCast));
+-         _2 = move _3 as &[u32] (PointerCoercion(Unsize));
 +         _3 = copy _9;
-+         _2 = copy _9 as &[u32] (PointerCoercion(Unsize, AsCast));
++         _2 = copy _9 as &[u32] (PointerCoercion(Unsize));
           StorageDead(_3);
           StorageLive(_6);
           _6 = const 1_usize;
--         _7 = PtrMetadata(copy _2);
+-         _7 = Len((*_2));
 -         _8 = Lt(copy _6, copy _7);
 -         assert(move _8, "index out of bounds: the length is {} but the index is {}", move _7, copy _6) -> [success: bb1, unwind continue];
 +         _7 = const 3_usize;

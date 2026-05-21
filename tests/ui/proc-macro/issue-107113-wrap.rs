@@ -1,6 +1,5 @@
 //@ edition:2021
-//@ proc-macro: issue-107113.rs
-//@ ignore-backends: gcc
+//@ aux-build:issue-107113.rs
 
 #[macro_use]
 extern crate issue_107113;

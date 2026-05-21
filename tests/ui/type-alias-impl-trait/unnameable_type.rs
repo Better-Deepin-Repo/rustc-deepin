@@ -16,7 +16,6 @@ use private::Trait;
 // downstream
 type MyPrivate = impl Sized;
 impl Trait for u32 {
-    #[define_opaque(MyPrivate)]
     fn dont_define_this(private: MyPrivate) {
         //~^ ERROR: incompatible type for trait
         let _: () = private;

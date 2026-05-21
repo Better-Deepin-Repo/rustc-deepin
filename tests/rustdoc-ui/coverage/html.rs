@@ -2,5 +2,3 @@
 
 /// Foo
 pub struct Xo;
-
-//~? ERROR `--output-format=html` is not supported for the `--show-coverage` option

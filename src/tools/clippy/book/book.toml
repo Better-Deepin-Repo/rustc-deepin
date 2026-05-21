@@ -1,10 +1,12 @@
 [book]
 authors = ["The Rust Clippy Developers"]
 language = "en"
+multilingual = false
+src = "src"
 title = "Clippy Documentation"
 
 [rust]
-edition = "2024"
+edition = "2018"
 
 [output.html]
 edit-url-template = "https://github.com/rust-lang/rust-clippy/edit/master/book/{path}"

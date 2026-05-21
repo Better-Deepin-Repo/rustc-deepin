@@ -1,7 +1,6 @@
 //! Tests for the `cargo fetch` command.
 
-use crate::prelude::*;
-use crate::utils::cross_compile::disabled as cross_compile_disabled;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::rustc_host;
 use cargo_test_support::{basic_manifest, cross_compile, project, str};
@@ -18,7 +17,7 @@ fn no_deps() {
 
 #[cargo_test]
 fn fetch_all_platform_dependencies_when_no_target_is_given() {
-    if cross_compile_disabled() {
+    if cross_compile::disabled() {
         return;
     }
 
@@ -68,9 +67,10 @@ fn fetch_all_platform_dependencies_when_no_target_is_given() {
         .run();
 }
 
+#[allow(deprecated)]
 #[cargo_test]
 fn fetch_platform_specific_dependencies() {
-    if cross_compile_disabled() {
+    if cross_compile::disabled() {
         return;
     }
 

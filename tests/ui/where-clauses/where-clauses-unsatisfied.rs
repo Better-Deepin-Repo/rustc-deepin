@@ -1,13 +1,4 @@
-//@ revisions: current next
-//@[next] compile-flags: -Znext-solver
-//@ ignore-compare-mode-next-solver (explicit revisions)
-
-fn equal<T>(a: &T, b: &T) -> bool
-where
-    T: Eq,
-{
-    a == b
-}
+fn equal<T>(a: &T, b: &T) -> bool where T : Eq { a == b }
 
 struct Struct;
 

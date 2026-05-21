@@ -6,9 +6,8 @@ LL |         this.i
    |
 help: you might have meant to use `self` here instead
    |
-LL -         this.i
-LL +         self.i
-   |
+LL |         self.i
+   |         ~~~~
 help: if you meant to use `self`, you are also missing a `self` receiver argument
    |
 LL |     fn needs_self(&self) {

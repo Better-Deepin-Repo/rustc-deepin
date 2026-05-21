@@ -2,6 +2,7 @@
 // Testing that a librustc_ast can parse modules with canonicalized base path
 //@ ignore-cross-compile
 //@ ignore-remote
+// no-remap-src-base: Reading `file!()` (expectedly) fails when enabled.
 
 #![feature(rustc_private)]
 
@@ -15,7 +16,7 @@ extern crate rustc_span;
 #[allow(unused_extern_crates)]
 extern crate rustc_driver;
 
-use rustc_parse::{lexer::StripTokens, new_parser_from_file, unwrap_or_emit_fatal};
+use rustc_parse::{new_parser_from_file, unwrap_or_emit_fatal};
 use rustc_session::parse::ParseSess;
 use std::path::Path;
 
@@ -29,15 +30,10 @@ pub fn main() {
 }
 
 fn parse() {
-    let psess = ParseSess::new();
+    let psess = ParseSess::new(vec![rustc_parse::DEFAULT_LOCALE_RESOURCE]);
 
     let path = Path::new(file!());
     let path = path.canonicalize().unwrap();
-    let mut parser = unwrap_or_emit_fatal(new_parser_from_file(
-        &psess,
-        &path,
-        StripTokens::ShebangAndFrontmatter,
-        None,
-    ));
+    let mut parser = unwrap_or_emit_fatal(new_parser_from_file(&psess, &path, None));
     let _ = parser.parse_crate_mod();
 }

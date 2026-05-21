@@ -54,9 +54,6 @@ pub fn streaming_output(
     Ok((stdout, stderr))
 }
 
-/// # Panics
-///
-/// Panics if `cmd` is not configured to have `stdout` and `stderr` as `piped`.
 pub fn spawn_with_streaming_output(
     mut cmd: Command,
     on_stdout_line: &mut dyn FnMut(&str),
@@ -76,7 +73,7 @@ pub fn spawn_with_streaming_output(
     Ok(Output { status, stdout, stderr })
 }
 
-#[cfg(all(unix, not(target_arch = "wasm32")))]
+#[cfg(unix)]
 mod imp {
     use std::{
         io::{self, prelude::*},
@@ -161,9 +158,9 @@ mod imp {
     };
 
     use miow::{
-        Overlapped,
         iocp::{CompletionPort, CompletionStatus},
         pipe::NamedPipe,
+        Overlapped,
     };
     use windows_sys::Win32::Foundation::ERROR_BROKEN_PIPE;
 

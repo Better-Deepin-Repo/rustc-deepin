@@ -70,7 +70,14 @@ fn functions(input: TokenStream, dirs: &[&str]) -> TokenStream {
     }
     assert!(!tests.is_empty());
 
-    functions.retain(|(f, _)| matches!(f.vis, syn::Visibility::Public(_)));
+    functions.retain(|(f, _)| {
+        if let syn::Visibility::Public(_) = f.vis {
+            if f.sig.unsafety.is_some() {
+                return true;
+            }
+        }
+        false
+    });
     assert!(!functions.is_empty());
 
     let input = proc_macro2::TokenStream::from(input);
@@ -90,11 +97,11 @@ fn functions(input: TokenStream, dirs: &[&str]) -> TokenStream {
                 arguments.push(to_type(ty));
             }
             for generic in f.sig.generics.params.iter() {
-                match *generic {
-                    syn::GenericParam::Const(ref c) => const_arguments.push(to_type(&c.ty)),
-                    syn::GenericParam::Type(ref _t) => (),
+                let ty = match *generic {
+                    syn::GenericParam::Const(ref c) => &c.ty,
                     _ => panic!("invalid generic argument on {name}"),
                 };
+                const_arguments.push(to_type(ty));
             }
             let ret = match f.sig.output {
                 syn::ReturnType::Default => quote! { None },
@@ -283,15 +290,6 @@ fn to_type(t: &syn::Type) -> proc_macro2::TokenStream {
             "uint64x2x2_t" => quote! { &U64X2X2 },
             "uint64x2x3_t" => quote! { &U64X2X3 },
             "uint64x2x4_t" => quote! { &U64X2X4 },
-            "float16x2_t" => quote! { &F16X2 },
-            "float16x4_t" => quote! { &F16X4 },
-            "float16x4x2_t" => quote! { &F16X4X2 },
-            "float16x4x3_t" => quote! { &F16X4X3 },
-            "float16x4x4_t" => quote! { &F16X4X4 },
-            "float16x8_t" => quote! { &F16X8 },
-            "float16x8x2_t" => quote! { &F16X8X2 },
-            "float16x8x3_t" => quote! { &F16X8X3 },
-            "float16x8x4_t" => quote! { &F16X8X4 },
             "float32x2_t" => quote! { &F32X2 },
             "float32x2x2_t" => quote! { &F32X2X2 },
             "float32x2x3_t" => quote! { &F32X2X3 },
@@ -346,10 +344,6 @@ fn to_type(t: &syn::Type) -> proc_macro2::TokenStream {
             "v8f16" => quote! { &v8f16 },
             "v4f32" => quote! { &v4f32 },
             "v2f64" => quote! { &v2f64 },
-
-            // Generic types
-            "T" => quote! { &GENERICT },
-            "U" => quote! { &GENERICU },
 
             s => panic!("unsupported type: \"{s}\""),
         },
@@ -498,7 +492,6 @@ fn find_target_feature(attrs: &[syn::Attribute]) -> Option<syn::Lit> {
     attrs
         .iter()
         .flat_map(|a| {
-            #[allow(clippy::collapsible_if)]
             if let syn::Meta::List(ref l) = a.meta {
                 if l.path.is_ident("target_feature") {
                     if let Ok(l) =
@@ -527,7 +520,6 @@ fn find_doc(attrs: &[syn::Attribute]) -> String {
     attrs
         .iter()
         .filter_map(|a| {
-            #[allow(clippy::collapsible_if)]
             if let syn::Meta::NameValue(ref l) = a.meta {
                 if l.path.is_ident("doc") {
                     if let syn::Expr::Lit(syn::ExprLit {
@@ -539,7 +531,7 @@ fn find_doc(attrs: &[syn::Attribute]) -> String {
                     }
                 }
             }
-            None
+            return None;
         })
         .collect()
 }

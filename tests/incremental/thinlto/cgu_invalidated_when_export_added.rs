@@ -1,6 +1,5 @@
 //@ revisions: cfail1 cfail2
 //@ build-pass
-//@ ignore-backends: gcc
 
 // rust-lang/rust#69798:
 //

@@ -1,8 +1,9 @@
-#![warn(clippy::exit)]
+#[warn(clippy::exit)]
 
 fn also_not_main() {
     std::process::exit(3);
-    //~^ exit
+    //~^ ERROR: usage of `process::exit`
+    //~| NOTE: `-D clippy::exit` implied by `-D warnings`
 }
 
 fn main() {

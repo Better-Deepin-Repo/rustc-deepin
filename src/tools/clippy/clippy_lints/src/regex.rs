@@ -2,13 +2,11 @@ use std::fmt::Display;
 
 use clippy_utils::consts::{ConstEvalCtxt, Constant};
 use clippy_utils::diagnostics::{span_lint, span_lint_and_help};
-use clippy_utils::paths;
-use clippy_utils::paths::PathLookup;
-use clippy_utils::res::MaybeQPath;
 use clippy_utils::source::SpanRangeExt;
+use clippy_utils::{def_path_def_ids, path_def_id, paths};
 use rustc_ast::ast::{LitKind, StrStyle};
 use rustc_hir::def_id::DefIdMap;
-use rustc_hir::{BorrowKind, Expr, ExprKind, OwnerId};
+use rustc_hir::{BorrowKind, Expr, ExprKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::impl_lint_pass;
 use rustc_span::{BytePos, Span};
@@ -25,11 +23,6 @@ declare_clippy_lint! {
     /// ### Example
     /// ```ignore
     /// Regex::new("(")
-    /// ```
-    ///
-    /// Use instead:
-    /// ```ignore
-    /// Regex::new("\(")
     /// ```
     #[clippy::version = "pre 1.29.0"]
     pub INVALID_REGEX,
@@ -56,53 +49,10 @@ declare_clippy_lint! {
     /// ```ignore
     /// Regex::new("^foobar")
     /// ```
-    ///
-    /// Use instead:
-    /// ```ignore
-    /// str::starts_with("foobar")
-    /// ```
     #[clippy::version = "pre 1.29.0"]
     pub TRIVIAL_REGEX,
     nursery,
     "trivial regular expressions"
-}
-
-declare_clippy_lint! {
-    /// ### What it does
-    ///
-    /// Checks for [regex](https://crates.io/crates/regex) compilation inside a loop with a literal.
-    ///
-    /// ### Why is this bad?
-    ///
-    /// Compiling a regex is a much more expensive operation than using one, and a compiled regex can be used multiple times.
-    /// This is documented as an antipattern [on the regex documentation](https://docs.rs/regex/latest/regex/#avoid-re-compiling-regexes-especially-in-a-loop)
-    ///
-    /// ### Example
-    /// ```rust,ignore
-    /// # let haystacks = [""];
-    /// # const MY_REGEX: &str = "a.b";
-    /// for haystack in haystacks {
-    ///     let regex = regex::Regex::new(MY_REGEX).unwrap();
-    ///     if regex.is_match(haystack) {
-    ///         // Perform operation
-    ///     }
-    /// }
-    /// ```
-    /// can be replaced with
-    /// ```rust,ignore
-    /// # let haystacks = [""];
-    /// # const MY_REGEX: &str = "a.b";
-    /// let regex = regex::Regex::new(MY_REGEX).unwrap();
-    /// for haystack in haystacks {
-    ///     if regex.is_match(haystack) {
-    ///         // Perform operation
-    ///     }
-    /// }
-    /// ```
-    #[clippy::version = "1.84.0"]
-    pub REGEX_CREATION_IN_LOOPS,
-    perf,
-    "regular expression compilation performed in a loop"
 }
 
 #[derive(Copy, Clone)]
@@ -116,15 +66,19 @@ enum RegexKind {
 #[derive(Default)]
 pub struct Regex {
     definitions: DefIdMap<RegexKind>,
-    loop_stack: Vec<(OwnerId, Span)>,
 }
 
-impl_lint_pass!(Regex => [INVALID_REGEX, TRIVIAL_REGEX, REGEX_CREATION_IN_LOOPS]);
+impl_lint_pass!(Regex => [INVALID_REGEX, TRIVIAL_REGEX]);
 
 impl<'tcx> LateLintPass<'tcx> for Regex {
     fn check_crate(&mut self, cx: &LateContext<'tcx>) {
-        let mut resolve = |path: &PathLookup, kind: RegexKind| {
-            for &id in path.get(cx) {
+        // We don't use `match_def_path` here because that relies on matching the exact path, which changed
+        // between regex 1.8 and 1.9
+        //
+        // `def_path_def_ids` will resolve through re-exports but is relatively heavy, so we only perform
+        // the operation once and store the results
+        let mut resolve = |path, kind| {
+            for id in def_path_def_ids(cx.tcx, path) {
                 self.definitions.insert(id, kind);
             }
         };
@@ -139,37 +93,15 @@ impl<'tcx> LateLintPass<'tcx> for Regex {
 
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
         if let ExprKind::Call(fun, [arg]) = expr.kind
-            && let Some(def_id) = fun.res(cx).opt_def_id()
+            && let Some(def_id) = path_def_id(cx, fun)
             && let Some(regex_kind) = self.definitions.get(&def_id)
         {
-            if let Some(&(loop_item_id, loop_span)) = self.loop_stack.last()
-                && loop_item_id == fun.hir_id.owner
-                && (matches!(arg.kind, ExprKind::Lit(_)) || const_str(cx, arg).is_some())
-            {
-                span_lint_and_help(
-                    cx,
-                    REGEX_CREATION_IN_LOOPS,
-                    fun.span,
-                    "compiling a regex in a loop",
-                    Some(loop_span),
-                    "move the regex construction outside this loop",
-                );
-            }
-
             match regex_kind {
                 RegexKind::Unicode => check_regex(cx, arg, true),
                 RegexKind::UnicodeSet => check_set(cx, arg, true),
                 RegexKind::Bytes => check_regex(cx, arg, false),
                 RegexKind::BytesSet => check_set(cx, arg, false),
             }
-        } else if let ExprKind::Loop(block, _, _, span) = expr.kind {
-            self.loop_stack.push((block.hir_id.owner, span));
-        }
-    }
-
-    fn check_expr_post(&mut self, _: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
-        if matches!(expr.kind, ExprKind::Loop(..)) {
-            self.loop_stack.pop();
         }
     }
 }

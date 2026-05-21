@@ -1,15 +1,16 @@
 use std::cell::RefCell;
 
-use rustc_abi::ExternAbi;
 use rustc_hir as hir;
 use rustc_hir::def::DefKind;
+use rustc_hir::intravisit::Visitor;
 use rustc_hir::lang_items::LangItem;
-use rustc_hir_analysis::check::check_function_signature;
+use rustc_hir_analysis::check::{check_function_signature, forbid_intrinsic_abi};
 use rustc_infer::infer::RegionVariableOrigin;
 use rustc_infer::traits::WellFormedLoc;
 use rustc_middle::ty::{self, Binder, Ty, TyCtxt};
 use rustc_span::def_id::LocalDefId;
-use rustc_span::sym;
+use rustc_span::symbol::sym;
+use rustc_target::spec::abi::Abi;
 use rustc_trait_selection::traits::{ObligationCause, ObligationCauseCode};
 use tracing::{debug, instrument};
 
@@ -34,8 +35,12 @@ pub(super) fn check_fn<'a, 'tcx>(
     params_can_be_unsized: bool,
 ) -> Option<CoroutineTypes<'tcx>> {
     let fn_id = fcx.tcx.local_def_id_to_hir_id(fn_def_id);
+
     let tcx = fcx.tcx;
+    let hir = tcx.hir();
+
     let declared_ret_ty = fn_sig.output();
+
     let ret_ty =
         fcx.register_infer_ok_obligations(fcx.infcx.replace_opaque_types_with_inference_vars(
             declared_ret_ty,
@@ -49,22 +54,22 @@ pub(super) fn check_fn<'a, 'tcx>(
 
     let span = body.value.span;
 
-    for param in body.params {
-        GatherLocalsVisitor::gather_from_param(fcx, param);
-    }
+    forbid_intrinsic_abi(tcx, span, fn_sig.abi);
+
+    GatherLocalsVisitor::new(fcx).visit_body(body);
 
     // C-variadic fns also have a `VaList` input that's not listed in `fn_sig`
     // (as it's created inside the body itself, not passed in from outside).
     let maybe_va_list = fn_sig.c_variadic.then(|| {
         let span = body.params.last().unwrap().span;
-        let va_list_did = tcx.require_lang_item(LangItem::VaList, span);
-        let region = fcx.next_region_var(RegionVariableOrigin::Misc(span));
+        let va_list_did = tcx.require_lang_item(LangItem::VaList, Some(span));
+        let region = fcx.next_region_var(RegionVariableOrigin::MiscVariable(span));
 
         tcx.type_of(va_list_did).instantiate(tcx, &[region.into()])
     });
 
     // Add formal parameters.
-    let inputs_hir = tcx.hir_fn_decl_by_hir_id(fn_id).map(|decl| &decl.inputs);
+    let inputs_hir = hir.fn_decl_by_hir_id(fn_id).map(|decl| &decl.inputs);
     let inputs_fn = fn_sig.inputs().iter().copied();
     for (idx, (param_ty, param)) in inputs_fn.chain(maybe_va_list).zip(body.params).enumerate() {
         // We checked the root's signature during wfcheck, but not the child.
@@ -94,7 +99,7 @@ pub(super) fn check_fn<'a, 'tcx>(
         if !params_can_be_unsized {
             fcx.require_type_is_sized(
                 param_ty,
-                param.ty_span,
+                param.pat.span,
                 // ty.span == binding_span iff this is a closure parameter with no type ascription,
                 // or if it's an implicit `self` parameter
                 ObligationCauseCode::SizedArgumentType(
@@ -112,22 +117,27 @@ pub(super) fn check_fn<'a, 'tcx>(
 
     fcx.typeck_results.borrow_mut().liberated_fn_sigs_mut().insert(fn_id, fn_sig);
 
-    // We checked the root's ret ty during wfcheck, but not the child.
-    if fcx.tcx.is_typeck_child(fn_def_id.to_def_id()) {
-        let return_or_body_span = match decl.output {
-            hir::FnRetTy::DefaultReturn(_) => body.value.span,
-            hir::FnRetTy::Return(ty) => ty.span,
-        };
+    let return_or_body_span = match decl.output {
+        hir::FnRetTy::DefaultReturn(_) => body.value.span,
+        hir::FnRetTy::Return(ty) => ty.span,
+    };
 
+    fcx.require_type_is_sized(
+        declared_ret_ty,
+        return_or_body_span,
+        ObligationCauseCode::SizedReturnType,
+    );
+    // We checked the root's signature during wfcheck, but not the child.
+    if fcx.tcx.is_typeck_child(fn_def_id.to_def_id()) {
         fcx.require_type_is_sized(
             declared_ret_ty,
             return_or_body_span,
-            ObligationCauseCode::SizedReturnType,
+            ObligationCauseCode::WellFormed(None),
         );
     }
 
     fcx.is_whole_body.set(true);
-    fcx.check_return_or_body_tail(body.value, false);
+    fcx.check_return_expr(body.value, false);
 
     // Finalize the return check by taking the LUB of the return types
     // we saw and assigning it to the expected return type. This isn't
@@ -178,7 +188,7 @@ fn check_panic_info_fn(tcx: TyCtxt<'_>, fn_id: LocalDefId, fn_sig: ty::FnSig<'_>
         tcx.dcx().span_err(span, "should have no const parameters");
     }
 
-    let panic_info_did = tcx.require_lang_item(hir::LangItem::PanicInfo, span);
+    let panic_info_did = tcx.require_lang_item(hir::LangItem::PanicInfo, Some(span));
 
     // build type `for<'a, 'b> fn(&'a PanicInfo<'b>) -> !`
     let panic_info_ty = tcx.type_of(panic_info_did).instantiate(
@@ -186,7 +196,7 @@ fn check_panic_info_fn(tcx: TyCtxt<'_>, fn_id: LocalDefId, fn_sig: ty::FnSig<'_>
         &[ty::GenericArg::from(ty::Region::new_bound(
             tcx,
             ty::INNERMOST,
-            ty::BoundRegion { var: ty::BoundVar::from_u32(1), kind: ty::BoundRegionKind::Anon },
+            ty::BoundRegion { var: ty::BoundVar::from_u32(1), kind: ty::BrAnon },
         ))],
     );
     let panic_info_ref_ty = Ty::new_imm_ref(
@@ -194,17 +204,17 @@ fn check_panic_info_fn(tcx: TyCtxt<'_>, fn_id: LocalDefId, fn_sig: ty::FnSig<'_>
         ty::Region::new_bound(
             tcx,
             ty::INNERMOST,
-            ty::BoundRegion { var: ty::BoundVar::ZERO, kind: ty::BoundRegionKind::Anon },
+            ty::BoundRegion { var: ty::BoundVar::ZERO, kind: ty::BrAnon },
         ),
         panic_info_ty,
     );
 
     let bounds = tcx.mk_bound_variable_kinds(&[
-        ty::BoundVariableKind::Region(ty::BoundRegionKind::Anon),
-        ty::BoundVariableKind::Region(ty::BoundRegionKind::Anon),
+        ty::BoundVariableKind::Region(ty::BrAnon),
+        ty::BoundVariableKind::Region(ty::BrAnon),
     ]);
     let expected_sig = ty::Binder::bind_with_vars(
-        tcx.mk_fn_sig([panic_info_ref_ty], tcx.types.never, false, fn_sig.safety, ExternAbi::Rust),
+        tcx.mk_fn_sig([panic_info_ref_ty], tcx.types.never, false, fn_sig.safety, Abi::Rust),
         bounds,
     );
 
@@ -227,7 +237,7 @@ fn check_lang_start_fn<'tcx>(tcx: TyCtxt<'tcx>, fn_sig: ty::FnSig<'tcx>, def_id:
     let generic_ty = Ty::new_param(tcx, fn_generic.index, fn_generic.name);
     let main_fn_ty = Ty::new_fn_ptr(
         tcx,
-        Binder::dummy(tcx.mk_fn_sig([], generic_ty, false, hir::Safety::Safe, ExternAbi::Rust)),
+        Binder::dummy(tcx.mk_fn_sig([], generic_ty, false, hir::Safety::Safe, Abi::Rust)),
     );
 
     let expected_sig = ty::Binder::dummy(tcx.mk_fn_sig(
@@ -240,7 +250,7 @@ fn check_lang_start_fn<'tcx>(tcx: TyCtxt<'tcx>, fn_sig: ty::FnSig<'tcx>, def_id:
         tcx.types.isize,
         false,
         fn_sig.safety,
-        ExternAbi::Rust,
+        Abi::Rust,
     ));
 
     let _ = check_function_signature(

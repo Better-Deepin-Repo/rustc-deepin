@@ -57,9 +57,9 @@ use crate::{cmp, fmt};
 /// [`Searcher`] type, which does the actual work of finding
 /// occurrences of the pattern in a string.
 ///
-/// Depending on the type of the pattern, the behavior of methods like
+/// Depending on the type of the pattern, the behaviour of methods like
 /// [`str::find`] and [`str::contains`] can change. The table below describes
-/// some of those behaviors.
+/// some of those behaviours.
 ///
 /// | Pattern type             | Match condition                           |
 /// |--------------------------|-------------------------------------------|
@@ -160,21 +160,6 @@ pub trait Pattern: Sized {
             None
         }
     }
-
-    /// Returns the pattern as utf-8 bytes if possible.
-    fn as_utf8_pattern(&self) -> Option<Utf8Pattern<'_>> {
-        None
-    }
-}
-/// Result of calling [`Pattern::as_utf8_pattern()`].
-/// Can be used for inspecting the contents of a [`Pattern`] in cases
-/// where the underlying representation can be represented as UTF-8.
-#[derive(Copy, Clone, Eq, PartialEq, Debug)]
-pub enum Utf8Pattern<'a> {
-    /// Type returned by String and str types.
-    StringPattern(&'a [u8]),
-    /// Type returned by char types.
-    CharPattern(char),
 }
 
 // Searcher
@@ -561,8 +546,8 @@ impl Pattern for char {
     type Searcher<'a> = CharSearcher<'a>;
 
     #[inline]
-    fn into_searcher<'a>(self, haystack: &'a str) -> Self::Searcher<'a> {
-        let mut utf8_encoded = [0; char::MAX_LEN_UTF8];
+    fn into_searcher(self, haystack: &str) -> Self::Searcher<'_> {
+        let mut utf8_encoded = [0; 4];
         let utf8_size = self
             .encode_utf8(&mut utf8_encoded)
             .len()
@@ -614,11 +599,6 @@ impl Pattern for char {
     {
         self.encode_utf8(&mut [0u8; 4]).strip_suffix_of(haystack)
     }
-
-    #[inline]
-    fn as_utf8_pattern(&self) -> Option<Utf8Pattern<'_>> {
-        Some(Utf8Pattern::CharPattern(*self))
-    }
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -643,21 +623,21 @@ where
 impl<const N: usize> MultiCharEq for [char; N] {
     #[inline]
     fn matches(&mut self, c: char) -> bool {
-        self.contains(&c)
+        self.iter().any(|&m| m == c)
     }
 }
 
 impl<const N: usize> MultiCharEq for &[char; N] {
     #[inline]
     fn matches(&mut self, c: char) -> bool {
-        self.contains(&c)
+        self.iter().any(|&m| m == c)
     }
 }
 
 impl MultiCharEq for &[char] {
     #[inline]
     fn matches(&mut self, c: char) -> bool {
-        self.contains(&c)
+        self.iter().any(|&m| m == c)
     }
 }
 
@@ -886,8 +866,8 @@ impl<'a, 'b> DoubleEndedSearcher<'a> for CharSliceSearcher<'a, 'b> {}
 /// # Examples
 ///
 /// ```
-/// assert_eq!("Hello world".find(&['o', 'l'][..]), Some(2));
-/// assert_eq!("Hello world".find(&['h', 'w'][..]), Some(6));
+/// assert_eq!("Hello world".find(&['l', 'l'] as &[_]), Some(2));
+/// assert_eq!("Hello world".find(&['l', 'l'][..]), Some(2));
 /// ```
 impl<'b> Pattern for &'b [char] {
     pattern_methods!('a, CharSliceSearcher<'a, 'b>, MultiCharEqPattern, CharSliceSearcher);
@@ -995,11 +975,7 @@ impl<'b> Pattern for &'b str {
                     return haystack.as_bytes().contains(&self.as_bytes()[0]);
                 }
 
-                #[cfg(any(
-                    all(target_arch = "x86_64", target_feature = "sse2"),
-                    all(target_arch = "loongarch64", target_feature = "lsx"),
-                    all(target_arch = "aarch64", target_feature = "neon")
-                ))]
+                #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
                 if self.len() <= 32 {
                     if let Some(result) = simd_contains(self, haystack) {
                         return result;
@@ -1045,11 +1021,6 @@ impl<'b> Pattern for &'b str {
         } else {
             None
         }
-    }
-
-    #[inline]
-    fn as_utf8_pattern(&self) -> Option<Utf8Pattern<'_>> {
-        Some(Utf8Pattern::StringPattern(self.as_bytes()))
     }
 }
 
@@ -1773,19 +1744,11 @@ impl TwoWayStrategy for RejectAndMatch {
 /// If we ever ship std with for x86-64-v3 or adapt this for other platforms then wider vectors
 /// should be evaluated.
 ///
-/// Similarly, on LoongArch the 128-bit LSX vector extension is the baseline,
-/// so we also use `u8x16` there. Wider vector widths may be considered
-/// for future LoongArch extensions (e.g., LASX).
-///
 /// For haystacks smaller than vector-size + needle length it falls back to
 /// a naive O(n*m) search so this implementation should not be called on larger needles.
 ///
 /// [0]: http://0x80.pl/articles/simd-strfind.html#sse-avx2
-#[cfg(any(
-    all(target_arch = "x86_64", target_feature = "sse2"),
-    all(target_arch = "loongarch64", target_feature = "lsx"),
-    all(target_arch = "aarch64", target_feature = "neon")
-))]
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 #[inline]
 fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
     let needle = needle.as_bytes();
@@ -1851,7 +1814,7 @@ fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
             }
             mask &= !(1 << trailing);
         }
-        false
+        return false;
     };
 
     let test_chunk = |idx| -> u16 {
@@ -1867,7 +1830,7 @@ fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
         let both = eq_first.bitand(eq_last);
         let mask = both.to_bitmask() as u16;
 
-        mask
+        return mask;
     };
 
     let mut i = 0;
@@ -1917,11 +1880,7 @@ fn simd_contains(needle: &str, haystack: &str) -> Option<bool> {
 /// # Safety
 ///
 /// Both slices must have the same length.
-#[cfg(any(
-    all(target_arch = "x86_64", target_feature = "sse2"),
-    all(target_arch = "loongarch64", target_feature = "lsx"),
-    all(target_arch = "aarch64", target_feature = "neon")
-))]
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))] // only called on x86
 #[inline]
 unsafe fn small_slice_eq(x: &[u8], y: &[u8]) -> bool {
     debug_assert_eq!(x.len(), y.len());

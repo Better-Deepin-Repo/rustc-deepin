@@ -1,4 +1,4 @@
-//@ edition: 2018
+//@ compile-flags: --edition 2018
 
 pub fn main() {
     let try_result: Option<_> = try { //~ ERROR `try` expression is experimental

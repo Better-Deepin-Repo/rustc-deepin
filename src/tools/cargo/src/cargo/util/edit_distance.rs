@@ -113,20 +113,16 @@ pub fn closest_msg<'a, T>(
     choice: &str,
     iter: impl Iterator<Item = T>,
     key: impl Fn(&T) -> &'a str,
-    kind: &str,
 ) -> String {
     match closest(choice, iter, &key) {
-        Some(e) => format!(
-            "\n\nhelp: a {kind} with a similar name exists: `{}`",
-            key(&e)
-        ),
+        Some(e) => format!("\n\n\tDid you mean `{}`?", key(&e)),
         None => String::new(),
     }
 }
 
 #[test]
 fn test_edit_distance() {
-    use std::char::{MAX, from_u32};
+    use std::char::{from_u32, MAX};
     // Test bytelength agnosticity
     for c in (0u32..MAX as u32)
         .filter_map(from_u32)

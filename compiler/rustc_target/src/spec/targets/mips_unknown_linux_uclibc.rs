@@ -1,11 +1,10 @@
-use rustc_abi::Endian;
+use crate::abi::Endian;
+use crate::spec::{base, Target, TargetOptions};
 
-use crate::spec::{Arch, Target, TargetMetadata, TargetOptions, base};
-
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     Target {
-        llvm_target: "mips-unknown-linux-gnu".into(),
-        metadata: TargetMetadata {
+        llvm_target: "mips-unknown-linux-uclibc".into(),
+        metadata: crate::spec::TargetMetadata {
             description: Some("MIPS Linux with uClibc".into()),
             tier: Some(3),
             host_tools: Some(false),
@@ -13,7 +12,7 @@ pub(crate) fn target() -> Target {
         },
         pointer_width: 32,
         data_layout: "E-m:m-p:32:32-i8:8:32-i16:16:32-i64:64-n32-S64".into(),
-        arch: Arch::Mips,
+        arch: "mips".into(),
         options: TargetOptions {
             endian: Endian::Big,
             cpu: "mips32r2".into(),

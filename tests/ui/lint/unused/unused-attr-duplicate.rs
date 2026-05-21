@@ -11,12 +11,8 @@
 // - no_main: extra setup
 #![deny(unused_attributes)]
 #![crate_name = "unused_attr_duplicate"]
-#![crate_name = "unused_attr_duplicate2"]
-//~^ ERROR unused attribute
-//~| WARN this was previously accepted
-//~| ERROR unused attribute
-//~| WARN this was previously accepted
-// FIXME(jdonszelmann) this error is given twice now. I'll look at this in the future
+#![crate_name = "unused_attr_duplicate2"] //~ ERROR unused attribute
+//~^ WARN this was previously accepted
 #![recursion_limit = "128"]
 #![recursion_limit = "256"] //~ ERROR unused attribute
 //~^ WARN this was previously accepted
@@ -70,11 +66,9 @@ fn t1() {}
 #[non_exhaustive] //~ ERROR unused attribute
 pub struct X;
 
-trait Trait {}
-
 #[automatically_derived]
 #[automatically_derived] //~ ERROR unused attribute
-impl Trait for X {}
+impl X {}
 
 #[inline(always)]
 #[inline(never)] //~ ERROR unused attribute
@@ -107,11 +101,5 @@ pub fn no_mangle_test() {}
 #[used]
 #[used] //~ ERROR unused attribute
 static FOO: u32 = 0;
-
-#[link_section = ".text"]
-//~^ ERROR unused attribute
-//~| WARN this was previously accepted
-#[link_section = ".bss"]
-pub extern "C" fn example() {}
 
 fn main() {}

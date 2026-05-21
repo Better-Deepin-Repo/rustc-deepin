@@ -5,6 +5,7 @@ use rustc_ast::LitKind;
 use rustc_errors::Applicability;
 use rustc_hir::{BinOpKind, Expr, ExprKind};
 use rustc_lint::{LateContext, LateLintPass, LintContext};
+use rustc_middle::lint::in_external_macro;
 use rustc_session::declare_lint_pass;
 
 declare_clippy_lint! {
@@ -31,7 +32,7 @@ declare_lint_pass!(ConfusingXorAndPow => [SUSPICIOUS_XOR_USED_AS_POW]);
 
 impl LateLintPass<'_> for ConfusingXorAndPow {
     fn check_expr(&mut self, cx: &LateContext<'_>, expr: &Expr<'_>) {
-        if !expr.span.in_external_macro(cx.sess().source_map())
+        if !in_external_macro(cx.sess(), expr.span)
             && let ExprKind::Binary(op, left, right) = &expr.kind
             && op.node == BinOpKind::BitXor
             && left.span.eq_ctxt(right.span)

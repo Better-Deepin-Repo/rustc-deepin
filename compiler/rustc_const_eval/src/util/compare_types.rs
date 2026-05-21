@@ -5,17 +5,27 @@
 
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_middle::traits::ObligationCause;
-use rustc_middle::ty::{Ty, TyCtxt, TypingEnv, Variance};
+use rustc_middle::ty::{ParamEnv, Ty, TyCtxt, Variance};
 use rustc_trait_selection::traits::ObligationCtxt;
 
-/// Returns whether `src` is a subtype of `dest`, i.e. `src <: dest`.
-pub fn sub_types<'tcx>(
+/// Returns whether the two types are equal up to subtyping.
+///
+/// This is used in case we don't know the expected subtyping direction
+/// and still want to check whether anything is broken.
+pub fn is_equal_up_to_subtyping<'tcx>(
     tcx: TyCtxt<'tcx>,
-    typing_env: TypingEnv<'tcx>,
+    param_env: ParamEnv<'tcx>,
     src: Ty<'tcx>,
     dest: Ty<'tcx>,
 ) -> bool {
-    relate_types(tcx, typing_env, Variance::Covariant, src, dest)
+    // Fast path.
+    if src == dest {
+        return true;
+    }
+
+    // Check for subtyping in either direction.
+    relate_types(tcx, param_env, Variance::Covariant, src, dest)
+        || relate_types(tcx, param_env, Variance::Covariant, dest, src)
 }
 
 /// Returns whether `src` is a subtype of `dest`, i.e. `src <: dest`.
@@ -25,7 +35,7 @@ pub fn sub_types<'tcx>(
 /// because we want to check for type equality.
 pub fn relate_types<'tcx>(
     tcx: TyCtxt<'tcx>,
-    typing_env: TypingEnv<'tcx>,
+    param_env: ParamEnv<'tcx>,
     variance: Variance,
     src: Ty<'tcx>,
     dest: Ty<'tcx>,
@@ -34,7 +44,8 @@ pub fn relate_types<'tcx>(
         return true;
     }
 
-    let (infcx, param_env) = tcx.infer_ctxt().ignoring_regions().build_with_typing_env(typing_env);
+    let mut builder = tcx.infer_ctxt().ignoring_regions();
+    let infcx = builder.build();
     let ocx = ObligationCtxt::new(&infcx);
     let cause = ObligationCause::dummy();
     let src = ocx.normalize(&cause, param_env, src);
@@ -43,5 +54,5 @@ pub fn relate_types<'tcx>(
         Ok(()) => {}
         Err(_) => return false,
     };
-    ocx.evaluate_obligations_error_on_ambiguity().is_empty()
+    ocx.select_all_or_error().is_empty()
 }

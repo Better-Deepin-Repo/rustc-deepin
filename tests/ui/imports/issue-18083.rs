@@ -5,7 +5,7 @@
 // each other and be reported as unresolved.
 
 mod a {
-    use crate::b::{B};
+    use b::{B};
     pub use self::inner::A;
 
     mod inner {
@@ -14,7 +14,7 @@ mod a {
 }
 
 mod b {
-    use crate::a::{A};
+    use a::{A};
     pub use self::inner::B;
 
     mod inner {

@@ -1,27 +1,23 @@
-#![allow(clippy::no_effect, clippy::op_ref, clippy::uninlined_format_args)]
 #![warn(clippy::manual_inspect)]
+#![allow(clippy::no_effect, clippy::op_ref)]
 
 fn main() {
     let _ = Some(0).map(|x| {
-        //~^ manual_inspect
         println!("{}", x);
         x
     });
 
     let _ = Some(0).map(|x| {
-        //~^ manual_inspect
         println!("{x}");
         x
     });
 
     let _ = Some(0).map(|x| {
-        //~^ manual_inspect
         println!("{}", x * 5 + 1);
         x
     });
 
     let _ = Some(0).map(|x| {
-        //~^ manual_inspect
         if x == 0 {
             panic!();
         }
@@ -29,7 +25,6 @@ fn main() {
     });
 
     let _ = Some(0).map(|x| {
-        //~^ manual_inspect
         if &x == &0 {
             let _y = x;
             panic!();
@@ -81,7 +76,6 @@ fn main() {
     }
 
     let _ = Some((String::new(), 0u32)).map(|x| {
-        //~^ manual_inspect
         if x.1 == 0 {
             let _x = x.1;
             panic!();
@@ -108,7 +102,6 @@ fn main() {
     });
 
     let _ = Some(String::new()).map(|x| {
-        //~^ manual_inspect
         if x.is_empty() {
             let _ = || {
                 let _x = &x;
@@ -120,7 +113,6 @@ fn main() {
     });
 
     let _ = Some(0).map(|x| {
-        //~^ manual_inspect
         if x == 0 {
             let _ = || {
                 let _x = x;
@@ -136,7 +128,6 @@ fn main() {
         struct Cell2(core::cell::Cell<u32>);
 
         let _ = Some(Cell2(Cell::new(0u32))).map(|x| {
-            //~^ manual_inspect
             x.0.set(1);
             x
         });
@@ -153,13 +144,11 @@ fn main() {
     }
 
     let _: Result<_, ()> = Ok(0).map(|x| {
-        //~^ manual_inspect
         println!("{}", x);
         x
     });
 
     let _: Result<(), _> = Err(0).map_err(|x| {
-        //~^ manual_inspect
         println!("{}", x);
         x
     });
@@ -167,7 +156,6 @@ fn main() {
     let _ = [0]
         .into_iter()
         .map(|x| {
-            //~^ manual_inspect
             println!("{}", x);
             x
         })
@@ -194,14 +182,5 @@ fn main() {
             println!("{}", x);
             x
         });
-    }
-}
-
-#[rustfmt::skip]
-fn layout_check() {
-    if let Some(x) = Some(1).map(|x| { println!("{x}"); //~ manual_inspect
-        // Do not collapse code into this comment
-        x }) {
-        println!("{x}");
     }
 }

@@ -1,199 +1,58 @@
 error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:7:5
+  --> tests/ui/format_push_string.rs:5:5
    |
 LL |     string += &format!("{:?}", 1234);
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
-   = note: you may need to import the `std::fmt::Write` trait
+   = help: consider using `write!` to avoid the extra allocation
    = note: `-D clippy::format-push-string` implied by `-D warnings`
    = help: to override `-D warnings` add `#[allow(clippy::format_push_string)]`
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -     string += &format!("{:?}", 1234);
-LL +     let _ = write!(string, "{:?}", 1234);
-   |
 
 error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:10:5
+  --> tests/ui/format_push_string.rs:7:5
    |
 LL |     string.push_str(&format!("{:?}", 5678));
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
    |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -     string.push_str(&format!("{:?}", 5678));
-LL +     let _ = write!(string, "{:?}", 5678);
-   |
+   = help: consider using `write!` to avoid the extra allocation
 
 error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:18:5
+  --> tests/ui/format_push_string.rs:15:13
    |
-LL |     string!().push_str(&format!("{:?}", 5678));
-   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+LL | /             hex += &(if upper {
+LL | |
+LL | |                 format!("{byte:02X}")
+LL | |             } else {
+LL | |                 format!("{byte:02x}")
+LL | |             });
+   | |______________^
    |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -     string!().push_str(&format!("{:?}", 5678));
-LL +     let _ = write!(string!(), "{:?}", 5678);
-   |
+   = help: consider using `write!` to avoid the extra allocation
 
 error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:30:17
+  --> tests/ui/format_push_string.rs:28:9
    |
-LL |                 string.push_str(&format!("{:?}", 1234));
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+LL | /         s += &(if let Some(_a) = Some(1234) {
+LL | |
+LL | |             format!("{}", 1234)
+LL | |         } else {
+LL | |             format!("{}", 1234)
+LL | |         });
+   | |__________^
    |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -                 string.push_str(&format!("{:?}", 1234));
-LL +                 let _ = write!(string, "{:?}", 1234);
-   |
+   = help: consider using `write!` to avoid the extra allocation
 
 error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:39:17
+  --> tests/ui/format_push_string.rs:35:9
    |
-LL |                 string.push_str(&format!("{:?}", 1234));
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+LL | /         s += &(match Some(1234) {
+LL | |
+LL | |             Some(_) => format!("{}", 1234),
+LL | |             None => format!("{}", 1234),
+LL | |         });
+   | |__________^
    |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -                 string.push_str(&format!("{:?}", 1234));
-LL +                 let _ = write!(string, "{:?}", 1234);
-   |
+   = help: consider using `write!` to avoid the extra allocation
 
-error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:48:17
-   |
-LL |                 string.push_str(&format!("{:?}", 1234));
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -                 string.push_str(&format!("{:?}", 1234));
-LL +                 let _ = write!(string, "{:?}", 1234);
-   |
-
-error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:57:17
-   |
-LL |                 string.push_str(&format!("{:?}", 1234));
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -                 string.push_str(&format!("{:?}", 1234));
-LL +                 let _ = write!(string, "{:?}", 1234);
-   |
-
-error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:66:17
-   |
-LL |                 string.push_str(&format!("{:?}", 1234));
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -                 string.push_str(&format!("{:?}", 1234));
-LL +                 let _ = write!(string, "{:?}", 1234);
-   |
-
-error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:73:17
-   |
-LL |                 string.push_str(&format!("{:?}", 1234));
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -                 string.push_str(&format!("{:?}", 1234));
-LL +                 let _ = write!(string, "{:?}", 1234);
-   |
-
-error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:84:17
-   |
-LL |                 string.push_str(&format!("{:?}", 1234));
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -                 string.push_str(&format!("{:?}", 1234));
-LL +                 let _ = write!(string, "{:?}", 1234);
-   |
-
-error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:93:17
-   |
-LL |                 string.push_str(&format!("{:?}", 1234));
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -                 string.push_str(&format!("{:?}", 1234));
-LL +                 let _ = write!(string, "{:?}", 1234);
-   |
-
-error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:102:17
-   |
-LL |                 string.push_str(&format!("{:?}", 1234));
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -                 string.push_str(&format!("{:?}", 1234));
-LL +                 let _ = write!(string, "{:?}", 1234);
-   |
-
-error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:111:17
-   |
-LL |                 string.push_str(&format!("{:?}", 1234));
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -                 string.push_str(&format!("{:?}", 1234));
-LL +                 let _ = write!(string, "{:?}", 1234);
-   |
-
-error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:120:17
-   |
-LL |                 string.push_str(&format!("{:?}", 1234));
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -                 string.push_str(&format!("{:?}", 1234));
-LL +                 let _ = write!(string, "{:?}", 1234);
-   |
-
-error: `format!(..)` appended to existing `String`
-  --> tests/ui/format_push_string.rs:127:17
-   |
-LL |                 string.push_str(&format!("{:?}", 1234));
-   |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
-   = note: you may need to import the `std::fmt::Write` trait
-help: consider using `write!` to avoid the extra allocation
-   |
-LL -                 string.push_str(&format!("{:?}", 1234));
-LL +                 let _ = write!(string, "{:?}", 1234);
-   |
-
-error: aborting due to 15 previous errors
+error: aborting due to 5 previous errors
 

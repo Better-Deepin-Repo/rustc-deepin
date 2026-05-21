@@ -26,34 +26,6 @@ label = "O-windows"
 
 [shortcut]
 
-# Enable issue transfers within the org
-# Documentation at: https://forge.rust-lang.org/triagebot/transfer.html
-[transfer]
-
-# Enable `@rustbot note` functionality
-# Documentation at: https://forge.rust-lang.org/triagebot/note.html
-[note]
-
-# Enable comments linking to triagebot range-diff when a PR is rebased
-# onto a different base commit
-# Documentation at: https://forge.rust-lang.org/triagebot/range-diff.html
-[range-diff]
-
-# Adds at the end of a review body a link to view the changes that happened
-# since the review
-# Documentation at: https://forge.rust-lang.org/triagebot/review-changes-since.html
-[review-changes-since]
-
-# Adds a "View all comments" link on the issue body that shows all the comments of an issue/PR
-# Documentation at: https://forge.rust-lang.org/triagebot/view-all-comments-link.html
-[view-all-comments-link]
-threshold = 20
-
-[merge-conflicts]
-remove = []
-add = ["S-waiting-on-author"]
-unless = ["S-blocked", "S-waiting-on-review"]
-
 [autolabel."S-waiting-on-review"]
 new_pr = true
 
@@ -63,6 +35,7 @@ warn_non_default_branch = true
 
 [assign.owners]
 "*" = ["@ehuss", "@epage", "@weihanglo"]
+
 
 [review-submitted]
 reviewed_label = "S-waiting-on-author"
@@ -80,11 +53,7 @@ trigger_files = [
 ]
 
 [autolabel."A-build-scripts"]
-trigger_files = [
-  "crates/build-rs-test-lib/",
-  "crates/build-rs/",
-  "src/cargo/core/compiler/custom_build.rs",
-]
+trigger_files = ["src/cargo/core/compiler/custom_build.rs"]
 
 [autolabel."A-cache-messages"]
 trigger_files = ["src/cargo/util/rustc.rs"]
@@ -116,6 +85,7 @@ trigger_files = ["src/cargo/util/context/mod.rs"]
 [autolabel."A-console-output"]
 trigger_files = [
   "src/cargo/core/shell.rs",
+  "src/cargo/util/machine_message.rs",
   "src/cargo/util/progress.rs",
 ]
 
@@ -160,7 +130,7 @@ trigger_files = ["src/cargo/util/flock.rs", "src/cargo/util/important_paths.rs"]
 trigger_files = ["src/cargo/core/compiler/future_incompat.rs"]
 
 [autolabel."A-git"]
-trigger_files = ["src/cargo/sources/git/", "src/cargo/ops/cargo_package/vcs.rs"]
+trigger_files = ["src/cargo/sources/git/"]
 
 [autolabel."A-home"]
 trigger_files = ["crates/home/"]
@@ -180,9 +150,6 @@ trigger_files = [
 
 [autolabel."A-interacts-with-crates.io"]
 trigger_files = ["crates/crates-io/", "src/cargo/ops/registry/"]
-
-[autolabel."A-json-output"]
-trigger_files = ["src/cargo/util/machine_message.rs"]
 
 [autolabel."A-layout"]
 trigger_files = [
@@ -249,7 +216,8 @@ trigger_files = [
 
 [autolabel."A-timings"]
 trigger_files = [
-    "src/cargo/core/compiler/timings/",
+    "src/cargo/core/compiler/timings.js",
+    "src/cargo/core/compiler/timings.rs",
     "src/cargo/util/cpu.rs",
 ]
 
@@ -291,7 +259,7 @@ trigger_files = ["src/bin/cargo/commands/fetch.rs", "src/cargo/ops/cargo_fetch.r
 trigger_files = [
     "crates/rustfix/",
     "src/bin/cargo/commands/fix.rs",
-    "src/cargo/ops/fix/",
+    "src/cargo/ops/fix.rs",
     "src/cargo/util/diagnostic_server.rs",
     "src/cargo/util/lockserver.rs",
 ]
@@ -330,7 +298,7 @@ trigger_files = ["src/bin/cargo/commands/new.rs", "src/cargo/ops/cargo_new.rs"]
 trigger_files = ["src/bin/cargo/commands/owner.rs", "src/cargo/ops/registry/owner.rs"]
 
 [autolabel."Command-package"]
-trigger_files = ["src/bin/cargo/commands/package.rs", "src/cargo/ops/cargo_package/"]
+trigger_files = ["src/bin/cargo/commands/package.rs", "src/cargo/ops/cargo_package.rs"]
 
 [autolabel."Command-pkgid"]
 trigger_files = ["src/bin/cargo/commands/pkgid.rs", "src/cargo/ops/cargo_pkgid.rs"]
@@ -345,7 +313,7 @@ trigger_files = ["src/bin/cargo/commands/read_manifest.rs", "src/cargo/ops/cargo
 trigger_files = ["src/bin/cargo/commands/remove.rs", "src/cargo/ops/cargo_remove.rs"]
 
 [autolabel."Command-report"]
-trigger_files = ["src/bin/cargo/commands/report.rs", "src/cargo/ops/cargo_report/"]
+trigger_files = ["src/bin/cargo/commands/report.rs"]
 
 [autolabel."Command-run"]
 trigger_files = ["src/bin/cargo/commands/run.rs", "src/cargo/ops/cargo_run.rs"]

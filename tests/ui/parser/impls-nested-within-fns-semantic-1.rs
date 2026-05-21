@@ -2,9 +2,11 @@
 //@ check-pass
 //@ compile-flags: -Znext-solver
 
-#![feature(const_trait_impl)]
+#![allow(incomplete_features)]
+#![feature(const_trait_impl, effects)]
 
-const trait Trait {
+#[const_trait]
+trait Trait {
     fn required();
 }
 

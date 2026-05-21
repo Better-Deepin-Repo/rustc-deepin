@@ -1,10 +1,7 @@
-use rustc_ast::util::classify;
-use rustc_ast::util::parser::{self, ExprPrecedence};
-use rustc_ast::{Expr, ExprKind, YieldKind};
+use rustc_ast::util::{classify, parser};
+use rustc_ast::Expr;
 
-// The default amount of fixing is minimal fixing, so all fixups are set to `false` by `Default`.
-// Fixups should be turned on in a targeted fashion where needed.
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug)]
 pub(crate) struct FixupContext {
     /// Print expression such that it can be parsed back as a statement
     /// consisting of the original expression.
@@ -94,24 +91,20 @@ pub(crate) struct FixupContext {
     /// }
     /// ```
     parenthesize_exterior_struct_lit: bool,
+}
 
-    /// This is the difference between:
-    ///
-    /// ```ignore (illustrative)
-    /// let _ = (return) - 1;  // without paren, this would return -1
-    ///
-    /// let _ = return + 1;  // no paren because '+' cannot begin expr
-    /// ```
-    next_operator_can_begin_expr: bool,
-
-    /// This is the difference between:
-    ///
-    /// ```ignore (illustrative)
-    /// let _ = 1 + return 1;  // no parens if rightmost subexpression
-    ///
-    /// let _ = 1 + (return 1) + 1;  // needs parens
-    /// ```
-    next_operator_can_continue_expr: bool,
+/// The default amount of fixing is minimal fixing. Fixups should be turned on
+/// in a targeted fashion where needed.
+impl Default for FixupContext {
+    fn default() -> Self {
+        FixupContext {
+            stmt: false,
+            leftmost_subexpression_in_stmt: false,
+            match_arm: false,
+            leftmost_subexpression_in_match_arm: false,
+            parenthesize_exterior_struct_lit: false,
+        }
+    }
 }
 
 impl FixupContext {
@@ -153,50 +146,19 @@ impl FixupContext {
             match_arm: false,
             leftmost_subexpression_in_match_arm: self.match_arm
                 || self.leftmost_subexpression_in_match_arm,
-            next_operator_can_begin_expr: false,
-            next_operator_can_continue_expr: true,
             ..self
         }
     }
 
-    /// Transform this fixup into the one that should apply when printing a
-    /// leftmost subexpression followed by a `.` or `?` token, which confer
-    /// different statement boundary rules compared to other leftmost
-    /// subexpressions.
-    pub(crate) fn leftmost_subexpression_with_dot(self) -> Self {
-        FixupContext {
-            stmt: self.stmt || self.leftmost_subexpression_in_stmt,
-            leftmost_subexpression_in_stmt: false,
-            match_arm: self.match_arm || self.leftmost_subexpression_in_match_arm,
-            leftmost_subexpression_in_match_arm: false,
-            next_operator_can_begin_expr: false,
-            next_operator_can_continue_expr: true,
-            ..self
-        }
-    }
-
-    /// Transform this fixup into the one that should apply when printing a
-    /// leftmost subexpression followed by punctuation that is legal as the
-    /// first token of an expression.
-    pub(crate) fn leftmost_subexpression_with_operator(
-        self,
-        next_operator_can_begin_expr: bool,
-    ) -> Self {
-        FixupContext { next_operator_can_begin_expr, ..self.leftmost_subexpression() }
-    }
-
-    /// Transform this fixup into the one that should apply when printing the
-    /// rightmost subexpression of the current expression.
+    /// Transform this fixup into the one that should apply when printing any
+    /// subexpression that is neither a leftmost subexpression nor surrounded in
+    /// delimiters.
     ///
-    /// The rightmost subexpression is any subexpression that has a different
-    /// first token than the current expression, but has the same last token.
-    ///
-    /// For example in `$a + $b` and `-$b`, the subexpression `$b` is a
-    /// rightmost subexpression.
-    ///
-    /// Not every expression has a rightmost subexpression. For example neither
-    /// `[$b]` nor `$a.f($b)` have one.
-    pub(crate) fn rightmost_subexpression(self) -> Self {
+    /// This is for any subexpression that has a different first token than the
+    /// current expression, and is not surrounded by a paren/bracket/brace. For
+    /// example the `$b` in `$a + $b` and `-$b`, but not the one in `[$b]` or
+    /// `$a.f($b)`.
+    pub(crate) fn subsequent_subexpression(self) -> Self {
         FixupContext {
             stmt: false,
             leftmost_subexpression_in_stmt: false,
@@ -229,39 +191,6 @@ impl FixupContext {
     ///     "let chain".
     pub(crate) fn needs_par_as_let_scrutinee(self, expr: &Expr) -> bool {
         self.parenthesize_exterior_struct_lit && parser::contains_exterior_struct_lit(expr)
-            || parser::needs_par_as_let_scrutinee(self.precedence(expr))
-    }
-
-    /// Determines the effective precedence of a subexpression. Some expressions
-    /// have higher or lower precedence when adjacent to particular operators.
-    pub(crate) fn precedence(self, expr: &Expr) -> ExprPrecedence {
-        if self.next_operator_can_begin_expr {
-            // Decrease precedence of value-less jumps when followed by an
-            // operator that would otherwise get interpreted as beginning a
-            // value for the jump.
-            if let ExprKind::Break(..)
-            | ExprKind::Ret(..)
-            | ExprKind::Yeet(..)
-            | ExprKind::Yield(YieldKind::Prefix(..)) = expr.kind
-            {
-                return ExprPrecedence::Jump;
-            }
-        }
-
-        if !self.next_operator_can_continue_expr {
-            // Increase precedence of expressions that extend to the end of
-            // current statement or group.
-            if let ExprKind::Break(..)
-            | ExprKind::Closure(..)
-            | ExprKind::Ret(..)
-            | ExprKind::Yeet(..)
-            | ExprKind::Yield(YieldKind::Prefix(..))
-            | ExprKind::Range(None, ..) = expr.kind
-            {
-                return ExprPrecedence::Prefix;
-            }
-        }
-
-        expr.precedence()
+            || parser::needs_par_as_let_scrutinee(expr.precedence().order())
     }
 }

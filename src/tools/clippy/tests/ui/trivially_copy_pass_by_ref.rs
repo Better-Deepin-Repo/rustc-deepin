@@ -1,15 +1,14 @@
 //@normalize-stderr-test: "\(\d+ byte\)" -> "(N byte)"
-//@normalize-stderr-test: "\(limit: \d+ byte\)" -> "(limit: N byte)"
+//@normalize-stderr-test: "\(limit: \d+ byte\)" -> "(limit: 8 byte)"
 #![deny(clippy::trivially_copy_pass_by_ref)]
 #![allow(
     clippy::disallowed_names,
-    clippy::extra_unused_lifetimes,
     clippy::needless_lifetimes,
-    clippy::needless_pass_by_ref_mut,
     clippy::redundant_field_names,
-    clippy::uninlined_format_args
+    clippy::uninlined_format_args,
+    clippy::needless_pass_by_ref_mut
 )]
-
+//@no-rustfix
 #[derive(Copy, Clone)]
 struct Foo(u32);
 
@@ -41,7 +40,6 @@ fn good_return_explicit_lt_ref<'a>(foo: &'a Foo) -> &'a u32 {
     &foo.0
 }
 
-#[allow(mismatched_lifetime_syntaxes)]
 fn good_return_implicit_lt_struct(foo: &Foo) -> FooRef {
     FooRef { foo }
 }
@@ -53,7 +51,6 @@ fn good_return_explicit_lt_struct<'a>(foo: &'a Foo) -> FooRef<'a> {
 
 fn bad(x: &u32, y: &Foo, z: &Baz) {}
 //~^ ERROR: this argument (4 byte) is passed by reference, but would be more efficient if passed by
-//~| ERROR: this argument (4 byte) is passed by reference, but would be more efficient if passed by
 //~| ERROR: this argument (4 byte) is passed by reference, but would be more efficient if passed by
 
 impl Foo {
@@ -92,26 +89,21 @@ impl Bar {
 }
 
 trait MyTrait {
-    fn trait_method(&self, foo: &Foo);
+    fn trait_method(&self, _foo: &Foo);
     //~^ ERROR: this argument (4 byte) is passed by reference, but would be more efficient if
 }
 
 pub trait MyTrait2 {
-    fn trait_method2(&self, color: &Color);
+    fn trait_method2(&self, _color: &Color);
 }
 
-trait MyTrait3 {
-    #[expect(clippy::trivially_copy_pass_by_ref)]
-    fn trait_method(&self, foo: &Foo);
-}
-
-// Trait impls should not warn
-impl MyTrait3 for Foo {
-    fn trait_method(&self, foo: &Foo) {
+impl MyTrait for Foo {
+    fn trait_method(&self, _foo: &Foo) {
         unimplemented!()
     }
 }
 
+#[allow(unused_variables)]
 mod issue3992 {
     pub trait A {
         #[allow(clippy::trivially_copy_pass_by_ref)]
@@ -142,39 +134,57 @@ mod issue5876 {
     }
 }
 
-fn ref_to_opt_ref_implicit(x: &u32) -> Option<&u32> {
+fn _ref_to_opt_ref_implicit(x: &u32) -> Option<&u32> {
     Some(x)
 }
 
-fn ref_to_opt_ref_explicit<'a>(x: &'a u32) -> Option<&'a u32> {
+#[allow(clippy::needless_lifetimes)]
+fn _ref_to_opt_ref_explicit<'a>(x: &'a u32) -> Option<&'a u32> {
     Some(x)
 }
 
-fn with_constraint<'a, 'b: 'a>(x: &'b u32, y: &'a u32) -> &'a u32 {
+fn _with_constraint<'a, 'b: 'a>(x: &'b u32, y: &'a u32) -> &'a u32 {
     if true { x } else { y }
 }
 
-async fn async_implicit(x: &u32) -> &u32 {
+async fn _async_implicit(x: &u32) -> &u32 {
     x
 }
 
-async fn async_explicit<'a>(x: &'a u32) -> &'a u32 {
+#[allow(clippy::needless_lifetimes)]
+async fn _async_explicit<'a>(x: &'a u32) -> &'a u32 {
     x
 }
 
-fn unrelated_lifetimes<'a, 'b>(_x: &'a u32, y: &'b u32) -> &'b u32 {
+fn _unrelated_lifetimes<'a, 'b>(_x: &'a u32, y: &'b u32) -> &'b u32 {
     //~^ ERROR: this argument (4 byte) is passed by reference, but would be more efficient if passed by
     y
 }
 
-fn return_ptr(x: &u32) -> *const u32 {
+fn _return_ptr(x: &u32) -> *const u32 {
     x
 }
 
-fn return_field_ptr(x: &(u32, u32)) -> *const u32 {
+fn _return_field_ptr(x: &(u32, u32)) -> *const u32 {
     &x.0
 }
 
-fn return_field_ptr_addr_of(x: &(u32, u32)) -> *const u32 {
+fn _return_field_ptr_addr_of(x: &(u32, u32)) -> *const u32 {
     core::ptr::addr_of!(x.0)
+}
+
+fn main() {
+    let (mut foo, bar) = (Foo(0), Bar([0; 24]));
+    let (mut a, b, c, x, y, z) = (0, 0, Bar([0; 24]), 0, Foo(0), 0);
+    good(&mut a, b, &c);
+    good_return_implicit_lt_ref(&y);
+    good_return_explicit_lt_ref(&y);
+    bad(&x, &y, &z);
+    foo.good(&mut a, b, &c);
+    foo.good2();
+    foo.bad(&x, &y, &z);
+    Foo::bad2(&x, &y, &z);
+    bar.good(&mut a, b, &c);
+    Bar::bad2(&x, &y, &z);
+    foo.as_ref();
 }

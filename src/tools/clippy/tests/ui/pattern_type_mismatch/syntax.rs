@@ -1,13 +1,5 @@
+#![allow(clippy::all)]
 #![warn(clippy::pattern_type_mismatch)]
-#![allow(
-    clippy::match_ref_pats,
-    clippy::never_loop,
-    clippy::redundant_pattern_matching,
-    clippy::single_match
-)]
-
-//@aux-build:external.rs
-use external::macro_with_match;
 
 fn main() {}
 
@@ -17,7 +9,7 @@ fn syntax_match() {
     // not ok
     match ref_value {
         Some(_) => (),
-        //~^ pattern_type_mismatch
+        //~^ ERROR: type of pattern does not match the expression type
         None => (),
     }
 
@@ -37,7 +29,7 @@ fn syntax_if_let() {
 
     // not ok
     if let Some(_) = ref_value {}
-    //~^ pattern_type_mismatch
+    //~^ ERROR: type of pattern does not match the expression type
 
     // ok
     if let &Some(_) = ref_value {}
@@ -49,8 +41,7 @@ fn syntax_while_let() {
 
     // not ok
     while let Some(_) = ref_value {
-        //~^ pattern_type_mismatch
-
+        //~^ ERROR: type of pattern does not match the expression type
         break;
     }
 
@@ -69,7 +60,7 @@ fn syntax_for() {
 
     // not ok
     for (_a, _b) in slice.iter() {}
-    //~^ pattern_type_mismatch
+    //~^ ERROR: type of pattern does not match the expression type
 
     // ok
     for &(_a, _b) in slice.iter() {}
@@ -80,7 +71,7 @@ fn syntax_let() {
 
     // not ok
     let (_n, _m) = ref_value;
-    //~^ pattern_type_mismatch
+    //~^ ERROR: type of pattern does not match the expression type
 
     // ok
     let &(_n, _m) = ref_value;
@@ -90,7 +81,7 @@ fn syntax_let() {
 fn syntax_fn() {
     // not ok
     fn foo((_a, _b): &(i32, i32)) {}
-    //~^ pattern_type_mismatch
+    //~^ ERROR: type of pattern does not match the expression type
 
     // ok
     fn foo_ok_1(&(_a, _b): &(i32, i32)) {}
@@ -105,7 +96,7 @@ fn syntax_closure() {
 
     // not ok
     foo(|(_a, _b)| ());
-    //~^ pattern_type_mismatch
+    //~^ ERROR: type of pattern does not match the expression type
 
     // ok
     foo(|&(_a, _b)| ());
@@ -122,7 +113,7 @@ fn macro_with_expression() {
     // not ok
     matching_macro!(match value {
         Some(_) => (),
-        //~^ pattern_type_mismatch
+        //~^ ERROR: type of pattern does not match the expression type
         _ => (),
     });
 
@@ -143,7 +134,6 @@ fn macro_expansion() {
             // not ok
             match $e {
                 Some(_) => (),
-                //~^ pattern_type_mismatch
                 _ => (),
             }
 
@@ -161,10 +151,4 @@ fn macro_expansion() {
 
     let value = &Some(23);
     matching_macro!(value);
-}
-
-fn external_macro_expansion() {
-    macro_with_match! {
-        ()
-    };
 }

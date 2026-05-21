@@ -1,4 +1,4 @@
-//@ ignore-auxiliary (used by `../test.rs`)
+//@ ignore-test (auxiliary, used by other tests)
 
 macro_rules! m {
     () => { include!("file.txt"); }

@@ -1,9 +1,8 @@
 error: this match could be written as a `let` statement
-  --> tests/ui/match_single_binding2.rs:16:36
+  --> tests/ui/match_single_binding2.rs:17:36
    |
 LL |               Some((iter, _item)) => match iter.size_hint() {
    |  ____________________________________^
-LL | |
 LL | |                 (min, max) => (min.saturating_add(1), max.and_then(|max| max.checked_add(1))),
 LL | |             },
    | |_____________^
@@ -22,22 +21,20 @@ error: this match could be written as a `let` statement
   --> tests/ui/match_single_binding2.rs:30:13
    |
 LL | /             match get_tup() {
-LL | |
-LL | |                 (a, b) => println!("a {a:?} and b {b:?}"),
+LL | |                 (a, b) => println!("a {:?} and b {:?}", a, b),
 LL | |             }
    | |_____________^
    |
 help: consider using a `let` statement
    |
 LL ~             let (a, b) = get_tup();
-LL +             println!("a {a:?} and b {b:?}")
+LL +             println!("a {:?} and b {:?}", a, b)
    |
 
 error: this match could be replaced by its scrutinee and body
-  --> tests/ui/match_single_binding2.rs:42:5
+  --> tests/ui/match_single_binding2.rs:41:5
    |
 LL | /     match side_effects() {
-LL | |
 LL | |         _ => println!("Side effects"),
 LL | |     }
    | |_____^
@@ -49,10 +46,9 @@ LL +     println!("Side effects");
    |
 
 error: this match could be replaced by its scrutinee and body
-  --> tests/ui/match_single_binding2.rs:50:5
+  --> tests/ui/match_single_binding2.rs:48:5
    |
 LL | /     match match x {
-LL | |
 LL | |         0 => 1,
 LL | |         _ => 2,
 LL | |     } {
@@ -63,7 +59,6 @@ LL | |     }
 help: consider using the scrutinee and body instead
    |
 LL ~     match x {
-LL +
 LL +         0 => 1,
 LL +         _ => 2,
 LL +     };

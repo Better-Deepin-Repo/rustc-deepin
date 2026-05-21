@@ -29,4 +29,5 @@ fn main() {
 
 [`trait`s][trait]
 
+
 [trait]: ../../trait.md

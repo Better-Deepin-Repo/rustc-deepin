@@ -2,10 +2,10 @@
 
 use std::collections::HashSet;
 
-use crate::prelude::*;
-use crate::utils::cargo_process;
 use cargo::util::cache_lock::CacheLockMode;
+use cargo_test_support::cargo_process;
 use cargo_test_support::paths;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::{RegistryBuilder, Response};
 use cargo_test_support::str;
 
@@ -94,8 +94,8 @@ fn not_update() {
     let registry = setup().build();
 
     use cargo::core::{Shell, SourceId};
-    use cargo::sources::RegistrySource;
     use cargo::sources::source::Source;
+    use cargo::sources::RegistrySource;
     use cargo::util::GlobalContext;
 
     let sid = SourceId::for_registry(registry.index_url()).unwrap();
@@ -115,11 +115,7 @@ fn not_update() {
     cargo_process("search postgres")
         .replace_crates_io(registry.index_url())
         .with_stdout_data(SEARCH_RESULTS)
-        // without "Updating ... index"
-        .with_stderr_data(str![[r#"
-[NOTE] to learn more about a package, run `cargo info <name>`
-
-"#]])
+        .with_stderr_data("") // without "Updating ... index"
         .run();
 }
 
@@ -132,7 +128,6 @@ fn replace_default() {
         .with_stdout_data(SEARCH_RESULTS)
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[NOTE] to learn more about a package, run `cargo info <name>`
 
 "#]])
         .run();
@@ -145,11 +140,6 @@ fn simple() {
     cargo_process("search postgres --index")
         .arg(registry.index_url().as_str())
         .with_stdout_data(SEARCH_RESULTS)
-        .with_stderr_data(str![[r#"
-[UPDATING] `[ROOT]/registry` index
-[NOTE] to learn more about a package, run `cargo info <name>`
-
-"#]])
         .run();
 }
 
@@ -160,11 +150,6 @@ fn multiple_query_params() {
     cargo_process("search postgres sql --index")
         .arg(registry.index_url().as_str())
         .with_stdout_data(SEARCH_RESULTS)
-        .with_stderr_data(str![[r#"
-[UPDATING] `[ROOT]/registry` index
-[NOTE] to learn more about a package, run `cargo info <name>`
-
-"#]])
         .run();
 }
 
@@ -178,6 +163,7 @@ fn ignore_quiet() {
         .run();
 }
 
+#[allow(deprecated)]
 #[cargo_test]
 fn colored_results() {
     let registry = setup().build();

@@ -5,10 +5,9 @@
 #![stable(feature = "rust1", since = "1.0.0")]
 
 use crate::fs::{self, Metadata, OpenOptions};
-use crate::io::BorrowedCursor;
 use crate::path::Path;
 use crate::sealed::Sealed;
-use crate::sys::{AsInner, AsInnerMut, IntoInner};
+use crate::sys_common::{AsInner, AsInnerMut, IntoInner};
 use crate::time::SystemTime;
 use crate::{io, sys};
 
@@ -50,44 +49,6 @@ pub trait FileExt {
     #[stable(feature = "file_offset", since = "1.15.0")]
     fn seek_read(&self, buf: &mut [u8], offset: u64) -> io::Result<usize>;
 
-    /// Seeks to a given position and reads some bytes into the buffer.
-    ///
-    /// This is equivalent to the [`seek_read`](FileExt::seek_read) method, except that it is passed
-    /// a [`BorrowedCursor`] rather than `&mut [u8]` to allow use with uninitialized buffers. The
-    /// new data will be appended to any existing contents of `buf`.
-    ///
-    /// Reading beyond the end of the file will always succeed without reading any bytes.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// #![feature(core_io_borrowed_buf)]
-    /// #![feature(read_buf_at)]
-    ///
-    /// use std::io;
-    /// use std::io::BorrowedBuf;
-    /// use std::fs::File;
-    /// use std::mem::MaybeUninit;
-    /// use std::os::windows::prelude::*;
-    ///
-    /// fn main() -> io::Result<()> {
-    ///     let mut file = File::open("pi.txt")?;
-    ///
-    ///     // Read some bytes starting from offset 2
-    ///     let mut buf: [MaybeUninit<u8>; 10] = [MaybeUninit::uninit(); 10];
-    ///     let mut buf = BorrowedBuf::from(buf.as_mut_slice());
-    ///     file.seek_read_buf(buf.unfilled(), 2)?;
-    ///
-    ///     assert!(buf.filled().starts_with(b"1"));
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    #[unstable(feature = "read_buf_at", issue = "140771")]
-    fn seek_read_buf(&self, buf: BorrowedCursor<'_>, offset: u64) -> io::Result<()> {
-        io::default_read_buf(|b| self.seek_read(b, offset), buf)
-    }
-
     /// Seeks to a given position and writes a number of bytes.
     ///
     /// Returns the number of bytes written.
@@ -128,18 +89,12 @@ impl FileExt for fs::File {
         self.as_inner().read_at(buf, offset)
     }
 
-    fn seek_read_buf(&self, buf: BorrowedCursor<'_>, offset: u64) -> io::Result<()> {
-        self.as_inner().read_buf_at(buf, offset)
-    }
-
     fn seek_write(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
         self.as_inner().write_at(buf, offset)
     }
 }
 
 /// Windows-specific extensions to [`fs::OpenOptions`].
-// WARNING: This trait is not sealed. DON'T add any new methods!
-// Add them to OpenOptionsExt2 instead.
 #[stable(feature = "open_options_ext", since = "1.10.0")]
 pub trait OpenOptionsExt {
     /// Overrides the `dwDesiredAccess` argument to the call to [`CreateFile`]
@@ -337,44 +292,13 @@ impl OpenOptionsExt for OpenOptions {
     }
 }
 
-#[unstable(feature = "windows_freeze_file_times", issue = "149715")]
-pub trait OpenOptionsExt2: Sealed {
-    /// If set to `true`, prevent the "last access time" of the file from being changed.
-    ///
-    /// Default to `false`.
-    #[unstable(feature = "windows_freeze_file_times", issue = "149715")]
-    fn freeze_last_access_time(&mut self, freeze: bool) -> &mut Self;
-
-    /// If set to `true`, prevent the "last write time" of the file from being changed.
-    ///
-    /// Default to `false`.
-    #[unstable(feature = "windows_freeze_file_times", issue = "149715")]
-    fn freeze_last_write_time(&mut self, freeze: bool) -> &mut Self;
-}
-
-#[unstable(feature = "sealed", issue = "none")]
-impl Sealed for OpenOptions {}
-
-#[unstable(feature = "windows_freeze_file_times", issue = "149715")]
-impl OpenOptionsExt2 for OpenOptions {
-    fn freeze_last_access_time(&mut self, freeze: bool) -> &mut Self {
-        self.as_inner_mut().freeze_last_access_time(freeze);
-        self
-    }
-
-    fn freeze_last_write_time(&mut self, freeze: bool) -> &mut Self {
-        self.as_inner_mut().freeze_last_write_time(freeze);
-        self
-    }
-}
-
 /// Windows-specific extensions to [`fs::Metadata`].
 ///
 /// The data members that this trait exposes correspond to the members
 /// of the [`BY_HANDLE_FILE_INFORMATION`] structure.
 ///
 /// [`BY_HANDLE_FILE_INFORMATION`]:
-///     https://docs.microsoft.com/windows/win32/api/fileapi/ns-fileapi-by_handle_file_information
+///     https://docs.microsoft.com/en-us/windows/win32/api/fileapi/ns-fileapi-by_handle_file_information
 #[stable(feature = "metadata_ext", since = "1.1.0")]
 pub trait MetadataExt {
     /// Returns the value of the `dwFileAttributes` field of this metadata.
@@ -398,7 +322,7 @@ pub trait MetadataExt {
     /// ```
     ///
     /// [File Attribute Constants]:
-    ///     https://docs.microsoft.com/windows/win32/fileio/file-attribute-constants
+    ///     https://docs.microsoft.com/en-us/windows/win32/fileio/file-attribute-constants
     #[stable(feature = "metadata_ext", since = "1.1.0")]
     fn file_attributes(&self) -> u32;
 
@@ -427,7 +351,7 @@ pub trait MetadataExt {
     /// }
     /// ```
     ///
-    /// [`FILETIME`]: https://docs.microsoft.com/windows/win32/api/minwinbase/ns-minwinbase-filetime
+    /// [`FILETIME`]: https://docs.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-filetime
     #[stable(feature = "metadata_ext", since = "1.1.0")]
     fn creation_time(&self) -> u64;
 
@@ -462,7 +386,7 @@ pub trait MetadataExt {
     /// }
     /// ```
     ///
-    /// [`FILETIME`]: https://docs.microsoft.com/windows/win32/api/minwinbase/ns-minwinbase-filetime
+    /// [`FILETIME`]: https://docs.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-filetime
     #[stable(feature = "metadata_ext", since = "1.1.0")]
     fn last_access_time(&self) -> u64;
 
@@ -495,11 +419,11 @@ pub trait MetadataExt {
     /// }
     /// ```
     ///
-    /// [`FILETIME`]: https://docs.microsoft.com/windows/win32/api/minwinbase/ns-minwinbase-filetime
+    /// [`FILETIME`]: https://docs.microsoft.com/en-us/windows/win32/api/minwinbase/ns-minwinbase-filetime
     #[stable(feature = "metadata_ext", since = "1.1.0")]
     fn last_write_time(&self) -> u64;
 
-    /// Returns the value of the `nFileSize` fields of this
+    /// Returns the value of the `nFileSize{High,Low}` fields of this
     /// metadata.
     ///
     /// The returned value does not have meaning for directories.
@@ -538,7 +462,7 @@ pub trait MetadataExt {
     #[unstable(feature = "windows_by_handle", issue = "63010")]
     fn number_of_links(&self) -> Option<u32>;
 
-    /// Returns the value of the `nFileIndex` fields of this
+    /// Returns the value of the `nFileIndex{Low,High}` fields of this
     /// metadata.
     ///
     /// This will return `None` if the `Metadata` instance was created from a
@@ -547,14 +471,10 @@ pub trait MetadataExt {
     #[unstable(feature = "windows_by_handle", issue = "63010")]
     fn file_index(&self) -> Option<u64>;
 
-    /// Returns the value of the `ChangeTime` fields of this metadata.
+    /// Returns the change time, which is the last time file metadata was changed, such as
+    /// renames, attributes, etc
     ///
-    /// `ChangeTime` is the last time file metadata was changed, such as
-    /// renames, attributes, etc.
-    ///
-    /// This will return `None` if `Metadata` instance was created from a call to
-    /// `DirEntry::metadata` or if the `target_vendor` is outside the current platform
-    /// support for this api.
+    /// This will return `None` if the `Metadata` instance was not created using the `FILE_BASIC_INFO` type.
     #[unstable(feature = "windows_change_time", issue = "121478")]
     fn change_time(&self) -> Option<u64>;
 }

@@ -1,6 +1,4 @@
-//@revisions: edition2015 edition2021
-//@[edition2015] edition:2015
-//@[edition2021] edition:2021
+#![warn(clippy::all, clippy::pedantic)]
 #![allow(
     clippy::missing_errors_doc,
     clippy::needless_pass_by_value,
@@ -12,7 +10,7 @@
     clippy::missing_panics_doc,
     clippy::return_self_not_must_use
 )]
-
+//@no-rustfix
 use std::ops::Mul;
 use std::rc::{self, Rc};
 use std::sync::{self, Arc};
@@ -26,92 +24,77 @@ impl T {
     // *****************************************
 
     pub fn eq(&self, other: &Self) -> bool {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `eq` can be confused for the standard trait method `std::cmp::Parti
         unimplemented!()
     }
 
     pub fn from_iter<T>(iter: T) -> Self {
-        //~[edition2021]^ should_implement_trait
-
+        //~^ ERROR: method `from_iter` can be confused for the standard trait method `std::ite
         unimplemented!()
     }
 
     pub fn from_str(s: &str) -> Result<Self, Self> {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `from_str` can be confused for the standard trait method `std::str:
         unimplemented!()
     }
 
     pub fn hash(&self, state: &mut T) {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `hash` can be confused for the standard trait method `std::hash::Ha
         unimplemented!()
     }
 
     pub fn index(&self, index: usize) -> &Self {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `index` can be confused for the standard trait method `std::ops::In
         unimplemented!()
     }
 
     pub fn index_mut(&mut self, index: usize) -> &mut Self {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `index_mut` can be confused for the standard trait method `std::ops
         unimplemented!()
     }
 
     pub fn into_iter(self) -> Self {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `into_iter` can be confused for the standard trait method `std::ite
         unimplemented!()
     }
 
     pub fn mul(self, rhs: Self) -> Self {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `mul` can be confused for the standard trait method `std::ops::Mul:
         unimplemented!()
     }
 
     pub fn neg(self) -> Self {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `neg` can be confused for the standard trait method `std::ops::Neg:
         unimplemented!()
     }
 
     pub fn next(&mut self) -> Option<Self> {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `next` can be confused for the standard trait method `std::iter::It
         unimplemented!()
     }
 
     pub fn not(self) -> Self {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `not` can be confused for the standard trait method `std::ops::Not:
         unimplemented!()
     }
 
     pub fn rem(self, rhs: Self) -> Self {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `rem` can be confused for the standard trait method `std::ops::Rem:
         unimplemented!()
     }
 
     pub fn shl(self, rhs: Self) -> Self {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `shl` can be confused for the standard trait method `std::ops::Shl:
         unimplemented!()
     }
 
     pub fn shr(self, rhs: Self) -> Self {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `shr` can be confused for the standard trait method `std::ops::Shr:
         unimplemented!()
     }
 
     pub fn sub(self, rhs: Self) -> Self {
-        //~^ should_implement_trait
-
+        //~^ ERROR: method `sub` can be confused for the standard trait method `std::ops::Sub:
         unimplemented!()
     }
     // **********

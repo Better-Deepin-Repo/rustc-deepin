@@ -1,4 +1,4 @@
-use super::{MIN_ALIGN, realloc_fallback};
+use super::{realloc_fallback, MIN_ALIGN};
 use crate::alloc::{GlobalAlloc, Layout, System};
 
 #[stable(feature = "alloc_system_type", since = "1.28.0")]

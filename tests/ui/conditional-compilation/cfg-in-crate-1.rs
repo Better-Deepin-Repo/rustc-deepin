@@ -1,1 +1,3 @@
-#![cfg(false)] //~ ERROR `main` function not found in crate `cfg_in_crate_1`
+//@ error-pattern: `main` function not found
+
+#![cfg(FALSE)]

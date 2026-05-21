@@ -1,27 +1,19 @@
+
 //! This file tests for the `DOC_MARKDOWN` lint.
 
 #![allow(dead_code, incomplete_features)]
 #![warn(clippy::doc_markdown)]
-#![feature(custom_inner_attributes, generic_const_exprs)]
+#![feature(custom_inner_attributes, generic_const_exprs, const_option)]
 #![rustfmt::skip]
 
 /// The foo_bar function does _nothing_. See also foo::bar. (note the dot there)
-//~^ doc_markdown
-//~| doc_markdown
 /// Markdown is _weird_. I mean _really weird_. This \_ is ok. So is `_`. But not Foo::some_fun
-//~^ doc_markdown
 /// which should be reported only once despite being __doubly bad__.
 /// Here be ::a::global:path, and _::another::global::path_.  :: is not a path though.
-//~^ doc_markdown
-//~| doc_markdown
 /// Import an item from ::awesome::global::blob:: (Intended postfix)
-//~^ doc_markdown
 /// These are the options for ::Cat: (Intended trailing single colon, shouldn't be linted)
-//~^ doc_markdown
 /// That's not code ~NotInCodeBlock~.
-//~^ doc_markdown
 /// be_sure_we_got_to_the_end_of_it
-//~^ doc_markdown
 fn foo_bar() {
 }
 
@@ -36,7 +28,6 @@ fn foo_bar() {
 /// _foo bar_
 /// ~~~
 /// be_sure_we_got_to_the_end_of_it
-//~^ doc_markdown
 fn multiline_codeblock() {
 }
 
@@ -44,7 +35,6 @@ fn multiline_codeblock() {
 /// multiline
 /// emphasis_.
 /// be_sure_we_got_to_the_end_of_it
-//~^ doc_markdown
 fn test_emphasis() {
 }
 
@@ -59,23 +49,20 @@ fn test_emphasis() {
 /// 32kb 32Mb 32Gb 32Tb 32Pb 32Eb
 /// NaN
 /// be_sure_we_got_to_the_end_of_it
-//~^ doc_markdown
 fn test_units() {
 }
 
 /// This tests allowed identifiers.
 /// KiB MiB GiB TiB PiB EiB
-/// MHz GHz THz
 /// AccessKit
-/// CoAP CoreFoundation CoreGraphics CoreText
+/// CoreFoundation CoreGraphics CoreText
 /// Direct2D Direct3D DirectWrite DirectX
 /// ECMAScript
 /// GPLv2 GPLv3
 /// GitHub GitLab
 /// IPv4 IPv6
-/// InfiniBand RoCE
 /// ClojureScript CoffeeScript JavaScript PostScript PureScript TypeScript
-/// PowerPC PowerShell WebAssembly
+/// WebAssembly
 /// NaN NaNs
 /// OAuth GraphQL
 /// OCaml
@@ -84,12 +71,11 @@ fn test_units() {
 /// WebGL WebGL2 WebGPU WebRTC WebSocket WebTransport
 /// TensorFlow
 /// TrueType
-/// iOS macOS FreeBSD NetBSD OpenBSD NixOS
+/// iOS macOS FreeBSD NetBSD OpenBSD
 /// TeX LaTeX BibTeX BibLaTeX
 /// MinGW
 /// CamelCase (see also #2395)
 /// be_sure_we_got_to_the_end_of_it
-//~^ doc_markdown
 fn test_allowed() {
 }
 
@@ -107,21 +93,20 @@ fn test_allowed() {
 /// expression of the type  `_ <bit_op> m <cmp_op> c` (where `<bit_op>`
 /// is one of {`&`, '|'} and `<cmp_op>` is one of {`!=`, `>=`, `>` ,
 /// be_sure_we_got_to_the_end_of_it
-//~^ doc_markdown
 fn main() {
+    foo_bar();
+    multiline_codeblock();
+    test_emphasis();
+    test_units();
 }
 
 /// ## CamelCaseThing
-//~^ doc_markdown
 /// Talks about `CamelCaseThing`. Titles should be ignored; see issue #897.
 ///
 /// # CamelCaseThing
-//~^ doc_markdown
 ///
 /// Not a title #897 CamelCaseThing
-//~^ doc_markdown
 /// be_sure_we_got_to_the_end_of_it
-//~^ doc_markdown
 fn issue897() {
 }
 
@@ -129,7 +114,6 @@ fn issue897() {
 /// I am confused by brackets? (foo `x_y`)
 /// I am confused by brackets? (`x_y` foo)
 /// be_sure_we_got_to_the_end_of_it
-//~^ doc_markdown
 fn issue900() {
 }
 
@@ -143,7 +127,6 @@ fn issue900() {
 /// [iterator]: https://doc.rust-lang.org/stable/std/iter/trait.Iterator.html
 /// [helper_types]: ../helper_types/index.html
 /// be_sure_we_got_to_the_end_of_it
-//~^ doc_markdown
 fn issue883() {
 }
 
@@ -162,9 +145,6 @@ That's in a code block: `PackedNode`
 And BarQuz too.
 be_sure_we_got_to_the_end_of_it
 */
-//~^^^ doc_markdown
-//~^^^ doc_markdown
-//~^^^^^^^^^^ doc_markdown
 fn issue1073() {
 }
 
@@ -176,9 +156,6 @@ That's in a code block: PackedNode
 And BarQuz too.
 be_sure_we_got_to_the_end_of_it
 */
-//~^^ doc_markdown
-//~^^^^ doc_markdown
-//~^^^^^^^^^^ doc_markdown
 fn issue1073_alt() {
 }
 
@@ -189,7 +166,6 @@ fn issue1073_alt() {
 /// StillDont
 /// ````
 /// be_sure_we_got_to_the_end_of_it
-//~^ doc_markdown
 fn four_quotes() {
 }
 
@@ -209,7 +185,6 @@ fn issue_1469() {}
 fn issue_1920() {}
 
 /// An iterator over mycrate::Collection's values.
-//~^ doc_markdown
 /// It should not lint a `'static` lifetime in ticks.
 fn issue_2210() {}
 
@@ -234,7 +209,6 @@ fn intra_doc_link() {}
 fn issue_2581() {}
 
 /// Foo \[bar\] \[baz\] \[qux\]. DocMarkdownLint
-//~^ doc_markdown
 fn lint_after_escaped_chars() {}
 
 // issue #7033 - generic_const_exprs ICE
@@ -258,22 +232,17 @@ where [(); N.checked_next_power_of_two().unwrap()]: {
 fn issue_11568() {}
 
 /// There is no try (do() or do_not()).
-//~^ doc_markdown
-//~| doc_markdown
 fn parenthesized_word() {}
 
 /// ABes
-//~^ doc_markdown
 /// OSes
 /// UXes
 fn plural_acronym_test() {}
 
-unsafe extern "C" {
+extern {
     /// foo()
-    //~^ doc_markdown
     fn in_extern();
 }
 
 /// https://github.com/rust-lang/rust-clippy/pull/12836
-//~^ doc_markdown
 fn check_autofix_for_base_urls() {}

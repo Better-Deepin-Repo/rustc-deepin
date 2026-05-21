@@ -1,26 +1,26 @@
 error[E0657]: `impl Trait` cannot capture higher-ranked lifetime from `dyn` type
-  --> $DIR/E0657.rs:10:27
+  --> $DIR/E0657.rs:10:31
    |
-LL |     -> Box<dyn for<'a> Id<impl Lt<'a>>>
-   |                           ^^^^^^^^--^ `impl Trait` implicitly captures all lifetimes in scope
+LL |     -> Box<for<'a> Id<impl Lt<'a>>>
+   |                               ^^
    |
 note: lifetime declared here
-  --> $DIR/E0657.rs:10:20
+  --> $DIR/E0657.rs:10:16
    |
-LL |     -> Box<dyn for<'a> Id<impl Lt<'a>>>
-   |                    ^^
+LL |     -> Box<for<'a> Id<impl Lt<'a>>>
+   |                ^^
 
 error[E0657]: `impl Trait` cannot capture higher-ranked lifetime from `dyn` type
-  --> $DIR/E0657.rs:19:31
+  --> $DIR/E0657.rs:19:35
    |
-LL |         -> Box<dyn for<'a> Id<impl Lt<'a>>>
-   |                               ^^^^^^^^--^ `impl Trait` implicitly captures all lifetimes in scope
+LL |         -> Box<for<'a> Id<impl Lt<'a>>>
+   |                                   ^^
    |
 note: lifetime declared here
-  --> $DIR/E0657.rs:19:24
+  --> $DIR/E0657.rs:19:20
    |
-LL |         -> Box<dyn for<'a> Id<impl Lt<'a>>>
-   |                        ^^
+LL |         -> Box<for<'a> Id<impl Lt<'a>>>
+   |                    ^^
 
 error: aborting due to 2 previous errors
 

@@ -2,7 +2,7 @@
 
 // Ensure that `dyn $($AutoTrait)+ ObjSafe` is well-formed.
 
-// Some arbitrary dyn-compatible trait:
+// Some arbitrary object-safe trait:
 trait Obj {}
 
 type _0 = dyn Unpin;

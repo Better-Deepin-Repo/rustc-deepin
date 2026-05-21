@@ -63,16 +63,24 @@ impl<'gctx> Source for DependencyConfusionThreatOverlaySource<'gctx> {
         };
         ready!(self.local.query(&local_dep, kind, &mut local_callback))?;
 
+        let mut package_collision = None;
         let mut remote_callback = |index: IndexSummary| {
             if local_packages.contains(index.as_summary()) {
-                tracing::debug!(?local_source, ?remote_source, ?index, "package collision");
-            } else {
-                f(index)
+                package_collision = Some(index.as_summary().clone());
             }
+            f(index)
         };
         ready!(self.remote.query(dep, kind, &mut remote_callback))?;
 
-        std::task::Poll::Ready(Ok(()))
+        if let Some(collision) = package_collision {
+            std::task::Poll::Ready(Err(anyhow::anyhow!(
+                "found a package in the remote registry and the local overlay: {}@{}",
+                collision.name(),
+                collision.version()
+            )))
+        } else {
+            std::task::Poll::Ready(Ok(()))
+        }
     }
 
     fn invalidate_cache(&mut self) {

@@ -3,6 +3,8 @@ struct S<A, B>(Option<(A, B)>);
 impl<A, B> S<A, B> {
     fn infer(&self, a: A, b: B) {}
     //~^ NOTE method defined here
+    //~| NOTE
+    //~| NOTE
 }
 
 fn main() {

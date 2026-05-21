@@ -4,16 +4,14 @@ use std::convert::TryInto;
 #[cfg(feature = "master")]
 use gccjit::CType;
 use gccjit::{RValue, Struct, Type};
-use rustc_abi::{AddressSpace, Align, Integer, Size};
 use rustc_codegen_ssa::common::TypeKind;
-use rustc_codegen_ssa::traits::{
-    BaseTypeCodegenMethods, DerivedTypeCodegenMethods, TypeMembershipCodegenMethods,
-};
+use rustc_codegen_ssa::traits::{BaseTypeMethods, DerivedTypeMethods, TypeMembershipMethods};
 use rustc_middle::ty::layout::TyAndLayout;
 use rustc_middle::{bug, ty};
+use rustc_target::abi::{AddressSpace, Align, Integer, Size};
 
 use crate::common::TypeReflection;
-use crate::context::{CodegenCx, new_array_type};
+use crate::context::CodegenCx;
 use crate::type_of::LayoutGccExt;
 
 impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
@@ -123,7 +121,7 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
     }
 }
 
-impl<'gcc, 'tcx> BaseTypeCodegenMethods for CodegenCx<'gcc, 'tcx> {
+impl<'gcc, 'tcx> BaseTypeMethods<'tcx> for CodegenCx<'gcc, 'tcx> {
     fn type_i8(&self) -> Type<'gcc> {
         self.i8_type
     }
@@ -299,19 +297,19 @@ impl<'gcc, 'tcx> BaseTypeCodegenMethods for CodegenCx<'gcc, 'tcx> {
         value.get_type()
     }
 
-    #[cfg_attr(feature = "master", expect(unused_mut))]
+    #[cfg_attr(feature = "master", allow(unused_mut))]
     fn type_array(&self, ty: Type<'gcc>, mut len: u64) -> Type<'gcc> {
         #[cfg(not(feature = "master"))]
-        if let Some(struct_type) = ty.is_struct()
-            && struct_type.get_field_count() == 0
-        {
-            // NOTE: since gccjit only supports i32 for the array size and libcore's tests uses a
-            // size of usize::MAX in test_binary_search, we workaround this by setting the size to
-            // zero for ZSTs.
-            len = 0;
+        if let Some(struct_type) = ty.is_struct() {
+            if struct_type.get_field_count() == 0 {
+                // NOTE: since gccjit only supports i32 for the array size and libcore's tests uses a
+                // size of usize::MAX in test_binary_search, we workaround this by setting the size to
+                // zero for ZSTs.
+                len = 0;
+            }
         }
 
-        new_array_type(self.context, None, ty, len)
+        self.context.new_array_type(None, ty, len)
     }
 }
 
@@ -383,4 +381,4 @@ pub fn struct_fields<'gcc, 'tcx>(
     (result, packed)
 }
 
-impl<'gcc, 'tcx> TypeMembershipCodegenMethods<'tcx> for CodegenCx<'gcc, 'tcx> {}
+impl<'gcc, 'tcx> TypeMembershipMethods<'tcx> for CodegenCx<'gcc, 'tcx> {}

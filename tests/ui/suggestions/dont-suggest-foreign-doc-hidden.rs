@@ -1,5 +1,5 @@
-//@ edition:2015
 //@ aux-build:hidden-struct.rs
+//@ compile-flags: --crate-type lib
 
 extern crate hidden_struct;
 
@@ -9,25 +9,7 @@ mod local {
 }
 
 pub fn test(_: Foo) {}
-//~^ ERROR [E0425]
+//~^ ERROR cannot find type `Foo` in this scope
 
 pub fn test2(_: Bar) {}
-//~^ ERROR [E0425]
-
-pub fn test3(_: Baz) {}
-//~^ ERROR [E0425]
-
-pub fn test4(_: Quux) {}
-//~^ ERROR [E0425]
-
-fn test5<T: hidden_struct::Marker>() {}
-
-fn test6<T: hidden_struct::library::Marker>() {}
-
-fn main() {
-    test5::<i32>();
-    //~^ ERROR [E0277]
-
-    test6::<i32>();
-    //~^ ERROR [E0277]
-}
+//~^ ERROR cannot find type `Bar` in this scope

@@ -5,31 +5,20 @@ use std::env;
 use std::fs::{self, write};
 use std::path::Path;
 
-use tidy::diagnostics::RunningCheck;
-use tidy::features::{Features, collect_env_vars, collect_lang_features, collect_lib_features};
+use tidy::features::{collect_lang_features, collect_lib_features, Features};
 use tidy::t;
 use tidy::unstable_book::{
-    ENV_VARS_DIR, LANG_FEATURES_DIR, LIB_FEATURES_DIR, PATH_STR,
-    collect_unstable_book_section_file_names, collect_unstable_feature_names,
+    collect_unstable_book_section_file_names, collect_unstable_feature_names, LANG_FEATURES_DIR,
+    LIB_FEATURES_DIR, PATH_STR,
 };
 
-fn generate_stub_issue(path: &Path, name: &str, issue: u32, description: &str) {
-    let content = format!(
-        include_str!("stub-issue.md"),
-        name = name,
-        issue = issue,
-        description = description
-    );
+fn generate_stub_issue(path: &Path, name: &str, issue: u32) {
+    let content = format!(include_str!("stub-issue.md"), name = name, issue = issue);
     t!(write(path, content), path);
 }
 
-fn generate_stub_no_issue(path: &Path, name: &str, description: &str) {
-    let content = format!(include_str!("stub-no-issue.md"), name = name, description = description);
-    t!(write(path, content), path);
-}
-
-fn generate_stub_env_var(path: &Path, name: &str) {
-    let content = format!(include_str!("stub-env-var.md"), name = name);
+fn generate_stub_no_issue(path: &Path, name: &str) {
+    let content = format!(include_str!("stub-no-issue.md"), name = name);
     t!(write(path, content), path);
 }
 
@@ -41,12 +30,8 @@ fn set_to_summary_str(set: &BTreeSet<String>, dir: &str) -> String {
 
 fn generate_summary(path: &Path, lang_features: &Features, lib_features: &Features) {
     let compiler_flags = collect_unstable_book_section_file_names(&path.join("src/compiler-flags"));
-    let compiler_env_vars =
-        collect_unstable_book_section_file_names(&path.join("src/compiler-environment-variables"));
 
     let compiler_flags_str = set_to_summary_str(&compiler_flags, "compiler-flags");
-    let compiler_env_vars_str =
-        set_to_summary_str(&compiler_env_vars, "compiler-environment-variables");
 
     let unstable_lang_features = collect_unstable_feature_names(&lang_features);
     let unstable_lib_features = collect_unstable_feature_names(&lib_features);
@@ -57,7 +42,6 @@ fn generate_summary(path: &Path, lang_features: &Features, lib_features: &Featur
     let summary_path = path.join("src/SUMMARY.md");
     let content = format!(
         include_str!("SUMMARY.md"),
-        compiler_env_vars = compiler_env_vars_str,
         compiler_flags = compiler_flags_str,
         language_features = lang_features_str,
         library_features = lib_features_str
@@ -65,7 +49,7 @@ fn generate_summary(path: &Path, lang_features: &Features, lib_features: &Featur
     t!(write(&summary_path, content), summary_path);
 }
 
-fn generate_feature_files(src: &Path, out: &Path, features: &Features) {
+fn generate_unstable_book_files(src: &Path, out: &Path, features: &Features) {
     let unstable_features = collect_unstable_feature_names(features);
     let unstable_section_file_names = collect_unstable_book_section_file_names(src);
     t!(fs::create_dir_all(&out));
@@ -74,28 +58,12 @@ fn generate_feature_files(src: &Path, out: &Path, features: &Features) {
         let file_name = format!("{feature_name}.md");
         let out_file_path = out.join(&file_name);
         let feature = &features[&feature_name_underscore];
-        let description = feature.description.as_deref().unwrap_or_default();
 
         if let Some(issue) = feature.tracking_issue {
-            generate_stub_issue(
-                &out_file_path,
-                &feature_name_underscore,
-                issue.get(),
-                &description,
-            );
+            generate_stub_issue(&out_file_path, &feature_name_underscore, issue.get());
         } else {
-            generate_stub_no_issue(&out_file_path, &feature_name_underscore, &description);
+            generate_stub_no_issue(&out_file_path, &feature_name_underscore);
         }
-    }
-}
-
-fn generate_env_files(src: &Path, out: &Path, env_vars: &BTreeSet<String>) {
-    let env_var_file_names = collect_unstable_book_section_file_names(src);
-    t!(fs::create_dir_all(&out));
-    for env_var in env_vars - &env_var_file_names {
-        let file_name = format!("{env_var}.md");
-        let out_file_path = out.join(&file_name);
-        generate_stub_env_var(&out_file_path, &env_var);
     }
 }
 
@@ -123,28 +91,26 @@ fn main() {
     let src_path = Path::new(&src_path_str);
     let dest_path = Path::new(&dest_path_str);
 
-    let lang_features = collect_lang_features(compiler_path, &mut RunningCheck::new_noop());
+    let lang_features = collect_lang_features(compiler_path, &mut false);
     let lib_features = collect_lib_features(library_path)
         .into_iter()
         .filter(|&(ref name, _)| !lang_features.contains_key(name))
         .collect();
-    let env_vars = collect_env_vars(compiler_path);
 
     let doc_src_path = src_path.join(PATH_STR);
 
     t!(fs::create_dir_all(&dest_path));
 
-    generate_feature_files(
+    generate_unstable_book_files(
         &doc_src_path.join(LANG_FEATURES_DIR),
         &dest_path.join(LANG_FEATURES_DIR),
         &lang_features,
     );
-    generate_feature_files(
+    generate_unstable_book_files(
         &doc_src_path.join(LIB_FEATURES_DIR),
         &dest_path.join(LIB_FEATURES_DIR),
         &lib_features,
     );
-    generate_env_files(&doc_src_path.join(ENV_VARS_DIR), &dest_path.join(ENV_VARS_DIR), &env_vars);
 
     copy_recursive(&doc_src_path, &dest_path);
 

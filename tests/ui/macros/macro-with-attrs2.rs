@@ -1,6 +1,6 @@
 //@ run-pass
 
-#[cfg(false)]
+#[cfg(FALSE)]
 macro_rules! foo { () => (1) }
 
 #[cfg(not(FALSE))]

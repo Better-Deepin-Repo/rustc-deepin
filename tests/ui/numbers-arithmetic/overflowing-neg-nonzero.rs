@@ -1,6 +1,6 @@
 //@ run-fail
 //@ error-pattern:attempt to negate with overflow
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 //@ compile-flags: -C debug-assertions
 #![allow(arithmetic_overflow)]
 

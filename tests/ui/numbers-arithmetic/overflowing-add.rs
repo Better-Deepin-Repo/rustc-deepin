@@ -1,8 +1,8 @@
 //@ run-fail
-//@ regex-error-pattern: thread 'main'.*panicked
-//@ error-pattern: attempt to add with overflow
+//@ error-pattern:thread 'main' panicked
+//@ error-pattern:attempt to add with overflow
 //@ compile-flags: -C debug-assertions
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 #![allow(arithmetic_overflow)]
 

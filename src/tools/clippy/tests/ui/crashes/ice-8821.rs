@@ -1,5 +1,3 @@
-//@ check-pass
-
 #![warn(clippy::let_unit_value)]
 
 fn f() {}

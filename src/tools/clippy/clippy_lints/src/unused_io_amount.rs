@@ -1,12 +1,11 @@
 use clippy_utils::diagnostics::span_lint_hir_and_then;
 use clippy_utils::macros::{is_panic, root_macro_call_first_node};
-use clippy_utils::res::MaybeDef;
-use clippy_utils::{paths, peel_blocks, sym};
+use clippy_utils::{is_res_lang_ctor, is_trait_method, match_trait_method, paths, peel_blocks};
 use hir::{ExprKind, HirId, PatKind};
 use rustc_hir as hir;
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::declare_lint_pass;
-use rustc_span::Span;
+use rustc_span::{sym, Span};
 
 declare_clippy_lint! {
     /// ### What it does
@@ -84,29 +83,6 @@ impl<'tcx> LateLintPass<'tcx> for UnusedIoAmount {
     /// to consider the arms, and we want to avoid breaking the logic for situations where things
     /// get desugared to match.
     fn check_block(&mut self, cx: &LateContext<'tcx>, block: &'tcx hir::Block<'tcx>) {
-        let fn_def_id = block.hir_id.owner.to_def_id();
-        if let Some(impl_id) = cx.tcx.trait_impl_of_assoc(fn_def_id) {
-            let trait_id = cx.tcx.impl_trait_id(impl_id);
-            // We don't want to lint inside io::Read or io::Write implementations, as the author has more
-            // information about their trait implementation than our lint, see https://github.com/rust-lang/rust-clippy/issues/4836
-            if let Some(trait_name) = cx.tcx.get_diagnostic_name(trait_id)
-                && matches!(trait_name, sym::IoRead | sym::IoWrite)
-            {
-                return;
-            }
-
-            let async_paths = [
-                &paths::TOKIO_IO_ASYNCREADEXT,
-                &paths::TOKIO_IO_ASYNCWRITEEXT,
-                &paths::FUTURES_IO_ASYNCREADEXT,
-                &paths::FUTURES_IO_ASYNCWRITEEXT,
-            ];
-
-            if async_paths.into_iter().any(|path| path.matches(cx, trait_id)) {
-                return;
-            }
-        }
-
         for stmt in block.stmts {
             if let hir::StmtKind::Semi(exp) = stmt.kind {
                 check_expr(cx, exp);
@@ -136,10 +112,7 @@ fn non_consuming_err_arm<'a>(cx: &LateContext<'a>, arm: &hir::Arm<'a>) -> bool {
     }
 
     if let PatKind::TupleStruct(ref path, [inner_pat], _) = arm.pat.kind {
-        return cx
-            .qpath_res(path, inner_pat.hir_id)
-            .ctor_parent(cx)
-            .is_lang_item(cx, hir::LangItem::ResultErr);
+        return is_res_lang_ctor(cx, cx.qpath_res(path, inner_pat.hir_id), hir::LangItem::ResultErr);
     }
 
     false
@@ -187,14 +160,14 @@ fn check_expr<'a>(cx: &LateContext<'a>, expr: &'a hir::Expr<'a>) {
             emit_lint(cx, expr.span, expr.hir_id, op, &[]);
         },
         _ => {},
-    }
+    };
 }
 
 fn should_lint<'a>(cx: &LateContext<'a>, mut inner: &'a hir::Expr<'a>) -> Option<IoOp> {
     inner = unpack_match(inner);
-    inner = unpack_try(cx, inner);
+    inner = unpack_try(inner);
     inner = unpack_call_chain(inner);
-    inner = unpack_await(cx, inner);
+    inner = unpack_await(inner);
     // we type-check it to get whether it's a read/write or their vectorized forms
     // and keep only the ones that are produce io amount
     check_io_mode(cx, inner)
@@ -206,7 +179,7 @@ fn is_ok_wild_or_dotdot_pattern<'a>(cx: &LateContext<'a>, pat: &hir::Pat<'a>) ->
 
     if let PatKind::TupleStruct(ref path, inner_pat, _) = pat.kind
         // we check against Result::Ok to avoid linting on Err(_) or something else.
-        && cx.qpath_res(path, pat.hir_id).ctor_parent(cx).is_lang_item(cx, hir::LangItem::ResultOk)
+        && is_res_lang_ctor(cx, cx.qpath_res(path, pat.hir_id), hir::LangItem::ResultOk)
     {
         if matches!(inner_pat, []) {
             return true;
@@ -229,24 +202,16 @@ fn is_unreachable_or_panic(cx: &LateContext<'_>, expr: &hir::Expr<'_>) -> bool {
         return false;
     };
     if is_panic(cx, macro_call.def_id) {
-        return !cx.tcx.hir_is_inside_const_context(expr.hir_id);
+        return !cx.tcx.hir().is_inside_const_context(expr.hir_id);
     }
-    cx.tcx.is_diagnostic_item(sym::unreachable_macro, macro_call.def_id)
+    matches!(cx.tcx.item_name(macro_call.def_id).as_str(), "unreachable")
 }
 
 fn unpack_call_chain<'a>(mut expr: &'a hir::Expr<'a>) -> &'a hir::Expr<'a> {
     while let ExprKind::MethodCall(path, receiver, ..) = expr.kind {
         if matches!(
-            path.ident.name,
-            sym::unwrap
-                | sym::expect
-                | sym::unwrap_or
-                | sym::unwrap_or_else
-                | sym::ok
-                | sym::is_ok
-                | sym::is_err
-                | sym::or_else
-                | sym::or
+            path.ident.as_str(),
+            "unwrap" | "expect" | "unwrap_or" | "unwrap_or_else" | "ok" | "is_ok" | "is_err" | "or_else" | "or"
         ) {
             expr = receiver;
         } else {
@@ -256,10 +221,12 @@ fn unpack_call_chain<'a>(mut expr: &'a hir::Expr<'a>) -> &'a hir::Expr<'a> {
     expr
 }
 
-fn unpack_try<'a>(cx: &LateContext<'_>, mut expr: &'a hir::Expr<'a>) -> &'a hir::Expr<'a> {
-    while let ExprKind::Call(func, [arg_0]) = expr.kind
-        && let ExprKind::Path(qpath) = func.kind
-        && cx.tcx.qpath_is_lang_item(qpath, hir::LangItem::TryTraitBranch)
+fn unpack_try<'a>(mut expr: &'a hir::Expr<'a>) -> &'a hir::Expr<'a> {
+    while let ExprKind::Call(func, [ref arg_0, ..]) = expr.kind
+        && matches!(
+            func.kind,
+            ExprKind::Path(hir::QPath::LangItem(hir::LangItem::TryTraitBranch, ..))
+        )
     {
         expr = arg_0;
     }
@@ -275,13 +242,16 @@ fn unpack_match<'a>(mut expr: &'a hir::Expr<'a>) -> &'a hir::Expr<'a> {
 
 /// If `expr` is an (e).await, return the inner expression "e" that's being
 /// waited on.  Otherwise return None.
-fn unpack_await<'a>(cx: &LateContext<'_>, expr: &'a hir::Expr<'a>) -> &'a hir::Expr<'a> {
-    if let ExprKind::Match(expr, _, hir::MatchSource::AwaitDesugar) = expr.kind
-        && let ExprKind::Call(func, [arg_0]) = expr.kind
-        && let ExprKind::Path(qpath) = func.kind
-        && cx.tcx.qpath_is_lang_item(qpath, hir::LangItem::IntoFutureIntoFuture)
-    {
-        return arg_0;
+fn unpack_await<'a>(expr: &'a hir::Expr<'a>) -> &'a hir::Expr<'a> {
+    if let ExprKind::Match(expr, _, hir::MatchSource::AwaitDesugar) = expr.kind {
+        if let ExprKind::Call(func, [ref arg_0, ..]) = expr.kind {
+            if matches!(
+                func.kind,
+                ExprKind::Path(hir::QPath::LangItem(hir::LangItem::IntoFutureIntoFuture, ..))
+            ) {
+                return arg_0;
+            }
+        }
     }
     expr
 }
@@ -300,28 +270,19 @@ fn check_io_mode(cx: &LateContext<'_>, call: &hir::Expr<'_>) -> Option<IoOp> {
         },
     };
 
-    if let Some(method_def_id) = cx.typeck_results().type_dependent_def_id(call.hir_id)
-        && let Some(trait_def_id) = cx.tcx.trait_of_assoc(method_def_id)
-    {
-        if let Some(diag_name) = cx.tcx.get_diagnostic_name(trait_def_id) {
-            match diag_name {
-                sym::IoRead => Some(IoOp::SyncRead(vectorized)),
-                sym::IoWrite => Some(IoOp::SyncWrite(vectorized)),
-                _ => None,
-            }
-        } else if paths::FUTURES_IO_ASYNCREADEXT.matches(cx, trait_def_id)
-            || paths::TOKIO_IO_ASYNCREADEXT.matches(cx, trait_def_id)
-        {
-            Some(IoOp::AsyncRead(vectorized))
-        } else if paths::TOKIO_IO_ASYNCWRITEEXT.matches(cx, trait_def_id)
-            || paths::FUTURES_IO_ASYNCWRITEEXT.matches(cx, trait_def_id)
-        {
-            Some(IoOp::AsyncWrite(vectorized))
-        } else {
-            None
-        }
-    } else {
-        None
+    match (
+        is_trait_method(cx, call, sym::IoRead),
+        is_trait_method(cx, call, sym::IoWrite),
+        match_trait_method(cx, call, &paths::FUTURES_IO_ASYNCREADEXT)
+            || match_trait_method(cx, call, &paths::TOKIO_IO_ASYNCREADEXT),
+        match_trait_method(cx, call, &paths::TOKIO_IO_ASYNCWRITEEXT)
+            || match_trait_method(cx, call, &paths::FUTURES_IO_ASYNCWRITEEXT),
+    ) {
+        (true, _, _, _) => Some(IoOp::SyncRead(vectorized)),
+        (_, true, _, _) => Some(IoOp::SyncWrite(vectorized)),
+        (_, _, true, _) => Some(IoOp::AsyncRead(vectorized)),
+        (_, _, _, true) => Some(IoOp::AsyncWrite(vectorized)),
+        _ => None,
     }
 }
 

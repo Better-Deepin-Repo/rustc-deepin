@@ -1,11 +1,19 @@
 //@ run-pass
 
-#![feature(core_intrinsics, rustc_attrs)]
+#![feature(intrinsics, rustc_attrs)]
+
+mod rusti {
+    extern "rust-intrinsic" {
+        pub fn pref_align_of<T>() -> usize;
+        #[rustc_safe_intrinsic]
+        pub fn min_align_of<T>() -> usize;
+    }
+}
 
 #[cfg(any(
-    target_os = "aix",
     target_os = "android",
     target_os = "dragonfly",
+    target_os = "emscripten",
     target_os = "freebsd",
     target_os = "fuchsia",
     target_os = "hurd",
@@ -21,12 +29,18 @@
 mod m {
     #[cfg(target_arch = "x86")]
     pub fn main() {
-        assert_eq!(std::mem::align_of::<u64>(), 4);
+        unsafe {
+            assert_eq!(::rusti::pref_align_of::<u64>(), 8);
+            assert_eq!(::rusti::min_align_of::<u64>(), 4);
+        }
     }
 
     #[cfg(not(target_arch = "x86"))]
     pub fn main() {
-        assert_eq!(std::mem::align_of::<u64>(), 8);
+        unsafe {
+            assert_eq!(::rusti::pref_align_of::<u64>(), 8);
+            assert_eq!(::rusti::min_align_of::<u64>(), 8);
+        }
     }
 }
 
@@ -34,21 +48,30 @@ mod m {
 mod m {
     #[cfg(target_arch = "x86_64")]
     pub fn main() {
-        assert_eq!(std::mem::align_of::<u64>(), 8);
+        unsafe {
+            assert_eq!(::rusti::pref_align_of::<u64>(), 8);
+            assert_eq!(::rusti::min_align_of::<u64>(), 8);
+        }
     }
 }
 
 #[cfg(target_os = "windows")]
 mod m {
     pub fn main() {
-        assert_eq!(std::mem::align_of::<u64>(), 8);
+        unsafe {
+            assert_eq!(::rusti::pref_align_of::<u64>(), 8);
+            assert_eq!(::rusti::min_align_of::<u64>(), 8);
+        }
     }
 }
 
 #[cfg(target_family = "wasm")]
 mod m {
     pub fn main() {
-        assert_eq!(std::mem::align_of::<u64>(), 8);
+        unsafe {
+            assert_eq!(::rusti::pref_align_of::<u64>(), 8);
+            assert_eq!(::rusti::min_align_of::<u64>(), 8);
+        }
     }
 }
 

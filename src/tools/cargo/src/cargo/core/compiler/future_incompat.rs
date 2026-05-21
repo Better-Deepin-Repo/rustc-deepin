@@ -8,7 +8,7 @@
 //! a [`FutureIncompatReport`], Cargo gathers and forwards it as a
 //! `Message::FutureIncompatReport` to the main thread.
 //!
-//! To have the correct layout of structures for deserializing a report
+//! To have the correct layout of strucutures for deserializing a report
 //! emitted by the compiler, most of structure definitions, for example
 //! [`FutureIncompatReport`], are copied either partially or entirely from
 //! [compiler/rustc_errors/src/json.rs][2] in rust-lang/rust repository.
@@ -35,11 +35,11 @@
 
 use crate::core::compiler::BuildContext;
 use crate::core::{Dependency, PackageId, Workspace};
-use crate::sources::SourceConfigMap;
 use crate::sources::source::QueryKind;
-use crate::util::CargoResult;
+use crate::sources::SourceConfigMap;
 use crate::util::cache_lock::CacheLockMode;
-use anyhow::{Context, bail, format_err};
+use crate::util::CargoResult;
+use anyhow::{bail, format_err, Context};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
@@ -70,8 +70,6 @@ pub struct FutureIncompatReport {
 /// Structure used for collecting reports in-memory.
 pub struct FutureIncompatReportPackage {
     pub package_id: PackageId,
-    /// Whether or not this is a local package, or a remote dependency.
-    pub is_local: bool,
     pub items: Vec<FutureBreakageItem>,
 }
 
@@ -93,7 +91,7 @@ pub struct Diagnostic {
     pub level: String,
 }
 
-/// The filename in the top-level `build-dir` directory where we store
+/// The filename in the top-level `target` directory where we store
 /// the report
 const FUTURE_INCOMPAT_FILE: &str = ".future-incompat-report.json";
 /// Max number of reports to save on disk.
@@ -142,10 +140,16 @@ impl OnDiskReports {
         mut self,
         ws: &Workspace<'_>,
         suggestion_message: String,
-        per_package: BTreeMap<String, String>,
+        per_package_reports: &[FutureIncompatReportPackage],
     ) -> u32 {
-        if let Some(existing_id) = self.has_report(&per_package) {
-            return existing_id;
+        let per_package = render_report(per_package_reports);
+
+        if let Some(existing_report) = self
+            .reports
+            .iter()
+            .find(|existing| existing.per_package == per_package)
+        {
+            return existing_report.id;
         }
 
         let report = OnDiskReport {
@@ -162,7 +166,7 @@ impl OnDiskReports {
         }
         let on_disk = serde_json::to_vec(&self).unwrap();
         if let Err(e) = ws
-            .build_dir()
+            .target_dir()
             .open_rw_exclusive_create(
                 FUTURE_INCOMPAT_FILE,
                 ws.gctx(),
@@ -185,17 +189,9 @@ impl OnDiskReports {
         saved_id
     }
 
-    /// Returns the ID of a report if it is already on disk.
-    fn has_report(&self, rendered_per_package: &BTreeMap<String, String>) -> Option<u32> {
-        self.reports
-            .iter()
-            .find(|existing| &existing.per_package == rendered_per_package)
-            .map(|report| report.id)
-    }
-
     /// Loads the on-disk reports.
     pub fn load(ws: &Workspace<'_>) -> CargoResult<OnDiskReports> {
-        let report_file = match ws.build_dir().open_ro_shared(
+        let report_file = match ws.target_dir().open_ro_shared(
             FUTURE_INCOMPAT_FILE,
             ws.gctx(),
             "Future incompatible report",
@@ -359,10 +355,9 @@ fn get_updates(ws: &Workspace<'_>, package_ids: &BTreeSet<PackageId>) -> Option<
 
         if !updated_versions.is_empty() {
             let updated_versions = itertools::join(updated_versions, ", ");
-            write!(
+            writeln!(
                 updates,
-                "
-  - {} has the following newer versions available: {}",
+                "{} has the following newer versions available: {}",
                 pkg_id, updated_versions
             )
             .unwrap();
@@ -413,14 +408,7 @@ pub fn save_and_display_report(
             OnDiskReports::default()
         }
     };
-
-    let rendered_report = render_report(per_package_future_incompat_reports);
-
-    // If the report is already on disk, then it will reuse the same ID,
-    // otherwise prepare for the next ID.
-    let report_id = current_reports
-        .has_report(&rendered_report)
-        .unwrap_or(current_reports.next_id);
+    let report_id = current_reports.next_id;
 
     // Get a list of unique and sorted package name/versions.
     let package_ids: BTreeSet<_> = per_package_future_incompat_reports
@@ -429,12 +417,23 @@ pub fn save_and_display_report(
         .collect();
     let package_vers: Vec<_> = package_ids.iter().map(|pid| pid.to_string()).collect();
 
+    if should_display_message || bcx.build_config.future_incompat_report {
+        drop(bcx.gctx.shell().warn(&format!(
+            "the following packages contain code that will be rejected by a future \
+             version of Rust: {}",
+            package_vers.join(", ")
+        )));
+    }
+
     let updated_versions = get_updates(bcx.ws, &package_ids).unwrap_or(String::new());
 
     let update_message = if !updated_versions.is_empty() {
         format!(
-            "\
-update to a newer version to see if the issue has been fixed{updated_versions}",
+            "
+- Some affected dependencies have newer versions available.
+You may want to consider updating them to a newer version to see if the issue has been fixed.
+
+{updated_versions}\n",
             updated_versions = updated_versions
         )
     } else {
@@ -446,9 +445,10 @@ update to a newer version to see if the issue has been fixed{updated_versions}",
         .map(|package_id| {
             let manifest = bcx.packages.get_one(*package_id).unwrap().manifest();
             format!(
-                "  - {package_spec}
-  - repository: {url}
-  - detailed warning command: `cargo report future-incompatibilities --id {id} --package {package_spec}`",
+                "
+  - {package_spec}
+  - Repository: {url}
+  - Detailed warning command: `cargo report future-incompatibilities --id {id} --package {package_spec}`",
                 package_spec = format!("{}@{}", package_id.name(), package_id.version()),
                 url = manifest
                     .metadata()
@@ -459,75 +459,47 @@ update to a newer version to see if the issue has been fixed{updated_versions}",
             )
         })
         .collect::<Vec<_>>()
-        .join("\n\n");
+        .join("\n");
 
-    let all_is_local = per_package_future_incompat_reports
-        .iter()
-        .all(|report| report.is_local);
+    let suggestion_message = format!(
+        "
+To solve this problem, you can try the following approaches:
 
-    let suggestion_header = "to solve this problem, you can try the following approaches:";
-    let mut suggestions = Vec::new();
-    if !all_is_local {
-        if !update_message.is_empty() {
-            suggestions.push(update_message);
-        }
-        suggestions.push(format!(
-            "\
-ensure the maintainers know of this problem (e.g. creating a bug report if needed)
-or even helping with a fix (e.g. by creating a pull request)
-{upstream_info}"
-        ));
-        suggestions.push(
-            "\
-use your own version of the dependency with the `[patch]` section in `Cargo.toml`
-For more information, see:
-https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html#the-patch-section"
-                .to_owned(),
-        );
-    }
+{update_message}
+- If the issue is not solved by updating the dependencies, a fix has to be
+implemented by those dependencies. You can help with that by notifying the
+maintainers of this problem (e.g. by creating a bug report) or by proposing a
+fix to the maintainers (e.g. by creating a pull request):
+{upstream_info}
 
-    let suggestion_message = if suggestions.is_empty() {
-        String::new()
-    } else {
-        let mut suggestion_message = String::new();
-        writeln!(&mut suggestion_message, "{suggestion_header}").unwrap();
-        for suggestion in &suggestions {
-            writeln!(
-                &mut suggestion_message,
-                "
-- {suggestion}"
-            )
-            .unwrap();
-        }
-        suggestion_message
-    };
-    let saved_report_id =
-        current_reports.save_report(bcx.ws, suggestion_message.clone(), rendered_report);
+- If waiting for an upstream fix is not an option, you can use the `[patch]`
+section in `Cargo.toml` to use your own version of the dependency. For more
+information, see:
+https://doc.rust-lang.org/cargo/reference/overriding-dependencies.html#the-patch-section
+        ",
+        upstream_info = upstream_info,
+        update_message = update_message,
+    );
 
-    if should_display_message || bcx.build_config.future_incompat_report {
-        use annotate_snippets::*;
-        let mut report = vec![Group::with_title(Level::WARNING.secondary_title(format!(
-            "the following packages contain code that will be rejected by a future \
-             version of Rust: {}",
-            package_vers.join(", ")
-        )))];
-        if bcx.build_config.future_incompat_report {
-            for suggestion in &suggestions {
-                report.push(Group::with_title(Level::HELP.secondary_title(suggestion)));
-            }
-            report.push(Group::with_title(Level::NOTE.secondary_title(format!(
-                "this report can be shown with `cargo report \
+    let saved_report_id = current_reports.save_report(
+        bcx.ws,
+        suggestion_message.clone(),
+        per_package_future_incompat_reports,
+    );
+
+    if bcx.build_config.future_incompat_report {
+        drop(bcx.gctx.shell().note(&suggestion_message));
+        drop(bcx.gctx.shell().note(&format!(
+            "this report can be shown with `cargo report \
              future-incompatibilities --id {}`",
-                saved_report_id
-            ))));
-        } else if should_display_message {
-            report.push(Group::with_title(Level::NOTE.secondary_title(format!(
-                "to see what the problems were, use the option \
+            saved_report_id
+        )));
+    } else if should_display_message {
+        drop(bcx.gctx.shell().note(&format!(
+            "to see what the problems were, use the option \
              `--future-incompat-report`, or run `cargo report \
              future-incompatibilities --id {}`",
-                saved_report_id
-            ))));
-        }
-        drop(bcx.gctx.shell().print_report(&report, false))
+            saved_report_id
+        )));
     }
 }

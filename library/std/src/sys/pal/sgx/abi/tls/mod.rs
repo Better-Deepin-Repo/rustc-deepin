@@ -3,7 +3,7 @@ mod sync_bitset;
 use self::sync_bitset::*;
 use crate::cell::Cell;
 use crate::num::NonZero;
-use crate::sync::atomic::{Atomic, AtomicUsize, Ordering};
+use crate::sync::atomic::{AtomicUsize, Ordering};
 use crate::{mem, ptr};
 
 #[cfg(target_pointer_width = "64")]
@@ -11,16 +11,18 @@ const USIZE_BITS: usize = 64;
 const TLS_KEYS: usize = 128; // Same as POSIX minimum
 const TLS_KEYS_BITSET_SIZE: usize = (TLS_KEYS + (USIZE_BITS - 1)) / USIZE_BITS;
 
-// Specifying linkage/symbol name is solely to ensure a single instance between this crate and its unit tests
 #[cfg_attr(test, linkage = "available_externally")]
-#[unsafe(export_name = "_ZN16__rust_internals3std3sys3pal3sgx3abi3tls14TLS_KEY_IN_USEE")]
+#[export_name = "_ZN16__rust_internals3std3sys3sgx3abi3tls14TLS_KEY_IN_USEE"]
 static TLS_KEY_IN_USE: SyncBitset = SYNC_BITSET_INIT;
-// Specifying linkage/symbol name is solely to ensure a single instance between this crate and its unit tests
+macro_rules! dup {
+    ((* $($exp:tt)*) $($val:tt)*) => (dup!( ($($exp)*) $($val)* $($val)* ));
+    (() $($val:tt)*) => ([$($val),*])
+}
 #[cfg_attr(test, linkage = "available_externally")]
-#[unsafe(export_name = "_ZN16__rust_internals3std3sys3pal3sgx3abi3tls14TLS_DESTRUCTORE")]
-static TLS_DESTRUCTOR: [Atomic<usize>; TLS_KEYS] = [const { AtomicUsize::new(0) }; TLS_KEYS];
+#[export_name = "_ZN16__rust_internals3std3sys3sgx3abi3tls14TLS_DESTRUCTORE"]
+static TLS_DESTRUCTOR: [AtomicUsize; TLS_KEYS] = dup!((* * * * * * *) (AtomicUsize::new(0)));
 
-unsafe extern "C" {
+extern "C" {
     fn get_tls_ptr() -> *const u8;
     fn set_tls_ptr(tls: *const u8);
 }
@@ -80,13 +82,20 @@ impl<'a> Drop for ActiveTls<'a> {
 
 impl Tls {
     pub fn new() -> Tls {
-        Tls { data: [const { Cell::new(ptr::null_mut()) }; TLS_KEYS] }
+        Tls { data: dup!((* * * * * * *) (Cell::new(ptr::null_mut()))) }
     }
 
     pub unsafe fn activate(&self) -> ActiveTls<'_> {
         // FIXME: Needs safety information. See entry.S for `set_tls_ptr` definition.
         unsafe { set_tls_ptr(self as *const Tls as _) };
         ActiveTls { tls: self }
+    }
+
+    #[allow(unused)]
+    pub unsafe fn activate_persistent(self: Box<Self>) {
+        // FIXME: Needs safety information. See entry.S for `set_tls_ptr` definition.
+        let ptr = Box::into_raw(self).cast_const().cast::<u8>();
+        unsafe { set_tls_ptr(ptr) };
     }
 
     unsafe fn current<'a>() -> &'a Tls {

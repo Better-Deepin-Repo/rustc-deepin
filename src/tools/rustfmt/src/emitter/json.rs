@@ -1,7 +1,7 @@
 use super::*;
-use crate::rustfmt_diff::{DiffLine, Mismatch, make_diff};
+use crate::rustfmt_diff::{make_diff, DiffLine, Mismatch};
 use serde::Serialize;
-use serde_json::to_writer as to_json_writer;
+use serde_json::to_string as to_json_string;
 
 #[derive(Debug, Default)]
 pub(crate) struct JsonEmitter {
@@ -26,8 +26,7 @@ struct MismatchedFile {
 
 impl Emitter for JsonEmitter {
     fn emit_footer(&self, output: &mut dyn Write) -> Result<(), io::Error> {
-        to_json_writer(&mut *output, &self.mismatched_files)?;
-        writeln!(output)
+        writeln!(output, "{}", &to_json_string(&self.mismatched_files)?)
     }
 
     fn emit_formatted_file(
@@ -57,7 +56,7 @@ impl JsonEmitter {
         filename: &FileName,
         diff: Vec<Mismatch>,
     ) -> Result<(), io::Error> {
-        let mut mismatches = Vec::with_capacity(diff.len());
+        let mut mismatches = vec![];
         for mismatch in diff {
             let original_begin_line = mismatch.line_number_orig;
             let expected_begin_line = mismatch.line_number;
@@ -253,7 +252,7 @@ mod tests {
             )
             .unwrap();
         let _ = emitter.emit_footer(&mut writer);
-        let exp_json = serde_json::to_string(&vec![MismatchedFile {
+        let exp_json = to_json_string(&vec![MismatchedFile {
             name: String::from(file_name),
             mismatches: vec![
                 MismatchedBlock {
@@ -339,7 +338,7 @@ mod tests {
             }],
         };
 
-        let exp_json = serde_json::to_string(&vec![exp_bin, exp_lib]).unwrap();
+        let exp_json = to_json_string(&vec![exp_bin, exp_lib]).unwrap();
         assert_eq!(&writer[..], format!("{exp_json}\n").as_bytes());
     }
 }

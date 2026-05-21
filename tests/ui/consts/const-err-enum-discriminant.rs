@@ -1,5 +1,3 @@
-//@ stderr-per-bitwidth
-
 #[derive(Copy, Clone)]
 union Foo {
     a: isize,
@@ -8,7 +6,8 @@ union Foo {
 
 enum Bar {
     Boo = [unsafe { Foo { b: () }.a }; 4][3],
-    //~^ ERROR uninitialized
+    //~^ ERROR evaluation of constant value failed
+    //~| uninitialized
 }
 
 fn main() {

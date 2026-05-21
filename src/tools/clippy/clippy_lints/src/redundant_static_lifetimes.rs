@@ -1,6 +1,6 @@
+use clippy_config::msrvs::{self, Msrv};
 use clippy_config::Conf;
 use clippy_utils::diagnostics::span_lint_and_then;
-use clippy_utils::msrvs::{self, MsrvStack};
 use clippy_utils::source::snippet;
 use rustc_ast::ast::{ConstItem, Item, ItemKind, StaticItem, Ty, TyKind};
 use rustc_errors::Applicability;
@@ -35,13 +35,13 @@ declare_clippy_lint! {
 }
 
 pub struct RedundantStaticLifetimes {
-    msrv: MsrvStack,
+    msrv: Msrv,
 }
 
 impl RedundantStaticLifetimes {
     pub fn new(conf: &'static Conf) -> Self {
         Self {
-            msrv: MsrvStack::new(conf.msrv),
+            msrv: conf.msrv.clone(),
         }
     }
 }
@@ -66,19 +66,25 @@ impl RedundantStaticLifetimes {
                 // Match the 'static lifetime
                 if let Some(lifetime) = *optional_lifetime {
                     match borrow_type.ty.kind {
-                        TyKind::Path(..) | TyKind::Slice(..) | TyKind::Array(..) | TyKind::Tup(..)
-                            if lifetime.ident.name == kw::StaticLifetime =>
-                        {
-                            let snip = snippet(cx, borrow_type.ty.span, "<type>");
-                            let sugg = format!("&{}{snip}", borrow_type.mutbl.prefix_str());
-                            span_lint_and_then(cx, REDUNDANT_STATIC_LIFETIMES, lifetime.ident.span, reason, |diag| {
-                                diag.span_suggestion(
-                                    ty.span,
-                                    "consider removing `'static`",
-                                    sugg,
-                                    Applicability::MachineApplicable, //snippet
+                        TyKind::Path(..) | TyKind::Slice(..) | TyKind::Array(..) | TyKind::Tup(..) => {
+                            if lifetime.ident.name == kw::StaticLifetime {
+                                let snip = snippet(cx, borrow_type.ty.span, "<type>");
+                                let sugg = format!("&{}{snip}", borrow_type.mutbl.prefix_str());
+                                span_lint_and_then(
+                                    cx,
+                                    REDUNDANT_STATIC_LIFETIMES,
+                                    lifetime.ident.span,
+                                    reason,
+                                    |diag| {
+                                        diag.span_suggestion(
+                                            ty.span,
+                                            "consider removing `'static`",
+                                            sugg,
+                                            Applicability::MachineApplicable, //snippet
+                                        );
+                                    },
                                 );
-                            });
+                            }
                         },
                         _ => {},
                     }
@@ -109,5 +115,5 @@ impl EarlyLintPass for RedundantStaticLifetimes {
         }
     }
 
-    extract_msrv_attr!();
+    extract_msrv_attr!(EarlyContext);
 }

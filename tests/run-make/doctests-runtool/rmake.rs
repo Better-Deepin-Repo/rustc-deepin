@@ -1,6 +1,4 @@
-//@ ignore-cross-compile (needs to run host tool binary)
-
-// Tests behavior of rustdoc `--test-runtool`.
+// Tests behavior of rustdoc `--runtool`.
 
 use std::path::PathBuf;
 
@@ -13,7 +11,7 @@ fn mkdir(name: &str) -> PathBuf {
     dir
 }
 
-// Behavior with --test-runtool with relative paths and --test-run-directory.
+// Behavior with --runtool with relative paths and --test-run-directory.
 fn main() {
     let run_dir_name = "rundir";
     let run_dir = mkdir(run_dir_name);
@@ -29,7 +27,7 @@ fn main() {
         .arg("--test")
         .arg("--test-run-directory")
         .arg(run_dir_name)
-        .arg("--test-runtool")
+        .arg("--runtool")
         .arg(&run_tool_binary)
         .extern_("t", "libt.rlib")
         .run();

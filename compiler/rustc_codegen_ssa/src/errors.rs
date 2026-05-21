@@ -1,31 +1,27 @@
 //! Errors emitted by codegen_ssa
 
 use std::borrow::Cow;
-use std::ffi::OsString;
 use std::io::Error;
 use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
 use rustc_errors::codes::*;
 use rustc_errors::{
-    Diag, DiagArgValue, DiagCtxtHandle, Diagnostic, EmissionGuarantee, IntoDiagArg, Level, msg,
+    Diag, DiagArgValue, DiagCtxtHandle, Diagnostic, EmissionGuarantee, IntoDiagArg, Level,
 };
-use rustc_macros::{Diagnostic, Subdiagnostic};
+use rustc_macros::Diagnostic;
 use rustc_middle::ty::layout::LayoutError;
-use rustc_middle::ty::{FloatTy, Ty};
+use rustc_middle::ty::Ty;
 use rustc_span::{Span, Symbol};
+use rustc_type_ir::FloatTy;
 
 use crate::assert_module_sources::CguReuse;
 use crate::back::command::Command;
+use crate::fluent_generated as fluent;
 
 #[derive(Diagnostic)]
-#[diag(
-    "CGU-reuse for `{$cgu_user_name}` is `{$actual_reuse}` but should be {$at_least ->
-        [one] {\"at least \"}
-        *[other] {\"\"}
-    }`{$expected_reuse}`"
-)]
-pub(crate) struct IncorrectCguReuseType<'a> {
+#[diag(codegen_ssa_incorrect_cgu_reuse_type)]
+pub struct IncorrectCguReuseType<'a> {
     #[primary_span]
     pub span: Span,
     pub cgu_user_name: &'a str,
@@ -35,33 +31,39 @@ pub(crate) struct IncorrectCguReuseType<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("CGU-reuse for `{$cgu_user_name}` is (mangled: `{$cgu_name}`) was not recorded")]
-pub(crate) struct CguNotRecorded<'a> {
+#[diag(codegen_ssa_cgu_not_recorded)]
+pub struct CguNotRecorded<'a> {
     pub cgu_user_name: &'a str,
     pub cgu_name: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("found CGU-reuse attribute but `-Zquery-dep-graph` was not specified")]
-pub(crate) struct MissingQueryDepGraph {
+#[diag(codegen_ssa_unknown_reuse_kind)]
+pub struct UnknownReuseKind {
+    #[primary_span]
+    pub span: Span,
+    pub kind: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_missing_query_depgraph)]
+pub struct MissingQueryDepGraph {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "found malformed codegen unit name `{$user_path}`. codegen units names must always start with the name of the crate (`{$crate_name}` in this case)"
-)]
-pub(crate) struct MalformedCguName<'a> {
+#[diag(codegen_ssa_malformed_cgu_name)]
+pub struct MalformedCguName {
     #[primary_span]
     pub span: Span,
-    pub user_path: &'a str,
-    pub crate_name: &'a str,
+    pub user_path: String,
+    pub crate_name: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("no module named `{$user_path}` (mangled: {$cgu_name}). available modules: {$cgu_names}")]
-pub(crate) struct NoModuleNamed<'a> {
+#[diag(codegen_ssa_no_module_named)]
+pub struct NoModuleNamed<'a> {
     #[primary_span]
     pub span: Span,
     pub user_path: &'a str,
@@ -70,57 +72,66 @@ pub(crate) struct NoModuleNamed<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("failed to write lib.def file: {$error}")]
-pub(crate) struct LibDefWriteFailure {
+#[diag(codegen_ssa_field_associated_value_expected)]
+pub struct FieldAssociatedValueExpected {
+    #[primary_span]
+    pub span: Span,
+    pub name: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_no_field)]
+pub struct NoField {
+    #[primary_span]
+    pub span: Span,
+    pub name: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_lib_def_write_failure)]
+pub struct LibDefWriteFailure {
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("failed to write version script: {$error}")]
-pub(crate) struct VersionScriptWriteFailure {
+#[diag(codegen_ssa_version_script_write_failure)]
+pub struct VersionScriptWriteFailure {
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("failed to write symbols file: {$error}")]
-pub(crate) struct SymbolFileWriteFailure {
+#[diag(codegen_ssa_symbol_file_write_failure)]
+pub struct SymbolFileWriteFailure {
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("`as-needed` modifier not implemented yet for ld64")]
-pub(crate) struct Ld64UnimplementedModifier;
+#[diag(codegen_ssa_ld64_unimplemented_modifier)]
+pub struct Ld64UnimplementedModifier;
 
 #[derive(Diagnostic)]
-#[diag("`as-needed` modifier not supported for current linker")]
-pub(crate) struct LinkerUnsupportedModifier;
+#[diag(codegen_ssa_linker_unsupported_modifier)]
+pub struct LinkerUnsupportedModifier;
 
 #[derive(Diagnostic)]
-#[diag("exporting symbols not implemented yet for L4Bender")]
-pub(crate) struct L4BenderExportingSymbolsUnimplemented;
+#[diag(codegen_ssa_L4Bender_exporting_symbols_unimplemented)]
+pub struct L4BenderExportingSymbolsUnimplemented;
 
 #[derive(Diagnostic)]
-#[diag("error enumerating natvis directory: {$error}")]
-pub(crate) struct NoNatvisDirectory {
+#[diag(codegen_ssa_no_natvis_directory)]
+pub struct NoNatvisDirectory {
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("cached cgu {$cgu_name} should have an object file, but doesn't")]
-pub(crate) struct NoSavedObjectFile<'a> {
+#[diag(codegen_ssa_no_saved_object_file)]
+pub struct NoSavedObjectFile<'a> {
     pub cgu_name: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[track_caller]` requires Rust ABI", code = E0737)]
-pub(crate) struct RequiresRustAbi {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("unable to copy {$source_file} to {$output_path}: {$error}")]
-pub(crate) struct CopyPathBuf {
+#[diag(codegen_ssa_copy_path_buf)]
+pub struct CopyPathBuf {
     pub source_file: PathBuf,
     pub output_path: PathBuf,
     pub error: Error,
@@ -128,15 +139,15 @@ pub(crate) struct CopyPathBuf {
 
 // Reports Paths using `Debug` implementation rather than Path's `Display` implementation.
 #[derive(Diagnostic)]
-#[diag("could not copy {$from} to {$to}: {$error}")]
-pub(crate) struct CopyPath<'a> {
+#[diag(codegen_ssa_copy_path)]
+pub struct CopyPath<'a> {
     from: DebugArgPath<'a>,
     to: DebugArgPath<'a>,
     error: Error,
 }
 
 impl<'a> CopyPath<'a> {
-    pub(crate) fn new(from: &'a Path, to: &'a Path, error: Error) -> CopyPath<'a> {
+    pub fn new(from: &'a Path, to: &'a Path, error: Error) -> CopyPath<'a> {
         CopyPath { from: DebugArgPath(from), to: DebugArgPath(to), error }
     }
 }
@@ -144,49 +155,45 @@ impl<'a> CopyPath<'a> {
 struct DebugArgPath<'a>(pub &'a Path);
 
 impl IntoDiagArg for DebugArgPath<'_> {
-    fn into_diag_arg(self, _: &mut Option<std::path::PathBuf>) -> rustc_errors::DiagArgValue {
+    fn into_diag_arg(self) -> rustc_errors::DiagArgValue {
         DiagArgValue::Str(Cow::Owned(format!("{:?}", self.0)))
     }
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "option `-o` or `--emit` is used to write binary output type `{$shorthand}` to stdout, but stdout is a tty"
-)]
-pub(crate) struct BinaryOutputToTty {
+#[diag(codegen_ssa_binary_output_to_tty)]
+pub struct BinaryOutputToTty {
     pub shorthand: &'static str,
 }
 
 #[derive(Diagnostic)]
-#[diag("ignoring emit path because multiple .{$extension} files were produced")]
-pub(crate) struct IgnoringEmitPath {
-    pub extension: &'static str,
+#[diag(codegen_ssa_ignoring_emit_path)]
+pub struct IgnoringEmitPath {
+    pub extension: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("ignoring -o because multiple .{$extension} files were produced")]
-pub(crate) struct IgnoringOutput {
-    pub extension: &'static str,
+#[diag(codegen_ssa_ignoring_output)]
+pub struct IgnoringOutput {
+    pub extension: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("couldn't create a temp dir: {$error}")]
-pub(crate) struct CreateTempDir {
+#[diag(codegen_ssa_create_temp_dir)]
+pub struct CreateTempDir {
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("failed to add native library {$library_path}: {$error}")]
-pub(crate) struct AddNativeLibrary {
+#[diag(codegen_ssa_add_native_library)]
+pub struct AddNativeLibrary {
     pub library_path: PathBuf,
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "multiple declarations of external function `{$function}` from library `{$library_name}` have different calling conventions"
-)]
-pub(crate) struct MultipleExternalFuncDecl<'a> {
+#[diag(codegen_ssa_multiple_external_func_decl)]
+pub struct MultipleExternalFuncDecl<'a> {
     #[primary_span]
     pub span: Span,
     pub function: Symbol,
@@ -195,275 +202,172 @@ pub(crate) struct MultipleExternalFuncDecl<'a> {
 
 #[derive(Diagnostic)]
 pub enum LinkRlibError {
-    #[diag("could not find formats for rlibs")]
+    #[diag(codegen_ssa_rlib_missing_format)]
     MissingFormat,
 
-    #[diag("could not find rlib for: `{$crate_name}`, found rmeta (metadata) file")]
+    #[diag(codegen_ssa_rlib_only_rmeta_found)]
     OnlyRmetaFound { crate_name: Symbol },
 
-    #[diag("could not find rlib for: `{$crate_name}`")]
+    #[diag(codegen_ssa_rlib_not_found)]
     NotFound { crate_name: Symbol },
 
-    #[diag(
-        "`{$ty1}` and `{$ty2}` do not have equivalent dependency formats (`{$list1}` vs `{$list2}`)"
-    )]
+    #[diag(codegen_ssa_rlib_incompatible_dependency_formats)]
     IncompatibleDependencyFormats { ty1: String, ty2: String, list1: String, list2: String },
 }
 
-pub(crate) struct ThorinErrorWrapper(pub thorin::Error);
+pub struct ThorinErrorWrapper(pub thorin::Error);
 
 impl<G: EmissionGuarantee> Diagnostic<'_, G> for ThorinErrorWrapper {
     fn into_diag(self, dcx: DiagCtxtHandle<'_>, level: Level) -> Diag<'_, G> {
         let build = |msg| Diag::new(dcx, level, msg);
         match self.0 {
-            thorin::Error::ReadInput(_) => build(msg!("failed to read input file")),
+            thorin::Error::ReadInput(_) => build(fluent::codegen_ssa_thorin_read_input_failure),
             thorin::Error::ParseFileKind(_) => {
-                build(msg!("failed to parse input file kind"))
+                build(fluent::codegen_ssa_thorin_parse_input_file_kind)
             }
             thorin::Error::ParseObjectFile(_) => {
-                build(msg!("failed to parse input object file"))
+                build(fluent::codegen_ssa_thorin_parse_input_object_file)
             }
             thorin::Error::ParseArchiveFile(_) => {
-                build(msg!("failed to parse input archive file"))
+                build(fluent::codegen_ssa_thorin_parse_input_archive_file)
             }
             thorin::Error::ParseArchiveMember(_) => {
-                build(msg!("failed to parse archive member"))
+                build(fluent::codegen_ssa_thorin_parse_archive_member)
             }
-            thorin::Error::InvalidInputKind => build(msg!("input is not an archive or elf object")),
-            thorin::Error::DecompressData(_) => build(msg!("failed to decompress compressed section")),
+            thorin::Error::InvalidInputKind => build(fluent::codegen_ssa_thorin_invalid_input_kind),
+            thorin::Error::DecompressData(_) => build(fluent::codegen_ssa_thorin_decompress_data),
             thorin::Error::NamelessSection(_, offset) => {
-                build(msg!("section without name at offset {$offset}"))
+                build(fluent::codegen_ssa_thorin_section_without_name)
                     .with_arg("offset", format!("0x{offset:08x}"))
             }
             thorin::Error::RelocationWithInvalidSymbol(section, offset) => {
-                build(msg!("relocation with invalid symbol for section `{$section}` at offset {$offset}"))
+                build(fluent::codegen_ssa_thorin_relocation_with_invalid_symbol)
                     .with_arg("section", section)
                     .with_arg("offset", format!("0x{offset:08x}"))
             }
             thorin::Error::MultipleRelocations(section, offset) => {
-                build(msg!("multiple relocations for section `{$section}` at offset {$offset}"))
+                build(fluent::codegen_ssa_thorin_multiple_relocations)
                     .with_arg("section", section)
                     .with_arg("offset", format!("0x{offset:08x}"))
             }
             thorin::Error::UnsupportedRelocation(section, offset) => {
-                build(msg!("unsupported relocation for section {$section} at offset {$offset}"))
+                build(fluent::codegen_ssa_thorin_unsupported_relocation)
                     .with_arg("section", section)
                     .with_arg("offset", format!("0x{offset:08x}"))
             }
-            thorin::Error::MissingDwoName(id) => build(msg!("missing path attribute to DWARF object ({$id})"))
+            thorin::Error::MissingDwoName(id) => build(fluent::codegen_ssa_thorin_missing_dwo_name)
                 .with_arg("id", format!("0x{id:08x}")),
             thorin::Error::NoCompilationUnits => {
-                build(msg!("input object has no compilation units"))
+                build(fluent::codegen_ssa_thorin_no_compilation_units)
             }
-            thorin::Error::NoDie => build(msg!("no top-level debugging information entry in compilation/type unit")),
+            thorin::Error::NoDie => build(fluent::codegen_ssa_thorin_no_die),
             thorin::Error::TopLevelDieNotUnit => {
-                build(msg!("top-level debugging information entry is not a compilation/type unit"))
+                build(fluent::codegen_ssa_thorin_top_level_die_not_unit)
             }
             thorin::Error::MissingRequiredSection(section) => {
-                build(msg!("input object missing required section `{$section}`"))
+                build(fluent::codegen_ssa_thorin_missing_required_section)
                     .with_arg("section", section)
             }
             thorin::Error::ParseUnitAbbreviations(_) => {
-                build(msg!("failed to parse unit abbreviations"))
+                build(fluent::codegen_ssa_thorin_parse_unit_abbreviations)
             }
             thorin::Error::ParseUnitAttribute(_) => {
-                build(msg!("failed to parse unit attribute"))
+                build(fluent::codegen_ssa_thorin_parse_unit_attribute)
             }
             thorin::Error::ParseUnitHeader(_) => {
-                build(msg!("failed to parse unit header"))
+                build(fluent::codegen_ssa_thorin_parse_unit_header)
             }
-            thorin::Error::ParseUnit(_) => build(msg!("failed to parse unit")),
+            thorin::Error::ParseUnit(_) => build(fluent::codegen_ssa_thorin_parse_unit),
             thorin::Error::IncompatibleIndexVersion(section, format, actual) => {
-                build(msg!("incompatible `{$section}` index version: found version {$actual}, expected version {$format}"))
+                build(fluent::codegen_ssa_thorin_incompatible_index_version)
                     .with_arg("section", section)
                     .with_arg("actual", actual)
                     .with_arg("format", format)
             }
             thorin::Error::OffsetAtIndex(_, index) => {
-                build(msg!("read offset at index {$index} of `.debug_str_offsets.dwo` section")).with_arg("index", index)
+                build(fluent::codegen_ssa_thorin_offset_at_index).with_arg("index", index)
             }
             thorin::Error::StrAtOffset(_, offset) => {
-                build(msg!("read string at offset {$offset} of `.debug_str.dwo` section"))
+                build(fluent::codegen_ssa_thorin_str_at_offset)
                     .with_arg("offset", format!("0x{offset:08x}"))
             }
             thorin::Error::ParseIndex(_, section) => {
-                build(msg!("failed to parse `{$section}` index section")).with_arg("section", section)
+                build(fluent::codegen_ssa_thorin_parse_index).with_arg("section", section)
             }
             thorin::Error::UnitNotInIndex(unit) => {
-                build(msg!("unit {$unit} from input package is not in its index"))
+                build(fluent::codegen_ssa_thorin_unit_not_in_index)
                     .with_arg("unit", format!("0x{unit:08x}"))
             }
             thorin::Error::RowNotInIndex(_, row) => {
-                build(msg!("row {$row} found in index's hash table not present in index")).with_arg("row", row)
+                build(fluent::codegen_ssa_thorin_row_not_in_index).with_arg("row", row)
             }
-            thorin::Error::SectionNotInRow => build(msg!("section not found in unit's row in index")),
-            thorin::Error::EmptyUnit(unit) => build(msg!("unit {$unit} in input DWARF object with no data"))
+            thorin::Error::SectionNotInRow => build(fluent::codegen_ssa_thorin_section_not_in_row),
+            thorin::Error::EmptyUnit(unit) => build(fluent::codegen_ssa_thorin_empty_unit)
                 .with_arg("unit", format!("0x{unit:08x}")),
             thorin::Error::MultipleDebugInfoSection => {
-                build(msg!("multiple `.debug_info.dwo` sections"))
+                build(fluent::codegen_ssa_thorin_multiple_debug_info_section)
             }
             thorin::Error::MultipleDebugTypesSection => {
-                build(msg!("multiple `.debug_types.dwo` sections in a package"))
+                build(fluent::codegen_ssa_thorin_multiple_debug_types_section)
             }
-            thorin::Error::NotSplitUnit => build(msg!("regular compilation unit in object (missing dwo identifier)")),
-            thorin::Error::DuplicateUnit(unit) => build(msg!("duplicate split compilation unit ({$unit})"))
+            thorin::Error::NotSplitUnit => build(fluent::codegen_ssa_thorin_not_split_unit),
+            thorin::Error::DuplicateUnit(unit) => build(fluent::codegen_ssa_thorin_duplicate_unit)
                 .with_arg("unit", format!("0x{unit:08x}")),
             thorin::Error::MissingReferencedUnit(unit) => {
-                build(msg!("unit {$unit} referenced by executable was not found"))
+                build(fluent::codegen_ssa_thorin_missing_referenced_unit)
                     .with_arg("unit", format!("0x{unit:08x}"))
             }
             thorin::Error::NoOutputObjectCreated => {
-                build(msg!("no output object was created from inputs"))
+                build(fluent::codegen_ssa_thorin_not_output_object_created)
             }
             thorin::Error::MixedInputEncodings => {
-                build(msg!("input objects have mixed encodings"))
+                build(fluent::codegen_ssa_thorin_mixed_input_encodings)
             }
             thorin::Error::Io(e) => {
-                build(msg!("{$error}")).with_arg("error", format!("{e}"))
+                build(fluent::codegen_ssa_thorin_io).with_arg("error", format!("{e}"))
             }
             thorin::Error::ObjectRead(e) => {
-                build(msg!("{$error}")).with_arg("error", format!("{e}"))
+                build(fluent::codegen_ssa_thorin_object_read).with_arg("error", format!("{e}"))
             }
             thorin::Error::ObjectWrite(e) => {
-                build(msg!("{$error}")).with_arg("error", format!("{e}"))
+                build(fluent::codegen_ssa_thorin_object_write).with_arg("error", format!("{e}"))
             }
             thorin::Error::GimliRead(e) => {
-                build(msg!("{$error}")).with_arg("error", format!("{e}"))
+                build(fluent::codegen_ssa_thorin_gimli_read).with_arg("error", format!("{e}"))
             }
             thorin::Error::GimliWrite(e) => {
-                build(msg!("{$error}")).with_arg("error", format!("{e}"))
+                build(fluent::codegen_ssa_thorin_gimli_write).with_arg("error", format!("{e}"))
             }
             _ => unimplemented!("Untranslated thorin error"),
         }
     }
 }
 
-pub(crate) struct LinkingFailed<'a> {
-    pub linker_path: &'a Path,
+pub struct LinkingFailed<'a> {
+    pub linker_path: &'a PathBuf,
     pub exit_status: ExitStatus,
-    pub command: Command,
+    pub command: &'a Command,
     pub escaped_output: String,
-    pub verbose: bool,
-    pub sysroot_dir: PathBuf,
 }
 
 impl<G: EmissionGuarantee> Diagnostic<'_, G> for LinkingFailed<'_> {
-    fn into_diag(mut self, dcx: DiagCtxtHandle<'_>, level: Level) -> Diag<'_, G> {
-        let mut diag =
-            Diag::new(dcx, level, msg!("linking with `{$linker_path}` failed: {$exit_status}"));
+    fn into_diag(self, dcx: DiagCtxtHandle<'_>, level: Level) -> Diag<'_, G> {
+        let mut diag = Diag::new(dcx, level, fluent::codegen_ssa_linking_failed);
         diag.arg("linker_path", format!("{}", self.linker_path.display()));
         diag.arg("exit_status", format!("{}", self.exit_status));
 
         let contains_undefined_ref = self.escaped_output.contains("undefined reference to");
 
-        if self.verbose {
-            diag.note(format!("{:?}", self.command));
-        } else {
-            self.command.env_clear();
-
-            enum ArgGroup {
-                Regular(OsString),
-                Objects(usize),
-                Rlibs(PathBuf, Vec<OsString>),
-            }
-
-            // Omit rust object files and fold rlibs in the error by default to make linker errors a
-            // bit less verbose.
-            let orig_args = self.command.take_args();
-            let mut args: Vec<ArgGroup> = vec![];
-            for arg in orig_args {
-                if arg.as_encoded_bytes().ends_with(b".rcgu.o") {
-                    if let Some(ArgGroup::Objects(n)) = args.last_mut() {
-                        *n += 1;
-                    } else {
-                        args.push(ArgGroup::Objects(1));
-                    }
-                } else if arg.as_encoded_bytes().ends_with(b".rlib") {
-                    let rlib_path = Path::new(&arg);
-                    let dir = rlib_path.parent().unwrap();
-                    let filename = rlib_path.file_stem().unwrap().to_owned();
-                    if let Some(ArgGroup::Rlibs(parent, rlibs)) = args.last_mut() {
-                        if parent == dir {
-                            rlibs.push(filename);
-                        } else {
-                            args.push(ArgGroup::Rlibs(dir.to_owned(), vec![filename]));
-                        }
-                    } else {
-                        args.push(ArgGroup::Rlibs(dir.to_owned(), vec![filename]));
-                    }
-                } else {
-                    args.push(ArgGroup::Regular(arg));
-                }
-            }
-            let crate_hash = regex::bytes::Regex::new(r"-[0-9a-f]+").unwrap();
-            self.command.args(args.into_iter().map(|arg_group| {
-                match arg_group {
-                    // SAFETY: we are only matching on ASCII, not any surrogate pairs, so any replacements we do will still be valid.
-                    ArgGroup::Regular(arg) => unsafe {
-                        use bstr::ByteSlice;
-                        OsString::from_encoded_bytes_unchecked(
-                            arg.as_encoded_bytes().replace(
-                                self.sysroot_dir.as_os_str().as_encoded_bytes(),
-                                b"<sysroot>",
-                            ),
-                        )
-                    },
-                    ArgGroup::Objects(n) => OsString::from(format!("<{n} object files omitted>")),
-                    ArgGroup::Rlibs(mut dir, rlibs) => {
-                        let is_sysroot_dir = match dir.strip_prefix(&self.sysroot_dir) {
-                            Ok(short) => {
-                                dir = Path::new("<sysroot>").join(short);
-                                true
-                            }
-                            Err(_) => false,
-                        };
-                        let mut arg = dir.into_os_string();
-                        arg.push("/");
-                        let needs_braces = rlibs.len() >= 2;
-                        if needs_braces {
-                            arg.push("{");
-                        }
-                        let mut first = true;
-                        for mut rlib in rlibs {
-                            if !first {
-                                arg.push(",");
-                            }
-                            first = false;
-                            if is_sysroot_dir {
-                                // SAFETY: Regex works one byte at a type, and our regex will not match surrogate pairs (because it only matches ascii).
-                                rlib = unsafe {
-                                    OsString::from_encoded_bytes_unchecked(
-                                        crate_hash
-                                            .replace(rlib.as_encoded_bytes(), b"-*")
-                                            .into_owned(),
-                                    )
-                                };
-                            }
-                            arg.push(rlib);
-                        }
-                        if needs_braces {
-                            arg.push("}");
-                        }
-                        arg.push(".rlib");
-                        arg
-                    }
-                }
-            }));
-
-            diag.note(format!("{:?}", self.command).trim_start_matches("env -i").to_owned());
-            diag.note("some arguments are omitted. use `--verbose` to show all linker arguments");
-        }
-
-        diag.note(self.escaped_output);
+        diag.note(format!("{:?}", self.command)).note(self.escaped_output);
 
         // Trying to match an error from OS linkers
         // which by now we have no way to translate.
         if contains_undefined_ref {
-            diag.note(msg!("some `extern` functions couldn't be found; some native libraries may need to be installed or have their path specified"))
-                .note(msg!("use the `-l` flag to specify native libraries to link"));
+            diag.note(fluent::codegen_ssa_extern_funcs_not_found)
+                .note(fluent::codegen_ssa_specify_libraries_to_link);
 
             if rustc_session::utils::was_invoked_from_cargo() {
-                diag.note(msg!("use the `cargo:rustc-link-lib` directive to specify the native libraries to link with Cargo (see https://doc.rust-lang.org/cargo/reference/build-scripts.html#rustc-link-lib)"));
+                diag.note(fluent::codegen_ssa_use_cargo_directive);
             }
         }
         diag
@@ -471,235 +375,253 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for LinkingFailed<'_> {
 }
 
 #[derive(Diagnostic)]
-#[diag("`link.exe` returned an unexpected error")]
-pub(crate) struct LinkExeUnexpectedError;
-
-pub(crate) struct LinkExeStatusStackBufferOverrun;
-
-impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for LinkExeStatusStackBufferOverrun {
-    fn into_diag(self, dcx: rustc_errors::DiagCtxtHandle<'a>, level: Level) -> Diag<'a, G> {
-        let mut diag = Diag::new(dcx, level, msg!("0xc0000409 is `STATUS_STACK_BUFFER_OVERRUN`"));
-        diag.note(msg!(
-            "this may have been caused by a program abort and not a stack buffer overrun"
-        ));
-        diag.note(msg!("consider checking the Application Event Log for Windows Error Reporting events to see the fail fast error code"));
-        diag
-    }
-}
+#[diag(codegen_ssa_link_exe_unexpected_error)]
+pub struct LinkExeUnexpectedError;
 
 #[derive(Diagnostic)]
-#[diag("the Visual Studio build tools may need to be repaired using the Visual Studio installer")]
-pub(crate) struct RepairVSBuildTools;
+#[diag(codegen_ssa_repair_vs_build_tools)]
+pub struct RepairVSBuildTools;
 
 #[derive(Diagnostic)]
-#[diag("or a necessary component may be missing from the \"C++ build tools\" workload")]
-pub(crate) struct MissingCppBuildToolComponent;
+#[diag(codegen_ssa_missing_cpp_build_tool_component)]
+pub struct MissingCppBuildToolComponent;
 
 #[derive(Diagnostic)]
-#[diag("in the Visual Studio installer, ensure the \"C++ build tools\" workload is selected")]
-pub(crate) struct SelectCppBuildToolWorkload;
+#[diag(codegen_ssa_select_cpp_build_tool_workload)]
+pub struct SelectCppBuildToolWorkload;
 
 #[derive(Diagnostic)]
-#[diag("you may need to install Visual Studio build tools with the \"C++ build tools\" workload")]
-pub(crate) struct VisualStudioNotInstalled;
+#[diag(codegen_ssa_visual_studio_not_installed)]
+pub struct VisualStudioNotInstalled;
 
 #[derive(Diagnostic)]
-#[diag("linker `{$linker_path}` not found")]
-#[note("{$error}")]
-pub(crate) struct LinkerNotFound {
+#[diag(codegen_ssa_linker_not_found)]
+#[note]
+pub struct LinkerNotFound {
     pub linker_path: PathBuf,
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("could not exec the linker `{$linker_path}`")]
-#[note("{$error}")]
-#[note("{$command_formatted}")]
-pub(crate) struct UnableToExeLinker {
+#[diag(codegen_ssa_unable_to_exe_linker)]
+#[note]
+#[note(codegen_ssa_command_note)]
+pub struct UnableToExeLinker {
     pub linker_path: PathBuf,
     pub error: Error,
     pub command_formatted: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("the msvc targets depend on the msvc linker but `link.exe` was not found")]
-pub(crate) struct MsvcMissingLinker;
+#[diag(codegen_ssa_msvc_missing_linker)]
+pub struct MsvcMissingLinker;
 
 #[derive(Diagnostic)]
-#[diag(
-    "the self-contained linker was requested, but it wasn't found in the target's sysroot, or in rustc's sysroot"
-)]
-pub(crate) struct SelfContainedLinkerMissing;
+#[diag(codegen_ssa_self_contained_linker_missing)]
+pub struct SelfContainedLinkerMissing;
 
 #[derive(Diagnostic)]
-#[diag(
-    "please ensure that Visual Studio 2017 or later, or Build Tools for Visual Studio were installed with the Visual C++ option"
-)]
-pub(crate) struct CheckInstalledVisualStudio;
+#[diag(codegen_ssa_check_installed_visual_studio)]
+pub struct CheckInstalledVisualStudio;
 
 #[derive(Diagnostic)]
-#[diag("VS Code is a different product, and is not sufficient")]
-pub(crate) struct InsufficientVSCodeProduct;
+#[diag(codegen_ssa_insufficient_vs_code_product)]
+pub struct InsufficientVSCodeProduct;
 
 #[derive(Diagnostic)]
-#[diag("target requires explicitly specifying a cpu with `-C target-cpu`")]
-pub(crate) struct CpuRequired;
-
-#[derive(Diagnostic)]
-#[diag("processing debug info with `dsymutil` failed: {$status}")]
-#[note("{$output}")]
-pub(crate) struct ProcessingDymutilFailed {
+#[diag(codegen_ssa_processing_dymutil_failed)]
+#[note]
+pub struct ProcessingDymutilFailed {
     pub status: ExitStatus,
     pub output: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("unable to run `dsymutil`: {$error}")]
-pub(crate) struct UnableToRunDsymutil {
+#[diag(codegen_ssa_unable_to_run_dsymutil)]
+pub struct UnableToRunDsymutil {
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("stripping debug info with `{$util}` failed: {$status}")]
-#[note("{$output}")]
-pub(crate) struct StrippingDebugInfoFailed<'a> {
+#[diag(codegen_ssa_stripping_debug_info_failed)]
+#[note]
+pub struct StrippingDebugInfoFailed<'a> {
     pub util: &'a str,
     pub status: ExitStatus,
     pub output: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("unable to run `{$util}`: {$error}")]
-pub(crate) struct UnableToRun<'a> {
+#[diag(codegen_ssa_unable_to_run)]
+pub struct UnableToRun<'a> {
     pub util: &'a str,
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("couldn't extract file stem from specified linker")]
-pub(crate) struct LinkerFileStem;
+#[diag(codegen_ssa_linker_file_stem)]
+pub struct LinkerFileStem;
 
 #[derive(Diagnostic)]
-#[diag(
-    "link against the following native artifacts when linking against this static library. The order and any duplication can be significant on some platforms"
-)]
-pub(crate) struct StaticLibraryNativeArtifacts;
+#[diag(codegen_ssa_static_library_native_artifacts)]
+pub struct StaticLibraryNativeArtifacts;
 
 #[derive(Diagnostic)]
-#[diag(
-    "native artifacts to link against have been written to {$path}. The order and any duplication can be significant on some platforms"
-)]
-pub(crate) struct StaticLibraryNativeArtifactsToFile<'a> {
+#[diag(codegen_ssa_static_library_native_artifacts_to_file)]
+pub struct StaticLibraryNativeArtifactsToFile<'a> {
     pub path: &'a Path,
 }
 
 #[derive(Diagnostic)]
-#[diag("can only use link script when linking with GNU-like linker")]
-pub(crate) struct LinkScriptUnavailable;
+#[diag(codegen_ssa_link_script_unavailable)]
+pub struct LinkScriptUnavailable;
 
 #[derive(Diagnostic)]
-#[diag("failed to write link script to {$path}: {$error}")]
-pub(crate) struct LinkScriptWriteFailure {
+#[diag(codegen_ssa_link_script_write_failure)]
+pub struct LinkScriptWriteFailure {
     pub path: PathBuf,
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("failed to write {$path}: {$error}")]
-pub(crate) struct FailedToWrite {
+#[diag(codegen_ssa_failed_to_write)]
+pub struct FailedToWrite {
     pub path: PathBuf,
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("unable to write debugger visualizer file `{$path}`: {$error}")]
-pub(crate) struct UnableToWriteDebuggerVisualizer {
+#[diag(codegen_ssa_unable_to_write_debugger_visualizer)]
+pub struct UnableToWriteDebuggerVisualizer {
     pub path: PathBuf,
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("failed to build archive from rlib at `{$path}`: {$error}")]
-pub(crate) struct RlibArchiveBuildFailure {
+#[diag(codegen_ssa_rlib_archive_build_failure)]
+pub struct RlibArchiveBuildFailure {
     pub path: PathBuf,
     pub error: Error,
 }
 
 #[derive(Diagnostic)]
-// Public for ArchiveBuilderBuilder::extract_bundled_libs
 pub enum ExtractBundledLibsError<'a> {
-    #[diag("failed to open file '{$rlib}': {$error}")]
+    #[diag(codegen_ssa_extract_bundled_libs_open_file)]
     OpenFile { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag("failed to mmap file '{$rlib}': {$error}")]
+    #[diag(codegen_ssa_extract_bundled_libs_mmap_file)]
     MmapFile { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag("failed to parse archive '{$rlib}': {$error}")]
+    #[diag(codegen_ssa_extract_bundled_libs_parse_archive)]
     ParseArchive { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag("failed to read entry '{$rlib}': {$error}")]
+    #[diag(codegen_ssa_extract_bundled_libs_read_entry)]
     ReadEntry { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag("failed to get data from archive member '{$rlib}': {$error}")]
+    #[diag(codegen_ssa_extract_bundled_libs_archive_member)]
     ArchiveMember { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag("failed to convert name '{$rlib}': {$error}")]
+    #[diag(codegen_ssa_extract_bundled_libs_convert_name)]
     ConvertName { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag("failed to write file '{$rlib}': {$error}")]
+    #[diag(codegen_ssa_extract_bundled_libs_write_file)]
     WriteFile { rlib: &'a Path, error: Box<dyn std::error::Error> },
 
-    #[diag("failed to write file '{$rlib}': {$error}")]
+    #[diag(codegen_ssa_extract_bundled_libs_write_file)]
     ExtractSection { rlib: &'a Path, error: Box<dyn std::error::Error> },
 }
 
 #[derive(Diagnostic)]
-#[diag("failed to read file: {$message}")]
-pub(crate) struct ReadFileError {
+#[diag(codegen_ssa_unsupported_arch)]
+pub struct UnsupportedArch<'a> {
+    pub arch: &'a str,
+    pub os: &'a str,
+}
+
+#[derive(Diagnostic)]
+pub enum AppleSdkRootError<'a> {
+    #[diag(codegen_ssa_apple_sdk_error_sdk_path)]
+    SdkPath { sdk_name: &'a str, error: Error },
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_read_file)]
+pub struct ReadFileError {
     pub message: std::io::Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("option `-C link-self-contained` is not supported on this target")]
-pub(crate) struct UnsupportedLinkSelfContained;
+#[diag(codegen_ssa_unsupported_link_self_contained)]
+pub struct UnsupportedLinkSelfContained;
 
 #[derive(Diagnostic)]
-#[diag("failed to build archive at `{$path}`: {$error}")]
-pub(crate) struct ArchiveBuildFailure {
+#[diag(codegen_ssa_archive_build_failure)]
+// Public for rustc_codegen_llvm::back::archive
+pub struct ArchiveBuildFailure {
     pub path: PathBuf,
     pub error: std::io::Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("don't know how to build archive of type: {$kind}")]
-pub(crate) struct UnknownArchiveKind<'a> {
+#[diag(codegen_ssa_unknown_archive_kind)]
+// Public for rustc_codegen_llvm::back::archive
+pub struct UnknownArchiveKind<'a> {
     pub kind: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("linking static libraries is not supported for BPF")]
-pub(crate) struct BpfStaticlibNotSupported;
-
-#[derive(Diagnostic)]
-#[diag("entry symbol `main` declared multiple times")]
-#[help(
-    "did you use `#[no_mangle]` on `fn main`? Use `#![no_main]` to suppress the usual Rust-generated entry point"
-)]
-pub(crate) struct MultipleMainFunctions {
+#[diag(codegen_ssa_expected_used_symbol)]
+pub struct ExpectedUsedSymbol {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("could not evaluate shuffle_indices at compile time")]
-pub(crate) struct ShuffleIndicesEvaluation {
+#[diag(codegen_ssa_multiple_main_functions)]
+#[help]
+pub struct MultipleMainFunctions {
     #[primary_span]
     pub span: Span,
 }
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_metadata_object_file_write)]
+pub struct MetadataObjectFileWrite {
+    pub error: Error,
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_invalid_windows_subsystem)]
+pub struct InvalidWindowsSubsystem {
+    pub subsystem: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_shuffle_indices_evaluation)]
+pub struct ShuffleIndicesEvaluation {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_missing_memory_ordering)]
+pub struct MissingMemoryOrdering;
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_unknown_atomic_ordering)]
+pub struct UnknownAtomicOrdering;
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_atomic_compare_exchange)]
+pub struct AtomicCompareExchange;
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_unknown_atomic_operation)]
+pub struct UnknownAtomicOperation;
 
 #[derive(Diagnostic)]
 pub enum InvalidMonomorphization<'tcx> {
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected basic integer type, found `{$ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_basic_integer_type, code = E0511)]
     BasicIntegerType {
         #[primary_span]
         span: Span,
@@ -707,15 +629,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected basic integer or pointer type, found `{$ty}`", code = E0511)]
-    BasicIntegerOrPtrType {
-        #[primary_span]
-        span: Span,
-        name: Symbol,
-        ty: Ty<'tcx>,
-    },
-
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected basic float type, found `{$ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_basic_float_type, code = E0511)]
     BasicFloatType {
         #[primary_span]
         span: Span,
@@ -723,14 +637,14 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `float_to_int_unchecked` intrinsic: expected basic float type, found `{$ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_float_to_int_unchecked, code = E0511)]
     FloatToIntUnchecked {
         #[primary_span]
         span: Span,
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: unsupported element type `{$f_ty}` of floating-point vector `{$in_ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_floating_point_vector, code = E0511)]
     FloatingPointVector {
         #[primary_span]
         span: Span,
@@ -739,7 +653,7 @@ pub enum InvalidMonomorphization<'tcx> {
         in_ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: `{$in_ty}` is not a floating-point type", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_floating_point_type, code = E0511)]
     FloatingPointType {
         #[primary_span]
         span: Span,
@@ -747,14 +661,14 @@ pub enum InvalidMonomorphization<'tcx> {
         in_ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: unrecognized intrinsic `{$name}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_unrecognized_intrinsic, code = E0511)]
     UnrecognizedIntrinsic {
         #[primary_span]
         span: Span,
         name: Symbol,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected SIMD argument type, found non-SIMD `{$ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_argument, code = E0511)]
     SimdArgument {
         #[primary_span]
         span: Span,
@@ -762,7 +676,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected SIMD input type, found non-SIMD `{$ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_input, code = E0511)]
     SimdInput {
         #[primary_span]
         span: Span,
@@ -770,7 +684,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected SIMD first type, found non-SIMD `{$ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_first, code = E0511)]
     SimdFirst {
         #[primary_span]
         span: Span,
@@ -778,7 +692,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected SIMD second type, found non-SIMD `{$ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_second, code = E0511)]
     SimdSecond {
         #[primary_span]
         span: Span,
@@ -786,7 +700,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected SIMD third type, found non-SIMD `{$ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_third, code = E0511)]
     SimdThird {
         #[primary_span]
         span: Span,
@@ -794,7 +708,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected SIMD return type, found non-SIMD `{$ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_return, code = E0511)]
     SimdReturn {
         #[primary_span]
         span: Span,
@@ -802,7 +716,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: invalid bitmask `{$mask_ty}`, expected `u{$expected_int_bits}` or `[u8; {$expected_bytes}]`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_invalid_bitmask, code = E0511)]
     InvalidBitmask {
         #[primary_span]
         span: Span,
@@ -812,7 +726,7 @@ pub enum InvalidMonomorphization<'tcx> {
         expected_bytes: u64,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected return type with length {$in_len} (same as input type `{$in_ty}`), found `{$ret_ty}` with length {$out_len}", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_return_length_input_type, code = E0511)]
     ReturnLengthInputType {
         #[primary_span]
         span: Span,
@@ -823,7 +737,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_len: u64,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected second argument with length {$in_len} (same as input type `{$in_ty}`), found `{$arg_ty}` with length {$out_len}", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_second_argument_length, code = E0511)]
     SecondArgumentLength {
         #[primary_span]
         span: Span,
@@ -834,7 +748,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_len: u64,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected third argument with length {$in_len} (same as input type `{$in_ty}`), found `{$arg_ty}` with length {$out_len}", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_third_argument_length, code = E0511)]
     ThirdArgumentLength {
         #[primary_span]
         span: Span,
@@ -845,7 +759,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_len: u64,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected return type with integer elements, found `{$ret_ty}` with non-integer `{$out_ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_return_integer_type, code = E0511)]
     ReturnIntegerType {
         #[primary_span]
         span: Span,
@@ -854,7 +768,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: simd_shuffle index must be a SIMD vector of `u32`, got `{$ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_shuffle, code = E0511)]
     SimdShuffle {
         #[primary_span]
         span: Span,
@@ -862,7 +776,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected return type of length {$in_len}, found `{$ret_ty}` with length {$out_len}", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_return_length, code = E0511)]
     ReturnLength {
         #[primary_span]
         span: Span,
@@ -872,7 +786,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_len: u64,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected return element type `{$in_elem}` (element of input `{$in_ty}`), found `{$ret_ty}` with element type `{$out_ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_return_element, code = E0511)]
     ReturnElement {
         #[primary_span]
         span: Span,
@@ -883,7 +797,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: SIMD index #{$arg_idx} is out of bounds (limit {$total_len})", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_simd_index_out_of_bounds, code = E0511)]
     SimdIndexOutOfBounds {
         #[primary_span]
         span: Span,
@@ -892,7 +806,7 @@ pub enum InvalidMonomorphization<'tcx> {
         total_len: u128,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected inserted type `{$in_elem}` (element of input `{$in_ty}`), found `{$out_ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_inserted_type, code = E0511)]
     InsertedType {
         #[primary_span]
         span: Span,
@@ -902,7 +816,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected return type `{$in_elem}` (element of input `{$in_ty}`), found `{$ret_ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_return_type, code = E0511)]
     ReturnType {
         #[primary_span]
         span: Span,
@@ -912,7 +826,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ret_ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected return type `{$in_ty}`, found `{$ret_ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_expected_return_type, code = E0511)]
     ExpectedReturnType {
         #[primary_span]
         span: Span,
@@ -921,7 +835,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ret_ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: mismatched lengths: mask length `{$m_len}` != other vector length `{$v_len}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_mismatched_lengths, code = E0511)]
     MismatchedLengths {
         #[primary_span]
         span: Span,
@@ -930,15 +844,24 @@ pub enum InvalidMonomorphization<'tcx> {
         v_len: u64,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected mask element type to be an integer, found `{$ty}`", code = E0511)]
-    MaskWrongElementType {
+    #[diag(codegen_ssa_invalid_monomorphization_mask_type, code = E0511)]
+    MaskType {
         #[primary_span]
         span: Span,
         name: Symbol,
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: cannot return `{$ret_ty}`, expected `u{$expected_int_bits}` or `[u8; {$expected_bytes}]`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_vector_argument, code = E0511)]
+    VectorArgument {
+        #[primary_span]
+        span: Span,
+        name: Symbol,
+        in_ty: Ty<'tcx>,
+        in_elem: Ty<'tcx>,
+    },
+
+    #[diag(codegen_ssa_invalid_monomorphization_cannot_return, code = E0511)]
     CannotReturn {
         #[primary_span]
         span: Span,
@@ -948,7 +871,7 @@ pub enum InvalidMonomorphization<'tcx> {
         expected_bytes: u64,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected element type `{$expected_element}` of second argument `{$second_arg}` to be a pointer to the element type `{$in_elem}` of the first argument `{$in_ty}`, found `{$expected_element}` != `{$mutability} {$in_elem}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_expected_element_type, code = E0511)]
     ExpectedElementType {
         #[primary_span]
         span: Span,
@@ -960,7 +883,16 @@ pub enum InvalidMonomorphization<'tcx> {
         mutability: ExpectedPointerMutability,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: unsupported {$symbol} from `{$in_ty}` with element `{$in_elem}` of size `{$size}` to `{$ret_ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_third_arg_element_type, code = E0511)]
+    ThirdArgElementType {
+        #[primary_span]
+        span: Span,
+        name: Symbol,
+        expected_element: Ty<'tcx>,
+        third_arg: Ty<'tcx>,
+    },
+
+    #[diag(codegen_ssa_invalid_monomorphization_unsupported_symbol_of_size, code = E0511)]
     UnsupportedSymbolOfSize {
         #[primary_span]
         span: Span,
@@ -972,7 +904,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ret_ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: unsupported {$symbol} from `{$in_ty}` with element `{$in_elem}` to `{$ret_ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_unsupported_symbol, code = E0511)]
     UnsupportedSymbol {
         #[primary_span]
         span: Span,
@@ -983,15 +915,15 @@ pub enum InvalidMonomorphization<'tcx> {
         ret_ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: cannot cast wide pointer `{$ty}`", code = E0511)]
-    CastWidePointer {
+    #[diag(codegen_ssa_invalid_monomorphization_cast_fat_pointer, code = E0511)]
+    CastFatPointer {
         #[primary_span]
         span: Span,
         name: Symbol,
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected pointer, got `{$ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_expected_pointer, code = E0511)]
     ExpectedPointer {
         #[primary_span]
         span: Span,
@@ -999,7 +931,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected `usize`, got `{$ty}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_expected_usize, code = E0511)]
     ExpectedUsize {
         #[primary_span]
         span: Span,
@@ -1007,7 +939,7 @@ pub enum InvalidMonomorphization<'tcx> {
         ty: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: unsupported cast from `{$in_ty}` with element `{$in_elem}` to `{$ret_ty}` with element `{$out_elem}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_unsupported_cast, code = E0511)]
     UnsupportedCast {
         #[primary_span]
         span: Span,
@@ -1018,7 +950,7 @@ pub enum InvalidMonomorphization<'tcx> {
         out_elem: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: unsupported operation on `{$in_ty}` with element `{$in_elem}`", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_unsupported_operation, code = E0511)]
     UnsupportedOperation {
         #[primary_span]
         span: Span,
@@ -1027,21 +959,13 @@ pub enum InvalidMonomorphization<'tcx> {
         in_elem: Ty<'tcx>,
     },
 
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected element type `{$expected_element}` of vector type `{$vector_type}` to be a signed or unsigned integer type", code = E0511)]
+    #[diag(codegen_ssa_invalid_monomorphization_expected_vector_element_type, code = E0511)]
     ExpectedVectorElementType {
         #[primary_span]
         span: Span,
         name: Symbol,
         expected_element: Ty<'tcx>,
         vector_type: Ty<'tcx>,
-    },
-
-    #[diag("invalid monomorphization of `{$name}` intrinsic: expected non-scalable type, found scalable type `{$ty}`", code = E0511)]
-    NonScalableType {
-        #[primary_span]
-        span: Span,
-        name: Symbol,
-        ty: Ty<'tcx>,
     },
 }
 
@@ -1051,7 +975,7 @@ pub enum ExpectedPointerMutability {
 }
 
 impl IntoDiagArg for ExpectedPointerMutability {
-    fn into_diag_arg(self, _: &mut Option<std::path::PathBuf>) -> DiagArgValue {
+    fn into_diag_arg(self) -> DiagArgValue {
         match self {
             ExpectedPointerMutability::Mut => DiagArgValue::Str(Cow::Borrowed("*mut")),
             ExpectedPointerMutability::Not => DiagArgValue::Str(Cow::Borrowed("*_")),
@@ -1060,26 +984,41 @@ impl IntoDiagArg for ExpectedPointerMutability {
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[target_feature(..)]` cannot be applied to safe trait method")]
-pub(crate) struct TargetFeatureSafeTrait {
+#[diag(codegen_ssa_invalid_no_sanitize)]
+#[note]
+pub struct InvalidNoSanitize {
     #[primary_span]
-    #[label("cannot be applied to safe trait method")]
     pub span: Span,
-    #[label("not an `unsafe` function")]
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_invalid_link_ordinal_nargs)]
+#[note]
+pub struct InvalidLinkOrdinalNargs {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_illegal_link_ordinal_format)]
+#[note]
+pub struct InvalidLinkOrdinalFormat {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(codegen_ssa_target_feature_safe_trait)]
+pub struct TargetFeatureSafeTrait {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+    #[label(codegen_ssa_label_def)]
     pub def: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("target feature `{$feature}` cannot be enabled with `#[target_feature]`: {$reason}")]
-pub struct ForbiddenTargetFeatureAttr<'a> {
-    #[primary_span]
-    pub span: Span,
-    pub feature: &'a str,
-    pub reason: &'a str,
-}
-
-#[derive(Diagnostic)]
-#[diag("failed to get layout for {$ty}: {$err}")]
+#[diag(codegen_ssa_failed_to_get_layout)]
 pub struct FailedToGetLayout<'tcx> {
     #[primary_span]
     pub span: Span,
@@ -1088,11 +1027,7 @@ pub struct FailedToGetLayout<'tcx> {
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "dlltool could not create import library with {$dlltool_path} {$dlltool_args}:
-{$stdout}
-{$stderr}"
-)]
+#[diag(codegen_ssa_dlltool_fail_import_library)]
 pub(crate) struct DlltoolFailImportLibrary<'a> {
     pub dlltool_path: Cow<'a, str>,
     pub dlltool_args: String,
@@ -1101,170 +1036,34 @@ pub(crate) struct DlltoolFailImportLibrary<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("error writing .DEF file: {$error}")]
+#[diag(codegen_ssa_error_writing_def_file)]
 pub(crate) struct ErrorWritingDEFFile {
     pub error: std::io::Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("error calling dlltool '{$dlltool_path}': {$error}")]
+#[diag(codegen_ssa_error_calling_dlltool)]
 pub(crate) struct ErrorCallingDllTool<'a> {
     pub dlltool_path: Cow<'a, str>,
     pub error: std::io::Error,
 }
 
 #[derive(Diagnostic)]
-#[diag("failed to create remark directory: {$error}")]
-pub(crate) struct ErrorCreatingRemarkDir {
+#[diag(codegen_ssa_error_creating_remark_dir)]
+pub struct ErrorCreatingRemarkDir {
     pub error: std::io::Error,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "`compiler_builtins` cannot call functions through upstream monomorphizations; encountered invalid call from `{$caller}` to `{$callee}`"
-)]
+#[diag(codegen_ssa_compiler_builtins_cannot_call)]
 pub struct CompilerBuiltinsCannotCall {
     pub caller: String,
     pub callee: String,
-    #[primary_span]
-    pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("error creating import library for {$lib_name}: {$error}")]
+#[diag(codegen_ssa_error_creating_import_library)]
 pub(crate) struct ErrorCreatingImportLibrary<'a> {
     pub lib_name: &'a str,
     pub error: String,
 }
-
-#[derive(Diagnostic)]
-#[diag("using host's `strip` binary to cross-compile to AIX which is not guaranteed to work")]
-pub(crate) struct AixStripNotUsed;
-
-#[derive(Diagnostic, Debug)]
-pub(crate) enum XcrunError {
-    #[diag("invoking `{$command_formatted}` to find {$sdk_name}.sdk failed: {$error}")]
-    FailedInvoking { sdk_name: &'static str, command_formatted: String, error: std::io::Error },
-
-    #[diag("failed running `{$command_formatted}` to find {$sdk_name}.sdk")]
-    #[note("{$stdout}{$stderr}")]
-    Unsuccessful {
-        sdk_name: &'static str,
-        command_formatted: String,
-        stdout: String,
-        stderr: String,
-    },
-}
-
-#[derive(Diagnostic, Debug)]
-#[diag("output of `xcrun` while finding {$sdk_name}.sdk")]
-#[note("{$stderr}")]
-pub(crate) struct XcrunSdkPathWarning {
-    pub sdk_name: &'static str,
-    pub stderr: String,
-}
-
-#[derive(Diagnostic)]
-#[diag("enabling the `neon` target feature on the current target is unsound due to ABI issues")]
-pub(crate) struct Aarch64SoftfloatNeon;
-
-#[derive(Diagnostic)]
-#[diag("unknown feature specified for `-Ctarget-feature`: `{$feature}`")]
-#[note("features must begin with a `+` to enable or `-` to disable it")]
-pub(crate) struct UnknownCTargetFeaturePrefix<'a> {
-    pub feature: &'a str,
-}
-
-#[derive(Subdiagnostic)]
-pub(crate) enum PossibleFeature<'a> {
-    #[help("you might have meant: `{$rust_feature}`")]
-    Some { rust_feature: &'a str },
-    #[help("consider filing a feature request")]
-    None,
-}
-
-#[derive(Diagnostic)]
-#[diag("unknown and unstable feature specified for `-Ctarget-feature`: `{$feature}`")]
-#[note(
-    "it is still passed through to the codegen backend, but use of this feature might be unsound and the behavior of this feature can change in the future"
-)]
-pub(crate) struct UnknownCTargetFeature<'a> {
-    pub feature: &'a str,
-    #[subdiagnostic]
-    pub rust_feature: PossibleFeature<'a>,
-}
-
-#[derive(Diagnostic)]
-#[diag("unstable feature specified for `-Ctarget-feature`: `{$feature}`")]
-#[note("this feature is not stably supported; its behavior can change in the future")]
-pub(crate) struct UnstableCTargetFeature<'a> {
-    pub feature: &'a str,
-}
-
-#[derive(Diagnostic)]
-#[diag("target feature `{$feature}` cannot be {$enabled} with `-Ctarget-feature`: {$reason}")]
-#[note(
-    "this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!"
-)]
-#[note("for more information, see issue #116344 <https://github.com/rust-lang/rust/issues/116344>")]
-pub(crate) struct ForbiddenCTargetFeature<'a> {
-    pub feature: &'a str,
-    pub enabled: &'a str,
-    pub reason: &'a str,
-}
-
-pub struct TargetFeatureDisableOrEnable<'a> {
-    pub features: &'a [&'a str],
-    pub span: Option<Span>,
-    pub missing_features: Option<MissingFeatures>,
-}
-
-#[derive(Subdiagnostic)]
-#[help("add the missing features in a `target_feature` attribute")]
-pub struct MissingFeatures;
-
-impl<G: EmissionGuarantee> Diagnostic<'_, G> for TargetFeatureDisableOrEnable<'_> {
-    fn into_diag(self, dcx: DiagCtxtHandle<'_>, level: Level) -> Diag<'_, G> {
-        let mut diag = Diag::new(
-            dcx,
-            level,
-            msg!("the target features {$features} must all be either enabled or disabled together"),
-        );
-        if let Some(span) = self.span {
-            diag.span(span);
-        };
-        if let Some(missing_features) = self.missing_features {
-            diag.subdiagnostic(missing_features);
-        }
-        diag.arg("features", self.features.join(", "));
-        diag
-    }
-}
-
-#[derive(Diagnostic)]
-#[diag("the feature named `{$feature}` is not valid for this target")]
-pub(crate) struct FeatureNotValid<'a> {
-    pub feature: &'a str,
-    #[primary_span]
-    #[label("`{$feature}` is not valid for this target")]
-    pub span: Span,
-    #[help("consider removing the leading `+` in the feature name")]
-    pub plus_hint: bool,
-}
-
-#[derive(Diagnostic)]
-#[diag("lto can only be run for executables, cdylibs and static library outputs")]
-pub(crate) struct LtoDisallowed;
-
-#[derive(Diagnostic)]
-#[diag("lto cannot be used for `dylib` crate type without `-Zdylib-lto`")]
-pub(crate) struct LtoDylib;
-
-#[derive(Diagnostic)]
-#[diag("lto cannot be used for `proc-macro` crate type without `-Zdylib-lto`")]
-pub(crate) struct LtoProcMacro;
-
-#[derive(Diagnostic)]
-#[diag("cannot prefer dynamic linking when performing LTO")]
-#[note("only 'staticlib', 'bin', and 'cdylib' outputs are supported with LTO")]
-pub(crate) struct DynamicLinkingWithLTO;

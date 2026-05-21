@@ -6,7 +6,6 @@ fn main() {}
 
 type Region<'a> = impl std::fmt::Debug;
 
-#[define_opaque(Region)]
 fn region<'b>(a: &'b ()) -> Region<'b> {
     a
 }

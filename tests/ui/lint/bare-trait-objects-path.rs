@@ -1,4 +1,3 @@
-//@ edition: 2015
 #![feature(associated_type_defaults)]
 
 trait Assoc {

@@ -1,12 +1,12 @@
 //! These structs are a subset of the ones found in `rustc_errors::json`.
 
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::str::FromStr;
 
-use regex::Regex;
 use serde::Deserialize;
 
 use crate::errors::{Error, ErrorKind};
+use crate::runtest::ProcRes;
 
 #[derive(Deserialize)]
 struct Diagnostic {
@@ -36,7 +36,9 @@ struct UnusedExternNotification {
 struct DiagnosticSpan {
     file_name: String,
     line_start: usize,
+    line_end: usize,
     column_start: usize,
+    column_end: usize,
     is_primary: bool,
     label: Option<String>,
     suggested_replacement: Option<String>,
@@ -137,27 +139,44 @@ pub fn extract_rendered(output: &str) -> String {
         .collect()
 }
 
-pub fn parse_output(file_name: &str, output: &str) -> Vec<Error> {
-    let mut errors = Vec::new();
-    for line in output.lines() {
-        // Compiler can emit non-json lines in non-`--error-format=json` modes,
-        // and in some situations even in json mode.
-        match serde_json::from_str::<Diagnostic>(line) {
-            Ok(diagnostic) => push_actual_errors(&mut errors, &diagnostic, &[], file_name),
-            Err(_) => errors.push(Error {
-                line_num: None,
-                column_num: None,
-                kind: ErrorKind::Raw,
-                msg: line.to_string(),
-                require_annotation: false,
-            }),
-        }
-    }
-    errors
+pub fn parse_output(file_name: &str, output: &str, proc_res: &ProcRes) -> Vec<Error> {
+    output.lines().flat_map(|line| parse_line(file_name, line, output, proc_res)).collect()
 }
 
-fn push_actual_errors(
-    errors: &mut Vec<Error>,
+fn parse_line(file_name: &str, line: &str, output: &str, proc_res: &ProcRes) -> Vec<Error> {
+    // The compiler sometimes intermingles non-JSON stuff into the
+    // output.  This hack just skips over such lines. Yuck.
+    if line.starts_with('{') {
+        match serde_json::from_str::<Diagnostic>(line) {
+            Ok(diagnostic) => {
+                let mut expected_errors = vec![];
+                push_expected_errors(&mut expected_errors, &diagnostic, &[], file_name);
+                expected_errors
+            }
+            Err(error) => {
+                // Ignore the future compat report message - this is handled
+                // by `extract_rendered`
+                if serde_json::from_str::<FutureIncompatReport>(line).is_ok() {
+                    vec![]
+                } else {
+                    proc_res.fatal(
+                        Some(&format!(
+                            "failed to decode compiler output as json: \
+                         `{}`\nline: {}\noutput: {}",
+                            error, line, output
+                        )),
+                        || (),
+                    );
+                }
+            }
+        }
+    } else {
+        vec![]
+    }
+}
+
+fn push_expected_errors(
+    expected_errors: &mut Vec<Error>,
     diagnostic: &Diagnostic,
     default_spans: &[&DiagnosticSpan],
     file_name: &str,
@@ -169,6 +188,8 @@ fn push_actual_errors(
         .map(|span| (span.is_primary, span.first_callsite_in_file(file_name)))
         .filter(|(_, span)| Path::new(&span.file_name) == Path::new(&file_name))
         .collect();
+
+    let spans_in_this_file: Vec<_> = spans_info_in_this_file.iter().map(|(_, span)| span).collect();
 
     let primary_spans: Vec<_> = spans_info_in_this_file
         .iter()
@@ -192,58 +213,57 @@ fn push_actual_errors(
     // also ensure that `//~ ERROR E123` *always* works. The
     // assumption is that these multi-line error messages are on their
     // way out anyhow.
-    let with_code = |text| match &diagnostic.code {
-        Some(code) => format!("{text} [{}]", code.code),
-        None => format!("{text}"),
+    let with_code = |span: &DiagnosticSpan, text: &str| {
+        match diagnostic.code {
+            Some(ref code) =>
+            // FIXME(#33000) -- it'd be better to use a dedicated
+            // UI harness than to include the line/col number like
+            // this, but some current tests rely on it.
+            //
+            // Note: Do NOT include the filename. These can easily
+            // cause false matches where the expected message
+            // appears in the filename, and hence the message
+            // changes but the test still passes.
+            {
+                format!(
+                    "{}:{}: {}:{}: {} [{}]",
+                    span.line_start,
+                    span.column_start,
+                    span.line_end,
+                    span.column_end,
+                    text,
+                    code.code.clone()
+                )
+            }
+            None =>
+            // FIXME(#33000) -- it'd be better to use a dedicated UI harness
+            {
+                format!(
+                    "{}:{}: {}:{}: {}",
+                    span.line_start, span.column_start, span.line_end, span.column_end, text
+                )
+            }
+        }
     };
 
-    // Convert multi-line messages into multiple errors.
-    // We expect to replace these with something more structured anyhow.
+    // Convert multi-line messages into multiple expected
+    // errors. We expect to replace these with something
+    // more structured shortly anyhow.
     let mut message_lines = diagnostic.message.lines();
-    let kind = ErrorKind::from_compiler_str(&diagnostic.level);
-    let first_line = message_lines.next().unwrap_or(&diagnostic.message);
-    if primary_spans.is_empty() {
-        static RE: OnceLock<Regex> = OnceLock::new();
-        let re_init =
-            || Regex::new(r"aborting due to \d+ previous errors?|\d+ warnings? emitted").unwrap();
-        errors.push(Error {
-            line_num: None,
-            column_num: None,
-            kind,
-            msg: with_code(first_line),
-            require_annotation: diagnostic.level != "failure-note"
-                && !RE.get_or_init(re_init).is_match(first_line),
-        });
-    } else {
+    if let Some(first_line) = message_lines.next() {
         for span in primary_spans {
-            errors.push(Error {
-                line_num: Some(span.line_start),
-                column_num: Some(span.column_start),
-                kind,
-                msg: with_code(first_line),
-                require_annotation: true,
-            });
+            let msg = with_code(span, first_line);
+            let kind = ErrorKind::from_str(&diagnostic.level).ok();
+            expected_errors.push(Error { line_num: span.line_start, kind, msg });
         }
     }
     for next_line in message_lines {
-        if primary_spans.is_empty() {
-            errors.push(Error {
-                line_num: None,
-                column_num: None,
-                kind,
-                msg: with_code(next_line),
-                require_annotation: false,
+        for span in primary_spans {
+            expected_errors.push(Error {
+                line_num: span.line_start,
+                kind: None,
+                msg: with_code(span, next_line),
             });
-        } else {
-            for span in primary_spans {
-                errors.push(Error {
-                    line_num: Some(span.line_start),
-                    column_num: Some(span.column_start),
-                    kind,
-                    msg: with_code(next_line),
-                    require_annotation: false,
-                });
-            }
         }
     }
 
@@ -251,14 +271,10 @@ fn push_actual_errors(
     for span in primary_spans {
         if let Some(ref suggested_replacement) = span.suggested_replacement {
             for (index, line) in suggested_replacement.lines().enumerate() {
-                errors.push(Error {
-                    line_num: Some(span.line_start + index),
-                    column_num: Some(span.column_start),
-                    kind: ErrorKind::Suggestion,
+                expected_errors.push(Error {
+                    line_num: span.line_start + index,
+                    kind: Some(ErrorKind::Suggestion),
                     msg: line.to_string(),
-                    // Empty suggestions (suggestions to remove something) are common
-                    // and annotating them in source is not useful.
-                    require_annotation: !line.is_empty(),
                 });
             }
         }
@@ -267,46 +283,39 @@ fn push_actual_errors(
     // Add notes for the backtrace
     for span in primary_spans {
         if let Some(frame) = &span.expansion {
-            push_backtrace(errors, frame, file_name);
+            push_backtrace(expected_errors, frame, file_name);
         }
     }
 
     // Add notes for any labels that appear in the message.
-    for (_, span) in spans_info_in_this_file {
-        if let Some(label) = &span.label {
-            errors.push(Error {
-                line_num: Some(span.line_start),
-                column_num: Some(span.column_start),
-                kind: ErrorKind::Note,
-                msg: label.clone(),
-                // Empty labels (only underlining spans) are common and do not need annotations.
-                require_annotation: !label.is_empty(),
-            });
-        }
+    for span in spans_in_this_file.iter().filter(|span| span.label.is_some()) {
+        expected_errors.push(Error {
+            line_num: span.line_start,
+            kind: Some(ErrorKind::Note),
+            msg: span.label.clone().unwrap(),
+        });
     }
 
     // Flatten out the children.
     for child in &diagnostic.children {
-        push_actual_errors(errors, child, primary_spans, file_name);
+        push_expected_errors(expected_errors, child, primary_spans, file_name);
     }
 }
 
 fn push_backtrace(
-    errors: &mut Vec<Error>,
+    expected_errors: &mut Vec<Error>,
     expansion: &DiagnosticSpanMacroExpansion,
     file_name: &str,
 ) {
     if Path::new(&expansion.span.file_name) == Path::new(&file_name) {
-        errors.push(Error {
-            line_num: Some(expansion.span.line_start),
-            column_num: Some(expansion.span.column_start),
-            kind: ErrorKind::Note,
+        expected_errors.push(Error {
+            line_num: expansion.span.line_start,
+            kind: Some(ErrorKind::Note),
             msg: format!("in this expansion of {}", expansion.macro_decl_name),
-            require_annotation: true,
         });
     }
 
     if let Some(previous_expansion) = &expansion.span.expansion {
-        push_backtrace(errors, previous_expansion, file_name);
+        push_backtrace(expected_errors, previous_expansion, file_name);
     }
 }

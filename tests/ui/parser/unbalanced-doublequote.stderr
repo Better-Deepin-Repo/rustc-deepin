@@ -1,9 +1,9 @@
 error[E0765]: unterminated double quote string
-  --> $DIR/unbalanced-doublequote.rs:3:5
+  --> $DIR/unbalanced-doublequote.rs:5:5
    |
 LL | /     "
 LL | | }
-   | |__^
+   | |_^
 
 error: aborting due to 1 previous error
 

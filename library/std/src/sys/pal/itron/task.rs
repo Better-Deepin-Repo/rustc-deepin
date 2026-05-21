@@ -1,5 +1,5 @@
 use super::abi;
-use super::error::{ItronError, fail, fail_aborting};
+use super::error::{fail, fail_aborting, ItronError};
 use crate::mem::MaybeUninit;
 
 /// Gets the ID of the task in Running state. Panics on failure.

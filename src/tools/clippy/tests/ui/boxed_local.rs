@@ -3,8 +3,7 @@
     clippy::needless_pass_by_value,
     clippy::unused_unit,
     clippy::redundant_clone,
-    clippy::match_single_binding,
-    clippy::needless_lifetimes
+    clippy::match_single_binding
 )]
 #![warn(clippy::boxed_local)]
 
@@ -38,8 +37,8 @@ fn warn_call() {
 }
 
 fn warn_arg(x: Box<A>) {
-    //~^ boxed_local
-
+    //~^ ERROR: local variable doesn't need to be boxed here
+    //~| NOTE: `-D clippy::boxed-local` implied by `-D warnings`
     x.foo();
 }
 
@@ -121,7 +120,7 @@ pub struct PeekableSeekable<I: Foo> {
 }
 
 pub fn new(_needs_name: Box<PeekableSeekable<&()>>) -> () {}
-//~^ boxed_local
+//~^ ERROR: local variable doesn't need to be boxed here
 
 /// Regression for #916, #1123
 ///
@@ -173,7 +172,6 @@ mod issue_3739 {
 /// This shouldn't warn for `boxed_local` as it is intended to called from non-Rust code.
 pub extern "C" fn do_not_warn_me(_c_pointer: Box<String>) -> () {}
 
-#[allow(missing_abi)]
 #[rustfmt::skip] // Forces rustfmt to not add ABI
 pub extern fn do_not_warn_me_no_abi(_c_pointer: Box<String>) -> () {}
 
@@ -187,8 +185,7 @@ mod issue4804 {
 
         // warn on `x: Box<u32>`
         fn default_impl_x(self: Box<Self>, x: Box<u32>) -> u32 {
-            //~^ boxed_local
-
+            //~^ ERROR: local variable doesn't need to be boxed here
             4
         }
     }
@@ -196,7 +193,7 @@ mod issue4804 {
     trait WarnTrait {
         // warn on `x: Box<u32>`
         fn foo(x: Box<u32>) {}
-        //~^ boxed_local
+        //~^ ERROR: local variable doesn't need to be boxed here
     }
 }
 

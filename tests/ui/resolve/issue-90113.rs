@@ -1,4 +1,3 @@
-//@ edition:2015
 mod list {
     pub use self::List::Cons;
 

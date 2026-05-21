@@ -7,22 +7,14 @@ fn repeat() -> ! {
     panic!()
 }
 
-#[deny(non_exhaustive_omitted_patterns)]
 pub fn f(x: Ordering) {
+    #[deny(non_exhaustive_omitted_patterns)]
     match x {
         Ordering::Relaxed => println!("relaxed"),
         Ordering::Release => println!("release"),
         Ordering::Acquire => println!("acquire"),
-        //~^ match_same_arms
-        Ordering::AcqRel | Ordering::SeqCst | _ => repeat(),
-    }
-
-    match x {
-        Ordering::Relaxed => println!("relaxed"),
-        Ordering::Release => println!("release"),
-        Ordering::Acquire => println!("acquire"),
-        //~^ match_same_arms
-        Ordering::AcqRel | Ordering::SeqCst | _ => repeat(),
+        Ordering::AcqRel | Ordering::SeqCst => repeat(),
+        _ => repeat(),
     }
 }
 
@@ -36,21 +28,21 @@ mod f {
             Ordering::Relaxed => println!("relaxed"),
             Ordering::Release => println!("release"),
             Ordering::Acquire => println!("acquire"),
-            //~^ match_same_arms
-            Ordering::AcqRel | Ordering::SeqCst | _ => repeat(),
+            Ordering::AcqRel | Ordering::SeqCst => repeat(),
+            _ => repeat(),
         }
     }
 }
 
-// Below can still suggest removing the other patterns
+// Below should still lint
 
 pub fn g(x: Ordering) {
     match x {
         Ordering::Relaxed => println!("relaxed"),
         Ordering::Release => println!("release"),
         Ordering::Acquire => println!("acquire"),
+        //~^ ERROR: this match arm has an identical body to the `_` wildcard arm
         _ => repeat(),
-        //~^ match_same_arms
     }
 }
 
@@ -62,8 +54,8 @@ mod g {
             Ordering::Relaxed => println!("relaxed"),
             Ordering::Release => println!("release"),
             Ordering::Acquire => println!("acquire"),
+            //~^ ERROR: this match arm has an identical body to the `_` wildcard arm
             _ => repeat(),
-            //~^ match_same_arms
         }
     }
 }

@@ -3,26 +3,27 @@ use cargo::util::print_available_packages;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 
-use cargo::CargoResult;
-use cargo::core::FeatureValue;
 use cargo::core::dependency::DepKind;
+use cargo::core::FeatureValue;
+use cargo::ops::cargo_add::add;
 use cargo::ops::cargo_add::AddOptions;
 use cargo::ops::cargo_add::DepOp;
-use cargo::ops::cargo_add::add;
 use cargo::ops::resolve_ws;
 use cargo::util::command_prelude::*;
+use cargo::util::interning::InternedString;
 use cargo::util::toml_mut::manifest::DepTable;
+use cargo::CargoResult;
 
 pub fn cli() -> Command {
     clap::Command::new("add")
         .about("Add dependencies to a Cargo.toml manifest file")
         .override_usage(
             color_print::cstr!("\
-       <bright-cyan,bold>cargo add</> <cyan>[OPTIONS] <<DEP>>[@<<VERSION>>] ...</>
-       <bright-cyan,bold>cargo add</> <cyan>[OPTIONS]</> <bright-cyan,bold>--path</> <cyan><<PATH>> ...</>
-       <bright-cyan,bold>cargo add</> <cyan>[OPTIONS]</> <bright-cyan,bold>--git</> <cyan><<URL>> ...</>"
+       <cyan,bold>cargo add</> <cyan>[OPTIONS] <<DEP>>[@<<VERSION>>] ...</>
+       <cyan,bold>cargo add</> <cyan>[OPTIONS]</> <cyan,bold>--path</> <cyan><<PATH>> ...</>
+       <cyan,bold>cargo add</> <cyan>[OPTIONS]</> <cyan,bold>--git</> <cyan><<URL>> ...</>"
         ))
-        .after_help(color_print::cstr!("Run `<bright-cyan,bold>cargo help add</>` for more detailed information.\n"))
+        .after_help(color_print::cstr!("Run `<cyan,bold>cargo help add</>` for more detailed information.\n"))
         .group(clap::ArgGroup::new("selected").multiple(true).required(true))
         .args([
             clap::Arg::new("crates")
@@ -86,6 +87,7 @@ Example uses:
 - Depend on crates with the same name from different registries"),
         ])
         .arg_manifest_path_without_unsupported_path_tip()
+        .arg_lockfile_path()
         .arg_package("Package to modify")
         .arg_ignore_rust_version()
         .arg_dry_run("Don't actually write the manifest")
@@ -98,17 +100,7 @@ Example uses:
                 .value_name("PATH")
                 .help("Filesystem path to local crate to add")
                 .group("selected")
-                .conflicts_with("git")
-                .add(clap_complete::engine::ArgValueCompleter::new(
-                    clap_complete::engine::PathCompleter::any()
-                        .filter(|path| path.join("Cargo.toml").exists()),
-                )),
-            clap::Arg::new("base")
-                .long("base")
-                .action(ArgAction::Set)
-                .value_name("BASE")
-                .help("The path base to use when adding from a local crate (unstable).")
-                .requires("path"),
+                .conflicts_with("git"),
             clap::Arg::new("git")
                 .long("git")
                 .action(ArgAction::Set)
@@ -146,11 +138,7 @@ This is the catch all, handling hashes to named references in remote repositorie
                 .long("registry")
                 .action(ArgAction::Set)
                 .value_name("NAME")
-                .help("Package registry for this dependency")
-                .add(clap_complete::ArgValueCandidates::new(|| {
-                    let candidates = get_registry_candidates();
-                    candidates.unwrap_or_default()
-                })),
+                .help("Package registry for this dependency"),
         ])
         .next_help_heading("Section")
         .args([
@@ -236,7 +224,6 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
 
 fn parse_dependencies(gctx: &GlobalContext, matches: &ArgMatches) -> CargoResult<Vec<DepOp>> {
     let path = matches.get_one::<String>("path");
-    let base = matches.get_one::<String>("base");
     let git = matches.get_one::<String>("git");
     let branch = matches.get_one::<String>("branch");
     let rev = matches.get_one::<String>("rev");
@@ -285,7 +272,7 @@ fn parse_dependencies(gctx: &GlobalContext, matches: &ArgMatches) -> CargoResult
         .map(String::as_str)
         .flat_map(parse_feature)
     {
-        let parsed_value = FeatureValue::new(feature.into());
+        let parsed_value = FeatureValue::new(InternedString::new(feature));
         match parsed_value {
             FeatureValue::Feature(_) => {
                 if 1 < crates.len() {
@@ -299,10 +286,7 @@ fn parse_dependencies(gctx: &GlobalContext, matches: &ArgMatches) -> CargoResult
                             )
                         })
                         .collect::<Vec<_>>();
-                    anyhow::bail!(
-                        "feature `{feature}` must be qualified by the dependency it's being activated for, like {}",
-                        candidates.join(", ")
-                    );
+                    anyhow::bail!("feature `{feature}` must be qualified by the dependency it's being activated for, like {}", candidates.join(", "));
                 }
                 crates
                     .first_mut()
@@ -320,9 +304,7 @@ fn parse_dependencies(gctx: &GlobalContext, matches: &ArgMatches) -> CargoResult
                 ..
             } => {
                 if infer_crate_name {
-                    anyhow::bail!(
-                        "`{feature}` is unsupported when inferring the crate name, use `{dep_feature}`"
-                    );
+                    anyhow::bail!("`{feature}` is unsupported when inferring the crate name, use `{dep_feature}`");
                 }
                 if dep_feature.contains('/') {
                     anyhow::bail!("multiple slashes in feature `{feature}` is not allowed");
@@ -347,7 +329,6 @@ fn parse_dependencies(gctx: &GlobalContext, matches: &ArgMatches) -> CargoResult
             public,
             registry: registry.clone(),
             path: path.map(String::from),
-            base: base.map(String::from),
             git: git.map(String::from),
             branch: branch.map(String::from),
             rev: rev.map(String::from),

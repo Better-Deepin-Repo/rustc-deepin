@@ -1,10 +1,10 @@
 //@aux-build:proc_macro_suspicious_else_formatting.rs
 
-#![warn(clippy::suspicious_else_formatting, clippy::possible_missing_else)]
+#![warn(clippy::suspicious_else_formatting)]
 #![allow(
     clippy::if_same_then_else,
     clippy::let_unit_value,
-    clippy::needless_ifs,
+    clippy::needless_if,
     clippy::needless_else
 )]
 
@@ -20,12 +20,10 @@ fn main() {
     // weird `else` formatting:
     if foo() {
     } {
-    //~^ possible_missing_else
     }
 
     if foo() {
     } if foo() {
-    //~^ possible_missing_else
     }
 
     let _ = { // if as the last expression
@@ -33,7 +31,6 @@ fn main() {
 
         if foo() {
         } if foo() {
-        //~^ possible_missing_else
         }
         else {
         }
@@ -42,7 +39,6 @@ fn main() {
     let _ = { // if in the middle of a block
         if foo() {
         } if foo() {
-        //~^ possible_missing_else
         }
         else {
         }
@@ -54,7 +50,6 @@ fn main() {
     } else
     {
     }
-    //~^^^ suspicious_else_formatting
 
     // This is fine, though weird. Allman style braces on the else.
     if foo() {
@@ -67,14 +62,12 @@ fn main() {
     } else
     if foo() { // the span of the above error should continue here
     }
-    //~^^^ suspicious_else_formatting
 
     if foo() {
     }
     else
     if foo() { // the span of the above error should continue here
     }
-    //~^^^^ suspicious_else_formatting
 
     // those are ok:
     if foo() {
@@ -102,8 +95,8 @@ fn main() {
 
     else
     {
+
     }
-    //~^^^^^ suspicious_else_formatting
 
     if foo() {
     }
@@ -112,7 +105,6 @@ fn main() {
     {
 
     }
-    //~^^^^^^ suspicious_else_formatting
 
     // #3864 - Allman style braces
     if foo()

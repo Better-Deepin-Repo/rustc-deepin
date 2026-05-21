@@ -1,77 +1,148 @@
-//! Utility functions for attributes, including Clippy's built-in ones
-
-use crate::source::SpanRangeExt;
-use crate::{sym, tokenize_with_text};
-use rustc_ast::attr::AttributeExt;
+use rustc_ast::{ast, attr};
 use rustc_errors::Applicability;
-use rustc_hir::find_attr;
 use rustc_lexer::TokenKind;
 use rustc_lint::LateContext;
 use rustc_middle::ty::{AdtDef, TyCtxt};
 use rustc_session::Session;
-use rustc_span::{Span, Symbol};
+use rustc_span::{sym, Span};
 use std::str::FromStr;
 
-/// Given `attrs`, extract all the instances of a built-in Clippy attribute called `name`
-pub fn get_builtin_attr<'a, A: AttributeExt + 'a>(
-    sess: &'a Session,
-    attrs: &'a [A],
-    name: Symbol,
-) -> impl Iterator<Item = &'a A> {
-    attrs.iter().filter(move |attr| {
-        if let [clippy, segment2] = &*attr.path()
-            && *clippy == sym::clippy
-        {
-            let path_span = attr
-                .path_span()
-                .expect("Clippy attributes are unparsed and have a span");
-            let new_name = match *segment2 {
-                sym::cyclomatic_complexity => Some("cognitive_complexity"),
-                sym::author
-                | sym::version
-                | sym::cognitive_complexity
-                | sym::dump
-                | sym::msrv
-                // The following attributes are for the 3rd party crate authors.
-                // See book/src/attribs.md
-                | sym::has_significant_drop
-                | sym::format_args => None,
-                _ => {
-                    sess.dcx().span_err(path_span, "usage of unknown attribute");
-                    return false;
-                },
-            };
+use crate::source::SpanRangeExt;
+use crate::tokenize_with_text;
 
-            match new_name {
-                Some(new_name) => {
-                    sess.dcx()
-                        .struct_span_err(path_span, "usage of deprecated attribute")
-                        .with_span_suggestion(
-                            path_span,
-                            "consider using",
-                            format!("clippy::{new_name}"),
-                            Applicability::MachineApplicable,
-                        )
-                        .emit();
-                    false
-                },
-                None => *segment2 == name,
-            }
+/// Deprecation status of attributes known by Clippy.
+pub enum DeprecationStatus {
+    /// Attribute is deprecated
+    Deprecated,
+    /// Attribute is deprecated and was replaced by the named attribute
+    Replaced(&'static str),
+    None,
+}
+
+#[rustfmt::skip]
+pub const BUILTIN_ATTRIBUTES: &[(&str, DeprecationStatus)] = &[
+    ("author",                DeprecationStatus::None),
+    ("version",               DeprecationStatus::None),
+    ("cognitive_complexity",  DeprecationStatus::None),
+    ("cyclomatic_complexity", DeprecationStatus::Replaced("cognitive_complexity")),
+    ("dump",                  DeprecationStatus::None),
+    ("msrv",                  DeprecationStatus::None),
+    ("has_significant_drop",  DeprecationStatus::None),
+];
+
+pub struct LimitStack {
+    stack: Vec<u64>,
+}
+
+impl Drop for LimitStack {
+    fn drop(&mut self) {
+        assert_eq!(self.stack.len(), 1);
+    }
+}
+
+impl LimitStack {
+    #[must_use]
+    pub fn new(limit: u64) -> Self {
+        Self { stack: vec![limit] }
+    }
+    pub fn limit(&self) -> u64 {
+        *self.stack.last().expect("there should always be a value in the stack")
+    }
+    pub fn push_attrs(&mut self, sess: &Session, attrs: &[ast::Attribute], name: &'static str) {
+        let stack = &mut self.stack;
+        parse_attrs(sess, attrs, name, |val| stack.push(val));
+    }
+    pub fn pop_attrs(&mut self, sess: &Session, attrs: &[ast::Attribute], name: &'static str) {
+        let stack = &mut self.stack;
+        parse_attrs(sess, attrs, name, |val| assert_eq!(stack.pop(), Some(val)));
+    }
+}
+
+pub fn get_attr<'a>(
+    sess: &'a Session,
+    attrs: &'a [ast::Attribute],
+    name: &'static str,
+) -> impl Iterator<Item = &'a ast::Attribute> {
+    attrs.iter().filter(move |attr| {
+        let attr = if let ast::AttrKind::Normal(ref normal) = attr.kind {
+            &normal.item
+        } else {
+            return false;
+        };
+        let attr_segments = &attr.path.segments;
+        if attr_segments.len() == 2 && attr_segments[0].ident.name == sym::clippy {
+            BUILTIN_ATTRIBUTES
+                .iter()
+                .find_map(|&(builtin_name, ref deprecation_status)| {
+                    if attr_segments[1].ident.name.as_str() == builtin_name {
+                        Some(deprecation_status)
+                    } else {
+                        None
+                    }
+                })
+                .map_or_else(
+                    || {
+                        sess.dcx()
+                            .span_err(attr_segments[1].ident.span, "usage of unknown attribute");
+                        false
+                    },
+                    |deprecation_status| {
+                        let mut diag = sess
+                            .dcx()
+                            .struct_span_err(attr_segments[1].ident.span, "usage of deprecated attribute");
+                        match *deprecation_status {
+                            DeprecationStatus::Deprecated => {
+                                diag.emit();
+                                false
+                            },
+                            DeprecationStatus::Replaced(new_name) => {
+                                diag.span_suggestion(
+                                    attr_segments[1].ident.span,
+                                    "consider using",
+                                    new_name,
+                                    Applicability::MachineApplicable,
+                                );
+                                diag.emit();
+                                false
+                            },
+                            DeprecationStatus::None => {
+                                diag.cancel();
+                                attr_segments[1].ident.name.as_str() == name
+                            },
+                        }
+                    },
+                )
         } else {
             false
         }
     })
 }
 
-/// If `attrs` contain exactly one instance of a built-in Clippy attribute called `name`,
-/// returns that attribute, and `None` otherwise
-pub fn get_unique_builtin_attr<'a, A: AttributeExt>(sess: &'a Session, attrs: &'a [A], name: Symbol) -> Option<&'a A> {
-    let mut unique_attr: Option<&A> = None;
-    for attr in get_builtin_attr(sess, attrs, name) {
+fn parse_attrs<F: FnMut(u64)>(sess: &Session, attrs: &[ast::Attribute], name: &'static str, mut f: F) {
+    for attr in get_attr(sess, attrs, name) {
+        if let Some(ref value) = attr.value_str() {
+            if let Ok(value) = FromStr::from_str(value.as_str()) {
+                f(value);
+            } else {
+                sess.dcx().span_err(attr.span, "not a number");
+            }
+        } else {
+            sess.dcx().span_err(attr.span, "bad clippy attribute");
+        }
+    }
+}
+
+pub fn get_unique_attr<'a>(
+    sess: &'a Session,
+    attrs: &'a [ast::Attribute],
+    name: &'static str,
+) -> Option<&'a ast::Attribute> {
+    let mut unique_attr: Option<&ast::Attribute> = None;
+    for attr in get_attr(sess, attrs, name) {
         if let Some(duplicate) = unique_attr {
             sess.dcx()
-                .struct_span_err(attr.span(), format!("`{name}` is defined multiple times"))
-                .with_span_note(duplicate.span(), "first definition found here")
+                .struct_span_err(attr.span, format!("`{name}` is defined multiple times"))
+                .with_span_note(duplicate.span, "first definition found here")
                 .emit();
         } else {
             unique_attr = Some(attr);
@@ -80,100 +151,51 @@ pub fn get_unique_builtin_attr<'a, A: AttributeExt>(sess: &'a Session, attrs: &'
     unique_attr
 }
 
-/// Checks whether `attrs` contain any of `proc_macro`, `proc_macro_derive` or
-/// `proc_macro_attribute`
-pub fn is_proc_macro(attrs: &[impl AttributeExt]) -> bool {
-    attrs.iter().any(AttributeExt::is_proc_macro_attr)
+/// Returns true if the attributes contain any of `proc_macro`,
+/// `proc_macro_derive` or `proc_macro_attribute`, false otherwise
+pub fn is_proc_macro(attrs: &[ast::Attribute]) -> bool {
+    attrs.iter().any(rustc_ast::Attribute::is_proc_macro_attr)
 }
 
-/// Checks whether `attrs` contain `#[doc(hidden)]`
-pub fn is_doc_hidden(attrs: &[impl AttributeExt]) -> bool {
-    attrs.iter().any(AttributeExt::is_doc_hidden)
+/// Returns true if the attributes contain `#[doc(hidden)]`
+pub fn is_doc_hidden(attrs: &[ast::Attribute]) -> bool {
+    attrs
+        .iter()
+        .filter(|attr| attr.has_name(sym::doc))
+        .filter_map(ast::Attribute::meta_item_list)
+        .any(|l| attr::list_contains_name(&l, sym::hidden))
 }
 
-/// Checks whether the given ADT, or any of its fields/variants, are marked as `#[non_exhaustive]`
 pub fn has_non_exhaustive_attr(tcx: TyCtxt<'_>, adt: AdtDef<'_>) -> bool {
     adt.is_variant_list_non_exhaustive()
-        || find_attr!(tcx, adt.did(), NonExhaustive(..))
+        || tcx.has_attr(adt.did(), sym::non_exhaustive)
         || adt.variants().iter().any(|variant_def| {
-            variant_def.is_field_list_non_exhaustive() || find_attr!(tcx, variant_def.def_id, NonExhaustive(..))
+            variant_def.is_field_list_non_exhaustive() || tcx.has_attr(variant_def.def_id, sym::non_exhaustive)
         })
         || adt
             .all_fields()
-            .any(|field_def| find_attr!(tcx, field_def.did, NonExhaustive(..)))
+            .any(|field_def| tcx.has_attr(field_def.did, sym::non_exhaustive))
 }
 
-/// Checks whether the given span contains a `#[cfg(..)]` attribute
+/// Checks if the given span contains a `#[cfg(..)]` attribute
 pub fn span_contains_cfg(cx: &LateContext<'_>, s: Span) -> bool {
     s.check_source_text(cx, |src| {
         let mut iter = tokenize_with_text(src);
 
         // Search for the token sequence [`#`, `[`, `cfg`]
-        while iter.any(|(t, ..)| matches!(t, TokenKind::Pound)) {
-            let mut iter = iter.by_ref().skip_while(|(t, ..)| {
+        while iter.any(|(t, _)| matches!(t, TokenKind::Pound)) {
+            let mut iter = iter.by_ref().skip_while(|(t, _)| {
                 matches!(
                     t,
                     TokenKind::Whitespace | TokenKind::LineComment { .. } | TokenKind::BlockComment { .. }
                 )
             });
-            if matches!(iter.next(), Some((TokenKind::OpenBracket, ..)))
-                && matches!(iter.next(), Some((TokenKind::Ident, "cfg", _)))
+            if matches!(iter.next(), Some((TokenKind::OpenBracket, _)))
+                && matches!(iter.next(), Some((TokenKind::Ident, "cfg")))
             {
                 return true;
             }
         }
         false
     })
-}
-
-/// Currently used to keep track of the current value of `#[clippy::cognitive_complexity(N)]`
-pub struct LimitStack {
-    default: u64,
-    stack: Vec<u64>,
-}
-
-impl Drop for LimitStack {
-    fn drop(&mut self) {
-        debug_assert_eq!(self.stack, Vec::<u64>::new()); // avoid `.is_empty()`, for a nicer error message
-    }
-}
-
-#[expect(missing_docs, reason = "they're all trivial...")]
-impl LimitStack {
-    #[must_use]
-    /// Initialize the stack starting with a default value, which usually comes from configuration
-    pub fn new(limit: u64) -> Self {
-        Self {
-            default: limit,
-            stack: vec![],
-        }
-    }
-    pub fn limit(&self) -> u64 {
-        self.stack.last().copied().unwrap_or(self.default)
-    }
-    pub fn push_attrs(&mut self, sess: &Session, attrs: &[impl AttributeExt], name: Symbol) {
-        let stack = &mut self.stack;
-        parse_attrs(sess, attrs, name, |val| stack.push(val));
-    }
-    pub fn pop_attrs(&mut self, sess: &Session, attrs: &[impl AttributeExt], name: Symbol) {
-        let stack = &mut self.stack;
-        parse_attrs(sess, attrs, name, |val| {
-            let popped = stack.pop();
-            debug_assert_eq!(popped, Some(val));
-        });
-    }
-}
-
-fn parse_attrs<F: FnMut(u64)>(sess: &Session, attrs: &[impl AttributeExt], name: Symbol, mut f: F) {
-    for attr in get_builtin_attr(sess, attrs, name) {
-        let Some(value) = attr.value_str() else {
-            sess.dcx().span_err(attr.span(), "bad clippy attribute");
-            continue;
-        };
-        let Ok(value) = u64::from_str(value.as_str()) else {
-            sess.dcx().span_err(attr.span(), "not a number");
-            continue;
-        };
-        f(value);
-    }
 }

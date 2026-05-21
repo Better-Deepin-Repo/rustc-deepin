@@ -1,8 +1,8 @@
 //! Tests for the -Zrustdoc-map feature.
 
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::{self, Package};
-use cargo_test_support::{Project, paths, project, str};
+use cargo_test_support::{paths, project, str, Project};
 
 fn basic_project() -> Project {
     Package::new("bar", "1.0.0")
@@ -33,6 +33,7 @@ fn basic_project() -> Project {
         .build()
 }
 
+#[allow(deprecated)]
 #[cargo_test]
 fn ignores_on_stable() {
     // Requires -Zrustdoc-map to use.
@@ -60,6 +61,7 @@ fn simple() {
     assert!(myfun.contains(r#"href="https://docs.rs/bar/1.0.0/bar/struct.Straw.html""#));
 }
 
+#[allow(deprecated)]
 #[ignore = "Broken, temporarily disabled until https://github.com/rust-lang/rust/pull/82776 is resolved."]
 #[cargo_test]
 // #[cargo_test(nightly, reason = "--extern-html-root-url is unstable")]
@@ -204,9 +206,7 @@ fn lib_name() {
 "#]])
         .run();
     let myfun = p.read_file("target/doc/foo/fn.myfun.html");
-    assert!(
-        myfun.contains(r#"href="https://docs.rs/bar/1.0.0/rumpelstiltskin/struct.Straw.html""#)
-    );
+    assert!(myfun.contains(r#"href="https://docs.rs/bar/1.0.0/rumpelstiltskin/struct.Straw.html""#));
 }
 
 #[cargo_test(nightly, reason = "--extern-html-root-url is unstable")]
@@ -451,6 +451,7 @@ fn alt_sparse_registry() {
     assert!(gold.contains(r#"href="https://docs.rs/grimm/1.0.0/grimm/struct.Gold.html""#));
 }
 
+#[allow(deprecated)]
 #[cargo_test(nightly, reason = "--extern-html-root-url is unstable")]
 fn same_deps_multi_occurrence_in_dep_tree() {
     // rust-lang/cargo#13543

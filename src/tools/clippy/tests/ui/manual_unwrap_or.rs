@@ -9,21 +9,18 @@
 fn option_unwrap_or() {
     // int case
     match Some(1) {
-        //~^ manual_unwrap_or
         Some(i) => i,
         None => 42,
     };
 
     // int case reversed
     match Some(1) {
-        //~^ manual_unwrap_or
         None => 42,
         Some(i) => i,
     };
 
     // richer none expr
     match Some(1) {
-        //~^ manual_unwrap_or
         Some(i) => i,
         None => 1 + 42,
     };
@@ -31,7 +28,6 @@ fn option_unwrap_or() {
     // multiline case
     #[rustfmt::skip]
     match Some(1) {
-    //~^ manual_unwrap_or
         Some(i) => i,
         None => {
             42 + 42
@@ -42,7 +38,6 @@ fn option_unwrap_or() {
 
     // string case
     match Some("Bob") {
-        //~^ manual_unwrap_or
         Some(i) => i,
         None => "Alice",
     };
@@ -90,7 +85,6 @@ fn option_unwrap_or() {
     };
 
     if let Some(x) = Some(1) {
-        //~^ manual_unwrap_or
         x
     } else {
         42
@@ -124,7 +118,6 @@ fn option_unwrap_or() {
 fn result_unwrap_or() {
     // int case
     match Ok::<i32, &str>(1) {
-        //~^ manual_unwrap_or
         Ok(i) => i,
         Err(_) => 42,
     };
@@ -132,14 +125,12 @@ fn result_unwrap_or() {
     // int case, scrutinee is a binding
     let a = Ok::<i32, &str>(1);
     match a {
-        //~^ manual_unwrap_or
         Ok(i) => i,
         Err(_) => 42,
     };
 
     // int case, suggestion must surround Result expr with parentheses
     match Ok(1) as Result<i32, &str> {
-        //~^ manual_unwrap_or
         Ok(i) => i,
         Err(_) => 42,
     };
@@ -153,21 +144,18 @@ fn result_unwrap_or() {
     }
     let s = S {};
     match s.method() {
-        //~^ manual_unwrap_or
         Some(i) => i,
         None => 42,
     };
 
     // int case reversed
     match Ok::<i32, &str>(1) {
-        //~^ manual_unwrap_or
         Err(_) => 42,
         Ok(i) => i,
     };
 
     // richer none expr
     match Ok::<i32, &str>(1) {
-        //~^ manual_unwrap_or
         Ok(i) => i,
         Err(_) => 1 + 42,
     };
@@ -175,7 +163,6 @@ fn result_unwrap_or() {
     // multiline case
     #[rustfmt::skip]
     match Ok::<i32, &str>(1) {
-    //~^ manual_unwrap_or
         Ok(i) => i,
         Err(_) => {
             42 + 42
@@ -186,7 +173,6 @@ fn result_unwrap_or() {
 
     // string case
     match Ok::<&str, &str>("Bob") {
-        //~^ manual_unwrap_or
         Ok(i) => i,
         Err(_) => "Alice",
     };
@@ -216,14 +202,13 @@ fn result_unwrap_or() {
         Ok(s) => s,
         Err(s) => s,
     };
+    // could lint, but unused_variables takes care of it
     match Ok::<&str, &str>("Alice") {
-        //~^ manual_unwrap_or
         Ok(s) => s,
         Err(s) => "Bob",
     };
 
     if let Ok(x) = Ok::<i32, i32>(1) {
-        //~^ manual_unwrap_or
         x
     } else {
         42
@@ -278,7 +263,6 @@ mod issue6965 {
 
     fn test() {
         let _ = match some_macro!() {
-            //~^ manual_unwrap_or
             Some(val) => val,
             None => 0,
         };
@@ -314,33 +298,6 @@ mod issue_13018 {
             None => &[],
         }
     }
-}
-
-fn implicit_deref(v: Vec<String>) {
-    let _ = if let Some(s) = v.first() { s } else { "" };
-}
-
-fn allowed_manual_unwrap_or_zero() -> u32 {
-    if let Some(x) = Some(42) {
-        //~^ manual_unwrap_or
-        x
-    } else {
-        0
-    }
-}
-
-fn issue_15807() {
-    let uncopyable_res: Result<usize, String> = Ok(1);
-    let _ = if let Ok(v) = uncopyable_res { v } else { 2 };
-
-    let x = uncopyable_res;
-    let _ = if let Ok(v) = x { v } else { 2 };
-    //~^ manual_unwrap_or
-
-    let copyable_res: Result<usize, ()> = Ok(1);
-    let _ = if let Ok(v) = copyable_res { v } else { 2 };
-    //~^ manual_unwrap_or
-    let _ = copyable_res;
 }
 
 fn main() {}

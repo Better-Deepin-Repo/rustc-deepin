@@ -12,7 +12,7 @@ For brevity, many parts of the documentation will refer to Apache NuttX as simpl
 
 ## Target maintainers
 
-[@no1wudi](https://github.com/no1wudi)
+- Qi Huang [@no1wudi](https://github.com/no1wudi)
 
 ## Requirements
 
@@ -20,13 +20,8 @@ The target name follow this format: `ARCH[-VENDOR]-nuttx-ABI`, where `ARCH` is t
 
 The following target names are defined:
 
-- `aarch64-unknown-nuttx`
-- `armv7a-nuttx-eabi`
-- `armv7a-nuttx-eabihf`
-- `thumbv6m-nuttx-eabi`
-- `thumbv7a-nuttx-eabi`
-- `thumbv7a-nuttx-eabihf`
-- `thumbv7m-nuttx-eabi`
+- `thumbv6m-nuttx-eal`
+- `thumbv7m-nuttx-eal`
 - `thumbv7em-nuttx-eabi`
 - `thumbv7em-nuttx-eabihf`
 - `thumbv8m.base-nuttx-eabi`
@@ -40,7 +35,7 @@ The following target names are defined:
 
 ## Building the target
 
-The target can be built by enabling it in the `rustc` build:
+The target can be built by enabled in the `rustc` build:
 
 ```toml
 [build]

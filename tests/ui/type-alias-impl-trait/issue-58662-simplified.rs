@@ -8,8 +8,6 @@ trait Trait {}
 impl<T> Trait for T {}
 
 type Foo<'c> = impl Trait + 'c;
-
-#[define_opaque(Foo)]
 fn foo<'a>(rng: &'a ()) -> Foo<'a> {
     fn helper<'b>(rng: &'b ()) -> impl 'b + Trait {
         rng
@@ -18,4 +16,5 @@ fn foo<'a>(rng: &'a ()) -> Foo<'a> {
     helper(rng)
 }
 
-fn main() {}
+fn main() {
+}

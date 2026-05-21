@@ -1,7 +1,7 @@
 #![crate_type = "lib"]
 
 pub mod public {
-    use crate::private_import;
+    use private_import;
 
     // should not be suggested since it is private
     struct Foo;

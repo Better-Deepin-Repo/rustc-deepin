@@ -13,27 +13,30 @@ rust-version.workspace = true
 doctest = false
 
 [dependencies]
+cov-mark = "2.0.0-pre.1"
 either.workspace = true
 itertools.workspace = true
-rowan.workspace = true
+rowan = "=0.15.15"
 rustc-hash.workspace = true
-rustc-literal-escaper.workspace = true
+indexmap.workspace = true
 smol_str.workspace = true
 triomphe.workspace = true
 tracing.workspace = true
 
+ra-ap-rustc_lexer.workspace = true
+
 parser.workspace = true
 stdx.workspace = true
+text-edit.workspace = true
 
 [dev-dependencies]
 rayon.workspace = true
-expect-test = "1.5.1"
-rustc_apfloat = "0.2.3"
+expect-test = "1.4.0"
+rustc_apfloat = "0.2.0"
 
 test-utils.workspace = true
 
 [features]
-default = []
 in-rust-tree = []
 
 [lints]

@@ -29,8 +29,9 @@
 //! each move.
 
 #![allow(internal_features)]
-#![cfg_attr(target_arch = "x86", feature(stdarch_internal))]
-#![cfg_attr(target_arch = "x86_64", feature(stdarch_internal))]
+#![feature(avx512_target_feature)]
+#![cfg_attr(target_arch = "x86", feature(stdarch_x86_avx512, stdarch_internal))]
+#![cfg_attr(target_arch = "x86_64", feature(stdarch_x86_avx512, stdarch_internal))]
 #![feature(stmt_expr_attributes)]
 
 use rand::seq::SliceRandom;
@@ -40,13 +41,9 @@ use std::cmp;
 use std::time::Instant;
 
 #[cfg(target_arch = "x86")]
-use core_arch::arch::x86::*;
+use {core_arch::arch::x86::*, std_detect::is_x86_feature_detected};
 #[cfg(target_arch = "x86_64")]
-use core_arch::arch::x86_64::*;
-#[cfg(target_arch = "x86")]
-use std::is_x86_feature_detected;
-#[cfg(target_arch = "x86_64")]
-use std::is_x86_feature_detected;
+use {core_arch::arch::x86_64::*, std_detect::is_x86_feature_detected};
 
 // types
 
@@ -77,7 +74,6 @@ const SCORE_NONE: i32 = -EVAL_INF - 1;
 /// DIRECTION 2: top left to bottom right\
 /// DIRECTION 3: top right to bottom left
 #[rustfmt::skip]
-#[allow(clippy::identity_op)]
 const DIRECTION: [[i32; 5]; 4] = [ [1, 2, 3, 4, 5],
                                    [1 * (FILE_SIZE + 1), 2 * (FILE_SIZE + 1), 3 * (FILE_SIZE + 1), 4 * (FILE_SIZE + 1), 5 * (FILE_SIZE + 1)],
                                    [1 * (FILE_SIZE + 2), 2 * (FILE_SIZE + 2), 3 * (FILE_SIZE + 2), 4 * (FILE_SIZE + 2), 5 * (FILE_SIZE + 2)],
@@ -85,7 +81,7 @@ const DIRECTION: [[i32; 5]; 4] = [ [1, 2, 3, 4, 5],
 
 /// A table to encode each location to a value in bit 31-0 in the bitboard for 4 direction
 #[rustfmt::skip]
-const MAPMOVEVALUE: [[i32; 239]; 4] = [ [// Direction 0
+const MAPMOVEVALUE: [[i32; 239]; 4] = [ [// Direction 0 
                                          1<<31, 1<<30, 1<<29, 1<<28, 1<<27, 1<<26, 1<<25, 1<<24, 1<<23, 1<<22, 1<<21, 1<<20, 1<<19, 1<<18, 1<<17, 0,
                                          1<<31, 1<<30, 1<<29, 1<<28, 1<<27, 1<<26, 1<<25, 1<<24, 1<<23, 1<<22, 1<<21, 1<<20, 1<<19, 1<<18, 1<<17, 0,
                                          1<<31, 1<<30, 1<<29, 1<<28, 1<<27, 1<<26, 1<<25, 1<<24, 1<<23, 1<<22, 1<<21, 1<<20, 1<<19, 1<<18, 1<<17, 0,
@@ -117,7 +113,7 @@ const MAPMOVEVALUE: [[i32; 239]; 4] = [ [// Direction 0
                                          1<<19, 1<<19, 1<<19, 1<<19, 1<<19, 1<<19, 1<<19, 1<<19, 1<<19, 1<<19, 1<<19, 1<<19, 1<<19, 1<<19, 1<<19, 0,
                                          1<<18, 1<<18, 1<<18, 1<<18, 1<<18, 1<<18, 1<<18, 1<<18, 1<<18, 1<<18, 1<<18, 1<<18, 1<<18, 1<<18, 1<<18, 0,
                                          1<<17, 1<<17, 1<<17, 1<<17, 1<<17, 1<<17, 1<<17, 1<<17, 1<<17, 1<<17, 1<<17, 1<<17, 1<<17, 1<<17, 1<<17],
-                                        [// Direction 2
+                                        [// Direction 2 
                                          1<<15, 1<<15, 1<<15, 1<<15, 1<<15, 1<<15, 1<<15, 1<<15, 1<<15, 1<<15, 1<<15, 0,     0,     0,     0,     0,
                                          1<<15, 1<<14, 1<<14, 1<<14, 1<<14, 1<<14, 1<<14, 1<<14, 1<<14, 1<<14, 1<<14, 1<<14, 0,     0,     0,     0,
                                          1<<15, 1<<14, 1<<13, 1<<13, 1<<13, 1<<13, 1<<13, 1<<13, 1<<13, 1<<13, 1<<13, 1<<13, 1<<13, 0,     0,     0,
@@ -151,9 +147,9 @@ const MAPMOVEVALUE: [[i32; 239]; 4] = [ [// Direction 0
                                          1<<1,  1<<2,  1<<3,  1<<4,  1<<5,  1<<6,  1<<1,  1<<1,  1<<1,  1<<1,  1<<1,  0,     0,     0,     0]
                                         ];
 
-/// A table to encode each location to an index in the bitboard for 4 direction
+/// A table to encode each location to an index in the bitboard for 4 direction 
 #[rustfmt::skip]
-const MAPMOVEIDX: [[i32; 239]; 4] = [ [// Direction 0
+const MAPMOVEIDX: [[i32; 239]; 4] = [ [// Direction 0 
                                        0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,
                                        1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  1,  0,
                                        2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  2,  0,
@@ -169,7 +165,7 @@ const MAPMOVEIDX: [[i32; 239]; 4] = [ [// Direction 0
                                        12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 0,
                                        13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 13, 0,
                                        14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14],
-                                      [// Direction 1
+                                      [// Direction 1 
                                        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 0,
                                        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 0,
                                        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 0,
@@ -233,7 +229,8 @@ const MAPMOVEIDX: [[i32; 239]; 4] = [ [// Direction 0
 /// The first dimension is color: Black, White and Empty.\
 /// The second and third one are 2 x 512-bit. Direction 0 and 2 use the first 512-bit. Direction 1 and
 /// 3 use the second 512-bit.\
-/// Each 512-bit is a 32-bit x 16 array. Direction 0 and 1 store at bit 31-16 and Direction 2 and 3 store at bit 15-0.
+/// Each 512-bit is a 32-bit x 16 array. Direction 0 and 1 store at bit 31-16 and Direction 2 and 3 store at bit 15-0.  
+
 pub struct Pos {
     // position
     state: [Color; SQUARE_SIZE as usize],
@@ -314,7 +311,7 @@ impl Pos {
 
         match self.p_turn {
             Color::Black => {
-                self.state[mv] = Color::Black;
+                self.state[mv as usize] = Color::Black;
                 // update black move and remove empty move in bitboard
                 self.bitboard[black][0][MAPMOVEIDX[0][mv] as usize] |= MAPMOVEVALUE[0][mv];
                 self.bitboard[empty][0][MAPMOVEIDX[0][mv] as usize] ^= MAPMOVEVALUE[0][mv];
@@ -326,7 +323,7 @@ impl Pos {
                 self.bitboard[empty][1][MAPMOVEIDX[3][mv] as usize] ^= MAPMOVEVALUE[3][mv];
             }
             Color::White => {
-                self.state[mv] = Color::White;
+                self.state[mv as usize] = Color::White;
                 // update white move and remove empty move in bitboard
                 self.bitboard[white][0][MAPMOVEIDX[0][mv] as usize] |= MAPMOVEVALUE[0][mv];
                 self.bitboard[empty][0][MAPMOVEIDX[0][mv] as usize] ^= MAPMOVEVALUE[0][mv];
@@ -348,7 +345,11 @@ impl Pos {
     }
 
     pub fn can_play(&self, from: Square) -> bool {
-        self.state[from as usize] == Color::Empty
+        if self.state[from as usize] == Color::Empty {
+            true
+        } else {
+            false
+        }
     }
 }
 
@@ -375,9 +376,18 @@ impl List {
 
     pub fn shuffle(&mut self) {
         let mut rng = thread_rng();
-        let num = self.p_size as usize;
+        let num = self.p_size;
+        let mut new_move: Vec<Move> = vec![];
 
-        self.p_move[..num].shuffle(&mut rng);
+        for x in 0..(num as usize) {
+            new_move.push(self.p_move[x]);
+        }
+
+        new_move.shuffle(&mut rng);
+
+        for x in 0..(self.p_size as usize) {
+            self.p_move[x] = new_move[x];
+        }
     }
 }
 
@@ -411,32 +421,45 @@ fn pos_is_draw(pos: &Pos) -> bool {
                 break;
             }
 
-            if !found {
+            if found == false {
                 break;
             }
         }
     }
 
-    found && !pos_is_winner(pos)
+    let mut out: bool = false;
+    if found == true && !pos_is_winner(pos) {
+        out = true;
+    }
+
+    out
 }
 
-#[target_feature(enable = "avx512f,avx512bw,popcnt")]
+#[target_feature(enable = "avx512f,avx512bw")]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-fn pos_is_draw_avx512(pos: &Pos) -> bool {
+unsafe fn pos_is_draw_avx512(pos: &Pos) -> bool {
     let empty = Color::Empty as usize;
 
-    let board0org = unsafe { _mm512_loadu_epi32(&pos.bitboard[empty][0][0]) };
+    let board0org = _mm512_loadu_epi32(&pos.bitboard[empty][0][0]);
 
     let answer = _mm512_set1_epi32(0);
 
     // if all empty is 0, all board is filled.
     let temp_mask = _mm512_mask_cmpneq_epi32_mask(0b11111111_11111111, answer, board0org);
 
-    _popcnt32(temp_mask as i32) == 0 && !pos_is_winner_avx512(pos)
+    if _popcnt32(temp_mask as i32) == 0 && !pos_is_winner_avx512(pos) {
+        return true;
+    } else {
+        return false;
+    }
 }
 
 fn pos_is_end(pos: &Pos) -> bool {
-    pos_is_winner(pos) || pos_is_draw(pos)
+    if pos_is_winner(pos) || pos_is_draw(pos) {
+        true
+    } else {
+        false
+    }
 }
 
 fn pos_disp(pos: &Pos) {
@@ -452,7 +475,7 @@ fn pos_disp(pos: &Pos) {
             }
         }
 
-        println!();
+        println!("");
     }
 
     match pos.turn() {
@@ -476,14 +499,13 @@ fn gen_moves(list: &mut List, pos: &Pos) {
 }
 
 /// AI: use Minimax search with alpha-beta pruning
-#[allow(clippy::manual_range_contains)]
 fn search(pos: &Pos, alpha: i32, beta: i32, depth: i32, _ply: i32) -> i32 {
     assert!(-EVAL_INF <= alpha && alpha < beta && beta <= EVAL_INF);
     // leaf?
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
-        if check_x86_avx512_features() {
+        if is_x86_feature_detected!("avx512bw") {
             unsafe {
                 if pos_is_winner_avx512(pos) {
                     return -EVAL_INF + _ply;
@@ -559,11 +581,14 @@ fn search(pos: &Pos, alpha: i32, beta: i32, depth: i32, _ply: i32) -> i32 {
         }
     }
 
-    assert_ne!(bm, MOVE_NONE);
+    assert!(bm != MOVE_NONE);
     assert!(bs >= -EVAL_INF && bs <= EVAL_INF);
 
-    //best move at the root node, best score elsewhere
-    if _ply == 0 { bm } else { bs }
+    if _ply == 0 {
+        bm
+    } else {
+        bs
+    } //best move at the root node, best score elsewhere
 }
 
 /// Evaluation function: give different scores to different patterns after a fixed depth.
@@ -574,12 +599,16 @@ fn eval(pos: &Pos, _ply: i32) -> i32 {
     // check if opp has live4 which will win playing next move
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
-        if check_x86_avx512_features() {
-            if unsafe { check_patternlive4_avx512(pos, def) } {
+        if is_x86_feature_detected!("avx512bw") {
+            unsafe {
+                if check_patternlive4_avx512(pos, def) {
+                    return -4096;
+                }
+            }
+        } else {
+            if check_patternlive4(pos, def) {
                 return -4096;
             }
-        } else if check_patternlive4(pos, def) {
-            return -4096;
         }
     }
 
@@ -593,12 +622,16 @@ fn eval(pos: &Pos, _ply: i32) -> i32 {
     // check if self has live4 which will win playing next move
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
-        if check_x86_avx512_features() {
-            if unsafe { check_patternlive4_avx512(pos, atk) } {
+        if is_x86_feature_detected!("avx512bw") {
+            unsafe {
+                if check_patternlive4_avx512(pos, atk) {
+                    return 2560;
+                }
+            }
+        } else {
+            if check_patternlive4(pos, atk) {
                 return 2560;
             }
-        } else if check_patternlive4(pos, atk) {
-            return 2560;
         }
     }
 
@@ -612,12 +645,16 @@ fn eval(pos: &Pos, _ply: i32) -> i32 {
     // check if self has dead4 which will win playing next move
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
-        if check_x86_avx512_features() {
-            if unsafe { check_patterndead4_avx512(pos, atk) > 0 } {
+        if is_x86_feature_detected!("avx512bw") {
+            unsafe {
+                if check_patterndead4_avx512(pos, atk) > 0 {
+                    return 2560;
+                }
+            }
+        } else {
+            if check_patterndead4(pos, atk) > 0 {
                 return 2560;
             }
-        } else if check_patterndead4(pos, atk) > 0 {
-            return 2560;
         }
     }
 
@@ -630,7 +667,7 @@ fn eval(pos: &Pos, _ply: i32) -> i32 {
 
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
-        if check_x86_avx512_features() {
+        if is_x86_feature_detected!("avx512bw") {
             unsafe {
                 let n_c4: i32 = check_patterndead4_avx512(pos, def);
                 let n_c3: i32 = check_patternlive3_avx512(pos, def);
@@ -717,12 +754,12 @@ fn check_pattern5(pos: &Pos, sd: Side) -> bool {
         for fl in 0..FILE_SIZE {
             let sq: Square = square_make(fl, rk);
 
-            for direction in &DIRECTION {
+            for pat in 0..4 {
                 let idx0 = sq;
-                let idx1 = sq + direction[0];
-                let idx2 = sq + direction[1];
-                let idx3 = sq + direction[2];
-                let idx4 = sq + direction[3];
+                let idx1 = sq + DIRECTION[pat][0];
+                let idx2 = sq + DIRECTION[pat][1];
+                let idx3 = sq + DIRECTION[pat][2];
+                let idx4 = sq + DIRECTION[pat][3];
 
                 let val0 = pos.state[idx0 as usize];
                 let val1 = pos.state[idx1 as usize];
@@ -736,7 +773,11 @@ fn check_pattern5(pos: &Pos, sd: Side) -> bool {
         }
     }
 
-    n > 0
+    if n > 0 {
+        true
+    } else {
+        false
+    }
 }
 
 /// Check <b>-OOOO-</b>
@@ -747,13 +788,13 @@ fn check_patternlive4(pos: &Pos, sd: Side) -> bool {
         for fl in 0..FILE_SIZE {
             let sq: Square = square_make(fl, rk);
 
-            for direction in &DIRECTION {
+            for pat in 0..4 {
                 let idx0 = sq;
-                let idx1 = sq + direction[0];
-                let idx2 = sq + direction[1];
-                let idx3 = sq + direction[2];
-                let idx4 = sq + direction[3];
-                let idx5 = sq + direction[4];
+                let idx1 = sq + DIRECTION[pat][0];
+                let idx2 = sq + DIRECTION[pat][1];
+                let idx3 = sq + DIRECTION[pat][2];
+                let idx4 = sq + DIRECTION[pat][3];
+                let idx5 = sq + DIRECTION[pat][4];
 
                 let val0 = pos.state[idx0 as usize];
                 let val1 = pos.state[idx1 as usize];
@@ -768,7 +809,11 @@ fn check_patternlive4(pos: &Pos, sd: Side) -> bool {
         }
     }
 
-    n > 0
+    if n > 0 {
+        true
+    } else {
+        false
+    }
 }
 
 /// Check <b>OOOO-, OOO-O, OO-OO, O-OOO, -OOOO</b>
@@ -779,12 +824,12 @@ fn check_patterndead4(pos: &Pos, sd: Side) -> i32 {
         for fl in 0..FILE_SIZE {
             let sq: Square = square_make(fl, rk);
 
-            for direction in &DIRECTION {
+            for dir in 0..4 {
                 let idx0 = sq;
-                let idx1 = sq + direction[0];
-                let idx2 = sq + direction[1];
-                let idx3 = sq + direction[2];
-                let idx4 = sq + direction[3];
+                let idx1 = sq + DIRECTION[dir][0];
+                let idx2 = sq + DIRECTION[dir][1];
+                let idx3 = sq + DIRECTION[dir][2];
+                let idx4 = sq + DIRECTION[dir][3];
 
                 let val0 = pos.state[idx0 as usize];
                 let val1 = pos.state[idx1 as usize];
@@ -817,13 +862,13 @@ fn check_patternlive3(pos: &Pos, sd: Side) -> i32 {
         for fl in 0..FILE_SIZE {
             let sq: Square = square_make(fl, rk);
 
-            for direction in &DIRECTION {
+            for dir in 0..4 {
                 let idx0 = sq;
-                let idx1 = sq + direction[0];
-                let idx2 = sq + direction[1];
-                let idx3 = sq + direction[2];
-                let idx4 = sq + direction[3];
-                let idx5 = sq + direction[4];
+                let idx1 = sq + DIRECTION[dir][0];
+                let idx2 = sq + DIRECTION[dir][1];
+                let idx3 = sq + DIRECTION[dir][2];
+                let idx4 = sq + DIRECTION[dir][3];
+                let idx5 = sq + DIRECTION[dir][4];
 
                 let val0 = pos.state[idx0 as usize];
                 let val1 = pos.state[idx1 as usize];
@@ -845,18 +890,16 @@ fn check_patternlive3(pos: &Pos, sd: Side) -> i32 {
     n
 }
 
-#[target_feature(enable = "avx512f,avx512bw,popcnt")]
+#[target_feature(enable = "avx512f,avx512bw")]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-fn pos_is_winner_avx512(pos: &Pos) -> bool {
+unsafe fn pos_is_winner_avx512(pos: &Pos) -> bool {
     let current_side = side_opp(pos.p_turn);
     let coloridx = current_side as usize;
 
-    let board0org: [__m512i; 2] = unsafe {
-        [
-            _mm512_loadu_epi32(&pos.bitboard[coloridx][0][0]),
-            _mm512_loadu_epi32(&pos.bitboard[coloridx][1][0]),
-        ]
-    }; // load states from bitboard
+    let board0org: [__m512i; 2] = [
+        _mm512_loadu_epi32(&pos.bitboard[coloridx][0][0]),
+        _mm512_loadu_epi32(&pos.bitboard[coloridx][1][0]),
+    ]; // load states from bitboard
 
     #[rustfmt::skip]
     let answer = _mm512_set1_epi16((1<<15)|(1<<14)|(1<<13)|(1<<12)|(1<<11)); // an unbroken chain of five moves
@@ -902,7 +945,9 @@ fn pos_is_winner_avx512(pos: &Pos) -> bool {
                                         0b00_10_10_10_10_11_10_10_10_10_11_11_11_11_11_10];
     let mut count_match: i32 = 0;
 
-    for mut board0 in board0org {
+    for dir in 0..2 {
+        // direction 0 and 1
+        let mut board0 = board0org[dir];
         let boardf = _mm512_and_si512(answer, board0);
         let temp_mask = _mm512_mask_cmpeq_epi16_mask(answer_mask[0], answer, boardf);
         count_match += _popcnt32(temp_mask as i32);
@@ -916,12 +961,16 @@ fn pos_is_winner_avx512(pos: &Pos) -> bool {
         }
     }
 
-    count_match > 0
+    if count_match > 0 {
+        return true;
+    } else {
+        return false;
+    }
 }
 
-#[target_feature(enable = "avx512f,avx512bw,popcnt")]
+#[target_feature(enable = "avx512f,avx512bw")]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-fn check_patternlive4_avx512(pos: &Pos, sd: Side) -> bool {
+unsafe fn check_patternlive4_avx512(pos: &Pos, sd: Side) -> bool {
     let coloridx = sd as usize;
     let emptyidx = Color::Empty as usize;
 
@@ -943,18 +992,14 @@ fn check_patternlive4_avx512(pos: &Pos, sd: Side) -> bool {
                                         0b00_10_10_11_11_11_11_11_10_10_10_10_10_11_11_10,
                                         0b00_10_10_10_11_11_11_10_10_10_10_10_11_11_11_10,
                                         0b00_10_10_10_10_11_10_10_10_10_10_11_11_11_11_10];
-    let board0org: [__m512i; 2] = unsafe {
-        [
-            _mm512_loadu_epi32(&pos.bitboard[coloridx][0][0]),
-            _mm512_loadu_epi32(&pos.bitboard[coloridx][1][0]),
-        ]
-    };
-    let board1org: [__m512i; 2] = unsafe {
-        [
-            _mm512_loadu_epi32(&pos.bitboard[emptyidx][0][0]),
-            _mm512_loadu_epi32(&pos.bitboard[emptyidx][1][0]),
-        ]
-    };
+    let board0org: [__m512i; 2] = [
+        _mm512_loadu_epi32(&pos.bitboard[coloridx][0][0]),
+        _mm512_loadu_epi32(&pos.bitboard[coloridx][1][0]),
+    ];
+    let board1org: [__m512i; 2] = [
+        _mm512_loadu_epi32(&pos.bitboard[emptyidx][0][0]),
+        _mm512_loadu_epi32(&pos.bitboard[emptyidx][1][0]),
+    ];
 
     let mut count_match: i32 = 0;
 
@@ -982,12 +1027,16 @@ fn check_patternlive4_avx512(pos: &Pos, sd: Side) -> bool {
         }
     }
 
-    count_match > 0
+    if count_match > 0 {
+        return true;
+    } else {
+        return false;
+    }
 }
 
-#[target_feature(enable = "avx512f,avx512bw,popcnt")]
+#[target_feature(enable = "avx512f,avx512bw")]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-fn check_patterndead4_avx512(pos: &Pos, sd: Side) -> i32 {
+unsafe fn check_patterndead4_avx512(pos: &Pos, sd: Side) -> i32 {
     let coloridx = sd as usize;
     let emptyidx = Color::Empty as usize;
 
@@ -1018,18 +1067,14 @@ fn check_patterndead4_avx512(pos: &Pos, sd: Side) -> i32 {
                                         0b00_10_10_11_11_11_11_11_10_10_10_10_11_11_11_10,
                                         0b00_10_10_10_11_11_11_10_10_10_10_11_11_11_11_10,
                                         0b00_10_10_10_10_11_10_10_10_10_11_11_11_11_11_10];
-    let board0org: [__m512i; 2] = unsafe {
-        [
-            _mm512_loadu_epi32(&pos.bitboard[coloridx][0][0]),
-            _mm512_loadu_epi32(&pos.bitboard[coloridx][1][0]),
-        ]
-    };
-    let board1org: [__m512i; 2] = unsafe {
-        [
-            _mm512_loadu_epi32(&pos.bitboard[emptyidx][0][0]),
-            _mm512_loadu_epi32(&pos.bitboard[emptyidx][1][0]),
-        ]
-    };
+    let board0org: [__m512i; 2] = [
+        _mm512_loadu_epi32(&pos.bitboard[coloridx][0][0]),
+        _mm512_loadu_epi32(&pos.bitboard[coloridx][1][0]),
+    ];
+    let board1org: [__m512i; 2] = [
+        _mm512_loadu_epi32(&pos.bitboard[emptyidx][0][0]),
+        _mm512_loadu_epi32(&pos.bitboard[emptyidx][1][0]),
+    ];
 
     let mut count_match: i32 = 0;
 
@@ -1062,16 +1107,16 @@ fn check_patterndead4_avx512(pos: &Pos, sd: Side) -> i32 {
     count_match
 }
 
-#[target_feature(enable = "avx512f,avx512bw,popcnt")]
+#[target_feature(enable = "avx512f,avx512bw")]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-fn check_patternlive3_avx512(pos: &Pos, sd: Side) -> i32 {
+unsafe fn check_patternlive3_avx512(pos: &Pos, sd: Side) -> i32 {
     let coloridx = sd as usize;
     let emptyidx = Color::Empty as usize;
 
     #[rustfmt::skip]
-    let board0org: [__m512i; 2] = unsafe { [_mm512_loadu_epi32(&pos.bitboard[coloridx][0][0]), _mm512_loadu_epi32(&pos.bitboard[coloridx][1][0])] };
+    let board0org: [__m512i; 2]  = [_mm512_loadu_epi32(&pos.bitboard[coloridx][0][0]), _mm512_loadu_epi32(&pos.bitboard[coloridx][1][0])];
     #[rustfmt::skip]
-    let board1org: [__m512i; 2] = unsafe { [_mm512_loadu_epi32(&pos.bitboard[emptyidx][0][0]), _mm512_loadu_epi32(&pos.bitboard[emptyidx][1][0])] };
+    let board1org: [__m512i; 2]  = [_mm512_loadu_epi32(&pos.bitboard[emptyidx][0][0]), _mm512_loadu_epi32(&pos.bitboard[emptyidx][1][0])];
 
     #[rustfmt::skip]
     let answer_color: [__m512i; 1] = [_mm512_set1_epi16(         (1<<14)|(1<<13)|(1<<12)         )];
@@ -1169,15 +1214,10 @@ fn check_patternlive3_avx512(pos: &Pos, sd: Side) -> i32 {
     count_match
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-fn check_x86_avx512_features() -> bool {
-    is_x86_feature_detected!("avx512bw") && is_x86_feature_detected!("popcnt")
-}
-
 fn main() {
     #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
     {
-        if check_x86_avx512_features() {
+        if is_x86_feature_detected!("avx512bw") {
             println!("\n\nThe program is running with avx512f and avx512bw intrinsics\n\n");
         } else {
             println!("\n\nThe program is running with NO intrinsics.\n\n");

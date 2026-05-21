@@ -1,11 +1,15 @@
-// This test ensures that `tail_expr_drop_order` does not activate in case Edition 2024 is used
-// because this is a migration lint.
-// Only `cargo fix --edition 2024` shall activate this lint.
+// This test ensures that `tail_expr_drop_order` does not activate in case Edition 2024 is not used
+// or the feature gate `shorter_tail_lifetimes` is disabled.
 
+//@ revisions: neither no_feature_gate edition_less_than_2024
 //@ check-pass
-//@ edition: 2024
+//@ [neither] edition: 2021
+//@ [no_feature_gate] compile-flags: -Z unstable-options
+//@ [no_feature_gate] edition: 2024
+//@ [edition_less_than_2024] edition: 2021
 
 #![deny(tail_expr_drop_order)]
+#![cfg_attr(edition_less_than_2024, feature(shorter_tail_lifetimes))]
 
 struct LoudDropper;
 impl Drop for LoudDropper {

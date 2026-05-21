@@ -1,7 +1,7 @@
 use std::fmt;
 
 use rustc_data_structures::fx::FxIndexSet;
-use rustc_span::{Symbol, sym};
+use rustc_span::{sym, Symbol};
 
 use super::{InlineAsmArch, InlineAsmType, ModifierInfo};
 use crate::spec::{RelocModel, Target};
@@ -47,15 +47,11 @@ impl RiscVInlineAsmRegClass {
                     types! { _: I8, I16, I32, F16, F32; }
                 }
             }
-            // FIXME(f128): Add `q: F128;` once LLVM support the `Q` extension.
+            // FIXME(f16_f128): Add `q: F128;` once LLVM support the `Q` extension.
             Self::freg => types! { f: F16, F32; d: F64; },
             Self::vreg => &[],
         }
     }
-}
-
-pub(crate) fn is_e(target_features: &FxIndexSet<Symbol>) -> bool {
-    target_features.contains(&sym::e)
 }
 
 fn not_e(
@@ -65,7 +61,7 @@ fn not_e(
     _target: &Target,
     _is_clobber: bool,
 ) -> Result<(), &'static str> {
-    if is_e(target_features) {
+    if target_features.contains(&sym::e) {
         Err("register can't be used with the `e` target feature")
     } else {
         Ok(())

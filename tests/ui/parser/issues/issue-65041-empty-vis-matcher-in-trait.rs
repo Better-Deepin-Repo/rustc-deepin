@@ -20,7 +20,7 @@ trait Alpha {
 }
 
 // We also accept visibilities on items in traits syntactically but not semantically.
-#[cfg(false)]
+#[cfg(FALSE)]
 trait Foo {
     pub fn bar();
     pub(crate) type baz;

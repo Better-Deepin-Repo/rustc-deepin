@@ -1,15 +1,21 @@
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use rustc_hir::attrs::DebuggerVisualizerType;
+use rustc_data_structures::sync::Lrc;
 use rustc_macros::{Decodable, Encodable, HashStable};
+
+#[derive(HashStable)]
+#[derive(Copy, PartialEq, PartialOrd, Clone, Ord, Eq, Hash, Debug, Encodable, Decodable)]
+pub enum DebuggerVisualizerType {
+    Natvis,
+    GdbPrettyPrinter,
+}
 
 /// A single debugger visualizer file.
 #[derive(HashStable)]
 #[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Encodable, Decodable)]
 pub struct DebuggerVisualizerFile {
     /// The complete debugger visualizer source.
-    pub src: Arc<[u8]>,
+    pub src: Lrc<[u8]>,
     /// Indicates which visualizer type this targets.
     pub visualizer_type: DebuggerVisualizerType,
     /// The file path to the visualizer file. This is used for reporting
@@ -20,13 +26,13 @@ pub struct DebuggerVisualizerFile {
 }
 
 impl DebuggerVisualizerFile {
-    pub fn new(src: Arc<[u8]>, visualizer_type: DebuggerVisualizerType, path: PathBuf) -> Self {
+    pub fn new(src: Lrc<[u8]>, visualizer_type: DebuggerVisualizerType, path: PathBuf) -> Self {
         DebuggerVisualizerFile { src, visualizer_type, path: Some(path) }
     }
 
     pub fn path_erased(&self) -> Self {
         DebuggerVisualizerFile {
-            src: Arc::clone(&self.src),
+            src: self.src.clone(),
             visualizer_type: self.visualizer_type,
             path: None,
         }

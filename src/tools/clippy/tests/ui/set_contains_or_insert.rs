@@ -10,42 +10,35 @@ fn should_warn_hashset() {
     let value = 5;
 
     if !set.contains(&value) {
-        //~^ set_contains_or_insert
         set.insert(value);
         println!("Just a comment");
     }
 
     if set.contains(&value) {
-        //~^ set_contains_or_insert
         set.insert(value);
         println!("Just a comment");
     }
 
     if !set.contains(&value) {
-        //~^ set_contains_or_insert
         set.insert(value);
     }
 
     if !!set.contains(&value) {
-        //~^ set_contains_or_insert
         set.insert(value);
         println!("Just a comment");
     }
 
     if (&set).contains(&value) {
-        //~^ set_contains_or_insert
         set.insert(value);
     }
 
     let borrow_value = &6;
     if !set.contains(borrow_value) {
-        //~^ set_contains_or_insert
         set.insert(*borrow_value);
     }
 
     let borrow_set = &mut set;
     if !borrow_set.contains(&value) {
-        //~^ set_contains_or_insert
         borrow_set.insert(value);
     }
 }
@@ -84,42 +77,35 @@ fn should_warn_btreeset() {
     let value = 5;
 
     if !set.contains(&value) {
-        //~^ set_contains_or_insert
         set.insert(value);
         println!("Just a comment");
     }
 
     if set.contains(&value) {
-        //~^ set_contains_or_insert
         set.insert(value);
         println!("Just a comment");
     }
 
     if !set.contains(&value) {
-        //~^ set_contains_or_insert
         set.insert(value);
     }
 
     if !!set.contains(&value) {
-        //~^ set_contains_or_insert
         set.insert(value);
         println!("Just a comment");
     }
 
     if (&set).contains(&value) {
-        //~^ set_contains_or_insert
         set.insert(value);
     }
 
     let borrow_value = &6;
     if !set.contains(borrow_value) {
-        //~^ set_contains_or_insert
         set.insert(*borrow_value);
     }
 
     let borrow_set = &mut set;
     if !borrow_set.contains(&value) {
-        //~^ set_contains_or_insert
         borrow_set.insert(value);
     }
 }
@@ -157,25 +143,10 @@ fn simply_true() -> bool {
     true
 }
 
-fn main() {}
-
-fn issue15990(s: &mut HashSet<usize>, v: usize) {
-    if !s.contains(&v) {
-        s.clear();
-        s.insert(v);
-    }
-
-    fn borrow_as_mut(v: usize, s: &mut HashSet<usize>) {
-        s.clear();
-    }
-    if !s.contains(&v) {
-        borrow_as_mut(v, s);
-        s.insert(v);
-    }
-
-    if !s.contains(&v) {
-        //~^ set_contains_or_insert
-        let _readonly_access = s.contains(&v);
-        s.insert(v);
-    }
+// This is placed last in order to be able to add new tests without changing line numbers
+fn main() {
+    should_warn_hashset();
+    should_warn_btreeset();
+    should_not_warn_hashset();
+    should_not_warn_btreeset();
 }

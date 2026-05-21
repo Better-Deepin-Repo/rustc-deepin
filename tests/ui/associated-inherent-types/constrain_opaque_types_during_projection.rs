@@ -11,8 +11,7 @@ impl Foo<i32> {
 
 type Tait = impl Sized;
 
-#[define_opaque(Tait)]
-fn bar() {
+fn bar(_: Tait) {
     let x: Foo<Tait>::Assoc = 42;
 }
 

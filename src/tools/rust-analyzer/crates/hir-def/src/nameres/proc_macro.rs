@@ -2,12 +2,9 @@
 
 use hir_expand::name::{AsName, Name};
 use intern::sym;
-use itertools::Itertools;
 
-use crate::{
-    item_tree::Attrs,
-    tt::{Leaf, TopSubtree, TtElement},
-};
+use crate::attr::Attrs;
+use crate::tt::{Leaf, TokenTree};
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct ProcMacroDef {
@@ -32,65 +29,62 @@ impl ProcMacroKind {
     }
 }
 
-impl Attrs<'_> {
-    pub(crate) fn parse_proc_macro_decl(&self, func_name: &Name) -> Option<ProcMacroDef> {
+impl Attrs {
+    #[rustfmt::skip]
+    pub fn parse_proc_macro_decl(&self, func_name: &Name) -> Option<ProcMacroDef> {
         if self.is_proc_macro() {
             Some(ProcMacroDef { name: func_name.clone(), kind: ProcMacroKind::Bang })
         } else if self.is_proc_macro_attribute() {
             Some(ProcMacroDef { name: func_name.clone(), kind: ProcMacroKind::Attr })
-        } else if self.by_key(sym::proc_macro_derive).exists() {
-            let derive = self.parse_proc_macro_derive();
-            Some(match derive {
-                Some((name, helpers)) => {
-                    ProcMacroDef { name, kind: ProcMacroKind::Derive { helpers } }
-                }
-                None => ProcMacroDef {
-                    name: func_name.clone(),
-                    kind: ProcMacroKind::Derive { helpers: Box::default() },
-                },
-            })
+        } else if self.by_key(&sym::proc_macro_derive).exists() {
+            let derive = self.by_key(&sym::proc_macro_derive).tt_values().next()?;
+            let def = parse_macro_name_and_helper_attrs(&derive.token_trees)
+                .map(|(name, helpers)| ProcMacroDef { name, kind: ProcMacroKind::Derive { helpers } });
+
+            if def.is_none() {
+                tracing::trace!("malformed `#[proc_macro_derive]`: {}", derive);
+            }
+
+            def
         } else {
             None
         }
-    }
-
-    pub(crate) fn parse_proc_macro_derive(&self) -> Option<(Name, Box<[Name]>)> {
-        let derive = self.by_key(sym::proc_macro_derive).tt_values().next()?;
-        parse_macro_name_and_helper_attrs(derive)
     }
 }
 
 // This fn is intended for `#[proc_macro_derive(..)]` and `#[rustc_builtin_macro(..)]`, which have
 // the same structure.
-pub(crate) fn parse_macro_name_and_helper_attrs(tt: &TopSubtree) -> Option<(Name, Box<[Name]>)> {
-    if let Some([TtElement::Leaf(Leaf::Ident(trait_name))]) =
-        tt.token_trees().iter().collect_array()
-    {
+#[rustfmt::skip]
+pub(crate) fn parse_macro_name_and_helper_attrs(tt: &[TokenTree]) -> Option<(Name, Box<[Name]>)> {
+    match tt {
         // `#[proc_macro_derive(Trait)]`
         // `#[rustc_builtin_macro(Trait)]`
-        Some((trait_name.as_name(), Box::new([])))
-    } else if let Some(
-        [
-            TtElement::Leaf(Leaf::Ident(trait_name)),
-            TtElement::Leaf(Leaf::Punct(comma)),
-            TtElement::Leaf(Leaf::Ident(attributes)),
-            TtElement::Subtree(_, helpers),
-        ],
-    ) = tt.token_trees().iter().collect_array()
-        && comma.char == ','
-        && attributes.sym == sym::attributes
-    {
+        [TokenTree::Leaf(Leaf::Ident(trait_name))] => Some((trait_name.as_name(), Box::new([]))),
+
         // `#[proc_macro_derive(Trait, attributes(helper1, helper2, ...))]`
         // `#[rustc_builtin_macro(Trait, attributes(helper1, helper2, ...))]`
-        let helpers = helpers
-            .filter_map(|tt| match tt {
-                TtElement::Leaf(Leaf::Ident(helper)) => Some(helper.as_name()),
-                _ => None,
-            })
-            .collect::<Box<[_]>>();
+        [
+            TokenTree::Leaf(Leaf::Ident(trait_name)),
+            TokenTree::Leaf(Leaf::Punct(comma)),
+            TokenTree::Leaf(Leaf::Ident(attributes)),
+            TokenTree::Subtree(helpers)
+        ] if comma.char == ',' && attributes.sym == sym::attributes =>
+        {
+            let helpers = helpers
+                .token_trees
+                .iter()
+                .filter(
+                    |tt| !matches!(tt, TokenTree::Leaf(Leaf::Punct(comma)) if comma.char == ','),
+                )
+                .map(|tt| match tt {
+                    TokenTree::Leaf(Leaf::Ident(helper)) => Some(helper.as_name()),
+                    _ => None,
+                })
+                .collect::<Option<Box<[_]>>>()?;
 
-        Some((trait_name.as_name(), helpers))
-    } else {
-        None
+            Some((trait_name.as_name(), helpers))
+        }
+
+        _ => None,
     }
 }

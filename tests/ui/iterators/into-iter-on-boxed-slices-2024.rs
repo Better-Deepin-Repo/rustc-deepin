@@ -1,5 +1,6 @@
 //@ check-pass
 //@ edition:2024
+//@ compile-flags: -Zunstable-options
 
 use std::ops::Deref;
 use std::rc::Rc;

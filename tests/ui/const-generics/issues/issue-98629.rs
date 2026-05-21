@@ -1,6 +1,7 @@
 #![feature(const_trait_impl)]
 
-const trait Trait {
+#[const_trait]
+trait Trait {
     const N: usize;
 }
 

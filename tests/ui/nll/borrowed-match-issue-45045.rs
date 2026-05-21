@@ -10,7 +10,7 @@ fn main() {
     let f = &mut e;
     let g = f;
     match e {
-        //~^ ERROR cannot use `e` because it was mutably borrowed [E0503]
+        //~^ cannot use `e` because it was mutably borrowed [E0503]
         Xyz::A => println!("a"),
         Xyz::B => println!("b"),
     };

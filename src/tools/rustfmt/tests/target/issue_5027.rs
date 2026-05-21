@@ -1,4 +1,4 @@
-// rustfmt-style_edition: 2024
+// rustfmt-version: Two
 
 pub type Iter<'a, D> = impl DoubleEndedIterator<Item = (SomethingSomethingSomethingLongType<D>)>
     + ExactSizeIterator

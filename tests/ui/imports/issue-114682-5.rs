@@ -1,3 +1,4 @@
+//@ check-pass
 //@ edition: 2018
 //@ aux-build: issue-114682-5-extern-1.rs
 //@ aux-build: issue-114682-5-extern-2.rs
@@ -8,9 +9,7 @@ extern crate issue_114682_5_extern_2;
 
 use issue_114682_5_extern_2::p::*;
 use issue_114682_5_extern_1::Url;
-//~^ ERROR `issue_114682_5_extern_1` is ambiguous
-//~| WARN `issue_114682_5_extern_1` is ambiguous
-//~| ERROR unresolved import `issue_114682_5_extern_1::Url`
-//~| WARN this was previously accepted
+// FIXME: The `issue_114682_5_extern_1` should be considered an ambiguous item,
+// as it has already been recognized as ambiguous in `issue_114682_5_extern_2`.
 
 fn main() {}

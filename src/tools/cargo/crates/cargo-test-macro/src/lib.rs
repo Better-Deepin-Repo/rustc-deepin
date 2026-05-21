@@ -3,14 +3,16 @@
 //! This is meant to be consumed alongside `cargo-test-support`. See
 //! <https://rust-lang.github.io/cargo/contrib/> for a guide on writing tests.
 //!
-//! > This crate is maintained by the Cargo team, primarily for use by Cargo
-//! > and not intended for external use. This
-//! > crate may make major changes to its APIs or be deprecated without warning.
+//! WARNING: You might not want to use this outside of Cargo.
+//!
+//! * This is designed for testing Cargo itself. Use at your own risk.
+//! * No guarantee on any stability across versions.
+//! * No feature request would be accepted unless proved useful for testing Cargo.
 
 use proc_macro::*;
 use std::path::Path;
 use std::process::Command;
-use std::sync::LazyLock;
+use std::sync::Once;
 
 /// Replacement for `#[test]`
 ///
@@ -34,8 +36,8 @@ use std::sync::LazyLock;
 ///   This is useful for tests that use unstable options in `rustc` or `rustdoc`.
 ///   These tests are run in Cargo's CI, but are disabled in rust-lang/rust's CI due to the difficulty of updating both repos simultaneously.
 ///   A `reason` field is required to explain why it is nightly-only.
-/// * `requires = "<cmd>"` --- This indicates a command that is required to be installed to be run.
-///   For example, `requires = "rustfmt"` means the test will only run if the executable `rustfmt` is installed.
+/// * `requires_<cmd>` --- This indicates a command that is required to be installed to be run.
+///   For example, `requires_rustfmt` means the test will only run if the executable `rustfmt` is installed.
 ///   These tests are *always* run on CI.
 ///   This is mainly used to avoid requiring contributors from having every dependency installed.
 /// * `build_std_real` --- This is a "real" `-Zbuild-std` test (in the `build_std` integration test).
@@ -133,18 +135,8 @@ pub fn cargo_test(attr: TokenStream, item: TokenStream) -> TokenStream {
                     "rustup or stable toolchain not installed"
                 );
             }
-            s if s.starts_with("requires=") => {
+            s if s.starts_with("requires_") => {
                 let command = &s[9..];
-                let Ok(literal) = command.parse::<Literal>() else {
-                    panic!("expect a string literal, found: {command}");
-                };
-                let literal = literal.to_string();
-                let Some(command) = literal
-                    .strip_prefix('"')
-                    .and_then(|lit| lit.strip_suffix('"'))
-                else {
-                    panic!("expect a quoted string literal, found: {literal}");
-                };
                 set_ignore!(!has_command(command), "{command} not installed");
             }
             s if s.starts_with(">=1.") => {
@@ -200,9 +192,6 @@ pub fn cargo_test(attr: TokenStream, item: TokenStream) -> TokenStream {
         add_attr(&mut ret, "ignore", reason);
     }
 
-    let mut test_name = None;
-    let mut num = 0;
-
     // Find where the function body starts, and add the boilerplate at the start.
     for token in item {
         let group = match token {
@@ -214,35 +203,18 @@ pub fn cargo_test(attr: TokenStream, item: TokenStream) -> TokenStream {
                     continue;
                 }
             }
-            TokenTree::Ident(i) => {
-                // The first time through it will be `fn` the second time is the
-                // name of the test.
-                if test_name.is_none() && num == 1 {
-                    test_name = Some(i.to_string())
-                } else {
-                    num += 1;
-                }
-                ret.extend(Some(TokenTree::Ident(i)));
-                continue;
-            }
             other => {
                 ret.extend(Some(other));
                 continue;
             }
         };
 
-        let name = &test_name
-            .clone()
-            .map(|n| n.split("::").next().unwrap().to_string())
-            .unwrap();
-
-        let mut new_body = to_token_stream(&format!(
-            r#"let _test_guard = {{
-                let tmp_dir = env!("CARGO_TARGET_TMPDIR");
-                let test_dir = cargo_test_support::paths::test_dir(std::file!(), "{name}");
-                cargo_test_support::paths::init_root(tmp_dir, test_dir)
-            }};"#
-        ));
+        let mut new_body = to_token_stream(
+            r#"let _test_guard = {
+                let tmp_dir = option_env!("CARGO_TARGET_TMPDIR");
+                cargo_test_support::paths::init_root(tmp_dir)
+            };"#,
+        );
 
         new_body.extend(group.stream());
         ret.extend(Some(TokenTree::from(Group::new(
@@ -274,21 +246,23 @@ fn to_token_stream(code: &str) -> TokenStream {
     code.parse().unwrap()
 }
 
-static VERSION: std::sync::LazyLock<(u32, bool)> = LazyLock::new(|| {
-    let output = Command::new("rustc")
-        .arg("-V")
-        .output()
-        .expect("rustc should run");
-    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
-    let vers = stdout.split_whitespace().skip(1).next().unwrap();
-    let is_nightly = option_env!("CARGO_TEST_DISABLE_NIGHTLY").is_none()
-        && (vers.contains("-nightly") || vers.contains("-dev"));
-    let minor = vers.split('.').skip(1).next().unwrap().parse().unwrap();
-    (minor, is_nightly)
-});
+static mut VERSION: (u32, bool) = (0, false);
 
 fn version() -> (u32, bool) {
-    LazyLock::force(&VERSION).clone()
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let output = Command::new("rustc")
+            .arg("-V")
+            .output()
+            .expect("rustc should run");
+        let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+        let vers = stdout.split_whitespace().skip(1).next().unwrap();
+        let is_nightly = option_env!("CARGO_TEST_DISABLE_NIGHTLY").is_none()
+            && (vers.contains("-nightly") || vers.contains("-dev"));
+        let minor = vers.split('.').skip(1).next().unwrap().parse().unwrap();
+        unsafe { VERSION = (minor, is_nightly) }
+    });
+    unsafe { VERSION }
 }
 
 fn check_command(command_path: &Path, args: &[&str]) -> bool {
@@ -309,6 +283,14 @@ fn check_command(command_path: &Path, args: &[&str]) -> bool {
         }
     };
     if !output.status.success() {
+        // Debian specific patch, upstream wontfix:
+        // qemu has a faulty vfork where it fails to fail if a command is not
+        // found, with a unix_wait_status of 32512, or 0x7f00, 7f meaning
+        // exit code 127. See https://github.com/rust-lang/rust/issues/90825
+        use std::os::unix::process::ExitStatusExt;
+        if output.status.into_raw() == 0x7f00 {
+            return false;
+        }
         panic!(
             "expected command `{command_name}` to be runnable, got error {}:\n\
             stderr:{}\n\
@@ -322,42 +304,19 @@ fn check_command(command_path: &Path, args: &[&str]) -> bool {
 }
 
 fn has_command(command: &str) -> bool {
-    use std::env::consts::EXE_EXTENSION;
-    // ALLOWED: For testing cargo itself only.
-    #[allow(clippy::disallowed_methods)]
-    let Some(paths) = std::env::var_os("PATH") else {
-        return false;
-    };
-    std::env::split_paths(&paths)
-        .flat_map(|path| {
-            let candidate = path.join(&command);
-            let with_exe = if EXE_EXTENSION.is_empty() {
-                None
-            } else {
-                Some(candidate.with_extension(EXE_EXTENSION))
-            };
-            std::iter::once(candidate).chain(with_exe)
-        })
-        .find(|p| is_executable(p))
-        .is_some()
-}
-
-#[cfg(unix)]
-fn is_executable<P: AsRef<Path>>(path: P) -> bool {
-    use std::os::unix::prelude::*;
-    std::fs::metadata(path)
-        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
-}
-
-#[cfg(windows)]
-fn is_executable<P: AsRef<Path>>(path: P) -> bool {
-    path.as_ref().is_file()
+    check_command(Path::new(command), &["--version"])
 }
 
 fn has_rustup_stable() -> bool {
     if option_env!("CARGO_TEST_DISABLE_NIGHTLY").is_some() {
         // This cannot run on rust-lang/rust CI due to the lack of rustup.
+        return false;
+    }
+    if cfg!(windows) && !is_ci() && option_env!("RUSTUP_WINDOWS_PATH_ADD_BIN").is_none() {
+        // There is an issue with rustup that doesn't allow recursive cargo
+        // invocations. Disable this on developer machines if the environment
+        // variable is not enabled. This can be removed once
+        // https://github.com/rust-lang/rustup/issues/3036 is resolved.
         return false;
     }
     // Cargo mucks with PATH on Windows, adding sysroot host libdir, which is

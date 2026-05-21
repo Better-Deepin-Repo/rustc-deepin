@@ -9,5 +9,5 @@ mod boo {
 
 fn bomp() -> boo::Boo {
     ""
-    //~^ ERROR mismatched types
+    //~^ mismatched types
 }

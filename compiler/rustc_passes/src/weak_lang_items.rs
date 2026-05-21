@@ -8,12 +8,10 @@ use rustc_hir::weak_lang_items::WEAK_LANG_ITEMS;
 use rustc_middle::middle::lang_items::required;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::config::CrateType;
-use rustc_target::spec::Os;
 
 use crate::errors::{
     MissingLangItem, MissingPanicHandler, PanicUnwindWithoutStd, UnknownExternLangItem,
 };
-use crate::lang_items::extract_ast;
 
 /// Checks the crate for usage of weak lang items, returning a vector of all the
 /// lang items required by this crate, but not defined yet.
@@ -28,10 +26,7 @@ pub(crate) fn check_crate(
     if items.eh_personality().is_none() {
         items.missing.push(LangItem::EhPersonality);
     }
-    if tcx.sess.target.os == Os::Emscripten
-        && items.eh_catch_typeinfo().is_none()
-        && !tcx.sess.opts.unstable_opts.emscripten_wasm_eh
-    {
+    if tcx.sess.target.os == "emscripten" && items.eh_catch_typeinfo().is_none() {
         items.missing.push(LangItem::EhCatchTypeinfo);
     }
 
@@ -47,7 +42,7 @@ struct WeakLangItemVisitor<'a, 'tcx> {
 
 impl<'ast> visit::Visitor<'ast> for WeakLangItemVisitor<'_, '_> {
     fn visit_foreign_item(&mut self, i: &'ast ast::ForeignItem) {
-        if let Some((lang_item, _)) = extract_ast(&i.attrs) {
+        if let Some((lang_item, _)) = lang_items::extract(&i.attrs) {
             if let Some(item) = LangItem::from_name(lang_item)
                 && item.is_weak()
             {
@@ -69,8 +64,7 @@ fn verify(tcx: TyCtxt<'_>, items: &lang_items::LanguageItems) {
         | CrateType::ProcMacro
         | CrateType::Cdylib
         | CrateType::Executable
-        | CrateType::StaticLib
-        | CrateType::Sdylib => true,
+        | CrateType::Staticlib => true,
         CrateType::Rlib => false,
     });
     if !needs_check {

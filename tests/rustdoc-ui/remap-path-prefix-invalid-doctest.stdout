@@ -5,11 +5,11 @@ test remapped_path/remap-path-prefix-invalid-doctest.rs - SomeStruct (line 10) .
 failures:
 
 ---- remapped_path/remap-path-prefix-invalid-doctest.rs - SomeStruct (line 10) stdout ----
-error: expected one of `!` or `::`, found `is`
+error: expected one of `!`, `.`, `::`, `;`, `?`, `{`, `}`, or an operator, found `is`
   --> remapped_path/remap-path-prefix-invalid-doctest.rs:11:6
    |
 LL | this is not real code
-   |      ^^ expected one of `!` or `::`
+   |      ^^ expected one of 8 possible tokens
 
 error: aborting due to 1 previous error
 

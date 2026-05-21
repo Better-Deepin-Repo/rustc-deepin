@@ -1,54 +1,45 @@
 /// Lang items used by the new trait solver. This can be mapped to whatever internal
 /// representation of `LangItem`s used in the underlying compiler implementation.
-pub enum SolverLangItem {
+pub enum TraitSolverLangItem {
     // tidy-alphabetical-start
-    AsyncFnKindUpvars,
-    AsyncFnOnceOutput,
-    CallOnceFuture,
-    CallRefFuture,
-    CoroutineReturn,
-    CoroutineYield,
-    DynMetadata,
-    FutureOutput,
-    Metadata,
-    // tidy-alphabetical-end
-}
-
-pub enum SolverAdtLangItem {
-    // tidy-alphabetical-start
-    Option,
-    Poll,
-    // tidy-alphabetical-end
-}
-
-pub enum SolverTraitLangItem {
-    // tidy-alphabetical-start
+    AsyncDestruct,
     AsyncFn,
     AsyncFnKindHelper,
+    AsyncFnKindUpvars,
     AsyncFnMut,
     AsyncFnOnce,
     AsyncFnOnceOutput,
     AsyncIterator,
-    BikeshedGuaranteedNoDrop,
+    CallOnceFuture,
+    CallRefFuture,
     Clone,
     Copy,
     Coroutine,
+    CoroutineReturn,
+    CoroutineYield,
     Destruct,
     DiscriminantKind,
-    Drop,
+    DynMetadata,
+    EffectsIntersection,
+    EffectsIntersectionOutput,
+    EffectsMaybe,
+    EffectsNoRuntime,
+    EffectsRuntime,
     Fn,
     FnMut,
     FnOnce,
     FnPtrTrait,
     FusedIterator,
     Future,
+    FutureOutput,
     Iterator,
-    MetaSized,
-    PointeeSized,
+    Metadata,
+    Option,
     PointeeTrait,
+    PointerLike,
+    Poll,
     Sized,
     TransmuteTrait,
-    TrivialClone,
     Tuple,
     Unpin,
     Unsize,

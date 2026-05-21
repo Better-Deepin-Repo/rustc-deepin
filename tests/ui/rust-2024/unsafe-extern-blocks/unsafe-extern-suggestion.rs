@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ run-rustfix
 
 #![deny(missing_unsafe_on_extern)]

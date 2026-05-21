@@ -1,47 +1,29 @@
 use rustc_errors::codes::*;
-use rustc_errors::{DiagArgFromDisplay, MultiSpan};
-use rustc_macros::{Diagnostic, Subdiagnostic};
+use rustc_errors::DiagArgFromDisplay;
+use rustc_macros::{Diagnostic, LintDiagnostic, Subdiagnostic};
 use rustc_span::{Span, Symbol};
 
 #[derive(Diagnostic)]
-#[diag("{$len ->
-    [1] field
-    *[other] fields
-} {$field_names} of {$variant_descr} `{$def_path_str}` {$len ->
-    [1] is
-    *[other] are
-} private", code = E0451)]
+#[diag(privacy_field_is_private, code = E0451)]
 pub(crate) struct FieldIsPrivate {
     #[primary_span]
-    pub span: MultiSpan,
-    #[label("in this type")]
-    pub struct_span: Option<Span>,
-    pub field_names: String,
+    pub span: Span,
+    pub field_name: Symbol,
     pub variant_descr: &'static str,
     pub def_path_str: String,
     #[subdiagnostic]
-    pub labels: Vec<FieldIsPrivateLabel>,
-    pub len: usize,
+    pub label: FieldIsPrivateLabel,
 }
 
 #[derive(Subdiagnostic)]
 pub(crate) enum FieldIsPrivateLabel {
-    #[label(
-        "{$rest_len ->
-            [1] field
-            *[other] fields
-        } {$rest_field_names} {$rest_len ->
-            [1] is
-            *[other] are
-        } private"
-    )]
+    #[label(privacy_field_is_private_is_update_syntax_label)]
     IsUpdateSyntax {
         #[primary_span]
         span: Span,
-        rest_field_names: String,
-        rest_len: usize,
+        field_name: Symbol,
     },
-    #[label("private field")]
+    #[label(privacy_field_is_private_label)]
     Other {
         #[primary_span]
         span: Span,
@@ -49,17 +31,17 @@ pub(crate) enum FieldIsPrivateLabel {
 }
 
 #[derive(Diagnostic)]
-#[diag("{$kind} `{$descr}` is private")]
+#[diag(privacy_item_is_private)]
 pub(crate) struct ItemIsPrivate<'a> {
     #[primary_span]
-    #[label("private {$kind}")]
+    #[label]
     pub span: Span,
     pub kind: &'a str,
     pub descr: DiagArgFromDisplay<'a>,
 }
 
 #[derive(Diagnostic)]
-#[diag("{$kind} is private")]
+#[diag(privacy_unnamed_item_is_private)]
 pub(crate) struct UnnamedItemIsPrivate {
     #[primary_span]
     pub span: Span,
@@ -67,40 +49,38 @@ pub(crate) struct UnnamedItemIsPrivate {
 }
 
 #[derive(Diagnostic)]
-#[diag("{$vis_descr} {$kind} `{$descr}` in public interface", code = E0446)]
+#[diag(privacy_in_public_interface, code = E0446)]
 pub(crate) struct InPublicInterface<'a> {
     #[primary_span]
-    #[label("can't leak {$vis_descr} {$kind}")]
+    #[label]
     pub span: Span,
     pub vis_descr: &'static str,
     pub kind: &'a str,
     pub descr: DiagArgFromDisplay<'a>,
-    #[label("`{$descr}` declared as {$vis_descr}")]
+    #[label(privacy_visibility_label)]
     pub vis_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("{$descr}")]
+#[diag(privacy_report_effective_visibility)]
 pub(crate) struct ReportEffectiveVisibility {
     #[primary_span]
     pub span: Span,
     pub descr: String,
 }
 
-#[derive(Diagnostic)]
-#[diag("{$kind} `{$descr}` from private dependency '{$krate}' in public interface")]
+#[derive(LintDiagnostic)]
+#[diag(privacy_from_private_dep_in_public_interface)]
 pub(crate) struct FromPrivateDependencyInPublicInterface<'a> {
     pub kind: &'a str,
     pub descr: DiagArgFromDisplay<'a>,
     pub krate: Symbol,
 }
 
-#[derive(Diagnostic)]
-#[diag("{$kind} `{$descr}` is reachable but cannot be named")]
+#[derive(LintDiagnostic)]
+#[diag(privacy_unnameable_types_lint)]
 pub(crate) struct UnnameableTypesLint<'a> {
-    #[label(
-        "reachable at visibility `{$reachable_vis}`, but can only be named at visibility `{$reexported_vis}`"
-    )]
+    #[label]
     pub span: Span,
     pub kind: &'a str,
     pub descr: DiagArgFromDisplay<'a>,
@@ -111,15 +91,15 @@ pub(crate) struct UnnameableTypesLint<'a> {
 // Used for `private_interfaces` and `private_bounds` lints.
 // They will replace private-in-public errors and compatibility lints in future.
 // See https://rust-lang.github.io/rfcs/2145-type-privacy.html for more details.
-#[derive(Diagnostic)]
-#[diag("{$ty_kind} `{$ty_descr}` is more private than the item `{$item_descr}`")]
+#[derive(LintDiagnostic)]
+#[diag(privacy_private_interface_or_bounds_lint)]
 pub(crate) struct PrivateInterfacesOrBoundsLint<'a> {
-    #[label("{$item_kind} `{$item_descr}` is reachable at visibility `{$item_vis_descr}`")]
+    #[label(privacy_item_label)]
     pub item_span: Span,
     pub item_kind: &'a str,
     pub item_descr: DiagArgFromDisplay<'a>,
     pub item_vis_descr: &'a str,
-    #[note("but {$ty_kind} `{$ty_descr}` is only usable at visibility `{$ty_vis_descr}`")]
+    #[note(privacy_ty_note)]
     pub ty_span: Span,
     pub ty_kind: &'a str,
     pub ty_descr: DiagArgFromDisplay<'a>,

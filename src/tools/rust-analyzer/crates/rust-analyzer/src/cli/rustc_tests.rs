@@ -7,21 +7,22 @@ use std::{cell::RefCell, fs::read_to_string, panic::AssertUnwindSafe, path::Path
 
 use hir::{ChangeWithProcMacros, Crate};
 use ide::{AnalysisHost, DiagnosticCode, DiagnosticsConfig};
-use ide_db::base_db;
 use itertools::Either;
+use paths::Utf8PathBuf;
 use profile::StopWatch;
-use project_model::toolchain_info::{QueryConfig, target_data};
+use project_model::target_data_layout::RustcDataLayoutConfig;
 use project_model::{
-    CargoConfig, ManifestPath, ProjectWorkspace, ProjectWorkspaceKind, RustLibSource,
-    RustSourceWorkspaceConfig, Sysroot,
+    target_data_layout, CargoConfig, ManifestPath, ProjectWorkspace, ProjectWorkspaceKind,
+    RustLibSource, Sysroot,
 };
 
-use load_cargo::{LoadCargoConfig, ProcMacroServerChoice, load_workspace};
+use load_cargo::{load_workspace, LoadCargoConfig, ProcMacroServerChoice};
 use rustc_hash::FxHashMap;
+use triomphe::Arc;
 use vfs::{AbsPathBuf, FileId};
 use walkdir::WalkDir;
 
-use crate::cli::{Result, flags, report_metric};
+use crate::cli::{flags, report_metric, Result};
 
 struct Tester {
     host: AnalysisHost,
@@ -62,26 +63,16 @@ fn detect_errors_from_rustc_stderr_file(p: PathBuf) -> FxHashMap<DiagnosticCode,
 
 impl Tester {
     fn new() -> Result<Self> {
-        let mut path = AbsPathBuf::assert_utf8(std::env::temp_dir());
-        path.push("ra-rustc-test");
-        let tmp_file = path.join("ra-rustc-test.rs");
+        let mut path = std::env::temp_dir();
+        path.push("ra-rustc-test.rs");
+        let tmp_file = AbsPathBuf::try_from(Utf8PathBuf::from_path_buf(path).unwrap()).unwrap();
         std::fs::write(&tmp_file, "")?;
-        let cargo_config = CargoConfig {
-            sysroot: Some(RustLibSource::Discover),
-            all_targets: true,
-            set_test: true,
-            ..Default::default()
-        };
+        let cargo_config =
+            CargoConfig { sysroot: Some(RustLibSource::Discover), ..Default::default() };
 
-        let mut sysroot = Sysroot::discover(tmp_file.parent().unwrap(), &cargo_config.extra_env);
-        let loaded_sysroot =
-            sysroot.load_workspace(&RustSourceWorkspaceConfig::default_cargo(), false, &|_| ());
-        if let Some(loaded_sysroot) = loaded_sysroot {
-            sysroot.set_workspace(loaded_sysroot);
-        }
-
-        let target_data = target_data::get(
-            QueryConfig::Rustc(&sysroot, tmp_file.parent().unwrap().as_ref()),
+        let sysroot = Sysroot::discover(tmp_file.parent().unwrap(), &cargo_config.extra_env);
+        let data_layout = target_data_layout::get(
+            RustcDataLayoutConfig::Rustc(&sysroot),
             None,
             &cargo_config.extra_env,
         );
@@ -90,20 +81,18 @@ impl Tester {
             kind: ProjectWorkspaceKind::DetachedFile {
                 file: ManifestPath::try_from(tmp_file).unwrap(),
                 cargo: None,
+                cargo_config_extra_env: Default::default(),
             },
             sysroot,
             rustc_cfg: vec![],
             toolchain: None,
-            target: target_data.map_err(|it| it.to_string().into()),
+            target_layout: data_layout.map(Arc::from).map_err(|it| Arc::from(it.to_string())),
             cfg_overrides: Default::default(),
-            extra_includes: vec![],
-            set_test: true,
         };
         let load_cargo_config = LoadCargoConfig {
             load_out_dirs_from_check: false,
             with_proc_macro_server: ProcMacroServerChoice::Sysroot,
             prefill_caches: false,
-            proc_macro_processes: 1,
         };
         let (db, _vfs, _proc_macro) =
             load_workspace(workspace, &cargo_config.extra_env, &load_cargo_config)?;
@@ -140,7 +129,7 @@ impl Tester {
             FxHashMap::default()
         };
         let text = read_to_string(&p).unwrap();
-        let mut change = ChangeWithProcMacros::default();
+        let mut change = ChangeWithProcMacros::new();
         // Ignore unstable tests, since they move too fast and we do not intend to support all of them.
         let mut ignore_test = text.contains("#![feature");
         // Ignore test with extern crates, as this infra don't support them yet.
@@ -165,13 +154,13 @@ impl Tester {
                     let analysis = self.host.analysis();
                     let root_file = self.root_file;
                     move || {
-                        let res = std::panic::catch_unwind(AssertUnwindSafe(move || {
+                        let res = std::panic::catch_unwind(move || {
                             analysis.full_diagnostics(
                                 diagnostic_config,
                                 ide::AssistResolveStrategy::None,
                                 root_file,
                             )
-                        }));
+                        });
                         main.unpark();
                         res
                     }
@@ -186,7 +175,7 @@ impl Tester {
 
             if !worker.is_finished() {
                 // attempt to cancel the worker, won't work for chalk hangs unfortunately
-                self.host.trigger_garbage_collection();
+                self.host.request_cancellation();
             }
             worker.join().and_then(identity)
         });
@@ -299,19 +288,19 @@ impl flags::RustcTests {
         for i in walk_dir {
             let i = i?;
             let p = i.into_path();
-            if let Some(f) = &self.filter
-                && !p.as_os_str().to_string_lossy().contains(f)
-            {
-                continue;
+            if let Some(f) = &self.filter {
+                if !p.as_os_str().to_string_lossy().contains(f) {
+                    continue;
+                }
             }
-            if p.extension().is_none_or(|x| x != "rs") {
+            if p.extension().map_or(true, |x| x != "rs") {
                 continue;
             }
             if let Err(e) = std::panic::catch_unwind({
                 let tester = AssertUnwindSafe(&mut tester);
                 let p = p.clone();
                 move || {
-                    let _guard = base_db::DbPanicContext::enter(p.display().to_string());
+                    let _guard = stdx::panic_context::enter(p.display().to_string());
                     { tester }.0.test(p);
                 }
             }) {

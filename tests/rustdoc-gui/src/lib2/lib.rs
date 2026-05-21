@@ -1,7 +1,7 @@
 // ignore-tidy-linelength
 
 #![feature(doc_cfg)]
-#![feature(negative_impls)]
+#![feature(doc_auto_cfg)]
 
 pub mod another_folder;
 pub mod another_mod;
@@ -60,8 +60,6 @@ impl Trait for Foo {
 impl implementors::Whatever for Foo {
     type Foo = u32;
 }
-
-impl !implementors::Whatever for StructToImplOnReexport {}
 
 #[doc(inline)]
 pub use implementors::TraitToReexport;
@@ -356,58 +354,5 @@ pub mod scroll_traits {
     /// scrolls as expected.
     pub trait TraitWithLongItemsName {
         fn this_is_a_method_with_a_long_name_returning_something() -> String;
-    }
-}
-
-pub struct Derefer(String);
-
-impl std::ops::Deref for Derefer {
-    type Target = str;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-pub mod deprecated {
-    #[deprecated(since = "1.26.0", note = "deprecated")]
-    pub struct DeprecatedStruct;
-
-    pub struct NonDeprecatedStruct;
-
-    pub trait NormalTrait {
-        #[deprecated(since = "1.26.0", note = "deprecated")]
-        /// doc
-        const X: usize = 12;
-
-        #[deprecated(since = "1.26.0", note = "deprecated")]
-        /// doc
-        fn normal_deprecated_fn();
-    }
-
-    #[deprecated(since = "1.26.0", note = "deprecated")]
-    pub trait DeprecatedTrait {
-        fn depr_deprecated_fn();
-    }
-
-    impl NonDeprecatedStruct {
-        #[deprecated(since = "1.26.0", note = "deprecated")]
-        /// doc
-        pub fn deprecated_fn() {}
-
-        /// doc
-        pub fn non_deprecated_fn() {}
-
-        #[deprecated(since = "TBD", note = "deprecated")]
-        /// doc
-        pub fn future_deprecated_fn() {}
-    }
-
-    impl NormalTrait for NonDeprecatedStruct {
-        fn normal_deprecated_fn() {}
-    }
-
-    impl DeprecatedTrait for NonDeprecatedStruct {
-        fn depr_deprecated_fn() {}
     }
 }

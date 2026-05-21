@@ -1,5 +1,5 @@
 [book]
-authors = ["The Rust Project Developers"]
+author = "The Rust Project Developers"
 title = "The Rustonomicon"
 description = "The Dark Arts of Advanced and Unsafe Rust Programming"
 
@@ -32,4 +32,4 @@ git-repository-url = "https://github.com/rust-lang/nomicon"
 "./arc.html" = "./arc-mutex/arc.html"
 
 [rust]
-edition = "2024"
+edition = "2021"

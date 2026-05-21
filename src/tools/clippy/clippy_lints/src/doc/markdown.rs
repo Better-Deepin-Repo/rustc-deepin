@@ -6,15 +6,13 @@ use rustc_lint::LateContext;
 use rustc_span::{BytePos, Pos, Span};
 use url::Url;
 
-use crate::doc::{DOC_MARKDOWN, Fragments};
-use std::ops::Range;
+use crate::doc::DOC_MARKDOWN;
 
 pub fn check(
     cx: &LateContext<'_>,
     valid_idents: &FxHashSet<String>,
     text: &str,
-    fragments: &Fragments<'_>,
-    fragment_range: Range<usize>,
+    span: Span,
     code_level: isize,
     blockquote_level: isize,
 ) {
@@ -66,31 +64,20 @@ pub fn check(
             close_parens += 1;
         }
 
-        // We'll use this offset to calculate the span to lint.
-        let fragment_offset = word.as_ptr() as usize - text.as_ptr() as usize;
-
         // Adjust for the current word
-        check_word(
-            cx,
-            word,
-            fragments,
-            &fragment_range,
-            fragment_offset,
-            code_level,
-            blockquote_level,
+        let offset = word.as_ptr() as usize - text.as_ptr() as usize;
+        let span = Span::new(
+            span.lo() + BytePos::from_usize(offset),
+            span.lo() + BytePos::from_usize(offset + word.len()),
+            span.ctxt(),
+            span.parent(),
         );
+
+        check_word(cx, word, span, code_level, blockquote_level);
     }
 }
 
-fn check_word(
-    cx: &LateContext<'_>,
-    word: &str,
-    fragments: &Fragments<'_>,
-    range: &Range<usize>,
-    fragment_offset: usize,
-    code_level: isize,
-    blockquote_level: isize,
-) {
+fn check_word(cx: &LateContext<'_>, word: &str, span: Span, code_level: isize, blockquote_level: isize) {
     /// Checks if a string is upper-camel-case, i.e., starts with an uppercase and
     /// contains at least two uppercase letters (`Clippy` is ok) and one lower-case
     /// letter (`NASA` is ok).
@@ -126,30 +113,20 @@ fn check_word(
         s != "-" && s.contains('-')
     }
 
-    if let Ok(url) = Url::parse(word)
+    if let Ok(url) = Url::parse(word) {
         // try to get around the fact that `foo::bar` parses as a valid URL
-        && !url.cannot_be_a_base()
-    {
-        let Some(fragment_span) = fragments.span(cx, range.clone()) else {
+        if !url.cannot_be_a_base() {
+            span_lint_and_sugg(
+                cx,
+                DOC_MARKDOWN,
+                span,
+                "you should put bare URLs between `<`/`>` or make a proper Markdown link",
+                "try",
+                format!("<{word}>"),
+                Applicability::MachineApplicable,
+            );
             return;
-        };
-        let span = Span::new(
-            fragment_span.lo() + BytePos::from_usize(fragment_offset),
-            fragment_span.lo() + BytePos::from_usize(fragment_offset + word.len()),
-            fragment_span.ctxt(),
-            fragment_span.parent(),
-        );
-
-        span_lint_and_sugg(
-            cx,
-            DOC_MARKDOWN,
-            span,
-            "you should put bare URLs between `<`/`>` or make a proper Markdown link",
-            "try",
-            format!("<{word}>"),
-            Applicability::MachineApplicable,
-        );
-        return;
+        }
     }
 
     // We assume that mixed-case words are not meant to be put inside backticks. (Issue #2343)
@@ -160,17 +137,6 @@ fn check_word(
     }
 
     if has_underscore(word) || word.contains("::") || is_camel_case(word) || word.ends_with("()") {
-        let Some(fragment_span) = fragments.span(cx, range.clone()) else {
-            return;
-        };
-
-        let span = Span::new(
-            fragment_span.lo() + BytePos::from_usize(fragment_offset),
-            fragment_span.lo() + BytePos::from_usize(fragment_offset + word.len()),
-            fragment_span.ctxt(),
-            fragment_span.parent(),
-        );
-
         span_lint_and_then(
             cx,
             DOC_MARKDOWN,

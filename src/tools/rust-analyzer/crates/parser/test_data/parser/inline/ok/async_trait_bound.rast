@@ -23,9 +23,9 @@ SOURCE_FILE
                   PATH_SEGMENT
                     NAME_REF
                       IDENT "Fn"
-                    PARENTHESIZED_ARG_LIST
+                    PARAM_LIST
                       L_PAREN "("
-                      TYPE_ARG
+                      PARAM
                         REF_TYPE
                           AMP "&"
                           PATH_TYPE

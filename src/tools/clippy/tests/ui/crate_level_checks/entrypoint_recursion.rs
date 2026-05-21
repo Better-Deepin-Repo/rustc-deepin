@@ -1,11 +1,11 @@
-//@ignore-target: apple
+//@ignore-target-apple
+
 #![feature(rustc_attrs)]
+
 #[warn(clippy::main_recursion)]
 #[allow(unconditional_recursion)]
 #[rustc_main]
 fn a() {
+    println!("Hello, World!");
     a();
-    //~^ main_recursion
 }
-
-fn main() {}

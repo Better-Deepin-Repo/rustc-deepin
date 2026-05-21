@@ -1,4 +1,4 @@
-error[E0425]: cannot find type `C` in this scope
+error[E0412]: cannot find type `C` in this scope
   --> $DIR/issue-109831.rs:4:24
    |
 LL | struct A;
@@ -9,9 +9,8 @@ LL | fn f(b1: B, b2: B, a2: C) {}
    |
 help: a struct with a similar name exists
    |
-LL - fn f(b1: B, b2: B, a2: C) {}
-LL + fn f(b1: B, b2: B, a2: A) {}
-   |
+LL | fn f(b1: B, b2: B, a2: A) {}
+   |                        ~
 help: you might be missing a type parameter
    |
 LL | fn f<C>(b1: B, b2: B, a2: C) {}
@@ -24,13 +23,7 @@ LL | struct A;
    | --------- similarly named unit struct `A` defined here
 ...
 LL |     f(A, A, B, C);
-   |                ^
-   |
-help: a unit struct with a similar name exists
-   |
-LL -     f(A, A, B, C);
-LL +     f(A, A, B, A);
-   |
+   |                ^ help: a unit struct with a similar name exists: `A`
 
 error[E0061]: this function takes 3 arguments but 4 arguments were supplied
   --> $DIR/issue-109831.rs:7:5
@@ -45,7 +38,7 @@ note: function defined here
   --> $DIR/issue-109831.rs:4:4
    |
 LL | fn f(b1: B, b2: B, a2: C) {}
-   |    ^ -----  -----
+   |    ^ -----  -----  -----
 help: remove the extra argument
    |
 LL -     f(A, A, B, C);
@@ -54,5 +47,5 @@ LL +     f(/* B */, /* B */, B);
 
 error: aborting due to 3 previous errors
 
-Some errors have detailed explanations: E0061, E0425.
+Some errors have detailed explanations: E0061, E0412, E0425.
 For more information about an error, try `rustc --explain E0061`.

@@ -1,14 +1,19 @@
 //! Completion tests for item list position.
-use expect_test::expect;
+use expect_test::{expect, Expect};
 
-use crate::tests::{check, check_edit, check_with_base_items};
+use crate::tests::{check_edit, check_empty, completion_list, BASE_ITEMS_FIXTURE};
+
+fn check(ra_fixture: &str, expect: Expect) {
+    let actual = completion_list(&format!("{BASE_ITEMS_FIXTURE}{ra_fixture}"));
+    expect.assert_eq(&actual)
+}
 
 #[test]
 fn in_mod_item_list() {
-    check_with_base_items(
+    check(
         r#"mod tests { $0 }"#,
         expect![[r#"
-            ma makro!(…) macro_rules! makro
+            ma makro!(…)           macro_rules! makro
             kw async
             kw const
             kw crate::
@@ -16,7 +21,6 @@ fn in_mod_item_list() {
             kw extern
             kw fn
             kw impl
-            kw impl for
             kw mod
             kw pub
             kw pub(crate)
@@ -39,10 +43,10 @@ fn in_mod_item_list() {
 
 #[test]
 fn in_source_file_item_list() {
-    check_with_base_items(
+    check(
         r#"$0"#,
         expect![[r#"
-            ma makro!(…) macro_rules! makro
+            ma makro!(…)           macro_rules! makro
             md module
             kw async
             kw const
@@ -51,7 +55,6 @@ fn in_source_file_item_list() {
             kw extern
             kw fn
             kw impl
-            kw impl for
             kw mod
             kw pub
             kw pub(crate)
@@ -73,10 +76,10 @@ fn in_source_file_item_list() {
 
 #[test]
 fn in_item_list_after_attr() {
-    check_with_base_items(
+    check(
         r#"#[attr] $0"#,
         expect![[r#"
-            ma makro!(…) macro_rules! makro
+            ma makro!(…)           macro_rules! makro
             md module
             kw async
             kw const
@@ -85,41 +88,6 @@ fn in_item_list_after_attr() {
             kw extern
             kw fn
             kw impl
-            kw impl for
-            kw mod
-            kw pub
-            kw pub(crate)
-            kw pub(super)
-            kw self::
-            kw static
-            kw struct
-            kw trait
-            kw type
-            kw union
-            kw unsafe
-            kw use
-            sn macro_rules
-            sn tfn (Test function)
-            sn tmod (Test module)
-        "#]],
-    )
-}
-
-#[test]
-fn in_item_list_after_inner_attr() {
-    check_with_base_items(
-        r#"#![attr] $0"#,
-        expect![[r#"
-            ma makro!(…) macro_rules! makro
-            md module
-            kw async
-            kw const
-            kw crate::
-            kw enum
-            kw extern
-            kw fn
-            kw impl
-            kw impl for
             kw mod
             kw pub
             kw pub(crate)
@@ -141,7 +109,7 @@ fn in_item_list_after_inner_attr() {
 
 #[test]
 fn in_qualified_path() {
-    check_with_base_items(
+    check(
         r#"crate::$0"#,
         expect![[r#"
             ma makro!(…) macro_rules! makro
@@ -152,14 +120,12 @@ fn in_qualified_path() {
 
 #[test]
 fn after_unsafe_token() {
-    check_with_base_items(
+    check(
         r#"unsafe $0"#,
         expect![[r#"
             kw async
-            kw extern
             kw fn
             kw impl
-            kw impl for
             kw trait
         "#]],
     );
@@ -167,7 +133,7 @@ fn after_unsafe_token() {
 
 #[test]
 fn after_async_token() {
-    check_with_base_items(
+    check(
         r#"async $0"#,
         expect![[r#"
             kw fn
@@ -178,7 +144,7 @@ fn after_async_token() {
 
 #[test]
 fn after_visibility() {
-    check_with_base_items(
+    check(
         r#"pub $0"#,
         expect![[r#"
             kw async
@@ -200,7 +166,7 @@ fn after_visibility() {
 
 #[test]
 fn after_visibility_unsafe() {
-    check_with_base_items(
+    check(
         r#"pub unsafe $0"#,
         expect![[r#"
             kw async
@@ -211,110 +177,11 @@ fn after_visibility_unsafe() {
 }
 
 #[test]
-fn after_abi() {
-    check_with_base_items(
-        r#"extern "C" $0"#,
-        expect![[r#"
-            kw async
-            kw const
-            kw enum
-            kw fn
-            kw impl
-            kw impl for
-            kw mod
-            kw pub
-            kw pub(crate)
-            kw pub(super)
-            kw static
-            kw struct
-            kw trait
-            kw type
-            kw union
-            kw unsafe
-            kw use
-        "#]],
-    );
-    check_with_base_items(
-        r#"extern "C" f$0"#,
-        expect![[r#"
-            kw async
-            kw const
-            kw enum
-            kw fn
-            kw impl
-            kw impl for
-            kw mod
-            kw pub
-            kw pub(crate)
-            kw pub(super)
-            kw static
-            kw struct
-            kw trait
-            kw type
-            kw union
-            kw unsafe
-            kw use
-        "#]],
-    );
-}
-
-#[test]
-fn after_extern_token() {
-    check_with_base_items(
-        r#"extern $0"#,
-        expect![[r#"
-            kw async
-            kw const
-            kw crate
-            kw enum
-            kw fn
-            kw impl
-            kw impl for
-            kw mod
-            kw pub
-            kw pub(crate)
-            kw pub(super)
-            kw static
-            kw struct
-            kw trait
-            kw type
-            kw union
-            kw unsafe
-            kw use
-        "#]],
-    );
-    check_with_base_items(
-        r#"extern cr$0"#,
-        expect![[r#"
-            kw async
-            kw const
-            kw crate
-            kw enum
-            kw fn
-            kw impl
-            kw impl for
-            kw mod
-            kw pub
-            kw pub(crate)
-            kw pub(super)
-            kw static
-            kw struct
-            kw trait
-            kw type
-            kw union
-            kw unsafe
-            kw use
-        "#]],
-    );
-    check_edit("crate", "extern $0", "extern crate $0;");
-}
-
-#[test]
 fn in_impl_assoc_item_list() {
-    check_with_base_items(
+    check(
         r#"impl Struct { $0 }"#,
         expect![[r#"
-            ma makro!(…) macro_rules! makro
+            ma makro!(…)  macro_rules! makro
             md module
             kw async
             kw const
@@ -331,10 +198,10 @@ fn in_impl_assoc_item_list() {
 
 #[test]
 fn in_impl_assoc_item_list_after_attr() {
-    check_with_base_items(
+    check(
         r#"impl Struct { #[attr] $0 }"#,
         expect![[r#"
-            ma makro!(…) macro_rules! makro
+            ma makro!(…)  macro_rules! makro
             md module
             kw async
             kw const
@@ -351,7 +218,7 @@ fn in_impl_assoc_item_list_after_attr() {
 
 #[test]
 fn in_trait_assoc_item_list() {
-    check_with_base_items(
+    check(
         r"trait Foo { $0 }",
         expect![[r#"
             ma makro!(…) macro_rules! makro
@@ -369,7 +236,7 @@ fn in_trait_assoc_item_list() {
 
 #[test]
 fn in_trait_assoc_fn_missing_body() {
-    check_with_base_items(
+    check(
         r#"trait Foo { fn function(); $0 }"#,
         expect![[r#"
             ma makro!(…) macro_rules! makro
@@ -387,7 +254,7 @@ fn in_trait_assoc_fn_missing_body() {
 
 #[test]
 fn in_trait_assoc_const_missing_body() {
-    check_with_base_items(
+    check(
         r#"trait Foo { const CONST: (); $0 }"#,
         expect![[r#"
             ma makro!(…) macro_rules! makro
@@ -405,7 +272,7 @@ fn in_trait_assoc_const_missing_body() {
 
 #[test]
 fn in_trait_assoc_type_aliases_missing_ty() {
-    check_with_base_items(
+    check(
         r#"trait Foo { type Type; $0 }"#,
         expect![[r#"
             ma makro!(…) macro_rules! makro
@@ -423,7 +290,7 @@ fn in_trait_assoc_type_aliases_missing_ty() {
 
 #[test]
 fn in_trait_impl_assoc_item_list() {
-    check_with_base_items(
+    check(
         r#"
 trait Test {
     type Type0;
@@ -446,8 +313,7 @@ impl Test for () {
             ct const CONST1: () =
             fn async fn function2()
             fn fn function1()
-            fn fn function2()
-            ma makro!(…) macro_rules! makro
+            ma makro!(…)            macro_rules! makro
             md module
             ta type Type1 =
             kw crate::
@@ -458,7 +324,7 @@ impl Test for () {
 
 #[test]
 fn in_trait_impl_no_unstable_item_on_stable() {
-    check(
+    check_empty(
         r#"
 trait Test {
     #[unstable]
@@ -482,7 +348,7 @@ impl Test for () {
 
 #[test]
 fn in_trait_impl_unstable_item_on_nightly() {
-    check(
+    check_empty(
         r#"
 //- toolchain:nightly
 trait Test {
@@ -510,10 +376,10 @@ impl Test for () {
 
 #[test]
 fn after_unit_struct() {
-    check_with_base_items(
+    check(
         r#"struct S; f$0"#,
         expect![[r#"
-            ma makro!(…) macro_rules! makro
+            ma makro!(…)           macro_rules! makro
             md module
             kw async
             kw const
@@ -522,7 +388,6 @@ fn after_unit_struct() {
             kw extern
             kw fn
             kw impl
-            kw impl for
             kw mod
             kw pub
             kw pub(crate)
@@ -591,33 +456,6 @@ type O = $0;
         r"
 struct A;
 trait B {
-type O<'a>
-where
-Self: 'a;
-}
-impl B for A {
-$0
-}
-",
-        r#"
-struct A;
-trait B {
-type O<'a>
-where
-Self: 'a;
-}
-impl B for A {
-type O<'a> = $0
-where
-Self: 'a;
-}
-"#,
-    );
-    check_edit(
-        "type O",
-        r"
-struct A;
-trait B {
 type O: ?Sized = u32;
 }
 impl B for A {
@@ -655,85 +493,4 @@ type O = $0;
 }
 ",
     )
-}
-
-#[test]
-fn inside_extern_blocks() {
-    // Should suggest `fn`, `static`, `unsafe`
-    check_with_base_items(
-        r#"extern { $0 }"#,
-        expect![[r#"
-            ma makro!(…) macro_rules! makro
-            md module
-            kw crate::
-            kw fn
-            kw pub
-            kw pub(crate)
-            kw pub(super)
-            kw self::
-            kw static
-            kw unsafe
-        "#]],
-    );
-
-    // Should suggest `fn`, `static`, `safe`, `unsafe`
-    check_with_base_items(
-        r#"unsafe extern { $0 }"#,
-        expect![[r#"
-            ma makro!(…) macro_rules! makro
-            md module
-            kw crate::
-            kw fn
-            kw pub
-            kw pub(crate)
-            kw pub(super)
-            kw safe
-            kw self::
-            kw static
-            kw unsafe
-        "#]],
-    );
-
-    check_with_base_items(
-        r#"unsafe extern { pub safe $0 }"#,
-        expect![[r#"
-            kw fn
-            kw static
-        "#]],
-    );
-
-    check_with_base_items(
-        r#"unsafe extern { pub unsafe $0 }"#,
-        expect![[r#"
-            kw fn
-            kw static
-        "#]],
-    )
-}
-
-#[test]
-fn tokens_from_macro() {
-    check_edit(
-        "fn as_ref",
-        r#"
-//- proc_macros: identity
-//- minicore: as_ref
-struct Foo;
-
-#[proc_macros::identity]
-impl<'a> AsRef<&'a i32> for Foo {
-    $0
-}
-    "#,
-        r#"
-struct Foo;
-
-#[proc_macros::identity]
-impl<'a> AsRef<&'a i32> for Foo {
-    fn as_ref(&self) -> &&'a i32 {
-    $0
-}
-}
-    "#,
-    );
 }

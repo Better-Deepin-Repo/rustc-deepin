@@ -4,13 +4,10 @@ on:
   schedule:
     - cron: "0 23 * * *"
 
-permissions:
-  contents: write
-
 jobs:
   publish_release:
     name: Publish release
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Set version
         run: |

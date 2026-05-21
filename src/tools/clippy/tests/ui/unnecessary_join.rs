@@ -8,7 +8,6 @@ fn main() {
         .iter()
         .map(|item| item.to_uppercase())
         .collect::<Vec<String>>()
-        //~^ unnecessary_join
         .join("");
     println!("{}", output);
 
@@ -18,7 +17,6 @@ fn main() {
         .iter()
         .map(|item| item.to_uppercase())
         .collect::<Vec<_>>()
-        //~^ unnecessary_join
         .join("");
     println!("{}", output);
 

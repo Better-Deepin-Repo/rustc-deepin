@@ -5,6 +5,7 @@
 // This test case should either run-pass or be rejected at compile time.
 // Currently we just disallow this usage and require pattern is monomorphic.
 
+#![feature(const_type_id)]
 #![feature(const_type_name)]
 
 use std::any::{self, TypeId};
@@ -17,7 +18,7 @@ impl<T: 'static> GetTypeId<T> {
 
 const fn check_type_id<T: 'static>() -> bool {
     matches!(GetTypeId::<T>::VALUE, GetTypeId::<T>::VALUE)
-    //~^ ERROR constant pattern cannot depend on generic parameters
+    //~^ ERROR constant pattern depends on a generic parameter
 }
 
 pub struct GetTypeNameLen<T>(T);
@@ -28,7 +29,7 @@ impl<T: 'static> GetTypeNameLen<T> {
 
 const fn check_type_name_len<T: 'static>() -> bool {
     matches!(GetTypeNameLen::<T>::VALUE, GetTypeNameLen::<T>::VALUE)
-    //~^ ERROR constant pattern cannot depend on generic parameters
+    //~^ ERROR constant pattern depends on a generic parameter
 }
 
 fn main() {

@@ -1,14 +1,14 @@
 use syntax::{
+    ast::{self, HasName, HasVisibility},
     AstNode,
     SyntaxKind::{
         self, ASSOC_ITEM_LIST, CONST, ENUM, FN, MACRO_DEF, MODULE, SOURCE_FILE, STATIC, STRUCT,
         TRAIT, TYPE_ALIAS, USE, VISIBILITY,
     },
     SyntaxNode, T,
-    ast::{self, HasName, HasVisibility},
 };
 
-use crate::{AssistContext, AssistId, Assists, utils::vis_offset};
+use crate::{utils::vis_offset, AssistContext, AssistId, AssistKind, Assists};
 
 // Assist: change_visibility
 //
@@ -65,20 +65,18 @@ fn add_vis(acc: &mut Assists, ctx: &AssistContext<'_>) -> Option<()> {
         if field.visibility().is_some() {
             return None;
         }
-        check_is_not_variant(&field)?;
         (vis_offset(field.syntax()), field_name.syntax().text_range())
     } else if let Some(field) = ctx.find_node_at_offset::<ast::TupleField>() {
         if field.visibility().is_some() {
             return None;
         }
-        check_is_not_variant(&field)?;
         (vis_offset(field.syntax()), field.syntax().text_range())
     } else {
         return None;
     };
 
     acc.add(
-        AssistId::refactor_rewrite("change_visibility"),
+        AssistId("change_visibility", AssistKind::RefactorRewrite),
         "Change visibility to pub(crate)",
         target,
         |edit| {
@@ -114,7 +112,7 @@ fn change_vis(acc: &mut Assists, vis: ast::Visibility) -> Option<()> {
     if vis.syntax().text() == "pub" {
         let target = vis.syntax().text_range();
         return acc.add(
-            AssistId::refactor_rewrite("change_visibility"),
+            AssistId("change_visibility", AssistKind::RefactorRewrite),
             "Change Visibility to pub(crate)",
             target,
             |edit| {
@@ -125,7 +123,7 @@ fn change_vis(acc: &mut Assists, vis: ast::Visibility) -> Option<()> {
     if vis.syntax().text() == "pub(crate)" {
         let target = vis.syntax().text_range();
         return acc.add(
-            AssistId::refactor_rewrite("change_visibility"),
+            AssistId("change_visibility", AssistKind::RefactorRewrite),
             "Change visibility to pub",
             target,
             |edit| {
@@ -134,11 +132,6 @@ fn change_vis(acc: &mut Assists, vis: ast::Visibility) -> Option<()> {
         );
     }
     None
-}
-
-fn check_is_not_variant(field: &impl AstNode) -> Option<()> {
-    let kind = field.syntax().parent()?.parent()?.kind();
-    (kind != SyntaxKind::VARIANT).then_some(())
 }
 
 #[cfg(test)]
@@ -244,13 +237,6 @@ mod tests {
             r"mod foo { pub enum Foo {Foo1} }
               fn main() { foo::Foo::Foo1$0 } ",
         );
-    }
-
-    #[test]
-    fn not_applicable_for_enum_variant_fields() {
-        check_assist_not_applicable(change_visibility, r"pub enum Foo { Foo1($0i32) }");
-
-        check_assist_not_applicable(change_visibility, r"pub enum Foo { Foo1 { $0n: i32 } }");
     }
 
     #[test]

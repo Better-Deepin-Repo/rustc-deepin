@@ -60,6 +60,7 @@ Don't actually write to the manifest.
 
 {{> options-locked }}
 
+{{> options-lockfile-path }}
 {{/options}}
 
 ### Package Selection
@@ -88,9 +89,9 @@ Package to remove from.
 
        cargo remove --dev trybuild
 
-3. Remove `nom` from the `wasm32-unknown-unknown` dependencies table
+3. Remove `nom` from the `x86_64-pc-windows-gnu` dependencies table
 
-       cargo remove --target wasm32-unknown-unknown nom
+       cargo remove --target x86_64-pc-windows-gnu nom
 
 ## SEE ALSO
 {{man "cargo" 1}}, {{man "cargo-add" 1}}

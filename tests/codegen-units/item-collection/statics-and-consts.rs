@@ -1,7 +1,7 @@
-//@ compile-flags:-Clink-dead-code
+//@ compile-flags:-Zprint-mono-items=eager
 
 #![deny(dead_code)]
-#![crate_type = "lib"]
+#![feature(start)]
 
 static STATIC1: i64 = {
     const STATIC1_CONST1: i64 = 2;
@@ -38,8 +38,8 @@ fn foo() {
 }
 
 //~ MONO_ITEM fn start
-#[no_mangle]
-pub fn start(_: isize, _: *const *const u8) -> isize {
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
     foo();
     let _ = STATIC1;
 

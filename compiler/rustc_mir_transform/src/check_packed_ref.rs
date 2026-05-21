@@ -3,15 +3,15 @@ use rustc_middle::mir::*;
 use rustc_middle::span_bug;
 use rustc_middle::ty::{self, TyCtxt};
 
-use crate::{errors, util};
+use crate::{errors, util, MirLint};
 
-pub(super) struct CheckPackedRef;
+pub struct CheckPackedRef;
 
-impl<'tcx> crate::MirLint<'tcx> for CheckPackedRef {
+impl<'tcx> MirLint<'tcx> for CheckPackedRef {
     fn run_lint(&self, tcx: TyCtxt<'tcx>, body: &Body<'tcx>) {
-        let typing_env = body.typing_env(tcx);
+        let param_env = tcx.param_env(body.source.def_id());
         let source_info = SourceInfo::outermost(body.span);
-        let mut checker = PackedRefChecker { body, tcx, typing_env, source_info };
+        let mut checker = PackedRefChecker { body, tcx, param_env, source_info };
         checker.visit_body(body);
     }
 }
@@ -19,7 +19,7 @@ impl<'tcx> crate::MirLint<'tcx> for CheckPackedRef {
 struct PackedRefChecker<'a, 'tcx> {
     body: &'a Body<'tcx>,
     tcx: TyCtxt<'tcx>,
-    typing_env: ty::TypingEnv<'tcx>,
+    param_env: ty::ParamEnv<'tcx>,
     source_info: SourceInfo,
 }
 
@@ -37,24 +37,24 @@ impl<'tcx> Visitor<'tcx> for PackedRefChecker<'_, 'tcx> {
     }
 
     fn visit_place(&mut self, place: &Place<'tcx>, context: PlaceContext, _location: Location) {
-        if context.is_borrow()
-            && let Some((adt, pack)) =
-                util::place_unalignment(self.tcx, self.body, self.typing_env, *place)
-        {
-            let def_id = self.body.source.instance.def_id();
-            if let Some(impl_def_id) = self.tcx.trait_impl_of_assoc(def_id)
-                && self.tcx.is_builtin_derived(impl_def_id)
-            {
-                // If we ever reach here it means that the generated derive
-                // code is somehow doing an unaligned reference, which it
-                // shouldn't do.
-                span_bug!(self.source_info.span, "builtin derive created an unaligned reference");
-            } else {
-                self.tcx.dcx().emit_err(errors::UnalignedPackedRef {
-                    span: self.source_info.span,
-                    ty_descr: adt.descr(),
-                    align: pack.bytes(),
-                });
+        if context.is_borrow() {
+            if util::is_disaligned(self.tcx, self.body, self.param_env, *place) {
+                let def_id = self.body.source.instance.def_id();
+                if let Some(impl_def_id) = self.tcx.impl_of_method(def_id)
+                    && self.tcx.is_builtin_derived(impl_def_id)
+                {
+                    // If we ever reach here it means that the generated derive
+                    // code is somehow doing an unaligned reference, which it
+                    // shouldn't do.
+                    span_bug!(
+                        self.source_info.span,
+                        "builtin derive created an unaligned reference"
+                    );
+                } else {
+                    self.tcx
+                        .dcx()
+                        .emit_err(errors::UnalignedPackedRef { span: self.source_info.span });
+                }
             }
         }
     }

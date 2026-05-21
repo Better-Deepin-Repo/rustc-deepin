@@ -8,8 +8,9 @@ use std::io::{BufWriter, Write};
 use serde::Deserialize;
 
 const PRINT_INSTRUCTION_VIOLATIONS: bool = false;
-const GENERATE_MISSING_X86_MD: bool = false;
-const SS: u8 = (8 * size_of::<usize>()) as u8;
+const PRINT_MISSING_LISTS: bool = false;
+const PRINT_MISSING_LISTS_MARKDOWN: bool = false;
+const SS: u8 = (8 * core::mem::size_of::<usize>()) as u8;
 
 struct Function {
     name: &'static str,
@@ -67,7 +68,7 @@ static TUPLE: Type = Type::Tuple;
 static CPUID: Type = Type::CpuidResult;
 static NEVER: Type = Type::Never;
 
-#[derive(Debug, PartialEq, Copy, Clone)]
+#[derive(Debug)]
 enum Type {
     PrimFloat(u8),
     PrimSigned(u8),
@@ -164,7 +165,7 @@ fn verify_all_signatures() {
     // Open up the network console and you'll see an xml file was downloaded
     // (currently called data-3.6.9.xml). That's the file we downloaded
     // here.
-    let xml = include_bytes!("../../../intrinsics_data/x86-intel.xml");
+    let xml = include_bytes!("../x86-intel.xml");
 
     let xml = &xml[..];
     let data: Data = quick_xml::de::from_reader(xml).expect("failed to deserialize xml");
@@ -180,7 +181,12 @@ fn verify_all_signatures() {
         if !rust.has_test {
             // FIXME: this list should be almost empty
             let skip = [
-                // MXCSR - deprecated, immediate UB
+                // EFLAGS
+                "__readeflags",
+                "__readeflags",
+                "__writeeflags",
+                "__writeeflags",
+                // MXCSR - deprecated
                 "_mm_getcsr",
                 "_mm_setcsr",
                 "_MM_GET_EXCEPTION_MASK",
@@ -201,7 +207,14 @@ fn verify_all_signatures() {
                 "_xrstors",
                 "_xsaves64",
                 "_xrstors64",
-                "_mm_loadiwkey",
+                // TSC
+                "_rdtsc",
+                "__rdtscp",
+                // TBM
+                "_t1mskc_u64",
+                // RTM
+                "_xbegin",
+                "_xend",
                 // RDRAND
                 "_rdrand16_step",
                 "_rdrand32_step",
@@ -237,14 +250,16 @@ fn verify_all_signatures() {
                 "_mm256_unpacklo_epi32",
                 "_mm256_unpackhi_epi64",
                 "_mm256_unpacklo_epi64",
-                // Has tests with some other intrinsic
-                "__writeeflags",
+                // Has tests with different name
+                "_mm_min_epi8",
+                "_mm_min_epi32",
                 "_xrstor",
                 "_xrstor64",
                 "_fxrstor",
                 "_fxrstor64",
-                "_xend",
-                "_xabort_code",
+                // Needs `f16` to test
+                "_mm_cvtps_ph",
+                "_mm256_cvtps_ph",
                 // Aliases
                 "_mm_comige_ss",
                 "_mm_cvt_ss2si",
@@ -291,25 +306,23 @@ fn verify_all_signatures() {
             "__cpuid_count" |
             "__cpuid" |
             "__get_cpuid_max" |
-            "_MM_SHUFFLE" |
-            "_xabort_code" |
             // Not listed with intel, but manually verified
             "cmpxchg16b"
             => continue,
+            // Intel requires the mask argument for _mm_shuffle_ps to be an
+            // unsigned integer, but all other _mm_shuffle_.. intrinsics
+            // take a signed-integer. This breaks `_MM_SHUFFLE` for
+            // `_mm_shuffle_ps`:
+            name@"_mm_shuffle_ps" => {
+                map.remove(name);
+                continue;
+            },
             _ => {}
         }
 
         // these are all AMD-specific intrinsics
         if let Some(feature) = rust.target_feature {
             if feature.contains("sse4a") || feature.contains("tbm") {
-                continue;
-            }
-
-            // FIXME: these have not been added to Intrinsics Guide yet
-            if ["amx-avx512", "amx-fp8", "amx-movrs", "amx-tf32"]
-                .iter()
-                .any(|f| feature.contains(f))
-            {
                 continue;
             }
         }
@@ -334,7 +347,10 @@ fn verify_all_signatures() {
     }
     assert!(all_valid);
 
-    if GENERATE_MISSING_X86_MD {
+    if PRINT_MISSING_LISTS {
+        print_missing(&map, io::stdout()).unwrap();
+    }
+    if PRINT_MISSING_LISTS_MARKDOWN {
         print_missing(
             &map,
             BufWriter::new(File::create("../core_arch/missing-x86.md").unwrap()),
@@ -367,22 +383,29 @@ fn print_missing(map: &HashMap<&str, Vec<&Intrinsic>>, mut f: impl Write) -> io:
 
     for (k, v) in &mut missing {
         v.sort_by_key(|intrinsic| &intrinsic.name); // sort to make the order of everything same
-        writeln!(f, "\n<details><summary>{k:?}</summary><p>\n")?;
-        for intel in v {
-            let url = format!(
-                "https://software.intel.com/sites/landingpage\
+        if PRINT_MISSING_LISTS_MARKDOWN {
+            writeln!(f, "\n<details><summary>{k:?}</summary><p>\n")?;
+            for intel in v {
+                let url = format!(
+                    "https://software.intel.com/sites/landingpage\
                          /IntrinsicsGuide/#text={}",
-                intel.name
-            );
-            writeln!(f, "  * [ ] [`{}`]({url})", intel.name)?;
+                    intel.name
+                );
+                writeln!(f, "  * [ ] [`{}`]({url})", intel.name)?;
+            }
+            writeln!(f, "</p></details>\n")?;
+        } else {
+            writeln!(f, "\n{k:?}\n")?;
+            for intel in v {
+                writeln!(f, "\t{}", intel.name)?;
+            }
         }
-        writeln!(f, "</p></details>\n")?;
     }
 
     f.flush()
 }
 
-fn check_target_features(rust: &Function, intel: &Intrinsic) -> Result<(), String> {
+fn matches(rust: &Function, intel: &Intrinsic) -> Result<(), String> {
     // Verify that all `#[target_feature]` annotations are correct,
     // ensuring that we've actually enabled the right instruction
     // set for this intrinsic.
@@ -409,7 +432,7 @@ fn check_target_features(rust: &Function, intel: &Intrinsic) -> Result<(), Strin
         }
     }
 
-    let rust_features = match rust.target_feature {
+    let rust_features: HashSet<String> = match rust.target_feature {
         Some(features) => features
             .split(',')
             .map(|feature| feature.to_string())
@@ -417,13 +440,16 @@ fn check_target_features(rust: &Function, intel: &Intrinsic) -> Result<(), Strin
         None => HashSet::new(),
     };
 
-    let mut intel_cpuids = HashSet::new();
-
     for cpuid in &intel.cpuid {
         // The pause intrinsic is in the SSE2 module, but it is backwards
         // compatible with CPUs without SSE2, and it therefore does not need the
         // target-feature attribute.
         if rust.name == "_mm_pause" {
+            continue;
+        }
+        // this is needed by _xsave and probably some related intrinsics,
+        // but let's just skip it for now.
+        if *cpuid == "XSS" {
             continue;
         }
 
@@ -447,54 +473,59 @@ fn check_target_features(rust: &Function, intel: &Intrinsic) -> Result<(), Strin
             continue;
         }
 
-        let cpuid = cpuid.to_lowercase().replace('_', "");
+        let cpuid = cpuid.to_lowercase();
 
         // Fix mismatching feature names:
-        let fixed_cpuid = match cpuid.as_ref() {
+        let fixup_cpuid = |cpuid: String| match cpuid.as_ref() {
             // The XML file names IFMA as "avx512ifma52", while Rust calls
             // it "avx512ifma".
             "avx512ifma52" => String::from("avx512ifma"),
-            "xss" => String::from("xsaves"),
-            "keylocker" => String::from("kl"),
-            "keylockerwide" => String::from("widekl"),
+            // The XML file names BITALG as "avx512_bitalg", while Rust calls
+            // it "avx512bitalg".
+            "avx512_bitalg" => String::from("avx512bitalg"),
+            // The XML file names VBMI as "avx512_vbmi", while Rust calls
+            // it "avx512vbmi".
+            "avx512_vbmi" => String::from("avx512vbmi"),
+            // The XML file names VBMI2 as "avx512_vbmi2", while Rust calls
+            // it "avx512vbmi2".
+            "avx512_vbmi2" => String::from("avx512vbmi2"),
+            // The XML file names VNNI as "avx512_vnni", while Rust calls
+            // it "avx512vnni".
+            "avx512_vnni" => String::from("avx512vnni"),
+            // The XML file names BF16 as "avx512_bf16", while Rust calls
+            // it "avx512bf16".
+            "avx512_bf16" => String::from("avx512bf16"),
+            // The XML file names FP16 as "avx512_fp16", while Rust calls
+            // it "avx512fp16".
+            "avx512_fp16" => String::from("avx512fp16"),
+            // The XML file names AVX-VNNI as "avx_vnni", while Rust calls
+            // it "avxvnni"
+            "avx_vnni" => String::from("avxvnni"),
+            // The XML file names AVX-VNNI_INT8 as "avx_vnni_int8", while Rust calls
+            // it "avxvnniint8"
+            "avx_vnni_int8" => String::from("avxvnniint8"),
+            // The XML file names AVX-NE-CONVERT as "avx_ne_convert", while Rust calls
+            // it "avxvnni"
+            "avx_ne_convert" => String::from("avxneconvert"),
+            // The XML file names AVX-IFMA as "avx_ifma", while Rust calls
+            // it "avxifma"
+            "avx_ifma" => String::from("avxifma"),
+            // The XML file names AVX-VNNI_INT16 as "avx_vnni_int16", while Rust calls
+            // it "avxvnniint16"
+            "avx_vnni_int16" => String::from("avxvnniint16"),
             _ => cpuid,
         };
+        let fixed_cpuid = fixup_cpuid(cpuid);
 
-        intel_cpuids.insert(fixed_cpuid);
-    }
-
-    if intel_cpuids.contains("gfni") {
-        if rust.name.contains("mask") {
-            // LLVM requires avx512bw for all masked GFNI intrinsics, and also avx512vl for the 128- and 256-bit versions
-            if !rust.name.starts_with("_mm512") {
-                intel_cpuids.insert(String::from("avx512vl"));
-            }
-            intel_cpuids.insert(String::from("avx512bw"));
-        } else if rust.name.starts_with("_mm256") {
-            // LLVM requires AVX for all non-masked 256-bit GFNI intrinsics
-            intel_cpuids.insert(String::from("avx"));
+        if !rust_features.contains(&fixed_cpuid) {
+            bail!(
+                "intel cpuid `{}` not in `{:?}` for {}",
+                fixed_cpuid,
+                rust_features,
+                rust.name
+            );
         }
     }
-
-    // Also, 512-bit vpclmulqdq intrisic requires avx512f
-    if &rust.name == &"_mm512_clmulepi64_epi128" {
-        intel_cpuids.insert(String::from("avx512f"));
-    }
-
-    if rust_features != intel_cpuids {
-        bail!(
-            "Intel cpuids `{:?}` doesn't match Rust `{:?}` for {}",
-            intel_cpuids,
-            rust_features,
-            rust.name
-        );
-    }
-
-    Ok(())
-}
-
-fn matches(rust: &Function, intel: &Intrinsic) -> Result<(), String> {
-    check_target_features(rust, intel)?;
 
     if PRINT_INSTRUCTION_VIOLATIONS {
         if rust.instrs.is_empty() {
@@ -526,7 +557,7 @@ fn matches(rust: &Function, intel: &Intrinsic) -> Result<(), String> {
 
     // Make sure we've got the right return type.
     if let Some(t) = rust.ret {
-        equate(t, &intel.return_.type_, "", intel, false)?;
+        equate(t, &intel.return_.type_, "", rust.name, false)?;
     } else if !intel.return_.type_.is_empty() && intel.return_.type_ != "void" {
         bail!(
             "{} returns `{}` with intel, void in rust",
@@ -548,7 +579,7 @@ fn matches(rust: &Function, intel: &Intrinsic) -> Result<(), String> {
         }
         for (i, (a, b)) in intel.parameters.iter().zip(rust.arguments).enumerate() {
             let is_const = rust.required_const.contains(&i);
-            equate(b, &a.type_, &a.etype, &intel, is_const)?;
+            equate(b, &a.type_, &a.etype, &intel.name, is_const)?;
         }
     }
 
@@ -661,59 +692,11 @@ fn matches(rust: &Function, intel: &Intrinsic) -> Result<(), String> {
     Ok(())
 }
 
-fn pointed_type(intrinsic: &Intrinsic) -> Result<Type, String> {
-    Ok(
-        if intrinsic.tech == "AMX"
-            || intrinsic
-                .cpuid
-                .iter()
-                .any(|cpuid| matches!(&**cpuid, "KEYLOCKER" | "KEYLOCKER_WIDE" | "XSAVE" | "FXSR"))
-        {
-            // AMX, KEYLOCKER and XSAVE intrinsics should take `*u8`
-            U8
-        } else if intrinsic.name == "_mm_clflush" {
-            // Just a false match in the following logic
-            U8
-        } else if ["_mm_storeu_si", "_mm_loadu_si"]
-            .iter()
-            .any(|x| intrinsic.name.starts_with(x))
-        {
-            // These have already been stabilized, so cannot be changed anymore
-            U8
-        } else if intrinsic.name.ends_with("i8") {
-            I8
-        } else if intrinsic.name.ends_with("i16") {
-            I16
-        } else if intrinsic.name.ends_with("i32") {
-            I32
-        } else if intrinsic.name.ends_with("i64") {
-            I64
-        } else if intrinsic.name.ends_with("i128") {
-            M128I
-        } else if intrinsic.name.ends_with("i256") {
-            M256I
-        } else if intrinsic.name.ends_with("i512") {
-            M512I
-        } else if intrinsic.name.ends_with("h") {
-            F16
-        } else if intrinsic.name.ends_with("s") {
-            F32
-        } else if intrinsic.name.ends_with("d") {
-            F64
-        } else {
-            bail!(
-                "Don't know what type of *void to use for {}",
-                intrinsic.name
-            );
-        },
-    )
-}
-
 fn equate(
     t: &Type,
     intel: &str,
     etype: &str,
-    intrinsic: &Intrinsic,
+    intrinsic: &str,
     is_const: bool,
 ) -> Result<(), String> {
     // Make pointer adjacent to the type: float * foo => float* foo
@@ -730,7 +713,7 @@ fn equate(
     if etype == "IMM" || intel == "constexpr int" {
         // The _bittest intrinsics claim to only accept immediates but actually
         // accept run-time values as well.
-        if !is_const && !intrinsic.name.starts_with("_bittest") {
+        if !is_const && !intrinsic.starts_with("_bittest") {
             bail!("argument required to be const but isn't");
         }
     } else {
@@ -755,8 +738,7 @@ fn equate(
             &Type::PrimUnsigned(32),
             "unsigned __int32" | "unsigned int" | "unsigned long" | "const unsigned int",
         ) => {}
-        (&Type::PrimUnsigned(64), "unsigned __int64") => {}
-        (&Type::PrimUnsigned(SS), "size_t") => {}
+        (&Type::PrimUnsigned(64), "unsigned __int64" | "size_t") => {}
 
         (&Type::M128, "__m128") => {}
         (&Type::M128BH, "__m128bh") => {}
@@ -778,16 +760,7 @@ fn equate(
         (&Type::MMASK16, "__mmask16") => {}
         (&Type::MMASK8, "__mmask8") => {}
 
-        (&Type::MutPtr(_type), "void*") | (&Type::ConstPtr(_type), "void const*") => {
-            let pointed_type = pointed_type(intrinsic)?;
-            if _type != &pointed_type {
-                bail!(
-                    "incorrect void pointer type {_type:?} in {}, should be pointer to {pointed_type:?}",
-                    intrinsic.name,
-                );
-            }
-        }
-
+        (&Type::MutPtr(_), "void*") => {}
         (&Type::MutPtr(&Type::PrimFloat(32)), "float*") => {}
         (&Type::MutPtr(&Type::PrimFloat(64)), "double*") => {}
         (&Type::MutPtr(&Type::PrimSigned(8)), "char*") => {}
@@ -816,6 +789,7 @@ fn equate(
         (&Type::MutPtr(&Type::M512I), "__m512i*") => {}
         (&Type::MutPtr(&Type::M512D), "__m512d*") => {}
 
+        (&Type::ConstPtr(_), "void const*") => {}
         (&Type::ConstPtr(&Type::PrimFloat(16)), "_Float16 const*") => {}
         (&Type::ConstPtr(&Type::PrimFloat(32)), "float const*") => {}
         (&Type::ConstPtr(&Type::PrimFloat(64)), "double const*") => {}
@@ -855,37 +829,34 @@ fn equate(
         // This is a macro (?) in C which seems to mutate its arguments, but
         // that means that we're taking pointers to arguments in rust
         // as we're not exposing it as a macro.
-        (&Type::MutPtr(&Type::M128), "__m128") if intrinsic.name == "_MM_TRANSPOSE4_PS" => {}
+        (&Type::MutPtr(&Type::M128), "__m128") if intrinsic == "_MM_TRANSPOSE4_PS" => {}
 
         // The _rdtsc intrinsic uses a __int64 return type, but this is a bug in
         // the intrinsics guide: https://github.com/rust-lang/stdarch/issues/559
         // We have manually fixed the bug by changing the return type to `u64`.
-        (&Type::PrimUnsigned(64), "__int64") if intrinsic.name == "_rdtsc" => {}
+        (&Type::PrimUnsigned(64), "__int64") if intrinsic == "_rdtsc" => {}
 
         // The _bittest and _bittest64 intrinsics takes a mutable pointer in the
         // intrinsics guide even though it never writes through the pointer:
-        (&Type::ConstPtr(&Type::PrimSigned(32)), "__int32*") if intrinsic.name == "_bittest" => {}
-        (&Type::ConstPtr(&Type::PrimSigned(64)), "__int64*") if intrinsic.name == "_bittest64" => {}
+        (&Type::ConstPtr(&Type::PrimSigned(32)), "__int32*") if intrinsic == "_bittest" => {}
+        (&Type::ConstPtr(&Type::PrimSigned(64)), "__int64*") if intrinsic == "_bittest64" => {}
         // The _xrstor, _fxrstor, _xrstor64, _fxrstor64 intrinsics take a
         // mutable pointer in the intrinsics guide even though they never write
         // through the pointer:
         (&Type::ConstPtr(&Type::PrimUnsigned(8)), "void*")
-            if matches!(
-                &*intrinsic.name,
-                "_xrstor" | "_xrstor64" | "_fxrstor" | "_fxrstor64"
-            ) => {}
+            if intrinsic == "_xrstor"
+                || intrinsic == "_xrstor64"
+                || intrinsic == "_fxrstor"
+                || intrinsic == "_fxrstor64" => {}
         // The _mm_stream_load_si128 intrinsic take a mutable pointer in the intrinsics
         // guide even though they never write through the pointer
-        (&Type::ConstPtr(&Type::M128I), "void*") if intrinsic.name == "_mm_stream_load_si128" => {}
-        /// Intel requires the mask argument for _mm_shuffle_ps to be an
-        // unsigned integer, but all other _mm_shuffle_.. intrinsics
-        // take a signed-integer. This breaks `_MM_SHUFFLE` for
-        // `_mm_shuffle_ps`
-        (&Type::PrimSigned(32), "unsigned int") if intrinsic.name == "_mm_shuffle_ps" => {}
+        (&Type::ConstPtr(&Type::M128I), "void*") if intrinsic == "_mm_stream_load_si128" => {}
 
         _ => bail!(
-            "failed to equate: `{intel}` and {t:?} for {}",
-            intrinsic.name
+            "failed to equate: `{}` and {:?} for {}",
+            intel,
+            t,
+            intrinsic
         ),
     }
     Ok(())

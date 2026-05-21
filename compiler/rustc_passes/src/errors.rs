@@ -1,265 +1,595 @@
 use std::io::Error;
 use std::path::{Path, PathBuf};
 
+use rustc_ast::Label;
 use rustc_errors::codes::*;
 use rustc_errors::{
     Applicability, Diag, DiagCtxtHandle, DiagSymbolList, Diagnostic, EmissionGuarantee, Level,
-    MultiSpan, msg,
+    MultiSpan, SubdiagMessageOp, Subdiagnostic,
 };
-use rustc_hir::Target;
-use rustc_hir::attrs::{MirDialect, MirPhase};
-use rustc_macros::{Diagnostic, Subdiagnostic};
+use rustc_hir::{self as hir, ExprKind, Target};
+use rustc_macros::{Diagnostic, LintDiagnostic, Subdiagnostic};
 use rustc_middle::ty::{MainDefinition, Ty};
-use rustc_span::{DUMMY_SP, Ident, Span, Symbol};
+use rustc_span::{Span, Symbol, DUMMY_SP};
 
 use crate::check_attr::ProcMacroKind;
+use crate::fluent_generated as fluent;
 use crate::lang_items::Duplicate;
 
-#[derive(Diagnostic)]
-#[diag("`#[diagnostic::do_not_recommend]` can only be placed on trait implementations")]
+#[derive(LintDiagnostic)]
+#[diag(passes_incorrect_do_not_recommend_location)]
 pub(crate) struct IncorrectDoNotRecommendLocation;
 
-#[derive(Diagnostic)]
-#[diag("`#[loop_match]` should be applied to a loop")]
-pub(crate) struct LoopMatchAttr {
-    #[primary_span]
-    pub attr_span: Span,
-    #[label("not a loop")]
-    pub node_span: Span,
-}
+#[derive(LintDiagnostic)]
+#[diag(passes_outer_crate_level_attr)]
+pub(crate) struct OuterCrateLevelAttr;
 
-#[derive(Diagnostic)]
-#[diag("`#[const_continue]` should be applied to a break expression")]
-pub(crate) struct ConstContinueAttr {
-    #[primary_span]
-    pub attr_span: Span,
-    #[label("not a break expression")]
-    pub node_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`{$no_mangle_attr}` attribute may not be used in combination with `{$export_name_attr}`")]
-pub(crate) struct MixedExportNameAndNoMangle {
-    #[label("`{$no_mangle_attr}` is ignored")]
-    #[suggestion(
-        "remove the `{$no_mangle_attr}` attribute",
-        style = "verbose",
-        code = "",
-        applicability = "machine-applicable"
-    )]
-    pub no_mangle_span: Span,
-    #[note("`{$export_name_attr}` takes precedence")]
-    pub export_name_span: Span,
-    pub no_mangle_attr: &'static str,
-    pub export_name_attr: &'static str,
-}
-
-#[derive(Diagnostic)]
-#[diag("crate-level attribute should be an inner attribute")]
-pub(crate) struct OuterCrateLevelAttr {
-    #[subdiagnostic]
-    pub suggestion: OuterCrateLevelAttrSuggestion,
-}
-
-#[derive(Subdiagnostic)]
-#[multipart_suggestion("add a `!`", style = "verbose")]
-pub(crate) struct OuterCrateLevelAttrSuggestion {
-    #[suggestion_part(code = "!")]
-    pub bang_position: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("crate-level attribute should be in the root module")]
+#[derive(LintDiagnostic)]
+#[diag(passes_inner_crate_level_attr)]
 pub(crate) struct InnerCrateLevelAttr;
 
+#[derive(LintDiagnostic)]
+#[diag(passes_ignored_attr_with_macro)]
+pub(crate) struct IgnoredAttrWithMacro<'a> {
+    pub sym: &'a str,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_ignored_attr)]
+pub(crate) struct IgnoredAttr<'a> {
+    pub sym: &'a str,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_inline_ignored_function_prototype)]
+pub(crate) struct IgnoredInlineAttrFnProto;
+
+#[derive(LintDiagnostic)]
+#[diag(passes_inline_ignored_constants)]
+#[warning]
+#[note]
+pub(crate) struct IgnoredInlineAttrConstants;
+
 #[derive(Diagnostic)]
-#[diag("`#[non_exhaustive]` can't be used to annotate items with default field values")]
-pub(crate) struct NonExhaustiveWithDefaultFieldValues {
+#[diag(passes_inline_not_fn_or_closure, code = E0518)]
+pub(crate) struct InlineNotFnOrClosure {
     #[primary_span]
     pub attr_span: Span,
-    #[label("this struct has default field values")]
+    #[label]
     pub defn_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[doc(alias = \"...\")]` isn't allowed on {$location}")]
+#[diag(passes_coverage_not_fn_or_closure, code = E0788)]
+pub(crate) struct CoverageNotFnOrClosure {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub defn_span: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_optimize_not_fn_or_closure)]
+pub(crate) struct OptimizeNotFnOrClosure;
+
+#[derive(Diagnostic)]
+#[diag(passes_should_be_applied_to_fn)]
+pub(crate) struct AttrShouldBeAppliedToFn {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub defn_span: Span,
+    pub on_crate: bool,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_should_be_applied_to_fn_or_unit_struct)]
+pub(crate) struct AttrShouldBeAppliedToFnOrUnitStruct {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub defn_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_should_be_applied_to_fn, code = E0739)]
+pub(crate) struct TrackedCallerWrongLocation {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub defn_span: Span,
+    pub on_crate: bool,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_should_be_applied_to_struct_enum, code = E0701)]
+pub(crate) struct NonExhaustiveWrongLocation {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub defn_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_should_be_applied_to_trait)]
+pub(crate) struct AttrShouldBeAppliedToTrait {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub defn_span: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_target_feature_on_statement)]
+pub(crate) struct TargetFeatureOnStatement;
+
+#[derive(Diagnostic)]
+#[diag(passes_should_be_applied_to_static)]
+pub(crate) struct AttrShouldBeAppliedToStatic {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub defn_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_doc_expect_str)]
+pub(crate) struct DocExpectStr<'a> {
+    #[primary_span]
+    pub attr_span: Span,
+    pub attr_name: &'a str,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_doc_alias_empty)]
+pub(crate) struct DocAliasEmpty<'a> {
+    #[primary_span]
+    pub span: Span,
+    pub attr_str: &'a str,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_doc_alias_bad_char)]
+pub(crate) struct DocAliasBadChar<'a> {
+    #[primary_span]
+    pub span: Span,
+    pub attr_str: &'a str,
+    pub char_: char,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_doc_alias_start_end)]
+pub(crate) struct DocAliasStartEnd<'a> {
+    #[primary_span]
+    pub span: Span,
+    pub attr_str: &'a str,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_doc_alias_bad_location)]
 pub(crate) struct DocAliasBadLocation<'a> {
     #[primary_span]
     pub span: Span,
+    pub attr_str: &'a str,
     pub location: &'a str,
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[doc(alias = \"{$attr_str}\"]` is the same as the item's name")]
-pub(crate) struct DocAliasNotAnAlias {
+#[diag(passes_doc_alias_not_an_alias)]
+pub(crate) struct DocAliasNotAnAlias<'a> {
     #[primary_span]
     pub span: Span,
-    pub attr_str: Symbol,
+    pub attr_str: &'a str,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_doc_alias_duplicated)]
+pub(crate) struct DocAliasDuplicated {
+    #[label]
+    pub first_defn: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[doc({$attr_name} = \"...\")]` should be used on empty modules")]
-pub(crate) struct DocKeywordAttributeEmptyMod {
+#[diag(passes_doc_alias_not_string_literal)]
+pub(crate) struct DocAliasNotStringLiteral {
     #[primary_span]
     pub span: Span,
-    pub attr_name: &'static str,
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[doc({$attr_name} = \"...\")]` should be used on modules")]
-pub(crate) struct DocKeywordAttributeNotMod {
+#[diag(passes_doc_alias_malformed)]
+pub(crate) struct DocAliasMalformed {
     #[primary_span]
     pub span: Span,
-    pub attr_name: &'static str,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "`#[doc(fake_variadic)]` must be used on the first of a set of tuple or fn pointer trait impls with varying arity"
-)]
+#[diag(passes_doc_keyword_empty_mod)]
+pub(crate) struct DocKeywordEmptyMod {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_doc_keyword_not_mod)]
+pub(crate) struct DocKeywordNotMod {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_doc_keyword_invalid_ident)]
+pub(crate) struct DocKeywordInvalidIdent {
+    #[primary_span]
+    pub span: Span,
+    pub doc_keyword: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_doc_fake_variadic_not_valid)]
 pub(crate) struct DocFakeVariadicNotValid {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[doc(keyword = \"...\")]` should be used on impl blocks")]
+#[diag(passes_doc_keyword_only_impl)]
 pub(crate) struct DocKeywordOnlyImpl {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[doc(search_unbox)]` should be used on generic structs and enums")]
-pub(crate) struct DocSearchUnboxInvalid {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("conflicting doc inlining attributes")]
-#[help("remove one of the conflicting attributes")]
-pub(crate) struct DocInlineConflict {
+#[diag(passes_doc_inline_conflict)]
+#[help]
+pub(crate) struct DocKeywordConflict {
     #[primary_span]
     pub spans: MultiSpan,
 }
 
-#[derive(Diagnostic)]
-#[diag("this attribute can only be applied to a `use` item")]
-#[note(
-    "read <https://doc.rust-lang.org/nightly/rustdoc/the-doc-attribute.html#inline-and-no_inline> for more information"
-)]
+#[derive(LintDiagnostic)]
+#[diag(passes_doc_inline_only_use)]
+#[note]
 pub(crate) struct DocInlineOnlyUse {
-    #[label("only applicable on `use` items")]
+    #[label]
     pub attr_span: Span,
-    #[label("not a `use` item")]
-    pub item_span: Span,
+    #[label(passes_not_a_use_item_label)]
+    pub item_span: Option<Span>,
 }
 
-#[derive(Diagnostic)]
-#[diag("this attribute can only be applied to an `extern crate` item")]
-#[note(
-    "read <https://doc.rust-lang.org/unstable-book/language-features/doc-masked.html> for more information"
-)]
+#[derive(LintDiagnostic)]
+#[diag(passes_doc_masked_only_extern_crate)]
+#[note]
 pub(crate) struct DocMaskedOnlyExternCrate {
-    #[label("only applicable on `extern crate` items")]
+    #[label]
     pub attr_span: Span,
-    #[label("not an `extern crate` item")]
-    pub item_span: Span,
+    #[label(passes_not_an_extern_crate_label)]
+    pub item_span: Option<Span>,
 }
 
-#[derive(Diagnostic)]
-#[diag("this attribute cannot be applied to an `extern crate self` item")]
+#[derive(LintDiagnostic)]
+#[diag(passes_doc_masked_not_extern_crate_self)]
 pub(crate) struct DocMaskedNotExternCrateSelf {
-    #[label("not applicable on `extern crate self` items")]
+    #[label]
     pub attr_span: Span,
-    #[label("`extern crate self` defined here")]
-    pub item_span: Span,
+    #[label(passes_extern_crate_self_label)]
+    pub item_span: Option<Span>,
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[ffi_const]` function cannot be `#[ffi_pure]`", code = E0757)]
+#[diag(passes_doc_attr_not_crate_level)]
+pub(crate) struct DocAttrNotCrateLevel<'a> {
+    #[primary_span]
+    pub span: Span,
+    pub attr_name: &'a str,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_doc_test_unknown)]
+pub(crate) struct DocTestUnknown {
+    pub path: String,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_doc_test_literal)]
+pub(crate) struct DocTestLiteral;
+
+#[derive(LintDiagnostic)]
+#[diag(passes_doc_test_takes_list)]
+pub(crate) struct DocTestTakesList;
+
+#[derive(LintDiagnostic)]
+#[diag(passes_doc_cfg_hide_takes_list)]
+pub(crate) struct DocCfgHideTakesList;
+
+#[derive(LintDiagnostic)]
+#[diag(passes_doc_test_unknown_any)]
+pub(crate) struct DocTestUnknownAny {
+    pub path: String,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_doc_test_unknown_spotlight)]
+#[note]
+#[note(passes_no_op_note)]
+pub(crate) struct DocTestUnknownSpotlight {
+    pub path: String,
+    #[suggestion(style = "short", applicability = "machine-applicable", code = "notable_trait")]
+    pub span: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_doc_test_unknown_include)]
+pub(crate) struct DocTestUnknownInclude {
+    pub path: String,
+    pub value: String,
+    pub inner: &'static str,
+    #[suggestion(code = "#{inner}[doc = include_str!(\"{value}\")]")]
+    pub sugg: (Span, Applicability),
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_doc_invalid)]
+pub(crate) struct DocInvalid;
+
+#[derive(Diagnostic)]
+#[diag(passes_pass_by_value)]
+pub(crate) struct PassByValue {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_allow_incoherent_impl)]
+pub(crate) struct AllowIncoherentImpl {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_has_incoherent_inherent_impl)]
+pub(crate) struct HasIncoherentInherentImpl {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_both_ffi_const_and_pure, code = E0757)]
 pub(crate) struct BothFfiConstAndPure {
     #[primary_span]
     pub attr_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("attribute should be applied to an `extern` block with non-Rust ABI")]
-#[warning(
-    "this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!"
-)]
-pub(crate) struct Link {
-    #[label("not an `extern` block")]
-    pub span: Option<Span>,
+#[diag(passes_ffi_pure_invalid_target, code = E0755)]
+pub(crate) struct FfiPureInvalidTarget {
+    #[primary_span]
+    pub attr_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("#[rustc_legacy_const_generics] functions must only have const generics")]
+#[diag(passes_ffi_const_invalid_target, code = E0756)]
+pub(crate) struct FfiConstInvalidTarget {
+    #[primary_span]
+    pub attr_span: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_must_use_no_effect)]
+pub(crate) struct MustUseNoEffect {
+    pub article: &'static str,
+    pub target: rustc_hir::Target,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_must_not_suspend)]
+pub(crate) struct MustNotSuspend {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub span: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_cold)]
+#[warning]
+pub(crate) struct Cold {
+    #[label]
+    pub span: Span,
+    pub on_crate: bool,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_link)]
+#[warning]
+pub(crate) struct Link {
+    #[label]
+    pub span: Option<Span>,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_link_name)]
+#[warning]
+pub(crate) struct LinkName<'a> {
+    #[help]
+    pub attr_span: Option<Span>,
+    #[label]
+    pub span: Span,
+    pub value: &'a str,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_no_link)]
+pub(crate) struct NoLink {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_export_name)]
+pub(crate) struct ExportName {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_rustc_layout_scalar_valid_range_not_struct)]
+pub(crate) struct RustcLayoutScalarValidRangeNotStruct {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_rustc_layout_scalar_valid_range_arg)]
+pub(crate) struct RustcLayoutScalarValidRangeArg {
+    #[primary_span]
+    pub attr_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_rustc_legacy_const_generics_only)]
 pub(crate) struct RustcLegacyConstGenericsOnly {
     #[primary_span]
     pub attr_span: Span,
-    #[label("non-const generic parameter")]
+    #[label]
     pub param_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("#[rustc_legacy_const_generics] must have one index for each generic parameter")]
+#[diag(passes_rustc_legacy_const_generics_index)]
 pub(crate) struct RustcLegacyConstGenericsIndex {
     #[primary_span]
     pub attr_span: Span,
-    #[label("generic parameters")]
+    #[label]
     pub generics_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("index exceeds number of arguments")]
+#[diag(passes_rustc_legacy_const_generics_index_exceed)]
 pub(crate) struct RustcLegacyConstGenericsIndexExceed {
     #[primary_span]
-    #[label(
-        "there {$arg_count ->
-            [one] is
-            *[other] are
-        } only {$arg_count} {$arg_count ->
-            [one] argument
-            *[other] arguments
-        }"
-    )]
+    #[label]
     pub span: Span,
     pub arg_count: usize,
 }
 
 #[derive(Diagnostic)]
-#[diag("conflicting representation hints", code = E0566)]
+#[diag(passes_rustc_legacy_const_generics_index_negative)]
+pub(crate) struct RustcLegacyConstGenericsIndexNegative {
+    #[primary_span]
+    pub invalid_args: Vec<Span>,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_rustc_dirty_clean)]
+pub(crate) struct RustcDirtyClean {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_link_section)]
+#[warning]
+pub(crate) struct LinkSection {
+    #[label]
+    pub span: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_no_mangle_foreign)]
+#[warning]
+#[note]
+pub(crate) struct NoMangleForeign {
+    #[label]
+    pub span: Span,
+    #[suggestion(code = "", applicability = "machine-applicable")]
+    pub attr_span: Span,
+    pub foreign_item_kind: &'static str,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_no_mangle)]
+#[warning]
+pub(crate) struct NoMangle {
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_repr_ident, code = E0565)]
+pub(crate) struct ReprIdent {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_repr_conflicting, code = E0566)]
 pub(crate) struct ReprConflicting {
     #[primary_span]
     pub hint_spans: Vec<Span>,
 }
 
-#[derive(Diagnostic)]
-#[diag("alignment must not be greater than `isize::MAX` bytes", code = E0589)]
-#[note("`isize::MAX` is {$size} for the current target")]
-pub(crate) struct InvalidReprAlignForTarget {
-    #[primary_span]
-    pub span: Span,
-    pub size: u64,
-}
-
-#[derive(Diagnostic)]
-#[diag("conflicting representation hints", code = E0566)]
+#[derive(LintDiagnostic)]
+#[diag(passes_repr_conflicting, code = E0566)]
 pub(crate) struct ReprConflictingLint;
 
 #[derive(Diagnostic)]
-#[diag("attribute should be applied to a macro")]
-pub(crate) struct MacroOnlyAttribute {
+#[diag(passes_used_static)]
+pub(crate) struct UsedStatic {
     #[primary_span]
     pub attr_span: Span,
-    #[label("not a macro")]
+    #[label]
+    pub span: Span,
+    pub target: &'static str,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_used_compiler_linker)]
+pub(crate) struct UsedCompilerLinker {
+    #[primary_span]
+    pub spans: Vec<Span>,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_allow_internal_unstable)]
+pub(crate) struct AllowInternalUnstable {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("couldn't read {$file}: {$error}")]
+#[diag(passes_debug_visualizer_placement)]
+pub(crate) struct DebugVisualizerPlacement {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_debug_visualizer_invalid)]
+#[note(passes_note_1)]
+#[note(passes_note_2)]
+#[note(passes_note_3)]
+pub(crate) struct DebugVisualizerInvalid {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_debug_visualizer_unreadable)]
 pub(crate) struct DebugVisualizerUnreadable<'a> {
     #[primary_span]
     pub span: Span,
@@ -268,114 +598,221 @@ pub(crate) struct DebugVisualizerUnreadable<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("attribute should be applied to `const fn`")]
+#[diag(passes_rustc_allow_const_fn_unstable)]
 pub(crate) struct RustcAllowConstFnUnstable {
     #[primary_span]
     pub attr_span: Span,
-    #[label("not a `const fn`")]
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("attribute should be applied to `#[repr(transparent)]` types")]
+#[diag(passes_rustc_safe_intrinsic)]
+pub(crate) struct RustcSafeIntrinsic {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_rustc_std_internal_symbol)]
+pub(crate) struct RustcStdInternalSymbol {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_rustc_pub_transparent)]
 pub(crate) struct RustcPubTransparent {
     #[primary_span]
     pub attr_span: Span,
-    #[label("not a `#[repr(transparent)]` type")]
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("attribute cannot be applied to a `async`, `gen` or `async gen` function")]
-pub(crate) struct RustcForceInlineCoro {
+#[diag(passes_link_ordinal)]
+pub(crate) struct LinkOrdinal {
     #[primary_span]
     pub attr_span: Span,
-    #[label("`async`, `gen` or `async gen` function")]
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_confusables)]
+pub(crate) struct Confusables {
+    #[primary_span]
+    pub attr_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_coroutine_on_non_closure)]
+pub(crate) struct CoroutineOnNonClosure {
+    #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
+#[diag(passes_linkage)]
+pub(crate) struct Linkage {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_empty_confusables)]
+pub(crate) struct EmptyConfusables {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_incorrect_meta_item, code = E0539)]
+pub(crate) struct IncorrectMetaItem {
+    #[primary_span]
+    pub span: Span,
+    #[subdiagnostic]
+    pub suggestion: IncorrectMetaItemSuggestion,
+}
+
+#[derive(Subdiagnostic)]
+#[multipart_suggestion(passes_incorrect_meta_item_suggestion, applicability = "maybe-incorrect")]
+pub(crate) struct IncorrectMetaItemSuggestion {
+    #[suggestion_part(code = "\"")]
+    pub lo: Span,
+    #[suggestion_part(code = "\"")]
+    pub hi: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_stability_promotable)]
+pub(crate) struct StabilityPromotable {
+    #[primary_span]
+    pub attr_span: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_deprecated)]
+pub(crate) struct Deprecated;
+
+#[derive(LintDiagnostic)]
+#[diag(passes_macro_use)]
+pub(crate) struct MacroUse {
+    pub name: Symbol,
+}
+
+#[derive(LintDiagnostic)]
 pub(crate) enum MacroExport {
-    #[diag("`#[macro_export]` has no effect on declarative macro definitions")]
-    #[note("declarative macros follow the same exporting rules as regular items")]
+    #[diag(passes_macro_export)]
+    Normal,
+
+    #[diag(passes_macro_export_on_decl_macro)]
+    #[note]
     OnDeclMacro,
+
+    #[diag(passes_invalid_macro_export_arguments)]
+    UnknownItem { name: Symbol },
+
+    #[diag(passes_invalid_macro_export_arguments_too_many_items)]
+    TooManyItems,
 }
 
 #[derive(Subdiagnostic)]
 pub(crate) enum UnusedNote {
-    #[note("attribute `{$name}` with an empty list has no effect")]
+    #[note(passes_unused_empty_lints_note)]
     EmptyList { name: Symbol },
-    #[note("attribute `{$name}` without any lints has no effect")]
+    #[note(passes_unused_no_lints_note)]
     NoLints { name: Symbol },
-    #[note("`default_method_body_is_const` has been replaced with `const` on traits")]
+    #[note(passes_unused_default_method_body_const_note)]
     DefaultMethodBodyConst,
-    #[note(
-        "the `linker_messages` lint can only be controlled at the root of a crate that needs to be linked"
-    )]
-    LinkerMessagesBinaryCrateOnly,
 }
 
-#[derive(Diagnostic)]
-#[diag("unused attribute")]
+#[derive(LintDiagnostic)]
+#[diag(passes_unused)]
 pub(crate) struct Unused {
-    #[suggestion("remove this attribute", code = "", applicability = "machine-applicable")]
+    #[suggestion(code = "", applicability = "machine-applicable")]
     pub attr_span: Span,
     #[subdiagnostic]
     pub note: UnusedNote,
 }
 
 #[derive(Diagnostic)]
-#[diag("attribute should be applied to function or closure", code = E0518)]
+#[diag(passes_non_exported_macro_invalid_attrs, code = E0518)]
 pub(crate) struct NonExportedMacroInvalidAttrs {
     #[primary_span]
-    #[label("not a function or closure")]
+    #[label]
     pub attr_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[may_dangle]` must be applied to a lifetime or type generic parameter in `Drop` impl")]
+#[diag(passes_may_dangle)]
 pub(crate) struct InvalidMayDangle {
     #[primary_span]
     pub attr_span: Span,
 }
 
-#[derive(Diagnostic)]
-#[diag("unused attribute")]
+#[derive(LintDiagnostic)]
+#[diag(passes_unused_duplicate)]
 pub(crate) struct UnusedDuplicate {
-    #[suggestion("remove this attribute", code = "", applicability = "machine-applicable")]
+    #[suggestion(code = "", applicability = "machine-applicable")]
     pub this: Span,
-    #[note("attribute also specified here")]
+    #[note]
     pub other: Span,
-    #[warning(
-        "this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!"
-    )]
+    #[warning]
     pub warning: bool,
 }
 
 #[derive(Diagnostic)]
-#[diag("multiple `{$name}` attributes")]
+#[diag(passes_unused_multiple)]
 pub(crate) struct UnusedMultiple {
     #[primary_span]
-    #[suggestion("remove this attribute", code = "", applicability = "machine-applicable")]
+    #[suggestion(code = "", applicability = "machine-applicable")]
     pub this: Span,
-    #[note("attribute also specified here")]
+    #[note]
     pub other: Span,
     pub name: Symbol,
 }
 
 #[derive(Diagnostic)]
-#[diag("this `#[deprecated]` annotation has no effect")]
-pub(crate) struct DeprecatedAnnotationHasNoEffect {
-    #[suggestion(
-        "remove the unnecessary deprecation attribute",
-        applicability = "machine-applicable",
-        code = ""
-    )]
+#[diag(passes_rustc_lint_opt_ty)]
+pub(crate) struct RustcLintOptTy {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("unknown external lang item: `{$lang_item}`", code = E0264)]
+#[diag(passes_rustc_lint_opt_deny_field_access)]
+pub(crate) struct RustcLintOptDenyFieldAccess {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_collapse_debuginfo)]
+pub(crate) struct CollapseDebuginfo {
+    #[primary_span]
+    pub attr_span: Span,
+    #[label]
+    pub defn_span: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_deprecated_annotation_has_no_effect)]
+pub(crate) struct DeprecatedAnnotationHasNoEffect {
+    #[suggestion(applicability = "machine-applicable", code = "")]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_unknown_external_lang_item, code = E0264)]
 pub(crate) struct UnknownExternLangItem {
     #[primary_span]
     pub span: Span,
@@ -383,78 +820,61 @@ pub(crate) struct UnknownExternLangItem {
 }
 
 #[derive(Diagnostic)]
-#[diag("`#[panic_handler]` function required, but not found")]
+#[diag(passes_missing_panic_handler)]
 pub(crate) struct MissingPanicHandler;
 
 #[derive(Diagnostic)]
-#[diag("unwinding panics are not supported without std")]
-#[help("using nightly cargo, use -Zbuild-std with panic=\"abort\" to avoid unwinding")]
-#[note(
-    "since the core library is usually precompiled with panic=\"unwind\", rebuilding your crate with panic=\"abort\" may not be enough to fix the problem"
-)]
+#[diag(passes_panic_unwind_without_std)]
+#[help]
+#[note]
 pub(crate) struct PanicUnwindWithoutStd;
 
 #[derive(Diagnostic)]
-#[diag("lang item required, but not found: `{$name}`")]
-#[note(
-    "this can occur when a binary crate with `#![no_std]` is compiled for a target where `{$name}` is defined in the standard library"
-)]
-#[help(
-    "you may be able to compile for a target that doesn't need `{$name}`, specify a target with `--target` or in `.cargo/config`"
-)]
+#[diag(passes_missing_lang_item)]
+#[note]
+#[help]
 pub(crate) struct MissingLangItem {
     pub name: Symbol,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "{$name ->
-    [panic_impl] `#[panic_handler]`
-    *[other] `{$name}` lang item
-} function is not allowed to have `#[track_caller]`"
-)]
+#[diag(passes_lang_item_fn_with_track_caller)]
 pub(crate) struct LangItemWithTrackCaller {
     #[primary_span]
     pub attr_span: Span,
     pub name: Symbol,
-    #[label(
-        "{$name ->
-            [panic_impl] `#[panic_handler]`
-            *[other] `{$name}` lang item
-        } function is not allowed to have `#[track_caller]`"
-    )]
+    #[label]
     pub sig_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "{$name ->
-        [panic_impl] `#[panic_handler]`
-        *[other] `{$name}` lang item
-    } function is not allowed to have `#[target_feature]`"
-)]
+#[diag(passes_lang_item_fn_with_target_feature)]
 pub(crate) struct LangItemWithTargetFeature {
     #[primary_span]
     pub attr_span: Span,
     pub name: Symbol,
-    #[label(
-        "{$name ->
-            [panic_impl] `#[panic_handler]`
-            *[other] `{$name}` lang item
-        } function is not allowed to have `#[target_feature]`"
-    )]
+    #[label]
     pub sig_span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("`{$name}` lang item must be applied to a {$expected_target}", code = E0718)]
+#[diag(passes_lang_item_on_incorrect_target, code = E0718)]
 pub(crate) struct LangItemOnIncorrectTarget {
     #[primary_span]
-    #[label("attribute should be applied to a {$expected_target}, not a {$actual_target}")]
+    #[label]
     pub span: Span,
     pub name: Symbol,
     pub expected_target: Target,
     pub actual_target: Target,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_unknown_lang_item, code = E0522)]
+pub(crate) struct UnknownLangItem {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+    pub name: Symbol,
 }
 
 pub(crate) struct InvalidAttrAtCrateLevel {
@@ -473,8 +893,7 @@ pub(crate) struct ItemFollowingInnerAttr {
 impl<G: EmissionGuarantee> Diagnostic<'_, G> for InvalidAttrAtCrateLevel {
     #[track_caller]
     fn into_diag(self, dcx: DiagCtxtHandle<'_>, level: Level) -> Diag<'_, G> {
-        let mut diag =
-            Diag::new(dcx, level, msg!("`{$name}` attribute cannot be used at crate level"));
+        let mut diag = Diag::new(dcx, level, fluent::passes_invalid_attr_at_crate_level);
         diag.span(self.span);
         diag.arg("name", self.name);
         // Only emit an error with a suggestion if we can create a string out
@@ -482,27 +901,27 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for InvalidAttrAtCrateLevel {
         if let Some(span) = self.sugg_span {
             diag.span_suggestion_verbose(
                 span,
-                msg!("perhaps you meant to use an outer attribute"),
+                fluent::passes_suggestion,
                 String::new(),
                 Applicability::MachineApplicable,
             );
         }
         if let Some(item) = self.item {
             diag.arg("kind", item.kind);
-            diag.span_label(item.span, msg!("the inner attribute doesn't annotate this {$kind}"));
+            diag.span_label(item.span, fluent::passes_invalid_attr_at_crate_level_item);
         }
         diag
     }
 }
 
 #[derive(Diagnostic)]
-#[diag("duplicate diagnostic item in crate `{$crate_name}`: `{$name}`")]
+#[diag(passes_duplicate_diagnostic_item_in_crate)]
 pub(crate) struct DuplicateDiagnosticItemInCrate {
     #[primary_span]
     pub duplicate_span: Option<Span>,
-    #[note("the diagnostic item is first defined here")]
+    #[note(passes_diagnostic_item_first_defined)]
     pub orig_span: Option<Span>,
-    #[note("the diagnostic item is first defined in crate `{$orig_crate_name}`")]
+    #[note]
     pub different_crates: bool,
     pub crate_name: Symbol,
     pub orig_crate_name: Symbol,
@@ -510,7 +929,7 @@ pub(crate) struct DuplicateDiagnosticItemInCrate {
 }
 
 #[derive(Diagnostic)]
-#[diag("abi: {$abi}")]
+#[diag(passes_layout_abi)]
 pub(crate) struct LayoutAbi {
     #[primary_span]
     pub span: Span,
@@ -518,7 +937,7 @@ pub(crate) struct LayoutAbi {
 }
 
 #[derive(Diagnostic)]
-#[diag("align: {$align}")]
+#[diag(passes_layout_align)]
 pub(crate) struct LayoutAlign {
     #[primary_span]
     pub span: Span,
@@ -526,7 +945,7 @@ pub(crate) struct LayoutAlign {
 }
 
 #[derive(Diagnostic)]
-#[diag("size: {$size}")]
+#[diag(passes_layout_size)]
 pub(crate) struct LayoutSize {
     #[primary_span]
     pub span: Span,
@@ -534,7 +953,7 @@ pub(crate) struct LayoutSize {
 }
 
 #[derive(Diagnostic)]
-#[diag("homogeneous_aggregate: {$homogeneous_aggregate}")]
+#[diag(passes_layout_homogeneous_aggregate)]
 pub(crate) struct LayoutHomogeneousAggregate {
     #[primary_span]
     pub span: Span,
@@ -542,16 +961,23 @@ pub(crate) struct LayoutHomogeneousAggregate {
 }
 
 #[derive(Diagnostic)]
-#[diag("layout_of({$normalized_ty}) = {$ty_layout}")]
-pub(crate) struct LayoutOf<'tcx> {
+#[diag(passes_layout_of)]
+pub(crate) struct LayoutOf {
     #[primary_span]
     pub span: Span,
-    pub normalized_ty: Ty<'tcx>,
+    pub normalized_ty: String,
     pub ty_layout: String,
 }
 
 #[derive(Diagnostic)]
-#[diag("fn_abi_of({$fn_name}) = {$fn_abi}")]
+#[diag(passes_layout_invalid_attribute)]
+pub(crate) struct LayoutInvalidAttribute {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_abi_of)]
 pub(crate) struct AbiOf {
     #[primary_span]
     pub span: Span,
@@ -560,11 +986,7 @@ pub(crate) struct AbiOf {
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "ABIs are not compatible
-    left ABI = {$left}
-    right ABI = {$right}"
-)]
+#[diag(passes_abi_ne)]
 pub(crate) struct AbiNe {
     #[primary_span]
     pub span: Span,
@@ -573,23 +995,22 @@ pub(crate) struct AbiNe {
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "`#[rustc_abi]` can only be applied to function items, type aliases, and associated functions"
-)]
+#[diag(passes_abi_invalid_attribute)]
 pub(crate) struct AbiInvalidAttribute {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("unrecognized argument")]
-pub(crate) struct UnrecognizedArgument {
+#[diag(passes_unrecognized_field)]
+pub(crate) struct UnrecognizedField {
     #[primary_span]
     pub span: Span,
+    pub name: Symbol,
 }
 
 #[derive(Diagnostic)]
-#[diag("feature `{$feature}` is declared stable since {$since}, but was previously declared stable since {$prev_since}", code = E0711)]
+#[diag(passes_feature_stable_twice, code = E0711)]
 pub(crate) struct FeatureStableTwice {
     #[primary_span]
     pub span: Span,
@@ -599,28 +1020,248 @@ pub(crate) struct FeatureStableTwice {
 }
 
 #[derive(Diagnostic)]
-#[diag("feature `{$feature}` is declared {$declared}, but was previously declared {$prev_declared}", code = E0711)]
-pub(crate) struct FeaturePreviouslyDeclared<'a> {
+#[diag(passes_feature_previously_declared, code = E0711)]
+pub(crate) struct FeaturePreviouslyDeclared<'a, 'b> {
     #[primary_span]
     pub span: Span,
     pub feature: Symbol,
     pub declared: &'a str,
-    pub prev_declared: &'a str,
+    pub prev_declared: &'b str,
+}
+
+pub(crate) struct BreakNonLoop<'a> {
+    pub span: Span,
+    pub head: Option<Span>,
+    pub kind: &'a str,
+    pub suggestion: String,
+    pub loop_label: Option<Label>,
+    pub break_label: Option<Label>,
+    pub break_expr_kind: &'a ExprKind<'a>,
+    pub break_expr_span: Span,
+}
+
+impl<'a, G: EmissionGuarantee> Diagnostic<'_, G> for BreakNonLoop<'a> {
+    #[track_caller]
+    fn into_diag(self, dcx: DiagCtxtHandle<'_>, level: Level) -> Diag<'_, G> {
+        let mut diag = Diag::new(dcx, level, fluent::passes_break_non_loop);
+        diag.span(self.span);
+        diag.code(E0571);
+        diag.arg("kind", self.kind);
+        diag.span_label(self.span, fluent::passes_label);
+        if let Some(head) = self.head {
+            diag.span_label(head, fluent::passes_label2);
+        }
+        diag.span_suggestion(
+            self.span,
+            fluent::passes_suggestion,
+            self.suggestion,
+            Applicability::MaybeIncorrect,
+        );
+        if let (Some(label), None) = (self.loop_label, self.break_label) {
+            match self.break_expr_kind {
+                ExprKind::Path(hir::QPath::Resolved(
+                    None,
+                    hir::Path { segments: [segment], res: hir::def::Res::Err, .. },
+                )) if label.ident.to_string() == format!("'{}", segment.ident) => {
+                    // This error is redundant, we will have already emitted a
+                    // suggestion to use the label when `segment` wasn't found
+                    // (hence the `Res::Err` check).
+                    diag.downgrade_to_delayed_bug();
+                }
+                _ => {
+                    diag.span_suggestion(
+                        self.break_expr_span,
+                        fluent::passes_break_expr_suggestion,
+                        label.ident,
+                        Applicability::MaybeIncorrect,
+                    );
+                }
+            }
+        }
+        diag
+    }
 }
 
 #[derive(Diagnostic)]
-#[diag("multiple functions with a `#[rustc_main]` attribute", code = E0137)]
+#[diag(passes_continue_labeled_block, code = E0696)]
+pub(crate) struct ContinueLabeledBlock {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+    #[label(passes_block_label)]
+    pub block_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_break_inside_closure, code = E0267)]
+pub(crate) struct BreakInsideClosure<'a> {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+    #[label(passes_closure_label)]
+    pub closure_span: Span,
+    pub name: &'a str,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_break_inside_coroutine, code = E0267)]
+pub(crate) struct BreakInsideCoroutine<'a> {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+    #[label(passes_coroutine_label)]
+    pub coroutine_span: Span,
+    pub name: &'a str,
+    pub kind: &'a str,
+    pub source: &'a str,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_outside_loop, code = E0268)]
+pub(crate) struct OutsideLoop<'a> {
+    #[primary_span]
+    #[label]
+    pub spans: Vec<Span>,
+    pub name: &'a str,
+    pub is_break: bool,
+    #[subdiagnostic]
+    pub suggestion: Option<OutsideLoopSuggestion>,
+}
+#[derive(Subdiagnostic)]
+#[multipart_suggestion(passes_outside_loop_suggestion, applicability = "maybe-incorrect")]
+pub(crate) struct OutsideLoopSuggestion {
+    #[suggestion_part(code = "'block: ")]
+    pub block_span: Span,
+    #[suggestion_part(code = " 'block")]
+    pub break_spans: Vec<Span>,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_unlabeled_in_labeled_block, code = E0695)]
+pub(crate) struct UnlabeledInLabeledBlock<'a> {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+    pub cf_type: &'a str,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_unlabeled_cf_in_while_condition, code = E0590)]
+pub(crate) struct UnlabeledCfInWhileCondition<'a> {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+    pub cf_type: &'a str,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_undefined_naked_function_abi)]
+pub(crate) struct UndefinedNakedFunctionAbi;
+
+#[derive(Diagnostic)]
+#[diag(passes_no_patterns)]
+pub(crate) struct NoPatterns {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_params_not_allowed)]
+#[help]
+pub(crate) struct ParamsNotAllowed {
+    #[primary_span]
+    pub span: Span,
+}
+
+pub(crate) struct NakedFunctionsAsmBlock {
+    pub span: Span,
+    pub multiple_asms: Vec<Span>,
+    pub non_asms: Vec<Span>,
+}
+
+impl<G: EmissionGuarantee> Diagnostic<'_, G> for NakedFunctionsAsmBlock {
+    #[track_caller]
+    fn into_diag(self, dcx: DiagCtxtHandle<'_>, level: Level) -> Diag<'_, G> {
+        let mut diag = Diag::new(dcx, level, fluent::passes_naked_functions_asm_block);
+        diag.span(self.span);
+        diag.code(E0787);
+        for span in self.multiple_asms.iter() {
+            diag.span_label(*span, fluent::passes_label_multiple_asm);
+        }
+        for span in self.non_asms.iter() {
+            diag.span_label(*span, fluent::passes_label_non_asm);
+        }
+        diag
+    }
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_naked_functions_operands, code = E0787)]
+pub(crate) struct NakedFunctionsOperands {
+    #[primary_span]
+    pub unsupported_operands: Vec<Span>,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_naked_functions_asm_options, code = E0787)]
+pub(crate) struct NakedFunctionsAsmOptions {
+    #[primary_span]
+    pub span: Span,
+    pub unsupported_options: String,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_naked_functions_must_use_noreturn, code = E0787)]
+pub(crate) struct NakedFunctionsMustUseNoreturn {
+    #[primary_span]
+    pub span: Span,
+    #[suggestion(code = ", options(noreturn)", applicability = "machine-applicable")]
+    pub last_span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_naked_functions_incompatible_attribute, code = E0736)]
+pub(crate) struct NakedFunctionIncompatibleAttribute {
+    #[primary_span]
+    #[label]
+    pub span: Span,
+    #[label(passes_naked_attribute)]
+    pub naked_span: Span,
+    pub attr: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_attr_only_in_functions)]
+pub(crate) struct AttrOnlyInFunctions {
+    #[primary_span]
+    pub span: Span,
+    pub attr: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_multiple_rustc_main, code = E0137)]
 pub(crate) struct MultipleRustcMain {
     #[primary_span]
     pub span: Span,
-    #[label("first `#[rustc_main]` function")]
+    #[label(passes_first)]
     pub first: Span,
-    #[label("additional `#[rustc_main]` function")]
+    #[label(passes_additional)]
     pub additional: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("the `main` function cannot be declared in an `extern` block")]
+#[diag(passes_multiple_start_functions, code = E0138)]
+pub(crate) struct MultipleStartFunctions {
+    #[primary_span]
+    pub span: Span,
+    #[label]
+    pub labeled: Span,
+    #[label(passes_previous)]
+    pub previous: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(passes_extern_main)]
 pub(crate) struct ExternMain {
     #[primary_span]
     pub span: Span,
@@ -640,8 +1281,7 @@ pub(crate) struct NoMainErr {
 impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for NoMainErr {
     #[track_caller]
     fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, G> {
-        let mut diag =
-            Diag::new(dcx, level, msg!("`main` function not found in crate `{$crate_name}`"));
+        let mut diag = Diag::new(dcx, level, fluent::passes_no_main_function);
         diag.span(DUMMY_SP);
         diag.code(E0601);
         diag.arg("crate_name", self.crate_name);
@@ -649,23 +1289,16 @@ impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for NoMainErr {
         diag.arg("has_filename", self.has_filename);
         let note = if !self.non_main_fns.is_empty() {
             for &span in &self.non_main_fns {
-                diag.span_note(span, msg!("here is a function named `main`"));
+                diag.span_note(span, fluent::passes_here_is_main);
             }
-            diag.note(msg!(
-                "you have one or more functions named `main` not defined at the crate level"
-            ));
-            diag.help(msg!("consider moving the `main` function definitions"));
+            diag.note(fluent::passes_one_or_more_possible_main);
+            diag.help(fluent::passes_consider_moving_main);
             // There were some functions named `main` though. Try to give the user a hint.
-            msg!(
-                "the main function must be defined at the crate level{$has_filename ->
-                    [true] {\" \"}(in `{$filename}`)
-                    *[false] {\"\"}
-                }"
-            )
+            fluent::passes_main_must_be_defined_at_crate
         } else if self.has_filename {
-            msg!("consider adding a `main` function to `{$filename}`")
+            fluent::passes_consider_adding_main_to_file
         } else {
-            msg!("consider adding a `main` function at the crate level")
+            fluent::passes_consider_adding_main_at_crate
         };
         if self.file_empty {
             diag.note(note);
@@ -678,11 +1311,11 @@ impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for NoMainErr {
             && main_def.opt_fn_def_id().is_none()
         {
             // There is something at `crate::main`, but it is not a function definition.
-            diag.span_label(main_def.span, msg!("non-function item at `crate::main` is found"));
+            diag.span_label(main_def.span, fluent::passes_non_function_main);
         }
 
         if self.add_teach_note {
-            diag.note(msg!("if you don't know the basics of Rust, you can go look to the Rust Book to get started: https://doc.rust-lang.org/book/"));
+            diag.note(fluent::passes_teach_note);
         }
         diag
     }
@@ -692,12 +1325,12 @@ pub(crate) struct DuplicateLangItem {
     pub local_span: Option<Span>,
     pub lang_item_name: Symbol,
     pub crate_name: Symbol,
-    pub dependency_of: Option<Symbol>,
+    pub dependency_of: Symbol,
     pub is_local: bool,
     pub path: String,
     pub first_defined_span: Option<Span>,
-    pub orig_crate_name: Option<Symbol>,
-    pub orig_dependency_of: Option<Symbol>,
+    pub orig_crate_name: Symbol,
+    pub orig_dependency_of: Symbol,
     pub orig_is_local: bool,
     pub orig_path: String,
     pub(crate) duplicate: Duplicate,
@@ -710,53 +1343,41 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for DuplicateLangItem {
             dcx,
             level,
             match self.duplicate {
-                Duplicate::Plain => msg!("found duplicate lang item `{$lang_item_name}`"),
-                Duplicate::Crate => {
-                    msg!("duplicate lang item in crate `{$crate_name}`: `{$lang_item_name}`")
-                }
-                Duplicate::CrateDepends => msg!(
-                    "duplicate lang item in crate `{$crate_name}` (which `{$dependency_of}` depends on): `{$lang_item_name}`"
-                ),
+                Duplicate::Plain => fluent::passes_duplicate_lang_item,
+                Duplicate::Crate => fluent::passes_duplicate_lang_item_crate,
+                Duplicate::CrateDepends => fluent::passes_duplicate_lang_item_crate_depends,
             },
         );
         diag.code(E0152);
         diag.arg("lang_item_name", self.lang_item_name);
         diag.arg("crate_name", self.crate_name);
-        if let Some(dependency_of) = self.dependency_of {
-            diag.arg("dependency_of", dependency_of);
-        }
+        diag.arg("dependency_of", self.dependency_of);
         diag.arg("path", self.path);
-        if let Some(orig_crate_name) = self.orig_crate_name {
-            diag.arg("orig_crate_name", orig_crate_name);
-        }
-        if let Some(orig_dependency_of) = self.orig_dependency_of {
-            diag.arg("orig_dependency_of", orig_dependency_of);
-        }
+        diag.arg("orig_crate_name", self.orig_crate_name);
+        diag.arg("orig_dependency_of", self.orig_dependency_of);
         diag.arg("orig_path", self.orig_path);
         if let Some(span) = self.local_span {
             diag.span(span);
         }
         if let Some(span) = self.first_defined_span {
-            diag.span_note(span, msg!("the lang item is first defined here"));
+            diag.span_note(span, fluent::passes_first_defined_span);
         } else {
-            if self.orig_dependency_of.is_none() {
-                diag.note(msg!("the lang item is first defined in crate `{$orig_crate_name}`"));
+            if self.orig_dependency_of.is_empty() {
+                diag.note(fluent::passes_first_defined_crate);
             } else {
-                diag.note(msg!("the lang item is first defined in crate `{$orig_crate_name}` (which `{$orig_dependency_of}` depends on)"));
+                diag.note(fluent::passes_first_defined_crate_depends);
             }
 
             if self.orig_is_local {
-                diag.note(msg!("first definition in the local crate (`{$orig_crate_name}`)"));
+                diag.note(fluent::passes_first_definition_local);
             } else {
-                diag.note(msg!(
-                    "first definition in `{$orig_crate_name}` loaded from {$orig_path}"
-                ));
+                diag.note(fluent::passes_first_definition_path);
             }
 
             if self.is_local {
-                diag.note(msg!("second definition in the local crate (`{$crate_name}`)"));
+                diag.note(fluent::passes_second_definition_local);
             } else {
-                diag.note(msg!("second definition in `{$crate_name}` loaded from {$path}"));
+                diag.note(fluent::passes_second_definition_path);
             }
         }
         diag
@@ -764,22 +1385,11 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for DuplicateLangItem {
 }
 
 #[derive(Diagnostic)]
-#[diag("`{$name}` lang item must be applied to a {$kind} with {$at_least ->
-        [true] at least {$num}
-        *[false] {$num}
-    } generic {$num ->
-        [one] argument
-        *[other] arguments
-    }", code = E0718)]
+#[diag(passes_incorrect_target, code = E0718)]
 pub(crate) struct IncorrectTarget<'a> {
     #[primary_span]
     pub span: Span,
-    #[label(
-        "this {$kind} has {$actual_num} generic {$actual_num ->
-            [one] argument
-            *[other] arguments
-        }"
-    )]
+    #[label]
     pub generics_span: Span,
     pub name: &'a str, // cannot be symbol because it renders e.g. `r#fn` instead of `fn`
     pub kind: &'static str,
@@ -788,34 +1398,22 @@ pub(crate) struct IncorrectTarget<'a> {
     pub at_least: bool,
 }
 
-#[derive(Diagnostic)]
-#[diag("lang items are not allowed in stable dylibs")]
-pub(crate) struct IncorrectCrateType {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(
-    "useless assignment of {$is_field_assign ->
-        [true] field
-        *[false] variable
-    } of type `{$ty}` to itself"
-)]
+#[derive(LintDiagnostic)]
+#[diag(passes_useless_assignment)]
 pub(crate) struct UselessAssignment<'a> {
     pub is_field_assign: bool,
     pub ty: Ty<'a>,
 }
 
-#[derive(Diagnostic)]
-#[diag("`#[inline]` is ignored on externally exported functions")]
-#[help(
-    "externally exported functions are functions with `#[no_mangle]`, `#[export_name]`, or `#[linkage]`"
-)]
-pub(crate) struct InlineIgnoredForExported;
+#[derive(LintDiagnostic)]
+#[diag(passes_only_has_effect_on)]
+pub(crate) struct OnlyHasEffectOn {
+    pub attr_name: Symbol,
+    pub target_name: String,
+}
 
 #[derive(Diagnostic)]
-#[diag("{$repr}")]
+#[diag(passes_object_lifetime_err)]
 pub(crate) struct ObjectLifetimeErr {
     #[primary_span]
     pub span: Span,
@@ -823,39 +1421,54 @@ pub(crate) struct ObjectLifetimeErr {
 }
 
 #[derive(Diagnostic)]
+#[diag(passes_unrecognized_repr_hint, code = E0552)]
+#[help]
+pub(crate) struct UnrecognizedReprHint {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(Diagnostic)]
 pub(crate) enum AttrApplication {
-    #[diag("attribute should be applied to an enum", code = E0517)]
+    #[diag(passes_attr_application_enum, code = E0517)]
     Enum {
         #[primary_span]
         hint_span: Span,
-        #[label("not an enum")]
+        #[label]
         span: Span,
     },
-    #[diag("attribute should be applied to a struct", code = E0517)]
+    #[diag(passes_attr_application_struct, code = E0517)]
     Struct {
         #[primary_span]
         hint_span: Span,
-        #[label("not a struct")]
+        #[label]
         span: Span,
     },
-    #[diag("attribute should be applied to a struct or union", code = E0517)]
+    #[diag(passes_attr_application_struct_union, code = E0517)]
     StructUnion {
         #[primary_span]
         hint_span: Span,
-        #[label("not a struct or union")]
+        #[label]
         span: Span,
     },
-    #[diag("attribute should be applied to a struct, enum, or union", code = E0517)]
+    #[diag(passes_attr_application_struct_enum_union, code = E0517)]
     StructEnumUnion {
         #[primary_span]
         hint_span: Span,
-        #[label("not a struct, enum, or union")]
+        #[label]
+        span: Span,
+    },
+    #[diag(passes_attr_application_struct_enum_function_method_union, code = E0517)]
+    StructEnumFunctionMethodUnion {
+        #[primary_span]
+        hint_span: Span,
+        #[label]
         span: Span,
     },
 }
 
 #[derive(Diagnostic)]
-#[diag("transparent {$target} cannot have other repr hints", code = E0692)]
+#[diag(passes_transparent_incompatible, code = E0692)]
 pub(crate) struct TransparentIncompatible {
     #[primary_span]
     pub hint_spans: Vec<Span>,
@@ -863,45 +1476,34 @@ pub(crate) struct TransparentIncompatible {
 }
 
 #[derive(Diagnostic)]
-#[diag("deprecated attribute must be paired with either stable or unstable attribute", code = E0549)]
+#[diag(passes_deprecated_attribute, code = E0549)]
 pub(crate) struct DeprecatedAttribute {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("this stability annotation is useless")]
+#[diag(passes_useless_stability)]
 pub(crate) struct UselessStability {
     #[primary_span]
-    #[label("useless stability annotation")]
+    #[label]
     pub span: Span,
-    #[label("the stability attribute annotates this item")]
+    #[label(passes_item)]
     pub item_sp: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("an API can't be stabilized after it is deprecated")]
+#[diag(passes_cannot_stabilize_deprecated)]
 pub(crate) struct CannotStabilizeDeprecated {
     #[primary_span]
-    #[label("invalid version")]
+    #[label]
     pub span: Span,
-    #[label("the stability attribute annotates this item")]
+    #[label(passes_item)]
     pub item_sp: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("can't mark as unstable using an already stable feature")]
-pub(crate) struct UnstableAttrForAlreadyStableFeature {
-    #[primary_span]
-    #[label("this feature is already stable")]
-    #[help("consider removing the attribute")]
-    pub attr_span: Span,
-    #[label("the stability attribute annotates this item")]
-    pub item_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("{$descr} has missing stability attribute")]
+#[diag(passes_missing_stability_attr)]
 pub(crate) struct MissingStabilityAttr<'a> {
     #[primary_span]
     pub span: Span,
@@ -909,7 +1511,7 @@ pub(crate) struct MissingStabilityAttr<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("{$descr} has missing const stability attribute")]
+#[diag(passes_missing_const_stab_attr)]
 pub(crate) struct MissingConstStabAttr<'a> {
     #[primary_span]
     pub span: Span,
@@ -917,86 +1519,23 @@ pub(crate) struct MissingConstStabAttr<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag("trait implementations cannot be const stable yet")]
-#[note("see issue #143874 <https://github.com/rust-lang/rust/issues/143874> for more information")]
+#[diag(passes_trait_impl_const_stable)]
+#[note]
 pub(crate) struct TraitImplConstStable {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag("const stability on the impl does not match the const stability on the trait")]
-pub(crate) struct TraitImplConstStabilityMismatch {
-    #[primary_span]
-    pub span: Span,
-    #[subdiagnostic]
-    pub impl_stability: ImplConstStability,
-    #[subdiagnostic]
-    pub trait_stability: TraitConstStability,
-}
-
-#[derive(Subdiagnostic)]
-pub(crate) enum TraitConstStability {
-    #[note("...but the trait is stable")]
-    Stable {
-        #[primary_span]
-        span: Span,
-    },
-    #[note("...but the trait is unstable")]
-    Unstable {
-        #[primary_span]
-        span: Span,
-    },
-}
-
-#[derive(Subdiagnostic)]
-pub(crate) enum ImplConstStability {
-    #[note("this impl is (implicitly) stable...")]
-    Stable {
-        #[primary_span]
-        span: Span,
-    },
-    #[note("this impl is unstable...")]
-    Unstable {
-        #[primary_span]
-        span: Span,
-    },
-}
-
-#[derive(Diagnostic)]
-#[diag("unknown feature `{$feature}`", code = E0635)]
+#[diag(passes_unknown_feature, code = E0635)]
 pub(crate) struct UnknownFeature {
     #[primary_span]
     pub span: Span,
     pub feature: Symbol,
-    #[subdiagnostic]
-    pub suggestion: Option<MisspelledFeature>,
-}
-
-#[derive(Subdiagnostic)]
-#[suggestion(
-    "there is a feature with a similar name: `{$actual_name}`",
-    style = "verbose",
-    code = "{actual_name}",
-    applicability = "maybe-incorrect"
-)]
-pub(crate) struct MisspelledFeature {
-    #[primary_span]
-    pub span: Span,
-    pub actual_name: Symbol,
 }
 
 #[derive(Diagnostic)]
-#[diag("feature `{$alias}` has been renamed to `{$feature}`", code = E0635)]
-pub(crate) struct RenamedFeature {
-    #[primary_span]
-    pub span: Span,
-    pub feature: Symbol,
-    pub alias: Symbol,
-}
-
-#[derive(Diagnostic)]
-#[diag("feature `{$implied_by}` implying `{$feature}` does not exist")]
+#[diag(passes_implied_feature_not_exist)]
 pub(crate) struct ImpliedFeatureNotExist {
     #[primary_span]
     pub span: Span,
@@ -1005,45 +1544,25 @@ pub(crate) struct ImpliedFeatureNotExist {
 }
 
 #[derive(Diagnostic)]
-#[diag("the feature `{$feature}` has already been enabled", code = E0636)]
+#[diag(passes_duplicate_feature_err, code = E0636)]
 pub(crate) struct DuplicateFeatureErr {
     #[primary_span]
     pub span: Span,
     pub feature: Symbol,
 }
-
 #[derive(Diagnostic)]
-#[diag(
-    "attributes `#[rustc_const_unstable]`, `#[rustc_const_stable]` and `#[rustc_const_stable_indirect]` require the function or method to be `const`"
-)]
+#[diag(passes_missing_const_err)]
 pub(crate) struct MissingConstErr {
     #[primary_span]
-    #[help("make the function or method const")]
+    #[help]
     pub fn_sig_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(
-    "attribute `#[rustc_const_stable]` can only be applied to functions that are declared `#[stable]`"
-)]
-pub(crate) struct ConstStableNotStable {
-    #[primary_span]
-    pub fn_sig_span: Span,
-    #[label("attribute specified here")]
+    #[label]
     pub const_span: Span,
 }
 
-#[derive(Diagnostic)]
+#[derive(LintDiagnostic)]
 pub(crate) enum MultipleDeadCodes<'tcx> {
-    #[diag(
-        "{ $multiple ->
-            *[true] multiple {$descr}s are
-            [false] { $num ->
-                [one] {$descr} {$name_list} is
-                *[other] {$descr}s {$name_list} are
-            }
-        } never {$participle}"
-    )]
+    #[diag(passes_dead_codes)]
     DeadCodes {
         multiple: bool,
         num: usize,
@@ -1051,22 +1570,11 @@ pub(crate) enum MultipleDeadCodes<'tcx> {
         participle: &'tcx str,
         name_list: DiagSymbolList,
         #[subdiagnostic]
-        // only on DeadCodes since it's never a problem for tuple struct fields
-        enum_variants_with_same_name: Vec<EnumVariantSameName<'tcx>>,
-        #[subdiagnostic]
         parent_info: Option<ParentInfo<'tcx>>,
         #[subdiagnostic]
         ignored_derived_impls: Option<IgnoredDerivedImpls>,
     },
-    #[diag(
-        "{ $multiple ->
-            *[true] multiple {$descr}s are
-            [false] { $num ->
-                [one] {$descr} {$name_list} is
-                *[other] {$descr}s {$name_list} are
-            }
-        } never {$participle}"
-    )]
+    #[diag(passes_dead_codes)]
     UnusedTupleStructFields {
         multiple: bool,
         num: usize,
@@ -1083,23 +1591,7 @@ pub(crate) enum MultipleDeadCodes<'tcx> {
 }
 
 #[derive(Subdiagnostic)]
-#[note(
-    "it is impossible to refer to the {$dead_descr} `{$dead_name}` because it is shadowed by this enum variant with the same name"
-)]
-pub(crate) struct EnumVariantSameName<'tcx> {
-    #[primary_span]
-    pub variant_span: Span,
-    pub dead_name: Symbol,
-    pub dead_descr: &'tcx str,
-}
-
-#[derive(Subdiagnostic)]
-#[label(
-    "{$num ->
-        [one] {$descr}
-        *[other] {$descr}s
-    } in this {$parent_descr}"
-)]
+#[label(passes_parent_info)]
 pub(crate) struct ParentInfo<'tcx> {
     pub num: usize,
     pub descr: &'tcx str,
@@ -1109,15 +1601,7 @@ pub(crate) struct ParentInfo<'tcx> {
 }
 
 #[derive(Subdiagnostic)]
-#[note(
-    "`{$name}` has {$trait_list_len ->
-        [one] a derived impl
-        *[other] derived impls
-    } for the {$trait_list_len ->
-        [one] trait {$trait_list}, but this is
-        *[other] traits {$trait_list}, but these are
-    } intentionally ignored during dead code analysis"
-)]
+#[note(passes_ignored_derived_impls)]
 pub(crate) struct IgnoredDerivedImpls {
     pub name: Symbol,
     pub trait_list: DiagSymbolList,
@@ -1127,13 +1611,7 @@ pub(crate) struct IgnoredDerivedImpls {
 #[derive(Subdiagnostic)]
 pub(crate) enum ChangeFields {
     #[multipart_suggestion(
-        "consider changing the { $num ->
-            [one] field
-            *[other] fields
-        } to be of unit type to suppress this warning while preserving the field numbering, or remove the { $num ->
-            [one] field
-            *[other] fields
-        }",
+        passes_change_fields_to_be_of_unit_type,
         applicability = "has-placeholders"
     )]
     ChangeToUnitTypeOrRemove {
@@ -1141,20 +1619,12 @@ pub(crate) enum ChangeFields {
         #[suggestion_part(code = "()")]
         spans: Vec<Span>,
     },
-    #[help(
-        "consider removing { $num ->
-            [one] this
-            *[other] these
-        } { $num ->
-            [one] field
-            *[other] fields
-        }"
-    )]
+    #[help(passes_remove_fields)]
     Remove { num: usize },
 }
 
 #[derive(Diagnostic)]
-#[diag("{$kind} has incorrect signature")]
+#[diag(passes_proc_macro_bad_sig)]
 pub(crate) struct ProcMacroBadSig {
     #[primary_span]
     pub span: Span,
@@ -1162,292 +1632,178 @@ pub(crate) struct ProcMacroBadSig {
 }
 
 #[derive(Diagnostic)]
-#[diag(
-    "the feature `{$feature}` has been stable since {$since} and no longer requires an attribute to enable"
+#[diag(passes_skipping_const_checks)]
+pub(crate) struct SkippingConstChecks {
+    #[primary_span]
+    pub span: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_unreachable_due_to_uninhabited)]
+pub(crate) struct UnreachableDueToUninhabited<'desc, 'tcx> {
+    pub descr: &'desc str,
+    #[label]
+    pub expr: Span,
+    #[label(passes_label_orig)]
+    #[note]
+    pub orig: Span,
+    pub ty: Ty<'tcx>,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_unused_var_maybe_capture_ref)]
+#[help]
+pub(crate) struct UnusedVarMaybeCaptureRef {
+    pub name: String,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_unused_capture_maybe_capture_ref)]
+#[help]
+pub(crate) struct UnusedCaptureMaybeCaptureRef {
+    pub name: String,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_unused_var_remove_field)]
+pub(crate) struct UnusedVarRemoveField {
+    pub name: String,
+    #[subdiagnostic]
+    pub sugg: UnusedVarRemoveFieldSugg,
+}
+
+#[derive(Subdiagnostic)]
+#[multipart_suggestion(
+    passes_unused_var_remove_field_suggestion,
+    applicability = "machine-applicable"
 )]
+pub(crate) struct UnusedVarRemoveFieldSugg {
+    #[suggestion_part(code = "")]
+    pub spans: Vec<Span>,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_unused_var_assigned_only)]
+#[note]
+pub(crate) struct UnusedVarAssignedOnly {
+    pub name: String,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_unnecessary_stable_feature)]
 pub(crate) struct UnnecessaryStableFeature {
     pub feature: Symbol,
     pub since: Symbol,
 }
 
-#[derive(Diagnostic)]
-#[diag(
-    "the feature `{$feature}` has been partially stabilized since {$since} and is succeeded by the feature `{$implies}`"
-)]
+#[derive(LintDiagnostic)]
+#[diag(passes_unnecessary_partial_stable_feature)]
 pub(crate) struct UnnecessaryPartialStableFeature {
-    #[suggestion(
-        "if you are using features which are still unstable, change to using `{$implies}`",
-        code = "{implies}",
-        applicability = "maybe-incorrect"
-    )]
+    #[suggestion(code = "{implies}", applicability = "maybe-incorrect")]
     pub span: Span,
-    #[suggestion(
-        "if you are using features which are now stable, remove this line",
-        code = "",
-        applicability = "maybe-incorrect"
-    )]
+    #[suggestion(passes_suggestion_remove, code = "", applicability = "maybe-incorrect")]
     pub line: Span,
     pub feature: Symbol,
     pub since: Symbol,
     pub implies: Symbol,
 }
 
-#[derive(Diagnostic)]
-#[diag("an `#[unstable]` annotation here has no effect")]
-#[note("see issue #55436 <https://github.com/rust-lang/rust/issues/55436> for more information")]
+#[derive(LintDiagnostic)]
+#[diag(passes_ineffective_unstable_impl)]
+#[note]
 pub(crate) struct IneffectiveUnstableImpl;
 
-#[derive(Diagnostic)]
-#[diag("sanitize attribute not allowed here")]
-pub(crate) struct SanitizeAttributeNotAllowed {
-    #[primary_span]
-    pub attr_span: Span,
-    #[label("not a function, impl block, or module")]
-    pub not_fn_impl_mod: Option<Span>,
-    #[label("function has no body")]
-    pub no_body: Option<Span>,
-    #[help("sanitize attribute can be applied to a function (with body), impl block, or module")]
-    pub help: (),
+#[derive(LintDiagnostic)]
+#[diag(passes_unused_assign)]
+#[help]
+pub(crate) struct UnusedAssign {
+    pub name: String,
 }
 
-// FIXME(jdonszelmann): move back to rustc_attr
-#[derive(Diagnostic)]
-#[diag(
-    "`const_stable_indirect` attribute does not make sense on `rustc_const_stable` function, its behavior is already implied"
-)]
-pub(crate) struct RustcConstStableIndirectPairing {
-    #[primary_span]
-    pub span: Span,
+#[derive(LintDiagnostic)]
+#[diag(passes_unused_assign_passed)]
+#[help]
+pub(crate) struct UnusedAssignPassed {
+    pub name: String,
 }
 
-#[derive(Diagnostic)]
-#[diag("most attributes are not supported in `where` clauses")]
-#[help("only `#[cfg]` and `#[cfg_attr]` are supported")]
-pub(crate) struct UnsupportedAttributesInWhere {
-    #[primary_span]
-    pub span: MultiSpan,
-}
-
-#[derive(Diagnostic)]
-pub(crate) enum UnexportableItem<'a> {
-    #[diag("{$descr}'s are not exportable")]
-    Item {
-        #[primary_span]
-        span: Span,
-        descr: &'a str,
-    },
-
-    #[diag("generic functions are not exportable")]
-    GenericFn(#[primary_span] Span),
-
-    #[diag("only functions with \"C\" ABI are exportable")]
-    FnAbi(#[primary_span] Span),
-
-    #[diag("types with unstable layout are not exportable")]
-    TypeRepr(#[primary_span] Span),
-
-    #[diag("{$desc} with `#[export_stable]` attribute uses type `{$ty}`, which is not exportable")]
-    TypeInInterface {
-        #[primary_span]
-        span: Span,
-        desc: &'a str,
-        ty: &'a str,
-        #[label("not exportable")]
-        ty_span: Span,
-    },
-
-    #[diag("private items are not exportable")]
-    PrivItem {
-        #[primary_span]
-        span: Span,
-        #[note("is only usable at visibility `{$vis_descr}`")]
-        vis_note: Span,
-        vis_descr: &'a str,
-    },
-
-    #[diag("ADT types with private fields are not exportable")]
-    AdtWithPrivFields {
-        #[primary_span]
-        span: Span,
-        #[note("`{$field_name}` is private")]
-        vis_note: Span,
-        field_name: &'a str,
-    },
-}
-
-#[derive(Diagnostic)]
-#[diag("`#[repr(align(...))]` is not supported on {$item}")]
-pub(crate) struct ReprAlignShouldBeAlign {
-    #[primary_span]
-    #[help("use `#[rustc_align(...)]` instead")]
-    pub span: Span,
-    pub item: &'static str,
-}
-
-#[derive(Diagnostic)]
-#[diag("`#[repr(align(...))]` is not supported on {$item}")]
-pub(crate) struct ReprAlignShouldBeAlignStatic {
-    #[primary_span]
-    #[help("use `#[rustc_align_static(...)]` instead")]
-    pub span: Span,
-    pub item: &'static str,
-}
-
-#[derive(Diagnostic)]
-#[diag("`dialect` key required")]
-pub(crate) struct CustomMirPhaseRequiresDialect {
-    #[primary_span]
-    pub attr_span: Span,
-    #[label("`phase` argument requires a `dialect` argument")]
-    pub phase_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("the {$dialect} dialect is not compatible with the {$phase} phase")]
-pub(crate) struct CustomMirIncompatibleDialectAndPhase {
-    pub dialect: MirDialect,
-    pub phase: MirPhase,
-    #[primary_span]
-    pub attr_span: Span,
-    #[label("this dialect...")]
-    pub dialect_span: Span,
-    #[label("... is not compatible with this phase")]
-    pub phase_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`eii_macro_for` is only valid on functions")]
-pub(crate) struct EiiImplNotFunction {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("`#[{$name}]` is unsafe to implement")]
-pub(crate) struct EiiImplRequiresUnsafe {
-    #[primary_span]
-    pub span: Span,
-    pub name: Symbol,
+#[derive(LintDiagnostic)]
+#[diag(passes_unused_variable_try_prefix)]
+pub(crate) struct UnusedVariableTryPrefix {
+    #[label]
+    pub label: Option<Span>,
     #[subdiagnostic]
-    pub suggestion: EiiImplRequiresUnsafeSuggestion,
+    pub string_interp: Vec<UnusedVariableStringInterp>,
+    #[subdiagnostic]
+    pub sugg: UnusedVariableSugg,
+    pub name: String,
 }
 
 #[derive(Subdiagnostic)]
-#[multipart_suggestion("wrap the attribute in `unsafe(...)`", applicability = "machine-applicable")]
-pub(crate) struct EiiImplRequiresUnsafeSuggestion {
-    #[suggestion_part(code = "unsafe(")]
-    pub left: Span,
-    #[suggestion_part(code = ")")]
-    pub right: Span,
+pub(crate) enum UnusedVariableSugg {
+    #[multipart_suggestion(passes_suggestion, applicability = "maybe-incorrect")]
+    TryPrefixSugg {
+        #[suggestion_part(code = "_{name}")]
+        spans: Vec<Span>,
+        name: String,
+    },
+    #[help(passes_unused_variable_args_in_macro)]
+    NoSugg {
+        #[primary_span]
+        span: Span,
+        name: String,
+    },
 }
 
-#[derive(Diagnostic)]
-#[diag("`#[{$name}]` is not allowed to have `#[track_caller]`")]
-pub(crate) struct EiiWithTrackCaller {
-    #[primary_span]
-    pub attr_span: Span,
-    pub name: Symbol,
-    #[label("`#[{$name}]` is not allowed to have `#[track_caller]`")]
-    pub sig_span: Span,
+pub(crate) struct UnusedVariableStringInterp {
+    pub lit: Span,
+    pub lo: Span,
+    pub hi: Span,
 }
 
-#[derive(Diagnostic)]
-#[diag("`#[{$name}]` required, but not found")]
-pub(crate) struct EiiWithoutImpl {
-    #[primary_span]
-    #[label("expected because `#[{$name}]` was declared here in crate `{$decl_crate_name}`")]
-    pub span: Span,
-    pub name: Symbol,
-
-    pub current_crate_name: Symbol,
-    pub decl_crate_name: Symbol,
-    #[help(
-        "expected at least one implementation in crate `{$current_crate_name}` or any of its dependencies"
-    )]
-    pub help: (),
+impl Subdiagnostic for UnusedVariableStringInterp {
+    fn add_to_diag_with<G: EmissionGuarantee, F: SubdiagMessageOp<G>>(
+        self,
+        diag: &mut Diag<'_, G>,
+        _f: &F,
+    ) {
+        diag.span_label(self.lit, crate::fluent_generated::passes_maybe_string_interpolation);
+        diag.multipart_suggestion(
+            crate::fluent_generated::passes_string_interpolation_only_works,
+            vec![(self.lo, String::from("format!(")), (self.hi, String::from(")"))],
+            Applicability::MachineApplicable,
+        );
+    }
 }
 
-#[derive(Diagnostic)]
-#[diag("multiple implementations of `#[{$name}]`")]
-pub(crate) struct DuplicateEiiImpls {
-    pub name: Symbol,
-
-    #[primary_span]
-    #[label("first implemented here in crate `{$first_crate}`")]
-    pub first_span: Span,
-    pub first_crate: Symbol,
-
-    #[label("also implemented here in crate `{$second_crate}`")]
-    pub second_span: Span,
-    pub second_crate: Symbol,
-
-    #[note("in addition to these two, { $num_additional_crates ->
-        [one] another implementation was found in crate {$additional_crate_names}
-        *[other] more implementations were also found in the following crates: {$additional_crate_names}
-    }")]
-    pub additional_crates: Option<()>,
-
-    pub num_additional_crates: usize,
-    pub additional_crate_names: String,
-
-    #[help(
-        "an \"externally implementable item\" can only have a single implementation in the final artifact. When multiple implementations are found, also in different crates, they conflict"
-    )]
-    pub help: (),
-}
-
-#[derive(Diagnostic)]
-#[diag("function doesn't have a default implementation")]
-pub(crate) struct FunctionNotHaveDefaultImplementation {
-    #[primary_span]
-    pub span: Span,
-    #[note("required by this annotation")]
-    pub note_span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("not a function")]
-pub(crate) struct MustImplementNotFunction {
-    #[primary_span]
-    pub span: Span,
+#[derive(LintDiagnostic)]
+#[diag(passes_unused_variable_try_ignore)]
+pub(crate) struct UnusedVarTryIgnore {
     #[subdiagnostic]
-    pub span_note: MustImplementNotFunctionSpanNote,
-    #[subdiagnostic]
-    pub note: MustImplementNotFunctionNote,
+    pub sugg: UnusedVarTryIgnoreSugg,
 }
 
 #[derive(Subdiagnostic)]
-#[note("required by this annotation")]
-pub(crate) struct MustImplementNotFunctionSpanNote {
-    #[primary_span]
-    pub span: Span,
+#[multipart_suggestion(passes_suggestion, applicability = "maybe-incorrect")]
+pub(crate) struct UnusedVarTryIgnoreSugg {
+    #[suggestion_part(code = "{name}: _")]
+    pub shorthands: Vec<Span>,
+    #[suggestion_part(code = "_")]
+    pub non_shorthands: Vec<Span>,
+    pub name: String,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(passes_attr_crate_level)]
+#[note]
+pub(crate) struct AttrCrateLevelOnly {
+    #[subdiagnostic]
+    pub sugg: Option<AttrCrateLevelOnlySugg>,
 }
 
 #[derive(Subdiagnostic)]
-#[note("all `#[rustc_must_implement_one_of]` arguments must be associated function names")]
-pub(crate) struct MustImplementNotFunctionNote {}
-
-#[derive(Diagnostic)]
-#[diag("function not found in this trait")]
-pub(crate) struct FunctionNotFoundInTrait {
+#[suggestion(passes_suggestion, applicability = "maybe-incorrect", code = "!", style = "verbose")]
+pub(crate) struct AttrCrateLevelOnlySugg {
     #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag("functions names are duplicated")]
-#[note("all `#[rustc_must_implement_one_of]` arguments must be unique")]
-pub(crate) struct FunctionNamesDuplicated {
-    #[primary_span]
-    pub spans: Vec<Span>,
-}
-
-#[derive(Diagnostic)]
-#[diag("there is no parameter `{$argument_name}` on trait `{$trait_name}`")]
-pub(crate) struct UnknownFormatParameterForOnUnimplementedAttr {
-    pub argument_name: Symbol,
-    pub trait_name: Ident,
-    // `false` if we're in rustc_on_unimplemented, since its syntax is a lot more complex.
-    #[help(r#"expect either a generic argument name or {"`{Self}`"} as format argument"#)]
-    pub help: bool,
+    pub attr: Span,
 }

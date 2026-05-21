@@ -6,16 +6,16 @@ Forwarded: not-needed
 
 ===================================================================
 ---
- src/bootstrap/src/core/builder/cargo.rs | 12 ++++++++++++
+ src/bootstrap/src/core/builder.rs | 12 ++++++++++++
  1 file changed, 12 insertions(+)
 
-diff --git a/src/bootstrap/src/core/builder/cargo.rs b/src/bootstrap/src/core/builder/cargo.rs
-index 4e36af0..8bd3e62 100644
---- a/src/bootstrap/src/core/builder/cargo.rs
-+++ b/src/bootstrap/src/core/builder/cargo.rs
-@@ -764,6 +764,18 @@ impl Builder<'_> {
-             hostflags.arg("--cfg=bootstrap");
-         }
+diff --git a/src/bootstrap/src/core/builder.rs b/src/bootstrap/src/core/builder.rs
+index 6e3efeb..8b22669 100644
+--- a/src/bootstrap/src/core/builder.rs
++++ b/src/bootstrap/src/core/builder.rs
+@@ -1625,6 +1625,18 @@ impl<'a> Builder<'a> {
+         hostflags.arg("-Zunstable-options");
+         hostflags.arg("--check-cfg=cfg(bootstrap)");
  
 +        // Debian-specific stuff here
 +        // set linker flags from LDFLAGS

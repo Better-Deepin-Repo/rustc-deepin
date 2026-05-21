@@ -1,4 +1,5 @@
 //@ aux-build:lint_stability.rs
+//@ error-pattern: use of deprecated function
 
 #![deny(deprecated)]
 
@@ -8,5 +9,5 @@ extern crate lint_stability;
 use lint_stability::*;
 
 fn main() {
-    macro_test!(); //~ ERROR use of deprecated function `lint_stability::deprecated`: text
+    macro_test!();
 }

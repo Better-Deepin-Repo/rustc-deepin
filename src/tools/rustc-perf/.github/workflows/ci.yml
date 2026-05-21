@@ -3,7 +3,7 @@ on:
   push:
     branches:
       - master
-  pull_request: { }
+  pull_request: {}
   schedule:
     - cron: "0 12 * * 1" # Every Monday at 12:00 UTC
 
@@ -13,18 +13,7 @@ env:
 jobs:
   test_and_deploy:
     name: Test and deploy
-    runs-on: ubuntu-22.04
-    env:
-      TEST_DB_URL: postgres://postgres:testpass@localhost:5432/postgres
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: testpass
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout the source code
         uses: actions/checkout@v4
@@ -37,7 +26,7 @@ jobs:
           rustup default $RUST_TOOLCHAIN_VERSION
           rustup component add --toolchain $RUST_TOOLCHAIN_VERSION rustfmt clippy
         env:
-          RUST_TOOLCHAIN_VERSION: 1.88.0
+          RUST_TOOLCHAIN_VERSION: 1.75.0
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -125,15 +114,15 @@ jobs:
         #
         # We want the four parts to have similar runtimes.
         BENCH_INCLUDE_EXCLUDE_OPTS: [
-          "--include cargo-0.87.1,stm32f4-0.15.1",
-          "--exclude cargo-0.87.1,stm32f4-0.15.1",
+          "--include cargo-0.60.0,stm32f4-0.14.0,webrender-2022",
+          "--exclude cargo-0.60.0,stm32f4-0.14.0,webrender-2022",
         ]
         PROFILES: [
           "Check,Debug,Doc",
           "Opt",
         ]
     name: Test benchmarks
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout the source code
         uses: actions/checkout@v4
@@ -172,7 +161,7 @@ jobs:
 
   test_backends:
     name: Test codegen backend benchmarks
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout the source code
         uses: actions/checkout@v4
@@ -208,7 +197,7 @@ jobs:
 
   test_runtime_benchmarks:
     name: Test runtime benchmarks
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout the source code
         uses: actions/checkout@v4
@@ -299,7 +288,7 @@ jobs:
 
   database-check:
     name: Database Check
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres
@@ -333,12 +322,12 @@ jobs:
       - name: Connect to PostgreSQL
         run: |
           timeout 5s ./target/debug/site 'postgresql://postgres:postgres@localhost:5432/postgres' 2>&1 | tee -a log || true
-          grep -Fxq "Warning: loading complete but no data identified." log
+          grep -Fxq "Loading complete but no data identified; exiting." log
 
       - name: Connect to SQLite
         run: |
           timeout 5s ./target/debug/site 2>&1 | tee -a log || true
-          grep -Fxq "Warning: loading complete but no data identified." log
+          grep -Fxq "Loading complete but no data identified; exiting." log
 
       - name: Build Postgres to SQLite exporter
         run: cargo build --bin postgres-to-sqlite
@@ -357,7 +346,7 @@ jobs:
 
   site-endpoint:
     name: Compare page endpoint test
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres
@@ -394,7 +383,7 @@ jobs:
 
       - name: Gather data
         run: |
-          cargo run --bin collector bench_local `rustup which rustc` --include syn --id version1 \
+          cargo run --bin collector bench_local `which rustc` --include syn --id version1 \
             --self-profile \
             --db postgresql://postgres:postgres@127.0.0.1:5432/postgres
           cargo run --bin collector bench_local `rustup +nightly which rustc` --include syn --id version2 \

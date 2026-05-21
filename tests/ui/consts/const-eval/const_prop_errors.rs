@@ -1,7 +1,5 @@
 //@ check-pass
 
-#![allow(function_casts_as_integer)]
-
 pub trait Foo {
     fn foo(self) -> u32;
 }

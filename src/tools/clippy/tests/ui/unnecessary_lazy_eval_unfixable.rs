@@ -11,16 +11,15 @@ struct SomeStruct {
 fn main() {
     // fix will break type inference
     let _ = Ok(1).unwrap_or_else(|()| 2);
-    //~^ unnecessary_lazy_evaluations
-
+    //~^ ERROR: unnecessary closure used to substitute value for `Result::Err`
+    //~| NOTE: `-D clippy::unnecessary-lazy-evaluations` implied by `-D warnings`
     mod e {
         pub struct E;
     }
     let _ = Ok(1).unwrap_or_else(|e::E| 2);
-    //~^ unnecessary_lazy_evaluations
-
+    //~^ ERROR: unnecessary closure used to substitute value for `Result::Err`
     let _ = Ok(1).unwrap_or_else(|SomeStruct { .. }| 2);
-    //~^ unnecessary_lazy_evaluations
+    //~^ ERROR: unnecessary closure used to substitute value for `Result::Err`
 
     // Fix #6343
     let arr = [(Some(1),)];
@@ -30,5 +29,4 @@ fn main() {
 fn issue11672() {
     // Return type annotation helps type inference and removing it can break code
     let _ = true.then(|| -> &[u8] { &[] });
-    //~^ unnecessary_lazy_evaluations
 }

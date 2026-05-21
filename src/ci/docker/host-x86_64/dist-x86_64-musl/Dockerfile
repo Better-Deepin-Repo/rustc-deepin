@@ -19,14 +19,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   patch \
   libssl-dev \
   pkg-config \
-  zlib1g-dev \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build/
 
 COPY scripts/musl-toolchain.sh /build/
-COPY scripts/musl-cve-2026-6042.diff /build/
-COPY scripts/musl-cve-2026-40200.diff /build/
 # We need to mitigate rust-lang/rust#34978 when compiling musl itself as well
 RUN CFLAGS="-Wa,-mrelax-relocations=no -Wa,--compress-debug-sections=none -Wl,--compress-debug-sections=none" \
     CXXFLAGS="-Wa,-mrelax-relocations=no -Wa,--compress-debug-sections=none -Wl,--compress-debug-sections=none" \

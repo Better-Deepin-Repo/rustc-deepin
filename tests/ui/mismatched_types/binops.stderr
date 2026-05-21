@@ -6,14 +6,14 @@ LL |     1 + Some(1);
    |
    = help: the trait `Add<Option<{integer}>>` is not implemented for `{integer}`
    = help: the following other types implement trait `Add<Rhs>`:
-             `&f128` implements `Add<f128>`
-             `&f128` implements `Add`
-             `&f16` implements `Add<f16>`
-             `&f16` implements `Add`
-             `&f32` implements `Add<f32>`
-             `&f32` implements `Add`
-             `&f64` implements `Add<f64>`
-             `&f64` implements `Add`
+             `&'a f128` implements `Add<f128>`
+             `&'a f16` implements `Add<f16>`
+             `&'a f32` implements `Add<f32>`
+             `&'a f64` implements `Add<f64>`
+             `&'a i128` implements `Add<i128>`
+             `&'a i16` implements `Add<i16>`
+             `&'a i32` implements `Add<i32>`
+             `&'a i64` implements `Add<i64>`
            and 56 others
 
 error[E0277]: cannot subtract `Option<{integer}>` from `usize`
@@ -23,23 +23,11 @@ LL |     2 as usize - Some(1);
    |                ^ no implementation for `usize - Option<{integer}>`
    |
    = help: the trait `Sub<Option<{integer}>>` is not implemented for `usize`
-help: the following other types implement trait `Sub<Rhs>`
-  --> $SRC_DIR/core/src/ops/arith.rs:LL:COL
-   |
-   = note: `usize` implements `Sub`
-  ::: $SRC_DIR/core/src/ops/arith.rs:LL:COL
-   |
-   = note: in this macro invocation
-  --> $SRC_DIR/core/src/internal_macros.rs:LL:COL
-   |
-   = note: `&usize` implements `Sub<usize>`
-  ::: $SRC_DIR/core/src/internal_macros.rs:LL:COL
-   |
-   = note: `usize` implements `Sub<&usize>`
-  ::: $SRC_DIR/core/src/internal_macros.rs:LL:COL
-   |
-   = note: `&usize` implements `Sub`
-   = note: this error originates in the macro `sub_impl` (in Nightly builds, run with -Z macro-backtrace for more info)
+   = help: the following other types implement trait `Sub<Rhs>`:
+             `&'a usize` implements `Sub<usize>`
+             `&usize` implements `Sub<&usize>`
+             `usize` implements `Sub<&usize>`
+             `usize` implements `Sub`
 
 error[E0277]: cannot multiply `{integer}` by `()`
   --> $DIR/binops.rs:4:7
@@ -49,14 +37,14 @@ LL |     3 * ();
    |
    = help: the trait `Mul<()>` is not implemented for `{integer}`
    = help: the following other types implement trait `Mul<Rhs>`:
-             `&f128` implements `Mul<f128>`
-             `&f128` implements `Mul`
-             `&f16` implements `Mul<f16>`
-             `&f16` implements `Mul`
-             `&f32` implements `Mul<f32>`
-             `&f32` implements `Mul`
-             `&f64` implements `Mul<f64>`
-             `&f64` implements `Mul`
+             `&'a f128` implements `Mul<f128>`
+             `&'a f16` implements `Mul<f16>`
+             `&'a f32` implements `Mul<f32>`
+             `&'a f64` implements `Mul<f64>`
+             `&'a i128` implements `Mul<i128>`
+             `&'a i16` implements `Mul<i16>`
+             `&'a i32` implements `Mul<i32>`
+             `&'a i64` implements `Mul<i64>`
            and 57 others
 
 error[E0277]: cannot divide `{integer}` by `&str`
@@ -67,14 +55,14 @@ LL |     4 / "";
    |
    = help: the trait `Div<&str>` is not implemented for `{integer}`
    = help: the following other types implement trait `Div<Rhs>`:
-             `&f128` implements `Div<f128>`
-             `&f128` implements `Div`
-             `&f16` implements `Div<f16>`
-             `&f16` implements `Div`
-             `&f32` implements `Div<f32>`
-             `&f32` implements `Div`
-             `&f64` implements `Div<f64>`
-             `&f64` implements `Div`
+             `&'a f128` implements `Div<f128>`
+             `&'a f16` implements `Div<f16>`
+             `&'a f32` implements `Div<f32>`
+             `&'a f64` implements `Div<f64>`
+             `&'a i128` implements `Div<i128>`
+             `&'a i16` implements `Div<i16>`
+             `&'a i32` implements `Div<i32>`
+             `&'a i64` implements `Div<i64>`
            and 62 others
 
 error[E0277]: can't compare `{integer}` with `String`

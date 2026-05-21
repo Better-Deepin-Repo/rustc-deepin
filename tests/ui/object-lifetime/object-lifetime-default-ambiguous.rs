@@ -21,11 +21,11 @@ struct Ref2<'a,'b:'a,T:'a+'b+?Sized> {
 }
 
 fn a<'a,'b>(t: Ref2<'a,'b, dyn Test>) {
-    //~^ ERROR cannot deduce the lifetime bound for this trait object type
+    //~^ ERROR lifetime bound for this object type cannot be deduced from context
 }
 
 fn b(t: Ref2<dyn Test>) {
-    //~^ ERROR cannot deduce the lifetime bound for this trait object type
+    //~^ ERROR lifetime bound for this object type cannot be deduced from context
 }
 
 fn c(t: Ref2<&dyn Test>) {
@@ -41,7 +41,7 @@ fn e(t: Ref2<Ref0<dyn Test>>) {
 }
 
 fn f(t: &Ref2<dyn Test>) {
-    //~^ ERROR cannot deduce the lifetime bound for this trait object type
+    //~^ ERROR lifetime bound for this object type cannot be deduced from context
 }
 
 fn main() {

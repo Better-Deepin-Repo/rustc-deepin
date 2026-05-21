@@ -1,5 +1,3 @@
-//@ check-pass
-
 #![warn(clippy::needless_pass_by_value)]
 
 extern crate proc_macro;

@@ -1,10 +1,11 @@
 // Figuring out the size of a vector type that depends on traits doesn't ICE
 
 #![allow(dead_code)]
-#![feature(repr_simd, core_intrinsics, generic_const_exprs)]
-#![allow(non_camel_case_types, incomplete_features)]
 
-use std::intrinsics::simd::{simd_extract, simd_insert};
+//@ pretty-expanded FIXME #23616
+
+#![feature(repr_simd, intrinsics, generic_const_exprs)]
+#![allow(non_camel_case_types, incomplete_features)]
 
 pub trait Simd {
     type Lane: Clone + Copy;
@@ -23,6 +24,11 @@ pub struct T<S: Simd>([S::Lane; S::SIZE]);
 //~^ ERROR unconstrained generic constant
 //~| ERROR SIMD vector element type should be a primitive scalar
 //~| ERROR unconstrained generic constant
+
+extern "rust-intrinsic" {
+    fn simd_insert<T, E>(x: T, idx: u32, y: E) -> T;
+    fn simd_extract<T, E>(x: T, idx: u32) -> E;
+}
 
 pub fn main() {
     let mut t = T::<i32x4>([0; 4]);

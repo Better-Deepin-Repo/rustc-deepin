@@ -1,4 +1,4 @@
-use ide_db::assists::AssistId;
+use ide_db::assists::{AssistId, AssistKind};
 use syntax::ast::{self, HasGenericParams, HasName};
 use syntax::{AstNode, SyntaxKind};
 
@@ -44,7 +44,7 @@ pub(crate) fn convert_nested_function_to_closure(
     let param_list = function.param_list()?;
 
     acc.add(
-        AssistId::refactor_rewrite("convert_nested_function_to_closure"),
+        AssistId("convert_nested_function_to_closure", AssistKind::RefactorRewrite),
         "Convert nested function to closure",
         target,
         |edit| {
@@ -63,7 +63,7 @@ pub(crate) fn convert_nested_function_to_closure(
 
 /// Returns whether the given function is nested within the body of another function.
 fn is_nested_function(function: &ast::Fn) -> bool {
-    function.syntax().ancestors().skip(1).find_map(ast::Item::cast).is_some_and(|it| {
+    function.syntax().ancestors().skip(1).find_map(ast::Item::cast).map_or(false, |it| {
         matches!(it, ast::Item::Fn(_) | ast::Item::Static(_) | ast::Item::Const(_))
     })
 }

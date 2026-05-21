@@ -1,6 +1,5 @@
 //@ run-pass
-//@ proc-macro: attr-on-trait.rs
-//@ ignore-backends: gcc
+//@ aux-build:attr-on-trait.rs
 
 extern crate attr_on_trait;
 

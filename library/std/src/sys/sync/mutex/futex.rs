@@ -1,11 +1,11 @@
 use crate::sync::atomic::Ordering::{Acquire, Relaxed, Release};
 use crate::sys::futex::{self, futex_wait, futex_wake};
 
-type Futex = futex::SmallFutex;
+type Atomic = futex::SmallAtomic;
 type State = futex::SmallPrimitive;
 
 pub struct Mutex {
-    futex: Futex,
+    futex: Atomic,
 }
 
 const UNLOCKED: State = 0;
@@ -15,19 +15,15 @@ const CONTENDED: State = 2; // locked, and other threads waiting (contended)
 impl Mutex {
     #[inline]
     pub const fn new() -> Self {
-        Self { futex: Futex::new(UNLOCKED) }
+        Self { futex: Atomic::new(UNLOCKED) }
     }
 
     #[inline]
-    // Make this a diagnostic item for Miri's concurrency model checker.
-    #[cfg_attr(not(test), rustc_diagnostic_item = "sys_mutex_try_lock")]
     pub fn try_lock(&self) -> bool {
         self.futex.compare_exchange(UNLOCKED, LOCKED, Acquire, Relaxed).is_ok()
     }
 
     #[inline]
-    // Make this a diagnostic item for Miri's concurrency model checker.
-    #[cfg_attr(not(test), rustc_diagnostic_item = "sys_mutex_lock")]
     pub fn lock(&self) {
         if self.futex.compare_exchange(UNLOCKED, LOCKED, Acquire, Relaxed).is_err() {
             self.lock_contended();
@@ -84,8 +80,6 @@ impl Mutex {
     }
 
     #[inline]
-    // Make this a diagnostic item for Miri's concurrency model checker.
-    #[cfg_attr(not(test), rustc_diagnostic_item = "sys_mutex_unlock")]
     pub unsafe fn unlock(&self) {
         if self.futex.swap(UNLOCKED, Release) == CONTENDED {
             // We only wake up one thread. When that thread locks the mutex, it

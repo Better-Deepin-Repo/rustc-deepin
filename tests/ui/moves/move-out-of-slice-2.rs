@@ -1,3 +1,5 @@
+#![feature(unsized_locals)]
+//~^ WARN the feature `unsized_locals` is incomplete
 #![allow(unused)]
 
 struct A;
@@ -7,24 +9,28 @@ struct C;
 fn main() {
     let a: Box<[A]> = Box::new([A]);
     match *a {
-        [a @ ..] => {} //~ERROR the size for values of type `[A]` cannot be known at compilation time [E0277]
+        //~^ ERROR cannot move out of type `[A]`, a non-copy slice
+        [a @ ..] => {}
         _ => {}
     }
     let b: Box<[A]> = Box::new([A, A, A]);
     match *b {
-        [_, _, b @ .., _] => {} //~ERROR the size for values of type `[A]` cannot be known at compilation time [E0277]
+        //~^ ERROR cannot move out of type `[A]`, a non-copy slice
+        [_, _, b @ .., _] => {}
         _ => {}
     }
 
     // `[C]` isn't `Copy`, even if `C` is.
     let c: Box<[C]> = Box::new([C]);
     match *c {
-        [c @ ..] => {} //~ERROR the size for values of type `[C]` cannot be known at compilation time [E0277]
+        //~^ ERROR cannot move out of type `[C]`, a non-copy slice
+        [c @ ..] => {}
         _ => {}
     }
     let d: Box<[C]> = Box::new([C, C, C]);
     match *d {
-        [_, _, d @ .., _] => {} //~ERROR the size for values of type `[C]` cannot be known at compilation time [E0277]
+        //~^ ERROR cannot move out of type `[C]`, a non-copy slice
+        [_, _, d @ .., _] => {}
         _ => {}
     }
 }

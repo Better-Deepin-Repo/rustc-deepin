@@ -1,4 +1,3 @@
-//@ edition:2015
 use spam::*; //~ ERROR unresolved import `spam` [E0432]
 
 fn main() {

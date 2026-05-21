@@ -1,9 +1,9 @@
 // Test that an assignment of type ! makes the rest of the block dead code.
-//
+
 //@ check-pass
 
 #![feature(never_type)]
-#![expect(dropping_copy_types)]
+#![allow(dropping_copy_types)]
 #![warn(unused)]
 
 fn main() {

@@ -1,4 +1,5 @@
 //@ run-pass
+//@ pretty-expanded FIXME #23616
 
 #![allow(unused_variables)]
 

@@ -4,7 +4,7 @@ This section covers a numbers of common compiler terms that arise in
 this guide. We try to give the general definition while providing some
 Rust-specific context.
 
-<a id="cfg"></a>
+<a name="cfg"></a>
 
 ## What is a control-flow graph?
 
@@ -100,7 +100,7 @@ When using a control-flow graph, a loop simply appears as a cycle in
 the graph, and the `break` keyword translates into a path out of that
 cycle.
 
-<a id="dataflow"></a>
+<a name="dataflow"></a>
 
 ## What is a dataflow analysis?
 
@@ -186,7 +186,7 @@ useful. For example, rather than starting from block (A) and moving forwards,
 we might have started with the usage of `x` and moved backwards to try to find
 its initialization.
 
-<a id="quantified"></a>
+<a name="quantified"></a>
 
 ## What is "universally quantified"? What about "existentially quantified"?
 
@@ -233,7 +233,7 @@ fn foo(_: dyn Debug)
 This function claims that there exists some type `T` that implements `Debug`
 such that the function is well-typed: `∃ T:  (T: Debug) and well_typed(foo)`.
 
-<a id="variance"></a>
+<a name="variance"></a>
 
 ## What is a de Bruijn Index?
 
@@ -243,7 +243,8 @@ use in lambda calculus evaluation (see [this Wikipedia article][wikideb] for
 more). In `rustc`, we use de Bruijn indices to [represent generic types][sub].
 
 [wikideb]: https://en.wikipedia.org/wiki/De_Bruijn_index
-[sub]: ../ty-module/generic-arguments.md
+[sub]: ../ty_module/generic_arguments.md
+
 
 Here is a basic example of how de Bruijn indices might be used for closures (we
 don't actually do this in `rustc` though!):
@@ -267,7 +268,7 @@ Check out the subtyping chapter from the
 See the [variance](../variance.html) chapter of this guide for more info on how
 the type checker handles variance.
 
-<a id="free-vs-bound"></a>
+<a name="free-vs-bound"></a>
 
 ## What is a "free region" or a "free variable"? What about "bound region"?
 
@@ -328,5 +329,5 @@ does not.
 - [nLab](https://ncatlab.org/nlab/show/HomePage)
 
 ## Misc Papers and Blog Posts
-- [Programming in Martin-Löf's Type Theory](https://www.cse.chalmers.se/research/group/logic/book/)
+- [Programming in Martin-Löf's Type Theory](https://www.researchgate.net/publication/213877272_Programming_in_Martin-Lof's_Type_Theory)
 - [Polymorphism, Subtyping, and Type Inference in MLsub](https://dl.acm.org/doi/10.1145/3093333.3009882)

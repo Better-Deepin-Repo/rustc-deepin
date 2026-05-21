@@ -8,7 +8,6 @@ use crate::{Optimization, Target};
 pub struct Session {
     target: Target,
     cpu: Option<String>,
-    feature: Option<String>,
     symbols: Vec<String>,
 
     /// A file that `llvm-link` supports, like a bitcode file or an archive.
@@ -22,12 +21,7 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn new(
-        target: crate::Target,
-        cpu: Option<String>,
-        feature: Option<String>,
-        out_path: PathBuf,
-    ) -> Self {
+    pub fn new(target: crate::Target, cpu: Option<String>, out_path: PathBuf) -> Self {
         let link_path = out_path.with_extension("o");
         let opt_path = out_path.with_extension("optimized.o");
         let sym_path = out_path.with_extension("symbols.txt");
@@ -35,7 +29,6 @@ impl Session {
         Session {
             target,
             cpu,
-            feature,
             symbols: Vec::new(),
             files: Vec::new(),
             link_path,
@@ -68,7 +61,7 @@ impl Session {
             .arg("-o")
             .arg(&self.link_path)
             .output()
-            .context("An error occurred when calling llvm-link. Make sure the llvm-tools component is installed.")?;
+            .context("An error occured when calling llvm-link. Make sure the llvm-tools component is installed.")?;
 
         if !llvm_link_output.status.success() {
             tracing::error!(
@@ -115,7 +108,7 @@ impl Session {
         }
 
         let opt_output = opt_cmd.output().context(
-            "An error occurred when calling opt. Make sure the llvm-tools component is installed.",
+            "An error occured when calling opt. Make sure the llvm-tools component is installed.",
         )?;
 
         if !opt_output.status.success() {
@@ -141,15 +134,11 @@ impl Session {
             lcc_command.arg("--mcpu").arg(mcpu);
         }
 
-        if let Some(mattr) = &self.feature {
-            lcc_command.arg(&format!("--mattr={}", mattr));
-        }
-
         let lcc_output = lcc_command
             .arg(&self.opt_path)
             .arg("-o").arg(&self.out_path)
             .output()
-            .context("An error occurred when calling llc. Make sure the llvm-tools component is installed.")?;
+            .context("An error occured when calling llc. Make sure the llvm-tools component is installed.")?;
 
         if !lcc_output.status.success() {
             tracing::error!(

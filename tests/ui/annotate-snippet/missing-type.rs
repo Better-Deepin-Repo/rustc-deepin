@@ -1,8 +1,6 @@
-//@ edition: 2015
-//@ compile-flags: --error-format human
+//@ compile-flags: --error-format human-annotate-rs -Z unstable-options
+//@ error-pattern:cannot find type `Iter` in this scope
 
 pub fn main() {
     let x: Iter;
 }
-
-//~? RAW cannot find type `Iter` in this scope

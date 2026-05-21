@@ -1,21 +1,16 @@
-r[expr.paren]
 # Grouped expressions
 
-r[expr.paren.syntax]
-```grammar,expressions
-GroupedExpression -> `(` Expression `)`
-```
+> **<sup>Syntax</sup>**\
+> _GroupedExpression_ :\
+> &nbsp;&nbsp; `(` [_Expression_] `)`
 
-r[expr.paren.intro]
-A *parenthesized expression* wraps a single expression, evaluating to that expression. The syntax for a parenthesized expression is a `(`, then an expression, called the *enclosed operand*, and then a `)`.
+A *parenthesized expression* wraps a single expression, evaluating to that expression.
+The syntax for a parenthesized expression is a `(`, then an expression, called the *enclosed operand*, and then a `)`.
 
-r[expr.paren.evaluation]
 Parenthesized expressions evaluate to the value of the enclosed operand.
+Unlike other expressions, parenthesized expressions are both [place expressions and value expressions][place].
+When the enclosed operand is a place expression, it is a place expression and when the enclosed operand is a value expression, it is a value expression.
 
-r[expr.paren.place-or-value]
-A parenthesized expression is a [place expression][place] if the enclosed operand is a place expression, and is a value expression if the enclosed operand is a value expression.
-
-r[expr.paren.override-precedence]
 Parentheses can be used to explicitly modify the precedence order of subexpressions within an expression.
 
 An example of a parenthesized expression:
@@ -44,4 +39,5 @@ assert_eq!( a.f (), "The method f");
 assert_eq!((a.f)(), "The field f");
 ```
 
+[_Expression_]: ../expressions.md
 [place]: ../expressions.md#place-expressions-and-value-expressions

@@ -1,60 +1,39 @@
-#[cfg]
-//~^ ERROR malformed `cfg` attribute
-//~| NOTE expected this to be a list
-//~| NOTE for more information, visit
+#[cfg] //~ ERROR `cfg` is not followed by parentheses
 struct S1;
 
-#[cfg = 10]
-//~^ ERROR malformed `cfg` attribute
-//~| NOTE expected this to be a list
-//~| NOTE for more information, visit
+#[cfg = 10] //~ ERROR `cfg` is not followed by parentheses
 struct S2;
 
-#[cfg()]
-//~^ ERROR malformed `cfg` attribute
-//~| NOTE expected a single argument here
-//~| NOTE for more information, visit
+#[cfg()] //~ ERROR `cfg` predicate is not specified
 struct S3;
 
-#[cfg(a, b)]
-//~^ ERROR malformed `cfg` attribute
-//~| NOTE expected a single argument here
-//~| NOTE for more information, visit
+#[cfg(a, b)] //~ ERROR multiple `cfg` predicates are specified
 struct S4;
 
-#[cfg("str")]
-//~^ ERROR malformed `cfg` attribute input
-//~| NOTE expected a valid identifier here
-//~| NOTE for more information, visit
+#[cfg("str")] //~ ERROR `cfg` predicate key cannot be a literal
 struct S5;
 
-#[cfg(a::b)]
-//~^ ERROR malformed `cfg` attribute input
-//~| NOTE expected a valid identifier here
-//~| NOTE for more information, visit
+#[cfg(a::b)] //~ ERROR `cfg` predicate key must be an identifier
 struct S6;
 
 #[cfg(a())] //~ ERROR invalid predicate `a`
 struct S7;
 
-#[cfg(a = 10)] //~ ERROR malformed `cfg` attribute input
-//~^ NOTE expected a string literal here
-//~| NOTE for more information, visit
+#[cfg(a = 10)] //~ ERROR literal in `cfg` predicate value must be a string
 struct S8;
 
-#[cfg(a = b"hi")]  //~ ERROR malformed `cfg` attribute input
-//~^ NOTE expected a normal string literal, not a byte string literal
+#[cfg(a = b"hi")]  //~ ERROR literal in `cfg` predicate value must be a string
 struct S9;
 
 macro_rules! generate_s10 {
     ($expr: expr) => {
         #[cfg(feature = $expr)]
-        //~^ ERROR expected a literal (`1u8`, `1.0f32`, `"string"`, etc.) here, found `expr` metavariable
+        //~^ ERROR expected unsuffixed literal, found `concat!("nonexistent")`
+        //~| ERROR expected unsuffixed literal, found `concat!("nonexistent")`
         struct S10;
     }
 }
 
 generate_s10!(concat!("nonexistent"));
-//~^ NOTE in this expansion of generate_s10!
 
 fn main() {}

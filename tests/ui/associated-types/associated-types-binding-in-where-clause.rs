@@ -1,6 +1,7 @@
 //@ run-pass
 // Test equality constraints on associated types in a where clause.
 
+//@ pretty-expanded FIXME #23616
 
 pub trait Foo {
     type A;

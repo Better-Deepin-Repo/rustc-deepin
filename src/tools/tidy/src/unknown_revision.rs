@@ -12,14 +12,12 @@ use std::sync::OnceLock;
 use ignore::DirEntry;
 use regex::Regex;
 
-use crate::diagnostics::{CheckId, RunningCheck, TidyCtx};
-use crate::iter_header::{HeaderLine, iter_header};
+use crate::iter_header::{iter_header, HeaderLine};
 use crate::walk::{filter_dirs, filter_not_rust, walk};
 
-pub fn check(tests_path: &Path, tidy_ctx: TidyCtx) {
-    let mut check = tidy_ctx.start_check(CheckId::new("unknown_revision").path(tests_path));
+pub fn check(tests_path: impl AsRef<Path>, bad: &mut bool) {
     walk(
-        tests_path,
+        tests_path.as_ref(),
         |path, is_dir| {
             filter_dirs(path) || filter_not_rust(path) || {
                 // Auxiliary source files for incremental tests can refer to revisions
@@ -27,11 +25,11 @@ pub fn check(tests_path: &Path, tidy_ctx: TidyCtx) {
                 is_dir && path.file_name().is_some_and(|name| name == "auxiliary")
             }
         },
-        &mut |entry, contents| visit_test_file(entry, contents, &mut check),
+        &mut |entry, contents| visit_test_file(entry, contents, bad),
     );
 }
 
-fn visit_test_file(entry: &DirEntry, contents: &str, check: &mut RunningCheck) {
+fn visit_test_file(entry: &DirEntry, contents: &str, bad: &mut bool) {
     let mut revisions = HashSet::new();
     let mut unused_revision_names = HashSet::new();
 
@@ -70,9 +68,10 @@ fn visit_test_file(entry: &DirEntry, contents: &str, check: &mut RunningCheck) {
 
     // Fail if any revision names appear in both places, since that's probably a mistake.
     for rev in revisions.intersection(&unused_revision_names).copied().collect::<BTreeSet<_>>() {
-        check.error(format!(
+        tidy_error!(
+            bad,
             "revision name [{rev}] appears in both `revisions` and `unused-revision-names` in {path}"
-        ));
+        );
     }
 
     // Compute the set of revisions that were mentioned but not declared,
@@ -85,7 +84,7 @@ fn visit_test_file(entry: &DirEntry, contents: &str, check: &mut RunningCheck) {
     bad_revisions.sort();
 
     for (line_number, rev) in bad_revisions {
-        check.error(format!("unknown revision [{rev}] at {path}:{line_number}"));
+        tidy_error!(bad, "unknown revision [{rev}] at {path}:{line_number}");
     }
 }
 

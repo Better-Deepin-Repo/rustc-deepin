@@ -9,7 +9,6 @@
 //@ run-rustfix
 
 #![allow(unused_variables)]
-#![allow(unused_assignments)]
 
 fn main() {
     let s: Option<u8> = None;
@@ -17,8 +16,8 @@ fn main() {
     match s {
         Some(x) @ y => {}
         //~^ ERROR pattern on wrong side of `@`
-        //~| NOTE pattern on the left, should be on the right
-        //~| NOTE binding on the right, should be on the left
+        //~| pattern on the left, should be on the right
+        //~| binding on the right, should be on the left
         //~| HELP switch the order
         //~| SUGGESTION y @ Some(x)
         _ => {}
@@ -27,8 +26,8 @@ fn main() {
     match 2 {
         1 ..= 5 @ e => {}
         //~^ ERROR pattern on wrong side of `@`
-        //~| NOTE pattern on the left, should be on the right
-        //~| NOTE binding on the right, should be on the left
+        //~| pattern on the left, should be on the right
+        //~| binding on the right, should be on the left
         //~| HELP switch the order
         //~| SUGGESTION e @ 1..=5
         _ => {}

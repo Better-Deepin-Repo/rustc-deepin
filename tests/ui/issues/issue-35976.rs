@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ revisions: imported unimported
 //@[imported] check-pass
 

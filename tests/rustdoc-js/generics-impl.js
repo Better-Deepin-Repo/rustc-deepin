@@ -14,7 +14,7 @@ const EXPECTED = [
         ],
     },
     {
-        'query': 'Aaaaaaa -> Result<usize>',
+        'query': 'Aaaaaaa -> usize',
         'others': [
             { 'path': 'generics_impl::Aaaaaaa', 'name': 'read' },
         ],
@@ -23,11 +23,6 @@ const EXPECTED = [
         'query': 'Read -> u64',
         'others': [
             { 'path': 'generics_impl::Ddddddd', 'name': 'eeeeeee' },
-        ],
-    },
-    {
-        'query': 'Ddddddd<Read> -> u64',
-        'others': [
             { 'path': 'generics_impl::Ddddddd', 'name': 'ggggggg' },
         ],
     },
@@ -35,6 +30,7 @@ const EXPECTED = [
         'query': 'trait:Read -> u64',
         'others': [
             { 'path': 'generics_impl::Ddddddd', 'name': 'eeeeeee' },
+            { 'path': 'generics_impl::Ddddddd', 'name': 'ggggggg' },
         ],
     },
     {

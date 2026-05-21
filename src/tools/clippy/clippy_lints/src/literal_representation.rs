@@ -6,6 +6,7 @@ use rustc_ast::ast::{Expr, ExprKind, LitKind};
 use rustc_ast::token;
 use rustc_errors::Applicability;
 use rustc_lint::{EarlyContext, EarlyLintPass, Lint, LintContext};
+use rustc_middle::lint::in_external_macro;
 use rustc_session::impl_lint_pass;
 use rustc_span::Span;
 use std::iter;
@@ -206,7 +207,7 @@ impl_lint_pass!(LiteralDigitGrouping => [
 impl EarlyLintPass for LiteralDigitGrouping {
     fn check_expr(&mut self, cx: &EarlyContext<'_>, expr: &Expr) {
         if let ExprKind::Lit(lit) = expr.kind
-            && !expr.span.in_external_macro(cx.sess().source_map())
+            && !in_external_macro(cx.sess(), expr.span)
         {
             self.check_lit(cx, lit, expr.span);
         }
@@ -250,7 +251,7 @@ impl LiteralDigitGrouping {
                     );
                     if !consistent {
                         return Err(WarningType::InconsistentDigitGrouping);
-                    }
+                    };
                 }
 
                 Ok(())
@@ -387,11 +388,12 @@ impl LiteralDigitGrouping {
 
         let first = groups.next().expect("At least one group");
 
-        if (radix == Radix::Binary || radix == Radix::Octal || radix == Radix::Hexadecimal)
-            && let Some(second_size) = groups.next()
-            && (!groups.all(|i| i == second_size) || first > second_size)
-        {
-            return Err(WarningType::UnusualByteGroupings);
+        if radix == Radix::Binary || radix == Radix::Octal || radix == Radix::Hexadecimal {
+            if let Some(second_size) = groups.next() {
+                if !groups.all(|i| i == second_size) || first > second_size {
+                    return Err(WarningType::UnusualByteGroupings);
+                }
+            }
         }
 
         if let Some(second) = groups.next() {
@@ -410,6 +412,7 @@ impl LiteralDigitGrouping {
     }
 }
 
+#[expect(clippy::module_name_repetitions)]
 pub struct DecimalLiteralRepresentation {
     threshold: u64,
 }
@@ -419,7 +422,7 @@ impl_lint_pass!(DecimalLiteralRepresentation => [DECIMAL_LITERAL_REPRESENTATION]
 impl EarlyLintPass for DecimalLiteralRepresentation {
     fn check_expr(&mut self, cx: &EarlyContext<'_>, expr: &Expr) {
         if let ExprKind::Lit(lit) = expr.kind
-            && !expr.span.in_external_macro(cx.sess().source_map())
+            && !in_external_macro(cx.sess(), expr.span)
         {
             self.check_lit(cx, lit, expr.span);
         }

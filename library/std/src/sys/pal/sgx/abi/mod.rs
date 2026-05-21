@@ -1,13 +1,12 @@
 #![cfg_attr(test, allow(unused))] // RT initialization logic is not compiled for test
 
 use core::arch::global_asm;
-use core::sync::atomic::{Atomic, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::alloc::System;
 use crate::io::Write;
 
 // runtime features
-pub mod panic;
+pub(super) mod panic;
 mod reloc;
 
 // library features
@@ -24,7 +23,7 @@ global_asm!(include_str!("entry.S"), options(att_syntax));
 struct EntryReturn(u64, u64);
 
 #[cfg(not(test))]
-#[unsafe(no_mangle)]
+#[no_mangle]
 unsafe extern "C" fn tcs_init(secondary: bool) {
     // Be very careful when changing this code: it runs before the binary has been
     // relocated. Any indirect accesses to symbols will likely fail.
@@ -32,7 +31,7 @@ unsafe extern "C" fn tcs_init(secondary: bool) {
     const BUSY: usize = 1;
     const DONE: usize = 2;
     // Three-state spin-lock
-    static RELOC_STATE: Atomic<usize> = AtomicUsize::new(UNINIT);
+    static RELOC_STATE: AtomicUsize = AtomicUsize::new(UNINIT);
 
     if secondary && RELOC_STATE.load(Ordering::Relaxed) != DONE {
         rtabort!("Entered secondary TCS before main TCS!")
@@ -61,22 +60,20 @@ unsafe extern "C" fn tcs_init(secondary: bool) {
 // (main function exists). If this is a library, the crate author should be
 // able to specify this
 #[cfg(not(test))]
-#[unsafe(no_mangle)]
+#[no_mangle]
 extern "C" fn entry(p1: u64, p2: u64, p3: u64, secondary: bool, p4: u64, p5: u64) -> EntryReturn {
     // FIXME: how to support TLS in library mode?
-    // We use the System allocator here such that the global allocator may use
-    // thread-locals.
-    let tls = Box::new_in(tls::Tls::new(), System);
+    let tls = Box::new(tls::Tls::new());
     let tls_guard = unsafe { tls.activate() };
 
     if secondary {
-        let join_notifier = crate::sys::thread::Thread::entry();
+        let join_notifier = super::thread::Thread::entry();
         drop(tls_guard);
         drop(join_notifier);
 
         EntryReturn(0, 0)
     } else {
-        unsafe extern "C" {
+        extern "C" {
             fn main(argc: isize, argv: *const *const u8) -> isize;
         }
 
@@ -96,7 +93,7 @@ extern "C" fn entry(p1: u64, p2: u64, p3: u64, secondary: bool, p4: u64, p5: u64
     }
 }
 
-pub fn exit_with_code(code: isize) -> ! {
+pub(super) fn exit_with_code(code: isize) -> ! {
     if code != 0 {
         if let Some(mut out) = panic::SgxPanicOutput::new() {
             let _ = write!(out, "Exited with status code {code}");
@@ -106,7 +103,7 @@ pub fn exit_with_code(code: isize) -> ! {
 }
 
 #[cfg(not(test))]
-#[unsafe(no_mangle)]
+#[no_mangle]
 extern "C" fn abort_reentry() -> ! {
     usercalls::exit(false)
 }

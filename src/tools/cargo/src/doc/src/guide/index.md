@@ -11,6 +11,5 @@ develop Rust packages.
 * [Cargo.toml vs Cargo.lock](cargo-toml-vs-cargo-lock.md)
 * [Tests](tests.md)
 * [Continuous Integration](continuous-integration.md)
-* [Publishing on crates.io](../reference/publishing.md)
 * [Cargo Home](cargo-home.md)
-* [Optimizing Build Performance](build-performance.md)
+* [Build Cache](build-cache.md)

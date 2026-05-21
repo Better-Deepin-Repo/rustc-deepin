@@ -1,5 +1,4 @@
-//@ proc-macro: issue-104884.rs
-//@ ignore-backends: gcc
+//@ aux-build:issue-104884.rs
 
 use std::collections::BinaryHeap;
 
@@ -12,11 +11,12 @@ struct PriorityQueueEntry<T> {
 }
 
 #[derive(PartialOrd, AddImpl)]
-//~^ ERROR: the trait bound `PriorityQueue<T>: Eq` is not satisfied
-//~| ERROR: can't compare `T` with `T`
-//~| ERROR: no method named `cmp` found for struct `BinaryHeap<PriorityQueueEntry<T>>`
-//~| ERROR: no field `height` on type `&PriorityQueue<T>`
+//~^ ERROR can't compare `PriorityQueue<T>` with `PriorityQueue<T>`
+//~| ERROR the trait bound `PriorityQueue<T>: Eq` is not satisfied
+//~| ERROR can't compare `T` with `T`
+//~| ERROR no method named `cmp` found for struct `BinaryHeap<PriorityQueueEntry<T>>`
+//~| ERROR no field `height` on type `&PriorityQueue<T>`
+
 struct PriorityQueue<T>(BinaryHeap<PriorityQueueEntry<T>>);
-//~^ ERROR: can't compare `PriorityQueue<T>` with `PriorityQueue<T>`
-//~| ERROR: can't compare `BinaryHeap<PriorityQueueEntry<T>>` with `_`
+//~^ ERROR can't compare `BinaryHeap<PriorityQueueEntry<T>>` with `_`
 fn main() {}

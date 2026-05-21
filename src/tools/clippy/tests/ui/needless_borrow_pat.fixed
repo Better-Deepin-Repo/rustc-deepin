@@ -1,3 +1,5 @@
+// FIXME: run-rustfix waiting on multi-span suggestions
+
 #![warn(clippy::needless_borrow)]
 #![allow(clippy::needless_borrowed_reference, clippy::explicit_auto_deref)]
 
@@ -55,22 +57,22 @@ fn main() {
     // Err, reference to a &String
     let _: &String = match Some(&x) {
         Some(x) => x,
-        //~^ needless_borrow
+        //~^ ERROR: this pattern creates a reference to a reference
+        //~| NOTE: `-D clippy::needless-borrow` implied by `-D warnings`
         None => return,
     };
 
     // Err, reference to a &String.
     let _: &String = match Some(&x) {
         Some(x) => x,
-        //~^ needless_borrow
+        //~^ ERROR: this pattern creates a reference to a reference
         None => return,
     };
 
     // Err, reference to a &String
     let _: &String = match Some(&x) {
         Some(x) => {
-            //~^ needless_borrow
-
+            //~^ ERROR: this pattern creates a reference to a reference
             f1(x);
             f1(x);
             x
@@ -81,21 +83,19 @@ fn main() {
     // Err, reference to a &String
     match Some(&x) {
         Some(x) => m1!(x),
-        //~^ needless_borrow
+        //~^ ERROR: this pattern creates a reference to a reference
         None => return,
     };
 
     // Err, reference to a &String
     let _ = |&x: &&String| {
-        //~^ needless_borrow
-
+        //~^ ERROR: this pattern creates a reference to a reference
         let _: &String = x;
     };
 
     // Err, reference to a &String
     let (y,) = (&x,);
-    //~^ needless_borrow
-
+    //~^ ERROR: this pattern creates a reference to a reference
     let _: &String = y;
 
     let y = &&x;
@@ -106,7 +106,7 @@ fn main() {
     // Err, reference to a &u32. Don't suggest adding a reference to the field access.
     let _: u32 = match Some(&x) {
         Some(x) => x.0,
-        //~^ needless_borrow
+        //~^ ERROR: this pattern creates a reference to a reference
         None => return,
     };
 
@@ -117,15 +117,14 @@ fn main() {
     // Err, reference to &u32.
     let _: &u32 = match E::A(&0) {
         E::A(x) | E::B(x) => x,
-        //~^ needless_borrow
+        //~^ ERROR: this pattern creates a reference to a reference
     };
 
     // Err, reference to &String.
     if_chain! {
         if true;
         if let Some(x) = Some(&String::new());
-        //~^ needless_borrow
-
+        //~^ ERROR: this pattern creates a reference to a reference
         then {
             f1(x);
         }
@@ -134,8 +133,7 @@ fn main() {
 
 // Err, reference to a &String
 fn f2<'a>(&x: &&'a String) -> &'a String {
-    //~^ needless_borrow
-
+    //~^ ERROR: this pattern creates a reference to a reference
     let _: &String = x;
     x
 }
@@ -143,8 +141,7 @@ fn f2<'a>(&x: &&'a String) -> &'a String {
 trait T1 {
     // Err, reference to a &String
     fn f(&x: &&String) {
-        //~^ needless_borrow
-
+        //~^ ERROR: this pattern creates a reference to a reference
         let _: &String = x;
     }
 }
@@ -153,8 +150,7 @@ struct S;
 impl T1 for S {
     // Err, reference to a &String
     fn f(&x: &&String) {
-        //~^ needless_borrow
-
+        //~^ ERROR: this pattern creates a reference to a reference
         let _: &String = x;
     }
 }

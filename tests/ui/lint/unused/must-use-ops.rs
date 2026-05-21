@@ -6,7 +6,7 @@
 #![feature(never_type)]
 
 fn deref_never(x: &!) {
-    // Don't lint for uninhabited types
+    // Don't lint for uninhabited typess
     *x;
 }
 

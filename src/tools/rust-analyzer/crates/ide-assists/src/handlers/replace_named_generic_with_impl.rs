@@ -1,17 +1,19 @@
 use hir::{FileRange, Semantics};
-use ide_db::text_edit::TextRange;
 use ide_db::{
-    EditionedFileId, RootDatabase,
     defs::Definition,
     search::{SearchScope, UsageSearchResult},
+    EditionedFileId, RootDatabase,
 };
 use syntax::{
-    AstNode,
-    ast::{self, HasGenericParams, HasName, HasTypeBounds, Name, NameLike, PathType, make},
-    match_ast,
+    ast::{
+        self, make::impl_trait_type, HasGenericParams, HasName, HasTypeBounds, Name, NameLike,
+        PathType,
+    },
+    match_ast, ted, AstNode,
 };
+use text_edit::TextRange;
 
-use crate::{AssistContext, AssistId, Assists};
+use crate::{AssistContext, AssistId, AssistKind, Assists};
 
 // Assist: replace_named_generic_with_impl
 //
@@ -67,35 +69,30 @@ pub(crate) fn replace_named_generic_with_impl(
     let target = type_param.syntax().text_range();
 
     acc.add(
-        AssistId::refactor_rewrite("replace_named_generic_with_impl"),
+        AssistId("replace_named_generic_with_impl", AssistKind::RefactorRewrite),
         "Replace named generic with impl trait",
         target,
         |edit| {
-            let mut editor = edit.make_editor(type_param.syntax());
+            let type_param = edit.make_mut(type_param);
+            let fn_ = edit.make_mut(fn_);
+
+            let path_types_to_replace = path_types_to_replace
+                .into_iter()
+                .map(|param| edit.make_mut(param))
+                .collect::<Vec<_>>();
 
             // remove trait from generic param list
             if let Some(generic_params) = fn_.generic_param_list() {
-                let params: Vec<ast::GenericParam> = generic_params
-                    .clone()
-                    .generic_params()
-                    .filter(|it| it.syntax() != type_param.syntax())
-                    .collect();
-                if params.is_empty() {
-                    editor.delete(generic_params.syntax());
-                } else {
-                    let new_generic_param_list = make::generic_param_list(params);
-                    editor.replace(
-                        generic_params.syntax(),
-                        new_generic_param_list.syntax().clone_for_update(),
-                    );
+                generic_params.remove_generic_param(ast::GenericParam::TypeParam(type_param));
+                if generic_params.generic_params().count() == 0 {
+                    ted::remove(generic_params.syntax());
                 }
             }
 
-            let new_bounds = make::impl_trait_type(type_bound_list);
+            let new_bounds = impl_trait_type(type_bound_list);
             for path_type in path_types_to_replace.iter().rev() {
-                editor.replace(path_type.syntax(), new_bounds.clone_for_update().syntax());
+                ted::replace(path_type.syntax(), new_bounds.clone_for_update().syntax());
             }
-            edit.add_file_edits(ctx.vfs_file_id(), editor);
         },
     )
 }

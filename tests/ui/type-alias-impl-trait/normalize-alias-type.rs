@@ -18,7 +18,7 @@ pub fn tr1() -> impl Tr {
 }
 
 struct Inner {
-    x: X,
+    x: helper::X,
 }
 impl Tr for Inner {
     fn get(&self) -> u32 {
@@ -26,9 +26,14 @@ impl Tr for Inner {
     }
 }
 
-pub type X = impl Tr;
+mod helper {
+    pub use super::*;
+    pub type X = impl Tr;
 
-#[define_opaque(X)]
-pub fn tr2() -> impl Tr {
-    Inner { x: tr1() }
+    pub fn tr2() -> impl Tr
+    where
+        X:,
+    {
+        Inner { x: tr1() }
+    }
 }

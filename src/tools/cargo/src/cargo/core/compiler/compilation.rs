@@ -2,19 +2,16 @@
 
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::{OsStr, OsString};
-use std::path::Path;
 use std::path::PathBuf;
 
 use cargo_platform::CfgExpr;
-use cargo_util::{ProcessBuilder, paths};
+use cargo_util::{paths, ProcessBuilder};
 
-use crate::core::Package;
-use crate::core::compiler::BuildContext;
-use crate::core::compiler::CompileTarget;
-use crate::core::compiler::RustdocFingerprint;
 use crate::core::compiler::apply_env_config;
-use crate::core::compiler::{CompileKind, Unit, UnitHash};
-use crate::util::{CargoResult, GlobalContext};
+use crate::core::compiler::BuildContext;
+use crate::core::compiler::{CompileKind, Metadata, Unit};
+use crate::core::Package;
+use crate::util::{context, CargoResult, GlobalContext};
 
 /// Represents the kind of process we are creating.
 #[derive(Debug)]
@@ -48,13 +45,14 @@ pub struct Doctest {
     /// The script metadata, if this unit's package has a build script.
     ///
     /// This is used for indexing [`Compilation::extra_env`].
-    pub script_metas: Option<Vec<UnitHash>>,
+    pub script_meta: Option<Metadata>,
 
     /// Environment variables to set in the rustdoc process.
     pub env: HashMap<String, OsString>,
 }
 
 /// Information about the output of a unit.
+#[derive(Ord, PartialOrd, Eq, PartialEq)]
 pub struct UnitOutput {
     /// The unit that generated this output.
     pub unit: Unit,
@@ -63,10 +61,7 @@ pub struct UnitOutput {
     /// The script metadata, if this unit's package has a build script.
     ///
     /// This is used for indexing [`Compilation::extra_env`].
-    pub script_metas: Option<Vec<UnitHash>>,
-
-    /// Environment variables to set in the unit's process.
-    pub env: HashMap<String, OsString>,
+    pub script_meta: Option<Metadata>,
 }
 
 /// A structure returning the result of a compilation.
@@ -86,7 +81,7 @@ pub struct Compilation<'gctx> {
     /// All directories for the output of native build commands.
     ///
     /// This is currently used to drive some entries which are added to the
-    /// `LD_LIBRARY_PATH` as appropriate.
+    /// LD_LIBRARY_PATH as appropriate.
     ///
     /// The order should be deterministic.
     pub native_dirs: BTreeSet<PathBuf>,
@@ -106,15 +101,10 @@ pub struct Compilation<'gctx> {
     ///
     /// The key is the build script metadata for uniquely identifying the
     /// `RunCustomBuild` unit that generated these env vars.
-    pub extra_env: HashMap<UnitHash, Vec<(String, String)>>,
+    pub extra_env: HashMap<Metadata, Vec<(String, String)>>,
 
     /// Libraries to test with rustdoc.
     pub to_doc_test: Vec<Doctest>,
-
-    /// Rustdoc fingerprint files to determine whether we need to run `rustdoc --merge=finalize`.
-    ///
-    /// See `-Zrustdoc-mergeable-info` for more.
-    pub rustdoc_fingerprints: Option<HashMap<CompileKind, RustdocFingerprint>>,
 
     /// The target host triple.
     pub host: String,
@@ -123,61 +113,32 @@ pub struct Compilation<'gctx> {
 
     /// Rustc process to be used by default
     rustc_process: ProcessBuilder,
-    /// Rustc process to be used for workspace crates instead of `rustc_process`
+    /// Rustc process to be used for workspace crates instead of rustc_process
     rustc_workspace_wrapper_process: ProcessBuilder,
-    /// Optional rustc process to be used for primary crates instead of either `rustc_process` or
-    /// `rustc_workspace_wrapper_process`
+    /// Optional rustc process to be used for primary crates instead of either rustc_process or
+    /// rustc_workspace_wrapper_process
     primary_rustc_process: Option<ProcessBuilder>,
 
-    /// The runner to use for each host or target process.
-    runners: HashMap<CompileKind, Option<(PathBuf, Vec<String>)>>,
+    target_runners: HashMap<CompileKind, Option<(PathBuf, Vec<String>)>>,
     /// The linker to use for each host or target.
-    linkers: HashMap<CompileKind, Option<PathBuf>>,
-
-    /// The total number of lint warnings emitted by the compilation.
-    pub lint_warning_count: usize,
+    target_linkers: HashMap<CompileKind, Option<PathBuf>>,
 }
 
 impl<'gctx> Compilation<'gctx> {
     pub fn new<'a>(bcx: &BuildContext<'a, 'gctx>) -> CargoResult<Compilation<'gctx>> {
-        let rustc_process = bcx.rustc().process();
-        let primary_rustc_process = bcx.build_config.primary_unit_rustc.clone();
-        let rustc_workspace_wrapper_process = bcx.rustc().workspace_process();
-        let host = bcx.host_triple().to_string();
+        let mut rustc = bcx.rustc().process();
+        let mut primary_rustc_process = bcx.build_config.primary_unit_rustc.clone();
+        let mut rustc_workspace_wrapper_process = bcx.rustc().workspace_process();
 
-        // When `target-applies-to-host=false`, and without `--target`,
-        // there will be only `CompileKind::Host` in requested_kinds.
-        // Need to insert target config explicitly for target-applies-to-host=false
-        // to find the correct configs.
-        let insert_explicit_host_runner = !bcx.gctx.target_applies_to_host()?
-            && bcx
-                .build_config
-                .requested_kinds
-                .iter()
-                .any(CompileKind::is_host);
-        let mut runners = bcx
-            .build_config
-            .requested_kinds
-            .iter()
-            .chain(Some(&CompileKind::Host))
-            .map(|kind| Ok((*kind, target_runner(bcx, *kind)?)))
-            .collect::<CargoResult<HashMap<_, _>>>()?;
-        if insert_explicit_host_runner {
-            let kind = explicit_host_kind(&host);
-            runners.insert(kind, target_runner(bcx, kind)?);
+        if bcx.gctx.extra_verbose() {
+            rustc.display_env_vars();
+            rustc_workspace_wrapper_process.display_env_vars();
+
+            if let Some(rustc) = primary_rustc_process.as_mut() {
+                rustc.display_env_vars();
+            }
         }
 
-        let mut linkers = bcx
-            .build_config
-            .requested_kinds
-            .iter()
-            .chain(Some(&CompileKind::Host))
-            .map(|kind| Ok((*kind, target_linker(bcx, *kind)?)))
-            .collect::<CargoResult<HashMap<_, _>>>()?;
-        if insert_explicit_host_runner {
-            let kind = explicit_host_kind(&host);
-            linkers.insert(kind, target_linker(bcx, kind)?);
-        }
         Ok(Compilation {
             native_dirs: BTreeSet::new(),
             root_output: HashMap::new(),
@@ -189,15 +150,25 @@ impl<'gctx> Compilation<'gctx> {
             root_crate_names: Vec::new(),
             extra_env: HashMap::new(),
             to_doc_test: Vec::new(),
-            rustdoc_fingerprints: None,
             gctx: bcx.gctx,
-            host,
-            rustc_process,
+            host: bcx.host_triple().to_string(),
+            rustc_process: rustc,
             rustc_workspace_wrapper_process,
             primary_rustc_process,
-            runners,
-            linkers,
-            lint_warning_count: 0,
+            target_runners: bcx
+                .build_config
+                .requested_kinds
+                .iter()
+                .chain(Some(&CompileKind::Host))
+                .map(|kind| Ok((*kind, target_runner(bcx, *kind)?)))
+                .collect::<CargoResult<HashMap<_, _>>>()?,
+            target_linkers: bcx
+                .build_config
+                .requested_kinds
+                .iter()
+                .chain(Some(&CompileKind::Host))
+                .map(|kind| Ok((*kind, target_linker(bcx, *kind)?)))
+                .collect::<CargoResult<HashMap<_, _>>>()?,
         })
     }
 
@@ -214,16 +185,14 @@ impl<'gctx> Compilation<'gctx> {
         is_primary: bool,
         is_workspace: bool,
     ) -> CargoResult<ProcessBuilder> {
-        let mut rustc = if is_primary && self.primary_rustc_process.is_some() {
+        let rustc = if is_primary && self.primary_rustc_process.is_some() {
             self.primary_rustc_process.clone().unwrap()
         } else if is_workspace {
             self.rustc_workspace_wrapper_process.clone()
         } else {
             self.rustc_process.clone()
         };
-        if self.gctx.extra_verbose() {
-            rustc.display_env_vars();
-        }
+
         let cmd = fill_rustc_tool_env(rustc, unit);
         self.fill_env(cmd, &unit.pkg, None, unit.kind, ToolKind::Rustc)
     }
@@ -232,14 +201,11 @@ impl<'gctx> Compilation<'gctx> {
     pub fn rustdoc_process(
         &self,
         unit: &Unit,
-        script_metas: Option<&Vec<UnitHash>>,
+        script_meta: Option<Metadata>,
     ) -> CargoResult<ProcessBuilder> {
-        let mut rustdoc = ProcessBuilder::new(&*self.gctx.rustdoc()?);
-        if self.gctx.extra_verbose() {
-            rustdoc.display_env_vars();
-        }
+        let rustdoc = ProcessBuilder::new(&*self.gctx.rustdoc()?);
         let cmd = fill_rustc_tool_env(rustdoc, unit);
-        let mut cmd = self.fill_env(cmd, &unit.pkg, script_metas, unit.kind, ToolKind::Rustdoc)?;
+        let mut cmd = self.fill_env(cmd, &unit.pkg, script_meta, unit.kind, ToolKind::Rustdoc)?;
         cmd.retry_with_argfile(true);
         unit.target.edition().cmd_edition_arg(&mut cmd);
 
@@ -261,65 +227,29 @@ impl<'gctx> Compilation<'gctx> {
         cmd: T,
         pkg: &Package,
     ) -> CargoResult<ProcessBuilder> {
-        // Only use host runner when -Zhost-config is enabled
-        // to ensure `target.<host>.runner` does not wrap build scripts.
-        let builder = if !self.gctx.target_applies_to_host()?
-            && let Some((runner, args)) = self
-                .runners
-                .get(&CompileKind::Host)
-                .and_then(|x| x.as_ref())
-        {
-            let mut builder = ProcessBuilder::new(runner);
-            builder.args(args);
-            builder.arg(cmd);
-            builder
-        } else {
-            ProcessBuilder::new(cmd)
-        };
-        self.fill_env(builder, pkg, None, CompileKind::Host, ToolKind::HostProcess)
+        self.fill_env(
+            ProcessBuilder::new(cmd),
+            pkg,
+            None,
+            CompileKind::Host,
+            ToolKind::HostProcess,
+        )
     }
 
     pub fn target_runner(&self, kind: CompileKind) -> Option<&(PathBuf, Vec<String>)> {
-        let target_applies_to_host = self.gctx.target_applies_to_host().unwrap_or(true);
-        let kind = if !target_applies_to_host && kind.is_host() {
-            // Use explicit host target triple when `target-applies-to-host=false`
-            // This ensures `host.runner` won't be accidentally applied to `cargo run` / `cargo test`.
-            explicit_host_kind(&self.host)
-        } else {
-            kind
-        };
-        self.runners.get(&kind).and_then(|x| x.as_ref())
-    }
-
-    /// Gets the `[host.linker]` for host build target (build scripts and proc macros).
-    pub fn host_linker(&self) -> Option<&Path> {
-        self.linkers
-            .get(&CompileKind::Host)
-            .and_then(|x| x.as_ref())
-            .map(|x| x.as_path())
+        self.target_runners.get(&kind).and_then(|x| x.as_ref())
     }
 
     /// Gets the user-specified linker for a particular host or target.
-    pub fn target_linker(&self, kind: CompileKind) -> Option<&Path> {
-        let target_applies_to_host = self.gctx.target_applies_to_host().unwrap_or(true);
-        let kind = if !target_applies_to_host && kind.is_host() {
-            // Use explicit host target triple when `target-applies-to-host=false`
-            // This ensures `host.linker` won't be accidentally applied to normal builds
-            explicit_host_kind(&self.host)
-        } else {
-            kind
-        };
-        self.linkers
-            .get(&kind)
-            .and_then(|x| x.as_ref())
-            .map(|x| x.as_path())
+    pub fn target_linker(&self, kind: CompileKind) -> Option<PathBuf> {
+        self.target_linkers.get(&kind).and_then(|x| x.clone())
     }
 
     /// Returns a [`ProcessBuilder`] appropriate for running a process for the
     /// target platform. This is typically used for `cargo run` and `cargo
     /// test`.
     ///
-    /// `script_metas` is the metadata for the `RunCustomBuild` unit that this
+    /// `script_meta` is the metadata for the `RunCustomBuild` unit that this
     /// unit used for its build script. Use `None` if the package did not have
     /// a build script.
     pub fn target_process<T: AsRef<OsStr>>(
@@ -327,7 +257,7 @@ impl<'gctx> Compilation<'gctx> {
         cmd: T,
         kind: CompileKind,
         pkg: &Package,
-        script_metas: Option<&Vec<UnitHash>>,
+        script_meta: Option<Metadata>,
     ) -> CargoResult<ProcessBuilder> {
         let builder = if let Some((runner, args)) = self.target_runner(kind) {
             let mut builder = ProcessBuilder::new(runner);
@@ -338,7 +268,7 @@ impl<'gctx> Compilation<'gctx> {
             ProcessBuilder::new(cmd)
         };
         let tool_kind = ToolKind::TargetProcess;
-        let mut builder = self.fill_env(builder, pkg, script_metas, kind, tool_kind)?;
+        let mut builder = self.fill_env(builder, pkg, script_meta, kind, tool_kind)?;
 
         if let Some(client) = self.gctx.jobserver_from_env() {
             builder.inherit_jobserver(client);
@@ -356,7 +286,7 @@ impl<'gctx> Compilation<'gctx> {
         &self,
         mut cmd: ProcessBuilder,
         pkg: &Package,
-        script_metas: Option<&Vec<UnitHash>>,
+        script_meta: Option<Metadata>,
         kind: CompileKind,
         tool_kind: ToolKind,
     ) -> CargoResult<ProcessBuilder> {
@@ -376,33 +306,24 @@ impl<'gctx> Compilation<'gctx> {
             }
             search_path.push(self.deps_output[&CompileKind::Host].clone());
         } else {
-            if let Some(path) = self.root_output.get(&kind) {
-                search_path.extend(super::filter_dynamic_search_path(
-                    self.native_dirs.iter(),
-                    path,
-                ));
-                search_path.push(path.clone());
-            }
+            search_path.extend(super::filter_dynamic_search_path(
+                self.native_dirs.iter(),
+                &self.root_output[&kind],
+            ));
             search_path.push(self.deps_output[&kind].clone());
+            search_path.push(self.root_output[&kind].clone());
             // For build-std, we don't want to accidentally pull in any shared
             // libs from the sysroot that ships with rustc. This may not be
             // required (at least I cannot craft a situation where it
             // matters), but is here to be safe.
-            if self.gctx.cli_unstable().build_std.is_none() ||
-                // Proc macros dynamically link to std, so set it anyway.
-                pkg.proc_macro()
-            {
+            if self.gctx.cli_unstable().build_std.is_none() {
                 search_path.push(self.sysroot_target_libdir[&kind].clone());
             }
         }
 
         let dylib_path = paths::dylib_path();
         let dylib_path_is_empty = dylib_path.is_empty();
-        if dylib_path.starts_with(&search_path) {
-            search_path = dylib_path;
-        } else {
-            search_path.extend(dylib_path.into_iter());
-        }
+        search_path.extend(dylib_path.into_iter());
         if cfg!(target_os = "macos") && dylib_path_is_empty {
             // These are the defaults when DYLD_FALLBACK_LIBRARY_PATH isn't
             // set or set to an empty string. Since Cargo is explicitly setting
@@ -416,15 +337,15 @@ impl<'gctx> Compilation<'gctx> {
         let search_path = paths::join_paths(&search_path, paths::dylib_path_envvar())?;
 
         cmd.env(paths::dylib_path_envvar(), &search_path);
-        if let Some(meta_vec) = script_metas {
-            for meta in meta_vec {
-                if let Some(env) = self.extra_env.get(meta) {
-                    for (k, v) in env {
-                        cmd.env(k, v);
-                    }
+        if let Some(meta) = script_meta {
+            if let Some(env) = self.extra_env.get(&meta) {
+                for (k, v) in env {
+                    cmd.env(k, v);
                 }
             }
         }
+
+        let metadata = pkg.manifest().metadata();
 
         let cargo_exe = self.gctx.cargo_exe()?;
         cmd.env(crate::CARGO_ENV, cargo_exe);
@@ -433,20 +354,44 @@ impl<'gctx> Compilation<'gctx> {
         // crate properties which might require rebuild upon change
         // consider adding the corresponding properties to the hash
         // in BuildContext::target_metadata()
+        let rust_version = pkg.rust_version().as_ref().map(ToString::to_string);
         cmd.env("CARGO_MANIFEST_DIR", pkg.root())
-            .env("CARGO_MANIFEST_PATH", pkg.manifest_path())
             .env("CARGO_PKG_VERSION_MAJOR", &pkg.version().major.to_string())
             .env("CARGO_PKG_VERSION_MINOR", &pkg.version().minor.to_string())
             .env("CARGO_PKG_VERSION_PATCH", &pkg.version().patch.to_string())
             .env("CARGO_PKG_VERSION_PRE", pkg.version().pre.as_str())
             .env("CARGO_PKG_VERSION", &pkg.version().to_string())
-            .env("CARGO_PKG_NAME", &*pkg.name());
-
-        for (key, value) in pkg.manifest().metadata().env_vars() {
-            cmd.env(key, value.as_ref());
-        }
-
-        cmd.cwd(pkg.root());
+            .env("CARGO_PKG_NAME", &*pkg.name())
+            .env(
+                "CARGO_PKG_DESCRIPTION",
+                metadata.description.as_ref().unwrap_or(&String::new()),
+            )
+            .env(
+                "CARGO_PKG_HOMEPAGE",
+                metadata.homepage.as_ref().unwrap_or(&String::new()),
+            )
+            .env(
+                "CARGO_PKG_REPOSITORY",
+                metadata.repository.as_ref().unwrap_or(&String::new()),
+            )
+            .env(
+                "CARGO_PKG_LICENSE",
+                metadata.license.as_ref().unwrap_or(&String::new()),
+            )
+            .env(
+                "CARGO_PKG_LICENSE_FILE",
+                metadata.license_file.as_ref().unwrap_or(&String::new()),
+            )
+            .env("CARGO_PKG_AUTHORS", &pkg.authors().join(":"))
+            .env(
+                "CARGO_PKG_RUST_VERSION",
+                &rust_version.as_deref().unwrap_or_default(),
+            )
+            .env(
+                "CARGO_PKG_README",
+                metadata.readme.as_ref().unwrap_or(&String::new()),
+            )
+            .cwd(pkg.root());
 
         apply_env_config(self.gctx, &mut cmd)?;
 
@@ -454,7 +399,7 @@ impl<'gctx> Compilation<'gctx> {
     }
 }
 
-/// Prepares a `rustc_tool` process with additional environment variables
+/// Prepares a rustc_tool process with additional environment variables
 /// that are only relevant in a context that has a unit
 fn fill_rustc_tool_env(mut cmd: ProcessBuilder, unit: &Unit) -> ProcessBuilder {
     if unit.target.is_executable() {
@@ -502,9 +447,14 @@ fn target_runner(
     bcx: &BuildContext<'_, '_>,
     kind: CompileKind,
 ) -> CargoResult<Option<(PathBuf, Vec<String>)>> {
-    if let Some(runner) = bcx.target_data.target_config(kind).runner.as_ref() {
-        let path = runner.val.path.clone().resolve_program(bcx.gctx);
-        return Ok(Some((path, runner.val.args.clone())));
+    let target = bcx.target_data.short_name(&kind);
+
+    // try target.{}.runner
+    let key = format!("target.{}.runner", target);
+
+    if let Some(v) = bcx.gctx.get::<Option<context::PathAndArgs>>(&key)? {
+        let path = v.path.resolve_program(bcx.gctx);
+        return Ok(Some((path, v.args)));
     }
 
     // try target.'cfg(...)'.runner
@@ -569,9 +519,4 @@ fn target_linker(bcx: &BuildContext<'_, '_>, kind: CompileKind) -> CargoResult<O
         );
     }
     Ok(matching_linker.map(|(_k, linker)| linker.val.clone().resolve_program(bcx.gctx)))
-}
-
-fn explicit_host_kind(host: &str) -> CompileKind {
-    let target = CompileTarget::new(host, false).expect("must be a host tuple");
-    CompileKind::Target(target)
 }

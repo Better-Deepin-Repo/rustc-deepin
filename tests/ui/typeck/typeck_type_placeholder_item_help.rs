@@ -11,7 +11,8 @@ const TEST3: _ = Some(42);
 //~^ ERROR the placeholder `_` is not allowed within types on item signatures for constants
 
 const TEST4: fn() -> _ = 42;
-//~^ ERROR the placeholder `_` is not allowed within types on item signatures for constants
+//~^ ERROR the placeholder `_` is not allowed within types on item signatures for functions
+//~| ERROR the placeholder `_` is not allowed within types on item signatures for constant items
 
 trait Test5 {
     const TEST5: _ = 42;

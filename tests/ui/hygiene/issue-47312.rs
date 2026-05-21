@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ check-pass
 
 #![feature(decl_macro)]

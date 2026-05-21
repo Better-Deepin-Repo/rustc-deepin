@@ -1,6 +1,5 @@
 //@ run-rustfix
 
-#![allow(dead_code)]
 struct S<T>(T);
 struct S2;
 

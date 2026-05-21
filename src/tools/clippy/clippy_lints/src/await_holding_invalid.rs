@@ -1,15 +1,13 @@
 use clippy_config::Conf;
-use clippy_config::types::{DisallowedPathWithoutReplacement, create_disallowed_map};
 use clippy_utils::diagnostics::span_lint_and_then;
-use clippy_utils::paths::{self, PathNS};
-use clippy_utils::sym;
+use clippy_utils::{create_disallowed_map, match_def_path, paths};
 use rustc_hir as hir;
 use rustc_hir::def_id::{DefId, DefIdMap};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::mir::CoroutineLayout;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::impl_lint_pass;
-use rustc_span::Span;
+use rustc_span::{sym, Span};
 
 declare_clippy_lint! {
     /// ### What it does
@@ -17,7 +15,7 @@ declare_clippy_lint! {
     /// `MutexGuard`.
     ///
     /// ### Why is this bad?
-    /// The Mutex types found in [`std::sync`](https://doc.rust-lang.org/stable/std/sync/) and
+    /// The Mutex types found in [`std::sync`][https://doc.rust-lang.org/stable/std/sync/] and
     /// [`parking_lot`](https://docs.rs/parking_lot/latest/parking_lot/) are
     /// not designed to operate in an async context across await points.
     ///
@@ -175,20 +173,14 @@ declare_clippy_lint! {
 impl_lint_pass!(AwaitHolding => [AWAIT_HOLDING_LOCK, AWAIT_HOLDING_REFCELL_REF, AWAIT_HOLDING_INVALID_TYPE]);
 
 pub struct AwaitHolding {
-    def_ids: DefIdMap<(&'static str, &'static DisallowedPathWithoutReplacement)>,
+    def_ids: DefIdMap<(&'static str, Option<&'static str>)>,
 }
 
 impl AwaitHolding {
     pub(crate) fn new(tcx: TyCtxt<'_>, conf: &'static Conf) -> Self {
-        let (def_ids, _) = create_disallowed_map(
-            tcx,
-            &conf.await_holding_invalid_types,
-            PathNS::Type,
-            crate::disallowed_types::def_kind_predicate,
-            "type",
-            false,
-        );
-        Self { def_ids }
+        Self {
+            def_ids: create_disallowed_map(tcx, &conf.await_holding_invalid_types),
+        }
     }
 }
 
@@ -199,9 +191,10 @@ impl<'tcx> LateLintPass<'tcx> for AwaitHolding {
             def_id,
             ..
         }) = expr.kind
-            && let Some(coroutine_layout) = cx.tcx.mir_coroutine_witnesses(*def_id)
         {
-            self.check_interior_types(cx, coroutine_layout);
+            if let Some(coroutine_layout) = cx.tcx.mir_coroutine_witnesses(*def_id) {
+                self.check_interior_types(cx, coroutine_layout);
+            }
         }
     }
 }
@@ -253,34 +246,35 @@ impl AwaitHolding {
                             );
                         },
                     );
-                } else if let Some(&(path, disallowed_path)) = self.def_ids.get(&adt.did()) {
-                    emit_invalid_type(cx, ty_cause.source_info.span, path, disallowed_path);
+                } else if let Some(&(path, reason)) = self.def_ids.get(&adt.did()) {
+                    emit_invalid_type(cx, ty_cause.source_info.span, path, reason);
                 }
             }
         }
     }
 }
 
-fn emit_invalid_type(
-    cx: &LateContext<'_>,
-    span: Span,
-    path: &'static str,
-    disallowed_path: &'static DisallowedPathWithoutReplacement,
-) {
+fn emit_invalid_type(cx: &LateContext<'_>, span: Span, path: &'static str, reason: Option<&'static str>) {
     span_lint_and_then(
         cx,
         AWAIT_HOLDING_INVALID_TYPE,
         span,
         format!("holding a disallowed type across an await point `{path}`"),
-        disallowed_path.diag_amendment(span),
+        |diag| {
+            if let Some(reason) = reason {
+                diag.note(reason);
+            }
+        },
     );
 }
 
 fn is_mutex_guard(cx: &LateContext<'_>, def_id: DefId) -> bool {
-    match cx.tcx.get_diagnostic_name(def_id) {
-        Some(name) => matches!(name, sym::MutexGuard | sym::RwLockReadGuard | sym::RwLockWriteGuard),
-        None => paths::PARKING_LOT_GUARDS.iter().any(|guard| guard.matches(cx, def_id)),
-    }
+    cx.tcx.is_diagnostic_item(sym::MutexGuard, def_id)
+        || cx.tcx.is_diagnostic_item(sym::RwLockReadGuard, def_id)
+        || cx.tcx.is_diagnostic_item(sym::RwLockWriteGuard, def_id)
+        || match_def_path(cx, def_id, &paths::PARKING_LOT_MUTEX_GUARD)
+        || match_def_path(cx, def_id, &paths::PARKING_LOT_RWLOCK_READ_GUARD)
+        || match_def_path(cx, def_id, &paths::PARKING_LOT_RWLOCK_WRITE_GUARD)
 }
 
 fn is_refcell_ref(cx: &LateContext<'_>, def_id: DefId) -> bool {

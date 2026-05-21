@@ -1,5 +1,6 @@
 //@ run-pass
-//@ needs-subprocess
+//@ ignore-emscripten no processes
+//@ ignore-sgx no processes
 //@ ignore-fuchsia Child I/O swaps not privileged
 
 // Previously libstd would set stdio descriptors of a child process

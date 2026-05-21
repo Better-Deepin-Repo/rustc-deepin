@@ -7,12 +7,5 @@ fn main() {
     if bar == 2 { //~ ERROR cannot find value
         println!("yes");
     }
-    {
-        let baz = 3;
-        struct S;
-    }
-    if baz == 3 { //~ ERROR cannot find value
-        println!("yes");
-    }
     test_func(1); //~ ERROR cannot find function
 }

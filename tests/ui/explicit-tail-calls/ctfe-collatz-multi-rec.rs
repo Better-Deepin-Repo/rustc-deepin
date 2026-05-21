@@ -1,5 +1,5 @@
 //@ run-pass
-#![expect(incomplete_features)]
+#![allow(incomplete_features)]
 #![feature(explicit_tail_calls)]
 
 /// A very unnecessarily complicated "implementation" of the Collatz conjecture.

@@ -31,11 +31,11 @@ impl fmt::Display for List {
         write!(f, "[")?;
 
         // Iterate over `v` in `vec` while enumerating the iteration
-        // index in `index`.
-        for (index, v) in vec.iter().enumerate() {
+        // count in `count`.
+        for (count, v) in vec.iter().enumerate() {
             // For every element except the first, add a comma.
             // Use the ? operator to return on errors.
-            if index != 0 { write!(f, ", ")?; }
+            if count != 0 { write!(f, ", ")?; }
             write!(f, "{}", v)?;
         }
 

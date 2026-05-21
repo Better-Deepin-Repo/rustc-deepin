@@ -1,20 +1,18 @@
 # armv4t-none-eabi / thumbv4t-none-eabi
 
-* **Tier:  3**
-* **Library Support:** core and alloc (bare-metal, `#![no_std]`)
+Tier 3
 
 These two targets are part of the [`arm-none-eabi`](arm-none-eabi.md) target
 group, and all the information there applies.
 
 Both of these targets can be used on the Game Boy Advance (GBA), among other
 things. On the GBA, one should usually use the `thumb` target to get the best
-overall performance.  Note that this architecture only supports the old
-Thumb-1 instruction set, not the later Thumb-2 instruction set.
+overall performance.
 
 ## Target Maintainers
 
-[@Lokathor](https://github.com/lokathor)
-[@corwinkuiper](https://github.com/corwinkuiper)
+* [@Lokathor](https://github.com/lokathor)
+* [@corwinkuiper](https://github.com/corwinkuiper)
 
 ## Testing
 

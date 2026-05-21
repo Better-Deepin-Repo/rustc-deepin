@@ -161,39 +161,37 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-#[stable(feature = "c_str_module", since = "1.88.0")]
+#[unstable(feature = "c_str_module", issue = "112134")]
 pub mod c_str;
 
 #[stable(feature = "core_c_void", since = "1.30.0")]
 pub use core::ffi::c_void;
+#[stable(feature = "core_ffi_c", since = "1.64.0")]
+pub use core::ffi::{
+    c_char, c_double, c_float, c_int, c_long, c_longlong, c_schar, c_short, c_uchar, c_uint,
+    c_ulong, c_ulonglong, c_ushort,
+};
 #[unstable(
     feature = "c_variadic",
     reason = "the `c_variadic` feature has not been properly tested on \
               all supported platforms",
     issue = "44930"
 )]
-pub use core::ffi::{VaArgSafe, VaList};
-#[stable(feature = "core_ffi_c", since = "1.64.0")]
-pub use core::ffi::{
-    c_char, c_double, c_float, c_int, c_long, c_longlong, c_schar, c_short, c_uchar, c_uint,
-    c_ulong, c_ulonglong, c_ushort,
-};
-#[unstable(feature = "c_size_t", issue = "88345")]
-pub use core::ffi::{c_ptrdiff_t, c_size_t, c_ssize_t};
+pub use core::ffi::{VaList, VaListImpl};
 
-#[doc(inline)]
+#[doc(no_inline)]
 #[stable(feature = "cstr_from_bytes_until_nul", since = "1.69.0")]
 pub use self::c_str::FromBytesUntilNulError;
-#[doc(inline)]
+#[doc(no_inline)]
 #[stable(feature = "cstr_from_bytes", since = "1.10.0")]
 pub use self::c_str::FromBytesWithNulError;
-#[doc(inline)]
+#[doc(no_inline)]
 #[stable(feature = "cstring_from_vec_with_nul", since = "1.58.0")]
 pub use self::c_str::FromVecWithNulError;
-#[doc(inline)]
+#[doc(no_inline)]
 #[stable(feature = "cstring_into", since = "1.7.0")]
 pub use self::c_str::IntoStringError;
-#[doc(inline)]
+#[doc(no_inline)]
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::c_str::NulError;
 #[doc(inline)]
@@ -203,5 +201,5 @@ pub use self::c_str::{CStr, CString};
 #[doc(inline)]
 pub use self::os_str::{OsStr, OsString};
 
-#[stable(feature = "os_str_display", since = "1.87.0")]
+#[unstable(feature = "os_str_display", issue = "120048")]
 pub mod os_str;

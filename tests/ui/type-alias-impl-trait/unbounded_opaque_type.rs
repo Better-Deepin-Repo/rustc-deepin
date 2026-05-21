@@ -2,9 +2,12 @@
 
 #![feature(type_alias_impl_trait)]
 
-pub type Opaque<T> = impl Sized;
-#[define_opaque(Opaque)]
-fn defining<T>() -> Opaque<T> {}
+mod opaque {
+    pub type Opaque<T> = impl Sized;
+    fn defining<T>() -> Opaque<T> {}
+}
+
+use opaque::Opaque;
 
 struct Ss<'a, T>(&'a Opaque<T>);
 

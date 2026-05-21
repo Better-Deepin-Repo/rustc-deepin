@@ -1,8 +1,8 @@
 //@ compile-flags: -Z unstable-options
-//@ ignore-stage1 (this can be removed when nightly goes to 1.96)
+
 #![feature(rustc_attrs)]
 #![feature(rustc_private)]
-#![deny(rustc::disallowed_pass_by_ref)]
+#![deny(rustc::pass_by_value)]
 #![allow(unused)]
 
 extern crate rustc_middle;

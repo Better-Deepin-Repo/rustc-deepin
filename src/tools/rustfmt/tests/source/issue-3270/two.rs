@@ -1,4 +1,4 @@
-// rustfmt-style_edition: 2024
+// rustfmt-version: Two
 
 pub fn main() {
  /*   let s = String::from(

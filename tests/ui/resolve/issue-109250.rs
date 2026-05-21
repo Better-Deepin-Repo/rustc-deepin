@@ -1,3 +1,3 @@
 fn main() {       //~ HELP consider importing
-    HashMap::new; //~ ERROR cannot find type `HashMap`
+    HashMap::new; //~ ERROR failed to resolve: use of undeclared type `HashMap`
 }

@@ -1,6 +1,5 @@
 import gdb
 
-
 class PersonPrinter:
     "Print a Person"
 
@@ -12,7 +11,6 @@ class PersonPrinter:
     def to_string(self):
         return "{} is {} years old.".format(self.name, self.age)
 
-
 def lookup(val):
     lookup_tag = val.type.tag
     if lookup_tag is None:
@@ -21,6 +19,5 @@ def lookup(val):
         return PersonPrinter(val)
 
     return None
-
 
 gdb.current_objfile().pretty_printers.append(lookup)

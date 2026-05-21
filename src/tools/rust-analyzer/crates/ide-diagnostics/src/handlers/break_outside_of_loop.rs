@@ -19,7 +19,6 @@ pub(crate) fn break_outside_of_loop(
         message,
         d.expr.map(|it| it.into()),
     )
-    .stable()
 }
 
 #[cfg(test)]

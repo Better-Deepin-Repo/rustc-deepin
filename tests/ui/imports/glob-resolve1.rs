@@ -1,4 +1,3 @@
-//@ edition:2015
 // Make sure that globs only bring in public things.
 
 use bar::*;

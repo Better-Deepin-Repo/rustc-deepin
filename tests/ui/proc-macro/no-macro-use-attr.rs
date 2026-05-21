@@ -1,9 +1,10 @@
-//@ check-pass
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 
+#![feature(rustc_attrs)]
 #![warn(unused_extern_crates)]
 
 extern crate test_macros;
 //~^ WARN unused extern crate
 
-fn main() {}
+#[rustc_error]
+fn main() {} //~ ERROR fatal error triggered by #[rustc_error]

@@ -1,45 +1,60 @@
-use clippy_utils::diagnostics::span_lint_hir_and_then;
-use clippy_utils::res::MaybeQPath;
+use clippy_utils::diagnostics::span_lint_and_sugg;
+use clippy_utils::path_res;
+use clippy_utils::source::snippet;
 use rustc_errors::Applicability;
 use rustc_hir::def::{DefKind, Res};
-use rustc_hir::{Block, Body, Expr, ExprKind, LangItem, MatchSource};
+use rustc_hir::{Block, Body, Expr, ExprKind, LangItem, MatchSource, QPath};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::declare_lint_pass;
 
 declare_clippy_lint! {
     /// ### What it does
-    /// Suggests replacing `Ok(x?)` or `Some(x?)` with `x` in return positions where the `?` operator
-    /// is not needed to convert the type of `x`.
+    /// Suggests alternatives for useless applications of `?` in terminating expressions
     ///
     /// ### Why is this bad?
     /// There's no reason to use `?` to short-circuit when execution of the body will end there anyway.
     ///
     /// ### Example
     /// ```no_run
-    /// # use std::num::ParseIntError;
-    /// fn f(s: &str) -> Option<usize> {
-    ///     Some(s.find('x')?)
+    /// struct TO {
+    ///     magic: Option<usize>,
     /// }
     ///
-    /// fn g(s: &str) -> Result<usize, ParseIntError> {
-    ///     Ok(s.parse()?)
+    /// fn f(to: TO) -> Option<usize> {
+    ///     Some(to.magic?)
     /// }
+    ///
+    /// struct TR {
+    ///     magic: Result<usize, bool>,
+    /// }
+    ///
+    /// fn g(tr: Result<TR, bool>) -> Result<usize, bool> {
+    ///     tr.and_then(|t| Ok(t.magic?))
+    /// }
+    ///
     /// ```
     /// Use instead:
     /// ```no_run
-    /// # use std::num::ParseIntError;
-    /// fn f(s: &str) -> Option<usize> {
-    ///     s.find('x')
+    /// struct TO {
+    ///     magic: Option<usize>,
     /// }
     ///
-    /// fn g(s: &str) -> Result<usize, ParseIntError> {
-    ///     s.parse()
+    /// fn f(to: TO) -> Option<usize> {
+    ///    to.magic
+    /// }
+    ///
+    /// struct TR {
+    ///     magic: Result<usize, bool>,
+    /// }
+    ///
+    /// fn g(tr: Result<TR, bool>) -> Result<usize, bool> {
+    ///     tr.and_then(|t| t.magic)
     /// }
     /// ```
     #[clippy::version = "1.51.0"]
     pub NEEDLESS_QUESTION_MARK,
     complexity,
-    "using `Ok(x?)` or `Some(x?)` where `x` would be equivalent"
+    "Suggest `value.inner_option` instead of `Some(value.inner_option?)`. The same goes for `Result<T, E>`."
 }
 
 declare_lint_pass!(NeedlessQuestionMark => [NEEDLESS_QUESTION_MARK]);
@@ -94,43 +109,31 @@ impl LateLintPass<'_> for NeedlessQuestionMark {
 
 fn check(cx: &LateContext<'_>, expr: &Expr<'_>) {
     if let ExprKind::Call(path, [arg]) = expr.kind
-        && let Res::Def(DefKind::Ctor(..), ctor_id) = path.res(cx)
+        && let Res::Def(DefKind::Ctor(..), ctor_id) = path_res(cx, path)
         && let Some(variant_id) = cx.tcx.opt_parent(ctor_id)
-        && let variant = if cx.tcx.lang_items().option_some_variant() == Some(variant_id) {
-            "Some"
+        && let sugg_remove = if cx.tcx.lang_items().option_some_variant() == Some(variant_id) {
+            "Some()"
         } else if cx.tcx.lang_items().result_ok_variant() == Some(variant_id) {
-            "Ok"
+            "Ok()"
         } else {
             return;
         }
         && let ExprKind::Match(inner_expr_with_q, _, MatchSource::TryDesugar(_)) = &arg.kind
         && let ExprKind::Call(called, [inner_expr]) = &inner_expr_with_q.kind
-        && let ExprKind::Path(qpath) = called.kind
-        && cx.tcx.qpath_is_lang_item(qpath, LangItem::TryTraitBranch)
+        && let ExprKind::Path(QPath::LangItem(LangItem::TryTraitBranch, ..)) = &called.kind
         && expr.span.eq_ctxt(inner_expr.span)
         && let expr_ty = cx.typeck_results().expr_ty(expr)
         && let inner_ty = cx.typeck_results().expr_ty(inner_expr)
         && expr_ty == inner_ty
     {
-        span_lint_hir_and_then(
+        span_lint_and_sugg(
             cx,
             NEEDLESS_QUESTION_MARK,
-            expr.hir_id,
             expr.span,
-            format!("enclosing `{variant}` and `?` operator are unneeded"),
-            |diag| {
-                diag.multipart_suggestion(
-                    format!("remove the enclosing `{variant}` and `?` operator"),
-                    vec![
-                        (expr.span.until(inner_expr.span), String::new()),
-                        (
-                            inner_expr.span.shrink_to_hi().to(expr.span.shrink_to_hi()),
-                            String::new(),
-                        ),
-                    ],
-                    Applicability::MachineApplicable,
-                );
-            },
+            "question mark operator is useless here",
+            format!("try removing question mark and `{sugg_remove}`"),
+            format!("{}", snippet(cx, inner_expr.span, r#""...""#)),
+            Applicability::MachineApplicable,
         );
     }
 }

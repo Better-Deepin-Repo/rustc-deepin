@@ -5,7 +5,7 @@
 macro_rules! pass_nonterminal {
     ($n:expr) => {
         #[repr(align($n))]
-        //~^ ERROR expected a literal (`1u8`, `1.0f32`, `"string"`, etc.) here, found `expr` metavariable
+        //~^ ERROR expected unsuffixed literal, found `n!()`
         struct S;
     };
 }
@@ -15,5 +15,6 @@ macro_rules! n {
 }
 
 pass_nonterminal!(n!());
+//~^ ERROR incorrect `repr(align)` attribute format: `align` expects a literal integer as argument [E0693]
 
 fn main() {}

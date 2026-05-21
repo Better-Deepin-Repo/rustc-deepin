@@ -11,14 +11,13 @@ SOURCE_FILE
       TYPE_BOUND_LIST
         TYPE_BOUND
           FOR_TYPE
-            FOR_BINDER
-              FOR_KW "for"
-              GENERIC_PARAM_LIST
-                L_ANGLE "<"
-                LIFETIME_PARAM
-                  LIFETIME
-                    LIFETIME_IDENT "'a"
-                R_ANGLE ">"
+            FOR_KW "for"
+            GENERIC_PARAM_LIST
+              L_ANGLE "<"
+              LIFETIME_PARAM
+                LIFETIME
+                  LIFETIME_IDENT "'a"
+              R_ANGLE ">"
             WHITESPACE " "
             PATH_TYPE
               PATH

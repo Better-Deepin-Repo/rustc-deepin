@@ -3,7 +3,7 @@ use std::fmt::Debug;
 use rustc_hir::def_id::DefId;
 use rustc_middle::ty::{self, Ty, Upcast};
 
-use super::{ObligationCause, PredicateObligation, PredicateObligations};
+use super::{ObligationCause, PredicateObligation};
 use crate::infer::InferCtxt;
 use crate::traits::Obligation;
 
@@ -19,9 +19,8 @@ pub enum ScrubbedTraitError<'tcx> {
     TrueError,
     /// An ambiguity. This goal may hold if further inference is done.
     Ambiguity,
-    /// An old-solver-style cycle error, which will fatal. This is not
-    /// returned by the new solver.
-    Cycle(PredicateObligations<'tcx>),
+    /// An old-solver-style cycle error, which will fatal.
+    Cycle(Vec<PredicateObligation<'tcx>>),
 }
 
 impl<'tcx> ScrubbedTraitError<'tcx> {
@@ -66,37 +65,21 @@ pub trait TraitEngine<'tcx, E: 'tcx>: 'tcx {
     fn register_predicate_obligations(
         &mut self,
         infcx: &InferCtxt<'tcx>,
-        obligations: PredicateObligations<'tcx>,
+        obligations: Vec<PredicateObligation<'tcx>>,
     ) {
         for obligation in obligations {
             self.register_predicate_obligation(infcx, obligation);
         }
     }
 
-    /// Go over the list of pending obligations and try to evaluate them.
-    ///
-    /// For each result:
-    /// Ok: remove the obligation from the list
-    /// Ambiguous: leave the obligation in the list to be evaluated later
-    /// Err: remove the obligation from the list and return an error
-    ///
-    /// Returns a list of errors from obligations that evaluated to Err.
     #[must_use]
-    fn try_evaluate_obligations(&mut self, infcx: &InferCtxt<'tcx>) -> Vec<E>;
+    fn select_where_possible(&mut self, infcx: &InferCtxt<'tcx>) -> Vec<E>;
 
     fn collect_remaining_errors(&mut self, infcx: &InferCtxt<'tcx>) -> Vec<E>;
 
-    /// Evaluate all pending obligations, return error if they can't be evaluated.
-    ///
-    /// For each result:
-    /// Ok: remove the obligation from the list
-    /// Ambiguous: remove the obligation from the list and return an error
-    /// Err: remove the obligation from the list and return an error
-    ///
-    /// Returns a list of errors from obligations that evaluated to Ambiguous or Err.
     #[must_use]
-    fn evaluate_obligations_error_on_ambiguity(&mut self, infcx: &InferCtxt<'tcx>) -> Vec<E> {
-        let errors = self.try_evaluate_obligations(infcx);
+    fn select_all_or_error(&mut self, infcx: &InferCtxt<'tcx>) -> Vec<E> {
+        let errors = self.select_where_possible(infcx);
         if !errors.is_empty() {
             return errors;
         }
@@ -104,17 +87,15 @@ pub trait TraitEngine<'tcx, E: 'tcx>: 'tcx {
         self.collect_remaining_errors(infcx)
     }
 
-    fn has_pending_obligations(&self) -> bool;
-
-    fn pending_obligations(&self) -> PredicateObligations<'tcx>;
+    fn pending_obligations(&self) -> Vec<PredicateObligation<'tcx>>;
 
     /// Among all pending obligations, collect those are stalled on a inference variable which has
-    /// changed since the last call to `try_evaluate_obligations`. Those obligations are marked as
+    /// changed since the last call to `select_where_possible`. Those obligations are marked as
     /// successful and returned.
-    fn drain_stalled_obligations_for_coroutines(
+    fn drain_unstalled_obligations(
         &mut self,
         infcx: &InferCtxt<'tcx>,
-    ) -> PredicateObligations<'tcx>;
+    ) -> Vec<PredicateObligation<'tcx>>;
 }
 
 pub trait FromSolverError<'tcx, E>: Debug + 'tcx {

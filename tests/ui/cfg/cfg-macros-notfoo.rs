@@ -3,7 +3,7 @@
 // check that cfg correctly chooses between the macro impls (see also
 // cfg-macros-foo.rs)
 
-#[cfg(false)]
+#[cfg(FALSE)]
 #[macro_use]
 mod foo {
     macro_rules! bar {

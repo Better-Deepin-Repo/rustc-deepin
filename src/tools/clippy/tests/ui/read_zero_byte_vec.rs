@@ -8,7 +8,6 @@ use std::fs::File;
 use std::io;
 use std::io::prelude::*;
 //@no-rustfix
-//@require-annotations-for-level: WARN
 extern crate futures;
 use futures::io::{AsyncRead, AsyncReadExt};
 use tokio::io::{AsyncRead as TokioAsyncRead, AsyncReadExt as _, AsyncWrite as TokioAsyncWrite, AsyncWriteExt as _};
@@ -120,30 +119,3 @@ fn allow_works<F: std::io::Read>(mut f: F) {
 }
 
 fn main() {}
-
-fn issue15575() -> usize {
-    use std::io::Read;
-    use std::net::TcpListener;
-
-    let listener = TcpListener::bind("127.0.0.1:9010").unwrap();
-    let mut stream_and_addr = listener.accept().unwrap();
-    let mut buf = Vec::with_capacity(32);
-    let num_bytes_received = stream_and_addr.0.read(&mut buf).unwrap();
-    //~^ read_zero_byte_vec
-
-    let cap = 1000;
-    let mut buf = Vec::with_capacity(cap);
-    let num_bytes_received = stream_and_addr.0.read(&mut buf).unwrap();
-    //~^ read_zero_byte_vec
-
-    let cap = 1000;
-    let mut buf = Vec::with_capacity(cap);
-    let num_bytes_received = { stream_and_addr.0.read(&mut buf) }.unwrap();
-    //~^ read_zero_byte_vec
-
-    use std::fs::File;
-    let mut f = File::open("foo.txt").unwrap();
-    let mut data = Vec::with_capacity(100);
-    f.read(&mut data).unwrap()
-    //~^ read_zero_byte_vec
-}

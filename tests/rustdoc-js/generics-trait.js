@@ -5,45 +5,16 @@ const EXPECTED = [
         'query': 'Result<SomeTrait>',
         'correction': null,
         'in_args': [
-            {
-                'path': 'generics_trait',
-                'name': 'beta',
-                'displayType': '`Result`<`T`, ()> -> ()',
-                'displayMappedNames': '',
-                'displayWhereClause': 'T: `SomeTrait`',
-            },
+            { 'path': 'generics_trait', 'name': 'beta' },
         ],
         'returned': [
-            {
-                'path': 'generics_trait',
-                'name': 'bet',
-                'displayType': ' -> `Result`<`T`, ()>',
-                'displayMappedNames': '',
-                'displayWhereClause': 'T: `SomeTrait`',
-            },
+            { 'path': 'generics_trait', 'name': 'bet' },
         ],
     },
     {
         'query': 'Resulx<SomeTrait>',
-        'correction': 'Result',
-        'in_args': [
-            {
-                'path': 'generics_trait',
-                'name': 'beta',
-                'displayType': '`Result`<`T`, ()> -> ()',
-                'displayMappedNames': '',
-                'displayWhereClause': 'T: `SomeTrait`',
-            },
-        ],
-        'returned': [
-            {
-                'path': 'generics_trait',
-                'name': 'bet',
-                'displayType': ' -> `Result`<`T`, ()>',
-                'displayMappedNames': '',
-                'displayWhereClause': 'T: `SomeTrait`',
-            },
-        ],
+        'in_args': [],
+        'returned': [],
     },
     {
         'query': 'Result<SomeTraiz>',
@@ -54,65 +25,20 @@ const EXPECTED = [
         'query': 'OtherThingxxxxxxxx',
         'correction': null,
         'in_args': [
-            {
-                'path': 'generics_trait',
-                'name': 'alpha',
-                'displayType': 'Result<`T`, ()> -> ()',
-                'displayMappedNames': '',
-                'displayWhereClause': 'T: `OtherThingxxxxxxxx`',
-            },
+            { 'path': 'generics_trait', 'name': 'alpha' },
         ],
         'returned': [
-            {
-                'path': 'generics_trait',
-                'name': 'alef',
-                'displayType': ' -> Result<`T`, ()>',
-                'displayMappedNames': '',
-                'displayWhereClause': 'T: `OtherThingxxxxxxxx`',
-            },
+            { 'path': 'generics_trait', 'name': 'alef' },
         ],
     },
     {
         'query': 'OtherThingxxxxxxxy',
         'correction': 'OtherThingxxxxxxxx',
         'in_args': [
-            {
-                'path': 'generics_trait',
-                'name': 'alpha',
-                'displayType': 'Result<`T`, ()> -> ()',
-                'displayMappedNames': '',
-                'displayWhereClause': 'T: `OtherThingxxxxxxxx`',
-            },
+            { 'path': 'generics_trait', 'name': 'alpha' },
         ],
         'returned': [
-            {
-                'path': 'generics_trait',
-                'name': 'alef',
-                'displayType': ' -> Result<`T`, ()>',
-                'displayMappedNames': '',
-                'displayWhereClause': 'T: `OtherThingxxxxxxxx`',
-            },
+            { 'path': 'generics_trait', 'name': 'alef' },
         ],
-    },
-];
-
-const PARSED = [
-    {
-        'query': 'Result<SomeTraiz>',
-        'userQuery': 'Result<SomeTraiz>',
-        'foundElems': 1,
-        'returned': [],
-        'error': null,
-        'proposeCorrectionFrom': 'SomeTraiz',
-        'proposeCorrectionTo': 'SomeTrait',
-    },
-    {
-        'query': 'Result<NoSuchTrait>',
-        'userQuery': 'Result<NoSuchTrait>',
-        'foundElems': 1,
-        'returned': [],
-        'error': null,
-        'proposeCorrectionFrom': 'NoSuchTrait',
-        'proposeCorrectionTo': null,
     },
 ];

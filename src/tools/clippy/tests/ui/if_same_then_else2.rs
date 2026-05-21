@@ -5,7 +5,7 @@
     clippy::equatable_if_let,
     clippy::collapsible_if,
     clippy::ifs_same_cond,
-    clippy::needless_ifs,
+    clippy::needless_if,
     clippy::needless_return,
     clippy::single_element_loop,
     clippy::branches_sharing_code
@@ -31,21 +31,21 @@ fn if_same_then_else2() -> Result<&'static str, ()> {
             }
         }
     }
-    //~^^^^^^^^^^^^^^^^^^^ if_same_then_else
+    //~^^^^^^^^^^^^^^^^^^^ ERROR: this `if` has identical blocks
 
     if true {
         if let Some(a) = Some(42) {}
     } else {
         if let Some(a) = Some(42) {}
     }
-    //~^^^^^ if_same_then_else
+    //~^^^^^ ERROR: this `if` has identical blocks
 
     if true {
         if let (1, .., 3) = (1, 2, 3) {}
     } else {
         if let (1, .., 3) = (1, 2, 3) {}
     }
-    //~^^^^^ if_same_then_else
+    //~^^^^^ ERROR: this `if` has identical blocks
 
     if true {
         if let (1, .., 3) = (1, 2, 3) {}
@@ -91,14 +91,14 @@ fn if_same_then_else2() -> Result<&'static str, ()> {
 
     // Same NaNs
     let _ = if true { f32::NAN } else { f32::NAN };
-    //~^ if_same_then_else
+    //~^ ERROR: this `if` has identical blocks
 
     if true {
         Ok("foo")?;
     } else {
         Ok("foo")?;
     }
-    //~^^^^^ if_same_then_else
+    //~^^^^^ ERROR: this `if` has identical blocks
 
     if true {
         let foo = "";
@@ -124,7 +124,7 @@ fn if_same_then_else2() -> Result<&'static str, ()> {
         let foo = "";
         return Ok(&foo[0..]);
     }
-    //~^^^^^^^ if_same_then_else
+    //~^^^^^^^ ERROR: this `if` has identical blocks
 
     // False positive `if_same_then_else`: `let (x, y)` vs. `let (y, x)`; see issue #3559.
     if true {

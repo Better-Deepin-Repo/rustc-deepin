@@ -6,7 +6,7 @@
 //! each submodule starts with `use super::*` import and exports
 //! "public" productions via `pub(super)`.
 //!
-//! See docs for [`Parser`] to learn about API,
+//! See docs for [`Parser`](super::parser::Parser) to learn about API,
 //! available to the grammar, and see docs for [`Event`](super::event::Event)
 //! to learn how this actually manages to produce parse trees.
 //!
@@ -39,9 +39,9 @@ mod patterns;
 mod types;
 
 use crate::{
-    SyntaxKind::{self, *},
-    T, TokenSet,
     parser::{CompletedMarker, Marker, Parser},
+    SyntaxKind::{self, *},
+    TokenSet, T,
 };
 
 pub(crate) mod entry {
@@ -67,7 +67,7 @@ pub(crate) mod entry {
         }
 
         pub(crate) fn pat_top(p: &mut Parser<'_>) {
-            patterns::pattern(p);
+            patterns::pattern_top(p);
         }
 
         pub(crate) fn ty(p: &mut Parser<'_>) {
@@ -80,8 +80,7 @@ pub(crate) mod entry {
             paths::type_path(p);
         }
         pub(crate) fn item(p: &mut Parser<'_>) {
-            // We can set `is_in_extern=true`, because it only allows `safe fn`, and there is no ambiguity here.
-            items::item_or_macro(p, true, true);
+            items::item_or_macro(p, true);
         }
         // Parse a meta item , which excluded [], e.g : #[ MetaItem ]
         pub(crate) fn meta_item(p: &mut Parser<'_>) {
@@ -94,17 +93,7 @@ pub(crate) mod entry {
 
         pub(crate) fn source_file(p: &mut Parser<'_>) {
             let m = p.start();
-            // test frontmatter
-            // #!/usr/bin/env cargo
-            //
-            // ---
-            // [dependencies]
-            // clap = { version = "4.2", features = ["derive"] }
-            // ---
-            //
-            // fn main() {}
             p.eat(SHEBANG);
-            p.eat(FRONTMATTER);
             items::mod_contents(p, false);
             m.complete(p, SOURCE_FILE);
         }
@@ -127,7 +116,7 @@ pub(crate) mod entry {
 
         pub(crate) fn pattern(p: &mut Parser<'_>) {
             let m = p.start();
-            patterns::pattern(p);
+            patterns::pattern_top(p);
             if p.at(EOF) {
                 m.abandon(p);
                 return;
@@ -252,7 +241,7 @@ fn opt_visibility(p: &mut Parser<'_>, in_tuple_field: bool) -> bool {
                 // struct MyStruct(pub ());
                 if !(in_tuple_field && matches!(p.nth(1), T![ident] | T![')'])) {
                     p.bump(T!['(']);
-                    paths::vis_path(p);
+                    paths::use_path(p);
                     p.expect(T![')']);
                 }
             }
@@ -262,7 +251,7 @@ fn opt_visibility(p: &mut Parser<'_>, in_tuple_field: bool) -> bool {
             T![in] => {
                 p.bump(T!['(']);
                 p.bump(T![in]);
-                paths::vis_path(p);
+                paths::use_path(p);
                 p.expect(T![')']);
             }
             _ => {}
@@ -317,49 +306,13 @@ fn name(p: &mut Parser<'_>) {
     name_r(p, TokenSet::EMPTY);
 }
 
-fn name_ref_or_self(p: &mut Parser<'_>) {
-    if matches!(p.current(), T![ident] | T![self]) {
+fn name_ref(p: &mut Parser<'_>) {
+    if p.at(IDENT) {
         let m = p.start();
-        p.bump_any();
+        p.bump(IDENT);
         m.complete(p, NAME_REF);
     } else {
-        p.err_and_bump("expected identifier or `self`");
-    }
-}
-
-fn name_ref_or_upper_self(p: &mut Parser<'_>) {
-    if matches!(p.current(), T![ident] | T![Self]) {
-        let m = p.start();
-        p.bump_any();
-        m.complete(p, NAME_REF);
-    } else {
-        p.err_and_bump("expected identifier or `Self`");
-    }
-}
-
-const PATH_NAME_REF_KINDS: TokenSet =
-    TokenSet::new(&[IDENT, T![self], T![super], T![crate], T![Self]]);
-
-fn name_ref_mod_path(p: &mut Parser<'_>) {
-    if p.at_ts(PATH_NAME_REF_KINDS) {
-        let m = p.start();
-        p.bump_any();
-        m.complete(p, NAME_REF);
-    } else {
-        p.err_and_bump("expected identifier, `self`, `super`, `crate`, or `Self`");
-    }
-}
-
-const PATH_NAME_REF_OR_INDEX_KINDS: TokenSet =
-    PATH_NAME_REF_KINDS.union(TokenSet::new(&[INT_NUMBER]));
-
-fn name_ref_mod_path_or_index(p: &mut Parser<'_>) {
-    if p.at_ts(PATH_NAME_REF_OR_INDEX_KINDS) {
-        let m = p.start();
-        p.bump_any();
-        m.complete(p, NAME_REF);
-    } else {
-        p.err_and_bump("expected integer, identifier, `self`, `super`, `crate`, or `Self`");
+        p.err_and_bump("expected identifier");
     }
 }
 

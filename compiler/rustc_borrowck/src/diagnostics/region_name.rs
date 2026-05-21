@@ -1,19 +1,23 @@
+#![allow(rustc::diagnostic_outside_of_impl)]
+#![allow(rustc::untranslatable_diagnostic)]
+
 use std::fmt::{self, Display};
 use std::iter;
 
 use rustc_data_structures::fx::IndexEntry;
-use rustc_errors::{Diag, EmissionGuarantee};
+use rustc_errors::Diag;
 use rustc_hir as hir;
 use rustc_hir::def::{DefKind, Res};
 use rustc_middle::ty::print::RegionHighlightMode;
 use rustc_middle::ty::{self, GenericArgKind, GenericArgsRef, RegionVid, Ty};
 use rustc_middle::{bug, span_bug};
-use rustc_span::{DUMMY_SP, Span, Symbol, kw, sym};
+use rustc_span::symbol::{kw, sym, Symbol};
+use rustc_span::{Span, DUMMY_SP};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
 use tracing::{debug, instrument};
 
-use crate::MirBorrowckCtxt;
 use crate::universal_regions::DefiningTy;
+use crate::MirBorrowckCtxt;
 
 /// A name for a particular region used in emitting diagnostics. This name could be a generated
 /// name like `'1`, a name used by the user like `'a`, or a name like `'static`.
@@ -26,8 +30,8 @@ pub(crate) struct RegionName {
 }
 
 /// Denotes the source of a region that is named by a `RegionName`. For example, a free region that
-/// was named by the user would get `NamedLateParamRegion` and `'static` lifetime would get
-/// `Static`. This helps to print the right kinds of diagnostics.
+/// was named by the user would get `NamedLateParamRegion` and `'static` lifetime would get `Static`.
+/// This helps to print the right kinds of diagnostics.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum RegionNameSource {
     /// A bound (not free) region that was instantiated at the def site (not an HRTB).
@@ -105,7 +109,7 @@ impl RegionName {
         }
     }
 
-    pub(crate) fn highlight_region_name<G: EmissionGuarantee>(&self, diag: &mut Diag<'_, G>) {
+    pub(crate) fn highlight_region_name(&self, diag: &mut Diag<'_>) {
         match &self.source {
             RegionNameSource::NamedLateParamRegion(span)
             | RegionNameSource::NamedEarlyParamRegion(span) => {
@@ -191,12 +195,12 @@ impl Display for RegionName {
 }
 
 impl rustc_errors::IntoDiagArg for RegionName {
-    fn into_diag_arg(self, path: &mut Option<std::path::PathBuf>) -> rustc_errors::DiagArgValue {
-        self.to_string().into_diag_arg(path)
+    fn into_diag_arg(self) -> rustc_errors::DiagArgValue {
+        self.to_string().into_diag_arg()
     }
 }
 
-impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
+impl<'tcx> MirBorrowckCtxt<'_, '_, '_, 'tcx> {
     pub(crate) fn mir_def_id(&self) -> hir::def_id::LocalDefId {
         self.body.source.def_id().expect_local()
     }
@@ -285,10 +289,10 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
         let tcx = self.infcx.tcx;
 
         debug!("give_region_a_name: error_region = {:?}", error_region);
-        match error_region.kind() {
-            ty::ReEarlyParam(ebr) => ebr.is_named().then(|| {
+        match *error_region {
+            ty::ReEarlyParam(ebr) => ebr.has_name().then(|| {
                 let def_id = tcx.generics_of(self.mir_def_id()).region_param(ebr, tcx).def_id;
-                let span = tcx.hir_span_if_local(def_id).unwrap_or(DUMMY_SP);
+                let span = tcx.hir().span_if_local(def_id).unwrap_or(DUMMY_SP);
                 RegionName { name: ebr.name, source: RegionNameSource::NamedEarlyParamRegion(span) }
             }),
 
@@ -296,12 +300,17 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                 Some(RegionName { name: kw::StaticLifetime, source: RegionNameSource::Static })
             }
 
-            ty::ReLateParam(late_param) => match late_param.kind {
-                ty::LateParamRegionKind::Named(region_def_id) => {
+            ty::ReLateParam(late_param) => match late_param.bound_region {
+                ty::BoundRegionKind::BrNamed(region_def_id, name) => {
                     // Get the span to point to, even if we don't use the name.
-                    let span = tcx.hir_span_if_local(region_def_id).unwrap_or(DUMMY_SP);
+                    let span = tcx.hir().span_if_local(region_def_id).unwrap_or(DUMMY_SP);
+                    debug!(
+                        "bound region named: {:?}, is_named: {:?}",
+                        name,
+                        late_param.bound_region.is_named()
+                    );
 
-                    if let Some(name) = late_param.kind.get_name(tcx) {
+                    if late_param.bound_region.is_named() {
                         // A named region that is actually named.
                         Some(RegionName {
                             name,
@@ -323,7 +332,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                     }
                 }
 
-                ty::LateParamRegionKind::ClosureEnv => {
+                ty::BoundRegionKind::BrEnv => {
                     let def_ty = self.regioncx.universal_regions().defining_ty;
 
                     let closure_kind = match def_ty {
@@ -335,7 +344,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                         }
                     };
                     let hir::ExprKind::Closure(&hir::Closure { fn_decl_span, .. }) =
-                        tcx.hir_expect_expr(self.mir_hir_id()).kind
+                        tcx.hir().expect_expr(self.mir_hir_id()).kind
                     else {
                         bug!("Closure is not defined by a closure expr");
                     };
@@ -360,8 +369,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                     })
                 }
 
-                ty::LateParamRegionKind::Anon(_) => None,
-                ty::LateParamRegionKind::NamedAnon(_, _) => bug!("only used for pretty printing"),
+                ty::BoundRegionKind::BrAnon => None,
             },
 
             ty::ReBound(..)
@@ -392,7 +400,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
             [implicit_inputs + argument_index];
         let (_, span) = self.regioncx.get_argument_name_and_span_for_region(
             self.body,
-            self.local_names(),
+            &self.local_names,
             argument_index,
         );
 
@@ -417,7 +425,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
         &self,
         argument_index: usize,
     ) -> Option<&hir::Ty<'tcx>> {
-        let fn_decl = self.infcx.tcx.hir_fn_decl_by_hir_id(self.mir_hir_id())?;
+        let fn_decl = self.infcx.tcx.hir().fn_decl_by_hir_id(self.mir_hir_id())?;
         let argument_hir_ty: &hir::Ty<'_> = fn_decl.inputs.get(argument_index)?;
         match argument_hir_ty.kind {
             // This indicates a variable with no type annotation, like
@@ -425,7 +433,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
             // must highlight the variable.
             // NOTE(eddyb) this is handled in/by the sole caller
             // (`give_name_if_anonymous_region_appears_in_arguments`).
-            hir::TyKind::Infer(()) => None,
+            hir::TyKind::Infer => None,
 
             _ => Some(argument_hir_ty),
         }
@@ -451,8 +459,11 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
     ) -> RegionNameHighlight {
         let mut highlight = RegionHighlightMode::default();
         highlight.highlighting_region_vid(self.infcx.tcx, needle_fr, counter);
-        let type_name =
-            self.infcx.err_ctxt().extract_inference_diagnostics_data(ty.into(), highlight).name;
+        let type_name = self
+            .infcx
+            .err_ctxt()
+            .extract_inference_diagnostics_data(ty.into(), Some(highlight))
+            .name;
 
         debug!(
             "highlight_if_we_cannot_match_hir_ty: type_name={:?} needle_fr={:?}",
@@ -525,15 +536,15 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                         // match_adt_and_segment in this case.
                         Res::Def(DefKind::TyAlias, _) => (),
                         _ => {
-                            if let Some(last_segment) = path.segments.last()
-                                && let Some(highlight) = self.match_adt_and_segment(
+                            if let Some(last_segment) = path.segments.last() {
+                                if let Some(highlight) = self.match_adt_and_segment(
                                     args,
                                     needle_fr,
                                     last_segment,
                                     search_stack,
-                                )
-                            {
-                                return Some(highlight);
+                                ) {
+                                    return Some(highlight);
+                                }
                             }
                         }
                     }
@@ -599,8 +610,8 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
         hir_args: &'hir hir::GenericArgs<'hir>,
         search_stack: &mut Vec<(Ty<'tcx>, &'hir hir::Ty<'hir>)>,
     ) -> Option<&'hir hir::Lifetime> {
-        for (arg, hir_arg) in iter::zip(args, hir_args.args) {
-            match (arg.kind(), hir_arg) {
+        for (kind, hir_arg) in iter::zip(args, hir_args.args) {
+            match (kind.unpack(), hir_arg) {
                 (GenericArgKind::Lifetime(r), hir::GenericArg::Lifetime(lt)) => {
                     if r.as_var() == needle_fr {
                         return Some(lt);
@@ -608,7 +619,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                 }
 
                 (GenericArgKind::Type(ty), hir::GenericArg::Type(hir_ty)) => {
-                    search_stack.push((ty, hir_ty.as_unambig_ty()));
+                    search_stack.push((ty, hir_ty));
                 }
 
                 (GenericArgKind::Const(_ct), hir::GenericArg::Const(_hir_ct)) => {
@@ -624,7 +635,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                 ) => {
                     self.dcx().span_delayed_bug(
                         hir_arg.span(),
-                        format!("unmatched arg and hir arg: found {arg:?} vs {hir_arg:?}"),
+                        format!("unmatched arg and hir arg: found {kind:?} vs {hir_arg:?}"),
                     );
                 }
             }
@@ -664,6 +675,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
     #[instrument(level = "trace", skip(self))]
     fn give_name_if_anonymous_region_appears_in_output(&self, fr: RegionVid) -> Option<RegionName> {
         let tcx = self.infcx.tcx;
+        let hir = tcx.hir();
 
         let return_ty = self.regioncx.universal_regions().unnormalized_output_ty;
         debug!("give_name_if_anonymous_region_appears_in_output: return_ty = {:?}", return_ty);
@@ -674,7 +686,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
         let mir_hir_id = self.mir_hir_id();
 
         let (return_span, mir_description, hir_ty) = match tcx.hir_node(mir_hir_id) {
-            hir::Node::Expr(&hir::Expr {
+            hir::Node::Expr(hir::Expr {
                 kind: hir::ExprKind::Closure(&hir::Closure { fn_decl, kind, fn_decl_span, .. }),
                 ..
             }) => {
@@ -703,7 +715,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                         hir::CoroutineSource::Fn,
                     )) => {
                         let parent_item =
-                            tcx.hir_node_by_def_id(tcx.hir_get_parent_item(mir_hir_id).def_id);
+                            tcx.hir_node_by_def_id(hir.get_parent_item(mir_hir_id).def_id);
                         let output = &parent_item
                             .fn_decl()
                             .expect("coroutine lowered from async fn should be in fn")
@@ -733,7 +745,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                         hir::CoroutineSource::Fn,
                     )) => {
                         let parent_item =
-                            tcx.hir_node_by_def_id(tcx.hir_get_parent_item(mir_hir_id).def_id);
+                            tcx.hir_node_by_def_id(hir.get_parent_item(mir_hir_id).def_id);
                         let output = &parent_item
                             .fn_decl()
                             .expect("coroutine lowered from gen fn should be in fn")
@@ -760,7 +772,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                         hir::CoroutineSource::Fn,
                     )) => {
                         let parent_item =
-                            tcx.hir_node_by_def_id(tcx.hir_get_parent_item(mir_hir_id).def_id);
+                            tcx.hir_node_by_def_id(hir.get_parent_item(mir_hir_id).def_id);
                         let output = &parent_item
                             .fn_decl()
                             .expect("coroutine lowered from async gen fn should be in fn")
@@ -813,19 +825,25 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
     /// async fn foo() -> i32 { 2 }
     /// ```
     ///
-    /// this function, given the lowered return type of `foo`, an [`OpaqueDef`] that implements
-    /// `Future<Output=i32>`, returns the `i32`.
+    /// this function, given the lowered return type of `foo`, an [`OpaqueDef`] that implements `Future<Output=i32>`,
+    /// returns the `i32`.
     ///
     /// [`OpaqueDef`]: hir::TyKind::OpaqueDef
     fn get_future_inner_return_ty(&self, hir_ty: &'tcx hir::Ty<'tcx>) -> &'tcx hir::Ty<'tcx> {
-        let hir::TyKind::OpaqueDef(opaque_ty) = hir_ty.kind else {
+        let hir = self.infcx.tcx.hir();
+
+        let hir::TyKind::OpaqueDef(id, _, _) = hir_ty.kind else {
             span_bug!(
                 hir_ty.span,
                 "lowered return type of async fn is not OpaqueDef: {:?}",
                 hir_ty
             );
         };
-        if let hir::OpaqueTy { bounds: [hir::GenericBound::Trait(trait_ref)], .. } = opaque_ty
+        let opaque_ty = hir.item(id);
+        if let hir::ItemKind::OpaqueTy(hir::OpaqueTy {
+            bounds: [hir::GenericBound::Trait(trait_ref, _)],
+            ..
+        }) = opaque_ty.kind
             && let Some(segment) = trait_ref.trait_ref.path.segments.last()
             && let Some(args) = segment.args
             && let [constraint] = args.constraints
@@ -862,11 +880,11 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
         let type_name = self
             .infcx
             .err_ctxt()
-            .extract_inference_diagnostics_data(yield_ty.into(), highlight)
+            .extract_inference_diagnostics_data(yield_ty.into(), Some(highlight))
             .name;
 
         let yield_span = match tcx.hir_node(self.mir_hir_id()) {
-            hir::Node::Expr(&hir::Expr {
+            hir::Node::Expr(hir::Expr {
                 kind: hir::ExprKind::Closure(&hir::Closure { fn_decl_span, .. }),
                 ..
             }) => tcx.sess.source_map().end_point(fn_decl_span),
@@ -889,10 +907,10 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
         &self,
         fr: RegionVid,
     ) -> Option<RegionName> {
-        let ty::ReEarlyParam(region) = self.to_error_region(fr)?.kind() else {
+        let ty::ReEarlyParam(region) = *self.to_error_region(fr)? else {
             return None;
         };
-        if region.is_named() {
+        if region.has_name() {
             return None;
         };
 
@@ -905,7 +923,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
 
         let found = tcx
             .any_free_region_meets(&tcx.type_of(region_parent).instantiate_identity(), |r| {
-                r.kind() == ty::ReEarlyParam(region)
+                *r == ty::ReEarlyParam(region)
             });
 
         Some(RegionName {
@@ -924,10 +942,10 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
         &self,
         fr: RegionVid,
     ) -> Option<RegionName> {
-        let ty::ReEarlyParam(region) = self.to_error_region(fr)?.kind() else {
+        let ty::ReEarlyParam(region) = *self.to_error_region(fr)? else {
             return None;
         };
-        if region.is_named() {
+        if region.has_name() {
             return None;
         };
 
@@ -966,7 +984,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
         {
             let (arg_name, arg_span) = self.regioncx.get_argument_name_and_span_for_region(
                 self.body,
-                self.local_names(),
+                &self.local_names,
                 arg_index,
             );
             let region_name = self.synthesize_region_name();
@@ -990,7 +1008,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
     ) -> bool {
         let tcx = self.infcx.tcx;
         ty.walk().any(|arg| {
-            if let ty::GenericArgKind::Type(ty) = arg.kind()
+            if let ty::GenericArgKind::Type(ty) = arg.unpack()
                 && let ty::Param(_) = ty.kind()
             {
                 clauses.iter().any(|pred| {
@@ -1000,7 +1018,7 @@ impl<'tcx> MirBorrowckCtxt<'_, '_, 'tcx> {
                             if data.projection_term.self_ty() == ty => {}
                         _ => return false,
                     }
-                    tcx.any_free_region_meets(pred, |r| r.kind() == ty::ReEarlyParam(region))
+                    tcx.any_free_region_meets(pred, |r| *r == ty::ReEarlyParam(region))
                 })
             } else {
                 false

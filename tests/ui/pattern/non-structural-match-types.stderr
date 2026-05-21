@@ -1,28 +1,14 @@
-error: constant of non-structural type `Option<fn() {uwu}>` in a pattern
-  --> $DIR/non-structural-match-types.rs:10:9
+error: `{closure@$DIR/non-structural-match-types.rs:9:17: 9:19}` cannot be used in patterns
+  --> $DIR/non-structural-match-types.rs:9:9
    |
-LL | impl<T> AnyOption<T> {
-   | --------------------
-LL |     const NONE: Option<T> = None;
-   |     --------------------- constant defined here
-...
-LL |         AnyOption::<_>::NONE => {}
-   |         ^^^^^^^^^^^^^^^^^^^^ constant of non-structural type
-   |
-   = note: see https://doc.rust-lang.org/stable/std/marker/trait.StructuralPartialEq.html for details
+LL |         const { || {} } => {}
+   |         ^^^^^^^^^^^^^^^
 
-error: constant of non-structural type `Option<{closure@$DIR/non-structural-match-types.rs:15:16: 15:18}>` in a pattern
-  --> $DIR/non-structural-match-types.rs:16:9
+error: `{async block@$DIR/non-structural-match-types.rs:12:17: 12:22}` cannot be used in patterns
+  --> $DIR/non-structural-match-types.rs:12:9
    |
-LL | impl<T> AnyOption<T> {
-   | --------------------
-LL |     const NONE: Option<T> = None;
-   |     --------------------- constant defined here
-...
-LL |         AnyOption::<_>::NONE => {}
-   |         ^^^^^^^^^^^^^^^^^^^^ constant of non-structural type
-   |
-   = note: see https://doc.rust-lang.org/stable/std/marker/trait.StructuralPartialEq.html for details
+LL |         const { async {} } => {}
+   |         ^^^^^^^^^^^^^^^^^^
 
 error: aborting due to 2 previous errors
 

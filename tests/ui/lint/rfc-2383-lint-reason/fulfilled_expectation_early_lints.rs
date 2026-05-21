@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 //@ check-pass
 
 fn expect_early_pass_lints() {

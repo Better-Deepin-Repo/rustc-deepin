@@ -1,10 +1,10 @@
 use clippy_utils::diagnostics::span_lint_and_sugg;
-use clippy_utils::res::{MaybeDef, MaybeTypeckRes};
 use clippy_utils::source::snippet_with_applicability;
-use clippy_utils::sym;
+use clippy_utils::{is_trait_method, match_def_path, paths};
 use rustc_errors::Applicability;
 use rustc_hir::{Expr, ExprKind};
 use rustc_lint::LateContext;
+use rustc_span::sym;
 
 use super::WAKER_CLONE_WAKE;
 
@@ -12,9 +12,9 @@ pub(super) fn check<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>, recv: &'
     let ty = cx.typeck_results().expr_ty(recv);
 
     if let Some(did) = ty.ty_adt_def()
-        && cx.tcx.is_diagnostic_item(sym::Waker, did.did())
+        && match_def_path(cx, did.did(), &paths::WAKER)
         && let ExprKind::MethodCall(_, waker_ref, &[], _) = recv.kind
-        && cx.ty_based_def(recv).opt_parent(cx).is_diag_item(cx, sym::Clone)
+        && is_trait_method(cx, recv, sym::Clone)
     {
         let mut applicability = Applicability::MachineApplicable;
         let snippet = snippet_with_applicability(cx, waker_ref.span.source_callsite(), "..", &mut applicability);

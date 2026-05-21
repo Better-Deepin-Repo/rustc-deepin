@@ -4,8 +4,8 @@ mod foo {
 }
 
 mod bar {
-    use crate::foo::x;
-    use crate::foo::x as z;
+    use foo::x;
+    use foo::x as z;
     pub fn thing() { x(10); z(10); }
 }
 

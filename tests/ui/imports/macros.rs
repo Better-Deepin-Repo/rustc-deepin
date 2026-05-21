@@ -8,13 +8,13 @@ mod foo {
 
 mod m1 {
     m!(use two_macros::*;);
-    use crate::foo::m; // This shadows the glob import
+    use foo::m; // This shadows the glob import
 }
 
 mod m2 {
     use two_macros::*;
-    m! { //~ ERROR `m` is ambiguous
-        use crate::foo::m;
+    m! { //~ ERROR ambiguous
+        use foo::m;
     }
 }
 

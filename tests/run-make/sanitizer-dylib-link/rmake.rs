@@ -7,8 +7,6 @@
 //@ needs-sanitizer-support
 //@ needs-sanitizer-address
 
-//@ compile-flags: -C unsafe-allow-abi-mismatch=sanitizer
-
 use run_make_support::{run_fail, rustc};
 
 fn main() {

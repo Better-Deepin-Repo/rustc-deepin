@@ -1,4 +1,5 @@
 //@ check-pass
+//@ compile-flags: -Zunstable-options
 //@ edition:2024
 
 fn main() {

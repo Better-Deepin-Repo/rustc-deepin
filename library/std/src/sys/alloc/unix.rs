@@ -1,4 +1,4 @@
-use super::{MIN_ALIGN, realloc_fallback};
+use super::{realloc_fallback, MIN_ALIGN};
 use crate::alloc::{GlobalAlloc, Layout, System};
 use crate::ptr;
 
@@ -58,18 +58,19 @@ unsafe impl GlobalAlloc for System {
     }
 }
 
-cfg_select! {
+cfg_if::cfg_if! {
     // We use posix_memalign wherever possible, but some targets have very incomplete POSIX coverage
     // so we need a fallback for those.
-    any(target_os = "horizon", target_os = "vita") => {
+    if #[cfg(any(
+        target_os = "horizon",
+        target_os = "vita",
+    ))] {
         #[inline]
         unsafe fn aligned_malloc(layout: &Layout) -> *mut u8 {
             unsafe { libc::memalign(layout.align(), layout.size()) as *mut u8 }
         }
-    }
-    _ => {
+    } else {
         #[inline]
-        #[cfg_attr(target_os = "vxworks", allow(unused_unsafe))]
         unsafe fn aligned_malloc(layout: &Layout) -> *mut u8 {
             let mut out = ptr::null_mut();
             // We prefer posix_memalign over aligned_alloc since it is more widely available, and
@@ -79,7 +80,7 @@ cfg_select! {
             // while others require the alignment to be at least the pointer size (Illumos, macOS).
             // posix_memalign only has one, clear requirement: that the alignment be a multiple of
             // `sizeof(void*)`. Since these are all powers of 2, we can just use max.
-            let align = layout.align().max(size_of::<usize>());
+            let align = layout.align().max(crate::mem::size_of::<usize>());
             let ret = unsafe { libc::posix_memalign(&mut out, align, layout.size()) };
             if ret != 0 { ptr::null_mut() } else { out as *mut u8 }
         }

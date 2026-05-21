@@ -1,20 +1,21 @@
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
-use clippy_utils::res::MaybeDef;
 use rustc_errors::{Applicability, Diag};
-use rustc_hir::intravisit::{Visitor, VisitorExt, walk_body, walk_expr, walk_ty};
-use rustc_hir::{self as hir, AmbigArg, Body, Expr, ExprKind, GenericArg, Item, ItemKind, QPath, TyKind};
+use rustc_hir as hir;
+use rustc_hir::intravisit::{walk_body, walk_expr, walk_inf, walk_ty, Visitor};
+use rustc_hir::{Body, Expr, ExprKind, GenericArg, Item, ItemKind, QPath, TyKind};
 use rustc_hir_analysis::lower_ty;
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::hir::nested_filter;
 use rustc_middle::ty::{Ty, TypeckResults};
 use rustc_session::declare_lint_pass;
+use rustc_span::symbol::sym;
 use rustc_span::Span;
 
 use clippy_utils::diagnostics::span_lint_and_then;
-use clippy_utils::source::{IntoSpan, SpanRangeExt, snippet, snippet_with_context};
-use clippy_utils::sym;
+use clippy_utils::source::{snippet, IntoSpan, SpanRangeExt};
+use clippy_utils::ty::is_type_diagnostic_item;
 
 declare_clippy_lint! {
     /// ### What it does
@@ -92,7 +93,7 @@ impl<'tcx> LateLintPass<'tcx> for ImplicitHasher {
                 ),
                 (
                     target.span(),
-                    format!("{}<{}, S>", target.type_name(), target.type_arguments()),
+                    format!("{}<{}, S>", target.type_name(), target.type_arguments(),),
                 ),
             ];
             suggestions.extend(vis.suggestions);
@@ -111,7 +112,7 @@ impl<'tcx> LateLintPass<'tcx> for ImplicitHasher {
         match item.kind {
             ItemKind::Impl(impl_) => {
                 let mut vis = ImplicitHasherTypeVisitor::new(cx);
-                vis.visit_ty_unambig(impl_.self_ty);
+                vis.visit_ty(impl_.self_ty);
 
                 for target in &vis.found {
                     if !item.span.eq_ctxt(target.span()) {
@@ -119,7 +120,7 @@ impl<'tcx> LateLintPass<'tcx> for ImplicitHasher {
                     }
 
                     let generics_suggestion_span = impl_.generics.span.substitute_dummy({
-                        let range = (item.span.lo()..target.span().lo()).map_range(cx, |_, src, range| {
+                        let range = (item.span.lo()..target.span().lo()).map_range(cx, |src, range| {
                             Some(src.get(range.clone())?.find("impl")? + 4..range.end)
                         });
                         if let Some(range) = range {
@@ -130,7 +131,7 @@ impl<'tcx> LateLintPass<'tcx> for ImplicitHasher {
                     });
 
                     let mut ctr_vis = ImplicitHasherConstructorVisitor::new(cx, target);
-                    for item in impl_.items.iter().map(|&item| cx.tcx.hir_impl_item(item)) {
+                    for item in impl_.items.iter().map(|item| cx.tcx.hir().impl_item(item.id)) {
                         ctr_vis.visit_impl_item(item);
                     }
 
@@ -148,29 +149,23 @@ impl<'tcx> LateLintPass<'tcx> for ImplicitHasher {
                     );
                 }
             },
-            ItemKind::Fn {
-                ref sig,
-                generics,
-                body: body_id,
-                ..
-            } => {
-                let body = cx.tcx.hir_body(body_id);
+            ItemKind::Fn(ref sig, generics, body_id) => {
+                let body = cx.tcx.hir().body(body_id);
 
                 for ty in sig.decl.inputs {
                     let mut vis = ImplicitHasherTypeVisitor::new(cx);
-                    vis.visit_ty_unambig(ty);
+                    vis.visit_ty(ty);
 
                     for target in &vis.found {
                         if generics.span.from_expansion() {
                             continue;
                         }
                         let generics_suggestion_span = generics.span.substitute_dummy({
-                            let range =
-                                (item.span.lo()..body.params[0].pat.span.lo()).map_range(cx, |_, src, range| {
-                                    let (pre, post) = src.get(range.clone())?.split_once("fn")?;
-                                    let pos = post.find('(')? + pre.len() + 2;
-                                    Some(pos..pos)
-                                });
+                            let range = (item.span.lo()..body.params[0].pat.span.lo()).map_range(cx, |src, range| {
+                                let (pre, post) = src.get(range.clone())?.split_once("fn")?;
+                                let pos = post.find('(')? + pre.len() + 2;
+                                Some(pos..pos)
+                            });
                             if let Some(range) = range {
                                 range.with_ctxt(item.span.ctxt())
                             } else {
@@ -223,20 +218,25 @@ impl<'tcx> ImplicitHasherType<'tcx> {
                     _ => None,
                 })
                 .collect();
+            let params_len = params.len();
 
             let ty = lower_ty(cx.tcx, hir_ty);
 
-            match (ty.opt_diag_name(cx), &params[..]) {
-                (Some(sym::HashMap), [k, v]) => Some(ImplicitHasherType::HashMap(
+            if is_type_diagnostic_item(cx, ty, sym::HashMap) && params_len == 2 {
+                Some(ImplicitHasherType::HashMap(
                     hir_ty.span,
                     ty,
-                    snippet(cx, k.span, "K"),
-                    snippet(cx, v.span, "V"),
-                )),
-                (Some(sym::HashSet), [t]) => {
-                    Some(ImplicitHasherType::HashSet(hir_ty.span, ty, snippet(cx, t.span, "T")))
-                },
-                _ => None,
+                    snippet(cx, params[0].span, "K"),
+                    snippet(cx, params[1].span, "V"),
+                ))
+            } else if is_type_diagnostic_item(cx, ty, sym::HashSet) && params_len == 1 {
+                Some(ImplicitHasherType::HashSet(
+                    hir_ty.span,
+                    ty,
+                    snippet(cx, params[0].span, "T"),
+                ))
+            } else {
+                None
             }
         } else {
             None
@@ -281,13 +281,21 @@ impl<'a, 'tcx> ImplicitHasherTypeVisitor<'a, 'tcx> {
     }
 }
 
-impl<'tcx> Visitor<'tcx> for ImplicitHasherTypeVisitor<'_, 'tcx> {
-    fn visit_ty(&mut self, t: &'tcx hir::Ty<'_, AmbigArg>) {
-        if let Some(target) = ImplicitHasherType::new(self.cx, t.as_unambig_ty()) {
+impl<'a, 'tcx> Visitor<'tcx> for ImplicitHasherTypeVisitor<'a, 'tcx> {
+    fn visit_ty(&mut self, t: &'tcx hir::Ty<'_>) {
+        if let Some(target) = ImplicitHasherType::new(self.cx, t) {
             self.found.push(target);
         }
 
         walk_ty(self, t);
+    }
+
+    fn visit_infer(&mut self, inf: &'tcx hir::InferArg) {
+        if let Some(target) = ImplicitHasherType::new(self.cx, &inf.to_ty()) {
+            self.found.push(target);
+        }
+
+        walk_inf(self, inf);
     }
 }
 
@@ -310,7 +318,7 @@ impl<'a, 'b, 'tcx> ImplicitHasherConstructorVisitor<'a, 'b, 'tcx> {
     }
 }
 
-impl<'tcx> Visitor<'tcx> for ImplicitHasherConstructorVisitor<'_, '_, 'tcx> {
+impl<'a, 'b, 'tcx> Visitor<'tcx> for ImplicitHasherConstructorVisitor<'a, 'b, 'tcx> {
     type NestedFilter = nested_filter::OnlyBodies;
 
     fn visit_body(&mut self, body: &Body<'tcx>) {
@@ -322,7 +330,6 @@ impl<'tcx> Visitor<'tcx> for ImplicitHasherConstructorVisitor<'_, '_, 'tcx> {
     fn visit_expr(&mut self, e: &'tcx Expr<'_>) {
         if let ExprKind::Call(fun, args) = e.kind
             && let ExprKind::Path(QPath::TypeRelative(ty, method)) = fun.kind
-            && matches!(method.ident.name, sym::new | sym::with_capacity)
             && let TyKind::Path(QPath::Resolved(None, ty_path)) = ty.kind
             && let Some(ty_did) = ty_path.res.opt_def_id()
         {
@@ -330,39 +337,37 @@ impl<'tcx> Visitor<'tcx> for ImplicitHasherConstructorVisitor<'_, '_, 'tcx> {
                 return;
             }
 
-            let container_name = match self.cx.tcx.get_diagnostic_name(ty_did) {
-                Some(sym::HashMap) => "HashMap",
-                Some(sym::HashSet) => "HashSet",
-                _ => return,
-            };
-
-            match method.ident.name {
-                sym::new => {
-                    self.suggestions.insert(e.span, format!("{container_name}::default()"));
-                },
-                sym::with_capacity => {
-                    let (arg_snippet, _) = snippet_with_context(
-                        self.cx,
-                        args[0].span,
-                        e.span.ctxt(),
-                        "..",
-                        // We can throw-away the applicability here since the whole suggestion is
-                        // marked as `MaybeIncorrect` later.
-                        &mut Applicability::MaybeIncorrect,
-                    );
+            if self.cx.tcx.is_diagnostic_item(sym::HashMap, ty_did) {
+                if method.ident.name == sym::new {
+                    self.suggestions.insert(e.span, "HashMap::default()".to_string());
+                } else if method.ident.name == sym!(with_capacity) {
                     self.suggestions.insert(
                         e.span,
-                        format!("{container_name}::with_capacity_and_hasher({arg_snippet}, Default::default())"),
+                        format!(
+                            "HashMap::with_capacity_and_hasher({}, Default::default())",
+                            snippet(self.cx, args[0].span, "capacity"),
+                        ),
                     );
-                },
-                _ => {},
+                }
+            } else if self.cx.tcx.is_diagnostic_item(sym::HashSet, ty_did) {
+                if method.ident.name == sym::new {
+                    self.suggestions.insert(e.span, "HashSet::default()".to_string());
+                } else if method.ident.name == sym!(with_capacity) {
+                    self.suggestions.insert(
+                        e.span,
+                        format!(
+                            "HashSet::with_capacity_and_hasher({}, Default::default())",
+                            snippet(self.cx, args[0].span, "capacity"),
+                        ),
+                    );
+                }
             }
         }
 
         walk_expr(self, e);
     }
 
-    fn maybe_tcx(&mut self) -> Self::MaybeTyCtxt {
-        self.cx.tcx
+    fn nested_visit_map(&mut self) -> Self::Map {
+        self.cx.tcx.hir()
     }
 }

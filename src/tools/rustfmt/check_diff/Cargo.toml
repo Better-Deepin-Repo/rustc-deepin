@@ -7,11 +7,3 @@ edition = "2021"
 
 [dependencies]
 clap = { version = "4.4.2", features = ["derive"] }
-tracing = "0.1.37"
-tracing-subscriber = { version = "0.3.17", features = ["env-filter"] }
-tempfile = "3"
-walkdir = "2.5.0"
-diffy = "0.4.0"
-crossbeam-channel = "0.5.15"
-ignore = "0.4.25"
-toml = "0.9.11"

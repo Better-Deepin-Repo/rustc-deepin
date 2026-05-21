@@ -1,7 +1,7 @@
-use hir::{Semantics, crate_def_map};
+use hir::{db::DefDatabase, Semantics};
 use ide_db::{
+    base_db::{CrateId, FileLoader},
     FileId, FilePosition, RootDatabase,
-    base_db::{Crate, RootQueryDb},
 };
 use itertools::Itertools;
 use syntax::{
@@ -15,11 +15,13 @@ use crate::NavigationTarget;
 //
 // Navigates to the parent module of the current module.
 //
-// | Editor  | Action Name |
-// |---------|-------------|
-// | VS Code | **rust-analyzer: Locate parent module** |
+// |===
+// | Editor  | Action Name
 //
-// ![Parent Module](https://user-images.githubusercontent.com/48062697/113065580-04c21800-91b1-11eb-9a32-00086161c0bd.gif)
+// | VS Code | **rust-analyzer: Locate parent module**
+// |===
+//
+// image::https://user-images.githubusercontent.com/48062697/113065580-04c21800-91b1-11eb-9a32-00086161c0bd.gif[]
 
 /// This returns `Vec` because a module may be included from several places.
 pub(crate) fn parent_module(db: &RootDatabase, position: FilePosition) -> Vec<NavigationTarget> {
@@ -29,13 +31,14 @@ pub(crate) fn parent_module(db: &RootDatabase, position: FilePosition) -> Vec<Na
     let mut module = find_node_at_offset::<ast::Module>(source_file.syntax(), position.offset);
 
     // If cursor is literally on `mod foo`, go to the grandpa.
-    if let Some(m) = &module
-        && !m
+    if let Some(m) = &module {
+        if !m
             .item_list()
-            .is_some_and(|it| it.syntax().text_range().contains_inclusive(position.offset))
-    {
-        cov_mark::hit!(test_resolve_parent_module_on_module_decl);
-        module = m.syntax().ancestors().skip(1).find_map(ast::Module::cast);
+            .map_or(false, |it| it.syntax().text_range().contains_inclusive(position.offset))
+        {
+            cov_mark::hit!(test_resolve_parent_module_on_module_decl);
+            module = m.syntax().ancestors().skip(1).find_map(ast::Module::cast);
+        }
     }
 
     match module {
@@ -52,13 +55,11 @@ pub(crate) fn parent_module(db: &RootDatabase, position: FilePosition) -> Vec<Na
 }
 
 /// This returns `Vec` because a module may be included from several places.
-pub(crate) fn crates_for(db: &RootDatabase, file_id: FileId) -> Vec<Crate> {
+pub(crate) fn crates_for(db: &RootDatabase, file_id: FileId) -> Vec<CrateId> {
     db.relevant_crates(file_id)
         .iter()
         .copied()
-        .filter(|&crate_id| {
-            crate_def_map(db, crate_id).modules_for_file(db, file_id).next().is_some()
-        })
+        .filter(|&crate_id| db.crate_def_map(crate_id).modules_for_file(file_id).next().is_some())
         .sorted()
         .collect()
 }
@@ -69,7 +70,7 @@ mod tests {
 
     use crate::fixture;
 
-    fn check(#[rust_analyzer::rust_fixture] ra_fixture: &str) {
+    fn check(ra_fixture: &str) {
         let (analysis, position, expected) = fixture::annotations(ra_fixture);
         let navs = analysis.parent_module(position).unwrap();
         let navs = navs

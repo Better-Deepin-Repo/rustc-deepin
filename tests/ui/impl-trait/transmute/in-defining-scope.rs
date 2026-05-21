@@ -1,12 +1,11 @@
-// Used to cause a query cycle due to using `TypingEnv::PostAnalysis`,
-// in #119821 const eval was changed to always use this mode.
+// This causes a query cycle due to using `Reveal::All`,
+// in #119821 const eval was changed to always use `Reveal::All`
 //
-//@ check-pass
-
+// See that PR for more details.
 use std::mem::transmute;
-
 fn foo() -> impl Sized {
-    //~^ WARN function cannot return without recursing
+    //~^ ERROR cycle detected when computing type of
+    //~| WARN function cannot return without recursing
     unsafe {
         transmute::<_, u8>(foo());
     }

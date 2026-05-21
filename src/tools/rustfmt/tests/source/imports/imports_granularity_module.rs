@@ -45,8 +45,3 @@ use b::v::{
 };
 use b::t::{/* Before b::t::self */ self};
 use b::c;
-
-use c;
-use d;
-
-use {library1, library2 as lib2, library3};

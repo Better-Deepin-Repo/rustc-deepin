@@ -27,8 +27,9 @@ pub fn cli() -> Command {
         .arg_silent_suggestion()
         .arg_features()
         .arg_manifest_path()
+        .arg_lockfile_path()
         .after_help(color_print::cstr!(
-            "Run `<bright-cyan,bold>cargo help metadata</>` for more detailed information.\n"
+            "Run `<cyan,bold>cargo help metadata</>` for more detailed information.\n"
         ))
 }
 

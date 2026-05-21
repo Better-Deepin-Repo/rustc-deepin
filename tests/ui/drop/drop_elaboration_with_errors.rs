@@ -10,7 +10,6 @@ struct Foo {
 
 type Tait = impl Sized;
 
-#[define_opaque(Tait)]
 fn ice_cold(beverage: Tait) {
     let Foo { field } = beverage;
     _ = field;

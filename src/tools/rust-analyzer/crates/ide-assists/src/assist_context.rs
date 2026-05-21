@@ -1,16 +1,16 @@
 //! See [`AssistContext`].
 
-use hir::{EditionedFileId, FileRange, Semantics};
-use ide_db::{FileId, RootDatabase, label::Label};
-use syntax::Edition;
+use hir::{FileRange, Semantics};
+use ide_db::EditionedFileId;
+use ide_db::{label::Label, FileId, RootDatabase};
 use syntax::{
+    algo::{self, find_node_at_offset, find_node_at_range},
     AstNode, AstToken, Direction, SourceFile, SyntaxElement, SyntaxKind, SyntaxToken, TextRange,
     TextSize, TokenAtOffset,
-    algo::{self, find_node_at_offset, find_node_at_range},
 };
 
 use crate::{
-    Assist, AssistId, AssistKind, AssistResolveStrategy, GroupLabel, assist_config::AssistConfig,
+    assist_config::AssistConfig, Assist, AssistId, AssistKind, AssistResolveStrategy, GroupLabel,
 };
 
 pub(crate) use ide_db::source_change::{SourceChangeBuilder, TreeMutator};
@@ -51,10 +51,6 @@ pub(crate) struct AssistContext<'a> {
     frange: FileRange,
     trimmed_range: TextRange,
     source_file: SourceFile,
-    // We cache this here to speed up things slightly
-    token_at_offset: TokenAtOffset<SyntaxToken>,
-    // We cache this here to speed up things slightly
-    covering_element: SyntaxElement,
 }
 
 impl<'a> AssistContext<'a> {
@@ -81,21 +77,11 @@ impl<'a> AssistContext<'a> {
             // Selection solely consists of whitespace so just fall back to the original
             _ => frange.range,
         };
-        let token_at_offset = source_file.syntax().token_at_offset(frange.range.start());
-        let covering_element = source_file.syntax().covering_element(trimmed_range);
 
-        AssistContext {
-            config,
-            sema,
-            frange,
-            source_file,
-            trimmed_range,
-            token_at_offset,
-            covering_element,
-        }
+        AssistContext { config, sema, frange, source_file, trimmed_range }
     }
 
-    pub(crate) fn db(&self) -> &'a RootDatabase {
+    pub(crate) fn db(&self) -> &RootDatabase {
         self.sema.db
     }
 
@@ -104,16 +90,8 @@ impl<'a> AssistContext<'a> {
         self.frange.range.start()
     }
 
-    pub(crate) fn vfs_file_id(&self) -> FileId {
-        self.frange.file_id.file_id(self.db())
-    }
-
     pub(crate) fn file_id(&self) -> EditionedFileId {
         self.frange.file_id
-    }
-
-    pub(crate) fn edition(&self) -> Edition {
-        self.frange.file_id.edition(self.db())
     }
 
     pub(crate) fn has_empty_selection(&self) -> bool {
@@ -126,12 +104,8 @@ impl<'a> AssistContext<'a> {
         self.trimmed_range
     }
 
-    pub(crate) fn source_file(&self) -> &SourceFile {
-        &self.source_file
-    }
-
     pub(crate) fn token_at_offset(&self) -> TokenAtOffset<SyntaxToken> {
-        self.token_at_offset.clone()
+        self.source_file.syntax().token_at_offset(self.offset())
     }
     pub(crate) fn find_token_syntax_at_offset(&self, kind: SyntaxKind) -> Option<SyntaxToken> {
         self.token_at_offset().find(|it| it.kind() == kind)
@@ -142,9 +116,6 @@ impl<'a> AssistContext<'a> {
     pub(crate) fn find_node_at_offset<N: AstNode>(&self) -> Option<N> {
         find_node_at_offset(self.source_file.syntax(), self.offset())
     }
-    pub(crate) fn find_node_at_trimmed_offset<N: AstNode>(&self) -> Option<N> {
-        find_node_at_offset(self.source_file.syntax(), self.trimmed_range.start())
-    }
     pub(crate) fn find_node_at_range<N: AstNode>(&self) -> Option<N> {
         find_node_at_range(self.source_file.syntax(), self.trimmed_range)
     }
@@ -153,7 +124,7 @@ impl<'a> AssistContext<'a> {
     }
     /// Returns the element covered by the selection range, this excludes trailing whitespace in the selection.
     pub(crate) fn covering_element(&self) -> SyntaxElement {
-        self.covering_element.clone()
+        self.source_file.syntax().covering_element(self.selection_trimmed())
     }
 }
 
@@ -168,7 +139,7 @@ impl Assists {
     pub(crate) fn new(ctx: &AssistContext<'_>, resolve: AssistResolveStrategy) -> Assists {
         Assists {
             resolve,
-            file: ctx.frange.file_id.file_id(ctx.db()),
+            file: ctx.frange.file_id.file_id(),
             buf: Vec::new(),
             allowed: ctx.config.allowed.clone(),
         }

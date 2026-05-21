@@ -6,9 +6,8 @@ LL |     fn foo() = 42;
    |
 help: surround the expression with `{` and `}` instead of `=` and `;`
    |
-LL -     fn foo() = 42;
-LL +     fn foo() { 42 }
-   |
+LL |     fn foo() { 42 }
+   |              ~    ~
 
 error: function body cannot be `= expression;`
   --> $DIR/fn-body-eq-expr-semi.rs:5:20
@@ -18,9 +17,8 @@ LL |     fn bar() -> u8 = 42;
    |
 help: surround the expression with `{` and `}` instead of `=` and `;`
    |
-LL -     fn bar() -> u8 = 42;
-LL +     fn bar() -> u8 { 42 }
-   |
+LL |     fn bar() -> u8 { 42 }
+   |                    ~    ~
 
 error: function body cannot be `= expression;`
   --> $DIR/fn-body-eq-expr-semi.rs:9:14
@@ -30,9 +28,8 @@ LL |     fn foo() = 42;
    |
 help: surround the expression with `{` and `}` instead of `=` and `;`
    |
-LL -     fn foo() = 42;
-LL +     fn foo() { 42 }
-   |
+LL |     fn foo() { 42 }
+   |              ~    ~
 
 error: function body cannot be `= expression;`
   --> $DIR/fn-body-eq-expr-semi.rs:11:20
@@ -42,9 +39,8 @@ LL |     fn bar() -> u8 = 42;
    |
 help: surround the expression with `{` and `}` instead of `=` and `;`
    |
-LL -     fn bar() -> u8 = 42;
-LL +     fn bar() -> u8 { 42 }
-   |
+LL |     fn bar() -> u8 { 42 }
+   |                    ~    ~
 
 error: function body cannot be `= expression;`
   --> $DIR/fn-body-eq-expr-semi.rs:16:14
@@ -54,9 +50,8 @@ LL |     fn foo() = 42;
    |
 help: surround the expression with `{` and `}` instead of `=` and `;`
    |
-LL -     fn foo() = 42;
-LL +     fn foo() { 42 }
-   |
+LL |     fn foo() { 42 }
+   |              ~    ~
 
 error: function body cannot be `= expression;`
   --> $DIR/fn-body-eq-expr-semi.rs:17:20
@@ -66,9 +61,8 @@ LL |     fn bar() -> u8 = 42;
    |
 help: surround the expression with `{` and `}` instead of `=` and `;`
    |
-LL -     fn bar() -> u8 = 42;
-LL +     fn bar() -> u8 { 42 }
-   |
+LL |     fn bar() -> u8 { 42 }
+   |                    ~    ~
 
 error: function body cannot be `= expression;`
   --> $DIR/fn-body-eq-expr-semi.rs:21:14
@@ -78,9 +72,8 @@ LL |     fn foo() = 42;
    |
 help: surround the expression with `{` and `}` instead of `=` and `;`
    |
-LL -     fn foo() = 42;
-LL +     fn foo() { 42 }
-   |
+LL |     fn foo() { 42 }
+   |              ~    ~
 
 error: function body cannot be `= expression;`
   --> $DIR/fn-body-eq-expr-semi.rs:22:20
@@ -90,9 +83,8 @@ LL |     fn bar() -> u8 = 42;
    |
 help: surround the expression with `{` and `}` instead of `=` and `;`
    |
-LL -     fn bar() -> u8 = 42;
-LL +     fn bar() -> u8 { 42 }
-   |
+LL |     fn bar() -> u8 { 42 }
+   |                    ~    ~
 
 error: incorrect function inside `extern` block
   --> $DIR/fn-body-eq-expr-semi.rs:9:8

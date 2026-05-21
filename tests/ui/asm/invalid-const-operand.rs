@@ -14,7 +14,7 @@ global_asm!("{}", const 0f32);
 global_asm!("{}", const 0 as *mut u8);
 //~^ ERROR invalid type for `const` operand
 
-fn test1() {
+fn main() {
     unsafe {
         // Const operands must be integers and must be constants.
 
@@ -27,11 +27,7 @@ fn test1() {
         //~^ ERROR invalid type for `const` operand
         asm!("{}", const &0);
         //~^ ERROR invalid type for `const` operand
-    }
-}
 
-fn test2() {
-    unsafe {
         // Constants must be... constant
 
         let x = 0;
@@ -51,5 +47,3 @@ fn test2() {
         //~^ ERROR attempt to use a non-constant value in a constant
     }
 }
-
-fn main() {}

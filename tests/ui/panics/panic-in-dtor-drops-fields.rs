@@ -3,8 +3,7 @@
 #![allow(dead_code)]
 #![allow(non_upper_case_globals)]
 
-//@ needs-threads
-//@ ignore-backends: gcc
+//@ ignore-emscripten no threads support
 
 use std::thread;
 

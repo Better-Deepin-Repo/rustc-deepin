@@ -7,17 +7,14 @@ use proc_macros::{external, inline_macros};
 
 fn should_trigger() {
     loop {}
-    //~^ empty_loop
     #[allow(clippy::never_loop)]
     loop {
         loop {}
-        //~^ empty_loop
     }
 
     #[allow(clippy::never_loop)]
     'outer: loop {
         'inner: loop {}
-        //~^ empty_loop
     }
 }
 

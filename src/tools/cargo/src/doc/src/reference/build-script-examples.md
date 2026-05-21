@@ -49,7 +49,7 @@ Here we can see that we have a `build.rs` build script and our binary in
 [package]
 name = "hello-from-generated-code"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 ```
 
 Let’s see what’s inside the build script:
@@ -86,13 +86,6 @@ There’s a couple of points of note here:
   such crate as a dependency, because there's an *implicit* invariant that
   sources in `.cargo/registry` should be immutable. `cargo` won't allow such
   scripts when packaging.
-  * Sometimes, projects want to check in a generated file, and treat it as
-    source code. However, in this case, the file shouldn't be generated from
-    `build.rs`. Instead, have a test or similar which checks that the file
-    precisely matches the generated version *and fails if the result doesn't
-    match*, and run that test as part of your CI. (The test can generate a
-    temporary file to compare to, and if you want to update the generated file,
-    you can replace the checked-in file with that temporary file.)
 * This script is relatively simple as it just writes out a small generated file.
   One could imagine that other more complex operations could take place such as
   generating a Rust module from a C header file or another language definition,
@@ -155,7 +148,7 @@ Pretty similar to before! Next, the manifest:
 [package]
 name = "hello-world-from-c"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 ```
 
 For now we’re not going to use any build dependencies, so let’s take a look at
@@ -259,7 +252,7 @@ void hello() {
 // Note the lack of the `#[link]` attribute. We’re delegating the responsibility
 // of selecting what to link over to the build script rather than hard-coding
 // it in the source file.
-unsafe extern { fn hello(); }
+extern { fn hello(); }
 
 fn main() {
     unsafe { hello(); }
@@ -305,7 +298,7 @@ with `pkg-config` installed. Let's start by setting up the manifest:
 [package]
 name = "libz-sys"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 links = "z"
 
 [build-dependencies]
@@ -334,7 +327,7 @@ Let's round out the example with a basic FFI binding:
 
 use std::os::raw::{c_uint, c_ulong};
 
-unsafe extern "C" {
+extern "C" {
     pub fn crc32(crc: c_ulong, buf: *const u8, len: c_uint) -> c_ulong;
 }
 
@@ -390,9 +383,9 @@ Here's an example:
 # Cargo.toml
 
 [package]
-name = "z_user"
+name = "zuser"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 libz-sys = "1.0.25"
@@ -410,12 +403,12 @@ script:
 
 fn main() {
     let mut cfg = cc::Build::new();
-    cfg.file("src/z_user.c");
+    cfg.file("src/zuser.c");
     if let Some(include) = std::env::var_os("DEP_Z_INCLUDE") {
         cfg.include(include);
     }
-    cfg.compile("z_user");
-    println!("cargo::rerun-if-changed=src/z_user.c");
+    cfg.compile("zuser");
+    println!("cargo::rerun-if-changed=src/zuser.c");
 }
 ```
 
@@ -424,42 +417,12 @@ the zlib header, and it should find the header, even on systems where it isn't
 already installed.
 
 ```c
-// src/z_user.c
+// src/zuser.c
 
 #include "zlib.h"
 
 // … rest of code that makes use of zlib.
 ```
-## Reading target configuration
-
-When a build script needs to make decisions based on the target platform, it should read the `CARGO_CFG_*` environment
-variables rather than using `cfg!` or `#[cfg]` attributes. This is because
-the build script is compiled for and runs on the *host* machine, while
-`CARGO_CFG_*` variables reflect the *target* platform, an important distinction
-when cross-compiling.
-```rust,ignore
-// build.rs
-
-fn main() {
-    // reads the TARGET configuration
-    let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap();
-
-    if target_os == "windows" {
-        println!("cargo::rustc-link-lib=userenv");
-    } else if target_os == "linux" {
-        println!("cargo::rustc-link-lib=pthread");
-    }
-}
-```
-
-Note that some configuration values may contain multiple values separated by
-commas (for example, `CARGO_CFG_TARGET_FAMILY` may be `unix,wasm`). When
-checking these values, be sure to handle this appropriately.
-
-For a more convenient, typed API, consider using the [`build-rs`] crate
-which handles these details for you.
-
-[`build-rs`]: https://crates.io/crates/build-rs
 
 ## Conditional compilation
 
@@ -477,7 +440,7 @@ script looks something [like
 this](https://github.com/sfackler/rust-openssl/blob/dc72a8e2c429e46c275e528b61a733a66e7877fc/openssl-sys/build/main.rs#L216):
 
 ```rust,ignore
-println!("cargo::metadata=version_number={openssl_version:x}");
+println!("cargo::version_number={:x}", openssl_version);
 ```
 
 This instruction causes the `DEP_OPENSSL_VERSION_NUMBER` environment variable

@@ -8,16 +8,18 @@ fn main() {}
 
 fn should_warn_simple_case() {
     let v = vec![SyncWeak::<u32>::new(); 2];
-    //~^ rc_clone_in_vec_init
-
+    //~^ ERROR: initializing a reference-counted pointer in `vec![elem; len]`
+    //~| NOTE: each element will point to the same `Weak` instance
     let v2 = vec![UnSyncWeak::<u32>::new(); 2];
-    //~^ rc_clone_in_vec_init
+    //~^ ERROR: initializing a reference-counted pointer in `vec![elem; len]`
+    //~| NOTE: each element will point to the same `Weak` instance
 
     let v = vec![Rc::downgrade(&Rc::new("x".to_string())); 2];
-    //~^ rc_clone_in_vec_init
-
+    //~^ ERROR: initializing a reference-counted pointer in `vec![elem; len]`
+    //~| NOTE: each element will point to the same `Weak` instance
     let v = vec![Arc::downgrade(&Arc::new("x".to_string())); 2];
-    //~^ rc_clone_in_vec_init
+    //~^ ERROR: initializing a reference-counted pointer in `vec![elem; len]`
+    //~| NOTE: each element will point to the same `Weak` instance
 }
 
 fn should_warn_simple_case_with_big_indentation() {
@@ -26,19 +28,19 @@ fn should_warn_simple_case_with_big_indentation() {
         dbg!(k);
         if true {
             let v = vec![Arc::downgrade(&Arc::new("x".to_string())); 2];
-            //~^ rc_clone_in_vec_init
-
+            //~^ ERROR: initializing a reference-counted pointer in `vec![elem; len]`
+            //~| NOTE: each element will point to the same `Weak` instance
             let v2 = vec![Rc::downgrade(&Rc::new("x".to_string())); 2];
-            //~^ rc_clone_in_vec_init
+            //~^ ERROR: initializing a reference-counted pointer in `vec![elem; len]`
+            //~| NOTE: each element will point to the same `Weak` instance
         }
     }
 }
 
 fn should_warn_complex_case() {
     let v = vec![
-    //~^ rc_clone_in_vec_init
-
-
+    //~^ ERROR: initializing a reference-counted pointer in `vec![elem; len]`
+    //~| NOTE: each element will point to the same `Weak` instance
         Arc::downgrade(&Arc::new(Mutex::new({
             let x = 1;
             dbg!(x);
@@ -48,9 +50,8 @@ fn should_warn_complex_case() {
     ];
 
     let v1 = vec![
-    //~^ rc_clone_in_vec_init
-
-
+    //~^ ERROR: initializing a reference-counted pointer in `vec![elem; len]`
+    //~| NOTE: each element will point to the same `Weak` instance
         Rc::downgrade(&Rc::new(Mutex::new({
             let x = 1;
             dbg!(x);

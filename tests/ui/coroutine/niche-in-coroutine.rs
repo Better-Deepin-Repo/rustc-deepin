@@ -15,6 +15,5 @@ fn main() {
         take(x);
     };
 
-    // FIXME(#63818): niches in coroutines are disabled. Should be `assert_eq`.
-    assert_ne!(size_of_val(&gen1), size_of_val(&Some(gen1)));
+    assert_eq!(size_of_val(&gen1), size_of_val(&Some(gen1)));
 }

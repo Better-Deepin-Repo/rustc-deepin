@@ -1,17 +1,20 @@
 //@ run-pass
 
+
+
+
 // Tests for using match as an expression
 
 fn test_basic() {
     let mut rs: bool = match true { true => { true } false => { false } };
-    assert!(rs);
+    assert!((rs));
     rs = match false { true => { false } false => { true } };
-    assert!(rs);
+    assert!((rs));
 }
 
 fn test_inferrence() {
     let rs = match true { true => { true } false => { false } };
-    assert!(rs);
+    assert!((rs));
 }
 
 fn test_alt_as_alt_head() {
@@ -22,7 +25,7 @@ fn test_alt_as_alt_head() {
           true => { false }
           false => { true }
         };
-    assert!(rs);
+    assert!((rs));
 }
 
 fn test_alt_as_block_result() {
@@ -31,7 +34,7 @@ fn test_alt_as_block_result() {
           true => { false }
           false => { match true { true => { true } false => { false } } }
         };
-    assert!(rs);
+    assert!((rs));
 }
 
 pub fn main() {

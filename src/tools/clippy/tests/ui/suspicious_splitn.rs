@@ -8,30 +8,32 @@ fn main() {
     let _ = [].splitn(0, |&x: &u32| x == 1);
 
     let _ = "a,b".splitn(0, ',');
-    //~^ suspicious_splitn
-
+    //~^ ERROR: `splitn` called with `0` splits
+    //~| NOTE: the resulting iterator will always return `None`
     let _ = "a,b".rsplitn(0, ',');
-    //~^ suspicious_splitn
-
+    //~^ ERROR: `rsplitn` called with `0` splits
+    //~| NOTE: the resulting iterator will always return `None`
     let _ = "a,b".splitn(1, ',');
-    //~^ suspicious_splitn
-
+    //~^ ERROR: `splitn` called with `1` split
+    //~| NOTE: the resulting iterator will always return the entire string followed by `No
     let _ = [0, 1, 2].splitn(0, |&x| x == 1);
-    //~^ suspicious_splitn
-
+    //~^ ERROR: `splitn` called with `0` splits
+    //~| NOTE: the resulting iterator will always return `None`
     let _ = [0, 1, 2].splitn_mut(0, |&x| x == 1);
-    //~^ suspicious_splitn
-
+    //~^ ERROR: `splitn_mut` called with `0` splits
+    //~| NOTE: the resulting iterator will always return `None`
     let _ = [0, 1, 2].splitn(1, |&x| x == 1);
-    //~^ suspicious_splitn
-
+    //~^ ERROR: `splitn` called with `1` split
+    //~| NOTE: the resulting iterator will always return the entire slice followed by `Non
     let _ = [0, 1, 2].rsplitn_mut(1, |&x| x == 1);
-    //~^ suspicious_splitn
+    //~^ ERROR: `rsplitn_mut` called with `1` split
+    //~| NOTE: the resulting iterator will always return the entire slice followed by `Non
 
     const X: usize = 0;
     let _ = "a,b".splitn(X + 1, ',');
-    //~^ suspicious_splitn
-
+    //~^ ERROR: `splitn` called with `1` split
+    //~| NOTE: the resulting iterator will always return the entire string followed by `No
     let _ = "a,b".splitn(X, ',');
-    //~^ suspicious_splitn
+    //~^ ERROR: `splitn` called with `0` splits
+    //~| NOTE: the resulting iterator will always return `None`
 }

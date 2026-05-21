@@ -6,7 +6,7 @@ pub(crate) type Cause = String;
 /// A single-item queue that allows callers to request an operation to
 /// be performed later.
 ///
-/// ```ignore
+/// ```
 /// let queue = OpQueue::default();
 ///
 /// // Request work to be done.
@@ -27,23 +27,19 @@ pub(crate) type Cause = String;
 pub(crate) struct OpQueue<Args = (), Output = ()> {
     op_requested: Option<(Cause, Args)>,
     op_in_progress: bool,
-    last_op_result: Option<Output>,
+    last_op_result: Output,
 }
 
-impl<Args, Output> Default for OpQueue<Args, Output> {
+impl<Args, Output: Default> Default for OpQueue<Args, Output> {
     fn default() -> Self {
-        Self { op_requested: None, op_in_progress: false, last_op_result: None }
+        Self { op_requested: None, op_in_progress: false, last_op_result: Default::default() }
     }
 }
 
-impl<Args: std::fmt::Debug, Output> OpQueue<Args, Output> {
-    /// Request an operation to start.
+impl<Args, Output> OpQueue<Args, Output> {
     pub(crate) fn request_op(&mut self, reason: Cause, args: Args) {
         self.op_requested = Some((reason, args));
     }
-
-    /// If there was an operation requested, mark this queue as
-    /// started and return the request arguments.
     pub(crate) fn should_start_op(&mut self) -> Option<(Cause, Args)> {
         if self.op_in_progress {
             return None;
@@ -51,25 +47,18 @@ impl<Args: std::fmt::Debug, Output> OpQueue<Args, Output> {
         self.op_in_progress = self.op_requested.is_some();
         self.op_requested.take()
     }
-
-    /// Mark an operation as completed.
     pub(crate) fn op_completed(&mut self, result: Output) {
         assert!(self.op_in_progress);
         self.op_in_progress = false;
-        self.last_op_result = Some(result);
+        self.last_op_result = result;
     }
 
-    /// Get the result of the last operation.
-    pub(crate) fn last_op_result(&self) -> Option<&Output> {
-        self.last_op_result.as_ref()
+    pub(crate) fn last_op_result(&self) -> &Output {
+        &self.last_op_result
     }
-
-    // Is there an operation that has started, but hasn't yet finished?
     pub(crate) fn op_in_progress(&self) -> bool {
         self.op_in_progress
     }
-
-    // Has an operation been requested?
     pub(crate) fn op_requested(&self) -> bool {
         self.op_requested.is_some()
     }

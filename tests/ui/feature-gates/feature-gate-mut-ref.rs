@@ -6,11 +6,8 @@ fn main() {
     let mut ref mut z = 14; //~  ERROR [E0658]
     z = &mut 15;
 
-    #[cfg(false)]
+    #[cfg(FALSE)]
     let mut ref x = 10; //~  ERROR [E0658]
-    #[cfg(false)]
+    #[cfg(FALSE)]
     let mut ref mut y = 10; //~  ERROR [E0658]
-
-    struct Foo { x: i32 }
-    let Foo { mut ref x } = Foo { x: 10 }; //~  ERROR [E0658]
 }

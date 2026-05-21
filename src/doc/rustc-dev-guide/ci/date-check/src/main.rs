@@ -1,8 +1,11 @@
-use std::collections::BTreeMap;
-use std::convert::TryInto as _;
-use std::path::{Path, PathBuf};
-use std::str::FromStr;
-use std::{env, fmt, fs, process};
+use std::{
+    collections::BTreeMap,
+    convert::TryInto as _,
+    env, fmt, fs,
+    path::{Path, PathBuf},
+    process,
+    str::FromStr,
+};
 
 use chrono::{Datelike as _, Month, TimeZone as _, Utc};
 use glob::glob;
@@ -16,13 +19,19 @@ struct Date {
 
 impl Date {
     fn months_since(self, other: Date) -> Option<u32> {
-        let self_chrono =
-            Utc.with_ymd_and_hms(self.year.try_into().unwrap(), self.month, 1, 0, 0, 0).unwrap();
-        let other_chrono =
-            Utc.with_ymd_and_hms(other.year.try_into().unwrap(), other.month, 1, 0, 0, 0).unwrap();
+        let self_chrono = Utc
+            .with_ymd_and_hms(self.year.try_into().unwrap(), self.month, 1, 0, 0, 0)
+            .unwrap();
+        let other_chrono = Utc
+            .with_ymd_and_hms(other.year.try_into().unwrap(), other.month, 1, 0, 0, 0)
+            .unwrap();
         let duration_since = self_chrono.signed_duration_since(other_chrono);
         let months_since = duration_since.num_days() / 30;
-        if months_since < 0 { None } else { Some(months_since.try_into().unwrap()) }
+        if months_since < 0 {
+            None
+        } else {
+            Some(months_since.try_into().unwrap())
+        }
     }
 }
 
@@ -57,18 +66,26 @@ fn collect_dates_from_file(date_regex: &Regex, text: &str) -> Vec<(usize, Date)>
     date_regex
         .captures_iter(text)
         .filter_map(|cap| {
-            if let (Some(month), Some(year), None, None) | (None, None, Some(month), Some(year)) =
-                (cap.name("m1"), cap.name("y1"), cap.name("m2"), cap.name("y2"))
-            {
+            if let (Some(month), Some(year), None, None) | (None, None, Some(month), Some(year)) = (
+                cap.name("m1"),
+                cap.name("y1"),
+                cap.name("m2"),
+                cap.name("y2"),
+            ) {
                 let year = year.as_str().parse().expect("year");
-                let month = Month::from_str(month.as_str()).expect("month").number_from_month();
+                let month = Month::from_str(month.as_str())
+                    .expect("month")
+                    .number_from_month();
                 Some((cap.get(0).expect("all").range(), Date { year, month }))
             } else {
                 None
             }
         })
         .map(|(byte_range, date)| {
-            line += text[end_of_last_cap..byte_range.end].chars().filter(|c| *c == '\n').count();
+            line += text[end_of_last_cap..byte_range.end]
+                .chars()
+                .filter(|c| *c == '\n')
+                .count();
             end_of_last_cap = byte_range.end;
             (line, date)
         })
@@ -114,14 +131,17 @@ fn filter_dates(
 fn main() {
     let mut args = env::args();
     if args.len() == 1 {
-        eprintln!("error: expected root of Markdown directory as CLI argument");
+        eprintln!("error: expected root Markdown directory as CLI argument");
         process::exit(1);
     }
     let root_dir = args.nth(1).unwrap();
     let root_dir_path = Path::new(&root_dir);
     let glob_pat = format!("{}/**/*.md", root_dir);
     let today_chrono = Utc::now().date_naive();
-    let current_month = Date { year: today_chrono.year_ce().1, month: today_chrono.month() };
+    let current_month = Date {
+        year: today_chrono.year_ce().1,
+        month: today_chrono.month(),
+    };
 
     let dates_by_file = collect_dates(glob(&glob_pat).unwrap().map(Result::unwrap));
     let dates_by_file: BTreeMap<_, _> =
@@ -153,18 +173,14 @@ fn main() {
         println!();
 
         for (path, dates) in dates_by_file {
-            let path = path.strip_prefix(&root_dir_path).unwrap_or(&path).display();
-            println!("- {path}");
+            println!(
+                "- {}",
+                path.strip_prefix(&root_dir_path).unwrap_or(&path).display(),
+            );
             for (line, date) in dates {
-                let url = format!(
-                    "https://github.com/rust-lang/rustc-dev-guide/blob/main/{path}?plain=1#L{line}"
-                );
-                println!("  - [ ] {date} [line {line}]({url})");
+                println!("  - [ ] line {}: {}", line, date);
             }
         }
-        println!();
-
-        println!("@rustbot label +C-date-reference-triage +E-easy +E-help-wanted");
         println!();
     }
 }
@@ -175,8 +191,14 @@ mod tests {
 
     #[test]
     fn test_months_since() {
-        let date1 = Date { year: 2020, month: 3 };
-        let date2 = Date { year: 2021, month: 1 };
+        let date1 = Date {
+            year: 2020,
+            month: 3,
+        };
+        let date2 = Date {
+            year: 2021,
+            month: 1,
+        };
         assert_eq!(date2.months_since(date1), Some(10));
     }
 
@@ -251,17 +273,83 @@ Test8
         assert_eq!(
             collect_dates_from_file(&make_date_regex(), text),
             vec![
-                (3, Date { year: 2021, month: 1 }),
-                (6, Date { year: 2021, month: 2 }),
-                (9, Date { year: 2021, month: 3 }),
-                (11, Date { year: 2021, month: 4 }),
-                (17, Date { year: 2021, month: 5 }),
-                (20, Date { year: 2021, month: 1 }),
-                (23, Date { year: 2021, month: 2 }),
-                (26, Date { year: 2021, month: 3 }),
-                (28, Date { year: 2021, month: 4 }),
-                (34, Date { year: 2021, month: 5 }),
-                (38, Date { year: 2021, month: 6 }),
+                (
+                    3,
+                    Date {
+                        year: 2021,
+                        month: 1,
+                    }
+                ),
+                (
+                    6,
+                    Date {
+                        year: 2021,
+                        month: 2,
+                    }
+                ),
+                (
+                    9,
+                    Date {
+                        year: 2021,
+                        month: 3,
+                    }
+                ),
+                (
+                    11,
+                    Date {
+                        year: 2021,
+                        month: 4,
+                    }
+                ),
+                (
+                    17,
+                    Date {
+                        year: 2021,
+                        month: 5,
+                    }
+                ),
+                (
+                    20,
+                    Date {
+                        year: 2021,
+                        month: 1,
+                    }
+                ),
+                (
+                    23,
+                    Date {
+                        year: 2021,
+                        month: 2,
+                    }
+                ),
+                (
+                    26,
+                    Date {
+                        year: 2021,
+                        month: 3,
+                    }
+                ),
+                (
+                    28,
+                    Date {
+                        year: 2021,
+                        month: 4,
+                    }
+                ),
+                (
+                    34,
+                    Date {
+                        year: 2021,
+                        month: 5,
+                    }
+                ),
+                (
+                    38,
+                    Date {
+                        year: 2021,
+                        month: 6,
+                    }
+                ),
             ],
         );
     }

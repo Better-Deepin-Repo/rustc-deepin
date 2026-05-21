@@ -2,7 +2,7 @@
 
 struct T1; //~ ERROR struct `T1` is never constructed
 pub struct T2(i32); //~ ERROR field `0` is never read
-struct T3; //~ ERROR struct `T3` is never constructed
+struct T3;
 
 trait Trait1 { //~ ERROR trait `Trait1` is never used
     const UNUSED: i32;

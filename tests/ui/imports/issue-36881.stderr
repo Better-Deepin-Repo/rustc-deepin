@@ -1,10 +1,10 @@
 error[E0432]: unresolved import `issue_36881_aux`
-  --> $DIR/issue-36881.rs:6:9
+  --> $DIR/issue-36881.rs:5:9
    |
 LL |     use issue_36881_aux::Foo;
-   |         ^^^^^^^^^^^^^^^ use of unresolved module or unlinked crate `issue_36881_aux`
+   |         ^^^^^^^^^^^^^^^ you might be missing crate `issue_36881_aux`
    |
-help: you might be missing a crate named `issue_36881_aux`, add it to your project and import it in your code
+help: consider importing the `issue_36881_aux` crate
    |
 LL + extern crate issue_36881_aux;
    |

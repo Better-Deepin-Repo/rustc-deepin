@@ -5,38 +5,21 @@
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::OnceLock;
-use std::thread::panicking;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use std::{env, fs, io, panic, str};
+use std::{env, fs, io, str};
 
-use object::read::archive::ArchiveFile;
+use build_helper::git::{get_git_merge_base, output_result, GitConfig};
+use build_helper::util::fail;
 
-use crate::BootstrapOverrideLld;
 use crate::core::builder::Builder;
 use crate::core::config::{Config, TargetSelection};
-use crate::utils::exec::{BootstrapCommand, command};
 pub use crate::utils::shared_helpers::{dylib_path, dylib_path_var};
+use crate::LldMode;
 
 #[cfg(test)]
 mod tests;
-
-/// A wrapper around `std::panic::Location` used to track the location of panics
-/// triggered by `t` macro usage.
-pub struct PanicTracker<'a>(pub &'a panic::Location<'a>);
-
-impl Drop for PanicTracker<'_> {
-    fn drop(&mut self) {
-        if panicking() {
-            eprintln!(
-                "Panic was initiated from {}:{}:{}",
-                self.0.file(),
-                self.0.line(),
-                self.0.column()
-            );
-        }
-    }
-}
 
 /// A helper macro to `unwrap` a result except also print out details like:
 ///
@@ -48,75 +31,31 @@ impl Drop for PanicTracker<'_> {
 /// using a `Result` with `try!`, but this may change one day...
 #[macro_export]
 macro_rules! t {
-    ($e:expr) => {{
-        let _panic_guard = $crate::PanicTracker(std::panic::Location::caller());
+    ($e:expr) => {
         match $e {
             Ok(e) => e,
             Err(e) => panic!("{} failed with {}", stringify!($e), e),
         }
-    }};
+    };
     // it can show extra info in the second parameter
-    ($e:expr, $extra:expr) => {{
-        let _panic_guard = $crate::PanicTracker(std::panic::Location::caller());
+    ($e:expr, $extra:expr) => {
         match $e {
             Ok(e) => e,
             Err(e) => panic!("{} failed with {} ({:?})", stringify!($e), e, $extra),
         }
-    }};
+    };
 }
-
 pub use t;
+
+use crate::utils::exec::{command, BootstrapCommand};
+
 pub fn exe(name: &str, target: TargetSelection) -> String {
     crate::utils::shared_helpers::exe(name, &target.triple)
 }
 
-/// Returns the path to the split debug info for the specified file if it exists.
-pub fn split_debuginfo(name: impl Into<PathBuf>) -> Option<PathBuf> {
-    // FIXME: only msvc is currently supported
-
-    let path = name.into();
-    let pdb = path.with_extension("pdb");
-    if pdb.exists() {
-        return Some(pdb);
-    }
-
-    // pdbs get named with '-' replaced by '_'
-    let file_name = pdb.file_name()?.to_str()?.replace("-", "_");
-
-    let pdb: PathBuf = [path.parent()?, Path::new(&file_name)].into_iter().collect();
-    pdb.exists().then_some(pdb)
-}
-
 /// Returns `true` if the file name given looks like a dynamic library.
-pub fn is_dylib(path: &Path) -> bool {
-    path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| {
-        ext == "dylib" || ext == "so" || ext == "dll" || (ext == "a" && is_aix_shared_archive(path))
-    })
-}
-
-/// Return the path to the containing submodule if available.
-pub fn submodule_path_of(builder: &Builder<'_>, path: &str) -> Option<String> {
-    let submodule_paths = builder.submodule_paths();
-    submodule_paths.iter().find_map(|submodule_path| {
-        if path.starts_with(submodule_path) { Some(submodule_path.to_string()) } else { None }
-    })
-}
-
-fn is_aix_shared_archive(path: &Path) -> bool {
-    let file = match fs::File::open(path) {
-        Ok(file) => file,
-        Err(_) => return false,
-    };
-    let reader = object::ReadCache::new(file);
-    let archive = match ArchiveFile::parse(&reader) {
-        Ok(result) => result,
-        Err(_) => return false,
-    };
-
-    archive
-        .members()
-        .filter_map(Result::ok)
-        .any(|entry| String::from_utf8_lossy(entry.name()).contains(".so"))
+pub fn is_dylib(name: &str) -> bool {
+    name.ends_with(".dylib") || name.ends_with(".so") || name.ends_with(".dll")
 }
 
 /// Returns `true` if the file name given looks like a debug info file
@@ -128,7 +67,7 @@ pub fn is_debug_info(name: &str) -> bool {
 /// Returns the corresponding relative library directory that the compiler's
 /// dylibs will be found in.
 pub fn libdir(target: TargetSelection) -> &'static str {
-    if target.is_windows() || target.contains("cygwin") { "bin" } else { "lib" }
+    if target.is_windows() { "bin" } else { "lib" }
 }
 
 /// Adds a list of lookup paths to `cmd`'s dynamic library lookup path.
@@ -139,6 +78,31 @@ pub fn add_dylib_path(path: Vec<PathBuf>, cmd: &mut BootstrapCommand) {
         list.insert(0, path);
     }
     cmd.env(dylib_path_var(), t!(env::join_paths(list)));
+}
+
+/// Adds a list of lookup paths to `cmd`'s link library lookup path.
+pub fn add_link_lib_path(path: Vec<PathBuf>, cmd: &mut BootstrapCommand) {
+    let mut list = link_lib_path();
+    for path in path {
+        list.insert(0, path);
+    }
+    cmd.env(link_lib_path_var(), t!(env::join_paths(list)));
+}
+
+/// Returns the environment variable which the link library lookup path
+/// resides in for this platform.
+fn link_lib_path_var() -> &'static str {
+    if cfg!(target_env = "msvc") { "LIB" } else { "LIBRARY_PATH" }
+}
+
+/// Parses the `link_lib_path_var()` environment variable, returning a list of
+/// paths that are members of this lookup path.
+fn link_lib_path() -> Vec<PathBuf> {
+    let var = match env::var_os(link_lib_path_var()) {
+        Some(v) => v,
+        None => return vec![],
+    };
+    env::split_paths(&var).collect()
 }
 
 pub struct TimeIt(bool, Instant);
@@ -155,6 +119,14 @@ impl Drop for TimeIt {
             println!("\tfinished in {}.{:03} seconds", time.as_secs(), time.subsec_millis());
         }
     }
+}
+
+/// Used for download caching
+pub(crate) fn program_out_of_date(stamp: &Path, key: &str) -> bool {
+    if !stamp.exists() {
+        return true;
+    }
+    t!(fs::read_to_string(stamp)) != key
 }
 
 /// Symlinks two directories, using junctions on Windows and normal symlinks on
@@ -174,20 +146,18 @@ pub fn symlink_dir(config: &Config, original: &Path, link: &Path) -> io::Result<
 
     #[cfg(windows)]
     fn symlink_dir_inner(target: &Path, junction: &Path) -> io::Result<()> {
-        junction::create(target, junction)
+        junction::create(&target, &junction)
     }
-}
-
-/// Return the host target on which we are currently running.
-pub fn get_host_target() -> TargetSelection {
-    TargetSelection::from_user(env!("BUILD_TRIPLE"))
 }
 
 /// Rename a file if from and to are in the same filesystem or
 /// copy and remove the file otherwise
 pub fn move_file<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> io::Result<()> {
     match fs::rename(&from, &to) {
-        Err(e) if e.kind() == io::ErrorKind::CrossesDevices => {
+        // FIXME: Once `ErrorKind::CrossesDevices` is stabilized use
+        // if e.kind() == io::ErrorKind::CrossesDevices {
+        #[cfg(unix)]
+        Err(e) if e.raw_os_error() == Some(libc::EXDEV) => {
             std::fs::copy(&from, &to)?;
             std::fs::remove_file(&from)
         }
@@ -273,6 +243,24 @@ pub fn is_valid_test_suite_arg<'a, P: AsRef<Path>>(
     }
 }
 
+// FIXME: get rid of this function
+pub fn check_run(cmd: &mut BootstrapCommand, print_cmd_on_fail: bool) -> bool {
+    let status = match cmd.as_command_mut().status() {
+        Ok(status) => status,
+        Err(e) => {
+            println!("failed to execute command: {cmd:?}\nERROR: {e}");
+            return false;
+        }
+    };
+    if !status.success() && print_cmd_on_fail {
+        println!(
+            "\n\ncommand did not execute successfully: {cmd:?}\n\
+             expected success, got: {status}\n\n"
+        );
+    }
+    status.success()
+}
+
 pub fn make(host: &str) -> PathBuf {
     if host.contains("dragonfly")
         || host.contains("freebsd")
@@ -283,6 +271,22 @@ pub fn make(host: &str) -> PathBuf {
     } else {
         PathBuf::from("make")
     }
+}
+
+#[track_caller]
+pub fn output(cmd: &mut Command) -> String {
+    let output = match cmd.stderr(Stdio::inherit()).output() {
+        Ok(status) => status,
+        Err(e) => fail(&format!("failed to execute command: {cmd:?}\nERROR: {e}")),
+    };
+    if !output.status.success() {
+        panic!(
+            "command did not execute successfully: {:?}\n\
+             expected success, got: {}",
+            cmd, output.status
+        );
+    }
+    String::from_utf8(output.stdout).unwrap()
 }
 
 /// Returns the last-modified time for `path`, or zero if it doesn't exist.
@@ -357,19 +361,15 @@ pub fn get_clang_cl_resource_dir(builder: &Builder<'_>, clang_cl_path: &str) -> 
 /// Returns a flag that configures LLD to use only a single thread.
 /// If we use an external LLD, we need to find out which version is it to know which flag should we
 /// pass to it (LLD older than version 10 had a different flag).
-fn lld_flag_no_threads(
-    builder: &Builder<'_>,
-    bootstrap_override_lld: BootstrapOverrideLld,
-    is_windows: bool,
-) -> &'static str {
+fn lld_flag_no_threads(builder: &Builder<'_>, lld_mode: LldMode, is_windows: bool) -> &'static str {
     static LLD_NO_THREADS: OnceLock<(&'static str, &'static str)> = OnceLock::new();
 
     let new_flags = ("/threads:1", "--threads=1");
     let old_flags = ("/no-threads", "--no-threads");
 
     let (windows_flag, other_flag) = LLD_NO_THREADS.get_or_init(|| {
-        let newer_version = match bootstrap_override_lld {
-            BootstrapOverrideLld::External => {
+        let newer_version = match lld_mode {
+            LldMode::External => {
                 let mut cmd = command("lld");
                 cmd.arg("-flavor").arg("ld").arg("--version");
                 let out = cmd.run_capture_stdout(builder).stdout();
@@ -386,7 +386,7 @@ fn lld_flag_no_threads(
 }
 
 pub fn dir_is_empty(dir: &Path) -> bool {
-    t!(std::fs::read_dir(dir), dir).next().is_none()
+    t!(std::fs::read_dir(dir)).next().is_none()
 }
 
 /// Extract the beta revision from the full version string.
@@ -395,7 +395,9 @@ pub fn dir_is_empty(dir: &Path) -> bool {
 /// the "y" part from the string.
 pub fn extract_beta_rev(version: &str) -> Option<String> {
     let parts = version.splitn(2, "-beta.").collect::<Vec<_>>();
-    parts.get(1).and_then(|s| s.find(' ').map(|p| s[..p].to_string()))
+    let count = parts.get(1).and_then(|s| s.find(' ').map(|p| s[..p].to_string()));
+
+    count
 }
 
 pub enum LldThreads {
@@ -426,29 +428,13 @@ pub fn linker_flags(
     lld_threads: LldThreads,
 ) -> Vec<String> {
     let mut args = vec![];
-    if !builder.is_lld_direct_linker(target) && builder.config.bootstrap_override_lld.is_used() {
-        match builder.config.bootstrap_override_lld {
-            BootstrapOverrideLld::External => {
-                args.push("-Clinker-features=+lld".to_string());
-                args.push("-Clink-self-contained=-linker".to_string());
-                args.push("-Zunstable-options".to_string());
-            }
-            BootstrapOverrideLld::SelfContained => {
-                args.push("-Clinker-features=+lld".to_string());
-                args.push("-Clink-self-contained=+linker".to_string());
-                args.push("-Zunstable-options".to_string());
-            }
-            BootstrapOverrideLld::None => unreachable!(),
-        };
+    if !builder.is_lld_direct_linker(target) && builder.config.lld_mode.is_used() {
+        args.push(String::from("-Clink-arg=-fuse-ld=lld"));
 
         if matches!(lld_threads, LldThreads::No) {
             args.push(format!(
                 "-Clink-arg=-Wl,{}",
-                lld_flag_no_threads(
-                    builder,
-                    builder.config.bootstrap_override_lld,
-                    target.is_windows()
-                )
+                lld_flag_no_threads(builder, builder.config.lld_mode, target.is_windows())
             ));
         }
     }
@@ -486,7 +472,7 @@ where
     use std::fmt::Write;
 
     input.as_ref().iter().fold(String::with_capacity(input.as_ref().len() * 2), |mut acc, &byte| {
-        write!(&mut acc, "{byte:02x}").expect("Failed to write byte to the hex String.");
+        write!(&mut acc, "{:02x}", byte).expect("Failed to write byte to the hex String.");
         acc
     })
 }
@@ -519,8 +505,6 @@ pub fn check_cfg_arg(name: &str, values: Option<&[&str]>) -> String {
 #[track_caller]
 pub fn git(source_dir: Option<&Path>) -> BootstrapCommand {
     let mut git = command("git");
-    // git commands are almost always read-only, so cache them by default
-    git.cached();
 
     if let Some(source_dir) = source_dir {
         git.current_dir(source_dir);
@@ -537,6 +521,28 @@ pub fn git(source_dir: Option<&Path>) -> BootstrapCommand {
     }
 
     git
+}
+
+/// Returns the closest commit available from upstream for the given `author` and `target_paths`.
+///
+/// If it fails to find the commit from upstream using `git merge-base`, fallbacks to HEAD.
+pub fn get_closest_merge_base_commit(
+    source_dir: Option<&Path>,
+    config: &GitConfig<'_>,
+    author: &str,
+    target_paths: &[PathBuf],
+) -> Result<String, String> {
+    let mut git = git(source_dir);
+
+    let merge_base = get_git_merge_base(config, source_dir).unwrap_or_else(|_| "HEAD".into());
+
+    git.args(["rev-list", &format!("--author={author}"), "-n1", "--first-parent", &merge_base]);
+
+    if !target_paths.is_empty() {
+        git.arg("--").args(target_paths);
+    }
+
+    Ok(output_result(git.as_command_mut())?.trim().to_owned())
 }
 
 /// Sets the file times for a given file at `path`.

@@ -13,7 +13,7 @@ pub(super) fn opt_generic_param_list(p: &mut Parser<'_>) {
 
 // test_err generic_param_list_recover
 // fn f<T: Clone,, U:, V>() {}
-pub(super) fn generic_param_list(p: &mut Parser<'_>) {
+fn generic_param_list(p: &mut Parser<'_>) {
     assert!(p.at(T![<]));
     let m = p.start();
     delimited(
@@ -56,7 +56,7 @@ fn generic_param(p: &mut Parser<'_>, m: Marker) -> bool {
 fn lifetime_param(p: &mut Parser<'_>, m: Marker) {
     assert!(p.at(LIFETIME_IDENT));
     lifetime(p);
-    if p.eat(T![:]) {
+    if p.at(T![:]) {
         lifetime_bounds(p);
     }
     m.complete(p, LIFETIME_PARAM);
@@ -106,23 +106,18 @@ fn const_param(p: &mut Parser<'_>, m: Marker) {
 }
 
 fn lifetime_bounds(p: &mut Parser<'_>) {
-    let marker = p.start();
-    while {
-        if !matches!(p.current(), LIFETIME_IDENT | T![>] | T![,]) {
-            p.error("expected lifetime");
-        }
-
-        type_bound(p)
-    } {
+    assert!(p.at(T![:]));
+    p.bump(T![:]);
+    while p.at(LIFETIME_IDENT) {
+        lifetime(p);
         if !p.eat(T![+]) {
             break;
         }
     }
-    marker.complete(p, TYPE_BOUND_LIST);
 }
 
 // test type_param_bounds
-// struct S<T: 'a + ?Sized + (Copy) + [const] Drop>;
+// struct S<T: 'a + ?Sized + (Copy) + ~const Drop>;
 pub(super) fn bounds(p: &mut Parser<'_>) {
     p.expect(T![:]);
     bounds_without_colon(p);
@@ -147,43 +142,41 @@ fn type_bound(p: &mut Parser<'_>) -> bool {
     let has_paren = p.eat(T!['(']);
     match p.current() {
         LIFETIME_IDENT => lifetime(p),
-        // test for_binder_bound
-        // fn foo<T: for<'a> [const] async Trait>() {}
-        T![for] => {
-            types::for_binder(p);
-            if path_type_bound(p).is_err() {
-                m.abandon(p);
-                return false;
-            }
-        }
+        T![for] => types::for_type(p, false),
         // test precise_capturing
-        // fn captures<'a: 'a, 'b: 'b, T>() -> impl Sized + use<'b, T, Self> {}
-
-        // test_err precise_capturing_invalid
-        // type T = impl use<self, 1>;
-        T![use] if p.nth_at(1, T![<]) => {
+        // fn captures<'a: 'a, 'b: 'b, T>() -> impl Sized + use<'b, T> {}
+        T![use] => {
             p.bump_any();
-            let m = p.start();
-            delimited(
-                p,
-                T![<],
-                T![>],
-                T![,],
-                || "expected identifier or lifetime".into(),
-                TokenSet::new(&[T![Self], IDENT, LIFETIME_IDENT]),
-                |p| {
-                    if p.at(LIFETIME_IDENT) {
-                        lifetime(p);
-                    } else {
-                        name_ref_or_upper_self(p);
-                    }
-                    true
-                },
-            );
-            m.complete(p, USE_BOUND_GENERIC_ARGS);
+            generic_param_list(p)
         }
-        _ => {
-            if path_type_bound(p).is_err() {
+        T![?] if p.nth_at(1, T![for]) => {
+            // test question_for_type_trait_bound
+            // fn f<T>() where T: ?for<> Sized {}
+            p.bump_any();
+            types::for_type(p, false)
+        }
+        current => {
+            match current {
+                T![?] => p.bump_any(),
+                T![~] => {
+                    p.bump_any();
+                    p.expect(T![const]);
+                }
+                // test const_trait_bound
+                // const fn foo(_: impl const Trait) {}
+                T![const] => {
+                    p.bump_any();
+                }
+                // test async_trait_bound
+                // fn async_foo(_: impl async Fn(&i32)) {}
+                T![async] => {
+                    p.bump_any();
+                }
+                _ => (),
+            }
+            if paths::is_use_path_start(p) {
+                types::path_type_bounds(p, false);
+            } else {
                 m.abandon(p);
                 return false;
             }
@@ -195,48 +188,6 @@ fn type_bound(p: &mut Parser<'_>) -> bool {
     m.complete(p, TYPE_BOUND);
 
     true
-}
-
-fn path_type_bound(p: &mut Parser<'_>) -> Result<(), ()> {
-    if p.eat(T![~]) {
-        p.expect(T![const]);
-    } else if p.eat(T!['[']) {
-        // test maybe_const_trait_bound
-        // const fn foo(_: impl [const] Trait) {}
-        p.expect(T![const]);
-        p.expect(T![']']);
-    } else {
-        // test const_trait_bound
-        // const fn foo(_: impl const Trait) {}
-        p.eat(T![const]);
-    }
-    // test async_trait_bound
-    // fn async_foo(_: impl async Fn(&i32)) {}
-    p.eat(T![async]);
-    // test question_for_type_trait_bound
-    // fn f<T>() where T: for<> ?Sized {}
-    p.eat(T![?]);
-
-    // test_err invalid_question_for_type_trait_bound
-    // fn f<T>() where T: ?for<> Sized {}
-
-    if paths::is_use_path_start(p) {
-        types::path_type_bounds(p, false);
-        // test_err type_bounds_macro_call_recovery
-        // fn foo<T: T![], T: T!, T: T!{}>() -> Box<T! + T!{}> {}
-        if p.at(T![!]) {
-            let m = p.start();
-            p.bump(T![!]);
-            p.error("unexpected `!` in type path, macro calls are not allowed here");
-            if p.at_ts(TokenSet::new(&[T!['{'], T!['['], T!['(']])) {
-                items::token_tree(p);
-            }
-            m.complete(p, ERROR);
-        }
-        Ok(())
-    } else {
-        Err(())
-    }
 }
 
 // test where_clause

@@ -144,14 +144,14 @@ impl<'tcx> LateLintPass<'tcx> for DropForgetUseless {
             && let Some(fn_name) = cx.tcx.get_diagnostic_name(def_id)
         {
             let arg_ty = cx.typeck_results().expr_ty(arg);
-            let is_copy = cx.type_is_copy_modulo_regions(arg_ty);
+            let is_copy = arg_ty.is_copy_modulo_regions(cx.tcx, cx.param_env);
             let drop_is_single_call_in_arm = is_single_call_in_arm(cx, arg, expr);
             let let_underscore_ignore_sugg = || {
-                if let Some((_, node)) = cx.tcx.hir_parent_iter(expr.hir_id).nth(0)
+                if let Some((_, node)) = cx.tcx.hir().parent_iter(expr.hir_id).nth(0)
                     && let Node::Stmt(stmt) = node
                     && let StmtKind::Semi(e) = stmt.kind
                     && e.hir_id == expr.hir_id
-                    && let Some(arg_span) = arg.span.find_ancestor_inside_same_ctxt(expr.span)
+                    && let Some(arg_span) = arg.span.find_ancestor_inside(expr.span)
                 {
                     UseLetUnderscoreIgnoreSuggestion::Suggestion {
                         start_span: expr.span.shrink_to_lo().until(arg_span),

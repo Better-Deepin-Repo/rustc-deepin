@@ -1,7 +1,6 @@
 //@ no-prefer-dynamic
 //@ revisions:rpass1 rpass2
 //@ compile-flags: -C lto
-//@ ignore-backends: gcc
 
 mod x {
     pub struct X {

@@ -1,5 +1,6 @@
+use crate::sync::atomic::AtomicU32;
 use crate::sync::atomic::Ordering::{Acquire, Relaxed, Release};
-use crate::sys::futex::{Futex, Primitive, futex_wait, futex_wake, futex_wake_all};
+use crate::sys::futex::{futex_wait, futex_wake, futex_wake_all};
 
 pub struct RwLock {
     // The state consists of a 30-bit reader counter, a 'readers waiting' flag, and a 'writers waiting' flag.
@@ -9,42 +10,41 @@ pub struct RwLock {
     //   0x3FFF_FFFF: Write locked
     // Bit 30: Readers are waiting on this futex.
     // Bit 31: Writers are waiting on the writer_notify futex.
-    state: Futex,
+    state: AtomicU32,
     // The 'condition variable' to notify writers through.
     // Incremented on every signal.
-    writer_notify: Futex,
+    writer_notify: AtomicU32,
 }
 
-const READ_LOCKED: Primitive = 1;
-const MASK: Primitive = (1 << 30) - 1;
-const WRITE_LOCKED: Primitive = MASK;
-const DOWNGRADE: Primitive = READ_LOCKED.wrapping_sub(WRITE_LOCKED); // READ_LOCKED - WRITE_LOCKED
-const MAX_READERS: Primitive = MASK - 1;
-const READERS_WAITING: Primitive = 1 << 30;
-const WRITERS_WAITING: Primitive = 1 << 31;
+const READ_LOCKED: u32 = 1;
+const MASK: u32 = (1 << 30) - 1;
+const WRITE_LOCKED: u32 = MASK;
+const MAX_READERS: u32 = MASK - 1;
+const READERS_WAITING: u32 = 1 << 30;
+const WRITERS_WAITING: u32 = 1 << 31;
 
 #[inline]
-fn is_unlocked(state: Primitive) -> bool {
+fn is_unlocked(state: u32) -> bool {
     state & MASK == 0
 }
 
 #[inline]
-fn is_write_locked(state: Primitive) -> bool {
+fn is_write_locked(state: u32) -> bool {
     state & MASK == WRITE_LOCKED
 }
 
 #[inline]
-fn has_readers_waiting(state: Primitive) -> bool {
+fn has_readers_waiting(state: u32) -> bool {
     state & READERS_WAITING != 0
 }
 
 #[inline]
-fn has_writers_waiting(state: Primitive) -> bool {
+fn has_writers_waiting(state: u32) -> bool {
     state & WRITERS_WAITING != 0
 }
 
 #[inline]
-fn is_read_lockable(state: Primitive) -> bool {
+fn is_read_lockable(state: u32) -> bool {
     // This also returns false if the counter could overflow if we tried to read lock it.
     //
     // We don't allow read-locking if there's readers waiting, even if the lock is unlocked
@@ -55,38 +55,20 @@ fn is_read_lockable(state: Primitive) -> bool {
 }
 
 #[inline]
-fn is_read_lockable_after_wakeup(state: Primitive) -> bool {
-    // We make a special case for checking if we can read-lock _after_ a reader thread that went to
-    // sleep has been woken up by a call to `downgrade`.
-    //
-    // `downgrade` will wake up all readers and place the lock in read mode. Thus, there should be
-    // no readers waiting and the lock should be read-locked (not write-locked or unlocked).
-    //
-    // Note that we do not check if any writers are waiting. This is because a call to `downgrade`
-    // implies that the caller wants other readers to read the value protected by the lock. If we
-    // did not allow readers to acquire the lock before writers after a `downgrade`, then only the
-    // original writer would be able to read the value, thus defeating the purpose of `downgrade`.
-    state & MASK < MAX_READERS
-        && !has_readers_waiting(state)
-        && !is_write_locked(state)
-        && !is_unlocked(state)
-}
-
-#[inline]
-fn has_reached_max_readers(state: Primitive) -> bool {
+fn has_reached_max_readers(state: u32) -> bool {
     state & MASK == MAX_READERS
 }
 
 impl RwLock {
     #[inline]
     pub const fn new() -> Self {
-        Self { state: Futex::new(0), writer_notify: Futex::new(0) }
+        Self { state: AtomicU32::new(0), writer_notify: AtomicU32::new(0) }
     }
 
     #[inline]
     pub fn try_read(&self) -> bool {
         self.state
-            .try_update(Acquire, Relaxed, |s| is_read_lockable(s).then(|| s + READ_LOCKED))
+            .fetch_update(Acquire, Relaxed, |s| is_read_lockable(s).then(|| s + READ_LOCKED))
             .is_ok()
     }
 
@@ -103,9 +85,6 @@ impl RwLock {
         }
     }
 
-    /// # Safety
-    ///
-    /// The `RwLock` must be read-locked (N readers) in order to call this.
     #[inline]
     pub unsafe fn read_unlock(&self) {
         let state = self.state.fetch_sub(READ_LOCKED, Release) - READ_LOCKED;
@@ -122,13 +101,11 @@ impl RwLock {
 
     #[cold]
     fn read_contended(&self) {
-        let mut has_slept = false;
         let mut state = self.spin_read();
 
         loop {
-            // If we have just been woken up, first check for a `downgrade` call.
-            // Otherwise, if we can read-lock it, lock it.
-            if (has_slept && is_read_lockable_after_wakeup(state)) || is_read_lockable(state) {
+            // If we can lock it, lock it.
+            if is_read_lockable(state) {
                 match self.state.compare_exchange_weak(state, state + READ_LOCKED, Acquire, Relaxed)
                 {
                     Ok(_) => return, // Locked!
@@ -140,7 +117,9 @@ impl RwLock {
             }
 
             // Check for overflow.
-            assert!(!has_reached_max_readers(state), "too many active read locks on RwLock");
+            if has_reached_max_readers(state) {
+                panic!("too many active read locks on RwLock");
+            }
 
             // Make sure the readers waiting bit is set before we go to sleep.
             if !has_readers_waiting(state) {
@@ -154,7 +133,6 @@ impl RwLock {
 
             // Wait for the state to change.
             futex_wait(&self.state, state | READERS_WAITING, None);
-            has_slept = true;
 
             // Spin again after waking up.
             state = self.spin_read();
@@ -164,7 +142,7 @@ impl RwLock {
     #[inline]
     pub fn try_write(&self) -> bool {
         self.state
-            .try_update(Acquire, Relaxed, |s| is_unlocked(s).then(|| s + WRITE_LOCKED))
+            .fetch_update(Acquire, Relaxed, |s| is_unlocked(s).then(|| s + WRITE_LOCKED))
             .is_ok()
     }
 
@@ -175,9 +153,6 @@ impl RwLock {
         }
     }
 
-    /// # Safety
-    ///
-    /// The `RwLock` must be write-locked (single writer) in order to call this.
     #[inline]
     pub unsafe fn write_unlock(&self) {
         let state = self.state.fetch_sub(WRITE_LOCKED, Release) - WRITE_LOCKED;
@@ -186,22 +161,6 @@ impl RwLock {
 
         if has_writers_waiting(state) || has_readers_waiting(state) {
             self.wake_writer_or_readers(state);
-        }
-    }
-
-    /// # Safety
-    ///
-    /// The `RwLock` must be write-locked (single writer) in order to call this.
-    #[inline]
-    pub unsafe fn downgrade(&self) {
-        // Removes all write bits and adds a single read bit.
-        let state = self.state.fetch_add(DOWNGRADE, Release);
-        debug_assert!(is_write_locked(state), "RwLock must be write locked to call `downgrade`");
-
-        if has_readers_waiting(state) {
-            // Since we had the exclusive lock, nobody else can unset this bit.
-            self.state.fetch_sub(READERS_WAITING, Relaxed);
-            futex_wake_all(&self.state);
         }
     }
 
@@ -266,7 +225,7 @@ impl RwLock {
     /// If both are waiting, this will wake up only one writer, but will fall
     /// back to waking up readers if there was no writer to wake up.
     #[cold]
-    fn wake_writer_or_readers(&self, mut state: Primitive) {
+    fn wake_writer_or_readers(&self, mut state: u32) {
         assert!(is_unlocked(state));
 
         // The readers waiting bit might be turned on at any point now,
@@ -325,13 +284,13 @@ impl RwLock {
         futex_wake(&self.writer_notify)
         // Note that FreeBSD and DragonFlyBSD don't tell us whether they woke
         // up any threads or not, and always return `false` here. That still
-        // results in correct behavior: it just means readers get woken up as
+        // results in correct behaviour: it just means readers get woken up as
         // well in case both readers and writers were waiting.
     }
 
     /// Spin for a while, but stop directly at the given condition.
     #[inline]
-    fn spin_until(&self, f: impl Fn(Primitive) -> bool) -> Primitive {
+    fn spin_until(&self, f: impl Fn(u32) -> bool) -> u32 {
         let mut spin = 100; // Chosen by fair dice roll.
         loop {
             let state = self.state.load(Relaxed);
@@ -344,13 +303,13 @@ impl RwLock {
     }
 
     #[inline]
-    fn spin_write(&self) -> Primitive {
+    fn spin_write(&self) -> u32 {
         // Stop spinning when it's unlocked or when there's waiting writers, to keep things somewhat fair.
         self.spin_until(|state| is_unlocked(state) || has_writers_waiting(state))
     }
 
     #[inline]
-    fn spin_read(&self) -> Primitive {
+    fn spin_read(&self) -> u32 {
         // Stop spinning when it's unlocked or read locked, or when there's waiting threads.
         self.spin_until(|state| {
             !is_write_locked(state) || has_readers_waiting(state) || has_writers_waiting(state)

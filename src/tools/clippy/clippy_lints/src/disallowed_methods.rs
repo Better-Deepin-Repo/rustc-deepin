@@ -1,7 +1,6 @@
 use clippy_config::Conf;
-use clippy_config::types::{DisallowedPath, create_disallowed_map};
+use clippy_utils::create_disallowed_map;
 use clippy_utils::diagnostics::span_lint_and_then;
-use clippy_utils::paths::PathNS;
 use rustc_hir::def::{CtorKind, DefKind, Res};
 use rustc_hir::def_id::DefIdMap;
 use rustc_hir::{Expr, ExprKind};
@@ -32,15 +31,11 @@ declare_clippy_lint! {
     ///     # When using an inline table, can add a `reason` for why the method
     ///     # is disallowed.
     ///     { path = "std::vec::Vec::leak", reason = "no leaking memory" },
-    ///     # Can also add a `replacement` that will be offered as a suggestion.
-    ///     { path = "std::sync::Mutex::new", reason = "prefer faster & simpler non-poisonable mutex", replacement = "parking_lot::Mutex::new" },
-    ///     # This would normally error if the path is incorrect, but with `allow-invalid` = `true`,
-    ///     # it will be silently ignored
-    ///     { path = "std::fs::InvalidPath", reason = "use alternative instead", allow-invalid = true },
     /// ]
     /// ```
     ///
     /// ```rust,ignore
+    /// // Example code where clippy issues a warning
     /// let xs = vec![1, 2, 3, 4];
     /// xs.leak(); // Vec::leak is disallowed in the config.
     /// // The diagnostic contains the message "no leaking memory".
@@ -52,6 +47,7 @@ declare_clippy_lint! {
     ///
     /// Use instead:
     /// ```rust,ignore
+    /// // Example code which does not raise clippy warning
     /// let mut xs = Vec::new(); // Vec::new is _not_ disallowed in the config.
     /// xs.push(123); // Vec::push is _not_ disallowed in the config.
     /// ```
@@ -62,25 +58,14 @@ declare_clippy_lint! {
 }
 
 pub struct DisallowedMethods {
-    disallowed: DefIdMap<(&'static str, &'static DisallowedPath)>,
+    disallowed: DefIdMap<(&'static str, Option<&'static str>)>,
 }
 
 impl DisallowedMethods {
     pub fn new(tcx: TyCtxt<'_>, conf: &'static Conf) -> Self {
-        let (disallowed, _) = create_disallowed_map(
-            tcx,
-            &conf.disallowed_methods,
-            PathNS::Value,
-            |def_kind| {
-                matches!(
-                    def_kind,
-                    DefKind::Fn | DefKind::Ctor(_, CtorKind::Fn) | DefKind::AssocFn
-                )
-            },
-            "function",
-            false,
-        );
-        Self { disallowed }
+        Self {
+            disallowed: create_disallowed_map(tcx, &conf.disallowed_methods),
+        }
     }
 }
 
@@ -88,23 +73,29 @@ impl_lint_pass!(DisallowedMethods => [DISALLOWED_METHODS]);
 
 impl<'tcx> LateLintPass<'tcx> for DisallowedMethods {
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
-        if expr.span.desugaring_kind().is_some() {
-            return;
-        }
         let (id, span) = match &expr.kind {
-            ExprKind::Path(path) if let Res::Def(_, id) = cx.qpath_res(path, expr.hir_id) => (id, expr.span),
+            ExprKind::Path(path)
+                if let Res::Def(DefKind::Fn | DefKind::Ctor(_, CtorKind::Fn) | DefKind::AssocFn, id) =
+                    cx.qpath_res(path, expr.hir_id) =>
+            {
+                (id, expr.span)
+            },
             ExprKind::MethodCall(name, ..) if let Some(id) = cx.typeck_results().type_dependent_def_id(expr.hir_id) => {
                 (id, name.ident.span)
             },
             _ => return,
         };
-        if let Some(&(path, disallowed_path)) = self.disallowed.get(&id) {
+        if let Some(&(path, reason)) = self.disallowed.get(&id) {
             span_lint_and_then(
                 cx,
                 DISALLOWED_METHODS,
                 span,
                 format!("use of a disallowed method `{path}`"),
-                disallowed_path.diag_amendment(span),
+                |diag| {
+                    if let Some(reason) = reason {
+                        diag.note(reason);
+                    }
+                },
             );
         }
     }

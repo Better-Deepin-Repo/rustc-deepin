@@ -1,6 +1,6 @@
 //! -Zadvanced-env tests
 
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::{paths, project, registry::Package};
 
 #[cargo_test]

@@ -1,6 +1,6 @@
 #![feature(no_core, unboxed_closures)]
 #![no_core]
-#![allow(dead_code, unnecessary_transmutes)]
+#![allow(dead_code)]
 
 extern crate mini_core;
 
@@ -11,7 +11,11 @@ fn abc(a: u8) -> u8 {
 }
 
 fn bcd(b: bool, a: u8) -> u8 {
-    if b { a * 2 } else { a * 3 }
+    if b {
+        a * 2
+    } else {
+        a * 3
+    }
 }
 
 fn call() {

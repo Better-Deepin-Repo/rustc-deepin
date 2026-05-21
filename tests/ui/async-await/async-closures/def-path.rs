@@ -1,6 +1,8 @@
 //@ compile-flags: -Zverbose-internals
 //@ edition:2021
 
+#![feature(async_closure)]
+
 fn main() {
     let x = async || {};
     //~^ NOTE the expected `async` closure body

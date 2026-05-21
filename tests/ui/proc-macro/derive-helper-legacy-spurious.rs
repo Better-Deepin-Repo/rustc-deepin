@@ -1,4 +1,4 @@
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 
 #![dummy] //~ ERROR cannot find attribute `dummy` in this scope
 
@@ -6,7 +6,7 @@
 extern crate test_macros;
 
 #[derive(Empty)]
-#[empty_helper]
+#[empty_helper] //~ ERROR cannot find attribute `empty_helper` in this scope
 struct Foo {}
 
 fn main() {}

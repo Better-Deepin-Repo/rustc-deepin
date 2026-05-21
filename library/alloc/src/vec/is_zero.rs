@@ -1,4 +1,3 @@
-use core::mem::SizedTypeProperties;
 use core::num::{NonZero, Saturating, Wrapping};
 
 use crate::boxed::Box;
@@ -21,8 +20,6 @@ macro_rules! impl_is_zero {
     };
 }
 
-impl_is_zero!((), |_: ()| true); // It is needed to impl for arrays and tuples of ().
-
 impl_is_zero!(i8, |x| x == 0); // It is needed to impl for arrays and tuples of i8.
 impl_is_zero!(i16, |x| x == 0);
 impl_is_zero!(i32, |x| x == 0);
@@ -43,41 +40,31 @@ impl_is_zero!(char, |x| x == '\0');
 impl_is_zero!(f32, |x: f32| x.to_bits() == 0);
 impl_is_zero!(f64, |x: f64| x.to_bits() == 0);
 
-// `IsZero` cannot be soundly implemented for pointers because of provenance
-// (see #135338).
-
-unsafe impl<T, const N: usize> IsZero for [T; N] {
+unsafe impl<T> IsZero for *const T {
     #[inline]
-    default fn is_zero(&self) -> bool {
-        // If the array is of length zero,
-        // then it doesn't actually contain any `T`s,
-        // so `T::clone` doesn't need to be called,
-        // and we can "zero-initialize" all zero bytes of the array.
-        N == 0
+    fn is_zero(&self) -> bool {
+        (*self).is_null()
+    }
+}
+
+unsafe impl<T> IsZero for *mut T {
+    #[inline]
+    fn is_zero(&self) -> bool {
+        (*self).is_null()
     }
 }
 
 unsafe impl<T: IsZero, const N: usize> IsZero for [T; N] {
     #[inline]
     fn is_zero(&self) -> bool {
-        if T::IS_ZST {
-            // If T is a ZST, then there is at most one possible value of `T`,
-            // so we only need to check one element for zeroness.
-            // We can't unconditionally return `true` here, since, e.g.
-            // `T = [NonTrivialCloneZst; 5]` is a ZST that implements `IsZero`
-            // due to the generic array impl, but `T::is_zero` returns `false`
-            // since the length is not 0.
-            self.get(0).is_none_or(IsZero::is_zero)
-        } else {
-            // Because this is generated as a runtime check, it's not obvious that
-            // it's worth doing if the array is really long. The threshold here
-            // is largely arbitrary, but was picked because as of 2022-07-01 LLVM
-            // fails to const-fold the check in `vec![[1; 32]; n]`
-            // See https://github.com/rust-lang/rust/pull/97581#issuecomment-1166628022
-            // Feel free to tweak if you have better evidence.
+        // Because this is generated as a runtime check, it's not obvious that
+        // it's worth doing if the array is really long. The threshold here
+        // is largely arbitrary, but was picked because as of 2022-07-01 LLVM
+        // fails to const-fold the check in `vec![[1; 32]; n]`
+        // See https://github.com/rust-lang/rust/pull/97581#issuecomment-1166628022
+        // Feel free to tweak if you have better evidence.
 
-            N <= 16 && self.iter().all(IsZero::is_zero)
-        }
+        N <= 16 && self.iter().all(IsZero::is_zero)
     }
 }
 
@@ -85,7 +72,7 @@ unsafe impl<T: IsZero, const N: usize> IsZero for [T; N] {
 macro_rules! impl_is_zero_tuples {
     // Stopper
     () => {
-        // We already have an impl for () above.
+        // No use for implementing for empty tuple because it is ZST.
     };
     ($first_arg:ident $(,$rest:ident)*) => {
         unsafe impl <$first_arg: IsZero, $($rest: IsZero,)*> IsZero for ($first_arg, $($rest,)*){
@@ -185,7 +172,7 @@ macro_rules! impl_is_zero_option_of_bool {
             fn is_zero(&self) -> bool {
                 // SAFETY: This is *not* a stable layout guarantee, but
                 // inside `core` we're allowed to rely on the current rustc
-                // behavior that options of bools will be one byte with
+                // behaviour that options of bools will be one byte with
                 // no padding, so long as they're nested less than 254 deep.
                 let raw: u8 = unsafe { core::mem::transmute(*self) };
                 raw == 0

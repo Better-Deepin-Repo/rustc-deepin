@@ -5,9 +5,11 @@
 //@ check-pass
 #![feature(type_alias_impl_trait)]
 
-pub type Ty<'a> = impl Sized + 'a;
-#[define_opaque(Ty)]
-fn define<'a>() -> Ty<'a> {}
+mod tait {
+    pub type Ty<'a> = impl Sized + 'a;
+    fn define<'a>() -> Ty<'a> {}
+}
+use tait::Ty;
 
 // Ty<'^0>: 'static
 fn test1(_: &'static fn(Ty<'_>)) {}

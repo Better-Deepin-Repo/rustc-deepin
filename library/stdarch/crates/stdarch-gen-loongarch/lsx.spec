@@ -1723,26 +1723,6 @@ name = lsx_vfrecip_d
 asm-fmts = vd, vj
 data-types = V2DF, V2DF
 
-/// lsx_vfrecipe_s
-name = lsx_vfrecipe_s
-asm-fmts = vd, vj
-data-types = V4SF, V4SF
-
-/// lsx_vfrecipe_d
-name = lsx_vfrecipe_d
-asm-fmts = vd, vj
-data-types = V2DF, V2DF
-
-/// lsx_vfrsqrte_s
-name = lsx_vfrsqrte_s
-asm-fmts = vd, vj
-data-types = V4SF, V4SF
-
-/// lsx_vfrsqrte_d
-name = lsx_vfrsqrte_d
-asm-fmts = vd, vj
-data-types = V2DF, V2DF
-
 /// lsx_vfrint_s
 name = lsx_vfrint_s
 asm-fmts = vd, vj
@@ -3286,7 +3266,7 @@ data-types = V4SI, V2DI, V2DI
 /// lsx_vorn_v
 name = lsx_vorn_v
 asm-fmts = vd, vj, vk
-data-types = UV16QI, UV16QI, UV16QI
+data-types = V16QI, V16QI, V16QI
 
 /// lsx_vldi
 name = lsx_vldi

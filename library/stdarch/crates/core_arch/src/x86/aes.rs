@@ -5,7 +5,7 @@
 //! The reference is [Intel 64 and IA-32 Architectures Software Developer's
 //! Manual Volume 2: Instruction Set Reference, A-Z][intel64_ref].
 //!
-//! [intel64_ref]: https://www.intel.com/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-instruction-set-reference-manual-325383.pdf
+//! [intel64_ref]: http://www.intel.de/content/dam/www/public/us/en/documents/manuals/64-ia-32-architectures-software-developer-instruction-set-reference-manual-325383.pdf
 
 use crate::core_arch::x86::__m128i;
 
@@ -13,7 +13,7 @@ use crate::core_arch::x86::__m128i;
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.aesni.aesdec"]
     fn aesdec(a: __m128i, round_key: __m128i) -> __m128i;
     #[link_name = "llvm.x86.aesni.aesdeclast"]
@@ -35,8 +35,8 @@ unsafe extern "C" {
 #[target_feature(enable = "aes")]
 #[cfg_attr(test, assert_instr(aesdec))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_aesdec_si128(a: __m128i, round_key: __m128i) -> __m128i {
-    unsafe { aesdec(a, round_key) }
+pub unsafe fn _mm_aesdec_si128(a: __m128i, round_key: __m128i) -> __m128i {
+    aesdec(a, round_key)
 }
 
 /// Performs the last round of an AES decryption flow on data (state) in `a`.
@@ -46,8 +46,8 @@ pub fn _mm_aesdec_si128(a: __m128i, round_key: __m128i) -> __m128i {
 #[target_feature(enable = "aes")]
 #[cfg_attr(test, assert_instr(aesdeclast))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_aesdeclast_si128(a: __m128i, round_key: __m128i) -> __m128i {
-    unsafe { aesdeclast(a, round_key) }
+pub unsafe fn _mm_aesdeclast_si128(a: __m128i, round_key: __m128i) -> __m128i {
+    aesdeclast(a, round_key)
 }
 
 /// Performs one round of an AES encryption flow on data (state) in `a`.
@@ -57,8 +57,8 @@ pub fn _mm_aesdeclast_si128(a: __m128i, round_key: __m128i) -> __m128i {
 #[target_feature(enable = "aes")]
 #[cfg_attr(test, assert_instr(aesenc))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_aesenc_si128(a: __m128i, round_key: __m128i) -> __m128i {
-    unsafe { aesenc(a, round_key) }
+pub unsafe fn _mm_aesenc_si128(a: __m128i, round_key: __m128i) -> __m128i {
+    aesenc(a, round_key)
 }
 
 /// Performs the last round of an AES encryption flow on data (state) in `a`.
@@ -68,8 +68,8 @@ pub fn _mm_aesenc_si128(a: __m128i, round_key: __m128i) -> __m128i {
 #[target_feature(enable = "aes")]
 #[cfg_attr(test, assert_instr(aesenclast))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_aesenclast_si128(a: __m128i, round_key: __m128i) -> __m128i {
-    unsafe { aesenclast(a, round_key) }
+pub unsafe fn _mm_aesenclast_si128(a: __m128i, round_key: __m128i) -> __m128i {
+    aesenclast(a, round_key)
 }
 
 /// Performs the `InvMixColumns` transformation on `a`.
@@ -79,8 +79,8 @@ pub fn _mm_aesenclast_si128(a: __m128i, round_key: __m128i) -> __m128i {
 #[target_feature(enable = "aes")]
 #[cfg_attr(test, assert_instr(aesimc))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_aesimc_si128(a: __m128i) -> __m128i {
-    unsafe { aesimc(a) }
+pub unsafe fn _mm_aesimc_si128(a: __m128i) -> __m128i {
+    aesimc(a)
 }
 
 /// Assist in expanding the AES cipher key.
@@ -95,9 +95,9 @@ pub fn _mm_aesimc_si128(a: __m128i) -> __m128i {
 #[cfg_attr(test, assert_instr(aeskeygenassist, IMM8 = 0))]
 #[rustc_legacy_const_generics(1)]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_aeskeygenassist_si128<const IMM8: i32>(a: __m128i) -> __m128i {
+pub unsafe fn _mm_aeskeygenassist_si128<const IMM8: i32>(a: __m128i) -> __m128i {
     static_assert_uimm_bits!(IMM8, 8);
-    unsafe { aeskeygenassist(a, IMM8 as u8) }
+    aeskeygenassist(a, IMM8 as u8)
 }
 
 #[cfg(test)]
@@ -112,7 +112,7 @@ mod tests {
     use crate::core_arch::x86::*;
 
     #[simd_test(enable = "aes")]
-    fn test_mm_aesdec_si128() {
+    unsafe fn test_mm_aesdec_si128() {
         // Constants taken from https://msdn.microsoft.com/en-us/library/cc664949.aspx.
         let a = _mm_set_epi64x(0x0123456789abcdef, 0x8899aabbccddeeff);
         let k = _mm_set_epi64x(0x1133557799bbddff, 0x0022446688aaccee);
@@ -122,7 +122,7 @@ mod tests {
     }
 
     #[simd_test(enable = "aes")]
-    fn test_mm_aesdeclast_si128() {
+    unsafe fn test_mm_aesdeclast_si128() {
         // Constants taken from https://msdn.microsoft.com/en-us/library/cc714178.aspx.
         let a = _mm_set_epi64x(0x0123456789abcdef, 0x8899aabbccddeeff);
         let k = _mm_set_epi64x(0x1133557799bbddff, 0x0022446688aaccee);
@@ -132,7 +132,7 @@ mod tests {
     }
 
     #[simd_test(enable = "aes")]
-    fn test_mm_aesenc_si128() {
+    unsafe fn test_mm_aesenc_si128() {
         // Constants taken from https://msdn.microsoft.com/en-us/library/cc664810.aspx.
         let a = _mm_set_epi64x(0x0123456789abcdef, 0x8899aabbccddeeff);
         let k = _mm_set_epi64x(0x1133557799bbddff, 0x0022446688aaccee);
@@ -142,7 +142,7 @@ mod tests {
     }
 
     #[simd_test(enable = "aes")]
-    fn test_mm_aesenclast_si128() {
+    unsafe fn test_mm_aesenclast_si128() {
         // Constants taken from https://msdn.microsoft.com/en-us/library/cc714136.aspx.
         let a = _mm_set_epi64x(0x0123456789abcdef, 0x8899aabbccddeeff);
         let k = _mm_set_epi64x(0x1133557799bbddff, 0x0022446688aaccee);
@@ -152,7 +152,7 @@ mod tests {
     }
 
     #[simd_test(enable = "aes")]
-    fn test_mm_aesimc_si128() {
+    unsafe fn test_mm_aesimc_si128() {
         // Constants taken from https://msdn.microsoft.com/en-us/library/cc714195.aspx.
         let a = _mm_set_epi64x(0x0123456789abcdef, 0x8899aabbccddeeff);
         let e = _mm_set_epi64x(0xc66c82284ee40aa0, 0x6633441122770055);
@@ -161,7 +161,7 @@ mod tests {
     }
 
     #[simd_test(enable = "aes")]
-    fn test_mm_aeskeygenassist_si128() {
+    unsafe fn test_mm_aeskeygenassist_si128() {
         // Constants taken from https://msdn.microsoft.com/en-us/library/cc714138.aspx.
         let a = _mm_set_epi64x(0x0123456789abcdef, 0x8899aabbccddeeff);
         let e = _mm_set_epi64x(0x857c266b7c266e85, 0xeac4eea9c4eeacea);

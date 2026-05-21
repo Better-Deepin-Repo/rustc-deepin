@@ -1,5 +1,5 @@
 use crate::stable_hasher::{HashStable, StableHasher};
-use crate::sync::{MappedReadGuard, MappedWriteGuard, ReadGuard, RwLock, WriteGuard};
+use crate::sync::{MappedReadGuard, ReadGuard, RwLock};
 
 /// The `Steal` struct is intended to used as the value for a query.
 /// Specifically, we sometimes have queries (*cough* MIR *cough*)
@@ -40,17 +40,9 @@ impl<T> Steal<T> {
         ReadGuard::map(borrow, |opt| opt.as_ref().unwrap())
     }
 
-    /// An escape hatch for rustc drivers to mutate `Steal` caches.
-    ///
-    /// Use at your own risk. This can badly break incremental compilation
-    /// and anything else that relies on the immutability of query caches.
     #[track_caller]
-    pub fn risky_hack_borrow_mut(&self) -> MappedWriteGuard<'_, T> {
-        let borrow = self.value.borrow_mut();
-        if borrow.is_none() {
-            panic!("attempted to read from stolen value: {}", std::any::type_name::<T>());
-        }
-        WriteGuard::map(borrow, |opt| opt.as_mut().unwrap())
+    pub fn get_mut(&mut self) -> &mut T {
+        self.value.get_mut().as_mut().expect("attempt to read from stolen value")
     }
 
     #[track_caller]
@@ -65,7 +57,6 @@ impl<T> Steal<T> {
     ///
     /// This should not be used within rustc as it leaks information not tracked
     /// by the query system, breaking incremental compilation.
-    #[rustc_lint_untracked_query_information]
     pub fn is_stolen(&self) -> bool {
         self.value.borrow().is_none()
     }

@@ -72,7 +72,7 @@ raw  { \n
 
     // note: `\x7B` is `{`
     println!("\x7B}\u{8} {", 1);
-    //~^ ERROR invalid format string: expected `}` but string was terminated
+    //~^ ERROR invalid format string: expected `'}'` but string was terminated
 
     println!("\x7B}\u8 {", 1);
     //~^ ERROR incorrect unicode escape sequence
@@ -83,12 +83,4 @@ raw  { \n
 
     println!(r#"\x7B}\u8 {"#, 1);
     //~^ ERROR invalid format string: unmatched `}` found
-
-    println!("{x?}, world!",);
-    //~^ ERROR invalid format string: expected `}`, found `?`
-    println!("{x,}, world!",);
-    //~^ ERROR invalid format string: python's numeric grouping `,` is not supported in rust format strings
-
-    println!("{x=}");
-    //~^ ERROR invalid format string: python's f-string debug `=` is not supported in rust, use `dbg(x)` instead
 }

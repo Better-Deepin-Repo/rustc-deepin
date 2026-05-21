@@ -5,7 +5,7 @@
 Target for the TEEOS operating system.
 
 TEEOS is a mini os run in TrustZone, for trusted/security apps. The kernel of TEEOS is HongMeng/ChCore micro kernel. The libc for TEEOS is a part of musl.
-It's very small that there is no network, no stdin, and no file system for apps in TEEOS.
+It's very small that there is no RwLock, no network, no stdin, and no file system for apps in TEEOS.
 
 Some abbreviation:
 
@@ -20,8 +20,8 @@ TEEOS is open source in progress. [MORE about](https://gitee.com/opentrustee-gro
 
 ## Target maintainers
 
-[@petrochenkov](https://github.com/petrochenkov)
-[@Sword-Destiny](https://github.com/Sword-Destiny)
+- Petrochenkov Vadim
+- Sword-Destiny
 
 ## Setup
 We use OpenHarmony SDK for TEEOS.
@@ -54,7 +54,7 @@ exec /path/to/ohos-sdk/linux/native/llvm/bin/clang++ \
 
 ## Building the target
 
-To build a rust toolchain, create a `bootstrap.toml` with the following contents:
+To build a rust toolchain, create a `config.toml` with the following contents:
 
 ```toml
 profile = "compiler"

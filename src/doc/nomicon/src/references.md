@@ -1,6 +1,6 @@
 # References
 
-There are two kinds of references:
+There are two kinds of reference:
 
 * Shared reference: `&`
 * Mutable reference: `&mut`

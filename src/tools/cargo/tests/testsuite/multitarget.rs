@@ -1,14 +1,11 @@
 //! Tests for multiple `--target` flags to subcommands
 
-use crate::prelude::*;
-use crate::utils::cross_compile::{
-    can_run_on_host as cross_compile_can_run_on_host, disabled as cross_compile_disabled,
-};
+use cargo_test_support::prelude::*;
 use cargo_test_support::{basic_manifest, cross_compile, project, rustc_host, str};
 
 #[cargo_test]
 fn simple_build() {
-    if cross_compile_disabled() {
+    if cross_compile::disabled() {
         return;
     }
     let t1 = cross_compile::alternate();
@@ -31,7 +28,7 @@ fn simple_build() {
 
 #[cargo_test]
 fn simple_build_with_config() {
-    if cross_compile_disabled() {
+    if cross_compile::disabled() {
         return;
     }
     let t1 = cross_compile::alternate();
@@ -58,7 +55,7 @@ fn simple_build_with_config() {
 
 #[cargo_test]
 fn simple_test() {
-    if !cross_compile_can_run_on_host() {
+    if !cross_compile::can_run_on_host() {
         return;
     }
     let t1 = cross_compile::alternate();
@@ -103,7 +100,7 @@ fn simple_run() {
 
 #[cargo_test]
 fn simple_doc() {
-    if cross_compile_disabled() {
+    if cross_compile::disabled() {
         return;
     }
     let t1 = cross_compile::alternate();
@@ -126,7 +123,7 @@ fn simple_doc() {
 
 #[cargo_test]
 fn simple_doc_open() {
-    if cross_compile_disabled() {
+    if cross_compile::disabled() {
         return;
     }
     let t1 = cross_compile::alternate();
@@ -154,7 +151,7 @@ fn simple_doc_open() {
 
 #[cargo_test]
 fn simple_check() {
-    if cross_compile_disabled() {
+    if cross_compile::disabled() {
         return;
     }
     let t1 = cross_compile::alternate();
@@ -174,7 +171,7 @@ fn simple_check() {
 
 #[cargo_test]
 fn same_value_twice() {
-    if cross_compile_disabled() {
+    if cross_compile::disabled() {
         return;
     }
     let t = rustc_host();
@@ -195,7 +192,7 @@ fn same_value_twice() {
 
 #[cargo_test]
 fn same_value_twice_with_config() {
-    if cross_compile_disabled() {
+    if cross_compile::disabled() {
         return;
     }
     let t = rustc_host();
@@ -220,7 +217,7 @@ fn same_value_twice_with_config() {
 
 #[cargo_test]
 fn works_with_config_in_both_string_or_list() {
-    if cross_compile_disabled() {
+    if cross_compile::disabled() {
         return;
     }
     let t = rustc_host();

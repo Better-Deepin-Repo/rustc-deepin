@@ -1,6 +1,8 @@
 #![crate_type = "rlib"]
 
 #![allow(unused_variables)]
+#![feature(omit_gdb_pretty_printer_section)]
+#![omit_gdb_pretty_printer_section]
 
 //@ no-prefer-dynamic
 //@ compile-flags:-g

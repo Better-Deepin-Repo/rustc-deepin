@@ -5,24 +5,23 @@ error: fn_abi_of(pass_zst) = FnAbi {
                        ty: (),
                        layout: Layout {
                            size: Size(0 bytes),
-                           align: AbiAlign {
+                           align: AbiAndPrefAlign {
                                abi: $SOME_ALIGN,
+                               pref: $SOME_ALIGN,
                            },
-                           backend_repr: Memory {
+                           abi: Aggregate {
                                sized: true,
                            },
                            fields: Arbitrary {
                                offsets: [],
-                               in_memory_order: [],
+                               memory_index: [],
                            },
                            largest_niche: None,
-                           uninhabited: false,
                            variants: Single {
                                index: 0,
                            },
                            max_repr_align: None,
                            unadjusted_abi_align: $SOME_ALIGN,
-                           randomization_seed: 0,
                        },
                    },
                    mode: Ignore,
@@ -33,33 +32,30 @@ error: fn_abi_of(pass_zst) = FnAbi {
                    ty: (),
                    layout: Layout {
                        size: Size(0 bytes),
-                       align: AbiAlign {
+                       align: AbiAndPrefAlign {
                            abi: $SOME_ALIGN,
+                           pref: $SOME_ALIGN,
                        },
-                       backend_repr: Memory {
+                       abi: Aggregate {
                            sized: true,
                        },
                        fields: Arbitrary {
                            offsets: [],
-                           in_memory_order: [],
+                           memory_index: [],
                        },
                        largest_niche: None,
-                       uninhabited: false,
                        variants: Single {
                            index: 0,
                        },
                        max_repr_align: None,
                        unadjusted_abi_align: $SOME_ALIGN,
-                       randomization_seed: 0,
                    },
                },
                mode: Ignore,
            },
            c_variadic: false,
            fixed_count: 1,
-           conv: X86(
-               SysV64,
-           ),
+           conv: X86_64SysV,
            can_unwind: false,
        }
   --> $DIR/sysv64-zst.rs:8:1

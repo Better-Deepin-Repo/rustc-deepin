@@ -14,7 +14,7 @@ OUT_DIR=`pwd`/crates/core_arch cargo run -p stdarch-gen-loongarch -- crates/stda
 
 # Generate tests
 OUT_DIR=`pwd`/crates/stdarch-gen-loongarch cargo run -p stdarch-gen-loongarch -- crates/stdarch-gen-loongarch/lsx.spec test
-loongarch64-unknown-linux-gnu-gcc -static -o lsx crates/stdarch-gen-loongarch/lsx.c -mlasx -mfrecipe
+loongarch64-unknown-linux-gnu-gcc -static -o lsx crates/stdarch-gen-loongarch/lsx.c -mlasx
 qemu-loongarch64 ./lsx > crates/core_arch/src/loongarch64/lsx/tests.rs
 rustfmt crates/core_arch/src/loongarch64/lsx/tests.rs
 ```
@@ -27,7 +27,7 @@ OUT_DIR=`pwd`/crates/core_arch cargo run -p stdarch-gen-loongarch -- crates/stda
 
 # Generate tests
 OUT_DIR=`pwd`/crates/stdarch-gen-loongarch cargo run -p stdarch-gen-loongarch -- crates/stdarch-gen-loongarch/lasx.spec test
-loongarch64-unknown-linux-gnu-gcc -static -o lasx crates/stdarch-gen-loongarch/lasx.c -mlasx -mfrecipe
+loongarch64-unknown-linux-gnu-gcc -static -o lasx crates/stdarch-gen-loongarch/lasx.c -mlasx
 qemu-loongarch64 ./lasx > crates/core_arch/src/loongarch64/lasx/tests.rs
 rustfmt crates/core_arch/src/loongarch64/lasx/tests.rs
 ```

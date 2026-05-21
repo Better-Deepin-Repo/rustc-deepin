@@ -1,4 +1,4 @@
-//@ edition: 2015
+//@ compile-flags: --edition 2015
 
 pub fn main() {
     let try_result: Option<_> = try {

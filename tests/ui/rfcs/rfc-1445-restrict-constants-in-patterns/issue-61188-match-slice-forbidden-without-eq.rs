@@ -12,7 +12,8 @@ const A: &[B] = &[];
 
 pub fn main() {
     match &[][..] {
-        A => (), //~ ERROR constant of non-structural type `&[B]` in a pattern
+        A => (),
+        //~^ ERROR must implement `PartialEq`
         _ => (),
     }
 }

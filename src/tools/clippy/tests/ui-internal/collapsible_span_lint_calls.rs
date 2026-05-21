@@ -1,4 +1,4 @@
-#![deny(clippy::collapsible_span_lint_calls)]
+#![deny(clippy::internal)]
 #![allow(clippy::missing_clippy_version_attribute)]
 #![feature(rustc_private)]
 
@@ -33,23 +33,18 @@ impl EarlyLintPass for Pass {
         let predicate = true;
 
         span_lint_and_then(cx, TEST_LINT, expr.span, lint_msg, |db| {
-            //~^ collapsible_span_lint_calls
             db.span_suggestion(expr.span, help_msg, sugg.to_string(), Applicability::MachineApplicable);
         });
         span_lint_and_then(cx, TEST_LINT, expr.span, lint_msg, |db| {
-            //~^ collapsible_span_lint_calls
             db.span_help(expr.span, help_msg);
         });
         span_lint_and_then(cx, TEST_LINT, expr.span, lint_msg, |db| {
-            //~^ collapsible_span_lint_calls
             db.help(help_msg);
         });
         span_lint_and_then(cx, TEST_LINT, expr.span, lint_msg, |db| {
-            //~^ collapsible_span_lint_calls
             db.span_note(expr.span, note_msg);
         });
         span_lint_and_then(cx, TEST_LINT, expr.span, lint_msg, |db| {
-            //~^ collapsible_span_lint_calls
             db.note(note_msg);
         });
 
@@ -64,35 +59,6 @@ impl EarlyLintPass for Pass {
         // Issue #8798
         span_lint_and_then(cx, TEST_LINT, expr.span, lint_msg, |db| {
             db.help(help_msg).help(help_msg);
-        });
-
-        // Issue #15880
-        #[expect(clippy::disallowed_names)]
-        let foo = "foo";
-        span_lint_and_then(cx, TEST_LINT, expr.span, lint_msg, |db| {
-            //~^ collapsible_span_lint_calls
-            db.span_suggestion(
-                expr.span,
-                format!("try using {foo}"),
-                format!("{foo}.use"),
-                Applicability::MachineApplicable,
-            );
-        });
-        span_lint_and_then(cx, TEST_LINT, expr.span, lint_msg, |db| {
-            //~^ collapsible_span_lint_calls
-            db.span_help(expr.span, format!("try using {foo}"));
-        });
-        span_lint_and_then(cx, TEST_LINT, expr.span, lint_msg, |db| {
-            //~^ collapsible_span_lint_calls
-            db.help(format!("try using {foo}"));
-        });
-        span_lint_and_then(cx, TEST_LINT, expr.span, lint_msg, |db| {
-            //~^ collapsible_span_lint_calls
-            db.span_note(expr.span, format!("required because of {foo}"));
-        });
-        span_lint_and_then(cx, TEST_LINT, expr.span, lint_msg, |db| {
-            //~^ collapsible_span_lint_calls
-            db.note(format!("required because of {foo}"));
         });
     }
 }

@@ -1,18 +1,22 @@
 //@ run-pass
-//@ ignore-backends: gcc
+//@ ignore-emscripten FIXME(#45351)
 
-#![feature(repr_simd, core_intrinsics)]
+#![feature(repr_simd, intrinsics)]
 
-#[path = "../../auxiliary/minisimd.rs"]
-mod minisimd;
-use minisimd::*;
+#[repr(simd)]
+#[derive(Copy, Clone, Debug)]
+pub struct Char3(pub i8, pub i8, pub i8);
 
-pub type Char3 = Simd<i8, 3>;
+#[repr(simd)]
+#[derive(Copy, Clone, Debug)]
+pub struct Short3(pub i16, pub i16, pub i16);
 
-pub type Short3 = Simd<i16, 3>;
+extern "rust-intrinsic" {
+    fn simd_cast<T, U>(x: T) -> U;
+}
 
 fn main() {
-    let cast: Short3 = unsafe { std::intrinsics::simd::simd_cast(Char3::from_array([10, -3, -9])) };
+    let cast: Short3 = unsafe { simd_cast(Char3(10, -3, -9)) };
 
     println!("{:?}", cast);
 }

@@ -1,16 +1,16 @@
-//@ compile-flags:-Clink-dead-code
+//@ compile-flags:-Zprint-mono-items=eager -Zpolymorphize=on
 
-#![crate_type = "lib"]
+#![feature(start)]
 
-static FN: fn() = foo::<i32>;
+pub static FN: fn() = foo::<i32>;
 
-fn foo<T>() {}
+pub fn foo<T>() {}
 
-//~ MONO_ITEM fn foo::<i32>
+//~ MONO_ITEM fn foo::<T>
 //~ MONO_ITEM static FN
 
 //~ MONO_ITEM fn start
-#[no_mangle]
-pub fn start(_: isize, _: *const *const u8) -> isize {
+#[start]
+fn start(_: isize, _: *const *const u8) -> isize {
     0
 }

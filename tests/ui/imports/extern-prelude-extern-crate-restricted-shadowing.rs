@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ aux-build:two_macros.rs
 
 macro_rules! define_vec {

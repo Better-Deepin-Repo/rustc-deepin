@@ -7,7 +7,6 @@ extern crate proc_macros;
 use proc_macros::{external, inline_macros};
 
 fn the_answer(ref mut x: u8) {
-    //~^ toplevel_ref_arg
     *x = 42;
 }
 
@@ -19,7 +18,6 @@ fn main() {
     // lint in macro
     inline! {
         fn fun_example(ref _x: usize) {}
-        //~^ toplevel_ref_arg
     }
 
     // do not lint in external macro

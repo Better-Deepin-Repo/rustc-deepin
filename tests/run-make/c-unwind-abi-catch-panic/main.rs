@@ -2,7 +2,7 @@
 //!
 //! This test triggers a panic when calling a foreign function that calls *back* into Rust.
 
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 
 fn main() {
     // Call `add_small_numbers`, passing arguments that will NOT trigger a panic.

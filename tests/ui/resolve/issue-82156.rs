@@ -1,3 +1,3 @@
 fn main() {
-    super(); //~ ERROR: too many leading `super` keywords
+    super(); //~ ERROR failed to resolve: there are too many leading `super` keywords
 }

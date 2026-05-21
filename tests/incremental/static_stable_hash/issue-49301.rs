@@ -1,7 +1,6 @@
 // https://github.com/rust-lang/rust/issues/49081
 
 //@ revisions:rpass1 rpass2
-//@ ignore-backends: gcc
 
 #[cfg(rpass1)]
 pub static A: &str = "hello";

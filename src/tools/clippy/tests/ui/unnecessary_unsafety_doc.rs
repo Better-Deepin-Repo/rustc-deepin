@@ -17,7 +17,6 @@ pub fn destroy_the_planet() {
 ///
 /// This function shouldn't be called unless the horsemen are ready
 pub fn apocalypse(universe: &mut ()) {
-    //~^ unnecessary_safety_doc
     unimplemented!();
 }
 
@@ -44,7 +43,6 @@ mod private_mod {
     ///
     /// Unnecessary safety!
     pub fn republished() {
-        //~^ unnecessary_safety_doc
         unimplemented!();
     }
 }
@@ -58,7 +56,6 @@ pub trait SafeTraitSafeMethods {
     ///
     /// Unnecessary!
     fn documented(self);
-    //~^ unnecessary_safety_doc
 }
 
 pub trait SafeTrait {
@@ -69,7 +66,6 @@ pub trait SafeTrait {
 ///
 /// Unnecessary!
 pub trait DocumentedSafeTrait {
-    //~^ unnecessary_safety_doc
     fn method2();
 }
 
@@ -98,7 +94,6 @@ impl Struct {
     ///
     /// Unnecessary!
     pub fn documented() -> Self {
-        //~^ unnecessary_safety_doc
         unimplemented!();
     }
 
@@ -126,7 +121,6 @@ macro_rules! very_safe {
         ///
         /// Driving is very safe already!
         pub fn drive() {
-            //~^ unnecessary_safety_doc
             whee()
         }
     };
@@ -155,6 +149,5 @@ pub mod __macro {
 
 /// # Implementation safety
 pub trait DocumentedSafeTraitWithImplementationHeader {
-    //~^ unnecessary_safety_doc
     fn method();
 }

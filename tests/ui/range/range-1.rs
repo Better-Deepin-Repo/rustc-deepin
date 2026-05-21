@@ -7,7 +7,7 @@ pub fn main() {
 
     // Bool => does not implement iterator.
     for i in false..true {}
-    //~^ ERROR `std::ops::Range<bool>` is not an iterator
+    //~^ ERROR `bool: Step` is not satisfied
 
     // Unsized type.
     let arr: &[_] = &[1, 2, 3];

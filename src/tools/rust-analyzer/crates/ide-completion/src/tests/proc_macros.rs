@@ -1,7 +1,12 @@
 //! Completion tests for expressions.
-use expect_test::expect;
+use expect_test::{expect, Expect};
 
-use crate::tests::check;
+use crate::tests::completion_list;
+
+fn check(ra_fixture: &str, expect: Expect) {
+    let actual = completion_list(ra_fixture);
+    expect.assert_eq(&actual)
+}
 
 #[test]
 fn complete_dot_in_attr() {
@@ -19,20 +24,19 @@ fn main() {
 }
 "#,
         expect![[r#"
-            me foo()     fn(&self)
-            sn box  Box::new(expr)
-            sn call function(expr)
-            sn const      const {}
-            sn dbg      dbg!(expr)
-            sn dbgr    dbg!(&expr)
-            sn deref         *expr
-            sn let             let
-            sn letm        let mut
-            sn match match expr {}
-            sn ref           &expr
-            sn refm      &mut expr
-            sn return  return expr
-            sn unsafe    unsafe {}
+            me foo()  fn(&self)
+            sn box    Box::new(expr)
+            sn call   function(expr)
+            sn dbg    dbg!(expr)
+            sn dbgr   dbg!(&expr)
+            sn deref  *expr
+            sn let    let
+            sn letm   let mut
+            sn match  match expr {}
+            sn ref    &expr
+            sn refm   &mut expr
+            sn return return expr
+            sn unsafe unsafe {}
         "#]],
     )
 }
@@ -53,20 +57,19 @@ fn main() {
 }
 "#,
         expect![[r#"
-            me foo()     fn(&self)
-            sn box  Box::new(expr)
-            sn call function(expr)
-            sn const      const {}
-            sn dbg      dbg!(expr)
-            sn dbgr    dbg!(&expr)
-            sn deref         *expr
-            sn let             let
-            sn letm        let mut
-            sn match match expr {}
-            sn ref           &expr
-            sn refm      &mut expr
-            sn return  return expr
-            sn unsafe    unsafe {}
+            me foo()  fn(&self)
+            sn box    Box::new(expr)
+            sn call   function(expr)
+            sn dbg    dbg!(expr)
+            sn dbgr   dbg!(&expr)
+            sn deref  *expr
+            sn let    let
+            sn letm   let mut
+            sn match  match expr {}
+            sn ref    &expr
+            sn refm   &mut expr
+            sn return return expr
+            sn unsafe unsafe {}
         "#]],
     )
 }
@@ -89,20 +92,19 @@ impl Foo {
 fn main() {}
 "#,
         expect![[r#"
-            me foo()     fn(&self)
-            sn box  Box::new(expr)
-            sn call function(expr)
-            sn const      const {}
-            sn dbg      dbg!(expr)
-            sn dbgr    dbg!(&expr)
-            sn deref         *expr
-            sn let             let
-            sn letm        let mut
-            sn match match expr {}
-            sn ref           &expr
-            sn refm      &mut expr
-            sn return  return expr
-            sn unsafe    unsafe {}
+            me foo()  fn(&self)
+            sn box    Box::new(expr)
+            sn call   function(expr)
+            sn dbg    dbg!(expr)
+            sn dbgr   dbg!(&expr)
+            sn deref  *expr
+            sn let    let
+            sn letm   let mut
+            sn match  match expr {}
+            sn ref    &expr
+            sn refm   &mut expr
+            sn return return expr
+            sn unsafe unsafe {}
         "#]],
     )
 }
@@ -125,20 +127,19 @@ impl Foo {
 fn main() {}
 "#,
         expect![[r#"
-            me foo()     fn(&self)
-            sn box  Box::new(expr)
-            sn call function(expr)
-            sn const      const {}
-            sn dbg      dbg!(expr)
-            sn dbgr    dbg!(&expr)
-            sn deref         *expr
-            sn let             let
-            sn letm        let mut
-            sn match match expr {}
-            sn ref           &expr
-            sn refm      &mut expr
-            sn return  return expr
-            sn unsafe    unsafe {}
+            me foo()  fn(&self)
+            sn box    Box::new(expr)
+            sn call   function(expr)
+            sn dbg    dbg!(expr)
+            sn dbgr   dbg!(&expr)
+            sn deref  *expr
+            sn let    let
+            sn letm   let mut
+            sn match  match expr {}
+            sn ref    &expr
+            sn refm   &mut expr
+            sn return return expr
+            sn unsafe unsafe {}
         "#]],
     )
 }

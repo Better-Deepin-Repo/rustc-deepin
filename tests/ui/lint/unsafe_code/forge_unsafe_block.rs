@@ -1,5 +1,5 @@
 //@ check-pass
-//@ proc-macro: forge_unsafe_block.rs
+//@ aux-build:forge_unsafe_block.rs
 
 #[macro_use]
 extern crate forge_unsafe_block;

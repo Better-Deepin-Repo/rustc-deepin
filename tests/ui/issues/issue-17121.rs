@@ -1,5 +1,6 @@
 //@ check-pass
 #![allow(dead_code)]
+//@ pretty-expanded FIXME #23616
 
 use std::fs::File;
 use std::io::{self, BufReader, Read};

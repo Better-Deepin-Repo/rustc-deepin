@@ -1,5 +1,6 @@
 #![warn(clippy::match_single_binding)]
 #![allow(unused_variables)]
+#![allow(clippy::uninlined_format_args)]
 
 fn main() {
     // Lint (additional curly braces needed, see #6572)
@@ -14,7 +15,6 @@ fn main() {
     fn size_hint<I: Iterator>(iter: &AppendIter<I>) -> (usize, Option<usize>) {
         match &iter.inner {
             Some((iter, _item)) => match iter.size_hint() {
-                //~^ match_single_binding
                 (min, max) => (min.saturating_add(1), max.and_then(|max| max.checked_add(1))),
             },
             None => (0, Some(0)),
@@ -28,8 +28,7 @@ fn main() {
         #[rustfmt::skip]
         Some((first, _second)) => {
             match get_tup() {
-            //~^ match_single_binding
-                (a, b) => println!("a {a:?} and b {b:?}"),
+                (a, b) => println!("a {:?} and b {:?}", a, b),
             }
         },
         None => println!("nothing"),
@@ -40,7 +39,6 @@ fn main() {
     // Lint (scrutinee has side effects)
     // issue #7094
     match side_effects() {
-        //~^ match_single_binding
         _ => println!("Side effects"),
     }
 
@@ -48,7 +46,6 @@ fn main() {
     // issue #7094
     let x = 1;
     match match x {
-        //~^ match_single_binding
         0 => 1,
         _ => 2,
     } {

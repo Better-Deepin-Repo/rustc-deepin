@@ -1,10 +1,8 @@
-use std::mem;
-
 use crate::clean::*;
 
 pub(crate) fn strip_item(mut item: Item) -> Item {
-    if !matches!(item.inner.kind, StrippedItem(..)) {
-        item.inner.kind = StrippedItem(Box::new(item.inner.kind));
+    if !matches!(*item.kind, StrippedItem(..)) {
+        item.kind = Box::new(StrippedItem(item.kind));
     }
     item
 }
@@ -82,8 +80,8 @@ pub(crate) trait DocFolder: Sized {
             | StaticItem(_)
             | ConstantItem(..)
             | TraitAliasItem(_)
-            | RequiredMethodItem(..)
-            | MethodItem(..)
+            | TyMethodItem(_)
+            | MethodItem(_, _)
             | StructFieldItem(_)
             | ForeignFunctionItem(..)
             | ForeignStaticItem(..)
@@ -91,22 +89,20 @@ pub(crate) trait DocFolder: Sized {
             | MacroItem(_)
             | ProcMacroItem(_)
             | PrimitiveItem(_)
-            | RequiredAssocConstItem(..)
-            | ProvidedAssocConstItem(..)
-            | ImplAssocConstItem(..)
-            | RequiredAssocTypeItem(..)
+            | TyAssocConstItem(..)
+            | AssocConstItem(..)
+            | TyAssocTypeItem(..)
             | AssocTypeItem(..)
-            | KeywordItem
-            | AttributeItem => kind,
+            | KeywordItem => kind,
         }
     }
 
     /// don't override!
     fn fold_item_recur(&mut self, mut item: Item) -> Item {
-        item.inner.kind = match item.inner.kind {
+        item.kind = Box::new(match *item.kind {
             StrippedItem(box i) => StrippedItem(Box::new(self.fold_inner_recur(i))),
-            _ => self.fold_inner_recur(item.inner.kind),
-        };
+            _ => self.fold_inner_recur(*item.kind),
+        });
         item
     }
 
@@ -120,11 +116,10 @@ pub(crate) trait DocFolder: Sized {
     fn fold_crate(&mut self, mut c: Crate) -> Crate {
         c.module = self.fold_item(c.module).unwrap();
 
-        for trait_ in c.external_traits.values_mut() {
-            trait_.items = mem::take(&mut trait_.items)
-                .into_iter()
-                .filter_map(|i| self.fold_item(i))
-                .collect();
+        let external_traits = { std::mem::take(&mut *c.external_traits.borrow_mut()) };
+        for (k, mut v) in external_traits {
+            v.items = v.items.into_iter().filter_map(|i| self.fold_item(i)).collect();
+            c.external_traits.borrow_mut().insert(k, v);
         }
 
         c

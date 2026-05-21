@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 fn main() {
     struct U;
     fn accept_fn_once(_: &impl FnOnce()) {}

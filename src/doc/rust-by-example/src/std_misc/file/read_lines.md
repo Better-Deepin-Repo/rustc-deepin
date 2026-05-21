@@ -5,7 +5,7 @@
 This might be a reasonable first attempt for a beginner's first
 implementation for reading lines from a file.
 
-```rust,no_run
+```rust,norun
 use std::fs::read_to_string;
 
 fn read_lines(filename: &str) -> Vec<String> {
@@ -23,11 +23,11 @@ Since the method `lines()` returns an iterator over the lines in the file,
 we can also perform a map inline and collect the results, yielding a more
 concise and fluent expression.
 
-```rust,no_run
+```rust,norun
 use std::fs::read_to_string;
 
 fn read_lines(filename: &str) -> Vec<String> {
-    read_to_string(filename)
+    read_to_string(filename) 
         .unwrap()  // panic on possible file-reading errors
         .lines()  // split the string into an iterator of string slices
         .map(String::from)  // make each slice into a string
@@ -56,7 +56,7 @@ fn main() {
     // File hosts.txt must exist in the current path
     if let Ok(lines) = read_lines("./hosts.txt") {
         // Consumes the iterator, returns an (Optional) String
-        for line in lines.map_while(Result::ok) {
+        for line in lines.flatten() {
             println!("{}", line);
         }
     }
@@ -72,7 +72,6 @@ where P: AsRef<Path>, {
 ```
 
 Running this program simply prints the lines individually.
-
 ```shell
 $ echo -e "127.0.0.1\n192.168.0.1\n" > hosts.txt
 $ rustc read_lines.rs && ./read_lines
@@ -85,3 +84,4 @@ generic `read_lines()` method with the same generic constraint, using the `where
 
 This process is more efficient than creating a `String` in memory with all of the file's
 contents. This can especially cause performance issues when working with larger files.
+

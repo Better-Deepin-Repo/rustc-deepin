@@ -8,8 +8,8 @@ rm -rf out/master/ || exit 0
 echo "Making the docs for master"
 mkdir out/master/
 cp util/gh-pages/index.html out/master
-cp util/gh-pages/theme.js out/master
 cp util/gh-pages/script.js out/master
+cp util/gh-pages/lints.json out/master
 cp util/gh-pages/style.css out/master
 
 if [[ -n $TAG_NAME ]]; then
@@ -25,14 +25,15 @@ if [[ $BETA = "true" ]]; then
 fi
 
 # Generate version index that is shown as root index page
-python3 ./util/versions.py ./util/gh-pages/versions.html out
+cp util/gh-pages/versions.html out/index.html
+
+echo "Making the versions.json file"
+python3 ./util/versions.py out
 
 # Now let's go have some fun with the cloned repo
 cd out
 git config user.name "GHA CI"
 git config user.email "gha@ci.invalid"
-
-git status
 
 if [[ -n $TAG_NAME ]]; then
   # track files, so that the following check works
@@ -45,8 +46,8 @@ if [[ -n $TAG_NAME ]]; then
   git add "$TAG_NAME"
   # Update the symlink
   git add stable
-  # Update the index.html file
-  git add index.html
+  # Update versions file
+  git add versions.json
   git commit -m "Add documentation for ${TAG_NAME} release: ${SHA}"
 elif [[ $BETA = "true" ]]; then
   if git diff --exit-code --quiet -- beta/; then

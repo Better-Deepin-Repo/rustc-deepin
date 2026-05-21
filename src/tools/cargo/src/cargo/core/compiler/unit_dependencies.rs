@@ -19,8 +19,6 @@ use std::collections::{HashMap, HashSet};
 
 use tracing::trace;
 
-use crate::CargoResult;
-use crate::core::compiler::UserIntent;
 use crate::core::compiler::artifact::match_artifacts_kind_with_targets;
 use crate::core::compiler::unit_graph::{UnitDep, UnitGraph};
 use crate::core::compiler::{
@@ -29,13 +27,12 @@ use crate::core::compiler::{
 use crate::core::dependency::{Artifact, ArtifactKind, ArtifactTarget, DepKind};
 use crate::core::profiles::{Profile, Profiles, UnitFor};
 use crate::core::resolver::features::{FeaturesFor, ResolvedFeatures};
-use crate::core::resolver::{ForceAllTargets, HasDevUnits, Resolve};
-use crate::core::{
-    Dependency, Feature, Package, PackageId, PackageSet, Target, TargetKind, Workspace,
-};
+use crate::core::resolver::Resolve;
+use crate::core::{Dependency, Package, PackageId, PackageSet, Target, TargetKind, Workspace};
 use crate::ops::resolve_all_features;
-use crate::util::GlobalContext;
 use crate::util::interning::InternedString;
+use crate::util::GlobalContext;
+use crate::CargoResult;
 
 const IS_NO_ARTIFACT_DEP: Option<&'static Artifact> = None;
 
@@ -54,9 +51,8 @@ struct State<'a, 'gctx> {
     std_features: Option<&'a ResolvedFeatures>,
     /// `true` while generating the dependencies for the standard library.
     is_std: bool,
-    /// The high-level operation requested by the user.
-    /// Used for preventing from building lib thrice.
-    intent: UserIntent,
+    /// The mode we are compiling in. Used for preventing from building lib thrice.
+    global_mode: CompileMode,
     target_data: &'a RustcTargetData<'gctx>,
     profiles: &'a Profiles,
     interner: &'a UnitInterner,
@@ -95,7 +91,7 @@ pub fn build_unit_dependencies<'a, 'gctx>(
     roots: &[Unit],
     scrape_units: &[Unit],
     std_roots: &HashMap<CompileKind, Vec<Unit>>,
-    intent: UserIntent,
+    global_mode: CompileMode,
     target_data: &'a RustcTargetData<'gctx>,
     profiles: &'a Profiles,
     interner: &'a UnitInterner,
@@ -120,7 +116,7 @@ pub fn build_unit_dependencies<'a, 'gctx>(
         std_resolve,
         std_features,
         is_std: false,
-        intent,
+        global_mode,
         target_data,
         profiles,
         interner,
@@ -144,27 +140,8 @@ pub fn build_unit_dependencies<'a, 'gctx>(
     // which affect the determinism of the build itself. As a result be sure
     // that dependency lists are always sorted to ensure we've always got a
     // deterministic output.
-    for (unit, list) in &mut state.unit_dependencies {
-        let is_multiple_build_scripts_enabled = unit
-            .pkg
-            .manifest()
-            .unstable_features()
-            .require(Feature::multiple_build_scripts())
-            .is_ok();
-
-        if is_multiple_build_scripts_enabled {
-            list.sort_by_key(|unit_dep| {
-                if unit_dep.unit.target.is_custom_build() {
-                    // We do not sort build scripts to preserve the user-defined order.
-                    // In terms of determinism, we are assuming nothing interferes with order from when the user set it in `Cargo.toml` to here
-                    (0, None)
-                } else {
-                    (1, Some(unit_dep.clone()))
-                }
-            });
-        } else {
-            list.sort();
-        }
+    for list in state.unit_dependencies.values_mut() {
+        list.sort();
     }
     trace!("ALL UNIT DEPENDENCIES {:#?}", state.unit_dependencies);
 
@@ -222,17 +199,17 @@ fn attach_std_deps(
 }
 
 /// Compute all the dependencies of the given root units.
-/// The result is stored in `state.unit_dependencies`.
+/// The result is stored in state.unit_dependencies.
 fn deps_of_roots(roots: &[Unit], state: &mut State<'_, '_>) -> CargoResult<()> {
     for unit in roots.iter() {
         // Dependencies of tests/benches should not have `panic` set.
-        // We check the user intent to see if we are running in `cargo test` in
-        // which case we ensure all dependencies have `panic` cleared, and
-        // avoid building the lib thrice (once with `panic`, once without, once
-        // for `--test`). In particular, the lib included for Doc tests and
-        // examples are `Build` mode here.
+        // We check the global test mode to see if we are running in `cargo
+        // test` in which case we ensure all dependencies have `panic`
+        // cleared, and avoid building the lib thrice (once with `panic`, once
+        // without, once for `--test`). In particular, the lib included for
+        // Doc tests and examples are `Build` mode here.
         let root_compile_kind = unit.kind;
-        let unit_for = if unit.mode.is_any_test() || state.intent.is_rustc_test() {
+        let unit_for = if unit.mode.is_any_test() || state.global_mode.is_rustc_test() {
             if unit.target.proc_macro() {
                 // Special-case for proc-macros, which are forced to for-host
                 // since they need to link with the proc_macro crate.
@@ -364,11 +341,7 @@ fn compute_deps(
     if unit.target.is_custom_build() {
         return Ok(ret);
     }
-    ret.extend(
-        dep_build_script(unit, unit_for, state)?
-            .into_iter()
-            .flatten(),
-    );
+    ret.extend(dep_build_script(unit, unit_for, state)?);
 
     // If this target is a binary, test, example, etc, then it depends on
     // the library of the same package. The call to `resolve.deps` above
@@ -399,10 +372,6 @@ fn compute_deps(
                                 state.features(),
                                 state.package_set,
                                 id,
-                                HasDevUnits::No,
-                                &[unit.kind],
-                                state.target_data,
-                                ForceAllTargets::No,
                             );
                             rf.iter().all(|f| features.contains(f))
                         }
@@ -657,28 +626,26 @@ fn compute_deps_doc(
             IS_NO_ARTIFACT_DEP,
         )?;
         ret.push(lib_unit_dep);
-        if dep_lib.documented() && state.intent.wants_deps_docs() {
-            // Document this lib as well.
-            let doc_unit_dep = new_unit_dep(
-                state,
-                unit,
-                dep_pkg,
-                dep_lib,
-                dep_unit_for,
-                unit.kind.for_target(dep_lib),
-                unit.mode,
-                IS_NO_ARTIFACT_DEP,
-            )?;
-            ret.push(doc_unit_dep);
+        if dep_lib.documented() {
+            if let CompileMode::Doc { deps: true, .. } = unit.mode {
+                // Document this lib as well.
+                let doc_unit_dep = new_unit_dep(
+                    state,
+                    unit,
+                    dep_pkg,
+                    dep_lib,
+                    dep_unit_for,
+                    unit.kind.for_target(dep_lib),
+                    unit.mode,
+                    IS_NO_ARTIFACT_DEP,
+                )?;
+                ret.push(doc_unit_dep);
+            }
         }
     }
 
     // Be sure to build/run the build script for documented libraries.
-    ret.extend(
-        dep_build_script(unit, unit_for, state)?
-            .into_iter()
-            .flatten(),
-    );
+    ret.extend(dep_build_script(unit, unit_for, state)?);
 
     // If we document a binary/example, we need the library available.
     if unit.target.is_bin() || unit.target.is_example() {
@@ -764,57 +731,54 @@ fn dep_build_script(
     unit: &Unit,
     unit_for: UnitFor,
     state: &State<'_, '_>,
-) -> CargoResult<Option<Vec<UnitDep>>> {
-    Some(
-        unit.pkg
-            .targets()
-            .iter()
-            .filter(|t| t.is_custom_build())
-            .map(|t| {
-                // The profile stored in the Unit is the profile for the thing
-                // the custom build script is running for.
-                let profile = state.profiles.get_profile_run_custom_build(&unit.profile);
-                // UnitFor::for_custom_build is used because we want the `host` flag set
-                // for all of our build dependencies (so they all get
-                // build-override profiles), including compiling the build.rs
-                // script itself.
-                //
-                // If `is_for_host_features` here is `false`, that means we are a
-                // build.rs script for a normal dependency and we want to set the
-                // CARGO_FEATURE_* environment variables to the features as a
-                // normal dep.
-                //
-                // If `is_for_host_features` here is `true`, that means that this
-                // package is being used as a build dependency or proc-macro, and
-                // so we only want to set CARGO_FEATURE_* variables for the host
-                // side of the graph.
-                //
-                // Keep in mind that the RunCustomBuild unit and the Compile
-                // build.rs unit use the same features. This is because some
-                // people use `cfg!` and `#[cfg]` expressions to check for enabled
-                // features instead of just checking `CARGO_FEATURE_*` at runtime.
-                // In the case with the new feature resolver (decoupled host
-                // deps), and a shared dependency has different features enabled
-                // for normal vs. build, then the build.rs script will get
-                // compiled twice. I believe it is not feasible to only build it
-                // once because it would break a large number of scripts (they
-                // would think they have the wrong set of features enabled).
-                let script_unit_for = unit_for.for_custom_build();
-                new_unit_dep_with_profile(
-                    state,
-                    unit,
-                    &unit.pkg,
-                    t,
-                    script_unit_for,
-                    unit.kind,
-                    CompileMode::RunCustomBuild,
-                    profile,
-                    IS_NO_ARTIFACT_DEP,
-                )
-            })
-            .collect(),
-    )
-    .transpose()
+) -> CargoResult<Option<UnitDep>> {
+    unit.pkg
+        .targets()
+        .iter()
+        .find(|t| t.is_custom_build())
+        .map(|t| {
+            // The profile stored in the Unit is the profile for the thing
+            // the custom build script is running for.
+            let profile = state.profiles.get_profile_run_custom_build(&unit.profile);
+            // UnitFor::for_custom_build is used because we want the `host` flag set
+            // for all of our build dependencies (so they all get
+            // build-override profiles), including compiling the build.rs
+            // script itself.
+            //
+            // If `is_for_host_features` here is `false`, that means we are a
+            // build.rs script for a normal dependency and we want to set the
+            // CARGO_FEATURE_* environment variables to the features as a
+            // normal dep.
+            //
+            // If `is_for_host_features` here is `true`, that means that this
+            // package is being used as a build dependency or proc-macro, and
+            // so we only want to set CARGO_FEATURE_* variables for the host
+            // side of the graph.
+            //
+            // Keep in mind that the RunCustomBuild unit and the Compile
+            // build.rs unit use the same features. This is because some
+            // people use `cfg!` and `#[cfg]` expressions to check for enabled
+            // features instead of just checking `CARGO_FEATURE_*` at runtime.
+            // In the case with the new feature resolver (decoupled host
+            // deps), and a shared dependency has different features enabled
+            // for normal vs. build, then the build.rs script will get
+            // compiled twice. I believe it is not feasible to only build it
+            // once because it would break a large number of scripts (they
+            // would think they have the wrong set of features enabled).
+            let script_unit_for = unit_for.for_custom_build();
+            new_unit_dep_with_profile(
+                state,
+                unit,
+                &unit.pkg,
+                t,
+                script_unit_for,
+                unit.kind,
+                CompileMode::RunCustomBuild,
+                profile,
+                IS_NO_ARTIFACT_DEP,
+            )
+        })
+        .transpose()
 }
 
 /// Choose the correct mode for dependencies.
@@ -902,7 +866,6 @@ fn new_unit_dep_with_profile(
         /*dep_hash*/ 0,
         artifact.map_or(IsArtifact::No, |_| IsArtifact::Yes),
         artifact_target,
-        false,
     );
     Ok(UnitDep {
         unit,
@@ -974,13 +937,11 @@ fn connect_run_custom_build_deps(state: &mut State<'_, '_>) {
                         .iter()
                         .map(move |a| (reverse_dep, a))
                 })
-                // Exclude ourself
-                .filter(|(_parent, other)| other.unit.pkg != unit.pkg)
                 // Only deps with `links`.
                 .filter(|(_parent, other)| {
-                    state.gctx.cli_unstable().any_build_script_metadata
-                        || (other.unit.target.is_linkable()
-                            && other.unit.pkg.manifest().links().is_some())
+                    other.unit.pkg != unit.pkg
+                        && other.unit.target.is_linkable()
+                        && other.unit.pkg.manifest().links().is_some()
                 })
                 // Avoid cycles when using the doc --scrape-examples feature:
                 // Say a workspace has crates A and B where A has a build-dependency on B.
@@ -1009,16 +970,7 @@ fn connect_run_custom_build_deps(state: &mut State<'_, '_>) {
                     state.unit_dependencies[&other.unit]
                         .iter()
                         .find(|other_dep| other_dep.unit.mode == CompileMode::RunCustomBuild)
-                        .map(|other_dep| {
-                            let mut dep = other_dep.clone();
-                            let dep_name = other.dep_name.unwrap_or(other.unit.pkg.name());
-                            // Propagate the manifest dep name from the sibling edge.
-                            // The RunCustomBuild-RustCustomBuild edge is synthetic
-                            // and doesn't carry a usable dep name, but build script
-                            // metadata needs one for `CARGO_DEP_<dep_name>_*` env var
-                            dep.dep_name = Some(dep_name);
-                            dep
-                        })
+                        .cloned()
                 })
                 .collect::<HashSet<_>>();
 

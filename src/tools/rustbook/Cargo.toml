@@ -1,5 +1,4 @@
 [workspace]
-members = ["../error_index_generator"]
 
 [package]
 name = "rustbook"
@@ -8,9 +7,14 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [dependencies]
-clap = { version = "4.0.32", features = ["cargo"] }
-mdbook-driver = { version = "0.5.2", features = ["search"] }
-mdbook-i18n-helpers = "0.4.0"
-mdbook-spec = { path = "../../doc/reference/tools/mdbook-spec" }
-mdbook-trpl = { path = "../../doc/book/packages/mdbook-trpl" }
-tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
+clap = "4.0.32"
+env_logger = "0.11"
+mdbook-trpl-listing = { path = "../../doc/book/packages/mdbook-trpl-listing" }
+mdbook-trpl-note = { path = "../../doc/book/packages/mdbook-trpl-note" }
+mdbook-i18n-helpers = "0.3.3"
+mdbook-spec = { path = "../../doc/reference/mdbook-spec"}
+
+[dependencies.mdbook]
+version = "0.4.37"
+default-features = false
+features = ["search"]

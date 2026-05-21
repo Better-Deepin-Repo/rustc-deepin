@@ -1,53 +1,46 @@
 use std::{env, fs};
 
-use gccjit::{Context, OutputKind};
+use gccjit::OutputKind;
 use rustc_codegen_ssa::back::link::ensure_removed;
-use rustc_codegen_ssa::back::write::{
-    BitcodeSection, CodegenContext, EmitObj, ModuleConfig, SharedEmitter,
-};
+use rustc_codegen_ssa::back::write::{BitcodeSection, CodegenContext, EmitObj, ModuleConfig};
 use rustc_codegen_ssa::{CompiledModule, ModuleCodegen};
-use rustc_data_structures::profiling::SelfProfilerRef;
-use rustc_errors::DiagCtxt;
+use rustc_errors::DiagCtxtHandle;
 use rustc_fs_util::link_or_copy;
-use rustc_log::tracing::debug;
 use rustc_session::config::OutputType;
+use rustc_span::fatal_error::FatalError;
 use rustc_target::spec::SplitDebuginfo;
 
-use crate::base::add_pic_option;
 use crate::errors::CopyBitcode;
-use crate::{GccContext, LtoMode};
+use crate::{GccCodegenBackend, GccContext};
 
-pub(crate) fn codegen(
-    cgcx: &CodegenContext,
-    prof: &SelfProfilerRef,
-    shared_emitter: &SharedEmitter,
+pub(crate) unsafe fn codegen(
+    cgcx: &CodegenContext<GccCodegenBackend>,
+    dcx: DiagCtxtHandle<'_>,
     module: ModuleCodegen<GccContext>,
     config: &ModuleConfig,
-) -> CompiledModule {
-    let dcx = DiagCtxt::new(Box::new(shared_emitter.clone()));
-    let dcx = dcx.handle();
-
-    let _timer = prof.generic_activity_with_arg("GCC_module_codegen", &*module.name);
+) -> Result<CompiledModule, FatalError> {
+    let _timer = cgcx.prof.generic_activity_with_arg("GCC_module_codegen", &*module.name);
     {
         let context = &module.module_llvm.context;
 
-        let lto_mode = module.module_llvm.lto_mode;
-        let lto_supported = module.module_llvm.lto_supported;
+        let module_name = module.name.clone();
 
-        let bc_out = cgcx.output_filenames.temp_path_for_cgu(
-            OutputType::Bitcode,
-            &module.name,
-            cgcx.invocation_temp.as_deref(),
-        );
-        let obj_out = cgcx.output_filenames.temp_path_for_cgu(
-            OutputType::Object,
-            &module.name,
-            cgcx.invocation_temp.as_deref(),
-        );
+        let should_combine_object_files = module.module_llvm.should_combine_object_files;
 
-        if config.bitcode_needed() {
-            let _timer =
-                prof.generic_activity_with_arg("GCC_module_codegen_make_bitcode", &*module.name);
+        let module_name = Some(&module_name[..]);
+
+        // NOTE: Only generate object files with GIMPLE when this environment variable is set for
+        // now because this requires a particular setup (same gcc/lto1/lto-wrapper commit as libgccjit).
+        // TODO: remove this environment variable.
+        let fat_lto = env::var("EMBED_LTO_BITCODE").as_deref() == Ok("1");
+
+        let bc_out = cgcx.output_filenames.temp_path(OutputType::Bitcode, module_name);
+        let obj_out = cgcx.output_filenames.temp_path(OutputType::Object, module_name);
+
+        if config.bitcode_needed() && fat_lto {
+            let _timer = cgcx
+                .prof
+                .generic_activity_with_arg("GCC_module_codegen_make_bitcode", &*module.name);
 
             // TODO(antoyo)
             /*if let Some(bitcode_filename) = bc_out.file_name() {
@@ -59,27 +52,27 @@ pub(crate) fn codegen(
             }*/
 
             if config.emit_bc || config.emit_obj == EmitObj::Bitcode {
-                let _timer = prof
+                let _timer = cgcx
+                    .prof
                     .generic_activity_with_arg("GCC_module_codegen_emit_bitcode", &*module.name);
-                if lto_supported {
-                    context.add_command_line_option("-flto=auto");
-                    context.add_command_line_option("-flto-partition=one");
-                }
+                context.add_command_line_option("-flto=auto");
+                context.add_command_line_option("-flto-partition=one");
+                // TODO: remove since we don't want fat objects when it is for Bitcode only.
+                context.add_command_line_option("-ffat-lto-objects");
                 context
                     .compile_to_file(OutputKind::ObjectFile, bc_out.to_str().expect("path to str"));
             }
 
             if config.emit_obj == EmitObj::ObjectCode(BitcodeSection::Full) {
-                let _timer = prof
+                let _timer = cgcx
+                    .prof
                     .generic_activity_with_arg("GCC_module_codegen_embed_bitcode", &*module.name);
-                if lto_supported {
-                    // TODO(antoyo): maybe we should call embed_bitcode to have the proper iOS fixes?
-                    //embed_bitcode(cgcx, llcx, llmod, &config.bc_cmdline, data);
+                // TODO(antoyo): maybe we should call embed_bitcode to have the proper iOS fixes?
+                //embed_bitcode(cgcx, llcx, llmod, &config.bc_cmdline, data);
 
-                    context.add_command_line_option("-flto=auto");
-                    context.add_command_line_option("-flto-partition=one");
-                    context.add_command_line_option("-ffat-lto-objects");
-                }
+                context.add_command_line_option("-flto=auto");
+                context.add_command_line_option("-flto-partition=one");
+                context.add_command_line_option("-ffat-lto-objects");
                 // TODO(antoyo): Send -plugin/usr/lib/gcc/x86_64-pc-linux-gnu/11.1.0/liblto_plugin.so to linker (this should be done when specifying the appropriate rustc cli argument).
                 context
                     .compile_to_file(OutputKind::ObjectFile, bc_out.to_str().expect("path to str"));
@@ -87,29 +80,22 @@ pub(crate) fn codegen(
         }
 
         if config.emit_ir {
-            let out = cgcx.output_filenames.temp_path_for_cgu(
-                OutputType::LlvmAssembly,
-                &module.name,
-                cgcx.invocation_temp.as_deref(),
-            );
+            let out = cgcx.output_filenames.temp_path(OutputType::LlvmAssembly, module_name);
             std::fs::write(out, "").expect("write file");
         }
 
         if config.emit_asm {
             let _timer =
-                prof.generic_activity_with_arg("GCC_module_codegen_emit_asm", &*module.name);
-            let path = cgcx.output_filenames.temp_path_for_cgu(
-                OutputType::Assembly,
-                &module.name,
-                cgcx.invocation_temp.as_deref(),
-            );
+                cgcx.prof.generic_activity_with_arg("GCC_module_codegen_emit_asm", &*module.name);
+            let path = cgcx.output_filenames.temp_path(OutputType::Assembly, module_name);
             context.compile_to_file(OutputKind::Assembler, path.to_str().expect("path to str"));
         }
 
         match config.emit_obj {
             EmitObj::ObjectCode(_) => {
-                let _timer =
-                    prof.generic_activity_with_arg("GCC_module_codegen_emit_obj", &*module.name);
+                let _timer = cgcx
+                    .prof
+                    .generic_activity_with_arg("GCC_module_codegen_emit_obj", &*module.name);
                 if env::var("CG_GCCJIT_DUMP_MODULE_NAMES").as_deref() == Ok("1") {
                     println!("Module {}", module.name);
                 }
@@ -130,18 +116,13 @@ pub(crate) fn codegen(
                     context.set_debug_info(true);
                     context.dump_to_file(path, true);
                 }
-                if lto_mode != LtoMode::None {
-                    let fat_lto = lto_mode == LtoMode::Fat;
-                    // We need to check if we're doing LTO since this code is also used for the
-                    // dummy ThinLTO implementation to combine the object files.
+                if should_combine_object_files {
                     if fat_lto {
                         context.add_command_line_option("-flto=auto");
                         context.add_command_line_option("-flto-partition=one");
 
                         // NOTE: without -fuse-linker-plugin, we get the following error:
                         // lto1: internal compiler error: decompressed stream: Destination buffer is too small
-                        // TODO(antoyo): since we do not do LTO when the linker is invoked anymore, perhaps
-                        // the following flag is not necessary anymore.
                         context.add_driver_option("-fuse-linker-plugin");
                     }
 
@@ -150,45 +131,11 @@ pub(crate) fn codegen(
                     // /usr/bin/ld: cannot find -lgcc_s: No such file or directory
                     context.add_driver_option("-nostdlib");
 
-                    let path = obj_out.to_str().expect("path to str");
-
-                    if fat_lto {
-                        let lto_path = format!("{}.lto", path);
-                        // cSpell:disable
-                        // FIXME(antoyo): The LTO frontend generates the following warning:
-                        // ../build_sysroot/sysroot_src/library/core/src/num/dec2flt/lemire.rs:150:15: warning: type of ‘_ZN4core3num7dec2flt5table17POWER_OF_FIVE_12817ha449a68fb31379e4E’ does not match original declaration [-Wlto-type-mismatch]
-                        // 150 |     let (lo5, hi5) = POWER_OF_FIVE_128[index];
-                        //     |               ^
-                        // lto1: note: ‘_ZN4core3num7dec2flt5table17POWER_OF_FIVE_12817ha449a68fb31379e4E’ was previously declared here
-                        //
-                        // This option is to mute it to make the UI tests pass with LTO enabled.
-                        // cSpell:enable
-                        context.add_driver_option("-Wno-lto-type-mismatch");
-                        // NOTE: this doesn't actually generate an executable. With the above
-                        // flags, it combines the .o files together in another .o.
-                        context.compile_to_file(OutputKind::Executable, &lto_path);
-
-                        let context = Context::default();
-                        if cgcx.target_arch == "x86" || cgcx.target_arch == "x86_64" {
-                            // NOTE: it seems we need to use add_driver_option instead of
-                            // add_command_line_option here because we use the LTO frontend via gcc.
-                            context.add_driver_option("-masm=intel");
-                        }
-
-                        // NOTE: these two options are needed to invoke LTO to produce an object file.
-                        // We need to initiate a second compilation because the arguments "-x lto"
-                        // needs to be at the very beginning.
-                        context.add_driver_option("-x");
-                        context.add_driver_option("lto");
-                        add_pic_option(&context, module.module_llvm.relocation_model);
-                        context.add_driver_option(lto_path);
-
-                        context.compile_to_file(OutputKind::ObjectFile, path);
-                    } else {
-                        // NOTE: this doesn't actually generate an executable. With the above
-                        // flags, it combines the .o files together in another .o.
-                        context.compile_to_file(OutputKind::Executable, path);
-                    }
+                    // NOTE: this doesn't actually generate an executable. With the above flags, it combines the .o files together in another .o.
+                    context.compile_to_file(
+                        OutputKind::Executable,
+                        obj_out.to_str().expect("path to str"),
+                    );
                 } else {
                     context.compile_to_file(
                         OutputKind::ObjectFile,
@@ -213,19 +160,26 @@ pub(crate) fn codegen(
         }
     }
 
-    module.into_compiled_module(
+    Ok(module.into_compiled_module(
         config.emit_obj != EmitObj::None,
         cgcx.target_can_use_split_dwarf && cgcx.split_debuginfo == SplitDebuginfo::Unpacked,
         config.emit_bc,
         config.emit_asm,
         config.emit_ir,
         &cgcx.output_filenames,
-        cgcx.invocation_temp.as_deref(),
-    )
+    ))
+}
+
+pub(crate) fn link(
+    _cgcx: &CodegenContext<GccCodegenBackend>,
+    _dcx: DiagCtxtHandle<'_>,
+    mut _modules: Vec<ModuleCodegen<GccContext>>,
+) -> Result<ModuleCodegen<GccContext>, FatalError> {
+    unimplemented!();
 }
 
 pub(crate) fn save_temp_bitcode(
-    cgcx: &CodegenContext,
+    cgcx: &CodegenContext<GccCodegenBackend>,
     _module: &ModuleCodegen<GccContext>,
     _name: &str,
 ) {

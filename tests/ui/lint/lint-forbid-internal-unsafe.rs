@@ -13,5 +13,5 @@ macro_rules! evil {
 
 fn main() {
     println!("{}", evil!(*(0 as *const u8)));
-    //~^ ERROR dereferencing a null pointer
+    //~^ WARNING dereferencing a null pointer
 }

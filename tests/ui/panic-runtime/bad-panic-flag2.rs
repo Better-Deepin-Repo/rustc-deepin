@@ -1,5 +1,4 @@
 //@ compile-flags:-C panic
+//@ error-pattern:requires either `unwind` or `abort`
 
 fn main() {}
-
-//~? ERROR codegen option `panic` requires either `unwind`, `abort`, or `immediate-abort`

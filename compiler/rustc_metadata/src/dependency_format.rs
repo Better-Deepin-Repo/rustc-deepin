@@ -52,8 +52,7 @@
 //! than finding a number of solutions (there are normally quite a few).
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet};
-use rustc_hir::def_id::{CrateNum, LOCAL_CRATE};
-use rustc_index::IndexVec;
+use rustc_hir::def_id::CrateNum;
 use rustc_middle::bug;
 use rustc_middle::middle::dependency_format::{Dependencies, DependencyList, Linkage};
 use rustc_middle::ty::TyCtxt;
@@ -61,14 +60,13 @@ use rustc_session::config::CrateType;
 use rustc_session::cstore::CrateDepKind;
 use rustc_session::cstore::LinkagePreference::{self, RequireDynamic, RequireStatic};
 use rustc_span::sym;
-use rustc_target::spec::PanicStrategy;
 use tracing::info;
 
 use crate::creader::CStore;
 use crate::errors::{
-    BadPanicStrategy, CrateDepMultiple, IncompatiblePanicInDropStrategy,
-    IncompatibleWithImmediateAbort, IncompatibleWithImmediateAbortCore, LibRequired,
-    NonStaticCrateDep, RequiredPanicStrategy, RlibRequired, RustcLibRequired, TwoPanicRuntimes,
+    BadPanicStrategy, CrateDepMultiple, IncompatiblePanicInDropStrategy, LibRequired,
+    NonStaticCrateDep, RequiredPanicStrategy, RlibRequired, RustcDriverHelp, RustcLibRequired,
+    TwoPanicRuntimes,
 };
 
 pub(crate) fn calculate(tcx: TyCtxt<'_>) -> Dependencies {
@@ -79,58 +77,61 @@ pub(crate) fn calculate(tcx: TyCtxt<'_>) -> Dependencies {
             verify_ok(tcx, &linkage);
             (ty, linkage)
         })
-        .collect()
+        .collect::<Vec<_>>()
 }
 
 fn calculate_type(tcx: TyCtxt<'_>, ty: CrateType) -> DependencyList {
     let sess = &tcx.sess;
 
-    if !sess.opts.output_types.should_link() {
-        return IndexVec::new();
+    if !sess.opts.output_types.should_codegen() {
+        return Vec::new();
     }
 
-    let preferred_linkage =
-        match ty {
-            // Generating a dylib without `-C prefer-dynamic` means that we're going
-            // to try to eagerly statically link all dependencies. This is normally
-            // done for end-product dylibs, not intermediate products.
-            //
-            // Treat cdylibs and staticlibs similarly. If `-C prefer-dynamic` is set,
-            // the caller may be code-size conscious, but without it, it makes sense
-            // to statically link a cdylib or staticlib. For staticlibs we use
-            // `-Z staticlib-prefer-dynamic` for now. This may be merged into
-            // `-C prefer-dynamic` in the future.
-            CrateType::Dylib | CrateType::Cdylib | CrateType::Sdylib => {
-                if sess.opts.cg.prefer_dynamic { Linkage::Dynamic } else { Linkage::Static }
-            }
-            CrateType::StaticLib => {
-                if sess.opts.unstable_opts.staticlib_prefer_dynamic {
-                    Linkage::Dynamic
-                } else {
-                    Linkage::Static
-                }
-            }
-
-            // If the global prefer_dynamic switch is turned off, or the final
-            // executable will be statically linked, prefer static crate linkage.
-            CrateType::Executable if !sess.opts.cg.prefer_dynamic || sess.crt_static(Some(ty)) => {
+    let preferred_linkage = match ty {
+        // Generating a dylib without `-C prefer-dynamic` means that we're going
+        // to try to eagerly statically link all dependencies. This is normally
+        // done for end-product dylibs, not intermediate products.
+        //
+        // Treat cdylibs and staticlibs similarly. If `-C prefer-dynamic` is set,
+        // the caller may be code-size conscious, but without it, it makes sense
+        // to statically link a cdylib or staticlib. For staticlibs we use
+        // `-Z staticlib-prefer-dynamic` for now. This may be merged into
+        // `-C prefer-dynamic` in the future.
+        CrateType::Dylib | CrateType::Cdylib => {
+            if sess.opts.cg.prefer_dynamic {
+                Linkage::Dynamic
+            } else {
                 Linkage::Static
             }
-            CrateType::Executable => Linkage::Dynamic,
+        }
+        CrateType::Staticlib => {
+            if sess.opts.unstable_opts.staticlib_prefer_dynamic {
+                Linkage::Dynamic
+            } else {
+                Linkage::Static
+            }
+        }
 
-            // proc-macro crates are mostly cdylibs, but we also need metadata.
-            CrateType::ProcMacro => Linkage::Static,
+        // If the global prefer_dynamic switch is turned off, or the final
+        // executable will be statically linked, prefer static crate linkage.
+        CrateType::Executable if !sess.opts.cg.prefer_dynamic || sess.crt_static(Some(ty)) => {
+            Linkage::Static
+        }
+        CrateType::Executable => Linkage::Dynamic,
 
-            // No linkage happens with rlibs, we just needed the metadata (which we
-            // got long ago), so don't bother with anything.
-            CrateType::Rlib => Linkage::NotLinked,
-        };
+        // proc-macro crates are mostly cdylibs, but we also need metadata.
+        CrateType::ProcMacro => Linkage::Static,
+
+        // No linkage happens with rlibs, we just needed the metadata (which we
+        // got long ago), so don't bother with anything.
+        CrateType::Rlib => Linkage::NotLinked,
+    };
 
     let mut unavailable_as_static = Vec::new();
 
     match preferred_linkage {
         // If the crate is not linked, there are no link-time dependencies.
-        Linkage::NotLinked => return IndexVec::new(),
+        Linkage::NotLinked => return Vec::new(),
         Linkage::Static => {
             // Attempt static linkage first. For dylibs and executables, we may be
             // able to retry below with dynamic linkage.
@@ -140,13 +141,13 @@ fn calculate_type(tcx: TyCtxt<'_>, ty: CrateType) -> DependencyList {
 
             // Static executables must have all static dependencies.
             // If any are not found, generate some nice pretty errors.
-            if (ty == CrateType::StaticLib && !sess.opts.unstable_opts.staticlib_allow_rdylib_deps)
+            if (ty == CrateType::Staticlib && !sess.opts.unstable_opts.staticlib_allow_rdylib_deps)
                 || (ty == CrateType::Executable
                     && sess.crt_static(Some(ty))
                     && !sess.target.crt_static_allows_dylibs)
             {
                 for &cnum in tcx.crates(()).iter() {
-                    if tcx.crate_dep_kind(cnum).macros_only() {
+                    if tcx.dep_kind(cnum).macros_only() {
                         continue;
                     }
                     let src = tcx.used_crate_source(cnum);
@@ -155,7 +156,7 @@ fn calculate_type(tcx: TyCtxt<'_>, ty: CrateType) -> DependencyList {
                     }
                     sess.dcx().emit_err(RlibRequired { crate_name: tcx.crate_name(cnum) });
                 }
-                return IndexVec::new();
+                return Vec::new();
             }
         }
         Linkage::Dynamic | Linkage::IncludedFromDylib => {}
@@ -163,15 +164,13 @@ fn calculate_type(tcx: TyCtxt<'_>, ty: CrateType) -> DependencyList {
 
     let all_dylibs = || {
         tcx.crates(()).iter().filter(|&&cnum| {
-            !tcx.crate_dep_kind(cnum).macros_only()
-                && (tcx.used_crate_source(cnum).dylib.is_some()
-                    || tcx.used_crate_source(cnum).sdylib_interface.is_some())
+            !tcx.dep_kind(cnum).macros_only() && tcx.used_crate_source(cnum).dylib.is_some()
         })
     };
 
     let mut upstream_in_dylibs = FxHashSet::default();
 
-    if tcx.features().rustc_private() {
+    if tcx.features().rustc_private {
         // We need this to prevent users of `rustc_driver` from linking dynamically to `std`
         // which does not work as `std` is also statically linked into `rustc_driver`.
 
@@ -211,42 +210,29 @@ fn calculate_type(tcx: TyCtxt<'_>, ty: CrateType) -> DependencyList {
 
     // Collect what we've got so far in the return vector.
     let last_crate = tcx.crates(()).len();
-    let mut ret = IndexVec::new();
-
-    // We need to fill in something for LOCAL_CRATE as IndexVec is a dense map.
-    // Linkage::Static semantically the most correct thing to use as the local
-    // crate is always statically linked into the linker output, even when
-    // linking a dylib. Using Linkage::Static also allow avoiding special cases
-    // for LOCAL_CRATE in some places.
-    assert_eq!(ret.push(Linkage::Static), LOCAL_CRATE);
-
-    for cnum in 1..last_crate + 1 {
-        let cnum = CrateNum::new(cnum);
-        assert_eq!(
-            ret.push(match formats.get(&cnum) {
-                Some(&RequireDynamic) => Linkage::Dynamic,
-                Some(&RequireStatic) => Linkage::IncludedFromDylib,
-                None => Linkage::NotLinked,
-            }),
-            cnum
-        );
-    }
+    let mut ret = (1..last_crate + 1)
+        .map(|cnum| match formats.get(&CrateNum::new(cnum)) {
+            Some(&RequireDynamic) => Linkage::Dynamic,
+            Some(&RequireStatic) => Linkage::IncludedFromDylib,
+            None => Linkage::NotLinked,
+        })
+        .collect::<Vec<_>>();
 
     // Run through the dependency list again, and add any missing libraries as
     // static libraries.
     //
     // If the crate hasn't been included yet and it's not actually required
-    // (e.g., it's a panic runtime) then we skip it here as well.
+    // (e.g., it's an allocator) then we skip it here as well.
     for &cnum in tcx.crates(()).iter() {
         let src = tcx.used_crate_source(cnum);
         if src.dylib.is_none()
             && !formats.contains_key(&cnum)
-            && tcx.crate_dep_kind(cnum) == CrateDepKind::Unconditional
+            && tcx.dep_kind(cnum) == CrateDepKind::Explicit
         {
             assert!(src.rlib.is_some() || src.rmeta.is_some());
             info!("adding staticlib: {}", tcx.crate_name(cnum));
             add_library(tcx, cnum, RequireStatic, &mut formats, &mut unavailable_as_static);
-            ret[cnum] = Linkage::Static;
+            ret[cnum.as_usize() - 1] = Linkage::Static;
         }
     }
 
@@ -254,7 +240,8 @@ fn calculate_type(tcx: TyCtxt<'_>, ty: CrateType) -> DependencyList {
     // artifact which means that we may need to inject dependencies of some
     // form.
     //
-    // Things like panic runtimes may not have been activated quite yet, so do so here.
+    // Things like allocators and panic runtimes may not have been activated
+    // quite yet, so do so here.
     activate_injected_dep(CStore::from_tcx(tcx).injected_panic_runtime(), &mut ret, &|cnum| {
         tcx.is_panic_runtime(cnum)
     });
@@ -265,15 +252,13 @@ fn calculate_type(tcx: TyCtxt<'_>, ty: CrateType) -> DependencyList {
     //
     // For situations like this, we perform one last pass over the dependencies,
     // making sure that everything is available in the requested format.
-    for (cnum, kind) in ret.iter_enumerated() {
-        if cnum == LOCAL_CRATE {
-            continue;
-        }
+    for (cnum, kind) in ret.iter().enumerate() {
+        let cnum = CrateNum::new(cnum + 1);
         let src = tcx.used_crate_source(cnum);
         match *kind {
             Linkage::NotLinked | Linkage::IncludedFromDylib => {}
             Linkage::Static if src.rlib.is_some() => continue,
-            Linkage::Dynamic if src.dylib.is_some() || src.sdylib_interface.is_some() => continue,
+            Linkage::Dynamic if src.dylib.is_some() => continue,
             kind => {
                 let kind = match kind {
                     Linkage::Static => "rlib",
@@ -315,9 +300,9 @@ fn add_library(
                     crate_name: tcx.crate_name(cnum),
                     non_static_deps: unavailable_as_static
                         .drain(..)
-                        .map(|cnum| NonStaticCrateDep { crate_name_: tcx.crate_name(cnum) })
+                        .map(|cnum| NonStaticCrateDep { crate_name: tcx.crate_name(cnum) })
                         .collect(),
-                    rustc_driver_help: linking_to_rustc_driver,
+                    rustc_driver_help: linking_to_rustc_driver.then_some(RustcDriverHelp),
                 });
             }
         }
@@ -333,7 +318,7 @@ fn attempt_static(tcx: TyCtxt<'_>, unavailable: &mut Vec<CrateNum>) -> Option<De
         .iter()
         .copied()
         .filter_map(|cnum| {
-            if tcx.crate_dep_kind(cnum).macros_only() {
+            if tcx.dep_kind(cnum).macros_only() {
                 return None;
             }
             let is_rlib = tcx.used_crate_source(cnum).rlib.is_some();
@@ -349,21 +334,18 @@ fn attempt_static(tcx: TyCtxt<'_>, unavailable: &mut Vec<CrateNum>) -> Option<De
 
     // All crates are available in an rlib format, so we're just going to link
     // everything in explicitly so long as it's actually required.
-    let mut ret = IndexVec::new();
-    assert_eq!(ret.push(Linkage::Static), LOCAL_CRATE);
-    for &cnum in tcx.crates(()) {
-        assert_eq!(
-            ret.push(match tcx.crate_dep_kind(cnum) {
-                CrateDepKind::Unconditional => Linkage::Static,
-                CrateDepKind::MacrosOnly | CrateDepKind::Conditional => Linkage::NotLinked,
-            }),
-            cnum
-        );
-    }
+    let mut ret = tcx
+        .crates(())
+        .iter()
+        .map(|&cnum| match tcx.dep_kind(cnum) {
+            CrateDepKind::Explicit => Linkage::Static,
+            CrateDepKind::MacrosOnly | CrateDepKind::Implicit => Linkage::NotLinked,
+        })
+        .collect::<Vec<_>>();
 
-    // Our panic runtime may not have been linked above if it wasn't explicitly
-    // linked, which is the case for any injected dependency. Handle that here
-    // and activate it.
+    // Our allocator/panic runtime may not have been linked above if it wasn't
+    // explicitly linked, which is the case for any injected dependency. Handle
+    // that here and activate them.
     activate_injected_dep(CStore::from_tcx(tcx).injected_panic_runtime(), &mut ret, &|cnum| {
         tcx.is_panic_runtime(cnum)
     });
@@ -371,21 +353,22 @@ fn attempt_static(tcx: TyCtxt<'_>, unavailable: &mut Vec<CrateNum>) -> Option<De
     Some(ret)
 }
 
-/// Given a list of how to link upstream dependencies so far, ensure that an
-/// injected dependency is activated. This will not do anything if one was
-/// transitively included already (e.g., via a dylib or explicitly so).
-///
-/// If an injected dependency was not found then we're guaranteed the
-/// metadata::creader module has injected that dependency (not listed as
-/// a required dependency) in one of the session's field. If this field is not
-/// set then this compilation doesn't actually need the dependency and we can
-/// also skip this step entirely.
+// Given a list of how to link upstream dependencies so far, ensure that an
+// injected dependency is activated. This will not do anything if one was
+// transitively included already (e.g., via a dylib or explicitly so).
+//
+// If an injected dependency was not found then we're guaranteed the
+// metadata::creader module has injected that dependency (not listed as
+// a required dependency) in one of the session's field. If this field is not
+// set then this compilation doesn't actually need the dependency and we can
+// also skip this step entirely.
 fn activate_injected_dep(
     injected: Option<CrateNum>,
     list: &mut DependencyList,
     replaces_injected: &dyn Fn(CrateNum) -> bool,
 ) {
-    for (cnum, slot) in list.iter_enumerated() {
+    for (i, slot) in list.iter().enumerate() {
+        let cnum = CrateNum::new(i + 1);
         if !replaces_injected(cnum) {
             continue;
         }
@@ -394,52 +377,26 @@ fn activate_injected_dep(
         }
     }
     if let Some(injected) = injected {
-        assert_eq!(list[injected], Linkage::NotLinked);
-        list[injected] = Linkage::Static;
+        let idx = injected.as_usize() - 1;
+        assert_eq!(list[idx], Linkage::NotLinked);
+        list[idx] = Linkage::Static;
     }
 }
 
-/// After the linkage for a crate has been determined we need to verify that
-/// there's only going to be one panic runtime in the output.
-fn verify_ok(tcx: TyCtxt<'_>, list: &DependencyList) {
+// After the linkage for a crate has been determined we need to verify that
+// there's only going to be one allocator in the output.
+fn verify_ok(tcx: TyCtxt<'_>, list: &[Linkage]) {
     let sess = &tcx.sess;
-    let list: Vec<_> = list
-        .iter_enumerated()
-        .filter_map(
-            |(cnum, linkage)| if *linkage == Linkage::NotLinked { None } else { Some(cnum) },
-        )
-        .collect();
     if list.is_empty() {
         return;
     }
-    let desired_strategy = sess.panic_strategy();
-
-    // If we are panic=immediate-abort, make sure everything in the dependency tree has also been
-    // compiled with immediate-abort.
-    if list
-        .iter()
-        .any(|cnum| tcx.required_panic_strategy(*cnum) == Some(PanicStrategy::ImmediateAbort))
-    {
-        let mut invalid_crates = Vec::new();
-        for cnum in list.iter().copied() {
-            if tcx.required_panic_strategy(cnum) != Some(PanicStrategy::ImmediateAbort) {
-                invalid_crates.push(cnum);
-                // If core is incompatible, it's very likely that we'd emit an error for every
-                // sysroot crate, so instead of doing that emit a single fatal error that suggests
-                // using build-std.
-                if tcx.crate_name(cnum) == sym::core {
-                    sess.dcx().emit_fatal(IncompatibleWithImmediateAbortCore);
-                }
-            }
-        }
-        for cnum in invalid_crates {
-            sess.dcx()
-                .emit_err(IncompatibleWithImmediateAbort { crate_name: tcx.crate_name(cnum) });
-        }
-    }
-
     let mut panic_runtime = None;
-    for cnum in list.iter().copied() {
+    for (i, linkage) in list.iter().enumerate() {
+        if let Linkage::NotLinked = *linkage {
+            continue;
+        }
+        let cnum = CrateNum::new(i + 1);
+
         if tcx.is_panic_runtime(cnum) {
             if let Some((prev, _)) = panic_runtime {
                 let prev_name = tcx.crate_name(prev);
@@ -459,6 +416,8 @@ fn verify_ok(tcx: TyCtxt<'_>, list: &DependencyList) {
     // only one, but we perform validation here that all the panic strategy
     // compilation modes for the whole DAG are valid.
     if let Some((runtime_cnum, found_strategy)) = panic_runtime {
+        let desired_strategy = sess.panic_strategy();
+
         // First up, validate that our selected panic runtime is indeed exactly
         // our same strategy.
         if found_strategy != desired_strategy {
@@ -472,7 +431,11 @@ fn verify_ok(tcx: TyCtxt<'_>, list: &DependencyList) {
         // strategy. If the dep isn't linked, we ignore it, and if our strategy
         // is abort then it's compatible with everything. Otherwise all crates'
         // panic strategy must match our own.
-        for cnum in list.iter().copied() {
+        for (i, linkage) in list.iter().enumerate() {
+            if let Linkage::NotLinked = *linkage {
+                continue;
+            }
+            let cnum = CrateNum::new(i + 1);
             if cnum == runtime_cnum || tcx.is_compiler_builtins(cnum) {
                 continue;
             }
@@ -487,16 +450,13 @@ fn verify_ok(tcx: TyCtxt<'_>, list: &DependencyList) {
                 });
             }
 
-            // panic_in_drop_strategy isn't allowed for LOCAL_CRATE
-            if cnum != LOCAL_CRATE {
-                let found_drop_strategy = tcx.panic_in_drop_strategy(cnum);
-                if tcx.sess.opts.unstable_opts.panic_in_drop != found_drop_strategy {
-                    sess.dcx().emit_err(IncompatiblePanicInDropStrategy {
-                        crate_name: tcx.crate_name(cnum),
-                        found_strategy: found_drop_strategy,
-                        desired_strategy: tcx.sess.opts.unstable_opts.panic_in_drop,
-                    });
-                }
+            let found_drop_strategy = tcx.panic_in_drop_strategy(cnum);
+            if tcx.sess.opts.unstable_opts.panic_in_drop != found_drop_strategy {
+                sess.dcx().emit_err(IncompatiblePanicInDropStrategy {
+                    crate_name: tcx.crate_name(cnum),
+                    found_strategy: found_drop_strategy,
+                    desired_strategy: tcx.sess.opts.unstable_opts.panic_in_drop,
+                });
             }
         }
     }

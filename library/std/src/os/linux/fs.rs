@@ -7,7 +7,7 @@
 use crate::fs::Metadata;
 #[allow(deprecated)]
 use crate::os::linux::raw;
-use crate::sys::AsInner;
+use crate::sys_common::AsInner;
 
 /// OS-specific extensions to [`fs::Metadata`].
 ///

@@ -2,7 +2,7 @@
 
 fn main() {}
 
-#[cfg(false)]
+#[cfg(FALSE)]
 impl X {
     fn f();
 }

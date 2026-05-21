@@ -3,7 +3,7 @@
 use crate::fs::Metadata;
 #[allow(deprecated)]
 use crate::os::emscripten::raw;
-use crate::sys::AsInner;
+use crate::sys_common::AsInner;
 
 /// OS-specific extensions to [`fs::Metadata`].
 ///
@@ -63,7 +63,7 @@ pub trait MetadataExt {
 impl MetadataExt for Metadata {
     #[allow(deprecated)]
     fn as_raw_stat(&self) -> &raw::stat {
-        unsafe { &*(self.as_inner().as_inner() as *const libc::stat as *const raw::stat) }
+        unsafe { &*(self.as_inner().as_inner() as *const libc::stat64 as *const raw::stat) }
     }
     fn st_dev(&self) -> u64 {
         self.as_inner().as_inner().st_dev as u64

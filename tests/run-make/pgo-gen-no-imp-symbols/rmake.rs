@@ -1,5 +1,3 @@
-//@ needs-target-std
-//
 // LLVM's profiling instrumentation adds a few symbols that are used by the profiler runtime.
 // Since these show up as globals in the LLVM IR, the compiler generates dllimport-related
 // __imp_ stubs for them. This can lead to linker errors because the instrumentation

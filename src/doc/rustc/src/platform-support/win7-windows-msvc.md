@@ -1,23 +1,18 @@
-# \*-win7-windows-msvc
+# *-win7-windows-msvc
 
 **Tier: 3**
 
-Windows targets continuing support of Windows 7.
-
-Target triples:
-- `i686-win7-windows-msvc`
-- `x86_64-win7-windows-msvc`
+Windows targets continuing support of windows7.
 
 ## Target maintainers
 
-[@roblabla](https://github.com/roblabla)
+- @roblabla
 
 ## Requirements
 
 This target supports all of core, alloc, std and test. This is automatically
 tested every night on private infrastructure hosted by the maintainer. Host
-tools may also work, though it is not guaranteed. Last known success built
-version of rustc with host tools (x86_64) is 1.91.0.
+tools may also work, though those are not currently tested.
 
 Those targets follow Windows calling convention for extern "C".
 
@@ -25,12 +20,12 @@ Like any other Windows target, the created binaries are in PE format.
 
 ## Building the target
 
-You can build Rust with support for the targets by adding it to the target list in bootstrap.toml:
+You can build Rust with support for the targets by adding it to the target list in config.toml:
 
 ```toml
 [build]
 build-stage = 1
-target = ["x86_64-win7-windows-msvc"]
+target = [ "x86_64-win7-windows-msvc" ]
 ```
 
 ## Building Rust programs
@@ -74,7 +69,7 @@ Windows SDK, which can be acquired using [`xwin`](https://github.com/Jake-Shadle
   clang-cl /imsvc "$XWIN/crt/include" /imsvc "$XWIN/sdk/include/ucrt" /imsvc "$XWIN/sdk/include/um" /imsvc "$XWIN/sdk/include/shared" --target="x86_64-pc-windows-msvc" "$@"
   ```
 
-- In your bootstrap.toml, add the following lines:
+- In your config.toml, add the following lines:
 
   ```toml
   [target.x86_64-win7-windows-msvc]

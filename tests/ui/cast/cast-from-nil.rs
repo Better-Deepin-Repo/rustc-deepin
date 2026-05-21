@@ -1,1 +1,2 @@
-fn main() { let u = (assert!(true) as u32); } //~ ERROR non-primitive cast: `()` as `u32`
+//@ error-pattern: non-primitive cast: `()` as `u32`
+fn main() { let u = (assert!(true) as u32); }

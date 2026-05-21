@@ -5,22 +5,18 @@ fn main() {
     let x = [1, 2, 3, 4];
 
     &x[..=4];
-    //~^ out_of_bounds_indexing
-
+    //~^ ERROR: range is out of bounds
+    //~| NOTE: `-D clippy::out-of-bounds-indexing` implied by `-D warnings`
     &x[1..5];
-    //~^ out_of_bounds_indexing
-
+    //~^ ERROR: range is out of bounds
     &x[5..];
-    //~^ out_of_bounds_indexing
-
+    //~^ ERROR: range is out of bounds
     &x[..5];
-    //~^ out_of_bounds_indexing
-
+    //~^ ERROR: range is out of bounds
     &x[5..].iter().map(|x| 2 * x).collect::<Vec<i32>>();
-    //~^ out_of_bounds_indexing
-
+    //~^ ERROR: range is out of bounds
     &x[0..=4];
-    //~^ out_of_bounds_indexing
+    //~^ ERROR: range is out of bounds
 
     &x[4..]; // Ok, should not produce stderr.
     &x[..4]; // Ok, should not produce stderr.

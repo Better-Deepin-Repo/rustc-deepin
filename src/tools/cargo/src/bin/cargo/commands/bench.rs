@@ -36,9 +36,9 @@ pub fn cli() -> Command {
             "Benchmark only the specified example",
             "Benchmark all examples",
             "Benchmark only the specified test target",
-            "Benchmark all targets that have `test = true` set",
+            "Benchmark all test targets",
             "Benchmark only the specified bench target",
-            "Benchmark all targets that have `bench = true` set",
+            "Benchmark all bench targets",
             "Benchmark all targets",
         )
         .arg_features()
@@ -50,9 +50,10 @@ pub fn cli() -> Command {
         .arg_unit_graph()
         .arg_timings()
         .arg_manifest_path()
+        .arg_lockfile_path()
         .arg_ignore_rust_version()
         .after_help(color_print::cstr!(
-            "Run `<bright-cyan,bold>cargo help bench</>` for more detailed information.\n"
+            "Run `<cyan,bold>cargo help bench</>` for more detailed information.\n"
         ))
 }
 
@@ -60,7 +61,7 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
     let ws = args.workspace(gctx)?;
 
     let mut compile_opts =
-        args.compile_options(gctx, UserIntent::Bench, Some(&ws), ProfileChecking::Custom)?;
+        args.compile_options(gctx, CompileMode::Bench, Some(&ws), ProfileChecking::Custom)?;
 
     compile_opts.build_config.requested_profile =
         args.get_profile_name("bench", ProfileChecking::Custom)?;

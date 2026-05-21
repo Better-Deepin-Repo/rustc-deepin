@@ -11,6 +11,7 @@ struct Baz {}
 
 impl Foo for Baz {
     async fn bar<F>(&mut self, _func: F) -> ()
+    //~^ ERROR `F` cannot be sent between threads safely
     where
         F: FnMut() + Send,
         //~^ ERROR impl has stricter requirements than trait

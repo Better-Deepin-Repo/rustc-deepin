@@ -7,16 +7,16 @@
 //! of a `Freeze` local. Those can still be considered to be SSA.
 
 use rustc_data_structures::graph::dominators::Dominators;
-use rustc_index::bit_set::DenseBitSet;
+use rustc_index::bit_set::BitSet;
 use rustc_index::{IndexSlice, IndexVec};
 use rustc_middle::bug;
 use rustc_middle::middle::resolve_bound_vars::Set1;
 use rustc_middle::mir::visit::*;
 use rustc_middle::mir::*;
-use rustc_middle::ty::{self, TyCtxt};
+use rustc_middle::ty::{ParamEnv, TyCtxt};
 use tracing::{debug, instrument, trace};
 
-pub(super) struct SsaLocals {
+pub struct SsaLocals {
     /// Assignments to each local. This defines whether the local is SSA.
     assignments: IndexVec<Local, Set1<DefLocation>>,
     /// We visit the body in reverse postorder, to ensure each local is assigned before it is used.
@@ -29,22 +29,24 @@ pub(super) struct SsaLocals {
     /// We ignore non-uses (Storage statements, debuginfo).
     direct_uses: IndexVec<Local, u32>,
     /// Set of SSA locals that are immutably borrowed.
-    borrowed_locals: DenseBitSet<Local>,
+    borrowed_locals: BitSet<Local>,
+}
+
+pub enum AssignedValue<'a, 'tcx> {
+    Arg,
+    Rvalue(&'a mut Rvalue<'tcx>),
+    Terminator,
 }
 
 impl SsaLocals {
-    pub(super) fn new<'tcx>(
-        tcx: TyCtxt<'tcx>,
-        body: &Body<'tcx>,
-        typing_env: ty::TypingEnv<'tcx>,
-    ) -> SsaLocals {
+    pub fn new<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>, param_env: ParamEnv<'tcx>) -> SsaLocals {
         let assignment_order = Vec::with_capacity(body.local_decls.len());
 
         let assignments = IndexVec::from_elem(Set1::Empty, &body.local_decls);
         let dominators = body.basic_blocks.dominators();
 
         let direct_uses = IndexVec::from_elem(0, &body.local_decls);
-        let borrowed_locals = DenseBitSet::new_empty(body.local_decls.len());
+        let borrowed_locals = BitSet::new_empty(body.local_decls.len());
         let mut visitor = SsaVisitor {
             body,
             assignments,
@@ -74,7 +76,7 @@ impl SsaLocals {
         // have already been marked as non-SSA.
         debug!(?visitor.borrowed_locals);
         for local in visitor.borrowed_locals.iter() {
-            if !body.local_decls[local].ty.is_freeze(tcx, typing_env) {
+            if !body.local_decls[local].ty.is_freeze(tcx, param_env) {
                 visitor.assignments[local] = Set1::Many;
             }
         }
@@ -99,25 +101,25 @@ impl SsaLocals {
         ssa
     }
 
-    pub(super) fn num_locals(&self) -> usize {
+    pub fn num_locals(&self) -> usize {
         self.assignments.len()
     }
 
-    pub(super) fn locals(&self) -> impl Iterator<Item = Local> {
+    pub fn locals(&self) -> impl Iterator<Item = Local> {
         self.assignments.indices()
     }
 
-    pub(super) fn is_ssa(&self, local: Local) -> bool {
+    pub fn is_ssa(&self, local: Local) -> bool {
         matches!(self.assignments[local], Set1::One(_))
     }
 
     /// Return the number of uses if a local that are not "Deref".
-    pub(super) fn num_direct_uses(&self, local: Local) -> u32 {
+    pub fn num_direct_uses(&self, local: Local) -> u32 {
         self.direct_uses[local]
     }
 
     #[inline]
-    pub(super) fn assignment_dominates(
+    pub fn assignment_dominates(
         &self,
         dominators: &Dominators<BasicBlock>,
         local: Local,
@@ -129,10 +131,10 @@ impl SsaLocals {
         }
     }
 
-    pub(super) fn assignments<'a, 'tcx>(
+    pub fn assignments<'a, 'tcx>(
         &'a self,
         body: &'a Body<'tcx>,
-    ) -> impl Iterator<Item = (Local, &'a Rvalue<'tcx>, Location)> {
+    ) -> impl Iterator<Item = (Local, &'a Rvalue<'tcx>, Location)> + 'a {
         self.assignment_order.iter().filter_map(|&local| {
             if let Set1::One(DefLocation::Assignment(loc)) = self.assignments[local] {
                 let stmt = body.stmt_at(loc).left()?;
@@ -144,6 +146,38 @@ impl SsaLocals {
                 None
             }
         })
+    }
+
+    pub fn for_each_assignment_mut<'tcx>(
+        &self,
+        basic_blocks: &mut IndexSlice<BasicBlock, BasicBlockData<'tcx>>,
+        mut f: impl FnMut(Local, AssignedValue<'_, 'tcx>, Location),
+    ) {
+        for &local in &self.assignment_order {
+            match self.assignments[local] {
+                Set1::One(DefLocation::Argument) => f(
+                    local,
+                    AssignedValue::Arg,
+                    Location { block: START_BLOCK, statement_index: 0 },
+                ),
+                Set1::One(DefLocation::Assignment(loc)) => {
+                    let bb = &mut basic_blocks[loc.block];
+                    // `loc` must point to a direct assignment to `local`.
+                    let stmt = &mut bb.statements[loc.statement_index];
+                    let StatementKind::Assign(box (target, ref mut rvalue)) = stmt.kind else {
+                        bug!()
+                    };
+                    assert_eq!(target.as_local(), Some(local));
+                    f(local, AssignedValue::Rvalue(rvalue), loc)
+                }
+                Set1::One(DefLocation::CallReturn { call, .. }) => {
+                    let bb = &mut basic_blocks[call];
+                    let loc = Location { block: call, statement_index: bb.statements.len() };
+                    f(local, AssignedValue::Terminator, loc)
+                }
+                _ => {}
+            }
+        }
     }
 
     /// Compute the equivalence classes for locals, based on copy statements.
@@ -160,17 +194,17 @@ impl SsaLocals {
     ///   _d => _a // transitively through _c
     ///
     /// Exception: we do not see through the return place, as it cannot be instantiated.
-    pub(super) fn copy_classes(&self) -> &IndexSlice<Local, Local> {
+    pub fn copy_classes(&self) -> &IndexSlice<Local, Local> {
         &self.copy_classes
     }
 
     /// Set of SSA locals that are immutably borrowed.
-    pub(super) fn borrowed_locals(&self) -> &DenseBitSet<Local> {
+    pub fn borrowed_locals(&self) -> &BitSet<Local> {
         &self.borrowed_locals
     }
 
     /// Make a property uniform on a copy equivalence class by removing elements.
-    pub(super) fn meet_copy_equivalence(&self, property: &mut DenseBitSet<Local>) {
+    pub fn meet_copy_equivalence(&self, property: &mut BitSet<Local>) {
         // Consolidate to have a local iff all its copies are.
         //
         // `copy_classes` defines equivalence classes between locals. The `local`s that recursively
@@ -197,14 +231,14 @@ impl SsaLocals {
     }
 }
 
-struct SsaVisitor<'a, 'tcx> {
+struct SsaVisitor<'tcx, 'a> {
     body: &'a Body<'tcx>,
     dominators: &'a Dominators<BasicBlock>,
     assignments: IndexVec<Local, Set1<DefLocation>>,
     assignment_order: Vec<Local>,
     direct_uses: IndexVec<Local, u32>,
     // Track locals that are immutably borrowed, so we can check their type is `Freeze` later.
-    borrowed_locals: DenseBitSet<Local>,
+    borrowed_locals: BitSet<Local>,
 }
 
 impl SsaVisitor<'_, '_> {
@@ -223,11 +257,8 @@ impl SsaVisitor<'_, '_> {
     }
 }
 
-impl<'tcx> Visitor<'tcx> for SsaVisitor<'_, 'tcx> {
+impl<'tcx> Visitor<'tcx> for SsaVisitor<'tcx, '_> {
     fn visit_local(&mut self, local: Local, ctxt: PlaceContext, loc: Location) {
-        if ctxt.may_observe_address() {
-            self.borrowed_locals.insert(local);
-        }
         match ctxt {
             PlaceContext::MutatingUse(MutatingUseContext::Projection)
             | PlaceContext::NonMutatingUse(NonMutatingUseContext::Projection) => bug!(),
@@ -240,6 +271,7 @@ impl<'tcx> Visitor<'tcx> for SsaVisitor<'_, 'tcx> {
             PlaceContext::NonMutatingUse(
                 NonMutatingUseContext::SharedBorrow | NonMutatingUseContext::FakeBorrow,
             ) => {
+                self.borrowed_locals.insert(local);
                 self.check_dominates(local, loc);
                 self.direct_uses[local] += 1;
             }
@@ -297,7 +329,9 @@ fn compute_copy_classes(ssa: &mut SsaLocals, body: &Body<'_>) {
     let mut copies = IndexVec::from_fn_n(|l| l, body.local_decls.len());
 
     for (local, rvalue, _) in ssa.assignments(body) {
-        let Rvalue::Use(Operand::Copy(place) | Operand::Move(place)) = rvalue else {
+        let (Rvalue::Use(Operand::Copy(place) | Operand::Move(place))
+        | Rvalue::CopyForDeref(place)) = rvalue
+        else {
             continue;
         };
 
@@ -317,15 +351,6 @@ fn compute_copy_classes(ssa: &mut SsaLocals, body: &Body<'_>) {
         // We visit in `assignment_order`, ie. reverse post-order, so `rhs` has been
         // visited before `local`, and we just have to copy the representing local.
         let head = copies[rhs];
-
-        // When propagating from `head` to `local` we need to ensure that changes to the address
-        // are not observable, so at most one the locals involved can be borrowed. Additionally, we
-        // need to ensure that the definition of `head` dominates all uses of `local`. When `local`
-        // is borrowed, there might exist an indirect use of `local` that isn't dominated by the
-        // definition, so we have to reject copy propagation.
-        if ssa.borrowed_locals().contains(local) {
-            continue;
-        }
 
         if local == RETURN_PLACE {
             // `_0` is special, we cannot rename it. Instead, rename the class of `rhs` to
@@ -368,7 +393,7 @@ pub(crate) struct StorageLiveLocals {
 impl StorageLiveLocals {
     pub(crate) fn new(
         body: &Body<'_>,
-        always_storage_live_locals: &DenseBitSet<Local>,
+        always_storage_live_locals: &BitSet<Local>,
     ) -> StorageLiveLocals {
         let mut storage_live = IndexVec::from_elem(Set1::Empty, &body.local_decls);
         for local in always_storage_live_locals.iter() {

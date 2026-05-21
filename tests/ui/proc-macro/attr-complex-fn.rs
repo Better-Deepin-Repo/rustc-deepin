@@ -1,6 +1,6 @@
 //@ check-pass
 //@ compile-flags: -Z span-debug --error-format human
-//@ proc-macro: test-macros.rs
+//@ aux-build:test-macros.rs
 
 #![feature(stmt_expr_attributes)]
 #![feature(custom_inner_attributes)]

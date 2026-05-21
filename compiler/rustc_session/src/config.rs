@@ -1,6 +1,8 @@
 //! Contains infrastructure for configuring the compiler, including parsing
 //! command-line options.
 
+#![allow(rustc::untranslatable_diagnostic)] // FIXME: make this translatable
+
 use std::collections::btree_map::{
     Iter as BTreeMapIter, Keys as BTreeMapKeysIter, Values as BTreeMapValuesIter,
 };
@@ -10,41 +12,34 @@ use std::hash::Hash;
 use std::path::{Path, PathBuf};
 use std::str::{self, FromStr};
 use std::sync::LazyLock;
-use std::{cmp, fs, iter};
+use std::{fmt, fs, iter};
 
-use externs::{ExternOpt, split_extern_opt};
 use rustc_data_structures::fx::{FxHashSet, FxIndexMap};
-use rustc_data_structures::stable_hasher::{StableHasher, StableOrd, ToStableHashKey};
+use rustc_data_structures::stable_hasher::{StableOrd, ToStableHashKey};
 use rustc_errors::emitter::HumanReadableErrorType;
-use rustc_errors::{ColorConfig, DiagCtxtFlags};
+use rustc_errors::{ColorConfig, DiagArgValue, DiagCtxtFlags, IntoDiagArg};
 use rustc_feature::UnstableFeatures;
-use rustc_hashes::Hash64;
-use rustc_macros::{BlobDecodable, Decodable, Encodable, HashStable_Generic};
-use rustc_span::edition::{DEFAULT_EDITION, EDITION_NAME_LIST, Edition, LATEST_STABLE_EDITION};
+use rustc_macros::{Decodable, Encodable, HashStable_Generic};
+use rustc_span::edition::{Edition, DEFAULT_EDITION, EDITION_NAME_LIST, LATEST_STABLE_EDITION};
 use rustc_span::source_map::FilePathMapping;
 use rustc_span::{
-    FileName, RealFileName, RemapPathScopeComponents, SourceFileHashAlgorithm, Symbol, sym,
+    sym, FileName, FileNameDisplayPreference, RealFileName, SourceFileHashAlgorithm, Symbol,
 };
 use rustc_target::spec::{
-    FramePointer, LinkSelfContainedComponents, LinkerFeatures, PanicStrategy, SplitDebuginfo,
-    Target, TargetTuple,
+    FramePointer, LinkSelfContainedComponents, LinkerFeatures, SplitDebuginfo, Target, TargetTriple,
 };
 use tracing::debug;
 
-pub use crate::config::cfg::{Cfg, CheckCfg, ExpectedValues};
-use crate::config::native_libs::parse_native_libs;
-pub use crate::config::print_request::{PrintKind, PrintRequest};
 use crate::errors::FileWriteFail;
 pub use crate::options::*;
 use crate::search_paths::SearchPath;
-use crate::utils::CanonicalizedPath;
-use crate::{EarlyDiagCtxt, HashStableContext, Session, filesearch, lint};
+use crate::utils::{CanonicalizedPath, NativeLib, NativeLibKind};
+use crate::{filesearch, lint, EarlyDiagCtxt, HashStableContext, Session};
 
 mod cfg;
-mod externs;
-mod native_libs;
-mod print_request;
 pub mod sigpipe;
+
+pub use cfg::{Cfg, CheckCfg, ExpectedValues};
 
 /// The different settings that the `-C strip` flag can have.
 #[derive(Clone, Copy, PartialEq, Hash, Debug)]
@@ -88,27 +83,21 @@ pub enum CFProtection {
     Full,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Hash, HashStable_Generic, Encodable, Decodable)]
+#[derive(Clone, Copy, Debug, PartialEq, Hash, HashStable_Generic)]
 pub enum OptLevel {
-    /// `-Copt-level=0`
-    No,
-    /// `-Copt-level=1`
-    Less,
-    /// `-Copt-level=2`
-    More,
-    /// `-Copt-level=3` / `-O`
-    Aggressive,
-    /// `-Copt-level=s`
-    Size,
-    /// `-Copt-level=z`
-    SizeMin,
+    No,         // -O0
+    Less,       // -O1
+    Default,    // -O2
+    Aggressive, // -O3
+    Size,       // -Os
+    SizeMin,    // -Oz
 }
 
 /// This is what the `LtoCli` values get mapped to after resolving defaults and
 /// and taking other command line options into account.
 ///
 /// Note that linker plugin-based LTO is a different mechanism entirely.
-#[derive(Clone, PartialEq, Encodable, Decodable)]
+#[derive(Clone, PartialEq)]
 pub enum Lto {
     /// Don't do any LTO whatsoever.
     No,
@@ -142,6 +131,13 @@ pub enum LtoCli {
 }
 
 /// The different settings that the `-C instrument-coverage` flag can have.
+///
+/// Coverage instrumentation now supports combining `-C instrument-coverage`
+/// with compiler and linker optimization (enabled with `-O` or `-C opt-level=1`
+/// and higher). Nevertheless, there are many variables, depending on options
+/// selected, code structure, and enabled attributes. If errors are encountered,
+/// either while compiling or when generating `llvm-cov show` reports, consider
+/// lowering the optimization level, or including/excluding `-C link-dead-code`.
 #[derive(Clone, Copy, PartialEq, Hash, Debug)]
 pub enum InstrumentCoverage {
     /// `-C instrument-coverage=no` (or `off`, `false` etc.)
@@ -150,24 +146,24 @@ pub enum InstrumentCoverage {
     Yes,
 }
 
-/// Individual flag values controlled by `-Zcoverage-options`.
+/// Individual flag values controlled by `-Z coverage-options`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct CoverageOptions {
     pub level: CoverageLevel,
 
-    /// **(internal test-only flag)**
-    /// `-Zcoverage-options=discard-all-spans-in-codegen`: During codegen,
-    /// discard all coverage spans as though they were invalid. Needed by
-    /// regression tests for #133606, because we don't have an easy way to
-    /// reproduce it from actual source code.
-    pub discard_all_spans_in_codegen: bool,
+    /// `-Z coverage-options=no-mir-spans`: Don't extract block coverage spans
+    /// from MIR statements/terminators, making it easier to inspect/debug
+    /// branch and MC/DC coverage mappings.
+    ///
+    /// For internal debugging only. If other code changes would make it hard
+    /// to keep supporting this flag, remove it.
+    pub no_mir_spans: bool,
 }
 
-/// Controls whether branch coverage is enabled.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+/// Controls whether branch coverage or MC/DC coverage is enabled.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum CoverageLevel {
     /// Instrument for coverage at the MIR block level.
-    #[default]
     Block,
     /// Also instrument branch points (includes block coverage).
     Branch,
@@ -187,63 +183,15 @@ pub enum CoverageLevel {
     /// instrumentation, so it might be removed in the future when MC/DC is
     /// sufficiently complete, or if it is making MC/DC changes difficult.
     Condition,
+    /// Instrument for MC/DC. Mostly a superset of condition coverage, but might
+    /// differ in some corner cases.
+    Mcdc,
 }
 
-// The different settings that the `-Z offload` flag can have.
-#[derive(Clone, PartialEq, Hash, Debug, Encodable, Decodable)]
-pub enum Offload {
-    /// Entry point for `std::offload`, enables kernel compilation for a gpu device
-    Device,
-    /// Second step in the offload pipeline, generates the host code to call kernels.
-    Host(String),
-    /// Test is similar to Host, but allows testing without a device artifact.
-    Test,
-}
-
-/// The different settings that the `-Z autodiff` flag can have.
-#[derive(Clone, PartialEq, Hash, Debug, Encodable, Decodable)]
-pub enum AutoDiff {
-    /// Enable the autodiff opt pipeline
-    Enable,
-
-    /// Print TypeAnalysis information
-    PrintTA,
-    /// Print TypeAnalysis information for a specific function
-    PrintTAFn(String),
-    /// Print ActivityAnalysis Information
-    PrintAA,
-    /// Print Performance Warnings from Enzyme
-    PrintPerf,
-    /// Print intermediate IR generation steps
-    PrintSteps,
-    /// Print the module, before running autodiff.
-    PrintModBefore,
-    /// Print the module after running autodiff.
-    PrintModAfter,
-    /// Print the module after running autodiff and optimizations.
-    PrintModFinal,
-
-    /// Print all passes scheduled by LLVM
-    PrintPasses,
-    /// Disable extra opt run after running autodiff
-    NoPostopt,
-    /// Enzyme's loose type debug helper (can cause incorrect gradients!!)
-    /// Usable in cases where Enzyme errors with `can not deduce type of X`.
-    LooseTypes,
-    /// Runs Enzyme's aggressive inlining
-    Inline,
-    /// Disable Type Tree
-    NoTT,
-}
-
-/// The different settings that the `-Z annotate-moves` flag can have.
-#[derive(Clone, Copy, PartialEq, Hash, Debug)]
-pub enum AnnotateMoves {
-    /// `-Z annotate-moves=no` (or `off`, `false` etc.)
-    Disabled,
-    /// `-Z annotate-moves` or `-Z annotate-moves=yes` (use default size limit)
-    /// `-Z annotate-moves=SIZE` (use specified size limit)
-    Enabled(Option<u64>),
+impl Default for CoverageLevel {
+    fn default() -> Self {
+        Self::Block
+    }
 }
 
 /// Settings for `-Z instrument-xray` flag.
@@ -303,7 +251,7 @@ pub struct LinkSelfContained {
     pub explicitly_set: Option<bool>,
 
     /// The components that are enabled on the CLI, using the `+component` syntax or one of the
-    /// `true` shortcuts.
+    /// `true` shorcuts.
     enabled_components: LinkSelfContainedComponents,
 
     /// The components that are disabled on the CLI, using the `-component` syntax or one of the
@@ -322,12 +270,12 @@ impl LinkSelfContained {
         if let Some(component_to_enable) = component.strip_prefix('+') {
             self.explicitly_set = None;
             self.enabled_components
-                .insert(LinkSelfContainedComponents::from_str(component_to_enable).ok()?);
+                .insert(LinkSelfContainedComponents::from_str(component_to_enable)?);
             Some(())
         } else if let Some(component_to_disable) = component.strip_prefix('-') {
             self.explicitly_set = None;
             self.disabled_components
-                .insert(LinkSelfContainedComponents::from_str(component_to_disable).ok()?);
+                .insert(LinkSelfContainedComponents::from_str(component_to_disable)?);
             Some(())
         } else {
             None
@@ -356,44 +304,22 @@ impl LinkSelfContained {
     }
 
     /// To help checking CLI usage while some of the values are unstable: returns whether one of the
-    /// unstable components was set individually, for the given `TargetTuple`. This would also
-    /// require the `-Zunstable-options` flag, to be allowed.
-    fn check_unstable_variants(&self, target_tuple: &TargetTuple) -> Result<(), String> {
-        if self.explicitly_set.is_some() {
-            return Ok(());
-        }
-
-        // `-C link-self-contained=-linker` is only stable on x64 linux.
-        let has_minus_linker = self.disabled_components.is_linker_enabled();
-        if has_minus_linker && target_tuple.tuple() != "x86_64-unknown-linux-gnu" {
-            return Err(format!(
-                "`-C link-self-contained=-linker` is unstable on the `{target_tuple}` \
-                    target. The `-Z unstable-options` flag must also be passed to use it on this target",
-            ));
-        }
-
-        // Any `+linker` or other component used is unstable, and that's an error.
-        let unstable_enabled = self.enabled_components;
-        let unstable_disabled = self.disabled_components - LinkSelfContainedComponents::LINKER;
-        if !unstable_enabled.union(unstable_disabled).is_empty() {
-            return Err(String::from(
-                "only `-C link-self-contained` values `y`/`yes`/`on`/`n`/`no`/`off`/`-linker` \
-                are stable, the `-Z unstable-options` flag must also be passed to use \
-                the unstable values",
-            ));
-        }
-
-        Ok(())
+    /// components was set individually. This would also require the `-Zunstable-options` flag, to
+    /// be allowed.
+    fn are_unstable_variants_set(&self) -> bool {
+        let any_component_set =
+            !self.enabled_components.is_empty() || !self.disabled_components.is_empty();
+        self.explicitly_set.is_none() && any_component_set
     }
 
     /// Returns whether the self-contained linker component was enabled on the CLI, using the
-    /// `-C link-self-contained=+linker` syntax, or one of the `true` shortcuts.
+    /// `-C link-self-contained=+linker` syntax, or one of the `true` shorcuts.
     pub fn is_linker_enabled(&self) -> bool {
         self.enabled_components.contains(LinkSelfContainedComponents::LINKER)
     }
 
     /// Returns whether the self-contained linker component was disabled on the CLI, using the
-    /// `-C link-self-contained=-linker` syntax, or one of the `false` shortcuts.
+    /// `-C link-self-contained=-linker` syntax, or one of the `false` shorcuts.
     pub fn is_linker_disabled(&self) -> bool {
         self.disabled_components.contains(LinkSelfContainedComponents::LINKER)
     }
@@ -410,7 +336,7 @@ impl LinkSelfContained {
     }
 }
 
-/// The different values that `-C linker-features` can take on the CLI: a list of individually
+/// The different values that `-Z linker-features` can take on the CLI: a list of individually
 /// enabled or disabled features used during linking.
 ///
 /// There is no need to enable or disable them in bulk. Each feature is fine-grained, and can be
@@ -434,7 +360,7 @@ impl LinkerFeaturesCli {
         // Duplicate flags are reduced as we go, the last occurrence wins:
         // `+feature,-feature,+feature` only enables the feature, and does not record it as both
         // enabled and disabled on the CLI.
-        // We also only expose `+/-lld` at the moment, as it's currently the only implemented linker
+        // We also only expose `+/-lld` at the moment, as it's currenty the only implemented linker
         // feature and toggling `LinkerFeatures::CC` would be a noop.
         match feature {
             "+lld" => {
@@ -449,39 +375,6 @@ impl LinkerFeaturesCli {
             }
             _ => None,
         }
-    }
-
-    /// When *not* using `-Z unstable-options` on the CLI, ensure only stable linker features are
-    /// used, for the given `TargetTuple`. Returns `Ok` if no unstable variants are used.
-    /// The caller should ensure that e.g. `nightly_options::is_unstable_enabled()`
-    /// returns false.
-    pub(crate) fn check_unstable_variants(&self, target_tuple: &TargetTuple) -> Result<(), String> {
-        // `-C linker-features=-lld` is only stable on x64 linux.
-        let has_minus_lld = self.disabled.is_lld_enabled();
-        if has_minus_lld && target_tuple.tuple() != "x86_64-unknown-linux-gnu" {
-            return Err(format!(
-                "`-C linker-features=-lld` is unstable on the `{target_tuple}` \
-                    target. The `-Z unstable-options` flag must also be passed to use it on this target",
-            ));
-        }
-
-        // Any `+lld` or non-lld feature used is unstable, and that's an error.
-        let unstable_enabled = self.enabled;
-        let unstable_disabled = self.disabled - LinkerFeatures::LLD;
-        if !unstable_enabled.union(unstable_disabled).is_empty() {
-            let unstable_features: Vec<_> = unstable_enabled
-                .iter()
-                .map(|f| format!("+{}", f.as_str().unwrap()))
-                .chain(unstable_disabled.iter().map(|f| format!("-{}", f.as_str().unwrap())))
-                .collect();
-            return Err(format!(
-                "`-C linker-features={}` is unstable, and also requires the \
-                `-Z unstable-options` flag to be used",
-                unstable_features.join(","),
-            ));
-        }
-
-        Ok(())
     }
 }
 
@@ -528,7 +421,7 @@ impl FmtDebug {
     }
 }
 
-#[derive(Clone, PartialEq, Hash, Debug, Encodable, Decodable)]
+#[derive(Clone, PartialEq, Hash, Debug)]
 pub enum SwitchWithOptPath {
     Enabled(Option<PathBuf>),
     Disabled,
@@ -544,7 +437,7 @@ impl SwitchWithOptPath {
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, HashStable_Generic)]
-#[derive(Encodable, BlobDecodable)]
+#[derive(Encodable, Decodable)]
 pub enum SymbolManglingVersion {
     Legacy,
     V0,
@@ -567,11 +460,15 @@ pub enum DebugInfoCompression {
     Zstd,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Hash)]
-pub enum MirStripDebugInfo {
-    None,
-    LocalsInTinyFunctions,
-    AllLocals,
+impl ToString for DebugInfoCompression {
+    fn to_string(&self) -> String {
+        match self {
+            DebugInfoCompression::None => "none",
+            DebugInfoCompression::Zlib => "zlib",
+            DebugInfoCompression::Zstd => "zstd",
+        }
+        .to_owned()
+    }
 }
 
 /// Split debug-information is enabled by `-C split-debuginfo`, this enum is only used if split
@@ -583,7 +480,7 @@ pub enum MirStripDebugInfo {
 /// DWARF provides a mechanism which allows the linker to skip the sections which don't require
 /// link-time relocation - either by putting those sections in DWARF object files, or by keeping
 /// them in the object file in such a way that the linker will skip them.
-#[derive(Clone, Copy, Debug, PartialEq, Hash, Encodable, Decodable)]
+#[derive(Clone, Copy, Debug, PartialEq, Hash)]
 pub enum SplitDwarfKind {
     /// Sections which do not require relocation are written into object file but ignored by the
     /// linker.
@@ -605,214 +502,126 @@ impl FromStr for SplitDwarfKind {
     }
 }
 
-macro_rules! define_output_types {
-    (
-        $(
-            $(#[doc = $doc:expr])*
-            $Variant:ident => {
-                shorthand: $shorthand:expr,
-                extension: $extension:expr,
-                description: $description:expr,
-                default_filename: $default_filename:expr,
-                is_text: $is_text:expr,
-                compatible_with_cgus_and_single_output: $compatible:expr
-            }
-        ),* $(,)?
-    ) => {
-        #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord, HashStable_Generic)]
-        #[derive(Encodable, Decodable)]
-        pub enum OutputType {
-            $(
-                $(#[doc = $doc])*
-                $Variant,
-            )*
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, PartialOrd, Ord, HashStable_Generic)]
+#[derive(Encodable, Decodable)]
+pub enum OutputType {
+    Bitcode,
+    ThinLinkBitcode,
+    Assembly,
+    LlvmAssembly,
+    Mir,
+    Metadata,
+    Object,
+    Exe,
+    DepInfo,
+}
+
+impl StableOrd for OutputType {
+    const CAN_USE_UNSTABLE_SORT: bool = true;
+
+    // Trivial C-Style enums have a stable sort order across compilation sessions.
+    const THIS_IMPLEMENTATION_HAS_BEEN_TRIPLE_CHECKED: () = ();
+}
+
+impl<HCX: HashStableContext> ToStableHashKey<HCX> for OutputType {
+    type KeyType = Self;
+
+    fn to_stable_hash_key(&self, _: &HCX) -> Self::KeyType {
+        *self
+    }
+}
+
+impl OutputType {
+    fn is_compatible_with_codegen_units_and_single_output_file(&self) -> bool {
+        match *self {
+            OutputType::Exe | OutputType::DepInfo | OutputType::Metadata => true,
+            OutputType::Bitcode
+            | OutputType::ThinLinkBitcode
+            | OutputType::Assembly
+            | OutputType::LlvmAssembly
+            | OutputType::Mir
+            | OutputType::Object => false,
         }
+    }
 
-
-        impl StableOrd for OutputType {
-            const CAN_USE_UNSTABLE_SORT: bool = true;
-
-            // Trivial C-Style enums have a stable sort order across compilation sessions.
-            const THIS_IMPLEMENTATION_HAS_BEEN_TRIPLE_CHECKED: () = ();
+    pub fn shorthand(&self) -> &'static str {
+        match *self {
+            OutputType::Bitcode => "llvm-bc",
+            OutputType::ThinLinkBitcode => "thin-link-bitcode",
+            OutputType::Assembly => "asm",
+            OutputType::LlvmAssembly => "llvm-ir",
+            OutputType::Mir => "mir",
+            OutputType::Object => "obj",
+            OutputType::Metadata => "metadata",
+            OutputType::Exe => "link",
+            OutputType::DepInfo => "dep-info",
         }
+    }
 
-        impl<HCX: HashStableContext> ToStableHashKey<HCX> for OutputType {
-            type KeyType = Self;
+    fn from_shorthand(shorthand: &str) -> Option<Self> {
+        Some(match shorthand {
+            "asm" => OutputType::Assembly,
+            "llvm-ir" => OutputType::LlvmAssembly,
+            "mir" => OutputType::Mir,
+            "llvm-bc" => OutputType::Bitcode,
+            "thin-link-bitcode" => OutputType::ThinLinkBitcode,
+            "obj" => OutputType::Object,
+            "metadata" => OutputType::Metadata,
+            "link" => OutputType::Exe,
+            "dep-info" => OutputType::DepInfo,
+            _ => return None,
+        })
+    }
 
-            fn to_stable_hash_key(&self, _: &HCX) -> Self::KeyType {
-                *self
-            }
+    fn shorthands_display() -> String {
+        format!(
+            "`{}`, `{}`, `{}`, `{}`, `{}`, `{}`, `{}`, `{}`, `{}`",
+            OutputType::Bitcode.shorthand(),
+            OutputType::ThinLinkBitcode.shorthand(),
+            OutputType::Assembly.shorthand(),
+            OutputType::LlvmAssembly.shorthand(),
+            OutputType::Mir.shorthand(),
+            OutputType::Object.shorthand(),
+            OutputType::Metadata.shorthand(),
+            OutputType::Exe.shorthand(),
+            OutputType::DepInfo.shorthand(),
+        )
+    }
+
+    pub fn extension(&self) -> &'static str {
+        match *self {
+            OutputType::Bitcode => "bc",
+            OutputType::ThinLinkBitcode => "indexing.o",
+            OutputType::Assembly => "s",
+            OutputType::LlvmAssembly => "ll",
+            OutputType::Mir => "mir",
+            OutputType::Object => "o",
+            OutputType::Metadata => "rmeta",
+            OutputType::DepInfo => "d",
+            OutputType::Exe => "",
         }
+    }
 
-
-        impl OutputType {
-            pub fn iter_all() -> impl Iterator<Item = OutputType> {
-                static ALL_VARIANTS: &[OutputType] = &[
-                    $(
-                        OutputType::$Variant,
-                    )*
-                ];
-                ALL_VARIANTS.iter().copied()
-            }
-
-            fn is_compatible_with_codegen_units_and_single_output_file(&self) -> bool {
-                match *self {
-                    $(
-                        OutputType::$Variant => $compatible,
-                    )*
-                }
-            }
-
-            pub fn shorthand(&self) -> &'static str {
-                match *self {
-                    $(
-                        OutputType::$Variant => $shorthand,
-                    )*
-                }
-            }
-
-            fn from_shorthand(shorthand: &str) -> Option<Self> {
-                match shorthand {
-                    $(
-                        s if s == $shorthand => Some(OutputType::$Variant),
-                    )*
-                    _ => None,
-                }
-            }
-
-            fn shorthands_display() -> String {
-                let shorthands = vec![
-                    $(
-                        format!("`{}`", $shorthand),
-                    )*
-                ];
-                shorthands.join(", ")
-            }
-
-            pub fn extension(&self) -> &'static str {
-                match *self {
-                    $(
-                        OutputType::$Variant => $extension,
-                    )*
-                }
-            }
-
-            pub fn is_text_output(&self) -> bool {
-                match *self {
-                    $(
-                        OutputType::$Variant => $is_text,
-                    )*
-                }
-            }
-
-            pub fn description(&self) -> &'static str {
-                match *self {
-                    $(
-                        OutputType::$Variant => $description,
-                    )*
-                }
-            }
-
-            pub fn default_filename(&self) -> &'static str {
-                match *self {
-                    $(
-                        OutputType::$Variant => $default_filename,
-                    )*
-                }
-            }
-
-
+    pub fn is_text_output(&self) -> bool {
+        match *self {
+            OutputType::Assembly
+            | OutputType::LlvmAssembly
+            | OutputType::Mir
+            | OutputType::DepInfo => true,
+            OutputType::Bitcode
+            | OutputType::ThinLinkBitcode
+            | OutputType::Object
+            | OutputType::Metadata
+            | OutputType::Exe => false,
         }
     }
 }
 
-define_output_types! {
-    Assembly => {
-        shorthand: "asm",
-        extension: "s",
-        description: "Generates a file with the crate's assembly code",
-        default_filename: "CRATE_NAME.s",
-        is_text: true,
-        compatible_with_cgus_and_single_output: false
-    },
-    #[doc = "This is the optimized bitcode, which could be either pre-LTO or non-LTO bitcode,"]
-    #[doc = "depending on the specific request type."]
-    Bitcode => {
-        shorthand: "llvm-bc",
-        extension: "bc",
-        description: "Generates a binary file containing the LLVM bitcode",
-        default_filename: "CRATE_NAME.bc",
-        is_text: false,
-        compatible_with_cgus_and_single_output: false
-    },
-    DepInfo => {
-        shorthand: "dep-info",
-        extension: "d",
-        description: "Generates a file with Makefile syntax that indicates all the source files that were loaded to generate the crate",
-        default_filename: "CRATE_NAME.d",
-        is_text: true,
-        compatible_with_cgus_and_single_output: true
-    },
-    Exe => {
-        shorthand: "link",
-        extension: "",
-        description: "Generates the crates specified by --crate-type. This is the default if --emit is not specified",
-        default_filename: "(platform and crate-type dependent)",
-        is_text: false,
-        compatible_with_cgus_and_single_output: true
-    },
-    LlvmAssembly => {
-        shorthand: "llvm-ir",
-        extension: "ll",
-        description: "Generates a file containing LLVM IR",
-        default_filename: "CRATE_NAME.ll",
-        is_text: true,
-        compatible_with_cgus_and_single_output: false
-    },
-    Metadata => {
-        shorthand: "metadata",
-        extension: "rmeta",
-        description: "Generates a file containing metadata about the crate",
-        default_filename: "libCRATE_NAME.rmeta",
-        is_text: false,
-        compatible_with_cgus_and_single_output: true
-    },
-    Mir => {
-        shorthand: "mir",
-        extension: "mir",
-        description: "Generates a file containing rustc's mid-level intermediate representation",
-        default_filename: "CRATE_NAME.mir",
-        is_text: true,
-        compatible_with_cgus_and_single_output: false
-    },
-    Object => {
-        shorthand: "obj",
-        extension: "o",
-        description: "Generates a native object file",
-        default_filename: "CRATE_NAME.o",
-        is_text: false,
-        compatible_with_cgus_and_single_output: false
-    },
-    #[doc = "This is the summary or index data part of the ThinLTO bitcode."]
-    ThinLinkBitcode => {
-        shorthand: "thin-link-bitcode",
-        extension: "indexing.o",
-        description: "Generates the ThinLTO summary as bitcode",
-        default_filename: "CRATE_NAME.indexing.o",
-        is_text: false,
-        compatible_with_cgus_and_single_output: false
-    },
-}
-
 /// The type of diagnostics output to generate.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ErrorOutputType {
     /// Output meant for the consumption of humans.
-    #[default]
-    HumanReadable {
-        kind: HumanReadableErrorType = HumanReadableErrorType { short: false, unicode: false },
-        color_config: ColorConfig = ColorConfig::Auto,
-    },
+    HumanReadable(HumanReadableErrorType, ColorConfig),
     /// Output that's consumed by other tools such as `rustfix` or the `RLS`.
     Json {
         /// Render the JSON in a human readable way (with indents and newlines).
@@ -822,6 +631,12 @@ pub enum ErrorOutputType {
         json_rendered: HumanReadableErrorType,
         color_config: ColorConfig,
     },
+}
+
+impl Default for ErrorOutputType {
+    fn default() -> Self {
+        Self::HumanReadable(HumanReadableErrorType::Default, ColorConfig::Auto)
+    }
 }
 
 #[derive(Clone, Hash, Debug)]
@@ -858,7 +673,7 @@ impl OutputTypes {
 
     /// Returns `true` if user specified a name and not just produced type
     pub fn contains_explicit_name(&self, key: &OutputType) -> bool {
-        matches!(self.0.get(key), Some(Some(..)))
+        self.0.get(key).map_or(false, |f| f.is_some())
     }
 
     pub fn iter(&self) -> BTreeMapIter<'_, OutputType, Option<OutFileName>> {
@@ -989,13 +804,43 @@ impl ExternEntry {
     }
 }
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Debug)]
+pub struct PrintRequest {
+    pub kind: PrintKind,
+    pub out: OutFileName,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum PrintKind {
+    FileNames,
+    Sysroot,
+    TargetLibdir,
+    CrateName,
+    Cfg,
+    CheckCfg,
+    CallingConventions,
+    TargetList,
+    TargetCPUs,
+    TargetFeatures,
+    RelocationModels,
+    CodeModels,
+    TlsModels,
+    TargetSpec,
+    AllTargetSpecs,
+    NativeStaticLibs,
+    StackProtectorStrategies,
+    LinkArgs,
+    SplitDebuginfo,
+    DeploymentTarget,
+}
+
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct NextSolverConfig {
     /// Whether the new trait solver should be enabled in coherence.
-    pub coherence: bool = true,
+    pub coherence: bool,
     /// Whether the new trait solver should be enabled everywhere.
     /// This is only `true` if `coherence` is also enabled.
-    pub globally: bool = false,
+    pub globally: bool,
 }
 
 #[derive(Clone)]
@@ -1023,15 +868,9 @@ impl Input {
         "rust_out"
     }
 
-    pub fn file_name(&self, session: &Session) -> FileName {
+    pub fn source_name(&self) -> FileName {
         match *self {
-            Input::File(ref ifile) => FileName::Real(
-                session
-                    .psess
-                    .source_map()
-                    .path_mapping()
-                    .to_real_filename(session.psess.source_map().working_dir(), ifile.as_path()),
-            ),
+            Input::File(ref ifile) => ifile.clone().into(),
             Input::Str { ref name, .. } => name.clone(),
         }
     }
@@ -1041,7 +880,7 @@ impl Input {
             Input::File(file) => Some(file),
             Input::Str { name, .. } => match name {
                 FileName::Real(real) => real.local_path(),
-                FileName::CfgSpec(_) => None,
+                FileName::QuoteExpansion(_) => None,
                 FileName::Anon(_) => None,
                 FileName::MacroExpansion(_) => None,
                 FileName::ProcMacroSourceCode(_) => None,
@@ -1054,7 +893,7 @@ impl Input {
     }
 }
 
-#[derive(Clone, Hash, Debug, HashStable_Generic, PartialEq, Eq, Encodable, Decodable)]
+#[derive(Clone, Hash, Debug, HashStable_Generic, PartialEq, Encodable, Decodable)]
 pub enum OutFileName {
     Real(PathBuf),
     Stdout,
@@ -1106,14 +945,11 @@ impl OutFileName {
         &self,
         outputs: &OutputFilenames,
         flavor: OutputType,
-        codegen_unit_name: &str,
-        invocation_temp: Option<&str>,
+        codegen_unit_name: Option<&str>,
     ) -> PathBuf {
         match *self {
             OutFileName::Real(ref path) => path.clone(),
-            OutFileName::Stdout => {
-                outputs.temp_path_for_cgu(flavor, codegen_unit_name, invocation_temp)
-            }
+            OutFileName::Stdout => outputs.temp_path(flavor, codegen_unit_name),
         }
     }
 
@@ -1138,41 +974,13 @@ pub struct OutputFilenames {
     filestem: String,
     pub single_output_file: Option<OutFileName>,
     temps_directory: Option<PathBuf>,
-    explicit_dwo_out_directory: Option<PathBuf>,
     pub outputs: OutputTypes,
 }
 
 pub const RLINK_EXT: &str = "rlink";
 pub const RUST_CGU_EXT: &str = "rcgu";
 pub const DWARF_OBJECT_EXT: &str = "dwo";
-pub const MAX_FILENAME_LENGTH: usize = 143; // ecryptfs limits filenames to 143 bytes see #49914
 
-/// Ensure the filename is not too long, as some filesystems have a limit.
-/// If the filename is too long, hash part of it and append the hash to the filename.
-/// This is a workaround for long crate names generating overly long filenames.
-fn maybe_strip_file_name(mut path: PathBuf) -> PathBuf {
-    if path.file_name().map_or(0, |name| name.len()) > MAX_FILENAME_LENGTH {
-        let filename = path.file_name().unwrap().to_string_lossy();
-        let hash_len = 64 / 4; // Hash64 is 64 bits encoded in hex
-        let hyphen_len = 1; // the '-' we insert between hash and suffix
-
-        // number of bytes of suffix we can keep so that "hash-<suffix>" fits
-        let allowed_suffix = MAX_FILENAME_LENGTH.saturating_sub(hash_len + hyphen_len);
-
-        // number of bytes to remove from the start
-        let stripped_bytes = filename.len().saturating_sub(allowed_suffix);
-
-        // ensure we don't cut in a middle of a char
-        let split_at = filename.ceil_char_boundary(stripped_bytes);
-
-        let mut hasher = StableHasher::new();
-        filename[..split_at].hash(&mut hasher);
-        let hash = hasher.finish::<Hash64>();
-
-        path.set_file_name(format!("{:x}-{}", hash, &filename[split_at..]));
-    }
-    path
-}
 impl OutputFilenames {
     pub fn new(
         out_directory: PathBuf,
@@ -1180,7 +988,6 @@ impl OutputFilenames {
         out_filestem: String,
         single_output_file: Option<OutFileName>,
         temps_directory: Option<PathBuf>,
-        explicit_dwo_out_directory: Option<PathBuf>,
         extra: String,
         outputs: OutputTypes,
     ) -> Self {
@@ -1188,7 +995,6 @@ impl OutputFilenames {
             out_directory,
             single_output_file,
             temps_directory,
-            explicit_dwo_out_directory,
             outputs,
             crate_stem: format!("{out_crate_name}{extra}"),
             filestem: format!("{out_filestem}{extra}"),
@@ -1201,10 +1007,6 @@ impl OutputFilenames {
             .and_then(|p| p.to_owned())
             .or_else(|| self.single_output_file.clone())
             .unwrap_or_else(|| OutFileName::Real(self.output_path(flavor)))
-    }
-
-    pub fn interface_path(&self) -> PathBuf {
-        self.out_directory.join(format!("lib{}.rs", self.crate_stem))
     }
 
     /// Gets the output path where a compilation artifact of the given type
@@ -1222,71 +1024,45 @@ impl OutputFilenames {
     /// Gets the path where a compilation artifact of the given type for the
     /// given codegen unit should be placed on disk. If codegen_unit_name is
     /// None, a path distinct from those of any codegen unit will be generated.
-    pub fn temp_path_for_cgu(
-        &self,
-        flavor: OutputType,
-        codegen_unit_name: &str,
-        invocation_temp: Option<&str>,
-    ) -> PathBuf {
+    pub fn temp_path(&self, flavor: OutputType, codegen_unit_name: Option<&str>) -> PathBuf {
         let extension = flavor.extension();
-        self.temp_path_ext_for_cgu(extension, codegen_unit_name, invocation_temp)
+        self.temp_path_ext(extension, codegen_unit_name)
     }
 
     /// Like `temp_path`, but specifically for dwarf objects.
-    pub fn temp_path_dwo_for_cgu(
-        &self,
-        codegen_unit_name: &str,
-        invocation_temp: Option<&str>,
-    ) -> PathBuf {
-        let p = self.temp_path_ext_for_cgu(DWARF_OBJECT_EXT, codegen_unit_name, invocation_temp);
-        if let Some(dwo_out) = &self.explicit_dwo_out_directory {
-            let mut o = dwo_out.clone();
-            o.push(p.file_name().unwrap());
-            o
-        } else {
-            p
-        }
+    pub fn temp_path_dwo(&self, codegen_unit_name: Option<&str>) -> PathBuf {
+        self.temp_path_ext(DWARF_OBJECT_EXT, codegen_unit_name)
     }
 
     /// Like `temp_path`, but also supports things where there is no corresponding
     /// OutputType, like noopt-bitcode or lto-bitcode.
-    pub fn temp_path_ext_for_cgu(
-        &self,
-        ext: &str,
-        codegen_unit_name: &str,
-        invocation_temp: Option<&str>,
-    ) -> PathBuf {
-        let mut extension = codegen_unit_name.to_string();
+    pub fn temp_path_ext(&self, ext: &str, codegen_unit_name: Option<&str>) -> PathBuf {
+        let mut extension = String::new();
 
-        // Append `.{invocation_temp}` to ensure temporary files are unique.
-        if let Some(rng) = invocation_temp {
-            extension.push('.');
-            extension.push_str(rng);
+        if let Some(codegen_unit_name) = codegen_unit_name {
+            extension.push_str(codegen_unit_name);
         }
 
-        // FIXME: This is sketchy that we're not appending `.rcgu` when the ext is empty.
-        // Append `.rcgu.{ext}`.
         if !ext.is_empty() {
-            extension.push('.');
-            extension.push_str(RUST_CGU_EXT);
-            extension.push('.');
+            if !extension.is_empty() {
+                extension.push('.');
+                extension.push_str(RUST_CGU_EXT);
+                extension.push('.');
+            }
+
             extension.push_str(ext);
         }
 
         let temps_directory = self.temps_directory.as_ref().unwrap_or(&self.out_directory);
-        maybe_strip_file_name(self.with_directory_and_extension(temps_directory, &extension))
-    }
 
-    pub fn temp_path_for_diagnostic(&self, ext: &str) -> PathBuf {
-        let temps_directory = self.temps_directory.as_ref().unwrap_or(&self.out_directory);
-        self.with_directory_and_extension(temps_directory, &ext)
+        self.with_directory_and_extension(temps_directory, &extension)
     }
 
     pub fn with_extension(&self, extension: &str) -> PathBuf {
         self.with_directory_and_extension(&self.out_directory, extension)
     }
 
-    pub fn with_directory_and_extension(&self, directory: &Path, extension: &str) -> PathBuf {
+    fn with_directory_and_extension(&self, directory: &PathBuf, extension: &str) -> PathBuf {
         let mut path = directory.join(&self.filestem);
         path.set_extension(extension);
         path
@@ -1298,11 +1074,10 @@ impl OutputFilenames {
         &self,
         split_debuginfo_kind: SplitDebuginfo,
         split_dwarf_kind: SplitDwarfKind,
-        cgu_name: &str,
-        invocation_temp: Option<&str>,
+        cgu_name: Option<&str>,
     ) -> Option<PathBuf> {
-        let obj_out = self.temp_path_for_cgu(OutputType::Object, cgu_name, invocation_temp);
-        let dwo_out = self.temp_path_dwo_for_cgu(cgu_name, invocation_temp);
+        let obj_out = self.temp_path(OutputType::Object, cgu_name);
+        let dwo_out = self.temp_path_dwo(cgu_name);
         match (split_debuginfo_kind, split_dwarf_kind) {
             (SplitDebuginfo::Off, SplitDwarfKind::Single | SplitDwarfKind::Split) => None,
             // Single mode doesn't change how DWARF is emitted, but does add Split DWARF attributes
@@ -1319,60 +1094,24 @@ impl OutputFilenames {
     }
 }
 
-pub(crate) fn parse_remap_path_scope(
-    early_dcx: &EarlyDiagCtxt,
-    matches: &getopts::Matches,
-    unstable_opts: &UnstableOptions,
-) -> RemapPathScopeComponents {
-    if let Some(v) = matches.opt_str("remap-path-scope") {
-        let mut slot = RemapPathScopeComponents::empty();
-        for s in v.split(',') {
-            slot |= match s {
-                "macro" => RemapPathScopeComponents::MACRO,
-                "diagnostics" => RemapPathScopeComponents::DIAGNOSTICS,
-                "documentation" => {
-                    if !unstable_opts.unstable_options {
-                        early_dcx.early_fatal("remapping `documentation` path scope requested but `-Zunstable-options` not specified");
-                    }
+bitflags::bitflags! {
+    /// Scopes used to determined if it need to apply to --remap-path-prefix
+    #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct RemapPathScopeComponents: u8 {
+        /// Apply remappings to the expansion of std::file!() macro
+        const MACRO = 1 << 0;
+        /// Apply remappings to printed compiler diagnostics
+        const DIAGNOSTICS = 1 << 1;
+        /// Apply remappings to debug informations
+        const DEBUGINFO = 1 << 3;
 
-                    RemapPathScopeComponents::DOCUMENTATION
-                },
-                "debuginfo" => RemapPathScopeComponents::DEBUGINFO,
-                "coverage" => RemapPathScopeComponents::COVERAGE,
-                "object" => RemapPathScopeComponents::OBJECT,
-                "all" => RemapPathScopeComponents::all(),
-                _ => early_dcx.early_fatal("argument for `--remap-path-scope` must be a comma separated list of scopes: `macro`, `diagnostics`, `documentation`, `debuginfo`, `coverage`, `object`, `all`"),
-            }
-        }
-        slot
-    } else {
-        RemapPathScopeComponents::all()
+        /// An alias for `macro` and `debuginfo`. This ensures all paths in compiled
+        /// executables or libraries are remapped but not elsewhere.
+        const OBJECT = Self::MACRO.bits() | Self::DEBUGINFO.bits();
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Sysroot {
-    pub explicit: Option<PathBuf>,
-    pub default: PathBuf,
-}
-
-impl Sysroot {
-    pub fn new(explicit: Option<PathBuf>) -> Sysroot {
-        Sysroot { explicit, default: filesearch::default_sysroot() }
-    }
-
-    /// Return explicit sysroot if it was passed with `--sysroot`, or default sysroot otherwise.
-    pub fn path(&self) -> &Path {
-        self.explicit.as_deref().unwrap_or(&self.default)
-    }
-
-    /// Returns both explicit sysroot if it was passed with `--sysroot` and the default sysroot.
-    pub fn all_paths(&self) -> impl Iterator<Item = &Path> {
-        self.explicit.as_deref().into_iter().chain(iter::once(&*self.default))
-    }
-}
-
-pub fn host_tuple() -> &'static str {
+pub fn host_triple() -> &'static str {
     // Get the host triple out of the build environment. This ensures that our
     // idea of the host triple is the same as for the set of libraries we've
     // actually built. We can't just take LLVM's host triple because they
@@ -1386,40 +1125,39 @@ pub fn host_tuple() -> &'static str {
 
 fn file_path_mapping(
     remap_path_prefix: Vec<(PathBuf, PathBuf)>,
-    remap_path_scope: RemapPathScopeComponents,
+    unstable_opts: &UnstableOptions,
 ) -> FilePathMapping {
-    FilePathMapping::new(remap_path_prefix.clone(), remap_path_scope)
+    FilePathMapping::new(
+        remap_path_prefix.clone(),
+        if unstable_opts.remap_path_scope.contains(RemapPathScopeComponents::DIAGNOSTICS)
+            && !remap_path_prefix.is_empty()
+        {
+            FileNameDisplayPreference::Remapped
+        } else {
+            FileNameDisplayPreference::Local
+        },
+    )
 }
 
 impl Default for Options {
     fn default() -> Options {
-        let unstable_opts = UnstableOptions::default();
-
-        // FIXME(Urgau): This is a hack that ideally shouldn't exist, but rustdoc
-        // currently uses this `Default` implementation, so we have no choice but
-        // to create a default working directory.
-        let working_dir = {
-            let working_dir = std::env::current_dir().unwrap();
-            let file_mapping = file_path_mapping(Vec::new(), RemapPathScopeComponents::empty());
-            file_mapping.to_real_filename(&RealFileName::empty(), &working_dir)
-        };
-
         Options {
             assert_incr_state: None,
             crate_types: Vec::new(),
             optimize: OptLevel::No,
             debuginfo: DebugInfo::None,
+            debuginfo_compression: DebugInfoCompression::None,
             lint_opts: Vec::new(),
             lint_cap: None,
             describe_lints: false,
             output_types: OutputTypes(BTreeMap::new()),
             search_paths: vec![],
-            sysroot: Sysroot::new(None),
-            target_triple: TargetTuple::from_tuple(host_tuple()),
+            maybe_sysroot: None,
+            target_triple: TargetTriple::from_triple(host_triple()),
             test: false,
             incremental: None,
             untracked_state_hash: Default::default(),
-            unstable_opts,
+            unstable_opts: Default::default(),
             prints: Vec::new(),
             cg: Default::default(),
             error_format: ErrorOutputType::default(),
@@ -1435,20 +1173,16 @@ impl Default for Options {
             cli_forced_codegen_units: None,
             cli_forced_local_thinlto_off: false,
             remap_path_prefix: Vec::new(),
-            remap_path_scope: RemapPathScopeComponents::all(),
             real_rust_source_base_dir: None,
-            real_rustc_dev_source_base_dir: None,
             edition: DEFAULT_EDITION,
             json_artifact_notifications: false,
-            json_timings: false,
             json_unused_externs: JsonUnusedExterns::No,
             json_future_incompat: false,
             pretty: None,
-            working_dir,
+            working_dir: RealFileName::LocalPath(std::env::current_dir().unwrap()),
             color: ColorConfig::Auto,
             logical_env: FxIndexMap::default(),
             verbose: false,
-            target_modifiers: BTreeMap::default(),
         }
     }
 }
@@ -1462,12 +1196,12 @@ impl Options {
     }
 
     pub fn file_path_mapping(&self) -> FilePathMapping {
-        file_path_mapping(self.remap_path_prefix.clone(), self.remap_path_scope)
+        file_path_mapping(self.remap_path_prefix.clone(), &self.unstable_opts)
     }
 
     /// Returns `true` if there will be an output file generated.
     pub fn will_create_output_file(&self) -> bool {
-        !self.unstable_opts.parse_crate_root_only && // The file is just being parsed
+        !self.unstable_opts.parse_only && // The file is just being parsed
             self.unstable_opts.ls.is_empty() // The file is just being queried
     }
 
@@ -1477,22 +1211,13 @@ impl Options {
             Some(setting) => setting,
             None => match self.optimize {
                 OptLevel::No | OptLevel::Less | OptLevel::Size | OptLevel::SizeMin => true,
-                OptLevel::More | OptLevel::Aggressive => false,
+                OptLevel::Default | OptLevel::Aggressive => false,
             },
         }
     }
 
     pub fn get_symbol_mangling_version(&self) -> SymbolManglingVersion {
-        self.cg.symbol_mangling_version.unwrap_or(if self.unstable_features.is_nightly_build() {
-            SymbolManglingVersion::V0
-        } else {
-            SymbolManglingVersion::Legacy
-        })
-    }
-
-    #[inline]
-    pub fn autodiff_enabled(&self) -> bool {
-        self.unstable_opts.autodiff.contains(&AutoDiff::Enable)
+        self.cg.symbol_mangling_version.unwrap_or(SymbolManglingVersion::Legacy)
     }
 }
 
@@ -1517,10 +1242,6 @@ impl UnstableOptions {
             }
         })
     }
-
-    pub fn checksum_hash_algorithm(&self) -> Option<SourceFileHashAlgorithm> {
-        self.checksum_hash_algorithm
-    }
 }
 
 // The type of entry function, so users can have their own entry functions
@@ -1535,11 +1256,30 @@ pub enum EntryFnType {
         /// and an `include!()`.
         sigpipe: u8,
     },
+    Start,
 }
 
-pub use rustc_hir::attrs::CrateType;
+#[derive(Copy, PartialEq, PartialOrd, Clone, Ord, Eq, Hash, Debug, Encodable, Decodable)]
+#[derive(HashStable_Generic)]
+pub enum CrateType {
+    Executable,
+    Dylib,
+    Rlib,
+    Staticlib,
+    Cdylib,
+    ProcMacro,
+}
 
-#[derive(Clone, Hash, Debug, PartialEq, Eq, Encodable, Decodable)]
+impl CrateType {
+    pub fn has_metadata(self) -> bool {
+        match self {
+            CrateType::Rlib | CrateType::Dylib | CrateType::ProcMacro => true,
+            CrateType::Executable | CrateType::Cdylib | CrateType::Staticlib => false,
+        }
+    }
+}
+
+#[derive(Clone, Hash, Debug, PartialEq, Eq)]
 pub enum Passes {
     Some(Vec<String>),
     All,
@@ -1570,7 +1310,6 @@ pub enum PAuthKey {
 #[derive(Clone, Copy, Hash, Debug, PartialEq)]
 pub struct PacRet {
     pub leaf: bool,
-    pub pc: bool,
     pub key: PAuthKey,
 }
 
@@ -1578,7 +1317,10 @@ pub struct PacRet {
 pub struct BranchProtection {
     pub bti: bool,
     pub pac_ret: Option<PacRet>,
-    pub gcs: bool,
+}
+
+pub(crate) const fn default_lib_output() -> CrateType {
+    CrateType::Rlib
 }
 
 pub fn build_configuration(sess: &Session, mut user_cfg: Cfg) -> Cfg {
@@ -1591,18 +1333,26 @@ pub fn build_configuration(sess: &Session, mut user_cfg: Cfg) -> Cfg {
     user_cfg
 }
 
-pub fn build_target_config(
-    early_dcx: &EarlyDiagCtxt,
-    target: &TargetTuple,
-    sysroot: &Path,
-    unstable_options: bool,
-) -> Target {
-    match Target::search(target, sysroot, unstable_options) {
+pub fn build_target_config(early_dcx: &EarlyDiagCtxt, opts: &Options, sysroot: &Path) -> Target {
+    match Target::search(&opts.target_triple, sysroot) {
         Ok((target, warnings)) => {
             for warning in warnings.warning_messages() {
                 early_dcx.early_warn(warning)
             }
 
+            // The `wasm32-wasi` target is being renamed to `wasm32-wasip1` as
+            // part of rust-lang/compiler-team#607 and
+            // rust-lang/compiler-team#695. Warn unconditionally on usage to
+            // raise awareness of the renaming. This code will be deleted in
+            // October 2024.
+            if opts.target_triple.triple() == "wasm32-wasi" {
+                early_dcx.early_warn(
+                    "the `wasm32-wasi` target is being renamed to \
+                    `wasm32-wasip1` and the `wasm32-wasi` target will be \
+                    removed from nightly in October 2024 and removed from \
+                    stable Rust in January 2025",
+                )
+            }
             if !matches!(target.pointer_width, 16 | 32 | 64) {
                 early_dcx.early_fatal(format!(
                     "target specification was invalid: unrecognized target-pointer-width {}",
@@ -1611,66 +1361,23 @@ pub fn build_target_config(
             }
             target
         }
-        Err(e) => {
-            let mut err =
-                early_dcx.early_struct_fatal(format!("error loading target specification: {e}"));
-            err.help("run `rustc --print target-list` for a list of built-in targets");
-            err.emit()
-        }
+        Err(e) => early_dcx.early_fatal(format!(
+            "Error loading target specification: {e}. \
+                     Run `rustc --print target-list` for a list of built-in targets"
+        )),
     }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum OptionStability {
+enum OptionStability {
     Stable,
     Unstable,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum OptionKind {
-    /// An option that takes a value, and cannot appear more than once (e.g. `--out-dir`).
-    ///
-    /// Corresponds to [`getopts::Options::optopt`].
-    Opt,
-
-    /// An option that takes a value, and can appear multiple times (e.g. `--emit`).
-    ///
-    /// Corresponds to [`getopts::Options::optmulti`].
-    Multi,
-
-    /// An option that does not take a value, and cannot appear more than once (e.g. `--help`).
-    ///
-    /// Corresponds to [`getopts::Options::optflag`].
-    /// The `hint` string must be empty.
-    Flag,
-
-    /// An option that does not take a value, and can appear multiple times (e.g. `-O`).
-    ///
-    /// Corresponds to [`getopts::Options::optflagmulti`].
-    /// The `hint` string must be empty.
-    FlagMulti,
-}
-
 pub struct RustcOptGroup {
-    /// The "primary" name for this option. Normally equal to `long_name`,
-    /// except for options that don't have a long name, in which case
-    /// `short_name` is used.
-    ///
-    /// This is needed when interacting with `getopts` in some situations,
-    /// because if an option has both forms, that library treats the long name
-    /// as primary and the short name as an alias.
-    pub name: &'static str,
+    pub apply: Box<dyn Fn(&mut getopts::Options) -> &mut getopts::Options>,
+    name: &'static str,
     stability: OptionStability,
-    kind: OptionKind,
-
-    short_name: &'static str,
-    long_name: &'static str,
-    desc: &'static str,
-    value_hint: &'static str,
-
-    /// If true, this option should not be printed by `rustc --help`, but
-    /// should still be printed by `rustc --help -v`.
-    pub is_verbose_help_only: bool,
 }
 
 impl RustcOptGroup {
@@ -1678,44 +1385,73 @@ impl RustcOptGroup {
         self.stability == OptionStability::Stable
     }
 
-    pub fn apply(&self, options: &mut getopts::Options) {
-        let &Self { short_name, long_name, desc, value_hint, .. } = self;
-        match self.kind {
-            OptionKind::Opt => options.optopt(short_name, long_name, desc, value_hint),
-            OptionKind::Multi => options.optmulti(short_name, long_name, desc, value_hint),
-            OptionKind::Flag => options.optflag(short_name, long_name, desc),
-            OptionKind::FlagMulti => options.optflagmulti(short_name, long_name, desc),
-        };
+    pub fn stable<F>(name: &'static str, f: F) -> RustcOptGroup
+    where
+        F: Fn(&mut getopts::Options) -> &mut getopts::Options + 'static,
+    {
+        RustcOptGroup { name, apply: Box::new(f), stability: OptionStability::Stable }
     }
 
-    /// This is for diagnostics-only.
-    pub fn long_name(&self) -> &str {
-        self.long_name
+    pub fn unstable<F>(name: &'static str, f: F) -> RustcOptGroup
+    where
+        F: Fn(&mut getopts::Options) -> &mut getopts::Options + 'static,
+    {
+        RustcOptGroup { name, apply: Box::new(f), stability: OptionStability::Unstable }
     }
 }
 
-pub fn make_opt(
-    stability: OptionStability,
-    kind: OptionKind,
-    short_name: &'static str,
-    long_name: &'static str,
-    desc: &'static str,
-    value_hint: &'static str,
-) -> RustcOptGroup {
-    // "Flag" options don't have a value, and therefore don't have a value hint.
-    match kind {
-        OptionKind::Opt | OptionKind::Multi => {}
-        OptionKind::Flag | OptionKind::FlagMulti => assert_eq!(value_hint, ""),
+// The `opt` local module holds wrappers around the `getopts` API that
+// adds extra rustc-specific metadata to each option; such metadata
+// is exposed by . The public
+// functions below ending with `_u` are the functions that return
+// *unstable* options, i.e., options that are only enabled when the
+// user also passes the `-Z unstable-options` debugging flag.
+mod opt {
+    // The `fn flag*` etc below are written so that we can use them
+    // in the future; do not warn about them not being used right now.
+    #![allow(dead_code)]
+
+    use super::RustcOptGroup;
+
+    type R = RustcOptGroup;
+    type S = &'static str;
+
+    fn stable<F>(name: S, f: F) -> R
+    where
+        F: Fn(&mut getopts::Options) -> &mut getopts::Options + 'static,
+    {
+        RustcOptGroup::stable(name, f)
     }
-    RustcOptGroup {
-        name: cmp::max_by_key(short_name, long_name, |s| s.len()),
-        stability,
-        kind,
-        short_name,
-        long_name,
-        desc,
-        value_hint,
-        is_verbose_help_only: false,
+
+    fn unstable<F>(name: S, f: F) -> R
+    where
+        F: Fn(&mut getopts::Options) -> &mut getopts::Options + 'static,
+    {
+        RustcOptGroup::unstable(name, f)
+    }
+
+    fn longer(a: S, b: S) -> S {
+        if a.len() > b.len() { a } else { b }
+    }
+
+    pub(crate) fn opt_s(a: S, b: S, c: S, d: S) -> R {
+        stable(longer(a, b), move |opts| opts.optopt(a, b, c, d))
+    }
+    pub(crate) fn multi_s(a: S, b: S, c: S, d: S) -> R {
+        stable(longer(a, b), move |opts| opts.optmulti(a, b, c, d))
+    }
+    pub(crate) fn flag_s(a: S, b: S, c: S) -> R {
+        stable(longer(a, b), move |opts| opts.optflag(a, b, c))
+    }
+    pub(crate) fn flagmulti_s(a: S, b: S, c: S) -> R {
+        stable(longer(a, b), move |opts| opts.optflagmulti(a, b, c))
+    }
+
+    fn opt(a: S, b: S, c: S, d: S) -> R {
+        unstable(longer(a, b), move |opts| opts.optopt(a, b, c, d))
+    }
+    pub(crate) fn multi(a: S, b: S, c: S, d: S) -> R {
+        unstable(longer(a, b), move |opts| opts.optmulti(a, b, c, d))
     }
 }
 
@@ -1726,170 +1462,142 @@ The default is {DEFAULT_EDITION} and the latest stable edition is {LATEST_STABLE
     )
 });
 
-static EMIT_HELP: LazyLock<String> = LazyLock::new(|| {
-    let mut result =
-        String::from("Comma separated list of types of output for the compiler to emit.\n");
-    result.push_str("Each TYPE has the default FILE name:\n");
-
-    for output in OutputType::iter_all() {
-        result.push_str(&format!("*  {} - {}\n", output.shorthand(), output.default_filename()));
-    }
-
-    result
-});
-
-/// Returns all rustc command line options, including metadata for
-/// each option, such as whether the option is stable.
-///
-/// # Option style guidelines
-///
-/// - `<param>`: Indicates a required parameter
-/// - `[param]`: Indicates an optional parameter
-/// - `|`: Indicates a mutually exclusive option
-/// - `*`: a list element with description
-pub fn rustc_optgroups() -> Vec<RustcOptGroup> {
-    use OptionKind::{Flag, FlagMulti, Multi, Opt};
-    use OptionStability::{Stable, Unstable};
-
-    use self::make_opt as opt;
-
-    let mut options = vec![
-        opt(Stable, Flag, "h", "help", "Display this message", ""),
-        opt(
-            Stable,
-            Multi,
-            "",
-            "cfg",
-            "Configure the compilation environment.\n\
-                SPEC supports the syntax `<NAME>[=\"<VALUE>\"]`.",
-            "<SPEC>",
-        ),
-        opt(Stable, Multi, "", "check-cfg", "Provide list of expected cfgs for checking", "<SPEC>"),
-        opt(
-            Stable,
-            Multi,
+/// Returns the "short" subset of the rustc command line options,
+/// including metadata for each option, such as whether the option is
+/// part of the stable long-term interface for rustc.
+pub fn rustc_short_optgroups() -> Vec<RustcOptGroup> {
+    vec![
+        opt::flag_s("h", "help", "Display this message"),
+        opt::multi_s("", "cfg", "Configure the compilation environment.
+                             SPEC supports the syntax `NAME[=\"VALUE\"]`.", "SPEC"),
+        opt::multi_s("", "check-cfg", "Provide list of expected cfgs for checking", "SPEC"),
+        opt::multi_s(
             "L",
             "",
-            "Add a directory to the library search path. \
-                The optional KIND can be one of <dependency|crate|native|framework|all> (default: all).",
-            "[<KIND>=]<PATH>",
+            "Add a directory to the library search path. The
+                             optional KIND can be one of dependency, crate, native,
+                             framework, or all (the default).",
+            "[KIND=]PATH",
         ),
-        opt(
-            Stable,
-            Multi,
+        opt::multi_s(
             "l",
             "",
-            "Link the generated crate(s) to the specified native\n\
-                library NAME. The optional KIND can be one of\n\
-                <static|framework|dylib> (default: dylib).\n\
-                Optional comma separated MODIFIERS\n\
-                <bundle|verbatim|whole-archive|as-needed>\n\
-                may be specified each with a prefix of either '+' to\n\
-                enable or '-' to disable.",
-            "[<KIND>[:<MODIFIERS>]=]<NAME>[:<RENAME>]",
+            "Link the generated crate(s) to the specified native
+                             library NAME. The optional KIND can be one of
+                             static, framework, or dylib (the default).
+                             Optional comma separated MODIFIERS (bundle|verbatim|whole-archive|as-needed)
+                             may be specified each with a prefix of either '+' to
+                             enable or '-' to disable.",
+            "[KIND[:MODIFIERS]=]NAME[:RENAME]",
         ),
         make_crate_type_option(),
-        opt(Stable, Opt, "", "crate-name", "Specify the name of the crate being built", "<NAME>"),
-        opt(Stable, Opt, "", "edition", &EDITION_STRING, EDITION_NAME_LIST),
-        opt(Stable, Multi, "", "emit", &EMIT_HELP, "<TYPE>[=<FILE>]"),
-        opt(Stable, Multi, "", "print", &print_request::PRINT_HELP, "<INFO>[=<FILE>]"),
-        opt(Stable, FlagMulti, "g", "", "Equivalent to -C debuginfo=2", ""),
-        opt(Stable, FlagMulti, "O", "", "Equivalent to -C opt-level=3", ""),
-        opt(Stable, Opt, "o", "", "Write output to FILENAME", "<FILENAME>"),
-        opt(Stable, Opt, "", "out-dir", "Write output to compiler-chosen filename in DIR", "<DIR>"),
-        opt(
-            Stable,
-            Opt,
+        opt::opt_s("", "crate-name", "Specify the name of the crate being built", "NAME"),
+        opt::opt_s(
+            "",
+            "edition",
+            &EDITION_STRING,
+            EDITION_NAME_LIST,
+        ),
+        opt::multi_s(
+            "",
+            "emit",
+            "Comma separated list of types of output for \
+             the compiler to emit",
+            "[asm|llvm-bc|llvm-ir|obj|metadata|link|dep-info|mir]",
+        ),
+        opt::multi_s(
+            "",
+            "print",
+            "Compiler information to print on stdout",
+            "[crate-name|file-names|sysroot|target-libdir|cfg|check-cfg|calling-conventions|\
+             target-list|target-cpus|target-features|relocation-models|code-models|\
+             tls-models|target-spec-json|all-target-specs-json|native-static-libs|\
+             stack-protector-strategies|link-args|deployment-target]",
+        ),
+        opt::flagmulti_s("g", "", "Equivalent to -C debuginfo=2"),
+        opt::flagmulti_s("O", "", "Equivalent to -C opt-level=2"),
+        opt::opt_s("o", "", "Write output to <filename>", "FILENAME"),
+        opt::opt_s(
+            "",
+            "out-dir",
+            "Write output to compiler-chosen filename \
+             in <dir>",
+            "DIR",
+        ),
+        opt::opt_s(
             "",
             "explain",
-            "Provide a detailed explanation of an error message",
-            "<OPT>",
+            "Provide a detailed explanation of an error \
+             message",
+            "OPT",
         ),
-        opt(Stable, Flag, "", "test", "Build a test harness", ""),
-        opt(Stable, Opt, "", "target", "Target tuple for which the code is compiled", "<TARGET>"),
-        opt(Stable, Multi, "A", "allow", "Set lint allowed", "<LINT>"),
-        opt(Stable, Multi, "W", "warn", "Set lint warnings", "<LINT>"),
-        opt(Stable, Multi, "", "force-warn", "Set lint force-warn", "<LINT>"),
-        opt(Stable, Multi, "D", "deny", "Set lint denied", "<LINT>"),
-        opt(Stable, Multi, "F", "forbid", "Set lint forbidden", "<LINT>"),
-        opt(
-            Stable,
-            Multi,
+        opt::flag_s("", "test", "Build a test harness"),
+        opt::opt_s("", "target", "Target triple for which the code is compiled", "TARGET"),
+        opt::multi_s("A", "allow", "Set lint allowed", "LINT"),
+        opt::multi_s("W", "warn", "Set lint warnings", "LINT"),
+        opt::multi_s("", "force-warn", "Set lint force-warn", "LINT"),
+        opt::multi_s("D", "deny", "Set lint denied", "LINT"),
+        opt::multi_s("F", "forbid", "Set lint forbidden", "LINT"),
+        opt::multi_s(
             "",
             "cap-lints",
-            "Set the most restrictive lint level. More restrictive lints are capped at this level",
-            "<LEVEL>",
+            "Set the most restrictive lint level. \
+             More restrictive lints are capped at this \
+             level",
+            "LEVEL",
         ),
-        opt(Stable, Multi, "C", "codegen", "Set a codegen option", "<OPT>[=<VALUE>]"),
-        opt(Stable, Flag, "V", "version", "Print version info and exit", ""),
-        opt(Stable, Flag, "v", "verbose", "Use verbose output", ""),
-    ];
+        opt::multi_s("C", "codegen", "Set a codegen option", "OPT[=VALUE]"),
+        opt::flag_s("V", "version", "Print version info and exit"),
+        opt::flag_s("v", "verbose", "Use verbose output"),
+    ]
+}
 
-    // Options in this list are hidden from `rustc --help` by default, but are
-    // shown by `rustc --help -v`.
-    let verbose_only = [
-        opt(
-            Stable,
-            Multi,
+/// Returns all rustc command line options, including metadata for
+/// each option, such as whether the option is part of the stable
+/// long-term interface for rustc.
+pub fn rustc_optgroups() -> Vec<RustcOptGroup> {
+    let mut opts = rustc_short_optgroups();
+    // FIXME: none of these descriptions are actually used
+    opts.extend(vec![
+        opt::multi_s(
             "",
             "extern",
             "Specify where an external rust library is located",
-            "<NAME>[=<PATH>]",
+            "NAME[=PATH]",
         ),
-        opt(Stable, Opt, "", "sysroot", "Override the system root", "<PATH>"),
-        opt(Unstable, Multi, "Z", "", "Set unstable / perma-unstable options", "<FLAG>"),
-        opt(
-            Stable,
-            Opt,
+        opt::opt_s("", "sysroot", "Override the system root", "PATH"),
+        opt::multi("Z", "", "Set unstable / perma-unstable options", "FLAG"),
+        opt::opt_s(
             "",
             "error-format",
             "How errors and other messages are produced",
-            "<human|json|short>",
+            "human|json|short",
         ),
-        opt(Stable, Multi, "", "json", "Configure the JSON output of the compiler", "<CONFIG>"),
-        opt(
-            Stable,
-            Opt,
+        opt::multi_s("", "json", "Configure the JSON output of the compiler", "CONFIG"),
+        opt::opt_s(
             "",
             "color",
             "Configure coloring of output:
-                * auto   = colorize, if output goes to a tty (default);
-                * always = always colorize output;
-                * never  = never colorize output",
-            "<auto|always|never>",
+                                 auto   = colorize, if output goes to a tty (default);
+                                 always = always colorize output;
+                                 never  = never colorize output",
+            "auto|always|never",
         ),
-        opt(
-            Stable,
-            Opt,
+        opt::opt_s(
             "",
             "diagnostic-width",
             "Inform rustc of the width of the output so that diagnostics can be truncated to fit",
-            "<WIDTH>",
+            "WIDTH",
         ),
-        opt(
-            Stable,
-            Multi,
+        opt::multi_s(
             "",
             "remap-path-prefix",
             "Remap source names in all output (compiler messages and output files)",
-            "<FROM>=<TO>",
+            "FROM=TO",
         ),
-        opt(
-            Stable,
-            Opt,
-            "",
-            "remap-path-scope",
-            "Defines which scopes of paths should be remapped by `--remap-path-prefix`",
-            "<macro,diagnostics,debuginfo,coverage,object,all>",
-        ),
-        opt(Unstable, Multi, "", "env-set", "Inject an environment variable", "<VAR>=<VALUE>"),
-    ];
-    options.extend(verbose_only.into_iter().map(|mut opt| {
-        opt.is_verbose_help_only = true;
-        opt
-    }));
-
-    options
+        opt::multi("", "env-set", "Inject an environment variable", "VAR=VALUE"),
+    ]);
+    opts
 }
 
 pub fn get_cmd_lint_options(
@@ -1899,7 +1607,7 @@ pub fn get_cmd_lint_options(
     let mut lint_opts_with_position = vec![];
     let mut describe_lints = false;
 
-    for level in [lint::Allow, lint::Warn, lint::ForceWarn, lint::Deny, lint::Forbid] {
+    for level in [lint::Allow, lint::Warn, lint::ForceWarn(None), lint::Deny, lint::Forbid] {
         for (arg_pos, lint_name) in matches.opt_strs_pos(level.as_str()) {
             if lint_name == "help" {
                 describe_lints = true;
@@ -1945,9 +1653,6 @@ pub struct JsonConfig {
     pub json_rendered: HumanReadableErrorType,
     pub json_color: ColorConfig,
     json_artifact_notifications: bool,
-    /// Output start and end timestamps of several high-level compilation sections
-    /// (frontend, backend, linker).
-    json_timings: bool,
     pub json_unused_externs: JsonUnusedExterns,
     json_future_incompat: bool,
 }
@@ -1984,12 +1689,11 @@ impl JsonUnusedExterns {
 /// The first value returned is how to render JSON diagnostics, and the second
 /// is whether or not artifact notifications are enabled.
 pub fn parse_json(early_dcx: &EarlyDiagCtxt, matches: &getopts::Matches) -> JsonConfig {
-    let mut json_rendered = HumanReadableErrorType { short: false, unicode: false };
+    let mut json_rendered = HumanReadableErrorType::Default;
     let mut json_color = ColorConfig::Never;
     let mut json_artifact_notifications = false;
     let mut json_unused_externs = JsonUnusedExterns::No;
     let mut json_future_incompat = false;
-    let mut json_timings = false;
     for option in matches.opt_strs("json") {
         // For now conservatively forbid `--color` with `--json` since `--json`
         // won't actually be emitting any colors and anything colorized is
@@ -2000,15 +1704,9 @@ pub fn parse_json(early_dcx: &EarlyDiagCtxt, matches: &getopts::Matches) -> Json
 
         for sub_option in option.split(',') {
             match sub_option {
-                "diagnostic-short" => {
-                    json_rendered = HumanReadableErrorType { short: true, unicode: false };
-                }
-                "diagnostic-unicode" => {
-                    json_rendered = HumanReadableErrorType { short: false, unicode: true };
-                }
+                "diagnostic-short" => json_rendered = HumanReadableErrorType::Short,
                 "diagnostic-rendered-ansi" => json_color = ColorConfig::Always,
                 "artifacts" => json_artifact_notifications = true,
-                "timings" => json_timings = true,
                 "unused-externs" => json_unused_externs = JsonUnusedExterns::Loud,
                 "unused-externs-silent" => json_unused_externs = JsonUnusedExterns::Silent,
                 "future-incompat" => json_future_incompat = true,
@@ -2021,7 +1719,6 @@ pub fn parse_json(early_dcx: &EarlyDiagCtxt, matches: &getopts::Matches) -> Json
         json_rendered,
         json_color,
         json_artifact_notifications,
-        json_timings,
         json_unused_externs,
         json_future_incompat,
     }
@@ -2031,11 +1728,10 @@ pub fn parse_json(early_dcx: &EarlyDiagCtxt, matches: &getopts::Matches) -> Json
 pub fn parse_error_format(
     early_dcx: &mut EarlyDiagCtxt,
     matches: &getopts::Matches,
-    color_config: ColorConfig,
+    color: ColorConfig,
     json_color: ColorConfig,
     json_rendered: HumanReadableErrorType,
 ) -> ErrorOutputType {
-    let default_kind = HumanReadableErrorType { short: false, unicode: false };
     // We need the `opts_present` check because the driver will send us Matches
     // with only stable options if no unstable options are used. Since error-format
     // is unstable, it will not be present. We have to use `opts_present` not
@@ -2043,7 +1739,10 @@ pub fn parse_error_format(
     let error_format = if matches.opts_present(&["error-format".to_owned()]) {
         match matches.opt_str("error-format").as_deref() {
             None | Some("human") => {
-                ErrorOutputType::HumanReadable { color_config, kind: default_kind }
+                ErrorOutputType::HumanReadable(HumanReadableErrorType::Default, color)
+            }
+            Some("human-annotate-rs") => {
+                ErrorOutputType::HumanReadable(HumanReadableErrorType::AnnotateSnippet, color)
             }
             Some("json") => {
                 ErrorOutputType::Json { pretty: false, json_rendered, color_config: json_color }
@@ -2051,27 +1750,20 @@ pub fn parse_error_format(
             Some("pretty-json") => {
                 ErrorOutputType::Json { pretty: true, json_rendered, color_config: json_color }
             }
-            Some("short") => ErrorOutputType::HumanReadable {
-                kind: HumanReadableErrorType { short: true, unicode: false },
-                color_config,
-            },
-            Some("human-unicode") => ErrorOutputType::HumanReadable {
-                kind: HumanReadableErrorType { short: false, unicode: true },
-                color_config,
-            },
+            Some("short") => ErrorOutputType::HumanReadable(HumanReadableErrorType::Short, color),
             Some(arg) => {
-                early_dcx.set_error_format(ErrorOutputType::HumanReadable {
-                    color_config,
-                    kind: default_kind,
-                });
+                early_dcx.abort_if_error_and_set_error_format(ErrorOutputType::HumanReadable(
+                    HumanReadableErrorType::Default,
+                    color,
+                ));
                 early_dcx.early_fatal(format!(
-                    "argument for `--error-format` must be `human`, `human-unicode`, \
-                    `json`, `pretty-json` or `short` (instead was `{arg}`)"
+                    "argument for `--error-format` must be `human`, `json` or \
+                     `short` (instead was `{arg}`)"
                 ))
             }
         }
     } else {
-        ErrorOutputType::HumanReadable { color_config, kind: default_kind }
+        ErrorOutputType::HumanReadable(HumanReadableErrorType::Default, color)
     };
 
     match error_format {
@@ -2119,21 +1811,18 @@ pub fn parse_crate_edition(early_dcx: &EarlyDiagCtxt, matches: &getopts::Matches
 fn check_error_format_stability(
     early_dcx: &EarlyDiagCtxt,
     unstable_opts: &UnstableOptions,
-    is_nightly_build: bool,
-    format: ErrorOutputType,
+    error_format: ErrorOutputType,
 ) {
-    if unstable_opts.unstable_options || is_nightly_build {
-        return;
+    if !unstable_opts.unstable_options {
+        if let ErrorOutputType::Json { pretty: true, .. } = error_format {
+            early_dcx.early_fatal("`--error-format=pretty-json` is unstable");
+        }
+        if let ErrorOutputType::HumanReadable(HumanReadableErrorType::AnnotateSnippet, _) =
+            error_format
+        {
+            early_dcx.early_fatal("`--error-format=human-annotate-rs` is unstable");
+        }
     }
-    let format = match format {
-        ErrorOutputType::Json { pretty: true, .. } => "pretty-json",
-        ErrorOutputType::HumanReadable { kind, .. } => match kind {
-            HumanReadableErrorType { unicode: true, .. } => "human-unicode",
-            _ => return,
-        },
-        _ => return,
-    };
-    early_dcx.early_fatal(format!("`--error-format={format}` is unstable"))
 }
 
 fn parse_output_types(
@@ -2142,7 +1831,7 @@ fn parse_output_types(
     matches: &getopts::Matches,
 ) -> OutputTypes {
     let mut output_types = BTreeMap::new();
-    if !unstable_opts.parse_crate_root_only {
+    if !unstable_opts.parse_only {
         for list in matches.opt_strs("emit") {
             for output_type in list.split(',') {
                 let (shorthand, path) = split_out_file_name(output_type);
@@ -2221,16 +1910,127 @@ fn should_override_cgus_and_disable_thinlto(
     (disable_local_thinlto, codegen_units)
 }
 
-pub fn parse_target_triple(early_dcx: &EarlyDiagCtxt, matches: &getopts::Matches) -> TargetTuple {
+fn collect_print_requests(
+    early_dcx: &EarlyDiagCtxt,
+    cg: &mut CodegenOptions,
+    unstable_opts: &UnstableOptions,
+    matches: &getopts::Matches,
+) -> Vec<PrintRequest> {
+    let mut prints = Vec::<PrintRequest>::new();
+    if cg.target_cpu.as_ref().is_some_and(|s| s == "help") {
+        prints.push(PrintRequest { kind: PrintKind::TargetCPUs, out: OutFileName::Stdout });
+        cg.target_cpu = None;
+    };
+    if cg.target_feature == "help" {
+        prints.push(PrintRequest { kind: PrintKind::TargetFeatures, out: OutFileName::Stdout });
+        cg.target_feature = String::new();
+    }
+
+    const PRINT_KINDS: &[(&str, PrintKind)] = &[
+        // tidy-alphabetical-start
+        ("all-target-specs-json", PrintKind::AllTargetSpecs),
+        ("calling-conventions", PrintKind::CallingConventions),
+        ("cfg", PrintKind::Cfg),
+        ("check-cfg", PrintKind::CheckCfg),
+        ("code-models", PrintKind::CodeModels),
+        ("crate-name", PrintKind::CrateName),
+        ("deployment-target", PrintKind::DeploymentTarget),
+        ("file-names", PrintKind::FileNames),
+        ("link-args", PrintKind::LinkArgs),
+        ("native-static-libs", PrintKind::NativeStaticLibs),
+        ("relocation-models", PrintKind::RelocationModels),
+        ("split-debuginfo", PrintKind::SplitDebuginfo),
+        ("stack-protector-strategies", PrintKind::StackProtectorStrategies),
+        ("sysroot", PrintKind::Sysroot),
+        ("target-cpus", PrintKind::TargetCPUs),
+        ("target-features", PrintKind::TargetFeatures),
+        ("target-libdir", PrintKind::TargetLibdir),
+        ("target-list", PrintKind::TargetList),
+        ("target-spec-json", PrintKind::TargetSpec),
+        ("tls-models", PrintKind::TlsModels),
+        // tidy-alphabetical-end
+    ];
+
+    // We disallow reusing the same path in multiple prints, such as `--print
+    // cfg=output.txt --print link-args=output.txt`, because outputs are printed
+    // by disparate pieces of the compiler, and keeping track of which files
+    // need to be overwritten vs appended to is annoying.
+    let mut printed_paths = FxHashSet::default();
+
+    prints.extend(matches.opt_strs("print").into_iter().map(|req| {
+        let (req, out) = split_out_file_name(&req);
+
+        let kind = match PRINT_KINDS.iter().find(|&&(name, _)| name == req) {
+            Some((_, PrintKind::TargetSpec)) => {
+                if unstable_opts.unstable_options {
+                    PrintKind::TargetSpec
+                } else {
+                    early_dcx.early_fatal(
+                        "the `-Z unstable-options` flag must also be passed to \
+                         enable the target-spec-json print option",
+                    );
+                }
+            }
+            Some((_, PrintKind::AllTargetSpecs)) => {
+                if unstable_opts.unstable_options {
+                    PrintKind::AllTargetSpecs
+                } else {
+                    early_dcx.early_fatal(
+                        "the `-Z unstable-options` flag must also be passed to \
+                         enable the all-target-specs-json print option",
+                    );
+                }
+            }
+            Some((_, PrintKind::CheckCfg)) => {
+                if unstable_opts.unstable_options {
+                    PrintKind::CheckCfg
+                } else {
+                    early_dcx.early_fatal(
+                        "the `-Z unstable-options` flag must also be passed to \
+                         enable the check-cfg print option",
+                    );
+                }
+            }
+            Some(&(_, print_kind)) => print_kind,
+            None => {
+                let prints =
+                    PRINT_KINDS.iter().map(|(name, _)| format!("`{name}`")).collect::<Vec<_>>();
+                let prints = prints.join(", ");
+
+                let mut diag =
+                    early_dcx.early_struct_fatal(format!("unknown print request: `{req}`"));
+                #[allow(rustc::diagnostic_outside_of_impl)]
+                diag.help(format!("valid print requests are: {prints}"));
+                diag.emit()
+            }
+        };
+
+        let out = out.unwrap_or(OutFileName::Stdout);
+        if let OutFileName::Real(path) = &out {
+            if !printed_paths.insert(path.clone()) {
+                early_dcx.early_fatal(format!(
+                    "cannot print multiple outputs to the same path: {}",
+                    path.display(),
+                ));
+            }
+        }
+
+        PrintRequest { kind, out }
+    }));
+
+    prints
+}
+
+pub fn parse_target_triple(early_dcx: &EarlyDiagCtxt, matches: &getopts::Matches) -> TargetTriple {
     match matches.opt_str("target") {
         Some(target) if target.ends_with(".json") => {
             let path = Path::new(&target);
-            TargetTuple::from_path(path).unwrap_or_else(|_| {
+            TargetTriple::from_path(path).unwrap_or_else(|_| {
                 early_dcx.early_fatal(format!("target file {path:?} does not exist"))
             })
         }
-        Some(target) => TargetTuple::TargetTuple(target),
-        _ => TargetTuple::from_tuple(host_tuple()),
+        Some(target) => TargetTriple::TargetTriple(target),
+        _ => TargetTriple::from_triple(host_triple()),
     }
 }
 
@@ -2255,12 +2055,12 @@ fn parse_opt_level(
         })
         .max();
     if max_o > max_c {
-        OptLevel::Aggressive
+        OptLevel::Default
     } else {
         match cg.opt_level.as_ref() {
             "0" => OptLevel::No,
             "1" => OptLevel::Less,
-            "2" => OptLevel::More,
+            "2" => OptLevel::Default,
             "3" => OptLevel::Aggressive,
             "s" => OptLevel::Size,
             "z" => OptLevel::SizeMin,
@@ -2301,16 +2101,186 @@ fn parse_assert_incr_state(
     }
 }
 
+fn parse_native_lib_kind(
+    early_dcx: &EarlyDiagCtxt,
+    matches: &getopts::Matches,
+    kind: &str,
+) -> (NativeLibKind, Option<bool>) {
+    let (kind, modifiers) = match kind.split_once(':') {
+        None => (kind, None),
+        Some((kind, modifiers)) => (kind, Some(modifiers)),
+    };
+
+    let kind = match kind {
+        "static" => NativeLibKind::Static { bundle: None, whole_archive: None },
+        "dylib" => NativeLibKind::Dylib { as_needed: None },
+        "framework" => NativeLibKind::Framework { as_needed: None },
+        "link-arg" => {
+            if !nightly_options::is_unstable_enabled(matches) {
+                let why = if nightly_options::match_is_nightly_build(matches) {
+                    " and only accepted on the nightly compiler"
+                } else {
+                    ", the `-Z unstable-options` flag must also be passed to use it"
+                };
+                early_dcx.early_fatal(format!("library kind `link-arg` is unstable{why}"))
+            }
+            NativeLibKind::LinkArg
+        }
+        _ => early_dcx.early_fatal(format!(
+            "unknown library kind `{kind}`, expected one of: static, dylib, framework, link-arg"
+        )),
+    };
+    match modifiers {
+        None => (kind, None),
+        Some(modifiers) => parse_native_lib_modifiers(early_dcx, kind, modifiers, matches),
+    }
+}
+
+fn parse_native_lib_modifiers(
+    early_dcx: &EarlyDiagCtxt,
+    mut kind: NativeLibKind,
+    modifiers: &str,
+    matches: &getopts::Matches,
+) -> (NativeLibKind, Option<bool>) {
+    let mut verbatim = None;
+    for modifier in modifiers.split(',') {
+        let (modifier, value) = match modifier.strip_prefix(['+', '-']) {
+            Some(m) => (m, modifier.starts_with('+')),
+            None => early_dcx.early_fatal(
+                "invalid linking modifier syntax, expected '+' or '-' prefix \
+                 before one of: bundle, verbatim, whole-archive, as-needed",
+            ),
+        };
+
+        let report_unstable_modifier = || {
+            if !nightly_options::is_unstable_enabled(matches) {
+                let why = if nightly_options::match_is_nightly_build(matches) {
+                    " and only accepted on the nightly compiler"
+                } else {
+                    ", the `-Z unstable-options` flag must also be passed to use it"
+                };
+                early_dcx.early_fatal(format!("linking modifier `{modifier}` is unstable{why}"))
+            }
+        };
+        let assign_modifier = |dst: &mut Option<bool>| {
+            if dst.is_some() {
+                let msg = format!("multiple `{modifier}` modifiers in a single `-l` option");
+                early_dcx.early_fatal(msg)
+            } else {
+                *dst = Some(value);
+            }
+        };
+        match (modifier, &mut kind) {
+            ("bundle", NativeLibKind::Static { bundle, .. }) => assign_modifier(bundle),
+            ("bundle", _) => early_dcx.early_fatal(
+                "linking modifier `bundle` is only compatible with `static` linking kind",
+            ),
+
+            ("verbatim", _) => assign_modifier(&mut verbatim),
+
+            ("whole-archive", NativeLibKind::Static { whole_archive, .. }) => {
+                assign_modifier(whole_archive)
+            }
+            ("whole-archive", _) => early_dcx.early_fatal(
+                "linking modifier `whole-archive` is only compatible with `static` linking kind",
+            ),
+
+            ("as-needed", NativeLibKind::Dylib { as_needed })
+            | ("as-needed", NativeLibKind::Framework { as_needed }) => {
+                report_unstable_modifier();
+                assign_modifier(as_needed)
+            }
+            ("as-needed", _) => early_dcx.early_fatal(
+                "linking modifier `as-needed` is only compatible with \
+                 `dylib` and `framework` linking kinds",
+            ),
+
+            // Note: this error also excludes the case with empty modifier
+            // string, like `modifiers = ""`.
+            _ => early_dcx.early_fatal(format!(
+                "unknown linking modifier `{modifier}`, expected one \
+                     of: bundle, verbatim, whole-archive, as-needed"
+            )),
+        }
+    }
+
+    (kind, verbatim)
+}
+
+fn parse_libs(early_dcx: &EarlyDiagCtxt, matches: &getopts::Matches) -> Vec<NativeLib> {
+    matches
+        .opt_strs("l")
+        .into_iter()
+        .map(|s| {
+            // Parse string of the form "[KIND[:MODIFIERS]=]lib[:new_name]",
+            // where KIND is one of "dylib", "framework", "static", "link-arg" and
+            // where MODIFIERS are a comma separated list of supported modifiers
+            // (bundle, verbatim, whole-archive, as-needed). Each modifier is prefixed
+            // with either + or - to indicate whether it is enabled or disabled.
+            // The last value specified for a given modifier wins.
+            let (name, kind, verbatim) = match s.split_once('=') {
+                None => (s, NativeLibKind::Unspecified, None),
+                Some((kind, name)) => {
+                    let (kind, verbatim) = parse_native_lib_kind(early_dcx, matches, kind);
+                    (name.to_string(), kind, verbatim)
+                }
+            };
+
+            let (name, new_name) = match name.split_once(':') {
+                None => (name, None),
+                Some((name, new_name)) => (name.to_string(), Some(new_name.to_owned())),
+            };
+            if name.is_empty() {
+                early_dcx.early_fatal("library name must not be empty");
+            }
+            NativeLib { name, new_name, kind, verbatim }
+        })
+        .collect()
+}
+
 pub fn parse_externs(
     early_dcx: &EarlyDiagCtxt,
     matches: &getopts::Matches,
     unstable_opts: &UnstableOptions,
 ) -> Externs {
+    fn is_ascii_ident(string: &str) -> bool {
+        let mut chars = string.chars();
+        if let Some(start) = chars.next()
+            && (start.is_ascii_alphabetic() || start == '_')
+        {
+            chars.all(|char| char.is_ascii_alphanumeric() || char == '_')
+        } else {
+            false
+        }
+    }
+
     let is_unstable_enabled = unstable_opts.unstable_options;
     let mut externs: BTreeMap<String, ExternEntry> = BTreeMap::new();
     for arg in matches.opt_strs("extern") {
-        let ExternOpt { crate_name: name, path, options } =
-            split_extern_opt(early_dcx, unstable_opts, &arg).unwrap_or_else(|e| e.emit());
+        let (name, path) = match arg.split_once('=') {
+            None => (arg, None),
+            Some((name, path)) => (name.to_string(), Some(Path::new(path))),
+        };
+        let (options, name) = match name.split_once(':') {
+            None => (None, name),
+            Some((opts, name)) => (Some(opts), name.to_string()),
+        };
+
+        if !is_ascii_ident(&name) {
+            let mut error = early_dcx.early_struct_fatal(format!(
+                "crate name `{name}` passed to `--extern` is not a valid ASCII identifier"
+            ));
+            let adjusted_name = name.replace('-', "_");
+            if is_ascii_ident(&adjusted_name) {
+                #[allow(rustc::diagnostic_outside_of_impl)] // FIXME
+                error.help(format!(
+                    "consider replacing the dashes with underscores: `{adjusted_name}`"
+                ));
+            }
+            error.emit();
+        }
+
+        let path = path.map(|p| CanonicalizedPath::new(p));
 
         let entry = externs.entry(name.to_owned());
 
@@ -2318,7 +2288,6 @@ pub fn parse_externs(
 
         let entry = if let Some(path) = path {
             // --extern prelude_name=some_file.rlib
-            let path = CanonicalizedPath::new(path);
             match entry {
                 Entry::Vacant(vacant) => {
                     let files = BTreeSet::from_iter(iter::once(path));
@@ -2447,20 +2416,17 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
 
     let edition = parse_crate_edition(early_dcx, matches);
 
-    let crate_name = matches.opt_str("crate-name");
-    let unstable_features = UnstableFeatures::from_environment(crate_name.as_deref());
     let JsonConfig {
         json_rendered,
         json_color,
         json_artifact_notifications,
-        json_timings,
         json_unused_externs,
         json_future_incompat,
     } = parse_json(early_dcx, matches);
 
     let error_format = parse_error_format(early_dcx, matches, color, json_color, json_rendered);
 
-    early_dcx.set_error_format(error_format);
+    early_dcx.abort_if_error_and_set_error_format(error_format);
 
     let diagnostic_width = matches.opt_get("diagnostic-width").unwrap_or_else(|_| {
         early_dcx.early_fatal("`--diagnostic-width` must be an positive integer");
@@ -2470,26 +2436,15 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
     let crate_types = parse_crate_types_from_list(unparsed_crate_types)
         .unwrap_or_else(|e| early_dcx.early_fatal(e));
 
-    let mut target_modifiers = BTreeMap::<OptionsTargetModifiers, String>::new();
-
-    let mut unstable_opts = UnstableOptions::build(early_dcx, matches, &mut target_modifiers);
+    let mut unstable_opts = UnstableOptions::build(early_dcx, matches);
     let (lint_opts, describe_lints, lint_cap) = get_cmd_lint_options(early_dcx, matches);
 
-    if !unstable_opts.unstable_options && json_timings {
-        early_dcx.early_fatal("--json=timings is unstable and requires using `-Zunstable-options`");
-    }
-
-    check_error_format_stability(
-        early_dcx,
-        &unstable_opts,
-        unstable_features.is_nightly_build(),
-        error_format,
-    );
+    check_error_format_stability(early_dcx, &unstable_opts, error_format);
 
     let output_types = parse_output_types(early_dcx, &unstable_opts, matches);
 
-    let mut cg = CodegenOptions::build(early_dcx, matches, &mut target_modifiers);
-    let (disable_local_thinlto, codegen_units) = should_override_cgus_and_disable_thinlto(
+    let mut cg = CodegenOptions::build(early_dcx, matches);
+    let (disable_local_thinlto, mut codegen_units) = should_override_cgus_and_disable_thinlto(
         early_dcx,
         &output_types,
         matches,
@@ -2500,13 +2455,29 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
         early_dcx.early_fatal("value for threads must be a positive non-zero integer");
     }
 
-    if unstable_opts.threads == parse::MAX_THREADS_CAP {
-        early_dcx.early_warn(format!("number of threads was capped at {}", parse::MAX_THREADS_CAP));
+    let fuel = unstable_opts.fuel.is_some() || unstable_opts.print_fuel.is_some();
+    if fuel && unstable_opts.threads > 1 {
+        early_dcx.early_fatal("optimization fuel is incompatible with multiple threads");
+    }
+    if fuel && cg.incremental.is_some() {
+        early_dcx.early_fatal("optimization fuel is incompatible with incremental compilation");
     }
 
     let incremental = cg.incremental.as_ref().map(PathBuf::from);
 
     let assert_incr_state = parse_assert_incr_state(early_dcx, &unstable_opts.assert_incr_state);
+
+    if unstable_opts.profile && incremental.is_some() {
+        early_dcx.early_fatal("can't instrument with gcov profiling when compiling incrementally");
+    }
+    if unstable_opts.profile {
+        match codegen_units {
+            Some(1) => {}
+            None => codegen_units = Some(1),
+            Some(_) => early_dcx
+                .early_fatal("can't instrument with gcov profiling with multiple codegen units"),
+        }
+    }
 
     if cg.profile_generate.enabled() && cg.profile_use.is_some() {
         early_dcx.early_fatal("options `-C profile-generate` and `-C profile-use` are exclusive");
@@ -2588,28 +2559,26 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
         }
     }
 
-    let unstable_options_enabled = nightly_options::is_unstable_enabled(matches);
-    if !unstable_options_enabled && cg.force_frame_pointers == FramePointer::NonLeaf {
+    if !nightly_options::is_unstable_enabled(matches)
+        && cg.force_frame_pointers == FramePointer::NonLeaf
+    {
         early_dcx.early_fatal(
             "`-Cforce-frame-pointers=non-leaf` or `always` also requires `-Zunstable-options` \
                 and a nightly compiler",
         )
     }
 
-    if !nightly_options::is_unstable_enabled(matches) && !unstable_opts.offload.is_empty() {
-        early_dcx.early_fatal(
-            "`-Zoffload=Enable` also requires `-Zunstable-options` \
-                and a nightly compiler",
-        )
-    }
-
-    let target_triple = parse_target_triple(early_dcx, matches);
-
-    // Ensure `-Z unstable-options` is required when using the unstable `-C link-self-contained` and
-    // `-C linker-flavor` options.
-    if !unstable_options_enabled {
-        if let Err(error) = cg.link_self_contained.check_unstable_variants(&target_triple) {
-            early_dcx.early_fatal(error);
+    // For testing purposes, until we have more feedback about these options: ensure `-Z
+    // unstable-options` is required when using the unstable `-C link-self-contained` and `-C
+    // linker-flavor` options.
+    if !nightly_options::is_unstable_enabled(matches) {
+        let uses_unstable_self_contained_option =
+            cg.link_self_contained.are_unstable_variants_set();
+        if uses_unstable_self_contained_option {
+            early_dcx.early_fatal(
+                "only `-C link-self-contained` values `y`/`yes`/`on`/`n`/`no`/`off` are stable, \
+                the `-Z unstable-options` flag must also be passed to use the unstable values",
+            );
         }
 
         if let Some(flavor) = cg.linker_flavor {
@@ -2636,40 +2605,21 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
         ));
     }
 
-    let prints = print_request::collect_print_requests(early_dcx, &mut cg, &unstable_opts, matches);
-
-    // -Zretpoline-external-thunk also requires -Zretpoline
-    if unstable_opts.retpoline_external_thunk {
-        unstable_opts.retpoline = true;
-        target_modifiers.insert(
-            OptionsTargetModifiers::UnstableOptions(UnstableOptionsTargetModifiers::retpoline),
-            "true".to_string(),
-        );
-    }
+    let prints = collect_print_requests(early_dcx, &mut cg, &unstable_opts, matches);
 
     let cg = cg;
 
+    let sysroot_opt = matches.opt_str("sysroot").map(|m| PathBuf::from(&m));
+    let target_triple = parse_target_triple(early_dcx, matches);
     let opt_level = parse_opt_level(early_dcx, matches, &cg);
     // The `-g` and `-C debuginfo` flags specify the same setting, so we want to be able
     // to use them interchangeably. See the note above (regarding `-O` and `-C opt-level`)
     // for more details.
     let debug_assertions = cg.debug_assertions.unwrap_or(opt_level == OptLevel::No);
     let debuginfo = select_debuginfo(matches, &cg);
+    let debuginfo_compression = unstable_opts.debuginfo_compression;
 
-    if !unstable_options_enabled {
-        if let Err(error) = cg.linker_features.check_unstable_variants(&target_triple) {
-            early_dcx.early_fatal(error);
-        }
-    }
-
-    if !unstable_options_enabled && cg.panic == Some(PanicStrategy::ImmediateAbort) {
-        early_dcx.early_fatal(
-            "`-Cpanic=immediate-abort` requires `-Zunstable-options` and a nightly compiler",
-        )
-    }
-
-    // Parse any `-l` flags, which link to native libraries.
-    let libs = parse_native_libs(early_dcx, &unstable_opts, unstable_features, matches);
+    let libs = parse_libs(early_dcx, matches);
 
     let test = matches.opt_present("test");
 
@@ -2684,8 +2634,9 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
 
     let externs = parse_externs(early_dcx, matches, &unstable_opts);
 
+    let crate_name = matches.opt_str("crate-name");
+
     let remap_path_prefix = parse_remap_path_prefix(early_dcx, matches, &unstable_opts);
-    let remap_path_scope = parse_remap_path_scope(early_dcx, matches, &unstable_opts);
 
     let pretty = parse_pretty(early_dcx, &unstable_opts);
 
@@ -2696,10 +2647,11 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
 
     let logical_env = parse_logical_env(early_dcx, matches);
 
-    let sysroot = Sysroot::new(matches.opt_str("sysroot").map(PathBuf::from));
+    let sysroot = filesearch::materialize_sysroot(sysroot_opt);
 
-    let real_source_base_dir = |suffix: &str, confirm: &str| {
-        let mut candidate = sysroot.path().join(suffix);
+    let real_rust_source_base_dir = {
+        // This is the location used by the `rust-src` `rustup` component.
+        let mut candidate = sysroot.join("lib/rustlib/src/rust");
         if let Ok(metadata) = candidate.symlink_metadata() {
             // Replace the symlink bootstrap creates, with its destination.
             // We could try to use `fs::canonicalize` instead, but that might
@@ -2712,49 +2664,26 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
         }
 
         // Only use this directory if it has a file we can expect to always find.
-        candidate.join(confirm).is_file().then_some(candidate)
+        candidate.join("library/std/src/lib.rs").is_file().then_some(candidate)
     };
 
-    let real_rust_source_base_dir =
-        // This is the location used by the `rust-src` `rustup` component.
-        real_source_base_dir("lib/rustlib/src/rust", "library/std/src/lib.rs");
+    let mut search_paths = vec![];
+    for s in &matches.opt_strs("L") {
+        search_paths.push(SearchPath::from_cli_opt(
+            &sysroot,
+            &target_triple,
+            early_dcx,
+            s,
+            unstable_opts.unstable_options,
+        ));
+    }
 
-    let real_rustc_dev_source_base_dir =
-        // This is the location used by the `rustc-dev` `rustup` component.
-        real_source_base_dir("lib/rustlib/rustc-src/rust", "compiler/rustc/src/main.rs");
+    let working_dir = std::env::current_dir().unwrap_or_else(|e| {
+        early_dcx.early_fatal(format!("Current directory is invalid: {e}"));
+    });
 
-    // We eagerly scan all files in each passed -L path. If the same directory is passed multiple
-    // times, and the directory contains a lot of files, this can take a lot of time.
-    // So we remove -L paths that were passed multiple times, and keep only the first occurrence.
-    // We still have to keep the original order of the -L arguments.
-    let search_paths: Vec<SearchPath> = {
-        let mut seen_search_paths = FxHashSet::default();
-        let search_path_matches: Vec<String> = matches.opt_strs("L");
-        search_path_matches
-            .iter()
-            .filter(|p| seen_search_paths.insert(*p))
-            .map(|path| {
-                SearchPath::from_cli_opt(
-                    sysroot.path(),
-                    &target_triple,
-                    early_dcx,
-                    &path,
-                    unstable_opts.unstable_options,
-                )
-            })
-            .collect()
-    };
-
-    // Ideally we would use `SourceMap::working_dir` instead, but we don't have access to it
-    // so we manually create the potentially-remapped working directory
-    let working_dir = {
-        let working_dir = std::env::current_dir().unwrap_or_else(|e| {
-            early_dcx.early_fatal(format!("Current directory is invalid: {e}"));
-        });
-
-        let file_mapping = file_path_mapping(remap_path_prefix.clone(), remap_path_scope);
-        file_mapping.to_real_filename(&RealFileName::empty(), &working_dir)
-    };
+    let file_mapping = file_path_mapping(remap_path_prefix.clone(), &unstable_opts);
+    let working_dir = file_mapping.to_real_filename(&working_dir);
 
     let verbose = matches.opt_present("verbose") || unstable_opts.verbose_internals;
 
@@ -2763,12 +2692,13 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
         crate_types,
         optimize: opt_level,
         debuginfo,
+        debuginfo_compression,
         lint_opts,
         lint_cap,
         describe_lints,
         output_types,
         search_paths,
-        sysroot,
+        maybe_sysroot: Some(sysroot),
         target_triple,
         test,
         incremental,
@@ -2779,7 +2709,7 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
         error_format,
         diagnostic_width,
         externs,
-        unstable_features,
+        unstable_features: UnstableFeatures::from_environment(crate_name.as_deref()),
         crate_name,
         libs,
         debug_assertions,
@@ -2789,12 +2719,9 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
         cli_forced_codegen_units: codegen_units,
         cli_forced_local_thinlto_off: disable_local_thinlto,
         remap_path_prefix,
-        remap_path_scope,
         real_rust_source_base_dir,
-        real_rustc_dev_source_base_dir,
         edition,
         json_artifact_notifications,
-        json_timings,
         json_unused_externs,
         json_future_incompat,
         pretty,
@@ -2802,7 +2729,6 @@ pub fn build_session_options(early_dcx: &mut EarlyDiagCtxt, matches: &getopts::M
         color,
         logical_env,
         verbose,
-        target_modifiers,
     }
 }
 
@@ -2839,14 +2765,12 @@ fn parse_pretty(early_dcx: &EarlyDiagCtxt, unstable_opts: &UnstableOptions) -> O
 }
 
 pub fn make_crate_type_option() -> RustcOptGroup {
-    make_opt(
-        OptionStability::Stable,
-        OptionKind::Multi,
+    opt::multi_s(
         "",
         "crate-type",
         "Comma separated list of types of crates
                                 for the compiler to emit",
-        "<bin|lib|rlib|dylib|cdylib|staticlib|proc-macro>",
+        "[bin|lib|rlib|dylib|cdylib|staticlib|proc-macro]",
     )
 }
 
@@ -2855,20 +2779,14 @@ pub fn parse_crate_types_from_list(list_list: Vec<String>) -> Result<Vec<CrateTy
     for unparsed_crate_type in &list_list {
         for part in unparsed_crate_type.split(',') {
             let new_part = match part {
-                "lib" => CrateType::default(),
+                "lib" => default_lib_output(),
                 "rlib" => CrateType::Rlib,
-                "staticlib" => CrateType::StaticLib,
+                "staticlib" => CrateType::Staticlib,
                 "dylib" => CrateType::Dylib,
                 "cdylib" => CrateType::Cdylib,
                 "bin" => CrateType::Executable,
                 "proc-macro" => CrateType::ProcMacro,
-                "sdylib" => CrateType::Sdylib,
-                _ => {
-                    return Err(format!(
-                        "unknown crate type: `{part}`, expected one of: \
-                        `lib`, `rlib`, `staticlib`, `dylib`, `cdylib`, `bin`, `proc-macro`",
-                    ));
-                }
+                _ => return Err(format!("unknown crate type: `{part}`")),
             };
             if !crate_types.contains(&new_part) {
                 crate_types.push(new_part)
@@ -2931,7 +2849,6 @@ pub mod nightly_options {
                         "the option `{}` is only accepted on the nightly compiler",
                         opt.name
                     );
-                    // The non-zero nightly_options_on_stable will force an early_fatal eventually.
                     let _ = early_dcx.early_err(msg);
                 }
                 OptionStability::Stable => {}
@@ -2948,6 +2865,25 @@ pub mod nightly_options {
                 if nightly_options_on_stable > 1 { "s" } else { "" }
             ));
         }
+    }
+}
+
+impl fmt::Display for CrateType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            CrateType::Executable => "bin".fmt(f),
+            CrateType::Dylib => "dylib".fmt(f),
+            CrateType::Rlib => "rlib".fmt(f),
+            CrateType::Staticlib => "staticlib".fmt(f),
+            CrateType::Cdylib => "cdylib".fmt(f),
+            CrateType::ProcMacro => "proc-macro".fmt(f),
+        }
+    }
+}
+
+impl IntoDiagArg for CrateType {
+    fn into_diag_arg(self) -> DiagArgValue {
+        self.to_string().into_diag_arg()
     }
 }
 
@@ -3019,6 +2955,14 @@ impl PpMode {
             | StableMir => true,
         }
     }
+    pub fn needs_hir(&self) -> bool {
+        use PpMode::*;
+        match *self {
+            Source(_) | AstTree | AstTreeExpanded => false,
+
+            Hir(_) | HirTree | ThirTree | ThirFlat | Mir | MirCFG | StableMir => true,
+        }
+    }
 
     pub fn needs_analysis(&self) -> bool {
         use PpMode::*;
@@ -3052,32 +2996,29 @@ pub enum WasiExecModel {
 /// how the hash should be calculated when adding a new command-line argument.
 pub(crate) mod dep_tracking {
     use std::collections::BTreeMap;
-    use std::hash::Hash;
+    use std::hash::{DefaultHasher, Hash};
     use std::num::NonZero;
     use std::path::PathBuf;
 
-    use rustc_abi::Align;
     use rustc_data_structures::fx::FxIndexMap;
-    use rustc_data_structures::stable_hasher::StableHasher;
+    use rustc_data_structures::stable_hasher::Hash64;
     use rustc_errors::LanguageIdentifier;
     use rustc_feature::UnstableFeatures;
-    use rustc_hashes::Hash64;
-    use rustc_hir::attrs::CollapseMacroDebuginfo;
     use rustc_span::edition::Edition;
-    use rustc_span::{RealFileName, RemapPathScopeComponents};
+    use rustc_span::RealFileName;
     use rustc_target::spec::{
         CodeModel, FramePointer, MergeFunctions, OnBrokenPipe, PanicStrategy, RelocModel,
-        RelroLevel, SanitizerSet, SplitDebuginfo, StackProtector, SymbolVisibility, TargetTuple,
-        TlsModel,
+        RelroLevel, SanitizerSet, SplitDebuginfo, StackProtector, TargetTriple, TlsModel, WasmCAbi,
     };
 
     use super::{
-        AnnotateMoves, AutoDiff, BranchProtection, CFGuard, CFProtection, CoverageOptions,
+        BranchProtection, CFGuard, CFProtection, CollapseMacroDebuginfo, CoverageOptions,
         CrateType, DebugInfo, DebugInfoCompression, ErrorOutputType, FmtDebug, FunctionReturn,
         InliningThreshold, InstrumentCoverage, InstrumentXRay, LinkerPluginLto, LocationDetail,
-        LtoCli, MirStripDebugInfo, NextSolverConfig, Offload, OptLevel, OutFileName, OutputType,
-        OutputTypes, PatchableFunctionEntry, Polonius, ResolveDocLinks, SourceFileHashAlgorithm,
-        SplitDwarfKind, SwitchWithOptPath, SymbolManglingVersion, WasiExecModel,
+        LtoCli, NextSolverConfig, OomStrategy, OptLevel, OutFileName, OutputType, OutputTypes,
+        PatchableFunctionEntry, Polonius, RemapPathScopeComponents, ResolveDocLinks,
+        SourceFileHashAlgorithm, SplitDwarfKind, SwitchWithOptPath, SymbolManglingVersion,
+        WasiExecModel,
     };
     use crate::lint;
     use crate::utils::NativeLib;
@@ -3085,7 +3026,7 @@ pub(crate) mod dep_tracking {
     pub(crate) trait DepTrackingHash {
         fn hash(
             &self,
-            hasher: &mut StableHasher,
+            hasher: &mut DefaultHasher,
             error_format: ErrorOutputType,
             for_crate_hash: bool,
         );
@@ -3094,7 +3035,7 @@ pub(crate) mod dep_tracking {
     macro_rules! impl_dep_tracking_hash_via_hash {
         ($($t:ty),+ $(,)?) => {$(
             impl DepTrackingHash for $t {
-                fn hash(&self, hasher: &mut StableHasher, _: ErrorOutputType, _for_crate_hash: bool) {
+                fn hash(&self, hasher: &mut DefaultHasher, _: ErrorOutputType, _for_crate_hash: bool) {
                     Hash::hash(self, hasher);
                 }
             }
@@ -3104,7 +3045,7 @@ pub(crate) mod dep_tracking {
     impl<T: DepTrackingHash> DepTrackingHash for Option<T> {
         fn hash(
             &self,
-            hasher: &mut StableHasher,
+            hasher: &mut DefaultHasher,
             error_format: ErrorOutputType,
             for_crate_hash: bool,
         ) {
@@ -3119,10 +3060,6 @@ pub(crate) mod dep_tracking {
     }
 
     impl_dep_tracking_hash_via_hash!(
-        (),
-        AnnotateMoves,
-        AutoDiff,
-        Offload,
         bool,
         usize,
         NonZero<usize>,
@@ -3149,14 +3086,13 @@ pub(crate) mod dep_tracking {
         LtoCli,
         DebugInfo,
         DebugInfoCompression,
-        MirStripDebugInfo,
         CollapseMacroDebuginfo,
         UnstableFeatures,
         NativeLib,
         SanitizerSet,
         CFGuard,
         CFProtection,
-        TargetTuple,
+        TargetTriple,
         Edition,
         LinkerPluginLto,
         ResolveDocLinks,
@@ -3165,7 +3101,6 @@ pub(crate) mod dep_tracking {
         StackProtector,
         SwitchWithOptPath,
         SymbolManglingVersion,
-        SymbolVisibility,
         RemapPathScopeComponents,
         SourceFileHashAlgorithm,
         OutFileName,
@@ -3174,13 +3109,14 @@ pub(crate) mod dep_tracking {
         LocationDetail,
         FmtDebug,
         BranchProtection,
+        OomStrategy,
         LanguageIdentifier,
         NextSolverConfig,
         PatchableFunctionEntry,
         Polonius,
         InliningThreshold,
         FunctionReturn,
-        Align,
+        WasmCAbi,
     );
 
     impl<T1, T2> DepTrackingHash for (T1, T2)
@@ -3190,7 +3126,7 @@ pub(crate) mod dep_tracking {
     {
         fn hash(
             &self,
-            hasher: &mut StableHasher,
+            hasher: &mut DefaultHasher,
             error_format: ErrorOutputType,
             for_crate_hash: bool,
         ) {
@@ -3209,7 +3145,7 @@ pub(crate) mod dep_tracking {
     {
         fn hash(
             &self,
-            hasher: &mut StableHasher,
+            hasher: &mut DefaultHasher,
             error_format: ErrorOutputType,
             for_crate_hash: bool,
         ) {
@@ -3225,7 +3161,7 @@ pub(crate) mod dep_tracking {
     impl<T: DepTrackingHash> DepTrackingHash for Vec<T> {
         fn hash(
             &self,
-            hasher: &mut StableHasher,
+            hasher: &mut DefaultHasher,
             error_format: ErrorOutputType,
             for_crate_hash: bool,
         ) {
@@ -3240,7 +3176,7 @@ pub(crate) mod dep_tracking {
     impl<T: DepTrackingHash, V: DepTrackingHash> DepTrackingHash for FxIndexMap<T, V> {
         fn hash(
             &self,
-            hasher: &mut StableHasher,
+            hasher: &mut DefaultHasher,
             error_format: ErrorOutputType,
             for_crate_hash: bool,
         ) {
@@ -3255,7 +3191,7 @@ pub(crate) mod dep_tracking {
     impl DepTrackingHash for OutputTypes {
         fn hash(
             &self,
-            hasher: &mut StableHasher,
+            hasher: &mut DefaultHasher,
             error_format: ErrorOutputType,
             for_crate_hash: bool,
         ) {
@@ -3272,7 +3208,7 @@ pub(crate) mod dep_tracking {
     // This is a stable hash because BTreeMap is a sorted container
     pub(crate) fn stable_hash(
         sub_hashes: BTreeMap<&'static str, &dyn DepTrackingHash>,
-        hasher: &mut StableHasher,
+        hasher: &mut DefaultHasher,
         error_format: ErrorOutputType,
         for_crate_hash: bool,
     ) {
@@ -3286,6 +3222,27 @@ pub(crate) mod dep_tracking {
     }
 }
 
+/// Default behavior to use in out-of-memory situations.
+#[derive(Clone, Copy, PartialEq, Hash, Debug, Encodable, Decodable, HashStable_Generic)]
+pub enum OomStrategy {
+    /// Generate a panic that can be caught by `catch_unwind`.
+    Panic,
+
+    /// Abort the process immediately.
+    Abort,
+}
+
+impl OomStrategy {
+    pub const SYMBOL: &'static str = "__rust_alloc_error_handler_should_panic";
+
+    pub fn should_panic(self) -> u8 {
+        match self {
+            OomStrategy::Panic => 1,
+            OomStrategy::Abort => 0,
+        }
+    }
+}
+
 /// How to run proc-macro code when building this crate
 #[derive(Clone, Copy, PartialEq, Hash, Debug)]
 pub enum ProcMacroExecutionStrategy {
@@ -3294,6 +3251,25 @@ pub enum ProcMacroExecutionStrategy {
 
     /// Run the proc-macro code on a different thread.
     CrossThread,
+}
+
+/// How to perform collapse macros debug info
+/// if-ext - if macro from different crate (related to callsite code)
+/// | cmd \ attr    | no  | (unspecified) | external | yes |
+/// | no            | no  | no            | no       | no  |
+/// | (unspecified) | no  | no            | if-ext   | yes |
+/// | external      | no  | if-ext        | if-ext   | yes |
+/// | yes           | yes | yes           | yes      | yes |
+#[derive(Clone, Copy, PartialEq, Hash, Debug)]
+pub enum CollapseMacroDebuginfo {
+    /// Don't collapse debuginfo for the macro
+    No = 0,
+    /// Unspecified value
+    Unspecified = 1,
+    /// Collapse debuginfo if the macro comes from a different crate
+    External = 2,
+    /// Collapse debuginfo for the macro
+    Yes = 3,
 }
 
 /// Which format to use for `-Z dump-mono-stats`

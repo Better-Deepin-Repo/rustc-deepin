@@ -3,7 +3,7 @@ use std::fmt;
 use rustc_data_structures::intern::Interned;
 use rustc_errors::{Diag, IntoDiagArg};
 use rustc_hir::def::Namespace;
-use rustc_hir::def_id::{CRATE_DEF_ID, DefId};
+use rustc_hir::def_id::{DefId, CRATE_DEF_ID};
 use rustc_middle::bug;
 use rustc_middle::ty::error::ExpectedFound;
 use rustc_middle::ty::print::{FmtPrinter, Print, PrintTraitRefExt as _, RegionHighlightMode};
@@ -21,24 +21,23 @@ use crate::traits::{ObligationCause, ObligationCauseCode};
 // HACK(eddyb) maybe move this in a more central location.
 #[derive(Copy, Clone)]
 pub struct Highlighted<'tcx, T> {
-    pub tcx: TyCtxt<'tcx>,
-    pub highlight: RegionHighlightMode<'tcx>,
-    pub value: T,
-    pub ns: Namespace,
+    tcx: TyCtxt<'tcx>,
+    highlight: RegionHighlightMode<'tcx>,
+    value: T,
 }
 
 impl<'tcx, T> IntoDiagArg for Highlighted<'tcx, T>
 where
     T: for<'a> Print<'tcx, FmtPrinter<'a, 'tcx>>,
 {
-    fn into_diag_arg(self, _: &mut Option<std::path::PathBuf>) -> rustc_errors::DiagArgValue {
+    fn into_diag_arg(self) -> rustc_errors::DiagArgValue {
         rustc_errors::DiagArgValue::Str(self.to_string().into())
     }
 }
 
 impl<'tcx, T> Highlighted<'tcx, T> {
     fn map<U>(self, f: impl FnOnce(T) -> U) -> Highlighted<'tcx, U> {
-        Highlighted { tcx: self.tcx, highlight: self.highlight, value: f(self.value), ns: self.ns }
+        Highlighted { tcx: self.tcx, highlight: self.highlight, value: f(self.value) }
     }
 }
 
@@ -47,11 +46,11 @@ where
     T: for<'a> Print<'tcx, FmtPrinter<'a, 'tcx>>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut p = ty::print::FmtPrinter::new(self.tcx, self.ns);
-        p.region_highlight_mode = self.highlight;
+        let mut printer = ty::print::FmtPrinter::new(self.tcx, Namespace::TypeNS);
+        printer.region_highlight_mode = self.highlight;
 
-        self.value.print(&mut p)?;
-        f.write_str(&p.into_buffer())
+        self.value.print(&mut printer)?;
+        f.write_str(&printer.into_buffer())
     }
 }
 
@@ -164,7 +163,7 @@ impl<'tcx> NiceRegionError<'_, 'tcx> {
                 sub_region @ Region(Interned(RePlaceholder(_), _)),
                 sup_region,
             )) => self.try_report_trait_placeholder_mismatch(
-                (!sup_region.is_named(self.tcx())).then_some(*sup_region),
+                (!sup_region.has_name()).then_some(*sup_region),
                 cause,
                 Some(*sub_region),
                 None,
@@ -176,7 +175,7 @@ impl<'tcx> NiceRegionError<'_, 'tcx> {
                 sub_region,
                 sup_region @ Region(Interned(RePlaceholder(_), _)),
             )) => self.try_report_trait_placeholder_mismatch(
-                (!sub_region.is_named(self.tcx())).then_some(*sub_region),
+                (!sub_region.has_name()).then_some(*sub_region),
                 cause,
                 None,
                 Some(*sup_region),
@@ -238,7 +237,7 @@ impl<'tcx> NiceRegionError<'_, 'tcx> {
         expected_args: GenericArgsRef<'tcx>,
         actual_args: GenericArgsRef<'tcx>,
     ) -> Diag<'tcx> {
-        let span = cause.span;
+        let span = cause.span();
 
         let (leading_ellipsis, satisfy_span, where_span, dup_span, def_id) =
             if let ObligationCauseCode::WhereClause(def_id, span)
@@ -382,7 +381,6 @@ impl<'tcx> NiceRegionError<'_, 'tcx> {
             tcx: self.tcx(),
             highlight: RegionHighlightMode::default(),
             value: trait_ref,
-            ns: Namespace::TypeNS,
         };
 
         let same_self_type = actual_trait_ref.self_ty() == expected_trait_ref.self_ty();

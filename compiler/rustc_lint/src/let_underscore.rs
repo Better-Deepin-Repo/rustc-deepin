@@ -2,7 +2,7 @@ use rustc_errors::MultiSpan;
 use rustc_hir as hir;
 use rustc_middle::ty;
 use rustc_session::{declare_lint, declare_lint_pass};
-use rustc_span::{Symbol, sym};
+use rustc_span::{sym, Symbol};
 
 use crate::lints::{NonBindingLet, NonBindingLetSub};
 use crate::{LateContext, LateLintPass, LintContext};
@@ -51,7 +51,7 @@ declare_lint! {
     /// intent.
     pub LET_UNDERSCORE_DROP,
     Allow,
-    "non-binding let on a type that has a destructor"
+    "non-binding let on a type that implements `Drop`"
 }
 
 declare_lint! {
@@ -128,7 +128,7 @@ impl<'tcx> LateLintPass<'tcx> for LetUnderscore {
 
             // If the type has a trivial Drop implementation, then it doesn't
             // matter that we drop the value immediately.
-            if !ty.needs_drop(cx.tcx, cx.typing_env()) {
+            if !ty.needs_drop(cx.tcx, cx.param_env) {
                 return;
             }
             // Lint for patterns like `mutex.lock()`, which returns `Result<MutexGuard, _>` as well.
@@ -152,7 +152,7 @@ impl<'tcx> LateLintPass<'tcx> for LetUnderscore {
                 // We can't suggest `drop()` when we're on the top level.
                 drop_fn_start_end: can_use_init
                     .map(|init| (local.span.until(init.span), init.span.shrink_to_hi())),
-                is_assign_desugar: matches!(local.source, rustc_hir::LocalSource::AssignDesugar),
+                is_assign_desugar: matches!(local.source, rustc_hir::LocalSource::AssignDesugar(_)),
             };
             if is_sync_lock {
                 let span = MultiSpan::from_span(pat.span);

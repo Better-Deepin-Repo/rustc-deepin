@@ -13,7 +13,6 @@ pub(crate) fn unresolved_extern_crate(
         "unresolved extern crate",
         d.decl.map(|it| it.into()),
     )
-    .stable()
 }
 
 #[cfg(test)]

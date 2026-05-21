@@ -1,13 +1,4 @@
 #![feature(min_specialization)]
-#![feature(const_trait_impl)]
-
-trait From<T> {
-    fn from(t: T) -> Self;
-}
-
-impl<T> From<T> for T {
-    fn from(t: T) -> T { t }
-}
 
 struct S;
 

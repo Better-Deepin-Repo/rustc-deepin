@@ -7,7 +7,7 @@ mod tests {
 
     pub type Callback = extern "C" fn(data: *mut c_void);
 
-    unsafe extern "C" {
+    extern "C" {
         fn foo(cb: Callback, data: *mut c_void);
     }
 

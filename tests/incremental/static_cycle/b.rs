@@ -1,5 +1,4 @@
 //@ revisions:rpass1 rpass2
-//@ ignore-backends: gcc
 
 #![cfg_attr(rpass2, warn(dead_code))]
 

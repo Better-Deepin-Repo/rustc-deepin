@@ -1,8 +1,6 @@
 // Test equality constraints on associated types. Check we get type errors
 // where we should.
 
-//@ dont-require-annotations: NOTE
-
 pub trait Foo {
     type A;
     fn boo(&self) -> <Self as Foo>::A;
@@ -24,9 +22,9 @@ fn foo1<I: Foo<A=Bar>>(x: I) {
 fn foo2<I: Foo>(x: I) {
     let _: Bar = x.boo();
     //~^ ERROR mismatched types
-    //~| NOTE found associated type `<I as Foo>::A`
-    //~| NOTE expected `Bar`, found
-    //~| NOTE expected struct `Bar`
+    //~| found associated type `<I as Foo>::A`
+    //~| expected `Bar`, found
+    //~| expected struct `Bar`
 }
 
 

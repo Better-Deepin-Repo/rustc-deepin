@@ -1,9 +1,11 @@
 //@ edition: 2021
 //@ check-pass
 
+#![feature(async_closure)]
+
 fn outlives<'a>(_: impl Sized + 'a) {}
 
-async fn call_once(f: impl AsyncFnOnce()) {
+async fn call_once(f: impl async FnOnce()) {
     f().await;
 }
 
@@ -36,10 +38,7 @@ fn through_field_and_ref<'a>(x: &S<'a>) {
 
     let c = async move || { println!("{}", *x.0); };
     outlives::<'a>(c());
-
-    // outlives::<'a>(call_once(c));
-    // The above fails b/c the by-move coroutine of `c` captures `x` in its entirety.
-    // Since we have not asserted that the borrow for `&S<'a>` outlives `'a`, it'll fail.
+    // outlives::<'a>(call_once(c)); // FIXME(async_closures): Figure out why this fails
 }
 
 fn main() {}

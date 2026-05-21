@@ -1,7 +1,7 @@
 use hir::InFile;
 use syntax::{AstNode, TextRange};
 
-use crate::{Diagnostic, DiagnosticCode, DiagnosticsContext, adjusted_display_range};
+use crate::{adjusted_display_range, Diagnostic, DiagnosticCode, DiagnosticsContext};
 
 // Diagnostic: incoherent-impl
 //
@@ -19,7 +19,6 @@ pub(crate) fn incoherent_impl(ctx: &DiagnosticsContext<'_>, d: &hir::IncoherentI
         "cannot define inherent `impl` for foreign type".to_owned(),
         display_range,
     )
-    .stable()
 }
 
 #[cfg(test)]

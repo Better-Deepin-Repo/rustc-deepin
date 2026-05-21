@@ -1,8 +1,8 @@
 //! Man-page formatter.
 
-use crate::EventIter;
 use crate::util::{header_text, parse_name_and_section};
-use anyhow::{Error, bail};
+use crate::EventIter;
+use anyhow::{bail, Error};
 use pulldown_cmark::{Alignment, Event, HeadingLevel, LinkType, Tag, TagEnd};
 use std::fmt::Write;
 use url::Url;
@@ -140,7 +140,7 @@ impl<'e> ManRenderer<'e> {
                                 suppress_paragraph = true;
                             }
                         }
-                        Tag::BlockQuote(..) => {
+                        Tag::BlockQuote(_kind) => {
                             self.flush();
                             // .RS = move left margin over 3
                             // .ll = shrink line length
@@ -167,7 +167,7 @@ impl<'e> ManRenderer<'e> {
                                     *n += 1;
                                 }
                                 // Unordered list.
-                                None => self.output.push_str("\\h'-04'\\(bu\\h'+03'"),
+                                None => self.output.push_str("\\h'-04'\\(bu\\h'+02'"),
                             }
                             suppress_paragraph = true;
                         }
@@ -251,28 +251,19 @@ impl<'e> ManRenderer<'e> {
                                         range.start
                                     );
                                 }
-                                LinkType::WikiLink { .. } => {
-                                    panic!("wikilink unsupported");
-                                }
                             }
                         }
                         Tag::Image { .. } => {
                             bail!("images are not currently supported")
                         }
-                        Tag::HtmlBlock { .. }
-                        | Tag::MetadataBlock { .. }
-                        | Tag::DefinitionList
-                        | Tag::DefinitionListTitle
-                        | Tag::DefinitionListDefinition
-                        | Tag::Superscript
-                        | Tag::Subscript => {}
+                        Tag::HtmlBlock { .. } | Tag::MetadataBlock { .. } => {}
                     }
                 }
                 Event::End(tag_end) => {
                     match &tag_end {
                         TagEnd::Paragraph => self.flush(),
                         TagEnd::Heading(..) => {}
-                        TagEnd::BlockQuote(..) => {
+                        TagEnd::BlockQuote => {
                             self.flush();
                             // restore left margin, restore line length
                             self.output.push_str(".br\n.RE\n.ll\n");
@@ -326,14 +317,7 @@ impl<'e> ManRenderer<'e> {
                                 write!(self.output, "<{}>", escape(&dest_url)?)?;
                             }
                         }
-                        TagEnd::Image
-                        | TagEnd::HtmlBlock
-                        | TagEnd::MetadataBlock(..)
-                        | TagEnd::DefinitionListDefinition
-                        | TagEnd::DefinitionListTitle
-                        | TagEnd::DefinitionList
-                        | TagEnd::Superscript
-                        | TagEnd::Subscript => {}
+                        TagEnd::Image | TagEnd::HtmlBlock | TagEnd::MetadataBlock(..) => {}
                     }
                 }
                 Event::Text(t) => {
@@ -427,7 +411,6 @@ impl<'e> ManRenderer<'e> {
     }
 }
 
-#[allow(clippy::collapsible_str_replace)]
 fn escape(s: &str) -> Result<String, Error> {
     // Note: Possible source on output escape sequences: https://man7.org/linux/man-pages/man7/groff_char.7.html.
     //       Otherwise, use generic escaping in the form `\[u1EE7]` or `\[u1F994]`.

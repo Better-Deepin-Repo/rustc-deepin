@@ -8,28 +8,26 @@ doesn't affect anything else that's already generated.
 
 Forwarded: not-needed
 ---
- src/tools/rust-installer/install-template.sh | 8 +++++++-
- 1 file changed, 7 insertions(+), 1 deletion(-)
+ src/tools/rust-installer/install-template.sh | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
 
 diff --git a/src/tools/rust-installer/install-template.sh b/src/tools/rust-installer/install-template.sh
-index c4f0c61..b7f0959 100644
+index b477c3e..fd93316 100644
 --- a/src/tools/rust-installer/install-template.sh
 +++ b/src/tools/rust-installer/install-template.sh
-@@ -610,7 +610,13 @@ install_components() {
+@@ -617,7 +617,10 @@ install_components() {
  
              maybe_backup_path "$_file_install_path"
  
-+            # Debian copy symlinks as-is, instead of dereferencing them
+-            if echo "$_file" | grep "^bin/" > /dev/null || test -x "$_src_dir/$_component/$_file"
 +            if [ -h "$_src_dir/$_component/$_file" ]
 +            then
 +            run cp -d "$_src_dir/$_component/$_file" "$_file_install_path"
-+            else
++            elif echo "$_file" | grep "^bin/" > /dev/null || test -x "$_src_dir/$_component/$_file"
+             then
              run cp "$_src_dir/$_component/$_file" "$_file_install_path"
-+            fi
-             if $_is_bin || test -x "$_src_dir/$_component/$_file"; then
-                 run chmod 755 "$_file_install_path"
-             else
-@@ -630,7 +636,7 @@ install_components() {
+             run chmod 755 "$_file_install_path"
+@@ -639,7 +642,7 @@ install_components() {
  
              maybe_backup_path "$_file_install_path"
  

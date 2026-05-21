@@ -20,7 +20,7 @@ pub(super) fn trait_(p: &mut Parser<'_>, m: Marker) {
         // trait Z<U> = where Self: T<U>;
         generic_params::opt_where_clause(p);
         p.expect(T![;]);
-        m.complete(p, TRAIT);
+        m.complete(p, TRAIT_ALIAS);
         return;
     }
 
@@ -54,13 +54,12 @@ pub(super) fn impl_(p: &mut Parser<'_>, m: Marker) {
     // impl const Send for S {}
     p.eat(T![const]);
 
-    // test impl_item_never_type
+    // FIXME: never type
     // impl ! {}
-    if p.at(T![!]) && !p.nth_at(1, T!['{']) {
-        // test impl_item_neg
-        // impl !Send for S {}
-        p.eat(T![!]);
-    }
+
+    // test impl_item_neg
+    // impl !Send for S {}
+    p.eat(T![!]);
     impl_type(p);
     if p.eat(T![for]) {
         impl_type(p);
@@ -95,7 +94,7 @@ pub(crate) fn assoc_item_list(p: &mut Parser<'_>) {
             error_block(p, "expected an item");
             continue;
         }
-        item_or_macro(p, true, false);
+        item_or_macro(p, true);
     }
     p.expect(T!['}']);
     m.complete(p, ASSOC_ITEM_LIST);

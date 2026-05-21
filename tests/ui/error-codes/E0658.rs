@@ -1,3 +1,6 @@
-use std::intrinsics; //~ ERROR E0658
+#[repr(u128)]
+enum Foo { //~ ERROR E0658
+    Bar(u64),
+}
 
 fn main() {}

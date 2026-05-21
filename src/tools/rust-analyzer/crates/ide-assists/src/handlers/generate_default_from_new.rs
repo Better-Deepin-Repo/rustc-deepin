@@ -1,13 +1,13 @@
 use ide_db::famous_defs::FamousDefs;
 use stdx::format_to;
 use syntax::{
+    ast::{self, make, HasGenericParams, HasName, Impl},
     AstNode,
-    ast::{self, HasGenericParams, HasName, HasTypeBounds, Impl, make},
 };
 
 use crate::{
-    AssistId,
     assist_context::{AssistContext, Assists},
+    AssistId,
 };
 
 // Assist: generate_default_from_new
@@ -65,7 +65,7 @@ pub(crate) fn generate_default_from_new(acc: &mut Assists, ctx: &AssistContext<'
     let insert_location = impl_.syntax().text_range();
 
     acc.add(
-        AssistId::generate("generate_default_from_new"),
+        AssistId("generate_default_from_new", crate::AssistKind::Generate),
         "Generate a Default impl from a new fn",
         insert_location,
         move |builder| {
@@ -88,19 +88,20 @@ fn generate_trait_impl_text_from_impl(
     let generic_params = impl_.generic_param_list().map(|generic_params| {
         let lifetime_params =
             generic_params.lifetime_params().map(ast::GenericParam::LifetimeParam);
-        let ty_or_const_params = generic_params.type_or_const_params().filter_map(|param| {
+        let ty_or_const_params = generic_params.type_or_const_params().map(|param| {
             // remove defaults since they can't be specified in impls
-            let param = match param {
+            match param {
                 ast::TypeOrConstParam::Type(param) => {
-                    let param = make::type_param(param.name()?, param.type_bound_list());
+                    let param = param.clone_for_update();
+                    param.remove_default();
                     ast::GenericParam::TypeParam(param)
                 }
                 ast::TypeOrConstParam::Const(param) => {
-                    let param = make::const_param(param.name()?, param.ty()?);
+                    let param = param.clone_for_update();
+                    param.remove_default();
                     ast::GenericParam::ConstParam(param)
                 }
-            };
-            Some(param)
+            }
         });
 
         make::generic_param_list(itertools::chain(lifetime_params, ty_or_const_params))
@@ -137,7 +138,7 @@ fn is_default_implemented(ctx: &AssistContext<'_>, impl_: &Impl) -> bool {
     };
 
     let ty = impl_def.self_ty(db);
-    let krate = impl_def.module(db).krate(ctx.db());
+    let krate = impl_def.module(db).krate();
     let default = FamousDefs(&ctx.sema, krate).core_default_Default();
     let default_trait = match default {
         Some(value) => value,

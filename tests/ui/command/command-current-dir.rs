@@ -1,9 +1,7 @@
 //@ run-pass
-//@ no-prefer-dynamic We move the binary around, so do not depend dynamically on libstd
-//@ needs-subprocess
+//@ ignore-wasm32 no processes
+//@ ignore-sgx no processes
 //@ ignore-fuchsia Needs directory creation privilege
-//@ ignore-tvos `Command::current_dir` requires fork, which is prohibited
-//@ ignore-watchos `Command::current_dir` requires fork, which is prohibited
 
 use std::env;
 use std::fs;

@@ -1,5 +1,4 @@
 //@ run-pass
-//@ ignore-backends: gcc
 
 #![feature(test)]
 #![deny(overflowing_literals)]

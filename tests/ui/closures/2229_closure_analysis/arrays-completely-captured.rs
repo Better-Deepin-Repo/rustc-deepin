@@ -13,10 +13,10 @@ fn main() {
     //~^ ERROR: First Pass analysis includes:
     //~| ERROR: Min Capture analysis includes:
         m[0] += 10;
-        //~^ NOTE: Capturing m[] -> Mutable
-        //~| NOTE: Min Capture m[] -> Mutable
+        //~^ NOTE: Capturing m[] -> MutBorrow
+        //~| NOTE: Min Capture m[] -> MutBorrow
         m[1] += 40;
-        //~^ NOTE: Capturing m[] -> Mutable
+        //~^ NOTE: Capturing m[] -> MutBorrow
     };
 
     c();

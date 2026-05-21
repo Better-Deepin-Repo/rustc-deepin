@@ -16,5 +16,5 @@ pub mod m {
 }
 
 fn main() {
-    somedep::somefun();  //~ ERROR cannot find
+    somedep::somefun();  //~ ERROR failed to resolve
 }

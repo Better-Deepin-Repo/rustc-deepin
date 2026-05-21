@@ -1,5 +1,7 @@
 # Cargo: Reject unused inherited default-features
 
+🚧 The 2024 Edition has not yet been released and hence this section is still "under construction".
+
 ## Summary
 
 - `default-features = false` is no longer allowed in an inherited workspace dependency if the workspace dependency specifies `default-features = true` (or does not specify `default-features`).
@@ -38,7 +40,7 @@ Just beware that if you build multiple workspace members at the same time, the f
 
 When using `cargo fix --edition`, Cargo will automatically update your `Cargo.toml` file to remove `default-features = false` in this situation.
 
-If you prefer to update your `Cargo.toml` manually, check for any warnings when running a build and remove the corresponding entries.
+If you would prefer to update your `Cargo.toml` manually, check for any warnings when running a build and remove the corresponding entries.
 Previous editions should display something like:
 
 ```text

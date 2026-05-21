@@ -2,17 +2,17 @@
 
 mod inner {
     fn global_inner(_: ::nonexistant::Foo) {
-        //~^ ERROR: cannot find module or crate `nonexistant`
+        //~^ ERROR failed to resolve: you might be missing crate `nonexistant`
     }
     fn crate_inner(_: crate::nonexistant::Foo) {
-        //~^ ERROR: cannot find module or crate `nonexistant`
+        //~^ ERROR failed to resolve: you might be missing crate `nonexistant`
     }
 
     fn bare_global(_: ::nonexistant) {
-        //~^ ERROR: cannot find type `nonexistant` in the crate root
+        //~^ ERROR cannot find type `nonexistant` in the crate root
     }
     fn bare_crate(_: crate::nonexistant) {
-        //~^ ERROR: cannot find type `nonexistant` in the crate root
+        //~^ ERROR cannot find type `nonexistant` in the crate root
     }
 }
 

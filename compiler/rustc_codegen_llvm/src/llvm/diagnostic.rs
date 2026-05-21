@@ -3,13 +3,13 @@
 use libc::c_uint;
 use rustc_span::InnerSpan;
 
-pub(crate) use self::Diagnostic::*;
-use self::OptimizationDiagnosticKind::*;
+pub use self::Diagnostic::*;
+pub use self::OptimizationDiagnosticKind::*;
 use super::{DiagnosticInfo, SMDiagnostic};
-use crate::llvm::Value;
+use crate::value::Value;
 
 #[derive(Copy, Clone, Debug)]
-pub(crate) enum OptimizationDiagnosticKind {
+pub enum OptimizationDiagnosticKind {
     OptimizationRemark,
     OptimizationMissed,
     OptimizationAnalysis,
@@ -19,10 +19,9 @@ pub(crate) enum OptimizationDiagnosticKind {
     OptimizationRemarkOther,
 }
 
-pub(crate) struct OptimizationDiagnostic<'ll> {
+pub struct OptimizationDiagnostic<'ll> {
     pub kind: OptimizationDiagnosticKind,
     pub pass_name: String,
-    #[expect(dead_code)]
     pub function: &'ll Value,
     pub line: c_uint,
     pub column: c_uint,
@@ -74,14 +73,14 @@ impl<'ll> OptimizationDiagnostic<'ll> {
     }
 }
 
-pub(crate) struct SrcMgrDiagnostic {
+pub struct SrcMgrDiagnostic {
     pub level: super::DiagnosticLevel,
     pub message: String,
     pub source: Option<(String, Vec<InnerSpan>)>,
 }
 
 impl SrcMgrDiagnostic {
-    pub(crate) unsafe fn unpack(diag: &SMDiagnostic) -> SrcMgrDiagnostic {
+    pub unsafe fn unpack(diag: &SMDiagnostic) -> SrcMgrDiagnostic {
         // Recover the post-substitution assembly code from LLVM for better
         // diagnostics.
         let mut have_source = false;
@@ -121,7 +120,7 @@ impl SrcMgrDiagnostic {
 }
 
 #[derive(Clone)]
-pub(crate) struct InlineAsmDiagnostic {
+pub struct InlineAsmDiagnostic {
     pub level: super::DiagnosticLevel,
     pub cookie: u64,
     pub message: String,
@@ -152,14 +151,14 @@ impl InlineAsmDiagnostic {
             unsafe { SrcMgrDiagnostic::unpack(super::LLVMRustGetSMDiagnostic(di, &mut cookie)) };
         InlineAsmDiagnostic {
             level: smdiag.level,
-            cookie,
+            cookie: cookie.into(),
             message: smdiag.message,
             source: smdiag.source,
         }
     }
 }
 
-pub(crate) enum Diagnostic<'ll> {
+pub enum Diagnostic<'ll> {
     Optimization(OptimizationDiagnostic<'ll>),
     InlineAsm(InlineAsmDiagnostic),
     PGO(&'ll DiagnosticInfo),
@@ -167,12 +166,11 @@ pub(crate) enum Diagnostic<'ll> {
     Unsupported(&'ll DiagnosticInfo),
 
     /// LLVM has other types that we do not wrap here.
-    #[expect(dead_code)]
     UnknownDiagnostic(&'ll DiagnosticInfo),
 }
 
 impl<'ll> Diagnostic<'ll> {
-    pub(crate) unsafe fn unpack(di: &'ll DiagnosticInfo) -> Self {
+    pub unsafe fn unpack(di: &'ll DiagnosticInfo) -> Self {
         use super::DiagnosticKind as Dk;
 
         unsafe {

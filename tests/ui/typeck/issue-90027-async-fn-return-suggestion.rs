@@ -1,5 +1,4 @@
 //@ edition:2018
-//@ dont-require-annotations: SUGGESTION
 
 async fn hello() { //~ HELP try adding a return type
     0

@@ -2,75 +2,32 @@ use std::env;
 use std::error::Error;
 use std::ffi::OsString;
 use std::fs::{self, File};
-use std::io::{self, BufWriter, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use ar_archive_writer::{
-    ArchiveKind, COFFShortExport, MachineTypes, NewArchiveMember, write_archive_to_stream,
+    write_archive_to_stream, ArchiveKind, COFFShortExport, MachineTypes, NewArchiveMember,
 };
-pub use ar_archive_writer::{DEFAULT_OBJECT_READER, ObjectReader};
+pub use ar_archive_writer::{ObjectReader, DEFAULT_OBJECT_READER};
 use object::read::archive::ArchiveFile;
 use object::read::macho::FatArch;
 use rustc_data_structures::fx::FxIndexSet;
 use rustc_data_structures::memmap::Mmap;
-use rustc_fs_util::TempDirBuilder;
-use rustc_metadata::EncodedMetadata;
 use rustc_session::Session;
-use rustc_span::Symbol;
-use rustc_target::spec::Arch;
+use rustc_span::symbol::Symbol;
+use tempfile::Builder as TempFileBuilder;
 use tracing::trace;
 
-use super::metadata::{create_compressed_metadata_file, search_for_section};
+use super::metadata::search_for_section;
 use crate::common;
-// Public for ArchiveBuilderBuilder::extract_bundled_libs
-pub use crate::errors::ExtractBundledLibsError;
+// Re-exporting for rustc_codegen_llvm::back::archive
+pub use crate::errors::{ArchiveBuildFailure, ExtractBundledLibsError, UnknownArchiveKind};
 use crate::errors::{
-    ArchiveBuildFailure, DlltoolFailImportLibrary, ErrorCallingDllTool, ErrorCreatingImportLibrary,
-    ErrorWritingDEFFile, UnknownArchiveKind,
+    DlltoolFailImportLibrary, ErrorCallingDllTool, ErrorCreatingImportLibrary, ErrorWritingDEFFile,
 };
-
-/// An item to be included in an import library.
-/// This is a slimmed down version of `COFFShortExport` from `ar-archive-writer`.
-pub struct ImportLibraryItem {
-    /// The name to be exported.
-    pub name: String,
-    /// The ordinal to be exported, if any.
-    pub ordinal: Option<u16>,
-    /// The original, decorated name if `name` is not decorated.
-    pub symbol_name: Option<String>,
-    /// True if this is a data export, false if it is a function export.
-    pub is_data: bool,
-}
-
-impl ImportLibraryItem {
-    fn into_coff_short_export(self, sess: &Session) -> COFFShortExport {
-        let import_name = (sess.target.arch == Arch::Arm64EC).then(|| self.name.clone());
-        COFFShortExport {
-            name: self.name,
-            ext_name: None,
-            symbol_name: self.symbol_name,
-            import_name,
-            export_as: None,
-            ordinal: self.ordinal.unwrap_or(0),
-            noname: self.ordinal.is_some(),
-            data: self.is_data,
-            private: false,
-            constant: false,
-        }
-    }
-}
 
 pub trait ArchiveBuilderBuilder {
     fn new_archive_builder<'a>(&self, sess: &'a Session) -> Box<dyn ArchiveBuilder + 'a>;
-
-    fn create_dylib_metadata_wrapper(
-        &self,
-        sess: &Session,
-        metadata: &EncodedMetadata,
-        symbol_name: &str,
-    ) -> Vec<u8> {
-        create_compressed_metadata_file(sess, metadata, symbol_name)
-    }
 
     /// Creates a DLL Import Library <https://docs.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-creation#creating-an-import-library>.
     /// and returns the path on disk to that import library.
@@ -81,7 +38,7 @@ pub trait ArchiveBuilderBuilder {
         &self,
         sess: &Session,
         lib_name: &str,
-        items: Vec<ImportLibraryItem>,
+        import_name_and_ordinal_vector: Vec<(String, Option<u16>)>,
         output_path: &Path,
     ) {
         if common::is_mingw_gnu_toolchain(&sess.target) {
@@ -90,16 +47,21 @@ pub trait ArchiveBuilderBuilder {
             // that loaded but crashed with an AV upon calling one of the imported
             // functions. Therefore, use binutils to create the import library instead,
             // by writing a .DEF file to the temp dir and calling binutils's dlltool.
-            create_mingw_dll_import_lib(sess, lib_name, items, output_path);
+            create_mingw_dll_import_lib(
+                sess,
+                lib_name,
+                import_name_and_ordinal_vector,
+                output_path,
+            );
         } else {
             trace!("creating import library");
             trace!("  dll_name {:#?}", lib_name);
             trace!("  output_path {}", output_path.display());
             trace!(
                 "  import names: {}",
-                items
+                import_name_and_ordinal_vector
                     .iter()
-                    .map(|ImportLibraryItem { name, .. }| name.clone())
+                    .map(|(name, _ordinal)| name.clone())
                     .collect::<Vec<_>>()
                     .join(", "),
             );
@@ -117,14 +79,26 @@ pub trait ArchiveBuilderBuilder {
                     .emit_fatal(ErrorCreatingImportLibrary { lib_name, error: error.to_string() }),
             };
 
-            let exports =
-                items.into_iter().map(|item| item.into_coff_short_export(sess)).collect::<Vec<_>>();
-            let machine = match &sess.target.arch {
-                Arch::X86_64 => MachineTypes::AMD64,
-                Arch::X86 => MachineTypes::I386,
-                Arch::AArch64 => MachineTypes::ARM64,
-                Arch::Arm64EC => MachineTypes::ARM64EC,
-                Arch::Arm => MachineTypes::ARMNT,
+            let exports = import_name_and_ordinal_vector
+                .iter()
+                .map(|(name, ordinal)| COFFShortExport {
+                    name: name.to_string(),
+                    ext_name: None,
+                    symbol_name: None,
+                    alias_target: None,
+                    ordinal: ordinal.unwrap_or(0),
+                    noname: ordinal.is_some(),
+                    data: false,
+                    private: false,
+                    constant: false,
+                })
+                .collect::<Vec<_>>();
+            let machine = match &*sess.target.arch {
+                "x86_64" => MachineTypes::AMD64,
+                "x86" => MachineTypes::I386,
+                "aarch64" => MachineTypes::ARM64,
+                "arm64ec" => MachineTypes::ARM64EC,
+                "arm" => MachineTypes::ARMNT,
                 cpu => panic!("unsupported cpu type {cpu}"),
             };
 
@@ -139,7 +113,6 @@ pub trait ArchiveBuilderBuilder {
                 // when linking a rust staticlib using `/WHOLEARCHIVE`.
                 // See #129020
                 true,
-                &[],
             ) {
                 sess.dcx()
                     .emit_fatal(ErrorCreatingImportLibrary { lib_name, error: error.to_string() });
@@ -184,19 +157,19 @@ pub trait ArchiveBuilderBuilder {
     }
 }
 
-fn create_mingw_dll_import_lib(
+pub fn create_mingw_dll_import_lib(
     sess: &Session,
     lib_name: &str,
-    items: Vec<ImportLibraryItem>,
+    import_name_and_ordinal_vector: Vec<(String, Option<u16>)>,
     output_path: &Path,
 ) {
     let def_file_path = output_path.with_extension("def");
 
     let def_file_content = format!(
         "EXPORTS\n{}",
-        items
+        import_name_and_ordinal_vector
             .into_iter()
-            .map(|ImportLibraryItem { name, ordinal, .. }| {
+            .map(|(name, ordinal)| {
                 match ordinal {
                     Some(n) => format!("{name} @{n} NONAME"),
                     None => name,
@@ -225,12 +198,12 @@ fn create_mingw_dll_import_lib(
     };
     // dlltool target architecture args from:
     // https://github.com/llvm/llvm-project-release-prs/blob/llvmorg-15.0.6/llvm/lib/ToolDrivers/llvm-dlltool/DlltoolDriver.cpp#L69
-    let (dlltool_target_arch, dlltool_target_bitness) = match &sess.target.arch {
-        Arch::X86_64 => ("i386:x86-64", "--64"),
-        Arch::X86 => ("i386", "--32"),
-        Arch::AArch64 => ("arm64", "--64"),
-        Arch::Arm => ("arm", "--32"),
-        arch => panic!("unsupported arch {arch}"),
+    let (dlltool_target_arch, dlltool_target_bitness) = match sess.target.arch.as_ref() {
+        "x86_64" => ("i386:x86-64", "--64"),
+        "x86" => ("i386", "--32"),
+        "aarch64" => ("arm64", "--64"),
+        "arm" => ("arm", "--32"),
+        _ => panic!("unsupported arch {}", sess.target.arch),
     };
     let mut dlltool_cmd = std::process::Command::new(&dlltool);
     dlltool_cmd
@@ -283,10 +256,10 @@ fn find_binutils_dlltool(sess: &Session) -> OsString {
         "dlltool.exe"
     } else {
         // On other platforms, use the architecture-specific name.
-        match sess.target.arch {
-            Arch::X86_64 => "x86_64-w64-mingw32-dlltool",
-            Arch::X86 => "i686-w64-mingw32-dlltool",
-            Arch::AArch64 => "aarch64-w64-mingw32-dlltool",
+        match sess.target.arch.as_ref() {
+            "x86_64" => "x86_64-w64-mingw32-dlltool",
+            "x86" => "i686-w64-mingw32-dlltool",
+            "aarch64" => "aarch64-w64-mingw32-dlltool",
 
             // For non-standard architectures (e.g., aarch32) fallback to "dlltool".
             _ => "dlltool",
@@ -318,14 +291,6 @@ pub trait ArchiveBuilder {
     ) -> io::Result<()>;
 
     fn build(self: Box<Self>, output: &Path) -> bool;
-}
-
-pub struct ArArchiveBuilderBuilder;
-
-impl ArchiveBuilderBuilder for ArArchiveBuilderBuilder {
-    fn new_archive_builder<'a>(&self, sess: &'a Session) -> Box<dyn ArchiveBuilder + 'a> {
-        Box::new(ArArchiveBuilder::new(sess, &DEFAULT_OBJECT_READER))
-    }
 }
 
 #[must_use = "must call build() to finish building the archive"]
@@ -380,9 +345,9 @@ pub fn try_extract_macho_fat_archive(
     archive_path: &Path,
 ) -> io::Result<Option<PathBuf>> {
     let archive_map = unsafe { Mmap::map(File::open(&archive_path)?)? };
-    let target_arch = match sess.target.arch {
-        Arch::AArch64 => object::Architecture::Aarch64,
-        Arch::X86_64 => object::Architecture::X86_64,
+    let target_arch = match sess.target.arch.as_ref() {
+        "aarch64" => object::Architecture::Aarch64,
+        "x86_64" => object::Architecture::X86_64,
         _ => return Ok(None),
     };
 
@@ -405,10 +370,11 @@ impl<'a> ArchiveBuilder for ArArchiveBuilder<'a> {
         mut skip: Box<dyn FnMut(&str) -> bool + 'static>,
     ) -> io::Result<()> {
         let mut archive_path = archive_path.to_path_buf();
-        if self.sess.target.llvm_target.contains("-apple-macosx")
-            && let Some(new_archive_path) = try_extract_macho_fat_archive(self.sess, &archive_path)?
-        {
-            archive_path = new_archive_path
+        if self.sess.target.llvm_target.contains("-apple-macosx") {
+            if let Some(new_archive_path) = try_extract_macho_fat_archive(self.sess, &archive_path)?
+            {
+                archive_path = new_archive_path
+            }
         }
 
         if self.src_archives.iter().any(|archive| archive.0 == archive_path) {
@@ -517,26 +483,23 @@ impl<'a> ArArchiveBuilder<'a> {
         // it creates. We need it to be the default mode for back compat reasons however. (See
         // #107495) To handle this we are telling tempfile to create a temporary directory instead
         // and then inside this directory create a file using File::create.
-        let archive_tmpdir = TempDirBuilder::new()
+        let archive_tmpdir = TempFileBuilder::new()
             .suffix(".temp-archive")
             .tempdir_in(output.parent().unwrap_or_else(|| Path::new("")))
             .map_err(|err| {
                 io_error_context("couldn't create a directory for the temp file", err)
             })?;
         let archive_tmpfile_path = archive_tmpdir.path().join("tmp.a");
-        let archive_tmpfile = File::create_new(&archive_tmpfile_path)
+        let mut archive_tmpfile = File::create_new(&archive_tmpfile_path)
             .map_err(|err| io_error_context("couldn't create the temp file", err))?;
 
-        let mut archive_tmpfile = BufWriter::new(archive_tmpfile);
         write_archive_to_stream(
             &mut archive_tmpfile,
             &entries,
             archive_kind,
             false,
-            /* is_ec = */ Some(self.sess.target.arch == Arch::Arm64EC),
+            /* is_ec = */ self.sess.target.arch == "arm64ec",
         )?;
-        archive_tmpfile.flush()?;
-        drop(archive_tmpfile);
 
         let any_entries = !entries.is_empty();
         drop(entries);

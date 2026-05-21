@@ -1,11 +1,10 @@
 //@ revisions: current next
 //@ ignore-compare-mode-next-solver (explicit revisions)
-//@[next] compile-flags: -Znext-solver --diagnostic-width=300
-//@[current] compile-flags: --diagnostic-width=300
+//@[next] compile-flags: -Znext-solver
 
 #![feature(coroutines, stmt_expr_attributes)]
 
-//@ normalize-stderr: "std::pin::Unpin" -> "std::marker::Unpin"
+//@ normalize-stderr-test: "std::pin::Unpin" -> "std::marker::Unpin"
 
 use std::marker::Unpin;
 

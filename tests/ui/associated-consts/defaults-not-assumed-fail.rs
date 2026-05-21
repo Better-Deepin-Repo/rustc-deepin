@@ -1,5 +1,4 @@
 //@ build-fail
-//@ dont-require-annotations: NOTE
 
 trait Tr {
     const A: u8 = 255;
@@ -7,7 +6,7 @@ trait Tr {
     // This should not be a constant evaluation error (overflow). The value of
     // `Self::A` must not be assumed to hold inside the trait.
     const B: u8 = Self::A + 1;
-    //~^ ERROR overflow
+    //~^ ERROR evaluation of `<() as Tr>::B` failed
 }
 
 // An impl that doesn't override any constant will NOT cause a const eval error
@@ -32,7 +31,7 @@ impl Tr for u32 {
 fn main() {
     assert_eq!(<() as Tr>::A, 255);
     assert_eq!(<() as Tr>::B, 0);    // causes the error above
-    //~^ NOTE constant
+    //~^ constant
 
     assert_eq!(<u8 as Tr>::A, 254);
     assert_eq!(<u8 as Tr>::B, 255);

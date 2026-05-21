@@ -16,29 +16,25 @@ fn magic(_: char) {}
 
 fn main() {
     "foo".is_ascii();
-    //~^ needless_character_iteration
-
+    //~^ ERROR: checking if a string is ascii using iterators
     !"foo".is_ascii();
-    //~^ needless_character_iteration
-
+    //~^ ERROR: checking if a string is ascii using iterators
     "foo".is_ascii();
-    //~^ needless_character_iteration
-
+    //~^ ERROR: checking if a string is ascii using iterators
     !"foo".is_ascii();
-    //~^ needless_character_iteration
+    //~^ ERROR: checking if a string is ascii using iterators
 
     let s = String::new();
     s.is_ascii();
-    //~^ needless_character_iteration
-
+    //~^ ERROR: checking if a string is ascii using iterators
     !"foo".to_string().is_ascii();
-    //~^ needless_character_iteration
+    //~^ ERROR: checking if a string is ascii using iterators
 
     "foo".is_ascii();
     !"foo".is_ascii();
 
     S::default().field().is_ascii();
-    //~^ needless_character_iteration
+    //~^ ERROR: checking if a string is ascii using iterators
 
     // Should not lint!
     "foo".chars().all(|c| {

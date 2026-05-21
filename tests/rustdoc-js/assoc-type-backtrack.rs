@@ -1,5 +1,3 @@
-#![feature(rustdoc_internals)]
-
 pub trait MyTrait2<X> {
     type Output;
 }
@@ -33,12 +31,10 @@ where
     }
 }
 
-#[doc(search_unbox)]
 pub trait MyFuture {
     type Output;
 }
 
-#[doc(search_unbox)]
 pub trait MyIntoFuture {
     type Output;
     type Fut: MyFuture<Output = Self::Output>;

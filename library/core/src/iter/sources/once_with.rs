@@ -58,8 +58,8 @@ use crate::iter::{FusedIterator, TrustedLen};
 /// ```
 #[inline]
 #[stable(feature = "iter_once_with", since = "1.43.0")]
-pub fn once_with<A, F: FnOnce() -> A>(make: F) -> OnceWith<F> {
-    OnceWith { make: Some(make) }
+pub fn once_with<A, F: FnOnce() -> A>(gen: F) -> OnceWith<F> {
+    OnceWith { gen: Some(gen) }
 }
 
 /// An iterator that yields a single element of type `A` by
@@ -70,13 +70,13 @@ pub fn once_with<A, F: FnOnce() -> A>(make: F) -> OnceWith<F> {
 #[derive(Clone)]
 #[stable(feature = "iter_once_with", since = "1.43.0")]
 pub struct OnceWith<F> {
-    make: Option<F>,
+    gen: Option<F>,
 }
 
 #[stable(feature = "iter_once_with_debug", since = "1.68.0")]
 impl<F> fmt::Debug for OnceWith<F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.make.is_some() {
+        if self.gen.is_some() {
             f.write_str("OnceWith(Some(_))")
         } else {
             f.write_str("OnceWith(None)")
@@ -90,13 +90,13 @@ impl<A, F: FnOnce() -> A> Iterator for OnceWith<F> {
 
     #[inline]
     fn next(&mut self) -> Option<A> {
-        let f = self.make.take()?;
+        let f = self.gen.take()?;
         Some(f())
     }
 
     #[inline]
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.make.iter().size_hint()
+        self.gen.iter().size_hint()
     }
 }
 
@@ -110,7 +110,7 @@ impl<A, F: FnOnce() -> A> DoubleEndedIterator for OnceWith<F> {
 #[stable(feature = "iter_once_with", since = "1.43.0")]
 impl<A, F: FnOnce() -> A> ExactSizeIterator for OnceWith<F> {
     fn len(&self) -> usize {
-        self.make.iter().len()
+        self.gen.iter().len()
     }
 }
 

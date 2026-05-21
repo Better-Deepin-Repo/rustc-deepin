@@ -11,6 +11,7 @@ RUN sh /scripts/rustbuild-setup.sh
 WORKDIR /tmp
 
 COPY scripts/crosstool-ng-build.sh /scripts/
+COPY host-x86_64/dist-mips-linux/patches/ /tmp/patches/
 COPY host-x86_64/dist-mips64el-linux/mips64el-linux-gnu.defconfig /tmp/crosstool.defconfig
 RUN /scripts/crosstool-ng-build.sh
 

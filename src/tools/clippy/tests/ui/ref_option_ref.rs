@@ -8,39 +8,37 @@
 
 static THRESHOLD: i32 = 10;
 static REF_THRESHOLD: &Option<&i32> = &Some(&THRESHOLD);
-//~^ ref_option_ref
-
+//~^ ERROR: since `&` implements the `Copy` trait, `&Option<&T>` can be simplified to `Opt
+//~| NOTE: `-D clippy::ref-option-ref` implied by `-D warnings`
 const CONST_THRESHOLD: &i32 = &10;
 const REF_CONST: &Option<&i32> = &Some(CONST_THRESHOLD);
-//~^ ref_option_ref
+//~^ ERROR: since `&` implements the `Copy` trait, `&Option<&T>` can be simplified to `Opt
 
 type RefOptRefU32<'a> = &'a Option<&'a u32>;
-//~^ ref_option_ref
-
+//~^ ERROR: since `&` implements the `Copy` trait, `&Option<&T>` can be simplified to `Opt
 type RefOptRef<'a, T> = &'a Option<&'a T>;
-//~^ ref_option_ref
+//~^ ERROR: since `&` implements the `Copy` trait, `&Option<&T>` can be simplified to `Opt
 
 fn foo(data: &Option<&u32>) {}
-//~^ ref_option_ref
+//~^ ERROR: since `&` implements the `Copy` trait, `&Option<&T>` can be simplified to `Opt
 
 fn bar(data: &u32) -> &Option<&u32> {
-    //~^ ref_option_ref
-
+    //~^ ERROR: since `&` implements the `Copy` trait, `&Option<&T>` can be simplified to `Opt
     &None
 }
 
 struct StructRef<'a> {
     data: &'a Option<&'a u32>,
-    //~^ ref_option_ref
+    //~^ ERROR: since `&` implements the `Copy` trait, `&Option<&T>` can be simplified to
 }
 
 struct StructTupleRef<'a>(u32, &'a Option<&'a u32>);
-//~^ ref_option_ref
+//~^ ERROR: since `&` implements the `Copy` trait, `&Option<&T>` can be simplified to `Opt
 
 enum EnumRef<'a> {
     Variant1(u32),
     Variant2(&'a Option<&'a u32>),
-    //~^ ref_option_ref
+    //~^ ERROR: since `&` implements the `Copy` trait, `&Option<&T>` can be simplified to
 }
 
 trait RefOptTrait {
@@ -50,14 +48,14 @@ trait RefOptTrait {
 
 impl RefOptTrait for u32 {
     type A = &'static Option<&'static Self>;
-    //~^ ref_option_ref
+    //~^ ERROR: since `&` implements the `Copy` trait, `&Option<&T>` can be simplified to
 
     fn foo(&self, _: Self::A) {}
 }
 
 fn main() {
     let x: &Option<&u32> = &None;
-    //~^ ref_option_ref
+    //~^ ERROR: since `&` implements the `Copy` trait, `&Option<&T>` can be simplified to
 }
 
 fn issue9682(arg: &Option<&mut String>) {

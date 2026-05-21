@@ -24,8 +24,7 @@ where
                 ty::AliasRelationDirection::Equate,
             ),
         );
-        // A projection goal holds if the alias is equal to the expected term.
-        self.add_goal(GoalSource::TypeRelating, goal);
+        self.add_goal(GoalSource::Misc, goal);
         self.evaluate_added_goals_and_make_canonical_response(Certainty::Yes)
     }
 }

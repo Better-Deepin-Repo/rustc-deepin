@@ -1,10 +1,12 @@
 use rustc_data_structures::fx::FxHashSet;
 use rustc_middle::bug;
-use rustc_middle::ty::{self, Ty, TyCtxt, TypeFoldable, TypeSuperVisitable, TypeVisitor};
+use rustc_middle::ty::visit::{TypeSuperVisitable, TypeVisitor};
+use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_span::Span;
+use rustc_type_ir::fold::TypeFoldable;
 use tracing::debug;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) struct Parameter(pub u32);
 
 impl From<ty::ParamTy> for Parameter {
@@ -49,7 +51,7 @@ pub(crate) fn parameters_for<'tcx>(
     include_nonconstraining: bool,
 ) -> Vec<Parameter> {
     let mut collector = ParameterCollector { parameters: vec![], include_nonconstraining };
-    let value = if !include_nonconstraining { tcx.expand_free_alias_tys(value) } else { value };
+    let value = if !include_nonconstraining { tcx.expand_weak_alias_tys(value) } else { value };
     value.visit_with(&mut collector);
     collector.parameters
 }
@@ -68,9 +70,9 @@ impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for ParameterCollector {
             {
                 return;
             }
-            // All free alias types should've been expanded beforehand.
-            ty::Alias(ty::Free, _) if !self.include_nonconstraining => {
-                bug!("unexpected free alias type")
+            // All weak alias types should've been expanded beforehand.
+            ty::Alias(ty::Weak, _) if !self.include_nonconstraining => {
+                bug!("unexpected weak alias type")
             }
             ty::Param(param) => self.parameters.push(Parameter::from(param)),
             _ => {}
@@ -80,7 +82,7 @@ impl<'tcx> TypeVisitor<TyCtxt<'tcx>> for ParameterCollector {
     }
 
     fn visit_region(&mut self, r: ty::Region<'tcx>) {
-        if let ty::ReEarlyParam(data) = r.kind() {
+        if let ty::ReEarlyParam(data) = *r {
             self.parameters.push(Parameter::from(data));
         }
     }
@@ -167,20 +169,15 @@ pub(crate) fn setup_constraining_predicates<'tcx>(
     // which is `O(nt)` where `t` is the depth of type-parameter constraints,
     // remembering that `t` should be less than 7 in practice.
     //
-    // FIXME(hkBst): the big-O bound above would be accurate for the number
-    // of calls to `parameters_for`, which itself is some O(complexity of type).
-    // That would make this potentially cubic instead of merely quadratic...
-    // ...unless we cache those `parameters_for` calls.
-    //
     // Basically, I iterate over all projections and swap every
     // "ready" projection to the start of the list, such that
     // all of the projections before `i` are topologically sorted
     // and constrain all the parameters in `input_parameters`.
     //
-    // In the first example, `input_parameters` starts by containing `U`,
-    // which is constrained by the self type `U`. Then, on the first pass we
+    // In the example, `input_parameters` starts by containing `U` - which
+    // is constrained by the trait-ref - and so on the first pass we
     // observe that `<U as Iterator>::Item = T` is a "ready" projection that
-    // constrains `T` and swap it to the front. As it is the sole projection,
+    // constrains `T` and swap it to front. As it is the sole projection,
     // no more swaps can take place afterwards, with the result being
     //   * <U as Iterator>::Item = T
     //   * T: Debug
@@ -198,25 +195,33 @@ pub(crate) fn setup_constraining_predicates<'tcx>(
         for j in i..predicates.len() {
             // Note that we don't have to care about binders here,
             // as the impl trait ref never contains any late-bound regions.
-            if let ty::ClauseKind::Projection(projection) = predicates[j].0.kind().skip_binder() &&
+            if let ty::ClauseKind::Projection(projection) = predicates[j].0.kind().skip_binder() {
+                // Special case: watch out for some kind of sneaky attempt
+                // to project out an associated type defined by this very
+                // trait.
+                let unbound_trait_ref = projection.projection_term.trait_ref(tcx);
+                if Some(unbound_trait_ref) == impl_trait_ref {
+                    continue;
+                }
 
-            // Special case: watch out for some kind of sneaky attempt to
-            // project out an associated type defined by this very trait.
-            !impl_trait_ref.is_some_and(|t| t == projection.projection_term.trait_ref(tcx)) &&
-
-            // A projection depends on its input types and determines its output
-            // type. For example, if we have
-            //     `<<T as Bar>::Baz as Iterator>::Output = <U as Iterator>::Output`
-            // then the projection only applies if `T` is known, but it still
-            // does not determine `U`.
-                parameters_for(tcx, projection.projection_term, true).iter().all(|p| input_parameters.contains(p))
-            {
+                // A projection depends on its input types and determines its output
+                // type. For example, if we have
+                //     `<<T as Bar>::Baz as Iterator>::Output = <U as Iterator>::Output`
+                // Then the projection only applies if `T` is known, but it still
+                // does not determine `U`.
+                let inputs = parameters_for(tcx, projection.projection_term, true);
+                let relies_only_on_inputs = inputs.iter().all(|p| input_parameters.contains(p));
+                if !relies_only_on_inputs {
+                    continue;
+                }
                 input_parameters.extend(parameters_for(tcx, projection.term, false));
-
-                predicates.swap(i, j);
-                i += 1;
-                changed = true;
+            } else {
+                continue;
             }
+            // fancy control flow to bypass borrow checker
+            predicates.swap(i, j);
+            i += 1;
+            changed = true;
         }
         debug!(
             "setup_constraining_predicates: predicates={:?} \

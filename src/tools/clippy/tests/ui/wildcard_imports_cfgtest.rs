@@ -1,4 +1,3 @@
-//@check-pass
 //@compile-flags: --test
 
 #![warn(clippy::wildcard_imports)]

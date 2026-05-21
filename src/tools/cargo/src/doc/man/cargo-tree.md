@@ -96,9 +96,6 @@ Prune the given package from the display of the dependency tree.
 {{#option "`--depth` _depth_" }}
 Maximum display depth of the dependency tree. A depth of 1 displays the direct
 dependencies, for example.
-
-If the given value is `workspace`, only shows the dependencies that are member
-of the current workspace, instead.
 {{/option}}
 
 {{#option "`--no-dedupe`" }}
@@ -162,10 +159,10 @@ Set the format string for each package. The default is "{p}".
 This is an arbitrary string which will be used to display each package. The following
 strings will be replaced with the corresponding value:
 
-- `{p}`, `{package}` --- The package name.
-- `{l}`, `{license}` --- The package license.
-- `{r}`, `{repository}` --- The package repository URL.
-- `{f}`, `{features}` --- Comma-separated list of package features that are enabled.
+- `{p}` --- The package name.
+- `{l}` --- The package license.
+- `{r}` --- The package repository URL.
+- `{f}` --- Comma-separated list of package features that are enabled.
 - `{lib}` --- The name, as used in a `use` statement, of the package's library.
 {{/option}}
 
@@ -189,6 +186,7 @@ Sets how each line is displayed. The _prefix_ value can be one of:
 
 {{> options-locked }}
 
+{{> options-lockfile-path }}
 {{/options}}
 
 {{> section-features }}

@@ -1,6 +1,5 @@
 //@compile-flags: --test
 #![warn(clippy::panic)]
-use std::panic::panic_any;
 
 fn main() {
     enum Enam {
@@ -10,13 +9,7 @@ fn main() {
     match a {
         Enam::A => {},
         _ => panic!(""),
-        //~^ panic
     }
-}
-
-fn issue_13292() {
-    panic_any("should lint")
-    //~^ panic
 }
 
 #[test]

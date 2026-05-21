@@ -2,16 +2,15 @@ use std::collections::HashSet;
 use std::hash::Hash;
 
 use rustdoc_json_types::{
-    AssocItemConstraint, AssocItemConstraintKind, Constant, Crate, DynTrait, Enum, Function,
-    FunctionPointer, FunctionSignature, GenericArg, GenericArgs, GenericBound, GenericParamDef,
-    Generics, Id, Impl, ItemEnum, ItemSummary, Module, Path, Primitive, ProcMacro, Static, Struct,
-    StructKind, Term, Trait, TraitAlias, Type, TypeAlias, Union, Use, Variant, VariantKind,
-    WherePredicate,
+    Constant, Crate, DynTrait, Enum, FnDecl, Function, FunctionPointer, GenericArg, GenericArgs,
+    GenericBound, GenericParamDef, Generics, Id, Impl, Import, ItemEnum, ItemSummary, Module, Path,
+    Primitive, ProcMacro, Static, Struct, StructKind, Term, Trait, TraitAlias, Type, TypeAlias,
+    TypeBinding, TypeBindingKind, Union, Variant, VariantKind, WherePredicate,
 };
 use serde_json::Value;
 
 use crate::item_kind::Kind;
-use crate::{Error, ErrorKind, json_find};
+use crate::{json_find, Error, ErrorKind};
 
 // This is a rustc implementation detail that we rely on here
 const LOCAL_CRATE_ID: u32 = 0;
@@ -91,7 +90,7 @@ impl<'a> Validator<'a> {
             item.links.values().for_each(|id| self.add_any_id(id));
 
             match &item.inner {
-                ItemEnum::Use(x) => self.check_use(x),
+                ItemEnum::Import(x) => self.check_import(x),
                 ItemEnum::Union(x) => self.check_union(x),
                 ItemEnum::Struct(x) => self.check_struct(x),
                 ItemEnum::StructField(x) => self.check_struct_field(x),
@@ -107,18 +106,18 @@ impl<'a> Validator<'a> {
                     self.check_constant(const_);
                 }
                 ItemEnum::Static(x) => self.check_static(x),
-                ItemEnum::ExternType => {} // nop
+                ItemEnum::ForeignType => {} // nop
                 ItemEnum::Macro(x) => self.check_macro(x),
                 ItemEnum::ProcMacro(x) => self.check_proc_macro(x),
                 ItemEnum::Primitive(x) => self.check_primitive_type(x),
                 ItemEnum::Module(x) => self.check_module(x, id),
                 // FIXME: Why don't these have their own structs?
                 ItemEnum::ExternCrate { .. } => {}
-                ItemEnum::AssocConst { type_, value: _ } => self.check_type(type_),
-                ItemEnum::AssocType { generics, bounds, type_ } => {
+                ItemEnum::AssocConst { type_, default: _ } => self.check_type(type_),
+                ItemEnum::AssocType { generics, bounds, default } => {
                     self.check_generics(generics);
                     bounds.iter().for_each(|b| self.check_generic_bound(b));
-                    if let Some(ty) = type_ {
+                    if let Some(ty) = default {
                         self.check_type(ty);
                     }
                 }
@@ -134,8 +133,8 @@ impl<'a> Validator<'a> {
         module.items.iter().for_each(|i| self.add_mod_item_id(i));
     }
 
-    fn check_use(&mut self, x: &'a Use) {
-        if x.is_glob {
+    fn check_import(&mut self, x: &'a Import) {
+        if x.glob {
             self.add_glob_import_item_id(x.id.as_ref().unwrap());
         } else if let Some(id) = &x.id {
             self.add_import_item_id(id);
@@ -153,7 +152,7 @@ impl<'a> Validator<'a> {
         match &x.kind {
             StructKind::Unit => {}
             StructKind::Tuple(fields) => fields.iter().flatten().for_each(|f| self.add_field_id(f)),
-            StructKind::Plain { fields, has_stripped_fields: _ } => {
+            StructKind::Plain { fields, fields_stripped: _ } => {
                 fields.iter().for_each(|f| self.add_field_id(f))
             }
         }
@@ -188,7 +187,7 @@ impl<'a> Validator<'a> {
         match kind {
             VariantKind::Plain => {}
             VariantKind::Tuple(tys) => tys.iter().flatten().for_each(|t| self.add_field_id(t)),
-            VariantKind::Struct { fields, has_stripped_fields: _ } => {
+            VariantKind::Struct { fields, fields_stripped: _ } => {
                 fields.iter().for_each(|f| self.add_field_id(f))
             }
         }
@@ -196,7 +195,7 @@ impl<'a> Validator<'a> {
 
     fn check_function(&mut self, x: &'a Function) {
         self.check_generics(&x.generics);
-        self.check_function_signature(&x.sig);
+        self.check_fn_decl(&x.decl);
     }
 
     fn check_trait(&mut self, x: &'a Trait, id: &Id) {
@@ -268,10 +267,10 @@ impl<'a> Validator<'a> {
             Type::Array { type_, len: _ } => self.check_type(&**type_),
             Type::ImplTrait(bounds) => bounds.iter().for_each(|b| self.check_generic_bound(b)),
             Type::Infer => {}
-            Type::RawPointer { is_mutable: _, type_ } => self.check_type(&**type_),
-            Type::BorrowedRef { lifetime: _, is_mutable: _, type_ } => self.check_type(&**type_),
+            Type::RawPointer { mutable: _, type_ } => self.check_type(&**type_),
+            Type::BorrowedRef { lifetime: _, mutable: _, type_ } => self.check_type(&**type_),
             Type::QualifiedPath { name: _, args, self_type, trait_ } => {
-                self.check_opt_generic_args(&args);
+                self.check_generic_args(&**args);
                 self.check_type(&**self_type);
                 if let Some(trait_) = trait_ {
                     self.check_path(trait_, PathKind::Trait);
@@ -280,7 +279,7 @@ impl<'a> Validator<'a> {
         }
     }
 
-    fn check_function_signature(&mut self, x: &'a FunctionSignature) {
+    fn check_fn_decl(&mut self, x: &'a FnDecl) {
         x.inputs.iter().for_each(|(_name, ty)| self.check_type(ty));
         if let Some(output) = &x.output {
             self.check_type(output);
@@ -303,21 +302,16 @@ impl<'a> Validator<'a> {
             PathKind::Trait => self.add_trait_or_alias_id(&x.id),
             PathKind::Type => self.add_type_id(&x.id),
         }
-
-        // FIXME: More robust support for checking things in $.index also exist in $.paths
-        if !self.krate.paths.contains_key(&x.id) {
-            self.fail(&x.id, ErrorKind::Custom(format!("No entry in '$.paths' for {x:?}")));
+        if let Some(args) = &x.args {
+            self.check_generic_args(&**args);
         }
-
-        self.check_opt_generic_args(&x.args);
     }
 
-    fn check_opt_generic_args(&mut self, x: &'a Option<Box<GenericArgs>>) {
-        let Some(x) = x else { return };
-        match &**x {
-            GenericArgs::AngleBracketed { args, constraints } => {
+    fn check_generic_args(&mut self, x: &'a GenericArgs) {
+        match x {
+            GenericArgs::AngleBracketed { args, bindings } => {
                 args.iter().for_each(|arg| self.check_generic_arg(arg));
-                constraints.iter().for_each(|bind| self.check_assoc_item_constraint(bind));
+                bindings.iter().for_each(|bind| self.check_type_binding(bind));
             }
             GenericArgs::Parenthesized { inputs, output } => {
                 inputs.iter().for_each(|ty| self.check_type(ty));
@@ -325,14 +319,13 @@ impl<'a> Validator<'a> {
                     self.check_type(o);
                 }
             }
-            GenericArgs::ReturnTypeNotation => {}
         }
     }
 
     fn check_generic_param_def(&mut self, gpd: &'a GenericParamDef) {
         match &gpd.kind {
             rustdoc_json_types::GenericParamDefKind::Lifetime { outlives: _ } => {}
-            rustdoc_json_types::GenericParamDefKind::Type { bounds, default, is_synthetic: _ } => {
+            rustdoc_json_types::GenericParamDefKind::Type { bounds, default, synthetic: _ } => {
                 bounds.iter().for_each(|b| self.check_generic_bound(b));
                 if let Some(ty) = default {
                     self.check_type(ty);
@@ -353,11 +346,11 @@ impl<'a> Validator<'a> {
         }
     }
 
-    fn check_assoc_item_constraint(&mut self, bind: &'a AssocItemConstraint) {
-        self.check_opt_generic_args(&bind.args);
+    fn check_type_binding(&mut self, bind: &'a TypeBinding) {
+        self.check_generic_args(&bind.args);
         match &bind.binding {
-            AssocItemConstraintKind::Equality(term) => self.check_term(term),
-            AssocItemConstraintKind::Constraint(bounds) => {
+            TypeBindingKind::Equality(term) => self.check_term(term),
+            TypeBindingKind::Constraint(bounds) => {
                 bounds.iter().for_each(|b| self.check_generic_bound(b))
             }
         }
@@ -395,7 +388,7 @@ impl<'a> Validator<'a> {
     }
 
     fn check_function_pointer(&mut self, fp: &'a FunctionPointer) {
-        self.check_function_signature(&fp.sig);
+        self.check_fn_decl(&fp.decl);
         fp.generic_params.iter().for_each(|gpd| self.check_generic_param_def(gpd));
     }
 
@@ -424,7 +417,7 @@ impl<'a> Validator<'a> {
         } else if !self.missing_ids.contains(id) {
             self.missing_ids.insert(id);
 
-            let sels = json_find::find_selector(&self.krate_json, &Value::Number(id.0.into()));
+            let sels = json_find::find_selector(&self.krate_json, &Value::String(id.0.clone()));
             assert_ne!(sels.len(), 0);
 
             self.fail(id, ErrorKind::NotFound(sels))

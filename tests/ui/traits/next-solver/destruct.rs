@@ -1,7 +1,7 @@
 //@ compile-flags: -Znext-solver
 //@ check-pass
 
-#![feature(const_trait_impl, const_destruct)]
+#![feature(const_trait_impl)]
 
 fn foo(_: impl std::marker::Destruct) {}
 

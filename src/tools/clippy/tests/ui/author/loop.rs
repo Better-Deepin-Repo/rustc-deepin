@@ -1,5 +1,3 @@
-//@ check-pass
-
 #![feature(stmt_expr_attributes)]
 #![allow(
     clippy::never_loop,

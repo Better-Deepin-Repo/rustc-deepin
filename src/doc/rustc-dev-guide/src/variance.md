@@ -1,5 +1,7 @@
 # Variance of type and lifetime parameters
 
+<!-- toc -->
+
 For a more general background on variance, see the [background] appendix.
 
 [background]: ./appendix/background.html
@@ -141,7 +143,7 @@ will wind up being considered green after it is re-evaluated.
 
 [rga]: ./queries/incremental-compilation.html
 
-<a id="addendum"></a>
+<a name="addendum"></a>
 
 ## Addendum: Variance on traits
 

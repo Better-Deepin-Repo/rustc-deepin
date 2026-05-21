@@ -1,6 +1,6 @@
-use crate::spec::{Abi, Cc, LinkArgs, LinkerFlavor, Lld, TargetOptions, add_link_args, base};
+use crate::spec::{add_link_args, base, Cc, LinkArgs, LinkerFlavor, Lld, TargetOptions};
 
-pub(crate) fn opts() -> TargetOptions {
+pub fn opts() -> TargetOptions {
     let base = base::windows_gnu::opts();
 
     // FIXME: This should be updated for the exception machinery changes from #67502
@@ -23,7 +23,7 @@ pub(crate) fn opts() -> TargetOptions {
     let late_link_args_static = LinkArgs::new();
 
     TargetOptions {
-        abi: Abi::Uwp,
+        abi: "uwp".into(),
         vendor: "uwp".into(),
         limit_rdylib_exports: false,
         late_link_args,

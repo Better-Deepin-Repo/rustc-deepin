@@ -1,5 +1,8 @@
 // Test that unsized locals uphold alignment requirements.
 // Regression test for #71416.
+//@ run-pass
+#![feature(unsized_locals)]
+#![allow(incomplete_features)]
 use std::any::Any;
 
 #[repr(align(256))]
@@ -20,7 +23,7 @@ fn mk() -> Box<dyn Any> {
 }
 
 fn main() {
-    let x = *mk(); //~ERROR the size for values of type `dyn Any` cannot be known at compilation time
+    let x = *mk();
     let dwncst = x.downcast_ref::<A>().unwrap();
     let addr = dwncst.f();
     assert_eq!(addr as usize % 256, 0);

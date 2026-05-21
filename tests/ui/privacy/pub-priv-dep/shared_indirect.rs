@@ -1,6 +1,7 @@
 //@ aux-crate:priv:shared=shared.rs
 //@ aux-crate:priv:indirect1=indirect1.rs
 //@ compile-flags: -Zunstable-options
+//@ check-pass
 
 // A shared dependency, where it is only indirectly public.
 //
@@ -22,7 +23,7 @@
 extern crate shared;
 extern crate indirect1;
 
+// FIXME: This should trigger.
 pub fn leaks_priv() -> shared::Shared {
-    //~^ ERROR type `Shared` from private dependency 'shared' in public interface
     shared::Shared
 }

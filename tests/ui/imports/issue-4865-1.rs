@@ -6,16 +6,16 @@
 // because these previous imports were not resolved.
 
 pub mod a {
-    use crate::b::fn_b;
-    use crate::c::*;
+    use b::fn_b;
+    use c::*;
 
     pub fn fn_a(){
     }
 }
 
 pub mod b {
-    use crate::a::fn_a;
-    use crate::c::*;
+    use a::fn_a;
+    use c::*;
 
     pub fn fn_b(){
     }

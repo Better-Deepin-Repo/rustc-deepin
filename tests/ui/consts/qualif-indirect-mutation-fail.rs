@@ -1,5 +1,7 @@
 //@ compile-flags: --crate-type=lib
+#![feature(const_mut_refs)]
 #![feature(const_precise_live_drops)]
+#![feature(const_swap)]
 
 // Mutable borrow of a field with drop impl.
 pub const fn f() {
@@ -15,7 +17,7 @@ pub const A1: () = {
     let b = &mut y;
     std::mem::swap(a, b);
     std::mem::forget(y);
-}; //~ ERROR calling non-const function `<Vec<u8> as Drop>::drop`
+};
 
 // Mutable borrow of a type with drop impl.
 pub const A2: () = {
@@ -26,7 +28,7 @@ pub const A2: () = {
     std::mem::swap(a, b);
     std::mem::forget(y);
     let _z = x; //~ ERROR destructor of
-}; //~ ERROR calling non-const function `<Vec<u8> as Drop>::drop`
+};
 
 // Shared borrow of a type that might be !Freeze and Drop.
 pub const fn g1<T>() {

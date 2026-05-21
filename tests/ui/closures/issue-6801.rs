@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 // Creating a stack closure which references a box and then
 // transferring ownership of the box before invoking the stack
 // closure results in a crash.

@@ -1,4 +1,0 @@
-# When updating this file, you need to also update
-# .gitlab-ci.yml
-[toolchain]
-channel = "1.90.0"

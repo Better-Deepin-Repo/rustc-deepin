@@ -1,6 +1,8 @@
 // New test for #53818: modifying static memory at compile-time is not allowed.
 // The test should never compile successfully
 
+#![feature(const_mut_refs)]
+
 use std::cell::UnsafeCell;
 
 struct Foo(UnsafeCell<u32>);
@@ -12,7 +14,7 @@ static FOO: Foo = Foo(UnsafeCell::new(42));
 
 static BAR: () = unsafe {
     *FOO.0.get() = 5;
-    //~^ ERROR modifying a static's initial value
+    //~^ ERROR could not evaluate static initializer
 };
 
 fn main() {

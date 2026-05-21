@@ -1,11 +1,5 @@
-//! JSON output and comparison functionality for Clippy warnings.
-//!
-//! This module handles serialization of Clippy warnings to JSON format,
-//! loading warnings from JSON files, and generating human-readable diffs
-//! between different linting runs.
-
-use std::path::{Path, PathBuf};
-use std::{fmt, fs};
+use std::fs;
+use std::path::Path;
 
 use itertools::{EitherOrBoth, Itertools};
 use serde::{Deserialize, Serialize};
@@ -14,7 +8,6 @@ use crate::ClippyWarning;
 
 /// This is the total number. 300 warnings results in 100 messages per section.
 const DEFAULT_LIMIT_PER_LINT: usize = 300;
-/// Target for total warnings to display across all lints when truncating output.
 const TRUNCATION_TOTAL_TARGET: usize = 1000;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -32,60 +25,8 @@ impl LintJson {
         (self.name.as_str(), self.file_line.as_str())
     }
 
-    /// Formats the warning information with an action verb for display.
     fn info_text(&self, action: &str) -> String {
         format!("{action} `{}` at [`{}`]({})", self.name, self.file_line, self.file_url)
-    }
-}
-
-#[derive(Debug, Serialize)]
-struct SummaryRow {
-    name: String,
-    added: usize,
-    removed: usize,
-    changed: usize,
-}
-
-#[derive(Debug, Serialize)]
-struct Summary(Vec<SummaryRow>);
-
-impl fmt::Display for Summary {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(
-            "\
-| Lint | Added | Removed | Changed |
-| ---- | ----: | ------: | ------: |
-",
-        )?;
-
-        for SummaryRow {
-            name,
-            added,
-            changed,
-            removed,
-        } in &self.0
-        {
-            let html_id = to_html_id(name);
-            writeln!(f, "| [`{name}`](#{html_id}) | {added} | {removed} | {changed} |")?;
-        }
-
-        Ok(())
-    }
-}
-
-impl Summary {
-    fn new(lints: &[LintWarnings]) -> Self {
-        Summary(
-            lints
-                .iter()
-                .map(|lint| SummaryRow {
-                    name: lint.name.clone(),
-                    added: lint.added.len(),
-                    removed: lint.removed.len(),
-                    changed: lint.changed.len(),
-                })
-                .collect(),
-        )
     }
 }
 
@@ -112,18 +53,13 @@ pub(crate) fn output(clippy_warnings: Vec<ClippyWarning>) -> String {
     serde_json::to_string(&lints).unwrap()
 }
 
-/// Loads lint warnings from a JSON file at the given path.
 fn load_warnings(path: &Path) -> Vec<LintJson> {
     let file = fs::read(path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()));
 
     serde_json::from_slice(&file).unwrap_or_else(|e| panic!("failed to deserialize {}: {e}", path.display()))
 }
 
-/// Generates and prints a diff between two sets of lint warnings.
-///
-/// Compares warnings from `old_path` and `new_path`, then displays a summary table
-/// and detailed information about added, removed, and changed warnings.
-pub(crate) fn diff(old_path: &Path, new_path: &Path, truncate: bool, write_summary: Option<PathBuf>) {
+pub(crate) fn diff(old_path: &Path, new_path: &Path, truncate: bool) {
     let old_warnings = load_warnings(old_path);
     let new_warnings = load_warnings(new_path);
 
@@ -157,14 +93,11 @@ pub(crate) fn diff(old_path: &Path, new_path: &Path, truncate: bool, write_summa
         }
     }
 
+    print_summary_table(&lint_warnings);
+    println!();
+
     if lint_warnings.is_empty() {
         return;
-    }
-
-    let summary = Summary::new(&lint_warnings);
-    if let Some(path) = write_summary {
-        let json = serde_json::to_string(&summary).unwrap();
-        fs::write(path, json).unwrap();
     }
 
     let truncate_after = if truncate {
@@ -178,13 +111,11 @@ pub(crate) fn diff(old_path: &Path, new_path: &Path, truncate: bool, write_summa
         usize::MAX
     };
 
-    println!("{summary}");
     for lint in lint_warnings {
         print_lint_warnings(&lint, truncate_after);
     }
 }
 
-/// Container for grouped lint warnings organized by status (added/removed/changed).
 #[derive(Debug)]
 struct LintWarnings {
     name: String,
@@ -197,11 +128,12 @@ fn print_lint_warnings(lint: &LintWarnings, truncate_after: usize) {
     let name = &lint.name;
     let html_id = to_html_id(name);
 
-    println!(r#"<h2 id="{html_id}"><code>{name}</code></h2>"#);
+    // The additional anchor is added for non GH viewers that don't prefix ID's
+    println!(r#"## `{name}` <a id="user-content-{html_id}"></a>"#);
     println!();
 
     print!(
-        r"{}, {}, {}",
+        r##"{}, {}, {}"##,
         count_string(name, "added", lint.added.len()),
         count_string(name, "removed", lint.removed.len()),
         count_string(name, "changed", lint.changed.len()),
@@ -213,7 +145,21 @@ fn print_lint_warnings(lint: &LintWarnings, truncate_after: usize) {
     print_changed_diff(&lint.changed, truncate_after / 3);
 }
 
-/// Prints a section of warnings with a header and formatted code blocks.
+fn print_summary_table(lints: &[LintWarnings]) {
+    println!("| Lint                                       | Added   | Removed | Changed |");
+    println!("| ------------------------------------------ | ------: | ------: | ------: |");
+
+    for lint in lints {
+        println!(
+            "| {:<62} | {:>7} | {:>7} | {:>7} |",
+            format!("[`{}`](#user-content-{})", lint.name, to_html_id(&lint.name)),
+            lint.added.len(),
+            lint.removed.len(),
+            lint.changed.len()
+        );
+    }
+}
+
 fn print_warnings(title: &str, warnings: &[LintJson], truncate_after: usize) {
     if warnings.is_empty() {
         return;
@@ -234,7 +180,6 @@ fn print_warnings(title: &str, warnings: &[LintJson], truncate_after: usize) {
     }
 }
 
-/// Prints a section of changed warnings with unified diff format.
 fn print_changed_diff(changed: &[(LintJson, LintJson)], truncate_after: usize) {
     if changed.is_empty() {
         return;
@@ -268,7 +213,6 @@ fn print_changed_diff(changed: &[(LintJson, LintJson)], truncate_after: usize) {
     }
 }
 
-/// Truncates a list to a maximum number of items and prints a message about truncation.
 fn truncate<T>(list: &[T], truncate_after: usize) -> &[T] {
     if list.len() > truncate_after {
         println!(
@@ -285,14 +229,14 @@ fn truncate<T>(list: &[T], truncate_after: usize) -> &[T] {
 
 fn print_h3(lint: &str, title: &str) {
     let html_id = to_html_id(lint);
-    // We have to use HTML here to be able to manually add an id, GitHub doesn't add them automatically
-    println!(r#"<h3 id="{html_id}-{title}">{title}</h3>"#);
+    // We have to use HTML here to be able to manually add an id.
+    println!(r#"### {title} <a id="user-content-{html_id}-{title}"></a>"#);
 }
 
-/// Creates a custom ID allowed by GitHub, they must start with `user-content-` and cannot contain
-/// `::`/`_`
+/// GitHub's markdown parsers doesn't like IDs with `::` and `_`. This simplifies
+/// the lint name for the HTML ID.
 fn to_html_id(lint_name: &str) -> String {
-    lint_name.replace("clippy::", "user-content-").replace('_', "-")
+    lint_name.replace("clippy::", "").replace('_', "-")
 }
 
 /// This generates the `x added` string for the start of the job summery.
@@ -304,6 +248,9 @@ fn count_string(lint: &str, label: &str, count: usize) -> String {
         format!("0 {label}")
     } else {
         let html_id = to_html_id(lint);
-        format!("[{count} {label}](#{html_id}-{label})")
+        // GitHub's job summaries don't add HTML ids to headings. That's why we
+        // manually have to add them. GitHub prefixes these manual ids with
+        // `user-content-` and that's how we end up with these awesome links :D
+        format!("[{count} {label}](#user-content-{html_id}-{label})")
     }
 }

@@ -1,5 +1,5 @@
 #![warn(clippy::manual_unwrap_or_default)]
-#![allow(clippy::unnecessary_literal_unwrap)]
+#![allow(clippy::unnecessary_literal_unwrap, clippy::manual_unwrap_or)]
 
 fn main() {
     let x: Option<Vec<String>> = None;
@@ -32,25 +32,14 @@ fn main() {
 
     let x: Result<String, i64> = Ok(String::new());
     x.unwrap_or_default();
-
-    // edge case
-    // because the `Some(bizarro)` pattern is not actually reachable,
-    // changing this match to `unwrap_or_default` would have side effects
-    let bizarro = Some(String::new());
-    match bizarro {
-        _ => String::new(),
-        Some(bizarro) => bizarro,
-    };
 }
 
 // Issue #12531
 unsafe fn no_deref_ptr(a: Option<i32>, b: *const Option<i32>) -> i32 {
-    unsafe {
-        match a {
-            // `*b` being correct depends on `a == Some(_)`
-            Some(_) => (*b).unwrap_or_default(),
-            _ => 0,
-        }
+    match a {
+        // `*b` being correct depends on `a == Some(_)`
+        Some(_) => (*b).unwrap_or_default(),
+        _ => 0,
     }
 }
 
@@ -109,36 +98,4 @@ fn issue_12928() {
     let x = Some(Y(0, 0));
     let y = if let Some(Y(a, _)) = x { a } else { 0 };
     let y = if let Some(Y(a, ..)) = x { a } else { 0 };
-}
-
-// For symmetry with `manual_unwrap_or` test
-fn allowed_manual_unwrap_or_zero() -> u32 {
-    Some(42).unwrap_or_default()
-}
-
-mod issue14716 {
-    struct Foo {
-        name: Option<String>,
-    }
-
-    fn bar(project: &Foo) {
-        let _name = match project.name {
-            Some(ref x) => x,
-            None => "",
-        };
-    }
-}
-
-fn issue_15807() {
-    let uncopyable_res: Result<usize, String> = Ok(1);
-    let _ = if let Ok(v) = uncopyable_res { v } else { 0 };
-
-    let x = uncopyable_res;
-    let _ = x.unwrap_or_default();
-    //~^ manual_unwrap_or_default
-
-    let copyable_res: Result<usize, ()> = Ok(1);
-    let _ = copyable_res.unwrap_or_default();
-    //~^ manual_unwrap_or_default
-    let _ = copyable_res;
 }

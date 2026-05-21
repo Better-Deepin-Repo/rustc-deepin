@@ -2,10 +2,10 @@ use super::SINGLE_ELEMENT_LOOP;
 use clippy_utils::diagnostics::span_lint_and_sugg;
 use clippy_utils::source::{indent_of, snippet, snippet_with_applicability};
 use clippy_utils::visitors::contains_break_or_continue;
+use rustc_ast::util::parser::PREC_PREFIX;
 use rustc_ast::Mutability;
-use rustc_ast::util::parser::ExprPrecedence;
 use rustc_errors::Applicability;
-use rustc_hir::{BorrowKind, Expr, ExprKind, Pat, PatKind, is_range_literal};
+use rustc_hir::{is_range_literal, BorrowKind, Expr, ExprKind, Pat, PatKind};
 use rustc_lint::LateContext;
 use rustc_span::edition::Edition;
 use rustc_span::sym;
@@ -84,13 +84,13 @@ pub(super) fn check<'tcx>(
         if !prefix.is_empty()
             && (
                 // Precedence of internal expression is less than or equal to precedence of `&expr`.
-                cx.precedence(arg_expression) <= ExprPrecedence::Prefix || is_range_literal(arg_expression)
+                arg_expression.precedence().order() <= PREC_PREFIX || is_range_literal(arg_expression)
             )
         {
             arg_snip = format!("({arg_snip})").into();
         }
 
-        if clippy_utils::higher::Range::hir(cx, arg_expression).is_some() {
+        if clippy_utils::higher::Range::hir(arg_expression).is_some() {
             let range_expr = snippet(cx, arg_expression.span, "?").to_string();
 
             let sugg = snippet(cx, arg_expression.span, "..");

@@ -1,21 +1,14 @@
-//@ add-minicore
 //@ needs-llvm-components: x86
 //@ compile-flags: --target=i686-pc-windows-msvc --crate-type=rlib
-//@ ignore-backends: gcc
 #![no_core]
 #![feature(no_core, lang_items)]
-
-extern crate minicore;
-use minicore::*;
+#[lang="sized"]
+trait Sized { }
 
 extern "stdcall" {
     fn printf(_: *const u8, ...);
-    //~^ ERROR: C-variadic functions with the "stdcall" calling convention are not supported
-}
-
-fn baz(f: extern "Rust" fn(usize, ...)) {
-    //~^ ERROR: C-variadic functions with the "Rust" calling convention are not supported
-    f(22, 44);
+    //~^ ERROR: C-variadic function must have a compatible calling convention,
+    // like C, cdecl, win64, sysv64 or efiapi
 }
 
 extern "C" {

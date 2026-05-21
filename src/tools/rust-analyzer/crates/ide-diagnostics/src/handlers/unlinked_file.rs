@@ -2,20 +2,20 @@
 
 use std::iter;
 
-use hir::crate_def_map;
-use hir::{InFile, ModuleSource};
-use ide_db::base_db::RootQueryDb;
-use ide_db::text_edit::TextEdit;
+use hir::{db::DefDatabase, DefMap, InFile, ModuleSource};
 use ide_db::{
-    FileId, FileRange, LineIndexDatabase, base_db::SourceDatabase, source_change::SourceChange,
+    base_db::{FileLoader, SourceDatabase, SourceRootDatabase},
+    source_change::SourceChange,
+    FileId, FileRange, LineIndexDatabase,
 };
 use paths::Utf8Component;
 use syntax::{
+    ast::{self, edit::IndentLevel, HasModuleItem, HasName},
     AstNode, TextRange,
-    ast::{self, HasModuleItem, HasName, edit::IndentLevel},
 };
+use text_edit::TextEdit;
 
-use crate::{Assist, Diagnostic, DiagnosticCode, DiagnosticsContext, Severity, fix};
+use crate::{fix, Assist, Diagnostic, DiagnosticCode, DiagnosticsContext, Severity};
 
 // Diagnostic: unlinked-file
 //
@@ -36,9 +36,7 @@ pub(crate) fn unlinked_file(
         "This file is not included anywhere in the module tree, so rust-analyzer can't offer IDE services."
     };
 
-    let message = format!(
-        "{message}\n\nIf you're intentionally working on unowned files, you can silence this warning by adding \"unlinked-file\" to rust-analyzer.diagnostics.disabled in your settings."
-    );
+    let message = format!("{message}\n\nIf you're intentionally working on unowned files, you can silence this warning by adding \"unlinked-file\" to rust-analyzer.diagnostics.disabled in your settings.");
 
     let mut unused = true;
 
@@ -50,7 +48,6 @@ pub(crate) fn unlinked_file(
         // Only show this diagnostic on the first three characters of
         // the file, to avoid overwhelming the user during startup.
         range = SourceDatabase::file_text(ctx.sema.db, file_id)
-            .text(ctx.sema.db)
             .char_indices()
             .take(3)
             .last()
@@ -69,7 +66,6 @@ pub(crate) fn unlinked_file(
             FileRange { file_id, range },
         )
         .with_unused(unused)
-        .stable()
         .with_fixes(fixes),
     );
 }
@@ -82,11 +78,7 @@ fn fixes(
     // If there's an existing module that could add `mod` or `pub mod` items to include the unlinked file,
     // suggest that as a fix.
 
-    let db = ctx.sema.db;
-
-    let source_root = ctx.sema.db.file_source_root(file_id).source_root_id(db);
-    let source_root = ctx.sema.db.source_root(source_root).source_root(db);
-
+    let source_root = ctx.sema.db.source_root(ctx.sema.db.file_source_root(file_id));
     let our_path = source_root.path_for_file(&file_id)?;
     let parent = our_path.parent()?;
     let (module_name, _) = our_path.name_and_extension()?;
@@ -101,15 +93,12 @@ fn fixes(
     };
 
     // check crate roots, i.e. main.rs, lib.rs, ...
-    let relevant_crates = db.relevant_crates(file_id);
-    'crates: for &krate in &*relevant_crates {
-        // FIXME: This shouldnt need to access the crate def map directly
-        let crate_def_map = crate_def_map(ctx.sema.db, krate);
+    'crates: for &krate in &*ctx.sema.db.relevant_crates(file_id) {
+        let crate_def_map = ctx.sema.db.crate_def_map(krate);
 
-        let root_module = &crate_def_map[crate_def_map.root_module_id()];
+        let root_module = &crate_def_map[DefMap::ROOT];
         let Some(root_file_id) = root_module.origin.file_id() else { continue };
-        let Some(crate_root_path) = source_root.path_for_file(&root_file_id.file_id(ctx.sema.db))
-        else {
+        let Some(crate_root_path) = source_root.path_for_file(&root_file_id.file_id()) else {
             continue;
         };
         let Some(rel) = parent.strip_prefix(&crate_root_path.parent()?) else { continue };
@@ -123,7 +112,7 @@ fn fixes(
                 // shouldn't occur
                 _ => continue 'crates,
             };
-            match current.children.iter().find(|(name, _)| name.as_str() == seg) {
+            match current.children.iter().find(|(name, _)| name.eq_ident(seg)) {
                 Some((_, &child)) => current = &crate_def_map[child],
                 None => continue 'crates,
             }
@@ -135,12 +124,7 @@ fn fixes(
         let InFile { file_id: parent_file_id, value: source } =
             current.definition_source(ctx.sema.db);
         let parent_file_id = parent_file_id.file_id()?;
-        return make_fixes(
-            parent_file_id.file_id(ctx.sema.db),
-            source,
-            &module_name,
-            trigger_range,
-        );
+        return make_fixes(parent_file_id.file_id(), source, &module_name, trigger_range);
     }
 
     // if we aren't adding to a crate root, walk backwards such that we support `#[path = ...]` overrides if possible
@@ -157,12 +141,10 @@ fn fixes(
             paths.into_iter().find_map(|path| source_root.file_for_path(&path))
         })?;
     stack.pop();
-    let relevant_crates = db.relevant_crates(parent_id);
-    'crates: for &krate in relevant_crates.iter() {
-        let crate_def_map = crate_def_map(ctx.sema.db, krate);
+    'crates: for &krate in ctx.sema.db.relevant_crates(parent_id).iter() {
+        let crate_def_map = ctx.sema.db.crate_def_map(krate);
         let Some((_, module)) = crate_def_map.modules().find(|(_, module)| {
-            module.origin.file_id().map(|file_id| file_id.file_id(ctx.sema.db)) == Some(parent_id)
-                && !module.origin.is_inline()
+            module.origin.file_id().map(Into::into) == Some(parent_id) && !module.origin.is_inline()
         }) else {
             continue;
         };
@@ -179,7 +161,7 @@ fn fixes(
             // try finding a parent that has an inline tree from here on
             let mut current = module;
             for s in stack.iter().rev() {
-                match module.children.iter().find(|(name, _)| name.as_str() == s) {
+                match module.children.iter().find(|(name, _)| name.eq_ident(s)) {
                     Some((_, child)) => {
                         current = &crate_def_map[*child];
                     }
@@ -192,12 +174,7 @@ fn fixes(
             let InFile { file_id: parent_file_id, value: source } =
                 current.definition_source(ctx.sema.db);
             let parent_file_id = parent_file_id.file_id()?;
-            return make_fixes(
-                parent_file_id.file_id(ctx.sema.db),
-                source,
-                &module_name,
-                trigger_range,
-            );
+            return make_fixes(parent_file_id.file_id(), source, &module_name, trigger_range);
         }
     }
 
@@ -216,11 +193,9 @@ fn make_fixes(
 
     let mod_decl = format!("mod {new_mod_name};");
     let pub_mod_decl = format!("pub mod {new_mod_name};");
-    let pub_crate_mod_decl = format!("pub(crate) mod {new_mod_name};");
 
     let mut mod_decl_builder = TextEdit::builder();
     let mut pub_mod_decl_builder = TextEdit::builder();
-    let mut pub_crate_mod_decl_builder = TextEdit::builder();
 
     let mut items = match &source {
         ModuleSource::SourceFile(it) => it.items(),
@@ -231,13 +206,13 @@ fn make_fixes(
     // If there's an existing `mod m;` statement matching the new one, don't emit a fix (it's
     // probably `#[cfg]`d out).
     for item in items.clone() {
-        if let ast::Item::Module(m) = item
-            && let Some(name) = m.name()
-            && m.item_list().is_none()
-            && name.to_string() == new_mod_name
-        {
-            cov_mark::hit!(unlinked_file_skip_fix_when_mod_already_exists);
-            return None;
+        if let ast::Item::Module(m) = item {
+            if let Some(name) = m.name() {
+                if m.item_list().is_none() && name.to_string() == new_mod_name {
+                    cov_mark::hit!(unlinked_file_skip_fix_when_mod_already_exists);
+                    return None;
+                }
+            }
         }
     }
 
@@ -249,7 +224,6 @@ fn make_fixes(
             let indent = IndentLevel::from_node(last.syntax());
             mod_decl_builder.insert(offset, format!("\n{indent}{mod_decl}"));
             pub_mod_decl_builder.insert(offset, format!("\n{indent}{pub_mod_decl}"));
-            pub_crate_mod_decl_builder.insert(offset, format!("\n{indent}{pub_crate_mod_decl}"));
         }
         None => {
             // Prepend before the first item in the file.
@@ -260,8 +234,6 @@ fn make_fixes(
                     let indent = IndentLevel::from_node(first.syntax());
                     mod_decl_builder.insert(offset, format!("{mod_decl}\n\n{indent}"));
                     pub_mod_decl_builder.insert(offset, format!("{pub_mod_decl}\n\n{indent}"));
-                    pub_crate_mod_decl_builder
-                        .insert(offset, format!("{pub_crate_mod_decl}\n\n{indent}"));
                 }
                 None => {
                     // No items in the file, so just append at the end.
@@ -279,8 +251,6 @@ fn make_fixes(
                     };
                     mod_decl_builder.insert(offset, format!("{indent}{mod_decl}\n"));
                     pub_mod_decl_builder.insert(offset, format!("{indent}{pub_mod_decl}\n"));
-                    pub_crate_mod_decl_builder
-                        .insert(offset, format!("{indent}{pub_crate_mod_decl}\n"));
                 }
             }
         }
@@ -297,12 +267,6 @@ fn make_fixes(
             "add_pub_mod_declaration",
             &format!("Insert `{pub_mod_decl}`"),
             SourceChange::from_text_edit(parent_file_id, pub_mod_decl_builder.finish()),
-            trigger_range,
-        ),
-        fix(
-            "add_pub_crate_mod_declaration",
-            &format!("Insert `{pub_crate_mod_decl}`"),
-            SourceChange::from_text_edit(parent_file_id, pub_crate_mod_decl_builder.finish()),
             trigger_range,
         ),
     ])
@@ -331,11 +295,6 @@ fn f() {}
 "#,
                 r#"
 pub mod foo;
-
-fn f() {}
-"#,
-                r#"
-pub(crate) mod foo;
 
 fn f() {}
 "#,

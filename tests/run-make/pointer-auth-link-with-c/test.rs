@@ -1,4 +1,4 @@
-#[link(name = "test", kind = "static")]
+#[link(name = "test")]
 extern "C" {
     fn foo() -> i32;
 }

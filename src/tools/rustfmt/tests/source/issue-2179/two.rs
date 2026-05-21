@@ -1,4 +1,4 @@
-// rustfmt-style_edition: 2024
+// rustfmt-version: Two
 // rustfmt-error_on_line_overflow: false
 
 fn issue_2179() {

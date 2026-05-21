@@ -26,8 +26,7 @@ pub fn g(i: i32) -> u32 {
 pub fn h() {
     // CHECK-LABEL: fn h(
     // CHECK: (inlined call_twice::<!, fn() -> ! {sleep}>)
-    // CHECK: (inlined <fn() -> ! {sleep} as Fn<()>>::call - shim(fn() -> ! {sleep}))
-    // CHECK: (inlined sleep)
+    // CHECK-NOT: inlined
     call_twice(sleep);
 }
 

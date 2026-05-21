@@ -1,7 +1,7 @@
 //@ run-fail
 //@ error-pattern:returned Box<dyn Error> from main()
 //@ failure-status: 1
-//@ needs-subprocess
+//@ ignore-emscripten no processes
 
 use std::error::Error;
 use std::io;

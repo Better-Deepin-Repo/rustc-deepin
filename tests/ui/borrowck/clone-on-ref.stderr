@@ -12,7 +12,7 @@ LL |
 LL |     drop(cloned_items);
    |          ------------ immutable borrow later used here
    |
-help: consider further restricting type parameter `T` with trait `Clone`
+help: consider further restricting this bound
    |
 LL | fn foo<T: Default + Clone>(list: &mut Vec<T>) {
    |                   +++++++
@@ -30,7 +30,7 @@ LL |     drop(x);
    |          ^ move out of `x` occurs here
 LL |
 LL |     println!("{b}");
-   |                - borrow later used here
+   |               --- borrow later used here
    |
 help: if `T` implemented `Clone`, you could clone the value
   --> $DIR/clone-on-ref.rs:11:8
@@ -39,7 +39,7 @@ LL | fn bar<T: std::fmt::Display>(x: T) {
    |        ^ consider constraining this type parameter with `Clone`
 LL |     let a = &x;
    |              - you could clone this value
-help: consider further restricting type parameter `T` with trait `Clone`
+help: consider further restricting this bound
    |
 LL | fn bar<T: std::fmt::Display + Clone>(x: T) {
    |                             +++++++
@@ -57,7 +57,7 @@ LL |     drop(x);
    |          ^ move out of `x` occurs here
 LL |
 LL |     println!("{b:?}");
-   |                - borrow later used here
+   |               ----- borrow later used here
    |
 note: if `A` implemented `Clone`, you could clone the value
   --> $DIR/clone-on-ref.rs:19:1

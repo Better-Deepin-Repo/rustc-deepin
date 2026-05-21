@@ -8,7 +8,7 @@ struct PrintName<T>(T);
 
 impl<T> PrintName<T> {
     const VOID: ! = { let x = 0 * std::mem::size_of::<T>(); [][x] };
-    //~^ ERROR index out of bounds: the length is 0 but the index is 0
+    //~^ ERROR evaluation of `PrintName::<()>::VOID` failed
 
 }
 

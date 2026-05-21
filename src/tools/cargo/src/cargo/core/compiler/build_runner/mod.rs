@@ -1,34 +1,33 @@
 //! [`BuildRunner`] is the mutable state used during the build process.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use crate::core::PackageId;
 use crate::core::compiler::compilation::{self, UnitOutput};
-use crate::core::compiler::locking::LockManager;
-use crate::core::compiler::{self, Unit, UserIntent, artifact};
+use crate::core::compiler::{self, artifact, Unit};
+use crate::core::PackageId;
 use crate::util::cache_lock::CacheLockMode;
 use crate::util::errors::CargoResult;
-use annotate_snippets::{Level, Message};
-use anyhow::{Context as _, bail};
-use cargo_util::paths;
+use anyhow::{bail, Context as _};
 use filetime::FileTime;
 use itertools::Itertools;
 use jobserver::Client;
 
-use super::RustdocFingerprint;
+use super::build_plan::BuildPlan;
 use super::custom_build::{self, BuildDeps, BuildScriptOutputs, BuildScripts};
-use super::fingerprint::{Checksum, Fingerprint};
+use super::fingerprint::Fingerprint;
 use super::job_queue::JobQueue;
 use super::layout::Layout;
 use super::lto::Lto;
 use super::unit_graph::UnitDep;
-use super::{BuildContext, Compilation, CompileKind, CompileMode, Executor, FileFlavor};
+use super::{
+    BuildContext, Compilation, CompileKind, CompileMode, Executor, FileFlavor, RustDocFingerprint,
+};
 
 mod compilation_files;
 use self::compilation_files::CompilationFiles;
-pub use self::compilation_files::{Metadata, OutputFile, UnitHash};
+pub use self::compilation_files::{Metadata, OutputFile};
 
 /// Collection of all the stuff that is needed to perform a build.
 ///
@@ -51,8 +50,6 @@ pub struct BuildRunner<'a, 'gctx> {
     pub fingerprints: HashMap<Unit, Arc<Fingerprint>>,
     /// Cache of file mtimes to reduce filesystem hits.
     pub mtime_cache: HashMap<PathBuf, FileTime>,
-    /// Cache of file checksums to reduce filesystem reads.
-    pub checksum_cache: HashMap<PathBuf, Checksum>,
     /// A set used to track which units have been compiled.
     /// A unit may appear in the job graph multiple times as a dependency of
     /// multiple packages, but it only needs to run once.
@@ -81,16 +78,13 @@ pub struct BuildRunner<'a, 'gctx> {
     pub lto: HashMap<Unit, Lto>,
 
     /// Map of Doc/Docscrape units to metadata for their -Cmetadata flag.
-    /// See `Context::find_metadata_units` for more details.
+    /// See Context::find_metadata_units for more details.
     pub metadata_for_doc_units: HashMap<Unit, Metadata>,
 
     /// Set of metadata of Docscrape units that fail before completion, e.g.
     /// because the target has a type error. This is in an Arc<Mutex<..>>
     /// because it is continuously updated as the job progresses.
-    pub failed_scrape_units: Arc<Mutex<HashSet<UnitHash>>>,
-
-    /// Manages locks for build units when fine grain locking is enabled.
-    pub lock_manager: Arc<LockManager>,
+    pub failed_scrape_units: Arc<Mutex<HashSet<Metadata>>>,
 }
 
 impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
@@ -119,7 +113,6 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
             build_script_outputs: Arc::new(Mutex::new(BuildScriptOutputs::default())),
             fingerprints: HashMap::new(),
             mtime_cache: HashMap::new(),
-            checksum_cache: HashMap::new(),
             compiled: HashSet::new(),
             build_scripts: HashMap::new(),
             build_explicit_deps: HashMap::new(),
@@ -130,29 +123,7 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
             lto: HashMap::new(),
             metadata_for_doc_units: HashMap::new(),
             failed_scrape_units: Arc::new(Mutex::new(HashSet::new())),
-            lock_manager: Arc::new(LockManager::new()),
         })
-    }
-
-    /// Dry-run the compilation without actually running it.
-    ///
-    /// This is expected to collect information like the location of output artifacts.
-    /// Please keep in sync with non-compilation part in [`BuildRunner::compile`].
-    pub fn dry_run(mut self) -> CargoResult<Compilation<'gctx>> {
-        let _lock = self
-            .bcx
-            .gctx
-            .acquire_package_cache_lock(CacheLockMode::Shared)?;
-        self.lto = super::lto::generate(self.bcx)?;
-        self.prepare_units()?;
-        self.prepare()?;
-        self.check_collisions()?;
-
-        for unit in &self.bcx.roots {
-            self.collect_tests_and_executables(unit)?;
-        }
-
-        Ok(self.compilation)
     }
 
     /// Starts compilation, waits for it to finish, and returns information
@@ -160,7 +131,7 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
     ///
     /// See [`ops::cargo_compile`] for a higher-level view of the compile process.
     ///
-    /// [`ops::cargo_compile`]: crate::ops::cargo_compile
+    /// [`ops::cargo_compile`]: ../../../ops/cargo_compile/index.html
     #[tracing::instrument(skip_all)]
     pub fn compile(mut self, exec: &Arc<dyn Executor>) -> CargoResult<Compilation<'gctx>> {
         // A shared lock is held during the duration of the build since rustc
@@ -171,6 +142,8 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
             .gctx
             .acquire_package_cache_lock(CacheLockMode::Shared)?;
         let mut queue = JobQueue::new(self.bcx);
+        let mut plan = BuildPlan::new();
+        let build_plan = self.bcx.build_config.build_plan;
         self.lto = super::lto::generate(self.bcx)?;
         self.prepare_units()?;
         self.prepare()?;
@@ -178,16 +151,21 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
         self.check_collisions()?;
         self.compute_metadata_for_doc_units();
 
-        // We need to make sure that if there were any previous docs already compiled,
-        // they were compiled with the same Rustc version that we're currently using.
-        // See the function doc comment for more.
-        if self.bcx.build_config.intent.is_doc() {
-            RustdocFingerprint::check_rustdoc_fingerprint(&self)?
+        // We need to make sure that if there were any previous docs
+        // already compiled, they were compiled with the same Rustc version that we're currently
+        // using. Otherwise we must remove the `doc/` folder and compile again forcing a rebuild.
+        //
+        // This is important because the `.js`/`.html` & `.css` files that are generated by Rustc don't have
+        // any versioning (See https://github.com/rust-lang/cargo/issues/8461).
+        // Therefore, we can end up with weird bugs and behaviours if we mix different
+        // versions of these files.
+        if self.bcx.build_config.mode.is_doc() {
+            RustDocFingerprint::check_rustdoc_fingerprint(&self)?
         }
 
         for unit in &self.bcx.roots {
             let force_rebuild = self.bcx.build_config.force_rebuild;
-            super::compile(&mut self, &mut queue, unit, exec, force_rebuild)?;
+            super::compile(&mut self, &mut queue, &mut plan, unit, exec, force_rebuild)?;
         }
 
         // Now that we've got the full job queue and we've done all our
@@ -201,7 +179,12 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
         }
 
         // Now that we've figured out everything that we're going to do, do it!
-        queue.execute(&mut self)?;
+        queue.execute(&mut self, &mut plan)?;
+
+        if build_plan {
+            plan.set_inputs(self.build_plan_inputs()?);
+            plan.output_plan(self.bcx.gctx);
+        }
 
         // Add `OUT_DIR` to env vars if unit has a build script.
         let units_with_build_script = &self
@@ -214,55 +197,74 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
         for unit in units_with_build_script {
             for dep in &self.bcx.unit_graph[unit] {
                 if dep.unit.mode.is_run_custom_build() {
-                    let out_dir = if self.bcx.gctx.cli_unstable().build_dir_new_layout {
-                        self.files().out_dir_new_layout(&dep.unit)
-                    } else {
-                        self.files().build_script_out_dir(&dep.unit)
-                    };
+                    let out_dir = self
+                        .files()
+                        .build_script_out_dir(&dep.unit)
+                        .display()
+                        .to_string();
                     let script_meta = self.get_run_build_script_metadata(&dep.unit);
                     self.compilation
                         .extra_env
                         .entry(script_meta)
                         .or_insert_with(Vec::new)
-                        .push(("OUT_DIR".to_string(), out_dir.display().to_string()));
+                        .push(("OUT_DIR".to_string(), out_dir));
                 }
             }
         }
 
-        self.collect_doc_merge_info()?;
-
         // Collect the result of the build into `self.compilation`.
         for unit in &self.bcx.roots {
-            self.collect_tests_and_executables(unit)?;
+            // Collect tests and executables.
+            for output in self.outputs(unit)?.iter() {
+                if output.flavor == FileFlavor::DebugInfo || output.flavor == FileFlavor::Auxiliary
+                {
+                    continue;
+                }
+
+                let bindst = output.bin_dst();
+
+                if unit.mode == CompileMode::Test {
+                    self.compilation
+                        .tests
+                        .push(self.unit_output(unit, &output.path));
+                } else if unit.target.is_executable() {
+                    self.compilation
+                        .binaries
+                        .push(self.unit_output(unit, bindst));
+                } else if unit.target.is_cdylib()
+                    && !self.compilation.cdylibs.iter().any(|uo| uo.unit == *unit)
+                {
+                    self.compilation
+                        .cdylibs
+                        .push(self.unit_output(unit, bindst));
+                }
+            }
 
             // Collect information for `rustdoc --test`.
             if unit.mode.is_doc_test() {
                 let mut unstable_opts = false;
                 let mut args = compiler::extern_args(&self, unit, &mut unstable_opts)?;
-                args.extend(compiler::lib_search_paths(&self, unit)?);
                 args.extend(compiler::lto_args(&self, unit));
                 args.extend(compiler::features_args(unit));
-                args.extend(compiler::check_cfg_args(unit));
+                args.extend(compiler::check_cfg_args(unit)?);
 
-                let script_metas = self.find_build_script_metadatas(unit);
-                if let Some(meta_vec) = script_metas.clone() {
-                    for meta in meta_vec {
-                        if let Some(output) = self.build_script_outputs.lock().unwrap().get(meta) {
-                            for cfg in &output.cfgs {
-                                args.push("--cfg".into());
-                                args.push(cfg.into());
-                            }
+                let script_meta = self.find_build_script_metadata(unit);
+                if let Some(meta) = script_meta {
+                    if let Some(output) = self.build_script_outputs.lock().unwrap().get(meta) {
+                        for cfg in &output.cfgs {
+                            args.push("--cfg".into());
+                            args.push(cfg.into());
+                        }
 
-                            for check_cfg in &output.check_cfgs {
-                                args.push("--check-cfg".into());
-                                args.push(check_cfg.into());
-                            }
+                        for check_cfg in &output.check_cfgs {
+                            args.push("--check-cfg".into());
+                            args.push(check_cfg.into());
+                        }
 
-                            for (lt, arg) in &output.linker_args {
-                                if lt.applies_to(&unit.target, unit.mode) {
-                                    args.push("-C".into());
-                                    args.push(format!("link-arg={}", arg).into());
-                                }
+                        for (lt, arg) in &output.linker_args {
+                            if lt.applies_to(&unit.target) {
+                                args.push("-C".into());
+                                args.push(format!("link-arg={}", arg).into());
                             }
                         }
                     }
@@ -282,12 +284,9 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
                     unit: unit.clone(),
                     args,
                     unstable_opts,
-                    linker: self
-                        .compilation
-                        .target_linker(unit.kind)
-                        .map(|p| p.to_path_buf()),
-                    script_metas,
-                    env: artifact::get_env(&self, unit, self.unit_deps(unit))?,
+                    linker: self.compilation.target_linker(unit.kind).clone(),
+                    script_meta,
+                    env: artifact::get_env(&self, self.unit_deps(unit))?,
                 });
             }
 
@@ -302,94 +301,10 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
                 .extend(output.env.iter().cloned());
 
             for dir in output.library_paths.iter() {
-                self.compilation
-                    .native_dirs
-                    .insert(dir.clone().into_path_buf());
+                self.compilation.native_dirs.insert(dir.clone());
             }
         }
         Ok(self.compilation)
-    }
-
-    fn collect_tests_and_executables(&mut self, unit: &Unit) -> CargoResult<()> {
-        for output in self.outputs(unit)?.iter() {
-            if matches!(
-                output.flavor,
-                FileFlavor::DebugInfo | FileFlavor::Auxiliary | FileFlavor::Sbom
-            ) {
-                continue;
-            }
-
-            let bindst = output.bin_dst();
-
-            if unit.mode == CompileMode::Test {
-                self.compilation
-                    .tests
-                    .push(self.unit_output(unit, &output.path)?);
-            } else if unit.target.is_executable() {
-                self.compilation
-                    .binaries
-                    .push(self.unit_output(unit, bindst)?);
-            } else if unit.target.is_cdylib()
-                && !self.compilation.cdylibs.iter().any(|uo| uo.unit == *unit)
-            {
-                self.compilation
-                    .cdylibs
-                    .push(self.unit_output(unit, bindst)?);
-            }
-        }
-        Ok(())
-    }
-
-    fn collect_doc_merge_info(&mut self) -> CargoResult<()> {
-        if !self.bcx.gctx.cli_unstable().rustdoc_mergeable_info {
-            return Ok(());
-        }
-
-        if !self.bcx.build_config.intent.is_doc() {
-            return Ok(());
-        }
-
-        if self.bcx.build_config.intent.wants_doc_json_output() {
-            // rustdoc JSON output doesn't support merge (yet?)
-            return Ok(());
-        }
-
-        let mut doc_parts_map: HashMap<_, Vec<_>> = HashMap::new();
-
-        let unit_iter = if self.bcx.build_config.intent.wants_deps_docs() {
-            itertools::Either::Left(self.bcx.unit_graph.keys())
-        } else {
-            itertools::Either::Right(self.bcx.roots.iter())
-        };
-
-        for unit in unit_iter {
-            if !unit.mode.is_doc() {
-                continue;
-            }
-            // Assumption: one `rustdoc` call generates only one cross-crate info JSON.
-            let outputs = self.outputs(unit)?;
-
-            let Some(doc_parts) = outputs
-                .iter()
-                .find(|o| matches!(o.flavor, FileFlavor::DocParts))
-            else {
-                continue;
-            };
-
-            doc_parts_map
-                .entry(unit.kind)
-                .or_default()
-                .push(doc_parts.path.to_owned());
-        }
-
-        self.compilation.rustdoc_fingerprints = Some(
-            doc_parts_map
-                .into_iter()
-                .map(|(kind, doc_parts)| (kind, RustdocFingerprint::new(self, kind, doc_parts)))
-                .collect(),
-        );
-
-        Ok(())
     }
 
     /// Returns the executable for the specified unit (if any).
@@ -409,34 +324,11 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
     #[tracing::instrument(skip_all)]
     pub fn prepare_units(&mut self) -> CargoResult<()> {
         let dest = self.bcx.profiles.get_dir_name();
-        // We try to only lock the artifact-dir if we need to.
-        // For example, `cargo check` does not write any files to the artifact-dir so we don't need
-        // to lock it.
-        let must_take_artifact_dir_lock = match self.bcx.build_config.intent {
-            UserIntent::Check { .. } => {
-                // Generally cargo check does not need to take the artifact-dir lock but there is
-                // one exception: If check has `--timings` we still need to lock artifact-dir since
-                // we will output the report files.
-                self.bcx.build_config.timing_report
-            }
-            UserIntent::Build
-            | UserIntent::Test
-            | UserIntent::Doc { .. }
-            | UserIntent::Doctest
-            | UserIntent::Bench => true,
-        };
-        let host_layout =
-            Layout::new(self.bcx.ws, None, &dest, must_take_artifact_dir_lock, false)?;
+        let host_layout = Layout::new(self.bcx.ws, None, &dest)?;
         let mut targets = HashMap::new();
         for kind in self.bcx.all_kinds.iter() {
             if let CompileKind::Target(target) = *kind {
-                let layout = Layout::new(
-                    self.bcx.ws,
-                    Some(target),
-                    &dest,
-                    must_take_artifact_dir_lock,
-                    false,
-                )?;
+                let layout = Layout::new(self.bcx.ws, Some(target), &dest)?;
                 targets.insert(target, layout);
             }
         }
@@ -472,22 +364,12 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
         let files = self.files.as_ref().unwrap();
         for &kind in self.bcx.all_kinds.iter() {
             let layout = files.layout(kind);
-            if let Some(artifact_dir) = layout.artifact_dir() {
-                self.compilation
-                    .root_output
-                    .insert(kind, artifact_dir.dest().to_path_buf());
-            }
-            if self.bcx.gctx.cli_unstable().build_dir_new_layout {
-                for (unit, _) in self.bcx.unit_graph.iter() {
-                    let dep_dir = self.files().deps_dir(unit);
-                    paths::create_dir_all(&dep_dir)?;
-                    self.compilation.deps_output.insert(kind, dep_dir);
-                }
-            } else {
-                self.compilation
-                    .deps_output
-                    .insert(kind, layout.build_dir().legacy_deps().to_path_buf());
-            }
+            self.compilation
+                .root_output
+                .insert(kind, layout.dest().to_path_buf());
+            self.compilation
+                .deps_output
+                .insert(kind, layout.deps().to_path_buf());
         }
         Ok(())
     }
@@ -506,73 +388,62 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
         &self.bcx.unit_graph[unit]
     }
 
-    /// Returns the `RunCustomBuild` Units associated with the given Unit.
+    /// Returns the RunCustomBuild Unit associated with the given Unit.
     ///
     /// If the package does not have a build script, this returns None.
-    pub fn find_build_script_units(&self, unit: &Unit) -> Option<Vec<Unit>> {
+    pub fn find_build_script_unit(&self, unit: &Unit) -> Option<Unit> {
         if unit.mode.is_run_custom_build() {
-            return Some(vec![unit.clone()]);
+            return Some(unit.clone());
         }
-
-        let build_script_units: Vec<Unit> = self.bcx.unit_graph[unit]
+        self.bcx.unit_graph[unit]
             .iter()
-            .filter(|unit_dep| {
+            .find(|unit_dep| {
                 unit_dep.unit.mode.is_run_custom_build()
                     && unit_dep.unit.pkg.package_id() == unit.pkg.package_id()
             })
             .map(|unit_dep| unit_dep.unit.clone())
-            .collect();
-        if build_script_units.is_empty() {
-            None
-        } else {
-            Some(build_script_units)
-        }
     }
 
-    /// Returns the metadata hash for the `RunCustomBuild` Unit associated with
+    /// Returns the metadata hash for the RunCustomBuild Unit associated with
     /// the given unit.
     ///
     /// If the package does not have a build script, this returns None.
-    pub fn find_build_script_metadatas(&self, unit: &Unit) -> Option<Vec<UnitHash>> {
-        self.find_build_script_units(unit).map(|units| {
-            units
-                .iter()
-                .map(|u| self.get_run_build_script_metadata(u))
-                .collect()
-        })
+    pub fn find_build_script_metadata(&self, unit: &Unit) -> Option<Metadata> {
+        let script_unit = self.find_build_script_unit(unit)?;
+        Some(self.get_run_build_script_metadata(&script_unit))
     }
 
-    /// Returns the metadata hash for a `RunCustomBuild` unit.
-    pub fn get_run_build_script_metadata(&self, unit: &Unit) -> UnitHash {
+    /// Returns the metadata hash for a RunCustomBuild unit.
+    pub fn get_run_build_script_metadata(&self, unit: &Unit) -> Metadata {
         assert!(unit.mode.is_run_custom_build());
-        self.files().metadata(unit).unit_id()
-    }
-
-    /// Returns the list of SBOM output file paths for a given [`Unit`].
-    pub fn sbom_output_files(&self, unit: &Unit) -> CargoResult<Vec<PathBuf>> {
-        Ok(self
-            .outputs(unit)?
-            .iter()
-            .filter(|o| o.flavor == FileFlavor::Sbom)
-            .map(|o| o.path.clone())
-            .collect())
+        self.files().metadata(unit)
     }
 
     pub fn is_primary_package(&self, unit: &Unit) -> bool {
         self.primary_packages.contains(&unit.pkg.package_id())
     }
 
+    /// Returns the list of filenames read by cargo to generate the [`BuildContext`]
+    /// (all `Cargo.toml`, etc.).
+    pub fn build_plan_inputs(&self) -> CargoResult<Vec<PathBuf>> {
+        // Keep sorted for consistency.
+        let mut inputs = BTreeSet::new();
+        // Note: dev-deps are skipped if they are not present in the unit graph.
+        for unit in self.bcx.unit_graph.keys() {
+            inputs.insert(unit.pkg.manifest_path().to_path_buf());
+        }
+        Ok(inputs.into_iter().collect())
+    }
+
     /// Returns a [`UnitOutput`] which represents some information about the
     /// output of a unit.
-    pub fn unit_output(&self, unit: &Unit, path: &Path) -> CargoResult<UnitOutput> {
-        let script_metas = self.find_build_script_metadatas(unit);
-        let env = artifact::get_env(&self, unit, self.unit_deps(unit))?;
-        Ok(UnitOutput {
+    pub fn unit_output(&self, unit: &Unit, path: &Path) -> UnitOutput {
+        let script_meta = self.find_build_script_metadata(unit);
+        UnitOutput {
             unit: unit.clone(),
             path: path.to_path_buf(),
-            script_metas,
-            env,
-        })
+            script_meta,
+        }
     }
 
     /// Check if any output file name collision happens.
@@ -580,56 +451,60 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
     #[tracing::instrument(skip_all)]
     fn check_collisions(&self) -> CargoResult<()> {
         let mut output_collisions = HashMap::new();
-        let describe_collision = |unit: &Unit, other_unit: &Unit| -> String {
+        let describe_collision = |unit: &Unit, other_unit: &Unit, path: &PathBuf| -> String {
             format!(
-                "the {} target `{}` in package `{}` has the same output filename as the {} target `{}` in package `{}`",
+                "The {} target `{}` in package `{}` has the same output \
+                     filename as the {} target `{}` in package `{}`.\n\
+                     Colliding filename is: {}\n",
                 unit.target.kind().description(),
                 unit.target.name(),
                 unit.pkg.package_id(),
                 other_unit.target.kind().description(),
                 other_unit.target.name(),
                 other_unit.pkg.package_id(),
+                path.display()
             )
         };
-        let suggestion = [
-            Level::NOTE.message("this may become a hard error in the future; see <https://github.com/rust-lang/cargo/issues/6313>"),
-            Level::HELP.message("consider changing their names to be unique or compiling them separately")
-        ];
-        let rustdoc_suggestion = [
-            Level::NOTE.message("this is a known bug where multiple crates with the same name use the same path; see <https://github.com/rust-lang/cargo/issues/6313>")
-        ];
+        let suggestion =
+            "Consider changing their names to be unique or compiling them separately.\n\
+             This may become a hard error in the future; see \
+             <https://github.com/rust-lang/cargo/issues/6313>.";
+        let rustdoc_suggestion =
+            "This is a known bug where multiple crates with the same name use\n\
+             the same path; see <https://github.com/rust-lang/cargo/issues/6313>.";
         let report_collision = |unit: &Unit,
                                 other_unit: &Unit,
                                 path: &PathBuf,
-                                messages: &[Message<'_>]|
+                                suggestion: &str|
          -> CargoResult<()> {
             if unit.target.name() == other_unit.target.name() {
-                self.bcx.gctx.shell().print_report(
-                    &[Level::WARNING
-                        .secondary_title(format!("output filename collision at {}", path.display()))
-                        .elements(
-                            [Level::NOTE.message(describe_collision(unit, other_unit))]
-                                .into_iter()
-                                .chain(messages.iter().cloned()),
-                        )],
-                    false,
-                )
+                self.bcx.gctx.shell().warn(format!(
+                    "output filename collision.\n\
+                     {}\
+                     The targets should have unique names.\n\
+                     {}",
+                    describe_collision(unit, other_unit, path),
+                    suggestion
+                ))
             } else {
-                self.bcx.gctx.shell().print_report(
-                    &[Level::WARNING
-                        .secondary_title(format!("output filename collision at {}", path.display()))
-                        .elements([
-                            Level::NOTE.message(describe_collision(unit, other_unit)),
-                            Level::NOTE.message("if this looks unexpected, it may be a bug in Cargo. Please file a bug \
-                                report at https://github.com/rust-lang/cargo/issues/ with as much information as you \
-                                can provide."),
-                            Level::NOTE.message(format!("cargo {} running on `{}` target `{}`",
-                                crate::version(), self.bcx.host_triple(), self.bcx.target_data.short_name(&unit.kind))),
-                            Level::NOTE.message(format!("first unit: {unit:?}")),
-                            Level::NOTE.message(format!("second unit: {other_unit:?}")),
-                        ])],
-                    false,
-                )
+                self.bcx.gctx.shell().warn(format!(
+                    "output filename collision.\n\
+                    {}\
+                    The output filenames should be unique.\n\
+                    {}\n\
+                    If this looks unexpected, it may be a bug in Cargo. Please file a bug report at\n\
+                    https://github.com/rust-lang/cargo/issues/ with as much information as you\n\
+                    can provide.\n\
+                    cargo {} running on `{}` target `{}`\n\
+                    First unit: {:?}\n\
+                    Second unit: {:?}",
+                    describe_collision(unit, other_unit, path),
+                    suggestion,
+                    crate::version(),
+                    self.bcx.host_triple(),
+                    self.bcx.target_data.short_name(&unit.kind),
+                    unit,
+                    other_unit))
             }
         };
 
@@ -686,31 +561,26 @@ impl<'a, 'gctx> BuildRunner<'a, 'gctx> {
                     if unit.mode.is_doc() {
                         // See https://github.com/rust-lang/rust/issues/56169
                         // and https://github.com/rust-lang/rust/issues/61378
-                        report_collision(unit, other_unit, &output.path, &rustdoc_suggestion)?;
+                        report_collision(unit, other_unit, &output.path, rustdoc_suggestion)?;
                     } else {
-                        report_collision(unit, other_unit, &output.path, &suggestion)?;
+                        report_collision(unit, other_unit, &output.path, suggestion)?;
                     }
                 }
                 if let Some(hardlink) = output.hardlink.as_ref() {
                     if let Some(other_unit) = output_collisions.insert(hardlink.clone(), unit) {
-                        report_collision(unit, other_unit, hardlink, &suggestion)?;
+                        report_collision(unit, other_unit, hardlink, suggestion)?;
                     }
                 }
                 if let Some(ref export_path) = output.export_path {
                     if let Some(other_unit) = output_collisions.insert(export_path.clone(), unit) {
-                        self.bcx.gctx.shell().print_report(
-                            &[Level::WARNING
-                                .secondary_title(format!(
-                                    "`--artifact-dir` filename collision at {}",
-                                    export_path.display()
-                                ))
-                                .elements(
-                                    [Level::NOTE.message(describe_collision(unit, other_unit))]
-                                        .into_iter()
-                                        .chain(suggestion.iter().cloned()),
-                                )],
-                            false,
-                        )?;
+                        self.bcx.gctx.shell().warn(format!(
+                            "`--artifact-dir` filename collision.\n\
+                             {}\
+                             The exported filenames should be unique.\n\
+                             {}",
+                            describe_collision(unit, other_unit, export_path),
+                            suggestion
+                        ))?;
                     }
                 }
             }

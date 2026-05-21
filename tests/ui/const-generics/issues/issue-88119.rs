@@ -1,8 +1,10 @@
-//@ check-pass
+//@ known-bug: #110395
+//@ compile-flags: -Znext-solver
 #![allow(incomplete_features)]
-#![feature(const_trait_impl, generic_const_exprs)]
+#![feature(const_trait_impl, effects, generic_const_exprs)]
 
-const trait ConstName {
+#[const_trait]
+trait ConstName {
     const NAME_BYTES: &'static [u8];
 }
 

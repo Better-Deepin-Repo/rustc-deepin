@@ -1,4 +1,3 @@
-//@ edition:2015..2021
 // Check that closure captures for slice patterns are inferred correctly
 
 fn arr_by_ref(mut x: [String; 3]) {

@@ -1,24 +1,24 @@
+use clippy_config::msrvs::{self, Msrv};
 use clippy_config::Conf;
-use clippy_utils::{sym, SpanlessEq};
 use clippy_utils::diagnostics::span_lint_and_sugg;
-use clippy_utils::msrvs::{self, Msrv};
-use clippy_utils::res::MaybeDef;
 use clippy_utils::source::snippet;
+use clippy_utils::ty::{get_type_diagnostic_name, is_type_lang_item};
+use clippy_utils::{match_def_path, paths, SpanlessEq};
 use rustc_errors::Applicability;
 use rustc_hir as hir;
-use rustc_hir::ExprKind::Assign;
 use rustc_hir::def_id::DefId;
+use rustc_hir::ExprKind::Assign;
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::impl_lint_pass;
+use rustc_span::symbol::sym;
 use rustc_span::Span;
-use rustc_span::symbol::Symbol;
 
-const ACCEPTABLE_METHODS: [Symbol; 5] = [
-    sym::binaryheap_iter,
-    sym::hashset_iter,
-    sym::btreeset_iter,
-    sym::slice_iter,
-    sym::vecdeque_iter,
+const ACCEPTABLE_METHODS: [&[&str]; 5] = [
+    &paths::BINARYHEAP_ITER,
+    &paths::HASHSET_ITER,
+    &paths::BTREESET_ITER,
+    &paths::SLICE_INTO,
+    &paths::VEC_DEQUE_ITER,
 ];
 
 declare_clippy_lint! {
@@ -50,7 +50,9 @@ pub struct ManualRetain {
 
 impl ManualRetain {
     pub fn new(conf: &'static Conf) -> Self {
-        Self { msrv: conf.msrv }
+        Self {
+            msrv: conf.msrv.clone(),
+        }
     }
 }
 
@@ -64,11 +66,13 @@ impl<'tcx> LateLintPass<'tcx> for ManualRetain {
             && let Some(collect_def_id) = cx.typeck_results().type_dependent_def_id(collect_expr.hir_id)
             && cx.tcx.is_diagnostic_item(sym::iterator_collect_fn, collect_def_id)
         {
-            check_into_iter(cx, left_expr, target_expr, expr.span, self.msrv);
-            check_iter(cx, left_expr, target_expr, expr.span, self.msrv);
-            check_to_owned(cx, left_expr, target_expr, expr.span, self.msrv);
+            check_into_iter(cx, left_expr, target_expr, expr.span, &self.msrv);
+            check_iter(cx, left_expr, target_expr, expr.span, &self.msrv);
+            check_to_owned(cx, left_expr, target_expr, expr.span, &self.msrv);
         }
     }
+
+    extract_msrv_attr!(LateContext);
 }
 
 fn check_into_iter(
@@ -76,11 +80,11 @@ fn check_into_iter(
     left_expr: &hir::Expr<'_>,
     target_expr: &hir::Expr<'_>,
     parent_expr_span: Span,
-    msrv: Msrv,
+    msrv: &Msrv,
 ) {
     if let hir::ExprKind::MethodCall(_, into_iter_expr, [_], _) = &target_expr.kind
         && let Some(filter_def_id) = cx.typeck_results().type_dependent_def_id(target_expr.hir_id)
-        && cx.tcx.is_diagnostic_item(sym::iter_filter, filter_def_id)
+        && match_def_path(cx, filter_def_id, &paths::CORE_ITER_FILTER)
         && let hir::ExprKind::MethodCall(_, struct_expr, [], _) = &into_iter_expr.kind
         && let Some(into_iter_def_id) = cx.typeck_results().type_dependent_def_id(into_iter_expr.hir_id)
         && Some(into_iter_def_id) == cx.tcx.lang_items().into_iter_fn()
@@ -88,14 +92,14 @@ fn check_into_iter(
         && SpanlessEq::new(cx).eq_expr(left_expr, struct_expr)
         && let hir::ExprKind::MethodCall(_, _, [closure_expr], _) = target_expr.kind
         && let hir::ExprKind::Closure(closure) = closure_expr.kind
-        && let filter_body = cx.tcx.hir_body(closure.body)
+        && let filter_body = cx.tcx.hir().body(closure.body)
         && let [filter_params] = filter_body.params
     {
         if match_map_type(cx, left_expr) {
-            if let hir::PatKind::Tuple([key_pat, value_pat], _) = filter_params.pat.kind
-                && let Some(sugg) = make_sugg(cx, key_pat, value_pat, left_expr, filter_body)
-            {
-                make_span_lint_and_sugg(cx, parent_expr_span, sugg);
+            if let hir::PatKind::Tuple([key_pat, value_pat], _) = filter_params.pat.kind {
+                if let Some(sugg) = make_sugg(cx, key_pat, value_pat, left_expr, filter_body) {
+                    make_span_lint_and_sugg(cx, parent_expr_span, sugg);
+                }
             }
             // Cannot lint other cases because `retain` requires two parameters
         } else {
@@ -119,23 +123,23 @@ fn check_iter(
     left_expr: &hir::Expr<'_>,
     target_expr: &hir::Expr<'_>,
     parent_expr_span: Span,
-    msrv: Msrv,
+    msrv: &Msrv,
 ) {
     if let hir::ExprKind::MethodCall(_, filter_expr, [], _) = &target_expr.kind
         && let Some(copied_def_id) = cx.typeck_results().type_dependent_def_id(target_expr.hir_id)
-        && let Some(copied_name) = cx.tcx.get_diagnostic_name(copied_def_id)
-        && matches!(copied_name, sym::iter_copied | sym::iter_cloned)
+        && (match_def_path(cx, copied_def_id, &paths::CORE_ITER_COPIED)
+            || match_def_path(cx, copied_def_id, &paths::CORE_ITER_CLONED))
         && let hir::ExprKind::MethodCall(_, iter_expr, [_], _) = &filter_expr.kind
         && let Some(filter_def_id) = cx.typeck_results().type_dependent_def_id(filter_expr.hir_id)
-        && cx.tcx.is_diagnostic_item(sym::iter_filter, filter_def_id)
+        && match_def_path(cx, filter_def_id, &paths::CORE_ITER_FILTER)
         && let hir::ExprKind::MethodCall(_, struct_expr, [], _) = &iter_expr.kind
         && let Some(iter_expr_def_id) = cx.typeck_results().type_dependent_def_id(iter_expr.hir_id)
-        && match_acceptable_sym(cx, iter_expr_def_id)
+        && match_acceptable_def_path(cx, iter_expr_def_id)
         && match_acceptable_type(cx, left_expr, msrv)
         && SpanlessEq::new(cx).eq_expr(left_expr, struct_expr)
         && let hir::ExprKind::MethodCall(_, _, [closure_expr], _) = filter_expr.kind
         && let hir::ExprKind::Closure(closure) = closure_expr.kind
-        && let filter_body = cx.tcx.hir_body(closure.body)
+        && let filter_body = cx.tcx.hir().body(closure.body)
         && let [filter_params] = filter_body.params
     {
         match filter_params.pat.kind {
@@ -157,7 +161,7 @@ fn check_iter(
                     ),
                 );
             },
-            hir::PatKind::Ref(pat, _, _) => make_span_lint_and_sugg(
+            hir::PatKind::Ref(pat, _) => make_span_lint_and_sugg(
                 cx,
                 parent_expr_span,
                 format!(
@@ -177,40 +181,41 @@ fn check_to_owned(
     left_expr: &hir::Expr<'_>,
     target_expr: &hir::Expr<'_>,
     parent_expr_span: Span,
-    msrv: Msrv,
+    msrv: &Msrv,
 ) {
-    if let hir::ExprKind::MethodCall(_, filter_expr, [], _) = &target_expr.kind
+    if msrv.meets(msrvs::STRING_RETAIN)
+        && let hir::ExprKind::MethodCall(_, filter_expr, [], _) = &target_expr.kind
         && let Some(to_owned_def_id) = cx.typeck_results().type_dependent_def_id(target_expr.hir_id)
         && cx.tcx.is_diagnostic_item(sym::to_owned_method, to_owned_def_id)
         && let hir::ExprKind::MethodCall(_, chars_expr, [_], _) = &filter_expr.kind
         && let Some(filter_def_id) = cx.typeck_results().type_dependent_def_id(filter_expr.hir_id)
-        && cx.tcx.is_diagnostic_item(sym::iter_filter, filter_def_id)
+        && match_def_path(cx, filter_def_id, &paths::CORE_ITER_FILTER)
         && let hir::ExprKind::MethodCall(_, str_expr, [], _) = &chars_expr.kind
         && let Some(chars_expr_def_id) = cx.typeck_results().type_dependent_def_id(chars_expr.hir_id)
-        && cx.tcx.is_diagnostic_item(sym::str_chars, chars_expr_def_id)
+        && match_def_path(cx, chars_expr_def_id, &paths::STR_CHARS)
         && let ty = cx.typeck_results().expr_ty(str_expr).peel_refs()
-        && ty.is_lang_item(cx, hir::LangItem::String)
+        && is_type_lang_item(cx, ty, hir::LangItem::String)
         && SpanlessEq::new(cx).eq_expr(left_expr, str_expr)
         && let hir::ExprKind::MethodCall(_, _, [closure_expr], _) = filter_expr.kind
         && let hir::ExprKind::Closure(closure) = closure_expr.kind
-        && let filter_body = cx.tcx.hir_body(closure.body)
+        && let filter_body = cx.tcx.hir().body(closure.body)
         && let [filter_params] = filter_body.params
-        && msrv.meets(cx, msrvs::STRING_RETAIN)
-        && let hir::PatKind::Ref(pat, _, _) = filter_params.pat.kind
     {
-        make_span_lint_and_sugg(
-            cx,
-            parent_expr_span,
-            format!(
-                "{}.retain(|{}| {})",
-                snippet(cx, left_expr.span, ".."),
-                snippet(cx, pat.span, ".."),
-                snippet(cx, filter_body.value.span, "..")
-            ),
-        );
+        if let hir::PatKind::Ref(pat, _) = filter_params.pat.kind {
+            make_span_lint_and_sugg(
+                cx,
+                parent_expr_span,
+                format!(
+                    "{}.retain(|{}| {})",
+                    snippet(cx, left_expr.span, ".."),
+                    snippet(cx, pat.span, ".."),
+                    snippet(cx, filter_body.value.span, "..")
+                ),
+            );
+        }
+        // Be conservative now. Do nothing for the `Binding` case.
+        // TODO: Ideally, we can rewrite the lambda by stripping one level of reference
     }
-    // Be conservative now. Do nothing for the `Binding` case.
-    // TODO: Ideally, we can rewrite the lambda by stripping one level of reference
 }
 
 fn make_sugg(
@@ -242,15 +247,15 @@ fn make_sugg(
     }
 }
 
-fn match_acceptable_sym(cx: &LateContext<'_>, collect_def_id: DefId) -> bool {
-    cx.tcx
-        .get_diagnostic_name(collect_def_id)
-        .is_some_and(|collect_name| ACCEPTABLE_METHODS.contains(&collect_name))
+fn match_acceptable_def_path(cx: &LateContext<'_>, collect_def_id: DefId) -> bool {
+    ACCEPTABLE_METHODS
+        .iter()
+        .any(|&method| match_def_path(cx, collect_def_id, method))
 }
 
-fn match_acceptable_type(cx: &LateContext<'_>, expr: &hir::Expr<'_>, msrv: Msrv) -> bool {
+fn match_acceptable_type(cx: &LateContext<'_>, expr: &hir::Expr<'_>, msrv: &Msrv) -> bool {
     let ty = cx.typeck_results().expr_ty(expr).peel_refs();
-    let required = match ty.opt_diag_name(cx) {
+    let required = match get_type_diagnostic_name(cx, ty) {
         Some(sym::BinaryHeap) => msrvs::BINARY_HEAP_RETAIN,
         Some(sym::BTreeSet) => msrvs::BTREE_SET_RETAIN,
         Some(sym::BTreeMap) => msrvs::BTREE_MAP_RETAIN,
@@ -259,12 +264,12 @@ fn match_acceptable_type(cx: &LateContext<'_>, expr: &hir::Expr<'_>, msrv: Msrv)
         Some(sym::Vec | sym::VecDeque) => return true,
         _ => return false,
     };
-    msrv.meets(cx, required)
+    msrv.meets(required)
 }
 
 fn match_map_type(cx: &LateContext<'_>, expr: &hir::Expr<'_>) -> bool {
     let ty = cx.typeck_results().expr_ty(expr).peel_refs();
-    matches!(ty.opt_diag_name(cx), Some(sym::BTreeMap | sym::HashMap))
+    matches!(get_type_diagnostic_name(cx, ty), Some(sym::BTreeMap | sym::HashMap))
 }
 
 fn make_span_lint_and_sugg(cx: &LateContext<'_>, span: Span, sugg: String) {

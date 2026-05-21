@@ -29,9 +29,6 @@
 //! eliminates the `Destroyed` state for these values, which can allow more niche
 //! optimizations to occur for the `State` enum. For `Drop` types, `()` is used.
 
-use crate::cell::Cell;
-use crate::ptr;
-
 mod eager;
 mod lazy;
 
@@ -47,32 +44,29 @@ pub use lazy::Storage as LazyStorage;
 )]
 #[allow_internal_unsafe]
 #[unstable(feature = "thread_local_internals", issue = "none")]
-#[rustc_macro_transparency = "semiopaque"]
+#[rustc_macro_transparency = "semitransparent"]
 pub macro thread_local_inner {
-    // NOTE: we cannot import `LocalKey`, `LazyStorage` or `EagerStorage` with a `use` because that
-    // can shadow user provided type or type alias with a matching name. Please update the shadowing
-    // test in `tests/thread.rs` if these types are renamed.
-
-    // Used to generate the `LocalKey` value for const-initialized thread locals.
-    (@key $t:ty, $(#[$align_attr:meta])*, const $init:expr) => {{
-        const __RUST_STD_INTERNAL_INIT: $t = $init;
+    // used to generate the `LocalKey` value for const-initialized thread locals
+    (@key $t:ty, const $init:expr) => {{
+        const __INIT: $t = $init;
 
         unsafe {
-            $crate::thread::LocalKey::new(const {
-                if $crate::mem::needs_drop::<$t>() {
+            use $crate::mem::needs_drop;
+            use $crate::thread::LocalKey;
+            use $crate::thread::local_impl::EagerStorage;
+
+            LocalKey::new(const {
+                if needs_drop::<$t>() {
                     |_| {
                         #[thread_local]
-                        $(#[$align_attr])*
-                        static __RUST_STD_INTERNAL_VAL: $crate::thread::local_impl::EagerStorage<$t>
-                            = $crate::thread::local_impl::EagerStorage::new(__RUST_STD_INTERNAL_INIT);
-                        __RUST_STD_INTERNAL_VAL.get()
+                        static VAL: EagerStorage<$t> = EagerStorage::new(__INIT);
+                        VAL.get()
                     }
                 } else {
                     |_| {
                         #[thread_local]
-                        $(#[$align_attr])*
-                        static __RUST_STD_INTERNAL_VAL: $t = __RUST_STD_INTERNAL_INIT;
-                        &__RUST_STD_INTERNAL_VAL
+                        static VAL: $t = __INIT;
+                        &VAL
                     }
                 }
             })
@@ -80,60 +74,36 @@ pub macro thread_local_inner {
     }},
 
     // used to generate the `LocalKey` value for `thread_local!`
-    (@key $t:ty, $(#[$align_attr:meta])*, $init:expr) => {{
+    (@key $t:ty, $init:expr) => {{
         #[inline]
-        fn __rust_std_internal_init_fn() -> $t {
+        fn __init() -> $t {
             $init
         }
 
         unsafe {
-            $crate::thread::LocalKey::new(const {
-                if $crate::mem::needs_drop::<$t>() {
-                    |__rust_std_internal_init| {
+            use $crate::mem::needs_drop;
+            use $crate::thread::LocalKey;
+            use $crate::thread::local_impl::LazyStorage;
+
+            LocalKey::new(const {
+                if needs_drop::<$t>() {
+                    |init| {
                         #[thread_local]
-                        $(#[$align_attr])*
-                        static __RUST_STD_INTERNAL_VAL: $crate::thread::local_impl::LazyStorage<$t, ()>
-                            = $crate::thread::local_impl::LazyStorage::new();
-                        __RUST_STD_INTERNAL_VAL.get_or_init(__rust_std_internal_init, __rust_std_internal_init_fn)
+                        static VAL: LazyStorage<$t, ()> = LazyStorage::new();
+                        VAL.get_or_init(init, __init)
                     }
                 } else {
-                    |__rust_std_internal_init| {
+                    |init| {
                         #[thread_local]
-                        $(#[$align_attr])*
-                        static __RUST_STD_INTERNAL_VAL: $crate::thread::local_impl::LazyStorage<$t, !>
-                            = $crate::thread::local_impl::LazyStorage::new();
-                        __RUST_STD_INTERNAL_VAL.get_or_init(__rust_std_internal_init, __rust_std_internal_init_fn)
+                        static VAL: LazyStorage<$t, !> = LazyStorage::new();
+                        VAL.get_or_init(init, __init)
                     }
                 }
             })
         }
     }},
-}
-
-#[rustc_macro_transparency = "semiopaque"]
-pub(crate) macro local_pointer {
-    () => {},
-    ($vis:vis static $name:ident; $($rest:tt)*) => {
-        #[thread_local]
-        $vis static $name: $crate::sys::thread_local::LocalPointer = $crate::sys::thread_local::LocalPointer::__new();
-        $crate::sys::thread_local::local_pointer! { $($rest)* }
+    ($(#[$attr:meta])* $vis:vis $name:ident, $t:ty, $($init:tt)*) => {
+        $(#[$attr])* $vis const $name: $crate::thread::LocalKey<$t> =
+            $crate::thread::local_impl::thread_local_inner!(@key $t, $($init)*);
     },
-}
-
-pub(crate) struct LocalPointer {
-    p: Cell<*mut ()>,
-}
-
-impl LocalPointer {
-    pub const fn __new() -> LocalPointer {
-        LocalPointer { p: Cell::new(ptr::null_mut()) }
-    }
-
-    pub fn get(&self) -> *mut () {
-        self.p.get()
-    }
-
-    pub fn set(&self, p: *mut ()) {
-        self.p.set(p)
-    }
 }

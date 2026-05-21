@@ -3,23 +3,34 @@
 //! All the static files are included here for centralized access in case anything other than the
 //! HTML rendering code (say, the theme checker) needs to access one of these files.
 
+use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::{fmt, str};
 
+use rustc_data_structures::fx::FxHasher;
+
 pub(crate) struct StaticFile {
     pub(crate) filename: PathBuf,
-    pub(crate) src_bytes: &'static [u8],
-    pub(crate) minified_bytes: &'static [u8],
+    pub(crate) bytes: &'static [u8],
 }
 
 impl StaticFile {
-    fn new(
-        filename: &str,
-        src_bytes: &'static [u8],
-        minified_bytes: &'static [u8],
-        sha256: &'static str,
-    ) -> StaticFile {
-        Self { filename: static_filename(filename, sha256), src_bytes, minified_bytes }
+    fn new(filename: &str, bytes: &'static [u8]) -> StaticFile {
+        Self { filename: static_filename(filename, bytes), bytes }
+    }
+
+    pub(crate) fn minified(&self) -> Vec<u8> {
+        let extension = match self.filename.extension() {
+            Some(e) => e,
+            None => return self.bytes.to_owned(),
+        };
+        if extension == "css" {
+            minifier::css::minify(str::from_utf8(self.bytes).unwrap()).unwrap().to_string().into()
+        } else if extension == "js" {
+            minifier::js::minify(str::from_utf8(self.bytes).unwrap()).to_string().into()
+        } else {
+            self.bytes.to_owned()
+        }
     }
 
     pub(crate) fn output_filename(&self) -> &Path {
@@ -47,9 +58,15 @@ pub(crate) fn suffix_path(filename: &str, suffix: &str) -> PathBuf {
     filename.into()
 }
 
-pub(crate) fn static_filename(filename: &str, sha256: &str) -> PathBuf {
+pub(crate) fn static_filename(filename: &str, contents: &[u8]) -> PathBuf {
     let filename = filename.rsplit('/').next().unwrap();
-    suffix_path(filename, sha256)
+    suffix_path(filename, &static_suffix(contents))
+}
+
+fn static_suffix(bytes: &[u8]) -> String {
+    let mut hasher = FxHasher::default();
+    hasher.write(bytes);
+    format!("-{:016x}", hasher.finish())
 }
 
 macro_rules! static_files {
@@ -58,9 +75,8 @@ macro_rules! static_files {
             $(pub $field: StaticFile,)+
         }
 
-        // sha256 files are generated in build.rs
         pub(crate) static STATIC_FILES: std::sync::LazyLock<StaticFiles> = std::sync::LazyLock::new(|| StaticFiles {
-            $($field: StaticFile::new($file_path, include_bytes!($file_path), include_bytes!(concat!(env!("OUT_DIR"), "/", $file_path, ".min")), include_str!(concat!(env!("OUT_DIR"), "/", $file_path, ".sha256"))),)+
+            $($field: StaticFile::new($file_path, include_bytes!($file_path)),)+
         });
 
         pub(crate) fn for_each<E>(f: impl Fn(&StaticFile) -> Result<(), E>) -> Result<(), E> {
@@ -80,7 +96,6 @@ static_files! {
     normalize_css => "static/css/normalize.css",
     main_js => "static/js/main.js",
     search_js => "static/js/search.js",
-    stringdex_js => "static/js/stringdex.js",
     settings_js => "static/js/settings.js",
     src_script_js => "static/js/src-script.js",
     storage_js => "static/js/storage.js",
@@ -91,15 +106,10 @@ static_files! {
     rust_logo_svg => "static/images/rust-logo.svg",
     rust_favicon_svg => "static/images/favicon.svg",
     rust_favicon_png_32 => "static/images/favicon-32x32.png",
-    fira_sans_italic => "static/fonts/FiraSans-Italic.woff2",
     fira_sans_regular => "static/fonts/FiraSans-Regular.woff2",
     fira_sans_medium => "static/fonts/FiraSans-Medium.woff2",
-    fira_sans_medium_italic => "static/fonts/FiraSans-MediumItalic.woff2",
-    fira_mono_regular => "static/fonts/FiraMono-Regular.woff2",
-    fira_mono_medium => "static/fonts/FiraMono-Medium.woff2",
     fira_sans_license => "static/fonts/FiraSans-LICENSE.txt",
     source_serif_4_regular => "static/fonts/SourceSerif4-Regular.ttf.woff2",
-    source_serif_4_semibold => "static/fonts/SourceSerif4-Semibold.ttf.woff2",
     source_serif_4_bold => "static/fonts/SourceSerif4-Bold.ttf.woff2",
     source_serif_4_italic => "static/fonts/SourceSerif4-It.ttf.woff2",
     source_serif_4_license => "static/fonts/SourceSerif4-LICENSE.md",
@@ -107,8 +117,6 @@ static_files! {
     source_code_pro_semibold => "static/fonts/SourceCodePro-Semibold.ttf.woff2",
     source_code_pro_italic => "static/fonts/SourceCodePro-It.ttf.woff2",
     source_code_pro_license => "static/fonts/SourceCodePro-LICENSE.txt",
-    nanum_barun_gothic_regular => "static/fonts/NanumBarunGothic.ttf.woff2",
-    nanum_barun_gothic_license => "static/fonts/NanumBarunGothic-LICENSE.txt",
 }
 
 pub(crate) static SCRAPE_EXAMPLES_HELP_MD: &str = include_str!("static/scrape-examples-help.md");

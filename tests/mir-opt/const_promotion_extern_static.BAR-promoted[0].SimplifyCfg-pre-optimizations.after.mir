@@ -15,4 +15,6 @@ const BAR::promoted[0]: &[&i32; 1] = {
     }
 }
 
-ALLOC0 (static: Y)
+ALLOC0 (static: Y, size: 4, align: 4) {
+    2a 00 00 00                                     │ *...
+}

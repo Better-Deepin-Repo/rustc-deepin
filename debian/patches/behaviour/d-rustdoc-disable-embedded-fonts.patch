@@ -10,17 +10,17 @@ Forwarded: not-needed
  2 files changed, 10 deletions(-)
 
 diff --git a/src/librustdoc/html/static/css/rustdoc.css b/src/librustdoc/html/static/css/rustdoc.css
-index 9e47f80..613b4c6 100644
+index 28df8d3..477e491 100644
 --- a/src/librustdoc/html/static/css/rustdoc.css
 +++ b/src/librustdoc/html/static/css/rustdoc.css
-@@ -179,14 +179,6 @@ xmlns="http://www.w3.org/2000/svg" fill="black" height="18px">\
+@@ -105,14 +105,6 @@ xmlns="http://www.w3.org/2000/svg" fill="black" height="18px">\
  	font-display: swap;
  }
  
 -/* Avoid using legacy CJK serif fonts in Windows like Batang. */
 -@font-face {
 -	font-family: 'NanumBarunGothic';
--	src: url("NanumBarunGothic-13b3dcba.ttf.woff2") format("woff2");
+-	src: url("NanumBarunGothic-0f09457c7a19b7c6.ttf.woff2") format("woff2");
 -	font-display: swap;
 -	unicode-range: U+AC00-D7AF, U+1100-11FF, U+3130-318F, U+A960-A97F, U+D7B0-D7FF;
 -}
@@ -29,10 +29,10 @@ index 9e47f80..613b4c6 100644
  	box-sizing: border-box;
  }
 diff --git a/src/librustdoc/html/static_files.rs b/src/librustdoc/html/static_files.rs
-index e670c2f..3a09bff 100644
+index 6157598..aed3928 100644
 --- a/src/librustdoc/html/static_files.rs
 +++ b/src/librustdoc/html/static_files.rs
-@@ -107,8 +107,6 @@ static_files! {
+@@ -117,8 +117,6 @@ static_files! {
      source_code_pro_semibold => "static/fonts/SourceCodePro-Semibold.ttf.woff2",
      source_code_pro_italic => "static/fonts/SourceCodePro-It.ttf.woff2",
      source_code_pro_license => "static/fonts/SourceCodePro-LICENSE.txt",

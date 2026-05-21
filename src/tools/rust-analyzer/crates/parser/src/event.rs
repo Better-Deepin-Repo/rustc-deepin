@@ -5,14 +5,14 @@
 use std::mem;
 
 use crate::{
-    SyntaxKind::{self, *},
     output::Output,
+    SyntaxKind::{self, *},
 };
 
 /// `Parser` produces a flat list of `Event`s.
 /// They are converted to a tree-structure in
 /// a separate pass, via `TreeBuilder`.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) enum Event {
     /// This event signifies the start of the node.
     /// It should be either abandoned (in which case the

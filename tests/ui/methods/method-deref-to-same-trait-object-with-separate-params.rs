@@ -1,7 +1,6 @@
-//@ dont-require-annotations: NOTE
-
 #![feature(arbitrary_self_types, coerce_unsized, dispatch_from_dyn, unsize)]
-#![feature(unsized_fn_params)]
+#![feature(unsized_locals, unsized_fn_params)]
+//~^ WARN the feature `unsized_locals` is incomplete
 
 // This tests a few edge-cases around `arbitrary_self_types`. Most specifically,
 // it checks that the `ObjectCandidate` you get from method matching can't
@@ -86,7 +85,7 @@ fn objectcandidate_impl() {
 
     // Observe the type of `z` is `u32`
     let _seetype: () = z; //~ ERROR mismatched types
-    //~| NOTE expected `()`, found `u32`
+    //~| expected `()`, found `u32`
 }
 
 fn traitcandidate_impl() {
@@ -103,7 +102,7 @@ fn traitcandidate_impl() {
 
     // Observe the type of `z` is `u64`
     let _seetype: () = z; //~ ERROR mismatched types
-    //~| NOTE expected `()`, found `u64`
+    //~| expected `()`, found `u64`
 }
 
 fn traitcandidate_impl_with_nuisance() {
@@ -138,7 +137,7 @@ fn neither_impl() {
 
     // Observe the type of `z` is `u8`
     let _seetype: () = z; //~ ERROR mismatched types
-    //~| NOTE expected `()`, found `u8`
+    //~| expected `()`, found `u8`
 }
 
 fn both_impls() {
@@ -156,7 +155,7 @@ fn both_impls() {
 
     // Observe the type of `z` is `u32`
     let _seetype: () = z; //~ ERROR mismatched types
-    //~| NOTE expected `()`, found `u32`
+    //~| expected `()`, found `u32`
 }
 
 
@@ -173,7 +172,7 @@ fn both_impls_with_nuisance() {
 
     // Observe the type of `z` is `u32`
     let _seetype: () = z; //~ ERROR mismatched types
-    //~| NOTE expected `()`, found `u32`
+    //~| expected `()`, found `u32`
 }
 
 fn main() {

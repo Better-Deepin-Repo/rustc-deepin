@@ -75,7 +75,3 @@
       }
   }
   
-  ALLOC0 (size: 1, align: 1) {
-      61                                              │ a
-  }
-  

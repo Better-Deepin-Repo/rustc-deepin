@@ -1,30 +1,30 @@
 use crate::spec::{
-    Arch, Cc, CodeModel, LinkerFlavor, Lld, Os, PanicStrategy, RelocModel, SanitizerSet, Target,
-    TargetMetadata, TargetOptions, cvs,
+    cvs, Cc, CodeModel, LinkerFlavor, Lld, PanicStrategy, RelocModel, SanitizerSet, Target,
+    TargetOptions,
 };
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     Target {
         data_layout: "e-m:e-p:64:64-i64:64-i128:128-n32:64-S128".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: None,
-            tier: Some(3),
+            tier: None,
             host_tools: None,
-            std: Some(true),
+            std: None,
         },
         llvm_target: "riscv64".into(),
         pointer_width: 64,
-        arch: Arch::RiscV64,
+        arch: "riscv64".into(),
 
         options: TargetOptions {
             families: cvs!["unix"],
-            os: Os::NuttX,
+            os: "nuttx".into(),
             linker_flavor: LinkerFlavor::Gnu(Cc::No, Lld::Yes),
             linker: Some("rust-lld".into()),
             llvm_abiname: "lp64d".into(),
             cpu: "generic-rv64".into(),
             max_atomic_width: Some(64),
-            features: "+m,+a,+f,+d,+c,+zicsr,+zifencei".into(),
+            features: "+m,+a,+f,+d,+c".into(),
             panic_strategy: PanicStrategy::Abort,
             relocation_model: RelocModel::Static,
             code_model: Some(CodeModel::Medium),

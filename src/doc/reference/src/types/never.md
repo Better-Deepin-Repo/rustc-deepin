@@ -1,19 +1,14 @@
-r[type.never]
 # Never type
 
-r[type.never.syntax]
-```grammar,types
-NeverType -> `!`
-```
+> **<sup>Syntax</sup>**\
+> _NeverType_ : `!`
 
-r[type.never.intro]
-The never type `!` is a type with no values, representing the result of computations that never complete.
+The never type `!` is a type with no values, representing the result of
+computations that never complete. Expressions of type `!` can be coerced into
+any other type.
 
-r[type.never.coercion]
-Expressions of type `!` can be coerced into any other type.
-
-r[type.never.constraint]
-The `!` type can **only** appear in function return types presently, indicating it is a diverging function that never returns.
+The `!` type can **only** appear in function return types presently,
+indicating it is a diverging function that never returns.
 
 ```rust
 fn foo() -> ! {

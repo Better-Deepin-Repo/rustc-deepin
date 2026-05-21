@@ -1,5 +1,6 @@
 //@ run-pass
 
+#![feature(control_flow_enum)]
 #![feature(try_trait_v2)]
 
 use std::ops::{ControlFlow, FromResidual, Try};

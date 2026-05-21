@@ -4,7 +4,6 @@
 //@ revisions:cfail1 cfail2
 //@ compile-flags: -Z query-dep-graph
 //@ build-pass (FIXME(62277): could be check-pass?)
-//@ ignore-backends: gcc
 
 #![feature(rustc_attrs)]
 #![feature(stmt_expr_attributes)]

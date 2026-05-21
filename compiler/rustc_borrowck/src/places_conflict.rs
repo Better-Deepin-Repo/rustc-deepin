@@ -3,7 +3,7 @@
 //! we can prove overlap one way or another. Essentially, we treat `Overlap` as
 //! a monoid and report a conflict if the product ends up not being `Disjoint`.
 //!
-//! On each step, if we didn't run out of borrow or place, we know that our elements
+//! At each step, if we didn't run out of borrow or place, we know that our elements
 //! have the same type, and that they only overlap if they are the identical.
 //!
 //! For example, if we are comparing these:
@@ -249,8 +249,8 @@ fn place_components_conflict<'tcx>(
                 | (ProjectionElem::ConstantIndex { .. }, _, _)
                 | (ProjectionElem::Subslice { .. }, _, _)
                 | (ProjectionElem::OpaqueCast { .. }, _, _)
-                | (ProjectionElem::Downcast { .. }, _, _)
-                | (ProjectionElem::UnwrapUnsafeBinder(_), _, _) => {
+                | (ProjectionElem::Subtype(_), _, _)
+                | (ProjectionElem::Downcast { .. }, _, _) => {
                     // Recursive case. This can still be disjoint on a
                     // further iteration if this a shallow access and
                     // there's a deref later on, e.g., a borrow
@@ -509,6 +509,7 @@ fn place_projection_conflict<'tcx>(
             | ProjectionElem::Field(..)
             | ProjectionElem::Index(..)
             | ProjectionElem::ConstantIndex { .. }
+            | ProjectionElem::Subtype(_)
             | ProjectionElem::OpaqueCast { .. }
             | ProjectionElem::Subslice { .. }
             | ProjectionElem::Downcast(..),
@@ -518,9 +519,5 @@ fn place_projection_conflict<'tcx>(
             pi1_elem,
             pi2_elem
         ),
-
-        (ProjectionElem::UnwrapUnsafeBinder(_), _) => {
-            todo!()
-        }
     }
 }

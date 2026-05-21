@@ -1,21 +1,15 @@
 #![warn(clippy::panicking_overflow_checks)]
-#![allow(clippy::needless_ifs)]
+#![allow(clippy::needless_if)]
 
 fn test(a: u32, b: u32, c: u32) {
-    if a + b < a {}
-    //~^ panicking_overflow_checks
-    if a > a + b {}
-    //~^ panicking_overflow_checks
-    if a + b < b {}
-    //~^ panicking_overflow_checks
-    if b > a + b {}
-    //~^ panicking_overflow_checks
+    if a + b < a {} //~ panicking_overflow_checks
+    if a > a + b {} //~ panicking_overflow_checks
+    if a + b < b {} //~ panicking_overflow_checks
+    if b > a + b {} //~ panicking_overflow_checks
     if a - b > b {}
     if b < a - b {}
-    if a - b > a {}
-    //~^ panicking_overflow_checks
-    if a < a - b {}
-    //~^ panicking_overflow_checks
+    if a - b > a {} //~ panicking_overflow_checks
+    if a < a - b {} //~ panicking_overflow_checks
     if a + b < c {}
     if c > a + b {}
     if a - b < c {}
@@ -28,4 +22,6 @@ fn test(a: u32, b: u32, c: u32) {
     if i - j < i {}
 }
 
-fn main() {}
+fn main() {
+    test(1, 2, 3)
+}

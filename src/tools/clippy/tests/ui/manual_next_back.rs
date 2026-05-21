@@ -30,7 +30,5 @@ fn main() {
 
     // should lint
     let _ = (0..10).rev().next().unwrap();
-    //~^ manual_next_back
     let _ = "something".bytes().rev().next();
-    //~^ manual_next_back
 }

@@ -1,4 +1,4 @@
-// rustfmt-style_edition: 2015
+// rustfmt-version: One
 
 fn plain_if(x: bool) -> u8 {
     if x {

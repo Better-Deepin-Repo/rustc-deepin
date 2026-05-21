@@ -1,7 +1,6 @@
 //@ run-pass
 //@ edition:2021
-//@ proc-macro: reserved-prefixes-macro-2018.rs
-//@ ignore-backends: gcc
+//@ aux-build:reserved-prefixes-macro-2018.rs
 
 extern crate reserved_prefixes_macro_2018 as m2018;
 

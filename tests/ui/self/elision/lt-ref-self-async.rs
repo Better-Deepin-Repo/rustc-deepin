@@ -1,6 +1,6 @@
 //@ edition:2018
 //@ run-rustfix
-#![allow(non_snake_case, dead_code, mismatched_lifetime_syntaxes)]
+#![allow(non_snake_case, dead_code)]
 
 use std::pin::Pin;
 

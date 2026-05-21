@@ -9,12 +9,12 @@ pub trait plus {
 }
 
 mod a {
-    use crate::plus;
+    use plus;
     impl plus for usize { fn plus(&self) -> isize { *self as isize + 20 } }
 }
 
 mod b {
-    use crate::plus;
+    use plus;
     impl plus for String { fn plus(&self) -> isize { 200 } }
 }
 

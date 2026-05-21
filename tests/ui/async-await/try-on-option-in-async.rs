@@ -1,3 +1,4 @@
+#![feature(async_closure)]
 //@ edition:2018
 fn main() {}
 

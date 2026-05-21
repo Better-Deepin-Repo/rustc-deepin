@@ -1,3 +1,5 @@
-fn f() -> isize { true } //~ ERROR mismatched types
+//@ error-pattern:mismatched types
+
+fn f() -> isize { true }
 
 fn main() { }

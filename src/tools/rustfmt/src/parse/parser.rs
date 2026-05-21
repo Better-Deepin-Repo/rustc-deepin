@@ -1,16 +1,16 @@
-use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 
-use rustc_ast::{ast, attr};
+use rustc_ast::token::TokenKind;
+use rustc_ast::{ast, attr, ptr};
 use rustc_errors::Diag;
-use rustc_parse::lexer::StripTokens;
 use rustc_parse::parser::Parser as RawParser;
-use rustc_parse::{exp, new_parser_from_file, new_parser_from_source_str, unwrap_or_emit_fatal};
-use rustc_span::{Span, sym};
+use rustc_parse::{new_parser_from_file, new_parser_from_source_str, unwrap_or_emit_fatal};
+use rustc_span::{sym, Span};
 use thin_vec::ThinVec;
 
-use crate::Input;
 use crate::parse::session::ParseSess;
+use crate::Input;
 
 pub(crate) type DirectoryOwnership = rustc_expand::module::DirOwnership;
 pub(crate) type ModulePathSuccess = rustc_expand::module::ModulePathSuccess;
@@ -65,14 +65,11 @@ impl<'a> ParserBuilder<'a> {
         input: Input,
     ) -> Result<RawParser<'a>, Vec<Diag<'a>>> {
         match input {
-            Input::File(ref file) => {
-                new_parser_from_file(psess, file, StripTokens::ShebangAndFrontmatter, None)
-            }
+            Input::File(ref file) => new_parser_from_file(psess, file, None),
             Input::Text(text) => new_parser_from_source_str(
                 psess,
                 rustc_span::FileName::Custom("stdin".to_owned()),
                 text,
-                StripTokens::ShebangAndFrontmatter,
             ),
         }
     }
@@ -106,15 +103,11 @@ impl<'a> Parser<'a> {
         psess: &'a ParseSess,
         path: &Path,
         span: Span,
-    ) -> Result<(ast::AttrVec, ThinVec<Box<ast::Item>>, Span), ParserError> {
+    ) -> Result<(ast::AttrVec, ThinVec<ptr::P<ast::Item>>, Span), ParserError> {
         let result = catch_unwind(AssertUnwindSafe(|| {
-            let mut parser = unwrap_or_emit_fatal(new_parser_from_file(
-                psess.inner(),
-                path,
-                StripTokens::ShebangAndFrontmatter,
-                Some(span),
-            ));
-            match parser.parse_mod(exp!(Eof)) {
+            let mut parser =
+                unwrap_or_emit_fatal(new_parser_from_file(psess.inner(), path, Some(span)));
+            match parser.parse_mod(&TokenKind::Eof) {
                 Ok((a, i, spans)) => Some((a, i, spans.inner_span)),
                 Err(e) => {
                     e.emit();

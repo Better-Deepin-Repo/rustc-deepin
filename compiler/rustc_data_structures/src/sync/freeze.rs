@@ -1,11 +1,13 @@
 use std::cell::UnsafeCell;
-use std::hint;
+use std::intrinsics::likely;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
-use crate::sync::{DynSend, DynSync, ReadGuard, RwLock, WriteGuard};
+use crate::sync::{AtomicBool, ReadGuard, RwLock, WriteGuard};
+#[cfg(parallel_compiler)]
+use crate::sync::{DynSend, DynSync};
 
 /// A type which allows mutation using a lock until
 /// the value is frozen and can be accessed lock-free.
@@ -20,6 +22,7 @@ pub struct FreezeLock<T> {
     lock: RwLock<()>,
 }
 
+#[cfg(parallel_compiler)]
 unsafe impl<T: DynSync + DynSend> DynSync for FreezeLock<T> {}
 
 impl<T> FreezeLock<T> {
@@ -60,11 +63,10 @@ impl<T> FreezeLock<T> {
     /// Get the inner value if frozen.
     #[inline]
     pub fn get(&self) -> Option<&T> {
-        if self.frozen.load(Ordering::Acquire) {
+        if likely(self.frozen.load(Ordering::Acquire)) {
             // SAFETY: This is frozen so the data cannot be modified.
             unsafe { Some(&*self.data.get()) }
         } else {
-            hint::cold_path();
             None
         }
     }
@@ -89,7 +91,7 @@ impl<T> FreezeLock<T> {
     #[inline]
     #[track_caller]
     pub fn write(&self) -> FreezeWriteGuard<'_, T> {
-        self.try_write().expect("data should not be frozen if we're still attempting to mutate it")
+        self.try_write().expect("still mutable")
     }
 
     #[inline]

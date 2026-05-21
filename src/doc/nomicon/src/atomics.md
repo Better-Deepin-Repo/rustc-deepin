@@ -4,7 +4,7 @@ Rust pretty blatantly just inherits the memory model for atomics from C++20. Thi
 due to this model being particularly excellent or easy to understand. Indeed,
 this model is quite complex and known to have [several flaws][C11-busted].
 Rather, it is a pragmatic concession to the fact that *everyone* is pretty bad
-at modeling atomics. At the very least, we can benefit from existing tooling and
+at modeling atomics. At very least, we can benefit from existing tooling and
 research around the C/C++ memory model.
 (You'll often see this model referred to as "C/C++11" or just "C11". C just copies
 the C++ memory model; and C++11 was the first version of the model but it has
@@ -206,7 +206,7 @@ fn main() {
     // ... distribute lock to threads somehow ...
 
     // Try to acquire the lock by setting it to true
-    while lock.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() { }
+    while lock.compare_and_swap(false, true, Ordering::Acquire) { }
     // broke out of the loop, so we successfully acquired the lock!
 
     // ... scary data accesses ...

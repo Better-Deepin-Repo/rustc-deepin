@@ -1,4 +1,3 @@
-use crate::marker::{Destruct, PhantomData};
 use crate::ops::ControlFlow;
 
 /// The `?` operator and `try {}` blocks.
@@ -113,26 +112,25 @@ use crate::ops::ControlFlow;
 ///     R::from_output(accum)
 /// }
 /// ```
-#[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
+#[unstable(feature = "try_trait_v2", issue = "84277")]
 #[rustc_on_unimplemented(
     on(
         all(from_desugaring = "TryBlock"),
         message = "a `try` block must return `Result` or `Option` \
-                    (or another type that implements `{This}`)",
+                    (or another type that implements `{Try}`)",
         label = "could not wrap the final value of the block as `{Self}` doesn't implement `Try`",
     ),
     on(
         all(from_desugaring = "QuestionMark"),
-        message = "the `?` operator can only be applied to values that implement `{This}`",
+        message = "the `?` operator can only be applied to values that implement `{Try}`",
         label = "the `?` operator cannot be applied to type `{Self}`"
     )
 )]
 #[doc(alias = "?")]
 #[lang = "Try"]
-#[rustc_const_unstable(feature = "const_try", issue = "74935")]
-pub const trait Try: [const] FromResidual {
+pub trait Try: FromResidual {
     /// The type of the value produced by `?` when *not* short-circuiting.
-    #[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
+    #[unstable(feature = "try_trait_v2", issue = "84277")]
     type Output;
 
     /// The type of the value passed to [`FromResidual::from_residual`]
@@ -156,7 +154,7 @@ pub const trait Try: [const] FromResidual {
     /// then typically you can use `Foo<std::convert::Infallible>` as its `Residual`
     /// type: that type will have a "hole" in the correct place, and will maintain the
     /// "foo-ness" of the residual so other types need to opt-in to interconversion.
-    #[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
+    #[unstable(feature = "try_trait_v2", issue = "84277")]
     type Residual;
 
     /// Constructs the type from its `Output` type.
@@ -188,7 +186,7 @@ pub const trait Try: [const] FromResidual {
     /// assert_eq!(r, Some(4));
     /// ```
     #[lang = "from_output"]
-    #[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
+    #[unstable(feature = "try_trait_v2", issue = "84277")]
     fn from_output(output: Self::Output) -> Self;
 
     /// Used in `?` to decide whether the operator should produce a value
@@ -215,7 +213,7 @@ pub const trait Try: [const] FromResidual {
     /// );
     /// ```
     #[lang = "branch"]
-    #[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
+    #[unstable(feature = "try_trait_v2", issue = "84277")]
     fn branch(self) -> ControlFlow<Self::Residual, Self::Output>;
 }
 
@@ -228,7 +226,7 @@ pub const trait Try: [const] FromResidual {
     on(
         all(
             from_desugaring = "QuestionMark",
-            Self = "core::result::Result<T, E>",
+            _Self = "core::result::Result<T, E>",
             R = "core::option::Option<core::convert::Infallible>",
         ),
         message = "the `?` operator can only be used on `Result`s, not `Option`s, \
@@ -239,7 +237,7 @@ pub const trait Try: [const] FromResidual {
     on(
         all(
             from_desugaring = "QuestionMark",
-            Self = "core::result::Result<T, E>",
+            _Self = "core::result::Result<T, E>",
         ),
         // There's a special error message in the trait selection code for
         // `From` in `?`, so this is not shown for result-in-result errors,
@@ -252,7 +250,7 @@ pub const trait Try: [const] FromResidual {
     on(
         all(
             from_desugaring = "QuestionMark",
-            Self = "core::option::Option<T>",
+            _Self = "core::option::Option<T>",
             R = "core::result::Result<T, E>",
         ),
         message = "the `?` operator can only be used on `Option`s, not `Result`s, \
@@ -263,7 +261,7 @@ pub const trait Try: [const] FromResidual {
     on(
         all(
             from_desugaring = "QuestionMark",
-            Self = "core::option::Option<T>",
+            _Self = "core::option::Option<T>",
         ),
         // `Option`-in-`Option` always works, as there's only one possible
         // residual, so this can also be phrased strongly.
@@ -275,7 +273,7 @@ pub const trait Try: [const] FromResidual {
     on(
         all(
             from_desugaring = "QuestionMark",
-            Self = "core::ops::control_flow::ControlFlow<B, C>",
+            _Self = "core::ops::control_flow::ControlFlow<B, C>",
             R = "core::ops::control_flow::ControlFlow<B, C>",
         ),
         message = "the `?` operator in {ItemContext} that returns `ControlFlow<B, _>` \
@@ -287,7 +285,7 @@ pub const trait Try: [const] FromResidual {
     on(
         all(
             from_desugaring = "QuestionMark",
-            Self = "core::ops::control_flow::ControlFlow<B, C>",
+            _Self = "core::ops::control_flow::ControlFlow<B, C>",
             // `R` is not a `ControlFlow`, as that case was matched previously
         ),
         message = "the `?` operator can only be used on `ControlFlow`s \
@@ -299,15 +297,14 @@ pub const trait Try: [const] FromResidual {
         all(from_desugaring = "QuestionMark"),
         message = "the `?` operator can only be used in {ItemContext} \
                     that returns `Result` or `Option` \
-                    (or another type that implements `{This}`)",
+                    (or another type that implements `{FromResidual}`)",
         label = "cannot use the `?` operator in {ItemContext} that returns `{Self}`",
         parent_label = "this function should return `Result` or `Option` to accept `?`"
     ),
 )]
 #[rustc_diagnostic_item = "FromResidual"]
-#[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
-#[rustc_const_unstable(feature = "const_try", issue = "74935")]
-pub const trait FromResidual<R = <Self as Try>::Residual> {
+#[unstable(feature = "try_trait_v2", issue = "84277")]
+pub trait FromResidual<R = <Self as Try>::Residual> {
     /// Constructs the type from a compatible `Residual` type.
     ///
     /// This should be implemented consistently with the `branch` method such
@@ -329,7 +326,7 @@ pub const trait FromResidual<R = <Self as Try>::Residual> {
     /// );
     /// ```
     #[lang = "from_residual"]
-    #[unstable(feature = "try_trait_v2", issue = "84277", old_name = "try_trait")]
+    #[unstable(feature = "try_trait_v2", issue = "84277")]
     fn from_residual(residual: R) -> Self;
 }
 
@@ -341,7 +338,6 @@ pub const trait FromResidual<R = <Self as Try>::Residual> {
 #[inline]
 #[track_caller] // because `Result::from_residual` has it
 #[lang = "from_yeet"]
-#[allow(unreachable_pub)] // not-exposed but still used via lang-item
 pub fn from_yeet<T, Y>(yeeted: Y) -> T
 where
     T: FromResidual<Yeet<Y>>,
@@ -360,28 +356,10 @@ where
 /// and in the other direction,
 /// `<Result<Infallible, E> as Residual<T>>::TryType = Result<T, E>`.
 #[unstable(feature = "try_trait_v2_residual", issue = "91285")]
-#[rustc_const_unstable(feature = "const_try_residual", issue = "91285")]
-pub const trait Residual<O>: Sized {
+pub trait Residual<O> {
     /// The "return" type of this meta-function.
     #[unstable(feature = "try_trait_v2_residual", issue = "91285")]
-    // FIXME: ought to be implied
-    type TryType: [const] Try<Output = O, Residual = Self>;
-}
-
-/// Used in `try {}` blocks so the type produced in the `?` desugaring
-/// depends on the residual type `R` and the output type of the block `O`,
-/// but importantly not on the contextual type the way it would be if
-/// we called `<_ as FromResidual>::from_residual(r)` directly.
-#[unstable(feature = "try_trait_v2_residual", issue = "91285")]
-#[rustc_const_unstable(feature = "const_try_residual", issue = "91285")]
-// needs to be `pub` to avoid `private type` errors
-#[expect(unreachable_pub)]
-#[inline] // FIXME: force would be nice, but fails -- see #148915
-#[lang = "into_try_type"]
-pub const fn residual_into_try_type<R: [const] Residual<O>, O>(
-    r: R,
-) -> <R as Residual<O>>::TryType {
-    FromResidual::from_residual(r)
+    type TryType: Try<Output = O, Residual = Self>;
 }
 
 #[unstable(feature = "pub_crate_should_not_need_unstable_attr", issue = "none")]
@@ -398,25 +376,6 @@ pub(crate) type ChangeOutputType<T: Try<Residual: Residual<V>>, V> =
 /// Not currently planned to be exposed publicly, so just `pub(crate)`.
 #[repr(transparent)]
 pub(crate) struct NeverShortCircuit<T>(pub T);
-// FIXME(const-hack): replace with `|a| NeverShortCircuit(f(a))` when const closures added.
-pub(crate) struct Wrapped<T, A, F: FnMut(A) -> T> {
-    f: F,
-    p: PhantomData<(T, A)>,
-}
-#[rustc_const_unstable(feature = "const_never_short_circuit", issue = "none")]
-impl<T, A, F: [const] FnMut(A) -> T + [const] Destruct> const FnOnce<(A,)> for Wrapped<T, A, F> {
-    type Output = NeverShortCircuit<T>;
-
-    extern "rust-call" fn call_once(mut self, args: (A,)) -> Self::Output {
-        self.call_mut(args)
-    }
-}
-#[rustc_const_unstable(feature = "const_never_short_circuit", issue = "none")]
-impl<T, A, F: [const] FnMut(A) -> T> const FnMut<(A,)> for Wrapped<T, A, F> {
-    extern "rust-call" fn call_mut(&mut self, (args,): (A,)) -> Self::Output {
-        NeverShortCircuit((self.f)(args))
-    }
-}
 
 impl<T> NeverShortCircuit<T> {
     /// Wraps a unary function to produce one that wraps the output into a `NeverShortCircuit`.
@@ -424,23 +383,19 @@ impl<T> NeverShortCircuit<T> {
     /// This is useful for implementing infallible functions in terms of the `try_` ones,
     /// without accidentally capturing extra generic parameters in a closure.
     #[inline]
-    pub(crate) const fn wrap_mut_1<A, F>(f: F) -> Wrapped<T, A, F>
-    where
-        F: [const] FnMut(A) -> T,
-    {
-        Wrapped { f, p: PhantomData }
+    pub fn wrap_mut_1<A>(mut f: impl FnMut(A) -> T) -> impl FnMut(A) -> NeverShortCircuit<T> {
+        move |a| NeverShortCircuit(f(a))
     }
 
     #[inline]
-    pub(crate) fn wrap_mut_2<A, B>(mut f: impl FnMut(A, B) -> T) -> impl FnMut(A, B) -> Self {
+    pub fn wrap_mut_2<A, B>(mut f: impl FnMut(A, B) -> T) -> impl FnMut(A, B) -> Self {
         move |a, b| NeverShortCircuit(f(a, b))
     }
 }
 
 pub(crate) enum NeverShortCircuitResidual {}
 
-#[rustc_const_unstable(feature = "const_never_short_circuit", issue = "none")]
-impl<T> const Try for NeverShortCircuit<T> {
+impl<T> Try for NeverShortCircuit<T> {
     type Output = T;
     type Residual = NeverShortCircuitResidual;
 
@@ -454,15 +409,15 @@ impl<T> const Try for NeverShortCircuit<T> {
         NeverShortCircuit(x)
     }
 }
-#[rustc_const_unstable(feature = "const_never_short_circuit", issue = "none")]
-impl<T> const FromResidual for NeverShortCircuit<T> {
+
+impl<T> FromResidual for NeverShortCircuit<T> {
     #[inline]
     fn from_residual(never: NeverShortCircuitResidual) -> Self {
         match never {}
     }
 }
-#[rustc_const_unstable(feature = "const_never_short_circuit", issue = "none")]
-impl<T: [const] Destruct> const Residual<T> for NeverShortCircuitResidual {
+
+impl<T> Residual<T> for NeverShortCircuitResidual {
     type TryType = NeverShortCircuit<T>;
 }
 

@@ -1,6 +1,6 @@
 //! Tests for `cargo-features` definitions.
 
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
 use cargo_test_support::{project, registry};
@@ -100,7 +100,7 @@ fn feature_required_dependency() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [DOWNLOADING] crates ...
 [DOWNLOADED] bar v1.0.0 (registry `dummy-registry`)
 [ERROR] failed to download replaced source registry `crates-io`
@@ -173,71 +173,7 @@ fn unknown_feature() {
 [ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
 
 Caused by:
-  unknown Cargo.toml feature `foo`
-
-  See https://doc.rust-lang.org/nightly/cargo/reference/unstable.html for more information.
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn wrong_kind_of_feature() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-                cargo-features = ["build-dir"]
-
-                [package]
-                name = "a"
-                version = "0.0.1"
-                edition = "2015"
-                authors = []
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .build();
-    p.cargo("check")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
-
-Caused by:
-  unknown Cargo.toml feature `build-dir`
-
-  See https://doc.rust-lang.org/nightly/cargo/reference/unstable.html for more information.
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn feature_syntax() {
-    let p = project()
-        .file(
-            "Cargo.toml",
-            r#"
-                cargo-features = ["bad_feature"]
-
-                [package]
-                name = "a"
-                version = "0.0.1"
-                edition = "2015"
-                authors = []
-            "#,
-        )
-        .file("src/lib.rs", "")
-        .build();
-    p.cargo("check")
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
-
-Caused by:
-  unknown Cargo.toml feature `bad_feature`
-
-  Feature names must use '-' instead of '_'.
+  unknown cargo feature `foo`
 
 "#]])
         .run();
@@ -548,7 +484,7 @@ fn nightly_feature_requires_nightly_in_dep() {
     p.cargo("check")
         .masquerade_as_nightly_cargo(&["test-dummy-unstable"])
         .with_stderr_data(str![[r#"
-[LOCKING] 1 package to latest compatible version
+[LOCKING] 2 packages to latest compatible versions
 [CHECKING] a v0.0.1 ([ROOT]/foo/a)
 [CHECKING] b v0.0.1 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -565,7 +501,7 @@ Caused by:
   failed to load source for dependency `a`
 
 Caused by:
-  unable to update [ROOT]/foo/a
+  Unable to update [ROOT]/foo/a
 
 Caused by:
   failed to parse manifest at `[ROOT]/foo/a/Cargo.toml`
@@ -698,18 +634,17 @@ fn publish_allowed() {
         .masquerade_as_nightly_cargo(&["test-dummy-unstable"])
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no description, license, license-file, documentation, homepage or repository
-  |
-  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
+[WARNING] manifest has no description, license, license-file, documentation, homepage or repository.
+See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
 [PACKAGING] a v0.0.1 ([ROOT]/foo)
-[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[PACKAGED] 3 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [VERIFYING] a v0.0.1 ([ROOT]/foo)
 [COMPILING] a v0.0.1 ([ROOT]/foo/target/package/a-0.0.1)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] a v0.0.1 ([ROOT]/foo)
 [UPLOADED] a v0.0.1 to registry `crates-io`
-[NOTE] waiting for a v0.0.1 to be available at registry `crates-io`
-[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
+[NOTE] waiting for `a v0.0.1` to be available at registry `crates-io`.
+You may press ctrl-c to skip waiting; the crate should be available shortly.
 [PUBLISHED] a v0.0.1 at registry `crates-io`
 
 "#]])
@@ -740,6 +675,7 @@ fn wrong_position() {
   |
 6 |                 cargo-features = ["test-dummy-unstable"]
   |                                  ^^^^^^^^^^^^^^^^^^^^^^^
+  |
 
 "#]])
         .run();

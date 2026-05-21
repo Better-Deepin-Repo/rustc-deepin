@@ -8,7 +8,7 @@ macro_rules! pos {
     };
 }
 
-#[unsafe(no_mangle)]
+#[no_mangle]
 pub extern "C" fn foo(outer: Pos, inner: fn(Pos, Pos)) {
     inner(outer, pos!());
 }

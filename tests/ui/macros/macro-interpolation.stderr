@@ -1,8 +1,8 @@
-error: expected identifier, found metavariable
+error: expected identifier, found `!`
   --> $DIR/macro-interpolation.rs:21:19
    |
 LL |         <$type as $trait>::$name
-   |                   ^^^^^^ expected identifier, found metavariable
+   |                   ^^^^^^ expected identifier
 ...
 LL |     let _: qpath!(ty, <str as !>::Owned);
    |            -----------------------------

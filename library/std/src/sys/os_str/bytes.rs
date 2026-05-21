@@ -2,13 +2,14 @@
 //! systems: just a `Vec<u8>`/`[u8]`.
 
 use core::clone::CloneToUninit;
+use core::ptr::addr_of_mut;
 
 use crate::borrow::Cow;
-use crate::bstr::ByteStr;
 use crate::collections::TryReserveError;
+use crate::fmt::Write;
 use crate::rc::Rc;
 use crate::sync::Arc;
-use crate::sys::{AsInner, FromInner, IntoInner};
+use crate::sys_common::{AsInner, IntoInner};
 use crate::{fmt, mem, str};
 
 #[cfg(test)]
@@ -25,37 +26,6 @@ pub struct Slice {
     pub inner: [u8],
 }
 
-impl IntoInner<Vec<u8>> for Buf {
-    fn into_inner(self) -> Vec<u8> {
-        self.inner
-    }
-}
-
-impl FromInner<Vec<u8>> for Buf {
-    fn from_inner(inner: Vec<u8>) -> Self {
-        Buf { inner }
-    }
-}
-
-impl AsInner<[u8]> for Buf {
-    #[inline]
-    fn as_inner(&self) -> &[u8] {
-        &self.inner
-    }
-}
-
-impl fmt::Debug for Buf {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(self.as_slice(), f)
-    }
-}
-
-impl fmt::Display for Buf {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(self.as_slice(), f)
-    }
-}
-
 impl fmt::Debug for Slice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.inner.utf8_chunks().debug(), f)
@@ -64,7 +34,37 @@ impl fmt::Debug for Slice {
 
 impl fmt::Display for Slice {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(ByteStr::new(&self.inner), f)
+        // If we're the empty string then our iterator won't actually yield
+        // anything, so perform the formatting manually
+        if self.inner.is_empty() {
+            return "".fmt(f);
+        }
+
+        for chunk in self.inner.utf8_chunks() {
+            let valid = chunk.valid();
+            // If we successfully decoded the whole chunk as a valid string then
+            // we can return a direct formatting of the string which will also
+            // respect various formatting flags if possible.
+            if chunk.invalid().is_empty() {
+                return valid.fmt(f);
+            }
+
+            f.write_str(valid)?;
+            f.write_char(char::REPLACEMENT_CHARACTER)?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Debug for Buf {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.as_slice(), formatter)
+    }
+}
+
+impl fmt::Display for Buf {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(self.as_slice(), formatter)
     }
 }
 
@@ -80,6 +80,19 @@ impl Clone for Buf {
     }
 }
 
+impl IntoInner<Vec<u8>> for Buf {
+    fn into_inner(self) -> Vec<u8> {
+        self.inner
+    }
+}
+
+impl AsInner<[u8]> for Buf {
+    #[inline]
+    fn as_inner(&self) -> &[u8] {
+        &self.inner
+    }
+}
+
 impl Buf {
     #[inline]
     pub fn into_encoded_bytes(self) -> Vec<u8> {
@@ -91,13 +104,7 @@ impl Buf {
         Self { inner: s }
     }
 
-    #[inline]
-    pub fn into_string(self) -> Result<String, Buf> {
-        String::from_utf8(self.inner).map_err(|p| Buf { inner: p.into_bytes() })
-    }
-
-    #[inline]
-    pub const fn from_string(s: String) -> Buf {
+    pub fn from_string(s: String) -> Buf {
         Buf { inner: s.into_bytes() }
     }
 
@@ -114,16 +121,6 @@ impl Buf {
     #[inline]
     pub fn capacity(&self) -> usize {
         self.inner.capacity()
-    }
-
-    #[inline]
-    pub fn push_slice(&mut self, s: &Slice) {
-        self.inner.extend_from_slice(&s.inner)
-    }
-
-    #[inline]
-    pub fn push_str(&mut self, s: &str) {
-        self.inner.extend_from_slice(s.as_bytes());
     }
 
     #[inline]
@@ -158,18 +155,26 @@ impl Buf {
 
     #[inline]
     pub fn as_slice(&self) -> &Slice {
-        // SAFETY: Slice is just a wrapper for [u8],
-        // and self.inner.as_slice() returns &[u8].
-        // Therefore, transmuting &[u8] to &Slice is safe.
-        unsafe { mem::transmute(self.inner.as_slice()) }
+        // SAFETY: Slice just wraps [u8],
+        // and &*self.inner is &[u8], therefore
+        // transmuting &[u8] to &Slice is safe.
+        unsafe { mem::transmute(&*self.inner) }
     }
 
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut Slice {
-        // SAFETY: Slice is just a wrapper for [u8],
-        // and self.inner.as_mut_slice() returns &mut [u8].
-        // Therefore, transmuting &mut [u8] to &mut Slice is safe.
-        unsafe { mem::transmute(self.inner.as_mut_slice()) }
+        // SAFETY: Slice just wraps [u8],
+        // and &mut *self.inner is &mut [u8], therefore
+        // transmuting &mut [u8] to &mut Slice is safe.
+        unsafe { mem::transmute(&mut *self.inner) }
+    }
+
+    pub fn into_string(self) -> Result<String, Buf> {
+        String::from_utf8(self.inner).map_err(|p| Buf { inner: p.into_bytes() })
+    }
+
+    pub fn push_slice(&mut self, s: &Slice) {
+        self.inner.extend_from_slice(&s.inner)
     }
 
     #[inline]
@@ -198,28 +203,19 @@ impl Buf {
         self.as_slice().into_rc()
     }
 
-    /// Provides plumbing to `Vec::truncate` without giving full mutable access
-    /// to the `Vec`.
-    ///
-    /// # Safety
-    ///
-    /// The length must be at an `OsStr` boundary, according to
-    /// `Slice::check_public_boundary`.
+    /// Provides plumbing to core `Vec::truncate`.
+    /// More well behaving alternative to allowing outer types
+    /// full mutable access to the core `Vec`.
     #[inline]
-    pub unsafe fn truncate_unchecked(&mut self, len: usize) {
+    pub(crate) fn truncate(&mut self, len: usize) {
         self.inner.truncate(len);
     }
 
-    /// Provides plumbing to `Vec::extend_from_slice` without giving full
-    /// mutable access to the `Vec`.
-    ///
-    /// # Safety
-    ///
-    /// The slice must be valid for the platform encoding (as described in
-    /// `OsStr::from_encoded_bytes_unchecked`). This encoding has no safety
-    /// requirements.
+    /// Provides plumbing to core `Vec::extend_from_slice`.
+    /// More well behaving alternative to allowing outer types
+    /// full mutable access to the core `Vec`.
     #[inline]
-    pub unsafe fn extend_from_slice_unchecked(&mut self, other: &[u8]) {
+    pub(crate) fn extend_from_slice(&mut self, other: &[u8]) {
         self.inner.extend_from_slice(other);
     }
 }
@@ -283,27 +279,28 @@ impl Slice {
         unsafe { Slice::from_encoded_bytes_unchecked(s.as_bytes()) }
     }
 
-    #[inline]
     pub fn to_str(&self) -> Result<&str, crate::str::Utf8Error> {
         str::from_utf8(&self.inner)
     }
 
-    #[inline]
     pub fn to_string_lossy(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(&self.inner)
     }
 
-    #[inline]
     pub fn to_owned(&self) -> Buf {
         Buf { inner: self.inner.to_vec() }
     }
 
-    #[inline]
     pub fn clone_into(&self, buf: &mut Buf) {
         self.inner.clone_into(&mut buf.inner)
     }
 
     #[inline]
+    pub fn into_box(&self) -> Box<Slice> {
+        let boxed: Box<[u8]> = self.inner.into();
+        unsafe { mem::transmute(boxed) }
+    }
+
     pub fn empty_box() -> Box<Slice> {
         let boxed: Box<[u8]> = Default::default();
         unsafe { mem::transmute(boxed) }
@@ -356,8 +353,8 @@ impl Slice {
 unsafe impl CloneToUninit for Slice {
     #[inline]
     #[cfg_attr(debug_assertions, track_caller)]
-    unsafe fn clone_to_uninit(&self, dst: *mut u8) {
-        // SAFETY: we're just a transparent wrapper around [u8]
-        unsafe { self.inner.clone_to_uninit(dst) }
+    unsafe fn clone_to_uninit(&self, dst: *mut Self) {
+        // SAFETY: we're just a wrapper around [u8]
+        unsafe { self.inner.clone_to_uninit(addr_of_mut!((*dst).inner)) }
     }
 }

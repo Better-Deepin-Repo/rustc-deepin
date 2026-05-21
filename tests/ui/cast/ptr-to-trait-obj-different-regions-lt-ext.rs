@@ -2,7 +2,7 @@
 //
 // issue: <https://github.com/rust-lang/rust/issues/120217>
 
-#![feature(arbitrary_self_types_pointers)]
+#![feature(arbitrary_self_types)]
 
 trait Static<'a> {
     fn proof(self: *const Self, s: &'a str) -> &'static str;

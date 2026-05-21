@@ -1,4 +1,3 @@
-//@ edition:2015
 // https://github.com/rust-lang/rust/issues/125013
 
 mod a {

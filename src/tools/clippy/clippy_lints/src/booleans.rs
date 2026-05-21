@@ -1,21 +1,15 @@
-use clippy_config::Conf;
 use clippy_utils::diagnostics::{span_lint_and_sugg, span_lint_hir_and_then};
-use clippy_utils::higher::has_let_expr;
-use clippy_utils::msrvs::{self, Msrv};
-use clippy_utils::res::MaybeDef;
-use clippy_utils::source::{SpanRangeExt, snippet_with_context};
-use clippy_utils::sugg::Sugg;
-use clippy_utils::ty::implements_trait;
-use clippy_utils::{eq_expr_value, sym};
+use clippy_utils::eq_expr_value;
+use clippy_utils::source::SpanRangeExt;
+use clippy_utils::ty::{implements_trait, is_type_diagnostic_item};
 use rustc_ast::ast::LitKind;
 use rustc_errors::Applicability;
-use rustc_hir::intravisit::{FnKind, Visitor, walk_expr};
-use rustc_hir::{BinOpKind, Body, Expr, ExprKind, FnDecl, RustcVersion, UnOp};
+use rustc_hir::intravisit::{walk_expr, FnKind, Visitor};
+use rustc_hir::{BinOpKind, Body, Expr, ExprKind, FnDecl, UnOp};
 use rustc_lint::{LateContext, LateLintPass, Level};
-use rustc_session::impl_lint_pass;
+use rustc_session::declare_lint_pass;
 use rustc_span::def_id::LocalDefId;
-use rustc_span::{Span, Symbol, SyntaxContext};
-use std::fmt::Write as _;
+use rustc_span::{sym, Span};
 
 declare_clippy_lint! {
     /// ### What it does
@@ -75,23 +69,9 @@ declare_clippy_lint! {
 }
 
 // For each pairs, both orders are considered.
-const METHODS_WITH_NEGATION: [(Option<RustcVersion>, Symbol, Symbol); 3] = [
-    (None, sym::is_some, sym::is_none),
-    (None, sym::is_err, sym::is_ok),
-    (Some(msrvs::IS_NONE_OR), sym::is_some_and, sym::is_none_or),
-];
+const METHODS_WITH_NEGATION: [(&str, &str); 2] = [("is_some", "is_none"), ("is_err", "is_ok")];
 
-pub struct NonminimalBool {
-    msrv: Msrv,
-}
-
-impl NonminimalBool {
-    pub fn new(conf: &'static Conf) -> Self {
-        Self { msrv: conf.msrv }
-    }
-}
-
-impl_lint_pass!(NonminimalBool => [NONMINIMAL_BOOL, OVERLY_COMPLEX_BOOL_EXPR]);
+declare_lint_pass!(NonminimalBool => [NONMINIMAL_BOOL, OVERLY_COMPLEX_BOOL_EXPR]);
 
 impl<'tcx> LateLintPass<'tcx> for NonminimalBool {
     fn check_fn(
@@ -103,7 +83,7 @@ impl<'tcx> LateLintPass<'tcx> for NonminimalBool {
         _: Span,
         _: LocalDefId,
     ) {
-        NonminimalBoolVisitor { cx, msrv: self.msrv }.visit_body(body);
+        NonminimalBoolVisitor { cx }.visit_body(body);
     }
 
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx Expr<'tcx>) {
@@ -196,28 +176,13 @@ fn check_inverted_bool_in_condition(
     );
 }
 
-fn check_simplify_not(cx: &LateContext<'_>, msrv: Msrv, expr: &Expr<'_>) {
+fn check_simplify_not(cx: &LateContext<'_>, expr: &Expr<'_>) {
     if let ExprKind::Unary(UnOp::Not, inner) = &expr.kind
         && !expr.span.from_expansion()
         && !inner.span.from_expansion()
-        && let Some(suggestion) = simplify_not(cx, msrv, inner)
-        && cx.tcx.lint_level_at_node(NONMINIMAL_BOOL, expr.hir_id).level != Level::Allow
+        && let Some(suggestion) = simplify_not(cx, inner)
+        && cx.tcx.lint_level_at_node(NONMINIMAL_BOOL, expr.hir_id).0 != Level::Allow
     {
-        use clippy_utils::sugg::{Sugg, has_enclosing_paren};
-        let maybe_par = if let Some(sug) = Sugg::hir_opt(cx, inner) {
-            match sug {
-                Sugg::BinOp(..) => true,
-                Sugg::MaybeParen(sug) if !has_enclosing_paren(&sug) => true,
-                _ => false,
-            }
-        } else {
-            false
-        };
-        let suggestion = if maybe_par {
-            format!("({suggestion})")
-        } else {
-            suggestion
-        };
         span_lint_and_sugg(
             cx,
             NONMINIMAL_BOOL,
@@ -232,7 +197,6 @@ fn check_simplify_not(cx: &LateContext<'_>, msrv: Msrv, expr: &Expr<'_>) {
 
 struct NonminimalBoolVisitor<'a, 'tcx> {
     cx: &'a LateContext<'tcx>,
-    msrv: Msrv,
 }
 
 use quine_mc_cluskey::Bool;
@@ -241,14 +205,14 @@ struct Hir2Qmm<'a, 'tcx, 'v> {
     cx: &'a LateContext<'tcx>,
 }
 
-impl<'v> Hir2Qmm<'_, '_, 'v> {
+impl<'a, 'tcx, 'v> Hir2Qmm<'a, 'tcx, 'v> {
     fn extract(&mut self, op: BinOpKind, a: &[&'v Expr<'_>], mut v: Vec<Bool>) -> Result<Vec<Bool>, String> {
         for a in a {
-            if let ExprKind::Binary(binop, lhs, rhs) = &a.kind
-                && binop.node == op
-            {
-                v = self.extract(op, &[lhs, rhs], v)?;
-                continue;
+            if let ExprKind::Binary(binop, lhs, rhs) = &a.kind {
+                if binop.node == op {
+                    v = self.extract(op, &[lhs, rhs], v)?;
+                    continue;
+                }
             }
             v.push(self.run(a)?);
         }
@@ -325,11 +289,10 @@ impl<'v> Hir2Qmm<'_, '_, 'v> {
 struct SuggestContext<'a, 'tcx, 'v> {
     terminals: &'v [&'v Expr<'v>],
     cx: &'a LateContext<'tcx>,
-    msrv: Msrv,
     output: String,
 }
 
-impl SuggestContext<'_, '_, '_> {
+impl<'a, 'tcx, 'v> SuggestContext<'a, 'tcx, 'v> {
     fn recurse(&mut self, suggestion: &Bool) -> Option<()> {
         use quine_mc_cluskey::Bool::{And, False, Not, Or, Term, True};
         match suggestion {
@@ -348,16 +311,11 @@ impl SuggestContext<'_, '_, '_> {
                 },
                 Term(n) => {
                     let terminal = self.terminals[n as usize];
-                    if let Some(str) = simplify_not(self.cx, self.msrv, terminal) {
+                    if let Some(str) = simplify_not(self.cx, terminal) {
                         self.output.push_str(&str);
                     } else {
-                        let mut app = Applicability::MachineApplicable;
-                        let snip = Sugg::hir_with_context(self.cx, terminal, SyntaxContext::root(), "", &mut app);
-                        // Ignore the case If the expression is inside a macro expansion, or the default snippet is used
-                        if app != Applicability::MachineApplicable {
-                            return None;
-                        }
-                        let _cannot_fail = write!(&mut self.output, "{}", &(!snip));
+                        self.output.push('!');
+                        self.output.push_str(&terminal.span.get_source_text(self.cx)?);
                     }
                 },
                 True | False | Not(_) => {
@@ -400,7 +358,7 @@ impl SuggestContext<'_, '_, '_> {
     }
 }
 
-fn simplify_not(cx: &LateContext<'_>, curr_msrv: Msrv, expr: &Expr<'_>) -> Option<String> {
+fn simplify_not(cx: &LateContext<'_>, expr: &Expr<'_>) -> Option<String> {
     match &expr.kind {
         ExprKind::Binary(binop, lhs, rhs) => {
             if !implements_ord(cx, lhs) {
@@ -416,65 +374,46 @@ fn simplify_not(cx: &LateContext<'_>, curr_msrv: Msrv, expr: &Expr<'_>) -> Optio
                 BinOpKind::Ge => Some(" < "),
                 _ => None,
             }
-            .map(|op| {
-                let mut app = Applicability::MachineApplicable;
-                let (lhs_snippet, _) = snippet_with_context(cx, lhs.span, SyntaxContext::root(), "", &mut app);
-                let (rhs_snippet, _) = snippet_with_context(cx, rhs.span, SyntaxContext::root(), "", &mut app);
+            .and_then(|op| {
+                let lhs_snippet = lhs.span.get_source_text(cx)?;
+                let rhs_snippet = rhs.span.get_source_text(cx)?;
 
-                if !(lhs_snippet.starts_with('(') && lhs_snippet.ends_with(')'))
-                    && let (ExprKind::Cast(..), BinOpKind::Ge) = (&lhs.kind, binop.node)
-                {
-                    // e.g. `(a as u64) < b`. Without the parens the `<` is
-                    // interpreted as a start of generic arguments for `u64`
-                    return format!("({lhs_snippet}){op}{rhs_snippet}");
+                if !(lhs_snippet.starts_with('(') && lhs_snippet.ends_with(')')) {
+                    if let (ExprKind::Cast(..), BinOpKind::Ge) = (&lhs.kind, binop.node) {
+                        // e.g. `(a as u64) < b`. Without the parens the `<` is
+                        // interpreted as a start of generic arguments for `u64`
+                        return Some(format!("({lhs_snippet}){op}{rhs_snippet}"));
+                    }
                 }
 
-                format!("{lhs_snippet}{op}{rhs_snippet}")
+                Some(format!("{lhs_snippet}{op}{rhs_snippet}"))
             })
         },
-        ExprKind::MethodCall(path, receiver, args, _) => {
+        ExprKind::MethodCall(path, receiver, [], _) => {
             let type_of_receiver = cx.typeck_results().expr_ty(receiver);
-            if !matches!(type_of_receiver.opt_diag_name(cx), Some(sym::Option | sym::Result)) {
+            if !is_type_diagnostic_item(cx, type_of_receiver, sym::Option)
+                && !is_type_diagnostic_item(cx, type_of_receiver, sym::Result)
+            {
                 return None;
             }
             METHODS_WITH_NEGATION
                 .iter()
                 .copied()
-                .flat_map(|(msrv, a, b)| vec![(msrv, a, b), (msrv, b, a)])
-                .find(|&(msrv, a, _)| a == path.ident.name && msrv.is_none_or(|msrv| curr_msrv.meets(cx, msrv)))
-                .and_then(|(_, _, neg_method)| {
-                    let negated_args = args
-                        .iter()
-                        .map(|arg| simplify_not(cx, curr_msrv, arg))
-                        .collect::<Option<Vec<_>>>()?
-                        .join(", ");
-                    Some(format!(
-                        "{}.{neg_method}({negated_args})",
-                        receiver.span.get_source_text(cx)?
-                    ))
+                .flat_map(|(a, b)| vec![(a, b), (b, a)])
+                .find(|&(a, _)| {
+                    let path: &str = path.ident.name.as_str();
+                    a == path
                 })
+                .and_then(|(_, neg_method)| Some(format!("{}.{neg_method}()", receiver.span.get_source_text(cx)?)))
         },
-        ExprKind::Closure(closure) => {
-            let body = cx.tcx.hir_body(closure.body);
-            let params = body
-                .params
-                .iter()
-                .map(|param| param.span.get_source_text(cx).map(|t| t.to_string()))
-                .collect::<Option<Vec<_>>>()?
-                .join(", ");
-            let negated = simplify_not(cx, curr_msrv, body.value)?;
-            Some(format!("|{params}| {negated}"))
-        },
-        ExprKind::Unary(UnOp::Not, expr) => expr.span.get_source_text(cx).map(|t| t.to_string()),
         _ => None,
     }
 }
 
-fn suggest(cx: &LateContext<'_>, msrv: Msrv, suggestion: &Bool, terminals: &[&Expr<'_>]) -> String {
+fn suggest(cx: &LateContext<'_>, suggestion: &Bool, terminals: &[&Expr<'_>]) -> String {
     let mut suggest_context = SuggestContext {
         terminals,
         cx,
-        msrv,
         output: String::new(),
     };
     suggest_context.recurse(suggestion);
@@ -536,7 +475,7 @@ fn terminal_stats(b: &Bool) -> Stats {
     stats
 }
 
-impl<'tcx> NonminimalBoolVisitor<'_, 'tcx> {
+impl<'a, 'tcx> NonminimalBoolVisitor<'a, 'tcx> {
     fn bool_expr(&self, e: &'tcx Expr<'_>) {
         let mut h2q = Hir2Qmm {
             terminals: Vec::new(),
@@ -556,7 +495,7 @@ impl<'tcx> NonminimalBoolVisitor<'_, 'tcx> {
                     _ => simplified.push(Bool::Not(Box::new(simple.clone()))),
                 }
                 let simple_negated = simple_negate(simple);
-                if simplified.contains(&simple_negated) {
+                if simplified.iter().any(|s| *s == simple_negated) {
                     continue;
                 }
                 simplified.push(simple_negated);
@@ -587,7 +526,7 @@ impl<'tcx> NonminimalBoolVisitor<'_, 'tcx> {
                                 diag.span_suggestion(
                                     e.span,
                                     "it would look like the following",
-                                    suggest(self.cx, self.msrv, suggestion, &h2q.terminals),
+                                    suggest(self.cx, suggestion, &h2q.terminals),
                                     // nonminimal_bool can produce minimal but
                                     // not human readable expressions (#3141)
                                     Applicability::Unspecified,
@@ -608,7 +547,7 @@ impl<'tcx> NonminimalBoolVisitor<'_, 'tcx> {
                 }
             }
             let nonminimal_bool_lint = |mut suggestions: Vec<_>| {
-                if self.cx.tcx.lint_level_at_node(NONMINIMAL_BOOL, e.hir_id).level != Level::Allow {
+                if self.cx.tcx.lint_level_at_node(NONMINIMAL_BOOL, e.hir_id).0 != Level::Allow {
                     suggestions.sort();
                     span_lint_hir_and_then(
                         self.cx,
@@ -630,12 +569,12 @@ impl<'tcx> NonminimalBoolVisitor<'_, 'tcx> {
                 }
             };
             if improvements.is_empty() {
-                check_simplify_not(self.cx, self.msrv, e);
+                check_simplify_not(self.cx, e);
             } else {
                 nonminimal_bool_lint(
                     improvements
                         .into_iter()
-                        .map(|suggestion| suggest(self.cx, self.msrv, suggestion, &h2q.terminals))
+                        .map(|suggestion| suggest(self.cx, suggestion, &h2q.terminals))
                         .collect(),
                 );
             }
@@ -643,13 +582,11 @@ impl<'tcx> NonminimalBoolVisitor<'_, 'tcx> {
     }
 }
 
-impl<'tcx> Visitor<'tcx> for NonminimalBoolVisitor<'_, 'tcx> {
+impl<'a, 'tcx> Visitor<'tcx> for NonminimalBoolVisitor<'a, 'tcx> {
     fn visit_expr(&mut self, e: &'tcx Expr<'_>) {
         if !e.span.from_expansion() {
             match &e.kind {
-                ExprKind::Binary(binop, _, _)
-                    if binop.node == BinOpKind::Or || binop.node == BinOpKind::And && !has_let_expr(e) =>
-                {
+                ExprKind::Binary(binop, _, _) if binop.node == BinOpKind::Or || binop.node == BinOpKind::And => {
                     self.bool_expr(e);
                 },
                 ExprKind::Unary(UnOp::Not, inner) => {
@@ -673,5 +610,5 @@ fn implements_ord(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
     let ty = cx.typeck_results().expr_ty(expr);
     cx.tcx
         .get_diagnostic_item(sym::Ord)
-        .is_some_and(|id| implements_trait(cx, ty, id, &[]))
+        .map_or(false, |id| implements_trait(cx, ty, id, &[]))
 }

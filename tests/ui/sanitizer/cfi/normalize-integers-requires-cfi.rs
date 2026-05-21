@@ -7,5 +7,3 @@
 #![feature(no_core)]
 #![no_core]
 #![no_main]
-
-//~? ERROR `-Zsanitizer-cfi-normalize-integers` requires `-Zsanitizer=cfi` or `-Zsanitizer=kcfi`

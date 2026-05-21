@@ -32,22 +32,14 @@ macro_rules! box_new {
 
 fn main() {
     let string1: Box<String> = Box::new(Default::default());
-    //~^ box_default
     let string2: Box<String> = Box::new(String::new());
-    //~^ box_default
     let impl1: Box<ImplementsDefault> = Box::new(Default::default());
-    //~^ box_default
     let vec: Box<Vec<u8>> = Box::new(Vec::new());
-    //~^ box_default
     let byte: Box<u8> = Box::new(u8::default());
-    //~^ box_default
     let vec2: Box<Vec<ImplementsDefault>> = Box::new(vec![]);
-    //~^ box_default
     let vec3: Box<Vec<bool>> = Box::new(Vec::from([]));
-    //~^ box_default
 
     let plain_default = Box::new(Default::default());
-    //~^ box_default
     let _: Box<String> = plain_default;
 
     let _: Box<String> = Box::new(default!());
@@ -65,7 +57,6 @@ fn main() {
     let vec4: Box<_> = Box::new(Vec::from([false; 0]));
     let more = ret_ty_fn();
     call_ty_fn(Box::new(u8::default()));
-    //~^ box_default
     issue_10381();
 
     // `Box::<Option<_>>::default()` would be valid here, but not `Box::default()` or
@@ -93,7 +84,6 @@ impl<T: Default> X<T> {
 
     fn same_generic_param() {
         Self::x(Box::new(T::default()));
-        //~^ box_default
     }
 }
 
@@ -126,7 +116,7 @@ fn issue_10381() {
     impl Bar for Foo {}
 
     fn maybe_get_bar(i: u32) -> Option<Box<dyn Bar>> {
-        if i.is_multiple_of(2) {
+        if i % 2 == 0 {
             Some(Box::new(Foo::default()))
         } else {
             None

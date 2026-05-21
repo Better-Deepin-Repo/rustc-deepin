@@ -1,47 +1,52 @@
 //! Module defining all known symbols required by the rest of rust-analyzer.
 #![allow(non_upper_case_globals)]
 
-use std::hash::{BuildHasher, BuildHasherDefault};
+use std::hash::{BuildHasherDefault, Hash as _, Hasher as _};
 
 use dashmap::{DashMap, SharedValue};
 use rustc_hash::FxHasher;
 
-use crate::{Symbol, symbol::TaggedArcPtr};
+use crate::{
+    symbol::{SymbolProxy, TaggedArcPtr},
+    Symbol,
+};
 
 macro_rules! define_symbols {
     (@WITH_NAME: $($alias:ident = $value:literal,)* @PLAIN: $($name:ident,)*) => {
-        // The strings should be in `static`s so that symbol equality holds.
+        // Ideally we would be emitting `const` here, but then we no longer have stable addresses
+        // which is what we are relying on for equality! In the future if consts can refer to
+        // statics we should swap these for `const`s and have the the string literal being pointed
+        // to be statics to refer to such that their address is stable.
         $(
-            pub const $name: Symbol = {
-                static SYMBOL_STR: &str = stringify!($name);
-                Symbol { repr: TaggedArcPtr::non_arc(&SYMBOL_STR) }
-            };
+            pub static $name: Symbol = Symbol { repr: TaggedArcPtr::non_arc(&stringify!($name)) };
         )*
         $(
-            pub const $alias: Symbol = {
-                static SYMBOL_STR: &str = $value;
-                Symbol { repr: TaggedArcPtr::non_arc(&SYMBOL_STR) }
-            };
+            pub static $alias: Symbol = Symbol { repr: TaggedArcPtr::non_arc(&$value) };
         )*
 
 
-        pub(super) fn prefill() -> DashMap<Symbol, (), BuildHasherDefault<FxHasher>> {
-            let mut dashmap_ = <DashMap<Symbol, (), BuildHasherDefault<FxHasher>>>::with_hasher(BuildHasherDefault::default());
+        pub(super) fn prefill() -> DashMap<SymbolProxy, (), BuildHasherDefault<FxHasher>> {
+            let mut dashmap_ = <DashMap<SymbolProxy, (), BuildHasherDefault<FxHasher>>>::with_hasher(BuildHasherDefault::default());
 
-            let hasher_ = dashmap_.hasher().clone();
-            let hash_one = |it_: &str| hasher_.hash_one(it_);
+            let hash_thing_ = |hasher_: &BuildHasherDefault<FxHasher>, it_: &SymbolProxy| {
+                let mut hasher_ = std::hash::BuildHasher::build_hasher(hasher_);
+                it_.hash(&mut hasher_);
+                hasher_.finish()
+            };
             {
                 $(
-                    let s = stringify!($name);
-                    let hash_ = hash_one(s);
+
+                    let proxy_ = SymbolProxy($name.repr);
+                    let hash_ = hash_thing_(dashmap_.hasher(), &proxy_);
                     let shard_idx_ = dashmap_.determine_shard(hash_ as usize);
-                    dashmap_.shards_mut()[shard_idx_].get_mut().insert(hash_, ($name, SharedValue::new(())), |(x, _)| hash_one(x.as_str()));
+                    dashmap_.shards_mut()[shard_idx_].get_mut().raw_entry_mut().from_hash(hash_, |k| k == &proxy_).insert(proxy_, SharedValue::new(()));
                 )*
                 $(
-                    let s = $value;
-                    let hash_ = hash_one(s);
+
+                    let proxy_ = SymbolProxy($alias.repr);
+                    let hash_ = hash_thing_(dashmap_.hasher(), &proxy_);
                     let shard_idx_ = dashmap_.determine_shard(hash_ as usize);
-                    dashmap_.shards_mut()[shard_idx_].get_mut().insert(hash_, ($alias, SharedValue::new(())), |(x, _)| hash_one(x.as_str()));
+                    dashmap_.shards_mut()[shard_idx_].get_mut().raw_entry_mut().from_hash(hash_, |k| k == &proxy_).insert(proxy_, SharedValue::new(()));
                 )*
             }
             dashmap_
@@ -75,7 +80,6 @@ define_symbols! {
     self_ = "self",
     Self_ = "Self",
     tick_static = "'static",
-    tick_underscore = "'_",
     dollar_crate = "$crate",
     MISSING_NAME = "[missing name]",
     fn_ = "fn",
@@ -85,17 +89,16 @@ define_symbols! {
     false_ = "false",
     let_ = "let",
     const_ = "const",
-    kw_impl = "impl",
     proc_dash_macro = "proc-macro",
     aapcs_dash_unwind = "aapcs-unwind",
     avr_dash_interrupt = "avr-interrupt",
     avr_dash_non_dash_blocking_dash_interrupt = "avr-non-blocking-interrupt",
     C_dash_cmse_dash_nonsecure_dash_call = "C-cmse-nonsecure-call",
-    C_dash_cmse_dash_nonsecure_dash_entry = "C-cmse-nonsecure-entry",
     C_dash_unwind = "C-unwind",
     cdecl_dash_unwind = "cdecl-unwind",
     fastcall_dash_unwind = "fastcall-unwind",
     msp430_dash_interrupt = "msp430-interrupt",
+    platform_dash_intrinsic = "platform-intrinsic",
     ptx_dash_kernel = "ptx-kernel",
     riscv_dash_interrupt_dash_m = "riscv-interrupt-m",
     riscv_dash_interrupt_dash_s = "riscv-interrupt-s",
@@ -109,8 +112,6 @@ define_symbols! {
     vectorcall_dash_unwind = "vectorcall-unwind",
     win64_dash_unwind = "win64-unwind",
     x86_dash_interrupt = "x86-interrupt",
-    rust_dash_preserve_dash_none = "preserve-none",
-    _0_u8 = "0_u8",
 
     @PLAIN:
     __ra_fixup,
@@ -129,7 +130,6 @@ define_symbols! {
     as_str,
     asm,
     assert,
-    attr,
     attributes,
     begin_panic,
     bench,
@@ -140,7 +140,6 @@ define_symbols! {
     bitxor_assign,
     bitxor,
     bool,
-    bootstrap,
     box_free,
     Box,
     boxed,
@@ -150,9 +149,6 @@ define_symbols! {
     C,
     call_mut,
     call_once,
-    async_call_once,
-    async_call_mut,
-    async_call,
     call,
     cdecl,
     Center,
@@ -160,31 +156,26 @@ define_symbols! {
     cfg_attr,
     cfg_eval,
     cfg,
-    cfg_select,
     char,
     clone,
-    trivial_clone,
     Clone,
     coerce_unsized,
     column,
-    completion,
     compile_error,
     concat_bytes,
+    concat_idents,
     concat,
     const_format_args,
     const_panic_fmt,
     const_param_ty,
     Context,
     Continue,
-    convert,
     copy,
     Copy,
     core_panic,
     core,
     coroutine_state,
     coroutine,
-    coroutine_return,
-    coroutine_yield,
     count,
     crate_type,
     CStr,
@@ -229,12 +220,6 @@ define_symbols! {
     fn_mut,
     fn_once_output,
     fn_once,
-    async_fn_once,
-    async_fn_once_output,
-    async_fn_mut,
-    async_fn,
-    call_ref_future,
-    call_once_future,
     fn_ptr_addr,
     fn_ptr_trait,
     format_alignment,
@@ -247,10 +232,6 @@ define_symbols! {
     format_unsafe_arg,
     format,
     freeze,
-    from,
-    From,
-    FromStr,
-    from_str,
     from_output,
     from_residual,
     from_usize,
@@ -261,7 +242,6 @@ define_symbols! {
     future_output,
     Future,
     ge,
-    generic_associated_type_extended,
     get_context,
     global_allocator,
     global_asm,
@@ -282,11 +262,8 @@ define_symbols! {
     index_mut,
     index,
     Index,
-    into,
-    Into,
     into_future,
     into_iter,
-    into_try_type,
     IntoFuture,
     IntoIter,
     IntoIterator,
@@ -300,7 +277,6 @@ define_symbols! {
     iterator,
     keyword,
     lang,
-    lang_items,
     le,
     Left,
     len,
@@ -323,7 +299,6 @@ define_symbols! {
     module_path,
     mul_assign,
     mul,
-    naked_asm,
     ne,
     neg,
     Neg,
@@ -356,10 +331,7 @@ define_symbols! {
     option,
     Option,
     Ord,
-    Ordering,
     Output,
-    CallRefFuture,
-    CallOnceFuture,
     owned_box,
     packed,
     panic_2015,
@@ -373,14 +345,11 @@ define_symbols! {
     panic_location,
     panic_misaligned_pointer_dereference,
     panic_nounwind,
-    panic_null_pointer_dereference,
     panic,
     Param,
-    parse,
     partial_ord,
     PartialEq,
     PartialOrd,
-    CoercePointee,
     path,
     Pending,
     phantom_data,
@@ -405,7 +374,6 @@ define_symbols! {
     RangeToInclusive,
     Ready,
     receiver,
-    receiver_target,
     recursion_limit,
     register_attr,
     register_tool,
@@ -422,38 +390,27 @@ define_symbols! {
     rust_2024,
     rust_analyzer,
     Rust,
-    rustc_allocator_zeroed,
-    rustc_allocator,
     rustc_allow_incoherent_impl,
     rustc_builtin_macro,
     rustc_coherence_is_core,
-    rustc_coinductive,
     rustc_const_panic_str,
-    rustc_deallocator,
     rustc_deprecated_safe_2024,
     rustc_has_incoherent_inherent_impls,
-    rustc_intrinsic_must_be_overridden,
-    rustc_intrinsic,
     rustc_layout_scalar_valid_range_end,
     rustc_layout_scalar_valid_range_start,
     rustc_legacy_const_generics,
     rustc_macro_transparency,
-    rustc_paren_sugar,
-    rustc_reallocator,
     rustc_reservation_impl,
     rustc_safe_intrinsic,
     rustc_skip_array_during_method_dispatch,
     rustc_skip_during_method_dispatch,
-    rustc_force_inline,
+    semitransparent,
     shl_assign,
     shl,
     shr_assign,
     shr,
     simd,
     sized,
-    meta_sized,
-    pointee_sized,
-    skip,
     slice_len_fn,
     Some,
     start,
@@ -472,22 +429,15 @@ define_symbols! {
     system,
     sysv64,
     Target,
-    target_feature,
-    enable,
     termination,
     test_case,
     test,
-    then,
     thiscall,
-    to_string,
     trace_macros,
     transmute_opts,
     transmute_trait,
     transparent,
-    try_into,
     Try,
-    TryFrom,
-    try_from,
     tuple_trait,
     u128,
     u16,
@@ -495,14 +445,12 @@ define_symbols! {
     u64,
     u8,
     unadjusted,
-    unknown,
     Unknown,
     unpin,
     unreachable_2015,
     unreachable_2021,
     unreachable,
     unsafe_cell,
-    unsafe_pinned,
     unsize,
     unstable,
     usize,
@@ -511,34 +459,6 @@ define_symbols! {
     vectorcall,
     wasm,
     win64,
-    args,
     array,
     boxed_slice,
-    completions,
-    ignore_flyimport,
-    ignore_flyimport_methods,
-    ignore_methods,
-    position,
-    flags,
-    precision,
-    width,
-    never_type_fallback,
-    specialization,
-    min_specialization,
-    arbitrary_self_types,
-    arbitrary_self_types_pointers,
-    supertrait_item_shadowing,
-    new_range,
-    range,
-    RangeCopy,
-    RangeFromCopy,
-    RangeInclusiveCopy,
-    RangeToInclusiveCopy,
-    hash,
-    partial_cmp,
-    cmp,
-    CoerceUnsized,
-    DispatchFromDyn,
-    define_opaque,
-    marker,
 }

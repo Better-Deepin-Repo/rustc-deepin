@@ -1,189 +1,191 @@
-//! Polonius analysis and support code:
-//! - dedicated constraints
-//! - conversion from NLL constraints
-//! - debugging utilities
-//! - etc.
+//! Functions dedicated to fact generation for the `-Zpolonius=legacy` datalog implementation.
 //!
-//! The current implementation models the flow-sensitive borrow-checking concerns as a graph
-//! containing both information about regions and information about the control flow.
-//!
-//! Loan propagation is seen as a reachability problem (with some subtleties) between where the loan
-//! is introduced and a given point.
-//!
-//! Constraints arising from type-checking allow loans to flow from region to region at the same CFG
-//! point. Constraints arising from liveness allow loans to flow within from point to point, between
-//! live regions at these points.
-//!
-//! Edges can be bidirectional to encode invariant relationships, and loans can flow "back in time"
-//! to traverse these constraints arising earlier in the CFG.
-//!
-//! When incorporating kills in the traversal, the loans reaching a given point are considered live.
-//!
-//! After this, the usual NLL process happens. These live loans are fed into a dataflow analysis
-//! combining them with the points where loans go out of NLL scope (the frontier where they stop
-//! propagating to a live region), to yield the "loans in scope" or "active loans", at a given
-//! point.
-//!
-//! Illegal accesses are still computed by checking whether one of these resulting loans is
-//! invalidated.
-//!
-//! More information on this simple approach can be found in the following links, and in the future
-//! in the rustc dev guide:
-//! - <https://smallcultfollowing.com/babysteps/blog/2023/09/22/polonius-part-1/>
-//! - <https://smallcultfollowing.com/babysteps/blog/2023/09/29/polonius-part-2/>
-//!
+//! Will be removed in the future, once the in-tree `-Zpolonius=next` implementation reaches feature
+//! parity.
 
-mod constraints;
-mod dump;
-pub(crate) mod legacy;
-mod liveness_constraints;
+use rustc_middle::mir::{Body, LocalKind, Location, START_BLOCK};
+use rustc_middle::ty::TyCtxt;
+use rustc_mir_dataflow::move_paths::{InitKind, InitLocation, MoveData};
+use tracing::debug;
 
-use std::collections::BTreeMap;
+use crate::borrow_set::BorrowSet;
+use crate::facts::{AllFacts, PoloniusRegionVid};
+use crate::location::LocationTable;
+use crate::type_check::free_region_relations::UniversalRegionRelations;
+use crate::universal_regions::UniversalRegions;
 
-use rustc_data_structures::fx::FxHashSet;
-use rustc_index::bit_set::SparseBitMatrix;
-use rustc_middle::mir::{Body, Local};
-use rustc_middle::ty::RegionVid;
-use rustc_mir_dataflow::points::PointIndex;
+mod loan_invalidations;
+mod loan_kills;
 
-pub(self) use self::constraints::*;
-pub(crate) use self::dump::dump_polonius_mir;
-use crate::dataflow::BorrowIndex;
-use crate::region_infer::values::LivenessValues;
-use crate::{BorrowSet, RegionInferenceContext};
-
-pub(crate) type LiveLoans = SparseBitMatrix<PointIndex, BorrowIndex>;
-
-/// This struct holds the necessary
-///  - liveness data, created during MIR typeck, and which will be used to lazily compute the
-///    polonius localized constraints, during NLL region inference as well as MIR dumping,
-///  - data needed by the borrowck error computation and diagnostics.
-#[derive(Default)]
-pub(crate) struct PoloniusContext {
-    /// The graph from which we extract the localized outlives constraints.
-    graph: Option<LocalizedConstraintGraph>,
-
-    /// The expected edge direction per live region: the kind of directed edge we'll create as
-    /// liveness constraints depends on the variance of types with respect to each contained region.
-    live_region_variances: BTreeMap<RegionVid, ConstraintDirection>,
-
-    /// The regions that outlive free regions are used to distinguish relevant live locals from
-    /// boring locals. A boring local is one whose type contains only such regions. Polonius
-    /// currently has more boring locals than NLLs so we record the latter to use in errors and
-    /// diagnostics, to focus on the locals we consider relevant and match NLL diagnostics.
-    pub(crate) boring_nll_locals: FxHashSet<Local>,
+/// When requested, emit most of the facts needed by polonius:
+/// - moves and assignments
+/// - universal regions and their relations
+/// - CFG points and edges
+/// - loan kills
+/// - loan invalidations
+///
+/// The rest of the facts are emitted during typeck and liveness.
+pub(crate) fn emit_facts<'tcx>(
+    all_facts: &mut Option<AllFacts>,
+    tcx: TyCtxt<'tcx>,
+    location_table: &LocationTable,
+    body: &Body<'tcx>,
+    borrow_set: &BorrowSet<'tcx>,
+    move_data: &MoveData<'_>,
+    universal_regions: &UniversalRegions<'_>,
+    universal_region_relations: &UniversalRegionRelations<'_>,
+) {
+    let Some(all_facts) = all_facts else {
+        // We don't do anything if there are no facts to fill.
+        return;
+    };
+    let _prof_timer = tcx.prof.generic_activity("polonius_fact_generation");
+    emit_move_facts(all_facts, move_data, location_table, body);
+    emit_universal_region_facts(
+        all_facts,
+        borrow_set,
+        universal_regions,
+        universal_region_relations,
+    );
+    emit_cfg_and_loan_kills_facts(all_facts, tcx, location_table, body, borrow_set);
+    emit_loan_invalidations_facts(all_facts, tcx, location_table, body, borrow_set);
 }
 
-/// The direction a constraint can flow into. Used to create liveness constraints according to
-/// variance.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-enum ConstraintDirection {
-    /// For covariant cases, we add a forward edge `O at P1 -> O at P2`.
-    Forward,
+/// Emit facts needed for move/init analysis: moves and assignments.
+fn emit_move_facts(
+    all_facts: &mut AllFacts,
+    move_data: &MoveData<'_>,
+    location_table: &LocationTable,
+    body: &Body<'_>,
+) {
+    all_facts
+        .path_is_var
+        .extend(move_data.rev_lookup.iter_locals_enumerated().map(|(l, r)| (r, l)));
 
-    /// For contravariant cases, we add a backward edge `O at P2 -> O at P1`
-    Backward,
+    for (child, move_path) in move_data.move_paths.iter_enumerated() {
+        if let Some(parent) = move_path.parent {
+            all_facts.child_path.push((child, parent));
+        }
+    }
 
-    /// For invariant cases, we add both the forward and backward edges `O at P1 <-> O at P2`.
-    Bidirectional,
+    let fn_entry_start =
+        location_table.start_index(Location { block: START_BLOCK, statement_index: 0 });
+
+    // initialized_at
+    for init in move_data.inits.iter() {
+        match init.location {
+            InitLocation::Statement(location) => {
+                let block_data = &body[location.block];
+                let is_terminator = location.statement_index == block_data.statements.len();
+
+                if is_terminator && init.kind == InitKind::NonPanicPathOnly {
+                    // We are at the terminator of an init that has a panic path,
+                    // and where the init should not happen on panic
+
+                    for successor in block_data.terminator().successors() {
+                        if body[successor].is_cleanup {
+                            continue;
+                        }
+
+                        // The initialization happened in (or rather, when arriving at)
+                        // the successors, but not in the unwind block.
+                        let first_statement = Location { block: successor, statement_index: 0 };
+                        all_facts
+                            .path_assigned_at_base
+                            .push((init.path, location_table.start_index(first_statement)));
+                    }
+                } else {
+                    // In all other cases, the initialization just happens at the
+                    // midpoint, like any other effect.
+                    all_facts
+                        .path_assigned_at_base
+                        .push((init.path, location_table.mid_index(location)));
+                }
+            }
+            // Arguments are initialized on function entry
+            InitLocation::Argument(local) => {
+                assert!(body.local_kind(local) == LocalKind::Arg);
+                all_facts.path_assigned_at_base.push((init.path, fn_entry_start));
+            }
+        }
+    }
+
+    for (local, path) in move_data.rev_lookup.iter_locals_enumerated() {
+        if body.local_kind(local) != LocalKind::Arg {
+            // Non-arguments start out deinitialised; we simulate this with an
+            // initial move:
+            all_facts.path_moved_at_base.push((path, fn_entry_start));
+        }
+    }
+
+    // moved_out_at
+    // deinitialisation is assumed to always happen!
+    all_facts
+        .path_moved_at_base
+        .extend(move_data.moves.iter().map(|mo| (mo.path, location_table.mid_index(mo.source))));
 }
 
-impl PoloniusContext {
-    /// Computes live loans using the set of loans model for `-Zpolonius=next`.
-    ///
-    /// First, creates a constraint graph combining regions and CFG points, by:
-    /// - converting NLL typeck constraints to be localized
-    /// - encoding liveness constraints
-    ///
-    /// Then, this graph is traversed, reachability is recorded as loan liveness, to be used by the
-    /// loan scope and active loans computations.
-    ///
-    /// The constraint data will be used to compute errors and diagnostics.
-    pub(crate) fn compute_loan_liveness<'tcx>(
-        &mut self,
-        regioncx: &mut RegionInferenceContext<'tcx>,
-        body: &Body<'tcx>,
-        borrow_set: &BorrowSet<'tcx>,
-    ) {
-        let liveness = regioncx.liveness_constraints();
+/// Emit universal regions facts, and their relations.
+fn emit_universal_region_facts(
+    all_facts: &mut AllFacts,
+    borrow_set: &BorrowSet<'_>,
+    universal_regions: &UniversalRegions<'_>,
+    universal_region_relations: &UniversalRegionRelations<'_>,
+) {
+    // 1: universal regions are modeled in Polonius as a pair:
+    // - the universal region vid itself.
+    // - a "placeholder loan" associated to this universal region. Since they don't exist in
+    //   the `borrow_set`, their `BorrowIndex` are synthesized as the universal region index
+    //   added to the existing number of loans, as if they succeeded them in the set.
+    //
+    all_facts
+        .universal_region
+        .extend(universal_regions.universal_regions().map(PoloniusRegionVid::from));
+    let borrow_count = borrow_set.len();
+    debug!(
+        "emit_universal_region_facts: polonius placeholders, num_universals={}, borrow_count={}",
+        universal_regions.len(),
+        borrow_count
+    );
 
-        // We don't need to prepare the graph (index NLL constraints, etc.) if we have no loans to
-        // trace throughout localized constraints.
-        if borrow_set.len() > 0 {
-            // From the outlives constraints, liveness, and variances, we can compute reachability
-            // on the lazy localized constraint graph to trace the liveness of loans, for the next
-            // step in the chain (the NLL loan scope and active loans computations).
-            let graph = LocalizedConstraintGraph::new(liveness, regioncx.outlives_constraints());
+    for universal_region in universal_regions.universal_regions() {
+        let universal_region_idx = universal_region.index();
+        let placeholder_loan_idx = borrow_count + universal_region_idx;
+        all_facts.placeholder.push((universal_region.into(), placeholder_loan_idx.into()));
+    }
 
-            let mut live_loans = LiveLoans::new(borrow_set.len());
-            let mut visitor = LoanLivenessVisitor { liveness, live_loans: &mut live_loans };
-            graph.traverse(
-                body,
-                liveness,
-                &self.live_region_variances,
-                regioncx.universal_regions(),
-                borrow_set,
-                &mut visitor,
+    // 2: the universal region relations `outlives` constraints are emitted as
+    //  `known_placeholder_subset` facts.
+    for (fr1, fr2) in universal_region_relations.known_outlives() {
+        if fr1 != fr2 {
+            debug!(
+                "emit_universal_region_facts: emitting polonius `known_placeholder_subset` \
+                     fr1={:?}, fr2={:?}",
+                fr1, fr2
             );
-            regioncx.record_live_loans(live_loans);
-
-            // The graph can be traversed again during MIR dumping, so we store it here.
-            self.graph = Some(graph);
+            all_facts.known_placeholder_subset.push((fr1.into(), fr2.into()));
         }
     }
 }
 
-/// Visitor to record loan liveness when traversing the localized constraint graph.
-struct LoanLivenessVisitor<'a> {
-    liveness: &'a LivenessValues,
-    live_loans: &'a mut LiveLoans,
+/// Emit facts about loan invalidations.
+fn emit_loan_invalidations_facts<'tcx>(
+    all_facts: &mut AllFacts,
+    tcx: TyCtxt<'tcx>,
+    location_table: &LocationTable,
+    body: &Body<'tcx>,
+    borrow_set: &BorrowSet<'tcx>,
+) {
+    loan_invalidations::emit_loan_invalidations(tcx, all_facts, location_table, body, borrow_set);
 }
 
-impl LocalizedConstraintGraphVisitor for LoanLivenessVisitor<'_> {
-    fn on_node_traversed(&mut self, loan: BorrowIndex, node: LocalizedNode) {
-        // Record the loan as being live on entry to this point if it reaches a live region
-        // there.
-        //
-        // This is an approximation of liveness (which is the thing we want), in that we're
-        // using a single notion of reachability to represent what used to be _two_ different
-        // transitive closures. It didn't seem impactful when coming up with the single-graph
-        // and reachability through space (regions) + time (CFG) concepts, but in practice the
-        // combination of time-traveling with kills is more impactful than initially
-        // anticipated.
-        //
-        // Kills should prevent a loan from reaching its successor points in the CFG, but not
-        // while time-traveling: we're not actually at that CFG point, but looking for
-        // predecessor regions that contain the loan. One of the two TCs we had pushed the
-        // transitive subset edges to each point instead of having backward edges, and the
-        // problem didn't exist before. In the abstract, naive reachability is not enough to
-        // model this, we'd need a slightly different solution. For example, maybe with a
-        // two-step traversal:
-        // - at each point we first traverse the subgraph (and possibly time-travel) looking for
-        //   exit nodes while ignoring kills,
-        // - and then when we're back at the current point, we continue normally.
-        //
-        // Another (less annoying) subtlety is that kills and the loan use-map are
-        // flow-insensitive. Kills can actually appear in places before a loan is introduced, or
-        // at a location that is actually unreachable in the CFG from the introduction point,
-        // and these can also be encountered during time-traveling.
-        //
-        // The simplest change that made sense to "fix" the issues above is taking into account
-        // kills that are:
-        // - reachable from the introduction point
-        // - encountered during forward traversal. Note that this is not transitive like the
-        //   two-step traversal described above: only kills encountered on exit via a backward
-        //   edge are ignored.
-        //
-        // This version of the analysis, however, is enough in practice to pass the tests that
-        // we care about and NLLs reject, without regressions on crater, and is an actionable
-        // subset of the full analysis. It also naturally points to areas of improvement that we
-        // wish to explore later, namely handling kills appropriately during traversal, instead
-        // of continuing traversal to all the reachable nodes.
-        //
-        // FIXME: analyze potential unsoundness, possibly in concert with a borrowck
-        // implementation in a-mir-formality, fuzzing, or manually crafting counter-examples.
-        if self.liveness.is_live_at_point(node.region, node.point) {
-            self.live_loans.insert(node.point, loan);
-        }
-    }
+/// Emit facts about CFG points and edges, as well as locations where loans are killed.
+fn emit_cfg_and_loan_kills_facts<'tcx>(
+    all_facts: &mut AllFacts,
+    tcx: TyCtxt<'tcx>,
+    location_table: &LocationTable,
+    body: &Body<'tcx>,
+    borrow_set: &BorrowSet<'tcx>,
+) {
+    loan_kills::emit_loan_kills(tcx, all_facts, location_table, body, borrow_set);
 }

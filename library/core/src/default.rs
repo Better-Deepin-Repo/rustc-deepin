@@ -33,7 +33,7 @@ use crate::ascii::Char as AsciiChar;
 /// }
 /// ```
 ///
-/// Now, you get all of the default values. Rust implements `Default` for various primitive types.
+/// Now, you get all of the default values. Rust implements `Default` for various primitives types.
 ///
 /// If you want to override a particular option, but still retain the other defaults:
 ///
@@ -101,10 +101,10 @@ use crate::ascii::Char as AsciiChar;
 ///     bar: f32,
 /// }
 /// ```
-#[rustc_diagnostic_item = "Default"]
+#[cfg_attr(not(test), rustc_diagnostic_item = "Default")]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_const_unstable(feature = "const_default", issue = "143894")]
-pub const trait Default: Sized {
+#[cfg_attr(not(bootstrap), rustc_trivial_field_reads)]
+pub trait Default: Sized {
     /// Returns the "default value" for a type.
     ///
     /// Default values are often some kind of initial value, identity value, or anything else that
@@ -150,8 +150,7 @@ pub macro Default($item:item) {
 macro_rules! default_impl {
     ($t:ty, $v:expr, $doc:tt) => {
         #[stable(feature = "rust1", since = "1.0.0")]
-        #[rustc_const_unstable(feature = "const_default", issue = "143894")]
-        impl const Default for $t {
+        impl Default for $t {
             #[inline(always)]
             #[doc = $doc]
             fn default() -> $t {

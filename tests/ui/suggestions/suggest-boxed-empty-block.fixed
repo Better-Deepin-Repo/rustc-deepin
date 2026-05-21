@@ -1,3 +1,5 @@
+#![feature(async_closure)]
+
 //@ edition:2021
 //@ run-rustfix
 

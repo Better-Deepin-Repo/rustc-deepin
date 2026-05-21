@@ -1,4 +1,3 @@
-//@ edition:2015
 #![allow(unused_imports)]
 
 mod inner {

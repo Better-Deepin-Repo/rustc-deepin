@@ -21,16 +21,16 @@ fn main() {
 
     match a_struct {
         A { a: 5, b: 42, c: "", .. } => {}, // Lint
-        //~^ rest_pat_in_fully_bound_structs
+        //~^ ERROR: unnecessary use of `..` pattern in struct binding. All fields were alr
         A { a: 0, b: 0, c: "", .. } => {}, // Lint
-        //~^ rest_pat_in_fully_bound_structs
+        //~^ ERROR: unnecessary use of `..` pattern in struct binding. All fields were alr
         _ => {},
     }
 
     match a_struct {
         A { a: 5, b: 42, .. } => {},
         A { a: 0, b: 0, c: "", .. } => {}, // Lint
-        //~^ rest_pat_in_fully_bound_structs
+        //~^ ERROR: unnecessary use of `..` pattern in struct binding. All fields were alr
         _ => {},
     }
 

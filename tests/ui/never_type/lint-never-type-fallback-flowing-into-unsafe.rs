@@ -1,5 +1,8 @@
 //@ revisions: e2015 e2024
+//@[e2015] check-pass
+//@[e2024] check-fail
 //@[e2024] edition:2024
+//@[e2024] compile-flags: -Zunstable-options
 
 use std::{marker, mem, ptr};
 
@@ -8,10 +11,10 @@ fn main() {}
 fn _zero() {
     if false {
         unsafe { mem::zeroed() }
-        //[e2015]~^ error: never type fallback affects this call to an `unsafe` function
+        //[e2015]~^ warn: never type fallback affects this call to an `unsafe` function
         //[e2024]~^^ error: never type fallback affects this call to an `unsafe` function
-        //~| warn: this changes meaning in Rust 2024 and in a future release in all editions!
-        //[e2024]~| warn: the type `!` does not permit zero-initialization
+        //~| warn: this will change its meaning in a future release!
+        //[e2024]~| warning: the type `!` does not permit zero-initialization
     } else {
         return;
     };
@@ -25,9 +28,9 @@ fn _trans() {
         unsafe {
             struct Zst;
             core::mem::transmute(Zst)
-            //[e2015]~^ error: never type fallback affects this call to an `unsafe` function
+            //[e2015]~^ warn: never type fallback affects this call to an `unsafe` function
             //[e2024]~^^ error: never type fallback affects this call to an `unsafe` function
-            //~| warn: this changes meaning in Rust 2024 and in a future release in all editions!
+            //~| warn: this will change its meaning in a future release!
         }
     } else {
         return;
@@ -42,9 +45,9 @@ fn _union() {
         }
 
         unsafe { Union { a: () }.b }
-        //[e2015]~^ error: never type fallback affects this union access
+        //[e2015]~^ warn: never type fallback affects this union access
         //[e2024]~^^ error: never type fallback affects this union access
-        //~| warn: this changes meaning in Rust 2024 and in a future release in all editions!
+        //~| warn: this will change its meaning in a future release!
     } else {
         return;
     };
@@ -53,9 +56,9 @@ fn _union() {
 fn _deref() {
     if false {
         unsafe { *ptr::from_ref(&()).cast() }
-        //[e2015]~^ error: never type fallback affects this raw pointer dereference
+        //[e2015]~^ warn: never type fallback affects this raw pointer dereference
         //[e2024]~^^ error: never type fallback affects this raw pointer dereference
-        //~| warn: this changes meaning in Rust 2024 and in a future release in all editions!
+        //~| warn: this will change its meaning in a future release!
     } else {
         return;
     };
@@ -74,9 +77,9 @@ fn _only_generics() {
         let x = None;
 
         unsafe { internally_create(x) }
-        //[e2015]~^ error: never type fallback affects this call to an `unsafe` function
+        //[e2015]~^ warn: never type fallback affects this call to an `unsafe` function
         //[e2024]~^^ error: never type fallback affects this call to an `unsafe` function
-        //~| warn: this changes meaning in Rust 2024 and in a future release in all editions!
+        //~| warn: this will change its meaning in a future release!
 
         x.unwrap()
     } else {
@@ -87,14 +90,14 @@ fn _only_generics() {
 fn _stored_function() {
     if false {
         let zeroed = mem::zeroed;
-        //[e2015]~^ error: never type fallback affects this `unsafe` function
+        //[e2015]~^ warn: never type fallback affects this `unsafe` function
         //[e2024]~^^ error: never type fallback affects this `unsafe` function
-        //~| warn: this changes meaning in Rust 2024 and in a future release in all editions!
+        //~| warn: this will change its meaning in a future release!
 
         unsafe { zeroed() }
-        //[e2015]~^ error: never type fallback affects this call to an `unsafe` function
+        //[e2015]~^ warn: never type fallback affects this call to an `unsafe` function
         //[e2024]~^^ error: never type fallback affects this call to an `unsafe` function
-        //~| warn: this changes meaning in Rust 2024 and in a future release in all editions!
+        //~| warn: this will change its meaning in a future release!
     } else {
         return;
     };
@@ -110,9 +113,9 @@ fn _only_generics_stored_function() {
 
         let x = None;
         let f = internally_create;
-        //[e2015]~^ error: never type fallback affects this `unsafe` function
+        //[e2015]~^ warn: never type fallback affects this `unsafe` function
         //[e2024]~^^ error: never type fallback affects this `unsafe` function
-        //~| warn: this changes meaning in Rust 2024 and in a future release in all editions!
+        //~| warn: this will change its meaning in a future release!
 
         unsafe { f(x) }
 
@@ -135,9 +138,9 @@ fn _method() {
     if false {
         unsafe {
             S(marker::PhantomData).create_out_of_thin_air()
-            //[e2015]~^ error: never type fallback affects this call to an `unsafe` method
+            //[e2015]~^ warn: never type fallback affects this call to an `unsafe` method
             //[e2024]~^^ error: never type fallback affects this call to an `unsafe` method
-            //~| warn: this changes meaning in Rust 2024 and in a future release in all editions!
+            //~| warn: this will change its meaning in a future release!
         }
     } else {
         return;
@@ -153,9 +156,9 @@ fn _objc() {
     macro_rules! msg_send {
         () => {
             match send_message::<_ /* ?0 */>() {
-                //[e2015]~^ error: never type fallback affects this call to an `unsafe` function
+                //[e2015]~^ warn: never type fallback affects this call to an `unsafe` function
                 //[e2024]~^^ error: never type fallback affects this call to an `unsafe` function
-                //~| warn: this changes meaning in Rust 2024 and in a future release in all editions!
+                //~| warn: this will change its meaning in a future release!
                 Ok(x) => x,
                 Err(_) => loop {},
             }

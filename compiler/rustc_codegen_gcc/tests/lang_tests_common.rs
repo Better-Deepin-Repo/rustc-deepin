@@ -1,11 +1,12 @@
 //! The common code for `tests/lang_tests_*.rs`
 
-#![allow(clippy::uninlined_format_args)]
+use std::{
+    env::{self, current_dir},
+    path::{Path, PathBuf},
+    process::Command,
+};
 
-use std::env::current_dir;
-use std::path::{Path, PathBuf};
-use std::process::Command;
-
+use boml::Toml;
 use lang_tester::LangTester;
 use tempfile::TempDir;
 
@@ -21,6 +22,21 @@ pub fn main_inner(profile: Profile) {
     let tempdir = TempDir::new().expect("temp dir");
     let current_dir = current_dir().expect("current dir");
     let current_dir = current_dir.to_str().expect("current dir").to_string();
+    let toml = Toml::parse(include_str!("../config.toml")).expect("Failed to parse `config.toml`");
+    let gcc_path = if let Ok(gcc_path) = toml.get_string("gcc-path") {
+        PathBuf::from(gcc_path.to_string())
+    } else {
+        // then we try to retrieve it from the `target` folder.
+        let commit = include_str!("../libgccjit.version").trim();
+        Path::new("build/libgccjit").join(commit)
+    };
+
+    let gcc_path = Path::new(&gcc_path)
+        .canonicalize()
+        .expect("failed to get absolute path of `gcc-path`")
+        .display()
+        .to_string();
+    env::set_var("LD_LIBRARY_PATH", gcc_path);
 
     fn rust_filter(path: &Path) -> bool {
         path.is_file() && path.extension().expect("extension").to_str().expect("to_str") == "rs"
@@ -33,10 +49,10 @@ pub fn main_inner(profile: Profile) {
 
     #[cfg(not(feature = "master"))]
     fn filter(filename: &Path) -> bool {
-        if let Some(filename) = filename.to_str()
-            && filename.ends_with("gep.rs")
-        {
-            return false;
+        if let Some(filename) = filename.to_str() {
+            if filename.ends_with("gep.rs") {
+                return false;
+            }
         }
         rust_filter(filename)
     }
@@ -45,14 +61,15 @@ pub fn main_inner(profile: Profile) {
         .test_dir("tests/run")
         .test_path_filter(filter)
         .test_extract(|path| {
-            std::fs::read_to_string(path)
+            let lines = std::fs::read_to_string(path)
                 .expect("read file")
                 .lines()
                 .skip_while(|l| !l.starts_with("//"))
                 .take_while(|l| l.starts_with("//"))
                 .map(|l| &l[2..])
                 .collect::<Vec<_>>()
-                .join("\n")
+                .join("\n");
+            lines
         })
         .test_cmds(move |path| {
             // Test command 1: Compile `x.rs` into `tempdir/x`.
@@ -66,8 +83,6 @@ pub fn main_inner(profile: Profile) {
                 &format!("{}/build/build_sysroot/sysroot/", current_dir),
                 "-C",
                 "link-arg=-lc",
-                "--extern",
-                "mini_core=target/out/libmini_core.rlib",
                 "-o",
                 exe.to_str().expect("to_str"),
                 path.to_str().expect("to_str"),
@@ -91,19 +106,7 @@ pub fn main_inner(profile: Profile) {
                 }
             }
             match profile {
-                Profile::Debug => {
-                    if test_target.is_ok() {
-                        // m68k doesn't have lubsan for now
-                        compiler.args(["-C", "llvm-args=sanitize-undefined"]);
-                    } else {
-                        compiler.args([
-                            "-C",
-                            "llvm-args=sanitize-undefined",
-                            "-C",
-                            "link-args=-lubsan",
-                        ]);
-                    }
-                }
+                Profile::Debug => {}
                 Profile::Release => {
                     compiler.args(["-C", "opt-level=3", "-C", "lto=no"]);
                 }

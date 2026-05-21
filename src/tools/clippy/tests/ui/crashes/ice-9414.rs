@@ -1,5 +1,3 @@
-//@ check-pass
-
 #![warn(clippy::result_large_err)]
 
 trait T {}

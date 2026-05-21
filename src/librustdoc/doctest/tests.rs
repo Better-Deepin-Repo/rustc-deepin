@@ -1,32 +1,27 @@
 use std::path::PathBuf;
 
-use rustc_span::edition::Edition;
-use rustc_span::{DUMMY_SP, FileName};
+use rustc_span::edition::DEFAULT_EDITION;
 
-use super::extracted::ExtractedDocTests;
-use super::{BuildDocTestBuilder, GlobalTestOptions, ScrapedDocTest};
-use crate::html::markdown::LangString;
+use super::{DocTestBuilder, GlobalTestOptions};
 
 fn make_test(
     test_code: &str,
     crate_name: Option<&str>,
     dont_insert_main: bool,
     opts: &GlobalTestOptions,
-    global_crate_attrs: Vec<&str>,
     test_id: Option<&str>,
 ) -> (String, usize) {
-    let mut builder = BuildDocTestBuilder::new(test_code)
-        .global_crate_attrs(global_crate_attrs.into_iter().map(|a| a.to_string()).collect());
-    if let Some(crate_name) = crate_name {
-        builder = builder.crate_name(crate_name);
-    }
-    if let Some(test_id) = test_id {
-        builder = builder.test_id(test_id.to_string());
-    }
-    let doctest = builder.build(None);
-    let (wrapped, line_offset) =
+    let doctest = DocTestBuilder::new(
+        test_code,
+        crate_name,
+        DEFAULT_EDITION,
+        false,
+        test_id.map(|s| s.to_string()),
+        None,
+    );
+    let (code, line_offset) =
         doctest.generate_unique_doctest(test_code, dont_insert_main, opts, crate_name);
-    (wrapped.to_string(), line_offset)
+    (code, line_offset)
 }
 
 /// Default [`GlobalTestOptions`] for these unit tests.
@@ -35,6 +30,7 @@ fn default_global_opts(crate_name: impl Into<String>) -> GlobalTestOptions {
         crate_name: crate_name.into(),
         no_crate_inject: false,
         insert_indent_space: false,
+        attrs: vec![],
         args_file: PathBuf::new(),
     }
 }
@@ -49,7 +45,7 @@ fn main() {
 assert_eq!(2+2, 4);
 }"
     .to_string();
-    let (output, len) = make_test(input, None, false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, None, false, &opts, None);
     assert_eq!((output, len), (expected, 2));
 }
 
@@ -64,7 +60,7 @@ fn main() {
 assert_eq!(2+2, 4);
 }"
     .to_string();
-    let (output, len) = make_test(input, Some("asdf"), false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, Some("asdf"), false, &opts, None);
     assert_eq!((output, len), (expected, 2));
 }
 
@@ -83,7 +79,7 @@ use asdf::qwop;
 assert_eq!(2+2, 4);
 }"
     .to_string();
-    let (output, len) = make_test(input, Some("asdf"), false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, Some("asdf"), false, &opts, None);
     assert_eq!((output, len), (expected, 3));
 }
 
@@ -100,7 +96,7 @@ use asdf::qwop;
 assert_eq!(2+2, 4);
 }"
     .to_string();
-    let (output, len) = make_test(input, Some("asdf"), false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, Some("asdf"), false, &opts, None);
     assert_eq!((output, len), (expected, 2));
 }
 
@@ -118,7 +114,7 @@ use std::*;
 assert_eq!(2+2, 4);
 }"
     .to_string();
-    let (output, len) = make_test(input, Some("std"), false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, Some("std"), false, &opts, None);
     assert_eq!((output, len), (expected, 2));
 }
 
@@ -137,7 +133,7 @@ use asdf::qwop;
 assert_eq!(2+2, 4);
 }"
     .to_string();
-    let (output, len) = make_test(input, Some("asdf"), false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, Some("asdf"), false, &opts, None);
     assert_eq!((output, len), (expected, 2));
 }
 
@@ -154,7 +150,7 @@ use asdf::qwop;
 assert_eq!(2+2, 4);
 }"
     .to_string();
-    let (output, len) = make_test(input, Some("asdf"), false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, Some("asdf"), false, &opts, None);
     assert_eq!((output, len), (expected, 2));
 }
 
@@ -162,7 +158,8 @@ assert_eq!(2+2, 4);
 fn make_test_opts_attrs() {
     // If you supplied some doctest attributes with `#![doc(test(attr(...)))]`, it will use
     // those instead of the stock `#![allow(unused)]`.
-    let opts = default_global_opts("asdf");
+    let mut opts = default_global_opts("asdf");
+    opts.attrs.push("feature(sick_rad)".to_string());
     let input = "use asdf::qwop;
 assert_eq!(2+2, 4);";
     let expected = "#![feature(sick_rad)]
@@ -173,10 +170,11 @@ use asdf::qwop;
 assert_eq!(2+2, 4);
 }"
     .to_string();
-    let (output, len) =
-        make_test(input, Some("asdf"), false, &opts, vec!["feature(sick_rad)"], None);
+    let (output, len) = make_test(input, Some("asdf"), false, &opts, None);
     assert_eq!((output, len), (expected, 3));
 
+    // Adding more will also bump the returned line offset.
+    opts.attrs.push("feature(hella_dope)".to_string());
     let expected = "#![feature(sick_rad)]
 #![feature(hella_dope)]
 #[allow(unused_extern_crates)]
@@ -186,18 +184,7 @@ use asdf::qwop;
 assert_eq!(2+2, 4);
 }"
     .to_string();
-    let (output, len) = make_test(
-        input,
-        Some("asdf"),
-        false,
-        &opts,
-        vec![
-            "feature(sick_rad)",
-            // Adding more will also bump the returned line offset.
-            "feature(hella_dope)",
-        ],
-        None,
-    );
+    let (output, len) = make_test(input, Some("asdf"), false, &opts, None);
     assert_eq!((output, len), (expected, 4));
 }
 
@@ -210,12 +197,11 @@ fn make_test_crate_attrs() {
 assert_eq!(2+2, 4);";
     let expected = "#![allow(unused)]
 #![feature(sick_rad)]
-
 fn main() {
 assert_eq!(2+2, 4);
 }"
     .to_string();
-    let (output, len) = make_test(input, None, false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, None, false, &opts, None);
     assert_eq!((output, len), (expected, 2));
 }
 
@@ -231,7 +217,7 @@ fn main() {
     assert_eq!(2+2, 4);
 }"
     .to_string();
-    let (output, len) = make_test(input, None, false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, None, false, &opts, None);
     assert_eq!((output, len), (expected, 1));
 }
 
@@ -242,12 +228,12 @@ fn make_test_fake_main() {
     let input = "//Ceci n'est pas une `fn main`
 assert_eq!(2+2, 4);";
     let expected = "#![allow(unused)]
-fn main() {
 //Ceci n'est pas une `fn main`
+fn main() {
 assert_eq!(2+2, 4);
 }"
     .to_string();
-    let (output, len) = make_test(input, None, false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, None, false, &opts, None);
     assert_eq!((output, len), (expected, 2));
 }
 
@@ -261,7 +247,7 @@ assert_eq!(2+2, 4);";
 //Ceci n'est pas une `fn main`
 assert_eq!(2+2, 4);"
         .to_string();
-    let (output, len) = make_test(input, None, true, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, None, true, &opts, None);
     assert_eq!((output, len), (expected, 1));
 }
 
@@ -273,13 +259,13 @@ fn make_test_issues_21299() {
 assert_eq!(2+2, 4);";
 
     let expected = "#![allow(unused)]
-fn main() {
 // fn main
+fn main() {
 assert_eq!(2+2, 4);
 }"
     .to_string();
 
-    let (output, len) = make_test(input, None, false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, None, false, &opts, None);
     assert_eq!((output, len), (expected, 2));
 }
 
@@ -299,7 +285,7 @@ assert_eq!(asdf::foo, 4);
 }"
     .to_string();
 
-    let (output, len) = make_test(input, Some("asdf"), false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, Some("asdf"), false, &opts, None);
     assert_eq!((output, len), (expected, 3));
 }
 
@@ -317,7 +303,7 @@ test_wrapper! {
 }"
     .to_string();
 
-    let (output, len) = make_test(input, Some("my_crate"), false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, Some("my_crate"), false, &opts, None);
     assert_eq!((output, len), (expected, 1));
 }
 
@@ -330,14 +316,14 @@ let mut input = String::new();
 io::stdin().read_line(&mut input)?;
 Ok::<(), io:Error>(())";
     let expected = "#![allow(unused)]
-fn main() { fn _inner() -> core::result::Result<(), impl core::fmt::Debug> {
+fn main() { fn _inner() -> Result<(), impl core::fmt::Debug> {
 use std::io;
 let mut input = String::new();
 io::stdin().read_line(&mut input)?;
 Ok::<(), io:Error>(())
 } _inner().unwrap() }"
         .to_string();
-    let (output, len) = make_test(input, None, false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, None, false, &opts, None);
     assert_eq!((output, len), (expected, 2));
 }
 
@@ -351,7 +337,7 @@ fn main() { #[allow(non_snake_case)] fn _doctest_main__some_unique_name() {
 assert_eq!(2+2, 4);
 } _doctest_main__some_unique_name() }"
         .to_string();
-    let (output, len) = make_test(input, None, false, &opts, Vec::new(), Some("_some_unique_name"));
+    let (output, len) = make_test(input, None, false, &opts, Some("_some_unique_name"));
     assert_eq!((output, len), (expected, 2));
 }
 
@@ -370,7 +356,7 @@ fn main() {
     eprintln!(\"hello anan\");
 }"
     .to_string();
-    let (output, len) = make_test(input, None, false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, None, false, &opts, None);
     assert_eq!((output, len), (expected, 2));
 }
 
@@ -390,127 +376,6 @@ fn main() {
     eprintln!(\"hello anan\");
 }"
     .to_string();
-    let (output, len) = make_test(input, None, false, &opts, Vec::new(), None);
+    let (output, len) = make_test(input, None, false, &opts, None);
     assert_eq!((output, len), (expected, 1));
-}
-
-#[test]
-fn comment_in_attrs() {
-    // If there is an inline code comment after attributes, we need to ensure that
-    // a backline will be added to prevent generating code "inside" it (and thus generating)
-    // invalid code.
-    let opts = default_global_opts("");
-    let input = "\
-#![feature(rustdoc_internals)]
-#![allow(internal_features)]
-#![doc(rust_logo)]
-//! This crate has the Rust(tm) branding on it.";
-    let expected = "\
-#![allow(unused)]
-#![feature(rustdoc_internals)]
-#![allow(internal_features)]
-#![doc(rust_logo)]
-//! This crate has the Rust(tm) branding on it.
-fn main() {
-
-}"
-    .to_string();
-    let (output, len) = make_test(input, None, false, &opts, Vec::new(), None);
-    assert_eq!((output, len), (expected, 2));
-
-    // And same, if there is a `main` function provided by the user, we ensure that it's
-    // correctly separated.
-    let input = "\
-#![feature(rustdoc_internals)]
-#![allow(internal_features)]
-#![doc(rust_logo)]
-//! This crate has the Rust(tm) branding on it.
-fn main() {}";
-    let expected = "\
-#![allow(unused)]
-#![feature(rustdoc_internals)]
-#![allow(internal_features)]
-#![doc(rust_logo)]
-//! This crate has the Rust(tm) branding on it.
-
-fn main() {}"
-        .to_string();
-    let (output, len) = make_test(input, None, false, &opts, Vec::new(), None);
-    assert_eq!((output, len), (expected, 1));
-}
-
-// This test ensures that the only attributes taken into account when we switch between
-// "crate level" content and the rest doesn't include inner attributes span, as it would
-// include part of the item and generate broken code.
-#[test]
-fn inner_attributes() {
-    let opts = default_global_opts("");
-    let input = r#"
-//! A doc comment that applies to the implicit anonymous module of this crate
-
-pub mod outer_module {
-    //!! - Still an inner line doc (but with a bang at the beginning)
-}
-"#;
-    let expected = "#![allow(unused)]
-
-//! A doc comment that applies to the implicit anonymous module of this crate
-
-
-fn main() {
-pub mod outer_module {
-    //!! - Still an inner line doc (but with a bang at the beginning)
-}
-}"
-    .to_string();
-    let (output, len) = make_test(input, None, false, &opts, Vec::new(), None);
-    assert_eq!((output, len), (expected, 2));
-}
-
-fn get_extracted_doctests(code: &str) -> ExtractedDocTests {
-    let opts = default_global_opts("");
-    let mut extractor = ExtractedDocTests::new();
-    extractor.add_test_with_edition(
-        ScrapedDocTest::new(
-            FileName::Custom(String::new()),
-            0,
-            Vec::new(),
-            LangString::default(),
-            code.to_string(),
-            DUMMY_SP,
-            Vec::new(),
-        ),
-        &opts,
-        Edition::Edition2018,
-    );
-    extractor
-}
-
-// Test that `extracted::DocTest::wrapper` is `None` if the doctest has a `main` function.
-#[test]
-fn test_extracted_doctest_wrapper_field() {
-    let extractor = get_extracted_doctests("fn main() {}");
-
-    assert_eq!(extractor.doctests().len(), 1);
-    let doctest_code = extractor.doctests()[0].doctest_code.as_ref().unwrap();
-    assert!(doctest_code.wrapper.is_none());
-}
-
-// Test that `ExtractedDocTest::doctest_code` is `None` if the doctest has syntax error.
-#[test]
-fn test_extracted_doctest_doctest_code_field() {
-    let extractor = get_extracted_doctests("let x +=");
-
-    assert_eq!(extractor.doctests().len(), 1);
-    assert!(extractor.doctests()[0].doctest_code.is_none());
-}
-
-// Test that `extracted::DocTest::wrapper` is `Some` if the doctest needs wrapping.
-#[test]
-fn test_extracted_doctest_wrapper_field_with_info() {
-    let extractor = get_extracted_doctests("let x = 12;");
-
-    assert_eq!(extractor.doctests().len(), 1);
-    let doctest_code = extractor.doctests()[0].doctest_code.as_ref().unwrap();
-    assert!(doctest_code.wrapper.is_some());
 }

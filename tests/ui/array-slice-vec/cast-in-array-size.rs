@@ -2,6 +2,7 @@
 
 
 // issues #10618 and #16382
+//@ pretty-expanded FIXME #23616
 
 const SIZE: isize = 25;
 

@@ -1,7 +1,6 @@
 //@ known-bug: #107975
 //@ compile-flags: -Copt-level=2
 //@ run-pass
-//@ ignore-backends: gcc
 
 // Based on https://github.com/rust-lang/rust/issues/107975#issuecomment-1432161340
 
@@ -24,7 +23,7 @@ fn main() {
         let v = 0;
         &v as *const _ as usize
     };
-    assert_eq!(format!("{a}"), format!("{b}"));
+    assert_eq!(a.to_string(), b.to_string());
     assert_eq!(format!("{}", a == b), "true");
     assert_eq!(format!("{}", cmp_in(a, b)), "true");
     assert_eq!(format!("{}", cmp(a, b)), "true");

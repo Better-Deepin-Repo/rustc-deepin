@@ -8,10 +8,10 @@ use std::hash::Hash;
 use std::iter::{Product, Sum};
 use std::ops::Index;
 
-use rustc_macros::{Decodable_NoContext, Encodable_NoContext};
+use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_macros::{Decodable_Generic, Encodable_Generic};
 
 use crate::fingerprint::Fingerprint;
-use crate::fx::{FxBuildHasher, FxHashMap, FxHashSet};
 use crate::stable_hasher::{HashStable, StableCompare, StableHasher, ToStableHashKey};
 
 /// `UnordItems` is the order-less version of `Iterator`. It only contains methods
@@ -108,16 +108,6 @@ impl<T, I: Iterator<Item = T>> UnordItems<T, I> {
 
     pub fn collect<C: From<UnordItems<T, I>>>(self) -> C {
         self.into()
-    }
-
-    /// If the iterator has only one element, returns it, otherwise returns `None`.
-    #[track_caller]
-    pub fn get_only(mut self) -> Option<T> {
-        let item = self.0.next();
-        if self.0.next().is_some() {
-            return None;
-        }
-        item
     }
 }
 
@@ -234,17 +224,17 @@ trait UnordCollection {}
 ///
 /// See [MCP 533](https://github.com/rust-lang/compiler-team/issues/533)
 /// for more information.
-#[derive(Debug, Eq, PartialEq, Clone, Encodable_NoContext, Decodable_NoContext)]
+#[derive(Debug, Eq, PartialEq, Clone, Encodable_Generic, Decodable_Generic)]
 pub struct UnordSet<V: Eq + Hash> {
     inner: FxHashSet<V>,
 }
 
 impl<V: Eq + Hash> UnordCollection for UnordSet<V> {}
 
-impl<V: Eq + Hash> const Default for UnordSet<V> {
+impl<V: Eq + Hash> Default for UnordSet<V> {
     #[inline]
     fn default() -> Self {
-        Self { inner: FxHashSet::with_hasher(FxBuildHasher) }
+        Self { inner: FxHashSet::default() }
     }
 }
 
@@ -267,12 +257,6 @@ impl<V: Eq + Hash> UnordSet<V> {
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
-    }
-
-    /// If the set has only one element, returns it, otherwise returns `None`.
-    #[inline]
-    pub fn get_only(&self) -> Option<&V> {
-        if self.inner.len() == 1 { self.inner.iter().next() } else { None }
     }
 
     #[inline]
@@ -431,17 +415,17 @@ impl<HCX, V: Hash + Eq + HashStable<HCX>> HashStable<HCX> for UnordSet<V> {
 ///
 /// See [MCP 533](https://github.com/rust-lang/compiler-team/issues/533)
 /// for more information.
-#[derive(Debug, Eq, PartialEq, Clone, Encodable_NoContext, Decodable_NoContext)]
+#[derive(Debug, Eq, PartialEq, Clone, Encodable_Generic, Decodable_Generic)]
 pub struct UnordMap<K: Eq + Hash, V> {
     inner: FxHashMap<K, V>,
 }
 
 impl<K: Eq + Hash, V> UnordCollection for UnordMap<K, V> {}
 
-impl<K: Eq + Hash, V> const Default for UnordMap<K, V> {
+impl<K: Eq + Hash, V> Default for UnordMap<K, V> {
     #[inline]
     fn default() -> Self {
-        Self { inner: FxHashMap::with_hasher(FxBuildHasher) }
+        Self { inner: FxHashMap::default() }
     }
 }
 
@@ -618,11 +602,6 @@ impl<K: Eq + Hash, V> UnordMap<K, V> {
             .into_iter()
             .map(|(_, v)| v)
     }
-
-    #[inline]
-    pub fn clear(&mut self) {
-        self.inner.clear()
-    }
 }
 
 impl<K, Q: ?Sized, V> Index<&Q> for UnordMap<K, V>
@@ -655,7 +634,7 @@ impl<HCX, K: Hash + Eq + HashStable<HCX>, V: HashStable<HCX>> HashStable<HCX> fo
 ///
 /// See [MCP 533](https://github.com/rust-lang/compiler-team/issues/533)
 /// for more information.
-#[derive(Default, Debug, Eq, PartialEq, Clone, Encodable_NoContext, Decodable_NoContext)]
+#[derive(Default, Debug, Eq, PartialEq, Clone, Encodable_Generic, Decodable_Generic)]
 pub struct UnordBag<V> {
     inner: Vec<V>,
 }

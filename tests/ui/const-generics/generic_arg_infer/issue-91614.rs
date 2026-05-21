@@ -1,4 +1,5 @@
 #![feature(portable_simd)]
+#![feature(generic_arg_infer)]
 use std::simd::Mask;
 
 fn main() {

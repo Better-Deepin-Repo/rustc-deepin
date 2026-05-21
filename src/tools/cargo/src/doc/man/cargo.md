@@ -17,14 +17,6 @@ cargo --- The Rust package manager
 This program is a package manager and build tool for the Rust language,
 available at <https://rust-lang.org>.
 
-_command_ may be one of:
-- built-in commands, see below
-- [aliases]
-- [external tools]
-
-[aliases]: ../reference/config.html#alias
-[external tools]: ../reference/external-tools.html#custom-subcommands
-
 ## COMMANDS
 
 ### Build Commands
@@ -94,6 +86,9 @@ _command_ may be one of:
 {{man "cargo-vendor" 1}}\
 &nbsp;&nbsp;&nbsp;&nbsp;Vendor all dependencies locally.
 
+{{man "cargo-verify-project" 1}}\
+&nbsp;&nbsp;&nbsp;&nbsp;Check correctness of crate manifest.
+
 ### Package Commands
 
 {{man "cargo-init" 1}}\
@@ -130,14 +125,6 @@ _command_ may be one of:
 
 {{man "cargo-yank" 1}}\
 &nbsp;&nbsp;&nbsp;&nbsp;Remove a pushed crate from the index.
-
-### Report Commands
-
-{{man "cargo-report" 1}}\
-&nbsp;&nbsp;&nbsp;&nbsp;Generate and display various kinds of reports.
-
-{{man "cargo-report-future-incompatibilities" 1}}\
-&nbsp;&nbsp;&nbsp;&nbsp;Reports any crates which will eventually stop compiling.
 
 ### General Commands
 

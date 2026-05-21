@@ -11,7 +11,7 @@ macro_rules! accept_pat {
 
 accept_pat!(..);
 
-#[cfg(false)]
+#[cfg(FALSE)]
 fn rest_patterns() {
     // Top level:
     fn foo(..: u8) {}

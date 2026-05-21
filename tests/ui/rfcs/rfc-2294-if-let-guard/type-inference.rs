@@ -1,5 +1,7 @@
 //@ check-pass
 
+#![feature(if_let_guard)]
+
 struct S;
 
 fn get<T>() -> Option<T> {

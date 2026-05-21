@@ -1,15 +1,14 @@
 //! Infrastructure for lazy project discovery. Currently only support rust-project.json discovery
 //! via a custom discover command.
-use std::path::Path;
+use std::{io, process::Command};
 
 use crossbeam_channel::Sender;
-use ide_db::FxHashMap;
 use paths::{AbsPathBuf, Utf8Path, Utf8PathBuf};
 use project_model::ProjectJsonData;
 use serde::{Deserialize, Serialize};
-use tracing::{info_span, span::EnteredSpan};
+use serde_json::Value;
 
-use crate::command::{CommandHandle, JsonLinesParser};
+use crate::command::{CommandHandle, ParseFromLine};
 
 pub(crate) const ARG_PLACEHOLDER: &str = "{arg}";
 
@@ -42,12 +41,8 @@ impl DiscoverCommand {
         Self { sender, command }
     }
 
-    /// Spawn the command inside `DiscoverCommand` and report progress, if any.
-    pub(crate) fn spawn(
-        &self,
-        discover_arg: DiscoverArgument,
-        current_dir: &Path,
-    ) -> anyhow::Result<DiscoverHandle> {
+    /// Spawn the command inside [Discover] and report progress, if any.
+    pub(crate) fn spawn(&self, discover_arg: DiscoverArgument) -> io::Result<DiscoverHandle> {
         let command = &self.command[0];
         let args = &self.command[1..];
 
@@ -62,23 +57,17 @@ impl DiscoverCommand {
             })
             .collect();
 
-        // TODO: are we sure the extra env should be empty?
-        let mut cmd = toolchain::command(command, current_dir, &FxHashMap::default());
+        let mut cmd = Command::new(command);
         cmd.args(args);
 
-        Ok(DiscoverHandle {
-            handle: CommandHandle::spawn(cmd, DiscoverProjectParser, self.sender.clone(), None)?,
-            span: info_span!("discover_command").entered(),
-        })
+        Ok(DiscoverHandle { _handle: CommandHandle::spawn(cmd, self.sender.clone())? })
     }
 }
 
-/// A handle to a spawned `DiscoverCommand`.
+/// A handle to a spawned [Discover].
 #[derive(Debug)]
 pub(crate) struct DiscoverHandle {
-    pub(crate) handle: CommandHandle<DiscoverProjectMessage>,
-    #[allow(dead_code)] // not accessed, but used to log on drop.
-    span: EnteredSpan,
+    _handle: CommandHandle<DiscoverProjectMessage>,
 }
 
 /// An enum containing either progress messages, an error,
@@ -116,24 +105,23 @@ impl DiscoverProjectMessage {
     }
 }
 
-struct DiscoverProjectParser;
+impl ParseFromLine for DiscoverProjectMessage {
+    fn from_line(line: &str, _error: &mut String) -> Option<Self> {
+        // can the line even be deserialized as JSON?
+        let Ok(data) = serde_json::from_str::<Value>(line) else {
+            let err = DiscoverProjectData::Error { error: line.to_owned(), source: None };
+            return Some(DiscoverProjectMessage::new(err));
+        };
 
-impl JsonLinesParser<DiscoverProjectMessage> for DiscoverProjectParser {
-    fn from_line(&self, line: &str, _error: &mut String) -> Option<DiscoverProjectMessage> {
-        match serde_json::from_str::<DiscoverProjectData>(line) {
-            Ok(data) => {
-                let msg = DiscoverProjectMessage::new(data);
-                Some(msg)
-            }
-            Err(err) => {
-                let err =
-                    DiscoverProjectData::Error { error: format!("{err:#?}\n{line}"), source: None };
-                Some(DiscoverProjectMessage::new(err))
-            }
-        }
+        let Ok(data) = serde_json::from_value::<DiscoverProjectData>(data) else {
+            return None;
+        };
+
+        let msg = DiscoverProjectMessage::new(data);
+        Some(msg)
     }
 
-    fn from_eof(&self) -> Option<DiscoverProjectMessage> {
+    fn from_eof() -> Option<Self> {
         None
     }
 }

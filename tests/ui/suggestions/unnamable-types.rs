@@ -1,7 +1,7 @@
 // Test that we do not suggest to add type annotations for unnamable types.
 
 #![crate_type="lib"]
-#![feature(coroutines, stmt_expr_attributes, const_async_blocks)]
+#![feature(coroutines, stmt_expr_attributes)]
 
 const A = 5;
 //~^ ERROR: missing type for `const` item
@@ -10,7 +10,7 @@ const A = 5;
 static B: _ = "abc";
 //~^ ERROR: the placeholder `_` is not allowed within types on item signatures for static variables
 //~| NOTE: not allowed in type signatures
-//~| HELP: replace this with a fully-specified type
+//~| HELP: replace with the correct type
 
 
 // FIXME: this should also suggest a function pointer, as the closure is non-capturing

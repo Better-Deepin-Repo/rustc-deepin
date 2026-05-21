@@ -14,35 +14,44 @@ const COMPRESSED_MAN: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/man.tgz"
 
 pub fn cli() -> Command {
     subcommand("help")
-        .about("Displays help for a cargo command")
-        .arg(Arg::new("COMMAND").action(ArgAction::Set).add(
-            clap_complete::ArgValueCandidates::new(|| {
-                super::builtin()
-                    .iter()
-                    .map(|cmd| {
-                        let name = cmd.get_name();
-                        clap_complete::CompletionCandidate::new(name)
-                            .help(cmd.get_about().cloned())
-                            .hide(cmd.is_hide_set())
-                    })
-                    .collect()
-            }),
-        ))
+        .about("Displays help for a cargo subcommand")
+        .arg(Arg::new("COMMAND").action(ArgAction::Set))
 }
 
 pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
-    let Some(subcommand) = args.get_one::<String>("COMMAND") else {
-        let _ = crate::cli::cli(gctx).print_help();
-        return Ok(());
-    };
+    let subcommand = args.get_one::<String>("COMMAND");
+    if let Some(subcommand) = subcommand {
+        if !try_help(gctx, subcommand)? {
+            match check_builtin(&subcommand) {
+                Some(s) => {
+                    crate::execute_internal_subcommand(
+                        gctx,
+                        &[OsStr::new(s), OsStr::new("--help")],
+                    )?;
+                }
+                None => {
+                    crate::execute_external_subcommand(
+                        gctx,
+                        subcommand,
+                        &[OsStr::new(subcommand), OsStr::new("--help")],
+                    )?;
+                }
+            }
+        }
+    } else {
+        let mut cmd = crate::cli::cli(gctx);
+        let _ = cmd.print_help();
+    }
+    Ok(())
+}
 
-    // Expand alias first
-    let subcommand = match aliased_command(gctx, subcommand).ok().flatten() {
+fn try_help(gctx: &GlobalContext, subcommand: &str) -> CargoResult<bool> {
+    let subcommand = match check_alias(gctx, subcommand) {
         // If this alias is more than a simple subcommand pass-through, show the alias.
         Some(argv) if argv.len() > 1 => {
             let alias = argv.join(" ");
             drop_println!(gctx, "`{}` is aliased to `{}`", subcommand, alias);
-            return Ok(());
+            return Ok(true);
         }
         // Otherwise, resolve the alias into its subcommand.
         Some(argv) => {
@@ -53,42 +62,23 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
         None => subcommand.to_string(),
     };
 
-    if super::builtin_exec(&subcommand).is_some() {
-        if try_help(&subcommand)? {
-            return Ok(());
-        }
-        crate::execute_internal_subcommand(gctx, &[OsStr::new(&subcommand), OsStr::new("--help")])?;
-    } else {
-        // If not built-in, try giving `--help` to external command.
-        crate::execute_external_subcommand(
-            gctx,
-            &subcommand,
-            &[OsStr::new(&subcommand), OsStr::new("--help")],
-        )?;
-    }
+    let subcommand = match check_builtin(&subcommand) {
+        Some(s) => s,
+        None => return Ok(false),
+    };
 
-    Ok(())
-}
-
-fn try_help(subcommand: &str) -> CargoResult<bool> {
-    #[expect(
-        clippy::disallowed_methods,
-        reason = "testing only, no reason for config support"
-    )]
-    let force_help_text = std::env::var("__CARGO_TEST_FORCE_HELP_TXT").is_ok();
-
-    if resolve_executable(Path::new("man")).is_ok() && !force_help_text {
-        let Some(man) = extract_man(subcommand, "1") else {
-            return Ok(false);
+    if resolve_executable(Path::new("man")).is_ok() {
+        let man = match extract_man(subcommand, "1") {
+            Some(man) => man,
+            None => return Ok(false),
         };
         write_and_spawn(subcommand, &man, "man")?;
     } else {
-        let Some(txt) = extract_man(subcommand, "txt") else {
-            return Ok(false);
+        let txt = match extract_man(subcommand, "txt") {
+            Some(txt) => txt,
+            None => return Ok(false),
         };
-        if force_help_text {
-            drop(std::io::stdout().write_all(&txt));
-        } else if resolve_executable(Path::new("less")).is_ok() {
+        if resolve_executable(Path::new("less")).is_ok() {
             write_and_spawn(subcommand, &txt, "less")?;
         } else if resolve_executable(Path::new("more")).is_ok() {
             write_and_spawn(subcommand, &txt, "more")?;
@@ -97,6 +87,20 @@ fn try_help(subcommand: &str) -> CargoResult<bool> {
         }
     }
     Ok(true)
+}
+
+/// Checks if the given subcommand is an alias.
+///
+/// Returns None if it is not an alias.
+fn check_alias(gctx: &GlobalContext, subcommand: &str) -> Option<Vec<String>> {
+    aliased_command(gctx, subcommand).ok().flatten()
+}
+
+/// Checks if the given subcommand is a built-in command (not via an alias).
+///
+/// Returns None if it is not a built-in command.
+fn check_builtin(subcommand: &str) -> Option<&str> {
+    super::builtin_exec(subcommand).map(|_| subcommand)
 }
 
 /// Extracts the given man page from the compressed archive.

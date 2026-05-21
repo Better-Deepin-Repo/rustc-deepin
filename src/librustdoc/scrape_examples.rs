@@ -3,11 +3,13 @@
 use std::fs;
 use std::path::PathBuf;
 
-use rustc_data_structures::fx::FxIndexMap;
+use rustc_data_structures::fx::FxHashMap;
 use rustc_errors::DiagCtxtHandle;
-use rustc_hir as hir;
 use rustc_hir::intravisit::{self, Visitor};
+use rustc_hir::{self as hir};
+use rustc_interface::interface;
 use rustc_macros::{Decodable, Encodable};
+use rustc_middle::hir::map::Map;
 use rustc_middle::hir::nested_filter;
 use rustc_middle::ty::{self, TyCtxt};
 use rustc_serialize::opaque::{FileEncoder, MemDecoder};
@@ -18,6 +20,7 @@ use rustc_span::edition::Edition;
 use rustc_span::{BytePos, FileName, SourceFile};
 use tracing::{debug, trace, warn};
 
+use crate::formats::renderer::FormatRenderer;
 use crate::html::render::Context;
 use crate::{clean, config, formats};
 
@@ -40,16 +43,10 @@ impl ScrapeExamplesOptions {
                 scrape_tests,
             }),
             (Some(_), false, _) | (None, true, _) => {
-                dcx.fatal(
-                    "must use --scrape-examples-output-path and --scrape-examples-target-crate \
-                     together",
-                );
+                dcx.fatal("must use --scrape-examples-output-path and --scrape-examples-target-crate together");
             }
             (None, false, true) => {
-                dcx.fatal(
-                    "must use --scrape-examples-output-path and \
-                     --scrape-examples-target-crate with --scrape-tests",
-                );
+                dcx.fatal("must use --scrape-examples-output-path and --scrape-examples-target-crate with --scrape-tests");
             }
             (None, false, false) => None,
         }
@@ -105,11 +102,13 @@ pub(crate) struct CallData {
     pub(crate) is_bin: bool,
 }
 
-pub(crate) type FnCallLocations = FxIndexMap<PathBuf, CallData>;
-pub(crate) type AllCallLocations = FxIndexMap<DefPathHash, FnCallLocations>;
+pub(crate) type FnCallLocations = FxHashMap<PathBuf, CallData>;
+pub(crate) type AllCallLocations = FxHashMap<DefPathHash, FnCallLocations>;
 
 /// Visitor for traversing a crate and finding instances of function calls.
 struct FindCalls<'a, 'tcx> {
+    tcx: TyCtxt<'tcx>,
+    map: Map<'tcx>,
     cx: Context<'tcx>,
     target_crates: Vec<CrateNum>,
     calls: &'a mut AllCallLocations,
@@ -122,19 +121,20 @@ where
 {
     type NestedFilter = nested_filter::OnlyBodies;
 
-    fn maybe_tcx(&mut self) -> Self::MaybeTyCtxt {
-        self.cx.tcx()
+    fn nested_visit_map(&mut self) -> Self::Map {
+        self.map
     }
 
     fn visit_expr(&mut self, ex: &'tcx hir::Expr<'tcx>) {
         intravisit::walk_expr(self, ex);
 
-        let tcx = self.cx.tcx();
+        let tcx = self.tcx;
 
         // If we visit an item that contains an expression outside a function body,
         // then we need to exit before calling typeck (which will panic). See
         // test/run-make/rustdoc-scrape-examples-invalid-expr for an example.
-        if tcx.hir_maybe_body_owned_by(ex.hir_id.owner.def_id).is_none() {
+        let hir = tcx.hir();
+        if hir.maybe_body_owned_by(ex.hir_id.owner.def_id).is_none() {
             return;
         }
 
@@ -166,27 +166,26 @@ where
         };
 
         // If this span comes from a macro expansion, then the source code may not actually show
-        // a use of the given item, so it would be a poor example. Hence, we skip all uses in
-        // macros.
+        // a use of the given item, so it would be a poor example. Hence, we skip all uses in macros.
         if call_span.from_expansion() {
             trace!("Rejecting expr from macro: {call_span:?}");
             return;
         }
 
-        // If the enclosing item has a span coming from a proc macro, then we also don't want to
-        // include the example.
-        let enclosing_item_span = tcx.hir_span_with_body(tcx.hir_get_parent_item(ex.hir_id).into());
+        // If the enclosing item has a span coming from a proc macro, then we also don't want to include
+        // the example.
+        let enclosing_item_span =
+            tcx.hir().span_with_body(tcx.hir().get_parent_item(ex.hir_id).into());
         if enclosing_item_span.from_expansion() {
             trace!("Rejecting expr ({call_span:?}) from macro item: {enclosing_item_span:?}");
             return;
         }
 
-        // If the enclosing item doesn't actually enclose the call, this means we probably have a
-        // weird macro issue even though the spans aren't tagged as being from an expansion.
+        // If the enclosing item doesn't actually enclose the call, this means we probably have a weird
+        // macro issue even though the spans aren't tagged as being from an expansion.
         if !enclosing_item_span.contains(call_span) {
             warn!(
-                "Attempted to scrape call at [{call_span:?}] whose enclosing item \
-                 [{enclosing_item_span:?}] doesn't contain the span of the call."
+                "Attempted to scrape call at [{call_span:?}] whose enclosing item [{enclosing_item_span:?}] doesn't contain the span of the call."
             );
             return;
         }
@@ -194,8 +193,7 @@ where
         // Similarly for the call w/ the function ident.
         if !call_span.contains(ident_span) {
             warn!(
-                "Attempted to scrape call at [{call_span:?}] whose identifier [{ident_span:?}] was \
-                 not contained in the span of the call."
+                "Attempted to scrape call at [{call_span:?}] whose identifier [{ident_span:?}] was not contained in the span of the call."
             );
             return;
         }
@@ -229,8 +227,7 @@ where
                     Some(url) => url,
                     None => {
                         trace!(
-                            "Rejecting expr ({call_span:?}) whose clean span ({clean_span:?}) \
-                             cannot be turned into a link"
+                            "Rejecting expr ({call_span:?}) whose clean span ({clean_span:?}) cannot be turned into a link"
                         );
                         return;
                     }
@@ -271,17 +268,14 @@ pub(crate) fn run(
     tcx: TyCtxt<'_>,
     options: ScrapeExamplesOptions,
     bin_crate: bool,
-) {
+) -> interface::Result<()> {
     let inner = move || -> Result<(), String> {
-        let emit_dep_info = renderopts.dep_info().is_some();
         // Generates source files for examples
         renderopts.no_emit_shared = true;
-        let (cx, _) = Context::init(krate, renderopts, cache, tcx, Default::default())
-            .map_err(|e| e.to_string())?;
+        let (cx, _) = Context::init(krate, renderopts, cache, tcx).map_err(|e| e.to_string())?;
 
         // Collect CrateIds corresponding to provided target crates
-        // If two different versions of the crate in the dependency tree, then examples will be
-        // collected from both.
+        // If two different versions of the crate in the dependency tree, then examples will be collected from both.
         let all_crates = tcx
             .crates(())
             .iter()
@@ -299,9 +293,10 @@ pub(crate) fn run(
         debug!("Scrape examples target_crates: {target_crates:?}");
 
         // Run call-finder on all items
-        let mut calls = FxIndexMap::default();
-        let mut finder = FindCalls { calls: &mut calls, cx, target_crates, bin_crate };
-        tcx.hir_visit_all_item_likes_in_crate(&mut finder);
+        let mut calls = FxHashMap::default();
+        let mut finder =
+            FindCalls { calls: &mut calls, tcx, map: tcx.hir(), cx, target_crates, bin_crate };
+        tcx.hir().visit_all_item_likes_in_crate(&mut finder);
 
         // The visitor might have found a type error, which we need to
         // promote to a fatal error
@@ -321,16 +316,14 @@ pub(crate) fn run(
         calls.encode(&mut encoder);
         encoder.finish().map_err(|(_path, e)| e.to_string())?;
 
-        if emit_dep_info {
-            rustc_interface::passes::write_dep_info(tcx);
-        }
-
         Ok(())
     };
 
     if let Err(e) = inner() {
         tcx.dcx().fatal(e);
     }
+
+    Ok(())
 }
 
 // Note: the DiagCtxt must be passed in explicitly because sess isn't available while parsing
@@ -338,11 +331,9 @@ pub(crate) fn run(
 pub(crate) fn load_call_locations(
     with_examples: Vec<String>,
     dcx: DiagCtxtHandle<'_>,
-    loaded_paths: &mut Vec<PathBuf>,
 ) -> AllCallLocations {
-    let mut all_calls: AllCallLocations = FxIndexMap::default();
+    let mut all_calls: AllCallLocations = FxHashMap::default();
     for path in with_examples {
-        loaded_paths.push(path.clone().into());
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
             Err(e) => dcx.fatal(format!("failed to load examples: {e}")),

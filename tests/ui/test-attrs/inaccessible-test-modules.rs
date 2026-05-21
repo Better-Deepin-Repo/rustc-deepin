@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ compile-flags:--test
 
 // the `--test` harness creates modules with these textual names, but

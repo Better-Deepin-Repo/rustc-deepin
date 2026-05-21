@@ -1,11 +1,8 @@
 error: unused variable: `var`
-  --> $DIR/issue-117284-arg-in-macro.rs:4:13
+  --> $DIR/issue-117284-arg-in-macro.rs:15:18
    |
-LL |         let $var = $struct.$var;
-   |             ^^^^
-...
 LL |     make_var!(s, var);
-   |     ----------------- in this macro invocation
+   |                  ^^^
    |
 help: `var` is captured in macro and introduced a unused variable
   --> $DIR/issue-117284-arg-in-macro.rs:4:13

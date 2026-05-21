@@ -1,12 +1,10 @@
-//@ check-pass
-
 pub trait Trait {
     fn f();
 }
 
 impl Trait for usize {
     fn f() {
-        unsafe extern "C" {
+        extern "C" {
             fn g() -> usize;
         }
     }

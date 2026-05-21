@@ -1,4 +1,3 @@
-//@ edition:2015
 // Tests that methods that implement a trait cannot be invoked
 // unless the trait is imported.
 
@@ -16,8 +15,8 @@ mod Lib {
 
 mod Import {
     // Trait is in scope here:
-    use crate::Lib::TheStruct;
-    use crate::Lib::TheTrait;
+    use Lib::TheStruct;
+    use Lib::TheTrait;
 
     fn call_the_fn(s: &TheStruct) {
         s.the_fn();
@@ -26,7 +25,7 @@ mod Import {
 
 mod NoImport {
     // Trait is not in scope here:
-    use crate::Lib::TheStruct;
+    use Lib::TheStruct;
 
     fn call_the_fn(s: &TheStruct) {
         s.the_fn();

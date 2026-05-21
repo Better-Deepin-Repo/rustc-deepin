@@ -2,7 +2,7 @@ pub use self::imp::read2;
 
 #[cfg(unix)]
 mod imp {
-    use libc::{F_GETFL, F_SETFL, O_NONBLOCK, c_int, fcntl};
+    use libc::{c_int, fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
     use std::io;
     use std::io::prelude::*;
     use std::mem;
@@ -88,9 +88,9 @@ mod imp {
     use std::process::{ChildStderr, ChildStdout};
     use std::slice;
 
-    use miow::Overlapped;
     use miow::iocp::{CompletionPort, CompletionStatus};
     use miow::pipe::NamedPipe;
+    use miow::Overlapped;
     use windows_sys::Win32::Foundation::ERROR_BROKEN_PIPE;
 
     struct Pipe<'a> {
@@ -141,21 +141,17 @@ mod imp {
 
     impl<'a> Pipe<'a> {
         unsafe fn new<P: IntoRawHandle>(p: P, dst: &'a mut Vec<u8>) -> Pipe<'a> {
-            // SAFETY: Handle must be owned, open, and closeable with CloseHandle.
-            let pipe = unsafe { NamedPipe::from_raw_handle(p.into_raw_handle()) };
             Pipe {
                 dst,
-                pipe,
+                pipe: NamedPipe::from_raw_handle(p.into_raw_handle()),
                 overlapped: Overlapped::zero(),
                 done: false,
             }
         }
 
         unsafe fn read(&mut self) -> io::Result<()> {
-            let dst = unsafe { slice_to_end(self.dst) };
-            // SAFETY: The buffer must be valid until the end of the I/O,
-            // which is handled in `read2`.
-            match unsafe { self.pipe.read_overlapped(dst, self.overlapped.raw()) } {
+            let dst = slice_to_end(self.dst);
+            match self.pipe.read_overlapped(dst, self.overlapped.raw()) {
                 Ok(_) => Ok(()),
                 Err(e) => {
                     if e.raw_os_error() == Some(ERROR_BROKEN_PIPE as i32) {
@@ -170,7 +166,7 @@ mod imp {
 
         unsafe fn complete(&mut self, status: &CompletionStatus) {
             let prev = self.dst.len();
-            unsafe { self.dst.set_len(prev + status.bytes_transferred() as usize) };
+            self.dst.set_len(prev + status.bytes_transferred() as usize);
             if status.bytes_transferred() == 0 {
                 self.done = true;
             }
@@ -184,6 +180,6 @@ mod imp {
         if v.capacity() == v.len() {
             v.reserve(1);
         }
-        unsafe { slice::from_raw_parts_mut(v.as_mut_ptr().add(v.len()), v.capacity() - v.len()) }
+        slice::from_raw_parts_mut(v.as_mut_ptr().add(v.len()), v.capacity() - v.len())
     }
 }

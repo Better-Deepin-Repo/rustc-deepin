@@ -1,13 +1,13 @@
 use crate::spec::base::xtensa;
-use crate::spec::{Arch, Target, TargetMetadata, TargetOptions};
+use crate::spec::{Target, TargetOptions};
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     Target {
         llvm_target: "xtensa-none-elf".into(),
         pointer_width: 32,
         data_layout: "e-m:e-p:32:32-v1:8:8-i64:64-i128:128-n32".into(),
-        arch: Arch::Xtensa,
-        metadata: TargetMetadata {
+        arch: "xtensa".into(),
+        metadata: crate::spec::TargetMetadata {
             description: Some("Xtensa ESP32".into()),
             tier: Some(3),
             host_tools: Some(false),
@@ -15,7 +15,6 @@ pub(crate) fn target() -> Target {
         },
 
         options: TargetOptions {
-            vendor: "espressif".into(),
             cpu: "esp32".into(),
             linker: Some("xtensa-esp32-elf-gcc".into()),
             max_atomic_width: Some(32),

@@ -1,5 +1,9 @@
+//@ force-host
+//@ no-prefer-dynamic
+
 #![feature(proc_macro_quote)]
 #![feature(proc_macro_internals)] // FIXME - this shouldn't be necessary
+#![crate_type = "proc-macro"]
 
 extern crate proc_macro;
 extern crate custom_quote;

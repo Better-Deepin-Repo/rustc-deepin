@@ -3,12 +3,11 @@
 // Test that static debug info is collapsed with #[collapse_debuginfo(yes)]
 
 //@ compile-flags:-g
-//@ ignore-backends: gcc
 
 // === GDB TESTS ===================================================================================
 
-//@ gdb-command:info line collapse_debuginfo_static::FOO
-//@ gdb-check:[...]Line 20[...]
+// gdb-command:info line collapse_debuginfo_static::FOO
+// gdb-check:[...]Line 19[...]
 
 #[collapse_debuginfo(yes)]
 macro_rules! decl_foo {

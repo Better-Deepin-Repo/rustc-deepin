@@ -1,4 +1,4 @@
-#![allow(clippy::manual_range_patterns)]
+//@no-rustfix: overlapping suggestions
 #![warn(clippy::match_same_arms)]
 
 pub enum Abc {
@@ -9,42 +9,30 @@ pub enum Abc {
 
 fn match_same_arms() {
     let _ = match Abc::A {
-        Abc::A => 0,
+        Abc::A => 0, //~ ERROR: this match arm has an identical body to the `_` wildcard arm
         Abc::B => 1,
         _ => 0,
-        //~^ match_same_arms
-    };
-
-    match 0 {
-        1 => 'a',
-        2 => 'b',
-        3 => 'b',
-        _ => 'b',
-        //~^ match_same_arms
     };
 
     match (1, 2, 3) {
-        (1, .., 3) => 42,
-        //~^ match_same_arms
+        (1, .., 3) => 42, //~ ERROR: this match arm has an identical body to another arm
         (.., 3) => 42,
         _ => 0,
     };
 
     let _ = match 42 {
         42 => 1,
-        //~^ match_same_arms
-        51 => 1,
-        41 => 2,
-        //~^ match_same_arms
+        51 => 1, //~ ERROR: this match arm has an identical body to another arm
+        41 => 2, //~ ERROR: this match arm has an identical body to another arm
         52 => 2,
         _ => 0,
     };
 
     let _ = match 42 {
         1 => 2,
-        //~^ match_same_arms
-        2 => 2,
-        3 => 2,
+        2 => 2, //~ ERROR: this match arm has an identical body to another arm
+        //~^ ERROR: this match arm has an identical body to another arm
+        3 => 2, //~ ERROR: this match arm has an identical body to another arm
         4 => 3,
         _ => 0,
     };
@@ -61,8 +49,8 @@ mod issue4244 {
         pub fn name(&self) -> String {
             match self {
                 CommandInfo::BuiltIn { name, .. } => name.to_string(),
-                //~^ match_same_arms
                 CommandInfo::External { name, .. } => name.to_string(),
+                //~^ ERROR: this match arm has an identical body to another arm
             }
         }
     }
@@ -148,20 +136,4 @@ fn main() {
         1 => cfg!(also_not_enabled),
         _ => false,
     };
-}
-
-fn issue16678() {
-    // ICE in Rust 1.94.0
-    match true {
-        true => {
-            fn wrapper(_arg: ()) {
-                _arg;
-            }
-        },
-        false => {
-            fn wrapper(_arg: ()) {
-                _arg;
-            }
-        },
-    }
 }

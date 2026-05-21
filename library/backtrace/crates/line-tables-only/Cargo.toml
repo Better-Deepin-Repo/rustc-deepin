@@ -1,8 +1,7 @@
 [package]
 name = "line-tables-only"
 version = "0.1.0"
-edition = "2024"
-publish = false
+edition = "2021"
 
 [build-dependencies]
 cc = "1.0"

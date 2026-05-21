@@ -1,4 +1,6 @@
-# Panicking in Rust
+# Panicking in rust
+
+<!-- toc -->
 
 ## Step 1: Invocation of the `panic!` macro.
 
@@ -110,4 +112,4 @@ In particular, in std's [runtime service],
 the call to the user-provided `main` function is wrapped in `catch_unwind`.
 
 
-[runtime service]: https://github.com/rust-lang/rust/blob/HEAD/library/std/src/rt.rs
+[runtime service]: https://github.com/rust-lang/rust/blob/master/library/std/src/rt.rs

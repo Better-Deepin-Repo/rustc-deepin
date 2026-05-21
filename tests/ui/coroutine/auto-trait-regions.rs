@@ -23,31 +23,31 @@ fn assert_foo<T: Foo>(f: T) {}
 fn main() {
     // Make sure 'static is erased for coroutine interiors so we can't match it in trait selection
     let x: &'static _ = &OnlyFooIfStaticRef(No);
-    let generator = #[coroutine] move || {
+    let gen = #[coroutine] move || {
         let x = x;
         yield;
         assert_foo(x);
     };
-    assert_foo(generator);
+    assert_foo(gen);
     //~^ ERROR implementation of `Foo` is not general enough
 
     // Allow impls which matches any lifetime
     let x = &OnlyFooIfRef(No);
-    let generator = #[coroutine] move || {
+    let gen = #[coroutine] move || {
         let x = x;
         yield;
         assert_foo(x);
     };
-    assert_foo(generator); // ok
+    assert_foo(gen); // ok
 
     // Disallow impls which relates lifetimes in the coroutine interior
-    let generator = #[coroutine] move || {
+    let gen = #[coroutine] move || {
         let a = A(&mut true, &mut true, No);
-        //~^ ERROR borrow may still be in use when coroutine yields
-        //~| ERROR borrow may still be in use when coroutine yields
+        //~^ temporary value dropped while borrowed
+        //~| temporary value dropped while borrowed
         yield;
         assert_foo(a);
     };
-    assert_foo(generator);
+    assert_foo(gen);
     //~^ ERROR not general enough
 }

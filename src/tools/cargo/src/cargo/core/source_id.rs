@@ -3,10 +3,10 @@ use crate::core::PackageId;
 use crate::core::SourceKind;
 use crate::sources::registry::CRATES_IO_HTTP_INDEX;
 use crate::sources::source::Source;
-use crate::sources::{CRATES_IO_DOMAIN, CRATES_IO_INDEX, CRATES_IO_REGISTRY, DirectorySource};
+use crate::sources::{DirectorySource, CRATES_IO_DOMAIN, CRATES_IO_INDEX, CRATES_IO_REGISTRY};
 use crate::sources::{GitSource, PathSource, RegistrySource};
 use crate::util::interning::InternedString;
-use crate::util::{CanonicalUrl, CargoResult, GlobalContext, IntoUrl, context};
+use crate::util::{context, CanonicalUrl, CargoResult, GlobalContext, IntoUrl};
 use anyhow::Context as _;
 use serde::de;
 use serde::ser;
@@ -204,23 +204,12 @@ impl SourceId {
         SourceId::new(SourceKind::Path, url, None)
     }
 
-    /// Creates a `SourceId` from a filesystem path.
-    ///
-    /// `path`: an absolute path.
-    pub fn for_manifest_path(manifest_path: &Path) -> CargoResult<SourceId> {
-        if crate::util::toml::is_embedded(manifest_path) && manifest_path.is_file() {
-            Self::for_path(manifest_path)
-        } else {
-            Self::for_path(manifest_path.parent().unwrap())
-        }
-    }
-
     /// Creates a `SourceId` from a Git reference.
     pub fn for_git(url: &Url, reference: GitReference) -> CargoResult<SourceId> {
         SourceId::new(SourceKind::Git(reference), url.clone(), None)
     }
 
-    /// Creates a `SourceId` from a remote registry URL when the registry name
+    /// Creates a SourceId from a remote registry URL when the registry name
     /// cannot be determined, e.g. a user passes `--index` directly from CLI.
     ///
     /// Use [`SourceId::for_alt_registry`] if a name can provided, which
@@ -404,9 +393,6 @@ impl SourceId {
                     .url
                     .to_file_path()
                     .expect("path sources cannot be remote");
-                if crate::util::toml::is_embedded(&path) && path.is_file() {
-                    anyhow::bail!("single file packages cannot be used as dependencies")
-                }
                 Ok(Box::new(PathSource::new(&path, self, gctx)))
             }
             SourceKind::Registry | SourceKind::SparseRegistry => Ok(Box::new(
@@ -460,7 +446,7 @@ impl SourceId {
     }
 
     /// Check if the precise data field stores information for this `name`
-    /// from a call to [`SourceId::with_precise_registry_version`].
+    /// from a call to [SourceId::with_precise_registry_version].
     ///
     /// If so return the version currently in the lock file and the version to be updated to.
     pub fn precise_registry_version(
@@ -516,23 +502,15 @@ impl SourceId {
     /// On a registry dependency we also need to keep track of the package that
     /// should be updated and even which of the versions should be updated.
     /// All of this gets encoded in the precise field using this method.
-    /// The data can be read with [`SourceId::precise_registry_version`]
+    /// The data can be read with [SourceId::precise_registry_version]
     pub fn with_precise_registry_version(
         self,
         name: InternedString,
         version: semver::Version,
         precise: &str,
     ) -> CargoResult<SourceId> {
-        let precise = semver::Version::parse(precise).with_context(|| {
-            if let Some(stripped) = precise.strip_prefix("v") {
-                return format!(
-                    "the version provided, `{precise}` is not a \
-                    valid SemVer version\n\n\
-                    help: try changing the version to `{stripped}`",
-                );
-            }
-            format!("invalid version format for precise version `{precise}`")
-        })?;
+        let precise = semver::Version::parse(precise)
+            .with_context(|| format!("invalid version format for precise version `{precise}`"))?;
 
         Ok(SourceId::wrap(SourceIdInner {
             precise: Some(Precise::Updated {
@@ -554,10 +532,7 @@ impl SourceId {
         url == CRATES_IO_INDEX || url == CRATES_IO_HTTP_INDEX || is_overridden_crates_io_url(url)
     }
 
-    /// Hashes `self` to be used in the name of some Cargo folders, so shouldn't vary.
-    ///
-    /// For git and url, `as_str` gives the serialisation of a url (which has a spec) and so
-    /// insulates against possible changes in how the url crate does hashing.
+    /// Hashes `self`.
     ///
     /// For paths, remove the workspace prefix so the same source will give the
     /// same hash in different locations, helping reproducible builds.
@@ -575,11 +550,7 @@ impl SourceId {
                 return;
             }
         }
-        self.inner.kind.hash(into);
-        match self.inner.kind {
-            SourceKind::Git(_) => (&self).inner.canonical_url.hash(into),
-            _ => (&self).inner.url.as_str().hash(into),
-        }
+        self.hash(into)
     }
 
     pub fn full_eq(self, other: SourceId) -> bool {
@@ -603,8 +574,8 @@ impl PartialOrd for SourceId {
     }
 }
 
-// Custom comparison defined as source kind and canonical URL equality,
-// ignoring the `precise` and `name` fields.
+// Custom comparison defined as canonical URL equality for git sources and URL
+// equality for other sources, ignoring the `precise` and `name` fields.
 impl Ord for SourceId {
     fn cmp(&self, other: &SourceId) -> Ordering {
         // If our interior pointers are to the exact same `SourceIdInner` then
@@ -613,10 +584,21 @@ impl Ord for SourceId {
             return Ordering::Equal;
         }
 
-        // Sort first based on `kind`, deferring to the URL comparison if
+        // Sort first based on `kind`, deferring to the URL comparison below if
         // the kinds are equal.
-        let ord_kind = self.inner.kind.cmp(&other.inner.kind);
-        ord_kind.then_with(|| self.inner.canonical_url.cmp(&other.inner.canonical_url))
+        match self.inner.kind.cmp(&other.inner.kind) {
+            Ordering::Equal => {}
+            other => return other,
+        }
+
+        // If the `kind` and the `url` are equal, then for git sources we also
+        // ensure that the canonical urls are equal.
+        match (&self.inner.kind, &other.inner.kind) {
+            (SourceKind::Git(_), SourceKind::Git(_)) => {
+                self.inner.canonical_url.cmp(&other.inner.canonical_url)
+            }
+            _ => self.inner.url.cmp(&other.inner.url),
+        }
     }
 }
 
@@ -662,7 +644,10 @@ impl fmt::Display for SourceId {
                 // Don't replace the URL display for git references,
                 // because those are kind of expected to be URLs.
                 write!(f, "{}", self.inner.url)?;
-                if let Some(pretty) = reference.pretty_ref(true) {
+                // TODO(-Znext-lockfile-bump): set it to true when the default is
+                // lockfile v4, because we want Source ID serialization to be
+                // consistent with lockfile.
+                if let Some(pretty) = reference.pretty_ref(false) {
                     write!(f, "?{}", pretty)?;
                 }
 
@@ -683,10 +668,16 @@ impl fmt::Display for SourceId {
     }
 }
 
+/// The hash of SourceId is used in the name of some Cargo folders, so shouldn't
+/// vary. `as_str` gives the serialisation of a url (which has a spec) and so
+/// insulates against possible changes in how the url crate does hashing.
 impl Hash for SourceId {
     fn hash<S: hash::Hasher>(&self, into: &mut S) {
         self.inner.kind.hash(into);
-        self.inner.canonical_url.hash(into);
+        match self.inner.kind {
+            SourceKind::Git(_) => self.inner.canonical_url.hash(into),
+            _ => self.inner.url.as_str().hash(into),
+        }
     }
 }
 
@@ -784,7 +775,7 @@ mod tests {
     // value.
     //
     // Note that the hash value matches what the crates.io source id has hashed
-    // since Rust 1.84.0. We strive to keep this value the same across
+    // since long before Rust 1.30. We strive to keep this value the same across
     // versions of Cargo because changing it means that users will need to
     // redownload the index and all crates they use when using a new Cargo version.
     //
@@ -793,100 +784,71 @@ mod tests {
     // you're able to restore the hash to its original value, please do so!
     // Otherwise please just leave a comment in your PR as to why the hash value is
     // changing and why the old value can't be easily preserved.
-    // If it takes an ugly hack to restore it,
-    // then leave a link here so we can remove the hack next time we change the hash.
     //
-    // Hacks to remove next time the hash changes:
-    // - (fill in your code here)
-    //
-    // The hash value should be stable across platforms, and doesn't depend on
-    // endianness and bit-width. One caveat is that absolute paths on Windows
-    // are inherently different than on Unix-like platforms. Unless we omit or
-    // strip the prefix components (e.g. `C:`), there is not way to have a true
-    // cross-platform stable hash for absolute paths.
+    // The hash value depends on endianness and bit-width, so we only run this test on
+    // little-endian 64-bit CPUs (such as x86-64 and ARM64) where it matches the
+    // well-known value.
     #[test]
+    #[cfg(all(target_endian = "little", target_pointer_width = "64"))]
+    fn test_cratesio_hash() {
+        let gctx = GlobalContext::default().unwrap();
+        let crates_io = SourceId::crates_io(&gctx).unwrap();
+        assert_eq!(crate::util::hex::short_hash(&crates_io), "1ecc6299db9ec823");
+    }
+
+    // See the comment in `test_cratesio_hash`.
+    //
+    // Only test on non-Windows as paths on Windows will get different hashes.
+    #[test]
+    #[cfg(all(target_endian = "little", target_pointer_width = "64", not(windows)))]
     fn test_stable_hash() {
         use std::hash::Hasher;
         use std::path::Path;
 
-        use snapbox::IntoData as _;
-        use snapbox::assert_data_eq;
-        use snapbox::str;
-
-        use crate::util::StableHasher;
-        use crate::util::hex::short_hash;
-
-        #[cfg(not(windows))]
-        let ws_root = Path::new("/tmp/ws");
-        #[cfg(windows)]
-        let ws_root = Path::new(r"C:\\tmp\ws");
-
         let gen_hash = |source_id: SourceId| {
-            let mut hasher = StableHasher::new();
-            source_id.stable_hash(ws_root, &mut hasher);
-            Hasher::finish(&hasher).to_string()
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            source_id.stable_hash(Path::new("/tmp/ws"), &mut hasher);
+            hasher.finish()
         };
-
-        let source_id = SourceId::crates_io(&GlobalContext::default().unwrap()).unwrap();
-        assert_data_eq!(gen_hash(source_id), str!["7062945687441624357"].raw());
-        assert_data_eq!(short_hash(&source_id), str!["25cdd57fae9f0462"].raw());
 
         let url = "https://my-crates.io".into_url().unwrap();
         let source_id = SourceId::for_registry(&url).unwrap();
-        assert_data_eq!(gen_hash(source_id), str!["8310250053664888498"].raw());
-        assert_data_eq!(short_hash(&source_id), str!["b2d65deb64f05373"].raw());
+        assert_eq!(gen_hash(source_id), 18108075011063494626);
+        assert_eq!(crate::util::hex::short_hash(&source_id), "fb60813d6cb8df79");
 
         let url = "https://your-crates.io".into_url().unwrap();
         let source_id = SourceId::for_alt_registry(&url, "alt").unwrap();
-        assert_data_eq!(gen_hash(source_id), str!["14149534903000258933"].raw());
-        assert_data_eq!(short_hash(&source_id), str!["755952de063f5dc4"].raw());
+        assert_eq!(gen_hash(source_id), 12862859764592646184);
+        assert_eq!(crate::util::hex::short_hash(&source_id), "09c10fd0cbd74bce");
 
         let url = "sparse+https://my-crates.io".into_url().unwrap();
         let source_id = SourceId::for_registry(&url).unwrap();
-        assert_data_eq!(gen_hash(source_id), str!["16249512552851930162"].raw());
-        assert_data_eq!(short_hash(&source_id), str!["327cfdbd92dd81e1"].raw());
+        assert_eq!(gen_hash(source_id), 8763561830438022424);
+        assert_eq!(crate::util::hex::short_hash(&source_id), "d1ea0d96f6f759b5");
 
         let url = "sparse+https://your-crates.io".into_url().unwrap();
         let source_id = SourceId::for_alt_registry(&url, "alt").unwrap();
-        assert_data_eq!(gen_hash(source_id), str!["6156697384053352292"].raw());
-        assert_data_eq!(short_hash(&source_id), str!["64a713b6a6fb7055"].raw());
+        assert_eq!(gen_hash(source_id), 5159702466575482972);
+        assert_eq!(crate::util::hex::short_hash(&source_id), "135d23074253cb78");
 
         let url = "file:///tmp/ws/crate".into_url().unwrap();
         let source_id = SourceId::for_git(&url, GitReference::DefaultBranch).unwrap();
-        assert_data_eq!(gen_hash(source_id), str!["473480029881867801"].raw());
-        assert_data_eq!(short_hash(&source_id), str!["199e591d94239206"].raw());
+        assert_eq!(gen_hash(source_id), 15332537265078583985);
+        assert_eq!(crate::util::hex::short_hash(&source_id), "73a808694abda756");
 
-        let path = &ws_root.join("crate");
+        let path = Path::new("/tmp/ws/crate");
+
         let source_id = SourceId::for_local_registry(path).unwrap();
-        #[cfg(not(windows))]
-        {
-            assert_data_eq!(gen_hash(source_id), str!["11515846423845066584"].raw());
-            assert_data_eq!(short_hash(&source_id), str!["58d73c154f81d09f"].raw());
-        }
-        #[cfg(windows)]
-        {
-            assert_data_eq!(gen_hash(source_id), str!["6146331155906064276"].raw());
-            assert_data_eq!(short_hash(&source_id), str!["946fb2239f274c55"].raw());
-        }
+        assert_eq!(gen_hash(source_id), 18446533307730842837);
+        assert_eq!(crate::util::hex::short_hash(&source_id), "52a84cc73f6fd48b");
 
         let source_id = SourceId::for_path(path).unwrap();
-        assert_data_eq!(gen_hash(source_id), str!["215644081443634269"].raw());
-        #[cfg(not(windows))]
-        assert_data_eq!(short_hash(&source_id), str!["64bace89c92b101f"].raw());
-        #[cfg(windows)]
-        assert_data_eq!(short_hash(&source_id), str!["01e1e6c391813fb6"].raw());
+        assert_eq!(gen_hash(source_id), 8764714075439899829);
+        assert_eq!(crate::util::hex::short_hash(&source_id), "e1ddd48578620fc1");
 
         let source_id = SourceId::for_directory(path).unwrap();
-        #[cfg(not(windows))]
-        {
-            assert_data_eq!(gen_hash(source_id), str!["6127590343904940368"].raw());
-            assert_data_eq!(short_hash(&source_id), str!["505191d1f3920955"].raw());
-        }
-        #[cfg(windows)]
-        {
-            assert_data_eq!(gen_hash(source_id), str!["10423446877655960172"].raw());
-            assert_data_eq!(short_hash(&source_id), str!["6c8ad69db585a790"].raw());
-        }
+        assert_eq!(gen_hash(source_id), 17459999773908528552);
+        assert_eq!(crate::util::hex::short_hash(&source_id), "6568fe2c2fab5bfe");
     }
 
     #[test]
@@ -922,10 +884,8 @@ mod tests {
 }
 
 /// Check if `url` equals to the overridden crates.io URL.
-#[expect(
-    clippy::disallowed_methods,
-    reason = "testing only, no reason for config support"
-)]
+// ALLOWED: For testing Cargo itself only.
+#[allow(clippy::disallowed_methods)]
 fn is_overridden_crates_io_url(url: &str) -> bool {
     std::env::var("__CARGO_TEST_CRATES_IO_URL_DO_NOT_USE_THIS").map_or(false, |v| v == url)
 }

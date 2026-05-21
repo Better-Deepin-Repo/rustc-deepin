@@ -1,7 +1,7 @@
 # The ref pattern
 
 When doing pattern matching or destructuring via the `let` binding, the `ref`
-keyword can be used to take references to the fields of a struct/tuple. The
+keyword can be used to take references to the fields of a struct/tuple. The 
 example below shows a few instances where this can be useful:
 
 ```rust,editable
@@ -45,13 +45,13 @@ fn main() {
 
     // A mutable tuple that includes a pointer
     let mut mutable_tuple = (Box::new(5u32), 3u32);
-
+    
     {
         // Destructure `mutable_tuple` to change the value of `last`.
         let (_, ref mut last) = mutable_tuple;
         *last = 2u32;
     }
-
+    
     println!("tuple is {:?}", mutable_tuple);
 }
 ```

@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use rustc_ast::ast;
 use rustc_ast::visit::Visitor;
+use rustc_span::symbol::{self, sym, Symbol};
 use rustc_span::Span;
-use rustc_span::symbol::{self, Symbol, sym};
 use thin_vec::ThinVec;
 use thiserror::Error;
 
@@ -26,7 +26,7 @@ type FileModMap<'ast> = BTreeMap<FileName, Module<'ast>>;
 #[derive(Debug, Clone)]
 pub(crate) struct Module<'a> {
     ast_mod_kind: Option<Cow<'a, ast::ModKind>>,
-    pub(crate) items: Cow<'a, ThinVec<Box<ast::Item>>>,
+    pub(crate) items: Cow<'a, ThinVec<rustc_ast::ptr::P<ast::Item>>>,
     inner_attr: ast::AttrVec,
     pub(crate) span: Span,
 }
@@ -35,7 +35,7 @@ impl<'a> Module<'a> {
     pub(crate) fn new(
         mod_span: Span,
         ast_mod_kind: Option<Cow<'a, ast::ModKind>>,
-        mod_items: Cow<'a, ThinVec<Box<ast::Item>>>,
+        mod_items: Cow<'a, ThinVec<rustc_ast::ptr::P<ast::Item>>>,
         mod_attrs: Cow<'a, ast::AttrVec>,
     ) -> Self {
         let inner_attr = mod_attrs
@@ -152,26 +152,7 @@ impl<'ast, 'psess, 'c> ModResolver<'ast, 'psess> {
         let mut visitor = visitor::CfgIfVisitor::new(self.psess);
         visitor.visit_item(&item);
         for module_item in visitor.mods() {
-            if let ast::ItemKind::Mod(_, _, ref sub_mod_kind) = module_item.item.kind {
-                self.visit_sub_mod(
-                    &module_item.item,
-                    Module::new(
-                        module_item.item.span,
-                        Some(Cow::Owned(sub_mod_kind.clone())),
-                        Cow::Owned(ThinVec::new()),
-                        Cow::Owned(ast::AttrVec::new()),
-                    ),
-                )?;
-            }
-        }
-        Ok(())
-    }
-
-    fn visit_cfg_match(&mut self, item: Cow<'ast, ast::Item>) -> Result<(), ModuleResolutionError> {
-        let mut visitor = visitor::CfgMatchVisitor::new(self.psess);
-        visitor.visit_item(&item);
-        for module_item in visitor.mods() {
-            if let ast::ItemKind::Mod(_, _, ref sub_mod_kind) = module_item.item.kind {
+            if let ast::ItemKind::Mod(_, ref sub_mod_kind) = module_item.item.kind {
                 self.visit_sub_mod(
                     &module_item.item,
                     Module::new(
@@ -189,20 +170,15 @@ impl<'ast, 'psess, 'c> ModResolver<'ast, 'psess> {
     /// Visit modules defined inside macro calls.
     fn visit_mod_outside_ast(
         &mut self,
-        items: ThinVec<Box<ast::Item>>,
+        items: ThinVec<rustc_ast::ptr::P<ast::Item>>,
     ) -> Result<(), ModuleResolutionError> {
         for item in items {
             if is_cfg_if(&item) {
-                self.visit_cfg_if(Cow::Owned(*item))?;
+                self.visit_cfg_if(Cow::Owned(item.into_inner()))?;
                 continue;
             }
 
-            if is_cfg_match(&item) {
-                self.visit_cfg_match(Cow::Owned(*item))?;
-                continue;
-            }
-
-            if let ast::ItemKind::Mod(_, _, ref sub_mod_kind) = item.kind {
+            if let ast::ItemKind::Mod(_, ref sub_mod_kind) = item.kind {
                 let span = item.span;
                 self.visit_sub_mod(
                     &item,
@@ -221,18 +197,14 @@ impl<'ast, 'psess, 'c> ModResolver<'ast, 'psess> {
     /// Visit modules from AST.
     fn visit_mod_from_ast(
         &mut self,
-        items: &'ast [Box<ast::Item>],
+        items: &'ast [rustc_ast::ptr::P<ast::Item>],
     ) -> Result<(), ModuleResolutionError> {
         for item in items {
             if is_cfg_if(item) {
                 self.visit_cfg_if(Cow::Borrowed(item))?;
             }
 
-            if is_cfg_match(item) {
-                self.visit_cfg_match(Cow::Borrowed(item))?;
-            }
-
-            if let ast::ItemKind::Mod(_, _, ref sub_mod_kind) = item.kind {
+            if let ast::ItemKind::Mod(_, ref sub_mod_kind) = item.kind {
                 let span = item.span;
                 self.visit_sub_mod(
                     item,
@@ -276,7 +248,7 @@ impl<'ast, 'psess, 'c> ModResolver<'ast, 'psess> {
         if is_mod_decl(item) {
             // mod foo;
             // Look for an extern file.
-            self.find_external_module(item.kind.ident().unwrap(), &item.attrs, sub_mod)
+            self.find_external_module(item.ident, &item.attrs, sub_mod)
         } else {
             // An internal module (`mod foo { /* ... */ }`);
             Ok(Some(SubModKind::Internal(item)))
@@ -319,7 +291,7 @@ impl<'ast, 'psess, 'c> ModResolver<'ast, 'psess> {
                 self.visit_sub_mod_after_directory_update(sub_mod, Some(directory))
             }
             SubModKind::Internal(item) => {
-                self.push_inline_mod_directory(item.kind.ident().unwrap(), &item.attrs);
+                self.push_inline_mod_directory(item.ident, &item.attrs);
                 self.visit_sub_mod_after_directory_update(sub_mod, None)
             }
             SubModKind::MultiExternal(mods) => {
@@ -570,7 +542,7 @@ impl<'ast, 'psess, 'c> ModResolver<'ast, 'psess> {
                     Cow::Owned(items),
                     Cow::Owned(attrs),
                 ),
-            ));
+            ))
         }
         result
     }
@@ -596,20 +568,6 @@ fn is_cfg_if(item: &ast::Item) -> bool {
         ast::ItemKind::MacCall(ref mac) => {
             if let Some(first_segment) = mac.path.segments.first() {
                 if first_segment.ident.name == Symbol::intern("cfg_if") {
-                    return true;
-                }
-            }
-            false
-        }
-        _ => false,
-    }
-}
-
-fn is_cfg_match(item: &ast::Item) -> bool {
-    match item.kind {
-        ast::ItemKind::MacCall(ref mac) => {
-            if let Some(last_segment) = mac.path.segments.last() {
-                if last_segment.ident.name == Symbol::intern("cfg_match") {
                     return true;
                 }
             }

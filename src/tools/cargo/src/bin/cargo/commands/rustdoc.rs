@@ -26,9 +26,9 @@ pub fn cli() -> Command {
             "Build only the specified example",
             "Build all examples",
             "Build only the specified test target",
-            "Build all targets that have `test = true` set",
+            "Build all test targets",
             "Build only the specified bench target",
-            "Build all targets that have `bench = true` set",
+            "Build all bench targets",
             "Build all targets",
         )
         .arg_features()
@@ -45,9 +45,10 @@ pub fn cli() -> Command {
         .arg_unit_graph()
         .arg_timings()
         .arg_manifest_path()
+        .arg_lockfile_path()
         .arg_ignore_rust_version()
         .after_help(color_print::cstr!(
-            "Run `<bright-cyan,bold>cargo help rustdoc</>` for more detailed information.\n"
+            "Run `<cyan,bold>cargo help rustdoc</>` for more detailed information.\n"
         ))
 }
 
@@ -63,7 +64,7 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
 
     let mut compile_opts = args.compile_options_for_single_package(
         gctx,
-        UserIntent::Doc {
+        CompileMode::Doc {
             deps: false,
             json: matches!(output_format, OutputFormat::Json),
         },

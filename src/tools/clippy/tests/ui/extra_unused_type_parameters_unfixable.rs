@@ -1,7 +1,7 @@
 #![warn(clippy::extra_unused_type_parameters)]
 
 fn unused_where_clause<T, U>(x: U)
-//~^ extra_unused_type_parameters
+//~^ ERROR: type parameter `T` goes unused in function definition
 where
     T: Default,
 {
@@ -9,7 +9,7 @@ where
 }
 
 fn unused_multi_where_clause<T, U, V: Default>(x: U)
-//~^ extra_unused_type_parameters
+//~^ ERROR: type parameters go unused in function definition: T, V
 where
     T: Default,
 {
@@ -17,7 +17,7 @@ where
 }
 
 fn unused_all_where_clause<T, U: Default, V: Default>()
-//~^ extra_unused_type_parameters
+//~^ ERROR: type parameters go unused in function definition: T, U, V
 where
     T: Default,
 {

@@ -1,4 +1,5 @@
 //@ edition:2018
+#![feature(async_closure)]
 use std::future::Future;
 
 // test the quality of annotations giving lifetimes names (`'1`) when async constructs are involved

@@ -1,5 +1,3 @@
-//@ edition: 2018
-
 macro_rules! define_other_core {
     ( ) => {
         extern crate std as core;
@@ -8,8 +6,7 @@ macro_rules! define_other_core {
 }
 
 fn main() {
-    core::panic!(); //~ ERROR `core` is ambiguous
-    ::core::panic!(); //~ ERROR `core` is ambiguous
+    core::panic!();
 }
 
 define_other_core!();

@@ -1,25 +1,24 @@
-use crate::spec::{Abi, Arch, Target, TargetMetadata, TargetOptions, base};
+use crate::spec::{base, Target, TargetOptions};
 
-pub(crate) fn target() -> Target {
+pub fn target() -> Target {
     Target {
         llvm_target: "mips64el-unknown-linux-gnuabi64".into(),
-        metadata: TargetMetadata {
+        metadata: crate::spec::TargetMetadata {
             description: Some("MIPS64 Linux, N64 ABI (kernel 4.4, glibc 2.23)".into()),
             tier: Some(3),
             host_tools: Some(true),
             std: Some(true),
         },
         pointer_width: 64,
-        data_layout: "e-m:e-i8:8:32-i16:16:32-i64:64-i128:128-n32:64-S128".into(),
-        arch: Arch::Mips64,
+        data_layout: "e-m:e-i8:8:32-i16:16:32-i64:64-n32:64-S128".into(),
+        arch: "mips64".into(),
         options: TargetOptions {
-            abi: Abi::Abi64,
+            abi: "abi64".into(),
             // NOTE(mips64r2) matches C toolchain
             cpu: "mips64r2".into(),
             features: "+mips64r2,+xgot".into(),
             max_atomic_width: Some(64),
             mcount: "_mcount".into(),
-            llvm_abiname: "n64".into(),
 
             ..base::linux_gnu::opts()
         },

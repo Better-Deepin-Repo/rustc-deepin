@@ -1,7 +1,7 @@
 //@ run-pass
 
 #![allow(dead_code)]
-//@ proc-macro: derive-two-attrs.rs
+//@ aux-build:derive-two-attrs.rs
 
 extern crate derive_two_attrs as foo;
 

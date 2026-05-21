@@ -1,4 +1,3 @@
-//@ edition:2015
 //@ check-pass
 // Tests that we properly lint at 'paren' expressions
 

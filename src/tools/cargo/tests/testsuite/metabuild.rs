@@ -2,10 +2,10 @@
 
 use std::str;
 
-use crate::prelude::*;
+use cargo_test_support::prelude::*;
 use cargo_test_support::{
-    Project, basic_lib_manifest, basic_manifest, is_coarse_mtime, project, registry::Package,
-    rustc_host, str,
+    basic_lib_manifest, basic_manifest, is_coarse_mtime, project, registry::Package, rustc_host,
+    str, Project,
 };
 
 #[cargo_test]
@@ -162,6 +162,7 @@ Caused by:
         .run();
 }
 
+#[allow(deprecated)]
 #[cargo_test]
 fn metabuild_optional_dep() {
     let p = project()
@@ -243,6 +244,7 @@ fn metabuild_lib_name() {
         .run();
 }
 
+#[allow(deprecated)]
 #[cargo_test]
 fn metabuild_fresh() {
     if is_coarse_mtime() {
@@ -376,6 +378,7 @@ fn metabuild_override() {
         .run();
 }
 
+#[allow(deprecated)]
 #[cargo_test]
 fn metabuild_workspace() {
     let p = project()
@@ -467,6 +470,127 @@ fn metabuild_metadata() {
         .map(|s| s.as_str().unwrap())
         .collect();
     assert_eq!(mb_info, ["mb", "mb-other"]);
+}
+
+#[cargo_test]
+fn metabuild_build_plan() {
+    let p = basic_project();
+
+    p.cargo("build --build-plan -Zunstable-options")
+        .masquerade_as_nightly_cargo(&["metabuild", "build-plan"])
+        .with_stdout_data(
+            str![[r#"
+{
+  "inputs": [
+    "[ROOT]/foo/Cargo.toml",
+    "[ROOT]/foo/mb/Cargo.toml",
+    "[ROOT]/foo/mb-other/Cargo.toml"
+  ],
+  "invocations": [
+    {
+      "args": "{...}",
+      "compile_mode": "build",
+      "cwd": "[ROOT]/foo",
+      "deps": [],
+      "env": "{...}",
+      "kind": null,
+      "links": {},
+      "outputs": [
+        "[ROOT]/foo/target/debug/deps/libmb-[HASH].rlib",
+        "[ROOT]/foo/target/debug/deps/libmb-[HASH].rmeta"
+      ],
+      "package_name": "mb",
+      "package_version": "0.5.0",
+      "program": "rustc",
+      "target_kind": [
+        "lib"
+      ]
+    },
+    {
+      "args": "{...}",
+      "compile_mode": "build",
+      "cwd": "[ROOT]/foo",
+      "deps": [],
+      "env": "{...}",
+      "kind": null,
+      "links": {},
+      "outputs": [
+        "[ROOT]/foo/target/debug/deps/libmb_other-[HASH].rlib",
+        "[ROOT]/foo/target/debug/deps/libmb_other-[HASH].rmeta"
+      ],
+      "package_name": "mb-other",
+      "package_version": "0.0.1",
+      "program": "rustc",
+      "target_kind": [
+        "lib"
+      ]
+    },
+    {
+      "args": "{...}",
+      "compile_mode": "build",
+      "cwd": "[ROOT]/foo",
+      "deps": [
+        0,
+        1
+      ],
+      "env": "{...}",
+      "kind": null,
+      "links": "{...}",
+      "outputs": "{...}",
+      "package_name": "foo",
+      "package_version": "0.0.1",
+      "program": "rustc",
+      "target_kind": [
+        "custom-build"
+      ]
+    },
+    {
+      "args": "{...}",
+      "compile_mode": "run-custom-build",
+      "cwd": "[ROOT]/foo",
+      "deps": [
+        2
+      ],
+      "env": "{...}",
+      "kind": null,
+      "links": {},
+      "outputs": [],
+      "package_name": "foo",
+      "package_version": "0.0.1",
+      "program": "[ROOT]/foo/target/debug/build/foo-[HASH]/metabuild-foo",
+      "target_kind": [
+        "custom-build"
+      ]
+    },
+    {
+      "args": "{...}",
+      "compile_mode": "build",
+      "cwd": "[ROOT]/foo",
+      "deps": [
+        3
+      ],
+      "env": "{...}",
+      "kind": null,
+      "links": "{...}",
+      "outputs": [
+        "[ROOT]/foo/target/debug/deps/libfoo-[HASH].rlib",
+        "[ROOT]/foo/target/debug/deps/libfoo-[HASH].rmeta"
+      ],
+      "package_name": "foo",
+      "package_version": "0.0.1",
+      "program": "rustc",
+      "target_kind": [
+        "lib"
+      ]
+    }
+  ]
+}
+"#]]
+            .is_json(),
+        )
+        .run();
+
+    assert_eq!(p.glob("target/.metabuild/metabuild-foo-*.rs").count(), 1);
 }
 
 #[cargo_test]
@@ -611,6 +735,7 @@ fn metabuild_external_dependency() {
     assert_eq!(p.glob("target/.metabuild/metabuild-dep-*.rs").count(), 1);
 }
 
+#[allow(deprecated)]
 #[cargo_test]
 fn metabuild_json_artifact() {
     let p = basic_project();
@@ -662,6 +787,7 @@ fn metabuild_json_artifact() {
         .run();
 }
 
+#[allow(deprecated)]
 #[cargo_test]
 fn metabuild_failed_build_json() {
     let p = basic_project();

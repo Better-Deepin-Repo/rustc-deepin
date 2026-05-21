@@ -18,22 +18,19 @@ use stdarch_test::assert_instr;
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(addss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_add_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_insert!(a, 0, _mm_cvtss_f32(a) + _mm_cvtss_f32(b)) }
+pub unsafe fn _mm_add_ss(a: __m128, b: __m128) -> __m128 {
+    simd_insert!(a, 0, _mm_cvtss_f32(a) + _mm_cvtss_f32(b))
 }
 
-/// Adds packed single-precision (32-bit) floating-point elements in `a` and
-/// `b`.
+/// Adds __m128 vectors.
 ///
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_add_ps)
 #[inline]
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(addps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_add_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_add(a, b) }
+pub unsafe fn _mm_add_ps(a: __m128, b: __m128) -> __m128 {
+    simd_add(a, b)
 }
 
 /// Subtracts the first component of `b` from `a`, the other components are
@@ -44,22 +41,19 @@ pub const fn _mm_add_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(subss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_sub_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_insert!(a, 0, _mm_cvtss_f32(a) - _mm_cvtss_f32(b)) }
+pub unsafe fn _mm_sub_ss(a: __m128, b: __m128) -> __m128 {
+    simd_insert!(a, 0, _mm_cvtss_f32(a) - _mm_cvtss_f32(b))
 }
 
-/// Subtracts packed single-precision (32-bit) floating-point elements in `a` and
-/// `b`.
+/// Subtracts __m128 vectors.
 ///
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_sub_ps)
 #[inline]
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(subps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_sub_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_sub(a, b) }
+pub unsafe fn _mm_sub_ps(a: __m128, b: __m128) -> __m128 {
+    simd_sub(a, b)
 }
 
 /// Multiplies the first component of `a` and `b`, the other components are
@@ -70,22 +64,19 @@ pub const fn _mm_sub_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(mulss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_mul_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_insert!(a, 0, _mm_cvtss_f32(a) * _mm_cvtss_f32(b)) }
+pub unsafe fn _mm_mul_ss(a: __m128, b: __m128) -> __m128 {
+    simd_insert!(a, 0, _mm_cvtss_f32(a) * _mm_cvtss_f32(b))
 }
 
-/// Multiplies packed single-precision (32-bit) floating-point elements in `a` and
-/// `b`.
+/// Multiplies __m128 vectors.
 ///
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_mul_ps)
 #[inline]
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(mulps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_mul_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_mul(a, b) }
+pub unsafe fn _mm_mul_ps(a: __m128, b: __m128) -> __m128 {
+    simd_mul(a, b)
 }
 
 /// Divides the first component of `b` by `a`, the other components are
@@ -96,22 +87,19 @@ pub const fn _mm_mul_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(divss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_div_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_insert!(a, 0, _mm_cvtss_f32(a) / _mm_cvtss_f32(b)) }
+pub unsafe fn _mm_div_ss(a: __m128, b: __m128) -> __m128 {
+    simd_insert!(a, 0, _mm_cvtss_f32(a) / _mm_cvtss_f32(b))
 }
 
-/// Divides packed single-precision (32-bit) floating-point elements in `a` and
-/// `b`.
+/// Divides __m128 vectors.
 ///
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_div_ps)
 #[inline]
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(divps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_div_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_div(a, b) }
+pub unsafe fn _mm_div_ps(a: __m128, b: __m128) -> __m128 {
+    simd_div(a, b)
 }
 
 /// Returns the square root of the first single-precision (32-bit)
@@ -122,8 +110,8 @@ pub const fn _mm_div_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(sqrtss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_sqrt_ss(a: __m128) -> __m128 {
-    unsafe { simd_insert!(a, 0, sqrtf32(_mm_cvtss_f32(a))) }
+pub unsafe fn _mm_sqrt_ss(a: __m128) -> __m128 {
+    simd_insert!(a, 0, sqrtf32(_mm_cvtss_f32(a)))
 }
 
 /// Returns the square root of packed single-precision (32-bit) floating-point
@@ -134,8 +122,8 @@ pub fn _mm_sqrt_ss(a: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(sqrtps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_sqrt_ps(a: __m128) -> __m128 {
-    unsafe { simd_fsqrt(a) }
+pub unsafe fn _mm_sqrt_ps(a: __m128) -> __m128 {
+    simd_fsqrt(a)
 }
 
 /// Returns the approximate reciprocal of the first single-precision
@@ -146,8 +134,8 @@ pub fn _mm_sqrt_ps(a: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(rcpss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_rcp_ss(a: __m128) -> __m128 {
-    unsafe { rcpss(a) }
+pub unsafe fn _mm_rcp_ss(a: __m128) -> __m128 {
+    rcpss(a)
 }
 
 /// Returns the approximate reciprocal of packed single-precision (32-bit)
@@ -158,8 +146,8 @@ pub fn _mm_rcp_ss(a: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(rcpps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_rcp_ps(a: __m128) -> __m128 {
-    unsafe { rcpps(a) }
+pub unsafe fn _mm_rcp_ps(a: __m128) -> __m128 {
+    rcpps(a)
 }
 
 /// Returns the approximate reciprocal square root of the first single-precision
@@ -170,8 +158,8 @@ pub fn _mm_rcp_ps(a: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(rsqrtss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_rsqrt_ss(a: __m128) -> __m128 {
-    unsafe { rsqrtss(a) }
+pub unsafe fn _mm_rsqrt_ss(a: __m128) -> __m128 {
+    rsqrtss(a)
 }
 
 /// Returns the approximate reciprocal square root of packed single-precision
@@ -182,8 +170,8 @@ pub fn _mm_rsqrt_ss(a: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(rsqrtps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_rsqrt_ps(a: __m128) -> __m128 {
-    unsafe { rsqrtps(a) }
+pub unsafe fn _mm_rsqrt_ps(a: __m128) -> __m128 {
+    rsqrtps(a)
 }
 
 /// Compares the first single-precision (32-bit) floating-point element of `a`
@@ -195,8 +183,8 @@ pub fn _mm_rsqrt_ps(a: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(minss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_min_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { minss(a, b) }
+pub unsafe fn _mm_min_ss(a: __m128, b: __m128) -> __m128 {
+    minss(a, b)
 }
 
 /// Compares packed single-precision (32-bit) floating-point elements in `a` and
@@ -207,9 +195,9 @@ pub fn _mm_min_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(minps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_min_ps(a: __m128, b: __m128) -> __m128 {
+pub unsafe fn _mm_min_ps(a: __m128, b: __m128) -> __m128 {
     // See the `test_mm_min_ps` test why this can't be implemented using `simd_fmin`.
-    unsafe { minps(a, b) }
+    minps(a, b)
 }
 
 /// Compares the first single-precision (32-bit) floating-point element of `a`
@@ -221,8 +209,8 @@ pub fn _mm_min_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(maxss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_max_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { maxss(a, b) }
+pub unsafe fn _mm_max_ss(a: __m128, b: __m128) -> __m128 {
+    maxss(a, b)
 }
 
 /// Compares packed single-precision (32-bit) floating-point elements in `a` and
@@ -233,9 +221,9 @@ pub fn _mm_max_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(maxps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_max_ps(a: __m128, b: __m128) -> __m128 {
+pub unsafe fn _mm_max_ps(a: __m128, b: __m128) -> __m128 {
     // See the `test_mm_min_ps` test why this can't be implemented using `simd_fmax`.
-    unsafe { maxps(a, b) }
+    maxps(a, b)
 }
 
 /// Bitwise AND of packed single-precision (32-bit) floating-point elements.
@@ -249,13 +237,10 @@ pub fn _mm_max_ps(a: __m128, b: __m128) -> __m128 {
     assert_instr(andps)
 )]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_and_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe {
-        let a: __m128i = mem::transmute(a);
-        let b: __m128i = mem::transmute(b);
-        mem::transmute(simd_and(a, b))
-    }
+pub unsafe fn _mm_and_ps(a: __m128, b: __m128) -> __m128 {
+    let a: __m128i = mem::transmute(a);
+    let b: __m128i = mem::transmute(b);
+    mem::transmute(simd_and(a, b))
 }
 
 /// Bitwise AND-NOT of packed single-precision (32-bit) floating-point
@@ -273,14 +258,11 @@ pub const fn _mm_and_ps(a: __m128, b: __m128) -> __m128 {
     assert_instr(andnps)
 )]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_andnot_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe {
-        let a: __m128i = mem::transmute(a);
-        let b: __m128i = mem::transmute(b);
-        let mask: __m128i = mem::transmute(i32x4::splat(-1));
-        mem::transmute(simd_and(simd_xor(mask, a), b))
-    }
+pub unsafe fn _mm_andnot_ps(a: __m128, b: __m128) -> __m128 {
+    let a: __m128i = mem::transmute(a);
+    let b: __m128i = mem::transmute(b);
+    let mask: __m128i = mem::transmute(i32x4::splat(-1));
+    mem::transmute(simd_and(simd_xor(mask, a), b))
 }
 
 /// Bitwise OR of packed single-precision (32-bit) floating-point elements.
@@ -294,13 +276,10 @@ pub const fn _mm_andnot_ps(a: __m128, b: __m128) -> __m128 {
     assert_instr(orps)
 )]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_or_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe {
-        let a: __m128i = mem::transmute(a);
-        let b: __m128i = mem::transmute(b);
-        mem::transmute(simd_or(a, b))
-    }
+pub unsafe fn _mm_or_ps(a: __m128, b: __m128) -> __m128 {
+    let a: __m128i = mem::transmute(a);
+    let b: __m128i = mem::transmute(b);
+    mem::transmute(simd_or(a, b))
 }
 
 /// Bitwise exclusive OR of packed single-precision (32-bit) floating-point
@@ -315,13 +294,10 @@ pub const fn _mm_or_ps(a: __m128, b: __m128) -> __m128 {
     assert_instr(xorps)
 )]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_xor_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe {
-        let a: __m128i = mem::transmute(a);
-        let b: __m128i = mem::transmute(b);
-        mem::transmute(simd_xor(a, b))
-    }
+pub unsafe fn _mm_xor_ps(a: __m128, b: __m128) -> __m128 {
+    let a: __m128i = mem::transmute(a);
+    let b: __m128i = mem::transmute(b);
+    mem::transmute(simd_xor(a, b))
 }
 
 /// Compares the lowest `f32` of both inputs for equality. The lowest 32 bits of
@@ -333,8 +309,8 @@ pub const fn _mm_xor_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpeqss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpeq_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpss(a, b, 0) }
+pub unsafe fn _mm_cmpeq_ss(a: __m128, b: __m128) -> __m128 {
+    cmpss(a, b, 0)
 }
 
 /// Compares the lowest `f32` of both inputs for less than. The lowest 32 bits
@@ -347,8 +323,8 @@ pub fn _mm_cmpeq_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpltss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmplt_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpss(a, b, 1) }
+pub unsafe fn _mm_cmplt_ss(a: __m128, b: __m128) -> __m128 {
+    cmpss(a, b, 1)
 }
 
 /// Compares the lowest `f32` of both inputs for less than or equal. The lowest
@@ -361,8 +337,8 @@ pub fn _mm_cmplt_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpless))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmple_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpss(a, b, 2) }
+pub unsafe fn _mm_cmple_ss(a: __m128, b: __m128) -> __m128 {
+    cmpss(a, b, 2)
 }
 
 /// Compares the lowest `f32` of both inputs for greater than. The lowest 32
@@ -375,8 +351,8 @@ pub fn _mm_cmple_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpltss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpgt_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_shuffle!(a, cmpss(b, a, 1), [4, 1, 2, 3]) }
+pub unsafe fn _mm_cmpgt_ss(a: __m128, b: __m128) -> __m128 {
+    simd_shuffle!(a, cmpss(b, a, 1), [4, 1, 2, 3])
 }
 
 /// Compares the lowest `f32` of both inputs for greater than or equal. The
@@ -389,8 +365,8 @@ pub fn _mm_cmpgt_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpless))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpge_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_shuffle!(a, cmpss(b, a, 2), [4, 1, 2, 3]) }
+pub unsafe fn _mm_cmpge_ss(a: __m128, b: __m128) -> __m128 {
+    simd_shuffle!(a, cmpss(b, a, 2), [4, 1, 2, 3])
 }
 
 /// Compares the lowest `f32` of both inputs for inequality. The lowest 32 bits
@@ -403,8 +379,8 @@ pub fn _mm_cmpge_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpneqss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpneq_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpss(a, b, 4) }
+pub unsafe fn _mm_cmpneq_ss(a: __m128, b: __m128) -> __m128 {
+    cmpss(a, b, 4)
 }
 
 /// Compares the lowest `f32` of both inputs for not-less-than. The lowest 32
@@ -417,8 +393,8 @@ pub fn _mm_cmpneq_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpnltss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpnlt_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpss(a, b, 5) }
+pub unsafe fn _mm_cmpnlt_ss(a: __m128, b: __m128) -> __m128 {
+    cmpss(a, b, 5)
 }
 
 /// Compares the lowest `f32` of both inputs for not-less-than-or-equal. The
@@ -431,8 +407,8 @@ pub fn _mm_cmpnlt_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpnless))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpnle_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpss(a, b, 6) }
+pub unsafe fn _mm_cmpnle_ss(a: __m128, b: __m128) -> __m128 {
+    cmpss(a, b, 6)
 }
 
 /// Compares the lowest `f32` of both inputs for not-greater-than. The lowest 32
@@ -445,8 +421,8 @@ pub fn _mm_cmpnle_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpnltss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpngt_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_shuffle!(a, cmpss(b, a, 5), [4, 1, 2, 3]) }
+pub unsafe fn _mm_cmpngt_ss(a: __m128, b: __m128) -> __m128 {
+    simd_shuffle!(a, cmpss(b, a, 5), [4, 1, 2, 3])
 }
 
 /// Compares the lowest `f32` of both inputs for not-greater-than-or-equal. The
@@ -459,8 +435,8 @@ pub fn _mm_cmpngt_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpnless))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpnge_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_shuffle!(a, cmpss(b, a, 6), [4, 1, 2, 3]) }
+pub unsafe fn _mm_cmpnge_ss(a: __m128, b: __m128) -> __m128 {
+    simd_shuffle!(a, cmpss(b, a, 6), [4, 1, 2, 3])
 }
 
 /// Checks if the lowest `f32` of both inputs are ordered. The lowest 32 bits of
@@ -473,8 +449,8 @@ pub fn _mm_cmpnge_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpordss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpord_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpss(a, b, 7) }
+pub unsafe fn _mm_cmpord_ss(a: __m128, b: __m128) -> __m128 {
+    cmpss(a, b, 7)
 }
 
 /// Checks if the lowest `f32` of both inputs are unordered. The lowest 32 bits
@@ -487,8 +463,8 @@ pub fn _mm_cmpord_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpunordss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpunord_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpss(a, b, 3) }
+pub unsafe fn _mm_cmpunord_ss(a: __m128, b: __m128) -> __m128 {
+    cmpss(a, b, 3)
 }
 
 /// Compares each of the four floats in `a` to the corresponding element in `b`.
@@ -500,8 +476,8 @@ pub fn _mm_cmpunord_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpeqps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpeq_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpps(a, b, 0) }
+pub unsafe fn _mm_cmpeq_ps(a: __m128, b: __m128) -> __m128 {
+    cmpps(a, b, 0)
 }
 
 /// Compares each of the four floats in `a` to the corresponding element in `b`.
@@ -513,8 +489,8 @@ pub fn _mm_cmpeq_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpltps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmplt_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpps(a, b, 1) }
+pub unsafe fn _mm_cmplt_ps(a: __m128, b: __m128) -> __m128 {
+    cmpps(a, b, 1)
 }
 
 /// Compares each of the four floats in `a` to the corresponding element in `b`.
@@ -527,8 +503,8 @@ pub fn _mm_cmplt_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpleps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmple_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpps(a, b, 2) }
+pub unsafe fn _mm_cmple_ps(a: __m128, b: __m128) -> __m128 {
+    cmpps(a, b, 2)
 }
 
 /// Compares each of the four floats in `a` to the corresponding element in `b`.
@@ -540,8 +516,8 @@ pub fn _mm_cmple_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpltps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpgt_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpps(b, a, 1) }
+pub unsafe fn _mm_cmpgt_ps(a: __m128, b: __m128) -> __m128 {
+    cmpps(b, a, 1)
 }
 
 /// Compares each of the four floats in `a` to the corresponding element in `b`.
@@ -554,8 +530,8 @@ pub fn _mm_cmpgt_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpleps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpge_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpps(b, a, 2) }
+pub unsafe fn _mm_cmpge_ps(a: __m128, b: __m128) -> __m128 {
+    cmpps(b, a, 2)
 }
 
 /// Compares each of the four floats in `a` to the corresponding element in `b`.
@@ -567,8 +543,8 @@ pub fn _mm_cmpge_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpneqps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpneq_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpps(a, b, 4) }
+pub unsafe fn _mm_cmpneq_ps(a: __m128, b: __m128) -> __m128 {
+    cmpps(a, b, 4)
 }
 
 /// Compares each of the four floats in `a` to the corresponding element in `b`.
@@ -581,8 +557,8 @@ pub fn _mm_cmpneq_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpnltps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpnlt_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpps(a, b, 5) }
+pub unsafe fn _mm_cmpnlt_ps(a: __m128, b: __m128) -> __m128 {
+    cmpps(a, b, 5)
 }
 
 /// Compares each of the four floats in `a` to the corresponding element in `b`.
@@ -595,8 +571,8 @@ pub fn _mm_cmpnlt_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpnleps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpnle_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpps(a, b, 6) }
+pub unsafe fn _mm_cmpnle_ps(a: __m128, b: __m128) -> __m128 {
+    cmpps(a, b, 6)
 }
 
 /// Compares each of the four floats in `a` to the corresponding element in `b`.
@@ -609,8 +585,8 @@ pub fn _mm_cmpnle_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpnltps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpngt_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpps(b, a, 5) }
+pub unsafe fn _mm_cmpngt_ps(a: __m128, b: __m128) -> __m128 {
+    cmpps(b, a, 5)
 }
 
 /// Compares each of the four floats in `a` to the corresponding element in `b`.
@@ -623,8 +599,8 @@ pub fn _mm_cmpngt_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpnleps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpnge_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpps(b, a, 6) }
+pub unsafe fn _mm_cmpnge_ps(a: __m128, b: __m128) -> __m128 {
+    cmpps(b, a, 6)
 }
 
 /// Compares each of the four floats in `a` to the corresponding element in `b`.
@@ -637,8 +613,8 @@ pub fn _mm_cmpnge_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpordps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpord_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpps(b, a, 7) }
+pub unsafe fn _mm_cmpord_ps(a: __m128, b: __m128) -> __m128 {
+    cmpps(b, a, 7)
 }
 
 /// Compares each of the four floats in `a` to the corresponding element in `b`.
@@ -651,8 +627,8 @@ pub fn _mm_cmpord_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cmpunordps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cmpunord_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { cmpps(b, a, 3) }
+pub unsafe fn _mm_cmpunord_ps(a: __m128, b: __m128) -> __m128 {
+    cmpps(b, a, 3)
 }
 
 /// Compares two 32-bit floats from the low-order bits of `a` and `b`. Returns
@@ -663,8 +639,8 @@ pub fn _mm_cmpunord_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(comiss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_comieq_ss(a: __m128, b: __m128) -> i32 {
-    unsafe { comieq_ss(a, b) }
+pub unsafe fn _mm_comieq_ss(a: __m128, b: __m128) -> i32 {
+    comieq_ss(a, b)
 }
 
 /// Compares two 32-bit floats from the low-order bits of `a` and `b`. Returns
@@ -675,8 +651,8 @@ pub fn _mm_comieq_ss(a: __m128, b: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(comiss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_comilt_ss(a: __m128, b: __m128) -> i32 {
-    unsafe { comilt_ss(a, b) }
+pub unsafe fn _mm_comilt_ss(a: __m128, b: __m128) -> i32 {
+    comilt_ss(a, b)
 }
 
 /// Compares two 32-bit floats from the low-order bits of `a` and `b`. Returns
@@ -688,8 +664,8 @@ pub fn _mm_comilt_ss(a: __m128, b: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(comiss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_comile_ss(a: __m128, b: __m128) -> i32 {
-    unsafe { comile_ss(a, b) }
+pub unsafe fn _mm_comile_ss(a: __m128, b: __m128) -> i32 {
+    comile_ss(a, b)
 }
 
 /// Compares two 32-bit floats from the low-order bits of `a` and `b`. Returns
@@ -701,8 +677,8 @@ pub fn _mm_comile_ss(a: __m128, b: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(comiss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_comigt_ss(a: __m128, b: __m128) -> i32 {
-    unsafe { comigt_ss(a, b) }
+pub unsafe fn _mm_comigt_ss(a: __m128, b: __m128) -> i32 {
+    comigt_ss(a, b)
 }
 
 /// Compares two 32-bit floats from the low-order bits of `a` and `b`. Returns
@@ -714,8 +690,8 @@ pub fn _mm_comigt_ss(a: __m128, b: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(comiss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_comige_ss(a: __m128, b: __m128) -> i32 {
-    unsafe { comige_ss(a, b) }
+pub unsafe fn _mm_comige_ss(a: __m128, b: __m128) -> i32 {
+    comige_ss(a, b)
 }
 
 /// Compares two 32-bit floats from the low-order bits of `a` and `b`. Returns
@@ -726,8 +702,8 @@ pub fn _mm_comige_ss(a: __m128, b: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(comiss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_comineq_ss(a: __m128, b: __m128) -> i32 {
-    unsafe { comineq_ss(a, b) }
+pub unsafe fn _mm_comineq_ss(a: __m128, b: __m128) -> i32 {
+    comineq_ss(a, b)
 }
 
 /// Compares two 32-bit floats from the low-order bits of `a` and `b`. Returns
@@ -739,8 +715,8 @@ pub fn _mm_comineq_ss(a: __m128, b: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(ucomiss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_ucomieq_ss(a: __m128, b: __m128) -> i32 {
-    unsafe { ucomieq_ss(a, b) }
+pub unsafe fn _mm_ucomieq_ss(a: __m128, b: __m128) -> i32 {
+    ucomieq_ss(a, b)
 }
 
 /// Compares two 32-bit floats from the low-order bits of `a` and `b`. Returns
@@ -753,8 +729,8 @@ pub fn _mm_ucomieq_ss(a: __m128, b: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(ucomiss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_ucomilt_ss(a: __m128, b: __m128) -> i32 {
-    unsafe { ucomilt_ss(a, b) }
+pub unsafe fn _mm_ucomilt_ss(a: __m128, b: __m128) -> i32 {
+    ucomilt_ss(a, b)
 }
 
 /// Compares two 32-bit floats from the low-order bits of `a` and `b`. Returns
@@ -767,8 +743,8 @@ pub fn _mm_ucomilt_ss(a: __m128, b: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(ucomiss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_ucomile_ss(a: __m128, b: __m128) -> i32 {
-    unsafe { ucomile_ss(a, b) }
+pub unsafe fn _mm_ucomile_ss(a: __m128, b: __m128) -> i32 {
+    ucomile_ss(a, b)
 }
 
 /// Compares two 32-bit floats from the low-order bits of `a` and `b`. Returns
@@ -781,8 +757,8 @@ pub fn _mm_ucomile_ss(a: __m128, b: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(ucomiss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_ucomigt_ss(a: __m128, b: __m128) -> i32 {
-    unsafe { ucomigt_ss(a, b) }
+pub unsafe fn _mm_ucomigt_ss(a: __m128, b: __m128) -> i32 {
+    ucomigt_ss(a, b)
 }
 
 /// Compares two 32-bit floats from the low-order bits of `a` and `b`. Returns
@@ -795,8 +771,8 @@ pub fn _mm_ucomigt_ss(a: __m128, b: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(ucomiss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_ucomige_ss(a: __m128, b: __m128) -> i32 {
-    unsafe { ucomige_ss(a, b) }
+pub unsafe fn _mm_ucomige_ss(a: __m128, b: __m128) -> i32 {
+    ucomige_ss(a, b)
 }
 
 /// Compares two 32-bit floats from the low-order bits of `a` and `b`. Returns
@@ -808,8 +784,8 @@ pub fn _mm_ucomige_ss(a: __m128, b: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(ucomiss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_ucomineq_ss(a: __m128, b: __m128) -> i32 {
-    unsafe { ucomineq_ss(a, b) }
+pub unsafe fn _mm_ucomineq_ss(a: __m128, b: __m128) -> i32 {
+    ucomineq_ss(a, b)
 }
 
 /// Converts the lowest 32 bit float in the input vector to a 32 bit integer.
@@ -825,8 +801,8 @@ pub fn _mm_ucomineq_ss(a: __m128, b: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cvtss2si))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cvtss_si32(a: __m128) -> i32 {
-    unsafe { cvtss2si(a) }
+pub unsafe fn _mm_cvtss_si32(a: __m128) -> i32 {
+    cvtss2si(a)
 }
 
 /// Alias for [`_mm_cvtss_si32`](fn._mm_cvtss_si32.html).
@@ -836,7 +812,7 @@ pub fn _mm_cvtss_si32(a: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cvtss2si))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cvt_ss2si(a: __m128) -> i32 {
+pub unsafe fn _mm_cvt_ss2si(a: __m128) -> i32 {
     _mm_cvtss_si32(a)
 }
 
@@ -855,8 +831,8 @@ pub fn _mm_cvt_ss2si(a: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cvttss2si))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cvttss_si32(a: __m128) -> i32 {
-    unsafe { cvttss2si(a) }
+pub unsafe fn _mm_cvttss_si32(a: __m128) -> i32 {
+    cvttss2si(a)
 }
 
 /// Alias for [`_mm_cvttss_si32`](fn._mm_cvttss_si32.html).
@@ -866,7 +842,7 @@ pub fn _mm_cvttss_si32(a: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cvttss2si))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cvtt_ss2si(a: __m128) -> i32 {
+pub unsafe fn _mm_cvtt_ss2si(a: __m128) -> i32 {
     _mm_cvttss_si32(a)
 }
 
@@ -878,9 +854,8 @@ pub fn _mm_cvtt_ss2si(a: __m128) -> i32 {
 // No point in using assert_instrs. In Unix x86_64 calling convention this is a
 // no-op, and on msvc it's just a `mov`.
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_cvtss_f32(a: __m128) -> f32 {
-    unsafe { simd_extract!(a, 0) }
+pub unsafe fn _mm_cvtss_f32(a: __m128) -> f32 {
+    simd_extract!(a, 0)
 }
 
 /// Converts a 32 bit integer to a 32 bit float. The result vector is the input
@@ -894,9 +869,8 @@ pub const fn _mm_cvtss_f32(a: __m128) -> f32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cvtsi2ss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_cvtsi32_ss(a: __m128, b: i32) -> __m128 {
-    unsafe { simd_insert!(a, 0, b as f32) }
+pub unsafe fn _mm_cvtsi32_ss(a: __m128, b: i32) -> __m128 {
+    cvtsi2ss(a, b)
 }
 
 /// Alias for [`_mm_cvtsi32_ss`](fn._mm_cvtsi32_ss.html).
@@ -906,7 +880,7 @@ pub const fn _mm_cvtsi32_ss(a: __m128, b: i32) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(cvtsi2ss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_cvt_si2ss(a: __m128, b: i32) -> __m128 {
+pub unsafe fn _mm_cvt_si2ss(a: __m128, b: i32) -> __m128 {
     _mm_cvtsi32_ss(a, b)
 }
 
@@ -918,8 +892,7 @@ pub fn _mm_cvt_si2ss(a: __m128, b: i32) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(movss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_set_ss(a: f32) -> __m128 {
+pub unsafe fn _mm_set_ss(a: f32) -> __m128 {
     __m128([a, 0.0, 0.0, 0.0])
 }
 
@@ -930,9 +903,8 @@ pub const fn _mm_set_ss(a: f32) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(shufps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_set1_ps(a: f32) -> __m128 {
-    f32x4::splat(a).as_m128()
+pub unsafe fn _mm_set1_ps(a: f32) -> __m128 {
+    __m128([a, a, a, a])
 }
 
 /// Alias for [`_mm_set1_ps`](fn._mm_set1_ps.html)
@@ -942,8 +914,7 @@ pub const fn _mm_set1_ps(a: f32) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(shufps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_set_ps1(a: f32) -> __m128 {
+pub unsafe fn _mm_set_ps1(a: f32) -> __m128 {
     _mm_set1_ps(a)
 }
 
@@ -968,10 +939,9 @@ pub const fn _mm_set_ps1(a: f32) -> __m128 {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_set_ps)
 #[inline]
 #[target_feature(enable = "sse")]
-// This intrinsic has no corresponding instruction.
+#[cfg_attr(test, assert_instr(unpcklps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_set_ps(a: f32, b: f32, c: f32, d: f32) -> __m128 {
+pub unsafe fn _mm_set_ps(a: f32, b: f32, c: f32, d: f32) -> __m128 {
     __m128([d, c, b, a])
 }
 
@@ -997,8 +967,7 @@ pub const fn _mm_set_ps(a: f32, b: f32, c: f32, d: f32) -> __m128 {
     assert_instr(movaps)
 )]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_setr_ps(a: f32, b: f32, c: f32, d: f32) -> __m128 {
+pub unsafe fn _mm_setr_ps(a: f32, b: f32, c: f32, d: f32) -> __m128 {
     __m128([a, b, c, d])
 }
 
@@ -1009,9 +978,8 @@ pub const fn _mm_setr_ps(a: f32, b: f32, c: f32, d: f32) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(xorps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_setzero_ps() -> __m128 {
-    const { unsafe { mem::zeroed() } }
+pub unsafe fn _mm_setzero_ps() -> __m128 {
+    __m128([0.0, 0.0, 0.0, 0.0])
 }
 
 /// A utility function for creating masks to use with Intel shuffle and
@@ -1041,21 +1009,18 @@ pub const fn _MM_SHUFFLE(z: u32, y: u32, x: u32, w: u32) -> i32 {
 #[cfg_attr(test, assert_instr(shufps, MASK = 3))]
 #[rustc_legacy_const_generics(2)]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_shuffle_ps<const MASK: i32>(a: __m128, b: __m128) -> __m128 {
+pub unsafe fn _mm_shuffle_ps<const MASK: i32>(a: __m128, b: __m128) -> __m128 {
     static_assert_uimm_bits!(MASK, 8);
-    unsafe {
-        simd_shuffle!(
-            a,
-            b,
-            [
-                MASK as u32 & 0b11,
-                (MASK as u32 >> 2) & 0b11,
-                ((MASK as u32 >> 4) & 0b11) + 4,
-                ((MASK as u32 >> 6) & 0b11) + 4,
-            ],
-        )
-    }
+    simd_shuffle!(
+        a,
+        b,
+        [
+            MASK as u32 & 0b11,
+            (MASK as u32 >> 2) & 0b11,
+            ((MASK as u32 >> 4) & 0b11) + 4,
+            ((MASK as u32 >> 6) & 0b11) + 4,
+        ],
+    )
 }
 
 /// Unpacks and interleave single-precision (32-bit) floating-point elements
@@ -1066,9 +1031,8 @@ pub const fn _mm_shuffle_ps<const MASK: i32>(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(unpckhps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_unpackhi_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_shuffle!(a, b, [2, 6, 3, 7]) }
+pub unsafe fn _mm_unpackhi_ps(a: __m128, b: __m128) -> __m128 {
+    simd_shuffle!(a, b, [2, 6, 3, 7])
 }
 
 /// Unpacks and interleave single-precision (32-bit) floating-point elements
@@ -1079,9 +1043,8 @@ pub const fn _mm_unpackhi_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(unpcklps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_unpacklo_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_shuffle!(a, b, [0, 4, 1, 5]) }
+pub unsafe fn _mm_unpacklo_ps(a: __m128, b: __m128) -> __m128 {
+    simd_shuffle!(a, b, [0, 4, 1, 5])
 }
 
 /// Combine higher half of `a` and `b`. The higher half of `b` occupies the
@@ -1090,12 +1053,11 @@ pub const fn _mm_unpacklo_ps(a: __m128, b: __m128) -> __m128 {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_movehl_ps)
 #[inline]
 #[target_feature(enable = "sse")]
-#[cfg_attr(test, assert_instr(movhlps))]
+#[cfg_attr(all(test, not(target_env = "msvc")), assert_instr(movhlps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_movehl_ps(a: __m128, b: __m128) -> __m128 {
+pub unsafe fn _mm_movehl_ps(a: __m128, b: __m128) -> __m128 {
     // TODO; figure why this is a different instruction on msvc?
-    unsafe { simd_shuffle!(a, b, [6, 7, 2, 3]) }
+    simd_shuffle!(a, b, [6, 7, 2, 3])
 }
 
 /// Combine lower half of `a` and `b`. The lower half of `b` occupies the
@@ -1104,11 +1066,10 @@ pub const fn _mm_movehl_ps(a: __m128, b: __m128) -> __m128 {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_movelh_ps)
 #[inline]
 #[target_feature(enable = "sse")]
-#[cfg_attr(test, assert_instr(movlhps))]
+#[cfg_attr(all(test, not(target_env = "msvc")), assert_instr(movlhps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_movelh_ps(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_shuffle!(a, b, [0, 1, 4, 5]) }
+pub unsafe fn _mm_movelh_ps(a: __m128, b: __m128) -> __m128 {
+    simd_shuffle!(a, b, [0, 1, 4, 5])
 }
 
 /// Returns a mask of the most significant bit of each element in `a`.
@@ -1121,14 +1082,11 @@ pub const fn _mm_movelh_ps(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(movmskps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_movemask_ps(a: __m128) -> i32 {
+pub unsafe fn _mm_movemask_ps(a: __m128) -> i32 {
     // Propagate the highest bit to the rest, because simd_bitmask
     // requires all-1 or all-0.
-    unsafe {
-        let mask: i32x4 = simd_lt(transmute(a), i32x4::ZERO);
-        simd_bitmask::<i32x4, u8>(mask) as i32
-    }
+    let mask: i32x4 = simd_lt(transmute(a), i32x4::splat(0));
+    simd_bitmask::<i32x4, u8>(mask).into()
 }
 
 /// Construct a `__m128` with the lowest element read from `p` and the other
@@ -1141,8 +1099,7 @@ pub const fn _mm_movemask_ps(a: __m128) -> i32 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(movss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const unsafe fn _mm_load_ss(p: *const f32) -> __m128 {
+pub unsafe fn _mm_load_ss(p: *const f32) -> __m128 {
     __m128([*p, 0.0, 0.0, 0.0])
 }
 
@@ -1157,8 +1114,7 @@ pub const unsafe fn _mm_load_ss(p: *const f32) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(movss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const unsafe fn _mm_load1_ps(p: *const f32) -> __m128 {
+pub unsafe fn _mm_load1_ps(p: *const f32) -> __m128 {
     let a = *p;
     __m128([a, a, a, a])
 }
@@ -1170,8 +1126,7 @@ pub const unsafe fn _mm_load1_ps(p: *const f32) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(movss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const unsafe fn _mm_load_ps1(p: *const f32) -> __m128 {
+pub unsafe fn _mm_load_ps1(p: *const f32) -> __m128 {
     _mm_load1_ps(p)
 }
 
@@ -1187,16 +1142,10 @@ pub const unsafe fn _mm_load_ps1(p: *const f32) -> __m128 {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_load_ps)
 #[inline]
 #[target_feature(enable = "sse")]
-// FIXME: Rust doesn't emit alignment attributes for MSVC x86-32. Ref https://github.com/rust-lang/rust/pull/139261
-// All aligned load/store intrinsics are affected
-#[cfg_attr(
-    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
-    assert_instr(movaps)
-)]
+#[cfg_attr(test, assert_instr(movaps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
 #[allow(clippy::cast_ptr_alignment)]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const unsafe fn _mm_load_ps(p: *const f32) -> __m128 {
+pub unsafe fn _mm_load_ps(p: *const f32) -> __m128 {
     *(p as *const __m128)
 }
 
@@ -1213,8 +1162,7 @@ pub const unsafe fn _mm_load_ps(p: *const f32) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(movups))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const unsafe fn _mm_loadu_ps(p: *const f32) -> __m128 {
+pub unsafe fn _mm_loadu_ps(p: *const f32) -> __m128 {
     // Note: Using `*p` would require `f32` alignment, but `movups` has no
     // alignment restrictions.
     let mut dst = _mm_undefined_ps();
@@ -1249,13 +1197,9 @@ pub const unsafe fn _mm_loadu_ps(p: *const f32) -> __m128 {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_loadr_ps)
 #[inline]
 #[target_feature(enable = "sse")]
-#[cfg_attr(
-    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
-    assert_instr(movaps)
-)]
+#[cfg_attr(test, assert_instr(movaps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const unsafe fn _mm_loadr_ps(p: *const f32) -> __m128 {
+pub unsafe fn _mm_loadr_ps(p: *const f32) -> __m128 {
     let a = _mm_load_ps(p);
     simd_shuffle!(a, a, [3, 2, 1, 0])
 }
@@ -1269,8 +1213,7 @@ pub const unsafe fn _mm_loadr_ps(p: *const f32) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(movss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const unsafe fn _mm_store_ss(p: *mut f32, a: __m128) {
+pub unsafe fn _mm_store_ss(p: *mut f32, a: __m128) {
     *p = simd_extract!(a, 0);
 }
 
@@ -1294,14 +1237,10 @@ pub const unsafe fn _mm_store_ss(p: *mut f32, a: __m128) {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_store1_ps)
 #[inline]
 #[target_feature(enable = "sse")]
-#[cfg_attr(
-    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
-    assert_instr(movaps)
-)]
+#[cfg_attr(test, assert_instr(movaps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
 #[allow(clippy::cast_ptr_alignment)]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const unsafe fn _mm_store1_ps(p: *mut f32, a: __m128) {
+pub unsafe fn _mm_store1_ps(p: *mut f32, a: __m128) {
     let b: __m128 = simd_shuffle!(a, a, [0, 0, 0, 0]);
     *(p as *mut __m128) = b;
 }
@@ -1311,13 +1250,9 @@ pub const unsafe fn _mm_store1_ps(p: *mut f32, a: __m128) {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_store_ps1)
 #[inline]
 #[target_feature(enable = "sse")]
-#[cfg_attr(
-    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
-    assert_instr(movaps)
-)]
+#[cfg_attr(test, assert_instr(movaps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const unsafe fn _mm_store_ps1(p: *mut f32, a: __m128) {
+pub unsafe fn _mm_store_ps1(p: *mut f32, a: __m128) {
     _mm_store1_ps(p, a);
 }
 
@@ -1334,14 +1269,10 @@ pub const unsafe fn _mm_store_ps1(p: *mut f32, a: __m128) {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_store_ps)
 #[inline]
 #[target_feature(enable = "sse")]
-#[cfg_attr(
-    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
-    assert_instr(movaps)
-)]
+#[cfg_attr(test, assert_instr(movaps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
 #[allow(clippy::cast_ptr_alignment)]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const unsafe fn _mm_store_ps(p: *mut f32, a: __m128) {
+pub unsafe fn _mm_store_ps(p: *mut f32, a: __m128) {
     *(p as *mut __m128) = a;
 }
 
@@ -1356,8 +1287,7 @@ pub const unsafe fn _mm_store_ps(p: *mut f32, a: __m128) {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(movups))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const unsafe fn _mm_storeu_ps(p: *mut f32, a: __m128) {
+pub unsafe fn _mm_storeu_ps(p: *mut f32, a: __m128) {
     ptr::copy_nonoverlapping(
         ptr::addr_of!(a) as *const u8,
         p as *mut u8,
@@ -1383,14 +1313,10 @@ pub const unsafe fn _mm_storeu_ps(p: *mut f32, a: __m128) {
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_storer_ps)
 #[inline]
 #[target_feature(enable = "sse")]
-#[cfg_attr(
-    all(test, not(all(target_arch = "x86", target_env = "msvc"))),
-    assert_instr(movaps)
-)]
+#[cfg_attr(test, assert_instr(movaps))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
 #[allow(clippy::cast_ptr_alignment)]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const unsafe fn _mm_storer_ps(p: *mut f32, a: __m128) {
+pub unsafe fn _mm_storer_ps(p: *mut f32, a: __m128) {
     let b: __m128 = simd_shuffle!(a, a, [3, 2, 1, 0]);
     *(p as *mut __m128) = b;
 }
@@ -1408,9 +1334,8 @@ pub const unsafe fn _mm_storer_ps(p: *mut f32, a: __m128) {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(movss))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_move_ss(a: __m128, b: __m128) -> __m128 {
-    unsafe { simd_shuffle!(a, b, [4, 1, 2, 3]) }
+pub unsafe fn _mm_move_ss(a: __m128, b: __m128) -> __m128 {
+    simd_shuffle!(a, b, [4, 1, 2, 3])
 }
 
 /// Performs a serializing operation on all non-temporal ("streaming") store instructions that
@@ -1484,8 +1409,8 @@ pub const fn _mm_move_ss(a: __m128, b: __m128) -> __m128 {
 #[target_feature(enable = "sse")]
 #[cfg_attr(test, assert_instr(sfence))]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_sfence() {
-    unsafe { sfence() }
+pub unsafe fn _mm_sfence() {
+    sfence()
 }
 
 /// Gets the unsigned 32-bit value of the MXCSR control and status register.
@@ -1511,11 +1436,9 @@ pub fn _mm_sfence() {
     note = "see `_mm_getcsr` documentation - use inline assembly instead"
 )]
 pub unsafe fn _mm_getcsr() -> u32 {
-    unsafe {
-        let mut result = 0_i32;
-        stmxcsr(ptr::addr_of_mut!(result) as *mut i8);
-        result as u32
-    }
+    let mut result = 0_i32;
+    stmxcsr(ptr::addr_of_mut!(result) as *mut i8);
+    result as u32
 }
 
 /// Sets the MXCSR register with the 32-bit unsigned integer value.
@@ -1525,19 +1448,21 @@ pub unsafe fn _mm_getcsr() -> u32 {
 ///
 /// It contains several groups of flags:
 ///
-/// * *Exception flags* report which exceptions occurred since last they were reset.
+/// * *Exception flags* report which exceptions occurred since last they were
+/// reset.
 ///
-/// * *Masking flags* can be used to mask (ignore) certain exceptions. By default
-///   these flags are all set to 1, so all exceptions are masked. When
-///   an exception is masked, the processor simply sets the exception flag and
-///   continues the operation. If the exception is unmasked, the flag is also set
-///   but additionally an exception handler is invoked.
+/// * *Masking flags* can be used to mask (ignore) certain exceptions. By
+/// default
+/// these flags are all set to 1, so all exceptions are masked. When an
+/// an exception is masked, the processor simply sets the exception flag and
+/// continues the operation. If the exception is unmasked, the flag is also set
+/// but additionally an exception handler is invoked.
 ///
 /// * *Rounding mode flags* control the rounding mode of floating point
-///   instructions.
+/// instructions.
 ///
 /// * The *denormals-are-zero mode flag* turns all numbers which would be
-///   denormalized (exponent bits are all zeros) into zeros.
+/// denormalized (exponent bits are all zeros) into zeros.
 ///
 /// Note that modifying the masking flags, rounding mode, or denormals-are-zero mode flags leads to
 /// **immediate Undefined Behavior**: Rust assumes that these are always in their default state and
@@ -1560,12 +1485,14 @@ pub unsafe fn _mm_getcsr() -> u32 {
 /// * `_MM_EXCEPT_DIV_ZERO`: Division by zero occurred.
 ///
 /// * `_MM_EXCEPT_OVERFLOW`: A numeric overflow exception occurred, i.e., a
-///   result was too large to be represented (e.g., an `f32` with absolute
-///   value greater than `2^128`).
+/// result was too large to be represented (e.g., an `f32` with absolute
+/// value
+///   greater than `2^128`).
 ///
 /// * `_MM_EXCEPT_UNDERFLOW`: A numeric underflow exception occurred, i.e., a
-///   result was too small to be represented in a normalized way (e.g., an
-///   `f32` with absolute value smaller than `2^-126`.)
+/// result was too small to be represented in a normalized way (e.g., an
+/// `f32`
+///   with absulte value smaller than `2^-126`.)
 ///
 /// * `_MM_EXCEPT_INEXACT`: An inexact-result exception occurred (a.k.a.
 ///   precision exception). This means some precision was lost due to rounding.
@@ -1811,7 +1738,7 @@ pub unsafe fn _MM_GET_ROUNDING_MODE() -> u32 {
     note = "see `_mm_setcsr` documentation - use inline assembly instead"
 )]
 pub unsafe fn _MM_SET_EXCEPTION_MASK(x: u32) {
-    _mm_setcsr((_mm_getcsr() & !_MM_MASK_MASK) | (x & _MM_MASK_MASK))
+    _mm_setcsr((_mm_getcsr() & !_MM_MASK_MASK) | x)
 }
 
 /// See [`_mm_setcsr`](fn._mm_setcsr.html)
@@ -1827,7 +1754,7 @@ pub unsafe fn _MM_SET_EXCEPTION_MASK(x: u32) {
     note = "see `_mm_setcsr` documentation - use inline assembly instead"
 )]
 pub unsafe fn _MM_SET_EXCEPTION_STATE(x: u32) {
-    _mm_setcsr((_mm_getcsr() & !_MM_EXCEPT_MASK) | (x & _MM_EXCEPT_MASK))
+    _mm_setcsr((_mm_getcsr() & !_MM_EXCEPT_MASK) | x)
 }
 
 /// See [`_mm_setcsr`](fn._mm_setcsr.html)
@@ -1843,7 +1770,9 @@ pub unsafe fn _MM_SET_EXCEPTION_STATE(x: u32) {
     note = "see `_mm_setcsr` documentation - use inline assembly instead"
 )]
 pub unsafe fn _MM_SET_FLUSH_ZERO_MODE(x: u32) {
-    _mm_setcsr((_mm_getcsr() & !_MM_FLUSH_ZERO_MASK) | (x & _MM_FLUSH_ZERO_MASK))
+    let val = (_mm_getcsr() & !_MM_FLUSH_ZERO_MASK) | x;
+    // println!("setting csr={:x}", val);
+    _mm_setcsr(val)
 }
 
 /// See [`_mm_setcsr`](fn._mm_setcsr.html)
@@ -1859,7 +1788,7 @@ pub unsafe fn _MM_SET_FLUSH_ZERO_MODE(x: u32) {
     note = "see `_mm_setcsr` documentation - use inline assembly instead"
 )]
 pub unsafe fn _MM_SET_ROUNDING_MODE(x: u32) {
-    _mm_setcsr((_mm_getcsr() & !_MM_ROUND_MASK) | (x & _MM_ROUND_MASK))
+    _mm_setcsr((_mm_getcsr() & !_MM_ROUND_MASK) | x)
 }
 
 /// See [`_mm_prefetch`](fn._mm_prefetch.html).
@@ -1896,7 +1825,7 @@ pub const _MM_HINT_ET1: i32 = 6;
 /// * [`_MM_HINT_T1`](constant._MM_HINT_T1.html): Fetch into L2 and higher.
 ///
 /// * [`_MM_HINT_T2`](constant._MM_HINT_T2.html): Fetch into L3 and higher or
-///   an implementation-specific choice (e.g., L2 if there is no L3).
+/// an   implementation-specific choice (e.g., L2 if there is no L3).
 ///
 /// * [`_MM_HINT_NTA`](constant._MM_HINT_NTA.html): Fetch data using the
 ///   non-temporal access (NTA) hint. It may be a place closer than main memory
@@ -1926,8 +1855,6 @@ pub const _MM_HINT_ET1: i32 = 6;
 /// * Prefetching may also fail if there are not enough memory-subsystem
 ///   resources (e.g., request buffers).
 ///
-/// Note: this intrinsic is safe to use even though it takes a raw pointer argument. In general, this
-/// cannot change the behavior of the program, including not trapping on invalid pointers.
 ///
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_prefetch)
 #[inline]
@@ -1938,27 +1865,23 @@ pub const _MM_HINT_ET1: i32 = 6;
 #[cfg_attr(test, assert_instr(prefetchnta, STRATEGY = _MM_HINT_NTA))]
 #[rustc_legacy_const_generics(1)]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-pub fn _mm_prefetch<const STRATEGY: i32>(p: *const i8) {
+pub unsafe fn _mm_prefetch<const STRATEGY: i32>(p: *const i8) {
     static_assert_uimm_bits!(STRATEGY, 3);
     // We use the `llvm.prefetch` intrinsic with `cache type` = 1 (data cache).
     // `locality` and `rw` are based on our `STRATEGY`.
-    unsafe {
-        prefetch(p, (STRATEGY >> 2) & 1, STRATEGY & 3, 1);
-    }
+    prefetch(p, (STRATEGY >> 2) & 1, STRATEGY & 3, 1);
 }
 
 /// Returns vector of type __m128 with indeterminate elements.
-/// Despite using the word "undefined" (following Intel's naming scheme), this non-deterministically
-/// picks some valid value and is not equivalent to [`mem::MaybeUninit`].
-/// In practice, this is typically equivalent to [`mem::zeroed`].
+/// Despite being "undefined", this is some valid value and not equivalent to [`mem::MaybeUninit`].
+/// In practice, this is equivalent to [`mem::zeroed`].
 ///
 /// [Intel's documentation](https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_undefined_ps)
 #[inline]
 #[target_feature(enable = "sse")]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _mm_undefined_ps() -> __m128 {
-    const { unsafe { mem::zeroed() } }
+pub unsafe fn _mm_undefined_ps() -> __m128 {
+    _mm_set1_ps(0.0)
 }
 
 /// Transpose the 4x4 matrix formed by 4 rows of __m128 in place.
@@ -1968,8 +1891,7 @@ pub const fn _mm_undefined_ps() -> __m128 {
 #[allow(non_snake_case)]
 #[target_feature(enable = "sse")]
 #[stable(feature = "simd_x86", since = "1.27.0")]
-#[rustc_const_unstable(feature = "stdarch_const_x86", issue = "149298")]
-pub const fn _MM_TRANSPOSE4_PS(
+pub unsafe fn _MM_TRANSPOSE4_PS(
     row0: &mut __m128,
     row1: &mut __m128,
     row2: &mut __m128,
@@ -1987,7 +1909,7 @@ pub const fn _MM_TRANSPOSE4_PS(
 }
 
 #[allow(improper_ctypes)]
-unsafe extern "C" {
+extern "C" {
     #[link_name = "llvm.x86.sse.rcp.ss"]
     fn rcpss(a: __m128) -> __m128;
     #[link_name = "llvm.x86.sse.rcp.ps"]
@@ -2034,6 +1956,8 @@ unsafe extern "C" {
     fn cvtss2si(a: __m128) -> i32;
     #[link_name = "llvm.x86.sse.cvttss2si"]
     fn cvttss2si(a: __m128) -> i32;
+    #[link_name = "llvm.x86.sse.cvtsi2ss"]
+    fn cvtsi2ss(a: __m128, b: i32) -> __m128;
     #[link_name = "llvm.x86.sse.sfence"]
     fn sfence();
     #[link_name = "llvm.x86.sse.stmxcsr"]
@@ -2067,7 +1991,6 @@ unsafe extern "C" {
 #[stable(feature = "simd_x86", since = "1.27.0")]
 #[allow(clippy::cast_ptr_alignment)]
 pub unsafe fn _mm_stream_ps(mem_addr: *mut f32, a: __m128) {
-    // see #1541, we should use inline asm to be sure, because LangRef isn't clear enough
     crate::arch::asm!(
         vps!("movntps", ",{a}"),
         p = in(reg) mem_addr,
@@ -2078,8 +2001,7 @@ pub unsafe fn _mm_stream_ps(mem_addr: *mut f32, a: __m128) {
 
 #[cfg(test)]
 mod tests {
-    use crate::core_arch::assert_eq_const as assert_eq;
-    use crate::{hint::black_box, ptr};
+    use crate::{hint::black_box, mem::transmute, ptr};
     use std::boxed;
     use stdarch_test::simd_test;
 
@@ -2088,7 +2010,7 @@ mod tests {
     const NAN: f32 = f32::NAN;
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_add_ps() {
+    unsafe fn test_mm_add_ps() {
         let a = _mm_setr_ps(-1.0, 5.0, 0.0, -10.0);
         let b = _mm_setr_ps(-100.0, 20.0, 0.0, -5.0);
         let r = _mm_add_ps(a, b);
@@ -2096,7 +2018,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_add_ss() {
+    unsafe fn test_mm_add_ss() {
         let a = _mm_set_ps(-1.0, 5.0, 0.0, -10.0);
         let b = _mm_set_ps(-100.0, 20.0, 0.0, -5.0);
         let r = _mm_add_ss(a, b);
@@ -2104,7 +2026,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_sub_ps() {
+    unsafe fn test_mm_sub_ps() {
         let a = _mm_setr_ps(-1.0, 5.0, 0.0, -10.0);
         let b = _mm_setr_ps(-100.0, 20.0, 0.0, -5.0);
         let r = _mm_sub_ps(a, b);
@@ -2112,7 +2034,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_sub_ss() {
+    unsafe fn test_mm_sub_ss() {
         let a = _mm_setr_ps(-1.0, 5.0, 0.0, -10.0);
         let b = _mm_setr_ps(-100.0, 20.0, 0.0, -5.0);
         let r = _mm_sub_ss(a, b);
@@ -2120,7 +2042,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_mul_ps() {
+    unsafe fn test_mm_mul_ps() {
         let a = _mm_setr_ps(-1.0, 5.0, 0.0, -10.0);
         let b = _mm_setr_ps(-100.0, 20.0, 0.0, -5.0);
         let r = _mm_mul_ps(a, b);
@@ -2128,7 +2050,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_mul_ss() {
+    unsafe fn test_mm_mul_ss() {
         let a = _mm_setr_ps(-1.0, 5.0, 0.0, -10.0);
         let b = _mm_setr_ps(-100.0, 20.0, 0.0, -5.0);
         let r = _mm_mul_ss(a, b);
@@ -2136,7 +2058,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_div_ps() {
+    unsafe fn test_mm_div_ps() {
         let a = _mm_setr_ps(-1.0, 5.0, 2.0, -10.0);
         let b = _mm_setr_ps(-100.0, 20.0, 0.2, -5.0);
         let r = _mm_div_ps(a, b);
@@ -2144,7 +2066,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_div_ss() {
+    unsafe fn test_mm_div_ss() {
         let a = _mm_setr_ps(-1.0, 5.0, 0.0, -10.0);
         let b = _mm_setr_ps(-100.0, 20.0, 0.0, -5.0);
         let r = _mm_div_ss(a, b);
@@ -2152,7 +2074,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_sqrt_ss() {
+    unsafe fn test_mm_sqrt_ss() {
         let a = _mm_setr_ps(4.0, 13.0, 16.0, 100.0);
         let r = _mm_sqrt_ss(a);
         let e = _mm_setr_ps(2.0, 13.0, 16.0, 100.0);
@@ -2160,7 +2082,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_sqrt_ps() {
+    unsafe fn test_mm_sqrt_ps() {
         let a = _mm_setr_ps(4.0, 13.0, 16.0, 100.0);
         let r = _mm_sqrt_ps(a);
         let e = _mm_setr_ps(2.0, 3.6055512, 4.0, 10.0);
@@ -2168,7 +2090,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_rcp_ss() {
+    unsafe fn test_mm_rcp_ss() {
         let a = _mm_setr_ps(4.0, 13.0, 16.0, 100.0);
         let r = _mm_rcp_ss(a);
         let e = _mm_setr_ps(0.24993896, 13.0, 16.0, 100.0);
@@ -2180,7 +2102,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_rcp_ps() {
+    unsafe fn test_mm_rcp_ps() {
         let a = _mm_setr_ps(4.0, 13.0, 16.0, 100.0);
         let r = _mm_rcp_ps(a);
         let e = _mm_setr_ps(0.24993896, 0.0769043, 0.06248474, 0.0099983215);
@@ -2191,7 +2113,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_rsqrt_ss() {
+    unsafe fn test_mm_rsqrt_ss() {
         let a = _mm_setr_ps(4.0, 13.0, 16.0, 100.0);
         let r = _mm_rsqrt_ss(a);
         let e = _mm_setr_ps(0.49987793, 13.0, 16.0, 100.0);
@@ -2202,7 +2124,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_rsqrt_ps() {
+    unsafe fn test_mm_rsqrt_ps() {
         let a = _mm_setr_ps(4.0, 13.0, 16.0, 100.0);
         let r = _mm_rsqrt_ps(a);
         let e = _mm_setr_ps(0.49987793, 0.2772827, 0.24993896, 0.099990845);
@@ -2213,7 +2135,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_min_ss() {
+    unsafe fn test_mm_min_ss() {
         let a = _mm_setr_ps(-1.0, 5.0, 0.0, -10.0);
         let b = _mm_setr_ps(-100.0, 20.0, 0.0, -5.0);
         let r = _mm_min_ss(a, b);
@@ -2221,7 +2143,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_min_ps() {
+    unsafe fn test_mm_min_ps() {
         let a = _mm_setr_ps(-1.0, 5.0, 0.0, -10.0);
         let b = _mm_setr_ps(-100.0, 20.0, 0.0, -5.0);
         let r = _mm_min_ps(a, b);
@@ -2234,17 +2156,17 @@ mod tests {
         // `r1` to `a` and `r2` to `b`.
         let a = _mm_setr_ps(-0.0, 0.0, 0.0, 0.0);
         let b = _mm_setr_ps(0.0, 0.0, 0.0, 0.0);
-        let r1 = _mm_min_ps(a, b).as_f32x4().to_bits();
-        let r2 = _mm_min_ps(b, a).as_f32x4().to_bits();
-        let a = a.as_f32x4().to_bits();
-        let b = b.as_f32x4().to_bits();
+        let r1: [u8; 16] = transmute(_mm_min_ps(a, b));
+        let r2: [u8; 16] = transmute(_mm_min_ps(b, a));
+        let a: [u8; 16] = transmute(a);
+        let b: [u8; 16] = transmute(b);
         assert_eq!(r1, b);
         assert_eq!(r2, a);
         assert_ne!(a, b); // sanity check that -0.0 is actually present
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_max_ss() {
+    unsafe fn test_mm_max_ss() {
         let a = _mm_setr_ps(-1.0, 5.0, 0.0, -10.0);
         let b = _mm_setr_ps(-100.0, 20.0, 0.0, -5.0);
         let r = _mm_max_ss(a, b);
@@ -2252,7 +2174,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_max_ps() {
+    unsafe fn test_mm_max_ps() {
         let a = _mm_setr_ps(-1.0, 5.0, 0.0, -10.0);
         let b = _mm_setr_ps(-100.0, 20.0, 0.0, -5.0);
         let r = _mm_max_ps(a, b);
@@ -2261,67 +2183,67 @@ mod tests {
         // Check SSE-specific semantics for -0.0 handling.
         let a = _mm_setr_ps(-0.0, 0.0, 0.0, 0.0);
         let b = _mm_setr_ps(0.0, 0.0, 0.0, 0.0);
-        let r1 = _mm_max_ps(a, b).as_f32x4().to_bits();
-        let r2 = _mm_max_ps(b, a).as_f32x4().to_bits();
-        let a = a.as_f32x4().to_bits();
-        let b = b.as_f32x4().to_bits();
+        let r1: [u8; 16] = transmute(_mm_max_ps(a, b));
+        let r2: [u8; 16] = transmute(_mm_max_ps(b, a));
+        let a: [u8; 16] = transmute(a);
+        let b: [u8; 16] = transmute(b);
         assert_eq!(r1, b);
         assert_eq!(r2, a);
         assert_ne!(a, b); // sanity check that -0.0 is actually present
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_and_ps() {
-        let a = f32x4::from_bits(u32x4::splat(0b0011)).as_m128();
-        let b = f32x4::from_bits(u32x4::splat(0b0101)).as_m128();
+    unsafe fn test_mm_and_ps() {
+        let a = transmute(u32x4::splat(0b0011));
+        let b = transmute(u32x4::splat(0b0101));
         let r = _mm_and_ps(*black_box(&a), *black_box(&b));
-        let e = f32x4::from_bits(u32x4::splat(0b0001)).as_m128();
+        let e = transmute(u32x4::splat(0b0001));
         assert_eq_m128(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_andnot_ps() {
-        let a = f32x4::from_bits(u32x4::splat(0b0011)).as_m128();
-        let b = f32x4::from_bits(u32x4::splat(0b0101)).as_m128();
+    unsafe fn test_mm_andnot_ps() {
+        let a = transmute(u32x4::splat(0b0011));
+        let b = transmute(u32x4::splat(0b0101));
         let r = _mm_andnot_ps(*black_box(&a), *black_box(&b));
-        let e = f32x4::from_bits(u32x4::splat(0b0100)).as_m128();
+        let e = transmute(u32x4::splat(0b0100));
         assert_eq_m128(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_or_ps() {
-        let a = f32x4::from_bits(u32x4::splat(0b0011)).as_m128();
-        let b = f32x4::from_bits(u32x4::splat(0b0101)).as_m128();
+    unsafe fn test_mm_or_ps() {
+        let a = transmute(u32x4::splat(0b0011));
+        let b = transmute(u32x4::splat(0b0101));
         let r = _mm_or_ps(*black_box(&a), *black_box(&b));
-        let e = f32x4::from_bits(u32x4::splat(0b0111)).as_m128();
+        let e = transmute(u32x4::splat(0b0111));
         assert_eq_m128(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_xor_ps() {
-        let a = f32x4::from_bits(u32x4::splat(0b0011)).as_m128();
-        let b = f32x4::from_bits(u32x4::splat(0b0101)).as_m128();
+    unsafe fn test_mm_xor_ps() {
+        let a = transmute(u32x4::splat(0b0011));
+        let b = transmute(u32x4::splat(0b0101));
         let r = _mm_xor_ps(*black_box(&a), *black_box(&b));
-        let e = f32x4::from_bits(u32x4::splat(0b0110)).as_m128();
+        let e = transmute(u32x4::splat(0b0110));
         assert_eq_m128(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpeq_ss() {
+    unsafe fn test_mm_cmpeq_ss() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(-1.0, 5.0, 6.0, 7.0);
-        let r = _mm_cmpeq_ss(a, b).as_f32x4().to_bits();
-        let e = f32x4::new(f32::from_bits(0), 2.0, 3.0, 4.0).to_bits();
+        let r: u32x4 = transmute(_mm_cmpeq_ss(a, b));
+        let e: u32x4 = transmute(_mm_setr_ps(f32::from_bits(0), 2.0, 3.0, 4.0));
         assert_eq!(r, e);
 
         let b2 = _mm_setr_ps(1.0, 5.0, 6.0, 7.0);
-        let r2 = _mm_cmpeq_ss(a, b2).as_f32x4().to_bits();
-        let e2 = f32x4::new(f32::from_bits(0xffffffff), 2.0, 3.0, 4.0).to_bits();
+        let r2: u32x4 = transmute(_mm_cmpeq_ss(a, b2));
+        let e2: u32x4 = transmute(_mm_setr_ps(f32::from_bits(0xffffffff), 2.0, 3.0, 4.0));
         assert_eq!(r2, e2);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmplt_ss() {
+    unsafe fn test_mm_cmplt_ss() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(0.0, 5.0, 6.0, 7.0);
         let c = _mm_setr_ps(1.0, 5.0, 6.0, 7.0);
@@ -2331,21 +2253,21 @@ mod tests {
         let c1 = 0u32; // a.extract(0) < c.extract(0)
         let d1 = !0u32; // a.extract(0) < d.extract(0)
 
-        let rb = _mm_cmplt_ss(a, b).as_f32x4().to_bits();
-        let eb = f32x4::new(f32::from_bits(b1), 2.0, 3.0, 4.0).to_bits();
+        let rb: u32x4 = transmute(_mm_cmplt_ss(a, b));
+        let eb: u32x4 = transmute(_mm_setr_ps(f32::from_bits(b1), 2.0, 3.0, 4.0));
         assert_eq!(rb, eb);
 
-        let rc = _mm_cmplt_ss(a, c).as_f32x4().to_bits();
-        let ec = f32x4::new(f32::from_bits(c1), 2.0, 3.0, 4.0).to_bits();
+        let rc: u32x4 = transmute(_mm_cmplt_ss(a, c));
+        let ec: u32x4 = transmute(_mm_setr_ps(f32::from_bits(c1), 2.0, 3.0, 4.0));
         assert_eq!(rc, ec);
 
-        let rd = _mm_cmplt_ss(a, d).as_f32x4().to_bits();
-        let ed = f32x4::new(f32::from_bits(d1), 2.0, 3.0, 4.0).to_bits();
+        let rd: u32x4 = transmute(_mm_cmplt_ss(a, d));
+        let ed: u32x4 = transmute(_mm_setr_ps(f32::from_bits(d1), 2.0, 3.0, 4.0));
         assert_eq!(rd, ed);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmple_ss() {
+    unsafe fn test_mm_cmple_ss() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(0.0, 5.0, 6.0, 7.0);
         let c = _mm_setr_ps(1.0, 5.0, 6.0, 7.0);
@@ -2355,21 +2277,21 @@ mod tests {
         let c1 = !0u32; // a.extract(0) <= c.extract(0)
         let d1 = !0u32; // a.extract(0) <= d.extract(0)
 
-        let rb = _mm_cmple_ss(a, b).as_f32x4().to_bits();
-        let eb = f32x4::new(f32::from_bits(b1), 2.0, 3.0, 4.0).to_bits();
+        let rb: u32x4 = transmute(_mm_cmple_ss(a, b));
+        let eb: u32x4 = transmute(_mm_setr_ps(f32::from_bits(b1), 2.0, 3.0, 4.0));
         assert_eq!(rb, eb);
 
-        let rc = _mm_cmple_ss(a, c).as_f32x4().to_bits();
-        let ec = f32x4::new(f32::from_bits(c1), 2.0, 3.0, 4.0).to_bits();
+        let rc: u32x4 = transmute(_mm_cmple_ss(a, c));
+        let ec: u32x4 = transmute(_mm_setr_ps(f32::from_bits(c1), 2.0, 3.0, 4.0));
         assert_eq!(rc, ec);
 
-        let rd = _mm_cmple_ss(a, d).as_f32x4().to_bits();
-        let ed = f32x4::new(f32::from_bits(d1), 2.0, 3.0, 4.0).to_bits();
+        let rd: u32x4 = transmute(_mm_cmple_ss(a, d));
+        let ed: u32x4 = transmute(_mm_setr_ps(f32::from_bits(d1), 2.0, 3.0, 4.0));
         assert_eq!(rd, ed);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpgt_ss() {
+    unsafe fn test_mm_cmpgt_ss() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(0.0, 5.0, 6.0, 7.0);
         let c = _mm_setr_ps(1.0, 5.0, 6.0, 7.0);
@@ -2379,21 +2301,21 @@ mod tests {
         let c1 = 0u32; // a.extract(0) > c.extract(0)
         let d1 = 0u32; // a.extract(0) > d.extract(0)
 
-        let rb = _mm_cmpgt_ss(a, b).as_f32x4().to_bits();
-        let eb = f32x4::new(f32::from_bits(b1), 2.0, 3.0, 4.0).to_bits();
+        let rb: u32x4 = transmute(_mm_cmpgt_ss(a, b));
+        let eb: u32x4 = transmute(_mm_setr_ps(f32::from_bits(b1), 2.0, 3.0, 4.0));
         assert_eq!(rb, eb);
 
-        let rc = _mm_cmpgt_ss(a, c).as_f32x4().to_bits();
-        let ec = f32x4::new(f32::from_bits(c1), 2.0, 3.0, 4.0).to_bits();
+        let rc: u32x4 = transmute(_mm_cmpgt_ss(a, c));
+        let ec: u32x4 = transmute(_mm_setr_ps(f32::from_bits(c1), 2.0, 3.0, 4.0));
         assert_eq!(rc, ec);
 
-        let rd = _mm_cmpgt_ss(a, d).as_f32x4().to_bits();
-        let ed = f32x4::new(f32::from_bits(d1), 2.0, 3.0, 4.0).to_bits();
+        let rd: u32x4 = transmute(_mm_cmpgt_ss(a, d));
+        let ed: u32x4 = transmute(_mm_setr_ps(f32::from_bits(d1), 2.0, 3.0, 4.0));
         assert_eq!(rd, ed);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpge_ss() {
+    unsafe fn test_mm_cmpge_ss() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(0.0, 5.0, 6.0, 7.0);
         let c = _mm_setr_ps(1.0, 5.0, 6.0, 7.0);
@@ -2403,21 +2325,21 @@ mod tests {
         let c1 = !0u32; // a.extract(0) >= c.extract(0)
         let d1 = 0u32; // a.extract(0) >= d.extract(0)
 
-        let rb = _mm_cmpge_ss(a, b).as_f32x4().to_bits();
-        let eb = f32x4::new(f32::from_bits(b1), 2.0, 3.0, 4.0).to_bits();
+        let rb: u32x4 = transmute(_mm_cmpge_ss(a, b));
+        let eb: u32x4 = transmute(_mm_setr_ps(f32::from_bits(b1), 2.0, 3.0, 4.0));
         assert_eq!(rb, eb);
 
-        let rc = _mm_cmpge_ss(a, c).as_f32x4().to_bits();
-        let ec = f32x4::new(f32::from_bits(c1), 2.0, 3.0, 4.0).to_bits();
+        let rc: u32x4 = transmute(_mm_cmpge_ss(a, c));
+        let ec: u32x4 = transmute(_mm_setr_ps(f32::from_bits(c1), 2.0, 3.0, 4.0));
         assert_eq!(rc, ec);
 
-        let rd = _mm_cmpge_ss(a, d).as_f32x4().to_bits();
-        let ed = f32x4::new(f32::from_bits(d1), 2.0, 3.0, 4.0).to_bits();
+        let rd: u32x4 = transmute(_mm_cmpge_ss(a, d));
+        let ed: u32x4 = transmute(_mm_setr_ps(f32::from_bits(d1), 2.0, 3.0, 4.0));
         assert_eq!(rd, ed);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpneq_ss() {
+    unsafe fn test_mm_cmpneq_ss() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(0.0, 5.0, 6.0, 7.0);
         let c = _mm_setr_ps(1.0, 5.0, 6.0, 7.0);
@@ -2427,21 +2349,21 @@ mod tests {
         let c1 = 0u32; // a.extract(0) != c.extract(0)
         let d1 = !0u32; // a.extract(0) != d.extract(0)
 
-        let rb = _mm_cmpneq_ss(a, b).as_f32x4().to_bits();
-        let eb = f32x4::new(f32::from_bits(b1), 2.0, 3.0, 4.0).to_bits();
+        let rb: u32x4 = transmute(_mm_cmpneq_ss(a, b));
+        let eb: u32x4 = transmute(_mm_setr_ps(f32::from_bits(b1), 2.0, 3.0, 4.0));
         assert_eq!(rb, eb);
 
-        let rc = _mm_cmpneq_ss(a, c).as_f32x4().to_bits();
-        let ec = f32x4::new(f32::from_bits(c1), 2.0, 3.0, 4.0).to_bits();
+        let rc: u32x4 = transmute(_mm_cmpneq_ss(a, c));
+        let ec: u32x4 = transmute(_mm_setr_ps(f32::from_bits(c1), 2.0, 3.0, 4.0));
         assert_eq!(rc, ec);
 
-        let rd = _mm_cmpneq_ss(a, d).as_f32x4().to_bits();
-        let ed = f32x4::new(f32::from_bits(d1), 2.0, 3.0, 4.0).to_bits();
+        let rd: u32x4 = transmute(_mm_cmpneq_ss(a, d));
+        let ed: u32x4 = transmute(_mm_setr_ps(f32::from_bits(d1), 2.0, 3.0, 4.0));
         assert_eq!(rd, ed);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpnlt_ss() {
+    unsafe fn test_mm_cmpnlt_ss() {
         // TODO: this test is exactly the same as for `_mm_cmpge_ss`, but there
         // must be a difference. It may have to do with behavior in the
         // presence of NaNs (signaling or quiet). If so, we should add tests
@@ -2456,21 +2378,21 @@ mod tests {
         let c1 = !0u32; // a.extract(0) >= c.extract(0)
         let d1 = 0u32; // a.extract(0) >= d.extract(0)
 
-        let rb = _mm_cmpnlt_ss(a, b).as_f32x4().to_bits();
-        let eb = f32x4::new(f32::from_bits(b1), 2.0, 3.0, 4.0).to_bits();
+        let rb: u32x4 = transmute(_mm_cmpnlt_ss(a, b));
+        let eb: u32x4 = transmute(_mm_setr_ps(f32::from_bits(b1), 2.0, 3.0, 4.0));
         assert_eq!(rb, eb);
 
-        let rc = _mm_cmpnlt_ss(a, c).as_f32x4().to_bits();
-        let ec = f32x4::new(f32::from_bits(c1), 2.0, 3.0, 4.0).to_bits();
+        let rc: u32x4 = transmute(_mm_cmpnlt_ss(a, c));
+        let ec: u32x4 = transmute(_mm_setr_ps(f32::from_bits(c1), 2.0, 3.0, 4.0));
         assert_eq!(rc, ec);
 
-        let rd = _mm_cmpnlt_ss(a, d).as_f32x4().to_bits();
-        let ed = f32x4::new(f32::from_bits(d1), 2.0, 3.0, 4.0).to_bits();
+        let rd: u32x4 = transmute(_mm_cmpnlt_ss(a, d));
+        let ed: u32x4 = transmute(_mm_setr_ps(f32::from_bits(d1), 2.0, 3.0, 4.0));
         assert_eq!(rd, ed);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpnle_ss() {
+    unsafe fn test_mm_cmpnle_ss() {
         // TODO: this test is exactly the same as for `_mm_cmpgt_ss`, but there
         // must be a difference. It may have to do with behavior in the
         // presence
@@ -2485,21 +2407,21 @@ mod tests {
         let c1 = 0u32; // a.extract(0) > c.extract(0)
         let d1 = 0u32; // a.extract(0) > d.extract(0)
 
-        let rb = _mm_cmpnle_ss(a, b).as_f32x4().to_bits();
-        let eb = f32x4::new(f32::from_bits(b1), 2.0, 3.0, 4.0).to_bits();
+        let rb: u32x4 = transmute(_mm_cmpnle_ss(a, b));
+        let eb: u32x4 = transmute(_mm_setr_ps(f32::from_bits(b1), 2.0, 3.0, 4.0));
         assert_eq!(rb, eb);
 
-        let rc = _mm_cmpnle_ss(a, c).as_f32x4().to_bits();
-        let ec = f32x4::new(f32::from_bits(c1), 2.0, 3.0, 4.0).to_bits();
+        let rc: u32x4 = transmute(_mm_cmpnle_ss(a, c));
+        let ec: u32x4 = transmute(_mm_setr_ps(f32::from_bits(c1), 2.0, 3.0, 4.0));
         assert_eq!(rc, ec);
 
-        let rd = _mm_cmpnle_ss(a, d).as_f32x4().to_bits();
-        let ed = f32x4::new(f32::from_bits(d1), 2.0, 3.0, 4.0).to_bits();
+        let rd: u32x4 = transmute(_mm_cmpnle_ss(a, d));
+        let ed: u32x4 = transmute(_mm_setr_ps(f32::from_bits(d1), 2.0, 3.0, 4.0));
         assert_eq!(rd, ed);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpngt_ss() {
+    unsafe fn test_mm_cmpngt_ss() {
         // TODO: this test is exactly the same as for `_mm_cmple_ss`, but there
         // must be a difference. It may have to do with behavior in the
         // presence of NaNs (signaling or quiet). If so, we should add tests
@@ -2514,21 +2436,21 @@ mod tests {
         let c1 = !0u32; // a.extract(0) <= c.extract(0)
         let d1 = !0u32; // a.extract(0) <= d.extract(0)
 
-        let rb = _mm_cmpngt_ss(a, b).as_f32x4().to_bits();
-        let eb = f32x4::new(f32::from_bits(b1), 2.0, 3.0, 4.0).to_bits();
+        let rb: u32x4 = transmute(_mm_cmpngt_ss(a, b));
+        let eb: u32x4 = transmute(_mm_setr_ps(f32::from_bits(b1), 2.0, 3.0, 4.0));
         assert_eq!(rb, eb);
 
-        let rc = _mm_cmpngt_ss(a, c).as_f32x4().to_bits();
-        let ec = f32x4::new(f32::from_bits(c1), 2.0, 3.0, 4.0).to_bits();
+        let rc: u32x4 = transmute(_mm_cmpngt_ss(a, c));
+        let ec: u32x4 = transmute(_mm_setr_ps(f32::from_bits(c1), 2.0, 3.0, 4.0));
         assert_eq!(rc, ec);
 
-        let rd = _mm_cmpngt_ss(a, d).as_f32x4().to_bits();
-        let ed = f32x4::new(f32::from_bits(d1), 2.0, 3.0, 4.0).to_bits();
+        let rd: u32x4 = transmute(_mm_cmpngt_ss(a, d));
+        let ed: u32x4 = transmute(_mm_setr_ps(f32::from_bits(d1), 2.0, 3.0, 4.0));
         assert_eq!(rd, ed);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpnge_ss() {
+    unsafe fn test_mm_cmpnge_ss() {
         // TODO: this test is exactly the same as for `_mm_cmplt_ss`, but there
         // must be a difference. It may have to do with behavior in the
         // presence of NaNs (signaling or quiet). If so, we should add tests
@@ -2543,21 +2465,21 @@ mod tests {
         let c1 = 0u32; // a.extract(0) < c.extract(0)
         let d1 = !0u32; // a.extract(0) < d.extract(0)
 
-        let rb = _mm_cmpnge_ss(a, b).as_f32x4().to_bits();
-        let eb = f32x4::new(f32::from_bits(b1), 2.0, 3.0, 4.0).to_bits();
+        let rb: u32x4 = transmute(_mm_cmpnge_ss(a, b));
+        let eb: u32x4 = transmute(_mm_setr_ps(f32::from_bits(b1), 2.0, 3.0, 4.0));
         assert_eq!(rb, eb);
 
-        let rc = _mm_cmpnge_ss(a, c).as_f32x4().to_bits();
-        let ec = f32x4::new(f32::from_bits(c1), 2.0, 3.0, 4.0).to_bits();
+        let rc: u32x4 = transmute(_mm_cmpnge_ss(a, c));
+        let ec: u32x4 = transmute(_mm_setr_ps(f32::from_bits(c1), 2.0, 3.0, 4.0));
         assert_eq!(rc, ec);
 
-        let rd = _mm_cmpnge_ss(a, d).as_f32x4().to_bits();
-        let ed = f32x4::new(f32::from_bits(d1), 2.0, 3.0, 4.0).to_bits();
+        let rd: u32x4 = transmute(_mm_cmpnge_ss(a, d));
+        let ed: u32x4 = transmute(_mm_setr_ps(f32::from_bits(d1), 2.0, 3.0, 4.0));
         assert_eq!(rd, ed);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpord_ss() {
+    unsafe fn test_mm_cmpord_ss() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(0.0, 5.0, 6.0, 7.0);
         let c = _mm_setr_ps(NAN, 5.0, 6.0, 7.0);
@@ -2567,21 +2489,21 @@ mod tests {
         let c1 = 0u32; // a.extract(0) ord c.extract(0)
         let d1 = !0u32; // a.extract(0) ord d.extract(0)
 
-        let rb = _mm_cmpord_ss(a, b).as_f32x4().to_bits();
-        let eb = f32x4::new(f32::from_bits(b1), 2.0, 3.0, 4.0).to_bits();
+        let rb: u32x4 = transmute(_mm_cmpord_ss(a, b));
+        let eb: u32x4 = transmute(_mm_setr_ps(f32::from_bits(b1), 2.0, 3.0, 4.0));
         assert_eq!(rb, eb);
 
-        let rc = _mm_cmpord_ss(a, c).as_f32x4().to_bits();
-        let ec = f32x4::new(f32::from_bits(c1), 2.0, 3.0, 4.0).to_bits();
+        let rc: u32x4 = transmute(_mm_cmpord_ss(a, c));
+        let ec: u32x4 = transmute(_mm_setr_ps(f32::from_bits(c1), 2.0, 3.0, 4.0));
         assert_eq!(rc, ec);
 
-        let rd = _mm_cmpord_ss(a, d).as_f32x4().to_bits();
-        let ed = f32x4::new(f32::from_bits(d1), 2.0, 3.0, 4.0).to_bits();
+        let rd: u32x4 = transmute(_mm_cmpord_ss(a, d));
+        let ed: u32x4 = transmute(_mm_setr_ps(f32::from_bits(d1), 2.0, 3.0, 4.0));
         assert_eq!(rd, ed);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpunord_ss() {
+    unsafe fn test_mm_cmpunord_ss() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(0.0, 5.0, 6.0, 7.0);
         let c = _mm_setr_ps(NAN, 5.0, 6.0, 7.0);
@@ -2591,165 +2513,165 @@ mod tests {
         let c1 = !0u32; // a.extract(0) unord c.extract(0)
         let d1 = 0u32; // a.extract(0) unord d.extract(0)
 
-        let rb = _mm_cmpunord_ss(a, b).as_f32x4().to_bits();
-        let eb = f32x4::new(f32::from_bits(b1), 2.0, 3.0, 4.0).to_bits();
+        let rb: u32x4 = transmute(_mm_cmpunord_ss(a, b));
+        let eb: u32x4 = transmute(_mm_setr_ps(f32::from_bits(b1), 2.0, 3.0, 4.0));
         assert_eq!(rb, eb);
 
-        let rc = _mm_cmpunord_ss(a, c).as_f32x4().to_bits();
-        let ec = f32x4::new(f32::from_bits(c1), 2.0, 3.0, 4.0).to_bits();
+        let rc: u32x4 = transmute(_mm_cmpunord_ss(a, c));
+        let ec: u32x4 = transmute(_mm_setr_ps(f32::from_bits(c1), 2.0, 3.0, 4.0));
         assert_eq!(rc, ec);
 
-        let rd = _mm_cmpunord_ss(a, d).as_f32x4().to_bits();
-        let ed = f32x4::new(f32::from_bits(d1), 2.0, 3.0, 4.0).to_bits();
+        let rd: u32x4 = transmute(_mm_cmpunord_ss(a, d));
+        let ed: u32x4 = transmute(_mm_setr_ps(f32::from_bits(d1), 2.0, 3.0, 4.0));
         assert_eq!(rd, ed);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpeq_ps() {
+    unsafe fn test_mm_cmpeq_ps() {
         let a = _mm_setr_ps(10.0, 50.0, 1.0, NAN);
         let b = _mm_setr_ps(15.0, 20.0, 1.0, NAN);
         let tru = !0u32;
         let fls = 0u32;
 
         let e = u32x4::new(fls, fls, tru, fls);
-        let r = _mm_cmpeq_ps(a, b).as_f32x4().to_bits();
+        let r: u32x4 = transmute(_mm_cmpeq_ps(a, b));
         assert_eq!(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmplt_ps() {
+    unsafe fn test_mm_cmplt_ps() {
         let a = _mm_setr_ps(10.0, 50.0, 1.0, NAN);
         let b = _mm_setr_ps(15.0, 20.0, 1.0, NAN);
         let tru = !0u32;
         let fls = 0u32;
 
         let e = u32x4::new(tru, fls, fls, fls);
-        let r = _mm_cmplt_ps(a, b).as_f32x4().to_bits();
+        let r: u32x4 = transmute(_mm_cmplt_ps(a, b));
         assert_eq!(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmple_ps() {
+    unsafe fn test_mm_cmple_ps() {
         let a = _mm_setr_ps(10.0, 50.0, 1.0, 4.0);
         let b = _mm_setr_ps(15.0, 20.0, 1.0, NAN);
         let tru = !0u32;
         let fls = 0u32;
 
         let e = u32x4::new(tru, fls, tru, fls);
-        let r = _mm_cmple_ps(a, b).as_f32x4().to_bits();
+        let r: u32x4 = transmute(_mm_cmple_ps(a, b));
         assert_eq!(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpgt_ps() {
+    unsafe fn test_mm_cmpgt_ps() {
         let a = _mm_setr_ps(10.0, 50.0, 1.0, NAN);
         let b = _mm_setr_ps(15.0, 20.0, 1.0, 42.0);
         let tru = !0u32;
         let fls = 0u32;
 
         let e = u32x4::new(fls, tru, fls, fls);
-        let r = _mm_cmpgt_ps(a, b).as_f32x4().to_bits();
+        let r: u32x4 = transmute(_mm_cmpgt_ps(a, b));
         assert_eq!(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpge_ps() {
+    unsafe fn test_mm_cmpge_ps() {
         let a = _mm_setr_ps(10.0, 50.0, 1.0, NAN);
         let b = _mm_setr_ps(15.0, 20.0, 1.0, 42.0);
         let tru = !0u32;
         let fls = 0u32;
 
         let e = u32x4::new(fls, tru, tru, fls);
-        let r = _mm_cmpge_ps(a, b).as_f32x4().to_bits();
+        let r: u32x4 = transmute(_mm_cmpge_ps(a, b));
         assert_eq!(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpneq_ps() {
+    unsafe fn test_mm_cmpneq_ps() {
         let a = _mm_setr_ps(10.0, 50.0, 1.0, NAN);
         let b = _mm_setr_ps(15.0, 20.0, 1.0, NAN);
         let tru = !0u32;
         let fls = 0u32;
 
         let e = u32x4::new(tru, tru, fls, tru);
-        let r = _mm_cmpneq_ps(a, b).as_f32x4().to_bits();
+        let r: u32x4 = transmute(_mm_cmpneq_ps(a, b));
         assert_eq!(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpnlt_ps() {
+    unsafe fn test_mm_cmpnlt_ps() {
         let a = _mm_setr_ps(10.0, 50.0, 1.0, NAN);
         let b = _mm_setr_ps(15.0, 20.0, 1.0, 5.0);
         let tru = !0u32;
         let fls = 0u32;
 
         let e = u32x4::new(fls, tru, tru, tru);
-        let r = _mm_cmpnlt_ps(a, b).as_f32x4().to_bits();
+        let r: u32x4 = transmute(_mm_cmpnlt_ps(a, b));
         assert_eq!(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpnle_ps() {
+    unsafe fn test_mm_cmpnle_ps() {
         let a = _mm_setr_ps(10.0, 50.0, 1.0, NAN);
         let b = _mm_setr_ps(15.0, 20.0, 1.0, 5.0);
         let tru = !0u32;
         let fls = 0u32;
 
         let e = u32x4::new(fls, tru, fls, tru);
-        let r = _mm_cmpnle_ps(a, b).as_f32x4().to_bits();
+        let r: u32x4 = transmute(_mm_cmpnle_ps(a, b));
         assert_eq!(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpngt_ps() {
+    unsafe fn test_mm_cmpngt_ps() {
         let a = _mm_setr_ps(10.0, 50.0, 1.0, NAN);
         let b = _mm_setr_ps(15.0, 20.0, 1.0, 5.0);
         let tru = !0u32;
         let fls = 0u32;
 
         let e = u32x4::new(tru, fls, tru, tru);
-        let r = _mm_cmpngt_ps(a, b).as_f32x4().to_bits();
+        let r: u32x4 = transmute(_mm_cmpngt_ps(a, b));
         assert_eq!(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpnge_ps() {
+    unsafe fn test_mm_cmpnge_ps() {
         let a = _mm_setr_ps(10.0, 50.0, 1.0, NAN);
         let b = _mm_setr_ps(15.0, 20.0, 1.0, 5.0);
         let tru = !0u32;
         let fls = 0u32;
 
         let e = u32x4::new(tru, fls, fls, tru);
-        let r = _mm_cmpnge_ps(a, b).as_f32x4().to_bits();
+        let r: u32x4 = transmute(_mm_cmpnge_ps(a, b));
         assert_eq!(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpord_ps() {
+    unsafe fn test_mm_cmpord_ps() {
         let a = _mm_setr_ps(10.0, 50.0, NAN, NAN);
         let b = _mm_setr_ps(15.0, NAN, 1.0, NAN);
         let tru = !0u32;
         let fls = 0u32;
 
         let e = u32x4::new(tru, fls, fls, fls);
-        let r = _mm_cmpord_ps(a, b).as_f32x4().to_bits();
+        let r: u32x4 = transmute(_mm_cmpord_ps(a, b));
         assert_eq!(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cmpunord_ps() {
+    unsafe fn test_mm_cmpunord_ps() {
         let a = _mm_setr_ps(10.0, 50.0, NAN, NAN);
         let b = _mm_setr_ps(15.0, NAN, 1.0, NAN);
         let tru = !0u32;
         let fls = 0u32;
 
         let e = u32x4::new(fls, tru, tru, tru);
-        let r = _mm_cmpunord_ps(a, b).as_f32x4().to_bits();
+        let r: u32x4 = transmute(_mm_cmpunord_ps(a, b));
         assert_eq!(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_comieq_ss() {
+    unsafe fn test_mm_comieq_ss() {
         let aa = &[3.0f32, 12.0, 23.0, NAN];
         let bb = &[3.0f32, 47.5, 1.5, NAN];
 
@@ -2770,7 +2692,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_comilt_ss() {
+    unsafe fn test_mm_comilt_ss() {
         let aa = &[3.0f32, 12.0, 23.0, NAN];
         let bb = &[3.0f32, 47.5, 1.5, NAN];
 
@@ -2791,7 +2713,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_comile_ss() {
+    unsafe fn test_mm_comile_ss() {
         let aa = &[3.0f32, 12.0, 23.0, NAN];
         let bb = &[3.0f32, 47.5, 1.5, NAN];
 
@@ -2812,7 +2734,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_comigt_ss() {
+    unsafe fn test_mm_comigt_ss() {
         let aa = &[3.0f32, 12.0, 23.0, NAN];
         let bb = &[3.0f32, 47.5, 1.5, NAN];
 
@@ -2833,7 +2755,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_comineq_ss() {
+    unsafe fn test_mm_comineq_ss() {
         let aa = &[3.0f32, 12.0, 23.0, NAN];
         let bb = &[3.0f32, 47.5, 1.5, NAN];
 
@@ -2854,7 +2776,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_ucomieq_ss() {
+    unsafe fn test_mm_ucomieq_ss() {
         let aa = &[3.0f32, 12.0, 23.0, NAN];
         let bb = &[3.0f32, 47.5, 1.5, NAN];
 
@@ -2875,7 +2797,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_ucomilt_ss() {
+    unsafe fn test_mm_ucomilt_ss() {
         let aa = &[3.0f32, 12.0, 23.0, NAN];
         let bb = &[3.0f32, 47.5, 1.5, NAN];
 
@@ -2896,7 +2818,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_ucomile_ss() {
+    unsafe fn test_mm_ucomile_ss() {
         let aa = &[3.0f32, 12.0, 23.0, NAN];
         let bb = &[3.0f32, 47.5, 1.5, NAN];
 
@@ -2917,7 +2839,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_ucomigt_ss() {
+    unsafe fn test_mm_ucomigt_ss() {
         let aa = &[3.0f32, 12.0, 23.0, NAN];
         let bb = &[3.0f32, 47.5, 1.5, NAN];
 
@@ -2938,7 +2860,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_ucomige_ss() {
+    unsafe fn test_mm_ucomige_ss() {
         let aa = &[3.0f32, 12.0, 23.0, NAN];
         let bb = &[3.0f32, 47.5, 1.5, NAN];
 
@@ -2959,7 +2881,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_ucomineq_ss() {
+    unsafe fn test_mm_ucomineq_ss() {
         let aa = &[3.0f32, 12.0, 23.0, NAN];
         let bb = &[3.0f32, 47.5, 1.5, NAN];
 
@@ -2979,8 +2901,59 @@ mod tests {
         }
     }
 
+    #[allow(deprecated)] // FIXME: This test uses deprecated CSR access functions
     #[simd_test(enable = "sse")]
-    fn test_mm_cvtss_si32() {
+    #[cfg_attr(miri, ignore)] // Uses _mm_setcsr, which is not supported by Miri
+    unsafe fn test_mm_comieq_ss_vs_ucomieq_ss() {
+        // If one of the arguments is a quiet NaN `comieq_ss` should signal an
+        // Invalid Operation Exception while `ucomieq_ss` should not.
+        let aa = &[3.0f32, NAN, 23.0, NAN];
+        let bb = &[3.0f32, 47.5, NAN, NAN];
+
+        let ee = &[1i32, 0, 0, 0];
+        let exc = &[0u32, 1, 1, 1]; // Should comieq_ss signal an exception?
+
+        for i in 0..4 {
+            let a = _mm_setr_ps(aa[i], 1.0, 2.0, 3.0);
+            let b = _mm_setr_ps(bb[i], 0.0, 2.0, 4.0);
+
+            _MM_SET_EXCEPTION_STATE(0);
+            let r1 = _mm_comieq_ss(*black_box(&a), b);
+            let s1 = _MM_GET_EXCEPTION_STATE();
+
+            _MM_SET_EXCEPTION_STATE(0);
+            let r2 = _mm_ucomieq_ss(*black_box(&a), b);
+            let s2 = _MM_GET_EXCEPTION_STATE();
+
+            assert_eq!(
+                ee[i], r1,
+                "_mm_comeq_ss({:?}, {:?}) = {}, expected: {} (i={})",
+                a, b, r1, ee[i], i
+            );
+            assert_eq!(
+                ee[i], r2,
+                "_mm_ucomeq_ss({:?}, {:?}) = {}, expected: {} (i={})",
+                a, b, r2, ee[i], i
+            );
+            assert_eq!(
+                s1,
+                exc[i] * _MM_EXCEPT_INVALID,
+                "_mm_comieq_ss() set exception flags: {} (i={})",
+                s1,
+                i
+            );
+            assert_eq!(
+                s2,
+                0, // ucomieq_ss should not signal an exception
+                "_mm_ucomieq_ss() set exception flags: {} (i={})",
+                s2,
+                i
+            );
+        }
+    }
+
+    #[simd_test(enable = "sse")]
+    unsafe fn test_mm_cvtss_si32() {
         let inputs = &[42.0f32, -3.1, 4.0e10, 4.0e-20, NAN, 2147483500.1];
         let result = &[42i32, -3, i32::MIN, 0, i32::MIN, 2147483520];
         for i in 0..inputs.len() {
@@ -2996,7 +2969,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    fn test_mm_cvttss_si32() {
+    unsafe fn test_mm_cvttss_si32() {
         let inputs = &[
             (42.0f32, 42i32),
             (-31.4, -31),
@@ -3021,40 +2994,36 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_cvtsi32_ss() {
-        let a = _mm_setr_ps(5.0, 6.0, 7.0, 8.0);
+    unsafe fn test_mm_cvtsi32_ss() {
+        let inputs = &[
+            (4555i32, 4555.0f32),
+            (322223333, 322223330.0),
+            (-432, -432.0),
+            (-322223333, -322223330.0),
+        ];
 
-        let r = _mm_cvtsi32_ss(a, 4555);
-        let e = _mm_setr_ps(4555.0, 6.0, 7.0, 8.0);
-        assert_eq_m128(e, r);
-
-        let r = _mm_cvtsi32_ss(a, 322223333);
-        let e = _mm_setr_ps(322223333.0, 6.0, 7.0, 8.0);
-        assert_eq_m128(e, r);
-
-        let r = _mm_cvtsi32_ss(a, -432);
-        let e = _mm_setr_ps(-432.0, 6.0, 7.0, 8.0);
-        assert_eq_m128(e, r);
-
-        let r = _mm_cvtsi32_ss(a, -322223333);
-        let e = _mm_setr_ps(-322223333.0, 6.0, 7.0, 8.0);
-        assert_eq_m128(e, r);
+        for &(x, f) in inputs.iter() {
+            let a = _mm_setr_ps(5.0, 6.0, 7.0, 8.0);
+            let r = _mm_cvtsi32_ss(a, x);
+            let e = _mm_setr_ps(f, 6.0, 7.0, 8.0);
+            assert_eq_m128(e, r);
+        }
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_cvtss_f32() {
+    unsafe fn test_mm_cvtss_f32() {
         let a = _mm_setr_ps(312.0134, 5.0, 6.0, 7.0);
         assert_eq!(_mm_cvtss_f32(a), 312.0134);
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_set_ss() {
+    unsafe fn test_mm_set_ss() {
         let r = _mm_set_ss(black_box(4.25));
         assert_eq_m128(r, _mm_setr_ps(4.25, 0.0, 0.0, 0.0));
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_set1_ps() {
+    unsafe fn test_mm_set1_ps() {
         let r1 = _mm_set1_ps(black_box(4.25));
         let r2 = _mm_set_ps1(black_box(4.25));
         assert_eq!(get_m128(r1, 0), 4.25);
@@ -3068,7 +3037,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_set_ps() {
+    unsafe fn test_mm_set_ps() {
         let r = _mm_set_ps(
             black_box(1.0),
             black_box(2.0),
@@ -3082,7 +3051,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_setr_ps() {
+    unsafe fn test_mm_setr_ps() {
         let r = _mm_setr_ps(
             black_box(1.0),
             black_box(2.0),
@@ -3093,21 +3062,20 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_setzero_ps() {
+    unsafe fn test_mm_setzero_ps() {
         let r = *black_box(&_mm_setzero_ps());
         assert_eq_m128(r, _mm_set1_ps(0.0));
     }
 
-    #[simd_test]
-    #[allow(non_snake_case)]
-    const fn test_MM_SHUFFLE() {
+    #[simd_test(enable = "sse")]
+    unsafe fn test_mm_shuffle() {
         assert_eq!(_MM_SHUFFLE(0, 1, 1, 3), 0b00_01_01_11);
         assert_eq!(_MM_SHUFFLE(3, 1, 1, 0), 0b11_01_01_00);
         assert_eq!(_MM_SHUFFLE(1, 2, 2, 1), 0b01_10_10_01);
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_shuffle_ps() {
+    unsafe fn test_mm_shuffle_ps() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(5.0, 6.0, 7.0, 8.0);
         let r = _mm_shuffle_ps::<0b00_01_01_11>(a, b);
@@ -3115,7 +3083,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_unpackhi_ps() {
+    unsafe fn test_mm_unpackhi_ps() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(5.0, 6.0, 7.0, 8.0);
         let r = _mm_unpackhi_ps(a, b);
@@ -3123,7 +3091,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_unpacklo_ps() {
+    unsafe fn test_mm_unpacklo_ps() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(5.0, 6.0, 7.0, 8.0);
         let r = _mm_unpacklo_ps(a, b);
@@ -3131,7 +3099,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_movehl_ps() {
+    unsafe fn test_mm_movehl_ps() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(5.0, 6.0, 7.0, 8.0);
         let r = _mm_movehl_ps(a, b);
@@ -3139,7 +3107,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_movelh_ps() {
+    unsafe fn test_mm_movelh_ps() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(5.0, 6.0, 7.0, 8.0);
         let r = _mm_movelh_ps(a, b);
@@ -3147,62 +3115,76 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_load_ss() {
+    unsafe fn test_mm_load_ss() {
         let a = 42.0f32;
-        let r = unsafe { _mm_load_ss(ptr::addr_of!(a)) };
+        let r = _mm_load_ss(ptr::addr_of!(a));
         assert_eq_m128(r, _mm_setr_ps(42.0, 0.0, 0.0, 0.0));
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_load1_ps() {
+    unsafe fn test_mm_load1_ps() {
         let a = 42.0f32;
-        let r = unsafe { _mm_load1_ps(ptr::addr_of!(a)) };
+        let r = _mm_load1_ps(ptr::addr_of!(a));
         assert_eq_m128(r, _mm_setr_ps(42.0, 42.0, 42.0, 42.0));
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_load_ps() {
-        let vals = Memory {
-            data: [1.0f32, 2.0, 3.0, 4.0],
-        };
+    unsafe fn test_mm_load_ps() {
+        let vals = &[1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
 
-        // guaranteed to be aligned to 16 bytes
-        let p = vals.data.as_ptr();
+        let mut p = vals.as_ptr();
+        let mut fixup = 0.0f32;
 
-        let r = unsafe { _mm_load_ps(p) };
-        let e = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
+        // Make sure p is aligned, otherwise we might get a
+        // (signal: 11, SIGSEGV: invalid memory reference)
+
+        let unalignment = (p as usize) & 0xf;
+        if unalignment != 0 {
+            let delta = (16 - unalignment) >> 2;
+            fixup = delta as f32;
+            p = p.add(delta);
+        }
+
+        let r = _mm_load_ps(p);
+        let e = _mm_add_ps(_mm_setr_ps(1.0, 2.0, 3.0, 4.0), _mm_set1_ps(fixup));
         assert_eq_m128(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_loadu_ps() {
+    unsafe fn test_mm_loadu_ps() {
         let vals = &[1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
-        let p = unsafe { vals.as_ptr().add(3) };
-        let r = unsafe { _mm_loadu_ps(black_box(p)) };
+        let p = vals.as_ptr().add(3);
+        let r = _mm_loadu_ps(black_box(p));
         assert_eq_m128(r, _mm_setr_ps(4.0, 5.0, 6.0, 7.0));
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_loadr_ps() {
-        let vals = Memory {
-            data: [1.0f32, 2.0, 3.0, 4.0],
-        };
+    unsafe fn test_mm_loadr_ps() {
+        let vals = &[1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
 
-        // guaranteed to be aligned to 16 bytes
-        let p = vals.data.as_ptr();
+        let mut p = vals.as_ptr();
+        let mut fixup = 0.0f32;
 
-        let r = unsafe { _mm_loadr_ps(p) };
-        let e = _mm_setr_ps(4.0, 3.0, 2.0, 1.0);
+        // Make sure p is aligned, otherwise we might get a
+        // (signal: 11, SIGSEGV: invalid memory reference)
+
+        let unalignment = (p as usize) & 0xf;
+        if unalignment != 0 {
+            let delta = (16 - unalignment) >> 2;
+            fixup = delta as f32;
+            p = p.add(delta);
+        }
+
+        let r = _mm_loadr_ps(p);
+        let e = _mm_add_ps(_mm_setr_ps(4.0, 3.0, 2.0, 1.0), _mm_set1_ps(fixup));
         assert_eq_m128(r, e);
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_store_ss() {
+    unsafe fn test_mm_store_ss() {
         let mut vals = [0.0f32; 8];
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
-        unsafe {
-            _mm_store_ss(vals.as_mut_ptr().add(1), a);
-        }
+        _mm_store_ss(vals.as_mut_ptr().add(1), a);
 
         assert_eq!(vals[0], 0.0);
         assert_eq!(vals[1], 1.0);
@@ -3210,73 +3192,110 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_store1_ps() {
-        let mut vals = Memory { data: [0.0f32; 4] };
+    unsafe fn test_mm_store1_ps() {
+        let mut vals = [0.0f32; 8];
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
 
-        // guaranteed to be aligned to 16 bytes
-        let p = vals.data.as_mut_ptr();
+        let mut ofs = 0;
+        let mut p = vals.as_mut_ptr();
 
-        unsafe {
-            _mm_store1_ps(p, *black_box(&a));
+        if (p as usize) & 0xf != 0 {
+            ofs = (16 - ((p as usize) & 0xf)) >> 2;
+            p = p.add(ofs);
         }
 
-        assert_eq!(vals.data, [1.0, 1.0, 1.0, 1.0]);
+        _mm_store1_ps(p, *black_box(&a));
+
+        if ofs > 0 {
+            assert_eq!(vals[ofs - 1], 0.0);
+        }
+        assert_eq!(vals[ofs + 0], 1.0);
+        assert_eq!(vals[ofs + 1], 1.0);
+        assert_eq!(vals[ofs + 2], 1.0);
+        assert_eq!(vals[ofs + 3], 1.0);
+        assert_eq!(vals[ofs + 4], 0.0);
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_store_ps() {
-        let mut vals = Memory { data: [0.0f32; 4] };
+    unsafe fn test_mm_store_ps() {
+        let mut vals = [0.0f32; 8];
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
 
-        // guaranteed to be aligned to 16 bytes
-        let p = vals.data.as_mut_ptr();
+        let mut ofs = 0;
+        let mut p = vals.as_mut_ptr();
 
-        unsafe {
-            _mm_store_ps(p, *black_box(&a));
+        // Align p to 16-byte boundary
+        if (p as usize) & 0xf != 0 {
+            ofs = (16 - ((p as usize) & 0xf)) >> 2;
+            p = p.add(ofs);
         }
 
-        assert_eq!(vals.data, [1.0, 2.0, 3.0, 4.0]);
+        _mm_store_ps(p, *black_box(&a));
+
+        if ofs > 0 {
+            assert_eq!(vals[ofs - 1], 0.0);
+        }
+        assert_eq!(vals[ofs + 0], 1.0);
+        assert_eq!(vals[ofs + 1], 2.0);
+        assert_eq!(vals[ofs + 2], 3.0);
+        assert_eq!(vals[ofs + 3], 4.0);
+        assert_eq!(vals[ofs + 4], 0.0);
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_storer_ps() {
-        let mut vals = Memory { data: [0.0f32; 4] };
+    unsafe fn test_mm_storer_ps() {
+        let mut vals = [0.0f32; 8];
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
 
-        // guaranteed to be aligned to 16 bytes
-        let p = vals.data.as_mut_ptr();
+        let mut ofs = 0;
+        let mut p = vals.as_mut_ptr();
 
-        unsafe {
-            _mm_storer_ps(p, *black_box(&a));
+        // Align p to 16-byte boundary
+        if (p as usize) & 0xf != 0 {
+            ofs = (16 - ((p as usize) & 0xf)) >> 2;
+            p = p.add(ofs);
         }
 
-        assert_eq!(vals.data, [4.0, 3.0, 2.0, 1.0]);
+        _mm_storer_ps(p, *black_box(&a));
+
+        if ofs > 0 {
+            assert_eq!(vals[ofs - 1], 0.0);
+        }
+        assert_eq!(vals[ofs + 0], 4.0);
+        assert_eq!(vals[ofs + 1], 3.0);
+        assert_eq!(vals[ofs + 2], 2.0);
+        assert_eq!(vals[ofs + 3], 1.0);
+        assert_eq!(vals[ofs + 4], 0.0);
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_storeu_ps() {
-        #[repr(align(16))]
-        struct Memory8 {
-            data: [f32; 8],
-        }
-
-        // guaranteed to be aligned to 16 bytes
-        let mut vals = Memory8 { data: [0.0f32; 8] };
+    unsafe fn test_mm_storeu_ps() {
+        let mut vals = [0.0f32; 8];
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
 
-        // guaranteed to be *not* aligned to 16 bytes
-        let p = unsafe { vals.data.as_mut_ptr().offset(1) };
+        let mut ofs = 0;
+        let mut p = vals.as_mut_ptr();
 
-        unsafe {
-            _mm_storeu_ps(p, *black_box(&a));
+        // Make sure p is **not** aligned to 16-byte boundary
+        if (p as usize) & 0xf == 0 {
+            ofs = 1;
+            p = p.add(1);
         }
 
-        assert_eq!(vals.data, [0.0, 1.0, 2.0, 3.0, 4.0, 0.0, 0.0, 0.0]);
+        _mm_storeu_ps(p, *black_box(&a));
+
+        if ofs > 0 {
+            assert_eq!(vals[ofs - 1], 0.0);
+        }
+        assert_eq!(vals[ofs + 0], 1.0);
+        assert_eq!(vals[ofs + 1], 2.0);
+        assert_eq!(vals[ofs + 2], 3.0);
+        assert_eq!(vals[ofs + 3], 4.0);
+        assert_eq!(vals[ofs + 4], 0.0);
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_move_ss() {
+    unsafe fn test_mm_move_ss() {
         let a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let b = _mm_setr_ps(5.0, 6.0, 7.0, 8.0);
 
@@ -3286,7 +3305,7 @@ mod tests {
     }
 
     #[simd_test(enable = "sse")]
-    const fn test_mm_movemask_ps() {
+    unsafe fn test_mm_movemask_ps() {
         let r = _mm_movemask_ps(_mm_setr_ps(-1.0, 5.0, -5.0, 0.0));
         assert_eq!(r, 0b0101);
 
@@ -3297,12 +3316,70 @@ mod tests {
     #[simd_test(enable = "sse")]
     // Miri cannot support this until it is clear how it fits in the Rust memory model
     #[cfg_attr(miri, ignore)]
-    fn test_mm_sfence() {
+    unsafe fn test_mm_sfence() {
         _mm_sfence();
     }
 
+    #[allow(deprecated)] // FIXME: This tests functions that are immediate UB
     #[simd_test(enable = "sse")]
-    const fn test_MM_TRANSPOSE4_PS() {
+    #[cfg_attr(miri, ignore)] // Miri does not support accesing the CSR
+    unsafe fn test_mm_getcsr_setcsr_1() {
+        let saved_csr = _mm_getcsr();
+
+        let a = _mm_setr_ps(1.1e-36, 0.0, 0.0, 1.0);
+        let b = _mm_setr_ps(0.001, 0.0, 0.0, 1.0);
+
+        _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+        let r = _mm_mul_ps(*black_box(&a), *black_box(&b));
+
+        _mm_setcsr(saved_csr);
+
+        let exp = _mm_setr_ps(0.0, 0.0, 0.0, 1.0);
+        assert_eq_m128(r, exp); // first component is a denormalized f32
+    }
+
+    #[allow(deprecated)] // FIXME: This tests functions that are immediate UB
+    #[simd_test(enable = "sse")]
+    #[cfg_attr(miri, ignore)] // Miri does not support accesing the CSR
+    unsafe fn test_mm_getcsr_setcsr_2() {
+        // Same as _mm_setcsr_1 test, but with opposite flag value.
+
+        let saved_csr = _mm_getcsr();
+
+        let a = _mm_setr_ps(1.1e-36, 0.0, 0.0, 1.0);
+        let b = _mm_setr_ps(0.001, 0.0, 0.0, 1.0);
+
+        _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_OFF);
+        let r = _mm_mul_ps(*black_box(&a), *black_box(&b));
+
+        _mm_setcsr(saved_csr);
+
+        let exp = _mm_setr_ps(1.1e-39, 0.0, 0.0, 1.0);
+        assert_eq_m128(r, exp); // first component is a denormalized f32
+    }
+
+    #[allow(deprecated)] // FIXME: This tests functions that are immediate UB
+    #[simd_test(enable = "sse")]
+    #[cfg_attr(miri, ignore)] // Miri does not support accesing the CSR
+    unsafe fn test_mm_getcsr_setcsr_underflow() {
+        _MM_SET_EXCEPTION_STATE(0);
+
+        let a = _mm_setr_ps(1.1e-36, 0.0, 0.0, 1.0);
+        let b = _mm_setr_ps(1e-5, 0.0, 0.0, 1.0);
+
+        assert_eq!(_MM_GET_EXCEPTION_STATE(), 0); // just to be sure
+
+        let r = _mm_mul_ps(*black_box(&a), *black_box(&b));
+
+        let exp = _mm_setr_ps(1.1e-41, 0.0, 0.0, 1.0);
+        assert_eq_m128(r, exp);
+
+        let underflow = _MM_GET_EXCEPTION_STATE() & _MM_EXCEPT_UNDERFLOW != 0;
+        assert!(underflow);
+    }
+
+    #[simd_test(enable = "sse")]
+    unsafe fn test_MM_TRANSPOSE4_PS() {
         let mut a = _mm_setr_ps(1.0, 2.0, 3.0, 4.0);
         let mut b = _mm_setr_ps(5.0, 6.0, 7.0, 8.0);
         let mut c = _mm_setr_ps(9.0, 10.0, 11.0, 12.0);
@@ -3325,14 +3402,11 @@ mod tests {
     // Miri cannot support this until it is clear how it fits in the Rust memory model
     // (non-temporal store)
     #[cfg_attr(miri, ignore)]
-    fn test_mm_stream_ps() {
+    unsafe fn test_mm_stream_ps() {
         let a = _mm_set1_ps(7.0);
         let mut mem = Memory { data: [-1.0; 4] };
 
-        unsafe {
-            _mm_stream_ps(ptr::addr_of_mut!(mem.data[0]), a);
-        }
-        _mm_sfence();
+        _mm_stream_ps(ptr::addr_of_mut!(mem.data[0]), a);
         for i in 0..4 {
             assert_eq!(mem.data[i], get_m128(a, i));
         }

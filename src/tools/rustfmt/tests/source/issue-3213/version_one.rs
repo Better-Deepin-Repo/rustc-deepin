@@ -1,4 +1,4 @@
-// rustfmt-style_edition: 2015
+// rustfmt-version: One
 
 fn foo() {
     match 0 {

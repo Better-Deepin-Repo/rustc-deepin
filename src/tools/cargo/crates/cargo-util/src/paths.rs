@@ -94,18 +94,11 @@ pub fn normalize_path(path: &Path) -> PathBuf {
         match component {
             Component::Prefix(..) => unreachable!(),
             Component::RootDir => {
-                ret.push(Component::RootDir);
+                ret.push(component.as_os_str());
             }
             Component::CurDir => {}
             Component::ParentDir => {
-                if ret.ends_with(Component::ParentDir) {
-                    ret.push(Component::ParentDir);
-                } else {
-                    let popped = ret.pop();
-                    if !popped && !ret.has_root() {
-                        ret.push(Component::ParentDir);
-                    }
-                }
+                ret.pop();
             }
             Component::Normal(c) => {
                 ret.push(c);
@@ -189,20 +182,9 @@ pub fn write<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> Result<()>
 
 /// Writes a file to disk atomically.
 ///
-/// This uses `tempfile::persist` to accomplish atomic writes.
-/// If the path is a symlink, it will follow the symlink and write to the actual target.
+/// write_atomic uses tempfile::persist to accomplish atomic writes.
 pub fn write_atomic<P: AsRef<Path>, C: AsRef<[u8]>>(path: P, contents: C) -> Result<()> {
     let path = path.as_ref();
-
-    // Check if the path is a symlink and follow it if it is
-    let resolved_path;
-    let path = if path.is_symlink() {
-        resolved_path = fs::read_link(path)
-            .with_context(|| format!("failed to read symlink at `{}`", path.display()))?;
-        &resolved_path
-    } else {
-        path
-    };
 
     // On unix platforms, get the permissions of the original file. Copy only the user/group/other
     // read/write/execute permission bits. The tempfile lib defaults to an initial mode of 0o600,
@@ -622,6 +604,8 @@ fn _link_or_copy(src: &Path, dst: &Path) -> Result<()> {
     }
 
     let link_result = if src.is_dir() {
+        #[cfg(target_os = "redox")]
+        use std::os::redox::fs::symlink;
         #[cfg(unix)]
         use std::os::unix::fs::symlink;
         #[cfg(windows)]
@@ -719,9 +703,9 @@ pub fn set_file_time_no_err<P: AsRef<Path>>(path: P, time: FileTime) {
 /// This canonicalizes both paths before stripping. This is useful if the
 /// paths are obtained in different ways, and one or the other may or may not
 /// have been normalized in some way.
-pub fn strip_prefix_canonical(
-    path: impl AsRef<Path>,
-    base: impl AsRef<Path>,
+pub fn strip_prefix_canonical<P: AsRef<Path>>(
+    path: P,
+    base: P,
 ) -> Result<PathBuf, std::path::StripPrefixError> {
     // Not all filesystems support canonicalize. Just ignore if it doesn't work.
     let safe_canonicalize = |path: &Path| match path.canonicalize() {
@@ -825,7 +809,7 @@ fn exclude_from_content_indexing(path: &Path) {
         use std::iter::once;
         use std::os::windows::prelude::OsStrExt;
         use windows_sys::Win32::Storage::FileSystem::{
-            FILE_ATTRIBUTE_NOT_CONTENT_INDEXED, GetFileAttributesW, SetFileAttributesW,
+            GetFileAttributesW, SetFileAttributesW, FILE_ATTRIBUTE_NOT_CONTENT_INDEXED,
         };
 
         let path: Vec<u16> = path.as_os_str().encode_wide().chain(once(0)).collect();
@@ -872,42 +856,8 @@ fn exclude_from_time_machine(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::join_paths;
-    use super::normalize_path;
     use super::write;
     use super::write_atomic;
-
-    #[test]
-    fn test_normalize_path() {
-        let cases = &[
-            ("", ""),
-            (".", ""),
-            (".////./.", ""),
-            ("/", "/"),
-            ("/..", "/"),
-            ("/foo/bar", "/foo/bar"),
-            ("/foo/bar/", "/foo/bar"),
-            ("/foo/bar/./././///", "/foo/bar"),
-            ("/foo/bar/..", "/foo"),
-            ("/foo/bar/../..", "/"),
-            ("/foo/bar/../../..", "/"),
-            ("foo/bar", "foo/bar"),
-            ("foo/bar/", "foo/bar"),
-            ("foo/bar/./././///", "foo/bar"),
-            ("foo/bar/..", "foo"),
-            ("foo/bar/../..", ""),
-            ("foo/bar/../../..", ".."),
-            ("../../foo/bar", "../../foo/bar"),
-            ("../../foo/bar/", "../../foo/bar"),
-            ("../../foo/bar/./././///", "../../foo/bar"),
-            ("../../foo/bar/..", "../../foo"),
-            ("../../foo/bar/../..", "../.."),
-            ("../../foo/bar/../../..", "../../.."),
-        ];
-        for (input, expected) in cases {
-            let actual = normalize_path(std::path::Path::new(input));
-            assert_eq!(actual, std::path::Path::new(expected), "input: {input}");
-        }
-    }
 
     #[test]
     fn write_works() {
@@ -990,33 +940,6 @@ mod tests {
              "
             );
         }
-    }
-
-    #[test]
-    fn write_atomic_symlink() {
-        let tmpdir = tempfile::tempdir().unwrap();
-        let target_path = tmpdir.path().join("target.txt");
-        let symlink_path = tmpdir.path().join("symlink.txt");
-
-        // Create initial file
-        write(&target_path, "initial").unwrap();
-
-        // Create symlink
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&target_path, &symlink_path).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_file(&target_path, &symlink_path).unwrap();
-
-        // Write through symlink
-        write_atomic(&symlink_path, "updated").unwrap();
-
-        // Verify both paths show the updated content
-        assert_eq!(std::fs::read_to_string(&target_path).unwrap(), "updated");
-        assert_eq!(std::fs::read_to_string(&symlink_path).unwrap(), "updated");
-
-        // Verify symlink still exists and points to the same target
-        assert!(symlink_path.is_symlink());
-        assert_eq!(std::fs::read_link(&symlink_path).unwrap(), target_path);
     }
 
     #[test]

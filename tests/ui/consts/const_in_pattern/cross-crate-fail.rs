@@ -9,13 +9,15 @@ fn main() {
     let _ = Defaulted;
     match None {
         consts::SOME => panic!(),
-        //~^ ERROR constant of non-structural type `CustomEq` in a pattern
+        //~^ must be annotated with `#[derive(PartialEq)]`
+
         _ => {}
     }
 
     match None {
         <Defaulted as consts::AssocConst>::SOME  => panic!(),
-        //~^ ERROR constant of non-structural type `CustomEq` in a pattern
+        //~^ must be annotated with `#[derive(PartialEq)]`
+
         _ => {}
     }
 }

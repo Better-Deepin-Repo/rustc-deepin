@@ -1,6 +1,5 @@
 //@ check-pass
-//@ compile-flags: --crate-type=lib
-//@ edition: 2021
+//@ compile-flags: --edition=2021 --crate-type=lib
 
 use std::{
     future::Future,

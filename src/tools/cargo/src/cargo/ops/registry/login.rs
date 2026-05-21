@@ -7,16 +7,16 @@
 
 use std::io::IsTerminal;
 
-use crate::CargoResult;
-use crate::GlobalContext;
 use crate::util::auth;
 use crate::util::auth::AuthorizationError;
+use crate::CargoResult;
+use crate::GlobalContext;
 use cargo_credential::LoginOptions;
 use cargo_credential::Secret;
 
-use super::RegistryOrIndex;
 use super::get_source_id;
 use super::registry;
+use super::RegistryOrIndex;
 
 pub fn registry_login(
     gctx: &GlobalContext,
@@ -34,7 +34,7 @@ pub fn registry_login(
         false,
         None,
     ) {
-        Ok((registry, _)) => Some(format!("{}/me", registry.host())),
+        Ok(registry) => Some(format!("{}/me", registry.host())),
         Err(e) if e.is::<AuthorizationError>() => e
             .downcast::<AuthorizationError>()
             .unwrap()

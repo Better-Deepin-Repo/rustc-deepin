@@ -1,3 +1,3 @@
-//@ ignore-auxiliary (used by `./inner-cfg-non-inline-mod.rs`)
+//@ ignore-test (auxiliary, used by other tests)
 
-#![cfg_attr(true, cfg(false))]
+#![cfg_attr(all(), cfg(FALSE))]
