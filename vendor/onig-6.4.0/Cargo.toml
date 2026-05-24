@@ -44,6 +44,3 @@ generate = ["onig_sys/generate"]
 posix-api = ["onig_sys/posix-api"]
 print-debug = ["onig_sys/print-debug"]
 std-pattern = []
-
-[target."cfg(windows)".dependencies.libc]
-version = "0.2"
