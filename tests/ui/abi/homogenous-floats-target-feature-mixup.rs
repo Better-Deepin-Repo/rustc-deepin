@@ -24,8 +24,7 @@ fn main() {
     match std::env::var("TARGET") {
         Ok(s) => {
             // Skip this tests on i586-unknown-linux-gnu where sse2 is disabled
-            // Debian: our i686 doesn't have SSE 2..
-            if s.contains("i586") || s.contains("i686") {
+            if s.contains("i586") {
                 return
             }
         }

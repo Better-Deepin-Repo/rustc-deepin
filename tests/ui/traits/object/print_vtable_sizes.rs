@@ -1,7 +1,5 @@
 //@ check-pass
 //@ compile-flags: -Z print-vtable-sizes
-//Debian: broken floats break the expected output on i386
-//@ ignore-i686-unknown-linux-gnu
 #![crate_type = "lib"]
 
 trait A<T: help::V>: AsRef<[T::V]> + AsMut<[T::V]> {}

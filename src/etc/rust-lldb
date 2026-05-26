@@ -10,7 +10,7 @@ host=$(rustc -vV | sed -n -e 's/^host: //p')
 RUSTC_SYSROOT="$(if type "$RUSTC" >/dev/null 2>&1; then "$RUSTC" --print=sysroot; else echo /usr; fi)"
 RUST_LLDB="$RUSTC_SYSROOT/lib/rustlib/$host/bin/lldb"
 
-lldb=lldb-17
+lldb=lldb-19
 if [ -f "$RUST_LLDB" ]; then
     lldb="$RUST_LLDB"
 else

@@ -1,3 +1,45 @@
+rustc (1.85.0+dfsg3-1) unstable; urgency=medium
+
+  * backport fix for gix-features CVE-2025-31130
+  * rust-lldb: fix lldb version (Closes: #1100950)
+  * cherry-pick fix for crossbeam-channel RUSTSEC-2025-0024
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Thu, 24 Apr 2025 17:47:57 +0200
+
+rustc (1.85.0+dfsg2-3) unstable; urgency=medium
+
+  * baseline: enable SSE2 for i386 build (Closes: #1095862)
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Fri, 11 Apr 2025 13:40:09 +0200
+
+rustc (1.85.0+dfsg2-2) unstable; urgency=medium
+
+  * Upload to unstable
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Fri, 04 Apr 2025 18:24:50 +0200
+
+rustc (1.85.0+dfsg2-1) experimental; urgency=medium
+
+  * d/control: bump libgit2-dev version
+  * vendor git2, git2-curl and libgit2-sys bindings for libgit2 1.9
+  * cargo: bump git2* dependencies
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Mon, 17 Mar 2025 06:54:23 +0100
+
+rustc (1.85.0+dfsg1-1) unstable; urgency=medium
+
+  * New (stable) upstream release.
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Thu, 20 Feb 2025 19:23:02 +0100
+
+rustc (1.85.0~beta.9+dfsg1-1~exp1) experimental; urgency=medium
+
+  * New upstream release 1.85.0~beta999
+  * build docs with -j1 to make them reproducible
+  * build: make windows libstd build opt-in
+
+ -- Fabian Grünbichler <debian@fabian.gruenbichler.email>  Mon, 17 Feb 2025 13:24:42 +0100
+
 rustc (1.84.0+dfsg1-2) unstable; urgency=medium
 
   * revert upstream commit breaking cross builds
