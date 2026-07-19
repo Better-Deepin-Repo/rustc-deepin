@@ -2,14 +2,14 @@
 
 use std::mem;
 
+use rustc_hir::attrs::AttributeKind;
 use rustc_hir::def_id::{CRATE_DEF_ID, LocalDefId};
+use rustc_hir::find_attr;
 use rustc_middle::ty::TyCtxt;
-use rustc_span::symbol::sym;
 use tracing::debug;
 
-use crate::clean;
 use crate::clean::utils::inherits_doc_hidden;
-use crate::clean::{Item, ItemIdSet};
+use crate::clean::{self, Item, ItemIdSet, reexport_chain};
 use crate::core::DocContext;
 use crate::fold::{DocFolder, strip_item};
 use crate::passes::{ImplStripper, Pass};
@@ -43,8 +43,8 @@ pub(crate) fn strip_hidden(krate: clean::Crate, cx: &mut DocContext<'_>) -> clea
         retained: &retained,
         cache: &cx.cache,
         is_json_output,
-        document_private: cx.render_options.document_private,
-        document_hidden: cx.render_options.document_hidden,
+        document_private: cx.document_private(),
+        document_hidden: cx.document_hidden(),
     };
     stripper.fold_crate(krate)
 }
@@ -89,12 +89,33 @@ impl Stripper<'_, '_> {
 impl DocFolder for Stripper<'_, '_> {
     fn fold_item(&mut self, i: Item) -> Option<Item> {
         let has_doc_hidden = i.is_doc_hidden();
+
+        if let clean::ImportItem(clean::Import { source, .. }) = &i.kind
+            && let Some(source_did) = source.did
+        {
+            if self.tcx.is_doc_hidden(source_did) {
+                return None;
+            } else if let Some(import_def_id) = i.def_id().and_then(|def_id| def_id.as_local()) {
+                let reexports = reexport_chain(self.tcx, import_def_id, source_did);
+
+                // Check if any reexport in the chain has a hidden source
+                let has_hidden_source = reexports
+                    .iter()
+                    .filter_map(|reexport| reexport.id())
+                    .any(|reexport_did| self.tcx.is_doc_hidden(reexport_did));
+
+                if has_hidden_source {
+                    return None;
+                }
+            }
+        }
+
         let is_impl_or_exported_macro = match i.kind {
             clean::ImplItem(..) => true,
             // If the macro has the `#[macro_export]` attribute, it means it's accessible at the
             // crate level so it should be handled differently.
             clean::MacroItem(..) => {
-                i.attrs.other_attrs.iter().any(|attr| attr.has_name(sym::macro_export))
+                find_attr!(&i.attrs.other_attrs, AttributeKind::MacroExport { .. })
             }
             _ => false,
         };
@@ -148,7 +169,7 @@ impl DocFolder for Stripper<'_, '_> {
                 self.update_retained = old;
                 if ret.item_id == clean::ItemId::DefId(CRATE_DEF_ID.into()) {
                     // We don't strip the current crate, even if it has `#[doc(hidden)]`.
-                    debug!("strip_hidden: Not strippping local crate");
+                    debug!("strip_hidden: Not stripping local crate");
                     Some(ret)
                 } else {
                     Some(strip_item(ret))

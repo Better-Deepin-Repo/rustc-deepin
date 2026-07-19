@@ -1,17 +1,17 @@
 use std::ops::Range;
+use std::sync::Arc;
 
-use gccjit::{Location, RValue};
+use gccjit::{Function, Location, RValue};
+use rustc_abi::Size;
 use rustc_codegen_ssa::mir::debuginfo::{DebugScope, FunctionDebugContext, VariableKind};
 use rustc_codegen_ssa::traits::{DebugInfoBuilderMethods, DebugInfoCodegenMethods};
-use rustc_data_structures::sync::Lrc;
-use rustc_index::bit_set::BitSet;
+use rustc_index::bit_set::DenseBitSet;
 use rustc_index::{Idx, IndexVec};
 use rustc_middle::mir::{self, Body, SourceScope};
-use rustc_middle::ty::{Instance, PolyExistentialTraitRef, Ty};
+use rustc_middle::ty::{ExistentialTraitRef, Instance, Ty};
 use rustc_session::config::DebugInfo;
 use rustc_span::{BytePos, Pos, SourceFile, SourceFileAndLine, Span, Symbol};
-use rustc_target::abi::Size;
-use rustc_target::abi::call::FnAbi;
+use rustc_target::callconv::FnAbi;
 
 use crate::builder::Builder;
 use crate::context::CodegenCx;
@@ -19,7 +19,7 @@ use crate::context::CodegenCx;
 pub(super) const UNKNOWN_LINE_NUMBER: u32 = 0;
 pub(super) const UNKNOWN_COLUMN_NUMBER: u32 = 0;
 
-impl<'a, 'gcc, 'tcx> DebugInfoBuilderMethods for Builder<'a, 'gcc, 'tcx> {
+impl<'a, 'gcc, 'tcx> DebugInfoBuilderMethods<'tcx> for Builder<'a, 'gcc, 'tcx> {
     // FIXME(eddyb) find a common convention for all of the debuginfo-related
     // names (choose between `dbg`, `debug`, `debuginfo`, `debug_info` etc.).
     fn dbg_var_addr(
@@ -29,11 +29,22 @@ impl<'a, 'gcc, 'tcx> DebugInfoBuilderMethods for Builder<'a, 'gcc, 'tcx> {
         _variable_alloca: Self::Value,
         _direct_offset: Size,
         _indirect_offsets: &[Size],
-        _fragment: Option<Range<Size>>,
+        _fragment: &Option<Range<Size>>,
     ) {
         // FIXME(tempdragon): Not sure if this is correct, probably wrong but still keep it here.
         #[cfg(feature = "master")]
         _variable_alloca.set_location(_dbg_loc);
+    }
+
+    fn dbg_var_value(
+        &mut self,
+        _dbg_var: Self::DIVariable,
+        _dbg_loc: Self::DILocation,
+        _value: Self::Value,
+        _direct_offset: Size,
+        _indirect_offsets: &[Size],
+        _fragment: &Option<Range<Size>>,
+    ) {
     }
 
     fn insert_reference_to_gdb_debug_scripts_section_global(&mut self) {
@@ -52,10 +63,6 @@ impl<'a, 'gcc, 'tcx> DebugInfoBuilderMethods for Builder<'a, 'gcc, 'tcx> {
     fn clear_dbg_loc(&mut self) {
         self.location = None;
     }
-
-    fn get_dbg_loc(&self) -> Option<Self::DILocation> {
-        self.location
-    }
 }
 
 /// Generate the `debug_context` in an MIR Body.
@@ -69,7 +76,7 @@ fn compute_mir_scopes<'gcc, 'tcx>(
 ) {
     // Find all scopes with variables defined in them.
     let variables = if cx.sess().opts.debuginfo == DebugInfo::Full {
-        let mut vars = BitSet::new_empty(mir.source_scopes.len());
+        let mut vars = DenseBitSet::new_empty(mir.source_scopes.len());
         // FIXME(eddyb) take into account that arguments always have debuginfo,
         // irrespective of their name (assuming full debuginfo is enabled).
         // NOTE(eddyb) actually, on second thought, those are always in the
@@ -82,7 +89,7 @@ fn compute_mir_scopes<'gcc, 'tcx>(
         // Nothing to emit, of course.
         None
     };
-    let mut instantiated = BitSet::new_empty(mir.source_scopes.len());
+    let mut instantiated = DenseBitSet::new_empty(mir.source_scopes.len());
     // Instantiate all scopes.
     for idx in 0..mir.source_scopes.len() {
         let scope = SourceScope::new(idx);
@@ -101,9 +108,9 @@ fn make_mir_scope<'gcc, 'tcx>(
     cx: &CodegenCx<'gcc, 'tcx>,
     _instance: Instance<'tcx>,
     mir: &Body<'tcx>,
-    variables: &Option<BitSet<SourceScope>>,
+    variables: &Option<DenseBitSet<SourceScope>>,
     debug_context: &mut FunctionDebugContext<'tcx, (), Location<'gcc>>,
-    instantiated: &mut BitSet<SourceScope>,
+    instantiated: &mut DenseBitSet<SourceScope>,
     scope: SourceScope,
 ) {
     if instantiated.contains(scope) {
@@ -126,14 +133,15 @@ fn make_mir_scope<'gcc, 'tcx>(
         return;
     };
 
-    if let Some(ref vars) = *variables {
-        if !vars.contains(scope) && scope_data.inlined.is_none() {
-            // Do not create a DIScope if there are no variables defined in this
-            // MIR `SourceScope`, and it's not `inlined`, to avoid debuginfo bloat.
-            debug_context.scopes[scope] = parent_scope;
-            instantiated.insert(scope);
-            return;
-        }
+    if let Some(ref vars) = *variables
+        && !vars.contains(scope)
+        && scope_data.inlined.is_none()
+    {
+        // Do not create a DIScope if there are no variables defined in this
+        // MIR `SourceScope`, and it's not `inlined`, to avoid debuginfo bloat.
+        debug_context.scopes[scope] = parent_scope;
+        instantiated.insert(scope);
+        return;
     }
 
     let loc = cx.lookup_debug_loc(scope_data.span.lo());
@@ -172,7 +180,7 @@ fn make_mir_scope<'gcc, 'tcx>(
 // `lookup_char_pos` return the right information instead.
 pub struct DebugLoc {
     /// Information about the original source file.
-    pub file: Lrc<SourceFile>,
+    pub file: Arc<SourceFile>,
     /// The (1-based) line number.
     pub line: u32,
     /// The (1-based) column number.
@@ -214,7 +222,7 @@ impl<'gcc, 'tcx> DebugInfoCodegenMethods<'tcx> for CodegenCx<'gcc, 'tcx> {
     fn create_vtable_debuginfo(
         &self,
         _ty: Ty<'tcx>,
-        _trait_ref: Option<PolyExistentialTraitRef<'tcx>>,
+        _trait_ref: Option<ExistentialTraitRef<'tcx>>,
         _vtable: Self::Value,
     ) {
         // TODO(antoyo)
@@ -224,7 +232,7 @@ impl<'gcc, 'tcx> DebugInfoCodegenMethods<'tcx> for CodegenCx<'gcc, 'tcx> {
         &self,
         instance: Instance<'tcx>,
         fn_abi: &FnAbi<'tcx, Ty<'tcx>>,
-        llfn: RValue<'gcc>,
+        llfn: Function<'gcc>,
         mir: &mir::Body<'tcx>,
     ) -> Option<FunctionDebugContext<'tcx, Self::DIScope, Self::DILocation>> {
         if self.sess().opts.debuginfo == DebugInfo::None {
@@ -275,7 +283,7 @@ impl<'gcc, 'tcx> DebugInfoCodegenMethods<'tcx> for CodegenCx<'gcc, 'tcx> {
         &self,
         _instance: Instance<'tcx>,
         _fn_abi: &FnAbi<'tcx, Ty<'tcx>>,
-        _maybe_definition_llfn: Option<RValue<'gcc>>,
+        _maybe_definition_llfn: Option<Function<'gcc>>,
     ) -> Self::DIScope {
         // TODO(antoyo): implement.
     }
@@ -288,7 +296,7 @@ impl<'gcc, 'tcx> DebugInfoCodegenMethods<'tcx> for CodegenCx<'gcc, 'tcx> {
     ) -> Self::DILocation {
         let pos = span.lo();
         let DebugLoc { file, line, col } = self.lookup_debug_loc(pos);
-        let loc = match file.name {
+        match file.name {
             rustc_span::FileName::Real(ref name) => match *name {
                 rustc_span::RealFileName::LocalPath(ref name) => {
                     if let Some(name) = name.to_str() {
@@ -313,7 +321,6 @@ impl<'gcc, 'tcx> DebugInfoCodegenMethods<'tcx> for CodegenCx<'gcc, 'tcx> {
                 }
             },
             _ => Location::null(),
-        };
-        loc
+        }
     }
 }

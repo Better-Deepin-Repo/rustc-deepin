@@ -83,6 +83,7 @@ fn main() {
     let mut download_dir = None;
     let mut sysroot_kind = SysrootKind::Clif;
     let mut use_unstable_features = true;
+    let mut panic_unwind_support = false;
     let mut frozen = false;
     let mut skip_tests = vec![];
     let mut use_backend = None;
@@ -108,6 +109,7 @@ fn main() {
                 }
             }
             "--no-unstable-features" => use_unstable_features = false,
+            "--panic-unwind-support" => panic_unwind_support = true,
             "--frozen" => frozen = true,
             "--skip-test" => {
                 // FIXME check that all passed in tests actually exist
@@ -156,10 +158,8 @@ fn main() {
         let cargo = rustc_info::get_cargo_path();
         let rustc = rustc_info::get_rustc_path();
         let rustdoc = rustc_info::get_rustdoc_path();
-        let triple = std::env::var("HOST_TRIPLE")
-            .ok()
-            .or_else(|| config::get_value("host"))
-            .unwrap_or_else(|| rustc_info::get_host_triple(&rustc));
+        let triple =
+            std::env::var("HOST_TRIPLE").unwrap_or_else(|_| rustc_info::get_host_triple(&rustc));
         Compiler {
             cargo,
             rustc,
@@ -170,10 +170,8 @@ fn main() {
             runner: vec![],
         }
     };
-    let target_triple = std::env::var("TARGET_TRIPLE")
-        .ok()
-        .or_else(|| config::get_value("target"))
-        .unwrap_or_else(|| bootstrap_host_compiler.triple.clone());
+    let target_triple =
+        std::env::var("TARGET_TRIPLE").unwrap_or_else(|_| bootstrap_host_compiler.triple.clone());
 
     let dirs = path::Dirs {
         source_dir: current_dir.clone(),
@@ -205,6 +203,7 @@ fn main() {
             &dirs,
             &bootstrap_host_compiler,
             use_unstable_features,
+            panic_unwind_support,
         ))
     };
     match command {
@@ -216,6 +215,7 @@ fn main() {
                 &dirs,
                 sysroot_kind,
                 use_unstable_features,
+                panic_unwind_support,
                 &skip_tests.iter().map(|test| &**test).collect::<Vec<_>>(),
                 &cg_clif_dylib,
                 &bootstrap_host_compiler,
@@ -234,6 +234,7 @@ fn main() {
                 &cg_clif_dylib,
                 rustup_toolchain_name.as_deref(),
                 &bootstrap_host_compiler,
+                panic_unwind_support,
             );
         }
         Command::Build => {
@@ -244,18 +245,20 @@ fn main() {
                 &bootstrap_host_compiler,
                 rustup_toolchain_name.as_deref(),
                 target_triple,
+                panic_unwind_support,
             );
         }
         Command::Bench => {
-            build_sysroot::build_sysroot(
+            let compiler = build_sysroot::build_sysroot(
                 &dirs,
                 sysroot_kind,
                 &cg_clif_dylib,
                 &bootstrap_host_compiler,
                 rustup_toolchain_name.as_deref(),
                 target_triple,
+                panic_unwind_support,
             );
-            bench::benchmark(&dirs, &bootstrap_host_compiler);
+            bench::benchmark(&dirs, &compiler);
         }
     }
 }

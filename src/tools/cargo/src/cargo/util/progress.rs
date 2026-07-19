@@ -74,6 +74,109 @@ struct Format {
     style: ProgressStyle,
     max_width: usize,
     max_print: usize,
+    term_integration: TerminalIntegration,
+    unicode: bool,
+}
+
+/// Controls terminal progress integration via OSC sequences.
+struct TerminalIntegration {
+    enabled: bool,
+    error: bool,
+}
+
+/// A progress status value printable as an ANSI OSC 9;4 escape code.
+#[cfg_attr(test, derive(PartialEq, Debug))]
+enum StatusValue {
+    /// No output.
+    None,
+    /// Remove progress.
+    Remove,
+    /// Progress value (0-100).
+    Value(f64),
+    /// Indeterminate state (no bar, just animation)
+    Indeterminate,
+    /// Progress value in an error state (0-100).
+    Error(f64),
+}
+
+enum ProgressOutput {
+    /// Print progress without a message
+    PrintNow,
+    /// Progress, message and progress report
+    TextAndReport(String, StatusValue),
+    /// Only progress report, no message and no text progress
+    Report(StatusValue),
+}
+
+impl TerminalIntegration {
+    #[cfg(test)]
+    fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            error: false,
+        }
+    }
+
+    /// Creates a `TerminalIntegration` from Cargo's configuration.
+    /// Autodetect support if not explicitly enabled or disabled.
+    fn from_config(gctx: &GlobalContext) -> Self {
+        let enabled = gctx
+            .progress_config()
+            .term_integration
+            .unwrap_or_else(|| gctx.shell().is_err_term_integration_available());
+
+        Self {
+            enabled,
+            error: false,
+        }
+    }
+
+    fn progress_state(&self, value: StatusValue) -> StatusValue {
+        match (self.enabled, self.error) {
+            (true, false) => value,
+            (true, true) => match value {
+                StatusValue::Value(v) => StatusValue::Error(v),
+                _ => StatusValue::Error(100.0),
+            },
+            (false, _) => StatusValue::None,
+        }
+    }
+
+    pub fn remove(&self) -> StatusValue {
+        self.progress_state(StatusValue::Remove)
+    }
+
+    pub fn value(&self, percent: f64) -> StatusValue {
+        self.progress_state(StatusValue::Value(percent))
+    }
+
+    pub fn indeterminate(&self) -> StatusValue {
+        self.progress_state(StatusValue::Indeterminate)
+    }
+
+    pub fn error(&mut self) {
+        self.error = true;
+    }
+}
+
+impl std::fmt::Display for StatusValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // From https://conemu.github.io/en/AnsiEscapeCodes.html#ConEmu_specific_OSC
+        // ESC ] 9 ; 4 ; st ; pr ST
+        // When st is 0: remove progress.
+        // When st is 1: set progress value to pr (number, 0-100).
+        // When st is 2: set error state in taskbar, pr is optional.
+        // When st is 3: set indeterminate state, pr is ignored.
+        // When st is 4: set paused state, pr is optional.
+        let (state, progress) = match self {
+            Self::None => return Ok(()), // No output
+            Self::Remove => (0, 0.0),
+            Self::Value(v) => (1, *v),
+            Self::Indeterminate => (3, 0.0),
+            Self::Error(v) => (2, *v),
+        };
+        write!(f, "\x1b]9;4;{state};{progress:.0}\x1b\\")
+    }
 }
 
 impl<'gctx> Progress<'gctx> {
@@ -126,6 +229,8 @@ impl<'gctx> Progress<'gctx> {
                     // 50 gives some space for text after the progress bar,
                     // even on narrow (e.g. 80 char) terminals.
                     max_print: 50,
+                    term_integration: TerminalIntegration::from_config(gctx),
+                    unicode: gctx.shell().err_unicode(),
                 },
                 name: name.to_string(),
                 done: false,
@@ -158,8 +263,7 @@ impl<'gctx> Progress<'gctx> {
     /// * `cur` should be how far along the progress is.
     /// * `max` is the maximum value for the progress bar.
     /// * `msg` is a small piece of text to display at the end of the progress
-    ///   bar. It will be truncated with `...` if it does not fit on the
-    ///   terminal.
+    ///   bar. It will be truncated with `…` if it does not fit on the terminal.
     ///
     /// This may not actually update the display if `tick` is being called too
     /// quickly.
@@ -223,7 +327,7 @@ impl<'gctx> Progress<'gctx> {
     /// calling it too often.
     pub fn print_now(&mut self, msg: &str) -> CargoResult<()> {
         match &mut self.state {
-            Some(s) => s.print("", msg),
+            Some(s) => s.print(ProgressOutput::PrintNow, msg),
             None => Ok(()),
         }
     }
@@ -232,6 +336,13 @@ impl<'gctx> Progress<'gctx> {
     pub fn clear(&mut self) {
         if let Some(ref mut s) = self.state {
             s.clear();
+        }
+    }
+
+    /// Sets the progress reporter to the error state.
+    pub fn indicate_error(&mut self) {
+        if let Some(s) = &mut self.state {
+            s.format.term_integration.error()
         }
     }
 }
@@ -269,6 +380,11 @@ impl Throttle {
 impl<'gctx> State<'gctx> {
     fn tick(&mut self, cur: usize, max: usize, msg: &str) -> CargoResult<()> {
         if self.done {
+            write!(
+                self.gctx.shell().err(),
+                "{}",
+                self.format.term_integration.remove()
+            )?;
             return Ok(());
         }
 
@@ -280,21 +396,30 @@ impl<'gctx> State<'gctx> {
         // return back to the beginning of the line for the next print.
         self.try_update_max_width();
         if let Some(pbar) = self.format.progress(cur, max) {
-            self.print(&pbar, msg)?;
+            self.print(pbar, msg)?;
         }
         Ok(())
     }
 
-    fn print(&mut self, prefix: &str, msg: &str) -> CargoResult<()> {
+    fn print(&mut self, progress: ProgressOutput, msg: &str) -> CargoResult<()> {
         self.throttle.update();
         self.try_update_max_width();
 
+        let (mut line, report) = match progress {
+            ProgressOutput::PrintNow => (String::new(), None),
+            ProgressOutput::TextAndReport(prefix, report) => (prefix, Some(report)),
+            ProgressOutput::Report(report) => (String::new(), Some(report)),
+        };
+
         // make sure we have enough room for the header
         if self.format.max_width < 15 {
+            // even if we don't have space we can still output progress report
+            if let Some(tb) = report {
+                write!(self.gctx.shell().err(), "{tb}\r")?;
+            }
             return Ok(());
         }
 
-        let mut line = prefix.to_string();
         self.format.render(&mut line, msg);
         while line.len() < self.format.max_width - 15 {
             line.push(' ');
@@ -304,8 +429,12 @@ impl<'gctx> State<'gctx> {
         if self.gctx.shell().is_cleared() || self.last_line.as_ref() != Some(&line) {
             let mut shell = self.gctx.shell();
             shell.set_needs_clear(false);
-            shell.status_header(&self.name)?;
-            write!(shell.err(), "{}\r", line)?;
+            shell.transient_status(&self.name)?;
+            if let Some(tb) = report {
+                write!(shell.err(), "{line}{tb}\r")?;
+            } else {
+                write!(shell.err(), "{line}\r")?;
+            }
             self.last_line = Some(line);
             shell.set_needs_clear(true);
         }
@@ -314,6 +443,12 @@ impl<'gctx> State<'gctx> {
     }
 
     fn clear(&mut self) {
+        // Always clear the progress report
+        let _ = write!(
+            self.gctx.shell().err(),
+            "{}",
+            self.format.term_integration.remove()
+        );
         // No need to clear if the progress is not currently being displayed.
         if self.last_line.is_some() && !self.gctx.shell().is_cleared() {
             self.gctx.shell().err_erase_line();
@@ -331,7 +466,7 @@ impl<'gctx> State<'gctx> {
 }
 
 impl Format {
-    fn progress(&self, cur: usize, max: usize) -> Option<String> {
+    fn progress(&self, cur: usize, max: usize) -> Option<ProgressOutput> {
         assert!(cur <= max);
         // Render the percentage at the far right and then figure how long the
         // progress bar is
@@ -339,11 +474,21 @@ impl Format {
         let pct = if !pct.is_finite() { 0.0 } else { pct };
         let stats = match self.style {
             ProgressStyle::Percentage => format!(" {:6.02}%", pct * 100.0),
-            ProgressStyle::Ratio => format!(" {}/{}", cur, max),
+            ProgressStyle::Ratio => format!(" {cur}/{max}"),
             ProgressStyle::Indeterminate => String::new(),
         };
+        let report = match self.style {
+            ProgressStyle::Percentage | ProgressStyle::Ratio => {
+                self.term_integration.value(pct * 100.0)
+            }
+            ProgressStyle::Indeterminate => self.term_integration.indeterminate(),
+        };
+
         let extra_len = stats.len() + 2 /* [ and ] */ + 15 /* status header */;
         let Some(display_width) = self.width().checked_sub(extra_len) else {
+            if self.term_integration.enabled {
+                return Some(ProgressOutput::Report(report));
+            }
             return None;
         };
 
@@ -371,13 +516,16 @@ impl Format {
         string.push(']');
         string.push_str(&stats);
 
-        Some(string)
+        Some(ProgressOutput::TextAndReport(string, report))
     }
 
     fn render(&self, string: &mut String, msg: &str) {
         let mut avail_msg_len = self.max_width - string.len() - 15;
         let mut ellipsis_pos = 0;
-        if avail_msg_len <= 3 {
+
+        let (ellipsis, ellipsis_width) = if self.unicode { ("…", 1) } else { ("...", 3) };
+
+        if avail_msg_len <= ellipsis_width {
             return;
         }
         for c in msg.chars() {
@@ -385,12 +533,12 @@ impl Format {
             if avail_msg_len >= display_width {
                 avail_msg_len -= display_width;
                 string.push(c);
-                if avail_msg_len >= 3 {
+                if avail_msg_len >= ellipsis_width {
                     ellipsis_pos = string.len();
                 }
             } else {
                 string.truncate(ellipsis_pos);
-                string.push_str("...");
+                string.push_str(ellipsis);
                 break;
             }
         }
@@ -398,7 +546,11 @@ impl Format {
 
     #[cfg(test)]
     fn progress_status(&self, cur: usize, max: usize, msg: &str) -> Option<String> {
-        let mut ret = self.progress(cur, max)?;
+        let mut ret = match self.progress(cur, max)? {
+            // Check only the variant that contains text.
+            ProgressOutput::TextAndReport(text, _) => text,
+            _ => return None,
+        };
         self.render(&mut ret, msg);
         Some(ret)
     }
@@ -420,6 +572,8 @@ fn test_progress_status() {
         style: ProgressStyle::Ratio,
         max_print: 40,
         max_width: 60,
+        term_integration: TerminalIntegration::new(false),
+        unicode: true,
     };
     assert_eq!(
         format.progress_status(0, 4, ""),
@@ -461,7 +615,7 @@ fn test_progress_status() {
     );
     assert_eq!(
         format.progress_status(3, 4, ": msg that's just fit"),
-        Some("[=============>     ] 3/4: msg that's just...".to_string())
+        Some("[=============>     ] 3/4: msg that's just f…".to_string())
     );
 
     // combining diacritics have width zero and thus can fit max_width.
@@ -474,16 +628,16 @@ fn test_progress_status() {
     // some non-ASCII ellipsize test
     assert_eq!(
         format.progress_status(3, 4, "_123456789123456e\u{301}\u{301}8\u{301}90a"),
-        Some("[=============>     ] 3/4_123456789123456e\u{301}\u{301}...".to_string())
+        Some("[=============>     ] 3/4_123456789123456e\u{301}\u{301}8\u{301}9…".to_string())
     );
     assert_eq!(
         format.progress_status(3, 4, "：每個漢字佔據了兩個字元"),
-        Some("[=============>     ] 3/4：每個漢字佔據了...".to_string())
+        Some("[=============>     ] 3/4：每個漢字佔據了兩…".to_string())
     );
     assert_eq!(
         // handle breaking at middle of character
         format.progress_status(3, 4, "：-每個漢字佔據了兩個字元"),
-        Some("[=============>     ] 3/4：-每個漢字佔據了...".to_string())
+        Some("[=============>     ] 3/4：-每個漢字佔據了兩…".to_string())
     );
 }
 
@@ -493,6 +647,8 @@ fn test_progress_status_percentage() {
         style: ProgressStyle::Percentage,
         max_print: 40,
         max_width: 60,
+        term_integration: TerminalIntegration::new(false),
+        unicode: true,
     };
     assert_eq!(
         format.progress_status(0, 77, ""),
@@ -518,6 +674,8 @@ fn test_progress_status_too_short() {
         style: ProgressStyle::Percentage,
         max_print: 25,
         max_width: 25,
+        term_integration: TerminalIntegration::new(false),
+        unicode: true,
     };
     assert_eq!(
         format.progress_status(1, 1, ""),
@@ -528,6 +686,26 @@ fn test_progress_status_too_short() {
         style: ProgressStyle::Percentage,
         max_print: 24,
         max_width: 24,
+        term_integration: TerminalIntegration::new(false),
+        unicode: true,
     };
     assert_eq!(format.progress_status(1, 1, ""), None);
+}
+
+#[test]
+fn test_term_integration_disabled() {
+    let report = TerminalIntegration::new(false);
+    let mut out = String::new();
+    out.push_str(&report.remove().to_string());
+    out.push_str(&report.value(10.0).to_string());
+    out.push_str(&report.indeterminate().to_string());
+    assert!(out.is_empty());
+}
+
+#[test]
+fn test_term_integration_error_state() {
+    let mut report = TerminalIntegration::new(true);
+    assert_eq!(report.value(10.0), StatusValue::Value(10.0));
+    report.error();
+    assert_eq!(report.value(50.0), StatusValue::Error(50.0));
 }

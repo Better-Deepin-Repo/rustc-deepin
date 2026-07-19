@@ -29,7 +29,7 @@ stdout and stderr output against the expected output.
 
 Generally, a functional test will be placed in `tests/testsuite/<command>.rs` and will look roughly like:
 ```rust,ignore
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
 use cargo_test_support::str;
 use cargo_test_support::project;
 
@@ -63,6 +63,16 @@ test.
 - This executes the command and evaluates different assertions
   - See [`support::compare`] for an explanation of the string pattern matching.
     Patterns are used to make it easier to match against the expected output.
+
+#### Filesystem layout testing
+
+Tests often to need to verify Cargo created/removed files.
+The `CargoPathExt` trait (implemented by `Path` and `PathBuf`) provides a `assert_dir_layout()` to verify the files in a directory (including nested directories).
+This takes a snapshot of file paths for the given directory and asserts that all files are present and no new files have been created.
+This function also takes a list of patterns to ignore from the snapshot to make working with platform specific files easier.
+
+Note: You will commonly need to call `unordered()` before passing your snapshot to deal with platform differences like binaries having `.exe` on Windows.
+`assert_build_dir_layout` is a more specialized version of `assert_dir_layout()` that is automatically unordered and ignores common platform specific files designed for the Cargo build cache.
 
 #### Testing Nightly Features
 
@@ -123,7 +133,7 @@ Tests that need to do cross-compilation should include this at the top of the
 test to disable it in scenarios where cross compilation isn't available:
 
 ```rust,ignore
-if cargo_test_support::cross_compile::disabled() {
+if crate::utils::cross_compile::disabled() {
     return;
 }
 ```
@@ -132,21 +142,11 @@ The name of the target can be fetched with the [`cross_compile::alternate()`]
 function. The name of the host target can be fetched with
 [`cargo_test_support::rustc_host()`].
 
-The cross-tests need to distinguish between targets which can *build* versus
-those which can actually *run* the resulting executable. Unfortunately, macOS is
-currently unable to run an alternate target (Apple removed 32-bit support a
-long time ago). For building, `x86_64-apple-darwin` will target
-`x86_64-apple-ios` as its alternate. However, the iOS target can only execute
-binaries if the iOS simulator is installed and configured. The simulator is
-not available in CI, so all tests that need to run cross-compiled binaries are
-disabled on CI. If you are running on macOS locally, and have the simulator
-installed, then it should be able to run them.
-
 If the test needs to run the cross-compiled binary, then it should have
 something like this to exit the test before doing so:
 
 ```rust,ignore
-if cargo_test_support::cross_compile::can_run_on_host() {
+if crate::utils::cross_compile::can_run_on_host() {
     return;
 }
 ```
@@ -165,10 +165,10 @@ mod <case>;
 
 `tests/testsuite/<command>/<case>/mod.rs`:
 ```rust,ignore
+use crate::prelude::*;
 use cargo_test_support::compare::assert_ui;
 use cargo_test_support::current_dir;
 use cargo_test_support::file;
-use cargo_test_support::prelude::*;
 use cargo_test_support::Project;
 
 #[cargo_test]

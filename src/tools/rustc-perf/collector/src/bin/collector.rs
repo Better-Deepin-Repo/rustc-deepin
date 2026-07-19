@@ -12,52 +12,69 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::process::Command;
+use std::str::FromStr;
 use std::time::Duration;
 use std::{str, time::Instant};
 
 use anyhow::Context;
+use chrono::Utc;
 use clap::builder::TypedValueParser;
 use clap::{Arg, Parser};
 use collector::compare::compare_artifacts;
+use hashbrown::HashSet;
 use humansize::{format_size, BINARY};
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use tabled::builder::Builder;
 use tabled::settings::object::{Columns, Rows};
-use tabled::settings::{Alignment, Border, Color, Modify};
+use tabled::settings::style::Border;
+use tabled::settings::{Alignment, Color, Modify, Width};
 use tokio::runtime::Runtime;
 
 use collector::api::next_artifact::NextArtifact;
 use collector::artifact_stats::{
     compile_and_get_stats, ArtifactStats, ArtifactWithStats, CargoProfile,
 };
+use collector::benchmark_set::{expand_benchmark_set, BenchmarkSetId, BenchmarkSetMember};
 use collector::codegen::{codegen_diff, CodegenType};
 use collector::compile::benchmark::category::Category;
 use collector::compile::benchmark::codegen_backend::CodegenBackend;
 use collector::compile::benchmark::profile::Profile;
 use collector::compile::benchmark::scenario::Scenario;
+use collector::compile::benchmark::target::Target;
 use collector::compile::benchmark::{
     compile_benchmark_dir, get_compile_benchmarks, ArtifactType, Benchmark, BenchmarkName,
+    CompileBenchmarkFilter,
 };
 use collector::compile::execute::bencher::BenchProcessor;
 use collector::compile::execute::profiler::{ProfileProcessor, Profiler};
 use collector::runtime::{
     bench_runtime, get_runtime_benchmark_groups, prepare_runtime_benchmark_suite,
-    runtime_benchmark_dir, BenchmarkFilter, BenchmarkSuite, BenchmarkSuiteCompilation,
-    CargoIsolationMode, RuntimeProfiler, DEFAULT_RUNTIME_ITERATIONS,
+    runtime_benchmark_dir, BenchmarkSuite, BenchmarkSuiteCompilation, CargoIsolationMode,
+    RuntimeBenchmarkFilter, RuntimeProfiler, DEFAULT_RUNTIME_ITERATIONS,
 };
 use collector::runtime::{profile_runtime, RuntimeCompilationOpts};
 use collector::toolchain::{
-    create_toolchain_from_published_version, get_local_toolchain, Sysroot, Toolchain,
-    ToolchainConfig,
+    create_toolchain_from_published_version, get_local_toolchain, Sysroot, SysrootDownloadError,
+    Toolchain, ToolchainConfig,
 };
 use collector::utils::cachegrind::cachegrind_diff;
 use collector::utils::{is_installed, wait_for_future};
-use collector::{utils, CollectorCtx, CollectorStepBuilder};
-use database::{ArtifactId, ArtifactIdNumber, Commit, CommitType, Connection, Pool};
+use collector::{command_output, utils, CollectorCtx, CollectorStepBuilder};
+use database::{
+    ArtifactId, ArtifactIdNumber, BenchmarkJob, BenchmarkJobConclusion, CollectorConfig, Commit,
+    CommitType, Connection, Pool,
+};
+
+/// Directory used to cache downloaded Rust toolchains on disk.
+const TOOLCHAIN_CACHE_DIRECTORY: &str = "cache";
+
+/// Maximum allowed number of toolchains in the toolchain cache directory.
+/// If the directory will have more toolchains, it will be purged.
+const TOOLCHAIN_CACHE_MAX_TOOLCHAINS: usize = 30;
 
 fn n_normal_benchmarks_remaining(n: usize) -> String {
     let suffix = if n == 1 { "" } else { "s" };
-    format!("{} normal benchmark{} remaining", n, suffix)
+    format!("{n} normal benchmark{suffix} remaining")
 }
 
 struct BenchmarkErrors(usize);
@@ -97,16 +114,17 @@ struct CompileBenchmarkConfig {
     iterations: Option<usize>,
     is_self_profile: bool,
     bench_rustc: bool,
+    targets: Vec<Target>,
 }
 
 struct RuntimeBenchmarkConfig {
     runtime_suite: BenchmarkSuite,
-    filter: BenchmarkFilter,
+    filter: RuntimeBenchmarkFilter,
     iterations: u32,
 }
 
 impl RuntimeBenchmarkConfig {
-    fn new(suite: BenchmarkSuite, filter: BenchmarkFilter, iterations: u32) -> Self {
+    fn new(suite: BenchmarkSuite, filter: RuntimeBenchmarkFilter, iterations: u32) -> Self {
         Self {
             runtime_suite: suite.filter(&filter),
             filter,
@@ -118,6 +136,7 @@ impl RuntimeBenchmarkConfig {
 struct SharedBenchmarkConfig {
     artifact_id: ArtifactId,
     toolchain: Toolchain,
+    job_id: Option<u32>,
 }
 
 fn check_measureme_installed() -> Result<(), String> {
@@ -131,14 +150,8 @@ fn check_measureme_installed() -> Result<(), String> {
     }
 }
 
-fn check_installed(name: &str) -> anyhow::Result<()> {
-    if !is_installed(name) {
-        anyhow::bail!("`{}` is not installed but must be", name);
-    }
-    Ok(())
-}
-
-fn generate_cachegrind_diffs(
+#[allow(clippy::too_many_arguments)]
+fn generate_diffs(
     id1: &str,
     id2: &str,
     out_dir: &Path,
@@ -146,12 +159,13 @@ fn generate_cachegrind_diffs(
     profiles: &[Profile],
     scenarios: &[Scenario],
     errors: &mut BenchmarkErrors,
+    profiler: &Profiler,
 ) -> Vec<PathBuf> {
     let mut annotated_diffs = Vec::new();
     for benchmark in benchmarks {
         for &profile in profiles {
             for scenario in scenarios.iter().flat_map(|scenario| {
-                if profile == Profile::Doc && scenario.is_incr() {
+                if profile.is_doc() && scenario.is_incr() {
                     return vec![];
                 }
                 match scenario {
@@ -159,28 +173,34 @@ fn generate_cachegrind_diffs(
                         vec![format!("{:?}", scenario)]
                     }
                     Scenario::IncrPatched => (0..benchmark.patches.len())
-                        .map(|i| format!("{:?}{}", scenario, i))
+                        .map(|i| format!("{scenario:?}{i}"))
                         .collect::<Vec<_>>(),
                 }
             }) {
                 let filename = |prefix, id| {
                     format!(
-                        "{}-{}-{}-{:?}-{}",
-                        prefix, id, benchmark.name, profile, scenario
+                        "{}-{}-{}-{:?}-{}{}",
+                        prefix,
+                        id,
+                        benchmark.name,
+                        profile,
+                        scenario,
+                        profiler.postfix()
                     )
                 };
-                let id_diff = format!("{}-{}", id1, id2);
-                let cgout1 = out_dir.join(filename("cgout", id1));
-                let cgout2 = out_dir.join(filename("cgout", id2));
-                let cgann_diff = out_dir.join(filename("cgann-diff", &id_diff));
+                let id_diff = format!("{id1}-{id2}");
+                let prefix = profiler.prefix();
+                let left = out_dir.join(filename(prefix, id1));
+                let right = out_dir.join(filename(prefix, id2));
+                let output = out_dir.join(filename(&format!("{prefix}-diff"), &id_diff));
 
-                if let Err(e) = cachegrind_diff(&cgout1, &cgout2, &cgann_diff) {
+                if let Err(e) = profiler.diff(&left, &right, &output) {
                     errors.incr();
-                    eprintln!("collector error: {:?}", e);
+                    eprintln!("collector error: {e:?}");
                     continue;
                 }
 
-                annotated_diffs.push(cgann_diff);
+                annotated_diffs.push(output);
             }
         }
     }
@@ -197,6 +217,7 @@ fn profile_compile(
     scenarios: &[Scenario],
     backends: &[CodegenBackend],
     errors: &mut BenchmarkErrors,
+    targets: &[Target],
 ) {
     eprintln!("Profiling {} with {:?}", toolchain.id, profiler);
     if let Profiler::SelfProfile = profiler {
@@ -217,6 +238,9 @@ fn profile_compile(
                 backends,
                 toolchain,
                 Some(1),
+                targets,
+                // We always want to profile everything
+                &hashbrown::HashSet::new(),
             ));
             eprintln!("Finished benchmark {benchmark_id}");
 
@@ -238,7 +262,7 @@ fn main() {
     match main_result() {
         Ok(code) => process::exit(code),
         Err(err) => {
-            eprintln!("collector error: {:?}", err);
+            eprintln!("collector error: {err:?}");
             process::exit(1);
         }
     }
@@ -330,6 +354,16 @@ struct LocalOptions {
     #[arg(long, value_delimiter = ',')]
     include: Vec<String>,
 
+    /// Include only benchmarks in this comma-separated list
+    #[arg(
+        long,
+        value_delimiter = ',',
+        conflicts_with("include"),
+        conflicts_with("exclude"),
+        conflicts_with("exclude_suffix")
+    )]
+    exact_match: Vec<String>,
+
     /// Include only benchmarks belonging to the given categories.
     #[arg(long, value_parser = EnumArgParser::<Category>::default(), default_value = "Primary,Secondary")]
     category: MultiEnumValue<Category>,
@@ -364,7 +398,8 @@ struct CompileTimeOptions {
     #[arg(long)]
     rustdoc: Option<PathBuf>,
 
-    /// The path to the local clippy to measure
+    /// The path to the local clippy to measure.
+    /// It should be a path to the `clippy-driver` binary.
     #[arg(long)]
     clippy: Option<PathBuf>,
 }
@@ -389,7 +424,7 @@ struct DbOption {
     /// Database output file
     // This would be better as a `PathBuf`, but it's used in various ways that
     // make that tricky without adjusting several points in the code.
-    #[arg(long, default_value = "results.db")]
+    #[arg(long, default_value = "results.db", env = "DATABASE_URL")]
     db: String,
 }
 
@@ -635,11 +670,61 @@ enum Commands {
         #[command(flatten)]
         db: DbOption,
 
+        /// Metric used to compare artifacts.
+        #[arg(long)]
+        metric: Option<database::metric::Metric>,
+
         /// The name of the base artifact to be compared.
-        base: String,
+        base: Option<String>,
 
         /// The name of the modified artifact to be compared.
-        modified: String,
+        modified: Option<String>,
+    },
+
+    /// Registers a new collector in the database.
+    /// Use `--is_active` to immediately mark the collector as active.
+    AddCollector {
+        #[command(flatten)]
+        db: DbOption,
+
+        /// Name of the collector.
+        #[arg(long)]
+        collector_name: String,
+
+        /// Target tuple which will the collector be benchmarking.
+        #[arg(long)]
+        target: String,
+
+        /// Should the collector be marked as active immediately?
+        /// Only active collectors will receive jobs.
+        #[arg(long)]
+        is_active: bool,
+
+        /// The benchmark set index that the collector will be benchmarking.
+        #[arg(long)]
+        benchmark_set: u32,
+    },
+
+    /// Benchmark test cases pulled from the job queue.
+    BenchmarkJobQueue {
+        /// The unique identifier for the collector.
+        /// It has to exist in the database; you can create new collectors using the `add_collector`
+        /// command.
+        #[arg(long)]
+        collector_name: String,
+
+        /// Git SHA of the commit that the collector is currently on.
+        /// If not present, the collector will attempt to figure it out from git directly.
+        #[arg(long)]
+        git_sha: Option<String>,
+
+        /// Periodically check if the collector's commit SHA matches the commit SHA of the
+        /// rustc-perf repository.
+        #[arg(long)]
+        check_git_sha: bool,
+
+        #[command(flatten)]
+        db: DbOption,
     },
 }
 
@@ -677,6 +762,25 @@ enum DownloadSubcommand {
     },
 }
 
+impl<'a> From<&'a LocalOptions> for CompileBenchmarkFilter<'a> {
+    fn from(value: &'a LocalOptions) -> Self {
+        if !value.exact_match.is_empty() {
+            Self::Exact(&value.exact_match)
+        } else if !value.include.is_empty()
+            || !value.exclude.is_empty()
+            || !value.exclude_suffix.is_empty()
+        {
+            Self::Fuzzy {
+                include: &value.include,
+                exclude: &value.exclude,
+                exclude_suffix: &value.exclude_suffix,
+            }
+        } else {
+            Self::All
+        }
+    }
+}
+
 fn main_result() -> anyhow::Result<i32> {
     env_logger::init();
 
@@ -690,14 +794,54 @@ fn main_result() -> anyhow::Result<i32> {
         runtime: &runtime_benchmark_dir,
     };
 
-    // XXX: This doesn't necessarily work for all archs
-    let target_triple = format!("{}-unknown-linux-gnu", std::env::consts::ARCH);
+    // We need to find the host tuple for a couple of things (several collector commands need it).
+    // Probably the simplest way of determining it is asking rustc what is its host tuple.
+    // However, where to get that rustc? We could just try using "rustc", but that is not always
+    // available, e.g. on Rust's CI.
+    // So we try to figure out if we have some rustc available from the command that is being
+    // executed; such rustc should definitely be executable on this host.
+    // If we don't, we'll simply fall back to `rustc`.
+    let used_rustc: Option<String> = match &args.command {
+        Commands::BinaryStats {
+            mode: BinaryStatsMode::Compile(args),
+            ..
+        } => Some(args.local.rustc.clone()),
+        Commands::BenchRuntimeLocal { local, .. } => Some(local.rustc.clone()),
+        Commands::ProfileRuntime { rustc, .. } => Some(rustc.clone()),
+        Commands::CodegenDiff { rustc1, .. } => Some(rustc1.clone()),
+        Commands::BenchLocal { local, .. } => Some(local.rustc.clone()),
+        Commands::ProfileLocal { local, .. } => Some(local.rustc.clone()),
+        Commands::BinaryStats {
+            mode: BinaryStatsMode::Local(_),
+            ..
+        }
+        | Commands::BenchNext { .. }
+        | Commands::BenchPublished { .. }
+        | Commands::InstallNext { .. }
+        | Commands::Download(_)
+        | Commands::PurgeArtifact { .. }
+        | Commands::BenchCmp { .. }
+        | Commands::AddCollector { .. }
+        | Commands::BenchmarkJobQueue { .. } => None,
+    };
+
+    let host_target_tuple = match used_rustc {
+        Some(rustc) => get_host_tuple_from_rustc(&rustc),
+        None => get_host_tuple_from_rustc("rustc"),
+    };
+    // We only unwrap the host tuple in places where we actually need it, to avoid panicking if it
+    // is missing, but we don't really need it.
+    let require_host_target_tuple = || {
+        host_target_tuple.expect(
+            "Cannot determine host target tuple. Please make a `rustc` binary available in PATH.",
+        )
+    };
 
     match args.command {
         Commands::BinaryStats { mode, symbols } => {
             match mode {
                 BinaryStatsMode::Compile(args) => {
-                    binary_stats_compile(args, symbols, &target_triple)?;
+                    binary_stats_compile(args, symbols, &require_host_target_tuple())?;
                 }
                 BinaryStatsMode::Local(args) => {
                     binary_stats_local(args, symbols)?;
@@ -716,7 +860,8 @@ fn main_result() -> anyhow::Result<i32> {
             purge,
         } => {
             log_db(&db);
-            let toolchain = get_local_toolchain_for_runtime_benchmarks(&local, &target_triple)?;
+            let toolchain =
+                get_local_toolchain_for_runtime_benchmarks(&local, &require_host_target_tuple())?;
             let pool = Pool::open(&db.db);
 
             let isolation_mode = if no_isolate {
@@ -725,9 +870,14 @@ fn main_result() -> anyhow::Result<i32> {
                 CargoIsolationMode::Isolated
             };
 
-            let mut rt = build_async_runtime();
+            let rt = build_async_runtime();
             let mut conn = rt.block_on(pool.connection());
-            let artifact_id = ArtifactId::Tag(toolchain.id.clone());
+            let artifact_id = ArtifactId::Commit(Commit {
+                sha: toolchain.id.clone(),
+                date: Utc::now().into(),
+                r#type: CommitType::Master,
+            });
+
             rt.block_on(purge_old_data(conn.as_mut(), &artifact_id, purge.purge));
 
             let runtime_suite = rt.block_on(load_runtime_benchmarks(
@@ -737,18 +887,20 @@ fn main_result() -> anyhow::Result<i32> {
                 runtime.group,
                 &toolchain,
                 &artifact_id,
+                None,
             ))?;
 
             let shared = SharedBenchmarkConfig {
                 artifact_id,
                 toolchain,
+                job_id: None,
             };
             let config = RuntimeBenchmarkConfig::new(
                 runtime_suite,
-                BenchmarkFilter::new(local.exclude, local.include),
+                RuntimeBenchmarkFilter::new(local.exclude, local.include),
                 iterations,
             );
-            run_benchmarks(&mut rt, conn, shared, None, Some(config))?;
+            rt.block_on(run_benchmarks(conn.as_mut(), shared, None, Some(config)))?;
             Ok(0)
         }
         Commands::ProfileRuntime {
@@ -758,6 +910,7 @@ fn main_result() -> anyhow::Result<i32> {
             rustc2,
             benchmark,
         } => {
+            let host_target_tuple = require_host_target_tuple();
             let get_suite = |rustc: &str, id: &str| {
                 let toolchain = get_local_toolchain(
                     &[Profile::Opt],
@@ -765,7 +918,7 @@ fn main_result() -> anyhow::Result<i32> {
                     rustc,
                     ToolchainConfig::default(),
                     id,
-                    target_triple.clone(),
+                    host_target_tuple.clone(),
                 )?;
                 let suite = prepare_runtime_benchmark_suite(
                     &toolchain,
@@ -815,6 +968,7 @@ fn main_result() -> anyhow::Result<i32> {
             rustc1: rustc,
             rustc2,
         } => {
+            let host_target_tuple = require_host_target_tuple();
             let get_toolchain = |rustc: &str, id: &str| {
                 let toolchain = get_local_toolchain(
                     &[Profile::Opt],
@@ -822,7 +976,7 @@ fn main_result() -> anyhow::Result<i32> {
                     rustc,
                     ToolchainConfig::default(),
                     id,
-                    target_triple.clone(),
+                    host_target_tuple.clone(),
                 )?;
                 Ok::<_, anyhow::Error>(toolchain)
             };
@@ -865,25 +1019,26 @@ fn main_result() -> anyhow::Result<i32> {
                     .cargo(local.cargo.as_deref(), local.cargo_config.as_slice())
                     .id(local.id.as_deref()),
                 "",
-                target_triple,
+                require_host_target_tuple(),
             )?;
 
-            let mut benchmarks = get_compile_benchmarks(
-                &compile_benchmark_dir,
-                &local.include,
-                &local.exclude,
-                &local.exclude_suffix,
-            )?;
+            let mut benchmarks = get_compile_benchmarks(&compile_benchmark_dir, (&local).into())?;
             benchmarks.retain(|b| local.category.0.contains(&b.category()));
 
-            let artifact_id = ArtifactId::Tag(toolchain.id.clone());
-            let mut rt = build_async_runtime();
+            let artifact_id = ArtifactId::Commit(Commit {
+                sha: toolchain.id.clone(),
+                date: Utc::now().into(),
+                r#type: CommitType::Master,
+            });
+
+            let rt = build_async_runtime();
             let mut conn = rt.block_on(pool.connection());
             rt.block_on(purge_old_data(conn.as_mut(), &artifact_id, purge.purge));
 
             let shared = SharedBenchmarkConfig {
                 toolchain,
                 artifact_id,
+                job_id: None,
             };
             let config = CompileBenchmarkConfig {
                 benchmarks,
@@ -893,9 +1048,10 @@ fn main_result() -> anyhow::Result<i32> {
                 iterations: Some(iterations),
                 is_self_profile: self_profile.self_profile,
                 bench_rustc: bench_rustc.bench_rustc,
+                targets: vec![Target::default()],
             };
 
-            run_benchmarks(&mut rt, conn, shared, Some(config), None)?;
+            rt.block_on(run_benchmarks(conn.as_mut(), shared, Some(config), None))?;
             Ok(0)
         }
 
@@ -909,7 +1065,7 @@ fn main_result() -> anyhow::Result<i32> {
             println!("processing artifacts");
             let client = reqwest::blocking::Client::new();
             let response: collector::api::next_artifact::Response = client
-                .get(format!("{}/perf/next_artifact", site_url))
+                .get(format!("{site_url}/perf/next_artifact"))
                 .send()?
                 .json()?;
             let next = if let Some(c) = response.artifact {
@@ -928,25 +1084,47 @@ fn main_result() -> anyhow::Result<i32> {
 
             let res = std::panic::catch_unwind(|| {
                 let pool = database::Pool::open(&db.db);
-                let mut rt = build_async_runtime();
+                let rt = build_async_runtime();
 
                 match next {
                     NextArtifact::Release(tag) => {
-                        let toolchain =
-                            create_toolchain_from_published_version(&tag, &target_triple)?;
-                        bench_published_artifact(
-                            rt.block_on(pool.connection()),
-                            &mut rt,
+                        let toolchain = create_toolchain_from_published_version(
+                            &tag,
+                            &require_host_target_tuple(),
+                        )?;
+                        let conn = rt.block_on(pool.connection());
+                        rt.block_on(bench_published_artifact(
+                            conn,
                             toolchain,
                             &benchmark_dirs,
-                        )
+                            None,
+                        ))
                     }
                     NextArtifact::Commit {
                         commit,
                         include,
                         exclude,
                         runs,
+                        backends: requested_backends,
                     } => {
+                        // Parse the requested backends, with LLVM as a fallback if none or no valid
+                        // ones were explicitly specified, which will be the case for the vast
+                        // majority of cases.
+                        let mut backends = vec![];
+                        if let Some(requested_backends) = requested_backends {
+                            let requested_backends = requested_backends.to_lowercase();
+                            if requested_backends.contains("llvm") {
+                                backends.push(CodegenBackend::Llvm);
+                            }
+                            if requested_backends.contains("cranelift") {
+                                backends.push(CodegenBackend::Cranelift);
+                            }
+                        }
+
+                        if backends.is_empty() {
+                            backends.push(CodegenBackend::Llvm);
+                        }
+
                         // FIXME: remove this when/if NextArtifact::Commit's include/exclude
                         // changed from Option<String> to Vec<String>
                         // to not to manually parse args
@@ -958,18 +1136,23 @@ fn main_result() -> anyhow::Result<i32> {
                             }
                         };
                         let sha = commit.sha.to_string();
-                        let sysroot = Sysroot::install(
-                            sha.clone(),
-                            &target_triple,
-                            vec![CodegenBackend::Llvm],
-                        )
-                        .with_context(|| format!("failed to install sysroot for {:?}", commit))?;
+                        let sysroot = rt
+                            .block_on(Sysroot::install(
+                                Path::new(TOOLCHAIN_CACHE_DIRECTORY),
+                                sha.clone(),
+                                &require_host_target_tuple(),
+                                &backends,
+                            ))
+                            .map_err(SysrootDownloadError::as_anyhow_error)
+                            .with_context(|| format!("failed to install sysroot for {commit:?}"))?;
 
                         let mut benchmarks = get_compile_benchmarks(
                             &compile_benchmark_dir,
-                            &split_args(include),
-                            &split_args(exclude),
-                            &[],
+                            CompileBenchmarkFilter::Fuzzy {
+                                include: &split_args(include),
+                                exclude: &split_args(exclude),
+                                exclude_suffix: &[],
+                            },
                         )?;
                         benchmarks.retain(|b| b.category().is_primary_or_secondary());
 
@@ -986,10 +1169,11 @@ fn main_result() -> anyhow::Result<i32> {
                                 Profile::Opt,
                             ],
                             scenarios: Scenario::all(),
-                            backends: vec![CodegenBackend::Llvm],
+                            backends,
                             iterations: runs.map(|v| v as usize),
                             is_self_profile: self_profile.self_profile,
                             bench_rustc: bench_rustc.bench_rustc,
+                            targets: vec![Target::default()],
                         };
                         let runtime_suite = rt.block_on(load_runtime_benchmarks(
                             conn.as_mut(),
@@ -998,30 +1182,31 @@ fn main_result() -> anyhow::Result<i32> {
                             None,
                             &toolchain,
                             &artifact_id,
+                            None,
                         ))?;
 
                         let runtime_config = RuntimeBenchmarkConfig {
                             runtime_suite,
-                            filter: BenchmarkFilter::keep_all(),
+                            filter: RuntimeBenchmarkFilter::keep_all(),
                             iterations: DEFAULT_RUNTIME_ITERATIONS,
                         };
                         let shared = SharedBenchmarkConfig {
                             artifact_id,
                             toolchain,
+                            job_id: None,
                         };
 
-                        run_benchmarks(
-                            &mut rt,
-                            conn,
+                        rt.block_on(run_benchmarks(
+                            conn.as_mut(),
                             shared,
                             Some(compile_config),
                             Some(runtime_config),
-                        )
+                        ))
                     }
                 }
             });
             // We need to send a message to this endpoint even if the collector panics
-            client.post(format!("{}/perf/onpush", site_url)).send()?;
+            client.post(format!("{site_url}/perf/onpush")).send()?;
 
             match res {
                 Ok(res) => res?,
@@ -1035,10 +1220,16 @@ fn main_result() -> anyhow::Result<i32> {
         Commands::BenchPublished { toolchain, db } => {
             log_db(&db);
             let pool = database::Pool::open(&db.db);
-            let mut rt = build_async_runtime();
+            let rt = build_async_runtime();
             let conn = rt.block_on(pool.connection());
-            let toolchain = create_toolchain_from_published_version(&toolchain, &target_triple)?;
-            bench_published_artifact(conn, &mut rt, toolchain, &benchmark_dirs)?;
+            let toolchain =
+                create_toolchain_from_published_version(&toolchain, &require_host_target_tuple())?;
+            rt.block_on(bench_published_artifact(
+                conn,
+                toolchain,
+                &benchmark_dirs,
+                None,
+            ))?;
             Ok(0)
         }
 
@@ -1062,12 +1253,7 @@ fn main_result() -> anyhow::Result<i32> {
             let scenarios = &opts.scenarios.0;
             let backends = &opts.codegen_backends.0;
 
-            let mut benchmarks = get_compile_benchmarks(
-                &compile_benchmark_dir,
-                &local.include,
-                &local.exclude,
-                &local.exclude_suffix,
-            )?;
+            let mut benchmarks = get_compile_benchmarks(&compile_benchmark_dir, (&local).into())?;
             benchmarks.retain(|b| local.category.0.contains(&b.category()));
 
             let mut errors = BenchmarkErrors::new();
@@ -1078,6 +1264,7 @@ fn main_result() -> anyhow::Result<i32> {
                 .build_global()
                 .unwrap();
 
+            let host_target_tuple = require_host_target_tuple();
             let mut get_toolchain_and_profile =
                 |rustc: &str, suffix: &str| -> anyhow::Result<String> {
                     let toolchain = get_local_toolchain(
@@ -1090,7 +1277,7 @@ fn main_result() -> anyhow::Result<i32> {
                             .cargo(local.cargo.as_deref(), local.cargo_config.as_slice())
                             .id(local.id.as_deref()),
                         suffix,
-                        target_triple.clone(),
+                        host_target_tuple.clone(),
                     )?;
                     let id = toolchain.id.clone();
                     profile_compile(
@@ -1102,6 +1289,7 @@ fn main_result() -> anyhow::Result<i32> {
                         scenarios,
                         backends,
                         &mut errors,
+                        &[Target::default()],
                     );
                     Ok(id)
                 };
@@ -1113,32 +1301,25 @@ fn main_result() -> anyhow::Result<i32> {
                 let id1 = get_toolchain_and_profile(local.rustc.as_str(), "1")?;
                 let id2 = get_toolchain_and_profile(rustc2.as_str(), "2")?;
 
-                if profiler == Profiler::Cachegrind {
-                    check_installed("valgrind")?;
-                    check_installed("cg_annotate")?;
-
-                    let diffs = generate_cachegrind_diffs(
-                        &id1,
-                        &id2,
-                        &out_dir,
-                        &benchmarks,
-                        profiles,
-                        scenarios,
-                        &mut errors,
-                    );
-                    match diffs.len().cmp(&1) {
-                        Ordering::Equal => {
-                            let short = out_dir.join("cgann-diff-latest");
-                            std::fs::copy(&diffs[0], &short).expect("copy to short path");
-                            eprintln!("Original diff at: {}", diffs[0].to_string_lossy());
-                            eprintln!("Short path: {}", short.to_string_lossy());
-                        }
-                        _ => {
-                            eprintln!("Diffs:");
-                            for diff in diffs {
-                                eprintln!("{}", diff.to_string_lossy());
-                            }
-                        }
+                let diffs = generate_diffs(
+                    &id1,
+                    &id2,
+                    &out_dir,
+                    &benchmarks,
+                    profiles,
+                    scenarios,
+                    &mut errors,
+                    &profiler,
+                );
+                if let [diff] = &diffs[..] {
+                    let short = out_dir.join(format!("{}-diff-latest", profiler.prefix()));
+                    std::fs::copy(diff, &short).expect("copy to short path");
+                    eprintln!("Original diff at: {}", diff.to_string_lossy());
+                    eprintln!("Short path: {}", short.to_string_lossy());
+                } else {
+                    eprintln!("Diffs:");
+                    for diff in diffs {
+                        eprintln!("{}", diff.to_string_lossy());
                     }
                 }
             } else {
@@ -1150,16 +1331,18 @@ fn main_result() -> anyhow::Result<i32> {
         }
 
         Commands::InstallNext { codegen_backends } => {
-            let last_sha = Command::new("git")
-                .arg("ls-remote")
-                .arg("https://github.com/rust-lang/rust.git")
-                .arg("master")
-                .output()
-                .unwrap();
-            let last_sha = String::from_utf8(last_sha.stdout).expect("utf8");
-            let last_sha = last_sha.split_whitespace().next().expect(&last_sha);
-            let commit = get_commit_or_fake_it(last_sha).expect("success");
-            let mut sysroot = Sysroot::install(commit.sha, &target_triple, codegen_backends.0)?;
+            let last_sha = get_latest_sha("https://github.com/rust-lang/rust").unwrap();
+            let commit = get_commit_or_fake_it(&last_sha).expect("success");
+
+            let rt = build_async_runtime();
+            let mut sysroot = rt
+                .block_on(Sysroot::install(
+                    Path::new(TOOLCHAIN_CACHE_DIRECTORY),
+                    commit.sha,
+                    &require_host_target_tuple(),
+                    &codegen_backends.0,
+                ))
+                .map_err(SysrootDownloadError::as_anyhow_error)?;
             sysroot.preserve(); // don't delete it
 
             // Print the directory containing the toolchain.
@@ -1200,14 +1383,435 @@ Make sure to modify `{dir}/perf-config.json` if the category/artifact don't matc
             println!("Data of artifact {name} were removed");
             Ok(0)
         }
-        Commands::BenchCmp { db, base, modified } => {
+        Commands::BenchCmp {
+            db,
+            base,
+            modified,
+            metric,
+        } => {
             let pool = Pool::open(&db.db);
             let rt = build_async_runtime();
             let conn = rt.block_on(pool.connection());
-            rt.block_on(compare_artifacts(conn, base, modified))?;
+            rt.block_on(compare_artifacts(conn, metric, base, modified))?;
+            Ok(0)
+        }
+
+        Commands::AddCollector {
+            db,
+            collector_name,
+            target,
+            is_active,
+            benchmark_set,
+        } => {
+            let pool = Pool::open(&db.db);
+            let rt = build_async_runtime();
+            let conn = rt.block_on(pool.connection());
+
+            let target = database::Target::from_str(&target).map_err(|e| anyhow::anyhow!(e))?;
+            rt.block_on(conn.add_collector_config(
+                &collector_name,
+                target,
+                benchmark_set,
+                is_active,
+            ))?;
+            Ok(0)
+        }
+
+        Commands::BenchmarkJobQueue {
+            collector_name,
+            git_sha,
+            check_git_sha,
+            db,
+        } => {
+            log_db(&db);
+
+            let git_sha = match git_sha {
+                Some(sha) => sha,
+                None => {
+                    let mut cmd = Command::new("git");
+                    cmd.args(["rev-parse", "HEAD"]);
+                    let stdout = command_output(&mut cmd)
+                        .context("Cannot determine current commit SHA")?
+                        .stdout;
+                    String::from_utf8(stdout).unwrap().trim().to_string()
+                }
+            };
+
+            let pool = Pool::open(&db.db);
+            let rt = build_async_runtime();
+            let conn = rt.block_on(pool.connection());
+
+            // Obtain the configuration and validate that it matches the
+            // collector's host target
+            let collector_config = rt
+                .block_on(conn.start_collector(&collector_name, &git_sha))?
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "No active collector with the name `{collector_name}` not found"
+                    )
+                })?;
+
+            let host_target_tuple = require_host_target_tuple();
+            if collector_config.target().as_str() != host_target_tuple {
+                return Err(anyhow::anyhow!(
+                    "The collector `{collector_name}` is configured for target `{}`, but the current host target seems to be `{host_target_tuple}`",
+                    collector_config.target()
+                ));
+            }
+
+            log::info!(
+                "Starting collector with target {}, benchmark set {} and commit {}",
+                collector_config.target(),
+                collector_config.benchmark_set().get_id(),
+                collector_config.commit_sha().expect("missing commit SHA")
+            );
+
+            let benchmarks =
+                get_compile_benchmarks(&compile_benchmark_dir, CompileBenchmarkFilter::All)?;
+
+            rt.block_on(run_job_queue_benchmarks(
+                pool,
+                conn,
+                &collector_config,
+                benchmarks,
+                check_git_sha,
+            ))?;
+
             Ok(0)
         }
     }
+}
+
+fn get_host_tuple_from_rustc(rustc: &str) -> anyhow::Result<String> {
+    Ok(
+        String::from_utf8(command_output(Command::new(rustc).arg("--print=host-tuple"))?.stdout)?
+            .trim()
+            .to_string(),
+    )
+}
+
+/// Maximum number of failures before a job will be marked as failed.
+const MAX_JOB_FAILS: u32 = 3;
+
+async fn run_job_queue_benchmarks(
+    pool: Pool,
+    mut conn: Box<dyn Connection>,
+    collector: &CollectorConfig,
+    all_compile_benchmarks: Vec<Benchmark>,
+    check_git_sha: bool,
+) -> anyhow::Result<()> {
+    let _ = tidy_toolchain_cache_dir();
+
+    let mut last_request_tag = None;
+
+    while let Some((benchmark_job, artifact_id)) = conn
+        .dequeue_benchmark_job(
+            collector.name(),
+            collector.target(),
+            collector.benchmark_set(),
+        )
+        .await?
+    {
+        // Are we benchmarking a different benchmark request than in the previous iteration of the
+        // loop?
+        let is_new_request = last_request_tag.is_some()
+            && last_request_tag.as_deref() != Some(benchmark_job.request_tag());
+        if is_new_request {
+            let _ = tidy_toolchain_cache_dir();
+        }
+
+        // Here we check if we should update our commit SHA, if rustc-perf has been updated.
+        // We only check for updates when we switch *benchmark requests*, not *benchmark jobs*,
+        // to avoid changing code in the middle of benchmarking the same request.
+        // Note that if an update happens, the job that we have just dequeued will have its deque
+        // counter increased. But since updates are relatively rare, that shouldn't be a big deal,
+        // it will be dequeued again when the collector starts again.
+        if check_git_sha && is_new_request && needs_git_update(collector) {
+            log::warn!("Exiting collector to update itself from git.");
+            return Ok(());
+        }
+
+        last_request_tag = Some(benchmark_job.request_tag().to_string());
+
+        log::info!("Dequeued job {benchmark_job:?}, artifact_id {artifact_id:?}");
+        let result = run_benchmark_job(
+            conn.as_mut(),
+            &benchmark_job,
+            artifact_id.clone(),
+            &all_compile_benchmarks,
+        )
+        .await;
+        match result {
+            Ok(_) => {
+                log::info!("Job finished sucessfully");
+                conn.mark_benchmark_job_as_completed(
+                    benchmark_job.id(),
+                    BenchmarkJobConclusion::Success,
+                )
+                .await?;
+            }
+            Err(error) => {
+                match error {
+                    BenchmarkJobError::Permanent(error) => {
+                        log::error!("Job finished with permanent error: {error:?}");
+
+                        // Store the error to the database
+                        let artifact_row_id = conn.artifact_id(&artifact_id).await;
+                        // Use a <job> placeholder to say that the error is associated with a job,
+                        // not with a benchmark.
+                        conn.record_error(
+                            artifact_row_id,
+                            "Job failure",
+                            &format!("Error while benchmarking job {benchmark_job:?}: {error:?}"),
+                            Some(benchmark_job.id()),
+                        )
+                        .await;
+
+                        // Something bad that probably cannot be retried has happened.
+                        // Immediately mark the job as failed and continue with other jobs
+                        log::info!("Marking the job as failed");
+                        conn.mark_benchmark_job_as_completed(
+                            benchmark_job.id(),
+                            BenchmarkJobConclusion::Failure,
+                        )
+                        .await?;
+                    }
+                    BenchmarkJobError::Transient(error) => {
+                        log::error!("Job finished with transient error: {error:?}");
+
+                        // There was some transient (i.e. I/O, network or database) error.
+                        // Let's retry the job later, with some sleep
+                        log::info!("Retrying after 30s...");
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+
+                        // Maybe there was a DB issue. Try to reconnect to the database.
+                        conn = pool.connection().await;
+                    }
+                }
+            }
+        }
+
+        conn.update_collector_heartbeat(collector.name()).await?;
+    }
+    log::info!("No job found, exiting");
+    Ok(())
+}
+
+/// Check the toolchain cache directory and delete it if it grows too large.
+/// Currently, we just assume that "too large" means "has more than N toolchains".
+fn tidy_toolchain_cache_dir() -> std::io::Result<()> {
+    let dir_count = Path::new(TOOLCHAIN_CACHE_DIRECTORY)
+        .read_dir()?
+        .filter_map(|e| e.ok())
+        .filter_map(|d| d.file_type().ok())
+        .filter(|t| t.is_dir())
+        .count();
+    if dir_count > TOOLCHAIN_CACHE_MAX_TOOLCHAINS {
+        log::warn!("Purging toolchain cache directory at {TOOLCHAIN_CACHE_DIRECTORY}");
+        // Just remove the whole directory, to avoid having to figure out which toolchains are old
+        std::fs::remove_dir_all(TOOLCHAIN_CACHE_DIRECTORY)?;
+    }
+    Ok(())
+}
+
+/// Returns true if the commit SHA of collector does not match the latest commit SHA of the master
+/// branch of https://github.com/rust-lang/rustc-perf.
+fn needs_git_update(collector: &CollectorConfig) -> bool {
+    let Some(commit_sha) = collector.commit_sha() else {
+        return false;
+    };
+
+    let Ok(upstream_sha) = get_latest_sha("https://github.com/rust-lang/rustc-perf") else {
+        return false;
+    };
+    if commit_sha != upstream_sha {
+        log::warn!(
+            "Commit {commit_sha} of collector is outdated, latest commit is {upstream_sha}."
+        );
+        true
+    } else {
+        false
+    }
+}
+
+/// Returns the latest known sha of the default branch of the specified `repo`.
+fn get_latest_sha(repo: &str) -> anyhow::Result<String> {
+    let mut cmd = Command::new("git");
+    cmd.arg("ls-remote").arg(repo).arg("HEAD");
+    match command_output(&mut cmd) {
+        Ok(output) => Ok(String::from_utf8(output.stdout)?
+            .split_whitespace()
+            .next()
+            .unwrap()
+            .to_string()),
+        Err(error) => {
+            log::error!("Cannot determine latest SHA of {repo}: {error:?}");
+            Err(error)
+        }
+    }
+}
+
+/// Error that happened during benchmarking of a job.
+enum BenchmarkJobError {
+    /// The error is non-recoverable.
+    /// For example, a rustc toolchain does not exist on CI
+    Permanent(anyhow::Error),
+    Transient(anyhow::Error),
+}
+
+impl From<anyhow::Error> for BenchmarkJobError {
+    fn from(error: anyhow::Error) -> Self {
+        Self::Transient(error)
+    }
+}
+
+async fn run_benchmark_job(
+    conn: &mut dyn Connection,
+    job: &BenchmarkJob,
+    artifact_id: ArtifactId,
+    all_compile_benchmarks: &[Benchmark],
+) -> Result<(), BenchmarkJobError> {
+    // Fail the job if it has been dequeued too many times
+    if job.deque_count() > MAX_JOB_FAILS {
+        return Err(BenchmarkJobError::Permanent(anyhow::anyhow!(
+            "Job failed after being dequeued for {MAX_JOB_FAILS} times"
+        )));
+    }
+
+    log::info!("Downloading sysroot");
+    let toolchain = match &artifact_id {
+        ArtifactId::Commit(commit) => {
+            let mut sysroot = match Sysroot::install(
+                Path::new(TOOLCHAIN_CACHE_DIRECTORY),
+                commit.sha.clone(),
+                job.target().as_str(),
+                &[job.backend().into()],
+            )
+            .await
+            {
+                Ok(sysroot) => sysroot,
+                Err(SysrootDownloadError::SysrootShaNotFound) => {
+                    return Err(BenchmarkJobError::Permanent(anyhow::anyhow!(
+                        "Artifacts for SHA {} and target {} were not found on CI servers",
+                        commit.sha,
+                        job.target().as_str()
+                    )))
+                }
+                Err(SysrootDownloadError::IO(error)) => return Err(error.into()),
+            };
+            // Avoid redownloading the same sysroot multiple times for different jobs, even
+            // across collector restarts.
+            sysroot.preserve();
+            Toolchain::from_sysroot(&sysroot, commit.sha.clone())
+        }
+        ArtifactId::Tag(tag) => {
+            create_toolchain_from_published_version(tag, job.target().as_str())?
+        }
+    };
+    log::info!("Sysroot download finished");
+
+    let (compile_config, runtime_config) =
+        create_benchmark_configs(conn, &toolchain, &artifact_id, job, all_compile_benchmarks)
+            .await
+            .map_err(|error| {
+                BenchmarkJobError::Permanent(anyhow::anyhow!(
+                    "Cannot prepare benchmark configs: {error:?}"
+                ))
+            })?;
+
+    let shared = SharedBenchmarkConfig {
+        artifact_id,
+        toolchain,
+        job_id: Some(job.id()),
+    };
+
+    // A failure here means that it was not possible to compile something, that likely won't resolve
+    // itself automatically.
+    run_benchmarks(conn, shared, compile_config, runtime_config)
+        .await
+        .map_err(|error| {
+            BenchmarkJobError::Permanent(anyhow::anyhow!("Cannot run benchmarks: {error:?}"))
+        })?;
+    Ok(())
+}
+
+async fn create_benchmark_configs(
+    conn: &mut dyn Connection,
+    toolchain: &Toolchain,
+    artifact_id: &ArtifactId,
+    job: &BenchmarkJob,
+    all_compile_benchmarks: &[Benchmark],
+) -> anyhow::Result<(
+    Option<CompileBenchmarkConfig>,
+    Option<RuntimeBenchmarkConfig>,
+)> {
+    // Expand the benchmark set and figure out which benchmarks should be executed
+    let benchmark_set = BenchmarkSetId::new(job.target().into(), job.benchmark_set().get_id());
+    let benchmark_set_members = expand_benchmark_set(benchmark_set);
+    log::debug!("Expanded benchmark set members: {benchmark_set_members:?}");
+
+    let mut bench_rustc = false;
+    let mut bench_runtime = false;
+    let mut bench_compile_benchmarks = HashSet::new();
+
+    match job.kind() {
+        database::BenchmarkJobKind::Runtime => {
+            bench_runtime = true;
+        }
+        database::BenchmarkJobKind::Compiletime => {
+            for member in benchmark_set_members {
+                match member {
+                    BenchmarkSetMember::CompileBenchmark(benchmark) => {
+                        bench_compile_benchmarks.insert(benchmark);
+                    }
+                }
+            }
+        }
+        database::BenchmarkJobKind::Rustc => {
+            bench_rustc = true;
+        }
+    }
+
+    let compile_config = if bench_rustc || !bench_compile_benchmarks.is_empty() {
+        Some(CompileBenchmarkConfig {
+            benchmarks: all_compile_benchmarks
+                .iter()
+                .filter(|b| bench_compile_benchmarks.contains(&b.name))
+                .cloned()
+                .collect(),
+            profiles: vec![job.profile().into()],
+            scenarios: Scenario::all(),
+            backends: vec![job.backend().into()],
+            iterations: None,
+            is_self_profile: true,
+            bench_rustc,
+            targets: vec![job.target().into()],
+        })
+    } else {
+        None
+    };
+
+    let runtime_config = if bench_runtime {
+        let runtime_suite = load_runtime_benchmarks(
+            conn,
+            &runtime_benchmark_dir(),
+            CargoIsolationMode::Isolated,
+            None,
+            toolchain,
+            artifact_id,
+            Some(job.id()),
+        )
+        .await?;
+        Some(RuntimeBenchmarkConfig {
+            runtime_suite,
+            filter: RuntimeBenchmarkFilter::keep_all(),
+            iterations: DEFAULT_RUNTIME_ITERATIONS,
+        })
+    } else {
+        None
+    };
+
+    Ok((compile_config, runtime_config))
 }
 
 fn binary_stats_local(args: BinaryStatsLocal, symbols: bool) -> anyhow::Result<()> {
@@ -1276,12 +1880,7 @@ fn binary_stats_compile(
         Profile::Opt => CargoProfile::Release,
         _ => return Err(anyhow::anyhow!("Only Debug and Opt profiles are supported")),
     };
-    let benchmarks = get_compile_benchmarks(
-        &compile_benchmark_dir(),
-        &local.include,
-        &local.exclude,
-        &local.exclude_suffix,
-    )?;
+    let benchmarks = get_compile_benchmarks(&compile_benchmark_dir(), (&local).into())?;
     for benchmark in benchmarks {
         println!("Stats for benchmark `{}`", benchmark.name);
         println!("{}", "-".repeat(20));
@@ -1352,7 +1951,7 @@ fn print_binary_stats(
 
     let mut builder = Builder::default();
     if use_diff {
-        builder.set_header([
+        builder.push_record([
             name_header,
             "Size (before)",
             "Size (after)",
@@ -1360,7 +1959,7 @@ fn print_binary_stats(
             "Diff (%)",
         ]);
     } else {
-        builder.set_header([name_header, "Size"]);
+        builder.push_record([name_header, "Size"]);
     }
 
     struct Row {
@@ -1486,17 +2085,20 @@ fn print_binary_stats(
         }
     }
 
+    table.with(Modify::new(Columns::first()).with(Width::wrap(80)));
     table.with(Modify::new(Columns::new(1..)).with(Alignment::right()));
     table.with(tabled::settings::Style::sharp());
     table.with(
         Modify::new(Rows::last()).with(
-            Border::default()
+            Border::new()
                 .top('─')
+                .left('│')
+                .right('│')
                 .corner_top_left('│')
                 .corner_top_right('│'),
         ),
     );
-    println!("{}", table);
+    println!("{table}");
 }
 
 fn get_local_toolchain_for_runtime_benchmarks(
@@ -1522,6 +2124,7 @@ async fn load_runtime_benchmarks(
     group: Option<String>,
     toolchain: &Toolchain,
     artifact_id: &ArtifactId,
+    job_id: Option<u32>,
 ) -> anyhow::Result<BenchmarkSuite> {
     let BenchmarkSuiteCompilation {
         suite,
@@ -1534,7 +2137,7 @@ async fn load_runtime_benchmarks(
         RuntimeCompilationOpts::default(),
     )?;
 
-    record_runtime_compilation_errors(conn, artifact_id, failed_to_compile).await;
+    record_runtime_compilation_errors(conn, artifact_id, failed_to_compile, job_id).await;
     Ok(suite)
 }
 
@@ -1542,11 +2145,12 @@ async fn record_runtime_compilation_errors(
     connection: &mut dyn Connection,
     artifact_id: &ArtifactId,
     errors: HashMap<String, String>,
+    job_id: Option<u32>,
 ) {
     let artifact_row_number = connection.artifact_id(artifact_id).await;
     for (krate, error) in errors {
         connection
-            .record_error(artifact_row_number, &krate, &error)
+            .record_error(artifact_row_number, &krate, &error, job_id)
             .await;
     }
 }
@@ -1585,7 +2189,7 @@ async fn init_collection(
     runtime: Option<&RuntimeBenchmarkConfig>,
 ) -> CollectorCtx {
     assert!(runtime.is_some() || compile.is_some());
-    let mut builder = CollectorStepBuilder::default();
+    let mut builder = CollectorStepBuilder::new(shared.job_id);
     if let Some(compile) = compile {
         builder = builder.record_compile_benchmarks(&compile.benchmarks, compile.bench_rustc);
     }
@@ -1598,31 +2202,21 @@ async fn init_collection(
 }
 
 /// Execute all benchmarks specified by the given configurations.
-fn run_benchmarks(
-    rt: &mut Runtime,
-    mut connection: Box<dyn Connection>,
+async fn run_benchmarks(
+    connection: &mut dyn Connection,
     shared: SharedBenchmarkConfig,
     compile: Option<CompileBenchmarkConfig>,
     runtime: Option<RuntimeBenchmarkConfig>,
 ) -> anyhow::Result<()> {
-    rt.block_on(record_toolchain_sizes(
-        connection.as_mut(),
-        &shared.artifact_id,
-        &shared.toolchain,
-    ));
+    record_toolchain_sizes(connection, &shared.artifact_id, &shared.toolchain).await;
 
-    let collector = rt.block_on(init_collection(
-        connection.as_mut(),
-        &shared,
-        compile.as_ref(),
-        runtime.as_ref(),
-    ));
+    let collector = init_collection(connection, &shared, compile.as_ref(), runtime.as_ref()).await;
 
     let start = Instant::now();
 
     // Compile benchmarks
     let compile_result = if let Some(compile) = compile {
-        let errors = bench_compile(rt, connection.as_mut(), &shared, compile, &collector);
+        let errors = bench_compile(connection, &shared, compile, &collector).await;
         errors
             .fail_if_nonzero()
             .context("Compile benchmarks failed")
@@ -1632,30 +2226,35 @@ fn run_benchmarks(
 
     // Runtime benchmarks
     let runtime_result = if let Some(runtime) = runtime {
-        rt.block_on(bench_runtime(
-            connection.as_mut(),
+        bench_runtime(
+            connection,
             runtime.runtime_suite,
             &collector,
             runtime.filter,
             runtime.iterations,
-        ))
+        )
+        .await
         .context("Runtime benchmarks failed")
     } else {
         Ok(())
     };
 
-    let end = start.elapsed();
-    rt.block_on(connection.record_duration(collector.artifact_row_id, end));
+    if shared.job_id.is_none() {
+        let end = start.elapsed();
+        connection
+            .record_duration(collector.artifact_row_id, end)
+            .await;
+    }
 
     compile_result.and(runtime_result)
 }
 
 /// Perform benchmarks on a published artifact.
-fn bench_published_artifact(
+async fn bench_published_artifact(
     mut connection: Box<dyn Connection>,
-    rt: &mut Runtime,
     toolchain: Toolchain,
-    dirs: &BenchmarkDirs,
+    dirs: &BenchmarkDirs<'_>,
+    job_id: Option<u32>,
 ) -> anyhow::Result<()> {
     let artifact_id = ArtifactId::Tag(toolchain.id.clone());
 
@@ -1671,25 +2270,27 @@ fn bench_published_artifact(
     };
 
     // Exclude benchmarks that don't work with a stable compiler.
-    let mut compile_benchmarks = get_compile_benchmarks(dirs.compile, &[], &[], &[])?;
+    let mut compile_benchmarks = get_compile_benchmarks(dirs.compile, CompileBenchmarkFilter::All)?;
     compile_benchmarks.retain(|b| b.category().is_stable());
 
-    let runtime_suite = rt.block_on(load_runtime_benchmarks(
+    let runtime_suite = load_runtime_benchmarks(
         connection.as_mut(),
         dirs.runtime,
         CargoIsolationMode::Isolated,
         None,
         &toolchain,
         &artifact_id,
-    ))?;
+        job_id,
+    )
+    .await?;
 
     let shared = SharedBenchmarkConfig {
         artifact_id,
         toolchain,
+        job_id: None,
     };
     run_benchmarks(
-        rt,
-        connection,
+        connection.as_mut(),
         shared,
         Some(CompileBenchmarkConfig {
             benchmarks: compile_benchmarks,
@@ -1699,13 +2300,15 @@ fn bench_published_artifact(
             iterations: Some(3),
             is_self_profile: false,
             bench_rustc: false,
+            targets: vec![Target::default()],
         }),
         Some(RuntimeBenchmarkConfig::new(
             runtime_suite,
-            BenchmarkFilter::keep_all(),
+            RuntimeBenchmarkFilter::keep_all(),
             DEFAULT_RUNTIME_ITERATIONS,
         )),
     )
+    .await
 }
 
 const COMPILE_BENCHMARK_TIMEOUT: Duration = Duration::from_secs(60 * 30);
@@ -1721,8 +2324,7 @@ async fn with_timeout<F: Future<Output = anyhow::Result<()>>>(fut: F) -> anyhow:
 }
 
 /// Perform compile benchmarks.
-fn bench_compile(
-    rt: &mut Runtime,
+async fn bench_compile(
     conn: &mut dyn Connection,
     shared: &SharedBenchmarkConfig,
     config: CompileBenchmarkConfig,
@@ -1738,51 +2340,58 @@ fn bench_compile(
 
     let start = Instant::now();
 
-    let mut measure_and_record =
-        |benchmark_name: &BenchmarkName,
-         category: Category,
-         print_intro: &dyn Fn(),
-         measure: &dyn Fn(&mut BenchProcessor) -> anyhow::Result<()>| {
-            let is_fresh = rt.block_on(collector.start_compile_step(conn, benchmark_name));
-            if !is_fresh {
-                eprintln!("skipping {} -- already benchmarked", benchmark_name);
-                return;
-            }
-            let mut tx = rt.block_on(conn.transaction());
-            let (supports_stable, category) = category.db_representation();
-            rt.block_on(tx.conn().record_compile_benchmark(
-                &benchmark_name.0,
-                Some(supports_stable),
-                category,
-            ));
-            print_intro();
-            let mut processor = BenchProcessor::new(
-                tx.conn(),
-                benchmark_name,
-                &shared.artifact_id,
-                collector.artifact_row_id,
-                config.is_self_profile,
-            );
-            let result = measure(&mut processor);
-            if let Err(s) = result {
-                eprintln!(
-                    "collector error: Failed to benchmark '{}', recorded: {:#}",
-                    benchmark_name, s
-                );
-                errors.incr();
-                rt.block_on(tx.conn().record_error(
+    #[allow(clippy::too_many_arguments)]
+    async fn measure_and_record<F: AsyncFn(&mut BenchProcessor) -> anyhow::Result<()>>(
+        collector: &CollectorCtx,
+        shared: &SharedBenchmarkConfig,
+        config: &CompileBenchmarkConfig,
+        errors: &mut BenchmarkErrors,
+        conn: &mut dyn Connection,
+        benchmark_name: &BenchmarkName,
+        category: Category,
+        print_intro: &dyn Fn(),
+        measure: F,
+    ) {
+        collector.start_compile_step(conn, benchmark_name).await;
+
+        let mut tx = conn.transaction().await;
+        let (supports_stable, category) = category.db_representation();
+        tx.conn()
+            .record_compile_benchmark(&benchmark_name.0, Some(supports_stable), category)
+            .await;
+        print_intro();
+        let mut processor = BenchProcessor::new(
+            tx.conn(),
+            benchmark_name,
+            &shared.artifact_id,
+            collector,
+            config.is_self_profile,
+        );
+        let result = measure(&mut processor).await;
+        if let Err(s) = result {
+            eprintln!("collector error: Failed to benchmark '{benchmark_name}', recorded: {s:#}");
+            errors.incr();
+            tx.conn()
+                .record_error(
                     collector.artifact_row_id,
                     &benchmark_name.0,
-                    &format!("{:?}", s),
-                ));
-            };
-            rt.block_on(collector.end_compile_step(tx.conn(), benchmark_name));
-            rt.block_on(tx.commit()).expect("committed");
+                    &format!("{s:?}"),
+                    shared.job_id,
+                )
+                .await;
         };
+        collector.end_compile_step(tx.conn(), benchmark_name).await;
+        tx.commit().await.expect("committed");
+    }
 
     // Normal benchmarks.
     for (nth_benchmark, benchmark) in config.benchmarks.iter().enumerate() {
         measure_and_record(
+            collector,
+            shared,
+            &config,
+            &mut errors,
+            conn,
             &benchmark.name,
             benchmark.category(),
             &|| {
@@ -1791,31 +2400,42 @@ fn bench_compile(
                     n_normal_benchmarks_remaining(config.benchmarks.len() - nth_benchmark)
                 )
             },
-            &|processor| {
-                rt.block_on(with_timeout(benchmark.measure(
+            async |processor| {
+                with_timeout(benchmark.measure(
                     processor,
                     &config.profiles,
                     &config.scenarios,
                     &config.backends,
                     &shared.toolchain,
                     config.iterations,
-                )))
+                    &config.targets,
+                    &collector.measured_compile_test_cases,
+                ))
+                .await
                 .with_context(|| anyhow::anyhow!("Cannot compile {}", benchmark.name))
             },
         )
+        .await;
     }
 
     // The special rustc benchmark, if requested.
     if bench_rustc {
         measure_and_record(
+            collector,
+            shared,
+            &config,
+            &mut errors,
+            conn,
             &BenchmarkName("rustc".to_string()),
             Category::Primary,
             &|| eprintln!("Special benchmark commencing (due to `--bench-rustc`)"),
-            &|processor| {
-                rt.block_on(with_timeout(processor.measure_rustc(&shared.toolchain)))
+            async |processor| {
+                with_timeout(processor.measure_rustc(&shared.toolchain))
+                    .await
                     .context("measure rustc")
             },
-        );
+        )
+        .await;
     }
 
     let end = start.elapsed();
@@ -1825,10 +2445,8 @@ fn bench_compile(
         end, errors.0
     );
 
-    rt.block_on(async move {
-        // This ensures that we're good to go with the just updated data.
-        conn.maybe_create_indices().await;
-    });
+    // This ensures that we're good to go with the just updated data.
+    conn.maybe_create_indices().await;
     errors
 }
 
@@ -1860,7 +2478,6 @@ async fn record_toolchain_sizes(
     record(conn, aid, "cargo", Some(&paths.cargo)).await;
     record(conn, aid, "librustc_driver", paths.lib_rustc.as_deref()).await;
     record(conn, aid, "libstd", paths.lib_std.as_deref()).await;
-    record(conn, aid, "libtest", paths.lib_test.as_deref()).await;
     record(conn, aid, "libLLVM", paths.lib_llvm.as_deref()).await;
 }
 
@@ -1906,7 +2523,7 @@ fn get_downloaded_crate_target(benchmark_dir: &Path, cmd: &DownloadCommand) -> P
             .trim_end_matches('/')
             .trim_end_matches(".git")
             .split('/')
-            .last()
+            .next_back()
             .expect("Crate name could not be determined from git URL")
             .to_string(),
         DownloadSubcommand::Crate { krate, version } => format!("{krate}-{version}"),

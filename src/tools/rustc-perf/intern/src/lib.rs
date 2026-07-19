@@ -8,7 +8,7 @@ use std::alloc::Layout;
 use std::fmt;
 use std::ptr;
 use std::ptr::NonNull;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 #[allow(clippy::missing_safety_doc)]
 pub trait InternString {
@@ -132,10 +132,13 @@ macro_rules! intern {
     };
 }
 
-lazy_static::lazy_static! {
-    static ref INTERNED: (ArcSwap<HashSet<ArenaStr>>, Mutex<(HashSet<ArenaStr>, Bump)>)
-        = (ArcSwap::new(Arc::new(HashSet::new())), Mutex::new((HashSet::new(), Bump::new())));
-}
+static INTERNED: LazyLock<(ArcSwap<HashSet<ArenaStr>>, Mutex<(HashSet<ArenaStr>, Bump)>)> =
+    LazyLock::new(|| {
+        (
+            ArcSwap::new(Arc::new(HashSet::new())),
+            Mutex::new((HashSet::new(), Bump::new())),
+        )
+    });
 
 pub fn preloaded<T: InternString>(value: &str) -> Option<T> {
     let set = INTERNED.0.load();
@@ -187,7 +190,7 @@ pub fn intern<T: InternString>(value: &str) -> T {
     })
 }
 
-#[derive(serde_derive::Serialize, Copy, Clone, PartialEq, Eq)]
+#[derive(serde::Serialize, Copy, Clone, PartialEq, Eq)]
 #[serde(into = "&'static str")]
 pub struct ArenaStr(NonNull<u8>);
 

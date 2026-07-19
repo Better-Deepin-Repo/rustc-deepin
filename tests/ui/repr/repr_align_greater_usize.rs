@@ -1,3 +1,4 @@
+//@ add-minicore
 //@ revisions: msp430 aarch32
 //@[msp430] needs-llvm-components: msp430
 //@[msp430] compile-flags: --target=msp430-none-elf
@@ -8,12 +9,12 @@
 // We should fail to compute alignment for types aligned higher than usize::MAX.
 // We can't handle alignments that require all 32 bits, so this only affects 16-bit.
 
-#![feature(lang_items, no_core)]
+#![feature(no_core)]
 #![no_core]
 #![crate_type = "lib"]
 
-#[lang = "sized"]
-trait Sized {}
+extern crate minicore;
+use minicore::*;
 
 #[repr(align(16384))]
 struct Kitten;

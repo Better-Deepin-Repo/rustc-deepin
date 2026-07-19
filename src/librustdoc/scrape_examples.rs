@@ -18,7 +18,6 @@ use rustc_span::edition::Edition;
 use rustc_span::{BytePos, FileName, SourceFile};
 use tracing::{debug, trace, warn};
 
-use crate::formats::renderer::FormatRenderer;
 use crate::html::render::Context;
 use crate::{clean, config, formats};
 
@@ -123,8 +122,8 @@ where
 {
     type NestedFilter = nested_filter::OnlyBodies;
 
-    fn nested_visit_map(&mut self) -> Self::Map {
-        self.cx.tcx().hir()
+    fn maybe_tcx(&mut self) -> Self::MaybeTyCtxt {
+        self.cx.tcx()
     }
 
     fn visit_expr(&mut self, ex: &'tcx hir::Expr<'tcx>) {
@@ -135,8 +134,7 @@ where
         // If we visit an item that contains an expression outside a function body,
         // then we need to exit before calling typeck (which will panic). See
         // test/run-make/rustdoc-scrape-examples-invalid-expr for an example.
-        let hir = tcx.hir();
-        if hir.maybe_body_owned_by(ex.hir_id.owner.def_id).is_none() {
+        if tcx.hir_maybe_body_owned_by(ex.hir_id.owner.def_id).is_none() {
             return;
         }
 
@@ -177,8 +175,7 @@ where
 
         // If the enclosing item has a span coming from a proc macro, then we also don't want to
         // include the example.
-        let enclosing_item_span =
-            tcx.hir().span_with_body(tcx.hir().get_parent_item(ex.hir_id).into());
+        let enclosing_item_span = tcx.hir_span_with_body(tcx.hir_get_parent_item(ex.hir_id).into());
         if enclosing_item_span.from_expansion() {
             trace!("Rejecting expr ({call_span:?}) from macro item: {enclosing_item_span:?}");
             return;
@@ -276,9 +273,11 @@ pub(crate) fn run(
     bin_crate: bool,
 ) {
     let inner = move || -> Result<(), String> {
+        let emit_dep_info = renderopts.dep_info().is_some();
         // Generates source files for examples
         renderopts.no_emit_shared = true;
-        let (cx, _) = Context::init(krate, renderopts, cache, tcx).map_err(|e| e.to_string())?;
+        let (cx, _) = Context::init(krate, renderopts, cache, tcx, Default::default())
+            .map_err(|e| e.to_string())?;
 
         // Collect CrateIds corresponding to provided target crates
         // If two different versions of the crate in the dependency tree, then examples will be
@@ -302,7 +301,7 @@ pub(crate) fn run(
         // Run call-finder on all items
         let mut calls = FxIndexMap::default();
         let mut finder = FindCalls { calls: &mut calls, cx, target_crates, bin_crate };
-        tcx.hir().visit_all_item_likes_in_crate(&mut finder);
+        tcx.hir_visit_all_item_likes_in_crate(&mut finder);
 
         // The visitor might have found a type error, which we need to
         // promote to a fatal error
@@ -322,6 +321,10 @@ pub(crate) fn run(
         calls.encode(&mut encoder);
         encoder.finish().map_err(|(_path, e)| e.to_string())?;
 
+        if emit_dep_info {
+            rustc_interface::passes::write_dep_info(tcx);
+        }
+
         Ok(())
     };
 
@@ -335,9 +338,11 @@ pub(crate) fn run(
 pub(crate) fn load_call_locations(
     with_examples: Vec<String>,
     dcx: DiagCtxtHandle<'_>,
+    loaded_paths: &mut Vec<PathBuf>,
 ) -> AllCallLocations {
     let mut all_calls: AllCallLocations = FxIndexMap::default();
     for path in with_examples {
+        loaded_paths.push(path.clone().into());
         let bytes = match fs::read(&path) {
             Ok(bytes) => bytes,
             Err(e) => dcx.fatal(format!("failed to load examples: {e}")),

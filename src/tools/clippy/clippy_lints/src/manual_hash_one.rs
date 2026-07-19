@@ -1,14 +1,14 @@
 use clippy_config::Conf;
 use clippy_utils::diagnostics::span_lint_hir_and_then;
 use clippy_utils::msrvs::{self, Msrv};
+use clippy_utils::res::{MaybeDef, MaybeResPath, MaybeTypeckRes};
 use clippy_utils::source::SpanRangeExt;
+use clippy_utils::sym;
 use clippy_utils::visitors::{is_local_used, local_used_once};
-use clippy_utils::{is_trait_method, path_to_local_id};
 use rustc_errors::Applicability;
 use rustc_hir::{BindingMode, ExprKind, LetStmt, Node, PatKind, StmtKind};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::impl_lint_pass;
-use rustc_span::sym;
 
 declare_clippy_lint! {
     /// ### What it does
@@ -53,9 +53,7 @@ pub struct ManualHashOne {
 
 impl ManualHashOne {
     pub fn new(conf: &'static Conf) -> Self {
-        Self {
-            msrv: conf.msrv.clone(),
-        }
+        Self { msrv: conf.msrv }
     }
 }
 
@@ -68,7 +66,7 @@ impl LateLintPass<'_> for ManualHashOne {
             && let Some(init) = local.init
             && !init.span.from_expansion()
             && let ExprKind::MethodCall(seg, build_hasher, [], _) = init.kind
-            && seg.ident.name.as_str() == "build_hasher"
+            && seg.ident.name == sym::build_hasher
 
             && let Node::Stmt(local_stmt) = cx.tcx.parent_hir_node(local.hir_id)
             && let Node::Block(block) = cx.tcx.parent_hir_node(local_stmt.hir_id)
@@ -84,8 +82,8 @@ impl LateLintPass<'_> for ManualHashOne {
             && !hash_expr.span.from_expansion()
             && let ExprKind::MethodCall(seg, hashed_value, [ref_to_hasher], _) = hash_expr.kind
             && seg.ident.name == sym::hash
-            && is_trait_method(cx, hash_expr, sym::Hash)
-            && path_to_local_id(ref_to_hasher.peel_borrows(), hasher)
+            && cx.ty_based_def(hash_expr).opt_parent(cx).is_diag_item(cx, sym::Hash)
+            && ref_to_hasher.peel_borrows().res_local_id() == Some(hasher)
 
             && let maybe_finish_stmt = stmts.next()
             // There should be no more statements referencing `hasher`
@@ -96,9 +94,9 @@ impl LateLintPass<'_> for ManualHashOne {
             && let Node::Expr(finish_expr) = cx.tcx.parent_hir_node(path_expr.hir_id)
             && !finish_expr.span.from_expansion()
             && let ExprKind::MethodCall(seg, _, [], _) = finish_expr.kind
-            && seg.ident.name.as_str() == "finish"
+            && seg.ident.name == sym::finish
 
-            && self.msrv.meets(msrvs::BUILD_HASHER_HASH_ONE)
+            && self.msrv.meets(cx, msrvs::BUILD_HASHER_HASH_ONE)
         {
             span_lint_hir_and_then(
                 cx,
@@ -129,6 +127,4 @@ impl LateLintPass<'_> for ManualHashOne {
             );
         }
     }
-
-    extract_msrv_attr!(LateContext);
 }

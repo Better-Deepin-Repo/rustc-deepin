@@ -12,6 +12,7 @@ pub fn b() {}
 #[proc_macro_derive(unsafe(Foo))]
 //~^ ERROR attribute is only usable with crates of the `proc-macro` crate type
 //~| ERROR: expected identifier, found keyword `unsafe`
+//~| ERROR malformed `proc_macro_derive` attribute input
 pub fn c() {}
 
 #[unsafe(proc_macro_attribute)]
@@ -28,6 +29,8 @@ pub fn e() {}
 //~| ERROR: malformed lint attribute input
 //~| ERROR: malformed lint attribute input
 //~| ERROR: expected identifier, found keyword `unsafe`
+//~| ERROR: malformed lint attribute input
+//~| ERROR: malformed lint attribute input
 //~| ERROR: malformed lint attribute input
 //~| ERROR: malformed lint attribute input
 pub fn f() {}

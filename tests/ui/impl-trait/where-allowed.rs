@@ -1,3 +1,4 @@
+//@ edition:2015..2021
 //! A simple test for testing many permutations of allowedness of
 //! impl Trait
 #![feature(impl_trait_in_fn_trait_return)]
@@ -157,6 +158,7 @@ extern "C" fn in_extern_fn_return() -> impl Debug {
 
 type InTypeAlias<R> = impl Debug;
 //~^ ERROR `impl Trait` in type aliases is unstable
+//~| ERROR unconstrained opaque type
 
 type InReturnInTypeAlias<R> = fn() -> impl Debug;
 //~^ ERROR `impl Trait` is not allowed in `fn` pointer
@@ -235,17 +237,15 @@ type InTypeAliasGenericParamDefault<T = impl Debug> = T;
 //~^ ERROR `impl Trait` is not allowed in generic parameter defaults
 
 // Disallowed
-impl <T = impl Debug> T {}
-//~^ ERROR defaults for type parameters are only allowed in `struct`, `enum`, `type`, or `trait` definitions
-//~| WARNING this was previously accepted by the compiler but is being phased out
-//~| ERROR `impl Trait` is not allowed in generic parameter defaults
+#[expect(invalid_type_param_default)]
+impl<T = impl Debug> T {}
+//~^ ERROR `impl Trait` is not allowed in generic parameter defaults
 //~| ERROR no nominal type found
 
 // Disallowed
+#[expect(invalid_type_param_default)]
 fn in_method_generic_param_default<T = impl Debug>(_: T) {}
-//~^ ERROR defaults for type parameters are only allowed in `struct`, `enum`, `type`, or `trait` definitions
-//~| WARNING this was previously accepted by the compiler but is being phased out
-//~| ERROR `impl Trait` is not allowed in generic parameter defaults
+//~^ ERROR `impl Trait` is not allowed in generic parameter defaults
 
 fn main() {
     let _in_local_variable: impl Fn() = || {};

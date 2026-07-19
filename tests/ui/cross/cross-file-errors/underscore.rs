@@ -1,5 +1,4 @@
-//@ ignore-test (auxiliary, used by other tests)
-#![crate_type = "lib"]
+//@ ignore-auxiliary (used by `./main.rs`)
 
 macro_rules! underscore {
     () => (

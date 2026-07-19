@@ -12,15 +12,18 @@ use hir::def_id::CRATE_DEF_ID;
 use rustc_errors::DiagCtxtHandle;
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_hir::{self as hir, HirId, ItemLocalMap};
-use rustc_hir_analysis::hir_ty_lowering::{HirTyLowerer, RegionInferReason};
-use rustc_infer::infer;
-use rustc_infer::traits::Obligation;
+use rustc_hir_analysis::hir_ty_lowering::{
+    HirTyLowerer, InherentAssocCandidate, RegionInferReason,
+};
+use rustc_infer::infer::{self, RegionVariableOrigin};
+use rustc_infer::traits::{DynCompatibilityViolation, Obligation};
 use rustc_middle::ty::{self, Const, Ty, TyCtxt, TypeVisitableExt};
 use rustc_session::Session;
-use rustc_span::{self, DUMMY_SP, Ident, Span, sym};
+use rustc_span::{self, DUMMY_SP, ErrorGuaranteed, Ident, Span, sym};
 use rustc_trait_selection::error_reporting::TypeErrCtxt;
-use rustc_trait_selection::error_reporting::infer::sub_relations::SubRelations;
-use rustc_trait_selection::traits::{ObligationCause, ObligationCauseCode, ObligationCtxt};
+use rustc_trait_selection::traits::{
+    self, FulfillmentError, ObligationCause, ObligationCauseCode, ObligationCtxt,
+};
 
 use crate::coercion::DynamicCoerceMany;
 use crate::fallback::DivergingFallbackBehavior;
@@ -31,12 +34,12 @@ use crate::{CoroutineTypes, Diverges, EnclosingBreakables, TypeckRootCtxt};
 /// functions, closures, and `const`s, including performing type inference
 /// with [`InferCtxt`].
 ///
-/// This is in contrast to [`ItemCtxt`], which is used to type-check item *signatures*
-/// and thus does not perform type inference.
+/// This is in contrast to `rustc_hir_analysis::collect::ItemCtxt`, which is
+/// used to type-check item *signatures* and thus does not perform type
+/// inference.
 ///
-/// See [`ItemCtxt`]'s docs for more.
+/// See `ItemCtxt`'s docs for more.
 ///
-/// [`ItemCtxt`]: rustc_hir_analysis::collect::ItemCtxt
 /// [`InferCtxt`]: infer::InferCtxt
 pub(crate) struct FnCtxt<'a, 'tcx> {
     pub(super) body_id: LocalDefId,
@@ -81,7 +84,7 @@ pub(crate) struct FnCtxt<'a, 'tcx> {
     /// you get indicates whether any subexpression that was
     /// evaluating up to and including `X` diverged.
     ///
-    /// We currently use this flag only for diagnostic purposes:
+    /// We currently use this flag for the following purposes:
     ///
     /// - To warn about unreachable code: if, after processing a
     ///   sub-expression but before we have applied the effects of the
@@ -94,13 +97,15 @@ pub(crate) struct FnCtxt<'a, 'tcx> {
     ///   warning. This corresponds to something like `{return;
     ///   foo();}` or `{return; 22}`, where we would warn on the
     ///   `foo()` or `22`.
+    /// - To assign the `!` type to block expressions with diverging
+    ///   statements.
     ///
     /// An expression represents dead code if, after checking it,
     /// the diverges flag is set to something other than `Maybe`.
     pub(super) diverges: Cell<Diverges>,
 
-    /// If one of the function arguments is a never pattern, this counts as diverging code. This
-    /// affect typechecking of the function body.
+    /// If one of the function arguments is a never pattern, this counts as diverging code.
+    /// This affect typechecking of the function body.
     pub(super) function_diverges_because_of_empty_arguments: Cell<Diverges>,
 
     /// Whether the currently checked node is the whole body of the function.
@@ -110,7 +115,9 @@ pub(crate) struct FnCtxt<'a, 'tcx> {
 
     pub(super) root_ctxt: &'a TypeckRootCtxt<'tcx>,
 
-    pub(super) fallback_has_occurred: Cell<bool>,
+    /// True if a divirging inference variable has been set to `()`/`!` because
+    /// of never type fallback. This is only used for diagnostics.
+    pub(super) diverging_fallback_has_occurred: Cell<bool>,
 
     pub(super) diverging_fallback_behavior: DivergingFallbackBehavior,
     pub(super) diverging_block_behavior: DivergingBlockBehavior,
@@ -120,6 +127,10 @@ pub(crate) struct FnCtxt<'a, 'tcx> {
     /// These are stored here so we may collect them when canonicalizing user
     /// type ascriptions later.
     pub(super) trait_ascriptions: RefCell<ItemLocalMap<Vec<ty::Clause<'tcx>>>>,
+
+    /// Whether the current crate enables the `rustc_attrs` feature.
+    /// This allows to skip processing attributes in many places.
+    pub(super) has_rustc_attrs: bool,
 }
 
 impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
@@ -144,10 +155,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 by_id: Default::default(),
             }),
             root_ctxt,
-            fallback_has_occurred: Cell::new(false),
+            diverging_fallback_has_occurred: Cell::new(false),
             diverging_fallback_behavior,
             diverging_block_behavior,
             trait_ascriptions: Default::default(),
+            has_rustc_attrs: root_ctxt.tcx.features().rustc_attrs(),
         }
     }
 
@@ -177,16 +189,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     ///
     /// [`InferCtxtErrorExt::err_ctxt`]: rustc_trait_selection::error_reporting::InferCtxtErrorExt::err_ctxt
     pub(crate) fn err_ctxt(&'a self) -> TypeErrCtxt<'a, 'tcx> {
-        let mut sub_relations = SubRelations::default();
-        sub_relations.add_constraints(
-            self,
-            self.fulfillment_cx.borrow_mut().pending_obligations().iter().map(|o| o.predicate),
-        );
         TypeErrCtxt {
             infcx: &self.infcx,
-            sub_relations: RefCell::new(sub_relations),
             typeck_results: Some(self.typeck_results.borrow()),
-            fallback_has_occurred: self.fallback_has_occurred.get(),
+            diverging_fallback_has_occurred: self.diverging_fallback_has_occurred.get(),
             normalize_fn_sig: Box::new(|fn_sig| {
                 if fn_sig.has_escaping_bound_vars() {
                     return fn_sig;
@@ -195,7 +201,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                     let ocx = ObligationCtxt::new(self);
                     let normalized_fn_sig =
                         ocx.normalize(&ObligationCause::dummy(), self.param_env, fn_sig);
-                    if ocx.select_all_or_error().is_empty() {
+                    if ocx.evaluate_obligations_error_on_ambiguity().is_empty() {
                         let normalized_fn_sig = self.resolve_vars_if_possible(normalized_fn_sig);
                         if !normalized_fn_sig.has_infer() {
                             return normalized_fn_sig;
@@ -238,8 +244,10 @@ impl<'tcx> HirTyLowerer<'tcx> for FnCtxt<'_, 'tcx> {
 
     fn re_infer(&self, span: Span, reason: RegionInferReason<'_>) -> ty::Region<'tcx> {
         let v = match reason {
-            RegionInferReason::Param(def) => infer::RegionParameterDefinition(span, def.name),
-            _ => infer::MiscVariable(span),
+            RegionInferReason::Param(def) => {
+                RegionVariableOrigin::RegionParameterDefinition(span, def.name)
+            }
+            _ => RegionVariableOrigin::Misc(span),
         };
         self.next_region_var(v)
     }
@@ -290,7 +298,7 @@ impl<'tcx> HirTyLowerer<'tcx> for FnCtxt<'_, 'tcx> {
         _: Ident,
     ) -> ty::EarlyBinder<'tcx, &'tcx [(ty::Clause<'tcx>, Span)]> {
         let tcx = self.tcx;
-        let item_def_id = tcx.hir().ty_param_owner(def_id);
+        let item_def_id = tcx.hir_ty_param_owner(def_id);
         let generics = tcx.generics_of(item_def_id);
         let index = generics.param_def_id_to_index[&def_id.to_def_id()];
         // HACK(eddyb) should get the original `Span`.
@@ -308,15 +316,77 @@ impl<'tcx> HirTyLowerer<'tcx> for FnCtxt<'_, 'tcx> {
         ))
     }
 
-    fn lower_assoc_ty(
+    fn select_inherent_assoc_candidates(
+        &self,
+        span: Span,
+        self_ty: Ty<'tcx>,
+        candidates: Vec<InherentAssocCandidate>,
+    ) -> (Vec<InherentAssocCandidate>, Vec<FulfillmentError<'tcx>>) {
+        let tcx = self.tcx();
+        let infcx = &self.infcx;
+        let mut fulfillment_errors = vec![];
+
+        let mut filter_iat_candidate = |self_ty, impl_| {
+            let ocx = ObligationCtxt::new_with_diagnostics(self);
+            let self_ty = ocx.normalize(&ObligationCause::dummy(), self.param_env, self_ty);
+
+            let impl_args = infcx.fresh_args_for_item(span, impl_);
+            let impl_ty = tcx.type_of(impl_).instantiate(tcx, impl_args);
+            let impl_ty = ocx.normalize(&ObligationCause::dummy(), self.param_env, impl_ty);
+
+            // Check that the self types can be related.
+            if ocx.eq(&ObligationCause::dummy(), self.param_env, impl_ty, self_ty).is_err() {
+                return false;
+            }
+
+            // Check whether the impl imposes obligations we have to worry about.
+            let impl_bounds = tcx.predicates_of(impl_).instantiate(tcx, impl_args);
+            let impl_bounds = ocx.normalize(&ObligationCause::dummy(), self.param_env, impl_bounds);
+            let impl_obligations = traits::predicates_for_generics(
+                |_, _| ObligationCause::dummy(),
+                self.param_env,
+                impl_bounds,
+            );
+            ocx.register_obligations(impl_obligations);
+
+            let mut errors = ocx.try_evaluate_obligations();
+            if !errors.is_empty() {
+                fulfillment_errors.append(&mut errors);
+                return false;
+            }
+
+            true
+        };
+
+        let mut universes = if self_ty.has_escaping_bound_vars() {
+            vec![None; self_ty.outer_exclusive_binder().as_usize()]
+        } else {
+            vec![]
+        };
+
+        let candidates =
+            traits::with_replaced_escaping_bound_vars(infcx, &mut universes, self_ty, |self_ty| {
+                candidates
+                    .into_iter()
+                    .filter(|&InherentAssocCandidate { impl_, .. }| {
+                        infcx.probe(|_| filter_iat_candidate(self_ty, impl_))
+                    })
+                    .collect()
+            });
+
+        (candidates, fulfillment_errors)
+    }
+
+    fn lower_assoc_item_path(
         &self,
         span: Span,
         item_def_id: DefId,
-        item_segment: &hir::PathSegment<'tcx>,
+        item_segment: &rustc_hir::PathSegment<'tcx>,
         poly_trait_ref: ty::PolyTraitRef<'tcx>,
-    ) -> Ty<'tcx> {
+    ) -> Result<(DefId, ty::GenericArgsRef<'tcx>), ErrorGuaranteed> {
         let trait_ref = self.instantiate_binder_with_fresh_vars(
             span,
+            // FIXME(mgca): `item_def_id` can be an AssocConst; rename this variant.
             infer::BoundRegionConversionTime::AssocTypeProjection(item_def_id),
             poly_trait_ref,
         );
@@ -328,14 +398,14 @@ impl<'tcx> HirTyLowerer<'tcx> for FnCtxt<'_, 'tcx> {
             trait_ref.args,
         );
 
-        Ty::new_projection_from_args(self.tcx(), item_def_id, item_args)
+        Ok((item_def_id, item_args))
     }
 
     fn probe_adt(&self, span: Span, ty: Ty<'tcx>) -> Option<ty::AdtDef<'tcx>> {
         match ty.kind() {
             ty::Adt(adt_def, _) => Some(*adt_def),
             // FIXME(#104767): Should we handle bound regions here?
-            ty::Alias(ty::Projection | ty::Inherent | ty::Weak, _)
+            ty::Alias(ty::Projection | ty::Inherent | ty::Free, _)
                 if !ty.has_escaping_bound_vars() =>
             {
                 if self.next_trait_solver() {
@@ -355,7 +425,7 @@ impl<'tcx> HirTyLowerer<'tcx> for FnCtxt<'_, 'tcx> {
             // WF obligations that are registered elsewhere, but they have a
             // better cause code assigned to them in `add_required_obligations_for_hir`.
             // This means that they should shadow obligations with worse spans.
-            if let ty::Alias(ty::Projection | ty::Weak, ty::AliasTy { args, def_id, .. }) =
+            if let ty::Alias(ty::Projection | ty::Free, ty::AliasTy { args, def_id, .. }) =
                 ty.kind()
             {
                 self.add_required_obligations_for_hir(span, *def_id, args, hir_id);
@@ -379,13 +449,17 @@ impl<'tcx> HirTyLowerer<'tcx> for FnCtxt<'_, 'tcx> {
         _hir_id: rustc_hir::HirId,
         _hir_ty: Option<&hir::Ty<'_>>,
     ) -> (Vec<Ty<'tcx>>, Ty<'tcx>) {
-        let input_tys = decl.inputs.iter().map(|a| self.lowerer().lower_arg_ty(a, None)).collect();
+        let input_tys = decl.inputs.iter().map(|a| self.lowerer().lower_ty(a)).collect();
 
         let output_ty = match decl.output {
             hir::FnRetTy::Return(output) => self.lowerer().lower_ty(output),
             hir::FnRetTy::DefaultReturn(..) => self.tcx().types.unit,
         };
         (input_tys, output_ty)
+    }
+
+    fn dyn_compatibility_violations(&self, trait_def_id: DefId) -> Vec<DynCompatibilityViolation> {
+        self.tcx.dyn_compatibility_violations(trait_def_id).to_vec()
     }
 }
 
@@ -405,9 +479,10 @@ pub(crate) struct LoweredTy<'tcx> {
 
 impl<'tcx> LoweredTy<'tcx> {
     fn from_raw(fcx: &FnCtxt<'_, 'tcx>, span: Span, raw: Ty<'tcx>) -> LoweredTy<'tcx> {
-        // FIXME(-Znext-solver): We're still figuring out how to best handle
-        // normalization and this doesn't feel too great. We should look at this
-        // code again before stabilizing it.
+        // FIXME(-Znext-solver=no): This is easier than requiring all uses of `LoweredTy`
+        // to call `try_structurally_resolve_type` instead. This seems like a lot of
+        // effort, especially as we're still supporting the old solver. We may revisit
+        // this in the future.
         let normalized = if fcx.next_trait_solver() {
             fcx.try_structurally_resolve_type(span, raw)
         } else {
@@ -432,11 +507,6 @@ fn default_fallback(tcx: TyCtxt<'_>) -> DivergingFallbackBehavior {
         return DivergingFallbackBehavior::ToNever;
     }
 
-    // `feature(never_type_fallback)`: fallback to `!` or `()` trying to not break stuff
-    if tcx.features().never_type_fallback() {
-        return DivergingFallbackBehavior::ContextDependent;
-    }
-
     // Otherwise: fallback to `()`
     DivergingFallbackBehavior::ToUnit
 }
@@ -450,17 +520,19 @@ fn parse_never_type_options_attr(
     let mut fallback = None;
     let mut block = None;
 
-    let items = tcx
-        .get_attr(CRATE_DEF_ID, sym::rustc_never_type_options)
-        .map(|attr| attr.meta_item_list().unwrap())
-        .unwrap_or_default();
+    let items = if tcx.features().rustc_attrs() {
+        tcx.get_attr(CRATE_DEF_ID, sym::rustc_never_type_options)
+            .map(|attr| attr.meta_item_list().unwrap())
+    } else {
+        None
+    };
+    let items = items.unwrap_or_default();
 
     for item in items {
         if item.has_name(sym::fallback) && fallback.is_none() {
             let mode = item.value_str().unwrap();
             match mode {
                 sym::unit => fallback = Some(DivergingFallbackBehavior::ToUnit),
-                sym::niko => fallback = Some(DivergingFallbackBehavior::ContextDependent),
                 sym::never => fallback = Some(DivergingFallbackBehavior::ToNever),
                 sym::no => fallback = Some(DivergingFallbackBehavior::NoFallback),
                 _ => {
@@ -486,7 +558,7 @@ fn parse_never_type_options_attr(
             item.span(),
             format!(
                 "unknown or duplicate never type option: `{}` (supported: `fallback`, `diverging_block_default`)",
-                item.name_or_empty()
+                item.name().unwrap()
             ),
         );
     }

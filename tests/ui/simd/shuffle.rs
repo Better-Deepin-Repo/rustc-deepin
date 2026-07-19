@@ -2,19 +2,23 @@
 //@ revisions: opt noopt
 //@[noopt] compile-flags: -Copt-level=0
 //@[opt] compile-flags: -O
-#![feature(repr_simd, intrinsics)]
+#![feature(repr_simd, core_intrinsics)]
 #![allow(incomplete_features)]
 #![feature(adt_const_params)]
 
 use std::marker::ConstParamTy;
 
-extern "rust-intrinsic" {
-    fn simd_shuffle<T, I, U>(a: T, b: T, i: I) -> U;
-}
+use std::intrinsics::simd::simd_shuffle;
 
+// not using `minisimd` because of the `ConstParamTy`
 #[derive(Copy, Clone, ConstParamTy, PartialEq, Eq)]
 #[repr(simd)]
 struct Simd<T, const N: usize>([T; N]);
+
+fn into_array<T, const N: usize>(v: Simd<T, N>) -> [T; N] {
+    const { assert!(size_of::<Simd<T, N>>() == size_of::<[T; N]>()) }
+    unsafe { std::intrinsics::transmute_unchecked(v) }
+}
 
 unsafe fn __shuffle_vector16<const IDX: Simd<u32, 16>, T, U>(x: T, y: T) -> U {
     simd_shuffle(x, y, IDX)
@@ -27,10 +31,10 @@ fn main() {
     let b = Simd::<u8, 4>([4, 5, 6, 7]);
     unsafe {
         let x: Simd<u8, 4> = simd_shuffle(a, b, I1);
-        assert_eq!(x.0, [0, 2, 4, 6]);
+        assert_eq!(into_array(x), [0, 2, 4, 6]);
 
         let y: Simd<u8, 2> = simd_shuffle(a, b, I2);
-        assert_eq!(y.0, [1, 5]);
+        assert_eq!(into_array(y), [1, 5]);
     }
 
     // Test that an indirection (via an unnamed constant)

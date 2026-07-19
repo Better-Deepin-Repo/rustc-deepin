@@ -3,8 +3,8 @@
 use anyhow::Context as _;
 
 use super::Dependency;
-use crate::util::toml_mut::dependency::RegistrySource;
 use crate::CargoResult;
+use crate::util::toml_mut::dependency::RegistrySource;
 use cargo_util_schemas::manifest::PackageName;
 
 /// User-specified crate
@@ -28,11 +28,35 @@ impl CrateSpec {
             .map(|(n, v)| (n, Some(v)))
             .unwrap_or((pkg_id, None));
 
-        PackageName::new(name)?;
+        let package_name = PackageName::new(name);
+        if !pkg_id.contains("@") && package_name.is_err() {
+            for (idx, ch) in pkg_id.char_indices() {
+                if !(unicode_ident::is_xid_continue(ch) || ch == '-') {
+                    let mut suggested_pkg_id = pkg_id.to_string();
+                    suggested_pkg_id.insert_str(idx, "@");
+                    if let Ok(_) = CrateSpec::resolve(&suggested_pkg_id.as_str()) {
+                        let err = package_name.unwrap_err();
+                        return Err(
+                            anyhow::format_err!("{err}\n\n\
+                                help: if this is meant to be a package name followed by a version, insert an `@` like `{suggested_pkg_id}`").into());
+                    }
+                }
+            }
+        }
+
+        package_name?;
 
         if let Some(version) = version {
-            semver::VersionReq::parse(version)
-                .with_context(|| format!("invalid version requirement `{version}`"))?;
+            semver::VersionReq::parse(version).with_context(|| {
+                if let Some(stripped) = version.strip_prefix("v") {
+                    return format!(
+                        "the version provided, `{version}` is not a \
+                         valid SemVer requirement\n\n\
+                         help: changing the package to `{name}@{stripped}`",
+                    );
+                }
+                format!("invalid version requirement `{version}`")
+            })?;
         }
 
         let id = Self {

@@ -1,5 +1,5 @@
+use rustc_errors::DiagArgFromDisplay;
 use rustc_errors::codes::*;
-use rustc_errors::{Diag, DiagArgFromDisplay, EmissionGuarantee, SubdiagMessageOp, Subdiagnostic};
 use rustc_macros::{Diagnostic, Subdiagnostic};
 use rustc_span::{Ident, Span, Symbol};
 
@@ -32,8 +32,6 @@ pub(crate) struct InvalidAbi {
     pub abi: Symbol,
     pub command: String,
     #[subdiagnostic]
-    pub explain: Option<InvalidAbiReason>,
-    #[subdiagnostic]
     pub suggestion: Option<InvalidAbiSuggestion>,
 }
 
@@ -45,24 +43,12 @@ pub(crate) struct TupleStructWithDefault {
     pub span: Span,
 }
 
-pub(crate) struct InvalidAbiReason(pub &'static str);
-
-impl Subdiagnostic for InvalidAbiReason {
-    fn add_to_diag_with<G: EmissionGuarantee, F: SubdiagMessageOp<G>>(
-        self,
-        diag: &mut Diag<'_, G>,
-        _: &F,
-    ) {
-        #[allow(rustc::untranslatable_diagnostic)]
-        diag.note(self.0);
-    }
-}
-
 #[derive(Subdiagnostic)]
 #[suggestion(
     ast_lowering_invalid_abi_suggestion,
-    code = "{suggestion}",
-    applicability = "maybe-incorrect"
+    code = "\"{suggestion}\"",
+    applicability = "maybe-incorrect",
+    style = "verbose"
 )]
 pub(crate) struct InvalidAbiSuggestion {
     #[primary_span]
@@ -212,12 +198,13 @@ pub(crate) struct InvalidRegister<'a> {
 }
 
 #[derive(Diagnostic)]
+#[note]
 #[diag(ast_lowering_invalid_register_class)]
-pub(crate) struct InvalidRegisterClass<'a> {
+pub(crate) struct InvalidRegisterClass {
     #[primary_span]
     pub op_span: Span,
     pub reg_class: Symbol,
-    pub error: &'a str,
+    pub supported_register_classes: String,
 }
 
 #[derive(Diagnostic)]
@@ -338,13 +325,6 @@ pub(crate) struct MisplacedDoubleDot {
 }
 
 #[derive(Diagnostic)]
-#[diag(ast_lowering_misplaced_relax_trait_bound)]
-pub(crate) struct MisplacedRelaxTraitBound {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
 #[diag(ast_lowering_match_arm_with_no_body)]
 pub(crate) struct MatchArmWithNoBody {
     #[primary_span]
@@ -386,24 +366,39 @@ pub(crate) struct InclusiveRangeWithNoEnd {
     pub span: Span,
 }
 
+#[derive(Subdiagnostic)]
+#[multipart_suggestion(
+    ast_lowering_bad_return_type_notation_output_suggestion,
+    applicability = "machine-applicable",
+    style = "verbose"
+)]
+/// Given `T: Tr<m() -> Ret>` or `T: Tr<m(Ty) -> Ret>`, suggest `T: Tr<m(..)>`.
+pub(crate) struct RTNSuggestion {
+    #[suggestion_part(code = "")]
+    pub output: Span,
+    #[suggestion_part(code = "(..)")]
+    pub input: Span,
+}
+
 #[derive(Diagnostic)]
 pub(crate) enum BadReturnTypeNotation {
     #[diag(ast_lowering_bad_return_type_notation_inputs)]
     Inputs {
         #[primary_span]
-        #[suggestion(code = "()", applicability = "maybe-incorrect")]
+        #[suggestion(code = "(..)", applicability = "machine-applicable", style = "verbose")]
         span: Span,
     },
     #[diag(ast_lowering_bad_return_type_notation_output)]
     Output {
         #[primary_span]
-        #[suggestion(code = "", applicability = "maybe-incorrect")]
         span: Span,
+        #[subdiagnostic]
+        suggestion: RTNSuggestion,
     },
     #[diag(ast_lowering_bad_return_type_notation_needs_dots)]
     NeedsDots {
         #[primary_span]
-        #[suggestion(code = "(..)", applicability = "maybe-incorrect")]
+        #[suggestion(code = "(..)", applicability = "machine-applicable", style = "verbose")]
         span: Span,
     },
     #[diag(ast_lowering_bad_return_type_notation_position)]
@@ -443,14 +438,6 @@ pub(crate) struct NoPreciseCapturesOnApit {
 }
 
 #[derive(Diagnostic)]
-#[diag(ast_lowering_no_precise_captures_on_rpitit)]
-#[note]
-pub(crate) struct NoPreciseCapturesOnRpitit {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
 #[diag(ast_lowering_yield_in_closure)]
 pub(crate) struct YieldInClosure {
     #[primary_span]
@@ -480,4 +467,11 @@ pub(crate) struct UseConstGenericArg {
     pub other_args: String,
     #[suggestion_part(code = "{other_args}")]
     pub call_args: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(ast_lowering_union_default_field_values)]
+pub(crate) struct UnionWithDefault {
+    #[primary_span]
+    pub span: Span,
 }

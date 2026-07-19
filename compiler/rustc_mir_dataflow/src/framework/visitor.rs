@@ -1,4 +1,4 @@
-use rustc_middle::mir::{self, BasicBlock, Location};
+use rustc_middle::mir::{self, BasicBlock, Location, traversal};
 
 use super::{Analysis, Direction, Results};
 
@@ -7,8 +7,8 @@ use super::{Analysis, Direction, Results};
 pub fn visit_results<'mir, 'tcx, A>(
     body: &'mir mir::Body<'tcx>,
     blocks: impl IntoIterator<Item = BasicBlock>,
-    results: &mut Results<'tcx, A>,
-    vis: &mut impl ResultsVisitor<'mir, 'tcx, A>,
+    results: &Results<'tcx, A>,
+    vis: &mut impl ResultsVisitor<'tcx, A>,
 ) where
     A: Analysis<'tcx>,
 {
@@ -22,14 +22,27 @@ pub fn visit_results<'mir, 'tcx, A>(
         assert!(reachable_blocks.contains(block));
 
         let block_data = &body[block];
-        A::Direction::visit_results_in_block(&mut state, block, block_data, results, vis);
+        state.clone_from(&results.entry_states[block]);
+        A::Direction::visit_results_in_block(&results.analysis, &mut state, block, block_data, vis);
     }
+}
+
+/// Like `visit_results`, but only for reachable blocks.
+pub fn visit_reachable_results<'mir, 'tcx, A>(
+    body: &'mir mir::Body<'tcx>,
+    results: &Results<'tcx, A>,
+    vis: &mut impl ResultsVisitor<'tcx, A>,
+) where
+    A: Analysis<'tcx>,
+{
+    let blocks = traversal::reachable(body).map(|(bb, _)| bb);
+    visit_results(body, blocks, results, vis)
 }
 
 /// A visitor over the results of an `Analysis`. Use this when you want to inspect domain values in
 /// many or all locations; use `ResultsCursor` if you want to inspect domain values only in certain
 /// locations.
-pub trait ResultsVisitor<'mir, 'tcx, A>
+pub trait ResultsVisitor<'tcx, A>
 where
     A: Analysis<'tcx>,
 {
@@ -38,9 +51,9 @@ where
     /// Called after the "early" effect of the given statement is applied to `state`.
     fn visit_after_early_statement_effect(
         &mut self,
-        _results: &mut Results<'tcx, A>,
+        _analysis: &A,
         _state: &A::Domain,
-        _statement: &'mir mir::Statement<'tcx>,
+        _statement: &mir::Statement<'tcx>,
         _location: Location,
     ) {
     }
@@ -48,9 +61,9 @@ where
     /// Called after the "primary" effect of the given statement is applied to `state`.
     fn visit_after_primary_statement_effect(
         &mut self,
-        _results: &mut Results<'tcx, A>,
+        _analysis: &A,
         _state: &A::Domain,
-        _statement: &'mir mir::Statement<'tcx>,
+        _statement: &mir::Statement<'tcx>,
         _location: Location,
     ) {
     }
@@ -58,9 +71,9 @@ where
     /// Called after the "early" effect of the given terminator is applied to `state`.
     fn visit_after_early_terminator_effect(
         &mut self,
-        _results: &mut Results<'tcx, A>,
+        _analysis: &A,
         _state: &A::Domain,
-        _terminator: &'mir mir::Terminator<'tcx>,
+        _terminator: &mir::Terminator<'tcx>,
         _location: Location,
     ) {
     }
@@ -70,9 +83,9 @@ where
     /// The `call_return_effect` (if one exists) will *not* be applied to `state`.
     fn visit_after_primary_terminator_effect(
         &mut self,
-        _results: &mut Results<'tcx, A>,
+        _analysis: &A,
         _state: &A::Domain,
-        _terminator: &'mir mir::Terminator<'tcx>,
+        _terminator: &mir::Terminator<'tcx>,
         _location: Location,
     ) {
     }

@@ -1,6 +1,6 @@
 use rustc_errors::codes::*;
+use rustc_hir::limit::Limit;
 use rustc_macros::{Diagnostic, Subdiagnostic};
-use rustc_session::Limit;
 use rustc_span::{Span, Symbol};
 
 #[derive(Subdiagnostic)]
@@ -69,9 +69,10 @@ pub(crate) struct Reentrant;
 
 #[derive(Diagnostic)]
 #[diag(query_system_increment_compilation)]
-#[help]
 #[note(query_system_increment_compilation_note1)]
 #[note(query_system_increment_compilation_note2)]
+#[note(query_system_increment_compilation_note3)]
+#[note(query_system_increment_compilation_note4)]
 pub(crate) struct IncrementCompilation {
     pub run_cmd: String,
     pub dep_node: String,
@@ -82,16 +83,16 @@ pub(crate) struct IncrementCompilation {
 #[diag(query_system_query_overflow)]
 pub struct QueryOverflow {
     #[primary_span]
-    pub span: Option<Span>,
+    pub span: Span,
     #[subdiagnostic]
-    pub layout_of_depth: Option<LayoutOfDepth>,
+    pub note: QueryOverflowNote,
     pub suggested_limit: Limit,
     pub crate_name: Symbol,
 }
 
 #[derive(Subdiagnostic)]
-#[note(query_system_layout_of_depth)]
-pub struct LayoutOfDepth {
+#[note(query_system_overflow_note)]
+pub struct QueryOverflowNote {
     pub desc: String,
     pub depth: usize,
 }

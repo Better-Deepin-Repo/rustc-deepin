@@ -3,14 +3,15 @@
 pub mod foo2 {
     pub mod bar2 {
         pub mod bar2 {
-            //~^ ERROR: module has the same name as its containing module
-            //~| NOTE: `-D clippy::module-inception` implied by `-D warnings`
+            //~^ module_inception
+
             pub mod foo2 {}
         }
         pub mod foo2 {}
     }
     pub mod foo2 {
-        //~^ ERROR: module has the same name as its containing module
+        //~^ module_inception
+
         pub mod bar2 {}
     }
 }
@@ -18,13 +19,15 @@ pub mod foo2 {
 mod foo {
     mod bar {
         mod bar {
-            //~^ ERROR: module has the same name as its containing module
+            //~^ module_inception
+
             mod foo {}
         }
         mod foo {}
     }
     mod foo {
-        //~^ ERROR: module has the same name as its containing module
+        //~^ module_inception
+
         mod bar {}
     }
 }
@@ -33,6 +36,15 @@ mod foo {
 mod bar {
     #[allow(clippy::module_inception)]
     mod bar {}
+}
+
+mod with_inner_impl {
+    struct S;
+    impl S {
+        fn f() {
+            mod with_inner_impl {}
+        }
+    }
 }
 
 fn main() {}

@@ -1,6 +1,22 @@
 # How to build and run the compiler
 
-<!-- toc -->
+<div class="warning">
+
+For `profile = "library"` users, or users who use `download-rustc = true | "if-unchanged"`, please be advised that
+the `./x test library/std` flow where `download-rustc` is active (i.e. no compiler changes) is currently broken.
+This is tracked in <https://github.com/rust-lang/rust/issues/142505>. Only the `./x test` flow is affected in this
+case, `./x {check,build} library/std` should still work.
+
+In the short-term, you may need to disable `download-rustc` for `./x test library/std`. This can be done either by:
+
+1. `./x test library/std --set rust.download-rustc=false`
+2. Or set `rust.download-rustc=false` in `bootstrap.toml`.
+
+Unfortunately that will require building the stage 1 compiler. The bootstrap team is working on this, but
+implementing a maintainable fix is taking some time.
+
+</div>
+
 
 The compiler is built using a tool called `x.py`. You will need to
 have Python installed to run it.
@@ -52,7 +68,7 @@ This instructs `git` to perform a "shallow clone", cloning the repository but tr
 the last `N` commits.
 
 Passing `--depth 1` tells `git` to clone the repository but truncate the history to the latest
-commit that is on the `master` branch, which is usually fine for browsing the source code or
+commit that is on the `main` branch, which is usually fine for browsing the source code or
 building the compiler.
 
 ```bash
@@ -63,7 +79,7 @@ cd rust
 > **NOTE**: A shallow clone limits which `git` commands can be run.
 > If you intend to work on and contribute to the compiler, it is
 > generally recommended to fully clone the repository [as shown above](#get-the-source-code),
-> or to perform a [partial clone](#shallow-clone-the-repository) instead.
+> or to perform a [partial clone](#partial-clone-the-repository) instead.
 >
 > For example, `git bisect` and `git blame` require access to the commit history,
 > so they don't work if the repository was cloned with `--depth 1`.
@@ -133,7 +149,7 @@ On Windows, the Powershell commands may give you an error that looks like this:
 ```
 PS C:\Users\vboxuser\rust> ./x
 ./x : File C:\Users\vboxuser\rust\x.ps1 cannot be loaded because running scripts is disabled on this system. For more
-information, see about_Execution_Policies at https:/go.microsoft.com/fwlink/?LinkID=135170.
+information, see about_Execution_Policies at https://go.microsoft.com/fwlink/?LinkID=135170.
 At line:1 char:1
 + ./x
 + ~~~
@@ -156,22 +172,22 @@ You can install it with `cargo install --path src/tools/x`.
 
 To clarify that this is another global installed binary util, which is
 similar to the one declared in section [What is `x.py`](#what-is-xpy), but
-it works as an independent process to execute the `x.py` rather than calling the 
+it works as an independent process to execute the `x.py` rather than calling the
 shell to run the platform related scripts.
 
-## Create a `config.toml`
+## Create a `bootstrap.toml`
 
 To start, run `./x setup` and select the `compiler` defaults. This will do some initialization
-and create a `config.toml` for you with reasonable defaults. If you use a different default (which
+and create a `bootstrap.toml` for you with reasonable defaults. If you use a different default (which
 you'll likely want to do if you want to contribute to an area of rust other than the compiler, such
 as rustdoc), make sure to read information about that default (located in `src/bootstrap/defaults`)
 as the build process may be different for other defaults.
 
-Alternatively, you can write `config.toml` by hand. See `config.example.toml` for all the available
+Alternatively, you can write `bootstrap.toml` by hand. See `bootstrap.example.toml` for all the available
 settings and explanations of them. See `src/bootstrap/defaults` for common settings to change.
 
 If you have already built `rustc` and you change settings related to LLVM, then you may have to
-execute `rm -rf build` for subsequent configuration changes to take effect. Note that `./x
+execute `./x clean --all` for subsequent configuration changes to take effect. Note that `./x
 clean` will not cause a rebuild of LLVM.
 
 ## Common `x` commands
@@ -206,21 +222,18 @@ See the chapters on
 Note that building will require a relatively large amount of storage space.
 You may want to have upwards of 10 or 15 gigabytes available to build the compiler.
 
-Once you've created a `config.toml`, you are now ready to run
+Once you've created a `bootstrap.toml`, you are now ready to run
 `x`. There are a lot of options here, but let's start with what is
 probably the best "go to" command for building a local compiler:
 
-```bash
+```console
 ./x build library
 ```
 
-This may *look* like it only builds the standard library, but that is not the case.
-What this command does is the following:
-
-- Build `std` using the stage0 compiler
-- Build `rustc` using the stage0 compiler
-  - This produces the stage1 compiler
-- Build `std` using the stage1 compiler
+What this command does is:
+- Build `rustc` using the stage0 compiler and stage0 `std`.
+- Build `library` (the standard libraries) with the stage1 compiler that was just built.
+- Assemble a working stage1 sysroot, containing the stage1 compiler and stage1 standard libraries.
 
 This final product (stage1 compiler + libs built using that compiler)
 is what you need to build other Rust programs (unless you use `#![no_std]` or
@@ -230,7 +243,7 @@ You will probably find that building the stage1 `std` is a bottleneck for you,
 but fear not, there is a (hacky) workaround...
 see [the section on avoiding rebuilds for std][keep-stage].
 
-[keep-stage]: ./suggested.md#faster-builds-with---keep-stage
+[keep-stage]: ./suggested.md#faster-rebuilds-with---keep-stage-std
 
 Sometimes you don't need a full build. When doing some kind of
 "type-based refactoring", like renaming a method, or changing the
@@ -238,11 +251,10 @@ signature of some function, you can use `./x check` instead for a much faster bu
 
 Note that this whole command just gives you a subset of the full `rustc`
 build. The **full** `rustc` build (what you get with `./x build
---stage 2 compiler/rustc`) has quite a few more steps:
+--stage 2 rustc`) has quite a few more steps:
 
 - Build `rustc` with the stage1 compiler.
-  - The resulting compiler here is called the "stage2" compiler.
-- Build `std` with stage2 compiler.
+  - The resulting compiler here is called the "stage2" compiler, which uses stage1 std from the previous command.
 - Build `librustdoc` and a bunch of other things with the stage2 compiler.
 
 You almost never need to do this.
@@ -250,14 +262,14 @@ You almost never need to do this.
 ### Build specific components
 
 If you are working on the standard library, you probably don't need to build
-the compiler unless you are planning to use a recently added nightly feature.
-Instead, you can just build using the bootstrap compiler.
+every other default component. Instead, you can build a specific component by
+providing its name, like this:
 
 ```bash
-./x build --stage 0 library
+./x build --stage 1 library
 ```
 
-If you choose the `library` profile when running `x setup`, you can omit `--stage 0` (it's the
+If you choose the `library` profile when running `x setup`, you can omit `--stage 1` (it's the
 default).
 
 ## Creating a rustup toolchain
@@ -271,7 +283,6 @@ you will likely need to build at some point; for example, if you want
 to run the entire test suite).
 
 ```bash
-rustup toolchain link stage0 build/host/stage0-sysroot # beta compiler + stage0 std
 rustup toolchain link stage1 build/host/stage1
 rustup toolchain link stage2 build/host/stage2
 ```
@@ -326,7 +337,7 @@ involve proc macros or build scripts, you must be sure to explicitly build targe
 host platform (in this case, `x86_64-unknown-linux-gnu`).
 
 If you want to always build for other targets without needing to pass flags to `x build`,
-you can configure this in the `[build]` section of your `config.toml` like so:
+you can configure this in the `[build]` section of your `bootstrap.toml` like so:
 
 ```toml
 [build]
@@ -336,8 +347,8 @@ target = ["x86_64-unknown-linux-gnu", "wasm32-wasip1"]
 Note that building for some targets requires having external dependencies installed
 (e.g. building musl targets requires a local copy of musl).
 Any target-specific configuration (e.g. the path to a local copy of musl)
-will need to be provided by your `config.toml`.
-Please see `config.example.toml` for information on target-specific configuration keys.
+will need to be provided by your `bootstrap.toml`.
+Please see `bootstrap.example.toml` for information on target-specific configuration keys.
 
 For examples of the complete configuration necessary to build a target, please visit
 [the rustc book](https://doc.rust-lang.org/rustc/platform-support.html),

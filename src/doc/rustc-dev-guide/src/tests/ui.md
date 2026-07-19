@@ -1,7 +1,5 @@
 # UI tests
 
-<!-- toc -->
-
 UI tests are a particular [test suite](compiletest.md#test-suites) of
 compiletest.
 
@@ -13,16 +11,21 @@ used for many other purposes. For example, tests can also be configured to [run
 the resulting program](#controlling-passfail-expectations) to verify its
 behavior.
 
+For a survey of each subdirectory's purpose under `tests/ui`, consult the
+[SUMMARY.md](https://github.com/rust-lang/rust/tree/HEAD/tests/ui/SUMMARY.md).
+This is useful if you write a new test, and are looking for a category to
+place it in.
+
 If you need to work with `#![no_std]` cross-compiling tests, consult the
 [`minicore` test auxiliary](./minicore.md) chapter.
 
-[`tests/ui`]: https://github.com/rust-lang/rust/blob/master/tests/ui
+[`tests/ui`]: https://github.com/rust-lang/rust/blob/HEAD/tests/ui
 
 ## General structure of a test
 
-A test consists of a Rust source file located anywhere in the `tests/ui`
-directory, but they should be placed in a suitable sub-directory. For example,
-[`tests/ui/hello.rs`] is a basic hello-world test.
+A test consists of a Rust source file located in the `tests/ui` directory.
+**Tests must be placed in the appropriate subdirectory** based on their purpose
+and testing category - placing tests directly in `tests/ui` is not permitted.
 
 Compiletest will use `rustc` to compile the test, and compare the output against
 the expected output which is stored in a `.stdout` or `.stderr` file located
@@ -41,8 +44,6 @@ pass/fail expectations](#controlling-passfail-expectations).
 By default, a test is built as an executable binary. If you need a different
 crate type, you can use the `#![crate_type]` attribute to set it as needed.
 
-[`tests/ui/hello.rs`]: https://github.com/rust-lang/rust/blob/master/tests/ui/hello.rs
-
 ## Output comparison
 
 UI tests store the expected output from the compiler in `.stderr` and `.stdout`
@@ -53,6 +54,11 @@ expect.
 The output is normalized to ignore unwanted differences, see the
 [Normalization](#normalization) section. If the file is missing, then
 compiletest expects the corresponding output to be empty.
+
+A common reason to use normalization, revisions, and most of the other following tools,
+is to account for platform differences. Consider alternatives to these tools, like
+e.g. using the `extern "rust-invalid"` ABI that is invalid on every platform
+instead of fixing the test to use cross-compilation and testing every possibly-invalid ABI.
 
 There can be multiple stdout/stderr files. The general form is:
 
@@ -89,6 +95,7 @@ will check for output files:
   [Normalization](#normalization)).
 - `dont-check-compiler-stderr` — Ignores stderr from the compiler.
 - `dont-check-compiler-stdout` — Ignores stdout from the compiler.
+- `compare-output-by-lines` — Some tests have non-deterministic orders of output, so we need to compare by lines.
 
 UI tests run with `-Zdeduplicate-diagnostics=no` flag which disables rustc's
 built-in diagnostic deduplication mechanism. This means you may see some
@@ -113,6 +120,8 @@ Compiletest makes the following replacements on the compiler output:
 - The base directory where the test's output goes is replaced with
   `$TEST_BUILD_DIR`. This only comes up in a few rare circumstances. Example:
   `/path/to/rust/build/x86_64-unknown-linux-gnu/test/ui`
+- The real directory to the standard library source is replaced with `$SRC_DIR_REAL`.
+- The real directory to the compiler source is replaced with `$COMPILER_DIR_REAL`.
 - Tabs are replaced with `\t`.
 - Backslashes (`\`) are converted to forward slashes (`/`) within paths (using a
   heuristic). This helps normalize differences with Windows-style paths.
@@ -165,8 +174,8 @@ The corresponding reference file will use the normalized output to test both
 Please see [`ui/transmute/main.rs`][mrs] and [`main.stderr`] for a concrete
 usage example.
 
-[mrs]: https://github.com/rust-lang/rust/blob/master/tests/ui/transmute/main.rs
-[`main.stderr`]: https://github.com/rust-lang/rust/blob/master/tests/ui/transmute/main.stderr
+[mrs]: https://github.com/rust-lang/rust/blob/HEAD/tests/ui/transmute/main.rs
+[`main.stderr`]: https://github.com/rust-lang/rust/blob/HEAD/tests/ui/transmute/main.stderr
 
 ## Error annotations
 
@@ -192,7 +201,7 @@ They have several forms, but generally are a comment with the diagnostic level
 to write out the entire message, just make sure to include the important part of
 the message to make it self-documenting.
 
-The error annotation needs to match with the line of the diagnostic. There are
+Most error annotations need to match with the line of the diagnostic. There are
 several ways to match the message with the line (see the examples below):
 
 * `~`: Associates the error level and message with the *current* line
@@ -202,6 +211,9 @@ several ways to match the message with the line (see the examples below):
 * `~|`: Associates the error level and message with the *same* line as the
   *previous comment*. This is more convenient than using multiple carets when
   there are multiple messages associated with the same line.
+* `~v`: Associates the error level and message with the *next* error
+  annotation line. Each symbol (`v`) that you add adds a line to this, so `~vvv`
+  is three lines below the error annotation line.
 
 Example:
 
@@ -215,6 +227,14 @@ fn meow(_: [u8]) {}
 The space character between `//~` (or other variants) and the subsequent text is
 negligible (i.e. there is no semantic difference between `//~ ERROR` and
 `//~ERROR` although the former is more common in the codebase).
+
+`~? <diagnostic kind>` (example being `~? ERROR`)
+is used to match diagnostics _without_ line info at all,
+or where the line info is outside the main test file[^main test file].
+These annotations can be placed on any line in the test file.
+
+[^main test file]: This is a file that has the `~?` annotations,
+as distinct from aux files, or sources that we have no control over.
 
 ### Error annotation examples
 
@@ -270,10 +290,36 @@ fn main() {
 //~| ERROR this pattern has 1 field, but the corresponding tuple struct has 3 fields [E0023]
 ```
 
+#### Positioned above error line
+
+Use the `//~v` idiom with number of v's in the string to indicate the number
+of lines below. This is typically used in lexer or parser tests matching on errors like unclosed
+delimiter or unclosed literal happening at the end of file.
+
+```rust,ignore
+// ignore-tidy-trailing-newlines
+//~v ERROR this file contains an unclosed delimiter
+fn main((ؼ
+```
+
+#### Error without line information
+
+Use `//~?` to match an error without line information.
+`//~?` is precise and will not match errors if their line information is available.
+It should be preferred over `//@ error-pattern`
+for tests wishing to match against compiler diagnostics,
+due to `//@ error-pattern` being imprecise and non-exhaustive.
+
+```rust,ignore
+//@ compile-flags: --print yyyy
+
+//~? ERROR unknown print request: `yyyy`
+```
+
 ### `error-pattern`
 
-The `error-pattern` [directive](directives.md) can be used for messages that don't
-have a specific span.
+The `error-pattern` [directive](directives.md) can be used for runtime messages which don't
+have a specific span, or, in exceptional cases, for compile time messages.
 
 Let's think about this test:
 
@@ -286,8 +332,8 @@ fn main() {
 }
 ```
 
-We want to ensure this shows "index out of bounds" but we cannot use the `ERROR`
-annotation since the error doesn't have any span. Then it's time to use the
+We want to ensure this shows "index out of bounds", but we cannot use the `ERROR`
+annotation since the runtime error doesn't have any span. Then it's time to use the
 `error-pattern` directive:
 
 ```rust,ignore
@@ -300,22 +346,52 @@ fn main() {
 }
 ```
 
-But for strict testing, try to use the `ERROR` annotation as much as possible.
+For strict testing of compile time output, try to use the line annotations `//~` as much as
+possible, including `//~?` annotations for diagnostics without spans.
 
-### Error levels
+If the compile time output is target dependent or too verbose, use directive
+`//@ dont-require-annotations: <diagnostic-kind>` to make the line annotation checking
+non-exhaustive.
+Some of the compiler messages can stay uncovered by annotations in this mode.
 
-The error levels that you can have are:
+For checking runtime output, `//@ check-run-results` may be preferable.
+
+Only use `error-pattern` if none of the above works, such as when finding a
+specific string pattern in a runtime panic output.
+
+Line annotations `//~` and `error-pattern` are compatible and can be used in the same test.
+
+### Diagnostic kinds (error levels)
+
+The diagnostic kinds that you can have are:
 
 - `ERROR`
-- `WARN` or `WARNING`
+- `WARN` (or `WARNING`)
 - `NOTE`
-- `HELP` and `SUGGESTION`
+- `HELP`
+- `SUGGESTION`
+- `RAW`
 
-You are allowed to not include a level, but you should include it at least for
-the primary message.
-
-The `SUGGESTION` level is used for specifying what the expected replacement text
+The `SUGGESTION` kind is used for specifying what the expected replacement text
 should be for a diagnostic suggestion.
+The `RAW` kind can be used for matching on lines from non-structured output sometimes emitted
+by the compiler instead of or in addition to structured json.
+
+`ERROR` and `WARN` kinds are required to be exhaustively covered by line annotations
+`//~` by default.
+
+Other kinds only need to be line-annotated if at least one annotation of that kind appears
+in the test file. For example, one `//~ NOTE` will also require all other `//~ NOTE`s in the file
+to be written out explicitly.
+
+Use directive `//@ dont-require-annotations` to opt out of exhaustive annotations.
+E.g. use `//@ dont-require-annotations: NOTE` to annotate notes selectively.
+Avoid using this directive for `ERROR`s and `WARN`ings, unless there's a serious reason, like
+target-dependent compiler output.
+
+Some diagnostics are never required to be line-annotated, regardless of their kind or directives,
+for example secondary lines of multiline diagnostics,
+or ubiquitous diagnostics like `aborting due to N previous errors`.
 
 UI tests use the `-A unused` flag by default to ignore all unused warnings, as
 unused warnings are usually not the focus of a test. However, simple code
@@ -353,7 +429,7 @@ would be a `.mir.stderr` and `.thir.stderr` file with the different outputs of
 the different revisions.
 
 > Note: cfg revisions also work inside the source code with `#[cfg]` attributes.
-> 
+>
 > By convention, the `FALSE` cfg is used to have an always-false config.
 
 ## Controlling pass/fail expectations
@@ -370,19 +446,29 @@ even run the resulting program. Just add one of the following
   - `//@ build-pass` — compilation and linking should succeed but do
     not run the resulting binary.
   - `//@ run-pass` — compilation should succeed and running the resulting
-    binary should also succeed.
+    binary should make it exit with code 0 which indicates success.
 - Fail directives:
   - `//@ check-fail` — compilation should fail (the codegen phase is skipped).
     This is the default for UI tests.
   - `//@ build-fail` — compilation should fail during the codegen phase.
-    This will run `rustc` twice, once to verify that it compiles successfully
-    without the codegen phase, then a second time the full compile should
-    fail.
+    This will run `rustc` twice:
+    - First time is to ensure that the compile succeeds without the codegen phase
+    - Second time is to ensure that the full compile fails
   - `//@ run-fail` — compilation should succeed, but running the resulting
-    binary should fail.
+    binary should make it exit with a code in the range `1..=127` which
+    indicates regular failure. On targets without unwind support, crashes
+    are also accepted.
+  - `//@ run-crash` — compilation should succeed, but running the resulting
+    binary should fail with a crash. Crashing is defined as "not exiting with
+    a code in the range `0..=127`". Example on Linux: Termination by `SIGABRT`
+    or `SIGSEGV`. Example on Windows: Exiting with the code for
+    `STATUS_ILLEGAL_INSTRUCTION` (`0xC000001D`).
+  - `//@ run-fail-or-crash` — compilation should succeed, but running the
+    resulting binary should either `run-fail` or `run-crash`. Useful if a test
+    crashes on some targets but just fails on others.
 
-For `run-pass` and `run-fail` tests, by default the output of the program itself
-is not checked.
+For `run-pass`. `run-fail`, `run-crash` and `run-fail-or-crash` tests, by
+default the output of the program itself is not checked.
 
 If you want to check the output of running the program, include the
 `check-run-results` directive. This will check for a `.run.stderr` and
@@ -414,6 +500,14 @@ reasons, including:
 2. Providing a sentinel that will fail if the bug is incidentally fixed. This
    can alert the developer so they know that the associated issue has been fixed
    and can possibly be closed.
+
+This directive takes comma-separated issue numbers as arguments, or `"unknown"`:
+
+- `//@ known-bug: #123, #456` (when the issues are on rust-lang/rust)
+- `//@ known-bug: rust-lang/chalk#123456`
+  (allows arbitrary text before the `#`, which is useful when the issue is on another repo)
+- `//@ known-bug: unknown`
+  (when there is no known issue yet; preferably open one if it does not already exist)
 
 Do not include [error annotations](#error-annotations) in a test with
 `known-bug`. The test should still include other normal directives and
@@ -454,7 +548,7 @@ For example, if your test is related to closures, you should put it in
 `tests/ui/closures`. When you reach the limit, you could increase it by tweaking
 [here][ui test tidy].
 
-[ui test tidy]: https://github.com/rust-lang/rust/blob/master/src/tools/tidy/src/ui_tests.rs
+[ui test tidy]: https://github.com/rust-lang/rust/blob/HEAD/src/tools/tidy/src/ui_tests.rs
 
 ## Rustfix tests
 
@@ -530,4 +624,27 @@ with "user-facing" Rust alone. Indeed, one could say that this slightly abuses
 the term "UI" (*user* interface) and turns such UI tests from black-box tests
 into white-box ones. Use them carefully and sparingly.
 
-[compiler debugging]: ../compiler-debugging.md#rustc_test-attributes
+[compiler debugging]: ../compiler-debugging.md#rustc_-test-attributes
+
+## UI test mode preset lint levels
+
+By default, test suites under UI test mode (`tests/ui`, `tests/ui-fulldeps`,
+but not `tests/rustdoc-ui`) will specify
+
+- `-A unused`
+- `-A internal_features`
+
+If:
+
+- The ui test's pass mode is below `run` (i.e. check or build).
+- No compare modes are specified.
+
+Since they can be very noisy in ui tests.
+
+You can override them with `compile-flags` lint level flags or
+in-source lint level attributes as required.
+
+Note that the `rustfix` version will *not* have `-A unused` passed,
+meaning that you may have to `#[allow(unused)]` to suppress `unused`
+lints on the rustfix'd file (because we might be testing rustfix
+on `unused` lints themselves).

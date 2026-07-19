@@ -1,6 +1,6 @@
 use std::cmp::max;
 
-use rustc_ast::{ast, ptr};
+use rustc_ast::ast;
 use rustc_span::{Span, source_map};
 
 use crate::macros::MacroArg;
@@ -12,7 +12,7 @@ pub(crate) trait Spanned {
     fn span(&self) -> Span;
 }
 
-impl<T: Spanned> Spanned for ptr::P<T> {
+impl<T: Spanned> Spanned for Box<T> {
     fn span(&self) -> Span {
         (**self).span()
     }
@@ -58,6 +58,7 @@ implement_spanned!(ast::ExprField);
 implement_spanned!(ast::ForeignItem);
 implement_spanned!(ast::Item);
 implement_spanned!(ast::Local);
+implement_spanned!(ast::WherePredicate);
 
 impl Spanned for ast::Stmt {
     fn span(&self) -> Span {
@@ -121,7 +122,7 @@ impl Spanned for ast::GenericParam {
     fn span(&self) -> Span {
         let lo = match self.kind {
             _ if !self.attrs.is_empty() => self.attrs[0].span.lo(),
-            ast::GenericParamKind::Const { kw_span, .. } => kw_span.lo(),
+            ast::GenericParamKind::Const { span, .. } => span.lo(),
             _ => self.ident.span.lo(),
         };
         let hi = if self.bounds.is_empty() {
@@ -146,12 +147,6 @@ impl Spanned for ast::FieldDef {
     fn span(&self) -> Span {
         // FIXME(default_field_values): This needs to be adjusted.
         span_with_attrs_lo_hi!(self, self.span.lo(), self.ty.span.hi())
-    }
-}
-
-impl Spanned for ast::WherePredicate {
-    fn span(&self) -> Span {
-        self.span
     }
 }
 
@@ -211,7 +206,7 @@ impl Spanned for ast::PreciseCapturingArg {
     }
 }
 
-impl<'a> Spanned for RangeOperand<'a> {
+impl<'a, T> Spanned for RangeOperand<'a, T> {
     fn span(&self) -> Span {
         self.span
     }

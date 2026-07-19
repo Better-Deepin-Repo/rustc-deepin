@@ -1,16 +1,15 @@
+r[items.use]
 # Use declarations
 
-r[items.use]
-
 r[items.use.syntax]
-> **<sup>Syntax:</sup>**\
-> _UseDeclaration_ :\
-> &nbsp;&nbsp; `use` _UseTree_ `;`
->
-> _UseTree_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; ([_SimplePath_]<sup>?</sup> `::`)<sup>?</sup> `*`\
-> &nbsp;&nbsp; | ([_SimplePath_]<sup>?</sup> `::`)<sup>?</sup> `{` (_UseTree_ ( `,`  _UseTree_ )<sup>\*</sup> `,`<sup>?</sup>)<sup>?</sup> `}`\
-> &nbsp;&nbsp; | [_SimplePath_]&nbsp;( `as` ( [IDENTIFIER] | `_` ) )<sup>?</sup>
+```grammar,items
+UseDeclaration -> `use` UseTree `;`
+
+UseTree ->
+      (SimplePath? `::`)? `*`
+    | (SimplePath? `::`)? `{` (UseTree ( `,`  UseTree )* `,`?)? `}`
+    | SimplePath ( `as` ( IDENTIFIER | `_` ) )?
+```
 
 r[items.use.intro]
 A _use declaration_ creates one or more local name bindings synonymous with
@@ -70,9 +69,8 @@ fn main() {
 }
 ```
 
-## `use` Visibility
-
 r[items.use.visibility]
+## `use` Visibility
 
 r[items.use.visibility.intro]
 Like items, `use` declarations are private to the containing module, by
@@ -106,12 +104,11 @@ fn main() {
 In this example, the module `quux` re-exports two public names defined in
 `foo`.
 
+r[items.use.path]
 ## `use` Paths
 
-r[items.use.path]
-
 r[items.use.path.intro]
-The [paths] that are allowed in a `use` item follow the [_SimplePath_] grammar and are similar to the paths that may be used in an expression.
+The [paths] that are allowed in a `use` item follow the [SimplePath] grammar and are similar to the paths that may be used in an expression.
 They may create bindings for:
 
 * Nameable [items]
@@ -141,9 +138,9 @@ fn example() {
 }
 ```
 
-r[items.use.path.edition2015]
-> **Edition differences**: In the 2015 edition, `use` paths are relative to the crate root.
-> For example:
+r[items.use.path.edition2018]
+> [!EDITION-2018]
+> In the 2015 edition, `use` paths are relative to the crate root. For example:
 >
 > ```rust,edition2015
 > mod foo {
@@ -165,9 +162,8 @@ r[items.use.path.edition2015]
 > Thus, [`extern crate`] declarations are still required in 2015 to reference an external crate in a `use` declaration.
 > Beginning with the 2018 edition, `use` declarations can specify an external crate dependency the same way `extern crate` can.
 
-## `as` renames
-
 r[items.use.as]
+## `as` renames
 
 The `as` keyword can be used to change the name of an imported entity.
 For example:
@@ -181,9 +177,8 @@ mod inner {
 }
 ```
 
-## Brace syntax
-
 r[items.use.multiple-syntax]
+## Brace syntax
 
 r[items.use.multiple-syntax.intro]
 Braces can be used in the last segment of the path to import multiple entities from the previous segment, or, if there are no previous segments, from the current scope.
@@ -201,12 +196,12 @@ r[items.use.multiple-syntax.empty]
 An empty brace does not import anything, though the leading path is validated that it is accessible.
 <!-- This is slightly wrong, see: https://github.com/rust-lang/rust/issues/61826 -->
 
-r[items.use.multiple-syntax.edition2015]
-> **Edition differences**: In the 2015 edition, paths are relative to the crate root, so an import such as `use {foo, bar};` will import the names `foo` and `bar` from the crate root, whereas starting in 2018, those names are relative to the current scope.
-
-## `self` imports
+r[items.use.multiple-syntax.edition2018]
+> [!EDITION-2018]
+> In the 2015 edition, paths are relative to the crate root, so an import such as `use {foo, bar};` will import the names `foo` and `bar` from the crate root, whereas starting in 2018, those names are relative to the current scope.
 
 r[items.use.self]
+## `self` imports
 
 r[items.use.self.intro]
 The keyword `self` may be used within [brace syntax](#brace-syntax) to create a binding of the parent entity under its own name.
@@ -246,13 +241,11 @@ fn main() {
 }
 ```
 
-> **Note**: `self` may also be used as the first segment of a path.
-> The usage of `self` as the first segment and inside a `use` brace is logically the same; it means the current module of the parent segment, or the current module if there is no parent segment.
-> See [`self`] in the paths chapter for more information on the meaning of a leading `self`.
-
-## Glob imports
+> [!NOTE]
+> `self` may also be used as the first segment of a path. The usage of `self` as the first segment and inside a `use` brace is logically the same; it means the current module of the parent segment, or the current module if there is no parent segment. See [`self`] in the paths chapter for more information on the meaning of a leading `self`.
 
 r[items.use.glob]
+## Glob imports
 
 r[items.use.glob.intro]
 The `*` character may be used as the last segment of a `use` path to import all importable entities from the entity of the preceding segment.
@@ -315,13 +308,12 @@ r[items.use.glob.last-segment-only]
 r[items.use.glob.self-import]
 `*` cannot be used to import a module's contents into itself (such as `use self::*;`).
 
-r[items.use.glob.edition2015]
-> **Edition differences**: In the 2015 edition, paths are relative to the crate root, so an import such as `use *;` is valid, and it means to import everything from the crate root.
-> This cannot be used in the crate root itself.
-
-## Underscore Imports
+r[items.use.glob.edition2018]
+> [!EDITION-2018]
+> In the 2015 edition, paths are relative to the crate root, so an import such as `use *;` is valid, and it means to import everything from the crate root. This cannot be used in the crate root itself.
 
 r[items.use.as-underscore]
+## Underscore imports
 
 r[items.use.as-underscore.intro]
 Items can be imported without binding to a name by using an underscore with
@@ -368,9 +360,8 @@ m!(use std as _;);
 // use std as _;
 ```
 
-## Restrictions
-
 r[items.use.restrictions]
+## Restrictions
 
 The following are restrictions for valid `use` declarations:
 
@@ -398,11 +389,11 @@ r[items.use.restrictions.variant]
   use TypeAlias::MyVariant; //~ ERROR
   ```
 
+r[items.use.ambiguities]
 ## Ambiguities
 
-r[items.use.ambiguities]
-
-> **Note**: This section is incomplete.
+> [!NOTE]
+> This section is incomplete.
 
 r[items.use.ambiguities.intro]
 Some situations are an error when there is an ambiguity as to which name a `use` declaration refers. This happens when there are two name candidates that do not resolve to the same entity.
@@ -451,18 +442,16 @@ fn main() {
 }
 ```
 
-[_SimplePath_]: ../paths.md#simple-paths
 [`extern crate`]: extern-crates.md
 [`macro_rules`]: ../macros-by-example.md
 [`self`]: ../paths.md#self
 [associated items]: associated-items.md
 [Attributes]: ../attributes.md
 [Built-in types]: ../types.md
-[Derive macros]: ../procedural-macros.md#derive-macros
+[Derive macros]: macro.proc.derive
 [Enum variants]: enumerations.md
 [extern prelude]: ../names/preludes.md#extern-prelude
 [generic parameters]: generics.md
-[IDENTIFIER]: ../identifiers.md
 [items]: ../items.md
 [local variables]: ../variables.md
 [namespace]: ../names/namespaces.md

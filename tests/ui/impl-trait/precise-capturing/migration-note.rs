@@ -29,11 +29,12 @@ fn needs_static() {
     let a = display_len(&x);
     //~^ ERROR `x` does not live long enough
     //~| NOTE this call may capture more lifetimes than intended
-    //~| NOTE argument requires that `x` is borrowed for `'static`
     //~| NOTE borrowed value does not live long enoug
 
     fn needs_static(_: impl Sized + 'static) {}
+    //~^ NOTE requirement that the value outlives `'static` introduced here
     needs_static(a);
+    //~^ NOTE argument requires that `x` is borrowed for `'static`
 }
 //~^ NOTE `x` dropped here while still borrowed
 
@@ -76,11 +77,12 @@ fn needs_static_mut() {
     let a = display_len_mut(&mut x);
     //~^ ERROR `x` does not live long enough
     //~| NOTE this call may capture more lifetimes than intended
-    //~| NOTE argument requires that `x` is borrowed for `'static`
     //~| NOTE borrowed value does not live long enough
 
     fn needs_static(_: impl Sized + 'static) {}
+    //~^ NOTE requirement that the value outlives `'static` introduced here
     needs_static(a);
+    //~^ NOTE argument requires that `x` is borrowed for `'static`
 }
 //~^ NOTE `x` dropped here while still borrowed
 

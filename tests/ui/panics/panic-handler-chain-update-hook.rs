@@ -2,7 +2,8 @@
 //@ needs-unwind
 #![allow(stable_features)]
 
-//@ ignore-emscripten no threads support
+//@ needs-threads
+//@ ignore-backends: gcc
 
 #![feature(std_panic)]
 #![feature(panic_update_hook)]

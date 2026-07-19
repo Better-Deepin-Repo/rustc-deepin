@@ -1,3 +1,4 @@
+//@ add-minicore
 //@ build-pass
 //@ revisions: arm
 //@[arm] compile-flags: --target arm-unknown-linux-gnueabi
@@ -5,6 +6,7 @@
 //@ revisions: aarch64
 //@[aarch64] compile-flags: --target aarch64-unknown-linux-gnu
 //@[aarch64] needs-llvm-components: aarch64
+//@ ignore-backends: gcc
 #![feature(
     no_core, lang_items, link_llvm_intrinsics,
     abi_unadjusted, repr_simd, arm_target_feature,
@@ -14,19 +16,8 @@
 #![crate_type = "lib"]
 #![allow(non_camel_case_types)]
 
-/// To work cross-target this test must be no_core.
-/// This little prelude supplies what we need.
-#[lang = "sized"]
-pub trait Sized {}
-
-#[lang = "copy"]
-pub trait Copy: Sized {}
-impl Copy for i8 {}
-impl<T: ?Sized> Copy for *const T {}
-impl<T: ?Sized> Copy for *mut T {}
-
-// I hate no_core tests!
-impl<T: Copy, const N: usize> Copy for [T; N] {}
+extern crate minicore;
+use minicore::*;
 
 // Regression test for https://github.com/rust-lang/rust/issues/118124.
 

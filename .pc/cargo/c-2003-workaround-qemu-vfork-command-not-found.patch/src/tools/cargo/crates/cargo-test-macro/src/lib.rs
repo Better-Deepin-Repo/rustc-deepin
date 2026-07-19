@@ -10,7 +10,7 @@
 use proc_macro::*;
 use std::path::Path;
 use std::process::Command;
-use std::sync::Once;
+use std::sync::LazyLock;
 
 /// Replacement for `#[test]`
 ///
@@ -219,7 +219,7 @@ pub fn cargo_test(attr: TokenStream, item: TokenStream) -> TokenStream {
 
         let mut new_body = to_token_stream(
             r#"let _test_guard = {
-                let tmp_dir = option_env!("CARGO_TARGET_TMPDIR");
+                let tmp_dir = env!("CARGO_TARGET_TMPDIR");
                 cargo_test_support::paths::init_root(tmp_dir)
             };"#,
         );
@@ -254,23 +254,21 @@ fn to_token_stream(code: &str) -> TokenStream {
     code.parse().unwrap()
 }
 
-static mut VERSION: (u32, bool) = (0, false);
+static VERSION: std::sync::LazyLock<(u32, bool)> = LazyLock::new(|| {
+    let output = Command::new("rustc")
+        .arg("-V")
+        .output()
+        .expect("rustc should run");
+    let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
+    let vers = stdout.split_whitespace().skip(1).next().unwrap();
+    let is_nightly = option_env!("CARGO_TEST_DISABLE_NIGHTLY").is_none()
+        && (vers.contains("-nightly") || vers.contains("-dev"));
+    let minor = vers.split('.').skip(1).next().unwrap().parse().unwrap();
+    (minor, is_nightly)
+});
 
 fn version() -> (u32, bool) {
-    static INIT: Once = Once::new();
-    INIT.call_once(|| {
-        let output = Command::new("rustc")
-            .arg("-V")
-            .output()
-            .expect("rustc should run");
-        let stdout = std::str::from_utf8(&output.stdout).expect("utf8");
-        let vers = stdout.split_whitespace().skip(1).next().unwrap();
-        let is_nightly = option_env!("CARGO_TEST_DISABLE_NIGHTLY").is_none()
-            && (vers.contains("-nightly") || vers.contains("-dev"));
-        let minor = vers.split('.').skip(1).next().unwrap().parse().unwrap();
-        unsafe { VERSION = (minor, is_nightly) }
-    });
-    unsafe { VERSION }
+    LazyLock::force(&VERSION).clone()
 }
 
 fn check_command(command_path: &Path, args: &[&str]) -> bool {
@@ -304,19 +302,42 @@ fn check_command(command_path: &Path, args: &[&str]) -> bool {
 }
 
 fn has_command(command: &str) -> bool {
-    check_command(Path::new(command), &["--version"])
+    use std::env::consts::EXE_EXTENSION;
+    // ALLOWED: For testing cargo itself only.
+    #[allow(clippy::disallowed_methods)]
+    let Some(paths) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&paths)
+        .flat_map(|path| {
+            let candidate = path.join(&command);
+            let with_exe = if EXE_EXTENSION.is_empty() {
+                None
+            } else {
+                Some(candidate.with_extension(EXE_EXTENSION))
+            };
+            std::iter::once(candidate).chain(with_exe)
+        })
+        .find(|p| is_executable(p))
+        .is_some()
+}
+
+#[cfg(unix)]
+fn is_executable<P: AsRef<Path>>(path: P) -> bool {
+    use std::os::unix::prelude::*;
+    std::fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn is_executable<P: AsRef<Path>>(path: P) -> bool {
+    path.as_ref().is_file()
 }
 
 fn has_rustup_stable() -> bool {
     if option_env!("CARGO_TEST_DISABLE_NIGHTLY").is_some() {
         // This cannot run on rust-lang/rust CI due to the lack of rustup.
-        return false;
-    }
-    if cfg!(windows) && !is_ci() && option_env!("RUSTUP_WINDOWS_PATH_ADD_BIN").is_none() {
-        // There is an issue with rustup that doesn't allow recursive cargo
-        // invocations. Disable this on developer machines if the environment
-        // variable is not enabled. This can be removed once
-        // https://github.com/rust-lang/rustup/issues/3036 is resolved.
         return false;
     }
     // Cargo mucks with PATH on Windows, adding sysroot host libdir, which is

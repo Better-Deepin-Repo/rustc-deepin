@@ -1,21 +1,20 @@
-{{#include attributes-redirect.html}}
+r[attributes]
 # Attributes
 
 r[attributes.syntax]
-> **<sup>Syntax</sup>**\
-> _InnerAttribute_ :\
-> &nbsp;&nbsp; `#` `!` `[` _Attr_ `]`
->
-> _OuterAttribute_ :\
-> &nbsp;&nbsp; `#` `[` _Attr_ `]`
->
-> _Attr_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; [_SimplePath_] _AttrInput_<sup>?</sup>\
-> &nbsp;&nbsp; | `unsafe` `(` [_SimplePath_] _AttrInput_<sup>?</sup> `)`
->
-> _AttrInput_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; [_DelimTokenTree_]\
-> &nbsp;&nbsp; | `=` [_Expression_]
+```grammar,attributes
+InnerAttribute -> `#` `!` `[` Attr `]`
+
+OuterAttribute -> `#` `[` Attr `]`
+
+Attr ->
+      SimplePath AttrInput?
+    | `unsafe` `(` SimplePath AttrInput? `)`
+
+AttrInput ->
+      DelimTokenTree
+    | `=` Expression
+```
 
 r[attributes.intro]
 An _attribute_ is a general, free-form metadatum that is interpreted according
@@ -23,9 +22,44 @@ to name, convention, language, and compiler version. Attributes are modeled
 on Attributes in [ECMA-335], with the syntax coming from [ECMA-334] \(C#).
 
 r[attributes.inner]
-_Inner attributes_, written with a bang (`!`) after the hash (`#`), apply to the
-item that the attribute is declared within. _Outer attributes_, written without
-the bang after the hash, apply to the thing that follows the attribute.
+_Inner attributes_, written with a bang (`!`) after the hash (`#`), apply to the form that the attribute is declared within.
+
+> [!EXAMPLE]
+> ```rust
+> // General metadata applied to the enclosing module or crate.
+> #![crate_type = "lib"]
+>
+> // Inner attribute applies to the entire function.
+> fn some_unused_variables() {
+>   #![allow(unused_variables)]
+>
+>   let x = ();
+>   let y = ();
+>   let z = ();
+> }
+> ```
+
+r[attributes.outer]
+_Outer attributes_, written without the bang after the hash, apply to the form that follows the attribute.
+
+> [!EXAMPLE]
+> ```rust
+> // A function marked as a unit test
+> #[test]
+> fn test_foo() {
+>     /* ... */
+> }
+>
+> // A conditionally-compiled module
+> #[cfg(target_os = "linux")]
+> mod bar {
+>     /* ... */
+> }
+>
+> // A lint attribute used to suppress a warning/error
+> #[allow(non_camel_case_types)]
+> type int8_t = i8;
+> ```
 
 r[attributes.input]
 The attribute consists of a path to the attribute, followed by an optional
@@ -44,6 +78,7 @@ The following attributes are unsafe:
 
 * [`export_name`]
 * [`link_section`]
+* [`naked`]
 * [`no_mangle`]
 
 r[attributes.kind]
@@ -55,7 +90,7 @@ Attributes can be classified into the following kinds:
 * [Tool attributes](#tool-attributes)
 
 r[attributes.allowed-position]
-Attributes may be applied to many things in the language:
+Attributes may be applied to many forms in the language:
 
 * All [item declarations] accept outer attributes while [external blocks],
   [functions], [implementations], and [modules] accept inner attributes.
@@ -72,60 +107,29 @@ Attributes may be applied to many things in the language:
 * [Function][functions], [closure] and [function pointer]
   parameters accept outer attributes. This includes attributes on variadic parameters
   denoted with `...` in function pointers and [external blocks][variadic functions].
-
-Some examples of attributes:
-
-```rust
-// General metadata applied to the enclosing module or crate.
-#![crate_type = "lib"]
-
-// A function marked as a unit test
-#[test]
-fn test_foo() {
-    /* ... */
-}
-
-// A conditionally-compiled module
-#[cfg(target_os = "linux")]
-mod bar {
-    /* ... */
-}
-
-// A lint attribute used to suppress a warning/error
-#[allow(non_camel_case_types)]
-type int8_t = i8;
-
-// Inner attribute applies to the entire function.
-fn some_unused_variables() {
-  #![allow(unused_variables)]
-
-  let x = ();
-  let y = ();
-  let z = ();
-}
-```
-
-## Meta Item Attribute Syntax
+* [Inline assembly] template strings and operands accept outer attributes. Only certain attributes are accepted semantically; for details, see [asm.attributes.supported-attributes].
 
 r[attributes.meta]
+## Meta item attribute syntax
 
 r[attributes.meta.intro]
-A "meta item" is the syntax used for the _Attr_ rule by most [built-in
+A "meta item" is the syntax used for the [Attr] rule by most [built-in
 attributes]. It has the following grammar:
 
 r[attributes.meta.syntax]
-> **<sup>Syntax</sup>**\
-> _MetaItem_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; [_SimplePath_]\
-> &nbsp;&nbsp; | [_SimplePath_] `=` [_Expression_]\
-> &nbsp;&nbsp; | [_SimplePath_] `(` _MetaSeq_<sup>?</sup> `)`
->
-> _MetaSeq_ :\
-> &nbsp;&nbsp; _MetaItemInner_ ( `,` MetaItemInner )<sup>\*</sup> `,`<sup>?</sup>
->
-> _MetaItemInner_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; _MetaItem_\
-> &nbsp;&nbsp; | [_Expression_]
+```grammar,attributes
+@root MetaItem ->
+      SimplePath
+    | SimplePath `=` Expression
+    | SimplePath `(` MetaSeq? `)`
+
+MetaSeq ->
+    MetaItemInner ( `,` MetaItemInner )* `,`?
+
+MetaItemInner ->
+      MetaItem
+    | Expression
+```
 
 r[attributes.meta.literal-expr]
 Expressions in meta items must macro-expand to literal expressions, which must not
@@ -162,48 +166,47 @@ Various built-in attributes use different subsets of the meta item syntax to
 specify their inputs. The following grammar rules show some commonly used
 forms:
 
-> **<sup>Syntax</sup>**\
-> _MetaWord_:\
-> &nbsp;&nbsp; [IDENTIFIER]
->
-> _MetaNameValueStr_:\
-> &nbsp;&nbsp; [IDENTIFIER] `=` ([STRING_LITERAL] | [RAW_STRING_LITERAL])
->
-> _MetaListPaths_:\
-> &nbsp;&nbsp; [IDENTIFIER] `(` ( [_SimplePath_] (`,` [_SimplePath_])* `,`<sup>?</sup> )<sup>?</sup> `)`
->
-> _MetaListIdents_:\
-> &nbsp;&nbsp; [IDENTIFIER] `(` ( [IDENTIFIER] (`,` [IDENTIFIER])* `,`<sup>?</sup> )<sup>?</sup> `)`
->
-> _MetaListNameValueStr_:\
-> &nbsp;&nbsp; [IDENTIFIER] `(` ( _MetaNameValueStr_ (`,` _MetaNameValueStr_)* `,`<sup>?</sup> )<sup>?</sup> `)`
+r[attributes.meta.builtin.syntax]
+```grammar,attributes
+@root MetaWord ->
+    IDENTIFIER
+
+MetaNameValueStr ->
+    IDENTIFIER `=` (STRING_LITERAL | RAW_STRING_LITERAL)
+
+@root MetaListPaths ->
+    IDENTIFIER `(` ( SimplePath (`,` SimplePath)* `,`? )? `)`
+
+@root MetaListIdents ->
+    IDENTIFIER `(` ( IDENTIFIER (`,` IDENTIFIER)* `,`? )? `)`
+
+@root MetaListNameValueStr ->
+    IDENTIFIER `(` ( MetaNameValueStr (`,` MetaNameValueStr)* `,`? )? `)`
+```
 
 Some examples of meta items are:
 
 Style | Example
 ------|--------
-_MetaWord_ | `no_std`
-_MetaNameValueStr_ | `doc = "example"`
-_MetaListPaths_ | `allow(unused, clippy::inline_always)`
-_MetaListIdents_ | `macro_use(foo, bar)`
-_MetaListNameValueStr_ | `link(name = "CoreFoundation", kind = "framework")`
-
-## Active and inert attributes
+[MetaWord] | `no_std`
+[MetaNameValueStr] | `doc = "example"`
+[MetaListPaths] | `allow(unused, clippy::inline_always)`
+[MetaListIdents] | `macro_use(foo, bar)`
+[MetaListNameValueStr] | `link(name = "CoreFoundation", kind = "framework")`
 
 r[attributes.activity]
+## Active and inert attributes
 
 r[attributes.activity.intro]
 An attribute is either active or inert. During attribute processing, *active
-attributes* remove themselves from the thing they are on while *inert attributes*
+attributes* remove themselves from the form they are on while *inert attributes*
 stay on.
 
-The [`cfg`] and [`cfg_attr`] attributes are active. The [`test`] attribute is
-inert when compiling for tests and active otherwise. [Attribute macros] are
-active. All other attributes are inert.
-
-## Tool attributes
+The [`cfg`] and [`cfg_attr`] attributes are active.
+[Attribute macros] are active. All other attributes are inert.
 
 r[attributes.tool]
+## Tool attributes
 
 r[attributes.tool.intro]
 The compiler may allow attributes for external tools where each tool resides
@@ -231,12 +234,11 @@ struct S {
 pub fn f() {}
 ```
 
-> Note: `rustc` currently recognizes the tools "clippy", "rustfmt", "diagnostic",
-> "miri" and "rust_analyzer".
-
-## Built-in attributes index
+> [!NOTE]
+> `rustc` currently recognizes the tools "clippy", "rustfmt", "diagnostic", "miri", and "rust_analyzer".
 
 r[attributes.builtin]
+## Built-in attributes index
 
 The following is an index of all built-in attributes.
 
@@ -292,6 +294,7 @@ The following is an index of all built-in attributes.
 - Code generation
   - [`inline`] --- Hint to inline code.
   - [`cold`] --- Hint that a function is unlikely to be called.
+  - [`naked`] --- Prevent the compiler from emitting a function prologue and epilogue.
   - [`no_builtins`] --- Disables use of certain built-in functions.
   - [`target_feature`] --- Configure platform-specific code generation.
   - [`track_caller`] --- Pass the parent call location to `std::panic::Location::caller()`.
@@ -334,14 +337,8 @@ The following is an index of all built-in attributes.
 [ECMA-334]: https://www.ecma-international.org/publications-and-standards/standards/ecma-334/
 [ECMA-335]: https://www.ecma-international.org/publications-and-standards/standards/ecma-335/
 [Expression Attributes]: expressions.md#expression-attributes
-[IDENTIFIER]: identifiers.md
-[RAW_STRING_LITERAL]: tokens.md#raw-string-literals
-[STRING_LITERAL]: tokens.md#string-literals
 [The Rustdoc Book]: ../rustdoc/the-doc-attribute.html
 [The Unstable Book]: ../unstable-book/index.html
-[_DelimTokenTree_]: macros.md
-[_Expression_]: expressions.md
-[_SimplePath_]: paths.md#simple-paths
 [`allow`]: attributes/diagnostics.md#lint-check-attributes
 [`automatically_derived`]: attributes/derive.md#the-automatically_derived-attribute
 [`cfg_attr`]: conditional-compilation.md#the-cfg_attr-attribute
@@ -365,9 +362,10 @@ The following is an index of all built-in attributes.
 [`link_ordinal`]: items/external-blocks.md#the-link_ordinal-attribute
 [`link_section`]: abi.md#the-link_section-attribute
 [`link`]: items/external-blocks.md#the-link-attribute
-[`macro_export`]: macros-by-example.md#path-based-scope
+[`macro_export`]: macros-by-example.md#the-macro_export-attribute
 [`macro_use`]: macros-by-example.md#the-macro_use-attribute
 [`must_use`]: attributes/diagnostics.md#the-must_use-attribute
+[`naked`]: attributes/codegen.md#the-naked-attribute
 [`no_builtins`]: attributes/codegen.md#the-no_builtins-attribute
 [`no_implicit_prelude`]: names/preludes.md#the-no_implicit_prelude-attribute
 [`no_link`]: items/extern-crates.md#the-no_link-attribute
@@ -375,11 +373,11 @@ The following is an index of all built-in attributes.
 [`no_mangle`]: abi.md#the-no_mangle-attribute
 [`no_std`]: names/preludes.md#the-no_std-attribute
 [`non_exhaustive`]: attributes/type_system.md#the-non_exhaustive-attribute
-[`panic_handler`]: runtime.md#the-panic_handler-attribute
+[`panic_handler`]: panic.md#the-panic_handler-attribute
 [`path`]: items/modules.md#the-path-attribute
-[`proc_macro_attribute`]: procedural-macros.md#attribute-macros
-[`proc_macro_derive`]: procedural-macros.md#derive-macros
-[`proc_macro`]: procedural-macros.md#function-like-procedural-macros
+[`proc_macro_attribute`]: procedural-macros.md#the-proc_macro_attribute-attribute
+[`proc_macro_derive`]: macro.proc.derive
+[`proc_macro`]: procedural-macros.md#the-proc_macro-attribute
 [`recursion_limit`]: attributes/limits.md#the-recursion_limit-attribute
 [`repr`]: type-layout.md#representations
 [`should_panic`]: attributes/testing.md#the-should_panic-attribute
@@ -390,7 +388,7 @@ The following is an index of all built-in attributes.
 [`used`]: abi.md#the-used-attribute
 [`warn`]: attributes/diagnostics.md#lint-check-attributes
 [`windows_subsystem`]: runtime.md#the-windows_subsystem-attribute
-[attribute macros]: procedural-macros.md#attribute-macros
+[attribute macros]: procedural-macros.md#the-proc_macro_attribute-attribute
 [block expressions]: expressions/block-expr.md
 [built-in attributes]: #built-in-attributes-index
 [derive macro helper attributes]: procedural-macros.md#derive-macro-helper-attributes
@@ -412,3 +410,4 @@ The following is an index of all built-in attributes.
 [variadic functions]: items/external-blocks.html#variadic-functions
 [`diagnostic::on_unimplemented`]: attributes/diagnostics.md#the-diagnosticon_unimplemented-attribute
 [`diagnostic::do_not_recommend`]: attributes/diagnostics.md#the-diagnosticdo_not_recommend-attribute
+[Inline assembly]: inline-assembly.md

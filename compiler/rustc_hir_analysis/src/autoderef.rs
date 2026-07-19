@@ -1,9 +1,9 @@
+use rustc_hir::limit::Limit;
 use rustc_infer::infer::InferCtxt;
 use rustc_infer::traits::PredicateObligations;
 use rustc_middle::ty::{self, Ty, TyCtxt, TypeVisitableExt};
-use rustc_session::Limit;
-use rustc_span::Span;
 use rustc_span::def_id::{LOCAL_CRATE, LocalDefId};
+use rustc_span::{ErrorGuaranteed, Span};
 use rustc_trait_selection::traits::ObligationCtxt;
 use tracing::{debug, instrument};
 
@@ -68,7 +68,14 @@ impl<'a, 'tcx> Iterator for Autoderef<'a, 'tcx> {
             return None;
         }
 
-        if self.state.cur_ty.is_ty_var() {
+        // We want to support method and function calls for `impl Deref<Target = ..>`.
+        //
+        // To do so we don't eagerly bail if the current type is the hidden type of an
+        // opaque type and instead return `None` in `fn overloaded_deref_ty` if the
+        // opaque does not have a `Deref` item-bound.
+        if let &ty::Infer(ty::TyVar(vid)) = self.state.cur_ty.kind()
+            && !self.infcx.has_opaques_with_sub_unified_hidden_type(vid)
+        {
             return None;
         }
 
@@ -86,7 +93,7 @@ impl<'a, 'tcx> Iterator for Autoderef<'a, 'tcx> {
                 if self.infcx.next_trait_solver()
                     && let ty::Alias(..) = ty.kind()
                 {
-                    let (normalized_ty, obligations) = self.structurally_normalize(ty)?;
+                    let (normalized_ty, obligations) = self.structurally_normalize_ty(ty)?;
                     self.state.obligations.extend(obligations);
                     (AutoderefKind::Builtin, normalized_ty)
                 } else {
@@ -160,13 +167,17 @@ impl<'a, 'tcx> Autoderef<'a, 'tcx> {
             self.param_env,
             ty::Binder::dummy(trait_ref),
         );
-        if !self.infcx.predicate_may_hold(&obligation) {
+        // We detect whether the self type implements `Deref` before trying to
+        // structurally normalize. We use `predicate_may_hold_opaque_types_jank`
+        // to support not-yet-defined opaque types. It will succeed for `impl Deref`
+        // but fail for `impl OtherTrait`.
+        if !self.infcx.predicate_may_hold_opaque_types_jank(&obligation) {
             debug!("overloaded_deref_ty: cannot match obligation");
             return None;
         }
 
         let (normalized_ty, obligations) =
-            self.structurally_normalize(Ty::new_projection(tcx, trait_target_def_id, [ty]))?;
+            self.structurally_normalize_ty(Ty::new_projection(tcx, trait_target_def_id, [ty]))?;
         debug!("overloaded_deref_ty({:?}) = ({:?}, {:?})", ty, normalized_ty, obligations);
         self.state.obligations.extend(obligations);
 
@@ -174,27 +185,27 @@ impl<'a, 'tcx> Autoderef<'a, 'tcx> {
     }
 
     #[instrument(level = "debug", skip(self), ret)]
-    pub fn structurally_normalize(
+    pub fn structurally_normalize_ty(
         &self,
         ty: Ty<'tcx>,
     ) -> Option<(Ty<'tcx>, PredicateObligations<'tcx>)> {
         let ocx = ObligationCtxt::new(self.infcx);
-        let Ok(normalized_ty) = ocx.structurally_normalize(
+        let Ok(normalized_ty) = ocx.structurally_normalize_ty(
             &traits::ObligationCause::misc(self.span, self.body_id),
             self.param_env,
             ty,
         ) else {
-            // We shouldn't have errors here, except for evaluate/fulfill mismatches,
-            // but that's not a reason for an ICE (`predicate_may_hold` is conservative
-            // by design).
-            // FIXME(-Znext-solver): This *actually* shouldn't happen then.
+            // We shouldn't have errors here in the old solver, except for
+            // evaluate/fulfill mismatches, but that's not a reason for an ICE.
             return None;
         };
-        let errors = ocx.select_where_possible();
+        let errors = ocx.try_evaluate_obligations();
         if !errors.is_empty() {
-            // This shouldn't happen, except for evaluate/fulfill mismatches,
-            // but that's not a reason for an ICE (`predicate_may_hold` is conservative
-            // by design).
+            if self.infcx.next_trait_solver() {
+                unreachable!();
+            }
+            // We shouldn't have errors here in the old solver, except for
+            // evaluate/fulfill mismatches, but that's not a reason for an ICE.
             debug!(?errors, "encountered errors while fulfilling");
             return None;
         }
@@ -202,14 +213,10 @@ impl<'a, 'tcx> Autoderef<'a, 'tcx> {
         Some((normalized_ty, ocx.into_pending_obligations()))
     }
 
-    /// Returns the final type we ended up with, which may be an inference
-    /// variable (we will resolve it first, if we want).
-    pub fn final_ty(&self, resolve: bool) -> Ty<'tcx> {
-        if resolve {
-            self.infcx.resolve_vars_if_possible(self.state.cur_ty)
-        } else {
-            self.state.cur_ty
-        }
+    /// Returns the final type we ended up with, which may be an unresolved
+    /// inference variable.
+    pub fn final_ty(&self) -> Ty<'tcx> {
+        self.state.cur_ty
     }
 
     pub fn step_count(&self) -> usize {
@@ -259,7 +266,11 @@ impl<'a, 'tcx> Autoderef<'a, 'tcx> {
     }
 }
 
-pub fn report_autoderef_recursion_limit_error<'tcx>(tcx: TyCtxt<'tcx>, span: Span, ty: Ty<'tcx>) {
+pub fn report_autoderef_recursion_limit_error<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    span: Span,
+    ty: Ty<'tcx>,
+) -> ErrorGuaranteed {
     // We've reached the recursion limit, error gracefully.
     let suggested_limit = match tcx.recursion_limit() {
         Limit(0) => Limit(2),
@@ -270,5 +281,5 @@ pub fn report_autoderef_recursion_limit_error<'tcx>(tcx: TyCtxt<'tcx>, span: Spa
         ty,
         suggested_limit,
         crate_name: tcx.crate_name(LOCAL_CRATE),
-    });
+    })
 }

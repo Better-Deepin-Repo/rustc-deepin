@@ -1,5 +1,7 @@
+//@ edition:2015..2021
 //@ run-pass
 //@ needs-unwind
+//@ ignore-backends: gcc
 
 #![feature(coroutines, coroutine_trait, stmt_expr_attributes)]
 #![feature(if_let_guard)]

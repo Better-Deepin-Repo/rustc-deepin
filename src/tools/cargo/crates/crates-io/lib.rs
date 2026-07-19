@@ -8,7 +8,7 @@ use std::io::{Cursor, SeekFrom};
 use std::time::Instant;
 
 use curl::easy::{Easy, List};
-use percent_encoding::{percent_encode, NON_ALPHANUMERIC};
+use percent_encoding::{NON_ALPHANUMERIC, percent_encode};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -82,12 +82,8 @@ pub struct NewCrateDependency {
     pub artifact: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bindep_target: Option<String>,
-    #[serde(default, skip_serializing_if = "is_false")]
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub lib: bool,
-}
-
-fn is_false(x: &bool) -> bool {
-    *x == false
 }
 
 #[derive(Deserialize)]
@@ -147,7 +143,7 @@ pub enum Error {
     #[error(transparent)]
     Curl(#[from] curl::Error),
 
-    /// Error from seriailzing the request payload and deserializing the
+    /// Error from serializing the request payload and deserializing the
     /// response body (like response body didn't match expected structure).
     #[error(transparent)]
     Json(#[from] serde_json::Error),
@@ -187,7 +183,7 @@ pub enum Error {
     #[error("{0}")]
     InvalidToken(&'static str),
 
-    /// Server was unavailable and timeouted. Happened when uploading a way
+    /// Server was unavailable and timed out. Happened when uploading a way
     /// too large tarball to crates.io.
     #[error(
         "Request timed out after 30 seconds. If you're trying to \

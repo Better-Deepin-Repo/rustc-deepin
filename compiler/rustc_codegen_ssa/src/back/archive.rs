@@ -13,12 +13,14 @@ use object::read::archive::ArchiveFile;
 use object::read::macho::FatArch;
 use rustc_data_structures::fx::FxIndexSet;
 use rustc_data_structures::memmap::Mmap;
+use rustc_fs_util::TempDirBuilder;
+use rustc_metadata::EncodedMetadata;
 use rustc_session::Session;
 use rustc_span::Symbol;
-use tempfile::Builder as TempFileBuilder;
+use rustc_target::spec::Arch;
 use tracing::trace;
 
-use super::metadata::search_for_section;
+use super::metadata::{create_compressed_metadata_file, search_for_section};
 use crate::common;
 // Re-exporting for rustc_codegen_llvm::back::archive
 pub use crate::errors::{ArchiveBuildFailure, ExtractBundledLibsError, UnknownArchiveKind};
@@ -39,16 +41,18 @@ pub struct ImportLibraryItem {
     pub is_data: bool,
 }
 
-impl From<ImportLibraryItem> for COFFShortExport {
-    fn from(item: ImportLibraryItem) -> Self {
+impl ImportLibraryItem {
+    fn into_coff_short_export(self, sess: &Session) -> COFFShortExport {
+        let import_name = (sess.target.arch == Arch::Arm64EC).then(|| self.name.clone());
         COFFShortExport {
-            name: item.name,
+            name: self.name,
             ext_name: None,
-            symbol_name: item.symbol_name,
-            alias_target: None,
-            ordinal: item.ordinal.unwrap_or(0),
-            noname: item.ordinal.is_some(),
-            data: item.is_data,
+            symbol_name: self.symbol_name,
+            import_name,
+            export_as: None,
+            ordinal: self.ordinal.unwrap_or(0),
+            noname: self.ordinal.is_some(),
+            data: self.is_data,
             private: false,
             constant: false,
         }
@@ -57,6 +61,15 @@ impl From<ImportLibraryItem> for COFFShortExport {
 
 pub trait ArchiveBuilderBuilder {
     fn new_archive_builder<'a>(&self, sess: &'a Session) -> Box<dyn ArchiveBuilder + 'a>;
+
+    fn create_dylib_metadata_wrapper(
+        &self,
+        sess: &Session,
+        metadata: &EncodedMetadata,
+        symbol_name: &str,
+    ) -> Vec<u8> {
+        create_compressed_metadata_file(sess, metadata, symbol_name)
+    }
 
     /// Creates a DLL Import Library <https://docs.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-creation#creating-an-import-library>.
     /// and returns the path on disk to that import library.
@@ -103,13 +116,14 @@ pub trait ArchiveBuilderBuilder {
                     .emit_fatal(ErrorCreatingImportLibrary { lib_name, error: error.to_string() }),
             };
 
-            let exports = items.into_iter().map(Into::into).collect::<Vec<_>>();
-            let machine = match &*sess.target.arch {
-                "x86_64" => MachineTypes::AMD64,
-                "x86" => MachineTypes::I386,
-                "aarch64" => MachineTypes::ARM64,
-                "arm64ec" => MachineTypes::ARM64EC,
-                "arm" => MachineTypes::ARMNT,
+            let exports =
+                items.into_iter().map(|item| item.into_coff_short_export(sess)).collect::<Vec<_>>();
+            let machine = match &sess.target.arch {
+                Arch::X86_64 => MachineTypes::AMD64,
+                Arch::X86 => MachineTypes::I386,
+                Arch::AArch64 => MachineTypes::ARM64,
+                Arch::Arm64EC => MachineTypes::ARM64EC,
+                Arch::Arm => MachineTypes::ARMNT,
                 cpu => panic!("unsupported cpu type {cpu}"),
             };
 
@@ -124,6 +138,7 @@ pub trait ArchiveBuilderBuilder {
                 // when linking a rust staticlib using `/WHOLEARCHIVE`.
                 // See #129020
                 true,
+                &[],
             ) {
                 sess.dcx()
                     .emit_fatal(ErrorCreatingImportLibrary { lib_name, error: error.to_string() });
@@ -209,12 +224,12 @@ fn create_mingw_dll_import_lib(
     };
     // dlltool target architecture args from:
     // https://github.com/llvm/llvm-project-release-prs/blob/llvmorg-15.0.6/llvm/lib/ToolDrivers/llvm-dlltool/DlltoolDriver.cpp#L69
-    let (dlltool_target_arch, dlltool_target_bitness) = match sess.target.arch.as_ref() {
-        "x86_64" => ("i386:x86-64", "--64"),
-        "x86" => ("i386", "--32"),
-        "aarch64" => ("arm64", "--64"),
-        "arm" => ("arm", "--32"),
-        _ => panic!("unsupported arch {}", sess.target.arch),
+    let (dlltool_target_arch, dlltool_target_bitness) = match &sess.target.arch {
+        Arch::X86_64 => ("i386:x86-64", "--64"),
+        Arch::X86 => ("i386", "--32"),
+        Arch::AArch64 => ("arm64", "--64"),
+        Arch::Arm => ("arm", "--32"),
+        arch => panic!("unsupported arch {arch}"),
     };
     let mut dlltool_cmd = std::process::Command::new(&dlltool);
     dlltool_cmd
@@ -267,10 +282,10 @@ fn find_binutils_dlltool(sess: &Session) -> OsString {
         "dlltool.exe"
     } else {
         // On other platforms, use the architecture-specific name.
-        match sess.target.arch.as_ref() {
-            "x86_64" => "x86_64-w64-mingw32-dlltool",
-            "x86" => "i686-w64-mingw32-dlltool",
-            "aarch64" => "aarch64-w64-mingw32-dlltool",
+        match sess.target.arch {
+            Arch::X86_64 => "x86_64-w64-mingw32-dlltool",
+            Arch::X86 => "i686-w64-mingw32-dlltool",
+            Arch::AArch64 => "aarch64-w64-mingw32-dlltool",
 
             // For non-standard architectures (e.g., aarch32) fallback to "dlltool".
             _ => "dlltool",
@@ -364,9 +379,9 @@ pub fn try_extract_macho_fat_archive(
     archive_path: &Path,
 ) -> io::Result<Option<PathBuf>> {
     let archive_map = unsafe { Mmap::map(File::open(&archive_path)?)? };
-    let target_arch = match sess.target.arch.as_ref() {
-        "aarch64" => object::Architecture::Aarch64,
-        "x86_64" => object::Architecture::X86_64,
+    let target_arch = match sess.target.arch {
+        Arch::AArch64 => object::Architecture::Aarch64,
+        Arch::X86_64 => object::Architecture::X86_64,
         _ => return Ok(None),
     };
 
@@ -389,11 +404,10 @@ impl<'a> ArchiveBuilder for ArArchiveBuilder<'a> {
         mut skip: Box<dyn FnMut(&str) -> bool + 'static>,
     ) -> io::Result<()> {
         let mut archive_path = archive_path.to_path_buf();
-        if self.sess.target.llvm_target.contains("-apple-macosx") {
-            if let Some(new_archive_path) = try_extract_macho_fat_archive(self.sess, &archive_path)?
-            {
-                archive_path = new_archive_path
-            }
+        if self.sess.target.llvm_target.contains("-apple-macosx")
+            && let Some(new_archive_path) = try_extract_macho_fat_archive(self.sess, &archive_path)?
+        {
+            archive_path = new_archive_path
         }
 
         if self.src_archives.iter().any(|archive| archive.0 == archive_path) {
@@ -414,10 +428,10 @@ impl<'a> ArchiveBuilder for ArArchiveBuilder<'a> {
                     let member_path = archive_path.parent().unwrap().join(Path::new(&file_name));
                     self.entries.push((file_name.into_bytes(), ArchiveEntry::File(member_path)));
                 } else {
-                    self.entries.push((file_name.into_bytes(), ArchiveEntry::FromArchive {
-                        archive_index,
-                        file_range: entry.file_range(),
-                    }));
+                    self.entries.push((
+                        file_name.into_bytes(),
+                        ArchiveEntry::FromArchive { archive_index, file_range: entry.file_range() },
+                    ));
                 }
             }
         }
@@ -502,7 +516,7 @@ impl<'a> ArArchiveBuilder<'a> {
         // it creates. We need it to be the default mode for back compat reasons however. (See
         // #107495) To handle this we are telling tempfile to create a temporary directory instead
         // and then inside this directory create a file using File::create.
-        let archive_tmpdir = TempFileBuilder::new()
+        let archive_tmpdir = TempDirBuilder::new()
             .suffix(".temp-archive")
             .tempdir_in(output.parent().unwrap_or_else(|| Path::new("")))
             .map_err(|err| {
@@ -518,7 +532,7 @@ impl<'a> ArArchiveBuilder<'a> {
             &entries,
             archive_kind,
             false,
-            /* is_ec = */ self.sess.target.arch == "arm64ec",
+            /* is_ec = */ Some(self.sess.target.arch == Arch::Arm64EC),
         )?;
         archive_tmpfile.flush()?;
         drop(archive_tmpfile);

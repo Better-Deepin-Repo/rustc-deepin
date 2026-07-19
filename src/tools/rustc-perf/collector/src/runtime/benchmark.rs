@@ -42,7 +42,7 @@ pub struct BenchmarkSuite {
 impl BenchmarkSuite {
     /// Returns a new suite containing only groups that contains at least a single benchmark
     /// that matches the filter.
-    pub fn filter(self, filter: &BenchmarkFilter) -> Self {
+    pub fn filter(self, filter: &RuntimeBenchmarkFilter) -> Self {
         let BenchmarkSuite {
             toolchain,
             groups,
@@ -64,7 +64,7 @@ impl BenchmarkSuite {
         }
     }
 
-    pub fn filtered_benchmark_count(&self, filter: &BenchmarkFilter) -> u64 {
+    pub fn filtered_benchmark_count(&self, filter: &RuntimeBenchmarkFilter) -> u64 {
         self.benchmark_names()
             .filter(|benchmark| passes_filter(benchmark, &filter.exclude, &filter.include))
             .count() as u64
@@ -86,12 +86,12 @@ impl BenchmarkSuite {
     }
 }
 
-pub struct BenchmarkFilter {
+pub struct RuntimeBenchmarkFilter {
     pub exclude: Vec<String>,
     pub include: Vec<String>,
 }
 
-impl BenchmarkFilter {
+impl RuntimeBenchmarkFilter {
     pub fn keep_all() -> Self {
         Self {
             exclude: vec![],
@@ -276,7 +276,7 @@ fn parse_benchmark_group(
         if let Some(ref executable) = artifact.executable {
             // Found a binary compiled by a runtime benchmark crate.
             // Execute it so that we find all the benchmarks it contains.
-            if artifact.target.kind.iter().any(|k| k == "bin") {
+            if artifact.target.is_bin() {
                 if group.is_some() {
                     return Err(anyhow::anyhow!(
                         "Runtime benchmark group `{group_name}` has produced multiple binaries"

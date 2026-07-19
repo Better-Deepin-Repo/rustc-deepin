@@ -2,8 +2,8 @@
 
 use crate::core::global_cache_tracker;
 use crate::core::{PackageId, SourceId};
-use crate::sources::registry::download;
 use crate::sources::registry::MaybeLock;
+use crate::sources::registry::download;
 use crate::sources::registry::{LoadResponse, RegistryConfig, RegistryData};
 use crate::util::cache_lock::CacheLockMode;
 use crate::util::errors::{CargoResult, HttpNotSuccessful};
@@ -11,7 +11,7 @@ use crate::util::interning::InternedString;
 use crate::util::network::http::http_handle;
 use crate::util::network::retry::{Retry, RetryResult};
 use crate::util::network::sleep::SleepTracker;
-use crate::util::{auth, Filesystem, GlobalContext, IntoUrl, Progress, ProgressStyle};
+use crate::util::{Filesystem, GlobalContext, IntoUrl, Progress, ProgressStyle, auth};
 use anyhow::Context as _;
 use cargo_credential::Operation;
 use cargo_util::paths;
@@ -23,7 +23,7 @@ use std::fs::{self, File};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::str;
-use std::task::{ready, Poll};
+use std::task::{Poll, ready};
 use std::time::Duration;
 use tracing::{debug, trace};
 use url::Url;
@@ -376,7 +376,7 @@ impl<'gctx> HttpRegistry<'gctx> {
         } else if self.gctx.cli_unstable().no_index_update {
             trace!("using local {} in no_index_update mode", path.display());
             true
-        } else if self.gctx.offline() {
+        } else if !self.gctx.network_allowed() {
             trace!("using local {} in offline mode", path.display());
             true
         } else if self.fresh.contains(path) {
@@ -511,7 +511,7 @@ impl<'gctx> RegistryData for HttpRegistry<'gctx> {
             return Poll::Ready(Ok(LoadResponse::NotFound));
         }
 
-        if self.gctx.offline() || self.gctx.cli_unstable().no_index_update {
+        if !self.gctx.network_allowed() || self.gctx.cli_unstable().no_index_update {
             // Return NotFound in offline mode when the file doesn't exist in the cache.
             // If this results in resolution failure, the resolver will suggest
             // removing the --offline flag.
@@ -869,7 +869,7 @@ mod tls {
     use super::Downloads;
     use std::cell::Cell;
 
-    thread_local!(static PTR: Cell<usize> = Cell::new(0));
+    thread_local!(static PTR: Cell<usize> = const { Cell::new(0) });
 
     pub(super) fn with<R>(f: impl FnOnce(Option<&Downloads<'_>>) -> R) -> R {
         let ptr = PTR.with(|p| p.get());

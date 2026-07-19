@@ -35,10 +35,12 @@
 use std::cmp::Ordering;
 
 use rustc_data_structures::work_queue::WorkQueue;
-use rustc_index::bit_set::{BitSet, MixedBitSet};
+use rustc_index::bit_set::{DenseBitSet, MixedBitSet};
 use rustc_index::{Idx, IndexVec};
 use rustc_middle::bug;
-use rustc_middle::mir::{self, BasicBlock, CallReturnPlaces, Location, TerminatorEdges, traversal};
+use rustc_middle::mir::{
+    self, BasicBlock, CallReturnPlaces, Location, SwitchTargetValue, TerminatorEdges, traversal,
+};
 use rustc_middle::ty::TyCtxt;
 use tracing::error;
 
@@ -57,7 +59,7 @@ pub use self::cursor::ResultsCursor;
 pub use self::direction::{Backward, Direction, Forward};
 pub use self::lattice::{JoinSemiLattice, MaybeReachable};
 pub use self::results::{EntryStates, Results};
-pub use self::visitor::{ResultsVisitor, visit_results};
+pub use self::visitor::{ResultsVisitor, visit_reachable_results, visit_results};
 
 /// Analysis domains are all bitsets of various kinds. This trait holds
 /// operations needed by all of them.
@@ -65,7 +67,7 @@ pub trait BitSetExt<T> {
     fn contains(&self, elem: T) -> bool;
 }
 
-impl<T: Idx> BitSetExt<T> for BitSet<T> {
+impl<T: Idx> BitSetExt<T> for DenseBitSet<T> {
     fn contains(&self, elem: T) -> bool {
         self.contains(elem)
     }
@@ -133,7 +135,7 @@ pub trait Analysis<'tcx> {
     /// analyses should not implement this without also implementing
     /// `apply_primary_statement_effect`.
     fn apply_early_statement_effect(
-        &mut self,
+        &self,
         _state: &mut Self::Domain,
         _statement: &mir::Statement<'tcx>,
         _location: Location,
@@ -142,7 +144,7 @@ pub trait Analysis<'tcx> {
 
     /// Updates the current dataflow state with the effect of evaluating a statement.
     fn apply_primary_statement_effect(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         statement: &mir::Statement<'tcx>,
         location: Location,
@@ -156,7 +158,7 @@ pub trait Analysis<'tcx> {
     /// analyses should not implement this without also implementing
     /// `apply_primary_terminator_effect`.
     fn apply_early_terminator_effect(
-        &mut self,
+        &self,
         _state: &mut Self::Domain,
         _terminator: &mir::Terminator<'tcx>,
         _location: Location,
@@ -170,7 +172,7 @@ pub trait Analysis<'tcx> {
     /// `InitializedPlaces` analyses, the return place for a function call is not marked as
     /// initialized here.
     fn apply_primary_terminator_effect<'mir>(
-        &mut self,
+        &self,
         _state: &mut Self::Domain,
         terminator: &'mir mir::Terminator<'tcx>,
         _location: Location,
@@ -186,7 +188,7 @@ pub trait Analysis<'tcx> {
     /// This is separate from `apply_primary_terminator_effect` to properly track state across
     /// unwind edges.
     fn apply_call_return_effect(
-        &mut self,
+        &self,
         _state: &mut Self::Domain,
         _block: BasicBlock,
         _return_places: CallReturnPlaces<'_, 'tcx>,
@@ -208,7 +210,7 @@ pub trait Analysis<'tcx> {
     /// engine doesn't need to clone the exit state for a block unless
     /// `get_switch_int_data` is actually called.
     fn get_switch_int_data(
-        &mut self,
+        &self,
         _block: mir::BasicBlock,
         _discr: &mir::Operand<'tcx>,
     ) -> Option<Self::SwitchIntData> {
@@ -217,10 +219,11 @@ pub trait Analysis<'tcx> {
 
     /// See comments on `get_switch_int_data`.
     fn apply_switch_int_edge_effect(
-        &mut self,
+        &self,
         _data: &mut Self::SwitchIntData,
         _state: &mut Self::Domain,
-        _edge: SwitchIntTarget,
+        _value: SwitchTargetValue,
+        _targets: &mir::SwitchTargets,
     ) {
         unreachable!();
     }
@@ -241,7 +244,7 @@ pub trait Analysis<'tcx> {
     /// Without a `pass_name` to differentiates them, only the results for the latest run will be
     /// saved.
     fn iterate_to_fixpoint<'mir>(
-        mut self,
+        self,
         tcx: TyCtxt<'tcx>,
         body: &'mir mir::Body<'tcx>,
         pass_name: Option<&'static str>,
@@ -278,13 +281,12 @@ pub trait Analysis<'tcx> {
         // every iteration.
         let mut state = self.bottom_value(body);
         while let Some(bb) = dirty_queue.pop() {
-            // Set the state to the entry state of the block.
-            // This is equivalent to `state = entry_states[bb].clone()`,
-            // but it saves an allocation, thus improving compile times.
+            // Set the state to the entry state of the block. This is equivalent to `state =
+            // entry_states[bb].clone()`, but it saves an allocation, thus improving compile times.
             state.clone_from(&entry_states[bb]);
 
             Self::Direction::apply_effects_in_block(
-                &mut self,
+                &self,
                 body,
                 &mut state,
                 bb,
@@ -298,10 +300,10 @@ pub trait Analysis<'tcx> {
             );
         }
 
-        let mut results = Results { analysis: self, entry_states };
+        let results = Results { analysis: self, entry_states };
 
         if tcx.sess.opts.unstable_opts.dump_mir_dataflow {
-            let res = write_graphviz_results(tcx, body, &mut results, pass_name);
+            let res = write_graphviz_results(tcx, body, &results, pass_name);
             if let Err(e) = res {
                 error!("Failed to write graphviz dataflow results: {}", e);
             }
@@ -334,7 +336,7 @@ pub trait GenKill<T> {
     }
 }
 
-impl<T: Idx> GenKill<T> for BitSet<T> {
+impl<T: Idx> GenKill<T> for DenseBitSet<T> {
     fn gen_(&mut self, elem: T) {
         self.insert(elem);
     }
@@ -428,11 +430,6 @@ impl EffectIndex {
             .then_with(|| self.effect.cmp(&other.effect));
         ord == Ordering::Less
     }
-}
-
-pub struct SwitchIntTarget {
-    pub value: Option<u128>,
-    pub target: BasicBlock,
 }
 
 #[cfg(test)]

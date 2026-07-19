@@ -1,7 +1,7 @@
 use super::ERR_EXPECT;
 use clippy_utils::diagnostics::span_lint_and_sugg;
 use clippy_utils::msrvs::{self, Msrv};
-use clippy_utils::ty::{has_debug_impl, is_type_diagnostic_item};
+use clippy_utils::ty::has_debug_impl;
 use rustc_errors::Applicability;
 use rustc_lint::LateContext;
 use rustc_middle::ty;
@@ -14,19 +14,14 @@ pub(super) fn check(
     recv: &rustc_hir::Expr<'_>,
     expect_span: Span,
     err_span: Span,
-    msrv: &Msrv,
+    msrv: Msrv,
 ) {
-    if is_type_diagnostic_item(cx, cx.typeck_results().expr_ty(recv), sym::Result)
-        // Test the version to make sure the lint can be showed (expect_err has been
-        // introduced in rust 1.17.0 : https://github.com/rust-lang/rust/pull/38982)
-        && msrv.meets(msrvs::EXPECT_ERR)
-
-        // Grabs the `Result<T, E>` type
-        && let result_type = cx.typeck_results().expr_ty(recv)
-        // Tests if the T type in a `Result<T, E>` is not None
-        && let Some(data_type) = get_data_type(cx, result_type)
-        // Tests if the T type in a `Result<T, E>` implements debug
+    let result_ty = cx.typeck_results().expr_ty(recv);
+    // Grabs the `Result<T, E>` type
+    if let Some(data_type) = get_data_type(cx, result_ty)
+        // Tests if the T type in a `Result<T, E>` implements Debug
         && has_debug_impl(cx, data_type)
+        && msrv.meets(cx, msrvs::EXPECT_ERR)
     {
         span_lint_and_sugg(
             cx,
@@ -37,13 +32,13 @@ pub(super) fn check(
             "expect_err".to_string(),
             Applicability::MachineApplicable,
         );
-    };
+    }
 }
 
 /// Given a `Result<T, E>` type, return its data (`T`).
 fn get_data_type<'a>(cx: &LateContext<'_>, ty: Ty<'a>) -> Option<Ty<'a>> {
     match ty.kind() {
-        ty::Adt(_, args) if is_type_diagnostic_item(cx, ty, sym::Result) => args.types().next(),
+        ty::Adt(adt, args) if cx.tcx.is_diagnostic_item(sym::Result, adt.did()) => args.types().next(),
         _ => None,
     }
 }

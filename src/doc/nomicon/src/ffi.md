@@ -11,7 +11,7 @@ snappy includes a C interface (documented in
 ## A note about libc
 
 Many of these examples use [the `libc` crate][libc], which provides various
-type definitions for C types, among other things. If you’re trying these
+type definitions for C types, among other things. If you’re trying out these
 examples yourself, you’ll need to add `libc` to your `Cargo.toml`:
 
 ```toml
@@ -20,6 +20,31 @@ libc = "0.2.0"
 ```
 
 [libc]: https://crates.io/crates/libc
+
+## Prepare the build script
+
+Because [snappy](https://github.com/google/snappy) is a static library by default, so there is no stdc++ linked in the output artifact. 
+In order to use this foreign library in Rust, we have to manually specify that we want to link stdc++ std to our project.
+The easiest way to do this is by setting up a build script.
+
+First edit `Cargo.toml`, inside `package` add `build = "build.rs"`:
+```toml
+[package]
+...
+build = "build.rs"
+```
+
+Then create a new file at the root of your workspace, named `build.rs`:
+```rust
+// build.rs
+fn main() {
+    println!("cargo:rustc-link-lib=dylib=stdc++"); // This line may be unnecessary for some environments.
+    println!("cargo:rustc-link-search=<YOUR SNAPPY LIBRARY PATH>");
+}
+```
+
+For more information, please read [The Cargo Book - build script](https://doc.rust-lang.org/cargo/reference/build-scripts.html).
+
 
 ## Calling foreign functions
 
@@ -31,7 +56,7 @@ compile if snappy is installed:
 use libc::size_t;
 
 #[link(name = "snappy")]
-extern {
+unsafe extern "C" {
     fn snappy_max_compressed_length(source_length: size_t) -> size_t;
 }
 
@@ -43,7 +68,7 @@ fn main() {
 
 The `extern` block is a list of function signatures in a foreign library, in
 this case with the platform's C ABI. The `#[link(...)]` attribute is used to
-instruct the linker to link against the snappy library so the symbols are
+instruct the linker to link against the snappy library so the symbols can be
 resolved.
 
 Foreign functions are assumed to be unsafe so calls to them need to be wrapped
@@ -64,7 +89,7 @@ The `extern` block can be extended to cover the entire snappy API:
 use libc::{c_int, size_t};
 
 #[link(name = "snappy")]
-extern {
+unsafe extern "C" {
     fn snappy_compress(input: *const u8,
                        input_length: size_t,
                        compressed: *mut u8,
@@ -89,7 +114,7 @@ The raw C API needs to be wrapped to provide memory safety and make use of highe
 like vectors. A library can choose to expose only the safe, high-level interface and hide the unsafe
 internal details.
 
-Wrapping the functions which expect buffers involves using the `slice::raw` module to manipulate Rust
+Wrapping the functions which expect buffers involves using the `slice::raw` module to manipulate Rust's
 vectors as pointers to memory. Rust's vectors are guaranteed to be a contiguous block of memory. The
 length is the number of elements currently contained, and the capacity is the total size in elements of
 the allocated memory. The length is less than or equal to the capacity.
@@ -236,13 +261,13 @@ mod tests {
 
 Foreign libraries often hand off ownership of resources to the calling code.
 When this occurs, we must use Rust's destructors to provide safety and guarantee
-the release of these resources (especially in the case of panic).
+the release of these resources (especially in the case of a panic).
 
-For more about destructors, see the [Drop trait](../std/ops/trait.Drop.html).
+For more information about destructors, see the [Drop trait](../std/ops/trait.Drop.html).
 
 ## Calling Rust code from C
 
-You may wish to compile Rust code in a way so that it can be called from C.
+You may wish to compile Rust code in a way that can be called from C.
 This is fairly easy, but requires a few things.
 
 ### Rust side
@@ -251,7 +276,7 @@ First, we assume you have a lib crate named as `rust_from_c`.
 `lib.rs` should have Rust code as following:
 
 ```rust
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn hello_from_rust() {
     println!("Hello from Rust!");
 }
@@ -268,7 +293,7 @@ Then, to compile Rust code as a shared library that can be called from C, add th
 crate-type = ["cdylib"]
 ```
 
-(NOTE: We could also use the `staticlib` crate type but it needs to tweak some linking flags.)
+(NOTE: We could also use the `staticlib` crate type but it also requires tweaking some linking flags.)
 
 Run `cargo build` and you're ready to go on the Rust side.
 
@@ -306,7 +331,7 @@ Hello from Rust!
 ```
 
 That's it!
-For more realistic example, check the [`cbindgen`].
+For a more realistic example, check the [`cbindgen`].
 
 [`cbindgen`]: https://github.com/eqrion/cbindgen
 
@@ -331,7 +356,7 @@ extern fn callback(a: i32) {
 }
 
 #[link(name = "extlib")]
-extern {
+unsafe extern {
    fn register_callback(cb: extern fn(i32)) -> i32;
    fn trigger_callback();
 }
@@ -383,7 +408,7 @@ struct RustObject {
     // Other members...
 }
 
-extern "C" fn callback(target: *mut RustObject, a: i32) {
+unsafe extern "C" fn callback(target: *mut RustObject, a: i32) {
     println!("I'm called from C with value {0}", a);
     unsafe {
         // Update the value in RustObject with the value received from the callback:
@@ -392,9 +417,9 @@ extern "C" fn callback(target: *mut RustObject, a: i32) {
 }
 
 #[link(name = "extlib")]
-extern {
+unsafe extern {
    fn register_callback(target: *mut RustObject,
-                        cb: extern fn(*mut RustObject, i32)) -> i32;
+                        cb: unsafe extern fn(*mut RustObject, i32)) -> i32;
    fn trigger_callback();
 }
 
@@ -523,7 +548,7 @@ blocks with the `static` keyword:
 <!-- ignore: requires libc crate -->
 ```rust,ignore
 #[link(name = "readline")]
-extern {
+unsafe extern {
     static rl_readline_version: libc::c_int;
 }
 
@@ -543,7 +568,7 @@ use std::ffi::CString;
 use std::ptr;
 
 #[link(name = "readline")]
-extern {
+unsafe extern {
     static mut rl_prompt: *const libc::c_char;
 }
 
@@ -573,7 +598,7 @@ conventions. Rust provides a way to tell the compiler which convention to use:
 #[cfg(all(target_os = "win32", target_arch = "x86"))]
 #[link(name = "kernel32")]
 #[allow(non_snake_case)]
-extern "stdcall" {
+unsafe extern "stdcall" {
     fn SetEnvironmentVariableA(n: *const u8, v: *const u8) -> libc::c_int;
 }
 # fn main() { }
@@ -590,13 +615,12 @@ are:
 * `vectorcall`
 This is currently hidden behind the `abi_vectorcall` gate and is subject to change.
 * `Rust`
-* `rust-intrinsic`
 * `system`
 * `C`
 * `win64`
 * `sysv64`
 
-Most of the abis in this list are self-explanatory, but the `system` abi may
+Most of the ABIs in this list are self-explanatory, but the `system` ABI may
 seem a little odd. This constraint selects whatever the appropriate ABI is for
 interoperating with the target's libraries. For example, on win32 with a x86
 architecture, this means that the abi used would be `stdcall`. On x86_64,
@@ -635,7 +659,7 @@ In C, functions can be 'variadic', meaning they accept a variable number of argu
 be achieved in Rust by specifying `...` within the argument list of a foreign function declaration:
 
 ```no_run
-extern {
+unsafe extern {
     fn foo(x: i32, ...);
 }
 
@@ -685,7 +709,7 @@ we have function pointers flying across the FFI boundary in both directions.
 use libc::c_int;
 
 # #[cfg(hidden)]
-extern "C" {
+unsafe extern "C" {
     /// Registers the callback.
     fn register(cb: Option<extern "C" fn(Option<extern "C" fn(c_int) -> c_int>, c_int) -> c_int>);
 }
@@ -750,8 +774,8 @@ mechanisms (notably C++'s `try`/`catch`).
 
 <!-- ignore: using unstable feature -->
 ```rust,ignore
-#[no_mangle]
-extern "C-unwind" fn example() {
+#[unsafe(no_mangle)]
+unsafe extern "C-unwind" fn example() {
     panic!("Uh oh");
 }
 ```
@@ -780,13 +804,13 @@ If the C++ frames have objects, their destructors will be called.
 <!-- ignore: using unstable feature -->
 ```rust,ignore
 #[link(...)]
-extern "C-unwind" {
+unsafe extern "C-unwind" {
     // A C++ function that may throw an exception
     fn may_throw();
 }
 
-#[no_mangle]
-extern "C-unwind" fn rust_passthrough() {
+#[unsafe(no_mangle)]
+unsafe extern "C-unwind" fn rust_passthrough() {
     let b = Box::new(5);
     unsafe { may_throw(); }
     println!("{:?}", &b);
@@ -816,7 +840,7 @@ will be printed.
 ### `panic` can be stopped at an ABI boundary
 
 ```rust
-#[no_mangle]
+#[unsafe(no_mangle)]
 extern "C" fn assert_nonzero(input: u32) {
     assert!(input != 0)
 }
@@ -833,7 +857,7 @@ process if it panics, you must use [`catch_unwind`]:
 ```rust
 use std::panic::catch_unwind;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn oh_no() -> i32 {
     let result = catch_unwind(|| {
         panic!("Oops!");
@@ -867,7 +891,7 @@ We can represent this in Rust with the `c_void` type:
 
 <!-- ignore: requires libc crate -->
 ```rust,ignore
-extern "C" {
+unsafe extern "C" {
     pub fn foo(arg: *mut libc::c_void);
     pub fn bar(arg: *mut libc::c_void);
 }
@@ -891,18 +915,18 @@ To do this in Rust, let’s create our own opaque types:
 ```rust
 #[repr(C)]
 pub struct Foo {
-    _data: [u8; 0],
+    _data: (),
     _marker:
         core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
 }
 #[repr(C)]
 pub struct Bar {
-    _data: [u8; 0],
+    _data: (),
     _marker:
         core::marker::PhantomData<(*mut u8, core::marker::PhantomPinned)>,
 }
 
-extern "C" {
+unsafe extern "C" {
     pub fn foo(arg: *mut Foo);
     pub fn bar(arg: *mut Bar);
 }
@@ -913,8 +937,8 @@ By including at least one private field and no constructor,
 we create an opaque type that we can't instantiate outside of this module.
 (A struct with no field could be instantiated by anyone.)
 We also want to use this type in FFI, so we have to add `#[repr(C)]`.
-The marker ensures the compiler does not mark the struct as `Send`, `Sync` and `Unpin` are
-not applied to the struct. (`*mut u8` is not `Send` or `Sync`, `PhantomPinned` is not `Unpin`)
+The marker ensures the compiler does not mark the struct as `Send`, `Sync`, and
+`Unpin`. (`*mut u8` is not `Send` or `Sync`, `PhantomPinned` is not `Unpin`)
 
 But because our `Foo` and `Bar` types are
 different, we’ll get type safety between the two of them, so we cannot

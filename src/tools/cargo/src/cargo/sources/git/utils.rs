@@ -5,16 +5,15 @@ use crate::core::{GitReference, Verbosity};
 use crate::sources::git::fetch::RemoteKind;
 use crate::sources::git::oxide;
 use crate::sources::git::oxide::cargo_config_to_gitoxide_overrides;
-use crate::util::errors::CargoResult;
-use crate::util::{
-    human_readable_bytes, network, GlobalContext, IntoUrl, MetricsCounter, Progress,
-};
-use anyhow::{anyhow, Context as _};
-use cargo_util::{paths, ProcessBuilder};
+use crate::util::HumanBytes;
+use crate::util::errors::{CargoResult, GitCliError};
+use crate::util::{GlobalContext, IntoUrl, MetricsCounter, Progress, network};
+use anyhow::{Context as _, anyhow};
+use cargo_util::{ProcessBuilder, paths};
 use curl::easy::List;
 use git2::{ErrorClass, ObjectType, Oid};
-use serde::ser;
 use serde::Serialize;
+use serde::ser;
 use std::borrow::Cow;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -278,7 +277,7 @@ impl<'a> GitCheckout<'a> {
         &self.database.remote.url()
     }
 
-    /// Clone a repo for a `revision` into a local path from a `datatabase`.
+    /// Clone a repo for a `revision` into a local path from a `database`.
     /// This is a filesystem-to-filesystem clone.
     fn clone_into(
         into: &Path,
@@ -799,12 +798,14 @@ where
             | ErrorClass::FetchHead
             | ErrorClass::Ssh
             | ErrorClass::Http => {
-                let mut msg = "network failure seems to have happened\n".to_string();
-                msg.push_str(
-                    "if a proxy or similar is necessary `net.git-fetch-with-cli` may help here\n",
-                );
-                msg.push_str(
-                    "https://doc.rust-lang.org/cargo/reference/config.html#netgit-fetch-with-cli",
+                let msg = format!(
+                    concat!(
+                        "network failure seems to have happened\n",
+                        "if a proxy or similar is necessary `net.git-fetch-with-cli` may help here\n",
+                        "https://doc.rust-lang.org/cargo/reference/config.html#netgit-fetch-with-cli",
+                        "{}"
+                    ),
+                    note_github_pull_request(url).unwrap_or_default()
                 );
                 err = err.context(msg);
             }
@@ -914,8 +915,8 @@ pub fn with_fetch_options(
                         counter.add(stats.received_bytes(), now);
                         last_update = now;
                     }
-                    let (rate, unit) = human_readable_bytes(counter.rate() as u64);
-                    format!(", {:.2}{}/s", rate, unit)
+                    let rate = HumanBytes(counter.rate() as u64);
+                    format!(", {rate:.2}/s")
                 };
                 progress
                     .tick(stats.indexed_objects(), stats.total_objects(), &msg)
@@ -956,14 +957,11 @@ pub fn fetch(
     gctx: &GlobalContext,
     remote_kind: RemoteKind,
 ) -> CargoResult<()> {
-    if gctx.frozen() {
+    if let Some(offline_flag) = gctx.offline_flag() {
         anyhow::bail!(
-            "attempting to update a git repository, but --frozen \
+            "attempting to update a git repository, but {offline_flag} \
              was specified"
         )
-    }
-    if !gctx.network_allowed() {
-        anyhow::bail!("can't update a git repository in the offline mode")
     }
 
     let shallow = remote_kind.to_shallow_setting(repo.is_shallow(), gctx);
@@ -1034,8 +1032,9 @@ pub fn fetch(
         }
     }
 
+    debug!("doing a fetch for {remote_url}");
     let result = if let Some(true) = gctx.net_config()?.git_fetch_with_cli {
-        fetch_with_cli(repo, remote_url, &refspecs, tags, gctx)
+        fetch_with_cli(repo, remote_url, &refspecs, tags, shallow, gctx)
     } else if gctx.cli_unstable().gitoxide.map_or(false, |git| git.fetch) {
         fetch_with_gitoxide(repo, remote_url, refspecs, tags, shallow, gctx)
     } else {
@@ -1079,14 +1078,21 @@ fn fetch_with_cli(
     url: &str,
     refspecs: &[String],
     tags: bool,
+    shallow: gix::remote::fetch::Shallow,
     gctx: &GlobalContext,
 ) -> CargoResult<()> {
+    debug!(target: "git-fetch", backend = "git-cli");
+
     let mut cmd = ProcessBuilder::new("git");
     cmd.arg("fetch");
     if tags {
         cmd.arg("--tags");
     } else {
         cmd.arg("--no-tags");
+    }
+    if let gix::remote::fetch::Shallow::DepthAtRemote(depth) = shallow {
+        let depth = 0i32.saturating_add_unsigned(depth.get());
+        cmd.arg(format!("--depth={depth}"));
     }
     match gctx.shell().verbosity() {
         Verbosity::Normal => {}
@@ -1114,7 +1120,11 @@ fn fetch_with_cli(
         .cwd(repo.path());
     gctx.shell()
         .verbose(|s| s.status("Running", &cmd.to_string()))?;
-    cmd.exec()?;
+    network::retry::with_retry(gctx, || {
+        cmd.exec()
+            .map_err(|error| GitCliError::new(error, true).into())
+    })?;
+
     Ok(())
 }
 
@@ -1126,12 +1136,15 @@ fn fetch_with_gitoxide(
     shallow: gix::remote::fetch::Shallow,
     gctx: &GlobalContext,
 ) -> CargoResult<()> {
+    debug!(target: "git-fetch", backend = "gitoxide");
+
     let git2_repo = repo;
     let config_overrides = cargo_config_to_gitoxide_overrides(gctx)?;
     let repo_reinitialized = AtomicBool::default();
     let res = oxide::with_retry_and_progress(
-        &git2_repo.path().to_owned(),
+        git2_repo.path(),
         gctx,
+        remote_url,
         &|repo_path,
           should_interrupt,
           mut progress,
@@ -1187,7 +1200,7 @@ fn fetch_with_gitoxide(
                     );
                     let outcome = connection
                         .prepare_fetch(&mut progress, gix::remote::ref_map::Options::default())?
-                        .with_shallow(shallow.clone().into())
+                        .with_shallow(shallow.clone())
                         .receive(&mut progress, should_interrupt)?;
                     Ok(outcome)
                 });
@@ -1234,7 +1247,8 @@ fn fetch_with_libgit2(
     shallow: gix::remote::fetch::Shallow,
     gctx: &GlobalContext,
 ) -> CargoResult<()> {
-    debug!("doing a fetch for {remote_url}");
+    debug!(target: "git-fetch", backend = "libgit2");
+
     let git_config = git2::Config::open_default()?;
     with_fetch_options(&git_config, remote_url, gctx, &mut |mut opts| {
         if tags {
@@ -1532,7 +1546,7 @@ fn github_fast_path(
         "https://api.github.com/repos/{}/{}/commits/{}",
         username, repository, github_branch_name,
     );
-    let mut handle = gctx.http()?.borrow_mut();
+    let mut handle = gctx.http()?.lock().unwrap();
     debug!("attempting GitHub fast path for {}", url);
     handle.get(true)?;
     handle.url(&url)?;
@@ -1576,6 +1590,33 @@ fn github_fast_path(
 /// Whether a `url` is one from GitHub.
 fn is_github(url: &Url) -> bool {
     url.host_str() == Some("github.com")
+}
+
+// Give some messages on GitHub PR URL given as is
+pub(crate) fn note_github_pull_request(url: &str) -> Option<String> {
+    if let Ok(url) = url.parse::<Url>()
+        && is_github(&url)
+    {
+        let path_segments = url
+            .path_segments()
+            .map(|p| p.into_iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        if let [owner, repo, "pull", pr_number, ..] = path_segments[..] {
+            let repo_url = format!("https://github.com/{owner}/{repo}.git");
+            let rev = format!("refs/pull/{pr_number}/head");
+            return Some(format!(
+                concat!(
+                    "\n\nnote: GitHub url {} is not a repository. \n",
+                    "help: Replace the dependency with \n",
+                    "       `git = \"{}\" rev = \"{}\"` \n",
+                    "   to specify pull requests as dependencies' revision."
+                ),
+                url, repo_url, rev
+            ));
+        }
+    }
+
+    None
 }
 
 /// Whether a `rev` looks like a commit hash (ASCII hex digits).

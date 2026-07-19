@@ -1,6 +1,6 @@
 use crate::command_prelude::*;
 use anyhow::bail;
-use cargo::{drop_println, CargoResult};
+use cargo::{CargoResult, drop_println};
 use serde::Serialize;
 
 pub fn cli() -> Command {
@@ -8,16 +8,15 @@ pub fn cli() -> Command {
         .about("Print a JSON representation of a Cargo.toml file's location")
         .arg(flag("workspace", "Locate Cargo.toml of the workspace root"))
         .arg(
-            opt(
-                "message-format",
-                "Output representation [possible values: json, plain]",
-            )
-            .value_name("FMT"),
+            opt("message-format", "Output representation")
+                .value_name("FMT")
+                .value_parser(["json", "plain"])
+                .ignore_case(true),
         )
         .arg_silent_suggestion()
         .arg_manifest_path()
         .after_help(color_print::cstr!(
-            "Run `<cyan,bold>cargo help locate-project</>` for more detailed information.\n"
+            "Run `<bright-cyan,bold>cargo help locate-project</>` for more detailed information.\n"
         ))
 }
 

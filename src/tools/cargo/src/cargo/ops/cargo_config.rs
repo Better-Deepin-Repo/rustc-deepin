@@ -3,7 +3,7 @@
 use crate::util::context::{ConfigKey, ConfigValue as CV, Definition, GlobalContext};
 use crate::util::errors::CargoResult;
 use crate::{drop_eprintln, drop_println};
-use anyhow::{bail, format_err, Error};
+use anyhow::{Error, bail, format_err};
 use serde_json::json;
 use std::borrow::Cow;
 use std::fmt;
@@ -105,11 +105,7 @@ fn maybe_env<'gctx>(
         .filter(|(env_key, _val)| env_key.starts_with(&format!("{}_", key.as_env_key())))
         .collect();
     env.sort_by_key(|x| x.0);
-    if env.is_empty() {
-        None
-    } else {
-        Some(env)
-    }
+    if env.is_empty() { None } else { Some(env) }
 }
 
 fn print_toml(gctx: &GlobalContext, opts: &GetOptions<'_>, key: &ConfigKey, cv: &CV) {
@@ -119,6 +115,21 @@ fn print_toml(gctx: &GlobalContext, opts: &GetOptions<'_>, key: &ConfigKey, cv: 
         }
         format!(" # {}", def)
     };
+
+    fn cv_to_toml(cv: &CV) -> toml_edit::Value {
+        match cv {
+            CV::String(s, _) => toml_edit::Value::from(s.as_str()),
+            CV::Integer(i, _) => toml_edit::Value::from(*i),
+            CV::Boolean(b, _) => toml_edit::Value::from(*b),
+            CV::List(l, _) => toml_edit::Value::from_iter(l.iter().map(cv_to_toml)),
+            CV::Table(t, _) => toml_edit::Value::from_iter({
+                let mut t: Vec<_> = t.iter().collect();
+                t.sort_by_key(|t| t.0);
+                t.into_iter().map(|(k, v)| (k, cv_to_toml(v)))
+            }),
+        }
+    }
+
     match cv {
         CV::Boolean(val, def) => drop_println!(gctx, "{} = {}{}", key, val, origin(def)),
         CV::Integer(val, def) => drop_println!(gctx, "{} = {}{}", key, val, origin(def)),
@@ -132,18 +143,14 @@ fn print_toml(gctx: &GlobalContext, opts: &GetOptions<'_>, key: &ConfigKey, cv: 
         CV::List(vals, _def) => {
             if opts.show_origin {
                 drop_println!(gctx, "{} = [", key);
-                for (val, def) in vals {
-                    drop_println!(
-                        gctx,
-                        "    {}, # {}",
-                        serde::Serialize::serialize(val, toml_edit::ser::ValueSerializer::new())
-                            .unwrap(),
-                        def
-                    );
+                for cv in vals {
+                    let val = cv_to_toml(cv);
+                    let def = cv.definition();
+                    drop_println!(gctx, "    {val}, # {def}");
                 }
                 drop_println!(gctx, "]");
             } else {
-                let vals: toml_edit::Array = vals.iter().map(|x| &x.0).collect();
+                let vals: toml_edit::Array = vals.iter().map(cv_to_toml).collect();
                 drop_println!(gctx, "{} = {}", key, vals);
             }
         }
@@ -208,7 +215,7 @@ fn print_json(gctx: &GlobalContext, key: &ConfigKey, cv: &CV, include_key: bool)
             CV::Integer(val, _def) => json!(val),
             CV::String(val, _def) => json!(val),
             CV::List(vals, _def) => {
-                let jvals: Vec<_> = vals.iter().map(|(val, _def)| json!(val)).collect();
+                let jvals: Vec<_> = vals.iter().map(cv_to_json).collect();
                 json!(jvals)
             }
             CV::Table(map, _def) => {

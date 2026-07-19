@@ -8,37 +8,42 @@ macro_rules! assert_const {
 }
 fn main() {
     assert!(true);
-    //~^ ERROR: `assert!(true)` will be optimized out by the compiler
+    //~^ assertions_on_constants
+
     assert!(false);
-    //~^ ERROR: `assert!(false)` should probably be replaced
+    //~^ assertions_on_constants
+
     assert!(true, "true message");
-    //~^ ERROR: `assert!(true)` will be optimized out by the compiler
+    //~^ assertions_on_constants
+
     assert!(false, "false message");
-    //~^ ERROR: `assert!(false, ..)` should probably be replaced
+    //~^ assertions_on_constants
 
     let msg = "panic message";
     assert!(false, "{}", msg.to_uppercase());
-    //~^ ERROR: `assert!(false, ..)` should probably be replaced
+    //~^ assertions_on_constants
 
     const B: bool = true;
     assert!(B);
-    //~^ ERROR: `assert!(true)` will be optimized out by the compiler
+    //~^ assertions_on_constants
 
     const C: bool = false;
     assert!(C);
-    //~^ ERROR: `assert!(false)` should probably be replaced
+    //~^ assertions_on_constants
+
     assert!(C, "C message");
-    //~^ ERROR: `assert!(false, ..)` should probably be replaced
+    //~^ assertions_on_constants
 
     debug_assert!(true);
-    //~^ ERROR: `debug_assert!(true)` will be optimized out by the compiler
+    //~^ assertions_on_constants
+
     // Don't lint this, since there is no better way for expressing "Only panic in debug mode".
     debug_assert!(false); // #3948
     assert_const!(3);
     assert_const!(-1);
 
-    // Don't lint if based on `cfg!(..)`:
     assert!(cfg!(feature = "hey") || cfg!(not(feature = "asdf")));
+    //~^ assertions_on_constants
 
     let flag: bool = cfg!(not(feature = "asdf"));
     assert!(flag);
@@ -47,18 +52,47 @@ fn main() {
     assert!(!CFG_FLAG);
 
     const _: () = assert!(true);
-    //~^ ERROR: `assert!(true)` will be optimized out by the compiler
+    //~^ assertions_on_constants
 
     assert!(8 == (7 + 1));
-    //~^ ERROR: `assert!(true)` will be optimized out by the compiler
+    //~^ assertions_on_constants
 
     // Don't lint if the value is dependent on a defined constant:
     const N: usize = 1024;
     const _: () = assert!(N.is_power_of_two());
 }
 
+const C: bool = true;
+
 const _: () = {
     assert!(true);
-    //~^ ERROR: `assert!(true)` will be optimized out by the compiler
+    //~^ assertions_on_constants
+
     assert!(8 == (7 + 1));
+    //~^ assertions_on_constants
+
+    assert!(C);
 };
+
+#[clippy::msrv = "1.57"]
+fn _f1() {
+    assert!(C);
+    //~^ assertions_on_constants
+}
+
+#[clippy::msrv = "1.56"]
+fn _f2() {
+    assert!(C);
+}
+
+#[clippy::msrv = "1.79"]
+fn _f3() {
+    assert!(C);
+    //~^ assertions_on_constants
+}
+
+#[clippy::msrv = "1.78"]
+fn _f4() {
+    assert!(C);
+    //~^ assertions_on_constants
+}

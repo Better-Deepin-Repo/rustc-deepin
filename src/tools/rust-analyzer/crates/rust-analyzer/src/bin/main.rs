@@ -44,11 +44,7 @@ fn actual_main() -> anyhow::Result<ExitCode> {
 
     #[cfg(debug_assertions)]
     if flags.wait_dbg || env::var("RA_WAIT_DBG").is_ok() {
-        #[allow(unused_mut)]
-        let mut d = 4;
-        while d == 4 {
-            d = 4;
-        }
+        wait_for_debugger();
     }
 
     if let Err(e) = setup_logging(flags.log_file.clone()) {
@@ -92,8 +88,31 @@ fn actual_main() -> anyhow::Result<ExitCode> {
         flags::RustAnalyzerCmd::Scip(cmd) => cmd.run()?,
         flags::RustAnalyzerCmd::RunTests(cmd) => cmd.run()?,
         flags::RustAnalyzerCmd::RustcTests(cmd) => cmd.run()?,
+        flags::RustAnalyzerCmd::PrimeCaches(cmd) => cmd.run()?,
     }
     Ok(ExitCode::SUCCESS)
+}
+
+#[cfg(debug_assertions)]
+fn wait_for_debugger() {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::System::Diagnostics::Debug::IsDebuggerPresent;
+        // SAFETY: WinAPI generated code that is defensively marked `unsafe` but
+        // in practice can not be used in an unsafe way.
+        while unsafe { IsDebuggerPresent() } == 0 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        #[allow(unused_mut)]
+        let mut d = 4;
+        while d == 4 {
+            d = 4;
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
 }
 
 fn setup_logging(log_file_flag: Option<PathBuf>) -> anyhow::Result<()> {
@@ -103,15 +122,21 @@ fn setup_logging(log_file_flag: Option<PathBuf>) -> anyhow::Result<()> {
         // directory which we set to the project workspace.
         // https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/general-environment-variables
         // https://docs.microsoft.com/en-us/windows/win32/api/dbghelp/nf-dbghelp-syminitialize
-        if let Ok(path) = env::current_exe() {
-            if let Some(path) = path.parent() {
+        if let Ok(path) = env::current_exe()
+            && let Some(path) = path.parent()
+        {
+            // SAFETY: This is safe because this is single-threaded.
+            unsafe {
                 env::set_var("_NT_SYMBOL_PATH", path);
             }
         }
     }
 
     if env::var("RUST_BACKTRACE").is_err() {
-        env::set_var("RUST_BACKTRACE", "short");
+        // SAFETY: This is safe because this is single-threaded.
+        unsafe {
+            env::set_var("RUST_BACKTRACE", "short");
+        }
     }
 
     let log_file = env::var("RA_LOG_FILE").ok().map(PathBuf::from).or(log_file_flag);
@@ -135,9 +160,9 @@ fn setup_logging(log_file_flag: Option<PathBuf>) -> anyhow::Result<()> {
 
     rust_analyzer::tracing::Config {
         writer,
-        // Deliberately enable all `error` logs if the user has not set RA_LOG, as there is usually
+        // Deliberately enable all `warn` logs if the user has not set RA_LOG, as there is usually
         // useful information in there for debugging.
-        filter: env::var("RA_LOG").ok().unwrap_or_else(|| "error".to_owned()),
+        filter: env::var("RA_LOG").ok().unwrap_or_else(|| "warn".to_owned()),
         chalk_filter: env::var("CHALK_DEBUG").ok(),
         profile_filter: env::var("RA_PROFILE").ok(),
         json_profile_filter: std::env::var("RA_PROFILE_JSON").ok(),
@@ -157,10 +182,8 @@ fn with_extra_thread(
     thread_intent: stdx::thread::ThreadIntent,
     f: impl FnOnce() -> anyhow::Result<()> + Send + 'static,
 ) -> anyhow::Result<()> {
-    let handle = stdx::thread::Builder::new(thread_intent)
-        .name(thread_name.into())
-        .stack_size(STACK_SIZE)
-        .spawn(f)?;
+    let handle =
+        stdx::thread::Builder::new(thread_intent, thread_name).stack_size(STACK_SIZE).spawn(f)?;
 
     handle.join()?;
 
@@ -185,12 +208,23 @@ fn run_server() -> anyhow::Result<()> {
     tracing::info!("InitializeParams: {}", initialize_params);
     let lsp_types::InitializeParams {
         root_uri,
-        capabilities,
+        mut capabilities,
         workspace_folders,
         initialization_options,
         client_info,
         ..
     } = from_json::<lsp_types::InitializeParams>("InitializeParams", &initialize_params)?;
+
+    // lsp-types has a typo in the `/capabilities/workspace/diagnostics` field, its typoed as `diagnostic`
+    if let Some(val) = initialize_params.pointer("/capabilities/workspace/diagnostics")
+        && let Ok(diag_caps) = from_json::<lsp_types::DiagnosticWorkspaceClientCapabilities>(
+            "DiagnosticWorkspaceClientCapabilities",
+            val,
+        )
+    {
+        tracing::info!("Patching lsp-types workspace diagnostics capabilities: {diag_caps:#?}");
+        capabilities.workspace.get_or_insert_default().diagnostic.get_or_insert(diag_caps);
+    }
 
     let root_path = match root_uri
         .and_then(|it| it.to_file_path().ok())
@@ -235,8 +269,8 @@ fn run_server() -> anyhow::Result<()> {
 
         if !error_sink.is_empty() {
             use lsp_types::{
-                notification::{Notification, ShowMessage},
                 MessageType, ShowMessageParams,
+                notification::{Notification, ShowMessage},
             };
             let not = lsp_server::Notification::new(
                 ShowMessage::METHOD.to_owned(),
@@ -272,6 +306,11 @@ fn run_server() -> anyhow::Result<()> {
     {
         config.rediscover_workspaces();
     }
+
+    rayon::ThreadPoolBuilder::new()
+        .thread_name(|ix| format!("RayonWorker{}", ix))
+        .build_global()
+        .unwrap();
 
     // If the io_threads have an error, there's usually an error on the main
     // loop too because the channels are closed. Ensure we report both errors.

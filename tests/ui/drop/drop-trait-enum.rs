@@ -2,8 +2,9 @@
 #![allow(dead_code)]
 #![allow(unused_assignments)]
 #![allow(unused_variables)]
-//@ ignore-emscripten no threads support
+//@ needs-threads
 //@ needs-unwind
+//@ ignore-backends: gcc
 
 use std::thread;
 use std::sync::mpsc::{channel, Sender};

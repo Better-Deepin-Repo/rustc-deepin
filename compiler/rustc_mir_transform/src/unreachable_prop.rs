@@ -6,9 +6,10 @@ use rustc_abi::Size;
 use rustc_data_structures::fx::FxHashSet;
 use rustc_middle::bug;
 use rustc_middle::mir::interpret::Scalar;
-use rustc_middle::mir::patch::MirPatch;
 use rustc_middle::mir::*;
 use rustc_middle::ty::{self, TyCtxt};
+
+use crate::patch::MirPatch;
 
 pub(super) struct UnreachablePropagation;
 
@@ -52,6 +53,10 @@ impl crate::MirPass<'_> for UnreachablePropagation {
             body.basic_blocks_mut()[bb].statements.clear();
         }
     }
+
+    fn is_required(&self) -> bool {
+        false
+    }
 }
 
 /// Return whether the current terminator is fully unreachable.
@@ -70,7 +75,7 @@ fn remove_successors_from_switch<'tcx>(
     let is_unreachable = |bb| unreachable_blocks.contains(&bb);
 
     // If there are multiple targets, we want to keep information about reachability for codegen.
-    // For example (see tests/codegen/match-optimizes-away.rs)
+    // For example (see tests/codegen-llvm/match-optimizes-away.rs)
     //
     // pub enum Two { A, B }
     // pub fn identity(x: Two) -> Two {

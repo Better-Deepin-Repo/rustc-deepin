@@ -6,10 +6,11 @@
 
 use std::path::{Path, PathBuf};
 
-use cargo_test_support::prelude::*;
-use cargo_test_support::registry::{Dependency, Package};
+use crate::prelude::*;
 use cargo_test_support::ProjectBuilder;
-use cargo_test_support::{paths, project, rustc_host, str, Execs};
+use cargo_test_support::cross_compile;
+use cargo_test_support::registry::{Dependency, Package};
+use cargo_test_support::{Execs, paths, project, rustc_host, str};
 
 struct Setup {
     rustc_wrapper: PathBuf,
@@ -86,7 +87,7 @@ fn setup() -> Setup {
     let p = ProjectBuilder::new(paths::root().join("rustc-wrapper"))
         .file(
             "src/main.rs",
-            r#"
+            &r#"
                 use std::process::Command;
                 use std::env;
                 fn main() {
@@ -96,21 +97,18 @@ fn setup() -> Setup {
                     if is_sysroot_crate {
                         args.push("--sysroot".to_string());
                         args.push(env::var("REAL_SYSROOT").unwrap());
-                    } else if args.iter().any(|arg| arg == "--target") {
+                    } else if let Some(pos) = args.iter().position(|arg| arg == "--target") {
                         // build-std target unit
-                        //
-                        // This `--sysroot` is here to disable the sysroot lookup,
-                        // to ensure nothing is required.
-                        // See https://github.com/rust-lang/wg-cargo-std-aware/issues/31
-                        // for more information on this.
-                        //
-                        // FIXME: this is broken on x86_64-unknown-linux-gnu
-                        // due to https://github.com/rust-lang/rust/pull/124129,
-                        // because it requires lld in the sysroot. See
-                        // https://github.com/rust-lang/rust/issues/125246 for
-                        // more information.
-                        // args.push("--sysroot".to_string());
-                        // args.push("/path/to/nowhere".to_string());
+
+                        // Set --sysroot only when the target is host
+                        if args.iter().nth(pos + 1) == Some(&"__HOST_TARGET__".to_string()) {
+                            // This `--sysroot` is here to disable the sysroot lookup,
+                            // to ensure nothing is required.
+                            // See https://github.com/rust-lang/wg-cargo-std-aware/issues/31
+                            // for more information on this.
+                            args.push("--sysroot".to_string());
+                            args.push("/path/to/nowhere".to_string());
+                        }
                     } else {
                         // host unit, do not use sysroot
                     }
@@ -118,7 +116,8 @@ fn setup() -> Setup {
                     let ret = Command::new(&args[0]).args(&args[1..]).status().unwrap();
                     std::process::exit(ret.code().unwrap_or(1));
                 }
-            "#,
+            "#
+            .replace("__HOST_TARGET__", rustc_host()),
         )
         .build();
     p.cargo("build").run();
@@ -263,7 +262,7 @@ fn shared_std_dependency_rebuild() {
                 [build-dependencies]
                 dep_test = {{ path = \"{}/tests/testsuite/mock-std/dep_test\" }}
             ",
-                manifest_dir
+                manifest_dir.replace('\\', "/")
             )
             .as_str(),
         )
@@ -297,20 +296,16 @@ fn shared_std_dependency_rebuild() {
 "#]])
         .run();
 
-    // TODO: Because of the way in which std is resolved, it's mandatory that this is left commented
-    // out as it will fail. This case should result in `dep_test` only being built once, however
-    // it's still being built twice. This is a bug.
-    //
-    //    p.cargo("build -v")
-    //        .build_std(&setup)
-    //        .with_stderr_does_not_contain(str![[r#"
-    //...
-    //[RUNNING] `[..] rustc --crate-name dep_test [..]`
-    //...
-    //[RUNNING] `[..] rustc --crate-name dep_test [..]`
-    //...
-    //"#]])
-    //        .run();
+    p.cargo("build -v")
+        .build_std(&setup)
+        .with_stderr_does_not_contain(str![[r#"
+    ...
+    [RUNNING] `[..] rustc --crate-name dep_test [..]`
+    ...
+    [RUNNING] `[..] rustc --crate-name dep_test [..]`
+    ...
+    "#]])
+        .run();
 }
 
 #[cargo_test(build_std_mock)]
@@ -391,24 +386,8 @@ fn check_core() {
 
 #[cargo_test(build_std_mock)]
 fn build_std_with_no_arg_for_core_only_target() {
-    let has_rustup_aarch64_unknown_none = std::process::Command::new("rustup")
-        .args(["target", "list", "--installed"])
-        .output()
-        .ok()
-        .map(|output| {
-            String::from_utf8(output.stdout)
-                .map(|stdout| stdout.contains("aarch64-unknown-none"))
-                .unwrap_or_default()
-        })
-        .unwrap_or_default();
-    if !has_rustup_aarch64_unknown_none {
-        let msg =
-            "to run this test, run `rustup target add aarch64-unknown-none --toolchain nightly`";
-        if cargo_util::is_ci() {
-            panic!("{msg}");
-        } else {
-            eprintln!("{msg}");
-        }
+    let target = "aarch64-unknown-none";
+    if !cross_compile::requires_target_installed(target) {
         return;
     }
 
@@ -427,7 +406,8 @@ fn build_std_with_no_arg_for_core_only_target() {
         .build();
 
     p.cargo("build -v")
-        .arg("--target=aarch64-unknown-none")
+        .arg("--target")
+        .arg(target)
         .build_std(&setup)
         .with_stderr_data(
             str![[r#"
@@ -457,7 +437,8 @@ fn build_std_with_no_arg_for_core_only_target() {
     // Note that we don't  download std dependencies for the second call
     // because `-Zbuild-std` downloads them all also when building for core only.
     p.cargo("build -v")
-        .arg("--target=aarch64-unknown-none")
+        .arg("--target")
+        .arg(target)
         .target_host()
         .build_std(&setup)
         .with_stderr_data(
@@ -676,7 +657,7 @@ fn doctest() {
         )
         .build();
 
-    p.cargo("test --doc -v -Zdoctest-xcompile")
+    p.cargo("test --doc -v")
         .build_std(&setup)
         .with_stdout_data(str![[r#"
 
@@ -712,7 +693,7 @@ fn no_implicit_alloc() {
         .target_host()
         .with_stderr_data(str![[r#"
 ...
-error[E0433]: failed to resolve: use of undeclared crate or module `alloc`
+error[E0433]: failed to resolve[..]`alloc`
 ...
 "#]])
         .with_status(101)
@@ -761,12 +742,14 @@ fn ignores_incremental() {
         .map(|e| e.unwrap())
         .collect();
     assert_eq!(incremental.len(), 1);
-    assert!(incremental[0]
-        .file_name()
-        .unwrap()
-        .to_str()
-        .unwrap()
-        .starts_with("foo-"));
+    assert!(
+        incremental[0]
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("foo-")
+    );
 }
 
 #[cargo_test(build_std_mock)]

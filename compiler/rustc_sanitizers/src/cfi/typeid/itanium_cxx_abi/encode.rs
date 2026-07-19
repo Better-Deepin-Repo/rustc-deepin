@@ -79,7 +79,7 @@ fn encode_args<'tcx>(
         s.push('I');
         let def_generics = tcx.generics_of(for_def);
         for (n, arg) in args.iter().enumerate() {
-            match arg.unpack() {
+            match arg.kind() {
                 GenericArgKind::Lifetime(region) => {
                     s.push_str(&encode_region(region, dict));
                 }
@@ -103,7 +103,7 @@ fn encode_args<'tcx>(
 /// <https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling.literal>).
 fn encode_const<'tcx>(
     tcx: TyCtxt<'tcx>,
-    c: Const<'tcx>,
+    ct: Const<'tcx>,
     ct_ty: Ty<'tcx>,
     dict: &mut FxHashMap<DictKey<'tcx>, usize>,
     options: EncodeTyOptions,
@@ -111,7 +111,7 @@ fn encode_const<'tcx>(
     // L<element-type>[n][<element-value>]E as literal argument
     let mut s = String::from('L');
 
-    match c.kind() {
+    match ct.kind() {
         // Const parameters
         ty::ConstKind::Param(..) => {
             // L<element-type>E as literal argument
@@ -121,18 +121,18 @@ fn encode_const<'tcx>(
         }
 
         // Literal arguments
-        ty::ConstKind::Value(ct_ty, ..) => {
+        ty::ConstKind::Value(cv) => {
             // L<element-type>[n]<element-value>E as literal argument
 
             // Element type
-            s.push_str(&encode_ty(tcx, ct_ty, dict, options));
+            s.push_str(&encode_ty(tcx, cv.ty, dict, options));
 
             // The only allowed types of const values are bool, u8, u16, u32,
             // u64, u128, usize i8, i16, i32, i64, i128, isize, and char. The
             // bool value false is encoded as 0 and true as 1.
-            match ct_ty.kind() {
+            match cv.ty.kind() {
                 ty::Int(ity) => {
-                    let bits = c
+                    let bits = cv
                         .try_to_bits(tcx, ty::TypingEnv::fully_monomorphized())
                         .expect("expected monomorphic const in cfi");
                     let val = Integer::from_int_ty(&tcx, *ity).size().sign_extend(bits) as i128;
@@ -142,30 +142,30 @@ fn encode_const<'tcx>(
                     let _ = write!(s, "{val}");
                 }
                 ty::Uint(_) => {
-                    let val = c
+                    let val = cv
                         .try_to_bits(tcx, ty::TypingEnv::fully_monomorphized())
                         .expect("expected monomorphic const in cfi");
                     let _ = write!(s, "{val}");
                 }
                 ty::Bool => {
-                    let val = c.try_to_bool().expect("expected monomorphic const in cfi");
+                    let val = cv.try_to_bool().expect("expected monomorphic const in cfi");
                     let _ = write!(s, "{val}");
                 }
                 _ => {
-                    bug!("encode_const: unexpected type `{:?}`", ct_ty);
+                    bug!("encode_const: unexpected type `{:?}`", cv.ty);
                 }
             }
         }
 
         _ => {
-            bug!("encode_const: unexpected kind `{:?}`", c.kind());
+            bug!("encode_const: unexpected kind `{:?}`", ct.kind());
         }
     }
 
     // Close the "L..E" pair
     s.push('E');
 
-    compress(dict, DictKey::Const(c), &mut s);
+    compress(dict, DictKey::Const(ct), &mut s);
 
     s
 }
@@ -245,7 +245,7 @@ fn encode_predicate<'tcx>(
             let name = encode_ty_name(tcx, projection.def_id);
             let _ = write!(s, "u{}{}", name.len(), name);
             s.push_str(&encode_args(tcx, projection.args, projection.def_id, true, dict, options));
-            match projection.term.unpack() {
+            match projection.term.kind() {
                 TermKind::Ty(ty) => s.push_str(&encode_ty(tcx, ty, dict, options)),
                 TermKind::Const(c) => s.push_str(&encode_const(
                     tcx,
@@ -287,7 +287,7 @@ fn encode_region<'tcx>(region: Region<'tcx>, dict: &mut FxHashMap<DictKey<'tcx>,
     // u6region[I[<region-disambiguator>][<region-index>]E] as vendor extended type
     let mut s = String::new();
     match region.kind() {
-        RegionKind::ReBound(debruijn, r) => {
+        RegionKind::ReBound(ty::BoundVarIndexKind::Bound(debruijn), r) => {
             s.push_str("u6regionI");
             // Debruijn index, which identifies the binder, as region disambiguator
             let num = debruijn.index() as u64;
@@ -303,7 +303,8 @@ fn encode_region<'tcx>(region: Region<'tcx>, dict: &mut FxHashMap<DictKey<'tcx>,
             s.push_str("u6region");
             compress(dict, DictKey::Region(region), &mut s);
         }
-        RegionKind::ReEarlyParam(..)
+        RegionKind::ReBound(ty::BoundVarIndexKind::Canonical, _)
+        | RegionKind::ReEarlyParam(..)
         | RegionKind::ReLateParam(..)
         | RegionKind::ReStatic
         | RegionKind::ReError(_)
@@ -448,10 +449,9 @@ pub(crate) fn encode_ty<'tcx>(
             if let Some(cfi_encoding) = tcx.get_attr(def_id, sym::cfi_encoding) {
                 // Use user-defined CFI encoding for type
                 if let Some(value_str) = cfi_encoding.value_str() {
-                    let value_str = value_str.to_string();
-                    let str = value_str.trim();
-                    if !str.is_empty() {
-                        s.push_str(str);
+                    let value_str = value_str.as_str().trim();
+                    if !value_str.is_empty() {
+                        s.push_str(value_str);
                         // Don't compress user-defined builtin types (see
                         // https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling-builtin and
                         // https://itanium-cxx-abi.github.io/cxx-abi/abi.html#mangling-compression).
@@ -459,7 +459,7 @@ pub(crate) fn encode_ty<'tcx>(
                             "v", "w", "b", "c", "a", "h", "s", "t", "i", "j", "l", "m", "x", "y",
                             "n", "o", "f", "d", "e", "g", "z", "Dh",
                         ];
-                        if !builtin_types.contains(&str) {
+                        if !builtin_types.contains(&value_str) {
                             compress(dict, DictKey::Ty(ty, TyQ::None), &mut s);
                         }
                     } else {
@@ -469,7 +469,7 @@ pub(crate) fn encode_ty<'tcx>(
                         )]
                         tcx.dcx()
                             .struct_span_err(
-                                cfi_encoding.span,
+                                cfi_encoding.span(),
                                 format!("invalid `cfi_encoding` for `{:?}`", ty.kind()),
                             )
                             .emit();
@@ -520,7 +520,7 @@ pub(crate) fn encode_ty<'tcx>(
                         )]
                         tcx.dcx()
                             .struct_span_err(
-                                cfi_encoding.span,
+                                cfi_encoding.span(),
                                 format!("invalid `cfi_encoding` for `{:?}`", ty.kind()),
                             )
                             .emit();
@@ -627,13 +627,10 @@ pub(crate) fn encode_ty<'tcx>(
         }
 
         // Trait types
-        ty::Dynamic(predicates, region, kind) => {
+        ty::Dynamic(predicates, region) => {
             // u3dynI<element-type1[..element-typeN]>E, where <element-type> is <predicate>, as
             // vendor extended type.
-            let mut s = String::from(match kind {
-                ty::Dyn => "u3dynI",
-                ty::DynStar => "u7dynstarI",
-            });
+            let mut s = String::from("u3dynI");
             s.push_str(&encode_predicates(tcx, predicates, dict, options));
             s.push_str(&encode_region(*region, dict));
             s.push('E');
@@ -715,13 +712,19 @@ fn encode_ty_name(tcx: TyCtxt<'_>, def_id: DefId) -> String {
             hir::definitions::DefPathData::ValueNs(..) => "v",
             hir::definitions::DefPathData::Closure => "C",
             hir::definitions::DefPathData::Ctor => "c",
-            hir::definitions::DefPathData::AnonConst => "k",
+            hir::definitions::DefPathData::AnonConst => "K",
+            hir::definitions::DefPathData::LateAnonConst => "k",
             hir::definitions::DefPathData::OpaqueTy => "i",
+            hir::definitions::DefPathData::SyntheticCoroutineBody => "s",
+            hir::definitions::DefPathData::NestedStatic => "n",
             hir::definitions::DefPathData::CrateRoot
             | hir::definitions::DefPathData::Use
             | hir::definitions::DefPathData::GlobalAsm
             | hir::definitions::DefPathData::MacroNs(..)
-            | hir::definitions::DefPathData::LifetimeNs(..) => {
+            | hir::definitions::DefPathData::OpaqueLifetime(..)
+            | hir::definitions::DefPathData::LifetimeNs(..)
+            | hir::definitions::DefPathData::DesugaredAnonymousLifetime
+            | hir::definitions::DefPathData::AnonAssocTy(..) => {
                 bug!("encode_ty_name: unexpected `{:?}`", disambiguated_data.data);
             }
         });

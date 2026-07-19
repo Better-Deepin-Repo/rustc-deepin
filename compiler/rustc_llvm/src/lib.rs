@@ -1,10 +1,5 @@
 // tidy-alphabetical-start
-#![allow(internal_features)]
-#![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
-#![doc(rust_logo)]
 #![feature(extern_types)]
-#![feature(rustdoc_internals)]
-#![warn(unreachable_pub)]
 // tidy-alphabetical-end
 
 use std::cell::RefCell;
@@ -181,12 +176,6 @@ pub fn initialize_available_targets() {
         LLVMInitializeSystemZAsmParser
     );
     init_target!(
-        llvm_component = "jsbackend",
-        LLVMInitializeJSBackendTargetInfo,
-        LLVMInitializeJSBackendTarget,
-        LLVMInitializeJSBackendTargetMC
-    );
-    init_target!(
         llvm_component = "msp430",
         LLVMInitializeMSP430TargetInfo,
         LLVMInitializeMSP430Target,
@@ -230,6 +219,7 @@ pub fn initialize_available_targets() {
         LLVMInitializeXtensaTargetInfo,
         LLVMInitializeXtensaTarget,
         LLVMInitializeXtensaTargetMC,
+        LLVMInitializeXtensaAsmPrinter,
         LLVMInitializeXtensaAsmParser
     );
     init_target!(

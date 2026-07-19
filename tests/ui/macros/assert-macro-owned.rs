@@ -1,7 +1,8 @@
+//@ edition:2015..2021
 //@ run-fail
 //@ error-pattern:panicked
 //@ error-pattern:test-assert-owned
-//@ ignore-emscripten no processes
+//@ needs-subprocess
 
 #![allow(non_fmt_panics)]
 

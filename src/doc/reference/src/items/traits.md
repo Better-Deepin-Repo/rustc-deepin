@@ -1,17 +1,15 @@
+r[items.traits]
 # Traits
 
-r[items.traits]
-
 r[items.traits.syntax]
-> **<sup>Syntax</sup>**\
-> _Trait_ :\
-> &nbsp;&nbsp; `unsafe`<sup>?</sup> `trait` [IDENTIFIER]&nbsp;
->              [_GenericParams_]<sup>?</sup>
->              ( `:` [_TypeParamBounds_]<sup>?</sup> )<sup>?</sup>
->              [_WhereClause_]<sup>?</sup> `{`\
-> &nbsp;&nbsp;&nbsp;&nbsp; [_InnerAttribute_]<sup>\*</sup>\
-> &nbsp;&nbsp;&nbsp;&nbsp; [_AssociatedItem_]<sup>\*</sup>\
-> &nbsp;&nbsp; `}`
+```grammar,items
+Trait ->
+    `unsafe`? `trait` IDENTIFIER GenericParams? ( `:` TypeParamBounds? )? WhereClause?
+    `{`
+        InnerAttribute*
+        AssociatedItem*
+    `}`
+```
 
 r[items.traits.intro]
 A _trait_ describes an abstract interface that types can implement. This
@@ -59,15 +57,13 @@ trait Example {
 r[items.traits.const-fn]
 Trait functions are not allowed to be [`const`].
 
-## Trait bounds
-
 r[items.traits.bounds]
+## Trait bounds
 
 Generic items may use traits as [bounds] on their type parameters.
 
-## Generic traits
-
 r[items.traits.generic]
+## Generic traits
 
 Type parameters can be specified for a trait to make it generic. These appear
 after the trait name, using the same syntax used in [generic functions].
@@ -81,9 +77,8 @@ trait Seq<T> {
 ```
 
 <a id="object-safety"></a>
-## Dyn compatibility
-
 r[items.traits.dyn-compatible]
+## Dyn compatibility
 
 r[items.traits.dyn-compatible.intro]
 A dyn-compatible trait can be the base trait of a [trait object]. A trait is
@@ -123,7 +118,8 @@ r[items.traits.dyn-compatible.associated-functions]
 r[items.traits.dyn-compatible.async-traits]
 * The [`AsyncFn`], [`AsyncFnMut`], and [`AsyncFnOnce`] traits are not dyn-compatible.
 
-> **Note**: This concept was formerly known as *object safety*.
+> [!NOTE]
+> This concept was formerly known as *object safety*.
 
 ```rust
 # use std::rc::Rc;
@@ -177,7 +173,7 @@ trait DynIncompatible {
     fn foo() {}  // ERROR: associated function without Sized
     fn returns(&self) -> Self; // ERROR: Self in return type
     fn typed<T>(&self, x: T) {} // ERROR: has generic type parameters
-    fn nested(self: Rc<Box<Self>>) {} // ERROR: nested receiver not yet supported
+    fn nested(self: Rc<Box<Self>>) {} // ERROR: nested receiver cannot be downcasted
 }
 
 struct S;
@@ -207,9 +203,8 @@ impl WithSelf for S {}
 let obj: Box<dyn WithSelf> = Box::new(S); // ERROR: cannot use `Self` type parameter
 ```
 
-## Supertraits
-
 r[items.traits.supertraits]
+## Supertraits
 
 r[items.traits.supertraits.intro]
 **Supertraits** are traits that are required to be implemented for a type to
@@ -228,7 +223,7 @@ The following is an example of declaring `Shape` to be a supertrait of `Circle`.
 
 ```rust
 trait Shape { fn area(&self) -> f64; }
-trait Circle : Shape { fn radius(&self) -> f64; }
+trait Circle: Shape { fn radius(&self) -> f64; }
 ```
 
 And the following is the same example, except using [where clauses].
@@ -248,7 +243,7 @@ trait Circle where Self: Shape {
         // A = pi * r^2
         // so algebraically,
         // r = sqrt(A / pi)
-        (self.area() /std::f64::consts::PI).sqrt()
+        (self.area() / std::f64::consts::PI).sqrt()
     }
 }
 ```
@@ -257,7 +252,7 @@ This next example calls a supertrait method on a generic parameter.
 
 ```rust
 # trait Shape { fn area(&self) -> f64; }
-# trait Circle : Shape { fn radius(&self) -> f64; }
+# trait Circle: Shape { fn radius(&self) -> f64; }
 fn print_area_and_radius<C: Circle>(c: C) {
     // Here we call the area method from the supertrait `Shape` of `Circle`.
     println!("Area: {}", c.area());
@@ -269,7 +264,7 @@ Similarly, here is an example of calling supertrait methods on trait objects.
 
 ```rust
 # trait Shape { fn area(&self) -> f64; }
-# trait Circle : Shape { fn radius(&self) -> f64; }
+# trait Circle: Shape { fn radius(&self) -> f64; }
 # struct UnitCircle;
 # impl Shape for UnitCircle { fn area(&self) -> f64 { std::f64::consts::PI } }
 # impl Circle for UnitCircle { fn radius(&self) -> f64 { 1.0 } }
@@ -278,9 +273,8 @@ let circle = Box::new(circle) as Box<dyn Circle>;
 let nonsense = circle.radius() * circle.area();
 ```
 
-## Unsafe traits
-
 r[items.traits.safety]
+## Unsafe traits
 
 r[items.traits.safety.intro]
 Traits items that begin with the `unsafe` keyword indicate that *implementing* the
@@ -289,54 +283,79 @@ The [trait implementation] must also begin with the `unsafe` keyword.
 
 [`Sync`] and [`Send`] are examples of unsafe traits.
 
+r[items.traits.params]
 ## Parameter patterns
 
-r[items.traits.params]
-
-r[items.traits.params.allowed-patterns]
-Function or method declarations without a body only allow [IDENTIFIER] or
-`_` [wild card][WildcardPattern] patterns. `mut` [IDENTIFIER] is currently
-allowed, but it is deprecated and will become a hard error in the future.
+r[items.traits.params.patterns-no-body]
+Parameters in associated functions without a body only allow [IDENTIFIER] or `_` [wild card][WildcardPattern] patterns, as well as the form allowed by [SelfParam]. `mut` [IDENTIFIER] is currently allowed, but it is deprecated and will become a hard error in the future.
 <!-- https://github.com/rust-lang/rust/issues/35203 -->
-
-r[items.traits.params.edition2015]
-In the 2015 edition, the pattern for a trait function or method parameter is
-optional:
-
-```rust,edition2015
-// 2015 Edition
-trait T {
-    fn f(i32);  // Parameter identifiers are not required.
-}
-```
-
-r[items.traits.params.restriction]
-The kinds of patterns for parameters is limited to one of the following:
-
-* [IDENTIFIER]
-* `mut` [IDENTIFIER]
-* [`_`][WildcardPattern]
-* `&` [IDENTIFIER]
-* `&&` [IDENTIFIER]
-
-r[items.traits.params.restriction.edition2018]
-Beginning in the 2018 edition, function or method parameter patterns are no
-longer optional. Also, all irrefutable patterns are allowed as long as there
-is a body. Without a body, the limitations listed above are still in effect.
 
 ```rust
 trait T {
-    fn f1((a, b): (i32, i32)) {}
-    fn f2(_: (i32, i32));  // Cannot use tuple pattern without a body.
+    fn f1(&self);
+    fn f2(x: Self, _: i32);
 }
 ```
 
-## Item visibility
+```rust,compile_fail,E0642
+trait T {
+    fn f2(&x: &i32); // ERROR: patterns aren't allowed in functions without bodies
+}
+```
+
+r[items.traits.params.patterns-with-body]
+Parameters in associated functions with a body only allow irrefutable patterns.
+
+```rust
+trait T {
+    fn f1((a, b): (i32, i32)) {} // OK: is irrefutable
+}
+```
+
+```rust,compile_fail,E0005
+trait T {
+    fn f1(123: i32) {} // ERROR: pattern is refutable
+    fn f2(Some(x): Option<i32>) {} // ERROR: pattern is refutable
+}
+```
+
+r[items.traits.params.pattern-required.edition2018]
+> [!EDITION-2018]
+> Prior to the 2018 edition, the pattern for an associated function parameter is optional:
+>
+> ```rust,edition2015
+> // 2015 Edition
+> trait T {
+>     fn f(i32); // OK: parameter identifiers are not required
+> }
+> ```
+>
+> Beginning in the 2018 edition, patterns are no longer optional.
+
+r[items.traits.params.restriction-patterns.edition2018]
+> [!EDITION-2018]
+> Prior to the 2018 edition, parameters in associated functions with a body are limited to the following kinds of patterns:
+>
+> * [IDENTIFIER]
+> * `mut` [IDENTIFIER]
+> * [`_`][WildcardPattern]
+> * `&` [IDENTIFIER]
+> * `&&` [IDENTIFIER]
+>
+> ```rust,edition2015,compile_fail,E0642
+> // 2015 Edition
+> trait T {
+>     fn f1((a, b): (i32, i32)) {} // ERROR: pattern not allowed
+> }
+> ```
+>
+> Beginning in 2018, all irrefutable patterns are allowed as described in [items.traits.params.patterns-with-body].
 
 r[items.traits.associated-visibility]
+## Item visibility
 
 r[items.traits.associated-visibility.intro]
-Trait items syntactically allow a [_Visibility_] annotation, but this is
+Trait items syntactically allow a [Visibility] annotation, but this is
 rejected when the trait is validated. This allows items to be parsed with a
 unified syntax across different contexts where they are used. As an example,
 an empty `vis` macro fragment specifier can be used for trait items, where the
@@ -370,14 +389,7 @@ fn main() {
 }
 ```
 
-[IDENTIFIER]: ../identifiers.md
 [WildcardPattern]: ../patterns.md#wildcard-pattern
-[_AssociatedItem_]: associated-items.md
-[_GenericParams_]: generics.md
-[_InnerAttribute_]: ../attributes.md
-[_TypeParamBounds_]: ../trait-bounds.md
-[_Visibility_]: ../visibility-and-privacy.md
-[_WhereClause_]: generics.md#where-clauses
 [bounds]: ../trait-bounds.md
 [trait object]: ../types/trait-object.md
 [associated items]: associated-items.md
@@ -398,17 +410,3 @@ fn main() {
 [`async`]: functions.md#async-functions
 [`const`]: functions.md#const-functions
 [type namespace]: ../names/namespaces.md
-
-<script>
-(function() {
-    var fragments = {
-        "#object-safety": "traits.html#dyn-compatibility",
-    };
-    var target = fragments[window.location.hash];
-    if (target) {
-        var url = window.location.toString();
-        var base = url.substring(0, url.lastIndexOf('/'));
-        window.location.replace(base + "/" + target);
-    }
-})();
-</script>

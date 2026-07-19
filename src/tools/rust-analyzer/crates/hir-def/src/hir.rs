@@ -13,22 +13,26 @@
 //! See also a neighboring `body` module.
 
 pub mod format_args;
+pub mod generics;
 pub mod type_ref;
 
 use std::fmt;
 
-use hir_expand::{name::Name, MacroDefId};
+use hir_expand::{MacroDefId, name::Name};
 use intern::Symbol;
-use la_arena::{Idx, RawIdx};
+use la_arena::Idx;
 use rustc_apfloat::ieee::{Half as f16, Quad as f128};
 use syntax::ast;
 use type_ref::TypeRefId;
 
 use crate::{
+    BlockId,
     builtin_type::{BuiltinFloat, BuiltinInt, BuiltinUint},
-    path::{GenericArgs, Path},
+    expr_store::{
+        HygieneId,
+        path::{GenericArgs, Path},
+    },
     type_ref::{Mutability, Rawness},
-    BlockId, ConstBlockId,
 };
 
 pub use syntax::ast::{ArithOp, BinaryOp, CmpOp, LogicOp, Ordering, RangeOp, UnaryOp};
@@ -37,14 +41,11 @@ pub type BindingId = Idx<Binding>;
 
 pub type ExprId = Idx<Expr>;
 
-/// FIXME: this is a hacky function which should be removed
-pub(crate) fn dummy_expr_id() -> ExprId {
-    ExprId::from_raw(RawIdx::from(u32::MAX))
-}
-
 pub type PatId = Idx<Pat>;
 
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+// FIXME: Encode this as a single u32, we won't ever reach all 32 bits especially given these counts
+// are local to the body.
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq, salsa::Update)]
 pub enum ExprOrPatId {
     ExprId(ExprId),
     PatId(PatId),
@@ -58,11 +59,19 @@ impl ExprOrPatId {
         }
     }
 
+    pub fn is_expr(&self) -> bool {
+        matches!(self, Self::ExprId(_))
+    }
+
     pub fn as_pat(self) -> Option<PatId> {
         match self {
             Self::PatId(v) => Some(v),
             _ => None,
         }
+    }
+
+    pub fn is_pat(&self) -> bool {
+        matches!(self, Self::PatId(_))
     }
 }
 stdx::impl_from!(ExprId, PatId for ExprOrPatId);
@@ -132,11 +141,7 @@ pub enum LiteralOrConst {
 
 impl Literal {
     pub fn negate(self) -> Option<Self> {
-        if let Literal::Int(i, k) = self {
-            Some(Literal::Int(-i, k))
-        } else {
-            None
-        }
+        if let Literal::Int(i, k) = self { Some(Literal::Int(-i, k)) } else { None }
     }
 }
 
@@ -207,7 +212,7 @@ pub enum Expr {
         statements: Box<[Statement]>,
         tail: Option<ExprId>,
     },
-    Const(ConstBlockId),
+    Const(ExprId),
     // FIXME: Fold this into Block with an unsafe flag?
     Unsafe {
         id: Option<BlockId>,
@@ -317,6 +322,72 @@ pub enum Expr {
     InlineAsm(InlineAsm),
 }
 
+impl Expr {
+    pub fn precedence(&self) -> ast::prec::ExprPrecedence {
+        use ast::prec::ExprPrecedence;
+
+        match self {
+            Expr::Array(_)
+            | Expr::InlineAsm(_)
+            | Expr::Block { .. }
+            | Expr::Unsafe { .. }
+            | Expr::Const(_)
+            | Expr::Async { .. }
+            | Expr::If { .. }
+            | Expr::Literal(_)
+            | Expr::Loop { .. }
+            | Expr::Match { .. }
+            | Expr::Missing
+            | Expr::Path(_)
+            | Expr::RecordLit { .. }
+            | Expr::Tuple { .. }
+            | Expr::OffsetOf(_)
+            | Expr::Underscore => ExprPrecedence::Unambiguous,
+
+            Expr::Await { .. }
+            | Expr::Call { .. }
+            | Expr::Field { .. }
+            | Expr::Index { .. }
+            | Expr::MethodCall { .. } => ExprPrecedence::Postfix,
+
+            Expr::Box { .. } | Expr::Let { .. } | Expr::UnaryOp { .. } | Expr::Ref { .. } => {
+                ExprPrecedence::Prefix
+            }
+
+            Expr::Cast { .. } => ExprPrecedence::Cast,
+
+            Expr::BinaryOp { op, .. } => match op {
+                None => ExprPrecedence::Unambiguous,
+                Some(BinaryOp::LogicOp(LogicOp::Or)) => ExprPrecedence::LOr,
+                Some(BinaryOp::LogicOp(LogicOp::And)) => ExprPrecedence::LAnd,
+                Some(BinaryOp::CmpOp(_)) => ExprPrecedence::Compare,
+                Some(BinaryOp::Assignment { .. }) => ExprPrecedence::Assign,
+                Some(BinaryOp::ArithOp(arith_op)) => match arith_op {
+                    ArithOp::Add | ArithOp::Sub => ExprPrecedence::Sum,
+                    ArithOp::Mul | ArithOp::Div | ArithOp::Rem => ExprPrecedence::Product,
+                    ArithOp::Shl | ArithOp::Shr => ExprPrecedence::Shift,
+                    ArithOp::BitXor => ExprPrecedence::BitXor,
+                    ArithOp::BitOr => ExprPrecedence::BitOr,
+                    ArithOp::BitAnd => ExprPrecedence::BitAnd,
+                },
+            },
+
+            Expr::Assignment { .. } => ExprPrecedence::Assign,
+
+            Expr::Become { .. }
+            | Expr::Break { .. }
+            | Expr::Closure { .. }
+            | Expr::Return { .. }
+            | Expr::Yeet { .. }
+            | Expr::Yield { .. } => ExprPrecedence::Jump,
+
+            Expr::Continue { .. } => ExprPrecedence::Unambiguous,
+
+            Expr::Range { .. } => ExprPrecedence::Range,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OffsetOf {
     pub container: TypeRefId,
@@ -327,6 +398,17 @@ pub struct OffsetOf {
 pub struct InlineAsm {
     pub operands: Box<[(Option<Name>, AsmOperand)]>,
     pub options: AsmOptions,
+    pub kind: InlineAsmKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InlineAsmKind {
+    /// `asm!()`.
+    Asm,
+    /// `global_asm!()`.
+    GlobalAsm,
+    /// `naked_asm!()`.
+    NakedAsm,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -550,6 +632,9 @@ pub struct Binding {
     pub name: Name,
     pub mode: BindingAnnotation,
     pub problems: Option<BindingProblems>,
+    /// Note that this may not be the direct `SyntaxContextId` of the binding's expansion, because transparent
+    /// expansions are attributed to their parent expansion (recursively).
+    pub hygiene: HygieneId,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -574,8 +659,9 @@ pub enum Pat {
         ellipsis: bool,
     },
     Range {
-        start: Option<Box<LiteralOrConst>>,
-        end: Option<Box<LiteralOrConst>>,
+        start: Option<ExprId>,
+        end: Option<ExprId>,
+        range_type: RangeOp,
     },
     Slice {
         prefix: Box<[PatId]>,

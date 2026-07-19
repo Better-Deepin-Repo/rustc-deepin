@@ -97,9 +97,8 @@ if [ -f "$docker_dir/$image/Dockerfile" ]; then
     docker --version
 
     REGISTRY=ghcr.io
-    # Hardcode username to reuse cache between auto and pr jobs
-    # FIXME: should be changed after move from rust-lang-ci
-    REGISTRY_USERNAME=rust-lang-ci
+    # Default to `rust-lang` to allow reusing the cache for local builds
+    REGISTRY_USERNAME=${GITHUB_REPOSITORY_OWNER:-rust-lang}
     # Tag used to push the final Docker image, so that it can be pulled by e.g. rustup
     IMAGE_TAG=${REGISTRY}/${REGISTRY_USERNAME}/rust-ci:${cksum}
     # Tag used to cache the Docker build
@@ -115,14 +114,7 @@ if [ -f "$docker_dir/$image/Dockerfile" ]; then
         "$context"
     )
 
-    # If the environment variable DOCKER_SCRIPT is defined,
-    # set the build argument SCRIPT_ARG to DOCKER_SCRIPT.
-    # In this way, we run the script defined in CI,
-    # instead of the one defined in the Dockerfile.
-    if [ -n "${DOCKER_SCRIPT+x}" ]; then
-      build_args+=("--build-arg" "SCRIPT_ARG=${DOCKER_SCRIPT}")
-    fi
-
+    GHCR_BUILDKIT_IMAGE="ghcr.io/rust-lang/buildkit:buildx-stable-1"
     # On non-CI jobs, we try to download a pre-built image from the rust-lang-ci
     # ghcr.io registry. If it is not possible, we fall back to building the image
     # locally.
@@ -140,7 +132,9 @@ if [ -f "$docker_dir/$image/Dockerfile" ]; then
     elif [[ "$PR_CI_JOB" == "1" ]];
     then
         # Enable a new Docker driver so that --cache-from works with a registry backend
-        docker buildx create --use --driver docker-container
+        # Use a custom image to avoid DockerHub rate limits
+        docker buildx create --use --driver docker-container \
+          --driver-opt image=${GHCR_BUILDKIT_IMAGE}
 
         # Build the image using registry caching backend
         retry docker \
@@ -156,7 +150,9 @@ if [ -f "$docker_dir/$image/Dockerfile" ]; then
             --password-stdin
 
         # Enable a new Docker driver so that --cache-from/to works with a registry backend
-        docker buildx create --use --driver docker-container
+        # Use a custom image to avoid DockerHub rate limits
+        docker buildx create --use --driver docker-container \
+          --driver-opt image=${GHCR_BUILDKIT_IMAGE}
 
         # Build the image using registry caching backend
         retry docker \
@@ -231,9 +227,15 @@ args=
 if [ "$SCCACHE_BUCKET" != "" ]; then
     args="$args --env SCCACHE_BUCKET"
     args="$args --env SCCACHE_REGION"
-    args="$args --env AWS_ACCESS_KEY_ID"
-    args="$args --env AWS_SECRET_ACCESS_KEY"
     args="$args --env AWS_REGION"
+
+    # Disable S3 authentication for PR builds, because the access keys are missing
+    if [ "$PR_CI_JOB" != "" ]; then
+      args="$args --env SCCACHE_S3_NO_CREDENTIALS=1"
+    else
+      args="$args --env AWS_ACCESS_KEY_ID"
+      args="$args --env AWS_SECRET_ACCESS_KEY"
+    fi
 else
     mkdir -p $HOME/.cache/sccache
     args="$args --env SCCACHE_DIR=/sccache --volume $HOME/.cache/sccache:/sccache"
@@ -277,7 +279,7 @@ args="$args --privileged"
 # `LOCAL_USER_ID` (recognized in `src/ci/run.sh`) to ensure that files are all
 # read/written as the same user as the bare-metal user.
 if [ -f /.dockerenv ]; then
-  docker create -v /checkout --name checkout alpine:3.4 /bin/true
+  docker create -v /checkout --name checkout ghcr.io/rust-lang/alpine:3.4 /bin/true
   docker cp . checkout:/checkout
   args="$args --volumes-from checkout"
 else
@@ -310,16 +312,6 @@ else
   command=(/checkout/src/ci/run.sh)
 fi
 
-if isCI; then
-  # Get some needed information for $BASE_COMMIT
-  #
-  # This command gets the last merge commit which we'll use as base to list
-  # deleted files since then.
-  BASE_COMMIT="$(git log --author=bors@rust-lang.org -n 2 --pretty=format:%H | tail -n 1)"
-else
-  BASE_COMMIT=""
-fi
-
 SUMMARY_FILE=github-summary.md
 touch $objdir/${SUMMARY_FILE}
 
@@ -329,6 +321,10 @@ if [ "$ENABLE_GCC_CODEGEN" = "1" ]; then
   # Fix rustc_codegen_gcc lto issues.
   extra_env="$extra_env --env GCC_EXEC_PREFIX=/usr/lib/gcc/"
   echo "Setting extra environment values for docker: $extra_env"
+fi
+
+if [ -n "${DOCKER_SCRIPT}" ]; then
+  extra_env="$extra_env --env SCRIPT=\"/scripts/${DOCKER_SCRIPT}\""
 fi
 
 docker \
@@ -344,13 +340,15 @@ docker \
   --env GITHUB_ACTIONS \
   --env GITHUB_REF \
   --env GITHUB_STEP_SUMMARY="/checkout/obj/${SUMMARY_FILE}" \
+  --env GITHUB_WORKFLOW_RUN_ID \
+  --env GITHUB_REPOSITORY \
   --env RUST_BACKTRACE \
   --env TOOLSTATE_REPO_ACCESS_TOKEN \
   --env TOOLSTATE_REPO \
   --env TOOLSTATE_PUBLISH \
   --env RUST_CI_OVERRIDE_RELEASE_CHANNEL \
-  --env CI_JOB_NAME="${CI_JOB_NAME-$IMAGE}" \
-  --env BASE_COMMIT="$BASE_COMMIT" \
+  --env CI_JOB_NAME="${CI_JOB_NAME-$image}" \
+  --env CI_JOB_DOC_URL="${CI_JOB_DOC_URL}" \
   --env DIST_TRY_BUILD \
   --env PR_CI_JOB \
   --env OBJDIR_ON_HOST="$objdir" \

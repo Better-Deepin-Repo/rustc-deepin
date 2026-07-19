@@ -10,10 +10,17 @@
 //! * By **copying** the whole rustc `lib_proc_macro` code, we are able to build this with `stable`
 //!   rustc rather than `unstable`. (Although in general ABI compatibility is still an issue)…
 
-#![cfg(any(feature = "sysroot-abi", rust_analyzer))]
+#![cfg(feature = "sysroot-abi")]
 #![cfg_attr(feature = "in-rust-tree", feature(rustc_private))]
 #![feature(proc_macro_internals, proc_macro_diagnostic, proc_macro_span)]
-#![allow(unreachable_pub, internal_features, clippy::disallowed_types, clippy::print_stderr)]
+#![allow(
+    unreachable_pub,
+    internal_features,
+    clippy::disallowed_types,
+    clippy::print_stderr,
+    unused_crate_dependencies
+)]
+#![deny(deprecated_safe, clippy::undocumented_unsafe_blocks)]
 
 extern crate proc_macro;
 #[cfg(feature = "in-rust-tree")]
@@ -24,115 +31,159 @@ extern crate ra_ap_rustc_lexer as rustc_lexer;
 #[cfg(feature = "in-rust-tree")]
 extern crate rustc_lexer;
 
+mod bridge;
 mod dylib;
-mod proc_macros;
 mod server_impl;
+mod token_stream;
 
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{HashMap, hash_map::Entry},
     env,
     ffi::OsString,
     fs,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, PoisonError},
     thread,
 };
 
 use paths::{Utf8Path, Utf8PathBuf};
-use proc_macro_api::{
-    msg::{
-        self, deserialize_span_data_index_map, serialize_span_data_index_map, ExpnGlobals,
-        SpanMode, TokenId, CURRENT_API_VERSION,
-    },
-    ProcMacroKind,
-};
 use span::Span;
+use temp_dir::TempDir;
 
-use crate::server_impl::TokenStream;
+pub use crate::server_impl::token_id::SpanId;
+
+pub use proc_macro::Delimiter;
+
+pub use crate::bridge::*;
+pub use crate::server_impl::literal_from_str;
+pub use crate::token_stream::{TokenStream, TokenStreamIter, literal_to_string};
+
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+pub enum ProcMacroKind {
+    CustomDerive,
+    Attr,
+    Bang,
+}
 
 pub const RUSTC_VERSION_STRING: &str = env!("RUSTC_VERSION");
 
 pub struct ProcMacroSrv<'env> {
-    expanders: HashMap<Utf8PathBuf, dylib::Expander>,
-    span_mode: SpanMode,
+    expanders: Mutex<HashMap<Utf8PathBuf, Arc<dylib::Expander>>>,
     env: &'env EnvSnapshot,
+    temp_dir: TempDir,
 }
 
 impl<'env> ProcMacroSrv<'env> {
     pub fn new(env: &'env EnvSnapshot) -> Self {
-        Self { expanders: Default::default(), span_mode: Default::default(), env }
+        Self {
+            expanders: Default::default(),
+            env,
+            temp_dir: TempDir::with_prefix("proc-macro-srv").unwrap(),
+        }
+    }
+
+    pub fn join_spans(&self, first: Span, second: Span) -> Option<Span> {
+        first.join(second, |_, _| {
+            // FIXME: Once we can talk back to the client, implement a "long join" request for anchors
+            // that differ in [AstId]s as joining those spans requires resolving the AstIds.
+            None
+        })
     }
 }
 
 const EXPANDER_STACK_SIZE: usize = 8 * 1024 * 1024;
 
 impl ProcMacroSrv<'_> {
-    pub fn set_span_mode(&mut self, span_mode: SpanMode) {
-        self.span_mode = span_mode;
-    }
-
-    pub fn span_mode(&self) -> SpanMode {
-        self.span_mode
-    }
-
-    pub fn expand(
-        &mut self,
-        msg::ExpandMacro { lib, env, current_dir, data }: msg::ExpandMacro,
-    ) -> Result<(msg::FlatTree, Vec<u32>), msg::PanicMessage> {
-        let span_mode = self.span_mode;
+    pub fn expand<S: ProcMacroSrvSpan>(
+        &self,
+        lib: impl AsRef<Utf8Path>,
+        env: &[(String, String)],
+        current_dir: Option<impl AsRef<Path>>,
+        macro_name: &str,
+        macro_body: token_stream::TokenStream<S>,
+        attribute: Option<token_stream::TokenStream<S>>,
+        def_site: S,
+        call_site: S,
+        mixed_site: S,
+    ) -> Result<token_stream::TokenStream<S>, PanicMessage> {
         let snapped_env = self.env;
-        let expander = self
-            .expander(lib.as_ref())
-            .map_err(|err| msg::PanicMessage(format!("failed to load macro: {err}")))?;
+        let expander = self.expander(lib.as_ref()).map_err(|err| PanicMessage {
+            message: Some(format!("failed to load macro: {err}")),
+        })?;
 
         let prev_env = EnvChange::apply(snapped_env, env, current_dir.as_ref().map(<_>::as_ref));
 
-        let result = match span_mode {
-            SpanMode::Id => expand_id(data, expander).map(|it| (it, vec![])),
-            SpanMode::RustAnalyzer => expand_ra_span(data, expander),
-        };
-
+        // Note, we spawn a new thread here so that thread locals allocation don't accumulate (this
+        // includes the proc-macro symbol interner)
+        let result = thread::scope(|s| {
+            let thread = thread::Builder::new()
+                .stack_size(EXPANDER_STACK_SIZE)
+                .name(macro_name.to_owned())
+                .spawn_scoped(s, move || {
+                    expander
+                        .expand(macro_name, macro_body, attribute, def_site, call_site, mixed_site)
+                });
+            match thread.unwrap().join() {
+                Ok(res) => res,
+                Err(e) => std::panic::resume_unwind(e),
+            }
+        });
         prev_env.rollback();
 
-        result.map_err(msg::PanicMessage)
+        result
     }
 
     pub fn list_macros(
-        &mut self,
+        &self,
         dylib_path: &Utf8Path,
     ) -> Result<Vec<(String, ProcMacroKind)>, String> {
         let expander = self.expander(dylib_path)?;
-        Ok(expander.list_macros())
+        Ok(expander.list_macros().map(|(k, v)| (k.to_owned(), v)).collect())
     }
 
-    fn expander(&mut self, path: &Utf8Path) -> Result<&dylib::Expander, String> {
+    fn expander(&self, path: &Utf8Path) -> Result<Arc<dylib::Expander>, String> {
         let expander = || {
-            dylib::Expander::new(path)
-                .map_err(|err| format!("Cannot create expander for {path}: {err}",))
+            let expander = dylib::Expander::new(&self.temp_dir, path)
+                .map_err(|err| format!("Cannot create expander for {path}: {err}",));
+            expander.map(Arc::new)
         };
 
-        Ok(match self.expanders.entry(path.to_path_buf()) {
-            Entry::Vacant(v) => v.insert(expander()?),
-            Entry::Occupied(mut e) => {
-                let time = fs::metadata(path).and_then(|it| it.modified()).ok();
-                if Some(e.get().modified_time()) != time {
-                    e.insert(expander()?);
+        Ok(
+            match self
+                .expanders
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .entry(path.to_path_buf())
+            {
+                Entry::Vacant(v) => v.insert(expander()?).clone(),
+                Entry::Occupied(mut e) => {
+                    let time = fs::metadata(path).and_then(|it| it.modified()).ok();
+                    if Some(e.get().modified_time()) != time {
+                        e.insert(expander()?);
+                    }
+                    e.get().clone()
                 }
-                e.into_mut()
-            }
-        })
+            },
+        )
     }
 }
 
-trait ProcMacroSrvSpan: Copy {
-    type Server: proc_macro::bridge::server::Server<TokenStream = TokenStream<Self>>;
+pub trait ProcMacroSrvSpan: Copy + Send + Sync {
+    type Server: proc_macro::bridge::server::Server<TokenStream = crate::token_stream::TokenStream<Self>>;
     fn make_server(call_site: Self, def_site: Self, mixed_site: Self) -> Self::Server;
 }
 
-impl ProcMacroSrvSpan for TokenId {
-    type Server = server_impl::token_id::TokenIdServer;
+impl ProcMacroSrvSpan for SpanId {
+    type Server = server_impl::token_id::SpanIdServer;
 
     fn make_server(call_site: Self, def_site: Self, mixed_site: Self) -> Self::Server {
-        Self::Server { call_site, def_site, mixed_site }
+        Self::Server {
+            call_site,
+            def_site,
+            mixed_site,
+            tracked_env_vars: Default::default(),
+            tracked_paths: Default::default(),
+        }
     }
 }
 impl ProcMacroSrvSpan for Span {
@@ -148,92 +199,7 @@ impl ProcMacroSrvSpan for Span {
     }
 }
 
-fn expand_id(
-    msg::ExpandMacroData {
-        macro_body,
-        macro_name,
-        attributes,
-        has_global_spans: ExpnGlobals { serialize: _, def_site, call_site, mixed_site },
-        span_data_table: _,
-    }: msg::ExpandMacroData,
-    expander: &dylib::Expander,
-) -> Result<msg::FlatTree, String> {
-    let def_site = TokenId(def_site as u32);
-    let call_site = TokenId(call_site as u32);
-    let mixed_site = TokenId(mixed_site as u32);
-
-    let macro_body = macro_body.to_subtree_unresolved(CURRENT_API_VERSION);
-    let attributes = attributes.map(|it| it.to_subtree_unresolved(CURRENT_API_VERSION));
-    let result = thread::scope(|s| {
-        let thread = thread::Builder::new()
-            .stack_size(EXPANDER_STACK_SIZE)
-            .name(macro_name.clone())
-            .spawn_scoped(s, || {
-                expander
-                    .expand(&macro_name, macro_body, attributes, def_site, call_site, mixed_site)
-                    .map(|it| msg::FlatTree::new_raw(&it, CURRENT_API_VERSION))
-            });
-        let res = match thread {
-            Ok(handle) => handle.join(),
-            Err(e) => return Err(e.to_string()),
-        };
-
-        match res {
-            Ok(res) => res,
-            Err(e) => std::panic::resume_unwind(e),
-        }
-    });
-    result
-}
-
-fn expand_ra_span(
-    msg::ExpandMacroData {
-        macro_body,
-        macro_name,
-        attributes,
-        has_global_spans: ExpnGlobals { serialize: _, def_site, call_site, mixed_site },
-        span_data_table,
-    }: msg::ExpandMacroData,
-    expander: &dylib::Expander,
-) -> Result<(msg::FlatTree, Vec<u32>), String> {
-    let mut span_data_table = deserialize_span_data_index_map(&span_data_table);
-
-    let def_site = span_data_table[def_site];
-    let call_site = span_data_table[call_site];
-    let mixed_site = span_data_table[mixed_site];
-
-    let macro_body = macro_body.to_subtree_resolved(CURRENT_API_VERSION, &span_data_table);
-    let attributes =
-        attributes.map(|it| it.to_subtree_resolved(CURRENT_API_VERSION, &span_data_table));
-    // Note, we spawn a new thread here so that thread locals allocation don't accumulate (this
-    // includes the proc-macro symbol interner)
-    let result = thread::scope(|s| {
-        let thread = thread::Builder::new()
-            .stack_size(EXPANDER_STACK_SIZE)
-            .name(macro_name.clone())
-            .spawn_scoped(s, || {
-                expander
-                    .expand(&macro_name, macro_body, attributes, def_site, call_site, mixed_site)
-                    .map(|it| {
-                        (
-                            msg::FlatTree::new(&it, CURRENT_API_VERSION, &mut span_data_table),
-                            serialize_span_data_index_map(&span_data_table),
-                        )
-                    })
-            });
-        let res = match thread {
-            Ok(handle) => handle.join(),
-            Err(e) => return Err(e.to_string()),
-        };
-
-        match res {
-            Ok(res) => res,
-            Err(e) => std::panic::resume_unwind(e),
-        }
-    });
-    result
-}
-
+#[derive(Debug, Clone)]
 pub struct PanicMessage {
     message: Option<String>,
 }
@@ -254,18 +220,22 @@ impl Default for EnvSnapshot {
     }
 }
 
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 struct EnvChange<'snap> {
-    changed_vars: Vec<String>,
+    changed_vars: Vec<&'snap str>,
     prev_working_dir: Option<PathBuf>,
     snap: &'snap EnvSnapshot,
+    _guard: std::sync::MutexGuard<'snap, ()>,
 }
 
 impl<'snap> EnvChange<'snap> {
     fn apply(
         snap: &'snap EnvSnapshot,
-        new_vars: Vec<(String, String)>,
+        new_vars: &'snap [(String, String)],
         current_dir: Option<&Path>,
     ) -> EnvChange<'snap> {
+        let guard = ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev_working_dir = match current_dir {
             Some(dir) => {
                 let prev_working_dir = std::env::current_dir().ok();
@@ -282,13 +252,15 @@ impl<'snap> EnvChange<'snap> {
         EnvChange {
             snap,
             changed_vars: new_vars
-                .into_iter()
+                .iter()
                 .map(|(k, v)| {
-                    env::set_var(&k, v);
-                    k
+                    // SAFETY: We have acquired the environment lock
+                    unsafe { env::set_var(k, v) };
+                    &**k
                 })
                 .collect(),
             prev_working_dir,
+            _guard: guard,
         }
     }
 
@@ -298,20 +270,23 @@ impl<'snap> EnvChange<'snap> {
 impl Drop for EnvChange<'_> {
     fn drop(&mut self) {
         for name in self.changed_vars.drain(..) {
-            match self.snap.vars.get::<std::ffi::OsStr>(name.as_ref()) {
-                Some(prev_val) => env::set_var(name, prev_val),
-                None => env::remove_var(name),
+            // SAFETY: We have acquired the environment lock
+            unsafe {
+                match self.snap.vars.get::<std::ffi::OsStr>(name.as_ref()) {
+                    Some(prev_val) => env::set_var(name, prev_val),
+                    None => env::remove_var(name),
+                }
             }
         }
 
-        if let Some(dir) = &self.prev_working_dir {
-            if let Err(err) = std::env::set_current_dir(dir) {
-                eprintln!(
-                    "Failed to set the current working dir to {}. Error: {:?}",
-                    dir.display(),
-                    err
-                )
-            }
+        if let Some(dir) = &self.prev_working_dir
+            && let Err(err) = std::env::set_current_dir(dir)
+        {
+            eprintln!(
+                "Failed to set the current working dir to {}. Error: {:?}",
+                dir.display(),
+                err
+            )
         }
     }
 }

@@ -16,13 +16,15 @@
 //! You can see more about wasi at <https://wasi.dev> and the component model at
 //! <https://github.com/WebAssembly/component-model>.
 
-use crate::spec::{LinkSelfContainedDefault, RelocModel, Target, base, crt_objects};
+use crate::spec::{
+    Arch, Env, LinkSelfContainedDefault, Os, RelocModel, Target, TargetMetadata, base, crt_objects,
+};
 
 pub(crate) fn target() -> Target {
     let mut options = base::wasm::options();
 
-    options.os = "wasi".into();
-    options.env = "p2".into();
+    options.os = Os::Wasi;
+    options.env = Env::P2;
     options.linker = Some("wasm-component-ld".into());
 
     options.pre_link_objects_self_contained = crt_objects::pre_wasi_self_contained();
@@ -59,15 +61,15 @@ pub(crate) fn target() -> Target {
 
     Target {
         llvm_target: "wasm32-wasip2".into(),
-        metadata: crate::spec::TargetMetadata {
+        metadata: TargetMetadata {
             description: Some("WebAssembly".into()),
-            tier: Some(3),
+            tier: Some(2),
             host_tools: Some(false),
             std: Some(true),
         },
         pointer_width: 32,
         data_layout: "e-m:e-p:32:32-p10:8:8-p20:8:8-i64:64-i128:128-n32:64-S128-ni:1:10:20".into(),
-        arch: "wasm32".into(),
+        arch: Arch::Wasm32,
         options,
     }
 }

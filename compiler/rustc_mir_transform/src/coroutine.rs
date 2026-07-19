@@ -51,19 +51,27 @@
 //! Otherwise it drops all the values in scope at the last suspension point.
 
 mod by_move_body;
-use std::{iter, ops};
+mod drop;
+use std::ops;
 
 pub(super) use by_move_body::coroutine_by_move_body_def_id;
+use drop::{
+    cleanup_async_drops, create_coroutine_drop_shim, create_coroutine_drop_shim_async,
+    create_coroutine_drop_shim_proxy_async, elaborate_coroutine_drops, expand_async_drops,
+    has_expandable_async_drops, insert_clean_drop,
+};
+use itertools::izip;
 use rustc_abi::{FieldIdx, VariantIdx};
 use rustc_data_structures::fx::FxHashSet;
 use rustc_errors::pluralize;
 use rustc_hir as hir;
 use rustc_hir::lang_items::LangItem;
 use rustc_hir::{CoroutineDesugaring, CoroutineKind};
-use rustc_index::bit_set::{BitMatrix, BitSet, GrowableBitSet};
-use rustc_index::{Idx, IndexVec};
-use rustc_middle::mir::visit::{MutVisitor, PlaceContext, Visitor};
+use rustc_index::bit_set::{BitMatrix, DenseBitSet, GrowableBitSet};
+use rustc_index::{Idx, IndexVec, indexvec};
+use rustc_middle::mir::visit::{MutVisitor, MutatingUseContext, PlaceContext, Visitor};
 use rustc_middle::mir::*;
+use rustc_middle::ty::util::Discr;
 use rustc_middle::ty::{
     self, CoroutineArgs, CoroutineArgsExt, GenericArgsRef, InstanceKind, Ty, TyCtxt, TypingMode,
 };
@@ -72,10 +80,13 @@ use rustc_mir_dataflow::impls::{
     MaybeBorrowedLocals, MaybeLiveLocals, MaybeRequiresStorage, MaybeStorageLive,
     always_storage_live_locals,
 };
-use rustc_mir_dataflow::{Analysis, Results, ResultsVisitor};
+use rustc_mir_dataflow::{
+    Analysis, Results, ResultsCursor, ResultsVisitor, visit_reachable_results,
+};
 use rustc_span::def_id::{DefId, LocalDefId};
-use rustc_span::{Span, sym};
-use rustc_target::spec::PanicStrategy;
+use rustc_span::source_map::dummy_spanned;
+use rustc_span::symbol::sym;
+use rustc_span::{DUMMY_SP, Span};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
 use rustc_trait_selection::infer::TyCtxtInferExt as _;
 use rustc_trait_selection::traits::{ObligationCause, ObligationCauseCode, ObligationCtxt};
@@ -100,6 +111,8 @@ impl<'tcx> MutVisitor<'tcx> for RenameLocalVisitor<'tcx> {
     fn visit_local(&mut self, local: &mut Local, _: PlaceContext, _: Location) {
         if *local == self.from {
             *local = self.to;
+        } else if *local == self.to {
+            *local = self.from;
         }
     }
 
@@ -120,8 +133,8 @@ struct SelfArgVisitor<'tcx> {
 }
 
 impl<'tcx> SelfArgVisitor<'tcx> {
-    fn new(tcx: TyCtxt<'tcx>, elem: ProjectionElem<Local, Ty<'tcx>>) -> Self {
-        Self { tcx, new_base: Place { local: SELF_ARG, projection: tcx.mk_place_elems(&[elem]) } }
+    fn new(tcx: TyCtxt<'tcx>, new_base: Place<'tcx>) -> Self {
+        Self { tcx, new_base }
     }
 }
 
@@ -134,21 +147,20 @@ impl<'tcx> MutVisitor<'tcx> for SelfArgVisitor<'tcx> {
         assert_ne!(*local, SELF_ARG);
     }
 
-    fn visit_place(&mut self, place: &mut Place<'tcx>, context: PlaceContext, location: Location) {
+    fn visit_place(&mut self, place: &mut Place<'tcx>, _: PlaceContext, _: Location) {
         if place.local == SELF_ARG {
             replace_base(place, self.new_base, self.tcx);
-        } else {
-            self.visit_local(&mut place.local, context, location);
+        }
 
-            for elem in place.projection.iter() {
-                if let PlaceElem::Index(local) = elem {
-                    assert_ne!(local, SELF_ARG);
-                }
+        for elem in place.projection.iter() {
+            if let PlaceElem::Index(local) = elem {
+                assert_ne!(local, SELF_ARG);
             }
         }
     }
 }
 
+#[tracing::instrument(level = "trace", skip(tcx))]
 fn replace_base<'tcx>(place: &mut Place<'tcx>, new_base: Place<'tcx>, tcx: TyCtxt<'tcx>) {
     place.local = new_base.local;
 
@@ -156,9 +168,11 @@ fn replace_base<'tcx>(place: &mut Place<'tcx>, new_base: Place<'tcx>, tcx: TyCtx
     new_projection.append(&mut place.projection.to_vec());
 
     place.projection = tcx.mk_place_elems(&new_projection);
+    tracing::trace!(?place);
 }
 
 const SELF_ARG: Local = Local::from_u32(1);
+const CTX_ARG: Local = Local::from_u32(2);
 
 /// A `yield` point in the coroutine.
 struct SuspensionPoint<'tcx> {
@@ -185,16 +199,16 @@ struct TransformVisitor<'tcx> {
     remap: IndexVec<Local, Option<(Ty<'tcx>, VariantIdx, FieldIdx)>>,
 
     // A map from a suspension point in a block to the locals which have live storage at that point
-    storage_liveness: IndexVec<BasicBlock, Option<BitSet<Local>>>,
+    storage_liveness: IndexVec<BasicBlock, Option<DenseBitSet<Local>>>,
 
     // A list of suspension points, generated during the transform
     suspension_points: Vec<SuspensionPoint<'tcx>>,
 
     // The set of locals that have no `StorageLive`/`StorageDead` annotations.
-    always_live_locals: BitSet<Local>,
+    always_live_locals: DenseBitSet<Local>,
 
-    // The original RETURN_PLACE local
-    old_ret_local: Local,
+    // New local we just create to hold the `CoroutineState` value.
+    new_ret_local: Local,
 
     old_yield_ty: Ty<'tcx>,
 
@@ -203,7 +217,7 @@ struct TransformVisitor<'tcx> {
 
 impl<'tcx> TransformVisitor<'tcx> {
     fn insert_none_ret_block(&self, body: &mut Body<'tcx>) -> BasicBlock {
-        let block = BasicBlock::new(body.basic_blocks.len());
+        let block = body.basic_blocks.next_index();
         let source_info = SourceInfo::outermost(body.span);
 
         let none_value = match self.coroutine_kind {
@@ -213,7 +227,7 @@ impl<'tcx> TransformVisitor<'tcx> {
             CoroutineKind::Coroutine(_) => span_bug!(body.span, "`Coroutine`s cannot be fused"),
             // `gen` continues return `None`
             CoroutineKind::Desugared(CoroutineDesugaring::Gen, _) => {
-                let option_def_id = self.tcx.require_lang_item(LangItem::Option, None);
+                let option_def_id = self.tcx.require_lang_item(LangItem::Option, body.span);
                 make_aggregate_adt(
                     option_def_id,
                     VariantIdx::ZERO,
@@ -230,7 +244,7 @@ impl<'tcx> TransformVisitor<'tcx> {
                     span: source_info.span,
                     const_: Const::Unevaluated(
                         UnevaluatedConst::new(
-                            self.tcx.require_lang_item(LangItem::AsyncGenFinished, None),
+                            self.tcx.require_lang_item(LangItem::AsyncGenFinished, body.span),
                             self.tcx.mk_args(&[yield_ty.into()]),
                         ),
                         self.old_yield_ty,
@@ -240,16 +254,16 @@ impl<'tcx> TransformVisitor<'tcx> {
             }
         };
 
-        let statements = vec![Statement {
-            kind: StatementKind::Assign(Box::new((Place::return_place(), none_value))),
+        let statements = vec![Statement::new(
             source_info,
-        }];
+            StatementKind::Assign(Box::new((Place::return_place(), none_value))),
+        )];
 
-        body.basic_blocks_mut().push(BasicBlockData {
+        body.basic_blocks_mut().push(BasicBlockData::new_stmts(
             statements,
-            terminator: Some(Terminator { source_info, kind: TerminatorKind::Return }),
-            is_cleanup: false,
-        });
+            Some(Terminator { source_info, kind: TerminatorKind::Return }),
+            false,
+        ));
 
         block
     }
@@ -259,6 +273,7 @@ impl<'tcx> TransformVisitor<'tcx> {
     // `core::ops::CoroutineState` only has single element tuple variants,
     // so we can just write to the downcasted first field and then set the
     // discriminant to the appropriate variant.
+    #[tracing::instrument(level = "trace", skip(self, statements))]
     fn make_state(
         &self,
         val: Operand<'tcx>,
@@ -270,22 +285,22 @@ impl<'tcx> TransformVisitor<'tcx> {
         const ONE: VariantIdx = VariantIdx::from_usize(1);
         let rvalue = match self.coroutine_kind {
             CoroutineKind::Desugared(CoroutineDesugaring::Async, _) => {
-                let poll_def_id = self.tcx.require_lang_item(LangItem::Poll, None);
+                let poll_def_id = self.tcx.require_lang_item(LangItem::Poll, source_info.span);
                 let args = self.tcx.mk_args(&[self.old_ret_ty.into()]);
                 let (variant_idx, operands) = if is_return {
-                    (ZERO, IndexVec::from_raw(vec![val])) // Poll::Ready(val)
+                    (ZERO, indexvec![val]) // Poll::Ready(val)
                 } else {
                     (ONE, IndexVec::new()) // Poll::Pending
                 };
                 make_aggregate_adt(poll_def_id, variant_idx, args, operands)
             }
             CoroutineKind::Desugared(CoroutineDesugaring::Gen, _) => {
-                let option_def_id = self.tcx.require_lang_item(LangItem::Option, None);
+                let option_def_id = self.tcx.require_lang_item(LangItem::Option, source_info.span);
                 let args = self.tcx.mk_args(&[self.old_yield_ty.into()]);
                 let (variant_idx, operands) = if is_return {
                     (ZERO, IndexVec::new()) // None
                 } else {
-                    (ONE, IndexVec::from_raw(vec![val])) // Some(val)
+                    (ONE, indexvec![val]) // Some(val)
                 };
                 make_aggregate_adt(option_def_id, variant_idx, args, operands)
             }
@@ -298,7 +313,10 @@ impl<'tcx> TransformVisitor<'tcx> {
                         span: source_info.span,
                         const_: Const::Unevaluated(
                             UnevaluatedConst::new(
-                                self.tcx.require_lang_item(LangItem::AsyncGenFinished, None),
+                                self.tcx.require_lang_item(
+                                    LangItem::AsyncGenFinished,
+                                    source_info.span,
+                                ),
                                 self.tcx.mk_args(&[yield_ty.into()]),
                             ),
                             self.old_yield_ty,
@@ -311,29 +329,26 @@ impl<'tcx> TransformVisitor<'tcx> {
             }
             CoroutineKind::Coroutine(_) => {
                 let coroutine_state_def_id =
-                    self.tcx.require_lang_item(LangItem::CoroutineState, None);
+                    self.tcx.require_lang_item(LangItem::CoroutineState, source_info.span);
                 let args = self.tcx.mk_args(&[self.old_yield_ty.into(), self.old_ret_ty.into()]);
                 let variant_idx = if is_return {
                     ONE // CoroutineState::Complete(val)
                 } else {
                     ZERO // CoroutineState::Yielded(val)
                 };
-                make_aggregate_adt(
-                    coroutine_state_def_id,
-                    variant_idx,
-                    args,
-                    IndexVec::from_raw(vec![val]),
-                )
+                make_aggregate_adt(coroutine_state_def_id, variant_idx, args, indexvec![val])
             }
         };
 
-        statements.push(Statement {
-            kind: StatementKind::Assign(Box::new((Place::return_place(), rvalue))),
+        // Assign to `new_ret_local`, which will be replaced by `RETURN_PLACE` later.
+        statements.push(Statement::new(
             source_info,
-        });
+            StatementKind::Assign(Box::new((self.new_ret_local.into(), rvalue))),
+        ));
     }
 
     // Create a Place referencing a coroutine struct field
+    #[tracing::instrument(level = "trace", skip(self), ret)]
     fn make_field(&self, variant_index: VariantIdx, idx: FieldIdx, ty: Ty<'tcx>) -> Place<'tcx> {
         let self_place = Place::from(SELF_ARG);
         let base = self.tcx.mk_place_downcast_unnamed(self_place, variant_index);
@@ -344,29 +359,45 @@ impl<'tcx> TransformVisitor<'tcx> {
     }
 
     // Create a statement which changes the discriminant
+    #[tracing::instrument(level = "trace", skip(self))]
     fn set_discr(&self, state_disc: VariantIdx, source_info: SourceInfo) -> Statement<'tcx> {
         let self_place = Place::from(SELF_ARG);
-        Statement {
+        Statement::new(
             source_info,
-            kind: StatementKind::SetDiscriminant {
+            StatementKind::SetDiscriminant {
                 place: Box::new(self_place),
                 variant_index: state_disc,
             },
-        }
+        )
     }
 
     // Create a statement which reads the discriminant into a temporary
+    #[tracing::instrument(level = "trace", skip(self, body))]
     fn get_discr(&self, body: &mut Body<'tcx>) -> (Statement<'tcx>, Place<'tcx>) {
         let temp_decl = LocalDecl::new(self.discr_ty, body.span);
         let local_decls_len = body.local_decls.push(temp_decl);
         let temp = Place::from(local_decls_len);
 
         let self_place = Place::from(SELF_ARG);
-        let assign = Statement {
-            source_info: SourceInfo::outermost(body.span),
-            kind: StatementKind::Assign(Box::new((temp, Rvalue::Discriminant(self_place)))),
-        };
+        let assign = Statement::new(
+            SourceInfo::outermost(body.span),
+            StatementKind::Assign(Box::new((temp, Rvalue::Discriminant(self_place)))),
+        );
         (assign, temp)
+    }
+
+    /// Swaps all references of `old_local` and `new_local`.
+    #[tracing::instrument(level = "trace", skip(self, body))]
+    fn replace_local(&mut self, old_local: Local, new_local: Local, body: &mut Body<'tcx>) {
+        body.local_decls.swap(old_local, new_local);
+
+        let mut visitor = RenameLocalVisitor { from: old_local, to: new_local, tcx: self.tcx };
+        visitor.visit_body(body);
+        for suspension in &mut self.suspension_points {
+            let ctxt = PlaceContext::MutatingUse(MutatingUseContext::Yield);
+            let location = Location { block: START_BLOCK, statement_index: 0 };
+            visitor.visit_place(&mut suspension.resume_arg, ctxt, location);
+        }
     }
 }
 
@@ -375,47 +406,62 @@ impl<'tcx> MutVisitor<'tcx> for TransformVisitor<'tcx> {
         self.tcx
     }
 
-    fn visit_local(&mut self, local: &mut Local, _: PlaceContext, _: Location) {
+    #[tracing::instrument(level = "trace", skip(self), ret)]
+    fn visit_local(&mut self, local: &mut Local, _: PlaceContext, _location: Location) {
         assert!(!self.remap.contains(*local));
     }
 
-    fn visit_place(
-        &mut self,
-        place: &mut Place<'tcx>,
-        _context: PlaceContext,
-        _location: Location,
-    ) {
+    #[tracing::instrument(level = "trace", skip(self), ret)]
+    fn visit_place(&mut self, place: &mut Place<'tcx>, _: PlaceContext, _location: Location) {
         // Replace an Local in the remap with a coroutine struct access
         if let Some(&Some((ty, variant_index, idx))) = self.remap.get(place.local) {
             replace_base(place, self.make_field(variant_index, idx, ty), self.tcx);
         }
     }
 
-    fn visit_basic_block_data(&mut self, block: BasicBlock, data: &mut BasicBlockData<'tcx>) {
+    #[tracing::instrument(level = "trace", skip(self, stmt), ret)]
+    fn visit_statement(&mut self, stmt: &mut Statement<'tcx>, location: Location) {
         // Remove StorageLive and StorageDead statements for remapped locals
-        data.retain_statements(|s| match s.kind {
-            StatementKind::StorageLive(l) | StatementKind::StorageDead(l) => {
-                !self.remap.contains(l)
-            }
-            _ => true,
-        });
+        if let StatementKind::StorageLive(l) | StatementKind::StorageDead(l) = stmt.kind
+            && self.remap.contains(l)
+        {
+            stmt.make_nop(true);
+        }
+        self.super_statement(stmt, location);
+    }
 
-        let ret_val = match data.terminator().kind {
+    #[tracing::instrument(level = "trace", skip(self, term), ret)]
+    fn visit_terminator(&mut self, term: &mut Terminator<'tcx>, location: Location) {
+        if let TerminatorKind::Return = term.kind {
+            // `visit_basic_block_data` introduces `Return` terminators which read `RETURN_PLACE`.
+            // But this `RETURN_PLACE` is already remapped, so we should not touch it again.
+            return;
+        }
+        self.super_terminator(term, location);
+    }
+
+    #[tracing::instrument(level = "trace", skip(self, data), ret)]
+    fn visit_basic_block_data(&mut self, block: BasicBlock, data: &mut BasicBlockData<'tcx>) {
+        match data.terminator().kind {
             TerminatorKind::Return => {
-                Some((true, None, Operand::Move(Place::from(self.old_ret_local)), None))
+                let source_info = data.terminator().source_info;
+                // We must assign the value first in case it gets declared dead below
+                self.make_state(
+                    Operand::Move(Place::return_place()),
+                    source_info,
+                    true,
+                    &mut data.statements,
+                );
+                // Return state.
+                let state = VariantIdx::new(CoroutineArgs::RETURNED);
+                data.statements.push(self.set_discr(state, source_info));
+                data.terminator_mut().kind = TerminatorKind::Return;
             }
-            TerminatorKind::Yield { ref value, resume, resume_arg, drop } => {
-                Some((false, Some((resume, resume_arg)), value.clone(), drop))
-            }
-            _ => None,
-        };
-
-        if let Some((is_return, resume, v, drop)) = ret_val {
-            let source_info = data.terminator().source_info;
-            // We must assign the value first in case it gets declared dead below
-            self.make_state(v, source_info, is_return, &mut data.statements);
-            let state = if let Some((resume, mut resume_arg)) = resume {
-                // Yield
+            TerminatorKind::Yield { ref value, resume, mut resume_arg, drop } => {
+                let source_info = data.terminator().source_info;
+                // We must assign the value first in case it gets declared dead below
+                self.make_state(value.clone(), source_info, false, &mut data.statements);
+                // Yield state.
                 let state = CoroutineArgs::RESERVED_VARIANTS + self.suspension_points.len();
 
                 // The resume arg target location might itself be remapped if its base local is
@@ -434,7 +480,7 @@ impl<'tcx> MutVisitor<'tcx> for TransformVisitor<'tcx> {
                         && !self.always_live_locals.contains(l);
                     if needs_storage_dead {
                         data.statements
-                            .push(Statement { source_info, kind: StatementKind::StorageDead(l) });
+                            .push(Statement::new(source_info, StatementKind::StorageDead(l)));
                     }
                 }
 
@@ -446,13 +492,11 @@ impl<'tcx> MutVisitor<'tcx> for TransformVisitor<'tcx> {
                     storage_liveness,
                 });
 
-                VariantIdx::new(state)
-            } else {
-                // Return
-                VariantIdx::new(CoroutineArgs::RETURNED) // state for returned
-            };
-            data.statements.push(self.set_discr(state, source_info));
-            data.terminator_mut().kind = TerminatorKind::Return;
+                let state = VariantIdx::new(state);
+                data.statements.push(self.set_discr(state, source_info));
+                data.terminator_mut().kind = TerminatorKind::Return;
+            }
+            _ => {}
         }
 
         self.super_basic_block_data(block, data);
@@ -468,53 +512,58 @@ fn make_aggregate_adt<'tcx>(
     Rvalue::Aggregate(Box::new(AggregateKind::Adt(def_id, variant_idx, args, None, None)), operands)
 }
 
+#[tracing::instrument(level = "trace", skip(tcx, body))]
 fn make_coroutine_state_argument_indirect<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
-    let coroutine_ty = body.local_decls.raw[1].ty;
+    let coroutine_ty = body.local_decls[SELF_ARG].ty;
 
     let ref_coroutine_ty = Ty::new_mut_ref(tcx, tcx.lifetimes.re_erased, coroutine_ty);
 
     // Replace the by value coroutine argument
-    body.local_decls.raw[1].ty = ref_coroutine_ty;
+    body.local_decls[SELF_ARG].ty = ref_coroutine_ty;
 
     // Add a deref to accesses of the coroutine state
-    SelfArgVisitor::new(tcx, ProjectionElem::Deref).visit_body(body);
+    SelfArgVisitor::new(tcx, tcx.mk_place_deref(SELF_ARG.into())).visit_body(body);
 }
 
+#[tracing::instrument(level = "trace", skip(tcx, body))]
 fn make_coroutine_state_argument_pinned<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
-    let ref_coroutine_ty = body.local_decls.raw[1].ty;
+    let coroutine_ty = body.local_decls[SELF_ARG].ty;
 
-    let pin_did = tcx.require_lang_item(LangItem::Pin, Some(body.span));
+    let ref_coroutine_ty = Ty::new_mut_ref(tcx, tcx.lifetimes.re_erased, coroutine_ty);
+
+    let pin_did = tcx.require_lang_item(LangItem::Pin, body.span);
     let pin_adt_ref = tcx.adt_def(pin_did);
     let args = tcx.mk_args(&[ref_coroutine_ty.into()]);
     let pin_ref_coroutine_ty = Ty::new_adt(tcx, pin_adt_ref, args);
 
     // Replace the by ref coroutine argument
-    body.local_decls.raw[1].ty = pin_ref_coroutine_ty;
+    body.local_decls[SELF_ARG].ty = pin_ref_coroutine_ty;
+
+    let unpinned_local = body.local_decls.push(LocalDecl::new(ref_coroutine_ty, body.span));
 
     // Add the Pin field access to accesses of the coroutine state
-    SelfArgVisitor::new(tcx, ProjectionElem::Field(FieldIdx::ZERO, ref_coroutine_ty))
-        .visit_body(body);
-}
+    SelfArgVisitor::new(tcx, tcx.mk_place_deref(unpinned_local.into())).visit_body(body);
 
-/// Allocates a new local and replaces all references of `local` with it. Returns the new local.
-///
-/// `local` will be changed to a new local decl with type `ty`.
-///
-/// Note that the new local will be uninitialized. It is the caller's responsibility to assign some
-/// valid value to it before its first use.
-fn replace_local<'tcx>(
-    local: Local,
-    ty: Ty<'tcx>,
-    body: &mut Body<'tcx>,
-    tcx: TyCtxt<'tcx>,
-) -> Local {
-    let new_decl = LocalDecl::new(ty, body.span);
-    let new_local = body.local_decls.push(new_decl);
-    body.local_decls.swap(local, new_local);
+    let source_info = SourceInfo::outermost(body.span);
+    let pin_field = tcx.mk_place_field(SELF_ARG.into(), FieldIdx::ZERO, ref_coroutine_ty);
 
-    RenameLocalVisitor { from: local, to: new_local, tcx }.visit_body(body);
-
-    new_local
+    let statements = &mut body.basic_blocks.as_mut_preserves_cfg()[START_BLOCK].statements;
+    // Miri requires retags to be the very first thing in the body.
+    // We insert this assignment just after.
+    let insert_point = statements
+        .iter()
+        .position(|stmt| !matches!(stmt.kind, StatementKind::Retag(..)))
+        .unwrap_or(statements.len());
+    statements.insert(
+        insert_point,
+        Statement::new(
+            source_info,
+            StatementKind::Assign(Box::new((
+                unpinned_local.into(),
+                Rvalue::Use(Operand::Copy(pin_field)),
+            ))),
+        ),
+    );
 }
 
 /// Transforms the `body` of the coroutine applying the following transforms:
@@ -538,15 +587,16 @@ fn replace_local<'tcx>(
 /// The async lowering step and the type / lifetime inference / checking are
 /// still using the `ResumeTy` indirection for the time being, and that indirection
 /// is removed here. After this transform, the coroutine body only knows about `&mut Context<'_>`.
-fn transform_async_context<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
+#[tracing::instrument(level = "trace", skip(tcx, body), ret)]
+fn transform_async_context<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) -> Ty<'tcx> {
     let context_mut_ref = Ty::new_task_context(tcx);
 
     // replace the type of the `resume` argument
-    replace_resume_ty_local(tcx, body, Local::new(2), context_mut_ref);
+    replace_resume_ty_local(tcx, body, CTX_ARG, context_mut_ref);
 
-    let get_context_def_id = tcx.require_lang_item(LangItem::GetContext, None);
+    let get_context_def_id = tcx.require_lang_item(LangItem::GetContext, body.span);
 
-    for bb in START_BLOCK..body.basic_blocks.next_index() {
+    for bb in body.basic_blocks.indices() {
         let bb_data = &body[bb];
         if bb_data.is_cleanup {
             continue;
@@ -555,11 +605,11 @@ fn transform_async_context<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
         match &bb_data.terminator().kind {
             TerminatorKind::Call { func, .. } => {
                 let func_ty = func.ty(body, tcx);
-                if let ty::FnDef(def_id, _) = *func_ty.kind() {
-                    if def_id == get_context_def_id {
-                        let local = eliminate_get_context_call(&mut body[bb]);
-                        replace_resume_ty_local(tcx, body, local, context_mut_ref);
-                    }
+                if let ty::FnDef(def_id, _) = *func_ty.kind()
+                    && def_id == get_context_def_id
+                {
+                    let local = eliminate_get_context_call(&mut body[bb]);
+                    replace_resume_ty_local(tcx, body, local, context_mut_ref);
                 }
             }
             TerminatorKind::Yield { resume_arg, .. } => {
@@ -568,6 +618,7 @@ fn transform_async_context<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
             _ => {}
         }
     }
+    context_mut_ref
 }
 
 fn eliminate_get_context_call<'tcx>(bb_data: &mut BasicBlockData<'tcx>) -> Local {
@@ -579,10 +630,8 @@ fn eliminate_get_context_call<'tcx>(bb_data: &mut BasicBlockData<'tcx>) -> Local
     let local = arg.node.place().unwrap().local;
 
     let arg = Rvalue::Use(arg.node);
-    let assign = Statement {
-        source_info: terminator.source_info,
-        kind: StatementKind::Assign(Box::new((destination, arg))),
-    };
+    let assign =
+        Statement::new(terminator.source_info, StatementKind::Assign(Box::new((destination, arg))));
     bb_data.statements.push(assign);
     bb_data.terminator = Some(Terminator {
         source_info: terminator.source_info,
@@ -592,6 +641,7 @@ fn eliminate_get_context_call<'tcx>(bb_data: &mut BasicBlockData<'tcx>) -> Local
 }
 
 #[cfg_attr(not(debug_assertions), allow(unused))]
+#[tracing::instrument(level = "trace", skip(tcx, body), ret)]
 fn replace_resume_ty_local<'tcx>(
     tcx: TyCtxt<'tcx>,
     body: &mut Body<'tcx>,
@@ -604,7 +654,7 @@ fn replace_resume_ty_local<'tcx>(
     #[cfg(debug_assertions)]
     {
         if let ty::Adt(resume_ty_adt, _) = local_ty.kind() {
-            let expected_adt = tcx.adt_def(tcx.require_lang_item(LangItem::ResumeTy, None));
+            let expected_adt = tcx.adt_def(tcx.require_lang_item(LangItem::ResumeTy, body.span));
             assert_eq!(*resume_ty_adt, expected_adt);
         } else {
             panic!("expected `ResumeTy`, found `{:?}`", local_ty);
@@ -633,7 +683,7 @@ struct LivenessInfo {
     saved_locals: CoroutineSavedLocals,
 
     /// The set of saved locals live at each suspension point.
-    live_locals_at_suspension_points: Vec<BitSet<CoroutineSavedLocal>>,
+    live_locals_at_suspension_points: Vec<DenseBitSet<CoroutineSavedLocal>>,
 
     /// Parallel vec to the above with SourceInfo for each yield terminator.
     source_info_at_suspension_points: Vec<SourceInfo>,
@@ -645,7 +695,7 @@ struct LivenessInfo {
 
     /// For every suspending block, the locals which are storage-live across
     /// that suspension point.
-    storage_liveness: IndexVec<BasicBlock, Option<BitSet<Local>>>,
+    storage_liveness: IndexVec<BasicBlock, Option<DenseBitSet<Local>>>,
 }
 
 /// Computes which locals have to be stored in the state-machine for the
@@ -656,10 +706,11 @@ struct LivenessInfo {
 ///   case none exist, the local is considered to be always live.
 /// - a local has to be stored if it is either directly used after the
 ///   the suspend point, or if it is live and has been previously borrowed.
+#[tracing::instrument(level = "trace", skip(tcx, body))]
 fn locals_live_across_suspend_points<'tcx>(
     tcx: TyCtxt<'tcx>,
     body: &Body<'tcx>,
-    always_live_locals: &BitSet<Local>,
+    always_live_locals: &DenseBitSet<Local>,
     movable: bool,
 ) -> LivenessInfo {
     // Calculate when MIR locals have live storage. This gives us an upper bound of their
@@ -668,18 +719,15 @@ fn locals_live_across_suspend_points<'tcx>(
         .iterate_to_fixpoint(tcx, body, None)
         .into_results_cursor(body);
 
-    // Calculate the MIR locals which have been previously
-    // borrowed (even if they are still active).
-    let borrowed_locals_results =
-        MaybeBorrowedLocals.iterate_to_fixpoint(tcx, body, Some("coroutine"));
-
-    let mut borrowed_locals_cursor = borrowed_locals_results.clone().into_results_cursor(body);
+    // Calculate the MIR locals that have been previously borrowed (even if they are still active).
+    let borrowed_locals = MaybeBorrowedLocals.iterate_to_fixpoint(tcx, body, Some("coroutine"));
+    let borrowed_locals_cursor1 = ResultsCursor::new_borrowing(body, &borrowed_locals);
+    let mut borrowed_locals_cursor2 = ResultsCursor::new_borrowing(body, &borrowed_locals);
 
     // Calculate the MIR locals that we need to keep storage around for.
-    let mut requires_storage_results =
-        MaybeRequiresStorage::new(borrowed_locals_results.into_results_cursor(body))
-            .iterate_to_fixpoint(tcx, body, None);
-    let mut requires_storage_cursor = requires_storage_results.as_results_cursor(body);
+    let requires_storage =
+        MaybeRequiresStorage::new(borrowed_locals_cursor1).iterate_to_fixpoint(tcx, body, None);
+    let mut requires_storage_cursor = ResultsCursor::new_borrowing(body, &requires_storage);
 
     // Calculate the liveness of MIR locals ignoring borrows.
     let mut liveness =
@@ -688,56 +736,56 @@ fn locals_live_across_suspend_points<'tcx>(
     let mut storage_liveness_map = IndexVec::from_elem(None, &body.basic_blocks);
     let mut live_locals_at_suspension_points = Vec::new();
     let mut source_info_at_suspension_points = Vec::new();
-    let mut live_locals_at_any_suspension_point = BitSet::new_empty(body.local_decls.len());
+    let mut live_locals_at_any_suspension_point = DenseBitSet::new_empty(body.local_decls.len());
 
     for (block, data) in body.basic_blocks.iter_enumerated() {
-        if let TerminatorKind::Yield { .. } = data.terminator().kind {
-            let loc = Location { block, statement_index: data.statements.len() };
+        let TerminatorKind::Yield { .. } = data.terminator().kind else { continue };
 
-            liveness.seek_to_block_end(block);
-            let mut live_locals = liveness.get().clone();
+        let loc = Location { block, statement_index: data.statements.len() };
 
-            if !movable {
-                // The `liveness` variable contains the liveness of MIR locals ignoring borrows.
-                // This is correct for movable coroutines since borrows cannot live across
-                // suspension points. However for immovable coroutines we need to account for
-                // borrows, so we conservatively assume that all borrowed locals are live until
-                // we find a StorageDead statement referencing the locals.
-                // To do this we just union our `liveness` result with `borrowed_locals`, which
-                // contains all the locals which has been borrowed before this suspension point.
-                // If a borrow is converted to a raw reference, we must also assume that it lives
-                // forever. Note that the final liveness is still bounded by the storage liveness
-                // of the local, which happens using the `intersect` operation below.
-                borrowed_locals_cursor.seek_before_primary_effect(loc);
-                live_locals.union(borrowed_locals_cursor.get());
-            }
+        liveness.seek_to_block_end(block);
+        let mut live_locals = liveness.get().clone();
 
-            // Store the storage liveness for later use so we can restore the state
-            // after a suspension point
-            storage_live.seek_before_primary_effect(loc);
-            storage_liveness_map[block] = Some(storage_live.get().clone());
-
-            // Locals live are live at this point only if they are used across
-            // suspension points (the `liveness` variable)
-            // and their storage is required (the `storage_required` variable)
-            requires_storage_cursor.seek_before_primary_effect(loc);
-            live_locals.intersect(requires_storage_cursor.get());
-
-            // The coroutine argument is ignored.
-            live_locals.remove(SELF_ARG);
-
-            debug!("loc = {:?}, live_locals = {:?}", loc, live_locals);
-
-            // Add the locals live at this suspension point to the set of locals which live across
-            // any suspension points
-            live_locals_at_any_suspension_point.union(&live_locals);
-
-            live_locals_at_suspension_points.push(live_locals);
-            source_info_at_suspension_points.push(data.terminator().source_info);
+        if !movable {
+            // The `liveness` variable contains the liveness of MIR locals ignoring borrows.
+            // This is correct for movable coroutines since borrows cannot live across
+            // suspension points. However for immovable coroutines we need to account for
+            // borrows, so we conservatively assume that all borrowed locals are live until
+            // we find a StorageDead statement referencing the locals.
+            // To do this we just union our `liveness` result with `borrowed_locals`, which
+            // contains all the locals which has been borrowed before this suspension point.
+            // If a borrow is converted to a raw reference, we must also assume that it lives
+            // forever. Note that the final liveness is still bounded by the storage liveness
+            // of the local, which happens using the `intersect` operation below.
+            borrowed_locals_cursor2.seek_before_primary_effect(loc);
+            live_locals.union(borrowed_locals_cursor2.get());
         }
+
+        // Store the storage liveness for later use so we can restore the state
+        // after a suspension point
+        storage_live.seek_before_primary_effect(loc);
+        storage_liveness_map[block] = Some(storage_live.get().clone());
+
+        // Locals live are live at this point only if they are used across
+        // suspension points (the `liveness` variable)
+        // and their storage is required (the `storage_required` variable)
+        requires_storage_cursor.seek_before_primary_effect(loc);
+        live_locals.intersect(requires_storage_cursor.get());
+
+        // The coroutine argument is ignored.
+        live_locals.remove(SELF_ARG);
+
+        debug!(?loc, ?live_locals);
+
+        // Add the locals live at this suspension point to the set of locals which live across
+        // any suspension points
+        live_locals_at_any_suspension_point.union(&live_locals);
+
+        live_locals_at_suspension_points.push(live_locals);
+        source_info_at_suspension_points.push(data.terminator().source_info);
     }
 
-    debug!("live_locals_anywhere = {:?}", live_locals_at_any_suspension_point);
+    debug!(?live_locals_at_any_suspension_point);
     let saved_locals = CoroutineSavedLocals(live_locals_at_any_suspension_point);
 
     // Renumber our liveness_map bitsets to include only the locals we are
@@ -751,7 +799,7 @@ fn locals_live_across_suspend_points<'tcx>(
         body,
         &saved_locals,
         always_live_locals.clone(),
-        requires_storage_results,
+        &requires_storage,
     );
 
     LivenessInfo {
@@ -768,7 +816,7 @@ fn locals_live_across_suspend_points<'tcx>(
 /// `CoroutineSavedLocal` is indexed in terms of the elements in this set;
 /// i.e. `CoroutineSavedLocal::new(1)` corresponds to the second local
 /// included in this set.
-struct CoroutineSavedLocals(BitSet<Local>);
+struct CoroutineSavedLocals(DenseBitSet<Local>);
 
 impl CoroutineSavedLocals {
     /// Returns an iterator over each `CoroutineSavedLocal` along with the `Local` it corresponds
@@ -777,11 +825,11 @@ impl CoroutineSavedLocals {
         self.iter().enumerate().map(|(i, l)| (CoroutineSavedLocal::from(i), l))
     }
 
-    /// Transforms a `BitSet<Local>` that contains only locals saved across yield points to the
-    /// equivalent `BitSet<CoroutineSavedLocal>`.
-    fn renumber_bitset(&self, input: &BitSet<Local>) -> BitSet<CoroutineSavedLocal> {
+    /// Transforms a `DenseBitSet<Local>` that contains only locals saved across yield points to the
+    /// equivalent `DenseBitSet<CoroutineSavedLocal>`.
+    fn renumber_bitset(&self, input: &DenseBitSet<Local>) -> DenseBitSet<CoroutineSavedLocal> {
         assert!(self.superset(input), "{:?} not a superset of {:?}", self.0, input);
-        let mut out = BitSet::new_empty(self.count());
+        let mut out = DenseBitSet::new_empty(self.count());
         for (saved_local, local) in self.iter_enumerated() {
             if input.contains(local) {
                 out.insert(saved_local);
@@ -801,7 +849,7 @@ impl CoroutineSavedLocals {
 }
 
 impl ops::Deref for CoroutineSavedLocals {
-    type Target = BitSet<Local>;
+    type Target = DenseBitSet<Local>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -815,8 +863,8 @@ impl ops::Deref for CoroutineSavedLocals {
 fn compute_storage_conflicts<'mir, 'tcx>(
     body: &'mir Body<'tcx>,
     saved_locals: &'mir CoroutineSavedLocals,
-    always_live_locals: BitSet<Local>,
-    mut requires_storage: Results<'tcx, MaybeRequiresStorage<'mir, 'tcx>>,
+    always_live_locals: DenseBitSet<Local>,
+    results: &Results<'tcx, MaybeRequiresStorage<'mir, 'tcx>>,
 ) -> BitMatrix<CoroutineSavedLocal, CoroutineSavedLocal> {
     assert_eq!(body.local_decls.len(), saved_locals.domain_size());
 
@@ -833,10 +881,10 @@ fn compute_storage_conflicts<'mir, 'tcx>(
         body,
         saved_locals,
         local_conflicts: BitMatrix::from_row_n(&ineligible_locals, body.local_decls.len()),
-        eligible_storage_live: BitSet::new_empty(body.local_decls.len()),
+        eligible_storage_live: DenseBitSet::new_empty(body.local_decls.len()),
     };
 
-    requires_storage.visit_reachable_with(body, &mut visitor);
+    visit_reachable_results(body, results, &mut visitor);
 
     let local_conflicts = visitor.local_conflicts;
 
@@ -871,17 +919,17 @@ struct StorageConflictVisitor<'a, 'tcx> {
     // benchmarks for coroutines.
     local_conflicts: BitMatrix<Local, Local>,
     // We keep this bitset as a buffer to avoid reallocating memory.
-    eligible_storage_live: BitSet<Local>,
+    eligible_storage_live: DenseBitSet<Local>,
 }
 
-impl<'a, 'tcx> ResultsVisitor<'a, 'tcx, MaybeRequiresStorage<'a, 'tcx>>
+impl<'a, 'tcx> ResultsVisitor<'tcx, MaybeRequiresStorage<'a, 'tcx>>
     for StorageConflictVisitor<'a, 'tcx>
 {
     fn visit_after_early_statement_effect(
         &mut self,
-        _results: &mut Results<'tcx, MaybeRequiresStorage<'a, 'tcx>>,
-        state: &BitSet<Local>,
-        _statement: &'a Statement<'tcx>,
+        _analysis: &MaybeRequiresStorage<'a, 'tcx>,
+        state: &DenseBitSet<Local>,
+        _statement: &Statement<'tcx>,
         loc: Location,
     ) {
         self.apply_state(state, loc);
@@ -889,9 +937,9 @@ impl<'a, 'tcx> ResultsVisitor<'a, 'tcx, MaybeRequiresStorage<'a, 'tcx>>
 
     fn visit_after_early_terminator_effect(
         &mut self,
-        _results: &mut Results<'tcx, MaybeRequiresStorage<'a, 'tcx>>,
-        state: &BitSet<Local>,
-        _terminator: &'a Terminator<'tcx>,
+        _analysis: &MaybeRequiresStorage<'a, 'tcx>,
+        state: &DenseBitSet<Local>,
+        _terminator: &Terminator<'tcx>,
         loc: Location,
     ) {
         self.apply_state(state, loc);
@@ -899,7 +947,7 @@ impl<'a, 'tcx> ResultsVisitor<'a, 'tcx, MaybeRequiresStorage<'a, 'tcx>>
 }
 
 impl StorageConflictVisitor<'_, '_> {
-    fn apply_state(&mut self, state: &BitSet<Local>, loc: Location) {
+    fn apply_state(&mut self, state: &DenseBitSet<Local>, loc: Location) {
         // Ignore unreachable blocks.
         if let TerminatorKind::Unreachable = self.body.basic_blocks[loc.block].terminator().kind {
             return;
@@ -918,13 +966,14 @@ impl StorageConflictVisitor<'_, '_> {
     }
 }
 
+#[tracing::instrument(level = "trace", skip(liveness, body))]
 fn compute_layout<'tcx>(
     liveness: LivenessInfo,
     body: &Body<'tcx>,
 ) -> (
     IndexVec<Local, Option<(Ty<'tcx>, VariantIdx, FieldIdx)>>,
     CoroutineLayout<'tcx>,
-    IndexVec<BasicBlock, Option<BitSet<Local>>>,
+    IndexVec<BasicBlock, Option<DenseBitSet<Local>>>,
 ) {
     let LivenessInfo {
         saved_locals,
@@ -935,8 +984,8 @@ fn compute_layout<'tcx>(
     } = liveness;
 
     // Gather live local types and their indices.
-    let mut locals = IndexVec::<CoroutineSavedLocal, _>::new();
-    let mut tys = IndexVec::<CoroutineSavedLocal, _>::new();
+    let mut locals = IndexVec::<CoroutineSavedLocal, _>::with_capacity(saved_locals.domain_size());
+    let mut tys = IndexVec::<CoroutineSavedLocal, _>::with_capacity(saved_locals.domain_size());
     for (saved_local, local) in saved_locals.iter_enumerated() {
         debug!("coroutine saved local {:?} => {:?}", saved_local, local);
 
@@ -944,7 +993,7 @@ fn compute_layout<'tcx>(
         let decl = &body.local_decls[local];
         debug!(?decl);
 
-        // Do not `assert_crate_local` here, as post-borrowck cleanup may have already cleared
+        // Do not `unwrap_crate_local` here, as post-borrowck cleanup may have already cleared
         // the information. This is alright, since `ignore_for_traits` is only relevant when
         // this code runs on pre-cleanup MIR, and `ignore_for_traits = false` is the safer
         // default.
@@ -970,38 +1019,39 @@ fn compute_layout<'tcx>(
     // In debuginfo, these will correspond to the beginning (UNRESUMED) or end
     // (RETURNED, POISONED) of the function.
     let body_span = body.source_scopes[OUTERMOST_SOURCE_SCOPE].span;
-    let mut variant_source_info: IndexVec<VariantIdx, SourceInfo> = [
+    let mut variant_source_info: IndexVec<VariantIdx, SourceInfo> = IndexVec::with_capacity(
+        CoroutineArgs::RESERVED_VARIANTS + live_locals_at_suspension_points.len(),
+    );
+    variant_source_info.extend([
         SourceInfo::outermost(body_span.shrink_to_lo()),
         SourceInfo::outermost(body_span.shrink_to_hi()),
         SourceInfo::outermost(body_span.shrink_to_hi()),
-    ]
-    .iter()
-    .copied()
-    .collect();
+    ]);
 
     // Build the coroutine variant field list.
     // Create a map from local indices to coroutine struct indices.
-    let mut variant_fields: IndexVec<VariantIdx, IndexVec<FieldIdx, CoroutineSavedLocal>> =
-        iter::repeat(IndexVec::new()).take(CoroutineArgs::RESERVED_VARIANTS).collect();
+    let mut variant_fields: IndexVec<VariantIdx, _> = IndexVec::from_elem_n(
+        IndexVec::new(),
+        CoroutineArgs::RESERVED_VARIANTS + live_locals_at_suspension_points.len(),
+    );
     let mut remap = IndexVec::from_elem_n(None, saved_locals.domain_size());
-    for (suspension_point_idx, live_locals) in live_locals_at_suspension_points.iter().enumerate() {
-        let variant_index =
-            VariantIdx::from(CoroutineArgs::RESERVED_VARIANTS + suspension_point_idx);
-        let mut fields = IndexVec::new();
-        for (idx, saved_local) in live_locals.iter().enumerate() {
-            fields.push(saved_local);
+    for (live_locals, &source_info_at_suspension_point, (variant_index, fields)) in izip!(
+        &live_locals_at_suspension_points,
+        &source_info_at_suspension_points,
+        variant_fields.iter_enumerated_mut().skip(CoroutineArgs::RESERVED_VARIANTS)
+    ) {
+        *fields = live_locals.iter().collect();
+        for (idx, &saved_local) in fields.iter_enumerated() {
             // Note that if a field is included in multiple variants, we will
             // just use the first one here. That's fine; fields do not move
             // around inside coroutines, so it doesn't matter which variant
             // index we access them by.
-            let idx = FieldIdx::from_usize(idx);
             remap[locals[saved_local]] = Some((tys[saved_local].ty, variant_index, idx));
         }
-        variant_fields.push(fields);
-        variant_source_info.push(source_info_at_suspension_points[suspension_point_idx]);
+        variant_source_info.push(source_info_at_suspension_point);
     }
-    debug!("coroutine variant_fields = {:?}", variant_fields);
-    debug!("coroutine storage_conflicts = {:#?}", storage_conflicts);
+    debug!(?variant_fields);
+    debug!(?storage_conflicts);
 
     let mut field_names = IndexVec::from_elem(None, &tys);
     for var in &body.var_debug_info {
@@ -1022,7 +1072,9 @@ fn compute_layout<'tcx>(
         variant_source_info,
         storage_conflicts,
     };
+    debug!(?remap);
     debug!(?layout);
+    debug!(?storage_liveness);
 
     (remap, layout, storage_liveness)
 }
@@ -1035,147 +1087,56 @@ fn insert_switch<'tcx>(
     body: &mut Body<'tcx>,
     cases: Vec<(usize, BasicBlock)>,
     transform: &TransformVisitor<'tcx>,
-    default: TerminatorKind<'tcx>,
+    default_block: BasicBlock,
 ) {
-    let default_block = insert_term_block(body, default);
     let (assign, discr) = transform.get_discr(body);
     let switch_targets =
         SwitchTargets::new(cases.iter().map(|(i, bb)| ((*i) as u128, *bb)), default_block);
     let switch = TerminatorKind::SwitchInt { discr: Operand::Move(discr), targets: switch_targets };
 
     let source_info = SourceInfo::outermost(body.span);
-    body.basic_blocks_mut().raw.insert(0, BasicBlockData {
-        statements: vec![assign],
-        terminator: Some(Terminator { source_info, kind: switch }),
-        is_cleanup: false,
-    });
+    body.basic_blocks_mut().raw.insert(
+        0,
+        BasicBlockData::new_stmts(
+            vec![assign],
+            Some(Terminator { source_info, kind: switch }),
+            false,
+        ),
+    );
 
-    let blocks = body.basic_blocks_mut().iter_mut();
-
-    for target in blocks.flat_map(|b| b.terminator_mut().successors_mut()) {
-        *target = BasicBlock::new(target.index() + 1);
+    for b in body.basic_blocks_mut().iter_mut() {
+        b.terminator_mut().successors_mut(|target| *target += 1);
     }
-}
-
-fn elaborate_coroutine_drops<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
-    use rustc_middle::mir::patch::MirPatch;
-    use rustc_mir_dataflow::elaborate_drops::{Unwind, elaborate_drop};
-
-    use crate::shim::DropShimElaborator;
-
-    // Note that `elaborate_drops` only drops the upvars of a coroutine, and
-    // this is ok because `open_drop` can only be reached within that own
-    // coroutine's resume function.
-    let typing_env = body.typing_env(tcx);
-
-    let mut elaborator = DropShimElaborator { body, patch: MirPatch::new(body), tcx, typing_env };
-
-    for (block, block_data) in body.basic_blocks.iter_enumerated() {
-        let (target, unwind, source_info) = match block_data.terminator() {
-            Terminator {
-                source_info,
-                kind: TerminatorKind::Drop { place, target, unwind, replace: _ },
-            } => {
-                if let Some(local) = place.as_local()
-                    && local == SELF_ARG
-                {
-                    (target, unwind, source_info)
-                } else {
-                    continue;
-                }
-            }
-            _ => continue,
-        };
-        let unwind = if block_data.is_cleanup {
-            Unwind::InCleanup
-        } else {
-            Unwind::To(match *unwind {
-                UnwindAction::Cleanup(tgt) => tgt,
-                UnwindAction::Continue => elaborator.patch.resume_block(),
-                UnwindAction::Unreachable => elaborator.patch.unreachable_cleanup_block(),
-                UnwindAction::Terminate(reason) => elaborator.patch.terminate_block(reason),
-            })
-        };
-        elaborate_drop(
-            &mut elaborator,
-            *source_info,
-            Place::from(SELF_ARG),
-            (),
-            *target,
-            unwind,
-            block,
-        );
-    }
-    elaborator.patch.apply(body);
-}
-
-fn create_coroutine_drop_shim<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    transform: &TransformVisitor<'tcx>,
-    coroutine_ty: Ty<'tcx>,
-    body: &Body<'tcx>,
-    drop_clean: BasicBlock,
-) -> Body<'tcx> {
-    let mut body = body.clone();
-    // Take the coroutine info out of the body, since the drop shim is
-    // not a coroutine body itself; it just has its drop built out of it.
-    let _ = body.coroutine.take();
-    // Make sure the resume argument is not included here, since we're
-    // building a body for `drop_in_place`.
-    body.arg_count = 1;
-
-    let source_info = SourceInfo::outermost(body.span);
-
-    let mut cases = create_cases(&mut body, transform, Operation::Drop);
-
-    cases.insert(0, (CoroutineArgs::UNRESUMED, drop_clean));
-
-    // The returned state and the poisoned state fall through to the default
-    // case which is just to return
-
-    insert_switch(&mut body, cases, transform, TerminatorKind::Return);
-
-    for block in body.basic_blocks_mut() {
-        let kind = &mut block.terminator_mut().kind;
-        if let TerminatorKind::CoroutineDrop = *kind {
-            *kind = TerminatorKind::Return;
-        }
-    }
-
-    // Replace the return variable
-    body.local_decls[RETURN_PLACE] = LocalDecl::with_source_info(tcx.types.unit, source_info);
-
-    make_coroutine_state_argument_indirect(tcx, &mut body);
-
-    // Change the coroutine argument from &mut to *mut
-    body.local_decls[SELF_ARG] =
-        LocalDecl::with_source_info(Ty::new_mut_ptr(tcx, coroutine_ty), source_info);
-
-    // Make sure we remove dead blocks to remove
-    // unrelated code from the resume part of the function
-    simplify::remove_dead_blocks(&mut body);
-
-    // Update the body's def to become the drop glue.
-    let coroutine_instance = body.source.instance;
-    let drop_in_place = tcx.require_lang_item(LangItem::DropInPlace, None);
-    let drop_instance = InstanceKind::DropGlue(drop_in_place, Some(coroutine_ty));
-
-    // Temporary change MirSource to coroutine's instance so that dump_mir produces more sensible
-    // filename.
-    body.source.instance = coroutine_instance;
-    dump_mir(tcx, false, "coroutine_drop", &0, &body, |_, _| Ok(()));
-    body.source.instance = drop_instance;
-
-    body
 }
 
 fn insert_term_block<'tcx>(body: &mut Body<'tcx>, kind: TerminatorKind<'tcx>) -> BasicBlock {
     let source_info = SourceInfo::outermost(body.span);
-    body.basic_blocks_mut().push(BasicBlockData {
-        statements: Vec::new(),
-        terminator: Some(Terminator { source_info, kind }),
-        is_cleanup: false,
-    })
+    body.basic_blocks_mut().push(BasicBlockData::new(Some(Terminator { source_info, kind }), false))
+}
+
+fn return_poll_ready_assign<'tcx>(tcx: TyCtxt<'tcx>, source_info: SourceInfo) -> Statement<'tcx> {
+    // Poll::Ready(())
+    let poll_def_id = tcx.require_lang_item(LangItem::Poll, source_info.span);
+    let args = tcx.mk_args(&[tcx.types.unit.into()]);
+    let val = Operand::Constant(Box::new(ConstOperand {
+        span: source_info.span,
+        user_ty: None,
+        const_: Const::zero_sized(tcx.types.unit),
+    }));
+    let ready_val = Rvalue::Aggregate(
+        Box::new(AggregateKind::Adt(poll_def_id, VariantIdx::from_usize(0), args, None, None)),
+        indexvec![val],
+    );
+    Statement::new(source_info, StatementKind::Assign(Box::new((Place::return_place(), ready_val))))
+}
+
+fn insert_poll_ready_block<'tcx>(tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) -> BasicBlock {
+    let source_info = SourceInfo::outermost(body.span);
+    body.basic_blocks_mut().push(BasicBlockData::new_stmts(
+        [return_poll_ready_assign(tcx, source_info)].to_vec(),
+        Some(Terminator { source_info, kind: TerminatorKind::Return }),
+        false,
+    ))
 }
 
 fn insert_panic_block<'tcx>(
@@ -1183,7 +1144,7 @@ fn insert_panic_block<'tcx>(
     body: &mut Body<'tcx>,
     message: AssertMessage<'tcx>,
 ) -> BasicBlock {
-    let assert_block = BasicBlock::new(body.basic_blocks.len());
+    let assert_block = body.basic_blocks.next_index();
     let kind = TerminatorKind::Assert {
         cond: Operand::Constant(Box::new(ConstOperand {
             span: body.span,
@@ -1206,19 +1167,13 @@ fn can_return<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>, typing_env: ty::Typing
     }
 
     // If there's a return terminator the function may return.
-    for block in body.basic_blocks.iter() {
-        if let TerminatorKind::Return = block.terminator().kind {
-            return true;
-        }
-    }
-
+    body.basic_blocks.iter().any(|block| matches!(block.terminator().kind, TerminatorKind::Return))
     // Otherwise the function can't return.
-    false
 }
 
 fn can_unwind<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> bool {
     // Nothing can unwind when landing pads are off.
-    if tcx.sess.panic_strategy() == PanicStrategy::Abort {
+    if !tcx.sess.panic_strategy().unwinds() {
         return false;
     }
 
@@ -1259,45 +1214,49 @@ fn can_unwind<'tcx>(tcx: TyCtxt<'tcx>, body: &Body<'tcx>) -> bool {
     false
 }
 
+// Poison the coroutine when it unwinds
+fn generate_poison_block_and_redirect_unwinds_there<'tcx>(
+    transform: &TransformVisitor<'tcx>,
+    body: &mut Body<'tcx>,
+) {
+    let source_info = SourceInfo::outermost(body.span);
+    let poison_block = body.basic_blocks_mut().push(BasicBlockData::new_stmts(
+        vec![transform.set_discr(VariantIdx::new(CoroutineArgs::POISONED), source_info)],
+        Some(Terminator { source_info, kind: TerminatorKind::UnwindResume }),
+        true,
+    ));
+
+    for (idx, block) in body.basic_blocks_mut().iter_enumerated_mut() {
+        let source_info = block.terminator().source_info;
+
+        if let TerminatorKind::UnwindResume = block.terminator().kind {
+            // An existing `Resume` terminator is redirected to jump to our dedicated
+            // "poisoning block" above.
+            if idx != poison_block {
+                *block.terminator_mut() =
+                    Terminator { source_info, kind: TerminatorKind::Goto { target: poison_block } };
+            }
+        } else if !block.is_cleanup
+            // Any terminators that *can* unwind but don't have an unwind target set are also
+            // pointed at our poisoning block (unless they're part of the cleanup path).
+            && let Some(unwind @ UnwindAction::Continue) = block.terminator_mut().unwind_mut()
+        {
+            *unwind = UnwindAction::Cleanup(poison_block);
+        }
+    }
+}
+
+#[tracing::instrument(level = "trace", skip(tcx, transform, body))]
 fn create_coroutine_resume_function<'tcx>(
     tcx: TyCtxt<'tcx>,
     transform: TransformVisitor<'tcx>,
     body: &mut Body<'tcx>,
     can_return: bool,
+    can_unwind: bool,
 ) {
-    let can_unwind = can_unwind(tcx, body);
-
     // Poison the coroutine when it unwinds
     if can_unwind {
-        let source_info = SourceInfo::outermost(body.span);
-        let poison_block = body.basic_blocks_mut().push(BasicBlockData {
-            statements: vec![
-                transform.set_discr(VariantIdx::new(CoroutineArgs::POISONED), source_info),
-            ],
-            terminator: Some(Terminator { source_info, kind: TerminatorKind::UnwindResume }),
-            is_cleanup: true,
-        });
-
-        for (idx, block) in body.basic_blocks_mut().iter_enumerated_mut() {
-            let source_info = block.terminator().source_info;
-
-            if let TerminatorKind::UnwindResume = block.terminator().kind {
-                // An existing `Resume` terminator is redirected to jump to our dedicated
-                // "poisoning block" above.
-                if idx != poison_block {
-                    *block.terminator_mut() = Terminator {
-                        source_info,
-                        kind: TerminatorKind::Goto { target: poison_block },
-                    };
-                }
-            } else if !block.is_cleanup {
-                // Any terminators that *can* unwind but don't have an unwind target set are also
-                // pointed at our poisoning block (unless they're part of the cleanup path).
-                if let Some(unwind @ UnwindAction::Continue) = block.terminator_mut().unwind_mut() {
-                    *unwind = UnwindAction::Cleanup(poison_block);
-                }
-            }
-        }
+        generate_poison_block_and_redirect_unwinds_there(&transform, body);
     }
 
     let mut cases = create_cases(body, &transform, Operation::Resume);
@@ -1322,7 +1281,13 @@ fn create_coroutine_resume_function<'tcx>(
         let block = match transform.coroutine_kind {
             CoroutineKind::Desugared(CoroutineDesugaring::Async, _)
             | CoroutineKind::Coroutine(_) => {
-                insert_panic_block(tcx, body, ResumedAfterReturn(transform.coroutine_kind))
+                // For `async_drop_in_place<T>::{closure}` we just keep return Poll::Ready,
+                // because async drop of such coroutine keeps polling original coroutine
+                if tcx.is_async_drop_in_place_coroutine(body.source.def_id()) {
+                    insert_poll_ready_block(tcx, body)
+                } else {
+                    insert_panic_block(tcx, body, ResumedAfterReturn(transform.coroutine_kind))
+                }
             }
             CoroutineKind::Desugared(CoroutineDesugaring::AsyncGen, _)
             | CoroutineKind::Desugared(CoroutineDesugaring::Gen, _) => {
@@ -1332,16 +1297,19 @@ fn create_coroutine_resume_function<'tcx>(
         cases.insert(1, (CoroutineArgs::RETURNED, block));
     }
 
-    insert_switch(body, cases, &transform, TerminatorKind::Unreachable);
-
-    make_coroutine_state_argument_indirect(tcx, body);
+    let default_block = insert_term_block(body, TerminatorKind::Unreachable);
+    insert_switch(body, cases, &transform, default_block);
 
     match transform.coroutine_kind {
+        CoroutineKind::Coroutine(_)
+        | CoroutineKind::Desugared(CoroutineDesugaring::Async | CoroutineDesugaring::AsyncGen, _) =>
+        {
+            make_coroutine_state_argument_pinned(tcx, body);
+        }
         // Iterator::next doesn't accept a pinned argument,
         // unlike for all other coroutine kinds.
-        CoroutineKind::Desugared(CoroutineDesugaring::Gen, _) => {}
-        _ => {
-            make_coroutine_state_argument_pinned(tcx, body);
+        CoroutineKind::Desugared(CoroutineDesugaring::Gen, _) => {
+            make_coroutine_state_argument_indirect(tcx, body);
         }
     }
 
@@ -1351,30 +1319,13 @@ fn create_coroutine_resume_function<'tcx>(
 
     pm::run_passes_no_validate(tcx, body, &[&abort_unwinding_calls::AbortUnwindingCalls], None);
 
-    dump_mir(tcx, false, "coroutine_resume", &0, body, |_, _| Ok(()));
-}
-
-fn insert_clean_drop(body: &mut Body<'_>) -> BasicBlock {
-    let return_block = insert_term_block(body, TerminatorKind::Return);
-
-    let term = TerminatorKind::Drop {
-        place: Place::from(SELF_ARG),
-        target: return_block,
-        unwind: UnwindAction::Continue,
-        replace: false,
-    };
-    let source_info = SourceInfo::outermost(body.span);
-
-    // Create a block to destroy an unresumed coroutines. This can only destroy upvars.
-    body.basic_blocks_mut().push(BasicBlockData {
-        statements: Vec::new(),
-        terminator: Some(Terminator { source_info, kind: term }),
-        is_cleanup: false,
-    })
+    if let Some(dumper) = MirDumper::new(tcx, "coroutine_resume", body) {
+        dumper.dump_mir(body);
+    }
 }
 
 /// An operation that can be performed on a coroutine.
-#[derive(PartialEq, Copy, Clone)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 enum Operation {
     Resume,
     Drop,
@@ -1389,6 +1340,7 @@ impl Operation {
     }
 }
 
+#[tracing::instrument(level = "trace", skip(transform, body))]
 fn create_cases<'tcx>(
     body: &mut Body<'tcx>,
     transform: &TransformVisitor<'tcx>,
@@ -1405,38 +1357,32 @@ fn create_cases<'tcx>(
                 let mut statements = Vec::new();
 
                 // Create StorageLive instructions for locals with live storage
-                for i in 0..(body.local_decls.len()) {
-                    let l = Local::new(i);
+                for l in body.local_decls.indices() {
                     let needs_storage_live = point.storage_liveness.contains(l)
                         && !transform.remap.contains(l)
                         && !transform.always_live_locals.contains(l);
                     if needs_storage_live {
-                        statements
-                            .push(Statement { source_info, kind: StatementKind::StorageLive(l) });
+                        statements.push(Statement::new(source_info, StatementKind::StorageLive(l)));
                     }
                 }
 
-                if operation == Operation::Resume {
+                if operation == Operation::Resume && point.resume_arg != CTX_ARG.into() {
                     // Move the resume argument to the destination place of the `Yield` terminator
-                    let resume_arg = Local::new(2); // 0 = return, 1 = self
-                    statements.push(Statement {
+                    statements.push(Statement::new(
                         source_info,
-                        kind: StatementKind::Assign(Box::new((
+                        StatementKind::Assign(Box::new((
                             point.resume_arg,
-                            Rvalue::Use(Operand::Move(resume_arg.into())),
+                            Rvalue::Use(Operand::Move(CTX_ARG.into())),
                         ))),
-                    });
+                    ));
                 }
 
                 // Then jump to the real target
-                let block = body.basic_blocks_mut().push(BasicBlockData {
+                let block = body.basic_blocks_mut().push(BasicBlockData::new_stmts(
                     statements,
-                    terminator: Some(Terminator {
-                        source_info,
-                        kind: TerminatorKind::Goto { target },
-                    }),
-                    is_cleanup: false,
-                });
+                    Some(Terminator { source_info, kind: TerminatorKind::Goto { target } }),
+                    false,
+                ));
 
                 (point.state, block)
             })
@@ -1483,9 +1429,9 @@ fn check_field_tys_sized<'tcx>(
     coroutine_layout: &CoroutineLayout<'tcx>,
     def_id: LocalDefId,
 ) {
-    // No need to check if unsized_locals/unsized_fn_params is disabled,
+    // No need to check if unsized_fn_params is disabled,
     // since we will error during typeck.
-    if !tcx.features().unsized_locals() && !tcx.features().unsized_fn_params() {
+    if !tcx.features().unsized_fn_params() {
         return;
     }
 
@@ -1506,11 +1452,11 @@ fn check_field_tys_sized<'tcx>(
             ),
             param_env,
             field_ty.ty,
-            tcx.require_lang_item(hir::LangItem::Sized, Some(field_ty.source_info.span)),
+            tcx.require_lang_item(hir::LangItem::Sized, field_ty.source_info.span),
         );
     }
 
-    let errors = ocx.select_all_or_error();
+    let errors = ocx.evaluate_obligations_error_on_ambiguity();
     debug!(?errors);
     if !errors.is_empty() {
         infcx.err_ctxt().report_fulfillment_errors(errors);
@@ -1518,41 +1464,45 @@ fn check_field_tys_sized<'tcx>(
 }
 
 impl<'tcx> crate::MirPass<'tcx> for StateTransform {
+    #[instrument(level = "debug", skip(self, tcx, body), ret)]
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
+        debug!(def_id = ?body.source.def_id());
+
         let Some(old_yield_ty) = body.yield_ty() else {
             // This only applies to coroutines
             return;
         };
+        tracing::trace!(def_id = ?body.source.def_id());
+
         let old_ret_ty = body.return_ty();
 
-        assert!(body.coroutine_drop().is_none());
+        assert!(body.coroutine_drop().is_none() && body.coroutine_drop_async().is_none());
+
+        if let Some(dumper) = MirDumper::new(tcx, "coroutine_before", body) {
+            dumper.dump_mir(body);
+        }
 
         // The first argument is the coroutine type passed by value
         let coroutine_ty = body.local_decls.raw[1].ty;
         let coroutine_kind = body.coroutine_kind().unwrap();
 
         // Get the discriminant type and args which typeck computed
-        let (discr_ty, movable) = match *coroutine_ty.kind() {
-            ty::Coroutine(_, args) => {
-                let args = args.as_coroutine();
-                (args.discr_ty(tcx), coroutine_kind.movability() == hir::Movability::Movable)
-            }
-            _ => {
-                tcx.dcx().span_bug(body.span, format!("unexpected coroutine type {coroutine_ty}"));
-            }
+        let ty::Coroutine(_, args) = coroutine_ty.kind() else {
+            tcx.dcx().span_bug(body.span, format!("unexpected coroutine type {coroutine_ty}"));
         };
+        let discr_ty = args.as_coroutine().discr_ty(tcx);
 
         let new_ret_ty = match coroutine_kind {
             CoroutineKind::Desugared(CoroutineDesugaring::Async, _) => {
                 // Compute Poll<return_ty>
-                let poll_did = tcx.require_lang_item(LangItem::Poll, None);
+                let poll_did = tcx.require_lang_item(LangItem::Poll, body.span);
                 let poll_adt_ref = tcx.adt_def(poll_did);
                 let poll_args = tcx.mk_args(&[old_ret_ty.into()]);
                 Ty::new_adt(tcx, poll_adt_ref, poll_args)
             }
             CoroutineKind::Desugared(CoroutineDesugaring::Gen, _) => {
                 // Compute Option<yield_ty>
-                let option_did = tcx.require_lang_item(LangItem::Option, None);
+                let option_did = tcx.require_lang_item(LangItem::Option, body.span);
                 let option_adt_ref = tcx.adt_def(option_did);
                 let option_args = tcx.mk_args(&[old_yield_ty.into()]);
                 Ty::new_adt(tcx, option_adt_ref, option_args)
@@ -1563,47 +1513,39 @@ impl<'tcx> crate::MirPass<'tcx> for StateTransform {
             }
             CoroutineKind::Coroutine(_) => {
                 // Compute CoroutineState<yield_ty, return_ty>
-                let state_did = tcx.require_lang_item(LangItem::CoroutineState, None);
+                let state_did = tcx.require_lang_item(LangItem::CoroutineState, body.span);
                 let state_adt_ref = tcx.adt_def(state_did);
                 let state_args = tcx.mk_args(&[old_yield_ty.into(), old_ret_ty.into()]);
                 Ty::new_adt(tcx, state_adt_ref, state_args)
             }
         };
 
-        // We rename RETURN_PLACE which has type mir.return_ty to old_ret_local
-        // RETURN_PLACE then is a fresh unused local with type ret_ty.
-        let old_ret_local = replace_local(RETURN_PLACE, new_ret_ty, body, tcx);
+        // We need to insert clean drop for unresumed state and perform drop elaboration
+        // (finally in open_drop_for_tuple) before async drop expansion.
+        // Async drops, produced by this drop elaboration, will be expanded,
+        // and corresponding futures kept in layout.
+        let has_async_drops = matches!(
+            coroutine_kind,
+            CoroutineKind::Desugared(CoroutineDesugaring::Async | CoroutineDesugaring::AsyncGen, _)
+        ) && has_expandable_async_drops(tcx, body, coroutine_ty);
 
         // Replace all occurrences of `ResumeTy` with `&mut Context<'_>` within async bodies.
         if matches!(
             coroutine_kind,
             CoroutineKind::Desugared(CoroutineDesugaring::Async | CoroutineDesugaring::AsyncGen, _)
         ) {
-            transform_async_context(tcx, body);
+            let context_mut_ref = transform_async_context(tcx, body);
+            expand_async_drops(tcx, body, context_mut_ref, coroutine_kind, coroutine_ty);
+
+            if let Some(dumper) = MirDumper::new(tcx, "coroutine_async_drop_expand", body) {
+                dumper.dump_mir(body);
+            }
+        } else {
+            cleanup_async_drops(body);
         }
 
-        // We also replace the resume argument and insert an `Assign`.
-        // This is needed because the resume argument `_2` might be live across a `yield`, in which
-        // case there is no `Assign` to it that the transform can turn into a store to the coroutine
-        // state. After the yield the slot in the coroutine state would then be uninitialized.
-        let resume_local = Local::new(2);
-        let resume_ty = body.local_decls[resume_local].ty;
-        let old_resume_local = replace_local(resume_local, resume_ty, body, tcx);
-
-        // When first entering the coroutine, move the resume argument into its old local
-        // (which is now a generator interior).
-        let source_info = SourceInfo::outermost(body.span);
-        let stmts = &mut body.basic_blocks_mut()[START_BLOCK].statements;
-        stmts.insert(0, Statement {
-            source_info,
-            kind: StatementKind::Assign(Box::new((
-                old_resume_local.into(),
-                Rvalue::Use(Operand::Move(resume_local.into())),
-            ))),
-        });
-
         let always_live_locals = always_storage_live_locals(body);
-
+        let movable = coroutine_kind.movability() == hir::Movability::Movable;
         let liveness_info =
             locals_live_across_suspend_points(tcx, body, &always_live_locals, movable);
 
@@ -1624,6 +1566,11 @@ impl<'tcx> crate::MirPass<'tcx> for StateTransform {
 
         let can_return = can_return(tcx, body, body.typing_env(tcx));
 
+        // We rename RETURN_PLACE which has type mir.return_ty to new_ret_local
+        // RETURN_PLACE then is a fresh unused local with type ret_ty.
+        let new_ret_local = body.local_decls.push(LocalDecl::new(new_ret_ty, body.span));
+        tracing::trace!(?new_ret_local);
+
         // Run the transformation which converts Places from Local to coroutine struct
         // accesses for locals in `remap`.
         // It also rewrites `return x` and `yield y` as writing a new coroutine state and returning
@@ -1636,12 +1583,30 @@ impl<'tcx> crate::MirPass<'tcx> for StateTransform {
             storage_liveness,
             always_live_locals,
             suspension_points: Vec::new(),
-            old_ret_local,
             discr_ty,
+            new_ret_local,
             old_ret_ty,
             old_yield_ty,
         };
         transform.visit_body(body);
+
+        // Swap the actual `RETURN_PLACE` and the provisional `new_ret_local`.
+        transform.replace_local(RETURN_PLACE, new_ret_local, body);
+
+        // MIR parameters are not explicitly assigned-to when entering the MIR body.
+        // If we want to save their values inside the coroutine state, we need to do so explicitly.
+        let source_info = SourceInfo::outermost(body.span);
+        let args_iter = body.args_iter();
+        body.basic_blocks.as_mut()[START_BLOCK].statements.splice(
+            0..0,
+            args_iter.filter_map(|local| {
+                let (ty, variant_index, idx) = transform.remap[local]?;
+                let lhs = transform.make_field(variant_index, idx, ty);
+                let rhs = Rvalue::Use(Operand::Move(local.into()));
+                let assign = StatementKind::Assign(Box::new((lhs, rhs)));
+                Some(Statement::new(source_info, assign))
+            }),
+        );
 
         // Update our MIR struct to reflect the changes we've made
         body.arg_count = 2; // self, resume arg
@@ -1663,30 +1628,61 @@ impl<'tcx> crate::MirPass<'tcx> for StateTransform {
         body.coroutine.as_mut().unwrap().resume_ty = None;
         body.coroutine.as_mut().unwrap().coroutine_layout = Some(layout);
 
+        // FIXME: Drops, produced by insert_clean_drop + elaborate_coroutine_drops,
+        // are currently sync only. To allow async for them, we need to move those calls
+        // before expand_async_drops, and fix the related problems.
+        //
         // Insert `drop(coroutine_struct)` which is used to drop upvars for coroutines in
         // the unresumed state.
         // This is expanded to a drop ladder in `elaborate_coroutine_drops`.
-        let drop_clean = insert_clean_drop(body);
+        let drop_clean = insert_clean_drop(tcx, body, has_async_drops);
 
-        dump_mir(tcx, false, "coroutine_pre-elab", &0, body, |_, _| Ok(()));
+        if let Some(dumper) = MirDumper::new(tcx, "coroutine_pre-elab", body) {
+            dumper.dump_mir(body);
+        }
 
         // Expand `drop(coroutine_struct)` to a drop ladder which destroys upvars.
         // If any upvars are moved out of, drop elaboration will handle upvar destruction.
         // However we need to also elaborate the code generated by `insert_clean_drop`.
         elaborate_coroutine_drops(tcx, body);
 
-        dump_mir(tcx, false, "coroutine_post-transform", &0, body, |_, _| Ok(()));
+        if let Some(dumper) = MirDumper::new(tcx, "coroutine_post-transform", body) {
+            dumper.dump_mir(body);
+        }
+
+        let can_unwind = can_unwind(tcx, body);
 
         // Create a copy of our MIR and use it to create the drop shim for the coroutine
-        let drop_shim = create_coroutine_drop_shim(tcx, &transform, coroutine_ty, body, drop_clean);
+        if has_async_drops {
+            // If coroutine has async drops, generating async drop shim
+            let mut drop_shim =
+                create_coroutine_drop_shim_async(tcx, &transform, body, drop_clean, can_unwind);
+            // Run derefer to fix Derefs that are not in the first place
+            deref_finder(tcx, &mut drop_shim, false);
+            body.coroutine.as_mut().unwrap().coroutine_drop_async = Some(drop_shim);
+        } else {
+            // If coroutine has no async drops, generating sync drop shim
+            let mut drop_shim =
+                create_coroutine_drop_shim(tcx, &transform, coroutine_ty, body, drop_clean);
+            // Run derefer to fix Derefs that are not in the first place
+            deref_finder(tcx, &mut drop_shim, false);
+            body.coroutine.as_mut().unwrap().coroutine_drop = Some(drop_shim);
 
-        body.coroutine.as_mut().unwrap().coroutine_drop = Some(drop_shim);
+            // For coroutine with sync drop, generating async proxy for `future_drop_poll` call
+            let mut proxy_shim = create_coroutine_drop_shim_proxy_async(tcx, body);
+            deref_finder(tcx, &mut proxy_shim, false);
+            body.coroutine.as_mut().unwrap().coroutine_drop_proxy_async = Some(proxy_shim);
+        }
 
         // Create the Coroutine::resume / Future::poll function
-        create_coroutine_resume_function(tcx, transform, body, can_return);
+        create_coroutine_resume_function(tcx, transform, body, can_return, can_unwind);
 
         // Run derefer to fix Derefs that are not in the first place
-        deref_finder(tcx, body);
+        deref_finder(tcx, body, false);
+    }
+
+    fn is_required(&self) -> bool {
+        true
     }
 }
 
@@ -1760,7 +1756,6 @@ impl<'tcx> Visitor<'tcx> for EnsureCoroutineFieldAssignmentsNeverAlias<'_> {
 
             StatementKind::FakeRead(..)
             | StatementKind::SetDiscriminant { .. }
-            | StatementKind::Deinit(..)
             | StatementKind::StorageLive(_)
             | StatementKind::StorageDead(_)
             | StatementKind::Retag(..)
@@ -1822,9 +1817,6 @@ impl<'tcx> Visitor<'tcx> for EnsureCoroutineFieldAssignmentsNeverAlias<'_> {
 fn check_suspend_tys<'tcx>(tcx: TyCtxt<'tcx>, layout: &CoroutineLayout<'tcx>, body: &Body<'tcx>) {
     let mut linted_tys = FxHashSet::default();
 
-    // We want a user-facing param-env.
-    let param_env = tcx.param_env(body.source.def_id());
-
     for (variant, yield_source_info) in
         layout.variant_fields.iter().zip(&layout.variant_source_info)
     {
@@ -1838,12 +1830,17 @@ fn check_suspend_tys<'tcx>(tcx: TyCtxt<'tcx>, layout: &CoroutineLayout<'tcx>, bo
                     continue;
                 };
 
-                check_must_not_suspend_ty(tcx, decl.ty, hir_id, param_env, SuspendCheckData {
-                    source_span: decl.source_info.span,
-                    yield_span: yield_source_info.span,
-                    plural_len: 1,
-                    ..Default::default()
-                });
+                check_must_not_suspend_ty(
+                    tcx,
+                    decl.ty,
+                    hir_id,
+                    SuspendCheckData {
+                        source_span: decl.source_info.span,
+                        yield_span: yield_source_info.span,
+                        plural_len: 1,
+                        ..Default::default()
+                    },
+                );
             }
         }
     }
@@ -1868,7 +1865,6 @@ fn check_must_not_suspend_ty<'tcx>(
     tcx: TyCtxt<'tcx>,
     ty: Ty<'tcx>,
     hir_id: hir::HirId,
-    param_env: ty::ParamEnv<'tcx>,
     data: SuspendCheckData<'_>,
 ) -> bool {
     if ty.is_unit() {
@@ -1883,14 +1879,15 @@ fn check_must_not_suspend_ty<'tcx>(
         ty::Adt(_, args) if ty.is_box() => {
             let boxed_ty = args.type_at(0);
             let allocator_ty = args.type_at(1);
-            check_must_not_suspend_ty(tcx, boxed_ty, hir_id, param_env, SuspendCheckData {
-                descr_pre: &format!("{}boxed ", data.descr_pre),
-                ..data
-            }) || check_must_not_suspend_ty(
+            check_must_not_suspend_ty(
+                tcx,
+                boxed_ty,
+                hir_id,
+                SuspendCheckData { descr_pre: &format!("{}boxed ", data.descr_pre), ..data },
+            ) || check_must_not_suspend_ty(
                 tcx,
                 allocator_ty,
                 hir_id,
-                param_env,
                 SuspendCheckData { descr_pre: &format!("{}allocator ", data.descr_pre), ..data },
             )
         }
@@ -1905,10 +1902,12 @@ fn check_must_not_suspend_ty<'tcx>(
                 {
                     let def_id = poly_trait_predicate.trait_ref.def_id;
                     let descr_pre = &format!("{}implementer{} of ", data.descr_pre, plural_suffix);
-                    if check_must_not_suspend_def(tcx, def_id, hir_id, SuspendCheckData {
-                        descr_pre,
-                        ..data
-                    }) {
+                    if check_must_not_suspend_def(
+                        tcx,
+                        def_id,
+                        hir_id,
+                        SuspendCheckData { descr_pre, ..data },
+                    ) {
                         has_emitted = true;
                         break;
                     }
@@ -1916,16 +1915,18 @@ fn check_must_not_suspend_ty<'tcx>(
             }
             has_emitted
         }
-        ty::Dynamic(binder, _, _) => {
+        ty::Dynamic(binder, _) => {
             let mut has_emitted = false;
             for predicate in binder.iter() {
                 if let ty::ExistentialPredicate::Trait(ref trait_ref) = predicate.skip_binder() {
                     let def_id = trait_ref.def_id;
                     let descr_post = &format!(" trait object{}{}", plural_suffix, data.descr_post);
-                    if check_must_not_suspend_def(tcx, def_id, hir_id, SuspendCheckData {
-                        descr_post,
-                        ..data
-                    }) {
+                    if check_must_not_suspend_def(
+                        tcx,
+                        def_id,
+                        hir_id,
+                        SuspendCheckData { descr_post, ..data },
+                    ) {
                         has_emitted = true;
                         break;
                     }
@@ -1937,10 +1938,12 @@ fn check_must_not_suspend_ty<'tcx>(
             let mut has_emitted = false;
             for (i, ty) in fields.iter().enumerate() {
                 let descr_post = &format!(" in tuple element {i}");
-                if check_must_not_suspend_ty(tcx, ty, hir_id, param_env, SuspendCheckData {
-                    descr_post,
-                    ..data
-                }) {
+                if check_must_not_suspend_ty(
+                    tcx,
+                    ty,
+                    hir_id,
+                    SuspendCheckData { descr_post, ..data },
+                ) {
                     has_emitted = true;
                 }
             }
@@ -1948,21 +1951,23 @@ fn check_must_not_suspend_ty<'tcx>(
         }
         ty::Array(ty, len) => {
             let descr_pre = &format!("{}array{} of ", data.descr_pre, plural_suffix);
-            check_must_not_suspend_ty(tcx, ty, hir_id, param_env, SuspendCheckData {
-                descr_pre,
-                // FIXME(must_not_suspend): This is wrong. We should handle printing unevaluated consts.
-                plural_len: len.try_to_target_usize(tcx).unwrap_or(0) as usize + 1,
-                ..data
-            })
+            check_must_not_suspend_ty(
+                tcx,
+                ty,
+                hir_id,
+                SuspendCheckData {
+                    descr_pre,
+                    // FIXME(must_not_suspend): This is wrong. We should handle printing unevaluated consts.
+                    plural_len: len.try_to_target_usize(tcx).unwrap_or(0) as usize + 1,
+                    ..data
+                },
+            )
         }
         // If drop tracking is enabled, we want to look through references, since the referent
         // may not be considered live across the await point.
         ty::Ref(_region, ty, _mutability) => {
             let descr_pre = &format!("{}reference{} to ", data.descr_pre, plural_suffix);
-            check_must_not_suspend_ty(tcx, ty, hir_id, param_env, SuspendCheckData {
-                descr_pre,
-                ..data
-            })
+            check_must_not_suspend_ty(tcx, ty, hir_id, SuspendCheckData { descr_pre, ..data })
         }
         _ => false,
     }

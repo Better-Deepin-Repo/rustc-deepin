@@ -2,6 +2,7 @@ personal_ws-1.1 en 0 utf-8
 abcabcabc
 abcd
 abcdefghijklmnopqrstuvwxyz
+ABIs
 AddAssign
 Addr
 adfb
@@ -57,6 +58,7 @@ booleans
 Bors
 BorrowMutError
 BoxMeUp
+boxt
 BTreeSet
 BufRead
 BufReader
@@ -151,6 +153,7 @@ durations
 ebook
 ebooks
 Edsger
+efdcd
 egular
 ElementRef
 else's
@@ -165,6 +168,7 @@ eprintln
 Erlang
 ErrorKind
 Español
+ETAPS
 eval
 executables
 ExitCode
@@ -205,6 +209,7 @@ grapheme
 Grapheme
 growable
 gzip
+handcoded
 handoff
 hardcode
 hardcoded
@@ -307,6 +312,7 @@ memoization
 metadata
 Metadata
 metaprogramming
+metavariable
 mibbit
 Mibbit
 microcontroller
@@ -339,6 +345,7 @@ mutexes
 Mutexes
 MutexGuard
 mutext
+mutextarct
 MyAsyncStateMachine
 MyBox
 myprogram
@@ -372,6 +379,7 @@ OpenGL
 optimizations
 OptionalFloatingPointNumber
 OptionalNumber
+optiont
 OsStr
 OsString
 other's
@@ -435,11 +443,13 @@ refactoring
 refcell
 RefCell
 refcellt
+refcelltrct
 RefMut
 reformats
 refutability
 reimplement
 RemAssign
+repost
 repr
 representable
 request's
@@ -450,6 +460,7 @@ retweet
 rewordings
 rint
 ripgrep
+Rumbul
 runnable
 runtime
 runtimes
@@ -485,6 +496,7 @@ sizeof
 SliceIndex
 Smalltalk
 snuck
+SocialPost
 someproject
 SomeType
 someusername
@@ -590,6 +602,7 @@ unsynchronized
 Unyank
 UpperCamelCase
 URIs
+urls
 UsefulType
 username
 USERPROFILE
@@ -613,6 +626,7 @@ wasi
 wasn
 weakt
 WeatherForecast
+webpage
 WebSocket
 whitespace
 wildcard

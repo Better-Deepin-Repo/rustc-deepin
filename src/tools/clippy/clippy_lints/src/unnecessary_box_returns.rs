@@ -55,7 +55,7 @@ impl UnnecessaryBoxReturns {
         }
     }
 
-    fn check_fn_item(&mut self, cx: &LateContext<'_>, decl: &FnDecl<'_>, def_id: LocalDefId, name: Symbol) {
+    fn check_fn_item(&self, cx: &LateContext<'_>, decl: &FnDecl<'_>, def_id: LocalDefId, name: Symbol) {
         // we don't want to tell someone to break an exported function if they ask us not to
         if self.avoid_breaking_exported_api && cx.effective_visibilities.is_exported(def_id) {
             return;
@@ -130,9 +130,9 @@ impl LateLintPass<'_> for UnnecessaryBoxReturns {
     }
 
     fn check_item(&mut self, cx: &LateContext<'_>, item: &Item<'_>) {
-        let ItemKind::Fn(signature, ..) = &item.kind else {
+        let ItemKind::Fn { ident, sig, .. } = &item.kind else {
             return;
         };
-        self.check_fn_item(cx, signature.decl, item.owner_id.def_id, item.ident.name);
+        self.check_fn_item(cx, sig.decl, item.owner_id.def_id, ident.name);
     }
 }

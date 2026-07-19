@@ -1,14 +1,15 @@
-#[cfg(FALSE)]
+//@ edition:2015
+#[cfg(false)]
 impl S {
     fn f(#[attr]) {} //~ ERROR expected parameter name, found `)`
 }
 
-#[cfg(FALSE)]
+#[cfg(false)]
 impl T for S {
     fn f(#[attr]) {} //~ ERROR expected parameter name, found `)`
 }
 
-#[cfg(FALSE)]
+#[cfg(false)]
 trait T {
     fn f(#[attr]); //~ ERROR expected argument name, found `)`
 }

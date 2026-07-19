@@ -13,8 +13,8 @@
     - [Tokens](tokens.md)
 
 - [Macros](macros.md)
-    - [Macros By Example](macros-by-example.md)
-    - [Procedural Macros](procedural-macros.md)
+    - [Macros by example](macros-by-example.md)
+    - [Procedural macros](procedural-macros.md)
 
 - [Crates and source files](crates-and-source-files.md)
 
@@ -35,7 +35,7 @@
     - [Implementations](items/implementations.md)
     - [External blocks](items/external-blocks.md)
     - [Generic parameters](items/generics.md)
-    - [Associated Items](items/associated-items.md)
+    - [Associated items](items/associated-items.md)
 
 - [Attributes](attributes.md)
     - [Testing](attributes/testing.md)
@@ -43,7 +43,7 @@
     - [Diagnostics](attributes/diagnostics.md)
     - [Code generation](attributes/codegen.md)
     - [Limits](attributes/limits.md)
-    - [Type System](attributes/type_system.md)
+    - [Type system](attributes/type_system.md)
     - [Debugger](attributes/debugger.md)
 
 - [Statements and expressions](statements-and-expressions.md)
@@ -63,7 +63,7 @@
         - [Closure expressions](expressions/closure-expr.md)
         - [Loop expressions](expressions/loop-expr.md)
         - [Range expressions](expressions/range-expr.md)
-        - [If and if let expressions](expressions/if-expr.md)
+        - [If expressions](expressions/if-expr.md)
         - [Match expressions](expressions/match-expr.md)
         - [Return expressions](expressions/return-expr.md)
         - [Await expressions](expressions/await-expr.md)
@@ -91,10 +91,10 @@
         - [Impl trait type](types/impl-trait.md)
         - [Type parameters](types/parameters.md)
         - [Inferred type](types/inferred.md)
-    - [Dynamically Sized Types](dynamically-sized-types.md)
+    - [Dynamically sized types](dynamically-sized-types.md)
     - [Type layout](type-layout.md)
     - [Interior mutability](interior-mutability.md)
-    - [Subtyping and Variance](subtyping.md)
+    - [Subtyping and variance](subtyping.md)
     - [Trait and lifetime bounds](trait-bounds.md)
     - [Type coercions](type-coercions.md)
     - [Destructors](destructors.md)
@@ -114,6 +114,8 @@
     - [Memory allocation and lifetime](memory-allocation-and-lifetime.md)
     - [Variables](variables.md)
 
+- [Panic](panic.md)
+
 - [Linkage](linkage.md)
 
 - [Inline assembly](inline-assembly.md)
@@ -123,14 +125,16 @@
     - [Behavior considered undefined](behavior-considered-undefined.md)
     - [Behavior not considered unsafe](behavior-not-considered-unsafe.md)
 
-- [Constant Evaluation](const_eval.md)
+- [Constant evaluation](const_eval.md)
 
-- [Application Binary Interface](abi.md)
+- [Application binary interface](abi.md)
 
 - [The Rust runtime](runtime.md)
 
 - [Appendices](appendices.md)
-    - [Macro Follow-Set Ambiguity Formal Specification](macro-ambiguity.md)
+    - [Grammar summary](grammar.md)
+    - [Syntax index](syntax-index.md)
+    - [Macro follow-set ambiguity formal specification](macro-ambiguity.md)
     - [Influences](influences.md)
     - [Test summary](test-summary.md)
     - [Glossary](glossary.md)

@@ -1,14 +1,14 @@
-# Associated Items
-
 r[items.associated]
+# Associated items
 
 r[items.associated.syntax]
-> **<sup>Syntax</sup>**\
-> _AssociatedItem_ :\
-> &nbsp;&nbsp; [_OuterAttribute_]<sup>\*</sup> (\
-> &nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp; [_MacroInvocationSemi_]\
-> &nbsp;&nbsp; &nbsp;&nbsp; | ( [_Visibility_]<sup>?</sup> ( [_TypeAlias_] | [_ConstantItem_] | [_Function_] ) )\
-> &nbsp;&nbsp; )
+```grammar,items
+AssociatedItem ->
+    OuterAttribute* (
+        MacroInvocationSemi
+      | ( Visibility? ( TypeAlias | ConstantItem | Function ) )
+    )
+```
 
 r[items.associated.intro]
 *Associated Items* are the items declared in [traits] or defined in
@@ -24,7 +24,7 @@ Specifically, there are [associated functions] (including methods), [associated 
 [associated constants]: #associated-constants
 
 r[items.associated.related]
-Associated items are useful when the associated item logically is related to the
+Associated items are useful when the associated item is logically related to the
 associating item. For example, the `is_some` method on `Option` is intrinsically
 related to Options, so should be associated.
 
@@ -37,9 +37,8 @@ r[items.associated.trait-items]
 It is the declarations that make up the contract of traits and what is available
 on generic types.
 
-## Associated functions and methods
-
 r[items.associated.fn]
+## Associated functions and methods
 
 r[items.associated.fn.intro]
 *Associated functions* are [functions] associated with a type.
@@ -60,8 +59,8 @@ r[items.associated.fn.def]
 An *associated function definition* defines a function associated with another
 type. It is written the same as a [function item].
 
-An example of a common associated function is a `new` function that returns
-a value of the type the associated function is associated with.
+> [!NOTE]
+> A common example is an associated function named `new` that returns a value of the type with which it is associated.
 
 ```rust
 struct Struct {
@@ -102,9 +101,8 @@ let _: f64 = <f64 as Num>::from_i32(42);
 let _: f64 = f64::from_i32(42);
 ```
 
-### Methods
-
 r[items.associated.fn.method]
+### Methods
 
 r[items.associated.fn.method.intro]
 Associated functions whose first parameter is named `self` are called *methods*
@@ -159,7 +157,8 @@ Shorthand             | Equivalent
 `&'lifetime self`     | `self: &'lifetime Self`
 `&'lifetime mut self` | `self: &'lifetime mut Self`
 
-> **Note**: Lifetimes can be, and usually are, elided with this shorthand.
+> [!NOTE]
+> Lifetimes can be, and usually are, elided with this shorthand.
 
 r[associated.fn.method.self-pat-mut]
 If the `self` parameter is prefixed with `mut`, it becomes a mutable variable,
@@ -213,21 +212,18 @@ let circle_shape = Circle::new();
 let bounding_box = circle_shape.bounding_box();
 ```
 
-r[items.associated.fn.params.edition2015]
-> **Edition differences**: In the 2015 edition, it is possible to declare trait
-> methods with anonymous parameters (e.g. `fn foo(u8)`). This is deprecated and
-> an error as of the 2018 edition. All parameters must have an argument name.
-
-#### Attributes on method parameters
+r[items.associated.fn.params.edition2018]
+> [!EDITION-2018]
+> In the 2015 edition, it is possible to declare trait methods with anonymous parameters (e.g. `fn foo(u8)`). This is deprecated and an error as of the 2018 edition. All parameters must have an argument name.
 
 r[items.associated.fn.param-attributes]
+#### Attributes on method parameters
 
 Attributes on method parameters follow the same rules and restrictions as
 [regular function parameters].
 
-## Associated Types
-
 r[items.associated.type]
+## Associated types
 
 r[items.associated.type.intro]
 *Associated types* are [type aliases] associated with another type.
@@ -351,7 +347,7 @@ fn main() {
 }
 ```
 
-### Associated Types Container Example
+### Associated types container example
 
 Consider the following example of a `Container` trait. Notice that the type is
 available for use in the method signatures:
@@ -394,9 +390,8 @@ trait Example {
 
 Given a reference to the associated type like `<X as Example>::Output<Y>`, the associated type itself must be `Ord`, and the type `Y` must be `Debug`.
 
-### Required where clauses on generic associated types
-
 r[items.associated.type.generic-where-clause]
+### Required where clauses on generic associated types
 
 r[items.associated.type.generic-where-clause.intro]
 Generic associated type declarations on traits currently may require a list of
@@ -465,9 +460,8 @@ trait StaticReturn {
 }
 ```
 
-## Associated Constants
-
 r[items.associated.const]
+## Associated constants
 
 r[items.associated.const.intro]
 *Associated constants* are [constants] associated with a type.
@@ -518,7 +512,7 @@ fn main() {
 }
 ```
 
-### Associated Constants Examples
+### Associated constants examples
 
 A basic example:
 
@@ -560,12 +554,6 @@ fn main() {
 }
 ```
 
-[_ConstantItem_]: constant-items.md
-[_Function_]: functions.md
-[_MacroInvocationSemi_]: ../macros.md#macro-invocation
-[_OuterAttribute_]: ../attributes.md
-[_TypeAlias_]: type-aliases.md
-[_Visibility_]: ../visibility-and-privacy.md
 [`Arc<Self>`]: ../special-types-and-traits.md#arct
 [`Box<Self>`]: ../special-types-and-traits.md#boxt
 [`Pin<P>`]: ../special-types-and-traits.md#pinp

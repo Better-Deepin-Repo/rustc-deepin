@@ -2,13 +2,14 @@ use std::ops::ControlFlow;
 
 use super::WHILE_LET_ON_ITERATOR;
 use clippy_utils::diagnostics::span_lint_and_sugg;
+use clippy_utils::res::{MaybeDef, MaybeTypeckRes};
 use clippy_utils::source::snippet_with_applicability;
 use clippy_utils::visitors::is_res_used;
-use clippy_utils::{get_enclosing_loop_or_multi_call_closure, higher, is_refutable, is_res_lang_ctor, is_trait_method};
+use clippy_utils::{as_some_pattern, get_enclosing_loop_or_multi_call_closure, higher, is_refutable};
 use rustc_errors::Applicability;
 use rustc_hir::def::Res;
 use rustc_hir::intravisit::{Visitor, walk_expr};
-use rustc_hir::{Closure, Expr, ExprKind, HirId, LangItem, LetStmt, Mutability, PatKind, UnOp};
+use rustc_hir::{Closure, Expr, ExprKind, HirId, LetStmt, Mutability, UnOp};
 use rustc_lint::LateContext;
 use rustc_middle::hir::nested_filter::OnlyBodies;
 use rustc_middle::ty::adjustment::Adjust;
@@ -18,12 +19,11 @@ use rustc_span::symbol::sym;
 pub(super) fn check<'tcx>(cx: &LateContext<'tcx>, expr: &'tcx Expr<'_>) {
     if let Some(higher::WhileLet { if_then, let_pat, let_expr, label, .. }) = higher::WhileLet::hir(expr)
         // check for `Some(..)` pattern
-        && let PatKind::TupleStruct(ref pat_path, some_pat, _) = let_pat.kind
-        && is_res_lang_ctor(cx, cx.qpath_res(pat_path, let_pat.hir_id), LangItem::OptionSome)
+        && let Some(some_pat) = as_some_pattern(cx, let_pat)
         // check for call to `Iterator::next`
         && let ExprKind::MethodCall(method_name, iter_expr, [], _) = let_expr.kind
         && method_name.ident.name == sym::next
-        && is_trait_method(cx, let_expr, sym::Iterator)
+        && cx.ty_based_def(let_expr).opt_parent(cx).is_diag_item(cx, sym::Iterator)
         && let Some(iter_expr_struct) = try_parse_iter_expr(cx, iter_expr)
         // get the loop containing the match expression
         && !uses_iter(cx, &iter_expr_struct, if_then)
@@ -245,8 +245,8 @@ fn needs_mutable_borrow(cx: &LateContext<'_>, iter_expr: &IterExpr, loop_expr: &
     impl<'tcx> Visitor<'tcx> for AfterLoopVisitor<'_, '_, 'tcx> {
         type NestedFilter = OnlyBodies;
         type Result = ControlFlow<()>;
-        fn nested_visit_map(&mut self) -> Self::Map {
-            self.cx.tcx.hir()
+        fn maybe_tcx(&mut self) -> Self::MaybeTyCtxt {
+            self.cx.tcx
         }
 
         fn visit_expr(&mut self, e: &'tcx Expr<'_>) -> Self::Result {
@@ -288,8 +288,8 @@ fn needs_mutable_borrow(cx: &LateContext<'_>, iter_expr: &IterExpr, loop_expr: &
     }
     impl<'tcx> Visitor<'tcx> for NestedLoopVisitor<'_, '_, 'tcx> {
         type NestedFilter = OnlyBodies;
-        fn nested_visit_map(&mut self) -> Self::Map {
-            self.cx.tcx.hir()
+        fn maybe_tcx(&mut self) -> Self::MaybeTyCtxt {
+            self.cx.tcx
         }
 
         fn visit_local(&mut self, l: &'tcx LetStmt<'_>) {
@@ -351,7 +351,7 @@ fn needs_mutable_borrow(cx: &LateContext<'_>, iter_expr: &IterExpr, loop_expr: &
             loop_id: loop_expr.hir_id,
             after_loop: false,
         };
-        v.visit_expr(cx.tcx.hir().body(cx.enclosing_body.unwrap()).value)
+        v.visit_expr(cx.tcx.hir_body(cx.enclosing_body.unwrap()).value)
             .is_break()
     }
 }

@@ -1,4 +1,7 @@
-use crate::spec::{Cc, LinkerFlavor, Lld, PanicStrategy, RelocModel, Target, TargetOptions};
+use crate::spec::{
+    Abi, Arch, Cc, LinkerFlavor, Lld, PanicStrategy, RelocModel, Target, TargetMetadata,
+    TargetOptions,
+};
 
 pub(crate) fn target() -> Target {
     Target {
@@ -6,16 +9,17 @@ pub(crate) fn target() -> Target {
         // `options.llvm_abiname`.
         data_layout: "e-m:e-p:32:32-i64:64-n32-S32".into(),
         llvm_target: "riscv32".into(),
-        metadata: crate::spec::TargetMetadata {
+        metadata: TargetMetadata {
             description: Some("Bare RISC-V (RV32EM ISA)".into()),
             tier: Some(3),
             host_tools: Some(false),
             std: Some(false),
         },
         pointer_width: 32,
-        arch: "riscv32".into(),
+        arch: Arch::RiscV32,
 
         options: TargetOptions {
+            abi: Abi::Ilp32e,
             linker_flavor: LinkerFlavor::Gnu(Cc::No, Lld::Yes),
             linker: Some("rust-lld".into()),
             cpu: "generic-rv32".into(),

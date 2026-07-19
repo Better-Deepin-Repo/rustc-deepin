@@ -2,56 +2,59 @@
 
 // tidy-alphabetical-start
 #![allow(internal_features)]
-#![doc(rust_logo)]
 #![feature(assert_matches)]
 #![feature(box_patterns)]
 #![feature(file_buffered)]
-#![feature(let_chains)]
+#![feature(if_let_guard)]
+#![feature(negative_impls)]
 #![feature(never_type)]
 #![feature(rustc_attrs)]
-#![feature(rustdoc_internals)]
 #![feature(stmt_expr_attributes)]
 #![feature(try_blocks)]
-#![warn(unreachable_pub)]
 // tidy-alphabetical-end
 
 use std::borrow::Cow;
-use std::cell::RefCell;
+use std::cell::{OnceCell, RefCell};
 use std::marker::PhantomData;
-use std::ops::Deref;
+use std::ops::{ControlFlow, Deref};
+use std::rc::Rc;
 
+use borrow_set::LocalsStateAtExit;
+use polonius_engine::AllFacts;
+use root_cx::BorrowCheckRootCtxt;
 use rustc_abi::FieldIdx;
+use rustc_data_structures::frozen::Frozen;
 use rustc_data_structures::fx::{FxIndexMap, FxIndexSet};
 use rustc_data_structures::graph::dominators::Dominators;
 use rustc_errors::LintDiagnostic;
 use rustc_hir as hir;
 use rustc_hir::CRATE_HIR_ID;
 use rustc_hir::def_id::LocalDefId;
-use rustc_index::bit_set::{BitSet, MixedBitSet};
+use rustc_index::bit_set::MixedBitSet;
 use rustc_index::{IndexSlice, IndexVec};
+use rustc_infer::infer::outlives::env::RegionBoundPairs;
 use rustc_infer::infer::{
     InferCtxt, NllRegionVariableOrigin, RegionVariableOrigin, TyCtxtInferExt,
 };
-use rustc_middle::mir::tcx::PlaceTy;
 use rustc_middle::mir::*;
 use rustc_middle::query::Providers;
-use rustc_middle::ty::fold::fold_regions;
-use rustc_middle::ty::{self, ParamEnv, RegionVid, TyCtxt, TypingMode};
-use rustc_middle::{bug, span_bug};
-use rustc_mir_dataflow::impls::{
-    EverInitializedPlaces, MaybeInitializedPlaces, MaybeUninitializedPlaces,
+use rustc_middle::ty::{
+    self, ParamEnv, RegionVid, Ty, TyCtxt, TypeFoldable, TypeVisitable, TypingMode, fold_regions,
 };
+use rustc_middle::{bug, span_bug};
+use rustc_mir_dataflow::impls::{EverInitializedPlaces, MaybeUninitializedPlaces};
 use rustc_mir_dataflow::move_paths::{
     InitIndex, InitLocation, LookupResult, MoveData, MovePathIndex,
 };
+use rustc_mir_dataflow::points::DenseLocationMap;
 use rustc_mir_dataflow::{Analysis, EntryStates, Results, ResultsVisitor, visit_results};
 use rustc_session::lint::builtin::{TAIL_EXPR_DROP_ORDER, UNUSED_MUT};
-use rustc_span::{Span, Symbol};
+use rustc_span::{ErrorGuaranteed, Span, Symbol};
 use smallvec::SmallVec;
 use tracing::{debug, instrument};
 
 use crate::borrow_set::{BorrowData, BorrowSet};
-use crate::consumers::{BodyWithBorrowckFacts, ConsumerOptions};
+use crate::consumers::{BodyWithBorrowckFacts, RustcFacts};
 use crate::dataflow::{BorrowIndex, Borrowck, BorrowckDomain, Borrows};
 use crate::diagnostics::{
     AccessKind, BorrowckDiagnosticsBuffer, IllegalMoveOriginKind, MoveError, RegionName,
@@ -59,11 +62,17 @@ use crate::diagnostics::{
 use crate::path_utils::*;
 use crate::place_ext::PlaceExt;
 use crate::places_conflict::{PlaceConflictBias, places_conflict};
-use crate::polonius::legacy::{LocationTable, PoloniusOutput};
+use crate::polonius::legacy::{
+    PoloniusFacts, PoloniusFactsExt, PoloniusLocationTable, PoloniusOutput,
+};
+use crate::polonius::{PoloniusContext, PoloniusDiagnosticsContext};
 use crate::prefixes::PrefixSet;
 use crate::region_infer::RegionInferenceContext;
+use crate::region_infer::opaque_types::DeferredOpaqueTypeError;
 use crate::renumber::RegionCtxt;
 use crate::session_diagnostics::VarNeedNotMut;
+use crate::type_check::free_region_relations::UniversalRegionRelations;
+use crate::type_check::{Locations, MirTypeckRegionConstraints, MirTypeckResults};
 
 mod borrow_set;
 mod borrowck_errors;
@@ -71,7 +80,7 @@ mod constraints;
 mod dataflow;
 mod def_use;
 mod diagnostics;
-mod member_constraints;
+mod handle_placeholders;
 mod nll;
 mod path_utils;
 mod place_ext;
@@ -80,11 +89,11 @@ mod polonius;
 mod prefixes;
 mod region_infer;
 mod renumber;
+mod root_cx;
 mod session_diagnostics;
 mod type_check;
 mod universal_regions;
 mod used_muts;
-mod util;
 
 /// A public API provided for the Rust compiler consumers.
 pub mod consumers;
@@ -102,66 +111,213 @@ pub fn provide(providers: &mut Providers) {
     *providers = Providers { mir_borrowck, ..*providers };
 }
 
-fn mir_borrowck(tcx: TyCtxt<'_>, def: LocalDefId) -> &BorrowCheckResult<'_> {
-    let (input_body, promoted) = tcx.mir_promoted(def);
+/// Provider for `query mir_borrowck`. Similar to `typeck`, this must
+/// only be called for typeck roots which will then borrowck all
+/// nested bodies as well.
+fn mir_borrowck(
+    tcx: TyCtxt<'_>,
+    def: LocalDefId,
+) -> Result<&FxIndexMap<LocalDefId, ty::DefinitionSiteHiddenType<'_>>, ErrorGuaranteed> {
+    assert!(!tcx.is_typeck_child(def.to_def_id()));
+    let (input_body, _) = tcx.mir_promoted(def);
     debug!("run query mir_borrowck: {}", tcx.def_path_str(def));
 
     let input_body: &Body<'_> = &input_body.borrow();
-
-    if input_body.should_skip() || input_body.tainted_by_errors.is_some() {
-        debug!("Skipping borrowck because of injected body or tainted body");
-        // Let's make up a borrowck result! Fun times!
-        let result = BorrowCheckResult {
-            concrete_opaque_types: FxIndexMap::default(),
-            closure_requirements: None,
-            used_mut_upvars: SmallVec::new(),
-            tainted_by_errors: input_body.tainted_by_errors,
-        };
-        return tcx.arena.alloc(result);
+    if let Some(guar) = input_body.tainted_by_errors {
+        debug!("Skipping borrowck because of tainted body");
+        Err(guar)
+    } else if input_body.should_skip() {
+        debug!("Skipping borrowck because of injected body");
+        let opaque_types = Default::default();
+        Ok(tcx.arena.alloc(opaque_types))
+    } else {
+        let mut root_cx = BorrowCheckRootCtxt::new(tcx, def, None);
+        root_cx.do_mir_borrowck();
+        root_cx.finalize()
     }
-
-    let borrowck_result = do_mir_borrowck(tcx, input_body, &*promoted.borrow(), None).0;
-    debug!("mir_borrowck done");
-
-    tcx.arena.alloc(borrowck_result)
 }
 
-/// Perform the actual borrow checking.
+/// Data propagated to the typeck parent by nested items.
+/// This should always be empty for the typeck root.
+#[derive(Debug)]
+struct PropagatedBorrowCheckResults<'tcx> {
+    closure_requirements: Option<ClosureRegionRequirements<'tcx>>,
+    used_mut_upvars: SmallVec<[FieldIdx; 8]>,
+}
+
+type DeferredClosureRequirements<'tcx> = Vec<(LocalDefId, ty::GenericArgsRef<'tcx>, Locations)>;
+
+/// After we borrow check a closure, we are left with various
+/// requirements that we have inferred between the free regions that
+/// appear in the closure's signature or on its field types. These
+/// requirements are then verified and proved by the closure's
+/// creating function. This struct encodes those requirements.
 ///
-/// Use `consumer_options: None` for the default behavior of returning
-/// [`BorrowCheckResult`] only. Otherwise, return [`BodyWithBorrowckFacts`] according
-/// to the given [`ConsumerOptions`].
-#[instrument(skip(tcx, input_body, input_promoted), fields(id=?input_body.source.def_id()), level = "debug")]
-fn do_mir_borrowck<'tcx>(
-    tcx: TyCtxt<'tcx>,
-    input_body: &Body<'tcx>,
-    input_promoted: &IndexSlice<Promoted, Body<'tcx>>,
-    consumer_options: Option<ConsumerOptions>,
-) -> (BorrowCheckResult<'tcx>, Option<Box<BodyWithBorrowckFacts<'tcx>>>) {
-    let def = input_body.source.def_id().expect_local();
-    let infcx = BorrowckInferCtxt::new(tcx, def);
-    if let Some(e) = input_body.tainted_by_errors {
-        infcx.set_tainted_by_errors(e);
+/// The requirements are listed as being between various `RegionVid`. The 0th
+/// region refers to `'static`; subsequent region vids refer to the free
+/// regions that appear in the closure (or coroutine's) type, in order of
+/// appearance. (This numbering is actually defined by the `UniversalRegions`
+/// struct in the NLL region checker. See for example
+/// `UniversalRegions::closure_mapping`.) Note the free regions in the
+/// closure's signature and captures are erased.
+///
+/// Example: If type check produces a closure with the closure args:
+///
+/// ```text
+/// ClosureArgs = [
+///     'a,                                         // From the parent.
+///     'b,
+///     i8,                                         // the "closure kind"
+///     for<'x> fn(&'<erased> &'x u32) -> &'x u32,  // the "closure signature"
+///     &'<erased> String,                          // some upvar
+/// ]
+/// ```
+///
+/// We would "renumber" each free region to a unique vid, as follows:
+///
+/// ```text
+/// ClosureArgs = [
+///     '1,                                         // From the parent.
+///     '2,
+///     i8,                                         // the "closure kind"
+///     for<'x> fn(&'3 &'x u32) -> &'x u32,         // the "closure signature"
+///     &'4 String,                                 // some upvar
+/// ]
+/// ```
+///
+/// Now the code might impose a requirement like `'1: '2`. When an
+/// instance of the closure is created, the corresponding free regions
+/// can be extracted from its type and constrained to have the given
+/// outlives relationship.
+#[derive(Clone, Debug)]
+pub struct ClosureRegionRequirements<'tcx> {
+    /// The number of external regions defined on the closure. In our
+    /// example above, it would be 3 -- one for `'static`, then `'1`
+    /// and `'2`. This is just used for a sanity check later on, to
+    /// make sure that the number of regions we see at the callsite
+    /// matches.
+    pub num_external_vids: usize,
+
+    /// Requirements between the various free regions defined in
+    /// indices.
+    pub outlives_requirements: Vec<ClosureOutlivesRequirement<'tcx>>,
+}
+
+/// Indicates an outlives-constraint between a type or between two
+/// free regions declared on the closure.
+#[derive(Copy, Clone, Debug)]
+pub struct ClosureOutlivesRequirement<'tcx> {
+    // This region or type ...
+    pub subject: ClosureOutlivesSubject<'tcx>,
+
+    // ... must outlive this one.
+    pub outlived_free_region: ty::RegionVid,
+
+    // If not, report an error here ...
+    pub blame_span: Span,
+
+    // ... due to this reason.
+    pub category: ConstraintCategory<'tcx>,
+}
+
+// Make sure this enum doesn't unintentionally grow
+#[cfg(target_pointer_width = "64")]
+rustc_data_structures::static_assert_size!(ConstraintCategory<'_>, 16);
+
+/// The subject of a `ClosureOutlivesRequirement` -- that is, the thing
+/// that must outlive some region.
+#[derive(Copy, Clone, Debug)]
+pub enum ClosureOutlivesSubject<'tcx> {
+    /// Subject is a type, typically a type parameter, but could also
+    /// be a projection. Indicates a requirement like `T: 'a` being
+    /// passed to the caller, where the type here is `T`.
+    Ty(ClosureOutlivesSubjectTy<'tcx>),
+
+    /// Subject is a free region from the closure. Indicates a requirement
+    /// like `'a: 'b` being passed to the caller; the region here is `'a`.
+    Region(ty::RegionVid),
+}
+
+/// Represents a `ty::Ty` for use in [`ClosureOutlivesSubject`].
+///
+/// This abstraction is necessary because the type may include `ReVar` regions,
+/// which is what we use internally within NLL code, and they can't be used in
+/// a query response.
+#[derive(Copy, Clone, Debug)]
+pub struct ClosureOutlivesSubjectTy<'tcx> {
+    inner: Ty<'tcx>,
+}
+// DO NOT implement `TypeVisitable` or `TypeFoldable` traits, because this
+// type is not recognized as a binder for late-bound region.
+impl<'tcx, I> !TypeVisitable<I> for ClosureOutlivesSubjectTy<'tcx> {}
+impl<'tcx, I> !TypeFoldable<I> for ClosureOutlivesSubjectTy<'tcx> {}
+
+impl<'tcx> ClosureOutlivesSubjectTy<'tcx> {
+    /// All regions of `ty` must be of kind `ReVar` and must represent
+    /// universal regions *external* to the closure.
+    pub fn bind(tcx: TyCtxt<'tcx>, ty: Ty<'tcx>) -> Self {
+        let inner = fold_regions(tcx, ty, |r, depth| match r.kind() {
+            ty::ReVar(vid) => {
+                let br = ty::BoundRegion {
+                    var: ty::BoundVar::from_usize(vid.index()),
+                    kind: ty::BoundRegionKind::Anon,
+                };
+                ty::Region::new_bound(tcx, depth, br)
+            }
+            _ => bug!("unexpected region in ClosureOutlivesSubjectTy: {r:?}"),
+        });
+
+        Self { inner }
     }
 
-    let mut local_names = IndexVec::from_elem(None, &input_body.local_decls);
-    for var_debug_info in &input_body.var_debug_info {
-        if let VarDebugInfoContents::Place(place) = var_debug_info.value {
-            if let Some(local) = place.as_local() {
-                if let Some(prev_name) = local_names[local]
-                    && var_debug_info.name != prev_name
-                {
-                    span_bug!(
-                        var_debug_info.source_info.span,
-                        "local {:?} has many names (`{}` vs `{}`)",
-                        local,
-                        prev_name,
-                        var_debug_info.name
-                    );
-                }
-                local_names[local] = Some(var_debug_info.name);
+    pub fn instantiate(
+        self,
+        tcx: TyCtxt<'tcx>,
+        mut map: impl FnMut(ty::RegionVid) -> ty::Region<'tcx>,
+    ) -> Ty<'tcx> {
+        fold_regions(tcx, self.inner, |r, depth| match r.kind() {
+            ty::ReBound(ty::BoundVarIndexKind::Bound(debruijn), br) => {
+                debug_assert_eq!(debruijn, depth);
+                map(ty::RegionVid::from_usize(br.var.index()))
             }
-        }
+            _ => bug!("unexpected region {r:?}"),
+        })
+    }
+}
+
+struct CollectRegionConstraintsResult<'tcx> {
+    infcx: BorrowckInferCtxt<'tcx>,
+    body_owned: Body<'tcx>,
+    promoted: IndexVec<Promoted, Body<'tcx>>,
+    move_data: MoveData<'tcx>,
+    borrow_set: BorrowSet<'tcx>,
+    location_table: PoloniusLocationTable,
+    location_map: Rc<DenseLocationMap>,
+    universal_region_relations: Frozen<UniversalRegionRelations<'tcx>>,
+    region_bound_pairs: Frozen<RegionBoundPairs<'tcx>>,
+    known_type_outlives_obligations: Frozen<Vec<ty::PolyTypeOutlivesPredicate<'tcx>>>,
+    constraints: MirTypeckRegionConstraints<'tcx>,
+    deferred_closure_requirements: DeferredClosureRequirements<'tcx>,
+    deferred_opaque_type_errors: Vec<DeferredOpaqueTypeError<'tcx>>,
+    polonius_facts: Option<AllFacts<RustcFacts>>,
+    polonius_context: Option<PoloniusContext>,
+}
+
+/// Start borrow checking by collecting the region constraints for
+/// the current body. This initializes the relevant data structures
+/// and then type checks the MIR body.
+fn borrowck_collect_region_constraints<'tcx>(
+    root_cx: &mut BorrowCheckRootCtxt<'tcx>,
+    def: LocalDefId,
+) -> CollectRegionConstraintsResult<'tcx> {
+    let tcx = root_cx.tcx;
+    let infcx = BorrowckInferCtxt::new(tcx, def, root_cx.root_def_id());
+    let (input_body, promoted) = tcx.mir_promoted(def);
+    let input_body: &Body<'_> = &input_body.borrow();
+    let input_promoted: &IndexSlice<_, _> = &promoted.borrow();
+    if let Some(e) = input_body.tainted_by_errors {
+        infcx.set_tainted_by_errors(e);
+        root_cx.set_tainted_by_errors(e);
     }
 
     // Replace all regions with fresh inference variables. This
@@ -170,90 +326,152 @@ fn do_mir_borrowck<'tcx>(
     // will have a lifetime tied to the inference context.
     let mut body_owned = input_body.clone();
     let mut promoted = input_promoted.to_owned();
-    let free_regions = nll::replace_regions_in_mir(&infcx, &mut body_owned, &mut promoted);
+    let universal_regions = nll::replace_regions_in_mir(&infcx, &mut body_owned, &mut promoted);
     let body = &body_owned; // no further changes
 
-    // FIXME(-Znext-solver): A bit dubious that we're only registering
-    // predefined opaques in the typeck root.
-    if infcx.next_trait_solver() && !infcx.tcx.is_typeck_child(body.source.def_id()) {
-        infcx.register_predefined_opaques_for_next_solver(def);
-    }
-
-    let location_table = LocationTable::new(body);
+    let location_table = PoloniusLocationTable::new(body);
 
     let move_data = MoveData::gather_moves(body, tcx, |_| true);
-    let promoted_move_data = promoted
-        .iter_enumerated()
-        .map(|(idx, body)| (idx, MoveData::gather_moves(body, tcx, |_| true)));
 
-    let flow_inits = MaybeInitializedPlaces::new(tcx, body, &move_data)
-        .iterate_to_fixpoint(tcx, body, Some("borrowck"))
-        .into_results_cursor(body);
-
-    let locals_are_invalidated_at_exit = tcx.hir().body_owner_kind(def).is_fn_or_closure();
+    let locals_are_invalidated_at_exit = tcx.hir_body_owner_kind(def).is_fn_or_closure();
     let borrow_set = BorrowSet::build(tcx, body, locals_are_invalidated_at_exit, &move_data);
 
-    // Compute non-lexical lifetimes.
+    let location_map = Rc::new(DenseLocationMap::new(body));
+
+    let polonius_input = root_cx.consumer.as_ref().map_or(false, |c| c.polonius_input())
+        || infcx.tcx.sess.opts.unstable_opts.polonius.is_legacy_enabled();
+    let mut polonius_facts =
+        (polonius_input || PoloniusFacts::enabled(infcx.tcx)).then_some(PoloniusFacts::default());
+
+    // Run the MIR type-checker.
+    let MirTypeckResults {
+        constraints,
+        universal_region_relations,
+        region_bound_pairs,
+        known_type_outlives_obligations,
+        deferred_closure_requirements,
+        polonius_context,
+    } = type_check::type_check(
+        root_cx,
+        &infcx,
+        body,
+        &promoted,
+        universal_regions,
+        &location_table,
+        &borrow_set,
+        &mut polonius_facts,
+        &move_data,
+        Rc::clone(&location_map),
+    );
+
+    CollectRegionConstraintsResult {
+        infcx,
+        body_owned,
+        promoted,
+        move_data,
+        borrow_set,
+        location_table,
+        location_map,
+        universal_region_relations,
+        region_bound_pairs,
+        known_type_outlives_obligations,
+        constraints,
+        deferred_closure_requirements,
+        deferred_opaque_type_errors: Default::default(),
+        polonius_facts,
+        polonius_context,
+    }
+}
+
+/// Using the region constraints computed by [borrowck_collect_region_constraints]
+/// and the additional constraints from [BorrowCheckRootCtxt::handle_opaque_type_uses],
+/// compute the region graph and actually check for any borrowck errors.
+fn borrowck_check_region_constraints<'tcx>(
+    root_cx: &mut BorrowCheckRootCtxt<'tcx>,
+    CollectRegionConstraintsResult {
+        infcx,
+        body_owned,
+        promoted,
+        move_data,
+        borrow_set,
+        location_table,
+        location_map,
+        universal_region_relations,
+        region_bound_pairs: _,
+        known_type_outlives_obligations: _,
+        constraints,
+        deferred_closure_requirements,
+        deferred_opaque_type_errors,
+        polonius_facts,
+        polonius_context,
+    }: CollectRegionConstraintsResult<'tcx>,
+) -> PropagatedBorrowCheckResults<'tcx> {
+    assert!(!infcx.has_opaque_types_in_storage());
+    assert!(deferred_closure_requirements.is_empty());
+    let tcx = root_cx.tcx;
+    let body = &body_owned;
+    let def = body.source.def_id().expect_local();
+
+    // Compute non-lexical lifetimes using the constraints computed
+    // by typechecking the MIR body.
     let nll::NllOutput {
         regioncx,
-        opaque_type_values,
         polonius_input,
         polonius_output,
         opt_closure_req,
         nll_errors,
-        localized_outlives_constraints,
+        polonius_diagnostics,
     } = nll::compute_regions(
+        root_cx,
         &infcx,
-        free_regions,
         body,
-        &promoted,
         &location_table,
-        flow_inits,
         &move_data,
         &borrow_set,
-        consumer_options,
+        location_map,
+        universal_region_relations,
+        constraints,
+        polonius_facts,
+        polonius_context,
     );
 
     // Dump MIR results into a file, if that is enabled. This lets us
     // write unit-tests, as well as helping with debugging.
     nll::dump_nll_mir(&infcx, body, &regioncx, &opt_closure_req, &borrow_set);
-
-    // We also have a `#[rustc_regions]` annotation that causes us to dump
-    // information.
-    let diags_buffer = &mut BorrowckDiagnosticsBuffer::default();
-    nll::dump_annotation(
+    polonius::dump_polonius_mir(
         &infcx,
         body,
         &regioncx,
         &opt_closure_req,
-        &opaque_type_values,
-        diags_buffer,
+        &borrow_set,
+        polonius_diagnostics.as_ref(),
     );
 
-    let movable_coroutine =
-        // The first argument is the coroutine type passed by value
-        if let Some(local) = body.local_decls.raw.get(1)
-        // Get the interior types and args which typeck computed
-        && let ty::Coroutine(def_id, _) = *local.ty.kind()
-        && tcx.coroutine_movability(def_id) == hir::Movability::Movable
-    {
-        true
-    } else {
-        false
-    };
+    // We also have a `#[rustc_regions]` annotation that causes us to dump
+    // information.
+    nll::dump_annotation(&infcx, body, &regioncx, &opt_closure_req);
 
-    for (idx, move_data) in promoted_move_data {
+    let movable_coroutine = body.coroutine.is_some()
+        && tcx.coroutine_movability(def.to_def_id()) == hir::Movability::Movable;
+
+    let diags_buffer = &mut BorrowckDiagnosticsBuffer::default();
+    // While promoteds should mostly be correct by construction, we need to check them for
+    // invalid moves to detect moving out of arrays:`struct S; fn main() { &([S][0]); }`.
+    for promoted_body in &promoted {
         use rustc_middle::mir::visit::Visitor;
-
-        let promoted_body = &promoted[idx];
+        // This assumes that we won't use some of the fields of the `promoted_mbcx`
+        // when detecting and reporting move errors. While it would be nice to move
+        // this check out of `MirBorrowckCtxt`, actually doing so is far from trivial.
+        let move_data = MoveData::gather_moves(promoted_body, tcx, |_| true);
         let mut promoted_mbcx = MirBorrowckCtxt {
+            root_cx,
             infcx: &infcx,
             body: promoted_body,
             move_data: &move_data,
-            location_table: &location_table, // no need to create a real one for the promoted, it is not used
+            // no need to create a real location table for the promoted, it is not used
+            location_table: &location_table,
             movable_coroutine,
             fn_self_span_reported: Default::default(),
-            locals_are_invalidated_at_exit,
             access_place_error_reported: Default::default(),
             reservation_error_reported: Default::default(),
             uninitialized_error_reported: Default::default(),
@@ -262,16 +480,14 @@ fn do_mir_borrowck<'tcx>(
             used_mut_upvars: SmallVec::new(),
             borrow_set: &borrow_set,
             upvars: &[],
-            local_names: IndexVec::from_elem(None, &promoted_body.local_decls),
+            local_names: OnceCell::from(IndexVec::from_elem(None, &promoted_body.local_decls)),
             region_names: RefCell::default(),
             next_region_name: RefCell::new(1),
             polonius_output: None,
             move_errors: Vec::new(),
             diags_buffer,
+            polonius_diagnostics: polonius_diagnostics.as_ref(),
         };
-        MoveVisitor { ctxt: &mut promoted_mbcx }.visit_body(promoted_body);
-        promoted_mbcx.report_move_errors();
-
         struct MoveVisitor<'a, 'b, 'infcx, 'tcx> {
             ctxt: &'a mut MirBorrowckCtxt<'b, 'infcx, 'tcx>,
         }
@@ -283,15 +499,17 @@ fn do_mir_borrowck<'tcx>(
                 }
             }
         }
+        MoveVisitor { ctxt: &mut promoted_mbcx }.visit_body(promoted_body);
+        promoted_mbcx.report_move_errors();
     }
 
     let mut mbcx = MirBorrowckCtxt {
+        root_cx,
         infcx: &infcx,
         body,
         move_data: &move_data,
         location_table: &location_table,
         movable_coroutine,
-        locals_are_invalidated_at_exit,
         fn_self_span_reported: Default::default(),
         access_place_error_reported: Default::default(),
         reservation_error_reported: Default::default(),
@@ -301,36 +519,31 @@ fn do_mir_borrowck<'tcx>(
         used_mut_upvars: SmallVec::new(),
         borrow_set: &borrow_set,
         upvars: tcx.closure_captures(def),
-        local_names,
+        local_names: OnceCell::new(),
         region_names: RefCell::default(),
         next_region_name: RefCell::new(1),
-        polonius_output,
         move_errors: Vec::new(),
         diags_buffer,
+        polonius_output: polonius_output.as_deref(),
+        polonius_diagnostics: polonius_diagnostics.as_ref(),
     };
 
     // Compute and report region errors, if any.
-    mbcx.report_region_errors(nll_errors);
+    if nll_errors.is_empty() {
+        mbcx.report_opaque_type_errors(deferred_opaque_type_errors);
+    } else {
+        mbcx.report_region_errors(nll_errors);
+    }
 
-    let mut flow_results = get_flow_results(tcx, body, &move_data, &borrow_set, &regioncx);
+    let flow_results = get_flow_results(tcx, body, &move_data, &borrow_set, &regioncx);
     visit_results(
         body,
         traversal::reverse_postorder(body).map(|(bb, _)| bb),
-        &mut flow_results,
+        &flow_results,
         &mut mbcx,
     );
 
     mbcx.report_move_errors();
-
-    // If requested, dump polonius MIR.
-    polonius::dump_polonius_mir(
-        &infcx,
-        body,
-        &regioncx,
-        &borrow_set,
-        localized_outlives_constraints,
-        &opt_closure_req,
-    );
 
     // For each non-user used mutable variable, check if it's been assigned from
     // a user-declared local. If so, then put that local into the used_mut set.
@@ -352,33 +565,33 @@ fn do_mir_borrowck<'tcx>(
 
     debug!("mbcx.used_mut: {:?}", mbcx.used_mut);
     mbcx.lint_unused_mut();
-    let tainted_by_errors = mbcx.emit_errors();
+    if let Some(guar) = mbcx.emit_errors() {
+        mbcx.root_cx.set_tainted_by_errors(guar);
+    }
 
-    let result = BorrowCheckResult {
-        concrete_opaque_types: opaque_type_values,
+    let result = PropagatedBorrowCheckResults {
         closure_requirements: opt_closure_req,
         used_mut_upvars: mbcx.used_mut_upvars,
-        tainted_by_errors,
     };
 
-    let body_with_facts = if consumer_options.is_some() {
-        let output_facts = mbcx.polonius_output;
-        Some(Box::new(BodyWithBorrowckFacts {
-            body: body_owned,
-            promoted,
-            borrow_set,
-            region_inference_context: regioncx,
-            location_table: polonius_input.as_ref().map(|_| location_table),
-            input_facts: polonius_input,
-            output_facts,
-        }))
-    } else {
-        None
-    };
+    if let Some(consumer) = &mut root_cx.consumer {
+        consumer.insert_body(
+            def,
+            BodyWithBorrowckFacts {
+                body: body_owned,
+                promoted,
+                borrow_set,
+                region_inference_context: regioncx,
+                location_table: polonius_input.as_ref().map(|_| location_table),
+                input_facts: polonius_input,
+                output_facts: polonius_output,
+            },
+        );
+    }
 
     debug!("do_mir_borrowck: result = {:#?}", result);
 
-    (result, body_with_facts)
+    result
 }
 
 fn get_flow_results<'a, 'tcx>(
@@ -414,7 +627,7 @@ fn get_flow_results<'a, 'tcx>(
 
     assert_eq!(borrows.entry_states.len(), uninits.entry_states.len());
     assert_eq!(borrows.entry_states.len(), ever_inits.entry_states.len());
-    let entry_states: EntryStates<'_, Borrowck<'_, '_>> =
+    let entry_states: EntryStates<_> =
         itertools::izip!(borrows.entry_states, uninits.entry_states, ever_inits.entry_states)
             .map(|(borrows, uninits, ever_inits)| BorrowckDomain { borrows, uninits, ever_inits })
             .collect();
@@ -424,15 +637,26 @@ fn get_flow_results<'a, 'tcx>(
 
 pub(crate) struct BorrowckInferCtxt<'tcx> {
     pub(crate) infcx: InferCtxt<'tcx>,
-    pub(crate) reg_var_to_origin: RefCell<FxIndexMap<ty::RegionVid, RegionCtxt>>,
+    pub(crate) root_def_id: LocalDefId,
     pub(crate) param_env: ParamEnv<'tcx>,
+    pub(crate) reg_var_to_origin: RefCell<FxIndexMap<ty::RegionVid, RegionCtxt>>,
 }
 
 impl<'tcx> BorrowckInferCtxt<'tcx> {
-    pub(crate) fn new(tcx: TyCtxt<'tcx>, def_id: LocalDefId) -> Self {
-        let infcx = tcx.infer_ctxt().build(TypingMode::analysis_in_body(tcx, def_id));
+    pub(crate) fn new(tcx: TyCtxt<'tcx>, def_id: LocalDefId, root_def_id: LocalDefId) -> Self {
+        let typing_mode = if tcx.use_typing_mode_borrowck() {
+            TypingMode::borrowck(tcx, def_id)
+        } else {
+            TypingMode::analysis_in_body(tcx, def_id)
+        };
+        let infcx = tcx.infer_ctxt().build(typing_mode);
         let param_env = tcx.param_env(def_id);
-        BorrowckInferCtxt { infcx, reg_var_to_origin: RefCell::new(Default::default()), param_env }
+        BorrowckInferCtxt {
+            infcx,
+            root_def_id,
+            reg_var_to_origin: RefCell::new(Default::default()),
+            param_env,
+        }
     }
 
     pub(crate) fn next_region_var<F>(
@@ -477,28 +701,6 @@ impl<'tcx> BorrowckInferCtxt<'tcx> {
 
         next_region
     }
-
-    /// With the new solver we prepopulate the opaque type storage during
-    /// MIR borrowck with the hidden types from HIR typeck. This is necessary
-    /// to avoid ambiguities as earlier goals can rely on the hidden type
-    /// of an opaque which is only constrained by a later goal.
-    fn register_predefined_opaques_for_next_solver(&self, def_id: LocalDefId) {
-        let tcx = self.tcx;
-        // OK to use the identity arguments for each opaque type key, since
-        // we remap opaques from HIR typeck back to their definition params.
-        for data in tcx.typeck(def_id).concrete_opaque_types.iter().map(|(k, v)| (*k, *v)) {
-            // HIR typeck did not infer the regions of the opaque, so we instantiate
-            // them with fresh inference variables.
-            let (key, hidden_ty) = fold_regions(tcx, data, |_, _| {
-                self.next_nll_region_var_in_universe(
-                    NllRegionVariableOrigin::Existential { from_forall: false },
-                    ty::UniverseIndex::ROOT,
-                )
-            });
-
-            self.inject_new_hidden_type_unchecked(key, hidden_ty);
-        }
-    }
 }
 
 impl<'tcx> Deref for BorrowckInferCtxt<'tcx> {
@@ -510,22 +712,16 @@ impl<'tcx> Deref for BorrowckInferCtxt<'tcx> {
 }
 
 struct MirBorrowckCtxt<'a, 'infcx, 'tcx> {
+    root_cx: &'a mut BorrowCheckRootCtxt<'tcx>,
     infcx: &'infcx BorrowckInferCtxt<'tcx>,
     body: &'a Body<'tcx>,
     move_data: &'a MoveData<'tcx>,
 
     /// Map from MIR `Location` to `LocationIndex`; created
     /// when MIR borrowck begins.
-    location_table: &'a LocationTable,
+    location_table: &'a PoloniusLocationTable,
 
     movable_coroutine: bool,
-    /// This keeps track of whether local variables are free-ed when the function
-    /// exits even without a `StorageDead`, which appears to be the case for
-    /// constants.
-    ///
-    /// I'm not sure this is the right approach - @eddyb could you try and
-    /// figure this out?
-    locals_are_invalidated_at_exit: bool,
     /// This field keeps track of when borrow errors are reported in the access_place function
     /// so that there is no duplicate reporting. This field cannot also be used for the conflicting
     /// borrow errors that is handled by the `reservation_error_reported` field as the inclusion
@@ -564,7 +760,7 @@ struct MirBorrowckCtxt<'a, 'infcx, 'tcx> {
     upvars: &'tcx [&'tcx ty::CapturedPlace<'tcx>],
 
     /// Names of local (user) variables (extracted from `var_debug_info`).
-    local_names: IndexVec<Local, Option<Symbol>>,
+    local_names: OnceCell<IndexVec<Local, Option<Symbol>>>,
 
     /// Record the region names generated for each region in the given
     /// MIR def so that we can reuse them later in help/error messages.
@@ -573,11 +769,13 @@ struct MirBorrowckCtxt<'a, 'infcx, 'tcx> {
     /// The counter for generating new region names.
     next_region_name: RefCell<usize>,
 
-    /// Results of Polonius analysis.
-    polonius_output: Option<Box<PoloniusOutput>>,
-
     diags_buffer: &'a mut BorrowckDiagnosticsBuffer<'infcx, 'tcx>,
     move_errors: Vec<MoveError<'tcx>>,
+
+    /// Results of Polonius analysis.
+    polonius_output: Option<&'a PoloniusOutput>,
+    /// When using `-Zpolonius=next`: the data used to compute errors and diagnostics.
+    polonius_diagnostics: Option<&'a PoloniusDiagnosticsContext>,
 }
 
 // Check that:
@@ -585,12 +783,12 @@ struct MirBorrowckCtxt<'a, 'infcx, 'tcx> {
 // 2. loans made in overlapping scopes do not conflict
 // 3. assignments do not affect things loaned out as immutable
 // 4. moves do not affect things loaned out in any way
-impl<'a, 'tcx> ResultsVisitor<'a, 'tcx, Borrowck<'a, 'tcx>> for MirBorrowckCtxt<'a, '_, 'tcx> {
+impl<'a, 'tcx> ResultsVisitor<'tcx, Borrowck<'a, 'tcx>> for MirBorrowckCtxt<'a, '_, 'tcx> {
     fn visit_after_early_statement_effect(
         &mut self,
-        _results: &mut Results<'tcx, Borrowck<'a, 'tcx>>,
+        _analysis: &Borrowck<'a, 'tcx>,
         state: &BorrowckDomain,
-        stmt: &'a Statement<'tcx>,
+        stmt: &Statement<'tcx>,
         location: Location,
     ) {
         debug!("MirBorrowckCtxt::process_statement({:?}, {:?}): {:?}", location, stmt, state);
@@ -642,7 +840,7 @@ impl<'a, 'tcx> ResultsVisitor<'a, 'tcx, Borrowck<'a, 'tcx>> for MirBorrowckCtxt<
             | StatementKind::StorageLive(..) => {}
             // This does not affect borrowck
             StatementKind::BackwardIncompatibleDropHint { place, reason: BackwardIncompatibleDropReason::Edition2024 } => {
-                self.check_backward_incompatible_drop(location, (**place, span), state);
+                self.check_backward_incompatible_drop(location, **place, state);
             }
             StatementKind::StorageDead(local) => {
                 self.access_place(
@@ -655,7 +853,6 @@ impl<'a, 'tcx> ResultsVisitor<'a, 'tcx, Borrowck<'a, 'tcx>> for MirBorrowckCtxt<
             }
             StatementKind::Nop
             | StatementKind::Retag { .. }
-            | StatementKind::Deinit(..)
             | StatementKind::SetDiscriminant { .. } => {
                 bug!("Statement not allowed in this MIR phase")
             }
@@ -664,9 +861,9 @@ impl<'a, 'tcx> ResultsVisitor<'a, 'tcx, Borrowck<'a, 'tcx>> for MirBorrowckCtxt<
 
     fn visit_after_early_terminator_effect(
         &mut self,
-        _results: &mut Results<'tcx, Borrowck<'a, 'tcx>>,
+        _analysis: &Borrowck<'a, 'tcx>,
         state: &BorrowckDomain,
-        term: &'a Terminator<'tcx>,
+        term: &Terminator<'tcx>,
         loc: Location,
     ) {
         debug!("MirBorrowckCtxt::process_terminator({:?}, {:?}): {:?}", loc, term, state);
@@ -678,7 +875,14 @@ impl<'a, 'tcx> ResultsVisitor<'a, 'tcx, Borrowck<'a, 'tcx>> for MirBorrowckCtxt<
             TerminatorKind::SwitchInt { discr, targets: _ } => {
                 self.consume_operand(loc, (discr, span), state);
             }
-            TerminatorKind::Drop { place, target: _, unwind: _, replace } => {
+            TerminatorKind::Drop {
+                place,
+                target: _,
+                unwind: _,
+                replace,
+                drop: _,
+                async_fut: _,
+            } => {
                 debug!(
                     "visit_terminator_drop \
                      loc: {:?} term: {:?} place: {:?} span: {:?}",
@@ -777,9 +981,9 @@ impl<'a, 'tcx> ResultsVisitor<'a, 'tcx, Borrowck<'a, 'tcx>> for MirBorrowckCtxt<
 
     fn visit_after_primary_terminator_effect(
         &mut self,
-        _results: &mut Results<'tcx, Borrowck<'a, 'tcx>>,
+        _analysis: &Borrowck<'a, 'tcx>,
         state: &BorrowckDomain,
-        term: &'a Terminator<'tcx>,
+        term: &Terminator<'tcx>,
         loc: Location,
     ) {
         let span = term.source_info.span;
@@ -799,13 +1003,20 @@ impl<'a, 'tcx> ResultsVisitor<'a, 'tcx, Borrowck<'a, 'tcx>> for MirBorrowckCtxt<
             | TerminatorKind::Return
             | TerminatorKind::TailCall { .. }
             | TerminatorKind::CoroutineDrop => {
-                // Returning from the function implicitly kills storage for all locals and statics.
-                // Often, the storage will already have been killed by an explicit
-                // StorageDead, but we don't always emit those (notably on unwind paths),
-                // so this "extra check" serves as a kind of backup.
-                for i in state.borrows.iter() {
-                    let borrow = &self.borrow_set[i];
-                    self.check_for_invalidation_at_exit(loc, borrow, span);
+                match self.borrow_set.locals_state_at_exit() {
+                    LocalsStateAtExit::AllAreInvalidated => {
+                        // Returning from the function implicitly kills storage for all locals and statics.
+                        // Often, the storage will already have been killed by an explicit
+                        // StorageDead, but we don't always emit those (notably on unwind paths),
+                        // so this "extra check" serves as a kind of backup.
+                        for i in state.borrows.iter() {
+                            let borrow = &self.borrow_set[i];
+                            self.check_for_invalidation_at_exit(loc, borrow, span);
+                        }
+                    }
+                    // If we do not implicitly invalidate all locals on exit,
+                    // we check for conflicts when dropping or moving this local.
+                    LocalsStateAtExit::SomeAreInvalidated { has_storage_dead_or_moved: _ } => {}
                 }
             }
 
@@ -1017,11 +1228,11 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
         &self,
         location: Location,
         state: &'s BorrowckDomain,
-    ) -> Cow<'s, BitSet<BorrowIndex>> {
+    ) -> Cow<'s, MixedBitSet<BorrowIndex>> {
         if let Some(polonius) = &self.polonius_output {
             // Use polonius output if it has been enabled.
             let location = self.location_table.start_index(location);
-            let mut polonius_output = BitSet::new_empty(self.borrow_set.len());
+            let mut polonius_output = MixedBitSet::new_empty(self.borrow_set.len());
             for &idx in polonius.errors_at(location) {
                 polonius_output.insert(idx);
             }
@@ -1067,31 +1278,31 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                         rw,
                         (borrow_index, borrow),
                     );
-                    Control::Continue
+                    ControlFlow::Continue(())
                 }
 
                 (Read(_), BorrowKind::Shared | BorrowKind::Fake(_))
                 | (
                     Read(ReadKind::Borrow(BorrowKind::Fake(FakeBorrowKind::Shallow))),
                     BorrowKind::Mut { .. },
-                ) => Control::Continue,
+                ) => ControlFlow::Continue(()),
 
                 (Reservation(_), BorrowKind::Fake(_) | BorrowKind::Shared) => {
                     // This used to be a future compatibility warning (to be
                     // disallowed on NLL). See rust-lang/rust#56254
-                    Control::Continue
+                    ControlFlow::Continue(())
                 }
 
                 (Write(WriteKind::Move), BorrowKind::Fake(FakeBorrowKind::Shallow)) => {
                     // Handled by initialization checks.
-                    Control::Continue
+                    ControlFlow::Continue(())
                 }
 
                 (Read(kind), BorrowKind::Mut { .. }) => {
                     // Reading from mere reservations of mutable-borrows is OK.
                     if !is_active(this.dominators(), borrow, location) {
-                        assert!(allow_two_phase_borrow(borrow.kind));
-                        return Control::Continue;
+                        assert!(borrow.kind.allows_two_phase_borrow());
+                        return ControlFlow::Continue(());
                     }
 
                     error_reported = true;
@@ -1107,7 +1318,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                             this.buffer_error(err);
                         }
                     }
-                    Control::Break
+                    ControlFlow::Break(())
                 }
 
                 (Reservation(kind) | Activation(kind, _) | Write(kind), _) => {
@@ -1154,7 +1365,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                             this.report_illegal_mutation_of_borrowed(location, place_span, borrow)
                         }
                     }
-                    Control::Break
+                    ControlFlow::Break(())
                 }
             },
         );
@@ -1162,13 +1373,13 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
         error_reported
     }
 
-    /// Through #123739, backward incompatible drops (BIDs) are introduced.
+    /// Through #123739, `BackwardIncompatibleDropHint`s (BIDs) are introduced.
     /// We would like to emit lints whether borrow checking fails at these future drop locations.
     #[instrument(level = "debug", skip(self, state))]
     fn check_backward_incompatible_drop(
         &mut self,
         location: Location,
-        (place, place_span): (Place<'tcx>, Span),
+        place: Place<'tcx>,
         state: &BorrowckDomain,
     ) {
         let tcx = self.infcx.tcx;
@@ -1194,7 +1405,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
             |borrow_index| borrows_in_scope.contains(borrow_index),
             |this, _borrow_index, borrow| {
                 if matches!(borrow.kind, BorrowKind::Fake(_)) {
-                    return Control::Continue;
+                    return ControlFlow::Continue(());
                 }
                 let borrowed = this.retrieve_borrow_spans(borrow).var_or_use_path_span();
                 let explain = this.explain_why_borrow_contains_point(
@@ -1208,19 +1419,11 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                     borrowed,
                     |diag| {
                         session_diagnostics::TailExprDropOrder { borrowed }.decorate_lint(diag);
-                        explain.add_explanation_to_diagnostic(
-                            this.infcx.tcx,
-                            this.body,
-                            &this.local_names,
-                            diag,
-                            "",
-                            None,
-                            None,
-                        );
+                        explain.add_explanation_to_diagnostic(&this, diag, "", None, None);
                     },
                 );
                 // We may stop at the first case
-                Control::Break
+                ControlFlow::Break(())
             },
         );
     }
@@ -1247,7 +1450,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
     fn consume_rvalue(
         &mut self,
         location: Location,
-        (rvalue, span): (&'a Rvalue<'tcx>, Span),
+        (rvalue, span): (&Rvalue<'tcx>, Span),
         state: &BorrowckDomain,
     ) {
         match rvalue {
@@ -1261,7 +1464,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                     }
                     BorrowKind::Mut { .. } => {
                         let wk = WriteKind::MutableBorrow(bk);
-                        if allow_two_phase_borrow(bk) {
+                        if bk.allows_two_phase_borrow() {
                             (Deep, Reservation(wk))
                         } else {
                             (Deep, Write(wk))
@@ -1291,15 +1494,18 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                 );
             }
 
-            &Rvalue::RawPtr(mutability, place) => {
-                let access_kind = match mutability {
-                    Mutability::Mut => (
+            &Rvalue::RawPtr(kind, place) => {
+                let access_kind = match kind {
+                    RawPtrKind::Mut => (
                         Deep,
                         Write(WriteKind::MutableBorrow(BorrowKind::Mut {
                             kind: MutBorrowKind::Default,
                         })),
                     ),
-                    Mutability::Not => (Deep, Read(ReadKind::Borrow(BorrowKind::Shared))),
+                    RawPtrKind::Const => (Deep, Read(ReadKind::Borrow(BorrowKind::Shared))),
+                    RawPtrKind::FakeForPtrMetadata => {
+                        (Shallow(Some(ArtificialField::ArrayLength)), Read(ReadKind::Copy))
+                    }
                 };
 
                 self.access_place(
@@ -1328,27 +1534,8 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                 self.consume_operand(location, (operand, span), state)
             }
 
-            &Rvalue::CopyForDeref(place) => {
-                self.access_place(
-                    location,
-                    (place, span),
-                    (Deep, Read(ReadKind::Copy)),
-                    LocalMutationIsAllowed::No,
-                    state,
-                );
-
-                // Finally, check if path was already moved.
-                self.check_if_path_or_subpath_is_moved(
-                    location,
-                    InitializationRequiringAction::Use,
-                    (place.as_ref(), span),
-                    state,
-                );
-            }
-
-            &(Rvalue::Len(place) | Rvalue::Discriminant(place)) => {
+            &Rvalue::Discriminant(place) => {
                 let af = match *rvalue {
-                    Rvalue::Len(..) => Some(ArtificialField::ArrayLength),
                     Rvalue::Discriminant(..) => None,
                     _ => unreachable!(),
                 };
@@ -1372,7 +1559,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                 self.consume_operand(location, (operand2, span), state);
             }
 
-            Rvalue::NullaryOp(_op, _ty) => {
+            Rvalue::NullaryOp(_op) => {
                 // nullary ops take no dynamic input; no borrowck effect.
             }
 
@@ -1385,11 +1572,13 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                     | AggregateKind::CoroutineClosure(def_id, _)
                     | AggregateKind::Coroutine(def_id, _) => {
                         let def_id = def_id.expect_local();
-                        let BorrowCheckResult { used_mut_upvars, .. } =
-                            self.infcx.tcx.mir_borrowck(def_id);
+                        let used_mut_upvars = self.root_cx.used_mut_upvars(def_id);
                         debug!("{:?} used_mut_upvars={:?}", def_id, used_mut_upvars);
-                        for field in used_mut_upvars {
-                            self.propagate_closure_used_mut_upvar(&operands[*field]);
+                        // FIXME: We're cloning the `SmallVec` here to avoid borrowing `root_cx`
+                        // when calling `propagate_closure_used_mut_upvar`. This should ideally
+                        // be unnecessary.
+                        for field in used_mut_upvars.clone() {
+                            self.propagate_closure_used_mut_upvar(&operands[field]);
                         }
                     }
                     AggregateKind::Adt(..)
@@ -1402,6 +1591,12 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                     self.consume_operand(location, (operand, span), state);
                 }
             }
+
+            Rvalue::WrapUnsafeBinder(op, _) => {
+                self.consume_operand(location, (op, span), state);
+            }
+
+            Rvalue::CopyForDeref(_) => bug!("`CopyForDeref` in borrowck"),
         }
     }
 
@@ -1485,14 +1680,20 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                         let stmt = &bbd.statements[loc.statement_index];
                         debug!("temporary assigned in: stmt={:?}", stmt);
 
-                        if let StatementKind::Assign(box (_, Rvalue::Ref(_, _, source))) = stmt.kind
-                        {
-                            propagate_closure_used_mut_place(self, source);
-                        } else {
-                            bug!(
-                                "closures should only capture user variables \
+                        match stmt.kind {
+                            StatementKind::Assign(box (
+                                _,
+                                Rvalue::Ref(_, _, source)
+                                | Rvalue::Use(Operand::Copy(source) | Operand::Move(source)),
+                            )) => {
+                                propagate_closure_used_mut_place(self, source);
+                            }
+                            _ => {
+                                bug!(
+                                    "closures should only capture user variables \
                                  or references to user variables"
-                            );
+                                );
+                            }
                         }
                     }
                     _ => propagate_closure_used_mut_place(self, place),
@@ -1505,7 +1706,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
     fn consume_operand(
         &mut self,
         location: Location,
-        (operand, span): (&'a Operand<'tcx>, Span),
+        (operand, span): (&Operand<'tcx>, Span),
         state: &BorrowckDomain,
     ) {
         match *operand {
@@ -1570,22 +1771,15 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
         // we'll have a memory leak) and assume that all statics have a destructor.
         //
         // FIXME: allow thread-locals to borrow other thread locals?
-
-        let (might_be_alive, will_be_dropped) =
-            if self.body.local_decls[root_place.local].is_ref_to_thread_local() {
-                // Thread-locals might be dropped after the function exits
-                // We have to dereference the outer reference because
-                // borrows don't conflict behind shared references.
-                root_place.projection = TyCtxtConsts::DEREF_PROJECTION;
-                (true, true)
-            } else {
-                (false, self.locals_are_invalidated_at_exit)
-            };
-
-        if !will_be_dropped {
-            debug!("place_is_invalidated_at_exit({:?}) - won't be dropped", place);
-            return;
-        }
+        let might_be_alive = if self.body.local_decls[root_place.local].is_ref_to_thread_local() {
+            // Thread-locals might be dropped after the function exits
+            // We have to dereference the outer reference because
+            // borrows don't conflict behind shared references.
+            root_place.projection = TyCtxtConsts::DEREF_PROJECTION;
+            true
+        } else {
+            false
+        };
 
         let sd = if might_be_alive { Deep } else { Shallow(None) };
 
@@ -1662,9 +1856,13 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
             match elem {
                 ProjectionElem::Deref => match place_ty.ty.kind() {
                     ty::Ref(..) | ty::RawPtr(..) => {
-                        self.move_errors.push(MoveError::new(place, location, BorrowedContent {
-                            target_place: place_ref.project_deeper(&[elem], tcx),
-                        }));
+                        self.move_errors.push(MoveError::new(
+                            place,
+                            location,
+                            BorrowedContent {
+                                target_place: place_ref.project_deeper(&[elem], tcx),
+                            },
+                        ));
                         return;
                     }
                     ty::Adt(adt, _) => {
@@ -1684,7 +1882,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                     | ty::Slice(_)
                     | ty::FnDef(_, _)
                     | ty::FnPtr(..)
-                    | ty::Dynamic(_, _, _)
+                    | ty::Dynamic(_, _)
                     | ty::Closure(_, _)
                     | ty::CoroutineClosure(_, _)
                     | ty::Coroutine(_, _)
@@ -1730,7 +1928,7 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                     | ty::Ref(_, _, _)
                     | ty::FnDef(_, _)
                     | ty::FnPtr(..)
-                    | ty::Dynamic(_, _, _)
+                    | ty::Dynamic(_, _)
                     | ty::CoroutineWitness(..)
                     | ty::Never
                     | ty::UnsafeBinder(_)
@@ -1770,11 +1968,10 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                 },
                 // `OpaqueCast`: only transmutes the type, so no moves there.
                 // `Downcast`  : only changes information about a `Place` without moving.
-                // `Subtype`   : only transmutes the type, so no moves.
                 // So it's safe to skip these.
                 ProjectionElem::OpaqueCast(_)
-                | ProjectionElem::Subtype(_)
-                | ProjectionElem::Downcast(_, _) => (),
+                | ProjectionElem::Downcast(_, _)
+                | ProjectionElem::UnwrapUnsafeBinder(_) => (),
             }
 
             place_ty = place_ty.projection_ty(tcx, elem);
@@ -1998,7 +2195,6 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
         for (place_base, elem) in place.iter_projections().rev() {
             match elem {
                 ProjectionElem::Index(_/*operand*/) |
-                ProjectionElem::Subtype(_) |
                 ProjectionElem::OpaqueCast(_) |
                 ProjectionElem::ConstantIndex { .. } |
                 // assigning to P[i] requires P to be valid.
@@ -2007,6 +2203,10 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                 //
                 // FIXME: is this true even if P is an adt with a dtor?
                 { }
+
+                ProjectionElem::UnwrapUnsafeBinder(_) => {
+                    check_parent_of_field(self, location, place_base, span, state);
+                }
 
                 // assigning to (*P) requires P to be initialized
                 ProjectionElem::Deref => {
@@ -2380,15 +2580,25 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
                             _ => bug!("Deref of unexpected type: {:?}", base_ty),
                         }
                     }
+                    // Check as the inner reference type if it is a field projection
+                    // from the `&pin` pattern
+                    ProjectionElem::Field(FieldIdx::ZERO, _)
+                        if let Some(adt) =
+                            place_base.ty(self.body(), self.infcx.tcx).ty.ty_adt_def()
+                            && adt.is_pin()
+                            && self.infcx.tcx.features().pin_ergonomics() =>
+                    {
+                        self.is_mutable(place_base, is_local_mutation_allowed)
+                    }
                     // All other projections are owned by their base path, so mutable if
                     // base path is mutable
                     ProjectionElem::Field(..)
                     | ProjectionElem::Index(..)
                     | ProjectionElem::ConstantIndex { .. }
                     | ProjectionElem::Subslice { .. }
-                    | ProjectionElem::Subtype(..)
                     | ProjectionElem::OpaqueCast { .. }
-                    | ProjectionElem::Downcast(..) => {
+                    | ProjectionElem::Downcast(..)
+                    | ProjectionElem::UnwrapUnsafeBinder(_) => {
                         let upvar_field_projection = self.is_upvar_field_projection(place);
                         if let Some(field) = upvar_field_projection {
                             let upvar = &self.upvars[field.index()];
@@ -2459,19 +2669,15 @@ impl<'a, 'tcx> MirBorrowckCtxt<'a, '_, 'tcx> {
         let body = self.body;
         for local in body.mut_vars_and_args_iter().filter(|local| !self.used_mut.contains(local)) {
             let local_decl = &body.local_decls[local];
-            let lint_root = match &body.source_scopes[local_decl.source_info.scope].local_data {
-                ClearCrossCrate::Set(data) => data.lint_root,
-                _ => continue,
+            let ClearCrossCrate::Set(SourceScopeLocalData { lint_root, .. }) =
+                body.source_scopes[local_decl.source_info.scope].local_data
+            else {
+                continue;
             };
 
             // Skip over locals that begin with an underscore or have no name
-            match self.local_names[local] {
-                Some(name) => {
-                    if name.as_str().starts_with('_') {
-                        continue;
-                    }
-                }
-                None => continue,
+            if self.local_excluded_from_unused_mut_lint(local) {
+                continue;
             }
 
             let span = local_decl.source_info.span;

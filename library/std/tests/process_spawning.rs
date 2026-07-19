@@ -5,7 +5,9 @@ use std::{env, fs, process, str};
 mod common;
 
 #[test]
-#[cfg_attr(any(miri, target_os = "wasi"), ignore)] // Process spawning not supported by Miri and wasi
+// Process spawning not supported by Miri, Emscripten and wasi
+#[cfg_attr(any(miri, target_os = "emscripten", target_os = "wasi"), ignore)]
+#[cfg_attr(any(target_os = "tvos", target_os = "watchos"), ignore = "fork is prohibited")]
 fn issue_15149() {
     // If we're the parent, copy our own binary to a new directory.
     let my_path = env::current_exe().unwrap();

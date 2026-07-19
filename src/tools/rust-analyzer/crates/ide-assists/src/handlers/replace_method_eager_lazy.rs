@@ -1,7 +1,7 @@
-use ide_db::assists::{AssistId, AssistKind};
+use ide_db::assists::AssistId;
 use syntax::{
-    ast::{self, make, Expr, HasArgList},
     AstNode,
+    ast::{self, Expr, HasArgList, make},
 };
 
 use crate::{AssistContext, Assists};
@@ -35,16 +35,12 @@ pub(crate) fn replace_with_lazy_method(acc: &mut Assists, ctx: &AssistContext<'_
     let (_, receiver_ty) = callable.receiver_param(ctx.sema.db)?;
     let n_params = callable.n_params() + 1;
 
-    let method_name_lazy = format!(
-        "{method_name}{}",
-        if method_name.text().ends_with("or") { "_else" } else { "_with" }
-    );
+    let method_name_lazy = lazy_method_name(&method_name.text());
 
     receiver_ty.iterate_method_candidates_with_traits(
         ctx.sema.db,
         &scope,
         &scope.visible_traits().0,
-        None,
         None,
         |func| {
             let valid = func.name(ctx.sema.db).as_str() == &*method_name_lazy
@@ -60,7 +56,7 @@ pub(crate) fn replace_with_lazy_method(acc: &mut Assists, ctx: &AssistContext<'_
     )?;
 
     acc.add(
-        AssistId("replace_with_lazy_method", AssistKind::RefactorRewrite),
+        AssistId::refactor_rewrite("replace_with_lazy_method"),
         format!("Replace {method_name} with {method_name_lazy}"),
         call.syntax().text_range(),
         |builder| {
@@ -71,19 +67,27 @@ pub(crate) fn replace_with_lazy_method(acc: &mut Assists, ctx: &AssistContext<'_
     )
 }
 
+fn lazy_method_name(name: &str) -> String {
+    if ends_is(name, "or") {
+        format!("{name}_else")
+    } else if ends_is(name, "and") {
+        format!("{name}_then")
+    } else if ends_is(name, "then_some") {
+        name.strip_suffix("_some").unwrap().to_owned()
+    } else {
+        format!("{name}_with")
+    }
+}
+
 fn into_closure(param: &Expr) -> Expr {
     (|| {
         if let ast::Expr::CallExpr(call) = param {
-            if call.arg_list()?.args().count() == 0 {
-                Some(call.expr()?)
-            } else {
-                None
-            }
+            if call.arg_list()?.args().count() == 0 { Some(call.expr()?) } else { None }
         } else {
             None
         }
     })()
-    .unwrap_or_else(|| make::expr_closure(None, param.clone()))
+    .unwrap_or_else(|| make::expr_closure(None, param.clone()).into())
 }
 
 // Assist: replace_with_eager_method
@@ -122,15 +126,12 @@ pub(crate) fn replace_with_eager_method(acc: &mut Assists, ctx: &AssistContext<'
     }
 
     let method_name_text = method_name.text();
-    let method_name_eager = method_name_text
-        .strip_suffix("_else")
-        .or_else(|| method_name_text.strip_suffix("_with"))?;
+    let method_name_eager = eager_method_name(&method_name_text)?;
 
     receiver_ty.iterate_method_candidates_with_traits(
         ctx.sema.db,
         &scope,
         &scope.visible_traits().0,
-        None,
         None,
         |func| {
             let valid = func.name(ctx.sema.db).as_str() == method_name_eager
@@ -140,7 +141,7 @@ pub(crate) fn replace_with_eager_method(acc: &mut Assists, ctx: &AssistContext<'
     )?;
 
     acc.add(
-        AssistId("replace_with_eager_method", AssistKind::RefactorRewrite),
+        AssistId::refactor_rewrite("replace_with_eager_method"),
         format!("Replace {method_name} with {method_name_eager}"),
         call.syntax().text_range(),
         |builder| {
@@ -154,16 +155,26 @@ pub(crate) fn replace_with_eager_method(acc: &mut Assists, ctx: &AssistContext<'
 fn into_call(param: &Expr) -> Expr {
     (|| {
         if let ast::Expr::ClosureExpr(closure) = param {
-            if closure.param_list()?.params().count() == 0 {
-                Some(closure.body()?)
-            } else {
-                None
-            }
+            if closure.param_list()?.params().count() == 0 { Some(closure.body()?) } else { None }
         } else {
             None
         }
     })()
-    .unwrap_or_else(|| make::expr_call(param.clone(), make::arg_list(Vec::new())))
+    .unwrap_or_else(|| make::expr_call(param.clone(), make::arg_list(Vec::new())).into())
+}
+
+fn eager_method_name(name: &str) -> Option<&str> {
+    if name == "then" {
+        return Some("then_some");
+    }
+
+    name.strip_suffix("_else")
+        .or_else(|| name.strip_suffix("_then"))
+        .or_else(|| name.strip_suffix("_with"))
+}
+
+fn ends_is(name: &str, end: &str) -> bool {
+    name.strip_suffix(end).is_some_and(|s| s.is_empty() || s.ends_with('_'))
 }
 
 #[cfg(test)]
@@ -303,6 +314,86 @@ fn foo() {
 fn foo() {
     let foo = Some("foo");
     return foo.map_or(42, |v| v.len());
+}
+"#,
+        )
+    }
+
+    #[test]
+    fn replace_and_with_and_then() {
+        check_assist(
+            replace_with_lazy_method,
+            r#"
+//- minicore: option, fn
+fn foo() {
+    let foo = Some("foo");
+    return foo.and$0(Some("bar"));
+}
+"#,
+            r#"
+fn foo() {
+    let foo = Some("foo");
+    return foo.and_then(|| Some("bar"));
+}
+"#,
+        )
+    }
+
+    #[test]
+    fn replace_and_then_with_and() {
+        check_assist(
+            replace_with_eager_method,
+            r#"
+//- minicore: option, fn
+fn foo() {
+    let foo = Some("foo");
+    return foo.and_then$0(|| Some("bar"));
+}
+"#,
+            r#"
+fn foo() {
+    let foo = Some("foo");
+    return foo.and(Some("bar"));
+}
+"#,
+        )
+    }
+
+    #[test]
+    fn replace_then_some_with_then() {
+        check_assist(
+            replace_with_lazy_method,
+            r#"
+//- minicore: option, fn, bool_impl
+fn foo() {
+    let foo = true;
+    let x = foo.then_some$0(2);
+}
+"#,
+            r#"
+fn foo() {
+    let foo = true;
+    let x = foo.then(|| 2);
+}
+"#,
+        )
+    }
+
+    #[test]
+    fn replace_then_with_then_some() {
+        check_assist(
+            replace_with_eager_method,
+            r#"
+//- minicore: option, fn, bool_impl
+fn foo() {
+    let foo = true;
+    let x = foo.then$0(|| 2);
+}
+"#,
+            r#"
+fn foo() {
+    let foo = true;
+    let x = foo.then_some(2);
 }
 "#,
         )

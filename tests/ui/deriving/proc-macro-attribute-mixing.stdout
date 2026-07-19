@@ -9,12 +9,13 @@
 //@ check-pass
 //@ proc-macro: another-proc-macro.rs
 //@ compile-flags: -Zunpretty=expanded
+//@ edition: 2015
 
 #![feature(derive_coerce_pointee)]
-#[prelude_import]
-use ::std::prelude::rust_2015::*;
 #[macro_use]
 extern crate std;
+#[prelude_import]
+use ::std::prelude::rust_2015::*;
 
 #[macro_use]
 extern crate another_proc_macro;

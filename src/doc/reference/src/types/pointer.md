@@ -1,23 +1,20 @@
-# Pointer types
-
 r[type.pointer]
+# Pointer types
 
 r[type.pointer.intro]
 All pointers are explicit first-class values.
 They can be moved or copied, stored into data structs, and returned from functions.
 
+r[type.pointer.reference]
 ## References (`&` and `&mut`)
 
-r[type.pointer.reference]
-
 r[type.pointer.reference.syntax]
-> **<sup>Syntax</sup>**\
-> _ReferenceType_ :\
-> &nbsp;&nbsp; `&` [_Lifetime_]<sup>?</sup> `mut`<sup>?</sup> [_TypeNoBounds_]
-
-### Shared references (`&`)
+```grammar,types
+ReferenceType -> `&` Lifetime? `mut`? TypeNoBounds
+```
 
 r[type.pointer.reference.shared]
+### Shared references (`&`)
 
 r[type.pointer.reference.shared.intro]
 Shared references point to memory which is owned by some other value.
@@ -33,9 +30,8 @@ Copying a reference is a "shallow" operation:
 it involves only copying the pointer itself, that is, pointers are `Copy`.
 Releasing a reference has no effect on the value it points to, but referencing of a [temporary value] will keep it alive during the scope of the reference itself.
 
-### Mutable references (`&mut`)
-
 r[type.pointer.reference.mut]
+### Mutable references (`&mut`)
 
 r[type.pointer.reference.mut.intro]
 Mutable references point to memory which is owned by some other value.
@@ -44,14 +40,13 @@ A mutable reference type is written `&mut type` or `&'a mut type`.
 r[type.pointer.reference.mut.copy]
 A mutable reference (that hasn't been borrowed) is the only way to access the value it points to, so is not `Copy`.
 
+r[type.pointer.raw]
 ## Raw pointers (`*const` and `*mut`)
 
-r[type.pointer.raw]
-
 r[type.pointer.raw.syntax]
-> **<sup>Syntax</sup>**\
-> _RawPointerType_ :\
-> &nbsp;&nbsp; `*` ( `mut` | `const` ) [_TypeNoBounds_]
+```grammar,types
+RawPointerType -> `*` ( `mut` | `const` ) TypeNoBounds
+```
 
 r[type.pointer.raw.intro]
 Raw pointers are pointers without safety or liveness guarantees.
@@ -75,15 +70,13 @@ When comparing raw pointers to [dynamically sized types] they also have their ad
 r[type.pointer.raw.constructor]
 Raw pointers can be created directly using `&raw const` for `*const` pointers and `&raw mut` for `*mut` pointers.
 
-## Smart Pointers
-
 r[type.pointer.smart]
+## Smart pointers
 
 The standard library contains additional 'smart pointer' types beyond references and raw pointers.
 
-## Bit validity
-
 r[type.pointer.validity]
+## Bit validity
 
 r[type.pointer.validity.pointer-fragment]
 Despite pointers and references being similar to `usize`s in the machine code emitted on most platforms,
@@ -96,8 +89,6 @@ the inverse direction (transmuting from an integer or array of integers to `P`) 
 However, the pointer produced via such a transmutation may not be dereferenced (not even if `T` has size zero).
 
 [Interior mutability]: ../interior-mutability.md
-[_Lifetime_]: ../trait-bounds.md
-[_TypeNoBounds_]: ../types.md#type-expressions
 [`unsafe` operation]: ../unsafety.md
 [dynamically sized types]: ../dynamically-sized-types.md
 [temporary value]: ../expressions.md#temporaries

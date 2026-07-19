@@ -354,6 +354,20 @@ impl<T: Eq + Hash + Copy> TransitiveRelation<T> {
             .collect()
     }
 
+    /// Given an element A, elements B with the lowest index such that `A R B`
+    /// and `B R A`, or `A` if no such element exists.
+    pub fn minimal_scc_representative(&self, a: T) -> T {
+        match self.index(a) {
+            Some(a_i) => self.with_closure(|closure| {
+                closure
+                    .iter(a_i.0)
+                    .find(|i| closure.contains(*i, a_i.0))
+                    .map_or(a, |i| self.elements[i])
+            }),
+            None => a,
+        }
+    }
+
     fn with_closure<OP, R>(&self, op: OP) -> R
     where
         OP: FnOnce(&BitMatrix<usize, usize>) -> R,
@@ -363,7 +377,7 @@ impl<T: Eq + Hash + Copy> TransitiveRelation<T> {
 
     /// Lists all the base edges in the graph: the initial _non-transitive_ set of element
     /// relations, which will be later used as the basis for the transitive closure computation.
-    pub fn base_edges(&self) -> impl Iterator<Item = (T, T)> + '_ {
+    pub fn base_edges(&self) -> impl Iterator<Item = (T, T)> {
         self.edges
             .iter()
             .map(move |edge| (self.elements[edge.source.0], self.elements[edge.target.0]))

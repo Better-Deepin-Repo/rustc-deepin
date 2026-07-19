@@ -13,18 +13,10 @@
 //! This API is completely unstable and subject to change.
 
 // tidy-alphabetical-start
-#![allow(internal_features)]
-#![allow(rustc::diagnostic_outside_of_impl)]
-#![allow(rustc::untranslatable_diagnostic)]
-#![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
-#![doc(rust_logo)]
+#![allow(rustc::direct_use_of_rustc_type_ir)]
 #![feature(assert_matches)]
 #![feature(extend_one)]
-#![feature(iterator_try_collect)]
-#![feature(let_chains)]
-#![feature(rustdoc_internals)]
 #![recursion_limit = "512"] // For rustdoc
-#![warn(unreachable_pub)]
 // tidy-alphabetical-end
 
 mod errors;

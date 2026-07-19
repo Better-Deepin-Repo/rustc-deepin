@@ -1,58 +1,198 @@
 //! Attributes & documentation for hir types.
 
-use std::ops::ControlFlow;
-
+use cfg::CfgExpr;
+use either::Either;
 use hir_def::{
-    attr::AttrsWithOwner,
+    AssocItemId, AttrDefId, FieldId, InternedModuleId, LifetimeParamId, ModuleDefId,
+    TypeOrConstParamId,
+    attrs::{AttrFlags, Docs, IsInnerDoc},
+    expr_store::path::Path,
     item_scope::ItemInNs,
-    path::{ModPath, Path},
     per_ns::Namespace,
     resolver::{HasResolver, Resolver, TypeNs},
-    AssocItemId, AttrDefId, ModuleDefId,
 };
-use hir_expand::{mod_path::PathKind, name::Name};
-use hir_ty::{db::HirDatabase, method_resolution};
-use span::SyntaxContextId;
+use hir_expand::{
+    mod_path::{ModPath, PathKind},
+    name::Name,
+};
+use hir_ty::{
+    db::HirDatabase,
+    method_resolution::{
+        self, CandidateId, MethodError, MethodResolutionContext, MethodResolutionUnstableFeatures,
+    },
+    next_solver::{DbInterner, TypingMode, infer::DbInternerInferExt},
+};
+use intern::Symbol;
 
 use crate::{
     Adt, AsAssocItem, AssocItem, BuiltinType, Const, ConstParam, DocLinkDef, Enum, ExternCrateDecl,
-    Field, Function, GenericParam, HasCrate, Impl, LifetimeParam, Macro, Module, ModuleDef, Static,
-    Struct, Trait, TraitAlias, Type, TypeAlias, TypeParam, Union, Variant, VariantDef,
+    Field, Function, GenericParam, HasCrate, Impl, LangItem, LifetimeParam, Macro, Module,
+    ModuleDef, Static, Struct, Trait, Type, TypeAlias, TypeParam, Union, Variant, VariantDef,
 };
 
-pub trait HasAttrs {
-    fn attrs(self, db: &dyn HirDatabase) -> AttrsWithOwner;
+#[derive(Debug, Clone, Copy)]
+pub enum AttrsOwner {
+    AttrDef(AttrDefId),
+    Field(FieldId),
+    LifetimeParam(LifetimeParamId),
+    TypeOrConstParam(TypeOrConstParamId),
+}
+
+impl AttrsOwner {
+    #[inline]
+    fn attr_def(&self) -> Option<AttrDefId> {
+        match self {
+            AttrsOwner::AttrDef(it) => Some(*it),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AttrsWithOwner {
+    pub(crate) attrs: AttrFlags,
+    owner: AttrsOwner,
+}
+
+impl AttrsWithOwner {
+    fn new(db: &dyn HirDatabase, owner: AttrDefId) -> Self {
+        Self { attrs: AttrFlags::query(db, owner), owner: AttrsOwner::AttrDef(owner) }
+    }
+
+    fn new_field(db: &dyn HirDatabase, owner: FieldId) -> Self {
+        Self { attrs: AttrFlags::query_field(db, owner), owner: AttrsOwner::Field(owner) }
+    }
+
+    fn new_lifetime_param(db: &dyn HirDatabase, owner: LifetimeParamId) -> Self {
+        Self {
+            attrs: AttrFlags::query_lifetime_param(db, owner),
+            owner: AttrsOwner::LifetimeParam(owner),
+        }
+    }
+    fn new_type_or_const_param(db: &dyn HirDatabase, owner: TypeOrConstParamId) -> Self {
+        Self {
+            attrs: AttrFlags::query_type_or_const_param(db, owner),
+            owner: AttrsOwner::TypeOrConstParam(owner),
+        }
+    }
+
+    #[inline]
+    pub fn is_unstable(&self) -> bool {
+        self.attrs.contains(AttrFlags::IS_UNSTABLE)
+    }
+
+    #[inline]
+    pub fn is_macro_export(&self) -> bool {
+        self.attrs.contains(AttrFlags::IS_MACRO_EXPORT)
+    }
+
+    #[inline]
+    pub fn is_doc_notable_trait(&self) -> bool {
+        self.attrs.contains(AttrFlags::IS_DOC_NOTABLE_TRAIT)
+    }
+
+    #[inline]
+    pub fn is_doc_hidden(&self) -> bool {
+        self.attrs.contains(AttrFlags::IS_DOC_HIDDEN)
+    }
+
+    #[inline]
+    pub fn is_deprecated(&self) -> bool {
+        self.attrs.contains(AttrFlags::IS_DEPRECATED)
+    }
+
+    #[inline]
+    pub fn is_non_exhaustive(&self) -> bool {
+        self.attrs.contains(AttrFlags::NON_EXHAUSTIVE)
+    }
+
+    #[inline]
+    pub fn is_test(&self) -> bool {
+        self.attrs.contains(AttrFlags::IS_TEST)
+    }
+
+    #[inline]
+    pub fn lang(&self, db: &dyn HirDatabase) -> Option<LangItem> {
+        self.owner
+            .attr_def()
+            .and_then(|owner| self.attrs.lang_item_with_attrs(db, owner))
+            .and_then(|lang| LangItem::from_symbol(&lang))
+    }
+
+    #[inline]
+    pub fn doc_aliases<'db>(&self, db: &'db dyn HirDatabase) -> &'db [Symbol] {
+        let owner = match self.owner {
+            AttrsOwner::AttrDef(it) => Either::Left(it),
+            AttrsOwner::Field(it) => Either::Right(it),
+            AttrsOwner::LifetimeParam(_) | AttrsOwner::TypeOrConstParam(_) => return &[],
+        };
+        self.attrs.doc_aliases(db, owner)
+    }
+
+    #[inline]
+    pub fn cfgs<'db>(&self, db: &'db dyn HirDatabase) -> Option<&'db CfgExpr> {
+        let owner = match self.owner {
+            AttrsOwner::AttrDef(it) => Either::Left(it),
+            AttrsOwner::Field(it) => Either::Right(it),
+            AttrsOwner::LifetimeParam(_) | AttrsOwner::TypeOrConstParam(_) => return None,
+        };
+        self.attrs.cfgs(db, owner)
+    }
+
+    #[inline]
+    pub fn hir_docs<'db>(&self, db: &'db dyn HirDatabase) -> Option<&'db Docs> {
+        match self.owner {
+            AttrsOwner::AttrDef(it) => AttrFlags::docs(db, it).as_deref(),
+            AttrsOwner::Field(it) => AttrFlags::field_docs(db, it),
+            AttrsOwner::LifetimeParam(_) | AttrsOwner::TypeOrConstParam(_) => None,
+        }
+    }
+}
+
+pub trait HasAttrs: Sized {
+    #[inline]
+    fn attrs(self, db: &dyn HirDatabase) -> AttrsWithOwner {
+        match self.attr_id(db) {
+            AttrsOwner::AttrDef(it) => AttrsWithOwner::new(db, it),
+            AttrsOwner::Field(it) => AttrsWithOwner::new_field(db, it),
+            AttrsOwner::LifetimeParam(it) => AttrsWithOwner::new_lifetime_param(db, it),
+            AttrsOwner::TypeOrConstParam(it) => AttrsWithOwner::new_type_or_const_param(db, it),
+        }
+    }
+
     #[doc(hidden)]
-    fn attr_id(self) -> AttrDefId;
+    fn attr_id(self, db: &dyn HirDatabase) -> AttrsOwner;
+
+    #[inline]
+    fn hir_docs(self, db: &dyn HirDatabase) -> Option<&Docs> {
+        match self.attr_id(db) {
+            AttrsOwner::AttrDef(it) => AttrFlags::docs(db, it).as_deref(),
+            AttrsOwner::Field(it) => AttrFlags::field_docs(db, it),
+            AttrsOwner::LifetimeParam(_) | AttrsOwner::TypeOrConstParam(_) => None,
+        }
+    }
 }
 
 macro_rules! impl_has_attrs {
     ($(($def:ident, $def_id:ident),)*) => {$(
         impl HasAttrs for $def {
-            fn attrs(self, db: &dyn HirDatabase) -> AttrsWithOwner {
-                let def = AttrDefId::$def_id(self.into());
-                AttrsWithOwner::new(db.upcast(), def)
-            }
-            fn attr_id(self) -> AttrDefId {
-                AttrDefId::$def_id(self.into())
+            #[inline]
+            fn attr_id(self, _db: &dyn HirDatabase) -> AttrsOwner {
+                AttrsOwner::AttrDef(AttrDefId::$def_id(self.into()))
             }
         }
     )*};
 }
 
 impl_has_attrs![
-    (Field, FieldId),
     (Variant, EnumVariantId),
     (Static, StaticId),
     (Const, ConstId),
     (Trait, TraitId),
-    (TraitAlias, TraitAliasId),
     (TypeAlias, TypeAliasId),
     (Macro, MacroId),
     (Function, FunctionId),
     (Adt, AdtId),
-    (Module, ModuleId),
-    (GenericParam, GenericParamId),
     (Impl, ImplId),
     (ExternCrateDecl, ExternCrateId),
 ];
@@ -60,11 +200,9 @@ impl_has_attrs![
 macro_rules! impl_has_attrs_enum {
     ($($variant:ident),* for $enum:ident) => {$(
         impl HasAttrs for $variant {
-            fn attrs(self, db: &dyn HirDatabase) -> AttrsWithOwner {
-                $enum::$variant(self).attrs(db)
-            }
-            fn attr_id(self) -> AttrDefId {
-                $enum::$variant(self).attr_id()
+            #[inline]
+            fn attr_id(self, db: &dyn HirDatabase) -> AttrsOwner {
+                $enum::$variant(self).attr_id(db)
             }
         }
     )*};
@@ -73,61 +211,97 @@ macro_rules! impl_has_attrs_enum {
 impl_has_attrs_enum![Struct, Union, Enum for Adt];
 impl_has_attrs_enum![TypeParam, ConstParam, LifetimeParam for GenericParam];
 
-impl HasAttrs for AssocItem {
-    fn attrs(self, db: &dyn HirDatabase) -> AttrsWithOwner {
+impl HasAttrs for Module {
+    #[inline]
+    fn attr_id(self, db: &dyn HirDatabase) -> AttrsOwner {
+        AttrsOwner::AttrDef(AttrDefId::ModuleId(InternedModuleId::new(db, self.id)))
+    }
+}
+
+impl HasAttrs for GenericParam {
+    #[inline]
+    fn attr_id(self, _db: &dyn HirDatabase) -> AttrsOwner {
         match self {
-            AssocItem::Function(it) => it.attrs(db),
-            AssocItem::Const(it) => it.attrs(db),
-            AssocItem::TypeAlias(it) => it.attrs(db),
+            GenericParam::TypeParam(it) => AttrsOwner::TypeOrConstParam(it.merge().into()),
+            GenericParam::ConstParam(it) => AttrsOwner::TypeOrConstParam(it.merge().into()),
+            GenericParam::LifetimeParam(it) => AttrsOwner::LifetimeParam(it.into()),
         }
     }
-    fn attr_id(self) -> AttrDefId {
+}
+
+impl HasAttrs for AssocItem {
+    #[inline]
+    fn attr_id(self, db: &dyn HirDatabase) -> AttrsOwner {
         match self {
-            AssocItem::Function(it) => it.attr_id(),
-            AssocItem::Const(it) => it.attr_id(),
-            AssocItem::TypeAlias(it) => it.attr_id(),
+            AssocItem::Function(it) => it.attr_id(db),
+            AssocItem::Const(it) => it.attr_id(db),
+            AssocItem::TypeAlias(it) => it.attr_id(db),
         }
+    }
+}
+
+impl HasAttrs for crate::Crate {
+    #[inline]
+    fn attr_id(self, db: &dyn HirDatabase) -> AttrsOwner {
+        self.root_module().attr_id(db)
+    }
+}
+
+impl HasAttrs for Field {
+    #[inline]
+    fn attr_id(self, _db: &dyn HirDatabase) -> AttrsOwner {
+        AttrsOwner::Field(self.into())
     }
 }
 
 /// Resolves the item `link` points to in the scope of `def`.
 pub fn resolve_doc_path_on(
     db: &dyn HirDatabase,
-    def: impl HasAttrs,
+    def: impl HasAttrs + Copy,
     link: &str,
     ns: Option<Namespace>,
+    is_inner_doc: IsInnerDoc,
 ) -> Option<DocLinkDef> {
-    resolve_doc_path_on_(db, link, def.attr_id(), ns)
+    resolve_doc_path_on_(db, link, def.attr_id(db), ns, is_inner_doc)
 }
 
 fn resolve_doc_path_on_(
     db: &dyn HirDatabase,
     link: &str,
-    attr_id: AttrDefId,
+    attr_id: AttrsOwner,
     ns: Option<Namespace>,
+    is_inner_doc: IsInnerDoc,
 ) -> Option<DocLinkDef> {
     let resolver = match attr_id {
-        AttrDefId::ModuleId(it) => it.resolver(db.upcast()),
-        AttrDefId::FieldId(it) => it.parent.resolver(db.upcast()),
-        AttrDefId::AdtId(it) => it.resolver(db.upcast()),
-        AttrDefId::FunctionId(it) => it.resolver(db.upcast()),
-        AttrDefId::EnumVariantId(it) => it.resolver(db.upcast()),
-        AttrDefId::StaticId(it) => it.resolver(db.upcast()),
-        AttrDefId::ConstId(it) => it.resolver(db.upcast()),
-        AttrDefId::TraitId(it) => it.resolver(db.upcast()),
-        AttrDefId::TraitAliasId(it) => it.resolver(db.upcast()),
-        AttrDefId::TypeAliasId(it) => it.resolver(db.upcast()),
-        AttrDefId::ImplId(it) => it.resolver(db.upcast()),
-        AttrDefId::ExternBlockId(it) => it.resolver(db.upcast()),
-        AttrDefId::UseId(it) => it.resolver(db.upcast()),
-        AttrDefId::MacroId(it) => it.resolver(db.upcast()),
-        AttrDefId::ExternCrateId(it) => it.resolver(db.upcast()),
-        AttrDefId::GenericParamId(_) => return None,
+        AttrsOwner::AttrDef(AttrDefId::ModuleId(it)) => {
+            let it = it.loc(db);
+            if is_inner_doc.yes() {
+                it.resolver(db)
+            } else if let Some(parent) = Module::from(it).parent(db) {
+                parent.id.resolver(db)
+            } else {
+                it.resolver(db)
+            }
+        }
+        AttrsOwner::AttrDef(AttrDefId::AdtId(it)) => it.resolver(db),
+        AttrsOwner::AttrDef(AttrDefId::FunctionId(it)) => it.resolver(db),
+        AttrsOwner::AttrDef(AttrDefId::EnumVariantId(it)) => it.resolver(db),
+        AttrsOwner::AttrDef(AttrDefId::StaticId(it)) => it.resolver(db),
+        AttrsOwner::AttrDef(AttrDefId::ConstId(it)) => it.resolver(db),
+        AttrsOwner::AttrDef(AttrDefId::TraitId(it)) => it.resolver(db),
+        AttrsOwner::AttrDef(AttrDefId::TypeAliasId(it)) => it.resolver(db),
+        AttrsOwner::AttrDef(AttrDefId::ImplId(it)) => it.resolver(db),
+        AttrsOwner::AttrDef(AttrDefId::ExternBlockId(it)) => it.resolver(db),
+        AttrsOwner::AttrDef(AttrDefId::UseId(it)) => it.resolver(db),
+        AttrsOwner::AttrDef(AttrDefId::MacroId(it)) => it.resolver(db),
+        AttrsOwner::AttrDef(AttrDefId::ExternCrateId(it)) => it.resolver(db),
+        AttrsOwner::Field(it) => it.parent.resolver(db),
+        AttrsOwner::LifetimeParam(_) | AttrsOwner::TypeOrConstParam(_) => return None,
     };
 
     let mut modpath = doc_modpath_from_str(link)?;
 
-    let resolved = resolver.resolve_module_path_in_items(db.upcast(), &modpath);
+    let resolved = resolver.resolve_module_path_in_items(db, &modpath);
     if resolved.is_none() {
         let last_name = modpath.pop_segment()?;
         resolve_assoc_or_field(db, resolver, modpath, last_name, ns)
@@ -148,7 +322,7 @@ fn resolve_doc_path_on_(
 
 fn resolve_assoc_or_field(
     db: &dyn HirDatabase,
-    resolver: Resolver,
+    resolver: Resolver<'_>,
     path: ModPath,
     name: Name,
     ns: Option<Namespace>,
@@ -156,7 +330,7 @@ fn resolve_assoc_or_field(
     let path = Path::from_known_path_with_no_generic(path);
     // FIXME: This does not handle `Self` on trait definitions, which we should resolve to the
     // trait itself.
-    let base_def = resolver.resolve_path_in_type_ns_fully(db.upcast(), &path)?;
+    let base_def = resolver.resolve_path_in_type_ns_fully(db, &path)?;
 
     let ty = match base_def {
         TypeNs::SelfType(id) => Impl::from(id).self_ty(db),
@@ -185,7 +359,7 @@ fn resolve_assoc_or_field(
             // Doc paths in this context may only resolve to an item of this trait
             // (i.e. no items of its supertraits), so we need to handle them here
             // independently of others.
-            return db.trait_data(id).items.iter().find(|it| it.0 == name).map(|(_, assoc_id)| {
+            return id.trait_items(db).items.iter().find(|it| it.0 == name).map(|(_, assoc_id)| {
                 let def = match *assoc_id {
                     AssocItemId::FunctionId(it) => ModuleDef::Function(it.into()),
                     AssocItemId::ConstId(it) => ModuleDef::Const(it.into()),
@@ -194,8 +368,7 @@ fn resolve_assoc_or_field(
                 DocLinkDef::ModuleDef(def)
             });
         }
-        TypeNs::TraitAliasId(_) => {
-            // XXX: Do these get resolved?
+        TypeNs::ModuleId(_) => {
             return None;
         }
     };
@@ -217,13 +390,13 @@ fn resolve_assoc_or_field(
     resolve_field(db, variant_def, name, ns)
 }
 
-fn resolve_assoc_item(
-    db: &dyn HirDatabase,
-    ty: &Type,
+fn resolve_assoc_item<'db>(
+    db: &'db dyn HirDatabase,
+    ty: &Type<'db>,
     name: &Name,
     ns: Option<Namespace>,
 ) -> Option<DocLinkDef> {
-    ty.iterate_assoc_items(db, ty.krate(db), move |assoc_item| {
+    ty.iterate_assoc_items(db, move |assoc_item| {
         if assoc_item.name(db)? != *name {
             return None;
         }
@@ -231,48 +404,44 @@ fn resolve_assoc_item(
     })
 }
 
-fn resolve_impl_trait_item(
-    db: &dyn HirDatabase,
-    resolver: Resolver,
-    ty: &Type,
+fn resolve_impl_trait_item<'db>(
+    db: &'db dyn HirDatabase,
+    resolver: Resolver<'_>,
+    ty: &Type<'db>,
     name: &Name,
     ns: Option<Namespace>,
 ) -> Option<DocLinkDef> {
-    let canonical = ty.canonical();
     let krate = ty.krate(db);
-    let environment = resolver
-        .generic_def()
-        .map_or_else(|| crate::TraitEnvironment::empty(krate.id), |d| db.trait_environment(d));
-    let traits_in_scope = resolver.traits_in_scope(db.upcast());
-
-    let mut result = None;
+    let environment = crate::param_env_from_resolver(db, &resolver);
+    let traits_in_scope = resolver.traits_in_scope(db);
 
     // `ty.iterate_path_candidates()` require a scope, which is not available when resolving
     // attributes here. Use path resolution directly instead.
     //
     // FIXME: resolve type aliases (which are not yielded by iterate_path_candidates)
-    method_resolution::iterate_path_candidates(
-        &canonical,
-        db,
-        environment,
-        &traits_in_scope,
-        method_resolution::VisibleFromModule::None,
-        Some(name),
-        &mut |assoc_item_id| {
-            // If two traits in scope define the same item, Rustdoc links to no specific trait (for
-            // instance, given two methods `a`, Rustdoc simply links to `method.a` with no
-            // disambiguation) so we just pick the first one we find as well.
-            result = as_module_def_if_namespace_matches(assoc_item_id.into(), ns);
-
-            if result.is_some() {
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        },
-    );
-
-    result
+    let interner = DbInterner::new_with(db, environment.krate);
+    let infcx = interner.infer_ctxt().build(TypingMode::PostAnalysis);
+    let unstable_features =
+        MethodResolutionUnstableFeatures::from_def_map(resolver.top_level_def_map());
+    let ctx = MethodResolutionContext {
+        infcx: &infcx,
+        resolver: &resolver,
+        param_env: environment.param_env,
+        traits_in_scope: &traits_in_scope,
+        edition: krate.edition(db),
+        unstable_features: &unstable_features,
+    };
+    let resolution = ctx.probe_for_name(method_resolution::Mode::Path, name.clone(), ty.ty);
+    let resolution = match resolution {
+        Ok(resolution) => resolution.item,
+        Err(MethodError::PrivateMatch(resolution)) => resolution.item,
+        _ => return None,
+    };
+    let resolution = match resolution {
+        CandidateId::FunctionId(id) => AssocItem::Function(id.into()),
+        CandidateId::ConstId(id) => AssocItem::Const(id.into()),
+    };
+    as_module_def_if_namespace_matches(resolution, ns)
 }
 
 fn resolve_field(
@@ -328,9 +497,7 @@ fn doc_modpath_from_str(link: &str) -> Option<ModPath> {
         };
         let parts = first_segment.into_iter().chain(parts).map(|segment| match segment.parse() {
             Ok(idx) => Name::new_tuple_field(idx),
-            Err(_) => {
-                Name::new(segment.split_once('<').map_or(segment, |it| it.0), SyntaxContextId::ROOT)
-            }
+            Err(_) => Name::new_root(segment.split_once('<').map_or(segment, |it| it.0)),
         });
         Some(ModPath::from_segments(kind, parts))
     };

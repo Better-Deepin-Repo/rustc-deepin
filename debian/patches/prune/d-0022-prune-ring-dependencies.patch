@@ -1,0 +1,140 @@
+From: =?utf-8?q?Fabian_Gr=C3=BCnbichler?= <f.gruenbichler@proxmox.com>
+Date: Wed, 21 Jan 2026 11:34:28 +0100
+Subject: prune ring dependencies
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+it contains a lot of pregenerated assembly files
+
+Forwarded: not-needed
+
+Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
+---
+ vendor/hyper-rustls-0.27.7/Cargo.toml   | 1 -
+ vendor/reqwest-0.12.24/Cargo.toml       | 9 ---------
+ vendor/rustls-0.23.35/Cargo.toml        | 8 --------
+ vendor/rustls-webpki-0.103.8/Cargo.toml | 7 -------
+ vendor/tokio-rustls-0.26.4/Cargo.toml   | 1 -
+ 5 files changed, 26 deletions(-)
+
+diff --git a/vendor/hyper-rustls-0.27.7/Cargo.toml b/vendor/hyper-rustls-0.27.7/Cargo.toml
+index 96b44cd..2b122b7 100644
+--- a/vendor/hyper-rustls-0.27.7/Cargo.toml
++++ b/vendor/hyper-rustls-0.27.7/Cargo.toml
+@@ -65,7 +65,6 @@ logging = [
+     "rustls/logging",
+ ]
+ native-tokio = ["rustls-native-certs"]
+-ring = ["rustls/ring"]
+ tls12 = [
+     "tokio-rustls/tls12",
+     "rustls/tls12",
+diff --git a/vendor/reqwest-0.12.24/Cargo.toml b/vendor/reqwest-0.12.24/Cargo.toml
+index 357a8e9..33ff8b5 100644
+--- a/vendor/reqwest-0.12.24/Cargo.toml
++++ b/vendor/reqwest-0.12.24/Cargo.toml
+@@ -71,12 +71,6 @@ __rustls = [
+     "dep:rustls",
+     "__tls",
+ ]
+-__rustls-ring = [
+-    "hyper-rustls?/ring",
+-    "tokio-rustls?/ring",
+-    "rustls?/ring",
+-    "quinn?/ring",
+-]
+ __tls = [
+     "dep:rustls-pki-types",
+     "tokio/io-util",
+@@ -163,12 +157,10 @@ native-tls-vendored = [
+ rustls-tls = ["rustls-tls-webpki-roots"]
+ rustls-tls-manual-roots = [
+     "rustls-tls-manual-roots-no-provider",
+-    "__rustls-ring",
+ ]
+ rustls-tls-manual-roots-no-provider = ["__rustls"]
+ rustls-tls-native-roots = [
+     "rustls-tls-native-roots-no-provider",
+-    "__rustls-ring",
+ ]
+ rustls-tls-native-roots-no-provider = [
+     "dep:rustls-native-certs",
+@@ -178,7 +170,6 @@ rustls-tls-native-roots-no-provider = [
+ rustls-tls-no-provider = ["rustls-tls-manual-roots-no-provider"]
+ rustls-tls-webpki-roots = [
+     "rustls-tls-webpki-roots-no-provider",
+-    "__rustls-ring",
+ ]
+ rustls-tls-webpki-roots-no-provider = [
+     "dep:webpki-roots",
+diff --git a/vendor/rustls-0.23.35/Cargo.toml b/vendor/rustls-0.23.35/Cargo.toml
+index 4614365..4299e2b 100644
+--- a/vendor/rustls-0.23.35/Cargo.toml
++++ b/vendor/rustls-0.23.35/Cargo.toml
+@@ -85,10 +85,6 @@ read_buf = [
+     "rustversion",
+     "std",
+ ]
+-ring = [
+-    "dep:ring",
+-    "webpki/ring",
+-]
+ std = [
+     "webpki/std",
+     "pki-types/std",
+@@ -152,10 +148,6 @@ version = "1.12"
+ features = ["alloc"]
+ package = "rustls-pki-types"
+ 
+-[dependencies.ring]
+-version = "0.17"
+-optional = true
+-
+ [dependencies.subtle]
+ version = "2.5.0"
+ default-features = false
+diff --git a/vendor/rustls-webpki-0.103.8/Cargo.toml b/vendor/rustls-webpki-0.103.8/Cargo.toml
+index 611a4b3..3cee9e0 100644
+--- a/vendor/rustls-webpki-0.103.8/Cargo.toml
++++ b/vendor/rustls-webpki-0.103.8/Cargo.toml
+@@ -77,7 +77,6 @@ rustdoc-args = [
+ 
+ [features]
+ alloc = [
+-    "ring?/alloc",
+     "pki-types/alloc",
+ ]
+ aws-lc-rs = [
+@@ -94,7 +93,6 @@ aws-lc-rs-unstable = [
+     "aws-lc-rs/unstable",
+ ]
+ default = ["std"]
+-ring = ["dep:ring"]
+ std = [
+     "alloc",
+     "pki-types/std",
+@@ -114,11 +112,6 @@ version = "1.12"
+ default-features = false
+ package = "rustls-pki-types"
+ 
+-[dependencies.ring]
+-version = "0.17"
+-optional = true
+-default-features = false
+-
+ [dependencies.untrusted]
+ version = "0.9"
+ 
+diff --git a/vendor/tokio-rustls-0.26.4/Cargo.toml b/vendor/tokio-rustls-0.26.4/Cargo.toml
+index 7eabd78..3029249 100644
+--- a/vendor/tokio-rustls-0.26.4/Cargo.toml
++++ b/vendor/tokio-rustls-0.26.4/Cargo.toml
+@@ -49,7 +49,6 @@ default = [
+ early-data = []
+ fips = ["rustls/fips"]
+ logging = ["rustls/logging"]
+-ring = ["rustls/ring"]
+ tls12 = ["rustls/tls12"]
+ zlib = ["rustls/zlib"]
+ 

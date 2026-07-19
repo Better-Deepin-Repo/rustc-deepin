@@ -3,19 +3,25 @@ use std::collections::VecDeque;
 use ide_db::{
     assists::GroupLabel,
     famous_defs::FamousDefs,
-    source_change::SourceChangeBuilder,
     syntax_helpers::node_ext::{for_each_tail_expr, walk_expr},
 };
 use syntax::{
-    ast::{self, make, AstNode, Expr::BinExpr, HasArgList},
-    ted, SyntaxKind, T,
+    NodeOrToken, SyntaxKind, T,
+    ast::{
+        self, AstNode,
+        Expr::BinExpr,
+        HasArgList,
+        prec::{ExprPrecedence, precedence},
+        syntax_factory::SyntaxFactory,
+    },
+    syntax_editor::{Position, SyntaxEditor},
 };
 
-use crate::{utils::invert_boolean_expression, AssistContext, AssistId, AssistKind, Assists};
+use crate::{AssistContext, AssistId, Assists, utils::invert_boolean_expression};
 
 // Assist: apply_demorgan
 //
-// Apply https://en.wikipedia.org/wiki/De_Morgan%27s_laws[De Morgan's law].
+// Apply [De Morgan's law](https://en.wikipedia.org/wiki/De_Morgan%27s_laws).
 // This transforms expressions of the form `!l || !r` into `!(l && r)`.
 // This also works with `&&`. This assist can only be applied with the cursor
 // on either `||` or `&&`.
@@ -32,14 +38,26 @@ use crate::{utils::invert_boolean_expression, AssistContext, AssistId, AssistKin
 // }
 // ```
 pub(crate) fn apply_demorgan(acc: &mut Assists, ctx: &AssistContext<'_>) -> Option<()> {
-    let mut bin_expr = ctx.find_node_at_offset::<ast::BinExpr>()?;
+    let mut bin_expr = if let Some(not) = ctx.find_token_syntax_at_offset(T![!])
+        && let Some(NodeOrToken::Node(next)) = not.next_sibling_or_token()
+        && let Some(paren) = ast::ParenExpr::cast(next)
+        && let Some(ast::Expr::BinExpr(bin_expr)) = paren.expr()
+    {
+        bin_expr
+    } else {
+        let bin_expr = ctx.find_node_at_offset::<ast::BinExpr>()?;
+        let op_range = bin_expr.op_token()?.text_range();
+
+        // Is the cursor on the expression's logical operator?
+        if !op_range.contains_range(ctx.selection_trimmed()) {
+            return None;
+        }
+
+        bin_expr
+    };
+
     let op = bin_expr.op_kind()?;
     let op_range = bin_expr.op_token()?.text_range();
-
-    // Is the cursor on the expression's logical operator?
-    if !op_range.contains_range(ctx.selection_trimmed()) {
-        return None;
-    }
 
     // Walk up the tree while we have the same binary operator
     while let Some(parent_expr) = bin_expr.syntax().parent().and_then(ast::BinExpr::cast) {
@@ -52,86 +70,100 @@ pub(crate) fn apply_demorgan(acc: &mut Assists, ctx: &AssistContext<'_>) -> Opti
     }
 
     let op = bin_expr.op_kind()?;
-    let inv_token = match op {
-        ast::BinaryOp::LogicOp(ast::LogicOp::And) => SyntaxKind::PIPE2,
-        ast::BinaryOp::LogicOp(ast::LogicOp::Or) => SyntaxKind::AMP2,
+    let (inv_token, prec) = match op {
+        ast::BinaryOp::LogicOp(ast::LogicOp::And) => (SyntaxKind::PIPE2, ExprPrecedence::LOr),
+        ast::BinaryOp::LogicOp(ast::LogicOp::Or) => (SyntaxKind::AMP2, ExprPrecedence::LAnd),
         _ => return None,
     };
 
-    let demorganed = bin_expr.clone_subtree().clone_for_update();
+    let make = SyntaxFactory::with_mappings();
 
-    ted::replace(demorganed.op_token()?, ast::make::token(inv_token));
+    let demorganed = bin_expr.clone_subtree();
+    let mut editor = SyntaxEditor::new(demorganed.syntax().clone());
+    editor.replace(demorganed.op_token()?, make.token(inv_token));
+
     let mut exprs = VecDeque::from([
-        (bin_expr.lhs()?, demorganed.lhs()?),
-        (bin_expr.rhs()?, demorganed.rhs()?),
+        (bin_expr.lhs()?, demorganed.lhs()?, prec),
+        (bin_expr.rhs()?, demorganed.rhs()?, prec),
     ]);
 
-    while let Some((expr, dm)) = exprs.pop_front() {
+    while let Some((expr, demorganed, prec)) = exprs.pop_front() {
         if let BinExpr(bin_expr) = &expr {
-            if let BinExpr(cbin_expr) = &dm {
+            if let BinExpr(cbin_expr) = &demorganed {
                 if op == bin_expr.op_kind()? {
-                    ted::replace(cbin_expr.op_token()?, ast::make::token(inv_token));
-                    exprs.push_back((bin_expr.lhs()?, cbin_expr.lhs()?));
-                    exprs.push_back((bin_expr.rhs()?, cbin_expr.rhs()?));
+                    editor.replace(cbin_expr.op_token()?, make.token(inv_token));
+                    exprs.push_back((bin_expr.lhs()?, cbin_expr.lhs()?, prec));
+                    exprs.push_back((bin_expr.rhs()?, cbin_expr.rhs()?, prec));
                 } else {
-                    let mut inv = invert_boolean_expression(expr);
-                    if inv.needs_parens_in(dm.syntax().parent()?) {
-                        inv = ast::make::expr_paren(inv).clone_for_update();
+                    let mut inv = invert_boolean_expression(&make, expr);
+                    if precedence(&inv).needs_parentheses_in(prec) {
+                        inv = make.expr_paren(inv).into();
                     }
-                    ted::replace(dm.syntax(), inv.syntax());
+                    editor.replace(demorganed.syntax(), inv.syntax());
                 }
             } else {
                 return None;
             }
         } else {
-            let mut inv = invert_boolean_expression(dm.clone_subtree()).clone_for_update();
-            if inv.needs_parens_in(dm.syntax().parent()?) {
-                inv = ast::make::expr_paren(inv).clone_for_update();
+            let mut inv = invert_boolean_expression(&make, demorganed.clone());
+            if precedence(&inv).needs_parentheses_in(prec) {
+                inv = make.expr_paren(inv).into();
             }
-            ted::replace(dm.syntax(), inv.syntax());
+            editor.replace(demorganed.syntax(), inv.syntax());
         }
     }
 
+    editor.add_mappings(make.finish_with_mappings());
+    let edit = editor.finish();
+    let demorganed = ast::Expr::cast(edit.new_root().clone())?;
+
     acc.add_group(
         &GroupLabel("Apply De Morgan's law".to_owned()),
-        AssistId("apply_demorgan", AssistKind::RefactorRewrite),
+        AssistId::refactor_rewrite("apply_demorgan"),
         "Apply De Morgan's law",
         op_range,
-        |edit| {
-            let demorganed = ast::Expr::BinExpr(demorganed);
-            let paren_expr = bin_expr.syntax().parent().and_then(ast::ParenExpr::cast);
-            let neg_expr = paren_expr
-                .clone()
+        |builder| {
+            let make = SyntaxFactory::with_mappings();
+            let (target_node, result_expr) = if let Some(neg_expr) = bin_expr
+                .syntax()
+                .parent()
+                .and_then(ast::ParenExpr::cast)
                 .and_then(|paren_expr| paren_expr.syntax().parent())
                 .and_then(ast::PrefixExpr::cast)
                 .filter(|prefix_expr| matches!(prefix_expr.op_kind(), Some(ast::UnaryOp::Not)))
-                .map(ast::Expr::PrefixExpr);
-
-            if let Some(paren_expr) = paren_expr {
-                if let Some(neg_expr) = neg_expr {
-                    cov_mark::hit!(demorgan_double_negation);
-                    let parent = neg_expr.syntax().parent();
-
-                    if parent.is_some_and(|parent| demorganed.needs_parens_in(parent)) {
-                        cov_mark::hit!(demorgan_keep_parens_for_op_precedence2);
-                        edit.replace_ast(neg_expr, make::expr_paren(demorganed));
-                    } else {
-                        edit.replace_ast(neg_expr, demorganed);
-                    };
-                } else {
-                    cov_mark::hit!(demorgan_double_parens);
-                    edit.replace_ast(paren_expr.into(), add_bang_paren(demorganed));
-                }
+            {
+                cov_mark::hit!(demorgan_double_negation);
+                (ast::Expr::from(neg_expr).syntax().clone(), demorganed)
+            } else if let Some(paren_expr) =
+                bin_expr.syntax().parent().and_then(ast::ParenExpr::cast)
+            {
+                cov_mark::hit!(demorgan_double_parens);
+                (paren_expr.syntax().clone(), add_bang_paren(&make, demorganed))
             } else {
-                edit.replace_ast(bin_expr.into(), add_bang_paren(demorganed));
-            }
+                (bin_expr.syntax().clone(), add_bang_paren(&make, demorganed))
+            };
+
+            let final_expr = if target_node
+                .parent()
+                .is_some_and(|p| result_expr.needs_parens_in_place_of(&p, &target_node))
+            {
+                cov_mark::hit!(demorgan_keep_parens_for_op_precedence2);
+                make.expr_paren(result_expr).into()
+            } else {
+                result_expr
+            };
+
+            let mut editor = builder.make_editor(&target_node);
+            editor.replace(&target_node, final_expr.syntax());
+            editor.add_mappings(make.finish_with_mappings());
+            builder.add_file_edits(ctx.vfs_file_id(), editor);
         },
     )
 }
 
 // Assist: apply_demorgan_iterator
 //
-// Apply https://en.wikipedia.org/wiki/De_Morgan%27s_laws[De Morgan's law] to
+// Apply [De Morgan's law](https://en.wikipedia.org/wiki/De_Morgan%27s_laws) to
 // `Iterator::all` and `Iterator::any`.
 //
 // This transforms expressions of the form `!iter.any(|x| predicate(x))` into
@@ -161,32 +193,33 @@ pub(crate) fn apply_demorgan_iterator(acc: &mut Assists, ctx: &AssistContext<'_>
     let (name, arg_expr) = validate_method_call_expr(ctx, &method_call)?;
 
     let ast::Expr::ClosureExpr(closure_expr) = arg_expr else { return None };
-    let closure_body = closure_expr.body()?;
+    let closure_body = closure_expr.body()?.clone_for_update();
 
     let op_range = method_call.syntax().text_range();
     let label = format!("Apply De Morgan's law to `Iterator::{}`", name.text().as_str());
     acc.add_group(
         &GroupLabel("Apply De Morgan's law".to_owned()),
-        AssistId("apply_demorgan_iterator", AssistKind::RefactorRewrite),
+        AssistId::refactor_rewrite("apply_demorgan_iterator"),
         label,
         op_range,
-        |edit| {
+        |builder| {
+            let make = SyntaxFactory::with_mappings();
+            let mut editor = builder.make_editor(method_call.syntax());
             // replace the method name
             let new_name = match name.text().as_str() {
-                "all" => make::name_ref("any"),
-                "any" => make::name_ref("all"),
+                "all" => make.name_ref("any"),
+                "any" => make.name_ref("all"),
                 _ => unreachable!(),
-            }
-            .clone_for_update();
-            edit.replace_ast(name, new_name);
+            };
+            editor.replace(name.syntax(), new_name.syntax());
 
             // negate all tail expressions in the closure body
-            let tail_cb = &mut |e: &_| tail_cb_impl(edit, e);
+            let tail_cb = &mut |e: &_| tail_cb_impl(&mut editor, &make, e);
             walk_expr(&closure_body, &mut |expr| {
-                if let ast::Expr::ReturnExpr(ret_expr) = expr {
-                    if let Some(ret_expr_arg) = &ret_expr.expr() {
-                        for_each_tail_expr(ret_expr_arg, tail_cb);
-                    }
+                if let ast::Expr::ReturnExpr(ret_expr) = expr
+                    && let Some(ret_expr_arg) = &ret_expr.expr()
+                {
+                    for_each_tail_expr(ret_expr_arg, tail_cb);
                 }
             });
             for_each_tail_expr(&closure_body, tail_cb);
@@ -198,15 +231,15 @@ pub(crate) fn apply_demorgan_iterator(acc: &mut Assists, ctx: &AssistContext<'_>
                 .and_then(ast::PrefixExpr::cast)
                 .filter(|prefix_expr| matches!(prefix_expr.op_kind(), Some(ast::UnaryOp::Not)))
             {
-                edit.delete(
-                    prefix_expr
-                        .op_token()
-                        .expect("prefix expression always has an operator")
-                        .text_range(),
+                editor.delete(
+                    prefix_expr.op_token().expect("prefix expression always has an operator"),
                 );
             } else {
-                edit.insert(method_call.syntax().text_range().start(), "!");
+                editor.insert(Position::before(method_call.syntax()), make.token(SyntaxKind::BANG));
             }
+
+            editor.add_mappings(make.finish_with_mappings());
+            builder.add_file_edits(ctx.vfs_file_id(), editor);
         },
     )
 }
@@ -233,26 +266,26 @@ fn validate_method_call_expr(
     it_type.impls_trait(sema.db, iter_trait, &[]).then_some((name_ref, arg_expr))
 }
 
-fn tail_cb_impl(edit: &mut SourceChangeBuilder, e: &ast::Expr) {
+fn tail_cb_impl(editor: &mut SyntaxEditor, make: &SyntaxFactory, e: &ast::Expr) {
     match e {
         ast::Expr::BreakExpr(break_expr) => {
             if let Some(break_expr_arg) = break_expr.expr() {
-                for_each_tail_expr(&break_expr_arg, &mut |e| tail_cb_impl(edit, e))
+                for_each_tail_expr(&break_expr_arg, &mut |e| tail_cb_impl(editor, make, e))
             }
         }
         ast::Expr::ReturnExpr(_) => {
             // all return expressions have already been handled by the walk loop
         }
         e => {
-            let inverted_body = invert_boolean_expression(e.clone());
-            edit.replace(e.syntax().text_range(), inverted_body.syntax().text());
+            let inverted_body = invert_boolean_expression(make, e.clone());
+            editor.replace(e.syntax(), inverted_body.syntax());
         }
     }
 }
 
 /// Add bang and parentheses to the expression.
-fn add_bang_paren(expr: ast::Expr) -> ast::Expr {
-    make::expr_prefix(T![!], make::expr_paren(expr))
+fn add_bang_paren(make: &SyntaxFactory, expr: ast::Expr) -> ast::Expr {
+    make.expr_prefix(T![!], make.expr_paren(expr).into()).into()
 }
 
 #[cfg(test)]
@@ -343,6 +376,15 @@ fn f() { !(S <= S || S < S) }
     }
 
     #[test]
+    fn demorgan_on_not() {
+        check_assist(
+            apply_demorgan,
+            "fn f() { $0!(1 || 3 && 4 || 5) }",
+            "fn f() { !1 && !(3 && 4) && !5 }",
+        )
+    }
+
+    #[test]
     fn demorgan_keep_pars_for_op_precedence() {
         check_assist(
             apply_demorgan,
@@ -369,15 +411,19 @@ fn f() { !(S <= S || S < S) }
 
     #[test]
     fn demorgan_keep_pars_for_op_precedence3() {
-        check_assist(apply_demorgan, "fn f() { (a || !(b &&$0 c); }", "fn f() { (a || !b || !c; }");
+        check_assist(
+            apply_demorgan,
+            "fn f() { (a || !(b &&$0 c); }",
+            "fn f() { (a || (!b || !c); }",
+        );
     }
 
     #[test]
-    fn demorgan_removes_pars_in_eq_precedence() {
+    fn demorgan_keeps_pars_in_eq_precedence() {
         check_assist(
             apply_demorgan,
             "fn() { let x = a && !(!b |$0| !c); }",
-            "fn() { let x = a && b && c; }",
+            "fn() { let x = a && (b && c); }",
         )
     }
 
@@ -585,6 +631,33 @@ fn main() {
     }
 }
 "#,
+        );
+    }
+
+    #[test]
+    fn demorgan_method_call_receiver() {
+        check_assist(
+            apply_demorgan,
+            "fn f() { (x ||$0 !y).then_some(42) }",
+            "fn f() { (!(!x && y)).then_some(42) }",
+        );
+    }
+
+    #[test]
+    fn demorgan_method_call_receiver_complex() {
+        check_assist(
+            apply_demorgan,
+            "fn f() { (a && b ||$0 c && d).then_some(42) }",
+            "fn f() { (!(!(a && b) && !(c && d))).then_some(42) }",
+        );
+    }
+
+    #[test]
+    fn demorgan_method_call_receiver_chained() {
+        check_assist(
+            apply_demorgan,
+            "fn f() { (a ||$0 b).then_some(42).or(Some(0)) }",
+            "fn f() { (!(!a && !b)).then_some(42).or(Some(0)) }",
         );
     }
 }

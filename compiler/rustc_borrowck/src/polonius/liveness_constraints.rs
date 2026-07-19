@@ -1,7 +1,6 @@
 use std::collections::BTreeMap;
 
 use rustc_index::bit_set::SparseBitMatrix;
-use rustc_index::interval::SparseIntervalMatrix;
 use rustc_middle::mir::{Body, Location};
 use rustc_middle::ty::relate::{self, Relate, RelateResult, TypeRelation};
 use rustc_middle::ty::{self, RegionVid, Ty, TyCtxt, TypeVisitable};
@@ -9,12 +8,12 @@ use rustc_mir_dataflow::points::PointIndex;
 
 use super::{
     ConstraintDirection, LocalizedOutlivesConstraint, LocalizedOutlivesConstraintSet,
-    PoloniusContext,
+    PoloniusLivenessContext,
 };
 use crate::region_infer::values::LivenessValues;
 use crate::universal_regions::UniversalRegions;
 
-impl PoloniusContext {
+impl PoloniusLivenessContext {
     /// Record the variance of each region contained within the given value.
     pub(crate) fn record_live_region_variance<'tcx>(
         &mut self,
@@ -29,25 +28,6 @@ impl PoloniusContext {
             universal_regions,
         };
         extractor.relate(value, value).expect("Can't have a type error relating to itself");
-    }
-
-    /// Unlike NLLs, in polonius we traverse the cfg to look for regions live across an edge, so we
-    /// need to transpose the "points where each region is live" matrix to a "live regions per point"
-    /// matrix.
-    // FIXME: avoid this conversion by always storing liveness data in this shape in the rest of
-    // borrowck.
-    pub(crate) fn record_live_regions_per_point(
-        &mut self,
-        num_regions: usize,
-        points_per_live_region: &SparseIntervalMatrix<RegionVid, PointIndex>,
-    ) {
-        let mut live_regions_per_point = SparseBitMatrix::new(num_regions);
-        for region in points_per_live_region.rows() {
-            for point in points_per_live_region.row(region).unwrap().iter() {
-                live_regions_per_point.insert(point, region);
-            }
-        }
-        self.live_regions = Some(live_regions_per_point);
     }
 }
 
@@ -125,22 +105,14 @@ fn propagate_loans_between_points(
         });
     }
 
-    let Some(current_live_regions) = live_regions.row(current_point) else {
-        // There are no constraints to add: there are no live regions at the current point.
-        return;
-    };
     let Some(next_live_regions) = live_regions.row(next_point) else {
         // There are no constraints to add: there are no live regions at the next point.
         return;
     };
 
     for region in next_live_regions.iter() {
-        if !current_live_regions.contains(region) {
-            continue;
-        }
-
-        // `region` is indeed live at both points, add a constraint between them, according to
-        // variance.
+        // `region` could be live at the current point, and is live at the next point: add a
+        // constraint between them, according to variance.
         if let Some(&direction) = live_region_variances.get(&region) {
             add_liveness_constraint(
                 region,

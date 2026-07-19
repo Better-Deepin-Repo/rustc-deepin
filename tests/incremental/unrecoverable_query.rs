@@ -7,6 +7,9 @@
 //@ revisions:cfail1 cfail2
 //@ compile-flags: --crate-type=lib
 //@ build-pass
+//@ ignore-backends: gcc
+
+#![allow(dead_code)]
 
 pub trait P {
     type A;

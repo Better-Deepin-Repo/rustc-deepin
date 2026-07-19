@@ -8,12 +8,12 @@ Forwarded: not-needed
  1 file changed, 3 insertions(+), 2 deletions(-)
 
 diff --git a/src/bootstrap/src/utils/channel.rs b/src/bootstrap/src/utils/channel.rs
-index 4a9ecc7..8f98bfa 100644
+index 21b4257..6b4feb1 100644
 --- a/src/bootstrap/src/utils/channel.rs
 +++ b/src/bootstrap/src/utils/channel.rs
-@@ -36,12 +36,13 @@ pub struct Info {
+@@ -37,12 +37,13 @@ pub struct Info {
  impl GitInfo {
-     pub fn new(omit_git_hash: bool, dir: &Path) -> GitInfo {
+     pub fn new(omit_git_hash: bool, dir: &Path, exec_ctx: impl AsRef<ExecutionContext>) -> GitInfo {
          // See if this even begins to look like a git dir
 -        if !dir.join(".git").exists() {
 +        // Debian: always use commit info file, since our .git is not upstreams..
@@ -25,5 +25,5 @@ index 4a9ecc7..8f98bfa 100644
 -        }
 +        //}
  
-         // Make sure git commands work
-         match helpers::git(Some(dir)).arg("rev-parse").as_command_mut().output() {
+         let mut git_command = helpers::git(Some(dir));
+         git_command.arg("rev-parse");

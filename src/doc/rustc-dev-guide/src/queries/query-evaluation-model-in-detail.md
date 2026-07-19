@@ -1,6 +1,4 @@
-# The Query Evaluation Model in Detail
-
-<!-- toc -->
+# The Query Evaluation Model in detail
 
 This chapter provides a deeper dive into the abstract model queries are built on.
 It does not go into implementation details but tries to explain

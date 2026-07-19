@@ -18,9 +18,14 @@ usr/share/doc/docs/*
 usr/share/doc/*/LICENSE-*
 usr/share/doc/*/README.md
 usr/share/doc/rustc/COPYRIGHT
+usr/share/doc/rustc/COPYRIGHT*.html
+usr/share/doc/rustc/licenses/*
 
 # should be claimed by dh_bash-completion
 etc/bash_completion.d/cargo
+
+# should we install this somewhere?
+etc/target-spec-json-schema.json
 
 # backup files from the previous stages
 usr/bin/*.old

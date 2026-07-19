@@ -2,14 +2,17 @@
 //@ compile-flags: --crate-type=rlib --target=aarch64-unknown-linux-gnu
 //@ needs-llvm-components: aarch64
 //@[paca] compile-flags: -Ctarget-feature=+paca
-//@[paca] error-pattern: the target features paca, pacg must all be either enabled or disabled together
 //@[pacg] compile-flags: -Ctarget-feature=+pacg
-//@[pacg] error-pattern: the name `foo` is defined multiple times
-#![feature(no_core, lang_items)]
+//@ ignore-backends: gcc
+//@ add-minicore
+// FIXME(#147881): *disable* the features again for minicore as otherwise that will fail to build.
+//@ minicore-compile-flags: -C target-feature=-pacg,-paca
+
+#![feature(no_core)]
 #![no_core]
 
-#[lang="sized"]
-trait Sized {}
+extern crate minicore;
+use minicore::*;
 
 // Can't use `compile_error!` here without `core`/`std` but requiring these makes this test only
 // work if you have libcore built in the sysroot for `aarch64-unknown-linux-gnu`. Can't run this
@@ -25,5 +28,6 @@ fn foo() {}
 // be).
 
 #[cfg(target_feature = "pacg")]
-pub unsafe fn foo() {
-}
+pub unsafe fn foo() {} //[pacg]~ ERROR the name `foo` is defined multiple times
+
+//~? ERROR the target features paca, pacg must all be either enabled or disabled together

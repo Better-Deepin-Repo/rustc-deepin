@@ -137,7 +137,8 @@ impl OsString {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[must_use]
     #[inline]
-    pub fn new() -> OsString {
+    #[rustc_const_stable(feature = "const_pathbuf_osstring_new", since = "1.91.0")]
+    pub const fn new() -> OsString {
         OsString { inner: Buf::from_string(String::new()) }
     }
 
@@ -203,8 +204,8 @@ impl OsString {
         self
     }
 
-    /// Converts the `OsString` into a byte slice.  To convert the byte slice back into an
-    /// `OsString`, use the [`OsStr::from_encoded_bytes_unchecked`] function.
+    /// Converts the `OsString` into a byte vector.  To convert the byte vector back into an
+    /// `OsString`, use the [`OsString::from_encoded_bytes_unchecked`] function.
     ///
     /// The byte encoding is an unspecified, platform-specific, self-synchronizing superset of UTF-8.
     /// By being a self-synchronizing superset of UTF-8, this encoding is also a superset of 7-bit
@@ -257,7 +258,30 @@ impl OsString {
     #[inline]
     #[rustc_confusables("append", "put")]
     pub fn push<T: AsRef<OsStr>>(&mut self, s: T) {
-        self.inner.push_slice(&s.as_ref().inner)
+        trait SpecPushTo {
+            fn spec_push_to(&self, buf: &mut OsString);
+        }
+
+        impl<T: AsRef<OsStr>> SpecPushTo for T {
+            #[inline]
+            default fn spec_push_to(&self, buf: &mut OsString) {
+                buf.inner.push_slice(&self.as_ref().inner);
+            }
+        }
+
+        // Use a more efficient implementation when the string is UTF-8.
+        macro spec_str($T:ty) {
+            impl SpecPushTo for $T {
+                #[inline]
+                fn spec_push_to(&self, buf: &mut OsString) {
+                    buf.inner.push_str(self);
+                }
+            }
+        }
+        spec_str!(str);
+        spec_str!(String);
+
+        s.spec_push_to(self)
     }
 
     /// Creates a new `OsString` with at least the given capacity.
@@ -544,13 +568,13 @@ impl OsString {
     /// However, keep in mind that trimming the capacity may result in a reallocation and copy.
     ///
     /// [`into_boxed_os_str`]: Self::into_boxed_os_str
-    #[unstable(feature = "os_string_pathbuf_leak", issue = "125965")]
+    #[stable(feature = "os_string_pathbuf_leak", since = "1.89.0")]
     #[inline]
     pub fn leak<'a>(self) -> &'a mut OsStr {
         OsStr::from_inner_mut(self.inner.leak())
     }
 
-    /// Truncate the the `OsString` to the specified length.
+    /// Truncate the `OsString` to the specified length.
     ///
     /// # Panics
     /// Panics if `len` does not lie on a valid `OsStr` boundary
@@ -559,15 +583,25 @@ impl OsString {
     #[unstable(feature = "os_string_truncate", issue = "133262")]
     pub fn truncate(&mut self, len: usize) {
         self.as_os_str().inner.check_public_boundary(len);
-        self.inner.truncate(len);
+        // SAFETY: The length was just checked to be at a valid boundary.
+        unsafe { self.inner.truncate_unchecked(len) };
     }
 
-    /// Provides plumbing to core `Vec::extend_from_slice`.
-    /// More well behaving alternative to allowing outer types
-    /// full mutable access to the core `Vec`.
+    /// Provides plumbing to `Vec::extend_from_slice` without giving full
+    /// mutable access to the `Vec`.
+    ///
+    /// # Safety
+    ///
+    /// The slice must be valid for the platform encoding (as described in
+    /// [`OsStr::from_encoded_bytes_unchecked`]).
+    ///
+    /// This bypasses the encoding-dependent surrogate joining, so either
+    /// `self` must not end with a leading surrogate half, or `other` must not
+    /// start with a trailing surrogate half.
     #[inline]
-    pub(crate) fn extend_from_slice(&mut self, other: &[u8]) {
-        self.inner.extend_from_slice(other);
+    pub(crate) unsafe fn extend_from_slice_unchecked(&mut self, other: &[u8]) {
+        // SAFETY: Guaranteed by caller.
+        unsafe { self.inner.extend_from_slice_unchecked(other) };
     }
 }
 
@@ -587,7 +621,30 @@ impl<T: ?Sized + AsRef<OsStr>> From<&T> for OsString {
     /// Copies any value implementing <code>[AsRef]&lt;[OsStr]&gt;</code>
     /// into a newly allocated [`OsString`].
     fn from(s: &T) -> OsString {
-        s.as_ref().to_os_string()
+        trait SpecToOsString {
+            fn spec_to_os_string(&self) -> OsString;
+        }
+
+        impl<T: AsRef<OsStr>> SpecToOsString for T {
+            #[inline]
+            default fn spec_to_os_string(&self) -> OsString {
+                self.as_ref().to_os_string()
+            }
+        }
+
+        // Preserve the known-UTF-8 property for strings.
+        macro spec_str($T:ty) {
+            impl SpecToOsString for $T {
+                #[inline]
+                fn spec_to_os_string(&self) -> OsString {
+                    OsString::from(String::from(self))
+                }
+            }
+        }
+        spec_str!(str);
+        spec_str!(String);
+
+        s.spec_to_os_string()
     }
 }
 
@@ -771,7 +828,8 @@ impl OsStr {
     /// ```
     #[inline]
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn new<S: AsRef<OsStr> + ?Sized>(s: &S) -> &OsStr {
+    #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
+    pub const fn new<S: [const] AsRef<OsStr> + ?Sized>(s: &S) -> &OsStr {
         s.as_ref()
     }
 
@@ -819,14 +877,16 @@ impl OsStr {
     }
 
     #[inline]
-    fn from_inner(inner: &Slice) -> &OsStr {
+    #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
+    const fn from_inner(inner: &Slice) -> &OsStr {
         // SAFETY: OsStr is just a wrapper of Slice,
         // therefore converting &Slice to &OsStr is safe.
         unsafe { &*(inner as *const Slice as *const OsStr) }
     }
 
     #[inline]
-    fn from_inner_mut(inner: &mut Slice) -> &mut OsStr {
+    #[rustc_const_unstable(feature = "const_convert", issue = "143773")]
+    const fn from_inner_mut(inner: &mut Slice) -> &mut OsStr {
         // SAFETY: OsStr is just a wrapper of Slice,
         // therefore converting &mut Slice to &mut OsStr is safe.
         // Any method that mutates OsStr must be careful not to
@@ -984,7 +1044,7 @@ impl OsStr {
     /// Converts a <code>[Box]<[OsStr]></code> into an [`OsString`] without copying or allocating.
     #[stable(feature = "into_boxed_os_str", since = "1.20.0")]
     #[must_use = "`self` will be dropped if the result is not used"]
-    pub fn into_os_string(self: Box<OsStr>) -> OsString {
+    pub fn into_os_string(self: Box<Self>) -> OsString {
         let boxed = unsafe { Box::from_raw(Box::into_raw(self) as *mut Slice) };
         OsString { inner: Buf::from_box(boxed) }
     }
@@ -1155,6 +1215,8 @@ impl OsStr {
 
     /// Checks if all characters in this string are within the ASCII range.
     ///
+    /// An empty string returns `true`.
+    ///
     /// # Examples
     ///
     /// ```
@@ -1204,13 +1266,12 @@ impl OsStr {
     /// # Examples
     ///
     /// ```
-    /// #![feature(os_str_display)]
     /// use std::ffi::OsStr;
     ///
     /// let s = OsStr::new("Hello, world!");
     /// println!("{}", s.display());
     /// ```
-    #[unstable(feature = "os_str_display", issue = "120048")]
+    #[stable(feature = "os_str_display", since = "1.87.0")]
     #[must_use = "this does not display the `OsStr`; \
                   it returns an object that can be displayed"]
     #[inline]
@@ -1224,8 +1285,7 @@ impl From<&OsStr> for Box<OsStr> {
     /// Copies the string into a newly allocated <code>[Box]&lt;[OsStr]&gt;</code>.
     #[inline]
     fn from(s: &OsStr) -> Box<OsStr> {
-        let rw = Box::into_raw(s.inner.into_box()) as *mut OsStr;
-        unsafe { Box::from_raw(rw) }
+        Box::clone_from_ref(s)
     }
 }
 
@@ -1559,7 +1619,6 @@ impl fmt::Debug for OsStr {
 /// # Examples
 ///
 /// ```
-/// #![feature(os_str_display)]
 /// use std::ffi::OsStr;
 ///
 /// let s = OsStr::new("Hello, world!");
@@ -1568,19 +1627,19 @@ impl fmt::Debug for OsStr {
 ///
 /// [`Display`]: fmt::Display
 /// [`format!`]: crate::format
-#[unstable(feature = "os_str_display", issue = "120048")]
+#[stable(feature = "os_str_display", since = "1.87.0")]
 pub struct Display<'a> {
     os_str: &'a OsStr,
 }
 
-#[unstable(feature = "os_str_display", issue = "120048")]
+#[stable(feature = "os_str_display", since = "1.87.0")]
 impl fmt::Debug for Display<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Debug::fmt(&self.os_str, f)
     }
 }
 
-#[unstable(feature = "os_str_display", issue = "120048")]
+#[stable(feature = "os_str_display", since = "1.87.0")]
 impl fmt::Display for Display<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.os_str.inner, f)
@@ -1626,7 +1685,8 @@ impl ToOwned for OsStr {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl AsRef<OsStr> for OsStr {
+#[rustc_const_unstable(feature = "const_convert", issue = "143773")]
+impl const AsRef<OsStr> for OsStr {
     #[inline]
     fn as_ref(&self) -> &OsStr {
         self

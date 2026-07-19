@@ -1,9 +1,6 @@
 // tidy-alphabetical-start
-#![allow(internal_features)]
-#![doc(rust_logo)]
 #![feature(box_patterns)]
-#![feature(rustdoc_internals)]
-#![warn(unreachable_pub)]
+#![feature(negative_impls)]
 // tidy-alphabetical-end
 
 mod helpers;

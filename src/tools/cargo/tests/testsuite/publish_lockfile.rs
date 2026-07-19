@@ -2,10 +2,11 @@
 
 use std::fs::File;
 
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
+use crate::utils::cargo_process;
 use cargo_test_support::registry::Package;
 use cargo_test_support::{
-    basic_manifest, cargo_process, git, paths, project, publish::validate_crate_contents, str,
+    basic_manifest, git, paths, project, publish::validate_crate_contents, str,
 };
 
 fn pl_manifest(name: &str, version: &str, extra: &str) -> String {
@@ -546,13 +547,15 @@ fn use_workspace_root_lockfile() {
     // Expect: package `bar` uses `serde v0.2.0` as required by workspace `Cargo.lock`.
     p.cargo("package --workspace")
         .with_stderr_data(str![[r#"
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] bar v0.0.1 ([ROOT]/foo/bar)
 [UPDATING] `dummy-registry` index
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [VERIFYING] bar v0.0.1 ([ROOT]/foo/bar)
@@ -562,7 +565,6 @@ See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for
 [COMPILING] bar v0.0.1 ([ROOT]/foo/target/package/bar-0.0.1)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [VERIFYING] foo v0.0.1 ([ROOT]/foo)
-[COMPILING] serde v0.2.0
 [COMPILING] foo v0.0.1 ([ROOT]/foo/target/package/foo-0.0.1)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 

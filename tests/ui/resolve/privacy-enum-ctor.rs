@@ -1,3 +1,4 @@
+//@ edition:2015
 mod m {
     pub enum E {
         Fn(u8),
@@ -8,7 +9,7 @@ mod m {
     }
 
     pub mod n {
-        pub(in m) enum Z {
+        pub(in crate::m) enum Z {
             Fn(u8),
             Struct {
                 s: u8,
@@ -17,7 +18,7 @@ mod m {
         }
     }
 
-    use m::n::Z; // OK, only the type is imported
+    use crate::m::n::Z; // OK, only the type is imported
 
     fn f() {
         n::Z;

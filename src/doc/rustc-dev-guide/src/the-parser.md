@@ -1,4 +1,4 @@
-# Lexing and Parsing
+# Lexing and parsing
 
 The very first thing the compiler does is take the program (in UTF-8 Unicode text)
 and turn it into a data format the compiler can work with more conveniently than strings.
@@ -52,14 +52,14 @@ the token stream, and then execute the parser to get a [`Crate`] (the root AST
 node).
 
 To minimize the amount of copying that is done,
-both [`StringReader`] and [`Parser`] have lifetimes which bind them to the parent [`ParseSess`].
+both [`Lexer`] and [`Parser`] have lifetimes which bind them to the parent [`ParseSess`].
 This contains all the information needed while parsing, as well as the [`SourceMap`] itself.
 
 Note that while parsing, we may encounter macro definitions or invocations.
 We set these aside to be expanded (see [Macro Expansion](./macro-expansion.md)).
 Expansion itself may require parsing the output of a macro, which may reveal more macros to be expanded, and so on.
 
-## More on Lexical Analysis
+## More on lexical analysis
 
 Code for lexical analysis is split between two crates:
 
@@ -67,7 +67,7 @@ Code for lexical analysis is split between two crates:
   constituting tokens. Although it is popular to implement lexers as generated
   finite state machines, the lexer in [`rustc_lexer`] is hand-written.
 
-- [`StringReader`] integrates [`rustc_lexer`] with data structures specific to
+- [`Lexer`] integrates [`rustc_lexer`] with data structures specific to
   `rustc`. Specifically, it adds `Span` information to tokens returned by
   [`rustc_lexer`] and interns identifiers.
 
@@ -76,7 +76,7 @@ Code for lexical analysis is split between two crates:
 [`ParseSess`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_session/parse/struct.ParseSess.html
 [`rustc_lexer`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_lexer/index.html
 [`SourceMap`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_span/source_map/struct.SourceMap.html
-[`StringReader`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_parse/lexer/struct.StringReader.html
+[`Lexer`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_parse/lexer/struct.Lexer.html
 [ast module]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_ast/ast/index.html
 [ast]: ./ast-validation.md
 [parser]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_parse/parser/index.html

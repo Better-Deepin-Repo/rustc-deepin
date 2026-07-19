@@ -6,7 +6,7 @@ pub(crate) type Cause = String;
 /// A single-item queue that allows callers to request an operation to
 /// be performed later.
 ///
-/// ```
+/// ```ignore
 /// let queue = OpQueue::default();
 ///
 /// // Request work to be done.
@@ -36,7 +36,7 @@ impl<Args, Output> Default for OpQueue<Args, Output> {
     }
 }
 
-impl<Args, Output> OpQueue<Args, Output> {
+impl<Args: std::fmt::Debug, Output> OpQueue<Args, Output> {
     /// Request an operation to start.
     pub(crate) fn request_op(&mut self, reason: Cause, args: Args) {
         self.op_requested = Some((reason, args));

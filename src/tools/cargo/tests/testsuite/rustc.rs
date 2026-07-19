@@ -1,7 +1,12 @@
 //! Tests for the `cargo rustc` command.
 
-use cargo_test_support::prelude::*;
-use cargo_test_support::{basic_bin_manifest, basic_lib_manifest, basic_manifest, project, str};
+use crate::prelude::*;
+use cargo_test_support::basic_bin_manifest;
+use cargo_test_support::basic_lib_manifest;
+use cargo_test_support::basic_manifest;
+use cargo_test_support::project;
+use cargo_test_support::str;
+use cargo_test_support::target_spec_json;
 
 #[cargo_test]
 fn build_lib_for_foo() {
@@ -534,6 +539,29 @@ fn fail_with_multiple_packages() {
 }
 
 #[cargo_test]
+fn fail_with_bad_bin_no_package() {
+    let p = project()
+        .file(
+            "src/main.rs",
+            r#"
+                fn main() { println!("hello a.rs"); }
+            "#,
+        )
+        .build();
+
+    p.cargo("rustc --bin main")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] no bin target named `main`
+[HELP] available bin targets:
+    foo
+...
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
 fn fail_with_glob() {
     let p = project()
         .file(
@@ -794,6 +822,29 @@ windows
 }
 
 #[cargo_test]
+fn rustc_with_print_cfg_config_toml_env() {
+    let p = project()
+        .file("Cargo.toml", &basic_bin_manifest("foo"))
+        .file("targets/best-target.json", target_spec_json())
+        .file(
+            ".cargo/config.toml",
+            r#"
+[build]
+target = "best-target"
+[env]
+RUST_TARGET_PATH = { value = "./targets", relative = true }
+"#,
+        )
+        .file("src/main.rs", r#"fn main() {} "#)
+        .build();
+
+    p.cargo("rustc -Z unstable-options --print cfg")
+        .masquerade_as_nightly_cargo(&["print"])
+        .with_stdout_data(str!["..."].unordered())
+        .run();
+}
+
+#[cargo_test]
 fn precedence() {
     // Ensure that the precedence of cargo-rustc is only lower than RUSTFLAGS,
     // but higher than most flags set by cargo.
@@ -820,6 +871,28 @@ fn precedence() {
 [COMPILING] foo v0.0.0 ([ROOT]/foo)
 [RUNNING] `rustc [..]-C strip=debuginfo [..]--cfg cargo_rustc -C strip=symbols --cfg from_rustflags`
 [FINISHED] `release` profile [optimized] target(s) in [ELAPSED]s
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn build_with_duplicate_crate_types() {
+    let p = project().file("src/lib.rs", "").build();
+
+    p.cargo("rustc -v --crate-type staticlib --crate-type staticlib")
+        .with_stderr_data(str![[r#"
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[RUNNING] `rustc [..] --crate-type staticlib --emit[..]
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .run();
+
+    p.cargo("rustc -v --crate-type staticlib --crate-type staticlib")
+        .with_stderr_data(str![[r#"
+[FRESH] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
         .run();

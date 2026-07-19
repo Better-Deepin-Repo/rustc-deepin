@@ -6,6 +6,7 @@ use rustc_errors::ErrorGuaranteed;
 use rustc_hir::def_id::DefId;
 use rustc_macros::{HashStable, TypeVisitable};
 use rustc_query_system::cache::Cache;
+use rustc_type_ir::solve::AliasBoundKind;
 
 use self::EvaluationResult::*;
 use super::{SelectionError, SelectionResult};
@@ -95,16 +96,17 @@ pub type EvaluationCache<'tcx, ENV> = Cache<(ENV, ty::PolyTraitPredicate<'tcx>),
 /// parameter environment.
 #[derive(PartialEq, Eq, Debug, Clone, TypeVisitable)]
 pub enum SelectionCandidate<'tcx> {
+    /// A built-in implementation for the `Sized` trait. This is preferred
+    /// over all other candidates.
+    SizedCandidate,
+
     /// A builtin implementation for some specific traits, used in cases
     /// where we cannot rely an ordinary library implementations.
     ///
-    /// The most notable examples are `sized`, `Copy` and `Clone`. This is also
+    /// The most notable examples are `Copy` and `Clone`. This is also
     /// used for the `DiscriminantKind` and `Pointee` trait, both of which have
     /// an associated type.
-    BuiltinCandidate {
-        /// `false` if there are no *further* obligations.
-        has_nested: bool,
-    },
+    BuiltinCandidate,
 
     /// Implementation of transmutability trait.
     TransmutabilityCandidate,
@@ -115,8 +117,13 @@ pub enum SelectionCandidate<'tcx> {
 
     /// This is a trait matching with a projected type as `Self`, and we found
     /// an applicable bound in the trait definition. The `usize` is an index
-    /// into the list returned by `tcx.item_bounds`.
-    ProjectionCandidate(usize),
+    /// into the list returned by `tcx.item_bounds` and the `AliasBoundKind`
+    /// is whether this is candidate from recursion on the self type of a
+    /// projection.
+    ProjectionCandidate {
+        idx: usize,
+        kind: AliasBoundKind,
+    },
 
     /// Implementation of a `Fn`-family trait by one of the anonymous types
     /// generated for an `||` expression.
@@ -153,6 +160,9 @@ pub enum SelectionCandidate<'tcx> {
     /// types generated for a fn pointer type (e.g., `fn(int) -> int`)
     FnPointerCandidate,
 
+    /// Builtin impl of the `PointerLike` trait.
+    PointerLikeCandidate,
+
     TraitAliasCandidate,
 
     /// Matching `dyn Trait` with a supertrait of `Trait`. The index is the
@@ -168,6 +178,8 @@ pub enum SelectionCandidate<'tcx> {
     BuiltinObjectCandidate,
 
     BuiltinUnsizeCandidate,
+
+    BikeshedGuaranteedNoDropCandidate,
 }
 
 /// The result of trait evaluation. The order is important
@@ -259,8 +271,6 @@ impl From<ErrorGuaranteed> for OverflowError {
         OverflowError::Error(e)
     }
 }
-
-TrivialTypeTraversalImpls! { OverflowError }
 
 impl<'tcx> From<OverflowError> for SelectionError<'tcx> {
     fn from(overflow_error: OverflowError) -> SelectionError<'tcx> {

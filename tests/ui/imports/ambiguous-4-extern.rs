@@ -1,5 +1,8 @@
+//@ edition:2015
 //@ check-pass
 // https://github.com/rust-lang/rust/pull/112743#issuecomment-1601986883
+
+#![warn(ambiguous_glob_imports)]
 
 macro_rules! m {
     () => {

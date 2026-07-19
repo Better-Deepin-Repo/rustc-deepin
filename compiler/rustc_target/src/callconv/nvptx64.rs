@@ -1,6 +1,7 @@
-use super::{ArgAttribute, ArgAttributes, ArgExtension, CastTarget};
-use crate::abi::call::{ArgAbi, FnAbi, PassMode, Reg, Size, Uniform};
-use crate::abi::{HasDataLayout, TyAbiInterface};
+use rustc_abi::{HasDataLayout, Reg, Size, TyAbiInterface};
+
+use super::CastTarget;
+use crate::callconv::{ArgAbi, FnAbi, Uniform};
 
 fn classify_ret<Ty>(ret: &mut ArgAbi<'_, Ty>) {
     if ret.layout.is_aggregate() && ret.layout.is_sized() {
@@ -10,7 +11,14 @@ fn classify_ret<Ty>(ret: &mut ArgAbi<'_, Ty>) {
     }
 }
 
-fn classify_arg<Ty>(arg: &mut ArgAbi<'_, Ty>) {
+fn classify_arg<'a, Ty, C>(cx: &C, arg: &mut ArgAbi<'a, Ty>)
+where
+    Ty: TyAbiInterface<'a, C> + Copy,
+{
+    if arg.layout.pass_indirectly_in_non_rustic_abis(cx) {
+        arg.make_indirect();
+        return;
+    }
     if arg.layout.is_aggregate() && arg.layout.is_sized() {
         classify_aggregate(arg)
     } else if arg.layout.size.bits() < 32 && arg.layout.is_sized() {
@@ -20,7 +28,7 @@ fn classify_arg<Ty>(arg: &mut ArgAbi<'_, Ty>) {
 
 /// the pass mode used for aggregates in arg and ret position
 fn classify_aggregate<Ty>(arg: &mut ArgAbi<'_, Ty>) {
-    let align_bytes = arg.layout.align.abi.bytes();
+    let align_bytes = arg.layout.align.bytes();
     let size = arg.layout.size;
 
     let reg = match align_bytes {
@@ -33,16 +41,10 @@ fn classify_aggregate<Ty>(arg: &mut ArgAbi<'_, Ty>) {
     };
 
     if align_bytes == size.bytes() {
-        arg.cast_to(CastTarget {
-            prefix: [Some(reg), None, None, None, None, None, None, None],
-            rest: Uniform::new(Reg::i8(), Size::from_bytes(0)),
-            attrs: ArgAttributes {
-                regular: ArgAttribute::default(),
-                arg_ext: ArgExtension::None,
-                pointee_size: Size::ZERO,
-                pointee_align: None,
-            },
-        });
+        arg.cast_to(CastTarget::prefixed(
+            [Some(reg), None, None, None, None, None, None, None],
+            Uniform::new(Reg::i8(), Size::ZERO),
+        ));
     } else {
         arg.cast_to(Uniform::new(reg, size));
     }
@@ -53,25 +55,43 @@ where
     Ty: TyAbiInterface<'a, C> + Copy,
     C: HasDataLayout,
 {
-    if matches!(arg.mode, PassMode::Pair(..)) && (arg.layout.is_adt() || arg.layout.is_tuple()) {
-        let align_bytes = arg.layout.align.abi.bytes();
+    match arg.mode {
+        super::PassMode::Ignore | super::PassMode::Direct(_) => return,
+        super::PassMode::Pair(_, _) => {}
+        super::PassMode::Cast { .. } => unreachable!(),
+        super::PassMode::Indirect { .. } => {}
+    }
 
-        let unit = match align_bytes {
-            1 => Reg::i8(),
-            2 => Reg::i16(),
-            4 => Reg::i32(),
-            8 => Reg::i64(),
-            16 => Reg::i128(),
-            _ => unreachable!("Align is given as power of 2 no larger than 16 bytes"),
-        };
-        arg.cast_to(Uniform::new(unit, Size::from_bytes(2 * align_bytes)));
+    // FIXME only allow structs and wide pointers here
+    // panic!(
+    //     "`extern \"ptx-kernel\"` doesn't allow passing types other than primitives and structs"
+    // );
+
+    let align_bytes = arg.layout.align.bytes();
+
+    let unit = match align_bytes {
+        1 => Reg::i8(),
+        2 => Reg::i16(),
+        4 => Reg::i32(),
+        8 => Reg::i64(),
+        16 => Reg::i128(),
+        _ => unreachable!("Align is given as power of 2 no larger than 16 bytes"),
+    };
+    if arg.layout.size.bytes() / align_bytes == 1 {
+        // Make sure we pass the struct as array at the LLVM IR level and not as a single integer.
+        arg.cast_to(CastTarget::prefixed(
+            [Some(unit), None, None, None, None, None, None, None],
+            Uniform::new(unit, Size::ZERO),
+        ));
     } else {
-        // FIXME: find a better way to do this. See https://github.com/rust-lang/rust/issues/117271.
-        arg.make_direct_deprecated();
+        arg.cast_to(Uniform::new(unit, arg.layout.size));
     }
 }
 
-pub(crate) fn compute_abi_info<Ty>(fn_abi: &mut FnAbi<'_, Ty>) {
+pub(crate) fn compute_abi_info<'a, Ty, C>(cx: &C, fn_abi: &mut FnAbi<'a, Ty>)
+where
+    Ty: TyAbiInterface<'a, C> + Copy,
+{
     if !fn_abi.ret.is_ignore() {
         classify_ret(&mut fn_abi.ret);
     }
@@ -80,7 +100,7 @@ pub(crate) fn compute_abi_info<Ty>(fn_abi: &mut FnAbi<'_, Ty>) {
         if arg.is_ignore() {
             continue;
         }
-        classify_arg(arg);
+        classify_arg(cx, arg);
     }
 }
 

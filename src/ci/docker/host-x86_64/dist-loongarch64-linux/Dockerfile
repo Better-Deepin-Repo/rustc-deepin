@@ -3,8 +3,8 @@ FROM ubuntu:22.04
 COPY scripts/cross-apt-packages.sh /scripts/
 RUN sh /scripts/cross-apt-packages.sh
 
-COPY scripts/crosstool-ng-git.sh /scripts/
-RUN sh /scripts/crosstool-ng-git.sh
+COPY scripts/crosstool-ng.sh /scripts/
+RUN sh /scripts/crosstool-ng.sh
 
 COPY scripts/rustbuild-setup.sh /scripts/
 RUN sh /scripts/rustbuild-setup.sh
@@ -21,7 +21,9 @@ ENV PATH=$PATH:/x-tools/loongarch64-unknown-linux-gnu/bin
 
 ENV CC_loongarch64_unknown_linux_gnu=loongarch64-unknown-linux-gnu-gcc \
     AR_loongarch64_unknown_linux_gnu=loongarch64-unknown-linux-gnu-ar \
-    CXX_loongarch64_unknown_linux_gnu=loongarch64-unknown-linux-gnu-g++
+    CXX_loongarch64_unknown_linux_gnu=loongarch64-unknown-linux-gnu-g++ \
+    CFLAGS_loongarch64_unknown_linux_gnu="-mcmodel=medium" \
+    CXXFLAGS_loongarch64_unknown_linux_gnu="-mcmodel=medium"
 
 # We re-use the Linux toolchain for bare-metal, because upstream bare-metal
 # target support for LoongArch is only available from GCC 14+.

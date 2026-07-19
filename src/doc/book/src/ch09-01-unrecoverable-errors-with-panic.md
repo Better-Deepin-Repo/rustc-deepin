@@ -11,10 +11,10 @@ panic occurs to make it easier to track down the source of the panic.
 
 > ### Unwinding the Stack or Aborting in Response to a Panic
 >
-> By default, when a panic occurs the program starts _unwinding_, which means
+> By default, when a panic occurs, the program starts _unwinding_, which means
 > Rust walks back up the stack and cleans up the data from each function it
-> encounters. However, walking back and cleaning up is a lot of work. Rust,
-> therefore, allows you to choose the alternative of immediately _aborting_,
+> encounters. However, walking back and cleaning up is a lot of work. Rust
+> therefore allows you to choose the alternative of immediately _aborting_,
 > which ends the program without cleaning up.
 >
 > Memory that the program was using will then need to be cleaned up by the
@@ -56,7 +56,7 @@ be in code that our code calls, and the filename and line number reported by
 the error message will be someone else’s code where the `panic!` macro is
 called, not the line of our code that eventually led to the `panic!` call.
 
-<!-- Old heading. Do not remove or links may break. -->
+<!-- Old headings. Do not remove or links may break. -->
 
 <a id="using-a-panic-backtrace"></a>
 
@@ -98,17 +98,17 @@ continue. Let’s try it and see:
 ```
 
 This error points at line 4 of our _main.rs_ where we attempt to access index
-`99` of the vector in `v`.
+99 of the vector in `v`.
 
 The `note:` line tells us that we can set the `RUST_BACKTRACE` environment
 variable to get a backtrace of exactly what happened to cause the error. A
 _backtrace_ is a list of all the functions that have been called to get to this
-point. Backtraces in Rust work as they do in other languages: the key to
+point. Backtraces in Rust work as they do in other languages: The key to
 reading the backtrace is to start from the top and read until you see files you
 wrote. That’s the spot where the problem originated. The lines above that spot
 are code that your code has called; the lines below are code that called your
 code. These before-and-after lines might include core Rust code, standard
-library code, or crates that you’re using. Let’s try getting a backtrace by
+library code, or crates that you’re using. Let’s try to get a backtrace by
 setting the `RUST_BACKTRACE` environment variable to any value except `0`.
 Listing 9-2 shows output similar to what you’ll see.
 
@@ -127,21 +127,21 @@ thread 'main' panicked at src/main.rs:4:6:
 index out of bounds: the len is 3 but the index is 99
 stack backtrace:
    0: rust_begin_unwind
-             at /rustc/f6e511eec7342f59a25f7c0534f1dbea00d01b14/library/std/src/panicking.rs:662:5
+             at /rustc/4d91de4e48198da2e33413efdcd9cd2cc0c46688/library/std/src/panicking.rs:692:5
    1: core::panicking::panic_fmt
-             at /rustc/f6e511eec7342f59a25f7c0534f1dbea00d01b14/library/core/src/panicking.rs:74:14
+             at /rustc/4d91de4e48198da2e33413efdcd9cd2cc0c46688/library/core/src/panicking.rs:75:14
    2: core::panicking::panic_bounds_check
-             at /rustc/f6e511eec7342f59a25f7c0534f1dbea00d01b14/library/core/src/panicking.rs:276:5
+             at /rustc/4d91de4e48198da2e33413efdcd9cd2cc0c46688/library/core/src/panicking.rs:273:5
    3: <usize as core::slice::index::SliceIndex<[T]>>::index
-             at /rustc/f6e511eec7342f59a25f7c0534f1dbea00d01b14/library/core/src/slice/index.rs:302:10
+             at file:///home/.rustup/toolchains/1.85/lib/rustlib/src/rust/library/core/src/slice/index.rs:274:10
    4: core::slice::index::<impl core::ops::index::Index<I> for [T]>::index
-             at /rustc/f6e511eec7342f59a25f7c0534f1dbea00d01b14/library/core/src/slice/index.rs:16:9
+             at file:///home/.rustup/toolchains/1.85/lib/rustlib/src/rust/library/core/src/slice/index.rs:16:9
    5: <alloc::vec::Vec<T,A> as core::ops::index::Index<I>>::index
-             at /rustc/f6e511eec7342f59a25f7c0534f1dbea00d01b14/library/alloc/src/vec/mod.rs:2920:9
+             at file:///home/.rustup/toolchains/1.85/lib/rustlib/src/rust/library/alloc/src/vec/mod.rs:3361:9
    6: panic::main
              at ./src/main.rs:4:6
    7: core::ops::function::FnOnce::call_once
-             at /rustc/f6e511eec7342f59a25f7c0534f1dbea00d01b14/library/core/src/ops/function.rs:250:5
+             at file:///home/.rustup/toolchains/1.85/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
 note: Some details are omitted, run with `RUST_BACKTRACE=full` for a verbose backtrace.
 ```
 

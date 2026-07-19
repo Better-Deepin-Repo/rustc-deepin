@@ -1,4 +1,4 @@
-use rustc_middle::middle::region;
+use rustc_middle::middle::region::{self, TempLifetime};
 use rustc_middle::mir::*;
 use rustc_middle::span_bug;
 use rustc_middle::thir::*;
@@ -18,7 +18,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         expr_id: ExprId,
         statement_scope: Option<region::Scope>,
     ) -> BlockAnd<()> {
-        let this = self;
+        let this = self; // See "LET_THIS_SELF".
         let expr = &this.thir[expr_id];
         let expr_span = expr.span;
         let source_info = this.source_info(expr.span);
@@ -78,8 +78,14 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 // because AssignOp is only legal for Copy types
                 // (overloaded ops should be desugared into a call).
                 let result = unpack!(
-                    block =
-                        this.build_binary_op(block, op, expr_span, lhs_ty, Operand::Copy(lhs), rhs)
+                    block = this.build_binary_op(
+                        block,
+                        op.into(),
+                        expr_span,
+                        lhs_ty,
+                        Operand::Copy(lhs),
+                        rhs
+                    )
                 );
                 this.cfg.push_assign(block, source_info, lhs, result);
 
@@ -91,6 +97,9 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             }
             ExprKind::Break { label, value } => {
                 this.break_scope(block, value, BreakableTarget::Break(label), source_info)
+            }
+            ExprKind::ConstContinue { label, value } => {
+                this.break_const_continuable_scope(block, value, label, source_info)
             }
             ExprKind::Return { value } => {
                 this.break_scope(block, value, BreakableTarget::Return, source_info)
@@ -123,11 +132,11 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
 
                     unpack!(block = this.break_for_tail_call(block, &args, source_info));
 
-                    this.cfg.terminate(block, source_info, TerminatorKind::TailCall {
-                        func: fun,
-                        args,
-                        fn_span,
-                    });
+                    this.cfg.terminate(
+                        block,
+                        source_info,
+                        TerminatorKind::TailCall { func: fun, args, fn_span },
+                    );
 
                     this.cfg.start_new_block().unit()
                 })
@@ -164,8 +173,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                         }
                     }
                     this.block_context.push(BlockFrame::TailExpr {
-                        tail_result_is_ignored: true,
-                        span: expr.span,
+                        info: BlockTailInfo { tail_result_is_ignored: true, span: expr.span },
                     });
                     Some(expr.span)
                 } else {

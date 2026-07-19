@@ -4,12 +4,13 @@ use std::borrow::Cow;
 use std::cell::{Cell, RefCell};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasher, Hash};
-use std::marker::PhantomData;
+use std::marker::{PhantomData, PointeeSized};
 use std::num::NonZero;
 use std::path;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use rustc_hashes::{Hash64, Hash128};
 use smallvec::{Array, SmallVec};
 use thin_vec::ThinVec;
 
@@ -19,6 +20,11 @@ use thin_vec::ThinVec;
 ///
 /// [utf8]: https://en.wikipedia.org/w/index.php?title=UTF-8&oldid=1058865525#Codepage_layout
 const STR_SENTINEL: u8 = 0xC1;
+
+/// For byte strings there are no bytes that cannot occur. Just use this value
+/// as a best-effort sentinel. There is no validation skipped so the potential
+/// for badness is lower than in the `STR_SENTINEL` case.
+const BYTE_STR_SENTINEL: u8 = 0xC2;
 
 /// A note about error handling.
 ///
@@ -71,6 +77,13 @@ pub trait Encoder {
         self.emit_u8(STR_SENTINEL);
     }
 
+    #[inline]
+    fn emit_byte_str(&mut self, v: &[u8]) {
+        self.emit_usize(v.len());
+        self.emit_raw_bytes(v);
+        self.emit_u8(BYTE_STR_SENTINEL);
+    }
+
     fn emit_raw_bytes(&mut self, s: &[u8]);
 }
 
@@ -121,7 +134,17 @@ pub trait Decoder {
         let len = self.read_usize();
         let bytes = self.read_raw_bytes(len + 1);
         assert!(bytes[len] == STR_SENTINEL);
+        // SAFETY: the presence of `STR_SENTINEL` gives us high (but not
+        // perfect) confidence that the bytes we just read truly are UTF-8.
         unsafe { std::str::from_utf8_unchecked(&bytes[..len]) }
+    }
+
+    #[inline]
+    fn read_byte_str(&mut self) -> &[u8] {
+        let len = self.read_usize();
+        let bytes = self.read_raw_bytes(len + 1);
+        assert!(bytes[len] == BYTE_STR_SENTINEL);
+        &bytes[..len]
     }
 
     fn read_raw_bytes(&mut self, len: usize) -> &[u8];
@@ -141,7 +164,7 @@ pub trait Decoder {
 ///   `rustc_metadata::rmeta::Lazy`.
 /// * `TyEncodable` should be used for types that are only serialized in crate
 ///   metadata or the incremental cache. This is most types in `rustc_middle`.
-pub trait Encodable<S: Encoder> {
+pub trait Encodable<S: Encoder>: PointeeSized {
     fn encode(&self, s: &mut S);
 }
 
@@ -197,7 +220,7 @@ direct_serialize_impls! {
     char emit_char read_char
 }
 
-impl<S: Encoder, T: ?Sized> Encodable<S> for &T
+impl<S: Encoder, T: ?Sized + PointeeSized> Encodable<S> for &T
 where
     T: Encodable<S>,
 {
@@ -238,7 +261,7 @@ impl<S: Encoder> Encodable<S> for str {
 
 impl<S: Encoder> Encodable<S> for String {
     fn encode(&self, s: &mut S) {
-        s.emit_str(&self[..]);
+        s.emit_str(&self);
     }
 }
 
@@ -714,5 +737,33 @@ impl<D: Decoder, T: Decodable<D>> Decodable<D> for Arc<[T]> {
     fn decode(d: &mut D) -> Arc<[T]> {
         let vec: Vec<T> = Decodable::decode(d);
         vec.into()
+    }
+}
+
+impl<S: Encoder> Encodable<S> for Hash64 {
+    #[inline]
+    fn encode(&self, s: &mut S) {
+        s.emit_raw_bytes(&self.as_u64().to_le_bytes());
+    }
+}
+
+impl<S: Encoder> Encodable<S> for Hash128 {
+    #[inline]
+    fn encode(&self, s: &mut S) {
+        s.emit_raw_bytes(&self.as_u128().to_le_bytes());
+    }
+}
+
+impl<D: Decoder> Decodable<D> for Hash64 {
+    #[inline]
+    fn decode(d: &mut D) -> Self {
+        Self::new(u64::from_le_bytes(d.read_raw_bytes(8).try_into().unwrap()))
+    }
+}
+
+impl<D: Decoder> Decodable<D> for Hash128 {
+    #[inline]
+    fn decode(d: &mut D) -> Self {
+        Self::new(u128::from_le_bytes(d.read_raw_bytes(16).try_into().unwrap()))
     }
 }

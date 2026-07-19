@@ -1,12 +1,13 @@
 use rustc_ast as ast;
 use rustc_data_structures::stable_hasher::{HashStable, HashingControls, StableHasher};
-use rustc_data_structures::sync::Lrc;
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_hir::definitions::DefPathHash;
 use rustc_session::Session;
 use rustc_session::cstore::Untracked;
 use rustc_span::source_map::SourceMap;
-use rustc_span::{BytePos, CachingSourceMapView, DUMMY_SP, SourceFile, Span, SpanData, Symbol};
+use rustc_span::{
+    BytePos, CachingSourceMapView, DUMMY_SP, Span, SpanData, StableSourceFileId, Symbol,
+};
 
 use crate::ich;
 
@@ -117,7 +118,7 @@ impl<'a> rustc_span::HashStableContext for StableHashingContext<'a> {
     fn span_data_to_lines_and_cols(
         &mut self,
         span: &SpanData,
-    ) -> Option<(Lrc<SourceFile>, usize, BytePos, usize, BytePos)> {
+    ) -> Option<(StableSourceFileId, usize, BytePos, usize, BytePos)> {
         self.source_map().span_data_to_lines_and_cols(span)
     }
 

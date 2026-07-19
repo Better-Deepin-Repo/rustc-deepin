@@ -33,15 +33,17 @@ pub(crate) fn inactive_code(
         message,
         ctx.sema.diagnostics_display_range(d.node),
     )
+    .stable()
     .with_unused(true);
     Some(res)
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{tests::check_diagnostics_with_config, DiagnosticsConfig};
+    use crate::{DiagnosticsConfig, tests::check_diagnostics_with_config};
 
-    pub(crate) fn check(ra_fixture: &str) {
+    #[track_caller]
+    pub(crate) fn check(#[rust_analyzer::rust_fixture] ra_fixture: &str) {
         let config = DiagnosticsConfig {
             disabled: std::iter::once("unlinked-file".to_owned()).collect(),
             ..DiagnosticsConfig::test_sample()
@@ -93,7 +95,7 @@ fn f() {
   //^^^^^^^^^^^^^^^^^^^^^^^^ weak: code is inactive due to #[cfg] directives: no is disabled
 
     #[cfg(no)] #[cfg(no2)] mod m;
-  //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ weak: code is inactive due to #[cfg] directives: no and no2 are disabled
+  //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ weak: code is inactive due to #[cfg] directives: no is disabled
 
     #[cfg(all(not(a), b))] enum E {}
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ weak: code is inactive due to #[cfg] directives: b is disabled
@@ -128,7 +130,6 @@ trait Bar {
     /// Tests that `cfg` attributes behind `cfg_attr` is handled properly.
     #[test]
     fn inactive_via_cfg_attr() {
-        cov_mark::check!(cfg_attr_active);
         check(
             r#"
     #[cfg_attr(not(never), cfg(no))] fn f() {}

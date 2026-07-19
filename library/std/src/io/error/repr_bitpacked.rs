@@ -103,7 +103,8 @@
 //! the time.
 
 use core::marker::PhantomData;
-use core::ptr::{self, NonNull};
+use core::num::NonZeroUsize;
+use core::ptr::NonNull;
 
 use super::{Custom, ErrorData, ErrorKind, RawOsError, SimpleMessage};
 
@@ -132,15 +133,6 @@ unsafe impl Send for Repr {}
 unsafe impl Sync for Repr {}
 
 impl Repr {
-    pub(super) fn new(dat: ErrorData<Box<Custom>>) -> Self {
-        match dat {
-            ErrorData::Os(code) => Self::new_os(code),
-            ErrorData::Simple(kind) => Self::new_simple(kind),
-            ErrorData::SimpleMessage(simple_message) => Self::new_simple_message(simple_message),
-            ErrorData::Custom(b) => Self::new_custom(b),
-        }
-    }
-
     pub(super) fn new_custom(b: Box<Custom>) -> Self {
         let p = Box::into_raw(b).cast::<u8>();
         // Should only be possible if an allocator handed out a pointer with
@@ -176,7 +168,7 @@ impl Repr {
         let utagged = ((code as usize) << 32) | TAG_OS;
         // Safety: `TAG_OS` is not zero, so the result of the `|` is not 0.
         let res = Self(
-            unsafe { NonNull::new_unchecked(ptr::without_provenance_mut(utagged)) },
+            NonNull::without_provenance(unsafe { NonZeroUsize::new_unchecked(utagged) }),
             PhantomData,
         );
         // quickly smoke-check we encoded the right thing (This generally will
@@ -193,7 +185,7 @@ impl Repr {
         let utagged = ((kind as usize) << 32) | TAG_SIMPLE;
         // Safety: `TAG_SIMPLE` is not zero, so the result of the `|` is not 0.
         let res = Self(
-            unsafe { NonNull::new_unchecked(ptr::without_provenance_mut(utagged)) },
+            NonNull::without_provenance(unsafe { NonZeroUsize::new_unchecked(utagged) }),
             PhantomData,
         );
         // quickly smoke-check we encoded the right thing (This generally will

@@ -1,24 +1,24 @@
 //! Interpret intrinsics, lang items and `extern "C"` wellknown functions which their implementation
 //! is not available.
 //!
-use std::cmp;
+use std::cmp::{self, Ordering};
 
-use chalk_ir::TyKind;
-use hir_def::{
-    builtin_type::{BuiltinInt, BuiltinUint},
-    resolver::HasResolver,
-};
+use hir_def::{attrs::AttrFlags, signatures::FunctionSignature};
 use hir_expand::name::Name;
-use intern::{sym, Symbol};
+use intern::sym;
+use rustc_type_ir::inherent::{AdtDef, IntoKind, SliceLike, Ty as _};
+use stdx::never;
 
 use crate::{
-    error_lifetime,
+    InferenceResult,
+    display::DisplayTarget,
+    drop::{DropGlue, has_drop_glue},
     mir::eval::{
-        pad16, Address, AdtId, Arc, BuiltinType, Evaluator, FunctionId, HasModule, HirDisplay,
-        InternedClosure, Interner, Interval, IntervalAndTy, IntervalOrOwned, ItemContainerId,
-        LangItem, Layout, Locals, Lookup, MirEvalError, MirSpan, Mutability, Result, Substitution,
-        Ty, TyBuilder, TyExt,
+        Address, AdtId, Arc, Evaluator, FunctionId, GenericArgs, HasModule, HirDisplay,
+        InternedClosure, Interval, IntervalAndTy, IntervalOrOwned, ItemContainerId, Layout, Locals,
+        Lookup, MirEvalError, MirSpan, Mutability, Result, Ty, TyKind, pad16,
     },
+    next_solver::Region,
 };
 
 mod simd;
@@ -39,35 +39,30 @@ macro_rules! not_supported {
     };
 }
 
-impl Evaluator<'_> {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EvalLangItem {
+    BeginPanic,
+    SliceLen,
+    DropInPlace,
+}
+
+impl<'db> Evaluator<'db> {
     pub(super) fn detect_and_exec_special_function(
         &mut self,
         def: FunctionId,
-        args: &[IntervalAndTy],
-        generic_args: &Substitution,
-        locals: &Locals,
+        args: &[IntervalAndTy<'db>],
+        generic_args: GenericArgs<'db>,
+        locals: &Locals<'db>,
         destination: Interval,
         span: MirSpan,
-    ) -> Result<bool> {
+    ) -> Result<'db, bool> {
         if self.not_special_fn_cache.borrow().contains(&def) {
             return Ok(false);
         }
 
-        let function_data = self.db.function_data(def);
-        let attrs = self.db.attrs(def.into());
-        let is_intrinsic = attrs.by_key(&sym::rustc_intrinsic).exists()
-            // Keep this around for a bit until extern "rustc-intrinsic" abis are no longer used
-            || (match &function_data.abi {
-                Some(abi) => *abi == sym::rust_dash_intrinsic,
-                None => match def.lookup(self.db.upcast()).container {
-                    hir_def::ItemContainerId::ExternBlockId(block) => {
-                        let id = block.lookup(self.db.upcast()).id;
-                        id.item_tree(self.db.upcast())[id.value].abi.as_ref()
-                            == Some(&sym::rust_dash_intrinsic)
-                    }
-                    _ => false,
-                },
-            });
+        let function_data = self.db.function_signature(def);
+        let attrs = AttrFlags::query(self.db, def.into());
+        let is_intrinsic = FunctionSignature::is_intrinsic(self.db, def);
 
         if is_intrinsic {
             return self.exec_intrinsic(
@@ -78,14 +73,11 @@ impl Evaluator<'_> {
                 locals,
                 span,
                 !function_data.has_body()
-                    || attrs.by_key(&sym::rustc_intrinsic_must_be_overridden).exists(),
+                    || attrs.contains(AttrFlags::RUSTC_INTRINSIC_MUST_BE_OVERRIDDEN),
             );
         }
-        let is_extern_c = match def.lookup(self.db.upcast()).container {
-            hir_def::ItemContainerId::ExternBlockId(block) => {
-                let id = block.lookup(self.db.upcast()).id;
-                id.item_tree(self.db.upcast())[id.value].abi.as_ref() == Some(&sym::C)
-            }
+        let is_extern_c = match def.lookup(self.db).container {
+            hir_def::ItemContainerId::ExternBlockId(block) => block.abi(self.db) == Some(sym::C),
             _ => false,
         };
         if is_extern_c {
@@ -101,18 +93,13 @@ impl Evaluator<'_> {
                 .map(|()| true);
         }
 
-        let alloc_fn =
-            attrs.iter().filter_map(|it| it.path().as_ident()).map(|it| it.symbol()).find(|it| {
-                [
-                    &sym::rustc_allocator,
-                    &sym::rustc_deallocator,
-                    &sym::rustc_reallocator,
-                    &sym::rustc_allocator_zeroed,
-                ]
-                .contains(it)
-            });
-        if let Some(alloc_fn) = alloc_fn {
-            self.exec_alloc_fn(alloc_fn, args, destination)?;
+        if attrs.intersects(
+            AttrFlags::RUSTC_ALLOCATOR
+                | AttrFlags::RUSTC_DEALLOCATOR
+                | AttrFlags::RUSTC_REALLOCATOR
+                | AttrFlags::RUSTC_ALLOCATOR_ZEROED,
+        ) {
+            self.exec_alloc_fn(attrs, args, destination)?;
             return Ok(true);
         }
         if let Some(it) = self.detect_lang_function(def) {
@@ -120,25 +107,23 @@ impl Evaluator<'_> {
             destination.write_from_bytes(self, &result)?;
             return Ok(true);
         }
-        if let ItemContainerId::TraitId(t) = def.lookup(self.db.upcast()).container {
-            if self.db.lang_attr(t.into()) == Some(LangItem::Clone) {
-                let [self_ty] = generic_args.as_slice(Interner) else {
-                    not_supported!("wrong generic arg count for clone");
-                };
-                let Some(self_ty) = self_ty.ty(Interner) else {
-                    not_supported!("wrong generic arg kind for clone");
-                };
-                // Clone has special impls for tuples and function pointers
-                if matches!(
-                    self_ty.kind(Interner),
-                    TyKind::Function(_) | TyKind::Tuple(..) | TyKind::Closure(..)
-                ) {
-                    self.exec_clone(def, args, self_ty.clone(), locals, destination, span)?;
-                    return Ok(true);
-                }
-                // Return early to prevent caching clone as non special fn.
-                return Ok(false);
+        if let ItemContainerId::TraitId(t) = def.lookup(self.db).container
+            && Some(t) == self.lang_items().Clone
+        {
+            let [self_ty] = generic_args.as_slice() else {
+                not_supported!("wrong generic arg count for clone");
+            };
+            let Some(self_ty) = self_ty.ty() else {
+                not_supported!("wrong generic arg kind for clone");
+            };
+            // Clone has special impls for tuples and function pointers
+            if matches!(self_ty.kind(), TyKind::FnPtr(..) | TyKind::Tuple(..) | TyKind::Closure(..))
+            {
+                self.exec_clone(def, args, self_ty, locals, destination, span)?;
+                return Ok(true);
             }
+            // Return early to prevent caching clone as non special fn.
+            return Ok(false);
         }
         self.not_special_fn_cache.borrow_mut().insert(def);
         Ok(false)
@@ -147,15 +132,10 @@ impl Evaluator<'_> {
     pub(super) fn detect_and_redirect_special_function(
         &mut self,
         def: FunctionId,
-    ) -> Result<Option<FunctionId>> {
+    ) -> Result<'db, Option<FunctionId>> {
         // `PanicFmt` is redirected to `ConstPanicFmt`
-        if let Some(LangItem::PanicFmt) = self.db.lang_attr(def.into()) {
-            let resolver =
-                self.db.crate_def_map(self.crate_id).crate_root().resolver(self.db.upcast());
-
-            let Some(hir_def::lang_item::LangItemTarget::Function(const_panic_fmt)) =
-                self.db.lang_item(resolver.krate(), LangItem::ConstPanicFmt)
-            else {
+        if Some(def) == self.lang_items().PanicFmt {
+            let Some(const_panic_fmt) = self.lang_items().ConstPanicFmt else {
                 not_supported!("const_panic_fmt lang item not found or not a function");
             };
             return Ok(Some(const_panic_fmt));
@@ -167,14 +147,14 @@ impl Evaluator<'_> {
     fn exec_clone(
         &mut self,
         def: FunctionId,
-        args: &[IntervalAndTy],
-        self_ty: Ty,
-        locals: &Locals,
+        args: &[IntervalAndTy<'db>],
+        self_ty: Ty<'db>,
+        locals: &Locals<'db>,
         destination: Interval,
         span: MirSpan,
-    ) -> Result<()> {
-        match self_ty.kind(Interner) {
-            TyKind::Function(_) => {
+    ) -> Result<'db, ()> {
+        match self_ty.kind() {
+            TyKind::FnPtr(..) => {
                 let [arg] = args else {
                     not_supported!("wrong arg count for clone");
                 };
@@ -187,27 +167,35 @@ impl Evaluator<'_> {
                     not_supported!("wrong arg count for clone");
                 };
                 let addr = Address::from_bytes(arg.get(self)?)?;
-                let InternedClosure(closure_owner, _) = self.db.lookup_intern_closure((*id).into());
-                let infer = self.db.infer(closure_owner);
-                let (captures, _) = infer.closure_info(id);
-                let layout = self.layout(&self_ty)?;
-                let ty_iter = captures.iter().map(|c| c.ty(subst));
+                let InternedClosure(closure_owner, _) = self.db.lookup_intern_closure(id.0);
+                let infer = InferenceResult::for_body(self.db, closure_owner);
+                let (captures, _) = infer.closure_info(id.0);
+                let layout = self.layout(self_ty)?;
+                let db = self.db;
+                let ty_iter = captures.iter().map(|c| c.ty(db, subst));
                 self.exec_clone_for_fields(ty_iter, layout, addr, def, locals, destination, span)?;
             }
-            TyKind::Tuple(_, subst) => {
+            TyKind::Tuple(subst) => {
                 let [arg] = args else {
                     not_supported!("wrong arg count for clone");
                 };
                 let addr = Address::from_bytes(arg.get(self)?)?;
-                let layout = self.layout(&self_ty)?;
-                let ty_iter = subst.iter(Interner).map(|ga| ga.assert_ty_ref(Interner).clone());
-                self.exec_clone_for_fields(ty_iter, layout, addr, def, locals, destination, span)?;
+                let layout = self.layout(self_ty)?;
+                self.exec_clone_for_fields(
+                    subst.iter(),
+                    layout,
+                    addr,
+                    def,
+                    locals,
+                    destination,
+                    span,
+                )?;
             }
             _ => {
                 self.exec_fn_with_args(
                     def,
                     args,
-                    Substitution::from1(Interner, self_ty),
+                    GenericArgs::new_from_iter(self.interner(), [self_ty.into()]),
                     locals,
                     destination,
                     None,
@@ -220,20 +208,25 @@ impl Evaluator<'_> {
 
     fn exec_clone_for_fields(
         &mut self,
-        ty_iter: impl Iterator<Item = Ty>,
+        ty_iter: impl Iterator<Item = Ty<'db>>,
         layout: Arc<Layout>,
         addr: Address,
         def: FunctionId,
-        locals: &Locals,
+        locals: &Locals<'db>,
         destination: Interval,
         span: MirSpan,
-    ) -> Result<()> {
+    ) -> Result<'db, ()> {
         for (i, ty) in ty_iter.enumerate() {
-            let size = self.layout(&ty)?.size.bytes_usize();
+            let size = self.layout(ty)?.size.bytes_usize();
             let tmp = self.heap_allocate(self.ptr_size(), self.ptr_size())?;
             let arg = IntervalAndTy {
                 interval: Interval { addr: tmp, size: self.ptr_size() },
-                ty: TyKind::Ref(Mutability::Not, error_lifetime(), ty.clone()).intern(Interner),
+                ty: Ty::new_ref(
+                    self.interner(),
+                    Region::error(self.interner()),
+                    ty,
+                    Mutability::Not,
+                ),
             };
             let offset = layout.fields.offset(i).bytes_usize();
             self.write_memory(tmp, &addr.offset(offset).to_bytes())?;
@@ -251,12 +244,14 @@ impl Evaluator<'_> {
 
     fn exec_alloc_fn(
         &mut self,
-        alloc_fn: &Symbol,
-        args: &[IntervalAndTy],
+        alloc_fn: AttrFlags,
+        args: &[IntervalAndTy<'db>],
         destination: Interval,
-    ) -> Result<()> {
+    ) -> Result<'db, ()> {
         match alloc_fn {
-            _ if *alloc_fn == sym::rustc_allocator_zeroed || *alloc_fn == sym::rustc_allocator => {
+            _ if alloc_fn
+                .intersects(AttrFlags::RUSTC_ALLOCATOR_ZEROED | AttrFlags::RUSTC_ALLOCATOR) =>
+            {
                 let [size, align] = args else {
                     return Err(MirEvalError::InternalError(
                         "rustc_allocator args are not provided".into(),
@@ -267,8 +262,8 @@ impl Evaluator<'_> {
                 let result = self.heap_allocate(size, align)?;
                 destination.write_from_bytes(self, &result.to_bytes())?;
             }
-            _ if *alloc_fn == sym::rustc_deallocator => { /* no-op for now */ }
-            _ if *alloc_fn == sym::rustc_reallocator => {
+            _ if alloc_fn.contains(AttrFlags::RUSTC_DEALLOCATOR) => { /* no-op for now */ }
+            _ if alloc_fn.contains(AttrFlags::RUSTC_REALLOCATOR) => {
                 let [ptr, old_size, align, new_size] = args else {
                     return Err(MirEvalError::InternalError(
                         "rustc_allocator args are not provided".into(),
@@ -292,19 +287,26 @@ impl Evaluator<'_> {
         Ok(())
     }
 
-    fn detect_lang_function(&self, def: FunctionId) -> Option<LangItem> {
-        use LangItem::*;
-        let attrs = self.db.attrs(def.into());
+    fn detect_lang_function(&self, def: FunctionId) -> Option<EvalLangItem> {
+        use EvalLangItem::*;
+        let lang_items = self.lang_items();
+        let attrs = AttrFlags::query(self.db, def.into());
 
-        if attrs.by_key(&sym::rustc_const_panic_str).exists() {
+        if attrs.contains(AttrFlags::RUSTC_CONST_PANIC_STR) {
             // `#[rustc_const_panic_str]` is treated like `lang = "begin_panic"` by rustc CTFE.
-            return Some(LangItem::BeginPanic);
+            return Some(BeginPanic);
         }
 
-        let candidate = attrs.lang_item()?;
         // We want to execute these functions with special logic
         // `PanicFmt` is not detected here as it's redirected later.
-        if [BeginPanic, SliceLen, DropInPlace].contains(&candidate) {
+        if let Some((_, candidate)) = [
+            (lang_items.BeginPanic, BeginPanic),
+            (lang_items.SliceLen, SliceLen),
+            (lang_items.DropInPlace, DropInPlace),
+        ]
+        .iter()
+        .find(|&(candidate, _)| candidate == Some(def))
+        {
             return Some(candidate);
         }
 
@@ -313,13 +315,13 @@ impl Evaluator<'_> {
 
     fn exec_lang_item(
         &mut self,
-        it: LangItem,
-        generic_args: &Substitution,
-        args: &[IntervalAndTy],
-        locals: &Locals,
+        it: EvalLangItem,
+        generic_args: GenericArgs<'db>,
+        args: &[IntervalAndTy<'db>],
+        locals: &Locals<'db>,
         span: MirSpan,
-    ) -> Result<Vec<u8>> {
-        use LangItem::*;
+    ) -> Result<'db, Vec<u8>> {
+        use EvalLangItem::*;
         let mut args = args.iter();
         match it {
             BeginPanic => {
@@ -329,7 +331,7 @@ impl Evaluator<'_> {
                         "argument of BeginPanic is not provided".into(),
                     ))?
                     .clone();
-                while let TyKind::Ref(_, _, ty) = arg.ty.kind(Interner) {
+                while let TyKind::Ref(_, ty, _) = arg.ty.kind() {
                     if ty.is_str() {
                         let (pointee, metadata) = arg.interval.get(self)?.split_at(self.ptr_size());
                         let len = from_bytes!(usize, metadata);
@@ -348,13 +350,10 @@ impl Evaluator<'_> {
                     let pointee = arg.interval.get(self)?;
                     arg = IntervalAndTy {
                         interval: Interval::new(Address::from_bytes(pointee)?, size),
-                        ty: ty.clone(),
+                        ty,
                     };
                 }
-                Err(MirEvalError::Panic(format!(
-                    "unknown-panic-payload: {:?}",
-                    arg.ty.kind(Interner)
-                )))
+                Err(MirEvalError::Panic(format!("unknown-panic-payload: {:?}", arg.ty.kind())))
             }
             SliceLen => {
                 let arg = args.next().ok_or(MirEvalError::InternalError(
@@ -365,18 +364,17 @@ impl Evaluator<'_> {
                 Ok(arg[ptr_size..].into())
             }
             DropInPlace => {
-                let ty =
-                    generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner)).ok_or(
-                        MirEvalError::InternalError(
-                            "generic argument of drop_in_place is not provided".into(),
-                        ),
-                    )?;
+                let ty = generic_args.as_slice().first().and_then(|it| it.ty()).ok_or(
+                    MirEvalError::InternalError(
+                        "generic argument of drop_in_place is not provided".into(),
+                    ),
+                )?;
                 let arg = args.next().ok_or(MirEvalError::InternalError(
                     "argument of drop_in_place is not provided".into(),
                 ))?;
                 let arg = arg.interval.get(self)?.to_owned();
                 self.run_drop_glue_deep(
-                    ty.clone(),
+                    ty,
                     locals,
                     Address::from_bytes(&arg[0..self.ptr_size()])?,
                     &arg[self.ptr_size()..],
@@ -384,18 +382,17 @@ impl Evaluator<'_> {
                 )?;
                 Ok(vec![])
             }
-            it => not_supported!("Executing lang item {it:?}"),
         }
     }
 
     fn exec_syscall(
         &mut self,
         id: i64,
-        args: &[IntervalAndTy],
+        args: &[IntervalAndTy<'db>],
         destination: Interval,
-        _locals: &Locals,
+        _locals: &Locals<'db>,
         _span: MirSpan,
-    ) -> Result<()> {
+    ) -> Result<'db, ()> {
         match id {
             318 => {
                 // SYS_getrandom
@@ -421,12 +418,12 @@ impl Evaluator<'_> {
     fn exec_extern_c(
         &mut self,
         as_str: &str,
-        args: &[IntervalAndTy],
-        _generic_args: &Substitution,
+        args: &[IntervalAndTy<'db>],
+        _generic_args: GenericArgs<'db>,
         destination: Interval,
-        locals: &Locals,
+        locals: &Locals<'db>,
         span: MirSpan,
-    ) -> Result<()> {
+    ) -> Result<'db, ()> {
         match as_str {
             "memcmp" => {
                 let [ptr1, ptr2, size] = args else {
@@ -565,7 +562,7 @@ impl Evaluator<'_> {
                     }
                     String::from_utf8_lossy(&name_buf)
                 };
-                let value = self.db.crate_graph()[self.crate_id].env.get(&name);
+                let value = self.crate_id.env(self.db).get(&name);
                 match value {
                     None => {
                         // Write null as fail
@@ -587,13 +584,13 @@ impl Evaluator<'_> {
     fn exec_intrinsic(
         &mut self,
         name: &str,
-        args: &[IntervalAndTy],
-        generic_args: &Substitution,
+        args: &[IntervalAndTy<'db>],
+        generic_args: GenericArgs<'db>,
         destination: Interval,
-        locals: &Locals,
+        locals: &Locals<'db>,
         span: MirSpan,
         needs_override: bool,
-    ) -> Result<bool> {
+    ) -> Result<'db, bool> {
         if let Some(name) = name.strip_prefix("atomic_") {
             return self
                 .exec_atomic_intrinsic(name, args, generic_args, destination, locals, span)
@@ -751,9 +748,7 @@ impl Evaluator<'_> {
         }
         match name {
             "size_of" => {
-                let Some(ty) =
-                    generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-                else {
+                let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
                     return Err(MirEvalError::InternalError(
                         "size_of generic arg is not provided".into(),
                     ));
@@ -761,21 +756,19 @@ impl Evaluator<'_> {
                 let size = self.size_of_sized(ty, locals, "size_of arg")?;
                 destination.write_from_bytes(self, &size.to_le_bytes()[0..destination.size])
             }
-            "min_align_of" | "pref_align_of" => {
-                let Some(ty) =
-                    generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-                else {
+            // FIXME: `min_align_of` was renamed to `align_of` in Rust 1.89
+            // (https://github.com/rust-lang/rust/pull/142410)
+            "min_align_of" | "align_of" => {
+                let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
                     return Err(MirEvalError::InternalError(
                         "align_of generic arg is not provided".into(),
                     ));
                 };
-                let align = self.layout(ty)?.align.abi.bytes();
+                let align = self.layout(ty)?.align.bytes();
                 destination.write_from_bytes(self, &align.to_le_bytes()[0..destination.size])
             }
             "size_of_val" => {
-                let Some(ty) =
-                    generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-                else {
+                let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
                     return Err(MirEvalError::InternalError(
                         "size_of_val generic arg is not provided".into(),
                     ));
@@ -793,17 +786,17 @@ impl Evaluator<'_> {
                     destination.write_from_bytes(self, &size.to_le_bytes())
                 }
             }
-            "min_align_of_val" => {
-                let Some(ty) =
-                    generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-                else {
+            // FIXME: `min_align_of_val` was renamed to `align_of_val` in Rust 1.89
+            // (https://github.com/rust-lang/rust/pull/142410)
+            "min_align_of_val" | "align_of_val" => {
+                let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
                     return Err(MirEvalError::InternalError(
-                        "min_align_of_val generic arg is not provided".into(),
+                        "align_of_val generic arg is not provided".into(),
                     ));
                 };
                 let [arg] = args else {
                     return Err(MirEvalError::InternalError(
-                        "min_align_of_val args are not provided".into(),
+                        "align_of_val args are not provided".into(),
                     ));
                 };
                 if let Some((_, align)) = self.size_align_of(ty, locals)? {
@@ -815,25 +808,22 @@ impl Evaluator<'_> {
                 }
             }
             "type_name" => {
-                let Some(ty) =
-                    generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-                else {
+                let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
                     return Err(MirEvalError::InternalError(
                         "type_name generic arg is not provided".into(),
                     ));
                 };
                 let ty_name = match ty.display_source_code(
                     self.db,
-                    locals.body.owner.module(self.db.upcast()),
+                    locals.body.owner.module(self.db),
                     true,
                 ) {
                     Ok(ty_name) => ty_name,
                     // Fallback to human readable display in case of `Err`. Ideally we want to use `display_source_code` to
                     // render full paths.
                     Err(_) => {
-                        let krate = locals.body.owner.krate(self.db.upcast());
-                        let edition = self.db.crate_graph()[krate].edition;
-                        ty.display(self.db, edition).to_string()
+                        let krate = locals.body.owner.krate(self.db);
+                        ty.display(self.db, DisplayTarget::from_crate(self.db, krate)).to_string()
                     }
                 };
                 let len = ty_name.len();
@@ -845,14 +835,19 @@ impl Evaluator<'_> {
                     .write_from_bytes(self, &len.to_le_bytes())
             }
             "needs_drop" => {
-                let Some(ty) =
-                    generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-                else {
+                let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
                     return Err(MirEvalError::InternalError(
                         "size_of generic arg is not provided".into(),
                     ));
                 };
-                let result = !ty.clone().is_copy(self.db, locals.body.owner);
+                let result = match has_drop_glue(&self.infcx, ty, self.param_env.param_env) {
+                    DropGlue::HasDropGlue => true,
+                    DropGlue::None => false,
+                    DropGlue::DependOnParams => {
+                        never!("should be fully monomorphized now");
+                        true
+                    }
+                };
                 destination.write_from_bytes(self, &[u8::from(result)])
             }
             "ptr_guaranteed_cmp" => {
@@ -908,9 +903,7 @@ impl Evaluator<'_> {
                 let lhs = i128::from_le_bytes(pad16(lhs.get(self)?, false));
                 let rhs = i128::from_le_bytes(pad16(rhs.get(self)?, false));
                 let ans = lhs.wrapping_sub(rhs);
-                let Some(ty) =
-                    generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-                else {
+                let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
                     return Err(MirEvalError::InternalError(
                         "ptr_offset_from generic arg is not provided".into(),
                     ));
@@ -999,13 +992,11 @@ impl Evaluator<'_> {
                         "const_eval_select args are not provided".into(),
                     ));
                 };
-                let result_ty = TyKind::Tuple(
-                    2,
-                    Substitution::from_iter(Interner, [lhs.ty.clone(), TyBuilder::bool()]),
-                )
-                .intern(Interner);
-                let op_size =
-                    self.size_of_sized(&lhs.ty, locals, "operand of add_with_overflow")?;
+                let result_ty = Ty::new_tup_from_iter(
+                    self.interner(),
+                    [lhs.ty, Ty::new_bool(self.interner())].into_iter(),
+                );
+                let op_size = self.size_of_sized(lhs.ty, locals, "operand of add_with_overflow")?;
                 let lhs = u128::from_le_bytes(pad16(lhs.get(self)?, false));
                 let rhs = u128::from_le_bytes(pad16(rhs.get(self)?, false));
                 let (ans, u128overflow) = match name {
@@ -1017,7 +1008,7 @@ impl Evaluator<'_> {
                 let is_overflow = u128overflow
                     || ans.to_le_bytes()[op_size..].iter().any(|&it| it != 0 && it != 255);
                 let is_overflow = vec![u8::from(is_overflow)];
-                let layout = self.layout(&result_ty)?;
+                let layout = self.layout(result_ty)?;
                 let result = self.construct_with_layout(
                     layout.size.bytes_usize(),
                     &layout,
@@ -1034,9 +1025,7 @@ impl Evaluator<'_> {
                         "copy_nonoverlapping args are not provided".into(),
                     ));
                 };
-                let Some(ty) =
-                    generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-                else {
+                let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
                     return Err(MirEvalError::InternalError(
                         "copy_nonoverlapping generic arg is not provided".into(),
                     ));
@@ -1055,43 +1044,35 @@ impl Evaluator<'_> {
                     return Err(MirEvalError::InternalError("offset args are not provided".into()));
                 };
                 let ty = if name == "offset" {
-                    let Some(ty0) =
-                        generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-                    else {
+                    let Some(ty0) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
                         return Err(MirEvalError::InternalError(
                             "offset generic arg is not provided".into(),
                         ));
                     };
-                    let Some(ty1) =
-                        generic_args.as_slice(Interner).get(1).and_then(|it| it.ty(Interner))
-                    else {
+                    let Some(ty1) = generic_args.as_slice().get(1).and_then(|it| it.ty()) else {
                         return Err(MirEvalError::InternalError(
                             "offset generic arg is not provided".into(),
                         ));
                     };
                     if !matches!(
-                        ty1.as_builtin(),
-                        Some(
-                            BuiltinType::Int(BuiltinInt::Isize)
-                                | BuiltinType::Uint(BuiltinUint::Usize)
-                        )
+                        ty1.kind(),
+                        TyKind::Int(rustc_type_ir::IntTy::Isize)
+                            | TyKind::Uint(rustc_type_ir::UintTy::Usize)
                     ) {
                         return Err(MirEvalError::InternalError(
                             "offset generic arg is not usize or isize".into(),
                         ));
                     }
-                    match ty0.as_raw_ptr() {
-                        Some((ty, _)) => ty,
-                        None => {
+                    match ty0.kind() {
+                        TyKind::RawPtr(ty, _) => ty,
+                        _ => {
                             return Err(MirEvalError::InternalError(
                                 "offset generic arg is not a raw pointer".into(),
                             ));
                         }
                     }
                 } else {
-                    let Some(ty) =
-                        generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-                    else {
+                    let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
                         return Err(MirEvalError::InternalError(
                             "arith_offset generic arg is not provided".into(),
                         ));
@@ -1112,7 +1093,7 @@ impl Evaluator<'_> {
                 // We don't call any drop glue yet, so there is nothing here
                 Ok(())
             }
-            "transmute" => {
+            "transmute" | "transmute_unchecked" => {
                 let [arg] = args else {
                     return Err(MirEvalError::InternalError(
                         "transmute arg is not provided".into(),
@@ -1216,9 +1197,7 @@ impl Evaluator<'_> {
                         "discriminant_value arg is not provided".into(),
                     ));
                 };
-                let Some(ty) =
-                    generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-                else {
+                let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
                     return Err(MirEvalError::InternalError(
                         "discriminant_value generic arg is not provided".into(),
                     ));
@@ -1226,7 +1205,7 @@ impl Evaluator<'_> {
                 let addr = Address::from_bytes(arg.get(self)?)?;
                 let size = self.size_of_sized(ty, locals, "discriminant_value ptr type")?;
                 let interval = Interval { addr, size };
-                let r = self.compute_discriminant(ty.clone(), interval.get(self)?)?;
+                let r = self.compute_discriminant(ty, interval.get(self)?)?;
                 destination.write_from_bytes(self, &r.to_le_bytes()[0..destination.size])
             }
             "const_eval_select" => {
@@ -1236,36 +1215,33 @@ impl Evaluator<'_> {
                     ));
                 };
                 let mut args = vec![const_fn.clone()];
-                let TyKind::Tuple(_, fields) = tuple.ty.kind(Interner) else {
+                let TyKind::Tuple(fields) = tuple.ty.kind() else {
                     return Err(MirEvalError::InternalError(
                         "const_eval_select arg[0] is not a tuple".into(),
                     ));
                 };
-                let layout = self.layout(&tuple.ty)?;
-                for (i, field) in fields.iter(Interner).enumerate() {
-                    let field = field.assert_ty_ref(Interner).clone();
+                let layout = self.layout(tuple.ty)?;
+                for (i, field) in fields.iter().enumerate() {
                     let offset = layout.fields.offset(i).bytes_usize();
                     let addr = tuple.interval.addr.offset(offset);
                     args.push(IntervalAndTy::new(addr, field, self, locals)?);
                 }
-                if let Some(target) = self.db.lang_item(self.crate_id, LangItem::FnOnce) {
-                    if let Some(def) = target.as_trait().and_then(|it| {
-                        self.db
-                            .trait_data(it)
-                            .method_by_name(&Name::new_symbol_root(sym::call_once.clone()))
-                    }) {
-                        self.exec_fn_trait(
-                            def,
-                            &args,
-                            // FIXME: wrong for manual impls of `FnOnce`
-                            Substitution::empty(Interner),
-                            locals,
-                            destination,
-                            None,
-                            span,
-                        )?;
-                        return Ok(true);
-                    }
+                if let Some(target) = self.lang_items().FnOnce
+                    && let Some(def) = target
+                        .trait_items(self.db)
+                        .method_by_name(&Name::new_symbol_root(sym::call_once))
+                {
+                    self.exec_fn_trait(
+                        def,
+                        &args,
+                        // FIXME: wrong for manual impls of `FnOnce`
+                        GenericArgs::new_from_iter(self.interner(), []),
+                        locals,
+                        destination,
+                        None,
+                        span,
+                    )?;
+                    return Ok(true);
                 }
                 not_supported!("FnOnce was not available for executing const_eval_select");
             }
@@ -1285,9 +1261,7 @@ impl Evaluator<'_> {
                     ));
                 };
                 let dst = Address::from_bytes(ptr.get(self)?)?;
-                let Some(ty) =
-                    generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-                else {
+                let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
                     return Err(MirEvalError::InternalError(
                         "write_via_copy generic arg is not provided".into(),
                     ));
@@ -1304,9 +1278,7 @@ impl Evaluator<'_> {
                 };
                 let count = from_bytes!(usize, count.get(self)?);
                 let val = from_bytes!(u8, val.get(self)?);
-                let Some(ty) =
-                    generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-                else {
+                let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
                     return Err(MirEvalError::InternalError(
                         "write_bytes generic arg is not provided".into(),
                     ));
@@ -1317,6 +1289,76 @@ impl Evaluator<'_> {
                 self.write_memory_using_ref(dst, size)?.fill(val);
                 Ok(())
             }
+            "ptr_metadata" => {
+                let [ptr] = args else {
+                    return Err(MirEvalError::InternalError(
+                        "ptr_metadata args are not provided".into(),
+                    ));
+                };
+                let arg = ptr.interval.get(self)?.to_owned();
+                let metadata = &arg[self.ptr_size()..];
+                destination.write_from_bytes(self, metadata)?;
+                Ok(())
+            }
+            "three_way_compare" => {
+                let [lhs, rhs] = args else {
+                    return Err(MirEvalError::InternalError(
+                        "three_way_compare args are not provided".into(),
+                    ));
+                };
+                let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
+                    return Err(MirEvalError::InternalError(
+                        "three_way_compare generic arg is not provided".into(),
+                    ));
+                };
+                let signed = match ty.kind() {
+                    TyKind::Int(_) => true,
+                    TyKind::Uint(_) => false,
+                    _ => {
+                        return Err(MirEvalError::InternalError(
+                            "three_way_compare expects an integral type".into(),
+                        ));
+                    }
+                };
+                let rhs = rhs.get(self)?;
+                let lhs = lhs.get(self)?;
+                let mut result = Ordering::Equal;
+                for (l, r) in lhs.iter().zip(rhs).rev() {
+                    let it = l.cmp(r);
+                    if it != Ordering::Equal {
+                        result = it;
+                        break;
+                    }
+                }
+                if signed
+                    && let Some((&l, &r)) = lhs.iter().zip(rhs).next_back()
+                    && l != r
+                {
+                    result = (l as i8).cmp(&(r as i8));
+                }
+                if let Some(e) = self.lang_items().Ordering {
+                    let ty = self.db.ty(e.into()).skip_binder();
+                    let r = self.compute_discriminant(ty, &[result as i8 as u8])?;
+                    destination.write_from_bytes(self, &r.to_le_bytes()[0..destination.size])?;
+                    Ok(())
+                } else {
+                    Err(MirEvalError::InternalError("Ordering enum not found".into()))
+                }
+            }
+            "aggregate_raw_ptr" => {
+                let [data, meta] = args else {
+                    return Err(MirEvalError::InternalError(
+                        "aggregate_raw_ptr args are not provided".into(),
+                    ));
+                };
+                destination.write_from_interval(self, data.interval)?;
+                Interval {
+                    addr: destination.addr.offset(data.interval.size),
+                    size: destination.size - data.interval.size,
+                }
+                .write_from_interval(self, meta.interval)?;
+                Ok(())
+            }
             _ if needs_override => not_supported!("intrinsic {name} is not implemented"),
             _ => return Ok(false),
         }
@@ -1325,37 +1367,37 @@ impl Evaluator<'_> {
 
     fn size_align_of_unsized(
         &mut self,
-        ty: &Ty,
+        ty: Ty<'db>,
         metadata: Interval,
-        locals: &Locals,
-    ) -> Result<(usize, usize)> {
-        Ok(match ty.kind(Interner) {
+        locals: &Locals<'db>,
+    ) -> Result<'db, (usize, usize)> {
+        Ok(match ty.kind() {
             TyKind::Str => (from_bytes!(usize, metadata.get(self)?), 1),
             TyKind::Slice(inner) => {
                 let len = from_bytes!(usize, metadata.get(self)?);
                 let (size, align) = self.size_align_of_sized(inner, locals, "slice inner type")?;
                 (size * len, align)
             }
-            TyKind::Dyn(_) => self.size_align_of_sized(
+            TyKind::Dynamic(..) => self.size_align_of_sized(
                 self.vtable_map.ty_of_bytes(metadata.get(self)?)?,
                 locals,
                 "dyn concrete type",
             )?,
-            TyKind::Adt(id, subst) => {
-                let id = id.0;
-                let layout = self.layout_adt(id, subst.clone())?;
+            TyKind::Adt(adt_def, subst) => {
+                let id = adt_def.def_id().0;
+                let layout = self.layout_adt(id, subst)?;
                 let id = match id {
                     AdtId::StructId(s) => s,
                     _ => not_supported!("unsized enum or union"),
                 };
-                let field_types = &self.db.field_types(id.into());
+                let field_types = self.db.field_types(id.into());
                 let last_field_ty =
-                    field_types.iter().next_back().unwrap().1.clone().substitute(Interner, subst);
+                    field_types.iter().next_back().unwrap().1.instantiate(self.interner(), subst);
                 let sized_part_size =
                     layout.fields.offset(field_types.iter().count() - 1).bytes_usize();
-                let sized_part_align = layout.align.abi.bytes() as usize;
+                let sized_part_align = layout.align.bytes() as usize;
                 let (unsized_part_size, unsized_part_align) =
-                    self.size_align_of_unsized(&last_field_ty, metadata, locals)?;
+                    self.size_align_of_unsized(last_field_ty, metadata, locals)?;
                 let align = sized_part_align.max(unsized_part_align) as isize;
                 let size = (sized_part_size + unsized_part_size) as isize;
                 // Must add any necessary padding to `size`
@@ -1378,12 +1420,12 @@ impl Evaluator<'_> {
     fn exec_atomic_intrinsic(
         &mut self,
         name: &str,
-        args: &[IntervalAndTy],
-        generic_args: &Substitution,
+        args: &[IntervalAndTy<'db>],
+        generic_args: GenericArgs<'db>,
         destination: Interval,
-        locals: &Locals,
+        locals: &Locals<'db>,
         _span: MirSpan,
-    ) -> Result<()> {
+    ) -> Result<'db, ()> {
         // We are a single threaded runtime with no UB checking and no optimization, so
         // we can implement atomic intrinsics as normal functions.
 
@@ -1393,8 +1435,7 @@ impl Evaluator<'_> {
 
         // The rest of atomic intrinsics have exactly one generic arg
 
-        let Some(ty) = generic_args.as_slice(Interner).first().and_then(|it| it.ty(Interner))
-        else {
+        let Some(ty) = generic_args.as_slice().first().and_then(|it| it.ty()) else {
             return Err(MirEvalError::InternalError(
                 "atomic intrinsic generic arg is not provided".into(),
             ));
@@ -1476,12 +1517,11 @@ impl Evaluator<'_> {
             } else {
                 (arg0_interval, false)
             };
-            let result_ty = TyKind::Tuple(
-                2,
-                Substitution::from_iter(Interner, [ty.clone(), TyBuilder::bool()]),
-            )
-            .intern(Interner);
-            let layout = self.layout(&result_ty)?;
+            let result_ty = Ty::new_tup_from_iter(
+                self.interner(),
+                [ty, Ty::new_bool(self.interner())].into_iter(),
+            );
+            let layout = self.layout(result_ty)?;
             let result = self.construct_with_layout(
                 layout.size.bytes_usize(),
                 &layout,

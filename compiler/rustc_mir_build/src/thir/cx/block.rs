@@ -6,9 +6,9 @@ use rustc_middle::ty;
 use rustc_middle::ty::CanonicalUserTypeAnnotation;
 use tracing::debug;
 
-use crate::thir::cx::Cx;
+use crate::thir::cx::ThirBuildCx;
 
-impl<'tcx> Cx<'tcx> {
+impl<'tcx> ThirBuildCx<'tcx> {
     pub(crate) fn mirror_block(&mut self, block: &'tcx hir::Block<'tcx>) -> BlockId {
         // We have to eagerly lower the "spine" of the statements
         // in order to get the lexical scoping correctly.
@@ -76,28 +76,24 @@ impl<'tcx> Cx<'tcx> {
                         let mut pattern = self.pattern_from_hir(local.pat);
                         debug!(?pattern);
 
-                        if let Some(ty) = &local.ty {
-                            if let Some(&user_ty) =
+                        if let Some(ty) = &local.ty
+                            && let Some(&user_ty) =
                                 self.typeck_results.user_provided_types().get(ty.hir_id)
-                            {
-                                debug!("mirror_stmts: user_ty={:?}", user_ty);
-                                let annotation = CanonicalUserTypeAnnotation {
-                                    user_ty: Box::new(user_ty),
-                                    span: ty.span,
-                                    inferred_ty: self.typeck_results.node_type(ty.hir_id),
-                                };
-                                pattern = Box::new(Pat {
-                                    ty: pattern.ty,
-                                    span: pattern.span,
-                                    kind: PatKind::AscribeUserType {
-                                        ascription: Ascription {
-                                            annotation,
-                                            variance: ty::Covariant,
-                                        },
-                                        subpattern: pattern,
-                                    },
-                                });
-                            }
+                        {
+                            debug!("mirror_stmts: user_ty={:?}", user_ty);
+                            let annotation = CanonicalUserTypeAnnotation {
+                                user_ty: Box::new(user_ty),
+                                span: ty.span,
+                                inferred_ty: self.typeck_results.node_type(ty.hir_id),
+                            };
+                            pattern = Box::new(Pat {
+                                ty: pattern.ty,
+                                span: pattern.span,
+                                kind: PatKind::AscribeUserType {
+                                    ascription: Ascription { annotation, variance: ty::Covariant },
+                                    subpattern: pattern,
+                                },
+                            });
                         }
 
                         let span = match local.init {

@@ -11,10 +11,13 @@ mod bad_manifest_path;
 mod bench;
 mod binary_name;
 mod build;
-mod build_plan;
+mod build_analysis;
+mod build_dir;
+mod build_dir_legacy;
 mod build_script;
 mod build_script_env;
 mod build_script_extra_link_arg;
+mod build_scripts_multiple;
 mod cache_lock;
 mod cache_messages;
 mod cargo;
@@ -66,7 +69,9 @@ mod cfg;
 mod check;
 mod check_cfg;
 mod clean;
+mod clean_new_layout;
 mod collisions;
+mod compile_time_deps;
 mod concurrent;
 mod config;
 mod config_cli;
@@ -85,6 +90,7 @@ mod doc;
 mod docscrape;
 mod edition;
 mod error;
+mod feature_unification;
 mod features;
 mod features2;
 mod features_namespaced;
@@ -102,6 +108,7 @@ mod git_shallow;
 mod glob_targets;
 mod global_cache_tracker;
 mod help;
+mod hints;
 mod https;
 mod inheritable_workspace_fields;
 mod install;
@@ -133,6 +140,7 @@ mod open_namespaces;
 mod owner;
 mod package;
 mod package_features;
+mod package_message_format;
 mod patch;
 mod path;
 mod paths;
@@ -143,6 +151,7 @@ mod proc_macro;
 mod profile_config;
 mod profile_custom;
 mod profile_overrides;
+mod profile_panic_immediate_abort;
 mod profile_targets;
 mod profile_trim_paths;
 mod profiles;
@@ -166,6 +175,7 @@ mod rustdoc_extern_html;
 mod rustdocflags;
 mod rustflags;
 mod rustup;
+mod sbom;
 mod script;
 mod search;
 mod shell_quoting;
@@ -175,10 +185,9 @@ mod standard_lib;
 mod test;
 mod timings;
 mod tool_paths;
-mod tree;
-mod tree_graph_features;
 mod unit_graph;
 mod update;
+mod utils;
 mod vendor;
 mod verify_project;
 mod version;
@@ -188,10 +197,16 @@ mod weak_dep_features;
 mod workspaces;
 mod yank;
 
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
+
+pub mod prelude {
+    pub use crate::utils::ext::CargoCommandExt;
+    pub use crate::utils::ext::CargoProjectExt;
+    pub use cargo_test_support::prelude::*;
+}
 
 #[cargo_test]
 fn aaa_trigger_cross_compile_disabled_check() {
     // This triggers the cross compile disabled check to run ASAP, see #5141
-    cargo_test_support::cross_compile::disabled();
+    crate::utils::cross_compile::disabled();
 }

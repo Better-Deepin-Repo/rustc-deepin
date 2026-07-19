@@ -6,29 +6,6 @@
 //! # use cargo_test_support::registry::RegistryBuilder;
 //! # use cargo_test_support::publish::validate_upload;
 //! # use cargo_test_support::project;
-//! // This replaces `registry::init()` and must be called before `Package::new().publish()`
-//! let registry = RegistryBuilder::new().http_api().http_index().build();
-//!
-//! let p = project()
-//!     .file(
-//!         "Cargo.toml",
-//!         r#"
-//!             [package]
-//!             name = "foo"
-//!             version = "0.0.1"
-//!             edition = "2015"
-//!             authors = []
-//!             license = "MIT"
-//!             description = "foo"
-//!         "#,
-//!     )
-//!     .file("src/main.rs", "fn main() {}")
-//!     .build();
-//!
-//! p.cargo("publish --no-verify")
-//!     .replace_crates_io(registry.index_url())
-//!     .run();
-//!
 //! validate_upload(
 //!     r#"
 //!     {
@@ -58,13 +35,13 @@
 //! ```
 
 use crate::compare::InMemoryDir;
-use crate::registry::{self, alt_api_path, FeatureMap};
+use crate::registry::{self, FeatureMap, alt_api_path};
 use flate2::read::GzDecoder;
 use snapbox::prelude::*;
 use std::collections::HashSet;
 use std::fs;
 use std::fs::File;
-use std::io::{self, prelude::*, SeekFrom};
+use std::io::{self, SeekFrom, prelude::*};
 use std::path::Path;
 use tar::Archive;
 
@@ -251,6 +228,7 @@ pub(crate) fn create_index_line(
     yanked: bool,
     links: Option<String>,
     rust_version: Option<&str>,
+    pubtime: Option<&str>,
     v: Option<u32>,
 ) -> String {
     // This emulates what crates.io does to retain backwards compatibility.
@@ -273,6 +251,9 @@ pub(crate) fn create_index_line(
     }
     if let Some(rust_version) = rust_version {
         json["rust_version"] = serde_json::json!(rust_version);
+    }
+    if let Some(pubtime) = pubtime {
+        json["pubtime"] = serde_json::json!(pubtime);
     }
 
     json.to_string()
@@ -322,7 +303,7 @@ fn split_index_features(mut features: FeatureMap) -> (FeatureMap, Option<Feature
             .iter()
             .any(|value| value.starts_with("dep:") || value.contains("?/"))
         {
-            let new_values = values.drain(..).collect();
+            let new_values = std::mem::take(values);
             features2.insert(feat.clone(), new_values);
         }
     }

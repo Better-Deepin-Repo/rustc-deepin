@@ -19,6 +19,9 @@ export type CompileBenchmarkFilter = {
     llvm: boolean;
     cranelift: boolean;
   };
+  target: {
+    x86_64_unknown_linux_gnu: boolean;
+  };
   category: {
     primary: boolean;
     secondary: boolean;
@@ -27,6 +30,11 @@ export type CompileBenchmarkFilter = {
     binary: boolean;
     library: boolean;
   };
+  changes: {
+    regressions: boolean;
+    improvements: boolean;
+  };
+  selfCompareBackend: boolean;
 } & BenchmarkFilter;
 
 export const defaultCompileFilter: CompileBenchmarkFilter = {
@@ -49,6 +57,9 @@ export const defaultCompileFilter: CompileBenchmarkFilter = {
     llvm: true,
     cranelift: true,
   },
+  target: {
+    x86_64_unknown_linux_gnu: true,
+  },
   category: {
     primary: true,
     secondary: true,
@@ -57,11 +68,17 @@ export const defaultCompileFilter: CompileBenchmarkFilter = {
     binary: true,
     library: true,
   },
+  changes: {
+    regressions: true,
+    improvements: true,
+  },
+  selfCompareBackend: false,
 };
 
 export type Profile = "check" | "debug" | "opt" | "doc";
 export type CodegenBackend = "llvm" | "cranelift";
 export type Category = "primary" | "secondary";
+export type Target = "x86_64-unknown-linux-gnu";
 
 export type CompileBenchmarkMap = Dict<CompileBenchmarkMetadata>;
 
@@ -85,6 +102,7 @@ export interface CompileBenchmarkComparison {
   profile: Profile;
   scenario: string;
   backend: CodegenBackend;
+  target: Target;
   comparison: StatComparison;
 }
 
@@ -93,6 +111,7 @@ export interface CompileTestCase {
   profile: Profile;
   scenario: string;
   backend: CodegenBackend;
+  target: Target;
   category: Category;
 }
 
@@ -141,6 +160,15 @@ export function computeCompileComparisonsWithNonRelevant(
     }
   }
 
+  function targetFilter(target: Target): boolean {
+    if (target === "x86_64-unknown-linux-gnu") {
+      return filter.target.x86_64_unknown_linux_gnu;
+    } else {
+      // Unknown, but by default we should show things
+      return true;
+    }
+  }
+
   function artifactFilter(metadata: CompileBenchmarkMetadata | null): boolean {
     if (metadata?.binary === null) return true;
 
@@ -148,6 +176,16 @@ export function computeCompileComparisonsWithNonRelevant(
     const isLibrary = !isBinary;
     if (isBinary && !filter.artifact.binary) return false;
     if (isLibrary && !filter.artifact.library) return false;
+
+    return true;
+  }
+
+  function changeFilter(
+    comparison: TestCaseComparison<CompileTestCase>
+  ): boolean {
+    const isImprovement = comparison.percent <= 0.0;
+    if (isImprovement && !filter.changes.improvements) return false;
+    if (!isImprovement && !filter.changes.regressions) return false;
 
     return true;
   }
@@ -163,8 +201,10 @@ export function computeCompileComparisonsWithNonRelevant(
       profileFilter(comparison.testCase.profile) &&
       scenarioFilter(comparison.testCase.scenario) &&
       backendFilter(comparison.testCase.backend) &&
+      targetFilter(comparison.testCase.target) &&
       categoryFilter(comparison.testCase.category) &&
       artifactFilter(benchmarkMap[comparison.testCase.benchmark] ?? null) &&
+      changeFilter(comparison) &&
       benchmarkNameMatchesFilter(comparison.testCase.benchmark, filter.name)
     );
   }
@@ -177,6 +217,7 @@ export function computeCompileComparisonsWithNonRelevant(
           profile: c.profile,
           scenario: c.scenario,
           backend: c.backend,
+          target: c.target,
           category: (benchmarkMap[c.benchmark] || {}).category || "secondary",
         };
         return calculateComparison(c.comparison, testCase);
@@ -206,5 +247,60 @@ export function createCompileBenchmarkMap(
 }
 
 export function testCaseKey(testCase: CompileTestCase): string {
-  return `${testCase.benchmark};${testCase.profile};${testCase.scenario};${testCase.category}`;
+  return `${testCase.benchmark};${testCase.profile};${testCase.scenario};${testCase.backend};${testCase.category}`;
+}
+
+// Transform compile comparisons to compare LLVM vs Cranelift, instead of
+// before/after. Assumes that the data comes from the same commit.
+export function transformDataForBackendComparison(
+  comparisons: CompileBenchmarkComparison[]
+): CompileBenchmarkComparison[] {
+  const benchmarkMap: Map<
+    string,
+    {
+      llvm: number | null;
+      cranelift: number | null;
+      benchmark: string;
+      profile: Profile;
+      target: Target;
+      scenario: string;
+    }
+  > = new Map();
+  for (const comparison of comparisons) {
+    const key = `${comparison.benchmark};${comparison.profile};${comparison.scenario};${comparison.target}`;
+    if (!benchmarkMap.has(key)) {
+      benchmarkMap.set(key, {
+        llvm: null,
+        cranelift: null,
+        benchmark: comparison.benchmark,
+        profile: comparison.profile,
+        scenario: comparison.scenario,
+        target: comparison.target,
+      });
+    }
+    const record = benchmarkMap.get(key);
+    if (comparison.backend === "llvm") {
+      record.llvm = comparison.comparison.statistics[0];
+    } else if (comparison.backend === "cranelift") {
+      record.cranelift = comparison.comparison.statistics[0];
+    }
+  }
+
+  return Array.from(benchmarkMap, ([_, entry]) => {
+    const comparison: CompileBenchmarkComparison = {
+      benchmark: entry.benchmark,
+      profile: entry.profile,
+      scenario: entry.scenario,
+      // Treat LLVM as the baseline
+      backend: "llvm",
+      target: entry.target,
+      comparison: {
+        statistics: [entry.llvm, entry.cranelift],
+        is_relevant: true,
+        significance_factor: 1.0,
+        significance_threshold: 1.0,
+      },
+    };
+    return comparison;
+  });
 }

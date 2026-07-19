@@ -1,16 +1,6 @@
-use expect_test::{expect, Expect};
+use expect_test::expect;
 
-use crate::tests::{completion_list, completion_list_with_trigger_character};
-
-fn check(ra_fixture: &str, expect: Expect) {
-    let actual = completion_list(ra_fixture);
-    expect.assert_eq(&actual);
-}
-
-fn check_with_trigger_character(ra_fixture: &str, trigger_character: char, expect: Expect) {
-    let actual = completion_list_with_trigger_character(ra_fixture, Some(trigger_character));
-    expect.assert_eq(&actual)
-}
+use crate::tests::{check, check_with_trigger_character};
 
 #[test]
 fn only_param() {
@@ -95,7 +85,11 @@ pub(crate) trait SourceRoot {
 }
 "#,
         expect![[r#"
+            bn &mut self
+            bn &self
             bn file_id: usize
+            bn mut self
+            bn self
             kw mut
             kw ref
         "#]],
@@ -124,7 +118,7 @@ fn trigger_by_l_paren() {
         r#"
 fn foo($0)
 "#,
-        '(',
+        Some('('),
         expect![[]],
     )
 }
@@ -186,6 +180,44 @@ impl A {
         expect![[r#"
             sp Self
             st A
+            bn file_id: usize
+            kw mut
+            kw ref
+        "#]],
+    )
+}
+
+#[test]
+fn in_trait_only_param() {
+    check(
+        r#"
+trait A {
+    fn foo(file_id: usize) {}
+    fn new($0) {}
+}
+"#,
+        expect![[r#"
+            bn &mut self
+            bn &self
+            bn file_id: usize
+            bn mut self
+            bn self
+            kw mut
+            kw ref
+        "#]],
+    )
+}
+
+#[test]
+fn in_trait_after_self() {
+    check(
+        r#"
+trait A {
+    fn foo(file_id: usize) {}
+    fn new(self, $0) {}
+}
+"#,
+        expect![[r#"
             bn file_id: usize
             kw mut
             kw ref

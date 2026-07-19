@@ -1,59 +1,48 @@
+r[items.fn]
 # Functions
 
-r[items.fn]
-
 r[items.fn.syntax]
-> **<sup>Syntax</sup>**\
-> _Function_ :\
-> &nbsp;&nbsp; _FunctionQualifiers_ `fn` [IDENTIFIER]&nbsp;[_GenericParams_]<sup>?</sup>\
-> &nbsp;&nbsp; &nbsp;&nbsp; `(` _FunctionParameters_<sup>?</sup> `)`\
-> &nbsp;&nbsp; &nbsp;&nbsp; _FunctionReturnType_<sup>?</sup> [_WhereClause_]<sup>?</sup>\
-> &nbsp;&nbsp; &nbsp;&nbsp; ( [_BlockExpression_] | `;` )
->
-> _FunctionQualifiers_ :\
-> &nbsp;&nbsp; `const`<sup>?</sup> `async`[^async-edition]<sup>?</sup> _ItemSafety_<sup>?</sup>[^extern-qualifiers] (`extern` _Abi_<sup>?</sup>)<sup>?</sup>
->
-> _ItemSafety_ :\
-> &nbsp;&nbsp; `safe`[^extern-safe] | `unsafe`
->
-> _Abi_ :\
-> &nbsp;&nbsp; [STRING_LITERAL] | [RAW_STRING_LITERAL]
->
-> _FunctionParameters_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; _SelfParam_ `,`<sup>?</sup>\
-> &nbsp;&nbsp; | (_SelfParam_ `,`)<sup>?</sup> _FunctionParam_ (`,` _FunctionParam_)<sup>\*</sup> `,`<sup>?</sup>
->
-> _SelfParam_ :\
-> &nbsp;&nbsp; [_OuterAttribute_]<sup>\*</sup> ( _ShorthandSelf_ | _TypedSelf_ )
->
-> _ShorthandSelf_ :\
-> &nbsp;&nbsp;  (`&` | `&` [_Lifetime_])<sup>?</sup> `mut`<sup>?</sup> `self`
->
-> _TypedSelf_ :\
-> &nbsp;&nbsp; `mut`<sup>?</sup> `self` `:` [_Type_]
->
-> _FunctionParam_ :\
-> &nbsp;&nbsp; [_OuterAttribute_]<sup>\*</sup> (
->   _FunctionParamPattern_ | `...` | [_Type_] [^fn-param-2015]
-> )
->
-> _FunctionParamPattern_ :\
-> &nbsp;&nbsp; [_PatternNoTopAlt_] `:` ( [_Type_] | `...` )
->
-> _FunctionReturnType_ :\
-> &nbsp;&nbsp; `->` [_Type_]
->
-> [^async-edition]: The `async` qualifier is not allowed in the 2015 edition.
->
-> [^extern-safe]: The `safe` function qualifier is only allowed semantically within
->   `extern` blocks.
->
-> [^extern-qualifiers]: *Relevant to editions earlier than Rust 2024*: Within
->   `extern` blocks, the `safe` or `unsafe` function qualifier is only allowed
->   when the `extern` is qualified as `unsafe`.
->
-> [^fn-param-2015]: Function parameters with only a type are only allowed
->   in an associated function of a [trait item] in the 2015 edition.
+```grammar,items
+Function ->
+    FunctionQualifiers `fn` IDENTIFIER GenericParams?
+        `(` FunctionParameters? `)`
+        FunctionReturnType? WhereClause?
+        ( BlockExpression | `;` )
+
+FunctionQualifiers -> `const`? `async`?[^async-edition] ItemSafety?[^extern-qualifiers] (`extern` Abi?)?
+
+ItemSafety -> `safe`[^extern-safe] | `unsafe`
+
+Abi -> STRING_LITERAL | RAW_STRING_LITERAL
+
+FunctionParameters ->
+      SelfParam `,`?
+    | (SelfParam `,`)? FunctionParam (`,` FunctionParam)* `,`?
+
+SelfParam -> OuterAttribute* ( ShorthandSelf | TypedSelf )
+
+ShorthandSelf -> (`&` | `&` Lifetime)? `mut`? `self`
+
+TypedSelf -> `mut`? `self` `:` Type
+
+FunctionParam -> OuterAttribute* ( FunctionParamPattern | `...` | Type[^fn-param-2015] )
+
+FunctionParamPattern -> PatternNoTopAlt `:` ( Type | `...` )
+
+FunctionReturnType -> `->` Type
+```
+
+[^async-edition]: The `async` qualifier is not allowed in the 2015 edition.
+
+[^extern-safe]: The `safe` function qualifier is only allowed semantically within
+  `extern` blocks.
+
+[^extern-qualifiers]: *Relevant to editions earlier than Rust 2024*: Within
+  `extern` blocks, the `safe` or `unsafe` function qualifier is only allowed
+  when the `extern` is qualified as `unsafe`.
+
+[^fn-param-2015]: Function parameters with only a type are only allowed
+  in an associated function of a [trait item] in the 2015 edition.
 
 r[items.fn.intro]
 A _function_ consists of a [block] (that's the _body_ of the function),
@@ -82,9 +71,8 @@ fn answer_to_life_the_universe_and_everything() -> i32 {
 r[items.fn.safety-qualifiers]
 The `safe` function is semantically only allowed when used in an [`extern` block].
 
-## Function parameters
-
 r[items.fn.params]
+## Function parameters
 
 r[items.fn.params.intro]
 Function parameters are irrefutable [patterns], so any pattern that is valid in
@@ -95,7 +83,7 @@ fn first((value, _): (i32, i32)) -> i32 { value }
 ```
 
 r[items.fn.params.self-pat]
-If the first parameter is a _SelfParam_, this indicates that the function is a
+If the first parameter is a [SelfParam], this indicates that the function is a
 [method].
 
 r[items.fn.params.self-restriction]
@@ -107,9 +95,8 @@ A parameter with the `...` token indicates a [variadic function], and may only
 be used as the last parameter of an [external block] function. The variadic
 parameter may have an optional identifier, such as `args: ...`.
 
-## Function body
-
 r[items.fn.body]
+## Function body
 
 r[items.fn.body.intro]
 The body block of a function is conceptually wrapped in another block that first binds the
@@ -133,9 +120,8 @@ r[items.fn.body.bodyless]
 Functions without a body block are terminated with a semicolon. This form
 may only appear in a [trait] or [external block].
 
-## Generic functions
-
 r[items.fn.generics]
+## Generic functions
 
 r[items.fn.generics.intro]
 A _generic function_ allows one or more _parameterized types_ to appear in its
@@ -186,9 +172,8 @@ component after the function name. This might be necessary if there is not
 sufficient context to determine the type parameters. For example,
 `mem::size_of::<u32>() == 4`.
 
-## Extern function qualifier
-
 r[items.fn.extern]
+## Extern function qualifier
 
 r[items.fn.extern.intro]
 The `extern` function qualifier allows providing function _definitions_ that can
@@ -259,31 +244,45 @@ let fptr: extern "C" fn() -> i32 = new_i32;
 ```
 
 r[items.fn.extern.unwind]
-Functions with an ABI that differs from `"Rust"` do not support unwinding in the
-exact same way that Rust does. Therefore, unwinding past the end of functions
-with such ABIs causes the process to abort.
+### Unwinding
 
-> **Note**: The LLVM backend of the `rustc` implementation
-aborts the process by executing an illegal instruction.
+r[items.fn.extern.unwind.intro]
+Most ABI strings come in two variants, one with an `-unwind` suffix and one without. The `Rust` ABI always permits unwinding, so there is no `Rust-unwind` ABI. The choice of ABI, together with the runtime [panic handler], determines the behavior when unwinding out of a function.
 
-## Const functions
+r[items.fn.extern.unwind.behavior]
+The table below indicates the behavior of an unwinding operation reaching each type of ABI boundary (function declaration or definition using the corresponding ABI string). Note that the Rust runtime is not affected by, and cannot have an effect on, any unwinding that occurs entirely within another language's runtime, that is, unwinds that are thrown and caught without reaching a Rust ABI boundary.
+
+The `panic`-unwind column refers to [panicking] via the `panic!` macro and similar standard library mechanisms, as well as to any other Rust operations that cause a panic, such as out-of-bounds array indexing or integer overflow.
+
+The "unwinding" ABI category refers to `"Rust"` (the implicit ABI of Rust functions not marked `extern`), `"C-unwind"`, and any other ABI with `-unwind` in its name. The "non-unwinding" ABI category refers to all other ABI strings, including `"C"` and `"stdcall"`.
+
+Native unwinding is defined per-target. On targets that support throwing and catching C++ exceptions, it refers to the mechanism used to implement this feature. Some platforms implement a form of unwinding referred to as ["forced unwinding"][forced-unwinding]; `longjmp` on Windows and `pthread_exit` in `glibc` are implemented this way. Forced unwinding is explicitly excluded from the "Native unwind" column in the table.
+
+| panic runtime  | ABI           | `panic`-unwind                        | Native unwind (unforced) |
+| -------------- | ------------  | ------------------------------------- | -----------------------  |
+| `panic=unwind` | unwinding     | unwind                                | unwind                   |
+| `panic=unwind` | non-unwinding | abort (see notes below)               | [undefined behavior]     |
+| `panic=abort`  | unwinding     | `panic` aborts without unwinding      | abort                    |
+| `panic=abort`  | non-unwinding | `panic` aborts without unwinding      | [undefined behavior]     |
+
+r[items.fn.extern.abort]
+With `panic=unwind`, when a `panic` is turned into an abort by a non-unwinding ABI boundary, either no destructors (`Drop` calls) will run, or all destructors up until the ABI boundary will run. It is unspecified which of those two behaviors will happen.
+
+For other considerations and limitations regarding unwinding across FFI boundaries, see the [relevant section in the Panic documentation][panic-ffi].
+
+[forced-unwinding]: https://rust-lang.github.io/rfcs/2945-c-unwind-abi.html#forced-unwinding
+[panic handler]: ../panic.md#the-panic_handler-attribute
+[panic-ffi]: ../panic.md#unwinding-across-ffi-boundaries
+[panicking]: ../panic.md
+[undefined behavior]: ../behavior-considered-undefined.md
 
 r[items.fn.const]
+## Const functions
 
-r[items.fn.const.intro]
-Functions qualified with the `const` keyword are [const functions], as are
-[tuple struct] and [tuple variant] constructors. _Const functions_  can be
-called from within [const contexts].
-
-r[items.fn.const.extern]
-Const functions may use the [`extern`] function qualifier.
-
-r[items.fn.const.exclusivity]
-Const functions are not allowed to be [async](#async-functions).
-
-## Async functions
+See [const functions] for the definition of const functions.
 
 r[items.fn.async]
+## Async functions
 
 r[items.fn.async.intro]
 Functions may be qualified as async, and this can also be combined with the
@@ -344,12 +343,11 @@ For more information on the effect of async, see [`async` blocks][async-blocks].
 [`impl Future`]: ../types/impl-trait.md
 
 r[items.fn.async.edition2018]
-> **Edition differences**: Async functions are only available beginning with
-> Rust 2018.
-
-### Combining `async` and `unsafe`
+> [!EDITION-2018]
+> Async functions are only available beginning with Rust 2018.
 
 r[items.fn.async.safety]
+### Combining `async` and `unsafe`
 
 r[items.fn.async.safety.intro]
 It is legal to declare a function that is both async and unsafe. The
@@ -392,9 +390,8 @@ dereferenced that pointer. This implies that `x` would have to be
 valid until the future is finished executing, and it is the caller's
 responsibility to ensure that.
 
-## Attributes on functions
-
 r[items.fn.attributes]
+## Attributes on functions
 
 r[items.fn.attributes.intro]
 [Outer attributes][attributes] are allowed on functions. [Inner
@@ -409,19 +406,28 @@ fn documented() {
 }
 ```
 
-> Note: Except for lints, it is idiomatic to only use outer attributes on
-> function items.
+> [!NOTE]
+> Except for lints, it is idiomatic to only use outer attributes on function items.
 
 r[items.fn.attributes.builtin-attributes]
-The attributes that have meaning on a function are [`cfg`], [`cfg_attr`], [`deprecated`],
-[`doc`], [`export_name`], [`link_section`], [`no_mangle`], [the lint check
-attributes], [`must_use`], [the procedural macro attributes], [the testing
-attributes], and [the optimization hint attributes]. Functions also accept
-attributes macros.
+The attributes that have meaning on a function are:
 
-## Attributes on function parameters
+- [`cfg_attr`]
+- [`cfg`]
+- [`cold`]
+- [`deprecated`]
+- [`doc`]
+- [`export_name`]
+- [`inline`]
+- [`link_section`]
+- [`must_use`]
+- [`no_mangle`]
+- [Lint check attributes]
+- [Procedural macro attributes]
+- [Testing attributes]
 
 r[items.fn.param-attributes]
+## Attributes on function parameters
 
 r[items.fn.param-attributes.intro]
 [Outer attributes][attributes] are allowed on function parameters and the
@@ -452,21 +458,8 @@ fn foo_oof(#[some_inert_attribute] arg: u8) {
 }
 ```
 
-[IDENTIFIER]: ../identifiers.md
-[RAW_STRING_LITERAL]: ../tokens.md#raw-string-literals
-[STRING_LITERAL]: ../tokens.md#string-literals
-[_BlockExpression_]: ../expressions/block-expr.md
-[_GenericParams_]: generics.md
-[_Lifetime_]: ../trait-bounds.md
-[_PatternNoTopAlt_]: ../patterns.md
-[_Type_]: ../types.md#type-expressions
-[_WhereClause_]: generics.md#where-clauses
-[_OuterAttribute_]: ../attributes.md
 [const contexts]: ../const_eval.md#const-context
 [const functions]: ../const_eval.md#const-functions
-[tuple struct]: structs.md
-[tuple variant]: enumerations.md
-[`extern`]: #extern-function-qualifier
 [external block]: external-blocks.md
 [path]: ../paths.md
 [block]: ../expressions/block-expr.md
@@ -478,10 +471,11 @@ fn foo_oof(#[some_inert_attribute] arg: u8) {
 [attributes]: ../attributes.md
 [`cfg`]: ../conditional-compilation.md#the-cfg-attribute
 [`cfg_attr`]: ../conditional-compilation.md#the-cfg_attr-attribute
-[the lint check attributes]: ../attributes/diagnostics.md#lint-check-attributes
-[the procedural macro attributes]: ../procedural-macros.md
-[the testing attributes]: ../attributes/testing.md
-[the optimization hint attributes]: ../attributes/codegen.md#optimization-hints
+[lint check attributes]: ../attributes/diagnostics.md#lint-check-attributes
+[procedural macro attributes]: macro.proc.attribute
+[testing attributes]: ../attributes/testing.md
+[`cold`]: ../attributes/codegen.md#the-cold-attribute
+[`inline`]: ../attributes/codegen.md#the-inline-attribute
 [`deprecated`]: ../attributes/diagnostics.md#the-deprecated-attribute
 [`doc`]: ../../rustdoc/the-doc-attribute.html
 [`must_use`]: ../attributes/diagnostics.md#the-must_use-attribute

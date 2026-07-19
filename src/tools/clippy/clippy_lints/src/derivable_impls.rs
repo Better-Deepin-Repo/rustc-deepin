@@ -10,7 +10,7 @@ use rustc_hir::{
 };
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_middle::ty::adjustment::{Adjust, PointerCoercion};
-use rustc_middle::ty::{self, AdtDef, GenericArgsRef, Ty, TypeckResults};
+use rustc_middle::ty::{self, AdtDef, GenericArgsRef, Ty, TypeckResults, VariantDef};
 use rustc_session::impl_lint_pass;
 use rustc_span::sym;
 
@@ -62,9 +62,7 @@ pub struct DerivableImpls {
 
 impl DerivableImpls {
     pub fn new(conf: &'static Conf) -> Self {
-        DerivableImpls {
-            msrv: conf.msrv.clone(),
-        }
+        DerivableImpls { msrv: conf.msrv }
     }
 }
 
@@ -87,6 +85,13 @@ fn contains_trait_object(ty: Ty<'_>) -> bool {
     }
 }
 
+fn determine_derive_macro(cx: &LateContext<'_>, is_const: bool) -> Option<&'static str> {
+    (!is_const)
+        .then_some("derive")
+        .or_else(|| cx.tcx.features().enabled(sym::derive_const).then_some("derive_const"))
+}
+
+#[expect(clippy::too_many_arguments)]
 fn check_struct<'tcx>(
     cx: &LateContext<'tcx>,
     item: &'tcx Item<'_>,
@@ -95,19 +100,20 @@ fn check_struct<'tcx>(
     adt_def: AdtDef<'_>,
     ty_args: GenericArgsRef<'_>,
     typeck_results: &'tcx TypeckResults<'tcx>,
+    is_const: bool,
 ) {
-    if let TyKind::Path(QPath::Resolved(_, p)) = self_ty.kind {
-        if let Some(PathSegment { args, .. }) = p.segments.last() {
-            let args = args.map(|a| a.args).unwrap_or(&[]);
+    if let TyKind::Path(QPath::Resolved(_, p)) = self_ty.kind
+        && let Some(PathSegment { args, .. }) = p.segments.last()
+    {
+        let args = args.map(|a| a.args).unwrap_or(&[]);
 
-            // ty_args contains the generic parameters of the type declaration, while args contains the
-            // arguments used at instantiation time. If both len are not equal, it means that some
-            // parameters were not provided (which means that the default values were used); in this
-            // case we will not risk suggesting too broad a rewrite. We won't either if any argument
-            // is a type or a const.
-            if ty_args.len() != args.len() || args.iter().any(|arg| !matches!(arg, GenericArg::Lifetime(_))) {
-                return;
-            }
+        // ty_args contains the generic parameters of the type declaration, while args contains the
+        // arguments used at instantiation time. If both len are not equal, it means that some
+        // parameters were not provided (which means that the default values were used); in this
+        // case we will not risk suggesting too broad a rewrite. We won't either if any argument
+        // is a type or a const.
+        if ty_args.len() != args.len() || args.iter().any(|arg| !matches!(arg, GenericArg::Lifetime(_))) {
+            return;
         }
     }
 
@@ -127,14 +133,18 @@ fn check_struct<'tcx>(
         ExprKind::Tup(fields) => fields.iter().all(is_default_without_adjusts),
         ExprKind::Call(callee, args) if is_path_self(callee) => args.iter().all(is_default_without_adjusts),
         ExprKind::Struct(_, fields, _) => fields.iter().all(|ef| is_default_without_adjusts(ef.expr)),
-        _ => false,
+        _ => return,
     };
 
-    if should_emit {
+    if should_emit && let Some(derive_snippet) = determine_derive_macro(cx, is_const) {
         let struct_span = cx.tcx.def_span(adt_def.did());
+        let indent_enum = indent_of(cx, struct_span).unwrap_or(0);
         let suggestions = vec![
             (item.span, String::new()), // Remove the manual implementation
-            (struct_span.shrink_to_lo(), "#[derive(Default)]\n".to_string()), // Add the derive attribute
+            (
+                struct_span.shrink_to_lo(),
+                format!("#[{derive_snippet}(Default)]\n{}", " ".repeat(indent_enum)),
+            ), // Add the derive attribute
         ];
 
         span_lint_and_then(cx, DERIVABLE_IMPLS, item.span, "this `impl` can be derived", |diag| {
@@ -147,11 +157,41 @@ fn check_struct<'tcx>(
     }
 }
 
-fn check_enum<'tcx>(cx: &LateContext<'tcx>, item: &'tcx Item<'_>, func_expr: &Expr<'_>, adt_def: AdtDef<'_>) {
-    if let ExprKind::Path(QPath::Resolved(None, p)) = &peel_blocks(func_expr).kind
-        && let Res::Def(DefKind::Ctor(CtorOf::Variant, CtorKind::Const), id) = p.res
-        && let variant_id = cx.tcx.parent(id)
-        && let Some(variant_def) = adt_def.variants().iter().find(|v| v.def_id == variant_id)
+fn extract_enum_variant<'tcx>(
+    cx: &LateContext<'tcx>,
+    func_expr: &'tcx Expr<'tcx>,
+    adt_def: AdtDef<'tcx>,
+) -> Option<&'tcx VariantDef> {
+    match &peel_blocks(func_expr).kind {
+        ExprKind::Path(QPath::Resolved(None, p))
+            if let Res::Def(DefKind::Ctor(CtorOf::Variant, CtorKind::Const), id) = p.res
+                && let variant_id = cx.tcx.parent(id)
+                && let Some(variant_def) = adt_def.variants().iter().find(|v| v.def_id == variant_id) =>
+        {
+            Some(variant_def)
+        },
+        ExprKind::Path(QPath::TypeRelative(ty, segment))
+            if let TyKind::Path(QPath::Resolved(None, p)) = &ty.kind
+                && let Res::SelfTyAlias {
+                    is_trait_impl: true, ..
+                } = p.res
+                && let variant_ident = segment.ident
+                && let Some(variant_def) = adt_def.variants().iter().find(|v| v.ident(cx.tcx) == variant_ident) =>
+        {
+            Some(variant_def)
+        },
+        _ => None,
+    }
+}
+
+fn check_enum<'tcx>(
+    cx: &LateContext<'tcx>,
+    item: &'tcx Item<'tcx>,
+    func_expr: &'tcx Expr<'tcx>,
+    adt_def: AdtDef<'tcx>,
+    is_const: bool,
+) {
+    if let Some(variant_def) = extract_enum_variant(cx, func_expr, adt_def)
         && variant_def.fields.is_empty()
         && !variant_def.is_field_list_non_exhaustive()
     {
@@ -160,11 +200,15 @@ fn check_enum<'tcx>(cx: &LateContext<'tcx>, item: &'tcx Item<'_>, func_expr: &Ex
         let variant_span = cx.tcx.def_span(variant_def.def_id);
         let indent_variant = indent_of(cx, variant_span).unwrap_or(0);
 
+        let Some(derive_snippet) = determine_derive_macro(cx, is_const) else {
+            return;
+        };
+
         let suggestions = vec![
             (item.span, String::new()), // Remove the manual implementation
             (
                 enum_span.shrink_to_lo(),
-                format!("#[derive(Default)]\n{}", " ".repeat(indent_enum)),
+                format!("#[{derive_snippet}(Default)]\n{}", " ".repeat(indent_enum)),
             ), // Add the derive attribute
             (
                 variant_span.shrink_to_lo(),
@@ -185,31 +229,40 @@ fn check_enum<'tcx>(cx: &LateContext<'tcx>, item: &'tcx Item<'_>, func_expr: &Ex
 impl<'tcx> LateLintPass<'tcx> for DerivableImpls {
     fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'_>) {
         if let ItemKind::Impl(Impl {
-            of_trait: Some(trait_ref),
+            of_trait: Some(of_trait),
             items: [child],
             self_ty,
+            constness,
             ..
         }) = item.kind
-            && !cx.tcx.has_attr(item.owner_id, sym::automatically_derived)
+            && !cx.tcx.is_automatically_derived(item.owner_id.to_def_id())
             && !item.span.from_expansion()
-            && let Some(def_id) = trait_ref.trait_def_id()
+            && let Some(def_id) = of_trait.trait_ref.trait_def_id()
             && cx.tcx.is_diagnostic_item(sym::Default, def_id)
-            && let impl_item_hir = child.id.hir_id()
+            && let impl_item_hir = child.hir_id()
             && let Node::ImplItem(impl_item) = cx.tcx.hir_node(impl_item_hir)
             && let ImplItemKind::Fn(_, b) = &impl_item.kind
-            && let Body { value: func_expr, .. } = cx.tcx.hir().body(*b)
+            && let Body { value: func_expr, .. } = cx.tcx.hir_body(*b)
             && let &ty::Adt(adt_def, args) = cx.tcx.type_of(item.owner_id).instantiate_identity().kind()
-            && let attrs = cx.tcx.hir().attrs(item.hir_id())
+            && let attrs = cx.tcx.hir_attrs(item.hir_id())
             && !attrs.iter().any(|attr| attr.doc_str().is_some())
-            && cx.tcx.hir().attrs(impl_item_hir).is_empty()
+            && cx.tcx.hir_attrs(impl_item_hir).is_empty()
         {
+            let is_const = constness == hir::Constness::Const;
             if adt_def.is_struct() {
-                check_struct(cx, item, self_ty, func_expr, adt_def, args, cx.tcx.typeck_body(*b));
-            } else if adt_def.is_enum() && self.msrv.meets(msrvs::DEFAULT_ENUM_ATTRIBUTE) {
-                check_enum(cx, item, func_expr, adt_def);
+                check_struct(
+                    cx,
+                    item,
+                    self_ty,
+                    func_expr,
+                    adt_def,
+                    args,
+                    cx.tcx.typeck_body(*b),
+                    is_const,
+                );
+            } else if adt_def.is_enum() && self.msrv.meets(cx, msrvs::DEFAULT_ENUM_ATTRIBUTE) {
+                check_enum(cx, item, func_expr, adt_def, is_const);
             }
         }
     }
-
-    extract_msrv_attr!(LateContext);
 }

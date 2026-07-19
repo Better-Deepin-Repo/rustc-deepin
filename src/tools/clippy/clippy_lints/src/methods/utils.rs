@@ -1,5 +1,5 @@
-use clippy_utils::ty::is_type_diagnostic_item;
-use clippy_utils::{get_parent_expr, path_to_local_id, usage};
+use clippy_utils::res::{MaybeDef, MaybeResPath};
+use clippy_utils::{get_parent_expr, usage};
 use rustc_hir::intravisit::{Visitor, walk_expr};
 use rustc_hir::{BorrowKind, Expr, ExprKind, HirId, Mutability, Pat, QPath, Stmt, StmtKind};
 use rustc_lint::LateContext;
@@ -8,6 +8,9 @@ use rustc_middle::ty::{self, Ty};
 use rustc_span::Span;
 use rustc_span::symbol::sym;
 
+/// Checks if `expr`, of type `ty`, corresponds to a slice or can be dereferenced to a slice, or if
+/// `expr` is a method call to `.iter()` on such a type. In these cases, return the slice-like
+/// expression.
 pub(super) fn derefs_to_slice<'tcx>(
     cx: &LateContext<'tcx>,
     expr: &'tcx Expr<'tcx>,
@@ -17,7 +20,7 @@ pub(super) fn derefs_to_slice<'tcx>(
         match ty.kind() {
             ty::Slice(_) => true,
             ty::Adt(..) if let Some(boxed) = ty.boxed_ty() => may_slice(cx, boxed),
-            ty::Adt(..) => is_type_diagnostic_item(cx, ty, sym::Vec),
+            ty::Adt(..) => ty.is_diag_item(cx, sym::Vec),
             ty::Array(_, size) => size.try_to_target_usize(cx.tcx).is_some(),
             ty::Ref(_, inner, _) => may_slice(cx, *inner),
             _ => false,
@@ -89,8 +92,8 @@ struct CloneOrCopyVisitor<'cx, 'tcx> {
 impl<'tcx> Visitor<'tcx> for CloneOrCopyVisitor<'_, 'tcx> {
     type NestedFilter = nested_filter::OnlyBodies;
 
-    fn nested_visit_map(&mut self) -> Self::Map {
-        self.cx.tcx.hir()
+    fn maybe_tcx(&mut self) -> Self::MaybeTyCtxt {
+        self.cx.tcx
     }
 
     fn visit_expr(&mut self, expr: &'tcx Expr<'tcx>) {
@@ -127,7 +130,7 @@ impl<'tcx> CloneOrCopyVisitor<'_, 'tcx> {
     fn is_binding(&self, expr: &Expr<'tcx>) -> bool {
         self.binding_hir_ids
             .iter()
-            .any(|hir_id| path_to_local_id(expr, *hir_id))
+            .any(|&hir_id| expr.res_local_id() == Some(hir_id))
     }
 }
 

@@ -7,11 +7,11 @@
 
 use rustc_macros::{HashStable, TypeFoldable, TypeVisitable};
 use rustc_span::Span;
-// FIXME: Remove this import and import via `traits::solve`.
-pub use rustc_type_ir::solve::NoSolution;
 
 use crate::error::DropCheckOverflow;
 use crate::infer::canonical::{Canonical, CanonicalQueryInput, QueryResponse};
+use crate::traits::solve;
+pub use crate::traits::solve::NoSolution;
 use crate::ty::{self, GenericArg, Ty, TyCtxt};
 
 pub mod type_op {
@@ -42,8 +42,15 @@ pub mod type_op {
         pub predicate: Predicate<'tcx>,
     }
 
+    /// Normalizes, but not in the new solver.
     #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, HashStable, TypeFoldable, TypeVisitable)]
     pub struct Normalize<T> {
+        pub value: T,
+    }
+
+    /// Normalizes, and deeply normalizes in the new solver.
+    #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, HashStable, TypeFoldable, TypeVisitable)]
+    pub struct DeeplyNormalize<T> {
         pub value: T,
     }
 
@@ -59,9 +66,18 @@ pub mod type_op {
 }
 
 pub type CanonicalAliasGoal<'tcx> =
-    CanonicalQueryInput<'tcx, ty::ParamEnvAnd<'tcx, ty::AliasTy<'tcx>>>;
+    CanonicalQueryInput<'tcx, ty::ParamEnvAnd<'tcx, ty::AliasTerm<'tcx>>>;
 
-pub type CanonicalTyGoal<'tcx> = CanonicalQueryInput<'tcx, ty::ParamEnvAnd<'tcx, Ty<'tcx>>>;
+pub type CanonicalMethodAutoderefStepsGoal<'tcx> =
+    CanonicalQueryInput<'tcx, ty::ParamEnvAnd<'tcx, MethodAutoderefSteps<'tcx>>>;
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, HashStable, TypeFoldable, TypeVisitable)]
+pub struct MethodAutoderefSteps<'tcx> {
+    /// The list of opaque types currently in the storage.
+    ///
+    /// Only used by the new solver for now.
+    pub predefined_opaques_in_body: solve::PredefinedOpaques<'tcx>,
+    pub self_ty: Ty<'tcx>,
+}
 
 pub type CanonicalPredicateGoal<'tcx> =
     CanonicalQueryInput<'tcx, ty::ParamEnvAnd<'tcx, ty::Predicate<'tcx>>>;
@@ -69,17 +85,14 @@ pub type CanonicalPredicateGoal<'tcx> =
 pub type CanonicalTypeOpAscribeUserTypeGoal<'tcx> =
     CanonicalQueryInput<'tcx, ty::ParamEnvAnd<'tcx, type_op::AscribeUserType<'tcx>>>;
 
-pub type CanonicalTypeOpEqGoal<'tcx> =
-    CanonicalQueryInput<'tcx, ty::ParamEnvAnd<'tcx, type_op::Eq<'tcx>>>;
-
-pub type CanonicalTypeOpSubtypeGoal<'tcx> =
-    CanonicalQueryInput<'tcx, ty::ParamEnvAnd<'tcx, type_op::Subtype<'tcx>>>;
-
 pub type CanonicalTypeOpProvePredicateGoal<'tcx> =
     CanonicalQueryInput<'tcx, ty::ParamEnvAnd<'tcx, type_op::ProvePredicate<'tcx>>>;
 
 pub type CanonicalTypeOpNormalizeGoal<'tcx, T> =
     CanonicalQueryInput<'tcx, ty::ParamEnvAnd<'tcx, type_op::Normalize<T>>>;
+
+pub type CanonicalTypeOpDeeplyNormalizeGoal<'tcx, T> =
+    CanonicalQueryInput<'tcx, ty::ParamEnvAnd<'tcx, type_op::DeeplyNormalize<T>>>;
 
 pub type CanonicalImpliedOutlivesBoundsGoal<'tcx> =
     CanonicalQueryInput<'tcx, ty::ParamEnvAnd<'tcx, type_op::ImpliedOutlivesBounds<'tcx>>>;
@@ -141,6 +154,7 @@ impl<'tcx> FromIterator<DropckConstraint<'tcx>> for DropckConstraint<'tcx> {
 #[derive(Debug, HashStable)]
 pub struct CandidateStep<'tcx> {
     pub self_ty: Canonical<'tcx, QueryResponse<'tcx, Ty<'tcx>>>,
+    pub self_ty_is_opaque: bool,
     pub autoderefs: usize,
     /// `true` if the type results from a dereference of a raw pointer.
     /// when assembling candidates, we include these steps, but not when
@@ -178,11 +192,11 @@ pub struct MethodAutoderefBadTy<'tcx> {
     pub ty: Canonical<'tcx, QueryResponse<'tcx, Ty<'tcx>>>,
 }
 
-/// Result of the `normalize_canonicalized_{{,inherent_}projection,weak}_ty` queries.
+/// Result of the `normalize_canonicalized_{{,inherent_}projection,free}` queries.
 #[derive(Clone, Debug, HashStable, TypeFoldable, TypeVisitable)]
 pub struct NormalizationResult<'tcx> {
     /// Result of the normalization.
-    pub normalized_ty: Ty<'tcx>,
+    pub normalized_term: ty::Term<'tcx>,
 }
 
 /// Outlives bounds are relationships between generic parameters,

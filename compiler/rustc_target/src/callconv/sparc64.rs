@@ -1,10 +1,12 @@
 // FIXME: This needs an audit for correctness and completeness.
 
-use crate::abi::call::{
-    ArgAbi, ArgAttribute, ArgAttributes, ArgExtension, CastTarget, FnAbi, Reg, Uniform,
+use rustc_abi::{
+    BackendRepr, FieldsShape, Float, HasDataLayout, Primitive, Reg, Scalar, Size, TyAbiInterface,
+    TyAndLayout,
 };
-use crate::abi::{self, HasDataLayout, Scalar, Size, TyAbiInterface, TyAndLayout};
-use crate::spec::HasTargetSpec;
+
+use crate::callconv::{ArgAbi, ArgAttribute, CastTarget, FnAbi, Uniform};
+use crate::spec::{Env, HasTargetSpec, Os};
 
 #[derive(Clone, Debug)]
 struct Sdata {
@@ -21,13 +23,13 @@ where
 {
     let dl = cx.data_layout();
 
-    if !matches!(scalar.primitive(), abi::Float(abi::F32 | abi::F64)) {
+    if !matches!(scalar.primitive(), Primitive::Float(Float::F32 | Float::F64)) {
         return data;
     }
 
     data.has_float = true;
 
-    if !data.last_offset.is_aligned(dl.f64_align.abi) && data.last_offset < offset {
+    if !data.last_offset.is_aligned(dl.f64_align) && data.last_offset < offset {
         if data.prefix_index == data.prefix.len() {
             return data;
         }
@@ -57,7 +59,7 @@ where
         return data;
     }
 
-    if scalar.primitive() == abi::Float(abi::F32) {
+    if scalar.primitive() == Primitive::Float(Float::F32) {
         data.arg_attribute = ArgAttribute::InReg;
         data.prefix[data.prefix_index] = Some(Reg::f32());
         data.last_offset = offset + Reg::f32().size;
@@ -81,14 +83,16 @@ where
 {
     data = arg_scalar(cx, scalar1, offset, data);
     match (scalar1.primitive(), scalar2.primitive()) {
-        (abi::Float(abi::F32), _) => offset += Reg::f32().size,
-        (_, abi::Float(abi::F64)) => offset += Reg::f64().size,
-        (abi::Int(i, _signed), _) => offset += i.size(),
-        (abi::Pointer(_), _) => offset += Reg::i64().size,
+        (Primitive::Float(Float::F32), _) => offset += Reg::f32().size,
+        (_, Primitive::Float(Float::F64)) => offset += Reg::f64().size,
+        (Primitive::Int(i, _signed), _) => offset += i.size(),
+        (Primitive::Pointer(_), _) => offset += Reg::i64().size,
         _ => {}
     }
 
-    if (offset.bytes() % 4) != 0 && matches!(scalar2.primitive(), abi::Float(abi::F32 | abi::F64)) {
+    if !offset.bytes().is_multiple_of(4)
+        && matches!(scalar2.primitive(), Primitive::Float(Float::F32 | Float::F64))
+    {
         offset += Size::from_bytes(4 - (offset.bytes() % 4));
     }
     data = arg_scalar(cx, scalar2, offset, data);
@@ -105,15 +109,15 @@ where
     Ty: TyAbiInterface<'a, C> + Copy,
     C: HasDataLayout,
 {
-    if let abi::FieldsShape::Union(_) = layout.fields {
+    if let FieldsShape::Union(_) = layout.fields {
         return data;
     }
 
     match layout.backend_repr {
-        abi::BackendRepr::Scalar(scalar) => {
+        BackendRepr::Scalar(scalar) => {
             data = arg_scalar(cx, &scalar, offset, data);
         }
-        abi::BackendRepr::Memory { .. } => {
+        BackendRepr::Memory { .. } => {
             for i in 0..layout.fields.count() {
                 if offset < layout.fields.offset(i) {
                     offset = layout.fields.offset(i);
@@ -122,7 +126,7 @@ where
             }
         }
         _ => {
-            if let abi::BackendRepr::ScalarPair(scalar1, scalar2) = &layout.backend_repr {
+            if let BackendRepr::ScalarPair(scalar1, scalar2) = &layout.backend_repr {
                 data = arg_scalar_pair(cx, scalar1, scalar2, offset, data);
             }
         }
@@ -136,6 +140,10 @@ where
     Ty: TyAbiInterface<'a, C> + Copy,
     C: HasDataLayout,
 {
+    if arg.layout.pass_indirectly_in_non_rustic_abis(cx) {
+        arg.make_indirect();
+        return;
+    }
     if !arg.layout.is_aggregate() {
         arg.extend_integer_width_to(64);
         return;
@@ -148,16 +156,16 @@ where
     }
 
     match arg.layout.fields {
-        abi::FieldsShape::Primitive => unreachable!(),
-        abi::FieldsShape::Array { .. } => {
+        FieldsShape::Primitive => unreachable!(),
+        FieldsShape::Array { .. } => {
             // Arrays are passed indirectly
             arg.make_indirect();
             return;
         }
-        abi::FieldsShape::Union(_) => {
+        FieldsShape::Union(_) => {
             // Unions and are always treated as a series of 64-bit integer chunks
         }
-        abi::FieldsShape::Arbitrary { .. } => {
+        FieldsShape::Arbitrary { .. } => {
             // Structures with floating point numbers need special care.
 
             let mut data = parse_structure(
@@ -177,7 +185,7 @@ where
                 // Structure { float, int, int } doesn't like to be handled like
                 // { float, long int }. Other way around it doesn't mind.
                 if data.last_offset < arg.layout.size
-                    && (data.last_offset.bytes() % 8) != 0
+                    && !data.last_offset.bytes().is_multiple_of(8)
                     && data.prefix_index < data.prefix.len()
                 {
                     data.prefix[data.prefix_index] = Some(Reg::i32());
@@ -186,21 +194,15 @@ where
                 }
 
                 let mut rest_size = arg.layout.size - data.last_offset;
-                if (rest_size.bytes() % 8) != 0 && data.prefix_index < data.prefix.len() {
+                if !rest_size.bytes().is_multiple_of(8) && data.prefix_index < data.prefix.len() {
                     data.prefix[data.prefix_index] = Some(Reg::i32());
                     rest_size = rest_size - Reg::i32().size;
                 }
 
-                arg.cast_to(CastTarget {
-                    prefix: data.prefix,
-                    rest: Uniform::new(Reg::i64(), rest_size),
-                    attrs: ArgAttributes {
-                        regular: data.arg_attribute,
-                        arg_ext: ArgExtension::None,
-                        pointee_size: Size::ZERO,
-                        pointee_align: None,
-                    },
-                });
+                arg.cast_to(
+                    CastTarget::prefixed(data.prefix, Uniform::new(Reg::i64(), rest_size))
+                        .with_attrs(data.arg_attribute.into()),
+                );
                 return;
             }
         }
@@ -214,15 +216,18 @@ where
     Ty: TyAbiInterface<'a, C> + Copy,
     C: HasDataLayout + HasTargetSpec,
 {
-    if !fn_abi.ret.is_ignore() {
+    if !fn_abi.ret.is_ignore() && fn_abi.ret.layout.is_sized() {
         classify_arg(cx, &mut fn_abi.ret, Size::from_bytes(32));
     }
 
     for arg in fn_abi.args.iter_mut() {
+        if !arg.layout.is_sized() {
+            continue;
+        }
         if arg.is_ignore() {
             // sparc64-unknown-linux-{gnu,musl,uclibc} doesn't ignore ZSTs.
-            if cx.target_spec().os == "linux"
-                && matches!(&*cx.target_spec().env, "gnu" | "musl" | "uclibc")
+            if cx.target_spec().os == Os::Linux
+                && matches!(cx.target_spec().env, Env::Gnu | Env::Musl | Env::Uclibc)
                 && arg.layout.is_zst()
             {
                 arg.make_indirect_from_ignore();

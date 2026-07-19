@@ -13,7 +13,7 @@ use std::{fmt::Display, fmt::Write as _};
 use crate::ident::{is_ascii_ident, is_ident};
 
 fn emit(directive: &str, value: impl Display) {
-    println!("cargo::{}={}", directive, value);
+    println!("cargo::{directive}={value}");
 }
 
 /// The `rerun-if-changed` instruction tells Cargo to re-run the build script if the
@@ -97,7 +97,7 @@ pub fn rustc_link_arg_bin(bin: &str, flag: &str) {
     if flag.contains([' ', '\n']) {
         panic!("cannot emit rustc-link-arg-bin: invalid flag {flag:?}");
     }
-    emit("rustc-link-arg-bin", format_args!("{}={}", bin, flag));
+    emit("rustc-link-arg-bin", format_args!("{bin}={flag}"));
 }
 
 /// The `rustc-link-arg-bins` instruction tells Cargo to pass the
@@ -119,6 +119,8 @@ pub fn rustc_link_arg_bins(flag: &str) {
 /// The `rustc-link-arg-tests` instruction tells Cargo to pass the
 /// [`-C link-arg=FLAG` option][link-arg] to the compiler, but only when building
 /// a tests target.
+///
+/// [link-arg]: https://doc.rust-lang.org/rustc/codegen-options/index.html#link-arg
 #[track_caller]
 pub fn rustc_link_arg_tests(flag: &str) {
     if flag.contains([' ', '\n']) {
@@ -130,6 +132,8 @@ pub fn rustc_link_arg_tests(flag: &str) {
 /// The `rustc-link-arg-examples` instruction tells Cargo to pass the
 /// [`-C link-arg=FLAG` option][link-arg] to the compiler, but only when building
 /// an examples target.
+///
+/// [link-arg]: https://doc.rust-lang.org/rustc/codegen-options/index.html#link-arg
 #[track_caller]
 pub fn rustc_link_arg_examples(flag: &str) {
     if flag.contains([' ', '\n']) {
@@ -141,6 +145,8 @@ pub fn rustc_link_arg_examples(flag: &str) {
 /// The `rustc-link-arg-benches` instruction tells Cargo to pass the
 /// [`-C link-arg=FLAG` option][link-arg] to the compiler, but only when building
 /// a benchmark target.
+///
+/// [link-arg]: https://doc.rust-lang.org/rustc/codegen-options/index.html#link-arg
 #[track_caller]
 pub fn rustc_link_arg_benches(flag: &str) {
     if flag.contains([' ', '\n']) {
@@ -433,5 +439,5 @@ pub fn metadata(key: &str, val: &str) {
         panic!("cannot emit metadata: invalid value {val:?}");
     }
 
-    emit("metadata", format_args!("{}={}", key, val));
+    emit("metadata", format_args!("{key}={val}"));
 }

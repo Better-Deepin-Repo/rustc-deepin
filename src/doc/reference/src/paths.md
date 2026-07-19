@@ -1,5 +1,7 @@
+r[paths]
 # Paths
 
+r[paths.intro]
 A *path* is a sequence of one or more path segments separated by `::` tokens.
 Paths are used to refer to [items], values, [types], [macros], and [attributes].
 
@@ -13,15 +15,19 @@ x::y::z;
 
 ## Types of paths
 
-### Simple Paths
+r[paths.simple]
+### Simple paths
 
-> **<sup>Syntax</sup>**\
-> _SimplePath_ :\
-> &nbsp;&nbsp; `::`<sup>?</sup> _SimplePathSegment_ (`::` _SimplePathSegment_)<sup>\*</sup>
->
-> _SimplePathSegment_ :\
-> &nbsp;&nbsp; [IDENTIFIER] | `super` | `self` | `crate` | `$crate`
+r[paths.simple.syntax]
+```grammar,paths
+SimplePath ->
+    `::`? SimplePathSegment (`::` SimplePathSegment)*
 
+SimplePathSegment ->
+    IDENTIFIER | `super` | `self` | `crate` | `$crate`
+```
+
+r[paths.simple.intro]
 Simple paths are used in [visibility] markers, [attributes], [macros][mbe], and [`use`] items.
 For example:
 
@@ -33,40 +39,45 @@ mod m {
 }
 ```
 
+r[paths.expr]
 ### Paths in expressions
 
-> **<sup>Syntax</sup>**\
-> _PathInExpression_ :\
-> &nbsp;&nbsp; `::`<sup>?</sup> _PathExprSegment_ (`::` _PathExprSegment_)<sup>\*</sup>
->
-> _PathExprSegment_ :\
-> &nbsp;&nbsp; _PathIdentSegment_ (`::` _GenericArgs_)<sup>?</sup>
->
-> _PathIdentSegment_ :\
-> &nbsp;&nbsp; [IDENTIFIER] | `super` | `self` | `Self` | `crate` | `$crate`
->
-> _GenericArgs_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `<` `>`\
-> &nbsp;&nbsp; | `<` ( _GenericArg_ `,` )<sup>\*</sup> _GenericArg_ `,`<sup>?</sup> `>`
->
-> _GenericArg_ :\
-> &nbsp;&nbsp; [_Lifetime_] | [_Type_] | _GenericArgsConst_ | _GenericArgsBinding_ | _GenericArgsBounds_
->
-> _GenericArgsConst_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; [_BlockExpression_]\
-> &nbsp;&nbsp; | [_LiteralExpression_]\
-> &nbsp;&nbsp; | `-` [_LiteralExpression_]\
-> &nbsp;&nbsp; | [_SimplePathSegment_]
->
-> _GenericArgsBinding_ :\
-> &nbsp;&nbsp; [IDENTIFIER] _GenericArgs_<sup>?</sup> `=` [_Type_]
->
-> _GenericArgsBounds_ :\
-> &nbsp;&nbsp; [IDENTIFIER] _GenericArgs_<sup>?</sup> `:` [_TypeParamBounds_]
+r[paths.expr.syntax]
+```grammar,paths
+PathInExpression ->
+    `::`? PathExprSegment (`::` PathExprSegment)*
 
+PathExprSegment ->
+    PathIdentSegment (`::` GenericArgs)?
+
+PathIdentSegment ->
+    IDENTIFIER | `super` | `self` | `Self` | `crate` | `$crate`
+
+GenericArgs ->
+      `<` `>`
+    | `<` ( GenericArg `,` )* GenericArg `,`? `>`
+
+GenericArg ->
+    Lifetime | Type | GenericArgsConst | GenericArgsBinding | GenericArgsBounds
+
+GenericArgsConst ->
+      BlockExpression
+    | LiteralExpression
+    | `-` LiteralExpression
+    | SimplePathSegment
+
+GenericArgsBinding ->
+    IDENTIFIER GenericArgs? `=` Type
+
+GenericArgsBounds ->
+    IDENTIFIER GenericArgs? `:` TypeParamBounds
+```
+
+r[paths.expr.intro]
 Paths in expressions allow for paths with generic arguments to be specified. They are
 used in various places in [expressions] and [patterns].
 
+r[paths.expr.turbofish]
 The `::` token is required before the opening `<` for generic arguments to avoid
 ambiguity with the less-than operator. This is colloquially known as "turbofish" syntax.
 
@@ -75,27 +86,53 @@ ambiguity with the less-than operator. This is colloquially known as "turbofish"
 Vec::<u8>::with_capacity(1024);
 ```
 
+r[paths.expr.argument-order]
 The order of generic arguments is restricted to lifetime arguments, then type
 arguments, then const arguments, then equality constraints.
 
-Const arguments must be surrounded by braces unless they are a
-[literal] or a single segment path.
+r[paths.expr.complex-const-params]
+Const arguments must be surrounded by braces unless they are a [literal], an [inferred const], or a single segment path. An [inferred const] may not be surrounded by braces.
 
+```rust
+mod m {
+    pub const C: usize = 1;
+}
+const C: usize = m::C;
+fn f<const N: usize>() -> [u8; N] { [0; N] }
+
+let _ = f::<1>(); // Literal.
+let _: [_; 1] = f::<_>(); // Inferred const.
+let _: [_; 1] = f::<(((_)))>(); // Inferred const.
+let _ = f::<C>(); // Single segment path.
+let _ = f::<{ m::C }>(); // Multi-segment path must be braced.
+```
+
+```rust,compile_fail
+fn f<const N: usize>() -> [u8; N] { [0; _] }
+let _: [_; 1] = f::<{ _ }>();
+//                    ^ ERROR `_` not allowed here
+```
+
+> [!NOTE]
+> In a generic argument list, an [inferred const] is parsed as an [inferred type][InferredType] but then semantically treated as a separate kind of [const generic argument].
+
+r[paths.expr.impl-trait-params]
 The synthetic type parameters corresponding to `impl Trait` types are implicit,
 and these cannot be explicitly specified.
 
+r[paths.qualified]
 ## Qualified paths
 
-> **<sup>Syntax</sup>**\
-> _QualifiedPathInExpression_ :\
-> &nbsp;&nbsp; _QualifiedPathType_ (`::` _PathExprSegment_)<sup>+</sup>
->
-> _QualifiedPathType_ :\
-> &nbsp;&nbsp; `<` [_Type_] (`as` _TypePath_)<sup>?</sup> `>`
->
-> _QualifiedPathInType_ :\
-> &nbsp;&nbsp; _QualifiedPathType_ (`::` _TypePathSegment_)<sup>+</sup>
+r[paths.qualified.syntax]
+```grammar,paths
+QualifiedPathInExpression -> QualifiedPathType (`::` PathExprSegment)+
 
+QualifiedPathType -> `<` Type (`as` TypePath)? `>`
+
+QualifiedPathInType -> QualifiedPathType (`::` TypePathSegment)+
+```
+
+r[paths.qualified.intro]
 Fully qualified paths allow for disambiguating the path for [trait implementations] and
 for specifying [canonical paths](#canonical-paths). When used in a type specification, it
 supports using the type syntax specified below.
@@ -118,26 +155,27 @@ S::f();  // Calls the inherent impl.
 <S as T2>::f();  // Calls the T2 trait function.
 ```
 
+r[paths.type]
 ### Paths in types
 
-> **<sup>Syntax</sup>**\
-> _TypePath_ :\
-> &nbsp;&nbsp; `::`<sup>?</sup> _TypePathSegment_ (`::` _TypePathSegment_)<sup>\*</sup>
->
-> _TypePathSegment_ :\
-> &nbsp;&nbsp; _PathIdentSegment_ (`::`<sup>?</sup> ([_GenericArgs_] | _TypePathFn_))<sup>?</sup>
->
-> _TypePathFn_ :\
-> `(` _TypePathFnInputs_<sup>?</sup> `)` (`->` [_TypeNoBounds_])<sup>?</sup>
->
-> _TypePathFnInputs_ :\
-> [_Type_] (`,` [_Type_])<sup>\*</sup> `,`<sup>?</sup>
+r[paths.type.syntax]
+```grammar,paths
+TypePath -> `::`? TypePathSegment (`::` TypePathSegment)*
 
+TypePathSegment -> PathIdentSegment (`::`? (GenericArgs | TypePathFn))?
+
+TypePathFn -> `(` TypePathFnInputs? `)` (`->` TypeNoBounds)?
+
+TypePathFnInputs -> Type (`,` Type)* `,`?
+```
+
+r[paths.type.intro]
 Type paths are used within type definitions, trait bounds, type parameter bounds,
 and qualified paths.
 
+r[paths.type.turbofish]
 Although the `::` token is allowed before the generics arguments, it is not required
-because there is no ambiguity like there is in _PathInExpression_.
+because there is no ambiguity like there is in [PathInExpression].
 
 ```rust
 # mod ops {
@@ -155,24 +193,25 @@ fn i<'a>() -> impl Iterator<Item = ops::Example<'a>> {
 type G = std::boxed::Box<dyn std::ops::FnOnce(isize) -> isize>;
 ```
 
+r[paths.qualifiers]
 ## Path qualifiers
 
 Paths can be denoted with various leading qualifiers to change the meaning of
 how it is resolved.
 
+r[paths.qualifiers.global-root]
 ### `::`
 
+r[paths.qualifiers.global-root.intro]
 Paths starting with `::` are considered to be *global paths* where the segments of the path
 start being resolved from a place which differs based on edition. Each identifier in
 the path must resolve to an item.
 
-> **Edition differences**: In the 2015 Edition, identifiers resolve from the "crate root"
-> (`crate::` in the 2018 edition), which contains a variety of different items, including
-> external crates, default crates such as `std` or `core`, and items in the top level of
-> the crate (including `use` imports).
+r[paths.qualifiers.global-root.edition2018]
+> [!EDITION-2018]
+> In the 2015 Edition, identifiers resolve from the "crate root" (`crate::` in the 2018 edition), which contains a variety of different items, including external crates, default crates such as `std` or `core`, and items in the top level of the crate (including `use` imports).
 >
-> Beginning with the 2018 Edition, paths starting with `::` resolve from
-> crates in the [extern prelude]. That is, they must be followed by the name of a crate.
+> Beginning with the 2018 Edition, paths starting with `::` resolve from crates in the [extern prelude]. That is, they must be followed by the name of a crate.
 
 ```rust
 pub fn foo() {
@@ -197,13 +236,17 @@ mod b {
 # fn main() {}
 ```
 
+r[paths.qualifiers.mod-self]
 ### `self`
 
-`self` resolves the path relative to the current module. `self` can only be used as the
-first segment, without a preceding `::`.
+r[paths.qualifiers.mod-self.intro]
+`self` resolves the path relative to the current module.
 
+r[paths.qualifiers.mod-self.restriction]
+`self` can only be used as the first segment, without a preceding `::`.
+
+r[paths.qualifiers.self-pat]
 In a method body, a path which consists of a single `self` segment resolves to the method's self parameter.
-
 
 ```rust
 fn foo() {}
@@ -219,19 +262,30 @@ impl S {
 # fn main() {}
 ```
 
+r[paths.qualifiers.type-self]
 ### `Self`
 
+r[paths.qualifiers.type-self.intro]
 `Self`, with a capital "S", is used to refer to the current type being implemented or defined. It may be used in the following situations:
 
+r[paths.qualifiers.type-self.trait]
 * In a [trait] definition, it refers to the type implementing the trait.
+
+r[paths.qualifiers.type-self.impl]
 * In an [implementation], it refers to the type being implemented.
   When implementing a tuple or unit [struct], it also refers to the constructor in the [value namespace].
+
+r[paths.qualifiers.type-self.type]
 * In the definition of a [struct], [enumeration], or [union], it refers to the type being defined.
   The definition is not allowed to be infinitely recursive (there must be an indirection).
 
+r[paths.qualifiers.type-self.scope]
 The scope of `Self` behaves similarly to a generic parameter; see the [`Self` scope] section for more details.
 
+r[paths.qualifiers.type-self.allowed-positions]
 `Self` can only be used as the first segment, without a preceding `::`.
+
+r[paths.qualifiers.type-self.no-generics]
 The `Self` path cannot include generic arguments (as in `Self::<i32>`).
 
 ```rust
@@ -272,10 +326,14 @@ struct NonEmptyList<T> {
 }
 ```
 
+r[paths.qualifiers.super]
 ### `super`
 
-`super` in a path resolves to the parent module. It may only be used in leading
-segments of the path, possibly after an initial `self` segment.
+r[paths.qualifiers.super.intro]
+`super` in a path resolves to the parent module.
+
+r[paths.qualifiers.super.allowed-positions]
+It may only be used in leading segments of the path, possibly after an initial `self` segment.
 
 ```rust
 mod a {
@@ -289,6 +347,7 @@ mod b {
 # fn main() {}
 ```
 
+r[paths.qualifiers.super.repetition]
 `super` may be repeated several times after the first `super` or `self` to refer to
 ancestor modules.
 
@@ -308,10 +367,14 @@ mod a {
 # fn main() {}
 ```
 
+r[paths.qualifiers.crate]
 ### `crate`
 
-`crate` resolves the path relative to the current crate. `crate` can only be used as the
-first segment, without a preceding `::`.
+r[paths.qualifiers.crate.intro]
+`crate` resolves the path relative to the current crate.
+
+r[paths.qualifiers.crate.allowed-positions]
+`crate` can only be used as the first segment, without a preceding `::`.
 
 ```rust
 fn foo() {}
@@ -323,10 +386,15 @@ mod a {
 # fn main() {}
 ```
 
+r[paths.qualifiers.macro-crate]
 ### `$crate`
 
-`$crate` is only used within [macro transcribers], and can only be used as the first
-segment, without a preceding `::`. `$crate` will expand to a path to access items from the
+r[paths.qualifiers.macro-crate.allowed-positions]
+[`$crate`] is only used within [macro transcribers], and can only be used as the first
+segment, without a preceding `::`.
+
+r[paths.qualifiers.macro-crate.hygiene]
+[`$crate`] will expand to a path to access items from the
 top level of the crate where the macro is defined, regardless of which crate the macro is
 invoked.
 
@@ -342,13 +410,21 @@ macro_rules! inc {
 # fn main() { }
 ```
 
+r[paths.canonical]
 ## Canonical paths
 
+r[paths.canonical.intro]
 Items defined in a module or implementation have a *canonical path* that
-corresponds to where within its crate it is defined. All other paths to these
-items are aliases. The canonical path is defined as a *path prefix* appended by
+corresponds to where within its crate it is defined.
+
+r[paths.canonical.alias]
+All other paths to these items are aliases.
+
+r[paths.canonical.def]
+The canonical path is defined as a *path prefix* appended by
 the path segment the item itself defines.
 
+r[paths.canonical.non-canonical]
 [Implementations] and [use declarations] do not have canonical paths, although
 the items that implementations define do have them. Items defined in
 block expressions do not have canonical paths. Items defined in a module that
@@ -357,13 +433,19 @@ defined in an implementation that refers to an item without a canonical path,
 e.g. as the implementing type, the trait being implemented, a type parameter or
 bound on a type parameter, do not have canonical paths.
 
-The path prefix for modules is the canonical path to that module. For bare
-implementations, it is the canonical path of the item being implemented
-surrounded by <span class="parenthetical">angle (`<>`)</span> brackets. For
-[trait implementations], it is the canonical path of the item being implemented
+r[paths.canonical.module-prefix]
+The path prefix for modules is the canonical path to that module.
+
+r[paths.canonical.bare-impl-prefix]
+For bare implementations, it is the canonical path of the item being implemented
+surrounded by <span class="parenthetical">angle (`<>`)</span> brackets.
+
+r[paths.canonical.trait-impl-prefix]
+For [trait implementations], it is the canonical path of the item being implemented
 followed by `as` followed by the canonical path to the trait all surrounded in
 <span class="parenthetical">angle (`<>`)</span> brackets.
 
+r[paths.canonical.local-canonical-path]
 The canonical path is only meaningful within a given crate. There is no global
 namespace across crates; an item's canonical path merely identifies it within
 the crate.
@@ -412,27 +494,20 @@ mod without { // crate::without
 # fn main() {}
 ```
 
-[_BlockExpression_]: expressions/block-expr.md
-[_Expression_]: expressions.md
-[_GenericArgs_]: #paths-in-expressions
-[_Lifetime_]: trait-bounds.md
-[_LiteralExpression_]: expressions/literal-expr.md
-[_SimplePathSegment_]: #simple-paths
-[_Type_]: types.md#type-expressions
-[_TypeNoBounds_]: types.md#type-expressions
-[_TypeParamBounds_]: trait-bounds.md
+[`$crate`]: macro.decl.hygiene.crate
 [implementations]: items/implementations.md
 [items]: items.md
 [literal]: expressions/literal-expr.md
 [use declarations]: items/use-declarations.md
-[IDENTIFIER]: identifiers.md
 [`Self` scope]: names/scopes.md#self-scope
 [`use`]: items/use-declarations.md
 [attributes]: attributes.md
+[const generic argument]: items.generics.const.argument
 [enumeration]: items/enumerations.md
 [expressions]: expressions.md
 [extern prelude]: names/preludes.md#extern-prelude
 [implementation]: items/implementations.md
+[inferred const]: items.generics.const.inferred
 [macro transcribers]: macros-by-example.md
 [macros]: macros.md
 [mbe]: macros-by-example.md

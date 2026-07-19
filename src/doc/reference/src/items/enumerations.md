@@ -1,32 +1,23 @@
+r[items.enum]
 # Enumerations
 
-r[items.enum]
-
 r[items.enum.syntax]
-> **<sup>Syntax</sup>**\
-> _Enumeration_ :\
-> &nbsp;&nbsp; `enum`
->    [IDENTIFIER]&nbsp;
->    [_GenericParams_]<sup>?</sup>
->    [_WhereClause_]<sup>?</sup>
->    `{` _EnumItems_<sup>?</sup> `}`
->
-> _EnumItems_ :\
-> &nbsp;&nbsp; _EnumItem_ ( `,` _EnumItem_ )<sup>\*</sup> `,`<sup>?</sup>
->
-> _EnumItem_ :\
-> &nbsp;&nbsp; _OuterAttribute_<sup>\*</sup> [_Visibility_]<sup>?</sup>\
-> &nbsp;&nbsp; [IDENTIFIER]&nbsp;( _EnumItemTuple_ | _EnumItemStruct_ )<sup>?</sup>
->                                _EnumItemDiscriminant_<sup>?</sup>
->
-> _EnumItemTuple_ :\
-> &nbsp;&nbsp; `(` [_TupleFields_]<sup>?</sup> `)`
->
-> _EnumItemStruct_ :\
-> &nbsp;&nbsp; `{` [_StructFields_]<sup>?</sup> `}`
->
-> _EnumItemDiscriminant_ :\
-> &nbsp;&nbsp; `=` [_Expression_]
+```grammar,items
+Enumeration ->
+    `enum` IDENTIFIER GenericParams? WhereClause? `{` EnumVariants? `}`
+
+EnumVariants -> EnumVariant ( `,` EnumVariant )* `,`?
+
+EnumVariant ->
+    OuterAttribute* Visibility?
+    IDENTIFIER ( EnumVariantTuple | EnumVariantStruct )? EnumVariantDiscriminant?
+
+EnumVariantTuple -> `(` TupleFields? `)`
+
+EnumVariantStruct -> `{` StructFields? `}`
+
+EnumVariantDiscriminant -> `=` Expression
+```
 
 r[items.enum.intro]
 An *enumeration*, also referred to as an *enum*, is a simultaneous definition of a
@@ -68,7 +59,7 @@ In this example, `Cat` is a _struct-like enum variant_, whereas `Dog` is simply
 called an enum variant.
 
 r[items.enum.fieldless]
-An enum where no constructors contain fields are called a
+An enum where no constructors contain fields is called a
 *<span id="field-less-enum">field-less enum</span>*. For example, this is a fieldless enum:
 
 ```rust
@@ -124,9 +115,8 @@ let z = StructLike { value: 123 }; // Struct expression.
 ```
 
 <span id="custom-discriminant-values-for-fieldless-enumerations"></span>
-## Discriminants
-
 r[items.enum.discriminant]
+## Discriminants
 
 r[items.enum.discriminant.intro]
 Each enum instance has a _discriminant_: an integer logically associated to it
@@ -139,9 +129,8 @@ another means of distinguishing variants) in its actual memory layout.
 
 ### Assigning discriminant values
 
-#### Explicit discriminants
-
 r[items.enum.discriminant.explicit]
+#### Explicit discriminants
 
 r[items.enum.discriminant.explicit.intro]
 In two circumstances, the discriminant of a variant may be explicitly set by
@@ -165,9 +154,8 @@ r[items.enum.discriminant.explicit.primitive-repr]
    }
    ```
 
-#### Implicit discriminants
-
 r[items.enum.discriminant.implicit]
+#### Implicit discriminants
 
 If a discriminant for a variant is not specified, then it is set to one higher
 than the discriminant of the previous variant in the declaration. If the
@@ -185,9 +173,8 @@ let baz_discriminant = Foo::Baz as u32;
 assert_eq!(baz_discriminant, 123);
 ```
 
-#### Restrictions
-
 r[items.enum.discriminant.restrictions]
+#### Restrictions
 
 r[items.enum.discriminant.restrictions.same-discriminant]
 It is an error when two variants share the same discriminant.
@@ -234,9 +221,8 @@ r[items.enum.discriminant.access-opaque]
 an enum value which can be compared. This cannot be used to get the value
 of the discriminant.
 
-#### Casting
-
 r[items.enum.discriminant.coercion]
+#### Casting
 
 r[items.enum.discriminant.coercion.intro]
 If an enumeration is [unit-only] (with no tuple and struct variants), then its
@@ -269,7 +255,7 @@ assert_eq!(1, Fieldless::Struct{} as isize);
 assert_eq!(2, Fieldless::Unit as isize);
 
 #[repr(u8)]
-enum FieldlessWithDiscrimants {
+enum FieldlessWithDiscriminants {
     First = 10,
     Tuple(),
     Second = 20,
@@ -277,11 +263,11 @@ enum FieldlessWithDiscrimants {
     Unit,
 }
 
-assert_eq!(10, FieldlessWithDiscrimants::First as u8);
-assert_eq!(11, FieldlessWithDiscrimants::Tuple() as u8);
-assert_eq!(20, FieldlessWithDiscrimants::Second as u8);
-assert_eq!(21, FieldlessWithDiscrimants::Struct{} as u8);
-assert_eq!(22, FieldlessWithDiscrimants::Unit as u8);
+assert_eq!(10, FieldlessWithDiscriminants::First as u8);
+assert_eq!(11, FieldlessWithDiscriminants::Tuple() as u8);
+assert_eq!(20, FieldlessWithDiscriminants::Second as u8);
+assert_eq!(21, FieldlessWithDiscriminants::Struct{} as u8);
+assert_eq!(22, FieldlessWithDiscriminants::Unit as u8);
 ```
 
 #### Pointer casting
@@ -314,9 +300,8 @@ assert_eq!(1, tuple_like.discriminant());
 assert_eq!(2, struct_like.discriminant());
 ```
 
-## Zero-variant enums
-
 r[items.enum.empty]
+## Zero-variant enums
 
 r[items.enum.empty.intro]
 Enums with zero variants are known as *zero-variant enums*. As they have
@@ -336,11 +321,10 @@ let x: ZeroVariants = panic!();
 let y: u32 = x; // mismatched type error
 ```
 
+r[items.enum.variant-visibility]
 ## Variant visibility
 
-r[items.enum.variant-visibility]
-
-Enum variants syntactically allow a [_Visibility_] annotation, but this is
+Enum variants syntactically allow a [Visibility] annotation, but this is
 rejected when the enum is validated. This allows items to be parsed with a
 unified syntax across different contexts where they are used.
 
@@ -361,7 +345,7 @@ macro_rules! mac_variant {
 mac_variant! { E }
 
 // This is allowed, since it is removed before being validated.
-#[cfg(FALSE)]
+#[cfg(false)]
 enum E {
     pub U,
     pub(crate) T(u8),
@@ -369,18 +353,11 @@ enum E {
 }
 ```
 
-[_Expression_]: ../expressions.md
-[_GenericParams_]: generics.md
-[_StructFields_]: structs.md
-[_TupleFields_]: structs.md
-[_Visibility_]: ../visibility-and-privacy.md
-[_WhereClause_]: generics.md#where-clauses
 [`C` representation]: ../type-layout.md#the-c-representation
 [call expression]: ../expressions/call-expr.md
 [constant expression]: ../const_eval.md#constant-expressions
 [enumerated type]: ../types/enum.md
 [Field-less enums]: #field-less-enum
-[IDENTIFIER]: ../identifiers.md
 [never type]: ../types/never.md
 [numeric cast]: ../expressions/operator-expr.md#semantics
 [path expression]: ../expressions/path-expr.md

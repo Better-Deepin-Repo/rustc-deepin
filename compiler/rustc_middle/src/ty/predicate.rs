@@ -1,15 +1,12 @@
 use std::cmp::Ordering;
 
-use rustc_data_structures::captures::Captures;
 use rustc_data_structures::intern::Interned;
 use rustc_hir::def_id::DefId;
 use rustc_macros::{HashStable, extension};
 use rustc_type_ir as ir;
-use tracing::instrument;
 
 use crate::ty::{
-    self, DebruijnIndex, EarlyBinder, PredicatePolarity, Ty, TyCtxt, TypeFlags, Upcast, UpcastFrom,
-    WithCachedTypeInfo,
+    self, DebruijnIndex, EarlyBinder, Ty, TyCtxt, TypeFlags, Upcast, UpcastFrom, WithCachedTypeInfo,
 };
 
 pub type TraitRef<'tcx> = ir::TraitRef<TyCtxt<'tcx>>;
@@ -28,6 +25,7 @@ pub type SubtypePredicate<'tcx> = ir::SubtypePredicate<TyCtxt<'tcx>>;
 pub type OutlivesPredicate<'tcx, T> = ir::OutlivesPredicate<TyCtxt<'tcx>, T>;
 pub type RegionOutlivesPredicate<'tcx> = OutlivesPredicate<'tcx, ty::Region<'tcx>>;
 pub type TypeOutlivesPredicate<'tcx> = OutlivesPredicate<'tcx, Ty<'tcx>>;
+pub type ArgOutlivesPredicate<'tcx> = OutlivesPredicate<'tcx, ty::GenericArg<'tcx>>;
 pub type PolyTraitPredicate<'tcx> = ty::Binder<'tcx, TraitPredicate<'tcx>>;
 pub type PolyRegionOutlivesPredicate<'tcx> = ty::Binder<'tcx, RegionOutlivesPredicate<'tcx>>;
 pub type PolyTypeOutlivesPredicate<'tcx> = ty::Binder<'tcx, TypeOutlivesPredicate<'tcx>>;
@@ -52,10 +50,6 @@ impl<'tcx> rustc_type_ir::inherent::Predicate<TyCtxt<'tcx>> for Predicate<'tcx> 
         self.as_clause()
     }
 
-    fn is_coinductive(self, interner: TyCtxt<'tcx>) -> bool {
-        self.is_coinductive(interner)
-    }
-
     fn allow_normalization(self) -> bool {
         self.allow_normalization()
     }
@@ -69,7 +63,7 @@ impl<'tcx> rustc_type_ir::inherent::IntoKind for Predicate<'tcx> {
     }
 }
 
-impl<'tcx> rustc_type_ir::visit::Flags for Predicate<'tcx> {
+impl<'tcx> rustc_type_ir::Flags for Predicate<'tcx> {
     fn flags(&self) -> TypeFlags {
         self.0.flags
     }
@@ -120,17 +114,6 @@ impl<'tcx> Predicate<'tcx> {
         Some(tcx.mk_predicate(kind))
     }
 
-    #[instrument(level = "debug", skip(tcx), ret)]
-    pub fn is_coinductive(self, tcx: TyCtxt<'tcx>) -> bool {
-        match self.kind().skip_binder() {
-            ty::PredicateKind::Clause(ty::ClauseKind::Trait(data)) => {
-                tcx.trait_is_coinductive(data.def_id())
-            }
-            ty::PredicateKind::Clause(ty::ClauseKind::WellFormed(_)) => true,
-            _ => false,
-        }
-    }
-
     /// Whether this projection can be soundly normalized.
     ///
     /// Wf predicates must not be normalized, as normalization
@@ -138,36 +121,43 @@ impl<'tcx> Predicate<'tcx> {
     /// unsoundly accept some programs. See #91068.
     #[inline]
     pub fn allow_normalization(self) -> bool {
-        // Keep this in sync with the one in `rustc_type_ir::inherent`!
         match self.kind().skip_binder() {
-            PredicateKind::Clause(ClauseKind::WellFormed(_))
-            | PredicateKind::AliasRelate(..)
-            | PredicateKind::NormalizesTo(..) => false,
+            PredicateKind::Clause(ClauseKind::WellFormed(_)) | PredicateKind::AliasRelate(..) => {
+                false
+            }
             PredicateKind::Clause(ClauseKind::Trait(_))
             | PredicateKind::Clause(ClauseKind::HostEffect(..))
             | PredicateKind::Clause(ClauseKind::RegionOutlives(_))
             | PredicateKind::Clause(ClauseKind::TypeOutlives(_))
             | PredicateKind::Clause(ClauseKind::Projection(_))
             | PredicateKind::Clause(ClauseKind::ConstArgHasType(..))
+            | PredicateKind::Clause(ClauseKind::UnstableFeature(_))
             | PredicateKind::DynCompatible(_)
             | PredicateKind::Subtype(_)
             | PredicateKind::Coerce(_)
             | PredicateKind::Clause(ClauseKind::ConstEvaluatable(_))
             | PredicateKind::ConstEquate(_, _)
+            | PredicateKind::NormalizesTo(..)
             | PredicateKind::Ambiguous => true,
         }
     }
 }
 
-impl rustc_errors::IntoDiagArg for Predicate<'_> {
-    fn into_diag_arg(self) -> rustc_errors::DiagArgValue {
-        rustc_errors::DiagArgValue::Str(std::borrow::Cow::Owned(self.to_string()))
+impl<'tcx> rustc_errors::IntoDiagArg for Predicate<'tcx> {
+    fn into_diag_arg(self, path: &mut Option<std::path::PathBuf>) -> rustc_errors::DiagArgValue {
+        ty::tls::with(|tcx| {
+            let pred = tcx.short_string(self, path);
+            rustc_errors::DiagArgValue::Str(std::borrow::Cow::Owned(pred))
+        })
     }
 }
 
-impl rustc_errors::IntoDiagArg for Clause<'_> {
-    fn into_diag_arg(self) -> rustc_errors::DiagArgValue {
-        rustc_errors::DiagArgValue::Str(std::borrow::Cow::Owned(self.to_string()))
+impl<'tcx> rustc_errors::IntoDiagArg for Clause<'tcx> {
+    fn into_diag_arg(self, path: &mut Option<std::path::PathBuf>) -> rustc_errors::DiagArgValue {
+        ty::tls::with(|tcx| {
+            let clause = tcx.short_string(self, path);
+            rustc_errors::DiagArgValue::Str(std::borrow::Cow::Owned(clause))
+        })
     }
 }
 
@@ -248,6 +238,8 @@ impl<'tcx> Clause<'tcx> {
         }
     }
 }
+
+impl<'tcx> rustc_type_ir::inherent::Clauses<TyCtxt<'tcx>> for ty::Clauses<'tcx> {}
 
 #[extension(pub trait ExistentialPredicateStableCmpExt<'tcx>)]
 impl<'tcx> ExistentialPredicate<'tcx> {
@@ -336,9 +328,9 @@ impl<'tcx> ty::List<ty::PolyExistentialPredicate<'tcx>> {
     }
 
     #[inline]
-    pub fn projection_bounds<'a>(
-        &'a self,
-    ) -> impl Iterator<Item = ty::Binder<'tcx, ExistentialProjection<'tcx>>> + 'a {
+    pub fn projection_bounds(
+        &self,
+    ) -> impl Iterator<Item = ty::Binder<'tcx, ExistentialProjection<'tcx>>> {
         self.iter().filter_map(|predicate| {
             predicate
                 .map_bound(|pred| match pred {
@@ -350,16 +342,14 @@ impl<'tcx> ty::List<ty::PolyExistentialPredicate<'tcx>> {
     }
 
     #[inline]
-    pub fn auto_traits<'a>(&'a self) -> impl Iterator<Item = DefId> + Captures<'tcx> + 'a {
+    pub fn auto_traits(&self) -> impl Iterator<Item = DefId> {
         self.iter().filter_map(|predicate| match predicate.skip_binder() {
             ExistentialPredicate::AutoTrait(did) => Some(did),
             _ => None,
         })
     }
 
-    pub fn without_auto_traits(
-        &self,
-    ) -> impl Iterator<Item = ty::PolyExistentialPredicate<'tcx>> + '_ {
+    pub fn without_auto_traits(&self) -> impl Iterator<Item = ty::PolyExistentialPredicate<'tcx>> {
         self.iter().filter(|predicate| {
             !matches!(predicate.as_ref().skip_binder(), ExistentialPredicate::AutoTrait(_))
         })
@@ -476,16 +466,6 @@ impl<'tcx> Clause<'tcx> {
     }
 }
 
-pub trait ToPolyTraitRef<'tcx> {
-    fn to_poly_trait_ref(&self) -> PolyTraitRef<'tcx>;
-}
-
-impl<'tcx> ToPolyTraitRef<'tcx> for PolyTraitPredicate<'tcx> {
-    fn to_poly_trait_ref(&self) -> PolyTraitRef<'tcx> {
-        self.map_bound_ref(|trait_pred| trait_pred.trait_ref)
-    }
-}
-
 impl<'tcx> UpcastFrom<TyCtxt<'tcx>, PredicateKind<'tcx>> for Predicate<'tcx> {
     fn upcast_from(from: PredicateKind<'tcx>, tcx: TyCtxt<'tcx>) -> Self {
         ty::Binder::dummy(from).upcast(tcx)
@@ -552,15 +532,6 @@ impl<'tcx> UpcastFrom<TyCtxt<'tcx>, ty::Binder<'tcx, TraitRef<'tcx>>> for Clause
     fn upcast_from(from: ty::Binder<'tcx, TraitRef<'tcx>>, tcx: TyCtxt<'tcx>) -> Self {
         let pred: PolyTraitPredicate<'tcx> = from.upcast(tcx);
         pred.upcast(tcx)
-    }
-}
-
-impl<'tcx> UpcastFrom<TyCtxt<'tcx>, ty::Binder<'tcx, TraitRef<'tcx>>> for PolyTraitPredicate<'tcx> {
-    fn upcast_from(from: ty::Binder<'tcx, TraitRef<'tcx>>, _tcx: TyCtxt<'tcx>) -> Self {
-        from.map_bound(|trait_ref| TraitPredicate {
-            trait_ref,
-            polarity: PredicatePolarity::Positive,
-        })
     }
 }
 
@@ -634,6 +605,28 @@ impl<'tcx> UpcastFrom<TyCtxt<'tcx>, PolyProjectionPredicate<'tcx>> for Clause<'t
     }
 }
 
+impl<'tcx> UpcastFrom<TyCtxt<'tcx>, ty::Binder<'tcx, ty::HostEffectPredicate<'tcx>>>
+    for Predicate<'tcx>
+{
+    fn upcast_from(
+        from: ty::Binder<'tcx, ty::HostEffectPredicate<'tcx>>,
+        tcx: TyCtxt<'tcx>,
+    ) -> Self {
+        from.map_bound(ty::ClauseKind::HostEffect).upcast(tcx)
+    }
+}
+
+impl<'tcx> UpcastFrom<TyCtxt<'tcx>, ty::Binder<'tcx, ty::HostEffectPredicate<'tcx>>>
+    for Clause<'tcx>
+{
+    fn upcast_from(
+        from: ty::Binder<'tcx, ty::HostEffectPredicate<'tcx>>,
+        tcx: TyCtxt<'tcx>,
+    ) -> Self {
+        from.map_bound(ty::ClauseKind::HostEffect).upcast(tcx)
+    }
+}
+
 impl<'tcx> UpcastFrom<TyCtxt<'tcx>, NormalizesTo<'tcx>> for Predicate<'tcx> {
     fn upcast_from(from: NormalizesTo<'tcx>, tcx: TyCtxt<'tcx>) -> Self {
         PredicateKind::NormalizesTo(from).upcast(tcx)
@@ -645,20 +638,7 @@ impl<'tcx> Predicate<'tcx> {
         let predicate = self.kind();
         match predicate.skip_binder() {
             PredicateKind::Clause(ClauseKind::Trait(t)) => Some(predicate.rebind(t)),
-            PredicateKind::Clause(ClauseKind::Projection(..))
-            | PredicateKind::Clause(ClauseKind::HostEffect(..))
-            | PredicateKind::Clause(ClauseKind::ConstArgHasType(..))
-            | PredicateKind::NormalizesTo(..)
-            | PredicateKind::AliasRelate(..)
-            | PredicateKind::Subtype(..)
-            | PredicateKind::Coerce(..)
-            | PredicateKind::Clause(ClauseKind::RegionOutlives(..))
-            | PredicateKind::Clause(ClauseKind::WellFormed(..))
-            | PredicateKind::DynCompatible(..)
-            | PredicateKind::Clause(ClauseKind::TypeOutlives(..))
-            | PredicateKind::Clause(ClauseKind::ConstEvaluatable(..))
-            | PredicateKind::ConstEquate(..)
-            | PredicateKind::Ambiguous => None,
+            _ => None,
         }
     }
 
@@ -666,20 +646,7 @@ impl<'tcx> Predicate<'tcx> {
         let predicate = self.kind();
         match predicate.skip_binder() {
             PredicateKind::Clause(ClauseKind::Projection(t)) => Some(predicate.rebind(t)),
-            PredicateKind::Clause(ClauseKind::Trait(..))
-            | PredicateKind::Clause(ClauseKind::HostEffect(..))
-            | PredicateKind::Clause(ClauseKind::ConstArgHasType(..))
-            | PredicateKind::NormalizesTo(..)
-            | PredicateKind::AliasRelate(..)
-            | PredicateKind::Subtype(..)
-            | PredicateKind::Coerce(..)
-            | PredicateKind::Clause(ClauseKind::RegionOutlives(..))
-            | PredicateKind::Clause(ClauseKind::WellFormed(..))
-            | PredicateKind::DynCompatible(..)
-            | PredicateKind::Clause(ClauseKind::TypeOutlives(..))
-            | PredicateKind::Clause(ClauseKind::ConstEvaluatable(..))
-            | PredicateKind::ConstEquate(..)
-            | PredicateKind::Ambiguous => None,
+            _ => None,
         }
     }
 
@@ -698,4 +665,16 @@ impl<'tcx> Predicate<'tcx> {
             _ => bug!("{self} is not a clause"),
         }
     }
+}
+
+// Some types are used a lot. Make sure they don't unintentionally get bigger.
+#[cfg(target_pointer_width = "64")]
+mod size_asserts {
+    use rustc_data_structures::static_assert_size;
+
+    use super::*;
+    // tidy-alphabetical-start
+    static_assert_size!(PredicateKind<'_>, 32);
+    static_assert_size!(WithCachedTypeInfo<PredicateKind<'_>>, 56);
+    // tidy-alphabetical-end
 }

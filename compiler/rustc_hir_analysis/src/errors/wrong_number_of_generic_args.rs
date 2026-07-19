@@ -4,7 +4,7 @@ use GenericArgsInfo::*;
 use rustc_errors::codes::*;
 use rustc_errors::{Applicability, Diag, Diagnostic, EmissionGuarantee, MultiSpan, pluralize};
 use rustc_hir as hir;
-use rustc_middle::ty::{self as ty, AssocItems, AssocKind, TyCtxt};
+use rustc_middle::ty::{self as ty, AssocItems, TyCtxt};
 use rustc_span::def_id::DefId;
 use tracing::debug;
 
@@ -134,9 +134,9 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
             // is from the 'of_trait' field of the enclosing impl
 
             let parent = self.tcx.parent_hir_node(self.path_segment.hir_id);
-            let parent_item = self.tcx.hir_node_by_def_id(
-                self.tcx.hir().get_parent_item(self.path_segment.hir_id).def_id,
-            );
+            let parent_item = self
+                .tcx
+                .hir_node_by_def_id(self.tcx.hir_get_parent_item(self.path_segment.hir_id).def_id);
 
             // Get the HIR id of the trait ref
             let hir::Node::TraitRef(hir::TraitRef { hir_ref_id: trait_ref_id, .. }) = parent else {
@@ -147,7 +147,11 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
             let hir::Node::Item(hir::Item {
                 kind:
                     hir::ItemKind::Impl(hir::Impl {
-                        of_trait: Some(hir::TraitRef { hir_ref_id: id_in_of_trait, .. }),
+                        of_trait:
+                            Some(hir::TraitImplHeader {
+                                trait_ref: hir::TraitRef { hir_ref_id: id_in_of_trait, .. },
+                                ..
+                            }),
                         ..
                     }),
                 ..
@@ -335,15 +339,14 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
             hir::GenericArg::Lifetime(lt) => Some(lt),
             _ => None,
         }) {
-            return std::iter::repeat(lt.to_string())
-                .take(num_params_to_take)
+            return std::iter::repeat_n(lt.to_string(), num_params_to_take)
                 .collect::<Vec<_>>()
                 .join(", ");
         }
 
         let mut ret = Vec::new();
         let mut ty_id = None;
-        for (id, node) in self.tcx.hir().parent_iter(path_hir_id) {
+        for (id, node) in self.tcx.hir_parent_iter(path_hir_id) {
             debug!(?id);
             if let hir::Node::Ty(_) = node {
                 ty_id = Some(id);
@@ -358,8 +361,7 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
                     matches!(fn_decl.output, hir::FnRetTy::Return(ty) if ty.hir_id == ty_id);
 
                 if in_arg || (in_ret && fn_decl.lifetime_elision_allowed) {
-                    return std::iter::repeat("'_".to_owned())
-                        .take(num_params_to_take)
+                    return std::iter::repeat_n("'_".to_owned(), num_params_to_take)
                         .collect::<Vec<_>>()
                         .join(", ");
                 }
@@ -384,18 +386,20 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
             })
             | hir::Node::AnonConst(..) = node
             {
-                return std::iter::repeat("'static".to_owned())
-                    .take(num_params_to_take.saturating_sub(ret.len()))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                return std::iter::repeat_n(
+                    "'static".to_owned(),
+                    num_params_to_take.saturating_sub(ret.len()),
+                )
+                .collect::<Vec<_>>()
+                .join(", ");
             }
 
             let params = if let Some(generics) = node.generics() {
                 generics.params
             } else if let hir::Node::Ty(ty) = node
-                && let hir::TyKind::BareFn(bare_fn) = ty.kind
+                && let hir::TyKind::FnPtr(fn_ptr) = ty.kind
             {
-                bare_fn.generic_params
+                fn_ptr.generic_params
             } else {
                 &[]
             };
@@ -437,8 +441,7 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
     ) -> String {
         let is_in_a_method_call = self
             .tcx
-            .hir()
-            .parent_iter(self.path_segment.hir_id)
+            .hir_parent_iter(self.path_segment.hir_id)
             .skip(1)
             .find_map(|(_, node)| match node {
                 hir::Node::Expr(expr) => Some(expr),
@@ -451,7 +454,7 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
                 )
             });
 
-        let fn_sig = self.tcx.hir().get_if_local(self.def_id).and_then(hir::Node::fn_sig);
+        let fn_sig = self.tcx.hir_get_if_local(self.def_id).and_then(hir::Node::fn_sig);
         let is_used_in_input = |def_id| {
             fn_sig.is_some_and(|fn_sig| {
                 fn_sig.decl.inputs.iter().any(|ty| match ty.kind {
@@ -487,15 +490,16 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
             let items: &AssocItems = self.tcx.associated_items(self.def_id);
             items
                 .in_definition_order()
-                .filter(|item| item.kind == AssocKind::Type)
                 .filter(|item| {
-                    !self
-                        .gen_args
-                        .constraints
-                        .iter()
-                        .any(|constraint| constraint.ident.name == item.name)
+                    item.is_type()
+                        && !item.is_impl_trait_in_trait()
+                        && !self
+                            .gen_args
+                            .constraints
+                            .iter()
+                            .any(|constraint| constraint.ident.name == item.name())
                 })
-                .map(|item| item.name.to_ident_string())
+                .map(|item| self.tcx.item_ident(item.def_id).to_string())
                 .collect()
         } else {
             Vec::default()
@@ -635,7 +639,7 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
                 self.suggest_adding_type_and_const_args(err);
             }
             ExcessTypesOrConsts { .. } => {
-                // this can happen with `~const T` where T isn't a const_trait.
+                // this can happen with `[const] T` where T isn't a `const trait`.
             }
             _ => unreachable!(),
         }
@@ -759,7 +763,7 @@ impl<'a, 'tcx> WrongNumberOfGenericArgs<'a, 'tcx> {
         &self,
         err: &mut Diag<'_, impl EmissionGuarantee>,
     ) {
-        let trait_ = match self.tcx.trait_of_item(self.def_id) {
+        let trait_ = match self.tcx.trait_of_assoc(self.def_id) {
             Some(def_id) => def_id,
             None => return,
         };

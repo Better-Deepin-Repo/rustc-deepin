@@ -105,6 +105,8 @@ one detailed below.
   to re-run the script.
 * [`cargo::rustc-link-arg=FLAG`](#rustc-link-arg) --- Passes custom flags to a
   linker for benchmarks, binaries, `cdylib` crates, examples, and tests.
+* [`cargo::rustc-link-arg-cdylib=FLAG`](#rustc-cdylib-link-arg) --- Passes custom
+  flags to a linker for cdylib crates.
 * [`cargo::rustc-link-arg-bin=BIN=FLAG`](#rustc-link-arg-bin) --- Passes custom
   flags to a linker for the binary `BIN`.
 * [`cargo::rustc-link-arg-bins=FLAG`](#rustc-link-arg-bins) --- Passes custom
@@ -126,8 +128,6 @@ one detailed below.
 * [`cargo::rustc-check-cfg=CHECK_CFG`](#rustc-check-cfg) -- Register custom `cfg`s as
   expected for compile-time checking of configs. 
 * [`cargo::rustc-env=VAR=VALUE`](#rustc-env) --- Sets an environment variable.
-* [`cargo::rustc-cdylib-link-arg=FLAG`](#rustc-cdylib-link-arg) --- Passes custom
-  flags to a linker for cdylib crates.
 - [`cargo::error=MESSAGE`](#cargo-error) --- Displays an error on the terminal.
 * [`cargo::warning=MESSAGE`](#cargo-warning) --- Displays a warning on the
   terminal.
@@ -147,6 +147,16 @@ linker script.
 
 [link-arg]: ../../rustc/codegen-options/index.md#link-arg
 
+### `cargo::rustc-link-arg-cdylib=FLAG` {#rustc-cdylib-link-arg}
+
+The `rustc-link-arg-cdylib` instruction tells Cargo to pass the [`-C
+link-arg=FLAG` option][link-arg] to the compiler, but only when building a
+`cdylib` library target. Its usage is highly platform specific. It is useful
+to set the shared library version or the runtime-path.
+
+For historical reasons, the `cargo::rustc-cdylib-link-arg` form is an alias
+for `cargo::rustc-link-arg-cdylib`, and has the same meaning.
+
 ### `cargo::rustc-link-arg-bin=BIN=FLAG` {#rustc-link-arg-bin}
 
 The `rustc-link-arg-bin` instruction tells Cargo to pass the [`-C
@@ -160,6 +170,24 @@ The `rustc-link-arg-bins` instruction tells Cargo to pass the [`-C
 link-arg=FLAG` option][link-arg] to the compiler, but only when building a
 binary target. Its usage is highly platform specific. It is useful
 to set a linker script or other linker options.
+
+### `cargo::rustc-link-arg-tests=FLAG` {#rustc-link-arg-tests}
+
+The `rustc-link-arg-tests` instruction tells Cargo to pass the [`-C
+link-arg=FLAG` option][link-arg] to the compiler, but only when building a
+tests target.
+
+### `cargo::rustc-link-arg-examples=FLAG` {#rustc-link-arg-examples}
+
+The `rustc-link-arg-examples` instruction tells Cargo to pass the [`-C
+link-arg=FLAG` option][link-arg] to the compiler, but only when building an examples
+target.
+
+### `cargo::rustc-link-arg-benches=FLAG` {#rustc-link-arg-benches}
+
+The `rustc-link-arg-benches` instruction tells Cargo to pass the [`-C
+link-arg=FLAG` option][link-arg] to the compiler, but only when building a benchmark
+target.
 
 ### `cargo::rustc-link-lib=LIB` {#rustc-link-lib}
 
@@ -184,24 +212,6 @@ The optional `KIND` may be one of `dylib`, `static`, or `framework`. See the
 
 [option-link]: ../../rustc/command-line-arguments.md#option-l-link-lib
 [FFI]: ../../nomicon/ffi.md
-
-### `cargo::rustc-link-arg-tests=FLAG` {#rustc-link-arg-tests}
-
-The `rustc-link-arg-tests` instruction tells Cargo to pass the [`-C
-link-arg=FLAG` option][link-arg] to the compiler, but only when building a
-tests target.
-
-### `cargo::rustc-link-arg-examples=FLAG` {#rustc-link-arg-examples}
-
-The `rustc-link-arg-examples` instruction tells Cargo to pass the [`-C
-link-arg=FLAG` option][link-arg] to the compiler, but only when building an examples
-target.
-
-### `cargo::rustc-link-arg-benches=FLAG` {#rustc-link-arg-benches}
-
-The `rustc-link-arg-benches` instruction tells Cargo to pass the [`-C
-link-arg=FLAG` option][link-arg] to the compiler, but only when building a benchmark
-target.
 
 ### `cargo::rustc-link-search=[KIND=]PATH` {#rustc-link-search}
 
@@ -307,13 +317,6 @@ Cargo][env-cargo].
 [env-macro]: ../../std/macro.env.html
 [env-cargo]: environment-variables.md#environment-variables-cargo-sets-for-crates
 
-### `cargo::rustc-cdylib-link-arg=FLAG` {#rustc-cdylib-link-arg}
-
-The `rustc-cdylib-link-arg` instruction tells Cargo to pass the [`-C
-link-arg=FLAG` option][link-arg] to the compiler, but only when building a
-`cdylib` library target. Its usage is highly platform specific. It is useful
-to set the shared library version or the runtime-path.
-
 ### `cargo::error=MESSAGE` {#cargo-error}
 
 The `error` instruction tells Cargo to display an error after the build script
@@ -403,6 +406,13 @@ variables like `TARGET` that [Cargo sets for build scripts][build-env]. The
 environment variables in use are those received by `cargo` invocations, not
 those received by the executable of the build script.
 
+As of 1.46, using [`env!`][env-macro] and [`option_env!`][option-env-macro] in
+source code will automatically detect changes and trigger rebuilds.
+`rerun-if-env-changed` is no longer needed for variables already referenced by
+these macros.
+
+[option-env-macro]: ../../std/macro.option_env.html
+
 ## The `links` Manifest Key
 
 The `package.links` key may be set in the `Cargo.toml` manifest to declare
@@ -435,7 +445,7 @@ The metadata is passed to the build scripts of **dependent** packages. For
 example, if the package `foo` depends on `bar`, which links `baz`, then if 
 `bar` generates `key=value` as part of its build script metadata, then the
 build script of `foo` will have the environment variables `DEP_BAZ_KEY=value`
-(note that the value of the `links` key is used).
+(note that the value of the `links` key is used and the case change for `key`).
 See the ["Using another `sys` crate"][using-another-sys] for an example of 
 how this can be used.
 
@@ -443,7 +453,7 @@ Note that metadata is only passed to immediate dependents, not transitive
 dependents.
 
 > **MSRV:** 1.77 is required for `cargo::metadata=KEY=VALUE`.
-> To support older versions, use `cargo:KEY=VAUE` (unsupported directives are assumed to be metadata keys).
+> To support older versions, use `cargo:KEY=VALUE` (unsupported directives are assumed to be metadata keys).
 
 [using-another-sys]: build-script-examples.md#using-another-sys-crate
 
@@ -465,7 +475,7 @@ convention of native-library-related packages:
 
 * Common dependencies on `foo-sys` alleviates the rule about one package per
   value of `links`.
-* Other `-sys` packages can take advantage of the `DEP_NAME_KEY=value`
+* Other `-sys` packages can take advantage of the `DEP_LINKS_KEY=value`
   environment variables to better integrate with other packages. See the
   ["Using another `sys` crate"][using-another-sys] example.
 * A common dependency allows centralizing logic on discovering `libfoo` itself

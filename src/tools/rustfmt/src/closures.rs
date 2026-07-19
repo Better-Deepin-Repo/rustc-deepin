@@ -1,4 +1,4 @@
-use rustc_ast::{ast, ptr};
+use rustc_ast::ast;
 use rustc_span::Span;
 use thin_vec::thin_vec;
 use tracing::debug;
@@ -165,7 +165,7 @@ fn rewrite_closure_with_block(
     let block = ast::Block {
         stmts: thin_vec![ast::Stmt {
             id: ast::NodeId::root(),
-            kind: ast::StmtKind::Expr(ptr::P(body.clone())),
+            kind: ast::StmtKind::Expr(Box::new(body.clone())),
             span: body.span,
         }],
         id: ast::NodeId::root(),
@@ -176,7 +176,6 @@ fn rewrite_closure_with_block(
             .first()
             .map(|attr| attr.span.to(body.span))
             .unwrap_or(body.span),
-        could_be_bare_literal: false,
     };
     let block = crate::expr::rewrite_block_with_visitor(
         context,
@@ -481,7 +480,7 @@ fn is_block_closure_forced_inner(expr: &ast::Expr, style_edition: StyleEdition) 
 ///     if true {...} else {...}
 ///      |x| 5
 /// isn't parsed as (if true {...} else {...} | x) | 5
-// From https://github.com/rust-lang/rust/blob/master/src/libsyntax/parse/classify.rs.
+// From https://github.com/rust-lang/rust/blob/HEAD/src/libsyntax/parse/classify.rs.
 fn expr_requires_semi_to_be_stmt(e: &ast::Expr) -> bool {
     match e.kind {
         ast::ExprKind::If(..)

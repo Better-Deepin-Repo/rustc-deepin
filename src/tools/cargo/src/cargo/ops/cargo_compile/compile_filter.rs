@@ -1,7 +1,6 @@
 //! Filters and their rules to select which Cargo targets will be built.
 
-use crate::core::compiler::CompileMode;
-
+use crate::core::compiler::UserIntent;
 use crate::core::{Target, TargetKind};
 use crate::util::restricted_names::is_glob_pattern;
 
@@ -103,12 +102,12 @@ impl CompileFilter {
         lib_only: bool,
         bins: Vec<String>,
         all_bins: bool,
-        tsts: Vec<String>,
-        all_tsts: bool,
-        exms: Vec<String>,
-        all_exms: bool,
-        bens: Vec<String>,
-        all_bens: bool,
+        tests: Vec<String>,
+        all_tests: bool,
+        examples: Vec<String>,
+        all_examples: bool,
+        benches: Vec<String>,
+        all_benches: bool,
         all_targets: bool,
     ) -> CompileFilter {
         if all_targets {
@@ -120,34 +119,34 @@ impl CompileFilter {
             LibRule::False
         };
         let rule_bins = FilterRule::new(bins, all_bins);
-        let rule_tsts = FilterRule::new(tsts, all_tsts);
-        let rule_exms = FilterRule::new(exms, all_exms);
-        let rule_bens = FilterRule::new(bens, all_bens);
+        let rule_tests = FilterRule::new(tests, all_tests);
+        let rule_examples = FilterRule::new(examples, all_examples);
+        let rule_benches = FilterRule::new(benches, all_benches);
 
-        CompileFilter::new(rule_lib, rule_bins, rule_tsts, rule_exms, rule_bens)
+        CompileFilter::new(rule_lib, rule_bins, rule_tests, rule_examples, rule_benches)
     }
 
     /// Constructs a filter from underlying primitives.
     pub fn new(
         rule_lib: LibRule,
         rule_bins: FilterRule,
-        rule_tsts: FilterRule,
-        rule_exms: FilterRule,
-        rule_bens: FilterRule,
+        rule_tests: FilterRule,
+        rule_examples: FilterRule,
+        rule_benches: FilterRule,
     ) -> CompileFilter {
         if rule_lib == LibRule::True
             || rule_bins.is_specific()
-            || rule_tsts.is_specific()
-            || rule_exms.is_specific()
-            || rule_bens.is_specific()
+            || rule_tests.is_specific()
+            || rule_examples.is_specific()
+            || rule_benches.is_specific()
         {
             CompileFilter::Only {
                 all_targets: false,
                 lib: rule_lib,
                 bins: rule_bins,
-                examples: rule_exms,
-                benches: rule_bens,
-                tests: rule_tsts,
+                examples: rule_examples,
+                benches: rule_benches,
+                tests: rule_tests,
             }
         } else {
             CompileFilter::Default {
@@ -216,23 +215,21 @@ impl CompileFilter {
     }
 
     /// Indicates if Cargo needs to build any dev dependency.
-    pub fn need_dev_deps(&self, mode: CompileMode) -> bool {
-        match mode {
-            CompileMode::Test | CompileMode::Doctest | CompileMode::Bench => true,
-            CompileMode::Check { test: true } => true,
-            CompileMode::Build
-            | CompileMode::Doc { .. }
-            | CompileMode::Docscrape
-            | CompileMode::Check { test: false } => match *self {
-                CompileFilter::Default { .. } => false,
-                CompileFilter::Only {
-                    ref examples,
-                    ref tests,
-                    ref benches,
-                    ..
-                } => examples.is_specific() || tests.is_specific() || benches.is_specific(),
-            },
-            CompileMode::RunCustomBuild => panic!("Invalid mode"),
+    pub fn need_dev_deps(&self, intent: UserIntent) -> bool {
+        match intent {
+            UserIntent::Test | UserIntent::Doctest | UserIntent::Bench => true,
+            UserIntent::Check { test: true } => true,
+            UserIntent::Build | UserIntent::Doc { .. } | UserIntent::Check { test: false } => {
+                match *self {
+                    CompileFilter::Default { .. } => false,
+                    CompileFilter::Only {
+                        ref examples,
+                        ref tests,
+                        ref benches,
+                        ..
+                    } => examples.is_specific() || tests.is_specific() || benches.is_specific(),
+                }
+            }
         }
     }
 

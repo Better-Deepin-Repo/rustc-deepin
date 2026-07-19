@@ -2,8 +2,8 @@
 
 use std::fs;
 
+use crate::prelude::*;
 use cargo_test_support::paths;
-use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
 use cargo_test_support::{basic_lib_manifest, basic_manifest, main_file, project};
@@ -1097,13 +1097,12 @@ fn invalid_base() {
         .with_stderr_data(
             "\
 [ERROR] invalid character `^` in path base name: `^^not-valid^^`, the first character must be a Unicode XID start character (most letters or `_`)
-
-
+       
+       
   --> Cargo.toml:10:23
    |
 10 |                 bar = { base = '^^not-valid^^', path = 'bar' }
    |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-   |
 ",
         )
         .run();

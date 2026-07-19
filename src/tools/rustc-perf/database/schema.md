@@ -35,6 +35,7 @@ Here is the diagram for compile-time benchmarks:
   │ scenario      │  │ cid      │   │
   │ backend       │  │ value    ├───┘
   │ metric        │  └──────────┘
+  │ target        │
   └───────────────┘
 ```
 
@@ -151,9 +152,9 @@ many times in the `pstat` table.
 
 ```
 sqlite> select * from pstat_series limit 1;
-id          crate       profile     scenario    backend  metric
-----------  ----------  ----------  ----------  -------  ------------
-1           helloworld  check       full        llvm     task-clock:u
+id          crate       profile     scenario    backend  target                    metric      
+----------  ----------  ----------  ----------  -------  ------------              ------------
+1           helloworld  check       full        llvm     x86_64-linux-unknown-gnu  task-clock:u
 ```
 
 ### pstat
@@ -238,21 +239,117 @@ is attached to the entry in this table, it can be benchmarked.
 * exclude: which benchmarks should be excluded (corresponds to the `--exclude` benchmark parameter)
 * runs: how many iterations should be used by default for the benchmark run
 * commit_date: when was the commit created
+* backends: the codegen backends to use for the benchmarks (corresponds to the `--backends` benchmark parameter)
 
 ```
 sqlite> select * from pull_request_build limit 1;
-bors_sha    pr  parent_sha  complete  requested    include  exclude  runs  commit_date
-----------  --  ----------  --------  ---------    -------  -------  ----  -----------
+bors_sha    pr  parent_sha  complete  requested    include  exclude  runs  commit_date  backends
+----------  --  ----------  --------  ---------    -------  -------  ----  -----------  --------
 1w0p83...   42  fq24xq...   true      <timestamp>                    3     <timestamp>
 ```
 
 ### error
 
-Records a compilation or runtime error for an artifact and a benchmark.
+Records an error within the application namely a;
+- compilation
+- runtime
+- error contextual to a benchmark job
 
-```
-sqlite> select * from error limit 1;
-aid         benchmark   error
-----------  ---         -----
-1           syn-1.0.89  Failed to compile...
-```
+Columns:
+
+* **id** (`BIGINT` / `SERIAL`): Primary key identifier for the error row;
+  auto increments with each new error.
+* **aid** (`INTERGER`): References the artifact id column.
+* **context** (`TEXT NOT NULL`): A little message to be able to understand a 
+  bit more about why or where the error occured.
+* **message** (`TEXT NOT NULL`): The error message.
+* **job_id** (`INTEGER`): A nullable job_id which, if it exists it will inform
+  us as to which job this error is part of.
+
+## New benchmarking design
+We are currently implementing a new design for dispatching benchmarks to collector(s) and storing
+them in the database. It will support new use-cases, like backfilling of new benchmarks into a parent
+commit and primarily benchmarking with multiple collectors (and multiple hardware architectures) in
+parallel.
+
+The tables below are a part of the new scheme.
+
+### benchmark_request
+
+Represents a single request for performing a benchmark collection. Each request can be one of three types:
+
+* Master: benchmark a merged master commit
+* Release: benchmark a published stable or beta compiler toolchain
+* Try: benchmark a try build on a PR
+
+Columns:
+
+* **id** (`int`): Unique ID.
+* **tag** (`text`): Identifier of the compiler toolchain that should be benchmarked.
+  * Commit SHA for master/try requests or release name (e.g. `1.80.0`) for release requests.
+  * Can be `NULL` for try requests that were queued for a perf. run, but their compiler artifacts haven't been built yet.
+* **parent_sha** (`text`): Parent SHA of the benchmarked commit.
+  * Can be `NULL` for try requests without compiler artifacts.
+* **commit_type** (`text NOT NULL`): One of `master`, `try` or `release`.
+* **commit_date** (`timestamptz`): Datetime when the compiler artifact commit (not the request) was created.
+  * Can be `NULL` for try requests without compiler artifacts.
+* **pr** (`int`): Pull request number associated with the master/try commit.
+  * `NULL` for release requests.
+* **created_at** (`timestamptz NOT NULL`): Datetime when the request was created.
+* **completed_at** (`timestamptz`): Datetime when the request was completed.
+* **status** (`text NOT NULL`): Current status of the benchmark request.
+  * `waiting-for-artifacts`: A try request waiting for compiler artifacts.
+  * `artifacts-ready`: Request that has compiler artifacts ready and can be benchmarked.
+  * `in-progress`: Request that is currently being benchmarked.
+  * `completed`: Completed request.
+* **backends** (`text NOT NULL`): Comma-separated list of codegen backends to benchmark. If empty, the default set of codegen backends will be benchmarked.
+* **profiles** (`text NOT NULL`): Comma-separated list of profiles to benchmark. If empty, the default set of profiles will be benchmarked.
+
+### collector_config
+
+Information about the collector; it's target architecture, when it was added,
+whether it is active and when it last had activity denoted by `last_heartbeat_at`.
+
+Columns:
+
+* **id** (`id`): A unique identifier for the collector.
+* **target** (`text NOT NULL`): The ISA of the collector for example; `aarch64-unknown-linux-gnu`.
+* **name** (`text NOT NULL`): Unique name for the collector.
+* **date_added** (`timestamptz NOT NULL`): When the collector was added
+* **last_heartbeat_at** (`timestamptz`): When the collector last updated this
+  column, a way to test if the collector is still alive.
+* **benchmark_set** (`int NOT NULL`): ID of the predefined benchmark suite to
+  execute.
+* **is_active** (`boolean NOT NULL`): For controlling whether the collector is
+  active for use. Useful for adding/removing collectors.
+
+### job_queue
+
+This table stores ephemeral benchmark jobs, which specifically tell the
+collector which benchmarks it should execute. The jobs will be kept in the
+table for ~30 days after being completed, so that we can quickly figure out
+what master parent jobs we need to backfill when handling try builds.
+
+Columns:
+
+* **id** (`bigint` / `serial`): Primary*key identifier for the job row;
+  auto*increments with each new job.
+* **request_tag** (`text`): References the parent benchmark request that
+  spawned this job.
+* **target** (`text NOT NULL`): Hardware/ISA the benchmarks must run on
+  (e.g. AArch64, x86_64).
+* **backend** (`text NOT NULL`): Code generation backend the collector should
+  test (e.g. llvm, cranelift).
+* **benchmark_set** (`int NOT NULL`): ID of the predefined benchmark suite to
+  execute.
+* **collector_name** (`text`): Name of the collector that claimed the job
+  (populated once the job is started).
+* **created_at** (`timestamptz NOT NULL`): Datetime when the job was queued.
+* **started_at** (`timestamptz`): Datetime when the collector actually began
+  running the benchmarks; NULL until the job is claimed.
+* **completed_at** (`timestampt`): Datetime when the collector finished
+  (successfully or otherwise); used to purge rows after ~30 days.
+* **status** (`text NOT NULL`): Current job state. `queued`, `in_progress`,
+  `success`, or `failure`.
+* **retry** (`int NOT NULL`): Number of times the job has been re*queued after
+  a failure; 0 on the first attempt.

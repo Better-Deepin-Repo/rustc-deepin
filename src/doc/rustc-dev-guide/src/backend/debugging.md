@@ -38,7 +38,7 @@ which means that LLVM assertion failures can show up as compiler crashes (not
 ICEs but "real" crashes) and other sorts of weird behavior. If you are
 encountering these, it is a good idea to try using a compiler with LLVM
 assertions enabled - either an "alt" nightly or a compiler you build yourself
-by setting `[llvm] assertions=true` in your config.toml - and see whether
+by setting `[llvm] assertions=true` in your bootstrap.toml - and see whether
 anything turns up.
 
 The rustc build process builds the LLVM tools into
@@ -56,7 +56,7 @@ These tools include:
 
 By default, the Rust build system does not check for changes to the LLVM source code or
 its build configuration settings. So, if you need to rebuild the LLVM that is linked
-into `rustc`, first delete the file `llvm-finished-building`, which should be located
+into `rustc`, first delete the file `.llvm-stamp`, which should be located
 in `build/<host-triple>/llvm/`.
 
 The default rustc compilation pipeline has multiple codegen units, which is
@@ -77,7 +77,7 @@ llvm-ir`). `--build-type=debug` emits code for debug builds. There are also
 other useful options. Also, debug info in LLVM IR can clutter the output a lot:
 `RUSTFLAGS="-C debuginfo=0"` is really useful.
 
-`RUSTFLAGS="-C save-temps"` outputs LLVM bitcode (not the same as IR) at
+`RUSTFLAGS="-C save-temps"` outputs LLVM bitcode at
 different stages during compilation, which is sometimes useful. The output LLVM
 bitcode will be in `.bc` files in the compiler's output directory, set via the
 `--out-dir DIR` argument to `rustc`.
@@ -160,7 +160,7 @@ from `./build/<host-triple>/llvm/bin/` with the LLVM IR emitted by rustc.
 When investigating the implementation of LLVM itself, you should be
 aware of its [internal debug infrastructure][llvm-debug].
 This is provided in LLVM Debug builds, which you enable for rustc
-LLVM builds by changing this setting in the config.toml:
+LLVM builds by changing this setting in the bootstrap.toml:
 ```
 [llvm]
 # Indicates whether the LLVM assertions are enabled or not
@@ -183,7 +183,7 @@ The quick summary is:
 ### Getting help and asking questions
 
 If you have some questions, head over to the [rust-lang Zulip] and
-specifically the `#t-compiler/wg-llvm` stream.
+specifically the `#t-compiler/wg-llvm` channel.
 
 [rust-lang Zulip]: https://rust-lang.zulipchat.com/
 

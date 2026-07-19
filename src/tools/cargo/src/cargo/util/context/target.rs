@@ -1,5 +1,5 @@
-use super::{ConfigKey, ConfigRelativePath, GlobalContext, OptValue, PathAndArgs, StringList, CV};
-use crate::core::compiler::{BuildOutput, LinkArgTarget};
+use super::{CV, ConfigKey, ConfigRelativePath, GlobalContext, OptValue, PathAndArgs, StringList};
+use crate::core::compiler::{BuildOutput, LibraryPath, LinkArgTarget};
 use crate::util::CargoResult;
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap};
@@ -167,20 +167,24 @@ fn parse_links_overrides(
                     let flags = value.string(key)?;
                     let whence = format!("target config `{}.{}` (in {})", target_key, key, flags.1);
                     let (paths, links) = BuildOutput::parse_rustc_flags(flags.0, &whence)?;
-                    output.library_paths.extend(paths);
+                    output
+                        .library_paths
+                        .extend(paths.into_iter().map(LibraryPath::External));
                     output.library_links.extend(links);
                 }
                 "rustc-link-lib" => {
-                    let list = value.list(key)?;
+                    let list = value.string_list(key)?;
                     output
                         .library_links
                         .extend(list.iter().map(|v| v.0.clone()));
                 }
                 "rustc-link-search" => {
-                    let list = value.list(key)?;
-                    output
-                        .library_paths
-                        .extend(list.iter().map(|v| PathBuf::from(&v.0)));
+                    let list = value.string_list(key)?;
+                    output.library_paths.extend(
+                        list.iter()
+                            .map(|v| PathBuf::from(&v.0))
+                            .map(LibraryPath::External),
+                    );
                 }
                 "rustc-link-arg-cdylib" | "rustc-cdylib-link-arg" => {
                     let args = extra_link_args(LinkArgTarget::Cdylib, key, value)?;
@@ -207,11 +211,11 @@ fn parse_links_overrides(
                     output.linker_args.extend(args);
                 }
                 "rustc-cfg" => {
-                    let list = value.list(key)?;
+                    let list = value.string_list(key)?;
                     output.cfgs.extend(list.iter().map(|v| v.0.clone()));
                 }
                 "rustc-check-cfg" => {
-                    let list = value.list(key)?;
+                    let list = value.string_list(key)?;
                     output.check_cfgs.extend(list.iter().map(|v| v.0.clone()));
                 }
                 "rustc-env" => {
@@ -234,11 +238,11 @@ fn parse_links_overrides(
     Ok(links_overrides)
 }
 
-fn extra_link_args<'a>(
+fn extra_link_args(
     link_type: LinkArgTarget,
     key: &str,
-    value: &'a CV,
-) -> CargoResult<impl Iterator<Item = (LinkArgTarget, String)> + 'a> {
-    let args = value.list(key)?;
-    Ok(args.iter().map(move |v| (link_type.clone(), v.0.clone())))
+    value: &CV,
+) -> CargoResult<Vec<(LinkArgTarget, String)>> {
+    let args = value.string_list(key)?;
+    Ok(args.into_iter().map(|v| (link_type.clone(), v.0)).collect())
 }

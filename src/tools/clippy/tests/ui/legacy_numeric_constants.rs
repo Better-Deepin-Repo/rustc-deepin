@@ -1,4 +1,5 @@
 //@aux-build:proc_macros.rs
+//@require-annotations-for-level: WARN
 #![allow(clippy::no_effect, deprecated, unused)]
 #![allow(clippy::legacy_numeric_constants)] // For imports.
 
@@ -78,8 +79,30 @@ fn main() {
     f64::consts::E;
     b!();
 
+    <std::primitive::i32>::max_value();
+    //~^ ERROR: usage of a legacy numeric method
+    //~| HELP: use the associated constant instead
     [(0, "", std::i128::MAX)];
     //~^ ERROR: usage of a legacy numeric constant
+    //~| HELP: use the associated constant instead
+    (i32::max_value());
+    //~^ ERROR: usage of a legacy numeric method
+    //~| HELP: use the associated constant instead
+    assert_eq!(0, -(i32::max_value()));
+    //~^ ERROR: usage of a legacy numeric method
+    //~| HELP: use the associated constant instead
+    (std::i128::MAX);
+    //~^ ERROR: usage of a legacy numeric constant
+    //~| HELP: use the associated constant instead
+    (<u32>::max_value());
+    //~^ ERROR: usage of a legacy numeric method
+    //~| HELP: use the associated constant instead
+    ((i32::max_value)());
+    //~^ ERROR: usage of a legacy numeric method
+    //~| HELP: use the associated constant instead
+    type Ω = i32;
+    Ω::max_value();
+    //~^ ERROR: usage of a legacy numeric method
     //~| HELP: use the associated constant instead
 }
 

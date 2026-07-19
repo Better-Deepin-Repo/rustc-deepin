@@ -3,10 +3,12 @@
 use self::format::Pattern;
 use crate::core::compiler::{CompileKind, RustcTargetData};
 use crate::core::dependency::DepKind;
-use crate::core::resolver::{features::CliFeatures, ForceAllTargets, HasDevUnits};
+use crate::core::resolver::{ForceAllTargets, HasDevUnits, features::CliFeatures};
 use crate::core::{Package, PackageId, PackageIdSpec, PackageIdSpecQuery, Workspace};
+use crate::ops::resolve::SpecsAndResolvedFeatures;
 use crate::ops::{self, Packages};
 use crate::util::CargoResult;
+use crate::util::style;
 use crate::{drop_print, drop_println};
 use anyhow::Context as _;
 use graph::Graph;
@@ -16,7 +18,7 @@ use std::str::FromStr;
 mod format;
 mod graph;
 
-pub use {graph::EdgeKind, graph::Node};
+pub use {graph::EdgeKind, graph::Node, graph::NodeId};
 
 pub struct TreeOptions {
     pub cli_features: CliFeatures,
@@ -49,6 +51,8 @@ pub struct TreeOptions {
     pub display_depth: DisplayDepth,
     /// Excludes proc-macro dependencies.
     pub no_proc_macro: bool,
+    /// Include only public dependencies.
+    pub public: bool,
 }
 
 #[derive(PartialEq)]
@@ -177,61 +181,67 @@ pub fn build_and_print(ws: &Workspace<'_>, opts: &TreeOptions) -> CargoResult<()
         .map(|pkg| (pkg.package_id(), pkg))
         .collect();
 
-    let mut graph = graph::build(
-        ws,
-        &ws_resolve.targeted_resolve,
-        &ws_resolve.resolved_features,
-        &specs,
-        &opts.cli_features,
-        &target_data,
-        &requested_kinds,
-        package_map,
-        opts,
-    )?;
-
-    let root_specs = if opts.invert.is_empty() {
-        specs
-    } else {
-        opts.invert
-            .iter()
-            .map(|p| PackageIdSpec::parse(p))
-            .collect::<Result<Vec<PackageIdSpec>, _>>()?
-    };
-    let root_ids = ws_resolve.targeted_resolve.specs_to_ids(&root_specs)?;
-    let root_indexes = graph.indexes_from_ids(&root_ids);
-
-    let root_indexes = if opts.duplicates {
-        // `-d -p foo` will only show duplicates within foo's subtree
-        graph = graph.from_reachable(root_indexes.as_slice());
-        graph.find_duplicates()
-    } else {
-        root_indexes
-    };
-
-    if !opts.invert.is_empty() || opts.duplicates {
-        graph.invert();
-    }
-
-    // Packages to prune.
-    let pkgs_to_prune = opts
-        .pkgs_to_prune
-        .iter()
-        .map(|p| PackageIdSpec::parse(p).map_err(Into::into))
-        .map(|r| {
-            // Provide an error message if pkgid is not within the resolved
-            // dependencies graph.
-            r.and_then(|spec| spec.query(ws_resolve.targeted_resolve.iter()).and(Ok(spec)))
-        })
-        .collect::<CargoResult<Vec<PackageIdSpec>>>()?;
-
-    if root_indexes.len() == 0 {
-        ws.gctx().shell().warn(
-            "nothing to print.\n\n\
-        To find dependencies that require specific target platforms, \
-        try to use option `--target all` first, and then narrow your search scope accordingly.",
+    for SpecsAndResolvedFeatures {
+        specs,
+        resolved_features,
+    } in ws_resolve.specs_and_features
+    {
+        let mut graph = graph::build(
+            ws,
+            &ws_resolve.targeted_resolve,
+            &resolved_features,
+            &specs,
+            &opts.cli_features,
+            &target_data,
+            &requested_kinds,
+            package_map.clone(),
+            opts,
         )?;
-    } else {
-        print(ws, opts, root_indexes, &pkgs_to_prune, &graph)?;
+
+        let root_specs = if opts.invert.is_empty() {
+            specs
+        } else {
+            opts.invert
+                .iter()
+                .map(|p| PackageIdSpec::parse(p))
+                .collect::<Result<Vec<PackageIdSpec>, _>>()?
+        };
+        let root_ids = ws_resolve.targeted_resolve.specs_to_ids(&root_specs)?;
+        let root_indexes = graph.indexes_from_ids(&root_ids);
+
+        let root_indexes = if opts.duplicates {
+            // `-d -p foo` will only show duplicates within foo's subtree
+            graph = graph.from_reachable(root_indexes.as_slice());
+            graph.find_duplicates()
+        } else {
+            root_indexes
+        };
+
+        if !opts.invert.is_empty() || opts.duplicates {
+            graph.invert();
+        }
+
+        // Packages to prune.
+        let pkgs_to_prune = opts
+            .pkgs_to_prune
+            .iter()
+            .map(|p| PackageIdSpec::parse(p).map_err(Into::into))
+            .map(|r| {
+                // Provide an error message if pkgid is not within the resolved
+                // dependencies graph.
+                r.and_then(|spec| spec.query(ws_resolve.targeted_resolve.iter()).and(Ok(spec)))
+            })
+            .collect::<CargoResult<Vec<PackageIdSpec>>>()?;
+
+        if root_indexes.len() == 0 {
+            ws.gctx().shell().warn(
+                "nothing to print.\n\n\
+            To find dependencies that require specific target platforms, \
+            try to use option `--target all` first, and then narrow your search scope accordingly.",
+            )?;
+        } else {
+            print(ws, opts, root_indexes, &pkgs_to_prune, &graph)?;
+        }
     }
     Ok(())
 }
@@ -240,7 +250,7 @@ pub fn build_and_print(ws: &Workspace<'_>, opts: &TreeOptions) -> CargoResult<()
 fn print(
     ws: &Workspace<'_>,
     opts: &TreeOptions,
-    roots: Vec<usize>,
+    roots: Vec<NodeId>,
     pkgs_to_prune: &[PackageIdSpec],
     graph: &Graph<'_>,
 ) -> CargoResult<()> {
@@ -282,7 +292,7 @@ fn print(
             &mut visited_deps,
             &mut levels_continue,
             &mut print_stack,
-        );
+        )?;
     }
 
     Ok(())
@@ -292,26 +302,26 @@ fn print(
 fn print_node<'a>(
     ws: &Workspace<'_>,
     graph: &'a Graph<'_>,
-    node_index: usize,
+    node_index: NodeId,
     format: &Pattern,
     symbols: &Symbols,
     pkgs_to_prune: &[PackageIdSpec],
     prefix: Prefix,
     no_dedupe: bool,
     display_depth: DisplayDepth,
-    visited_deps: &mut HashSet<usize>,
-    levels_continue: &mut Vec<bool>,
-    print_stack: &mut Vec<usize>,
-) {
+    visited_deps: &mut HashSet<NodeId>,
+    levels_continue: &mut Vec<(anstyle::Style, bool)>,
+    print_stack: &mut Vec<NodeId>,
+) -> CargoResult<()> {
     let new = no_dedupe || visited_deps.insert(node_index);
 
     match prefix {
         Prefix::Depth => drop_print!(ws.gctx(), "{}", levels_continue.len()),
         Prefix::Indent => {
-            if let Some((last_continues, rest)) = levels_continue.split_last() {
-                for continues in rest {
+            if let Some(((last_style, last_continues), rest)) = levels_continue.split_last() {
+                for (style, continues) in rest {
                     let c = if *continues { symbols.down } else { " " };
-                    drop_print!(ws.gctx(), "{}   ", c);
+                    drop_print!(ws.gctx(), "{style}{c}{style:#}   ");
                 }
 
                 let c = if *last_continues {
@@ -319,7 +329,12 @@ fn print_node<'a>(
                 } else {
                     symbols.ell
                 };
-                drop_print!(ws.gctx(), "{0}{1}{1} ", c, symbols.right);
+                drop_print!(
+                    ws.gctx(),
+                    "{last_style}{0}{1}{1}{last_style:#} ",
+                    c,
+                    symbols.right
+                );
             }
         }
         Prefix::None => {}
@@ -333,12 +348,12 @@ fn print_node<'a>(
     let star = if (new && !in_cycle) || !has_deps {
         ""
     } else {
-        " (*)"
+        color_print::cstr!(" <yellow,dim>(*)</>")
     };
     drop_println!(ws.gctx(), "{}{}", format.display(graph, node_index), star);
 
     if !new || in_cycle {
-        return;
+        return Ok(());
     }
     print_stack.push(node_index);
 
@@ -362,47 +377,53 @@ fn print_node<'a>(
             levels_continue,
             print_stack,
             kind,
-        );
+        )?;
     }
     print_stack.pop();
+
+    Ok(())
 }
 
 /// Prints all the dependencies of a package for the given dependency kind.
 fn print_dependencies<'a>(
     ws: &Workspace<'_>,
     graph: &'a Graph<'_>,
-    node_index: usize,
+    node_index: NodeId,
     format: &Pattern,
     symbols: &Symbols,
     pkgs_to_prune: &[PackageIdSpec],
     prefix: Prefix,
     no_dedupe: bool,
     display_depth: DisplayDepth,
-    visited_deps: &mut HashSet<usize>,
-    levels_continue: &mut Vec<bool>,
-    print_stack: &mut Vec<usize>,
+    visited_deps: &mut HashSet<NodeId>,
+    levels_continue: &mut Vec<(anstyle::Style, bool)>,
+    print_stack: &mut Vec<NodeId>,
     kind: &EdgeKind,
-) {
-    let deps = graph.connected_nodes(node_index, kind);
+) -> CargoResult<()> {
+    let deps = graph.edges_of_kind(node_index, kind);
     if deps.is_empty() {
-        return;
+        return Ok(());
     }
 
     let name = match kind {
         EdgeKind::Dep(DepKind::Normal) => None,
-        EdgeKind::Dep(DepKind::Build) => Some("[build-dependencies]"),
-        EdgeKind::Dep(DepKind::Development) => Some("[dev-dependencies]"),
+        EdgeKind::Dep(DepKind::Build) => Some(color_print::cstr!(
+            "<bright-blue,bold>[build-dependencies]</>"
+        )),
+        EdgeKind::Dep(DepKind::Development) => Some(color_print::cstr!(
+            "<bright-cyan,bold>[dev-dependencies]</>"
+        )),
         EdgeKind::Feature => None,
     };
 
     if let Prefix::Indent = prefix {
         if let Some(name) = name {
-            for continues in &**levels_continue {
+            for (style, continues) in &**levels_continue {
                 let c = if *continues { symbols.down } else { " " };
-                drop_print!(ws.gctx(), "{}   ", c);
+                drop_print!(ws.gctx(), "{style}{c}{style:#}   ");
             }
 
-            drop_println!(ws.gctx(), "{}", name);
+            drop_println!(ws.gctx(), "{name}");
         }
     }
 
@@ -413,31 +434,32 @@ fn print_dependencies<'a>(
 
     // Current level exceeds maximum display depth. Skip.
     if levels_continue.len() + 1 > max_display_depth as usize {
-        return;
+        return Ok(());
     }
 
     let mut it = deps
         .iter()
         .filter(|dep| {
             // Filter out packages to prune.
-            match graph.node(**dep) {
+            match graph.node(dep.node()) {
                 Node::Package { package_id, .. } => {
                     if filter_non_workspace_member && !ws.is_member_id(*package_id) {
                         return false;
                     }
                     !pkgs_to_prune.iter().any(|spec| spec.matches(*package_id))
                 }
-                _ => true,
+                Node::Feature { .. } => true,
             }
         })
         .peekable();
 
     while let Some(dependency) = it.next() {
-        levels_continue.push(it.peek().is_some());
+        let style = edge_line_color(dependency.kind());
+        levels_continue.push((style, it.peek().is_some()));
         print_node(
             ws,
             graph,
-            *dependency,
+            dependency.node(),
             format,
             symbols,
             pkgs_to_prune,
@@ -447,7 +469,18 @@ fn print_dependencies<'a>(
             visited_deps,
             levels_continue,
             print_stack,
-        );
+        )?;
         levels_continue.pop();
+    }
+
+    Ok(())
+}
+
+fn edge_line_color(kind: EdgeKind) -> anstyle::Style {
+    match kind {
+        EdgeKind::Dep(DepKind::Normal) => style::DEP_NORMAL,
+        EdgeKind::Dep(DepKind::Build) => style::DEP_BUILD,
+        EdgeKind::Dep(DepKind::Development) => style::DEP_DEV,
+        EdgeKind::Feature => style::DEP_FEATURE,
     }
 }

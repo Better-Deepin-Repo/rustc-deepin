@@ -184,11 +184,13 @@ def main(*args):
 
     nodoc = "nodoc" in build_options or "nodoc" in build_profiles
     nocheck = "nocheck" in build_options or "nocheck" in build_profiles
+    terse = "terse" in build_options
 
     # note this is actually the "build target" type, see rustc's README.Debian
     # for full details of the messed-up terminology here
     host_rust_type = os.getenv("DEB_HOST_RUST_TYPE", "")
     host_gnu_type = os.getenv("DEB_HOST_GNU_TYPE", "")
+    build_gnu_type = os.getenv("DEB_BUILD_GNU_TYPE", "")
 
     log(f'options = {build_options}, profiles = {build_profiles}, parallel = {parallel}, lto = {lto}')
     log(f'rust_type = {host_rust_type}, gnu_type = {host_gnu_type}')
@@ -213,16 +215,22 @@ def main(*args):
     newargs = []
     subcmd = None
     for a in args:
-        if (subcmd is None) and (a in ("build", "rustc", "doc", "test", "bench", "install")):
+        if (subcmd is None) and (a in ("build", "rustc", "doc", "test", "bench", "install", "cinstall", "cbuild", "ctest")):
             subcmd = a
-            newargs.extend(["-Zavoid-dev-deps", a, "--verbose", "--verbose"] +
-                parallel + ["--target", host_rust_type])
+            newargs.extend(["-Zavoid-dev-deps", a])
+            if not terse:
+                newargs.extend(["--verbose", "--verbose"])
+            # old cargo-c mishandled explicit --target, so only add it for cross builds for now!
+            if (a not in ("cbuild", "cinstall", "ctest")) or (host_gnu_type != build_gnu_type):
+                newargs.extend(parallel + ["--target", host_rust_type])
             if lto:
                 newargs.append("--config")
                 newargs.append(f"profile.release.lto={lto}")
         elif (subcmd is None) and (a == "clean"):
             subcmd = a
-            newargs.extend([a, "--verbose", "--verbose"])
+            newargs.extend([a])
+            if not terse:
+                newargs.extend(["--verbose", "--verbose"])
         else:
             newargs.append(a)
 

@@ -1,7 +1,6 @@
 //! The compiler code necessary to implement the `#[derive]` extensions.
 
 use rustc_ast as ast;
-use rustc_ast::ptr::P;
 use rustc_ast::{GenericArg, MetaItem};
 use rustc_expand::base::{Annotatable, ExpandResult, ExtCtxt, MultiItemModifier};
 use rustc_span::{Span, Symbol, sym};
@@ -23,9 +22,8 @@ pub(crate) mod bounds;
 pub(crate) mod clone;
 pub(crate) mod coerce_pointee;
 pub(crate) mod debug;
-pub(crate) mod decodable;
 pub(crate) mod default;
-pub(crate) mod encodable;
+pub(crate) mod from;
 pub(crate) mod hash;
 
 #[path = "cmp/eq.rs"]
@@ -59,7 +57,7 @@ impl MultiItemModifier for BuiltinDerive {
         let mut items = Vec::new();
         match item {
             Annotatable::Stmt(stmt) => {
-                if let ast::StmtKind::Item(item) = stmt.into_inner().kind {
+                if let ast::StmtKind::Item(item) = stmt.kind {
                     (self.0)(
                         ecx,
                         span,
@@ -68,7 +66,7 @@ impl MultiItemModifier for BuiltinDerive {
                         &mut |a| {
                             // Cannot use 'ecx.stmt_item' here, because we need to pass 'ecx'
                             // to the function
-                            items.push(Annotatable::Stmt(P(ast::Stmt {
+                            items.push(Annotatable::Stmt(Box::new(ast::Stmt {
                                 id: ast::DUMMY_NODE_ID,
                                 kind: ast::StmtKind::Item(a.expect_item()),
                                 span,
@@ -93,33 +91,32 @@ fn call_intrinsic(
     cx: &ExtCtxt<'_>,
     span: Span,
     intrinsic: Symbol,
-    args: ThinVec<P<ast::Expr>>,
-) -> P<ast::Expr> {
+    args: ThinVec<Box<ast::Expr>>,
+) -> Box<ast::Expr> {
     let span = cx.with_def_site_ctxt(span);
     let path = cx.std_path(&[sym::intrinsics, intrinsic]);
     cx.expr_call_global(span, path, args)
 }
 
 /// Constructs an expression that calls the `unreachable` intrinsic.
-fn call_unreachable(cx: &ExtCtxt<'_>, span: Span) -> P<ast::Expr> {
+fn call_unreachable(cx: &ExtCtxt<'_>, span: Span) -> Box<ast::Expr> {
     let span = cx.with_def_site_ctxt(span);
     let path = cx.std_path(&[sym::intrinsics, sym::unreachable]);
     let call = cx.expr_call_global(span, path, ThinVec::new());
 
-    cx.expr_block(P(ast::Block {
+    cx.expr_block(Box::new(ast::Block {
         stmts: thin_vec![cx.stmt_expr(call)],
         id: ast::DUMMY_NODE_ID,
         rules: ast::BlockCheckMode::Unsafe(ast::CompilerGenerated),
         span,
         tokens: None,
-        could_be_bare_literal: false,
     }))
 }
 
 fn assert_ty_bounds(
     cx: &ExtCtxt<'_>,
     stmts: &mut ThinVec<ast::Stmt>,
-    ty: P<ast::Ty>,
+    ty: Box<ast::Ty>,
     span: Span,
     assert_path: &[Symbol],
 ) {

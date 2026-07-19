@@ -1,3 +1,4 @@
+use intravisit::InferKind;
 use rustc_data_structures::sorted_map::SortedMap;
 use rustc_hir as hir;
 use rustc_hir::def_id::{LocalDefId, LocalDefIdMap};
@@ -78,24 +79,31 @@ impl<'a, 'hir> NodeCollector<'a, 'hir> {
 
         // Make sure that the DepNode of some node coincides with the HirId
         // owner of that node.
-        if cfg!(debug_assertions) && hir_id.owner != self.owner {
-            span_bug!(
-                span,
-                "inconsistent HirId at `{:?}` for `{:?}`: \
+        if cfg!(debug_assertions) {
+            if hir_id.owner != self.owner {
+                span_bug!(
+                    span,
+                    "inconsistent HirId at `{:?}` for `{node:?}`: \
                      current_dep_node_owner={} ({:?}), hir_id.owner={} ({:?})",
-                self.tcx.sess.source_map().span_to_diagnostic_string(span),
-                node,
-                self.tcx
-                    .definitions_untracked()
-                    .def_path(self.owner.def_id)
-                    .to_string_no_crate_verbose(),
-                self.owner,
-                self.tcx
-                    .definitions_untracked()
-                    .def_path(hir_id.owner.def_id)
-                    .to_string_no_crate_verbose(),
-                hir_id.owner,
-            )
+                    self.tcx.sess.source_map().span_to_diagnostic_string(span),
+                    self.tcx
+                        .definitions_untracked()
+                        .def_path(self.owner.def_id)
+                        .to_string_no_crate_verbose(),
+                    self.owner,
+                    self.tcx
+                        .definitions_untracked()
+                        .def_path(hir_id.owner.def_id)
+                        .to_string_no_crate_verbose(),
+                    hir_id.owner,
+                )
+            }
+            if self.tcx.sess.opts.incremental.is_some()
+                && span.parent().is_none()
+                && !span.is_dummy()
+            {
+                span_bug!(span, "span without a parent: {:#?}, {node:?}", span.data())
+            }
         }
 
         self.nodes[hir_id.local_id] = ParentedNode { parent: self.parent_node, node };
@@ -117,9 +125,9 @@ impl<'a, 'hir> NodeCollector<'a, 'hir> {
 }
 
 impl<'a, 'hir> Visitor<'hir> for NodeCollector<'a, 'hir> {
-    /// Because we want to track parent items and so forth, enable
-    /// deep walking so that we walk nested items in the context of
-    /// their outer items.
+    // Because we want to track parent items and so forth, enable
+    // deep walking so that we walk nested items in the context of
+    // their outer items.
 
     fn visit_nested_item(&mut self, item: ItemId) {
         debug!("visit_nested_item: {:?}", item);
@@ -156,11 +164,11 @@ impl<'a, 'hir> Visitor<'hir> for NodeCollector<'a, 'hir> {
     fn visit_item(&mut self, i: &'hir Item<'hir>) {
         debug_assert_eq!(i.owner_id, self.owner);
         self.with_parent(i.hir_id(), |this| {
-            if let ItemKind::Struct(struct_def, _) = &i.kind {
+            if let ItemKind::Struct(_, _, struct_def) = &i.kind
                 // If this is a tuple or unit-like struct, register the constructor.
-                if let Some(ctor_hir_id) = struct_def.ctor_hir_id() {
-                    this.insert(i.span, ctor_hir_id, Node::Ctor(struct_def));
-                }
+                && let Some(ctor_hir_id) = struct_def.ctor_hir_id()
+            {
+                this.insert(i.span, ctor_hir_id, Node::Ctor(struct_def));
             }
             intravisit::walk_item(this, i);
         });
@@ -209,6 +217,14 @@ impl<'a, 'hir> Visitor<'hir> for NodeCollector<'a, 'hir> {
         });
     }
 
+    fn visit_pat_expr(&mut self, expr: &'hir PatExpr<'hir>) {
+        self.insert(expr.span, expr.hir_id, Node::PatExpr(expr));
+
+        self.with_parent(expr.hir_id, |this| {
+            intravisit::walk_pat_expr(this, expr);
+        });
+    }
+
     fn visit_pat_field(&mut self, field: &'hir PatField<'hir>) {
         self.insert(field.span, field.hir_id, Node::PatField(field));
         self.with_parent(field.hir_id, |this| {
@@ -250,14 +266,6 @@ impl<'a, 'hir> Visitor<'hir> for NodeCollector<'a, 'hir> {
         });
     }
 
-    fn visit_const_arg(&mut self, const_arg: &'hir ConstArg<'hir>) {
-        self.insert(const_arg.span(), const_arg.hir_id, Node::ConstArg(const_arg));
-
-        self.with_parent(const_arg.hir_id, |this| {
-            intravisit::walk_const_arg(this, const_arg);
-        });
-    }
-
     fn visit_expr(&mut self, expr: &'hir Expr<'hir>) {
         self.insert(expr.span, expr.hir_id, Node::Expr(expr));
 
@@ -287,20 +295,39 @@ impl<'a, 'hir> Visitor<'hir> for NodeCollector<'a, 'hir> {
         intravisit::walk_path_segment(self, path_segment);
     }
 
-    fn visit_ty(&mut self, ty: &'hir Ty<'hir>) {
-        self.insert(ty.span, ty.hir_id, Node::Ty(ty));
+    fn visit_ty(&mut self, ty: &'hir Ty<'hir, AmbigArg>) {
+        self.insert(ty.span, ty.hir_id, Node::Ty(ty.as_unambig_ty()));
 
         self.with_parent(ty.hir_id, |this| {
             intravisit::walk_ty(this, ty);
         });
     }
 
-    fn visit_infer(&mut self, inf: &'hir InferArg) {
-        self.insert(inf.span, inf.hir_id, Node::Infer(inf));
+    fn visit_const_arg(&mut self, const_arg: &'hir ConstArg<'hir, AmbigArg>) {
+        self.insert(
+            const_arg.as_unambig_ct().span(),
+            const_arg.hir_id,
+            Node::ConstArg(const_arg.as_unambig_ct()),
+        );
 
-        self.with_parent(inf.hir_id, |this| {
-            intravisit::walk_inf(this, inf);
+        self.with_parent(const_arg.hir_id, |this| {
+            intravisit::walk_const_arg(this, const_arg);
         });
+    }
+
+    fn visit_infer(
+        &mut self,
+        inf_id: HirId,
+        inf_span: Span,
+        kind: InferKind<'hir>,
+    ) -> Self::Result {
+        match kind {
+            InferKind::Ty(ty) => self.insert(inf_span, inf_id, Node::Ty(ty)),
+            InferKind::Const(ct) => self.insert(inf_span, inf_id, Node::ConstArg(ct)),
+            InferKind::Ambig(inf) => self.insert(inf_span, inf_id, Node::Infer(inf)),
+        }
+
+        self.visit_id(inf_id);
     }
 
     fn visit_trait_ref(&mut self, tr: &'hir TraitRef<'hir>) {
@@ -354,28 +381,16 @@ impl<'a, 'hir> Visitor<'hir> for NodeCollector<'a, 'hir> {
         })
     }
 
-    fn visit_trait_item_ref(&mut self, ii: &'hir TraitItemRef) {
-        // Do not visit the duplicate information in TraitItemRef. We want to
-        // map the actual nodes, not the duplicate ones in the *Ref.
-        let TraitItemRef { id, ident: _, kind: _, span: _ } = *ii;
-
-        self.visit_nested_trait_item(id);
+    fn visit_trait_item_ref(&mut self, id: &'hir TraitItemId) {
+        self.visit_nested_trait_item(*id);
     }
 
-    fn visit_impl_item_ref(&mut self, ii: &'hir ImplItemRef) {
-        // Do not visit the duplicate information in ImplItemRef. We want to
-        // map the actual nodes, not the duplicate ones in the *Ref.
-        let ImplItemRef { id, ident: _, kind: _, span: _, trait_item_def_id: _ } = *ii;
-
-        self.visit_nested_impl_item(id);
+    fn visit_impl_item_ref(&mut self, id: &'hir ImplItemId) {
+        self.visit_nested_impl_item(*id);
     }
 
-    fn visit_foreign_item_ref(&mut self, fi: &'hir ForeignItemRef) {
-        // Do not visit the duplicate information in ForeignItemRef. We want to
-        // map the actual nodes, not the duplicate ones in the *Ref.
-        let ForeignItemRef { id, ident: _, span: _ } = *fi;
-
-        self.visit_nested_foreign_item(id);
+    fn visit_foreign_item_ref(&mut self, id: &'hir ForeignItemId) {
+        self.visit_nested_foreign_item(*id);
     }
 
     fn visit_where_predicate(&mut self, predicate: &'hir WherePredicate<'hir>) {
@@ -385,8 +400,12 @@ impl<'a, 'hir> Visitor<'hir> for NodeCollector<'a, 'hir> {
         });
     }
 
-    fn visit_pattern_type_pattern(&mut self, p: &'hir hir::Pat<'hir>) {
-        self.visit_pat(p)
+    fn visit_pattern_type_pattern(&mut self, pat: &'hir hir::TyPat<'hir>) {
+        self.insert(pat.span, pat.hir_id, Node::TyPat(pat));
+
+        self.with_parent(pat.hir_id, |this| {
+            intravisit::walk_ty_pat(this, pat);
+        });
     }
 
     fn visit_precise_capturing_arg(

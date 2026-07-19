@@ -1,15 +1,19 @@
 #Test-Command: ./debian/rules build
 #Depends: @builddeps@
 #Restrictions: rw-build-tree, allow-stderr
-#
+
 Tests: create-and-build-crate
-Restrictions: rw-build-tree, allow-stderr, needs-internet
-Depends: cargo, ca-certificates
+Restrictions: rw-build-tree, allow-stderr
+Depends: cargo, librust-anyhow-dev
 
 Tests: create-and-build-wasm-wasip1-crate
-Restrictions: rw-build-tree, allow-stderr, needs-internet
-Depends: cargo, ca-certificates, libstd-rust-dev-wasm32, rust-llvm
+Restrictions: rw-build-tree, allow-stderr
+Depends: cargo, libstd-rust-dev-wasm32, rust-llvm, librust-anyhow-dev
 
 Tests: create-and-build-wasm-wasip2-crate
+Restrictions: rw-build-tree, allow-stderr
+Depends: cargo, libstd-rust-dev-wasm32, rust-llvm, librust-anyhow-dev
+
+Tests: download-crate-from-crates-io
 Restrictions: rw-build-tree, allow-stderr, needs-internet
-Depends: cargo, ca-certificates, libstd-rust-dev-wasm32, rust-llvm
+Depends: cargo, rustc, ca-certificates

@@ -22,8 +22,9 @@ LL |     println!("{:?}", b"/*� } �if isAdmin� � begin admins only ");
    |
 help: if you meant to use the UTF-8 encoding of '\u{202e}', use \xHH escapes
    |
-LL |     println!("{:?}", b"/*\xE2\x80\xAE } �if isAdmin� � begin admins only ");
-   |                          ~~~~~~~~~~~~
+LL -     println!("{:?}", b"/*� } �if isAdmin� � begin admins only ");
+LL +     println!("{:?}", b"/*\xE2\x80\xAE } �if isAdmin� � begin admins only ");
+   |
 
 error: non-ASCII character in byte string literal
   --> $DIR/unicode-control-codepoints.rs:18:30
@@ -33,8 +34,9 @@ LL |     println!("{:?}", b"/*� } �if isAdmin� � begin admins only ");
    |
 help: if you meant to use the UTF-8 encoding of '\u{2066}', use \xHH escapes
    |
-LL |     println!("{:?}", b"/*� } \xE2\x81\xA6if isAdmin� � begin admins only ");
-   |                              ~~~~~~~~~~~~
+LL -     println!("{:?}", b"/*� } �if isAdmin� � begin admins only ");
+LL +     println!("{:?}", b"/*� } \xE2\x81\xA6if isAdmin� � begin admins only ");
+   |
 
 error: non-ASCII character in byte string literal
   --> $DIR/unicode-control-codepoints.rs:18:41
@@ -44,8 +46,9 @@ LL |     println!("{:?}", b"/*� } �if isAdmin� � begin admins only ");
    |
 help: if you meant to use the UTF-8 encoding of '\u{2069}', use \xHH escapes
    |
-LL |     println!("{:?}", b"/*� } �if isAdmin\xE2\x81\xA9 � begin admins only ");
-   |                                         ~~~~~~~~~~~~
+LL -     println!("{:?}", b"/*� } �if isAdmin� � begin admins only ");
+LL +     println!("{:?}", b"/*� } �if isAdmin\xE2\x81\xA9 � begin admins only ");
+   |
 
 error: non-ASCII character in byte string literal
   --> $DIR/unicode-control-codepoints.rs:18:43
@@ -55,8 +58,9 @@ LL |     println!("{:?}", b"/*� } �if isAdmin� � begin admins only ");
    |
 help: if you meant to use the UTF-8 encoding of '\u{2066}', use \xHH escapes
    |
-LL |     println!("{:?}", b"/*� } �if isAdmin� \xE2\x81\xA6 begin admins only ");
-   |                                           ~~~~~~~~~~~~
+LL -     println!("{:?}", b"/*� } �if isAdmin� � begin admins only ");
+LL +     println!("{:?}", b"/*� } �if isAdmin� \xE2\x81\xA6 begin admins only ");
+   |
 
 error: non-ASCII character in raw byte string literal
   --> $DIR/unicode-control-codepoints.rs:23:29
@@ -96,21 +100,6 @@ LL |     // if access_level != "us�e�r" { // Check if admin
    = note: `#[deny(text_direction_codepoint_in_comment)]` on by default
    = help: if their presence wasn't intentional, you can remove them
 
-error: unicode codepoint changing visible direction of text present in comment
-  --> $DIR/unicode-control-codepoints.rs:40:1
-   |
-LL | //"/*� } �if isAdmin� � begin admins only */"
-   | ^^^^^-^^^-^^^^^^^^^^-^-^^^^^^^^^^^^^^^^^^^^^^
-   | |    |   |          | |
-   | |    |   |          | '\u{2066}'
-   | |    |   |          '\u{2069}'
-   | |    |   '\u{2066}'
-   | |    '\u{202e}'
-   | this comment contains invisible unicode text flow control codepoints
-   |
-   = note: these kind of unicode codepoints change the way text flows on applications that support them, but can cause confusion because they change the order of characters on the screen
-   = help: if their presence wasn't intentional, you can remove them
-
 error: unicode codepoint changing visible direction of text present in literal
   --> $DIR/unicode-control-codepoints.rs:13:22
    |
@@ -128,8 +117,9 @@ LL |     println!("{:?}", "/*� } �if isAdmin� � begin admins only ");
    = help: if their presence wasn't intentional, you can remove them
 help: if you want to keep them but make them visible in your source code, you can escape them
    |
-LL |     println!("{:?}", "/*\u{202e} } \u{2066}if isAdmin\u{2069} \u{2066} begin admins only ");
-   |                         ~~~~~~~~   ~~~~~~~~          ~~~~~~~~ ~~~~~~~~
+LL -     println!("{:?}", "/*� } �if isAdmin� � begin admins only ");
+LL +     println!("{:?}", "/*\u{202e} } \u{2066}if isAdmin\u{2069} \u{2066} begin admins only ");
+   |
 
 error: unicode codepoint changing visible direction of text present in literal
   --> $DIR/unicode-control-codepoints.rs:16:22
@@ -147,8 +137,9 @@ LL |     println!("{:?}", r##"/*� } �if isAdmin� � begin admins only "##
    = help: if their presence wasn't intentional, you can remove them
 help: if you want to keep them but make them visible in your source code, you can escape them
    |
-LL |     println!("{:?}", r##"/*\u{202e} } \u{2066}if isAdmin\u{2069} \u{2066} begin admins only "##);
-   |                            ~~~~~~~~   ~~~~~~~~          ~~~~~~~~ ~~~~~~~~
+LL -     println!("{:?}", r##"/*� } �if isAdmin� � begin admins only "##);
+LL +     println!("{:?}", r##"/*\u{202e} } \u{2066}if isAdmin\u{2069} \u{2066} begin admins only "##);
+   |
 
 error: unicode codepoint changing visible direction of text present in literal
   --> $DIR/unicode-control-codepoints.rs:28:22
@@ -163,8 +154,9 @@ LL |     println!("{:?}", '�');
    = help: if their presence wasn't intentional, you can remove them
 help: if you want to keep them but make them visible in your source code, you can escape them
    |
-LL |     println!("{:?}", '\u{202e}');
-   |                       ~~~~~~~~
+LL -     println!("{:?}", '�');
+LL +     println!("{:?}", '\u{202e}');
+   |
 
 error: unicode codepoint changing visible direction of text present in literal
   --> $DIR/unicode-control-codepoints.rs:31:13
@@ -179,8 +171,9 @@ LL |     let _ = c"�";
    = help: if their presence wasn't intentional, you can remove them
 help: if you want to keep them but make them visible in your source code, you can escape them
    |
-LL |     let _ = c"\u{202e}";
-   |               ~~~~~~~~
+LL -     let _ = c"�";
+LL +     let _ = c"\u{202e}";
+   |
 
 error: unicode codepoint changing visible direction of text present in literal
   --> $DIR/unicode-control-codepoints.rs:33:13
@@ -195,24 +188,41 @@ LL |     let _ = cr#"�"#;
    = help: if their presence wasn't intentional, you can remove them
 help: if you want to keep them but make them visible in your source code, you can escape them
    |
-LL |     let _ = cr#"\u{202e}"#;
-   |                 ~~~~~~~~
+LL -     let _ = cr#"�"#;
+LL +     let _ = cr#"\u{202e}"#;
+   |
 
-error: unicode codepoint changing visible direction of text present in format string
+error: unicode codepoint changing visible direction of text present in literal
   --> $DIR/unicode-control-codepoints.rs:36:14
    |
 LL |     println!("{{�}}");
    |              ^^^-^^^
    |              |  |
    |              |  '\u{202e}'
-   |              this format string contains an invisible unicode text flow control codepoint
+   |              this literal contains an invisible unicode text flow control codepoint
    |
    = note: these kind of unicode codepoints change the way text flows on applications that support them, but can cause confusion because they change the order of characters on the screen
    = help: if their presence wasn't intentional, you can remove them
 help: if you want to keep them but make them visible in your source code, you can escape them
    |
-LL |     println!("{{\u{202e}}}");
-   |                 ~~~~~~~~
+LL -     println!("{{�}}");
+LL +     println!("{{\u{202e}}}");
+   |
+
+error: unicode codepoint changing visible direction of text present in comment
+  --> $DIR/unicode-control-codepoints.rs:40:1
+   |
+LL | //"/*� } �if isAdmin� � begin admins only */"
+   | ^^^^^-^^^-^^^^^^^^^^-^-^^^^^^^^^^^^^^^^^^^^^^
+   | |    |   |          | |
+   | |    |   |          | '\u{2066}'
+   | |    |   |          '\u{2069}'
+   | |    |   '\u{2066}'
+   | |    '\u{202e}'
+   | this comment contains invisible unicode text flow control codepoints
+   |
+   = note: these kind of unicode codepoints change the way text flows on applications that support them, but can cause confusion because they change the order of characters on the screen
+   = help: if their presence wasn't intentional, you can remove them
 
 error: unicode codepoint changing visible direction of text present in doc comment
   --> $DIR/unicode-control-codepoints.rs:43:1

@@ -17,8 +17,10 @@
 
 //@[regparm4] check-fail
 //@[regparm4] compile-flags: -Zregparm=4
-//@[regparm4] error-pattern: `-Zregparm=4` is unsupported (valid values 0-3)
+//@ ignore-backends: gcc
 
 #![feature(no_core)]
 #![no_core]
 #![no_main]
+
+//[regparm4]~? ERROR `-Zregparm=4` is unsupported (valid values 0-3)

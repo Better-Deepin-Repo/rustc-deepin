@@ -1,8 +1,8 @@
 use super::features::{CliFeatures, RequestedFeatures};
 use crate::core::{Dependency, PackageId, SourceId, Summary};
+use crate::util::GlobalContext;
 use crate::util::errors::CargoResult;
 use crate::util::interning::InternedString;
-use crate::util::GlobalContext;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU64;
@@ -122,7 +122,7 @@ impl ResolveBehavior {
             "2" => Ok(ResolveBehavior::V2),
             "3" => Ok(ResolveBehavior::V3),
             s => anyhow::bail!(
-                "`resolver` setting `{}` is not valid, valid options are \"1\" or \"2\"",
+                "`resolver` setting `{}` is not valid, valid options are \"1\", \"2\" or \"3\"",
                 s
             ),
         }
@@ -339,10 +339,10 @@ pub enum ConflictReason {
     /// we're only allowed one per dependency graph.
     Links(InternedString),
 
-    /// A dependency listed features that weren't actually available on the
+    /// A dependency listed a feature that wasn't actually available on the
     /// candidate. For example we tried to activate feature `foo` but the
     /// candidate we're activating didn't actually have the feature `foo`.
-    MissingFeatures(InternedString),
+    MissingFeature(InternedString),
 
     /// A dependency listed a feature that ended up being a required dependency.
     /// For example we tried to activate feature `foo` but the
@@ -360,8 +360,8 @@ impl ConflictReason {
         matches!(self, ConflictReason::Links(_))
     }
 
-    pub fn is_missing_features(&self) -> bool {
-        matches!(self, ConflictReason::MissingFeatures(_))
+    pub fn is_missing_feature(&self) -> bool {
+        matches!(self, ConflictReason::MissingFeature(_))
     }
 
     pub fn is_required_dependency_as_features(&self) -> bool {

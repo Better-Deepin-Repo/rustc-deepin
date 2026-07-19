@@ -36,10 +36,11 @@ function normalizeBackend(backend: string): string {
     </Tooltip>
   </div>
 
-  <pre><code>./target/release/collector binary_stats compile \
+  <pre><code>cargo run --release --bin collector \
+    binary_stats compile \
     +{{ props.baseArtifact.commit }} \
     --rustc2 +{{ props.artifact.commit }} \
-    --include {{ testCase.benchmark }} \
+    --exact-match {{ testCase.benchmark }} \
     --profile {{ normalizeProfile(testCase.profile) }} \
     --backend {{ normalizeBackend(testCase.backend) }}</code></pre>
 </template>

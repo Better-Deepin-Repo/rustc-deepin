@@ -1,4 +1,4 @@
-use std::num::NonZero;
+use std::num::{NonZero, ParseIntError};
 
 use rustc_ast::token;
 use rustc_ast::util::literal::LitError;
@@ -7,12 +7,20 @@ use rustc_errors::{
     Diag, DiagCtxtHandle, DiagMessage, Diagnostic, EmissionGuarantee, ErrorGuaranteed, Level,
     MultiSpan,
 };
-use rustc_macros::{Diagnostic, Subdiagnostic};
+use rustc_macros::{Diagnostic, LintDiagnostic, Subdiagnostic};
 use rustc_span::{Span, Symbol};
 use rustc_target::spec::{SplitDebuginfo, StackProtector, TargetTuple};
 
 use crate::config::CrateType;
 use crate::parse::ParseSess;
+
+#[derive(Diagnostic)]
+pub(crate) enum AppleDeploymentTarget {
+    #[diag(session_apple_deployment_target_invalid)]
+    Invalid { env_var: &'static str, error: ParseIntError },
+    #[diag(session_apple_deployment_target_too_low)]
+    TooLow { env_var: &'static str, version: String, os_min: String },
+}
 
 pub(crate) struct FeatureGateError {
     pub(crate) span: MultiSpan,
@@ -148,6 +156,10 @@ pub(crate) struct SanitizerCfiGeneralizePointersRequiresCfi;
 pub(crate) struct SanitizerCfiNormalizeIntegersRequiresCfi;
 
 #[derive(Diagnostic)]
+#[diag(session_sanitizer_kcfi_arity_requires_kcfi)]
+pub(crate) struct SanitizerKcfiArityRequiresKcfi;
+
+#[derive(Diagnostic)]
 #[diag(session_sanitizer_kcfi_requires_panic_abort)]
 pub(crate) struct SanitizerKcfiRequiresPanicAbort;
 
@@ -161,6 +173,7 @@ pub(crate) struct UnstableVirtualFunctionElimination;
 
 #[derive(Diagnostic)]
 #[diag(session_unsupported_dwarf_version)]
+#[help(session_unsupported_dwarf_version_help)]
 pub(crate) struct UnsupportedDwarfVersion {
     pub(crate) dwarf_version: u32,
 }
@@ -212,21 +225,6 @@ pub(crate) struct FileWriteFail<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag(session_crate_name_does_not_match)]
-pub(crate) struct CrateNameDoesNotMatch {
-    #[primary_span]
-    pub(crate) span: Span,
-    pub(crate) s: Symbol,
-    pub(crate) name: Symbol,
-}
-
-#[derive(Diagnostic)]
-#[diag(session_crate_name_invalid)]
-pub(crate) struct CrateNameInvalid<'a> {
-    pub(crate) s: &'a str,
-}
-
-#[derive(Diagnostic)]
 #[diag(session_crate_name_empty)]
 pub(crate) struct CrateNameEmpty {
     #[primary_span]
@@ -234,20 +232,14 @@ pub(crate) struct CrateNameEmpty {
 }
 
 #[derive(Diagnostic)]
-#[diag(session_invalid_character_in_create_name)]
+#[diag(session_invalid_character_in_crate_name)]
 pub(crate) struct InvalidCharacterInCrateName {
     #[primary_span]
     pub(crate) span: Option<Span>,
     pub(crate) character: char,
     pub(crate) crate_name: Symbol,
-    #[subdiagnostic]
-    pub(crate) crate_name_help: Option<InvalidCrateNameHelp>,
-}
-
-#[derive(Subdiagnostic)]
-pub(crate) enum InvalidCrateNameHelp {
-    #[help(session_invalid_character_in_create_name_help)]
-    AddCrateName,
+    #[help]
+    pub(crate) help: Option<()>,
 }
 
 #[derive(Subdiagnostic)]
@@ -380,6 +372,13 @@ struct BinaryFloatLiteralNotSupported {
 }
 
 #[derive(Diagnostic)]
+#[diag(session_unsupported_crate_type_for_codegen_backend)]
+pub(crate) struct UnsupportedCrateTypeForCodegenBackend {
+    pub(crate) crate_type: CrateType,
+    pub(crate) codegen_backend: &'static str,
+}
+
+#[derive(Diagnostic)]
 #[diag(session_unsupported_crate_type_for_target)]
 pub(crate) struct UnsupportedCrateTypeForTarget<'a> {
     pub(crate) crate_type: CrateType,
@@ -392,6 +391,10 @@ pub fn report_lit_error(
     lit: token::Lit,
     span: Span,
 ) -> ErrorGuaranteed {
+    create_lit_error(psess, err, lit, span).emit()
+}
+
+pub fn create_lit_error(psess: &ParseSess, err: LitError, lit: token::Lit, span: Span) -> Diag<'_> {
     // Checks if `s` looks like i32 or u1234 etc.
     fn looks_like_width_suffix(first_chars: &[char], s: &str) -> bool {
         s.len() > 1 && s.starts_with(first_chars) && s[1..].chars().all(|c| c.is_ascii_digit())
@@ -422,32 +425,32 @@ pub fn report_lit_error(
     let dcx = psess.dcx();
     match err {
         LitError::InvalidSuffix(suffix) => {
-            dcx.emit_err(InvalidLiteralSuffix { span, kind: lit.kind.descr(), suffix })
+            dcx.create_err(InvalidLiteralSuffix { span, kind: lit.kind.descr(), suffix })
         }
         LitError::InvalidIntSuffix(suffix) => {
             let suf = suffix.as_str();
             if looks_like_width_suffix(&['i', 'u'], suf) {
                 // If it looks like a width, try to be helpful.
-                dcx.emit_err(InvalidIntLiteralWidth { span, width: suf[1..].into() })
+                dcx.create_err(InvalidIntLiteralWidth { span, width: suf[1..].into() })
             } else if let Some(fixed) = fix_base_capitalisation(lit.symbol.as_str(), suf) {
-                dcx.emit_err(InvalidNumLiteralBasePrefix { span, fixed })
+                dcx.create_err(InvalidNumLiteralBasePrefix { span, fixed })
             } else {
-                dcx.emit_err(InvalidNumLiteralSuffix { span, suffix: suf.to_string() })
+                dcx.create_err(InvalidNumLiteralSuffix { span, suffix: suf.to_string() })
             }
         }
         LitError::InvalidFloatSuffix(suffix) => {
             let suf = suffix.as_str();
             if looks_like_width_suffix(&['f'], suf) {
                 // If it looks like a width, try to be helpful.
-                dcx.emit_err(InvalidFloatLiteralWidth { span, width: suf[1..].to_string() })
+                dcx.create_err(InvalidFloatLiteralWidth { span, width: suf[1..].to_string() })
             } else {
-                dcx.emit_err(InvalidFloatLiteralSuffix { span, suffix: suf.to_string() })
+                dcx.create_err(InvalidFloatLiteralSuffix { span, suffix: suf.to_string() })
             }
         }
         LitError::NonDecimalFloat(base) => match base {
-            16 => dcx.emit_err(HexadecimalFloatLiteralNotSupported { span }),
-            8 => dcx.emit_err(OctalFloatLiteralNotSupported { span }),
-            2 => dcx.emit_err(BinaryFloatLiteralNotSupported { span }),
+            16 => dcx.create_err(HexadecimalFloatLiteralNotSupported { span }),
+            8 => dcx.create_err(OctalFloatLiteralNotSupported { span }),
+            2 => dcx.create_err(BinaryFloatLiteralNotSupported { span }),
             _ => unreachable!(),
         },
         LitError::IntTooLarge(base) => {
@@ -458,7 +461,7 @@ pub fn report_lit_error(
                 16 => format!("{max:#x}"),
                 _ => format!("{max}"),
             };
-            dcx.emit_err(IntLiteralTooLarge { span, limit })
+            dcx.create_err(IntLiteralTooLarge { span, limit })
         }
     }
 }
@@ -478,6 +481,10 @@ pub(crate) struct FunctionReturnRequiresX86OrX8664;
 #[derive(Diagnostic)]
 #[diag(session_function_return_thunk_extern_requires_non_large_code_model)]
 pub(crate) struct FunctionReturnThunkExternRequiresNonLargeCodeModel;
+
+#[derive(Diagnostic)]
+#[diag(session_indirect_branch_cs_prefix_requires_x86_or_x86_64)]
+pub(crate) struct IndirectBranchCsPrefixRequiresX86OrX8664;
 
 #[derive(Diagnostic)]
 #[diag(session_unsupported_regparm)]
@@ -509,3 +516,13 @@ pub(crate) struct SoftFloatIgnored;
 #[note]
 #[note(session_soft_float_deprecated_issue)]
 pub(crate) struct SoftFloatDeprecated;
+
+#[derive(LintDiagnostic)]
+#[diag(session_unexpected_builtin_cfg)]
+#[note(session_controlled_by)]
+#[note(session_incoherent)]
+pub(crate) struct UnexpectedBuiltinCfg {
+    pub(crate) cfg: String,
+    pub(crate) cfg_name: Symbol,
+    pub(crate) controlled_by: &'static str,
+}

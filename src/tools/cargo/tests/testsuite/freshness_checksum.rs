@@ -6,8 +6,8 @@ use std::net::TcpListener;
 use std::process::Stdio;
 use std::thread;
 
+use crate::prelude::*;
 use cargo_test_support::assert_deps_contains;
-use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::{
     basic_lib_manifest, basic_manifest, project, rustc_host, rustc_host_env, str,
@@ -2030,6 +2030,7 @@ fn edition_change_invalidates() {
     p.cargo("build -Zchecksum-freshness")
         .masquerade_as_nightly_cargo(&["checksum-freshness"])
         .with_stderr_data(str![[r#"
+[WARNING] `edition` is set on library `foo` which is deprecated
 [COMPILING] foo v0.1.0 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -2038,6 +2039,7 @@ fn edition_change_invalidates() {
     p.cargo("build -Zchecksum-freshness -v")
         .masquerade_as_nightly_cargo(&["checksum-freshness"])
         .with_stderr_data(str![[r#"
+[WARNING] `edition` is set on library `foo` which is deprecated
 [FRESH] foo v0.1.0 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
@@ -2602,7 +2604,6 @@ fn lld_is_fresh() {
             r#"
                 [target.x86_64-pc-windows-msvc]
                 linker = "rust-lld"
-                rustflags = ["-C", "link-arg=-fuse-ld=lld"]
             "#,
         )
         .file(
@@ -2959,6 +2960,66 @@ fn use_checksum_cache_in_cargo_home() {
 ...
 [ERROR] could not compile `foo` (lib) due to 1 previous error
 ...
+"#]])
+        .run();
+}
+
+#[cargo_test(nightly, reason = "requires -Zchecksum-hash-algorithm")]
+fn incremental_build_script_execution_got_new_mtime_and_cargo_check() {
+    // See https://github.com/rust-lang/cargo/issues/16104
+    let p = project()
+        .file("src/lib.rs", "")
+        .file("touch-me", "")
+        .file(
+            "build.rs",
+            r#"fn main() { println!("cargo::rerun-if-changed=touch-me") }"#,
+        )
+        .build();
+
+    p.cargo("check -Zchecksum-freshness")
+        .masquerade_as_nightly_cargo(&["checksum-freshness"])
+        .env("CARGO_INCREMENTAL", "1")
+        .with_stderr_data(str![[r#"
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .run();
+
+    p.change_file("touch-me", "oops");
+
+    // The first one is expected to rerun build script
+    p.cargo("check -Zchecksum-freshness -v")
+        .masquerade_as_nightly_cargo(&["checksum-freshness"])
+        .env("CARGO_INCREMENTAL", "1")
+        .with_stderr_data(str![[r#"
+[DIRTY] foo v0.0.1 ([ROOT]/foo): the file `touch-me` has changed ([TIME_DIFF_AFTER_LAST_BUILD])
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[RUNNING] `[ROOT]/foo/target/debug/build/foo-[HASH]/build-script-build`
+[RUNNING] `rustc --crate-name foo [..]`
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .run();
+
+    // subsequent cargo check gets stuck...
+    p.cargo("check -Zchecksum-freshness -v")
+        .masquerade_as_nightly_cargo(&["checksum-freshness"])
+        .env("CARGO_INCREMENTAL", "1")
+        .with_stderr_data(str![[r#"
+[FRESH] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .run();
+
+    p.cargo("check -Zchecksum-freshness -v")
+        .masquerade_as_nightly_cargo(&["checksum-freshness"])
+        .env("CARGO_INCREMENTAL", "1")
+        .with_stderr_data(str![[r#"
+[FRESH] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
 "#]])
         .run();
 }

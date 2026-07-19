@@ -1,4 +1,4 @@
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::str;
 
@@ -76,13 +76,12 @@ workspace = true
 6 | this-lint-does-not-exist = "warn"
   | ^^^^^^^^^^^^^^^^^^^^^^^^
   |
+  = [NOTE] `cargo::unknown_lints` is set to `warn` by default
 [NOTE] `cargo::this-lint-does-not-exist` was inherited
  --> foo/Cargo.toml:9:1
   |
 9 | workspace = true
   | ----------------
-  |
-  = [NOTE] `cargo::unknown_lints` is set to `warn` by default
 [CHECKING] foo v0.0.1 ([ROOT]/foo/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 

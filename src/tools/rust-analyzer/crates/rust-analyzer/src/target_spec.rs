@@ -2,12 +2,14 @@
 
 use std::mem;
 
+use cargo_metadata::PackageId;
 use cfg::{CfgAtom, CfgExpr};
 use hir::sym;
-use ide::{Cancellable, CrateId, FileId, RunnableKind, TestId};
+use ide::{Cancellable, Crate, FileId, RunnableKind, TestId};
 use project_model::project_json::Runnable;
 use project_model::{CargoFeatures, ManifestPath, TargetKind};
 use rustc_hash::FxHashSet;
+use triomphe::Arc;
 use vfs::AbsPathBuf;
 
 use crate::global_state::GlobalStateSnapshot;
@@ -52,9 +54,10 @@ pub(crate) struct CargoTargetSpec {
     pub(crate) workspace_root: AbsPathBuf,
     pub(crate) cargo_toml: ManifestPath,
     pub(crate) package: String,
+    pub(crate) package_id: Arc<PackageId>,
     pub(crate) target: String,
     pub(crate) target_kind: TargetKind,
-    pub(crate) crate_id: CrateId,
+    pub(crate) crate_id: Crate,
     pub(crate) required_features: Vec<String>,
     pub(crate) features: FxHashSet<String>,
     pub(crate) sysroot_root: Option<vfs::AbsPathBuf>,
@@ -62,7 +65,6 @@ pub(crate) struct CargoTargetSpec {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ProjectJsonTargetSpec {
-    pub(crate) crate_id: CrateId,
     pub(crate) label: String,
     pub(crate) target_kind: TargetKind,
     pub(crate) shell_runnables: Vec<Runnable>,
@@ -265,12 +267,13 @@ mod tests {
 
     use ide::Edition;
     use syntax::{
-        ast::{self, AstNode},
         SmolStr,
+        ast::{self, AstNode},
     };
     use syntax_bridge::{
-        dummy_test_span_utils::{DummyTestSpanMap, DUMMY},
-        syntax_node_to_token_tree, DocCommentDesugarMode,
+        DocCommentDesugarMode,
+        dummy_test_span_utils::{DUMMY, DummyTestSpanMap},
+        syntax_node_to_token_tree,
     };
 
     fn check(cfg: &str, expected_features: &[&str]) {

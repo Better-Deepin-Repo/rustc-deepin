@@ -6,16 +6,19 @@ use std::{
     sync::atomic::{AtomicU32, Ordering},
 };
 
-use base64::{prelude::BASE64_STANDARD, Engine};
+use base64::{Engine, prelude::BASE64_STANDARD};
 use ide::{
     Annotation, AnnotationKind, Assist, AssistKind, Cancellable, CompletionFieldsToResolve,
     CompletionItem, CompletionItemKind, CompletionRelevance, Documentation, FileId, FileRange,
     FileSystemEdit, Fold, FoldKind, Highlight, HlMod, HlOperator, HlPunct, HlRange, HlTag, Indel,
-    InlayFieldsToResolve, InlayHint, InlayHintLabel, InlayHintLabelPart, InlayKind, Markup,
-    NavigationTarget, ReferenceCategory, RenameError, Runnable, Severity, SignatureHelp,
+    InlayFieldsToResolve, InlayHint, InlayHintLabel, InlayHintLabelPart, InlayKind, LazyProperty,
+    Markup, NavigationTarget, ReferenceCategory, RenameError, Runnable, Severity, SignatureHelp,
     SnippetEdit, SourceChange, StructureNodeKind, SymbolKind, TextEdit, TextRange, TextSize,
+    UpdateTest,
 };
-use ide_db::{assists, rust_doc::format_docs, FxHasher};
+use ide_db::{
+    FxHasher, MiniCore, assists, rust_doc::format_docs, source_change::ChangeAnnotationId,
+};
 use itertools::Itertools;
 use paths::{Utf8Component, Utf8Prefix};
 use semver::VersionReq;
@@ -23,15 +26,14 @@ use serde_json::to_value;
 use vfs::AbsPath;
 
 use crate::{
-    completion_item_hash,
-    config::{CallInfoConfig, Config},
+    config::{CallInfoConfig, ClientCommandsConfig, Config},
     global_state::GlobalStateSnapshot,
     line_index::{LineEndings, LineIndex, PositionEncoding},
     lsp::{
+        LspError, completion_item_hash,
         ext::ShellRunnableArgs,
         semantic_tokens::{self, standard_fallback_type},
         utils::invalid_params_error,
-        LspError,
     },
     lsp_ext::{self, SnippetTextEdit},
     target_spec::{CargoTargetSpec, TargetSpec},
@@ -61,7 +63,7 @@ pub(crate) fn symbol_kind(symbol_kind: SymbolKind) -> lsp_types::SymbolKind {
         SymbolKind::Struct => lsp_types::SymbolKind::STRUCT,
         SymbolKind::Enum => lsp_types::SymbolKind::ENUM,
         SymbolKind::Variant => lsp_types::SymbolKind::ENUM_MEMBER,
-        SymbolKind::Trait | SymbolKind::TraitAlias => lsp_types::SymbolKind::INTERFACE,
+        SymbolKind::Trait => lsp_types::SymbolKind::INTERFACE,
         SymbolKind::Macro
         | SymbolKind::ProcMacro
         | SymbolKind::BuiltinAttr
@@ -117,7 +119,7 @@ pub(crate) fn diagnostic_severity(severity: Severity) -> lsp_types::DiagnosticSe
     }
 }
 
-pub(crate) fn documentation(documentation: Documentation) -> lsp_types::Documentation {
+pub(crate) fn documentation(documentation: Documentation<'_>) -> lsp_types::Documentation {
     let value = format_docs(&documentation);
     let markup_content = lsp_types::MarkupContent { kind: lsp_types::MarkupKind::Markdown, value };
     lsp_types::Documentation::MarkupContent(markup_content)
@@ -156,7 +158,6 @@ pub(crate) fn completion_item_kind(
             SymbolKind::Static => lsp_types::CompletionItemKind::VALUE,
             SymbolKind::Struct => lsp_types::CompletionItemKind::STRUCT,
             SymbolKind::Trait => lsp_types::CompletionItemKind::INTERFACE,
-            SymbolKind::TraitAlias => lsp_types::CompletionItemKind::INTERFACE,
             SymbolKind::TypeAlias => lsp_types::CompletionItemKind::STRUCT,
             SymbolKind::TypeParam => lsp_types::CompletionItemKind::TYPE_PARAMETER,
             SymbolKind::Union => lsp_types::CompletionItemKind::STRUCT,
@@ -199,7 +200,10 @@ pub(crate) fn snippet_text_edit(
     line_index: &LineIndex,
     is_snippet: bool,
     indel: Indel,
+    annotation: Option<ChangeAnnotationId>,
+    client_supports_annotations: bool,
 ) -> lsp_ext::SnippetTextEdit {
+    let annotation_id = annotation.filter(|_| client_supports_annotations).map(|it| it.to_string());
     let text_edit = text_edit(line_index, indel);
     let insert_text_format =
         if is_snippet { Some(lsp_types::InsertTextFormat::SNIPPET) } else { None };
@@ -207,7 +211,7 @@ pub(crate) fn snippet_text_edit(
         range: text_edit.range,
         new_text: text_edit.new_text,
         insert_text_format,
-        annotation_id: None,
+        annotation_id,
     }
 }
 
@@ -222,10 +226,20 @@ pub(crate) fn snippet_text_edit_vec(
     line_index: &LineIndex,
     is_snippet: bool,
     text_edit: TextEdit,
+    clients_support_annotations: bool,
 ) -> Vec<lsp_ext::SnippetTextEdit> {
+    let annotation = text_edit.change_annotation();
     text_edit
         .into_iter()
-        .map(|indel| self::snippet_text_edit(line_index, is_snippet, indel))
+        .map(|indel| {
+            self::snippet_text_edit(
+                line_index,
+                is_snippet,
+                indel,
+                annotation,
+                clients_support_annotations,
+            )
+        })
         .collect()
 }
 
@@ -244,10 +258,12 @@ pub(crate) fn completion_items(
 
     let max_relevance = items.iter().map(|it| it.relevance.score()).max().unwrap_or_default();
     let mut res = Vec::with_capacity(items.len());
+    let client_commands = config.client_commands();
     for item in items {
         completion_item(
             &mut res,
             config,
+            &client_commands,
             fields_to_resolve,
             line_index,
             version,
@@ -258,7 +274,7 @@ pub(crate) fn completion_items(
         );
     }
 
-    if let Some(limit) = config.completion(None).limit {
+    if let Some(limit) = config.completion(None, MiniCore::default()).limit {
         res.sort_by(|item1, item2| item1.sort_text.cmp(&item2.sort_text));
         res.truncate(limit);
     }
@@ -269,6 +285,7 @@ pub(crate) fn completion_items(
 fn completion_item(
     acc: &mut Vec<lsp_types::CompletionItem>,
     config: &Config,
+    client_commands: &ClientCommandsConfig,
     fields_to_resolve: &CompletionFieldsToResolve,
     line_index: &LineIndex,
     version: Option<i32>,
@@ -328,7 +345,7 @@ fn completion_item(
     } else {
         item.deprecated.then(|| vec![lsp_types::CompletionItemTag::DEPRECATED])
     };
-    let command = if item.trigger_call_info && config.client_commands().trigger_parameter_hints {
+    let command = if item.trigger_call_info && client_commands.trigger_parameter_hints {
         if fields_to_resolve.resolve_command {
             something_to_resolve |= true;
             None
@@ -388,19 +405,17 @@ fn completion_item(
 
     set_score(&mut lsp_item, max_relevance, item.relevance);
 
-    let imports =
-        if config.completion(None).enable_imports_on_the_fly && !item.import_to_add.is_empty() {
-            item.import_to_add
-                .clone()
-                .into_iter()
-                .map(|(import_path, import_name)| lsp_ext::CompletionImport {
-                    full_import_path: import_path,
-                    imported_name: import_name,
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
+    let imports = if config.completion(None, MiniCore::default()).enable_imports_on_the_fly
+        && !item.import_to_add.is_empty()
+    {
+        item.import_to_add
+            .clone()
+            .into_iter()
+            .map(|import_path| lsp_ext::CompletionImport { full_import_path: import_path })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let (ref_resolve_data, resolve_data) = if something_to_resolve || !imports.is_empty() {
         let ref_resolve_data = if ref_match.is_some() {
             let ref_resolve_data = lsp_ext::CompletionResolveData {
@@ -484,8 +499,15 @@ pub(crate) fn signature_help(
                 .parameter_ranges()
                 .iter()
                 .map(|it| {
-                    let start = call_info.signature[..it.start().into()].chars().count() as u32;
-                    let end = call_info.signature[..it.end().into()].chars().count() as u32;
+                    let start = call_info.signature[..it.start().into()]
+                        .chars()
+                        .map(|c| c.len_utf16())
+                        .sum::<usize>() as u32;
+                    let end = start
+                        + call_info.signature[it.start().into()..it.end().into()]
+                            .chars()
+                            .map(|c| c.len_utf16())
+                            .sum::<usize>() as u32;
                     [start, end]
                 })
                 .map(|label_offsets| lsp_types::ParameterInformation {
@@ -504,9 +526,9 @@ pub(crate) fn signature_help(
                     label.push_str(", ");
                 }
                 first = false;
-                let start = label.chars().count() as u32;
+                let start = label.len() as u32;
                 label.push_str(param);
-                let end = label.chars().count() as u32;
+                let end = label.len() as u32;
                 params.push(lsp_types::ParameterInformation {
                     label: lsp_types::ParameterLabel::LabelOffsets([start, end]),
                     documentation: None,
@@ -546,7 +568,17 @@ pub(crate) fn inlay_hint(
     file_id: FileId,
     mut inlay_hint: InlayHint,
 ) -> Cancellable<lsp_types::InlayHint> {
-    let resolve_range_and_hash = inlay_hint.needs_resolve().map(|range| {
+    let hint_needs_resolve = |hint: &InlayHint| -> Option<TextRange> {
+        hint.resolve_parent.filter(|_| {
+            hint.text_edit.as_ref().is_some_and(LazyProperty::is_lazy)
+                || hint.label.parts.iter().any(|part| {
+                    part.linked_location.as_ref().is_some_and(LazyProperty::is_lazy)
+                        || part.tooltip.as_ref().is_some_and(LazyProperty::is_lazy)
+                })
+        })
+    };
+
+    let resolve_range_and_hash = hint_needs_resolve(&inlay_hint).map(|range| {
         (
             range,
             std::hash::BuildHasher::hash_one(
@@ -557,19 +589,21 @@ pub(crate) fn inlay_hint(
     });
 
     let mut something_to_resolve = false;
-    let text_edits = if snap
-        .config
-        .visual_studio_code_version()
-        // https://github.com/microsoft/vscode/issues/193124
-        .map_or(true, |version| VersionReq::parse(">=1.86.0").unwrap().matches(version))
-        && resolve_range_and_hash.is_some()
-        && fields_to_resolve.resolve_text_edits
-    {
-        something_to_resolve |= inlay_hint.text_edit.is_some();
-        None
-    } else {
-        inlay_hint.text_edit.take().map(|it| text_edit_vec(line_index, it))
-    };
+    let text_edits = inlay_hint
+        .text_edit
+        .take()
+        .and_then(|it| match it {
+            LazyProperty::Computed(it) => Some(it),
+            LazyProperty::Lazy => {
+                something_to_resolve |=
+                    snap.config.visual_studio_code_version().is_none_or(|version| {
+                        VersionReq::parse(">=1.86.0").unwrap().matches(version)
+                    }) && resolve_range_and_hash.is_some()
+                        && fields_to_resolve.resolve_text_edits;
+                None
+            }
+        })
+        .map(|it| text_edit_vec(line_index, it));
     let (label, tooltip) = inlay_hint_label(
         snap,
         fields_to_resolve,
@@ -622,22 +656,23 @@ fn inlay_hint_label(
     let (label, tooltip) = match &*label.parts {
         [InlayHintLabelPart { linked_location: None, .. }] => {
             let InlayHintLabelPart { text, tooltip, .. } = label.parts.pop().unwrap();
-            let hint_tooltip = if needs_resolve && fields_to_resolve.resolve_hint_tooltip {
-                *something_to_resolve |= tooltip.is_some();
-                None
-            } else {
-                match tooltip {
-                    Some(ide::InlayTooltip::String(s)) => {
-                        Some(lsp_types::InlayHintTooltip::String(s))
-                    }
-                    Some(ide::InlayTooltip::Markdown(s)) => {
-                        Some(lsp_types::InlayHintTooltip::MarkupContent(lsp_types::MarkupContent {
-                            kind: lsp_types::MarkupKind::Markdown,
-                            value: s,
-                        }))
-                    }
-                    None => None,
+            let tooltip = tooltip.and_then(|it| match it {
+                LazyProperty::Computed(it) => Some(it),
+                LazyProperty::Lazy => {
+                    *something_to_resolve |=
+                        needs_resolve && fields_to_resolve.resolve_hint_tooltip;
+                    None
                 }
+            });
+            let hint_tooltip = match tooltip {
+                Some(ide::InlayTooltip::String(s)) => Some(lsp_types::InlayHintTooltip::String(s)),
+                Some(ide::InlayTooltip::Markdown(s)) => {
+                    Some(lsp_types::InlayHintTooltip::MarkupContent(lsp_types::MarkupContent {
+                        kind: lsp_types::MarkupKind::Markdown,
+                        value: s,
+                    }))
+                }
+                None => None,
             };
             (lsp_types::InlayHintLabel::String(text), hint_tooltip)
         }
@@ -646,31 +681,38 @@ fn inlay_hint_label(
                 .parts
                 .into_iter()
                 .map(|part| {
-                    let tooltip = if needs_resolve && fields_to_resolve.resolve_label_tooltip {
-                        *something_to_resolve |= part.tooltip.is_some();
-                        None
-                    } else {
-                        match part.tooltip {
-                            Some(ide::InlayTooltip::String(s)) => {
-                                Some(lsp_types::InlayHintLabelPartTooltip::String(s))
-                            }
-                            Some(ide::InlayTooltip::Markdown(s)) => {
-                                Some(lsp_types::InlayHintLabelPartTooltip::MarkupContent(
-                                    lsp_types::MarkupContent {
-                                        kind: lsp_types::MarkupKind::Markdown,
-                                        value: s,
-                                    },
-                                ))
-                            }
-                            None => None,
+                    let tooltip = part.tooltip.and_then(|it| match it {
+                        LazyProperty::Computed(it) => Some(it),
+                        LazyProperty::Lazy => {
+                            *something_to_resolve |= fields_to_resolve.resolve_label_tooltip;
+                            None
                         }
+                    });
+                    let tooltip = match tooltip {
+                        Some(ide::InlayTooltip::String(s)) => {
+                            Some(lsp_types::InlayHintLabelPartTooltip::String(s))
+                        }
+                        Some(ide::InlayTooltip::Markdown(s)) => {
+                            Some(lsp_types::InlayHintLabelPartTooltip::MarkupContent(
+                                lsp_types::MarkupContent {
+                                    kind: lsp_types::MarkupKind::Markdown,
+                                    value: s,
+                                },
+                            ))
+                        }
+                        None => None,
                     };
-                    let location = if needs_resolve && fields_to_resolve.resolve_label_location {
-                        *something_to_resolve |= part.linked_location.is_some();
-                        None
-                    } else {
-                        part.linked_location.map(|range| location(snap, range)).transpose()?
-                    };
+                    let location = part
+                        .linked_location
+                        .and_then(|it| match it {
+                            LazyProperty::Computed(it) => Some(it),
+                            LazyProperty::Lazy => {
+                                *something_to_resolve |= fields_to_resolve.resolve_label_location;
+                                None
+                            }
+                        })
+                        .map(|range| location(snap, range))
+                        .transpose()?;
                     Ok(lsp_types::InlayHintLabelPart {
                         value: part.text,
                         tooltip,
@@ -716,7 +758,7 @@ pub(crate) fn semantic_tokens(
                 | HlTag::None
                     if highlight_range.highlight.mods.is_empty() =>
                 {
-                    continue
+                    continue;
                 }
                 _ => (),
             }
@@ -787,7 +829,6 @@ fn semantic_token_type_and_modifiers(
             SymbolKind::Union => types::UNION,
             SymbolKind::TypeAlias => types::TYPE_ALIAS,
             SymbolKind::Trait => types::INTERFACE,
-            SymbolKind::TraitAlias => types::INTERFACE,
             SymbolKind::Macro => types::MACRO,
             SymbolKind::ProcMacro => types::PROC_MACRO,
             SymbolKind::BuiltinAttr => types::BUILTIN_ATTRIBUTE,
@@ -809,6 +850,7 @@ fn semantic_token_type_and_modifiers(
             HlOperator::Bitwise => types::BITWISE,
             HlOperator::Arithmetic => types::ARITHMETIC,
             HlOperator::Logical => types::LOGICAL,
+            HlOperator::Negation => types::NEGATION,
             HlOperator::Comparison => types::COMPARISON,
             HlOperator::Other => types::OPERATOR,
         },
@@ -840,6 +882,7 @@ fn semantic_token_type_and_modifiers(
             HlMod::ControlFlow => mods::CONTROL_FLOW,
             HlMod::CrateRoot => mods::CRATE_ROOT,
             HlMod::DefaultLibrary => mods::DEFAULT_LIBRARY,
+            HlMod::Deprecated => mods::DEPRECATED,
             HlMod::Definition => mods::DECLARATION,
             HlMod::Documentation => mods::DOCUMENTATION,
             HlMod::Injected => mods::INJECTED,
@@ -870,15 +913,18 @@ pub(crate) fn folding_range(
         FoldKind::Comment => Some(lsp_types::FoldingRangeKind::Comment),
         FoldKind::Imports => Some(lsp_types::FoldingRangeKind::Imports),
         FoldKind::Region => Some(lsp_types::FoldingRangeKind::Region),
-        FoldKind::Mods
+        FoldKind::Modules
         | FoldKind::Block
         | FoldKind::ArgList
         | FoldKind::Consts
         | FoldKind::Statics
+        | FoldKind::TypeAliases
         | FoldKind::WhereClause
         | FoldKind::ReturnType
         | FoldKind::Array
-        | FoldKind::MatchArm => None,
+        | FoldKind::ExternCrates
+        | FoldKind::MatchArm
+        | FoldKind::Function => None,
     };
 
     let range = range(line_index, fold.range);
@@ -1054,9 +1100,11 @@ fn merge_text_and_snippet_edits(
     line_index: &LineIndex,
     edit: TextEdit,
     snippet_edit: SnippetEdit,
+    client_supports_annotations: bool,
 ) -> Vec<SnippetTextEdit> {
     let mut edits: Vec<SnippetTextEdit> = vec![];
     let mut snippets = snippet_edit.into_edit_ranges().into_iter().peekable();
+    let annotation = edit.change_annotation();
     let text_edits = edit.into_iter();
     // offset to go from the final source location to the original source location
     let mut source_text_offset = 0i32;
@@ -1103,6 +1151,8 @@ fn merge_text_and_snippet_edits(
                 line_index,
                 true,
                 Indel { insert: format!("${snippet_index}"), delete: snippet_range },
+                annotation,
+                client_supports_annotations,
             ))
         }
 
@@ -1161,11 +1211,19 @@ fn merge_text_and_snippet_edits(
                 line_index,
                 true,
                 Indel { insert: new_text, delete: current_indel.delete },
+                annotation,
+                client_supports_annotations,
             ))
         } else {
             // snippet edit was beyond the current one
             // since it wasn't consumed, it's available for the next pass
-            edits.push(snippet_text_edit(line_index, false, current_indel));
+            edits.push(snippet_text_edit(
+                line_index,
+                false,
+                current_indel,
+                annotation,
+                client_supports_annotations,
+            ));
         }
 
         // update the final source -> initial source mapping offset
@@ -1191,6 +1249,8 @@ fn merge_text_and_snippet_edits(
             line_index,
             true,
             Indel { insert: format!("${snippet_index}"), delete: snippet_range },
+            annotation,
+            client_supports_annotations,
         )
     }));
 
@@ -1206,10 +1266,22 @@ pub(crate) fn snippet_text_document_edit(
 ) -> Cancellable<lsp_ext::SnippetTextDocumentEdit> {
     let text_document = optional_versioned_text_document_identifier(snap, file_id);
     let line_index = snap.file_line_index(file_id)?;
+    let client_supports_annotations = snap.config.change_annotation_support();
     let mut edits = if let Some(snippet_edit) = snippet_edit {
-        merge_text_and_snippet_edits(&line_index, edit, snippet_edit)
+        merge_text_and_snippet_edits(&line_index, edit, snippet_edit, client_supports_annotations)
     } else {
-        edit.into_iter().map(|it| snippet_text_edit(&line_index, is_snippet, it)).collect()
+        let annotation = edit.change_annotation();
+        edit.into_iter()
+            .map(|it| {
+                snippet_text_edit(
+                    &line_index,
+                    is_snippet,
+                    it,
+                    annotation,
+                    client_supports_annotations,
+                )
+            })
+            .collect()
     };
 
     if snap.analysis.is_library_file(file_id)? && snap.config.change_annotation_support() {
@@ -1330,6 +1402,16 @@ pub(crate) fn snippet_workspace_edit(
                     )),
                 },
             ))
+            .chain(source_change.annotations.into_iter().map(|(id, annotation)| {
+                (
+                    id.to_string(),
+                    lsp_types::ChangeAnnotation {
+                        label: annotation.label,
+                        description: annotation.description,
+                        needs_confirmation: Some(annotation.needs_confirmation),
+                    },
+                )
+            }))
             .collect(),
         )
     }
@@ -1411,7 +1493,7 @@ pub(crate) fn call_hierarchy_item(
 
 pub(crate) fn code_action_kind(kind: AssistKind) -> lsp_types::CodeActionKind {
     match kind {
-        AssistKind::None | AssistKind::Generate => lsp_types::CodeActionKind::EMPTY,
+        AssistKind::Generate => lsp_types::CodeActionKind::EMPTY,
         AssistKind::QuickFix => lsp_types::CodeActionKind::QUICKFIX,
         AssistKind::Refactor => lsp_types::CodeActionKind::REFACTOR,
         AssistKind::RefactorExtract => lsp_types::CodeActionKind::REFACTOR_EXTRACT,
@@ -1422,6 +1504,7 @@ pub(crate) fn code_action_kind(kind: AssistKind) -> lsp_types::CodeActionKind {
 
 pub(crate) fn code_action(
     snap: &GlobalStateSnapshot,
+    commands: &ClientCommandsConfig,
     assist: Assist,
     resolve_data: Option<(usize, lsp_types::CodeActionParams, Option<i32>)>,
 ) -> Cancellable<lsp_ext::CodeAction> {
@@ -1435,7 +1518,6 @@ pub(crate) fn code_action(
         command: None,
     };
 
-    let commands = snap.config.client_commands();
     res.command = match assist.command {
         Some(assists::Command::TriggerParameterHints) if commands.trigger_parameter_hints => {
             Some(command::trigger_parameter_hints())
@@ -1448,7 +1530,12 @@ pub(crate) fn code_action(
         (Some(it), _) => res.edit = Some(snippet_workspace_edit(snap, it)?),
         (None, Some((index, code_action_params, version))) => {
             res.data = Some(lsp_ext::CodeActionData {
-                id: format!("{}:{}:{index}", assist.id.0, assist.id.1.name()),
+                id: format!(
+                    "{}:{}:{index}:{}",
+                    assist.id.0,
+                    assist.id.1.name(),
+                    assist.id.2.map(|x| x.to_string()).unwrap_or("".to_owned())
+                ),
                 code_action_params,
                 version,
             });
@@ -1482,7 +1569,7 @@ pub(crate) fn runnable(
             );
 
             let cwd = match runnable.kind {
-                ide::RunnableKind::Bin { .. } => workspace_root.clone(),
+                ide::RunnableKind::Bin => workspace_root.clone(),
                 _ => spec.cargo_toml.parent().to_owned(),
             };
 
@@ -1567,6 +1654,7 @@ pub(crate) fn code_lens(
             let line_index = snap.file_line_index(run.nav.file_id)?;
             let annotation_range = range(&line_index, annotation.range);
 
+            let update_test = run.update_test;
             let title = run.title();
             let can_debug = match run.kind {
                 ide::RunnableKind::DocTest { .. } => false,
@@ -1601,6 +1689,17 @@ pub(crate) fn code_lens(
                             command: Some(command),
                             data: None,
                         })
+                    }
+                    if lens_config.update_test && client_commands_config.run_single {
+                        let label = update_test.label();
+                        if let Some(r) = make_update_runnable(&r, update_test) {
+                            let command = command::run_single(&r, label.unwrap().as_str());
+                            acc.push(lsp_types::CodeLens {
+                                range: annotation_range,
+                                command: Some(command),
+                                data: None,
+                            })
+                        }
                     }
                 }
 
@@ -1786,7 +1885,7 @@ pub(crate) mod command {
 
     pub(crate) fn debug_single(runnable: &lsp_ext::Runnable) -> lsp_types::Command {
         lsp_types::Command {
-            title: "Debug".into(),
+            title: "⚙\u{fe0e} Debug".into(),
             command: "rust-analyzer.debugSingle".into(),
             arguments: Some(vec![to_value(runnable).unwrap()]),
         }
@@ -1838,20 +1937,34 @@ pub(crate) mod command {
     }
 }
 
-pub(crate) fn implementation_title(count: usize) -> String {
-    if count == 1 {
-        "1 implementation".into()
-    } else {
-        format!("{count} implementations")
+pub(crate) fn make_update_runnable(
+    runnable: &lsp_ext::Runnable,
+    update_test: UpdateTest,
+) -> Option<lsp_ext::Runnable> {
+    let label = update_test.label()?;
+
+    let mut runnable = runnable.clone();
+    runnable.label = format!("{} + {}", runnable.label, label);
+
+    let lsp_ext::RunnableArgs::Cargo(r) = &mut runnable.args else {
+        return None;
+    };
+
+    r.environment.extend(update_test.env().iter().map(|(k, v)| (k.to_string(), v.to_string())));
+
+    if update_test.insta {
+        r.cargo_args.insert(0, "insta".to_owned());
     }
+
+    Some(runnable)
+}
+
+pub(crate) fn implementation_title(count: usize) -> String {
+    if count == 1 { "1 implementation".into() } else { format!("{count} implementations") }
 }
 
 pub(crate) fn reference_title(count: usize) -> String {
-    if count == 1 {
-        "1 reference".into()
-    } else {
-        format!("{count} references")
-    }
+    if count == 1 { "1 reference".into() } else { format!("{count} references") }
 }
 
 pub(crate) fn markup_content(
@@ -1862,7 +1975,7 @@ pub(crate) fn markup_content(
         ide::HoverDocFormat::Markdown => lsp_types::MarkupKind::Markdown,
         ide::HoverDocFormat::PlainText => lsp_types::MarkupKind::PlainText,
     };
-    let value = format_docs(&Documentation::new(markup.into()));
+    let value = format_docs(&Documentation::new_owned(markup.into()));
     lsp_types::MarkupContent { kind, value }
 }
 
@@ -1874,7 +1987,7 @@ pub(crate) fn rename_error(err: RenameError) -> LspError {
 
 #[cfg(test)]
 mod tests {
-    use expect_test::{expect, Expect};
+    use expect_test::{Expect, expect};
     use ide::{Analysis, FilePosition};
     use ide_db::source_change::Snippet;
     use test_utils::extract_offset;
@@ -1958,7 +2071,7 @@ fn bar(_: usize) {}
 
     #[track_caller]
     fn check_rendered_snippets_in_source(
-        ra_fixture: &str,
+        #[rust_analyzer::rust_fixture] ra_fixture: &str,
         edit: TextEdit,
         snippets: SnippetEdit,
         expect: Expect,
@@ -1971,7 +2084,7 @@ fn bar(_: usize) {}
             encoding: PositionEncoding::Utf8,
         };
 
-        let res = merge_text_and_snippet_edits(&line_index, edit, snippets);
+        let res = merge_text_and_snippet_edits(&line_index, edit, snippets, true);
 
         // Ensure that none of the ranges overlap
         {

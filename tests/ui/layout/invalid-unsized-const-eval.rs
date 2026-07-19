@@ -10,5 +10,6 @@ struct LazyLock {
 }
 
 static EMPTY_SET: LazyLock = todo!();
+//~^ ERROR the type `(dyn Sync, ())` has an unknown layout
 
 fn main() {}

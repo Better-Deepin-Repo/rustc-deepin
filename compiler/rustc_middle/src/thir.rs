@@ -11,6 +11,7 @@
 use std::cmp::Ordering;
 use std::fmt;
 use std::ops::Index;
+use std::sync::Arc;
 
 use rustc_abi::{FieldIdx, Integer, Size, VariantIdx};
 use rustc_ast::{AsmMacro, InlineAsmOptions, InlineAsmTemplatePiece};
@@ -19,27 +20,26 @@ use rustc_hir::def_id::DefId;
 use rustc_hir::{BindingMode, ByRef, HirId, MatchSource, RangeEnd};
 use rustc_index::{IndexVec, newtype_index};
 use rustc_macros::{HashStable, TyDecodable, TyEncodable, TypeVisitable};
-use rustc_middle::middle::region;
-use rustc_middle::mir::interpret::AllocId;
-use rustc_middle::mir::{self, BinOp, BorrowKind, FakeReadCause, UnOp};
-use rustc_middle::ty::adjustment::PointerCoercion;
-use rustc_middle::ty::layout::IntegerExt;
-use rustc_middle::ty::{
-    self, AdtDef, CanonicalUserType, CanonicalUserTypeAnnotation, FnSig, GenericArgsRef, List, Ty,
-    TyCtxt, UpvarArgs,
-};
 use rustc_span::def_id::LocalDefId;
 use rustc_span::{ErrorGuaranteed, Span, Symbol};
 use rustc_target::asm::InlineAsmRegOrRegClass;
 use tracing::instrument;
 
+use crate::middle::region;
+use crate::mir::interpret::AllocId;
+use crate::mir::{self, AssignOp, BinOp, BorrowKind, FakeReadCause, UnOp};
+use crate::thir::visit::for_each_immediate_subpat;
+use crate::ty::adjustment::PointerCoercion;
+use crate::ty::layout::IntegerExt;
+use crate::ty::{
+    self, AdtDef, CanonicalUserType, CanonicalUserTypeAnnotation, FnSig, GenericArgsRef, Ty,
+    TyCtxt, UpvarArgs,
+};
+
 pub mod visit;
 
 macro_rules! thir_with_elements {
     (
-        $($field_name:ident: $field_ty:ty,)*
-
-    @elements:
         $($name:ident: $id:ty => $value:ty => $format:literal,)*
     ) => {
         $(
@@ -50,25 +50,24 @@ macro_rules! thir_with_elements {
             }
         )*
 
+        // Note: Making `Thir` implement `Clone` is useful for external tools that need access to
+        // THIR bodies even after the `Steal` query result has been stolen.
+        // One such tool is https://github.com/rust-corpus/qrates/.
         /// A container for a THIR body.
         ///
         /// This can be indexed directly by any THIR index (e.g. [`ExprId`]).
         #[derive(Debug, HashStable, Clone)]
         pub struct Thir<'tcx> {
-            $(
-                pub $field_name: $field_ty,
-            )*
+            pub body_type: BodyTy<'tcx>,
             $(
                 pub $name: IndexVec<$id, $value>,
             )*
         }
 
         impl<'tcx> Thir<'tcx> {
-            pub fn new($($field_name: $field_ty,)*) -> Thir<'tcx> {
+            pub fn new(body_type: BodyTy<'tcx>) -> Thir<'tcx> {
                 Thir {
-                    $(
-                        $field_name,
-                    )*
+                    body_type,
                     $(
                         $name: IndexVec::new(),
                     )*
@@ -88,9 +87,6 @@ macro_rules! thir_with_elements {
 }
 
 thir_with_elements! {
-    body_type: BodyTy<'tcx>,
-
-@elements:
     arms: ArmId => Arm<'tcx> => "a{}",
     blocks: BlockId => Block => "b{}",
     exprs: ExprId => Expr<'tcx> => "e{}",
@@ -102,6 +98,7 @@ thir_with_elements! {
 pub enum BodyTy<'tcx> {
     Const(Ty<'tcx>),
     Fn(FnSig<'tcx>),
+    GlobalAsm(Ty<'tcx>),
 }
 
 /// Description of a type-checked function parameter.
@@ -259,23 +256,13 @@ pub struct Expr<'tcx> {
     /// The type of this expression
     pub ty: Ty<'tcx>,
 
-    /// The lifetime of this expression if it should be spilled into a
-    /// temporary
-    pub temp_lifetime: TempLifetime,
+    /// The id of the HIR expression whose [temporary scope] should be used for this expression.
+    ///
+    /// [temporary scope]: https://doc.rust-lang.org/reference/destructors.html#temporary-scopes
+    pub temp_scope_id: hir::ItemLocalId,
 
     /// span of the expression in the source
     pub span: Span,
-}
-
-/// Temporary lifetime information for THIR expressions
-#[derive(Clone, Copy, Debug, HashStable)]
-pub struct TempLifetime {
-    /// Lifetime for temporaries as expected.
-    /// This should be `None` in a constant context.
-    pub temp_lifetime: Option<region::Scope>,
-    /// If `Some(lt)`, indicates that the lifetime of this temporary will change to `lt` in a future edition.
-    /// If `None`, then no changes are expected, or lints are disabled.
-    pub backwards_incompatible: Option<region::Scope>,
 }
 
 #[derive(Clone, Debug, HashStable)]
@@ -295,7 +282,10 @@ pub enum ExprKind<'tcx> {
     If {
         if_then_scope: region::Scope,
         cond: ExprId,
+        /// `then` is always `ExprKind::Block`.
         then: ExprId,
+        /// If present, the `else_opt` expr is always `ExprKind::Block` (for
+        /// `else`) or `ExprKind::If` (for `else if`).
         else_opt: Option<ExprId>,
     },
     /// A function call. Method calls and overloaded operators are converted to plain function calls.
@@ -318,6 +308,14 @@ pub enum ExprKind<'tcx> {
         /// The span of the function, without the dot and receiver
         /// (e.g. `foo(a, b)` in `x.foo(a, b)`).
         fn_span: Span,
+    },
+    /// A use expression `x.use`.
+    ByUse {
+        /// The expression on which use is applied.
+        expr: ExprId,
+        /// The span of use, without the dot and receiver
+        /// (e.g. `use` in `x.use`).
+        span: Span,
     },
     /// A *non-overloaded* dereference.
     Deref {
@@ -370,6 +368,14 @@ pub enum ExprKind<'tcx> {
     Loop {
         body: ExprId,
     },
+    /// A `#[loop_match] loop { state = 'blk: { match state { ... } } }` expression.
+    LoopMatch {
+        /// The state variable that is updated.
+        /// The `match_data.scrutinee` is the same variable, but with a different span.
+        state: ExprId,
+        region_scope: region::Scope,
+        match_data: Box<LoopMatchMatchData>,
+    },
     /// Special expression representing the `let` part of an `if let` or similar construct
     /// (including `if let` guards in match arms, and let-chains formed by `&&`).
     ///
@@ -384,7 +390,6 @@ pub enum ExprKind<'tcx> {
     /// A `match` expression.
     Match {
         scrutinee: ExprId,
-        scrutinee_hir_id: HirId,
         arms: Box<[ArmId]>,
         match_source: MatchSource,
     },
@@ -399,7 +404,7 @@ pub enum ExprKind<'tcx> {
     },
     /// A *non-overloaded* operation assignment, e.g. `lhs += rhs`.
     AssignOp {
-        op: BinOp,
+        op: AssignOp,
         lhs: ExprId,
         rhs: ExprId,
     },
@@ -447,6 +452,11 @@ pub enum ExprKind<'tcx> {
     Continue {
         label: region::Scope,
     },
+    /// A `#[const_continue] break` expression.
+    ConstContinue {
+        label: region::Scope,
+        value: ExprId,
+    },
     /// A `return` expression.
     Return {
         value: Option<ExprId>,
@@ -489,11 +499,24 @@ pub enum ExprKind<'tcx> {
         user_ty: UserTy<'tcx>,
         user_ty_span: Span,
     },
+    /// An unsafe binder cast on a place, e.g. `unwrap_binder!(*ptr)`.
+    PlaceUnwrapUnsafeBinder {
+        source: ExprId,
+    },
+    /// An unsafe binder cast on a value, e.g. `unwrap_binder!(rvalue())`,
+    /// which makes a temporary.
+    ValueUnwrapUnsafeBinder {
+        source: ExprId,
+    },
+    /// Construct an unsafe binder, e.g. `wrap_binder(&ref)`.
+    WrapUnsafeBinder {
+        source: ExprId,
+    },
     /// A closure definition.
     Closure(Box<ClosureExpr<'tcx>>),
     /// A literal.
     Literal {
-        lit: &'tcx hir::Lit,
+        lit: hir::Lit,
         neg: bool,
     },
     /// For literals that don't correspond to anything in the HIR
@@ -527,11 +550,6 @@ pub enum ExprKind<'tcx> {
     },
     /// Inline assembly, i.e. `asm!()`.
     InlineAsm(Box<InlineAsmExpr<'tcx>>),
-    /// Field offset (`offset_of!`)
-    OffsetOf {
-        container: Ty<'tcx>,
-        fields: &'tcx List<(VariantIdx, FieldIdx)>,
-    },
     /// An expression taking a reference to a thread local.
     ThreadLocalRef(DefId),
     /// A `yield` expression.
@@ -563,6 +581,14 @@ pub struct Arm<'tcx> {
     pub body: ExprId,
     pub lint_level: LintLevel,
     pub scope: region::Scope,
+    pub span: Span,
+}
+
+/// The `match` part of a `#[loop_match]`
+#[derive(Clone, Debug, HashStable)]
+pub struct LoopMatchMatchData {
+    pub scrutinee: ExprId,
+    pub arms: Box<[ArmId]>,
     pub span: Span,
 }
 
@@ -601,8 +627,7 @@ pub enum InlineAsmOperand<'tcx> {
         span: Span,
     },
     SymFn {
-        value: mir::Const<'tcx>,
-        span: Span,
+        value: ExprId,
     },
     SymStatic {
         def_id: DefId,
@@ -615,7 +640,7 @@ pub enum InlineAsmOperand<'tcx> {
 #[derive(Clone, Debug, HashStable, TypeVisitable)]
 pub struct FieldPat<'tcx> {
     pub field: FieldIdx,
-    pub pattern: Box<Pat<'tcx>>,
+    pub pattern: Pat<'tcx>,
 }
 
 #[derive(Clone, Debug, HashStable, TypeVisitable)]
@@ -657,28 +682,7 @@ impl<'tcx> Pat<'tcx> {
             return;
         }
 
-        use PatKind::*;
-        match &self.kind {
-            Wild
-            | Never
-            | Range(..)
-            | Binding { subpattern: None, .. }
-            | Constant { .. }
-            | Error(_) => {}
-            AscribeUserType { subpattern, .. }
-            | Binding { subpattern: Some(subpattern), .. }
-            | Deref { subpattern }
-            | DerefPattern { subpattern, .. }
-            | ExpandedConstant { subpattern, .. } => subpattern.walk_(it),
-            Leaf { subpatterns } | Variant { subpatterns, .. } => {
-                subpatterns.iter().for_each(|field| field.pattern.walk_(it))
-            }
-            Or { pats } => pats.iter().for_each(|p| p.walk_(it)),
-            Array { box ref prefix, ref slice, box ref suffix }
-            | Slice { box ref prefix, ref slice, box ref suffix } => {
-                prefix.iter().chain(slice.iter()).chain(suffix.iter()).for_each(|p| p.walk_(it))
-            }
-        }
+        for_each_immediate_subpat(self, |p| p.walk_(it));
     }
 
     /// Whether the pattern has a `PatKind::Error` nested within.
@@ -752,6 +756,9 @@ pub struct Ascription<'tcx> {
 
 #[derive(Clone, Debug, HashStable, TypeVisitable)]
 pub enum PatKind<'tcx> {
+    /// A missing pattern, e.g. for an anonymous param in a bare fn like `fn f(u32)`.
+    Missing,
+
     /// A wildcard pattern: `_`.
     Wild,
 
@@ -769,9 +776,15 @@ pub enum PatKind<'tcx> {
         var: LocalVarId,
         ty: Ty<'tcx>,
         subpattern: Option<Box<Pat<'tcx>>>,
+
         /// Is this the leftmost occurrence of the binding, i.e., is `var` the
         /// `HirId` of this pattern?
+        ///
+        /// (The same binding can occur multiple times in different branches of
+        /// an or-pattern, but only one of them will be primary.)
         is_primary: bool,
+        /// Is this binding a shorthand struct pattern, i.e. `Foo { a }`?
+        is_shorthand: bool,
     },
 
     /// `Foo(...)` or `Foo{...}` or `Foo`, where `Foo` is a variant name from an ADT with
@@ -797,64 +810,65 @@ pub enum PatKind<'tcx> {
     /// Deref pattern, written `box P` for now.
     DerefPattern {
         subpattern: Box<Pat<'tcx>>,
-        mutability: hir::Mutability,
+        /// Whether the pattern scrutinee needs to be borrowed in order to call `Deref::deref` or
+        /// `DerefMut::deref_mut`, and if so, which. This is `ByRef::No` for deref patterns on
+        /// boxes; they are lowered using a built-in deref rather than a method call, thus they
+        /// don't borrow the scrutinee.
+        #[type_visitable(ignore)]
+        borrow: ByRef,
     },
 
     /// One of the following:
-    /// * `&str`/`&[u8]` (represented as a valtree), which will be handled as a string/slice pattern
-    ///   and thus exhaustiveness checking will detect if you use the same string/slice twice in
-    ///   different patterns.
-    /// * integer, bool, char or float (represented as a valtree), which will be handled by
+    /// * `&str`, which will be handled as a string pattern and thus
+    ///   exhaustiveness checking will detect if you use the same string twice in different
+    ///   patterns.
+    /// * integer, bool, char or float, which will be handled by
     ///   exhaustiveness to cover exactly its own value, similar to `&str`, but these values are
     ///   much simpler.
+    /// * raw pointers derived from integers, other raw pointers will have already resulted in an
+    ///   error.
     /// * `String`, if `string_deref_patterns` is enabled.
     Constant {
-        value: mir::Const<'tcx>,
+        value: ty::Value<'tcx>,
     },
 
     /// Pattern obtained by converting a constant (inline or named) to its pattern
-    /// representation using `const_to_pat`.
+    /// representation using `const_to_pat`. This is used for unsafety checking.
     ExpandedConstant {
-        /// [DefId] of the constant, we need this so that we have a
-        /// reference that can be used by unsafety checking to visit nested
-        /// unevaluated constants and for diagnostics. If the `DefId` doesn't
-        /// correspond to a local crate, it points at the `const` item.
+        /// [DefId] of the constant item.
         def_id: DefId,
-        /// If `false`, then `def_id` points at a `const` item, otherwise it
-        /// corresponds to a local inline const.
-        is_inline: bool,
-        /// If the inline constant is used in a range pattern, this subpattern
-        /// represents the range (if both ends are inline constants, there will
-        /// be multiple InlineConstant wrappers).
+        /// The pattern that the constant lowered to.
         ///
-        /// Otherwise, the actual pattern that the constant lowered to. As with
-        /// other constants, inline constants are matched structurally where
-        /// possible.
+        /// HACK: we need to keep the `DefId` of inline constants around for unsafety checking;
+        /// therefore when a range pattern contains inline constants, we re-wrap the range pattern
+        /// with the `ExpandedConstant` nodes that correspond to the range endpoints. Hence
+        /// `subpattern` may actually be a range pattern, and `def_id` be the constant for one of
+        /// its endpoints.
         subpattern: Box<Pat<'tcx>>,
     },
 
-    Range(Box<PatRange<'tcx>>),
+    Range(Arc<PatRange<'tcx>>),
 
     /// Matches against a slice, checking the length and extracting elements.
     /// irrefutable when there is a slice pattern and both `prefix` and `suffix` are empty.
     /// e.g., `&[ref xs @ ..]`.
     Slice {
-        prefix: Box<[Box<Pat<'tcx>>]>,
+        prefix: Box<[Pat<'tcx>]>,
         slice: Option<Box<Pat<'tcx>>>,
-        suffix: Box<[Box<Pat<'tcx>>]>,
+        suffix: Box<[Pat<'tcx>]>,
     },
 
     /// Fixed match against an array; irrefutable.
     Array {
-        prefix: Box<[Box<Pat<'tcx>>]>,
+        prefix: Box<[Pat<'tcx>]>,
         slice: Option<Box<Pat<'tcx>>>,
-        suffix: Box<[Box<Pat<'tcx>>]>,
+        suffix: Box<[Pat<'tcx>]>,
     },
 
     /// An or-pattern, e.g. `p | q`.
     /// Invariant: `pats.len() >= 2`.
     Or {
-        pats: Box<[Box<Pat<'tcx>>]>,
+        pats: Box<[Pat<'tcx>]>,
     },
 
     /// A never pattern `!`.
@@ -908,7 +922,7 @@ impl<'tcx> PatRange<'tcx> {
         let lo_is_min = match self.lo {
             PatRangeBoundary::NegInfinity => true,
             PatRangeBoundary::Finite(value) => {
-                let lo = value.try_to_bits(size).unwrap() ^ bias;
+                let lo = value.try_to_scalar_int().unwrap().to_bits(size) ^ bias;
                 lo <= min
             }
             PatRangeBoundary::PosInfinity => false,
@@ -917,7 +931,7 @@ impl<'tcx> PatRange<'tcx> {
             let hi_is_max = match self.hi {
                 PatRangeBoundary::NegInfinity => false,
                 PatRangeBoundary::Finite(value) => {
-                    let hi = value.try_to_bits(size).unwrap() ^ bias;
+                    let hi = value.try_to_scalar_int().unwrap().to_bits(size) ^ bias;
                     hi > max || hi == max && self.end == RangeEnd::Included
                 }
                 PatRangeBoundary::PosInfinity => true,
@@ -930,22 +944,17 @@ impl<'tcx> PatRange<'tcx> {
     }
 
     #[inline]
-    pub fn contains(
-        &self,
-        value: mir::Const<'tcx>,
-        tcx: TyCtxt<'tcx>,
-        typing_env: ty::TypingEnv<'tcx>,
-    ) -> Option<bool> {
+    pub fn contains(&self, value: ty::Value<'tcx>, tcx: TyCtxt<'tcx>) -> Option<bool> {
         use Ordering::*;
-        debug_assert_eq!(self.ty, value.ty());
+        debug_assert_eq!(value.ty, self.ty);
         let ty = self.ty;
-        let value = PatRangeBoundary::Finite(value);
+        let value = PatRangeBoundary::Finite(value.valtree);
         // For performance, it's important to only do the second comparison if necessary.
         Some(
-            match self.lo.compare_with(value, ty, tcx, typing_env)? {
+            match self.lo.compare_with(value, ty, tcx)? {
                 Less | Equal => true,
                 Greater => false,
-            } && match value.compare_with(self.hi, ty, tcx, typing_env)? {
+            } && match value.compare_with(self.hi, ty, tcx)? {
                 Less => true,
                 Equal => self.end == RangeEnd::Included,
                 Greater => false,
@@ -954,21 +963,16 @@ impl<'tcx> PatRange<'tcx> {
     }
 
     #[inline]
-    pub fn overlaps(
-        &self,
-        other: &Self,
-        tcx: TyCtxt<'tcx>,
-        typing_env: ty::TypingEnv<'tcx>,
-    ) -> Option<bool> {
+    pub fn overlaps(&self, other: &Self, tcx: TyCtxt<'tcx>) -> Option<bool> {
         use Ordering::*;
         debug_assert_eq!(self.ty, other.ty);
         // For performance, it's important to only do the second comparison if necessary.
         Some(
-            match other.lo.compare_with(self.hi, self.ty, tcx, typing_env)? {
+            match other.lo.compare_with(self.hi, self.ty, tcx)? {
                 Less => true,
                 Equal => self.end == RangeEnd::Included,
                 Greater => false,
-            } && match self.lo.compare_with(other.hi, self.ty, tcx, typing_env)? {
+            } && match self.lo.compare_with(other.hi, self.ty, tcx)? {
                 Less => true,
                 Equal => other.end == RangeEnd::Included,
                 Greater => false,
@@ -979,11 +983,13 @@ impl<'tcx> PatRange<'tcx> {
 
 impl<'tcx> fmt::Display for PatRange<'tcx> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let PatRangeBoundary::Finite(value) = &self.lo {
+        if let &PatRangeBoundary::Finite(valtree) = &self.lo {
+            let value = ty::Value { ty: self.ty, valtree };
             write!(f, "{value}")?;
         }
-        if let PatRangeBoundary::Finite(value) = &self.hi {
+        if let &PatRangeBoundary::Finite(valtree) = &self.hi {
             write!(f, "{}", self.end)?;
+            let value = ty::Value { ty: self.ty, valtree };
             write!(f, "{value}")?;
         } else {
             // `0..` is parsed as an inclusive range, we must display it correctly.
@@ -997,7 +1003,8 @@ impl<'tcx> fmt::Display for PatRange<'tcx> {
 /// If present, the const must be of a numeric type.
 #[derive(Copy, Clone, Debug, PartialEq, HashStable, TypeVisitable)]
 pub enum PatRangeBoundary<'tcx> {
-    Finite(mir::Const<'tcx>),
+    /// The type of this valtree is stored in the surrounding `PatRange`.
+    Finite(ty::ValTree<'tcx>),
     NegInfinity,
     PosInfinity,
 }
@@ -1008,20 +1015,15 @@ impl<'tcx> PatRangeBoundary<'tcx> {
         matches!(self, Self::Finite(..))
     }
     #[inline]
-    pub fn as_finite(self) -> Option<mir::Const<'tcx>> {
+    pub fn as_finite(self) -> Option<ty::ValTree<'tcx>> {
         match self {
             Self::Finite(value) => Some(value),
             Self::NegInfinity | Self::PosInfinity => None,
         }
     }
-    pub fn eval_bits(
-        self,
-        ty: Ty<'tcx>,
-        tcx: TyCtxt<'tcx>,
-        typing_env: ty::TypingEnv<'tcx>,
-    ) -> u128 {
+    pub fn to_bits(self, ty: Ty<'tcx>, tcx: TyCtxt<'tcx>) -> u128 {
         match self {
-            Self::Finite(value) => value.eval_bits(tcx, typing_env),
+            Self::Finite(value) => value.try_to_scalar_int().unwrap().to_bits_unchecked(),
             Self::NegInfinity => {
                 // Unwrap is ok because the type is known to be numeric.
                 ty.numeric_min_and_max_as_bits(tcx).unwrap().0
@@ -1033,14 +1035,8 @@ impl<'tcx> PatRangeBoundary<'tcx> {
         }
     }
 
-    #[instrument(skip(tcx, typing_env), level = "debug", ret)]
-    pub fn compare_with(
-        self,
-        other: Self,
-        ty: Ty<'tcx>,
-        tcx: TyCtxt<'tcx>,
-        typing_env: ty::TypingEnv<'tcx>,
-    ) -> Option<Ordering> {
+    #[instrument(skip(tcx), level = "debug", ret)]
+    pub fn compare_with(self, other: Self, ty: Ty<'tcx>, tcx: TyCtxt<'tcx>) -> Option<Ordering> {
         use PatRangeBoundary::*;
         match (self, other) {
             // When comparing with infinities, we must remember that `0u8..` and `0u8..=255`
@@ -1068,8 +1064,8 @@ impl<'tcx> PatRangeBoundary<'tcx> {
             _ => {}
         }
 
-        let a = self.eval_bits(ty, tcx, typing_env);
-        let b = other.eval_bits(ty, tcx, typing_env);
+        let a = self.to_bits(ty, tcx);
+        let b = other.to_bits(ty, tcx);
 
         match ty.kind() {
             ty::Float(ty::FloatTy::F16) => {
@@ -1116,7 +1112,7 @@ mod size_asserts {
     use super::*;
     // tidy-alphabetical-start
     static_assert_size!(Block, 48);
-    static_assert_size!(Expr<'_>, 72);
+    static_assert_size!(Expr<'_>, 64);
     static_assert_size!(ExprKind<'_>, 40);
     static_assert_size!(Pat<'_>, 64);
     static_assert_size!(PatKind<'_>, 48);

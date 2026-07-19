@@ -134,8 +134,8 @@ As of `2025-01-02T`, the list of known names is as follows:
  - `unix`
  - `windows`
 
-> Starting with 1.85.0, the `test` cfg is consider to be a "userspace" config
-> despite being also set by `rustc` and should be managed by the build-system it-self.
+> Starting with 1.85.0, the `test` cfg is considered to be a "userspace" config
+> despite being also set by `rustc` and should be managed by the build system itself.
 
 Like with `values(any())`, well known names checking can be disabled by passing `cfg(any())`
 as argument to `--check-cfg`.

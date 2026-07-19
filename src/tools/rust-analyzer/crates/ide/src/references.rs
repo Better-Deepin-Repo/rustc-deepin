@@ -8,59 +8,126 @@
 //! for text occurrences of the identifier. If there's an `ast::NameRef`
 //! at the index that the match starts at and its tree parent is
 //! resolved to the search element definition, we get a reference.
+//!
+//! Special handling for constructors/initializations:
+//! When searching for references to a struct/enum/variant, if the cursor is positioned on:
+//! - `{` after a struct/enum/variant definition
+//! - `(` for tuple structs/variants
+//! - `;` for unit structs
+//! - The type name in a struct/enum/variant definition
+//!   Then only constructor/initialization usages will be shown, filtering out other references.
 
 use hir::{PathResolution, Semantics};
 use ide_db::{
+    FileId, MiniCore, RootDatabase,
     defs::{Definition, NameClass, NameRefClass},
+    helpers::pick_best_token,
+    ra_fixture::UpmapFromRaFixture,
     search::{ReferenceCategory, SearchScope, UsageSearchResult},
-    FileId, RootDatabase,
 };
 use itertools::Itertools;
+use macros::UpmapFromRaFixture;
 use nohash_hasher::IntMap;
-use span::Edition;
+use syntax::AstToken;
 use syntax::{
-    ast::{self, HasName},
-    match_ast, AstNode,
+    AstNode,
     SyntaxKind::*,
-    SyntaxNode, TextRange, TextSize, T,
+    SyntaxNode, T, TextRange, TextSize,
+    ast::{self, HasName},
+    match_ast,
 };
 
-use crate::{highlight_related, FilePosition, HighlightedRange, NavigationTarget, TryToNav};
+use crate::{
+    Analysis, FilePosition, HighlightedRange, NavigationTarget, TryToNav, highlight_related,
+};
 
-#[derive(Debug, Clone)]
+/// Result of a reference search operation.
+#[derive(Debug, Clone, UpmapFromRaFixture)]
 pub struct ReferenceSearchResult {
+    /// Information about the declaration site of the searched item.
+    /// For ADTs (structs/enums), this points to the type definition.
+    /// May be None for primitives or items without clear declaration sites.
     pub declaration: Option<Declaration>,
+    /// All references found, grouped by file.
+    /// For ADTs when searching from a constructor position (e.g. on '{', '(', ';'),
+    /// this only includes constructor/initialization usages.
+    /// The map key is the file ID, and the value is a vector of (range, category) pairs.
+    /// - range: The text range of the reference in the file
+    /// - category: Metadata about how the reference is used (read/write/etc)
     pub references: IntMap<FileId, Vec<(TextRange, ReferenceCategory)>>,
 }
 
-#[derive(Debug, Clone)]
+/// Information about the declaration site of a searched item.
+#[derive(Debug, Clone, UpmapFromRaFixture)]
 pub struct Declaration {
+    /// Navigation information to jump to the declaration
     pub nav: NavigationTarget,
+    /// Whether the declared item is mutable (relevant for variables)
     pub is_mut: bool,
 }
 
 // Feature: Find All References
 //
-// Shows all references of the item at the cursor location
+// Shows all references of the item at the cursor location. This includes:
+// - Direct references to variables, functions, types, etc.
+// - Constructor/initialization references when cursor is on struct/enum definition tokens
+// - References in patterns and type contexts
+// - References through dereferencing and borrowing
+// - References in macro expansions
 //
-// |===
-// | Editor  | Shortcut
+// Special handling for constructors:
+// - When the cursor is on `{`, `(`, or `;` in a struct/enum definition
+// - When the cursor is on the type name in a struct/enum definition
+// These cases will show only constructor/initialization usages of the type
 //
-// | VS Code | kbd:[Shift+Alt+F12]
-// |===
+// | Editor  | Shortcut |
+// |---------|----------|
+// | VS Code | <kbd>Shift+Alt+F12</kbd> |
 //
-// image::https://user-images.githubusercontent.com/48062697/113020670-b7c34f00-917a-11eb-8003-370ac5f2b3cb.gif[]
+// ![Find All References](https://user-images.githubusercontent.com/48062697/113020670-b7c34f00-917a-11eb-8003-370ac5f2b3cb.gif)
+
+#[derive(Debug)]
+pub struct FindAllRefsConfig<'a> {
+    pub search_scope: Option<SearchScope>,
+    pub minicore: MiniCore<'a>,
+}
+
+/// Find all references to the item at the given position.
+///
+/// # Arguments
+/// * `sema` - Semantic analysis context
+/// * `position` - Position in the file where to look for the item
+/// * `search_scope` - Optional scope to limit the search (e.g. current crate only)
+///
+/// # Returns
+/// Returns `None` if no valid item is found at the position.
+/// Otherwise returns a vector of `ReferenceSearchResult`, usually with one element.
+/// Multiple results can occur in case of ambiguity or when searching for trait items.
+///
+/// # Special cases
+/// - Control flow keywords (break, continue, etc): Shows all related jump points
+/// - Constructor search: When on struct/enum definition tokens (`{`, `(`, `;`), shows only initialization sites
+/// - Format string arguments: Shows template parameter usages
+/// - Lifetime parameters: Shows lifetime constraint usages
+///
+/// # Constructor search
+/// When the cursor is on specific tokens in a struct/enum definition:
+/// - `{` after struct/enum/variant: Shows record literal initializations
+/// - `(` after tuple struct/variant: Shows tuple literal initializations
+/// - `;` after unit struct: Shows unit literal initializations
+/// - Type name in definition: Shows all initialization usages
+///   In these cases, other kinds of references (like type references) are filtered out.
 pub(crate) fn find_all_refs(
     sema: &Semantics<'_, RootDatabase>,
     position: FilePosition,
-    search_scope: Option<SearchScope>,
+    config: &FindAllRefsConfig<'_>,
 ) -> Option<Vec<ReferenceSearchResult>> {
     let _p = tracing::info_span!("find_all_refs").entered();
     let syntax = sema.parse_guess_edition(position.file_id).syntax().clone();
     let make_searcher = |literal_search: bool| {
         move |def: Definition| {
             let mut usages =
-                def.usages(sema).set_scope(search_scope.as_ref()).include_self_refs().all();
+                def.usages(sema).set_scope(config.search_scope.as_ref()).include_self_refs().all();
             if literal_search {
                 retain_adt_literal_usages(&mut usages, def, sema);
             }
@@ -69,7 +136,7 @@ pub(crate) fn find_all_refs(
                 .into_iter()
                 .map(|(file_id, refs)| {
                     (
-                        file_id.into(),
+                        file_id.file_id(sema.db),
                         refs.into_iter()
                             .map(|file_ref| (file_ref.range, file_ref.category))
                             .unique()
@@ -81,7 +148,7 @@ pub(crate) fn find_all_refs(
                 Definition::Module(module) => {
                     Some(NavigationTarget::from_module_to_decl(sema.db, module))
                 }
-                def => def.try_to_nav(sema.db),
+                def => def.try_to_nav(sema),
             }
             .map(|nav| {
                 let (nav, extra_ref) = match nav.def_site {
@@ -108,11 +175,25 @@ pub(crate) fn find_all_refs(
         return Some(vec![res]);
     }
 
+    if let Some(token) = syntax.token_at_offset(position.offset).left_biased()
+        && let Some(token) = ast::String::cast(token.clone())
+        && let Some((analysis, fixture_analysis)) =
+            Analysis::from_ra_fixture(sema, token.clone(), &token, config.minicore)
+        && let Some((virtual_file_id, file_offset)) =
+            fixture_analysis.map_offset_down(position.offset)
+    {
+        return analysis
+            .find_all_refs(FilePosition { file_id: virtual_file_id, offset: file_offset }, config)
+            .ok()??
+            .upmap_from_ra_fixture(&fixture_analysis, virtual_file_id, position.file_id)
+            .ok();
+    }
+
     match name_for_constructor_search(&syntax, position) {
         Some(name) => {
             let def = match NameClass::classify(sema, &name)? {
                 NameClass::Definition(it) | NameClass::ConstReference(it) => it,
-                NameClass::PatFieldShorthand { local_def: _, field_ref } => {
+                NameClass::PatFieldShorthand { local_def: _, field_ref, adt_subst: _ } => {
                     Definition::Field(field_ref)
                 }
             };
@@ -125,11 +206,11 @@ pub(crate) fn find_all_refs(
     }
 }
 
-pub(crate) fn find_defs<'a>(
-    sema: &'a Semantics<'_, RootDatabase>,
+pub(crate) fn find_defs(
+    sema: &Semantics<'_, RootDatabase>,
     syntax: &SyntaxNode,
     offset: TextSize,
-) -> Option<impl IntoIterator<Item = Definition> + 'a> {
+) -> Option<Vec<Definition>> {
     let token = syntax.token_at_offset(offset).find(|t| {
         matches!(
             t.kind(),
@@ -144,7 +225,7 @@ pub(crate) fn find_defs<'a>(
         )
     })?;
 
-    if let Some((_, resolution)) = sema.check_for_format_args_template(token.clone(), offset) {
+    if let Some((.., resolution)) = sema.check_for_format_args_template(token.clone(), offset) {
         return resolution.map(Definition::from).map(|it| vec![it]);
     }
 
@@ -156,10 +237,12 @@ pub(crate) fn find_defs<'a>(
                 let def = match name_like {
                     ast::NameLike::NameRef(name_ref) => {
                         match NameRefClass::classify(sema, &name_ref)? {
-                            NameRefClass::Definition(def) => def,
-                            NameRefClass::FieldShorthand { local_ref, field_ref: _ } => {
-                                Definition::Local(local_ref)
-                            }
+                            NameRefClass::Definition(def, _) => def,
+                            NameRefClass::FieldShorthand {
+                                local_ref,
+                                field_ref: _,
+                                adt_subst: _,
+                            } => Definition::Local(local_ref),
                             NameRefClass::ExternCrateShorthand { decl, .. } => {
                                 Definition::ExternCrateDecl(decl)
                             }
@@ -167,14 +250,14 @@ pub(crate) fn find_defs<'a>(
                     }
                     ast::NameLike::Name(name) => match NameClass::classify(sema, &name)? {
                         NameClass::Definition(it) | NameClass::ConstReference(it) => it,
-                        NameClass::PatFieldShorthand { local_def, field_ref: _ } => {
+                        NameClass::PatFieldShorthand { local_def, field_ref: _, adt_subst: _ } => {
                             Definition::Local(local_def)
                         }
                     },
                     ast::NameLike::Lifetime(lifetime) => {
                         NameRefClass::classify_lifetime(sema, &lifetime)
                             .and_then(|class| match class {
-                                NameRefClass::Definition(it) => Some(it),
+                                NameRefClass::Definition(it, _) => Some(it),
                                 _ => None,
                             })
                             .or_else(|| {
@@ -203,14 +286,14 @@ fn retain_adt_literal_usages(
                     reference
                         .name
                         .as_name_ref()
-                        .map_or(false, |name_ref| is_enum_lit_name_ref(sema, enum_, name_ref))
+                        .is_some_and(|name_ref| is_enum_lit_name_ref(sema, enum_, name_ref))
                 })
             });
             usages.references.retain(|_, it| !it.is_empty());
         }
         Definition::Adt(_) | Definition::Variant(_) => {
             refs.for_each(|it| {
-                it.retain(|reference| reference.name.as_name_ref().map_or(false, is_lit_name_ref))
+                it.retain(|reference| reference.name.as_name_ref().is_some_and(is_lit_name_ref))
             });
             usages.references.retain(|_, it| !it.is_empty());
         }
@@ -218,7 +301,19 @@ fn retain_adt_literal_usages(
     }
 }
 
-/// Returns `Some` if the cursor is at a position for an item to search for all its constructor/literal usages
+/// Returns `Some` if the cursor is at a position where we should search for constructor/initialization usages.
+/// This is used to implement the special constructor search behavior when the cursor is on specific tokens
+/// in a struct/enum/variant definition.
+///
+/// # Returns
+/// - `Some(name)` if the cursor is on:
+///   - `{` after a struct/enum/variant definition
+///   - `(` for tuple structs/variants
+///   - `;` for unit structs
+///   - The type name in a struct/enum/variant definition
+/// - `None` otherwise
+///
+/// The returned name is the name of the type whose constructor usages should be searched for.
 fn name_for_constructor_search(syntax: &SyntaxNode, position: FilePosition) -> Option<ast::Name> {
     let token = syntax.token_at_offset(position.offset).right_biased()?;
     let token_parent = token.parent()?;
@@ -256,6 +351,16 @@ fn name_for_constructor_search(syntax: &SyntaxNode, position: FilePosition) -> O
     }
 }
 
+/// Checks if a name reference is part of an enum variant literal expression.
+/// Used to filter references when searching for enum variant constructors.
+///
+/// # Arguments
+/// * `sema` - Semantic analysis context
+/// * `enum_` - The enum type to check against
+/// * `name_ref` - The name reference to check
+///
+/// # Returns
+/// `true` if the name reference is used as part of constructing a variant of the given enum.
 fn is_enum_lit_name_ref(
     sema: &Semantics<'_, RootDatabase>,
     enum_: hir::Enum,
@@ -283,12 +388,19 @@ fn is_enum_lit_name_ref(
         .unwrap_or(false)
 }
 
+/// Checks if a path ends with the given name reference.
+/// Helper function for checking constructor usage patterns.
 fn path_ends_with(path: Option<ast::Path>, name_ref: &ast::NameRef) -> bool {
     path.and_then(|path| path.segment())
         .and_then(|segment| segment.name_ref())
         .map_or(false, |segment| segment == *name_ref)
 }
 
+/// Checks if a name reference is used in a literal (constructor) context.
+/// Used to filter references when searching for struct/variant constructors.
+///
+/// # Returns
+/// `true` if the name reference is used as part of a struct/variant literal expression.
 fn is_lit_name_ref(name_ref: &ast::NameRef) -> bool {
     name_ref.syntax().ancestors().find_map(|ancestor| {
         match_ast! {
@@ -306,9 +418,12 @@ fn handle_control_flow_keywords(
     FilePosition { file_id, offset }: FilePosition,
 ) -> Option<ReferenceSearchResult> {
     let file = sema.parse_guess_edition(file_id);
-    let edition =
-        sema.attach_first_edition(file_id).map(|it| it.edition()).unwrap_or(Edition::CURRENT);
-    let token = file.syntax().token_at_offset(offset).find(|t| t.kind().is_keyword(edition))?;
+    let edition = sema.attach_first_edition(file_id).edition(sema.db);
+    let token = pick_best_token(file.syntax().token_at_offset(offset), |kind| match kind {
+        _ if kind.is_keyword(edition) => 4,
+        T![=>] => 3,
+        _ => 1,
+    })?;
 
     let references = match token.kind() {
         T![fn] | T![return] | T![try] => highlight_related::highlight_exit_points(sema, token),
@@ -319,6 +434,7 @@ fn handle_control_flow_keywords(
         T![for] if token.parent().and_then(ast::ForExpr::cast).is_some() => {
             highlight_related::highlight_break_points(sema, token)
         }
+        T![if] | T![=>] | T![match] => highlight_related::highlight_branch_exit_points(sema, token),
         _ => return None,
     }
     .into_iter()
@@ -327,7 +443,7 @@ fn handle_control_flow_keywords(
             .into_iter()
             .map(|HighlightedRange { range, category }| (range, category))
             .collect();
-        (file_id.into(), ranges)
+        (file_id.file_id(sema.db), ranges)
     })
     .collect();
 
@@ -336,12 +452,12 @@ fn handle_control_flow_keywords(
 
 #[cfg(test)]
 mod tests {
-    use expect_test::{expect, Expect};
-    use ide_db::FileId;
-    use span::EditionedFileId;
+    use expect_test::{Expect, expect};
+    use hir::EditionedFileId;
+    use ide_db::{FileId, MiniCore, RootDatabase};
     use stdx::format_to;
 
-    use crate::{fixture, SearchScope};
+    use crate::{SearchScope, fixture, references::FindAllRefsConfig};
 
     #[test]
     fn exclude_tests() {
@@ -938,7 +1054,7 @@ use self$0;
 use self$0;
 "#,
             expect![[r#"
-                Module FileId(0) 0..10
+                _ Module FileId(0) 0..10
 
                 FileId(0) 4..8 import
             "#]],
@@ -1003,7 +1119,12 @@ pub(super) struct Foo$0 {
 
         check_with_scope(
             code,
-            Some(SearchScope::single_file(EditionedFileId::current_edition(FileId::from_raw(2)))),
+            Some(&mut |db| {
+                SearchScope::single_file(EditionedFileId::current_edition_guess_origin(
+                    db,
+                    FileId::from_raw(2),
+                ))
+            }),
             expect![[r#"
                 quux Function FileId(0) 19..35 26..30
 
@@ -1253,13 +1374,174 @@ impl Foo {
         );
     }
 
-    fn check(ra_fixture: &str, expect: Expect) {
+    #[test]
+    fn test_highlight_if_branches() {
+        check(
+            r#"
+fn main() {
+    let x = if$0 true {
+        1
+    } else if false {
+        2
+    } else {
+        3
+    };
+
+    println!("x: {}", x);
+}
+"#,
+            expect![[r#"
+                FileId(0) 24..26
+                FileId(0) 42..43
+                FileId(0) 55..57
+                FileId(0) 74..75
+                FileId(0) 97..98
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_highlight_match_branches() {
+        check(
+            r#"
+fn main() {
+    $0match Some(42) {
+        Some(x) if x > 0 => println!("positive"),
+        Some(0) => println!("zero"),
+        Some(_) => println!("negative"),
+        None => println!("none"),
+    };
+}
+"#,
+            expect![[r#"
+                FileId(0) 16..21
+                FileId(0) 61..81
+                FileId(0) 102..118
+                FileId(0) 139..159
+                FileId(0) 177..193
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_highlight_match_arm_arrow() {
+        check(
+            r#"
+fn main() {
+    match Some(42) {
+        Some(x) if x > 0 $0=> println!("positive"),
+        Some(0) => println!("zero"),
+        Some(_) => println!("negative"),
+        None => println!("none"),
+    }
+}
+"#,
+            expect![[r#"
+                FileId(0) 58..60
+                FileId(0) 61..81
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_highlight_nested_branches() {
+        check(
+            r#"
+fn main() {
+    let x = $0if true {
+        if false {
+            1
+        } else {
+            match Some(42) {
+                Some(_) => 2,
+                None => 3,
+            }
+        }
+    } else {
+        4
+    };
+
+    println!("x: {}", x);
+}
+"#,
+            expect![[r#"
+                FileId(0) 24..26
+                FileId(0) 65..66
+                FileId(0) 140..141
+                FileId(0) 167..168
+                FileId(0) 215..216
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_highlight_match_with_complex_guards() {
+        check(
+            r#"
+fn main() {
+    let x = $0match (x, y) {
+        (a, b) if a > b && a % 2 == 0 => 1,
+        (a, b) if a < b || b % 2 == 1 => 2,
+        (a, _) if a > 40 => 3,
+        _ => 4,
+    };
+
+    println!("x: {}", x);
+}
+"#,
+            expect![[r#"
+                FileId(0) 24..29
+                FileId(0) 80..81
+                FileId(0) 124..125
+                FileId(0) 155..156
+                FileId(0) 171..172
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_highlight_mixed_if_match_expressions() {
+        check(
+            r#"
+fn main() {
+    let x = $0if let Some(x) = Some(42) {
+        1
+    } else if let None = None {
+        2
+    } else {
+        match 42 {
+            0 => 3,
+            _ => 4,
+        }
+    };
+}
+"#,
+            expect![[r#"
+                FileId(0) 24..26
+                FileId(0) 60..61
+                FileId(0) 73..75
+                FileId(0) 102..103
+                FileId(0) 153..154
+                FileId(0) 173..174
+            "#]],
+        );
+    }
+
+    fn check(#[rust_analyzer::rust_fixture] ra_fixture: &str, expect: Expect) {
         check_with_scope(ra_fixture, None, expect)
     }
 
-    fn check_with_scope(ra_fixture: &str, search_scope: Option<SearchScope>, expect: Expect) {
+    fn check_with_scope(
+        #[rust_analyzer::rust_fixture] ra_fixture: &str,
+        search_scope: Option<&mut dyn FnMut(&RootDatabase) -> SearchScope>,
+        expect: Expect,
+    ) {
         let (analysis, pos) = fixture::position(ra_fixture);
-        let refs = analysis.find_all_refs(pos, search_scope).unwrap().unwrap();
+        let config = FindAllRefsConfig {
+            search_scope: search_scope.map(|it| it(&analysis.db)),
+            minicore: MiniCore::default(),
+        };
+        let refs = analysis.find_all_refs(pos, &config).unwrap().unwrap();
 
         let mut actual = String::new();
         for mut refs in refs {
@@ -1528,7 +1810,7 @@ trait Bar$0 = Foo where Self: ;
 fn foo<T: Bar>(_: impl Bar, _: &dyn Bar) {}
 "#,
             expect![[r#"
-                Bar TraitAlias FileId(0) 13..42 19..22
+                Bar Trait FileId(0) 13..42 19..22
 
                 FileId(0) 53..56
                 FileId(0) 66..69
@@ -2768,6 +3050,106 @@ const FOO$0: i32 = 0;
                 FOO Const FileId(1) 0..19 6..9
 
                 FileId(0) 45..48
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_highlight_if_let_match_combined() {
+        check(
+            r#"
+enum MyEnum { A(i32), B(String), C }
+
+fn main() {
+    let val = MyEnum::A(42);
+
+    let x = $0if let MyEnum::A(x) = val {
+        1
+    } else if let MyEnum::B(s) = val {
+        2
+    } else {
+        match val {
+            MyEnum::C => 3,
+            _ => 4,
+        }
+    };
+}
+"#,
+            expect![[r#"
+                FileId(0) 92..94
+                FileId(0) 128..129
+                FileId(0) 141..143
+                FileId(0) 177..178
+                FileId(0) 237..238
+                FileId(0) 257..258
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_highlight_nested_match_expressions() {
+        check(
+            r#"
+enum Outer { A(Inner), B }
+enum Inner { X, Y(i32) }
+
+fn main() {
+    let val = Outer::A(Inner::Y(42));
+
+    $0match val {
+        Outer::A(inner) => match inner {
+            Inner::X => println!("Inner::X"),
+            Inner::Y(n) if n > 0 => println!("Inner::Y positive: {}", n),
+            Inner::Y(_) => println!("Inner::Y non-positive"),
+        },
+        Outer::B => println!("Outer::B"),
+    }
+}
+"#,
+            expect![[r#"
+                FileId(0) 108..113
+                FileId(0) 185..205
+                FileId(0) 243..279
+                FileId(0) 308..341
+                FileId(0) 374..394
+            "#]],
+        );
+    }
+
+    #[test]
+    fn raw_labels_and_lifetimes() {
+        check(
+            r#"
+fn foo<'r#fn>(s: &'r#fn str) {
+    let _a: &'r#fn str = s;
+    let _b: &'r#fn str;
+    'r#break$0: {
+        break 'r#break;
+    }
+}
+        "#,
+            expect![[r#"
+                'break Label FileId(0) 87..96 87..95
+
+                FileId(0) 113..121
+            "#]],
+        );
+        check(
+            r#"
+fn foo<'r#fn$0>(s: &'r#fn str) {
+    let _a: &'r#fn str = s;
+    let _b: &'r#fn str;
+    'r#break: {
+        break 'r#break;
+    }
+}
+        "#,
+            expect![[r#"
+                'fn LifetimeParam FileId(0) 7..12
+
+                FileId(0) 18..23
+                FileId(0) 44..49
+                FileId(0) 72..77
             "#]],
         );
     }

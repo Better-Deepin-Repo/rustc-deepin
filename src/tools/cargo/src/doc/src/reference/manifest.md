@@ -50,6 +50,7 @@ Every manifest file consists of the following sections:
 * [`[badges]`](#the-badges-section) --- Badges to display on a registry.
 * [`[features]`](features.md) --- Conditional compilation features.
 * [`[lints]`](#the-lints-section) --- Configure linters for this package.
+* [`[hints]`](#the-hints-section) --- Provide hints for compiling this package.
 * [`[patch]`](overriding-dependencies.md#the-patch-section) --- Override dependencies.
 * [`[replace]`](overriding-dependencies.md#the-replace-section) --- Override dependencies (deprecated).
 * [`[profile]`](profiles.md) --- Compiler settings and optimizations.
@@ -63,7 +64,6 @@ The first section in a `Cargo.toml` is `[package]`.
 [package]
 name = "hello_world" # the name of the package
 version = "0.1.0"    # the current version, obeying semver
-authors = ["Alice <a@example.com>", "Bob <b@example.com>"]
 ```
 
 The only field required by Cargo is [`name`](#the-name-field). If publishing to
@@ -107,7 +107,7 @@ A metadata part can be added after a plus, such as `1.0.0+21AF26D3`.
 This is for informational purposes only and is generally ignored by Cargo.
 
 Cargo bakes in the concept of [Semantic Versioning](https://semver.org/),
-so versions are considered considered [compatible](semver.md) if their left-most non-zero major/minor/patch component is the same.
+so versions are considered [compatible](semver.md) if their left-most non-zero major/minor/patch component is the same.
 See the [Resolver] chapter for more information on how Cargo uses versions to
 resolve dependencies.
 
@@ -121,10 +121,10 @@ This field is optional and defaults to `0.0.0`.  The field is required for publi
 
 ### The `authors` field
 
+> **Warning**: This field is deprecated
+
 The optional `authors` field lists in an array the people or organizations that are considered
-the "authors" of the package. The exact meaning is open to interpretation --- it
-may list the original or primary authors, current maintainers, or owners of the
-package. An optional email address may be included within angled brackets at
+the "authors" of the package. An optional email address may be included within angled brackets at
 the end of each author entry.
 
 ```toml
@@ -133,13 +133,8 @@ the end of each author entry.
 authors = ["Graydon Hoare", "Fnu Lnu <no-reply@rust-lang.org>"]
 ```
 
-This field is only surfaced in package metadata and in the `CARGO_PKG_AUTHORS`
-environment variable within `build.rs`. It is not displayed in the [crates.io]
-user interface.
-
-> **Warning**: Package manifests cannot be changed once published, so this
-> field cannot be changed or removed in already-published versions of a
-> package.
+This field is surfaced in package metadata and in the `CARGO_PKG_AUTHORS`
+environment variable within `build.rs` for backwards compatibility.
 
 ### The `edition` field
 
@@ -414,8 +409,8 @@ The following files are always included:
 
 * The `Cargo.toml` file of the package itself is always included, it does not
   need to be listed in `include`.
-* A minimized `Cargo.lock` is automatically included if the package contains a
-  binary or example target, see [`cargo package`] for more information.
+* A minimized `Cargo.lock` is automatically included.
+  See [`cargo package`] for more information.
 * If a [`license-file`](#the-license-and-license-file-fields) is specified, it
   is always included.
 
@@ -571,6 +566,26 @@ As for dependents, Cargo suppresses lints from non-path dependencies with featur
 
 > **MSRV:** Respected as of 1.74
 
+## The `[hints]` section
+
+The `[hints]` section allows specifying hints for compiling this package. Cargo
+will respect these hints by default when compiling this package, though the
+top-level package being built can override these values through the `[profile]`
+mechanism. Hints are, by design, always safe for Cargo to ignore; if Cargo
+encounters a hint it doesn't understand, or a hint it understands but with a
+value it doesn't understand, it will warn, but not error. As a result,
+specifying hints in a crate does not impact the MSRV of the crate.
+
+Individual hints may have an associated unstable feature gate that you need to
+pass in order to apply the configuration they specify, but if you don't specify
+that unstable feature gate, you will again get only a warning, not an error.
+
+There are no stable hints at this time. See the [hint-mostly-unused
+documentation](unstable.md#profile-hint-mostly-unused-option) for information
+on an unstable hint.
+
+> **MSRV:** Respected as of 1.90.
+
 ## The `[badges]` section
 
 The `[badges]` section is for specifying status badges that can be displayed
@@ -632,46 +647,3 @@ more detail.
 [spdx-license-list-3.20]: https://github.com/spdx/license-list-data/tree/v3.20
 [SPDX site]: https://spdx.org
 [TOML]: https://toml.io/
-
-<script>
-(function() {
-    var fragments = {
-        "#the-project-layout": "../guide/project-layout.html",
-        "#examples": "cargo-targets.html#examples",
-        "#tests": "cargo-targets.html#tests",
-        "#integration-tests": "cargo-targets.html#integration-tests",
-        "#configuring-a-target": "cargo-targets.html#configuring-a-target",
-        "#target-auto-discovery": "cargo-targets.html#target-auto-discovery",
-        "#the-required-features-field-optional": "cargo-targets.html#the-required-features-field",
-        "#building-dynamic-or-static-libraries": "cargo-targets.html#the-crate-type-field",
-        "#the-workspace-section": "workspaces.html#the-workspace-section",
-        "#virtual-workspace": "workspaces.html",
-        "#package-selection": "workspaces.html#package-selection",
-        "#the-features-section": "features.html#the-features-section",
-        "#rules": "features.html",
-        "#usage-in-end-products": "features.html",
-        "#usage-in-packages": "features.html",
-        "#the-patch-section": "overriding-dependencies.html#the-patch-section",
-        "#using-patch-with-multiple-versions": "overriding-dependencies.html#using-patch-with-multiple-versions",
-        "#the-replace-section": "overriding-dependencies.html#the-replace-section",
-        "#package-metadata": "manifest.html#the-package-section",
-        "#the-authors-field-optional": "manifest.html#the-authors-field",
-        "#the-edition-field-optional": "manifest.html#the-edition-field",
-        "#the-documentation-field-optional": "manifest.html#the-documentation-field",
-        "#the-workspace--field-optional": "manifest.html#the-workspace-field",
-        "#package-build": "manifest.html#the-build-field",
-        "#the-build-field-optional": "manifest.html#the-build-field",
-        "#the-links-field-optional": "manifest.html#the-links-field",
-        "#the-exclude-and-include-fields-optional": "manifest.html#the-exclude-and-include-fields",
-        "#the-publish--field-optional": "manifest.html#the-publish-field",
-        "#the-metadata-table-optional": "manifest.html#the-metadata-table",
-        "#rust-version": "rust-version.html",
-    };
-    var target = fragments[window.location.hash];
-    if (target) {
-        var url = window.location.toString();
-        var base = url.substring(0, url.lastIndexOf('/'));
-        window.location.replace(base + "/" + target);
-    }
-})();
-</script>

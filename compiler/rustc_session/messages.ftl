@@ -1,3 +1,9 @@
+session_apple_deployment_target_invalid =
+    failed to parse deployment target specified in {$env_var}: {$error}
+
+session_apple_deployment_target_too_low =
+    deployment target in {$env_var} was set to {$version}, but the minimum supported by `rustc` is {$os_min}
+
 session_binary_float_literal_not_supported = binary float literal is not supported
 session_branch_protection_requires_aarch64 = `-Zbranch-protection` is only supported on aarch64
 
@@ -8,11 +14,7 @@ session_cannot_mix_and_match_sanitizers = `-Zsanitizer={$first}` is incompatible
 session_cli_feature_diagnostic_help =
     add `-Zcrate-attr="feature({$feature})"` to the command-line options to enable
 
-session_crate_name_does_not_match = `--crate-name` and `#[crate_name]` are required to match, but `{$s}` != `{$name}`
-
 session_crate_name_empty = crate name must not be empty
-
-session_crate_name_invalid = crate names cannot start with a `-`, but `{$s}` has a leading hyphen
 
 session_embed_source_insufficient_dwarf_version = `-Zembed-source=y` requires at least `-Z dwarf-version=5` but DWARF version is {$dwarf_version}
 
@@ -47,13 +49,15 @@ session_hexadecimal_float_literal_not_supported = hexadecimal float literal is n
 session_incompatible_linker_flavor = linker flavor `{$flavor}` is incompatible with the current target
     .note = compatible flavors are: {$compatible_list}
 
+session_indirect_branch_cs_prefix_requires_x86_or_x86_64 = `-Zindirect-branch-cs-prefix` is only supported on x86 and x86_64
+
 session_instrumentation_not_supported = {$us} instrumentation is not supported for this target
 
 session_int_literal_too_large = integer literal is too large
     .note = value exceeds limit of `{$limit}`
 
-session_invalid_character_in_create_name = invalid character `{$character}` in crate name: `{$crate_name}`
-session_invalid_character_in_create_name_help = you can either pass `--crate-name` on the command line or add `#![crate_name="…"]` to set the crate name
+session_invalid_character_in_crate_name = invalid character {$character} in crate name: `{$crate_name}`
+    .help = you can either pass `--crate-name` on the command line or add `#![crate_name = "…"]` to set the crate name
 
 session_invalid_float_literal_suffix = invalid suffix `{$suffix}` for float literal
     .label = invalid suffix `{$suffix}`
@@ -98,6 +102,8 @@ session_sanitizer_cfi_requires_lto = `-Zsanitizer=cfi` requires `-Clto` or `-Cli
 
 session_sanitizer_cfi_requires_single_codegen_unit = `-Zsanitizer=cfi` with `-Clto` requires `-Ccodegen-units=1`
 
+session_sanitizer_kcfi_arity_requires_kcfi = `-Zsanitizer-kcfi-arity` requires `-Zsanitizer=kcfi`
+
 session_sanitizer_kcfi_requires_panic_abort = `-Z sanitizer=kcfi` requires `-C panic=abort`
 
 session_sanitizer_not_supported = {$us} sanitizer is not supported for this target
@@ -125,15 +131,23 @@ session_target_small_data_threshold_not_supported = `-Z small-data-threshold` is
 
 session_target_stack_protector_not_supported = `-Z stack-protector={$stack_protector}` is not supported for target {$target_triple} and will be ignored
 
+session_unexpected_builtin_cfg = unexpected `--cfg {$cfg}` flag
+    .controlled_by = config `{$cfg_name}` is only supposed to be controlled by `{$controlled_by}`
+    .incoherent = manually setting a built-in cfg can and does create incoherent behaviors
+
 session_unleashed_feature_help_named = skipping check for `{$gate}` feature
 session_unleashed_feature_help_unnamed = skipping check that does not even have a feature gate
 
 session_unstable_virtual_function_elimination = `-Zvirtual-function-elimination` requires `-Clto`
 
+session_unsupported_crate_type_for_codegen_backend =
+    dropping unsupported crate type `{$crate_type}` for codegen backend `{$codegen_backend}`
+
 session_unsupported_crate_type_for_target =
     dropping unsupported crate type `{$crate_type}` for target `{$target_triple}`
 
-session_unsupported_dwarf_version = requested DWARF version {$dwarf_version} is greater than 5
+session_unsupported_dwarf_version = requested DWARF version {$dwarf_version} is not supported
+session_unsupported_dwarf_version_help = supported DWARF versions are 2, 3, 4 and 5
 
 session_unsupported_reg_struct_return_arch = `-Zreg-struct-return` is only supported on x86
 session_unsupported_regparm = `-Zregparm={$regparm}` is unsupported (valid values 0-3)

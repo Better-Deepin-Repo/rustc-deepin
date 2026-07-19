@@ -1,6 +1,5 @@
-# Unsafety
-
 r[safety]
+# Unsafety
 
 r[safety.intro]
 Unsafe operations are those that can potentially violate the memory-safety
@@ -14,13 +13,16 @@ r[safety.unsafe-deref]
 - Dereferencing a [raw pointer].
 
 r[safety.unsafe-static]
-- Reading or writing a [mutable] or [external] static variable.
+- Reading or writing a [mutable] or unsafe [external] static variable.
 
 r[safety.unsafe-union-access]
 - Accessing a field of a [`union`], other than to assign to it.
 
 r[safety.unsafe-call]
-- Calling an unsafe function (including an intrinsic or foreign function).
+- Calling an unsafe function.
+
+r[safety.unsafe-target-feature-call]
+- Calling a safe function marked with a [`target_feature`][attributes.codegen.target_feature] from a function that does not have a `target_feature` attribute enabling the same features (see [attributes.codegen.target_feature.safety-restrictions]).
 
 r[safety.unsafe-impl]
 - Implementing an [unsafe trait].

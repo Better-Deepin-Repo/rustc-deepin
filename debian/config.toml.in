@@ -1,4 +1,4 @@
-change-id = 133207
+change-id = 146435
 
 [build]
 submodules = false
@@ -33,8 +33,7 @@ tools = [
   "wasm-component-ld",
 ]
 
-# we use pre-built LLVM, so can't optimize compiler-rt
-optimized-compiler-builtins = false
+optimized-compiler-builtins = COMPILER_RT_PATH
 
 [install]
 prefix = "/usr"
@@ -59,12 +58,15 @@ PROFILER_PATH
 
 )dnl
 [target.wasm32-wasip1]
+llvm-config = "LLVM_DESTDIR/usr/lib/llvm-LLVM_VERSION/bin/llvm-config"
 wasi-root = "/usr"
 profiler = false
 [target.wasm32-wasip2]
+llvm-config = "LLVM_DESTDIR/usr/lib/llvm-LLVM_VERSION/bin/llvm-config"
 wasi-root = "/usr"
 profiler = false
 [target.wasm32-unknown-unknown]
+llvm-config = "LLVM_DESTDIR/usr/lib/llvm-LLVM_VERSION/bin/llvm-config"
 profiler = false
 
 ifelse(WINDOWS_ARCH,,,
@@ -75,12 +77,14 @@ profiler = false
 [llvm]
 link-shared = true
 download-ci-llvm = false
+ninja = false
 
 [rust]
 download-rustc = false
 jemalloc = false
 optimize = MAKE_OPTIMISATIONS
 dist-src = false
+lld = false
 
 channel = "RELEASE_CHANNEL"
 

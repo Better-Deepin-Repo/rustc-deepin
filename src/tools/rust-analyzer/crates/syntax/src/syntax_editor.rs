@@ -5,6 +5,7 @@
 //! [`SyntaxEditor`]: https://github.com/dotnet/roslyn/blob/43b0b05cc4f492fd5de00f6f6717409091df8daa/src/Workspaces/Core/Portable/Editing/SyntaxEditor.cs
 
 use std::{
+    fmt, iter,
     num::NonZeroU32,
     ops::RangeInclusive,
     sync::atomic::{AtomicU32, Ordering},
@@ -19,6 +20,7 @@ mod edit_algo;
 mod edits;
 mod mapping;
 
+pub use edits::Removable;
 pub use mapping::{SyntaxMapping, SyntaxMappingBuilder};
 
 #[derive(Debug)]
@@ -32,11 +34,20 @@ pub struct SyntaxEditor {
 impl SyntaxEditor {
     /// Creates a syntax editor to start editing from `root`
     pub fn new(root: SyntaxNode) -> Self {
-        Self { root, changes: vec![], mappings: SyntaxMapping::new(), annotations: vec![] }
+        Self { root, changes: vec![], mappings: SyntaxMapping::default(), annotations: vec![] }
     }
 
     pub fn add_annotation(&mut self, element: impl Element, annotation: SyntaxAnnotation) {
         self.annotations.push((element.syntax_element(), annotation))
+    }
+
+    pub fn add_annotation_all(
+        &mut self,
+        elements: Vec<impl Element>,
+        annotation: SyntaxAnnotation,
+    ) {
+        self.annotations
+            .extend(elements.into_iter().map(|e| e.syntax_element()).zip(iter::repeat(annotation)));
     }
 
     pub fn merge(&mut self, mut other: SyntaxEditor) {
@@ -70,6 +81,16 @@ impl SyntaxEditor {
             "should not delete root node"
         );
         self.changes.push(Change::Replace(element.syntax_element(), None));
+    }
+
+    pub fn delete_all(&mut self, range: RangeInclusive<SyntaxElement>) {
+        if range.start() == range.end() {
+            self.delete(range.start());
+            return;
+        }
+
+        debug_assert!(is_ancestor_or_self_of_element(range.start(), &self.root));
+        self.changes.push(Change::ReplaceAll(range, Vec::new()))
     }
 
     pub fn replace(&mut self, old: impl Element, new: impl Element) {
@@ -150,21 +171,14 @@ impl SyntaxEdit {
 #[repr(transparent)]
 pub struct SyntaxAnnotation(NonZeroU32);
 
-impl SyntaxAnnotation {
-    /// Creates a unique syntax annotation to attach data to.
-    pub fn new() -> Self {
+impl Default for SyntaxAnnotation {
+    fn default() -> Self {
         static COUNTER: AtomicU32 = AtomicU32::new(1);
 
         // Only consistency within a thread matters, as SyntaxElements are !Send
         let id = COUNTER.fetch_add(1, Ordering::Relaxed);
 
         Self(NonZeroU32::new(id).expect("syntax annotation id overflow"))
-    }
-}
-
-impl Default for SyntaxAnnotation {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -282,6 +296,64 @@ enum ChangeKind {
     Replace,
 }
 
+impl fmt::Display for Change {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Change::Insert(position, node_or_token) => {
+                let parent = position.parent();
+                let mut parent_str = parent.to_string();
+                let target_range = self.target_range().start() - parent.text_range().start();
+
+                parent_str.insert_str(
+                    target_range.into(),
+                    &format!("\x1b[42m{node_or_token}\x1b[0m\x1b[K"),
+                );
+                f.write_str(&parent_str)
+            }
+            Change::InsertAll(position, vec) => {
+                let parent = position.parent();
+                let mut parent_str = parent.to_string();
+                let target_range = self.target_range().start() - parent.text_range().start();
+                let insertion: String = vec.iter().map(|it| it.to_string()).collect();
+
+                parent_str
+                    .insert_str(target_range.into(), &format!("\x1b[42m{insertion}\x1b[0m\x1b[K"));
+                f.write_str(&parent_str)
+            }
+            Change::Replace(old, new) => {
+                if let Some(new) = new {
+                    write!(f, "\x1b[41m{old}\x1b[42m{new}\x1b[0m\x1b[K")
+                } else {
+                    write!(f, "\x1b[41m{old}\x1b[0m\x1b[K")
+                }
+            }
+            Change::ReplaceWithMany(old, vec) => {
+                let new: String = vec.iter().map(|it| it.to_string()).collect();
+                write!(f, "\x1b[41m{old}\x1b[42m{new}\x1b[0m\x1b[K")
+            }
+            Change::ReplaceAll(range, vec) => {
+                let parent = range.start().parent().unwrap();
+                let parent_str = parent.to_string();
+                let pre_range =
+                    TextRange::new(parent.text_range().start(), range.start().text_range().start());
+                let old_range = TextRange::new(
+                    range.start().text_range().start(),
+                    range.end().text_range().end(),
+                );
+                let post_range =
+                    TextRange::new(range.end().text_range().end(), parent.text_range().end());
+
+                let pre_str = &parent_str[pre_range - parent.text_range().start()];
+                let old_str = &parent_str[old_range - parent.text_range().start()];
+                let post_str = &parent_str[post_range - parent.text_range().start()];
+                let new: String = vec.iter().map(|it| it.to_string()).collect();
+
+                write!(f, "{pre_str}\x1b[41m{old_str}\x1b[42m{new}\x1b[0m\x1b[K{post_str}")
+            }
+        }
+    }
+}
+
 /// Utility trait to allow calling syntax editor functions with references or owned
 /// nodes. Do not use outside of this module.
 pub trait Element {
@@ -326,8 +398,8 @@ mod tests {
     use expect_test::expect;
 
     use crate::{
+        AstNode,
         ast::{self, make, syntax_factory::SyntaxFactory},
-        AstNode, SyntaxKind,
     };
 
     use super::*;
@@ -335,7 +407,7 @@ mod tests {
     #[test]
     fn basic_usage() {
         let root = make::match_arm(
-            [make::wildcard_pat().into()],
+            make::wildcard_pat().into(),
             None,
             make::expr_tuple([
                 make::expr_bin_op(
@@ -344,19 +416,20 @@ mod tests {
                     make::expr_literal("2").into(),
                 ),
                 make::expr_literal("true").into(),
-            ]),
+            ])
+            .into(),
         );
 
         let to_wrap = root.syntax().descendants().find_map(ast::TupleExpr::cast).unwrap();
         let to_replace = root.syntax().descendants().find_map(ast::BinExpr::cast).unwrap();
 
         let mut editor = SyntaxEditor::new(root.syntax().clone());
-        let make = SyntaxFactory::new();
+        let make = SyntaxFactory::with_mappings();
 
         let name = make::name("var_name");
         let name_ref = make::name_ref("var_name").clone_for_update();
 
-        let placeholder_snippet = SyntaxAnnotation::new();
+        let placeholder_snippet = SyntaxAnnotation::default();
         editor.add_annotation(name.syntax(), placeholder_snippet);
         editor.add_annotation(name_ref.syntax(), placeholder_snippet);
 
@@ -381,15 +454,16 @@ mod tests {
             _ => {
                 let var_name = 2 + 2;
                 (var_name, true)
-            }"#]];
+            },"#]];
         expect.assert_eq(&edit.new_root.to_string());
 
         assert_eq!(edit.find_annotation(placeholder_snippet).len(), 2);
-        assert!(edit
-            .annotations
-            .iter()
-            .flat_map(|(_, elements)| elements)
-            .all(|element| element.ancestors().any(|it| &it == edit.new_root())))
+        assert!(
+            edit.annotations
+                .iter()
+                .flat_map(|(_, elements)| elements)
+                .all(|element| element.ancestors().any(|it| &it == edit.new_root()))
+        )
     }
 
     #[test]
@@ -461,7 +535,7 @@ mod tests {
         let second_let = root.syntax().descendants().find_map(ast::LetStmt::cast).unwrap();
 
         let mut editor = SyntaxEditor::new(root.syntax().clone());
-        let make = SyntaxFactory::new();
+        let make = SyntaxFactory::with_mappings();
 
         let new_block_expr = make.block_expr([], Some(ast::Expr::BlockExpr(inner_block.clone())));
 
@@ -513,7 +587,7 @@ mod tests {
         let inner_block = root.clone();
 
         let mut editor = SyntaxEditor::new(root.syntax().clone());
-        let make = SyntaxFactory::new();
+        let make = SyntaxFactory::with_mappings();
 
         let new_block_expr = make.block_expr([], Some(ast::Expr::BlockExpr(inner_block.clone())));
 
@@ -545,11 +619,12 @@ mod tests {
     fn test_replace_token_in_parent() {
         let parent_fn = make::fn_(
             None,
+            None,
             make::name("it"),
             None,
             None,
             make::param_list(None, []),
-            make::block_expr([], Some(make::expr_unit())),
+            make::block_expr([], Some(make::ext::expr_unit())),
             Some(make::ret_type(make::ty_unit())),
             false,
             false,
@@ -562,28 +637,74 @@ mod tests {
         if let Some(ret_ty) = parent_fn.ret_type() {
             editor.delete(ret_ty.syntax().clone());
 
-            if let Some(SyntaxElement::Token(token)) = ret_ty.syntax().next_sibling_or_token() {
-                if token.kind().is_trivia() {
-                    editor.delete(token);
-                }
+            if let Some(SyntaxElement::Token(token)) = ret_ty.syntax().next_sibling_or_token()
+                && token.kind().is_trivia()
+            {
+                editor.delete(token);
             }
         }
 
         if let Some(tail) = parent_fn.body().unwrap().tail_expr() {
-            // FIXME: We do this because `xtask tidy` will not allow us to have trailing whitespace in the expect string.
-            if let Some(SyntaxElement::Token(token)) = tail.syntax().prev_sibling_or_token() {
-                if let SyntaxKind::WHITESPACE = token.kind() {
-                    editor.delete(token);
-                }
-            }
             editor.delete(tail.syntax().clone());
         }
 
         let edit = editor.finish();
 
-        let expect = expect![[r#"
-fn it() {
-}"#]];
+        let expect = expect![["fn it() {\n    \n}"]];
+        expect.assert_eq(&edit.new_root.to_string());
+    }
+
+    #[test]
+    fn test_more_times_replace_node_to_mutable_token() {
+        let arg_list =
+            make::arg_list([make::expr_literal("1").into(), make::expr_literal("2").into()]);
+
+        let mut editor = SyntaxEditor::new(arg_list.syntax().clone());
+        let target_expr = make::token(parser::SyntaxKind::UNDERSCORE);
+
+        for arg in arg_list.args() {
+            editor.replace(arg.syntax(), &target_expr);
+        }
+
+        let edit = editor.finish();
+
+        let expect = expect![["(_, _)"]];
+        expect.assert_eq(&edit.new_root.to_string());
+    }
+
+    #[test]
+    fn test_more_times_replace_node_to_mutable() {
+        let arg_list =
+            make::arg_list([make::expr_literal("1").into(), make::expr_literal("2").into()]);
+
+        let mut editor = SyntaxEditor::new(arg_list.syntax().clone());
+        let target_expr = make::expr_literal("3").clone_for_update();
+
+        for arg in arg_list.args() {
+            editor.replace(arg.syntax(), target_expr.syntax());
+        }
+
+        let edit = editor.finish();
+
+        let expect = expect![["(3, 3)"]];
+        expect.assert_eq(&edit.new_root.to_string());
+    }
+
+    #[test]
+    fn test_more_times_insert_node_to_mutable() {
+        let arg_list =
+            make::arg_list([make::expr_literal("1").into(), make::expr_literal("2").into()]);
+
+        let mut editor = SyntaxEditor::new(arg_list.syntax().clone());
+        let target_expr = make::ext::expr_unit().clone_for_update();
+
+        for arg in arg_list.args() {
+            editor.insert(Position::before(arg.syntax()), target_expr.syntax());
+        }
+
+        let edit = editor.finish();
+
+        let expect = expect![["(()1, ()2)"]];
         expect.assert_eq(&edit.new_root.to_string());
     }
 }

@@ -2,12 +2,14 @@ use crate::core::compiler::{CompileKind, CompileMode, Layout, RustcTargetData};
 use crate::core::profiles::Profiles;
 use crate::core::{PackageIdSpec, PackageIdSpecQuery, TargetKind, Workspace};
 use crate::ops;
+use crate::util::HumanBytes;
 use crate::util::edit_distance;
 use crate::util::errors::CargoResult;
 use crate::util::interning::InternedString;
-use crate::util::{human_readable_bytes, GlobalContext, Progress, ProgressStyle};
+use crate::util::{GlobalContext, Progress, ProgressStyle};
 use anyhow::bail;
 use cargo_util::paths;
+use indexmap::IndexSet;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -16,7 +18,7 @@ use std::rc::Rc;
 pub struct CleanOptions<'gctx> {
     pub gctx: &'gctx GlobalContext,
     /// A list of packages to clean. If empty, everything is cleaned.
-    pub spec: Vec<String>,
+    pub spec: IndexSet<String>,
     /// The target arch triple to clean, or None for the host arch
     pub targets: Vec<String>,
     /// Whether to clean the release directory
@@ -41,6 +43,7 @@ pub struct CleanContext<'gctx> {
 /// Cleans various caches.
 pub fn clean(ws: &Workspace<'_>, opts: &CleanOptions<'_>) -> CargoResult<()> {
     let mut target_dir = ws.target_dir();
+    let mut build_dir = ws.build_dir();
     let gctx = opts.gctx;
     let mut clean_ctx = CleanContext::new(gctx);
     clean_ctx.dry_run = opts.dry_run;
@@ -67,6 +70,7 @@ pub fn clean(ws: &Workspace<'_>, opts: &CleanOptions<'_>) -> CargoResult<()> {
             // that profile.
             let dir_name = profiles.get_dir_name();
             target_dir = target_dir.join(dir_name);
+            build_dir = build_dir.join(dir_name);
         }
 
         // If we have a spec, then we need to delete some packages, otherwise, just
@@ -75,7 +79,15 @@ pub fn clean(ws: &Workspace<'_>, opts: &CleanOptions<'_>) -> CargoResult<()> {
         // Note that we don't bother grabbing a lock here as we're just going to
         // blow it all away anyway.
         if opts.spec.is_empty() {
-            clean_ctx.remove_paths(&[target_dir.into_path_unlocked()])?;
+            let paths: &[PathBuf] = if build_dir != target_dir {
+                &[
+                    target_dir.into_path_unlocked(),
+                    build_dir.into_path_unlocked(),
+                ]
+            } else {
+                &[target_dir.into_path_unlocked()]
+            };
+            clean_ctx.remove_paths(paths)?;
         } else {
             clean_specs(
                 &mut clean_ctx,
@@ -97,7 +109,7 @@ fn clean_specs(
     ws: &Workspace<'_>,
     profiles: &Profiles,
     targets: &[String],
-    spec: &[String],
+    spec: &IndexSet<String>,
     dry_run: bool,
 ) -> CargoResult<()> {
     // Clean specific packages.
@@ -105,15 +117,17 @@ fn clean_specs(
     let target_data = RustcTargetData::new(ws, &requested_kinds)?;
     let (pkg_set, resolve) = ops::resolve_ws(ws, dry_run)?;
     let prof_dir_name = profiles.get_dir_name();
-    let host_layout = Layout::new(ws, None, &prof_dir_name)?;
+    let host_layout = Layout::new(ws, None, &prof_dir_name, true)?;
     // Convert requested kinds to a Vec of layouts.
     let target_layouts: Vec<(CompileKind, Layout)> = requested_kinds
         .into_iter()
         .filter_map(|kind| match kind {
-            CompileKind::Target(target) => match Layout::new(ws, Some(target), &prof_dir_name) {
-                Ok(layout) => Some(Ok((kind, layout))),
-                Err(e) => Some(Err(e)),
-            },
+            CompileKind::Target(target) => {
+                match Layout::new(ws, Some(target), &prof_dir_name, true) {
+                    Ok(layout) => Some(Ok((kind, layout))),
+                    Err(e) => Some(Err(e)),
+                }
+            }
             CompileKind::Host => None,
         })
         .collect::<CargoResult<_>>()?;
@@ -166,6 +180,7 @@ fn clean_specs(
                 &spec.name(),
                 resolve.iter(),
                 |id| id.name().as_str(),
+                "package",
             ));
             anyhow::bail!(
                 "package ID specification `{}` did not match any packages{}",
@@ -179,102 +194,166 @@ fn clean_specs(
 
     clean_ctx.progress = Box::new(CleaningPackagesBar::new(clean_ctx.gctx, packages.len()));
 
-    // Try to reduce the amount of times we iterate over the same target directory by storing away
-    // the directories we've iterated over (and cleaned for a given package).
-    let mut cleaned_packages: HashMap<_, HashSet<_>> = HashMap::default();
-    for pkg in packages {
-        let pkg_dir = format!("{}-*", pkg.name());
-        clean_ctx.progress.on_cleaning_package(&pkg.name())?;
+    if clean_ctx.gctx.cli_unstable().build_dir_new_layout {
+        for pkg in packages {
+            clean_ctx.progress.on_cleaning_package(&pkg.name())?;
 
-        // Clean fingerprints.
-        for (_, layout) in &layouts_with_host {
-            let dir = escape_glob_path(layout.fingerprint())?;
-            clean_ctx
-                .rm_rf_package_glob_containing_hash(&pkg.name(), &Path::new(&dir).join(&pkg_dir))?;
-        }
-
-        for target in pkg.targets() {
-            if target.is_custom_build() {
-                // Get both the build_script_build and the output directory.
-                for (_, layout) in &layouts_with_host {
-                    let dir = escape_glob_path(layout.build())?;
-                    clean_ctx.rm_rf_package_glob_containing_hash(
-                        &pkg.name(),
-                        &Path::new(&dir).join(&pkg_dir),
-                    )?;
-                }
-                continue;
+            // Remove intermediate artifacts
+            for (_compile_kind, layout) in &layouts_with_host {
+                let dir = layout.build_dir().build_unit(&pkg.name());
+                clean_ctx.rm_rf(&dir)?;
             }
-            let crate_name: Rc<str> = target.crate_name().into();
-            let path_dot: &str = &format!("{crate_name}.");
-            let path_dash: &str = &format!("{crate_name}-");
-            for &mode in &[
-                CompileMode::Build,
-                CompileMode::Test,
-                CompileMode::Check { test: false },
-            ] {
-                for (compile_kind, layout) in &layouts {
-                    let triple = target_data.short_name(compile_kind);
 
-                    let (file_types, _unsupported) = target_data
-                        .info(*compile_kind)
-                        .rustc_outputs(mode, target.kind(), triple)?;
-                    let (dir, uplift_dir) = match target.kind() {
-                        TargetKind::ExampleBin | TargetKind::ExampleLib(..) => {
-                            (layout.examples(), Some(layout.examples()))
-                        }
-                        // Tests/benchmarks are never uplifted.
-                        TargetKind::Test | TargetKind::Bench => (layout.deps(), None),
-                        _ => (layout.deps(), Some(layout.dest())),
-                    };
-                    let mut dir_glob_str = escape_glob_path(dir)?;
-                    let dir_glob = Path::new(&dir_glob_str);
-                    for file_type in file_types {
-                        // Some files include a hash in the filename, some don't.
-                        let hashed_name = file_type.output_filename(target, Some("*"));
-                        let unhashed_name = file_type.output_filename(target, None);
-
-                        clean_ctx.rm_rf_glob(&dir_glob.join(&hashed_name))?;
-                        clean_ctx.rm_rf(&dir.join(&unhashed_name))?;
-
-                        // Remove the uplifted copy.
+            // Remove the uplifted copy.
+            for target in pkg.targets() {
+                if target.is_custom_build() {
+                    continue;
+                }
+                let crate_name: Rc<str> = target.crate_name().into();
+                for &mode in &[
+                    CompileMode::Build,
+                    CompileMode::Test,
+                    CompileMode::Check { test: false },
+                ] {
+                    for (compile_kind, layout) in &layouts {
+                        let triple = target_data.short_name(compile_kind);
+                        let (file_types, _unsupported) = target_data
+                            .info(*compile_kind)
+                            .rustc_outputs(mode, target.kind(), triple, clean_ctx.gctx)?;
+                        let artifact_dir = layout
+                            .artifact_dir()
+                            .expect("artifact-dir was not locked during clean");
+                        let uplift_dir = match target.kind() {
+                            TargetKind::ExampleBin | TargetKind::ExampleLib(..) => {
+                                Some(artifact_dir.examples())
+                            }
+                            // Tests/benchmarks are never uplifted.
+                            TargetKind::Test | TargetKind::Bench => None,
+                            _ => Some(artifact_dir.dest()),
+                        };
                         if let Some(uplift_dir) = uplift_dir {
-                            let uplifted_path = uplift_dir.join(file_type.uplift_filename(target));
-                            clean_ctx.rm_rf(&uplifted_path)?;
-                            // Dep-info generated by Cargo itself.
-                            let dep_info = uplifted_path.with_extension("d");
-                            clean_ctx.rm_rf(&dep_info)?;
+                            for file_type in file_types {
+                                let uplifted_path =
+                                    uplift_dir.join(file_type.uplift_filename(target));
+                                clean_ctx.rm_rf(&uplifted_path)?;
+                                // Dep-info generated by Cargo itself.
+                                let dep_info = uplifted_path.with_extension("d");
+                                clean_ctx.rm_rf(&dep_info)?;
+                            }
                         }
-                    }
-                    let unhashed_dep_info = dir.join(format!("{}.d", crate_name));
-                    clean_ctx.rm_rf(&unhashed_dep_info)?;
 
-                    if !dir_glob_str.ends_with(std::path::MAIN_SEPARATOR) {
-                        dir_glob_str.push(std::path::MAIN_SEPARATOR);
+                        let dir = escape_glob_path(layout.build_dir().incremental())?;
+                        let incremental = Path::new(&dir).join(format!("{}-*", crate_name));
+                        clean_ctx.rm_rf_glob(&incremental)?;
                     }
-                    dir_glob_str.push('*');
-                    let dir_glob_str: Rc<str> = dir_glob_str.into();
-                    if cleaned_packages
-                        .entry(dir_glob_str.clone())
-                        .or_default()
-                        .insert(crate_name.clone())
-                    {
-                        let paths = [
-                            // Remove dep-info file generated by rustc. It is not tracked in
-                            // file_types. It does not have a prefix.
-                            (path_dash, ".d"),
-                            // Remove split-debuginfo files generated by rustc.
-                            (path_dot, ".o"),
-                            (path_dot, ".dwo"),
-                            (path_dot, ".dwp"),
-                        ];
-                        clean_ctx.rm_rf_prefix_list(&dir_glob_str, &paths)?;
-                    }
+                }
+            }
+        }
+    } else {
+        // Try to reduce the amount of times we iterate over the same target directory by storing away
+        // the directories we've iterated over (and cleaned for a given package).
+        let mut cleaned_packages: HashMap<_, HashSet<_>> = HashMap::default();
+        for pkg in packages {
+            let pkg_dir = format!("{}-*", pkg.name());
+            clean_ctx.progress.on_cleaning_package(&pkg.name())?;
 
-                    // TODO: what to do about build_script_build?
-                    let dir = escape_glob_path(layout.incremental())?;
-                    let incremental = Path::new(&dir).join(format!("{}-*", crate_name));
-                    clean_ctx.rm_rf_glob(&incremental)?;
+            // Clean fingerprints.
+            for (_, layout) in &layouts_with_host {
+                let dir = escape_glob_path(layout.build_dir().legacy_fingerprint())?;
+                clean_ctx.rm_rf_package_glob_containing_hash(
+                    &pkg.name(),
+                    &Path::new(&dir).join(&pkg_dir),
+                )?;
+            }
+
+            for target in pkg.targets() {
+                if target.is_custom_build() {
+                    // Get both the build_script_build and the output directory.
+                    for (_, layout) in &layouts_with_host {
+                        let dir = escape_glob_path(layout.build_dir().build())?;
+                        clean_ctx.rm_rf_package_glob_containing_hash(
+                            &pkg.name(),
+                            &Path::new(&dir).join(&pkg_dir),
+                        )?;
+                    }
+                    continue;
+                }
+                let crate_name: Rc<str> = target.crate_name().into();
+                let path_dot: &str = &format!("{crate_name}.");
+                let path_dash: &str = &format!("{crate_name}-");
+                for &mode in &[
+                    CompileMode::Build,
+                    CompileMode::Test,
+                    CompileMode::Check { test: false },
+                ] {
+                    for (compile_kind, layout) in &layouts {
+                        let triple = target_data.short_name(compile_kind);
+                        let (file_types, _unsupported) = target_data
+                            .info(*compile_kind)
+                            .rustc_outputs(mode, target.kind(), triple, clean_ctx.gctx)?;
+                        let artifact_dir = layout
+                            .artifact_dir()
+                            .expect("artifact-dir was not locked during clean");
+                        let (dir, uplift_dir) = match target.kind() {
+                            TargetKind::ExampleBin | TargetKind::ExampleLib(..) => {
+                                (layout.build_dir().examples(), Some(artifact_dir.examples()))
+                            }
+                            // Tests/benchmarks are never uplifted.
+                            TargetKind::Test | TargetKind::Bench => {
+                                (layout.build_dir().legacy_deps(), None)
+                            }
+                            _ => (layout.build_dir().legacy_deps(), Some(artifact_dir.dest())),
+                        };
+                        let mut dir_glob_str = escape_glob_path(dir)?;
+                        let dir_glob = Path::new(&dir_glob_str);
+                        for file_type in file_types {
+                            // Some files include a hash in the filename, some don't.
+                            let hashed_name = file_type.output_filename(target, Some("*"));
+                            let unhashed_name = file_type.output_filename(target, None);
+
+                            clean_ctx.rm_rf_glob(&dir_glob.join(&hashed_name))?;
+                            clean_ctx.rm_rf(&dir.join(&unhashed_name))?;
+
+                            // Remove the uplifted copy.
+                            if let Some(uplift_dir) = uplift_dir {
+                                let uplifted_path =
+                                    uplift_dir.join(file_type.uplift_filename(target));
+                                clean_ctx.rm_rf(&uplifted_path)?;
+                                // Dep-info generated by Cargo itself.
+                                let dep_info = uplifted_path.with_extension("d");
+                                clean_ctx.rm_rf(&dep_info)?;
+                            }
+                        }
+                        let unhashed_dep_info = dir.join(format!("{}.d", crate_name));
+                        clean_ctx.rm_rf(&unhashed_dep_info)?;
+
+                        if !dir_glob_str.ends_with(std::path::MAIN_SEPARATOR) {
+                            dir_glob_str.push(std::path::MAIN_SEPARATOR);
+                        }
+                        dir_glob_str.push('*');
+                        let dir_glob_str: Rc<str> = dir_glob_str.into();
+                        if cleaned_packages
+                            .entry(dir_glob_str.clone())
+                            .or_default()
+                            .insert(crate_name.clone())
+                        {
+                            let paths = [
+                                // Remove dep-info file generated by rustc. It is not tracked in
+                                // file_types. It does not have a prefix.
+                                (path_dash, ".d"),
+                                // Remove split-debuginfo files generated by rustc.
+                                (path_dot, ".o"),
+                                (path_dot, ".dwo"),
+                                (path_dot, ".dwp"),
+                            ];
+                            clean_ctx.rm_rf_prefix_list(&dir_glob_str, &paths)?;
+                        }
+
+                        // TODO: what to do about build_script_build?
+                        let dir = escape_glob_path(layout.build_dir().incremental())?;
+                        let incremental = Path::new(&dir).join(format!("{}-*", crate_name));
+                        clean_ctx.rm_rf_glob(&incremental)?;
+                    }
                 }
             }
         }
@@ -446,13 +525,8 @@ impl<'gctx> CleanContext<'gctx> {
         let byte_count = if self.total_bytes_removed == 0 {
             String::new()
         } else {
-            // Don't show a fractional number of bytes.
-            if self.total_bytes_removed < 1024 {
-                format!(", {}B total", self.total_bytes_removed)
-            } else {
-                let (bytes, unit) = human_readable_bytes(self.total_bytes_removed);
-                format!(", {bytes:.1}{unit} total")
-            }
+            let bytes = HumanBytes(self.total_bytes_removed);
+            format!(", {bytes:.1} total")
         };
         // I think displaying the number of directories removed isn't
         // particularly interesting to the user. However, if there are 0

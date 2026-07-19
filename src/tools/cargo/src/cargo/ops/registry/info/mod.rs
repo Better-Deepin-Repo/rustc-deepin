@@ -6,7 +6,7 @@ use cargo_util_schemas::core::{PackageIdSpec, PartialVersion};
 use crate::core::registry::PackageRegistry;
 use crate::core::{Dependency, Package, PackageId, PackageIdSpecQuery, Registry, Workspace};
 use crate::ops::registry::info::view::pretty_view;
-use crate::ops::registry::{get_source_id_with_package_id, RegistryOrIndex, RegistrySourceIds};
+use crate::ops::registry::{RegistryOrIndex, RegistrySourceIds, get_source_id_with_package_id};
 use crate::ops::resolve_ws;
 use crate::sources::source::QueryKind;
 use crate::sources::{IndexSummary, SourceConfigMap};
@@ -198,12 +198,8 @@ fn validate_locked_and_frozen_options(
 ) -> Result<(), anyhow::Error> {
     // Only in workspace, we can use --frozen or --locked.
     if !in_workspace {
-        if gctx.locked() {
-            bail!("the option `--locked` can only be used within a workspace");
-        }
-
-        if gctx.frozen() {
-            bail!("the option `--frozen` can only be used within a workspace");
+        if let Some(locked_flag) = gctx.locked_flag() {
+            bail!("the option `{locked_flag}` can only be used within a workspace");
         }
     }
     Ok(())

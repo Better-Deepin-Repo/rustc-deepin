@@ -1,3 +1,4 @@
+//@ compile-flags: --enable-index-page -Z unstable-options
 //! The point of this crate is to be able to have enough different "kinds" of
 //! documentation generated so we can test each different features.
 #![doc(html_playground_url="https://play.rust-lang.org/")]
@@ -79,6 +80,7 @@ impl Foo {
     pub fn warning2() {}
 }
 
+/// <a href="#implementations"><code id="trait-impl-link-in-summary">A collapsible trait impl with a link</code></a>
 impl AsRef<str> for Foo {
     fn as_ref(&self) -> &str {
         "hello"
@@ -159,6 +161,10 @@ pub enum AnEnum {
 #[doc(keyword = "for")]
 /// Some keyword.
 pub mod keyword {}
+
+#[doc(attribute = "forbid")]
+/// Some attribute.
+pub mod repr {}
 
 /// Just some type alias.
 pub type SomeType = u32;
@@ -454,10 +460,10 @@ pub fn safe_fn() {}
 
 #[repr(C)]
 pub struct WithGenerics<T: TraitWithNoDocblocks, S = String, E = WhoLetTheDogOut, P = i8> {
-    s: S,
-    t: T,
-    e: E,
-    p: P,
+    pub s: S,
+    pub t: T,
+    pub e: E,
+    pub p: P,
 }
 
 pub struct StructWithPublicUndocumentedFields {
@@ -615,6 +621,15 @@ pub mod private {
     }
 }
 
+/// ```
+/// fn super_long_function_name_because_i_need_to_hit_the_limit_and_break_beyond_it() {
+/// }
+/// ```
+///
+/// ```text
+/// fn super_long_function_name_because_i_need_to_hit_the_limit_and_break_beyond_it_v2() {
+/// }
+/// ```
 pub mod trait_bounds {
     pub trait OneBound: Sized {}
     pub trait TwoBounds: Sized + Copy {}
@@ -690,4 +705,94 @@ impl ImplDoc {
 /// * list
 impl ImplDoc {
     pub fn bar5() {}
+}
+
+pub trait ItemsTrait {
+    /// You want doc, here is doc!
+    ///
+    /// blablala
+    type F;
+
+    /// You want doc, here is doc!
+    ///
+    /// blablala
+    const X: u32;
+
+    /// You want doc, here is doc!
+    ///
+    /// blablala
+    fn foo() {}
+
+    /// You want doc, here is doc!
+    ///
+    /// blablala
+    fn bar();
+}
+
+pub mod SidebarSort {
+    use std::cell::Cell;
+    use std::sync::atomic::*;
+    pub trait Sort {}
+
+    impl Sort for u32 {}
+    impl Sort for u8 {}
+    impl Sort for u16 {}
+    impl Sort for usize {}
+    impl Sort for AtomicU32 {}
+    impl Sort for AtomicU16 {}
+    impl Sort for AtomicU8 {}
+    impl Sort for AtomicBool {}
+    impl Sort for Cell<u16> {}
+    impl Sort for Cell<u8> {}
+    impl<'a> Sort for &'a str {}
+}
+
+pub mod impls_indent {
+    pub struct Context;
+
+    /// Working with objects.
+    ///
+    /// # Safety
+    ///
+    /// Functions that take indices of locals do not check bounds on these indices;
+    /// the caller must ensure that the indices are less than the number of locals
+    /// in the current stack frame.
+    impl Context {
+    }
+
+    /// Working with objects.
+    ///
+    /// # Safety
+    ///
+    /// Functions that take indices of locals do not check bounds on these indices;
+    /// the caller must ensure that the indices are less than the number of locals
+    /// in the current stack frame.
+    impl Context {
+        /// bla
+        pub fn bar() {}
+    }
+}
+
+pub mod tooltips {
+    pub struct X;
+
+    impl X {
+        pub fn bar() -> Vec<u8> {
+            Vec::new()
+        }
+    }
+
+    pub fn bar() -> Vec<u8> {
+        Vec::new()
+    }
+}
+
+pub mod tyalias {
+    pub struct X<T>(pub T);
+
+    impl<T: std::fmt::Debug> X<T> {
+        pub fn blob(&self) {}
+    }
+
+    pub type Y = X<u8>;
 }

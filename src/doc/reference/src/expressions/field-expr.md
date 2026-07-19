@@ -1,17 +1,26 @@
+r[expr.field]
 # Field access expressions
 
-> **<sup>Syntax</sup>**\
-> _FieldExpression_ :\
-> &nbsp;&nbsp; [_Expression_] `.` [IDENTIFIER]
+r[expr.field.syntax]
+```grammar,expressions
+FieldExpression -> Expression `.` IDENTIFIER
+```
 
+r[expr.field.intro]
 A *field expression* is a [place expression] that evaluates to the location of a field of a [struct] or [union].
+
+r[expr.field.mut]
 When the operand is [mutable], the field expression is also mutable.
 
+r[expr.field.form]
 The syntax for a field expression is an expression, called the *container operand*, then a `.`, and finally an [identifier].
+
+r[expr.field.not-method-call]
 Field expressions cannot be followed by a parenthetical comma-separated list of expressions, as that is instead parsed as a [method call expression].
 That is, they cannot be the function operand of a [call expression].
 
-> **Note**: Wrap the field expression in a [parenthesized expression] to use it in a call expression.
+> [!NOTE]
+> Wrap the field expression in a [parenthesized expression] to use it in a call expression.
 >
 > ```rust
 > # struct HoldsCallable<F: Fn()> { callable: F }
@@ -34,16 +43,18 @@ foo().x;
 (mystruct.function_field)() // Call expression containing a field expression
 ```
 
+r[expr.field.autoref-deref]
 ## Automatic dereferencing
 
 If the type of the container operand implements [`Deref`] or [`DerefMut`][`Deref`] depending on whether the operand is [mutable], it is *automatically dereferenced* as many times as necessary to make the field access possible.
 This process is also called *autoderef* for short.
 
+r[expr.field.borrow]
 ## Borrowing
 
 The fields of a struct or a reference to a struct are treated as separate entities when borrowing.
 If the struct does not implement [`Drop`] and is stored in a local variable, this also applies to moving out of each of its fields.
-This also does not apply if automatic dereferencing is done though user-defined types other than [`Box`].
+This also does not apply if automatic dereferencing is done through user-defined types other than [`Box`].
 
 ```rust
 struct A { f1: String, f2: String, f3: String }
@@ -59,11 +70,10 @@ let c: &String = &x.f2;         // Can borrow again
 let d: String = x.f3;           // Move out of x.f3
 ```
 
-[_Expression_]: ../expressions.md
 [`Box`]: ../special-types-and-traits.md#boxt
 [`Deref`]: ../special-types-and-traits.md#deref-and-derefmut
 [`drop`]: ../special-types-and-traits.md#drop
-[IDENTIFIER]: ../identifiers.md
+[identifier]: ../identifiers.md
 [call expression]: call-expr.md
 [method call expression]: method-call-expr.md
 [mutable]: ../expressions.md#mutability

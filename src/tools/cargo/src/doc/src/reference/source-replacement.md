@@ -1,8 +1,12 @@
 # Source Replacement
 
-This document is about replacing the crate index. You can read about overriding
-dependencies in the [overriding dependencies] section of this
-documentation.
+This document is about redirecting communication with [registries]
+or repositories of [git-based dependencies] to another data source, such as a
+server mirroring the original registry or an exact local copy.
+
+If you want to patch individual dependencies, see [overriding dependencies] section of this
+documentation. If you want to control how Cargo makes network requests, see [`[http]`](config.md#http)
+and [`[net]`](config.md#net) configuration.
 
 A *source* is a provider that contains crates that may be included as
 dependencies for a package. Cargo supports the ability to **replace one source
@@ -26,11 +30,14 @@ dependencies through the usage of [the `[patch]` key][overriding
 dependencies], and private registry support is described in [the Registries
 chapter][registries].
 
-When using source replacement, running commands like `cargo publish` that need to
-contact the registry require passing the `--registry` option. This helps avoid
+When using source replacement, running commands that need to
+contact the registry directly[^1] requires passing the `--registry` option. This helps avoid
 any ambiguity about which registry to contact, and will use the authentication
 token for the specified registry.
 
+[^1]: Examples of such commands are in [Publishing Commands].
+
+[Publishing Commands]: ../commands/publishing-commands.md
 [overriding dependencies]: overriding-dependencies.md
 [registries]: registries.md
 
@@ -84,13 +91,26 @@ git = "https://example.com/path/to/repo"
 
 ## Registry Sources
 
-A "registry source" is one that is the same as crates.io itself. That is, it has
-an index served in a git repository which matches the format of the
-[crates.io index](https://github.com/rust-lang/crates.io-index). That repository
-then has configuration indicating where to download crates from.
+A "registry source" is one that works like crates.io itself. It's an index
+that conforms to the specification at https://doc.rust-lang.org/cargo/reference/registry-index.html
+with a configuration file indicating where to download crates from.
 
-Currently there is not an already-available project for setting up a mirror of
-crates.io. Stay tuned though!
+Registry sources can use [either git or sparse HTTP protocol][protocols]:
+
+```toml
+# Git protocol
+registry = "ssh://git@example.com/path/to/index.git"
+
+# Sparse HTTP protocol  
+registry = "sparse+https://example.com/path/to/index"
+
+# HTTPS git protocol
+registry = "https://example.com/path/to/index"
+```
+
+[protocols]: registries.md#registry-protocols
+
+[crates.io index]: https://doc.rust-lang.org/cargo/reference/registry-index.html
 
 ## Local Registry Sources
 
@@ -128,3 +148,13 @@ is placed on the name of each directory.
 Each crate in a directory source also has an associated metadata file indicating
 the checksum of each file in the crate to protect against accidental
 modifications.
+
+## Git sources
+
+Git sources represent repositories used by [git-based dependencies]. They're
+used to specify which git-based dependencies should be replaced with alternative sources.
+
+Git sources are *not* related to the [git registries][protocols],
+and can't be used to replace registry sources.
+
+[git-based dependencies]: specifying-dependencies.md#specifying-dependencies-from-git-repositories

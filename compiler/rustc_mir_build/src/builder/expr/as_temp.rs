@@ -2,7 +2,7 @@
 
 use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_hir::HirId;
-use rustc_middle::middle::region::{Scope, ScopeData};
+use rustc_middle::middle::region::{Scope, ScopeData, TempLifetime};
 use rustc_middle::mir::*;
 use rustc_middle::thir::*;
 use tracing::{debug, instrument};
@@ -34,7 +34,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         expr_id: ExprId,
         mutability: Mutability,
     ) -> BlockAnd<Local> {
-        let this = self;
+        let this = self; // See "LET_THIS_SELF".
 
         let expr = &this.thir[expr_id];
         let expr_span = expr.span;
@@ -85,7 +85,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
 
                 _ => LocalInfo::Boring,
             };
-            **local_decl.local_info.as_mut().assert_crate_local() = local_info;
+            **local_decl.local_info.as_mut().unwrap_crate_local() = local_info;
             this.local_decls.push(local_decl)
         };
         debug!(?temp);
@@ -102,8 +102,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 if let Block { expr: None, targeted_by_break: false, .. } = this.thir[block]
                     && expr_ty.is_never() => {}
             _ => {
-                this.cfg
-                    .push(block, Statement { source_info, kind: StatementKind::StorageLive(temp) });
+                this.cfg.push(block, Statement::new(source_info, StatementKind::StorageLive(temp)));
 
                 // In constants, `temp_lifetime` is `None` for temporaries that
                 // live for the `'static` lifetime. Thus we do not drop these

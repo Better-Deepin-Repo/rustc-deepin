@@ -1,8 +1,7 @@
 use core::ops::ControlFlow;
 
-use rustc_ast as ast;
 use rustc_ast::visit::visit_opt;
-use rustc_ast::{EnumDef, VariantData, attr};
+use rustc_ast::{self as ast, EnumDef, Safety, VariantData, attr};
 use rustc_expand::base::{Annotatable, DummyResult, ExtCtxt};
 use rustc_span::{ErrorGuaranteed, Ident, Span, kw, sym};
 use smallvec::SmallVec;
@@ -42,7 +41,7 @@ pub(crate) fn expand_deriving_default(
                     StaticStruct(_, fields) => {
                         default_struct_substructure(cx, trait_span, substr, fields)
                     }
-                    StaticEnum(enum_def, _) => {
+                    StaticEnum(enum_def) => {
                         default_enum_substructure(cx, trait_span, enum_def, item.span())
                     }
                     _ => cx.dcx().span_bug(trait_span, "method in `derive(Default)`"),
@@ -51,11 +50,14 @@ pub(crate) fn expand_deriving_default(
         }],
         associated_types: Vec::new(),
         is_const,
+        is_staged_api_crate: cx.ecfg.features.staged_api(),
+        safety: Safety::Default,
+        document: true,
     };
     trait_def.expand(cx, mitem, item, push)
 }
 
-fn default_call(cx: &ExtCtxt<'_>, span: Span) -> ast::ptr::P<ast::Expr> {
+fn default_call(cx: &ExtCtxt<'_>, span: Span) -> Box<ast::Expr> {
     // Note that `kw::Default` is "default" and `sym::Default` is "Default"!
     let default_ident = cx.std_path(&[kw::Default, sym::Default, kw::Default]);
     cx.expr_call_global(span, default_ident, ThinVec::new())
@@ -108,30 +110,38 @@ fn default_enum_substructure(
         Ok(default_variant) => {
             // We now know there is exactly one unit variant with exactly one `#[default]` attribute.
             match &default_variant.data {
-                VariantData::Unit(_) => cx.expr_path(cx.path(default_variant.span, vec![
-                    Ident::new(kw::SelfUpper, default_variant.span),
-                    default_variant.ident,
-                ])),
+                VariantData::Unit(_) => cx.expr_path(cx.path(
+                    default_variant.span,
+                    vec![Ident::new(kw::SelfUpper, default_variant.span), default_variant.ident],
+                )),
                 VariantData::Struct { fields, .. } => {
                     // This only happens if `#![feature(default_field_values)]`. We have validated
                     // all fields have default values in the definition.
                     let default_fields = fields
                         .iter()
                         .map(|field| {
-                            cx.field_imm(field.span, field.ident.unwrap(), match &field.default {
-                                // We use `Default::default()`.
-                                None => default_call(cx, field.span),
-                                // We use the field default const expression.
-                                Some(val) => {
-                                    cx.expr(val.value.span, ast::ExprKind::ConstBlock(val.clone()))
-                                }
-                            })
+                            cx.field_imm(
+                                field.span,
+                                field.ident.unwrap(),
+                                match &field.default {
+                                    // We use `Default::default()`.
+                                    None => default_call(cx, field.span),
+                                    // We use the field default const expression.
+                                    Some(val) => cx.expr(
+                                        val.value.span,
+                                        ast::ExprKind::ConstBlock(val.clone()),
+                                    ),
+                                },
+                            )
                         })
                         .collect();
-                    let path = cx.path(default_variant.span, vec![
-                        Ident::new(kw::SelfUpper, default_variant.span),
-                        default_variant.ident,
-                    ]);
+                    let path = cx.path(
+                        default_variant.span,
+                        vec![
+                            Ident::new(kw::SelfUpper, default_variant.span),
+                            default_variant.ident,
+                        ],
+                    );
                     cx.expr_struct(default_variant.span, path, default_fields)
                 }
                 // Logic error in `extract_default_variant`.

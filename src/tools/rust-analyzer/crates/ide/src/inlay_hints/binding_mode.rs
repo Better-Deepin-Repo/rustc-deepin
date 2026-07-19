@@ -8,7 +8,6 @@ use hir::Mutability;
 use ide_db::famous_defs::FamousDefs;
 
 use ide_db::text_edit::TextEditBuilder;
-use span::EditionedFileId;
 use syntax::ast::{self, AstNode};
 
 use crate::{InlayHint, InlayHintLabel, InlayHintPosition, InlayHintsConfig, InlayKind};
@@ -16,8 +15,7 @@ use crate::{InlayHint, InlayHintLabel, InlayHintPosition, InlayHintsConfig, Inla
 pub(super) fn hints(
     acc: &mut Vec<InlayHint>,
     FamousDefs(sema, _): &FamousDefs<'_, '_>,
-    config: &InlayHintsConfig,
-    _file_id: EditionedFileId,
+    config: &InlayHintsConfig<'_>,
     pat: &ast::Pat,
 ) -> Option<()> {
     if !config.binding_mode_hints {
@@ -61,7 +59,6 @@ pub(super) fn hints(
         }
         hint.label.append_str(r);
     });
-    hint.pad_right = was_mut_last;
     let acc_base = acc.len();
     match pat {
         ast::Pat::IdentPat(pat) if pat.ref_token().is_none() && pat.mut_token().is_none() => {
@@ -86,6 +83,7 @@ pub(super) fn hints(
         }
         ast::Pat::OrPat(pat) if !pattern_adjustments.is_empty() && outer_paren_pat.is_none() => {
             hint.label.append_str("(");
+            was_mut_last = false;
             acc.push(InlayHint::closing_paren_after(
                 InlayKind::BindingMode,
                 pat.syntax().text_range(),
@@ -94,21 +92,29 @@ pub(super) fn hints(
         _ => (),
     }
     if !hint.label.parts.is_empty() {
+        hint.pad_right = was_mut_last;
         acc.push(hint);
     }
 
     if let hints @ [_, ..] = &mut acc[acc_base..] {
-        let mut edit = TextEditBuilder::default();
-        for h in &mut *hints {
-            edit.insert(
-                match h.position {
-                    InlayHintPosition::Before => h.range.start(),
-                    InlayHintPosition::After => h.range.end(),
-                },
-                h.label.parts.iter().map(|p| &*p.text).collect(),
-            );
-        }
-        let edit = edit.finish();
+        let edit = config.lazy_text_edit(|| {
+            let mut edit = TextEditBuilder::default();
+            for h in &mut *hints {
+                edit.insert(
+                    match h.position {
+                        InlayHintPosition::Before => h.range.start(),
+                        InlayHintPosition::After => h.range.end(),
+                    },
+                    h.label
+                        .parts
+                        .iter()
+                        .map(|p| &*p.text)
+                        .chain(h.pad_right.then_some(" "))
+                        .collect(),
+                );
+            }
+            edit.finish()
+        });
         hints.iter_mut().for_each(|h| h.text_edit = Some(edit.clone()));
     }
 
@@ -117,9 +123,11 @@ pub(super) fn hints(
 
 #[cfg(test)]
 mod tests {
+    use expect_test::expect;
+
     use crate::{
-        inlay_hints::tests::{check_with_config, DISABLED_CONFIG},
         InlayHintsConfig,
+        inlay_hints::tests::{DISABLED_CONFIG, check_edit, check_with_config},
     };
 
     #[test]
@@ -191,6 +199,29 @@ fn foo(s @ Struct { field, .. }: &Struct) {}
          //^^^^^^^^^^^^^^^^^^^^&
                   //^^^^^ref
 "#,
+        );
+    }
+
+    #[test]
+    fn edits() {
+        check_edit(
+            InlayHintsConfig { binding_mode_hints: true, ..DISABLED_CONFIG },
+            r#"
+fn main() {
+    match &(0,) {
+        (x,) | (x,) => (),
+        ((x,) | (x,)) => (),
+    }
+}
+"#,
+            expect![[r#"
+                fn main() {
+                    match &(0,) {
+                        &(&((ref x,) | (ref x,))) => (),
+                        &((ref x,) | (ref x,)) => (),
+                    }
+                }
+            "#]],
         );
     }
 }

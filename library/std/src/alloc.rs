@@ -11,7 +11,7 @@
 //!
 //! This attribute allows configuring the choice of global allocator.
 //! You can use this to implement a completely custom global allocator
-//! to route all default allocation requests to a custom object.
+//! to route all[^system-alloc] default allocation requests to a custom object.
 //!
 //! ```rust
 //! use std::alloc::{GlobalAlloc, System, Layout};
@@ -20,11 +20,11 @@
 //!
 //! unsafe impl GlobalAlloc for MyAllocator {
 //!     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-//!         System.alloc(layout)
+//!         unsafe { System.alloc(layout) }
 //!     }
 //!
 //!     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-//!         System.dealloc(ptr, layout)
+//!         unsafe { System.dealloc(ptr, layout) }
 //!     }
 //! }
 //!
@@ -52,12 +52,19 @@
 //!
 //! The `#[global_allocator]` can only be used once in a crate
 //! or its recursive dependencies.
+//!
+//! [^system-alloc]: Note that the Rust standard library internals may still
+//! directly call [`System`] when necessary (for example for the runtime
+//! support typically required to implement a global allocator, see [re-entrance] on [`GlobalAlloc`]
+//! for more details).
+//!
+//! [re-entrance]: trait.GlobalAlloc.html#re-entrance
 
 #![deny(unsafe_op_in_unsafe_fn)]
 #![stable(feature = "alloc_module", since = "1.28.0")]
 
 use core::ptr::NonNull;
-use core::sync::atomic::{AtomicPtr, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use core::{hint, mem, ptr};
 
 #[stable(feature = "alloc_module", since = "1.28.0")]
@@ -102,7 +109,7 @@ pub use alloc_crate::alloc::*;
 ///
 /// unsafe impl GlobalAlloc for Counter {
 ///     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-///         let ret = System.alloc(layout);
+///         let ret = unsafe { System.alloc(layout) };
 ///         if !ret.is_null() {
 ///             ALLOCATED.fetch_add(layout.size(), Relaxed);
 ///         }
@@ -110,7 +117,7 @@ pub use alloc_crate::alloc::*;
 ///     }
 ///
 ///     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-///         System.dealloc(ptr, layout);
+///         unsafe { System.dealloc(ptr, layout); }
 ///         ALLOCATED.fetch_sub(layout.size(), Relaxed);
 ///     }
 /// }
@@ -344,23 +351,79 @@ pub fn take_alloc_error_hook() -> fn(Layout) {
     if hook.is_null() { default_alloc_error_hook } else { unsafe { mem::transmute(hook) } }
 }
 
+#[optimize(size)]
 fn default_alloc_error_hook(layout: Layout) {
-    extern "Rust" {
-        // This symbol is emitted by rustc next to __rust_alloc_error_handler.
-        // Its value depends on the -Zoom={panic,abort} compiler option.
-        static __rust_alloc_error_handler_should_panic: u8;
+    if cfg!(panic = "immediate-abort") {
+        return;
     }
 
-    if unsafe { __rust_alloc_error_handler_should_panic != 0 } {
+    unsafe extern "Rust" {
+        // This symbol is emitted by rustc next to __rust_alloc_error_handler.
+        // Its value depends on the -Zoom={panic,abort} compiler option.
+        #[rustc_std_internal_symbol]
+        fn __rust_alloc_error_handler_should_panic_v2() -> u8;
+    }
+
+    if unsafe { __rust_alloc_error_handler_should_panic_v2() != 0 } {
         panic!("memory allocation of {} bytes failed", layout.size());
+    }
+
+    // This is the default path taken on OOM, and the only path taken on stable with std.
+    // Crucially, it does *not* call any user-defined code, and therefore users do not have to
+    // worry about allocation failure causing reentrancy issues. That makes it different from
+    // the default `__rdl_alloc_error_handler` defined in alloc (i.e., the default alloc error
+    // handler that is  called when there is no `#[alloc_error_handler]`), which triggers a
+    // regular panic and thus can invoke a user-defined panic hook, executing arbitrary
+    // user-defined code.
+
+    static PREV_ALLOC_FAILURE: AtomicBool = AtomicBool::new(false);
+    if PREV_ALLOC_FAILURE.swap(true, Ordering::Relaxed) {
+        // Don't try to print a backtrace if a previous alloc error happened. This likely means
+        // there is not enough memory to print a backtrace, although it could also mean that two
+        // threads concurrently run out of memory.
+        rtprintpanic!(
+            "memory allocation of {} bytes failed\nskipping backtrace printing to avoid potential recursion\n",
+            layout.size()
+        );
+        return;
     } else {
-        // This is the default path taken on OOM, and the only path taken on stable with std.
-        // Crucially, it does *not* call any user-defined code, and therefore users do not have to
-        // worry about allocation failure causing reentrancy issues. That makes it different from
-        // the default `__rdl_oom` defined in alloc (i.e., the default alloc error handler that is
-        // called when there is no `#[alloc_error_handler]`), which triggers a regular panic and
-        // thus can invoke a user-defined panic hook, executing arbitrary user-defined code.
         rtprintpanic!("memory allocation of {} bytes failed\n", layout.size());
+    }
+
+    let Some(mut out) = crate::sys::stdio::panic_output() else {
+        return;
+    };
+
+    // Use a lock to prevent mixed output in multithreading context.
+    // Some platforms also require it when printing a backtrace, like `SymFromAddr` on Windows.
+    // Make sure to not take this lock until after checking PREV_ALLOC_FAILURE to avoid deadlocks
+    // when there is too little memory to print a backtrace.
+    let mut lock = crate::sys::backtrace::lock();
+
+    match crate::panic::get_backtrace_style() {
+        Some(crate::panic::BacktraceStyle::Short) => {
+            drop(lock.print(&mut out, crate::backtrace_rs::PrintFmt::Short))
+        }
+        Some(crate::panic::BacktraceStyle::Full) => {
+            drop(lock.print(&mut out, crate::backtrace_rs::PrintFmt::Full))
+        }
+        Some(crate::panic::BacktraceStyle::Off) => {
+            use crate::io::Write;
+            let _ = writeln!(
+                out,
+                "note: run with `RUST_BACKTRACE=1` environment variable to display a \
+                             backtrace"
+            );
+            if cfg!(miri) {
+                let _ = writeln!(
+                    out,
+                    "note: in Miri, you may have to set `MIRIFLAGS=-Zmiri-env-forward=RUST_BACKTRACE` \
+                                for the environment variable to have an effect"
+                );
+            }
+        }
+        // If backtraces aren't supported or are forced-off, do nothing.
+        None => {}
     }
 }
 
@@ -369,11 +432,13 @@ fn default_alloc_error_hook(layout: Layout) {
 #[alloc_error_handler]
 #[unstable(feature = "alloc_internals", issue = "none")]
 pub fn rust_oom(layout: Layout) -> ! {
-    let hook = HOOK.load(Ordering::Acquire);
-    let hook: fn(Layout) =
-        if hook.is_null() { default_alloc_error_hook } else { unsafe { mem::transmute(hook) } };
-    hook(layout);
-    crate::process::abort()
+    crate::sys::backtrace::__rust_end_short_backtrace(|| {
+        let hook = HOOK.load(Ordering::Acquire);
+        let hook: fn(Layout) =
+            if hook.is_null() { default_alloc_error_hook } else { unsafe { mem::transmute(hook) } };
+        hook(layout);
+        crate::process::abort()
+    })
 }
 
 #[cfg(not(test))]

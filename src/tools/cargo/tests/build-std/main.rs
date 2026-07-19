@@ -20,10 +20,16 @@
 
 #![allow(clippy::disallowed_methods)]
 
-use cargo_test_support::prelude::*;
-use cargo_test_support::{basic_manifest, paths, project, rustc_host, str, Execs};
+use cargo_test_support::Execs;
+use cargo_test_support::basic_manifest;
+use cargo_test_support::paths;
+use cargo_test_support::project;
+use cargo_test_support::rustc_host;
+use cargo_test_support::str;
+use cargo_test_support::target_spec_json;
+use cargo_test_support::{Project, prelude::*};
 use std::env;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn enable_build_std(e: &mut Execs, arg: Option<&str>, isolated: bool) {
     if !isolated {
@@ -48,7 +54,7 @@ trait BuildStd: Sized {
     ///
     /// The environment is not isolated is to avoid excessive network requests
     /// and downloads. A side effect is `[BLOCKING]` will show up in stderr,
-    /// as a sign of package cahce lock contention when running other build-std
+    /// as a sign of package cache lock contention when running other build-std
     /// tests concurrently.
     fn build_std(&mut self) -> &mut Self;
 
@@ -159,7 +165,7 @@ fn basic() {
         .build_std_isolated()
         .target_host()
         .with_stderr_data(str![[r#"
-[COMPILING] rustc-std-workspace-std [..]
+[COMPILING] [..]
 ...
 [COMPILING] test v0.0.0 ([..])
 [COMPILING] foo v0.0.1 ([ROOT]/foo)
@@ -179,6 +185,37 @@ fn basic() {
         .join("deps");
     assert!(p.glob(deps_dir.join("*.rlib")).count() > 0);
     assert_eq!(p.glob(deps_dir.join("*.dylib")).count(), 0);
+}
+
+#[cargo_test(build_std_real)]
+fn lto() {
+    // Checks that `-Zbuild-std` can work with `lto = "thin"`.
+    // This regression is from https://github.com/rust-lang/rust/issues/146109.
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                [package]
+                name = "foo"
+                version = "0.1.0"
+                edition = "2021"
+
+                [profile.dev]
+                lto = "thin"
+            "#,
+        )
+        .file(
+            "src/main.rs",
+            r#"
+            fn main() {}
+            "#,
+        )
+        .build();
+
+    p.cargo("build")
+        .build_std_arg("std")
+        .env("RUSTFLAGS", "-C linker-features=-lld")
+        .run();
 }
 
 #[cargo_test(build_std_real)]
@@ -262,21 +299,7 @@ fn cross_custom() {
         )
         .file("dep/Cargo.toml", &basic_manifest("dep", "0.1.0"))
         .file("dep/src/lib.rs", "#![no_std] pub fn answer() -> u32 { 42 }")
-        .file(
-            "custom-target.json",
-            r#"
-            {
-                "llvm-target": "x86_64-unknown-none-gnu",
-                "data-layout": "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
-                "arch": "x86_64",
-                "target-endian": "little",
-                "target-pointer-width": "64",
-                "target-c-int-width": "32",
-                "os": "none",
-                "linker-flavor": "ld.lld"
-            }
-            "#,
-        )
+        .file("custom-target.json", target_spec_json())
         .build();
 
     p.cargo("build --target custom-target.json -v")
@@ -303,24 +326,7 @@ fn custom_test_framework() {
             }
             "#,
         )
-        .file(
-            "target.json",
-            r#"
-            {
-                "llvm-target": "x86_64-unknown-none-gnu",
-                "data-layout": "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
-                "arch": "x86_64",
-                "target-endian": "little",
-                "target-pointer-width": "64",
-                "target-c-int-width": "32",
-                "os": "none",
-                "linker-flavor": "ld.lld",
-                "linker": "rust-lld",
-                "executables": true,
-                "panic-strategy": "abort"
-            }
-            "#,
-        )
+        .file("target.json", target_spec_json())
         .build();
 
     // This is a bit of a hack to use the rust-lld that ships with most toolchains.
@@ -377,7 +383,7 @@ fn remap_path_scope() {
 [FINISHED] `release` profile [optimized + debuginfo] target(s) in [ELAPSED]s
 [RUNNING] `target/[HOST_TARGET]/release/foo`
 ...
-[..]thread '[..]' panicked at [..]src/main.rs:3:[..]:
+[..]thread [..] panicked at [..]src/main.rs:3:[..]:
 [..]remap to /rustc/<hash>[..]
 [..]at /rustc/[..]/library/std/src/[..]
 [..]at ./src/main.rs:3:[..]
@@ -421,7 +427,9 @@ fn test_proc_macro() {
 }
 
 #[cargo_test(build_std_real)]
-fn test_panic_abort() {
+fn default_features_still_included_with_extra_build_std_features() {
+    // This is a regression test to ensure when adding extra `build-std-features`,
+    // the default feature set is still respected and included.
     // See rust-lang/cargo#14935
     let p = project()
         .file(
@@ -438,6 +446,37 @@ fn test_panic_abort() {
     p.cargo("check")
         .build_std_arg("std,panic_abort")
         .env("RUSTFLAGS", "-C panic=abort")
-        .arg("-Zbuild-std-features=panic_immediate_abort")
+        .arg("-Zbuild-std-features=optimize_for_size")
         .run();
+}
+
+pub trait CargoProjectExt {
+    /// Creates a `ProcessBuilder` to run cargo.
+    ///
+    /// Arguments can be separated by spaces.
+    ///
+    /// For `cargo run`, see [`Project::rename_run`].
+    ///
+    /// # Example:
+    ///
+    /// ```no_run
+    /// # let p = cargo_test_support::project().build();
+    /// p.cargo("build --bin foo").run();
+    /// ```
+    fn cargo(&self, cmd: &str) -> Execs;
+}
+
+impl CargoProjectExt for Project {
+    fn cargo(&self, cmd: &str) -> Execs {
+        let cargo = cargo_exe();
+        let mut execs = self.process(&cargo);
+        execs.env("CARGO", cargo);
+        execs.arg_line(cmd);
+        execs
+    }
+}
+
+/// Path to the cargo binary
+pub fn cargo_exe() -> PathBuf {
+    snapbox::cmd::cargo_bin!("cargo").to_path_buf()
 }

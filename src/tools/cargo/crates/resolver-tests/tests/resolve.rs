@@ -1,11 +1,11 @@
-use cargo::core::dependency::DepKind;
 use cargo::core::Dependency;
+use cargo::core::dependency::DepKind;
 use cargo::util::GlobalContext;
 
 use resolver_tests::{
     helpers::{
-        assert_contains, assert_same, dep, dep_kind, dep_loc, dep_req, loc_names, names, pkg,
-        pkg_dep, pkg_dep_with, pkg_id, pkg_loc, registry, ToDep, ToPkgId,
+        ToDep, ToPkgId, assert_contains, assert_same, dep, dep_kind, dep_loc, dep_req, loc_names,
+        names, pkg, pkg_dep, pkg_dep_with, pkg_id, pkg_loc, registry,
     },
     pkg, resolve, resolve_with_global_context,
 };
@@ -741,8 +741,8 @@ fn incomplete_information_skipping() {
     let new_reg = registry(
         input
             .iter()
+            .filter(|&x| package_to_yank != x.package_id())
             .cloned()
-            .filter(|x| package_to_yank != x.package_id())
             .collect(),
     );
     assert_eq!(input.len(), new_reg.len() + 1);
@@ -810,8 +810,8 @@ fn incomplete_information_skipping_2() {
     let new_reg = registry(
         input
             .iter()
+            .filter(|&x| package_to_yank != x.package_id())
             .cloned()
-            .filter(|x| package_to_yank != x.package_id())
             .collect(),
     );
     assert_eq!(input.len(), new_reg.len() + 1);
@@ -860,8 +860,8 @@ fn incomplete_information_skipping_3() {
     let new_reg = registry(
         input
             .iter()
+            .filter(|&x| package_to_yank != x.package_id())
             .cloned()
-            .filter(|x| package_to_yank != x.package_id())
             .collect(),
     );
     assert_eq!(input.len(), new_reg.len() + 1);

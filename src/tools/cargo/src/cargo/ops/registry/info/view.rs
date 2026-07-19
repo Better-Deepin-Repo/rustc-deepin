@@ -2,14 +2,14 @@ use std::collections::HashMap;
 use std::io::Write;
 
 use crate::core::Shell;
-use crate::util::style::{ERROR, HEADER, LITERAL, NOP, NOTE, WARN};
+use crate::util::style::{CONTEXT, ERROR, HEADER, LITERAL, NOP, WARN};
 use crate::{
+    CargoResult, GlobalContext,
     core::{
-        dependency::DepKind, shell::Verbosity, Dependency, FeatureMap, Package, PackageId, SourceId,
+        Dependency, FeatureMap, Package, PackageId, SourceId, dependency::DepKind, shell::Verbosity,
     },
     sources::IndexSummary,
     util::interning::InternedString,
-    CargoResult, GlobalContext,
 };
 
 // Pretty print the package information.
@@ -26,7 +26,7 @@ pub(super) fn pretty_view(
     let header = HEADER;
     let error = ERROR;
     let warn = WARN;
-    let note = NOTE;
+    let context = CONTEXT;
 
     let mut shell = gctx.shell();
     let verbosity = shell.verbosity();
@@ -45,7 +45,7 @@ pub(super) fn pretty_view(
         } else {
             format!("#{}", metadata.keywords.join(" #"))
         };
-        write!(shell.out(), " {note}{message}{note:#}")?;
+        write!(shell.out(), " {context}{message}{context:#}")?;
     }
 
     let stdout = shell.out();
@@ -68,7 +68,7 @@ pub(super) fn pretty_view(
         (Some(latest), false) if latest.as_summary().version() != package_id.version() => {
             write!(
                 stdout,
-                " {warn}(latest {} {warn:#}{note}from {}{note:#}{warn}){warn:#}",
+                " {warn}(latest {} {warn:#}{context}from {}{context:#}{warn}){warn:#}",
                 latest.as_summary().version(),
                 pretty_source(summary.source_id(), gctx)
             )?;
@@ -83,7 +83,7 @@ pub(super) fn pretty_view(
         (_, false) => {
             write!(
                 stdout,
-                " {note}(from {}){note:#}",
+                " {context}(from {}){context:#}",
                 pretty_source(summary.source_id(), gctx)
             )?;
         }
@@ -135,7 +135,7 @@ pub(super) fn pretty_view(
         )?;
     }
 
-    let activated = &[InternedString::new("default")];
+    let activated = &["default".into()];
     let resolved_features = resolve_features(activated, summary.features());
     pretty_features(
         resolved_features.clone(),
@@ -400,7 +400,7 @@ fn suggest_cargo_tree(package_id: PackageId, shell: &mut Shell) -> CargoResult<(
     let literal = LITERAL;
 
     shell.note(format_args!(
-        "to see how you depend on {name}, run `{literal}cargo tree --invert --package {name}@{version}{literal:#}`",
+        "to see how you depend on {name}, run `{literal}cargo tree --invert {name}@{version}{literal:#}`",
         name = package_id.name(),
         version = package_id.version(),
     ))

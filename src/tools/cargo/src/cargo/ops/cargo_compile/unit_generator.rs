@@ -2,6 +2,8 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 
+use crate::core::Workspace;
+use crate::core::compiler::UserIntent;
 use crate::core::compiler::rustdoc::RustdocScrapeExamples;
 use crate::core::compiler::unit_dependencies::IsArtifact;
 use crate::core::compiler::{CompileKind, CompileMode, Unit};
@@ -11,10 +13,10 @@ use crate::core::profiles::{Profiles, UnitFor};
 use crate::core::resolver::features::{self, FeaturesFor};
 use crate::core::resolver::{HasDevUnits, Resolve};
 use crate::core::{FeatureValue, Package, PackageSet, Summary, Target};
-use crate::core::{TargetKind, Workspace};
 use crate::util::restricted_names::is_glob_pattern;
-use crate::util::{closest_msg, CargoResult};
+use crate::util::{CargoResult, closest_msg};
 
+use super::Packages;
 use super::compile_filter::{CompileFilter, FilterRule, LibRule};
 use super::packages::build_glob;
 
@@ -44,14 +46,15 @@ struct Proposal<'a> {
 /// [`generate_root_units`]: UnitGenerator::generate_root_units
 /// [`build_unit_dependencies`]: crate::core::compiler::unit_dependencies::build_unit_dependencies
 /// [`UnitGraph`]: crate::core::compiler::unit_graph::UnitGraph
-pub(super) struct UnitGenerator<'a, 'gctx> {
+pub struct UnitGenerator<'a, 'gctx> {
     pub ws: &'a Workspace<'gctx>,
     pub packages: &'a [&'a Package],
+    pub spec: &'a Packages,
     pub target_data: &'a RustcTargetData<'gctx>,
     pub filter: &'a CompileFilter,
     pub requested_kinds: &'a [CompileKind],
     pub explicit_host_kind: CompileKind,
-    pub mode: CompileMode,
+    pub intent: UserIntent,
     pub resolve: &'a Resolve,
     pub workspace_resolve: &'a Option<Resolve>,
     pub resolved_features: &'a features::ResolvedFeatures,
@@ -81,20 +84,6 @@ impl<'a> UnitGenerator<'a, '_> {
                     CompileMode::Test
                 }
             }
-            CompileMode::Build => match *target.kind() {
-                TargetKind::Test => CompileMode::Test,
-                TargetKind::Bench => CompileMode::Bench,
-                _ => CompileMode::Build,
-            },
-            // `CompileMode::Bench` is only used to inform `filter_default_targets`
-            // which command is being used (`cargo bench`). Afterwards, tests
-            // and benches are treated identically. Switching the mode allows
-            // de-duplication of units that are essentially identical. For
-            // example, `cargo build --all-targets --release` creates the units
-            // (lib profile:bench, mode:test) and (lib profile:bench, mode:bench)
-            // and since these are the same, we want them to be de-duplicated in
-            // `unit_dependencies`.
-            CompileMode::Bench => CompileMode::Test,
             _ => initial_target_mode,
         };
 
@@ -178,6 +167,7 @@ impl<'a> UnitGenerator<'a, '_> {
                     /*dep_hash*/ 0,
                     IsArtifact::No,
                     None,
+                    false,
                 )
             })
             .collect()
@@ -186,17 +176,17 @@ impl<'a> UnitGenerator<'a, '_> {
     /// Given a list of all targets for a package, filters out only the targets
     /// that are automatically included when the user doesn't specify any targets.
     fn filter_default_targets<'b>(&self, targets: &'b [Target]) -> Vec<&'b Target> {
-        match self.mode {
-            CompileMode::Bench => targets.iter().filter(|t| t.benched()).collect(),
-            CompileMode::Test => targets
+        match self.intent {
+            UserIntent::Bench => targets.iter().filter(|t| t.benched()).collect(),
+            UserIntent::Test => targets
                 .iter()
                 .filter(|t| t.tested() || t.is_example())
                 .collect(),
-            CompileMode::Build | CompileMode::Check { .. } => targets
+            UserIntent::Build | UserIntent::Check { .. } => targets
                 .iter()
                 .filter(|t| t.is_bin() || t.is_lib())
                 .collect(),
-            CompileMode::Doc { .. } => {
+            UserIntent::Doc { .. } => {
                 // `doc` does lib and bins (bin with same name as lib is skipped).
                 targets
                     .iter()
@@ -209,8 +199,8 @@ impl<'a> UnitGenerator<'a, '_> {
                     })
                     .collect()
             }
-            CompileMode::Doctest | CompileMode::RunCustomBuild | CompileMode::Docscrape => {
-                panic!("Invalid mode {:?}", self.mode)
+            UserIntent::Doctest => {
+                panic!("Invalid intent {:?}", self.intent)
             }
         }
     }
@@ -247,53 +237,111 @@ impl<'a> UnitGenerator<'a, '_> {
         mode: CompileMode,
     ) -> CargoResult<Vec<Proposal<'a>>> {
         let is_glob = is_glob_pattern(target_name);
-        let proposals = if is_glob {
-            let pattern = build_glob(target_name)?;
-            let filter = |t: &Target| is_expected_kind(t) && pattern.matches(t.name());
-            self.filter_targets(filter, true, mode)
-        } else {
-            let filter = |t: &Target| t.name() == target_name && is_expected_kind(t);
-            self.filter_targets(filter, true, mode)
-        };
-
-        if proposals.is_empty() {
-            let targets = self
-                .packages
-                .iter()
-                .flat_map(|pkg| {
-                    pkg.targets()
-                        .iter()
-                        .filter(|target| is_expected_kind(target))
-                })
-                .collect::<Vec<_>>();
-            let suggestion = closest_msg(target_name, targets.iter(), |t| t.name());
-            if !suggestion.is_empty() {
-                anyhow::bail!(
-                    "no {} target {} `{}`{}",
-                    target_desc,
-                    if is_glob { "matches pattern" } else { "named" },
-                    target_name,
-                    suggestion
-                );
+        let pattern = build_glob(target_name)?;
+        let filter = |t: &Target| {
+            if is_glob {
+                is_expected_kind(t) && pattern.matches(t.name())
             } else {
-                let mut msg = String::new();
-                writeln!(
-                    msg,
-                    "no {} target {} `{}`.",
-                    target_desc,
-                    if is_glob { "matches pattern" } else { "named" },
-                    target_name,
-                )?;
-                if !targets.is_empty() {
-                    writeln!(msg, "Available {} targets:", target_desc)?;
-                    for target in targets {
-                        writeln!(msg, "    {}", target.name())?;
+                is_expected_kind(t) && t.name() == target_name
+            }
+        };
+        let proposals = self.filter_targets(filter, true, mode);
+        if proposals.is_empty() {
+            let mut targets = std::collections::BTreeMap::new();
+            for (pkg, target) in self.packages.iter().flat_map(|pkg| {
+                pkg.targets()
+                    .iter()
+                    .filter(|target| is_expected_kind(target))
+                    .map(move |t| (pkg, t))
+            }) {
+                targets
+                    .entry(target.name())
+                    .or_insert_with(Vec::new)
+                    .push((pkg, target));
+            }
+
+            let suggestion = closest_msg(target_name, targets.keys(), |t| t, "target");
+            let targets_elsewhere = self.get_targets_from_other_packages(filter)?;
+            let append_targets_elsewhere = |msg: &mut String| {
+                let mut available_msg = Vec::new();
+                for (package, targets) in &targets_elsewhere {
+                    if !targets.is_empty() {
+                        available_msg.push(format!(
+                            "help: available {target_desc} in `{package}` package:"
+                        ));
+                        for target in targets {
+                            available_msg.push(format!("    {target}"));
+                        }
                     }
                 }
-                anyhow::bail!(msg);
+                if !available_msg.is_empty() {
+                    write!(msg, "\n{}", available_msg.join("\n"))?;
+                }
+                CargoResult::Ok(())
+            };
+
+            let unmatched_packages = match self.spec {
+                Packages::Default | Packages::OptOut(_) | Packages::All(_) => {
+                    " in default-run packages".to_owned()
+                }
+                Packages::Packages(packages) => match packages.len() {
+                    0 => String::new(),
+                    1 => format!(" in `{}` package", packages[0]),
+                    _ => format!(" in `{}`, ... packages", packages[0]),
+                },
+            };
+
+            let named = if is_glob { "matches pattern" } else { "named" };
+
+            let mut msg = String::new();
+            write!(
+                msg,
+                "no {target_desc} target {named} `{target_name}`{unmatched_packages}{suggestion}",
+            )?;
+            if !targets_elsewhere.is_empty() {
+                append_targets_elsewhere(&mut msg)?;
+            } else if suggestion.is_empty() && !targets.is_empty() {
+                write!(msg, "\nhelp: available {} targets:", target_desc)?;
+                for (target_name, pkgs) in targets {
+                    if pkgs.len() == 1 {
+                        write!(msg, "\n    {target_name}")?;
+                    } else {
+                        for (pkg, _) in pkgs {
+                            let pkg_name = pkg.name();
+                            write!(msg, "\n    {target_name} in package {pkg_name}")?;
+                        }
+                    }
+                }
             }
+            anyhow::bail!(msg);
         }
         Ok(proposals)
+    }
+
+    fn get_targets_from_other_packages(
+        &self,
+        filter_fn: impl Fn(&Target) -> bool,
+    ) -> CargoResult<Vec<(&str, Vec<&str>)>> {
+        let packages = Packages::All(Vec::new()).get_packages(self.ws)?;
+        let targets = packages
+            .into_iter()
+            .filter_map(|pkg| {
+                let mut targets: Vec<_> = pkg
+                    .manifest()
+                    .targets()
+                    .iter()
+                    .filter_map(|target| filter_fn(target).then(|| target.name()))
+                    .collect();
+                if targets.is_empty() {
+                    None
+                } else {
+                    targets.sort();
+                    Some((pkg.name().as_str(), targets))
+                }
+            })
+            .collect();
+
+        Ok(targets)
     }
 
     /// Returns a list of proposed targets based on command-line target selection flags.
@@ -335,9 +383,9 @@ impl<'a> UnitGenerator<'a, '_> {
                         pkg,
                         target,
                         requires_features: !required_features_filterable,
-                        mode: self.mode,
+                        mode: to_compile_mode(self.intent),
                     }));
-                    if self.mode == CompileMode::Test {
+                    if matches!(self.intent, UserIntent::Test) {
                         if let Some(t) = pkg
                             .targets()
                             .iter()
@@ -363,9 +411,10 @@ impl<'a> UnitGenerator<'a, '_> {
             } => {
                 if *lib != LibRule::False {
                     let mut libs = Vec::new();
-                    for proposal in self.filter_targets(Target::is_lib, false, self.mode) {
+                    let compile_mode = to_compile_mode(self.intent);
+                    for proposal in self.filter_targets(Target::is_lib, false, compile_mode) {
                         let Proposal { target, pkg, .. } = proposal;
-                        if self.mode.is_doc_test() && !target.doctestable() {
+                        if matches!(self.intent, UserIntent::Doctest) && !target.doctestable() {
                             let types = target.rustc_crate_types();
                             let types_str: Vec<&str> = types.iter().map(|t| t.as_str()).collect();
                             self.ws.gctx().shell().warn(format!(
@@ -395,16 +444,18 @@ impl<'a> UnitGenerator<'a, '_> {
                     proposals.extend(libs);
                 }
 
+                let default_mode = to_compile_mode(self.intent);
+
                 // If `--tests` was specified, add all targets that would be
                 // generated by `cargo test`.
                 let test_filter = match tests {
                     FilterRule::All => Target::tested,
                     FilterRule::Just(_) => Target::is_test,
                 };
-                let test_mode = match self.mode {
-                    CompileMode::Build => CompileMode::Test,
-                    CompileMode::Check { .. } => CompileMode::Check { test: true },
-                    _ => self.mode,
+                let test_mode = match self.intent {
+                    UserIntent::Build => CompileMode::Test,
+                    UserIntent::Check { .. } => CompileMode::Check { test: true },
+                    _ => default_mode,
                 };
                 // If `--benches` was specified, add all targets that would be
                 // generated by `cargo bench`.
@@ -412,25 +463,25 @@ impl<'a> UnitGenerator<'a, '_> {
                     FilterRule::All => Target::benched,
                     FilterRule::Just(_) => Target::is_bench,
                 };
-                let bench_mode = match self.mode {
-                    CompileMode::Build => CompileMode::Bench,
-                    CompileMode::Check { .. } => CompileMode::Check { test: true },
-                    _ => self.mode,
-                };
 
-                proposals.extend(self.list_rule_targets(bins, "bin", Target::is_bin, self.mode)?);
+                proposals.extend(self.list_rule_targets(
+                    bins,
+                    "bin",
+                    Target::is_bin,
+                    default_mode,
+                )?);
                 proposals.extend(self.list_rule_targets(
                     examples,
                     "example",
                     Target::is_example,
-                    self.mode,
+                    default_mode,
                 )?);
                 proposals.extend(self.list_rule_targets(tests, "test", test_filter, test_mode)?);
                 proposals.extend(self.list_rule_targets(
                     benches,
                     "bench",
                     bench_filter,
-                    bench_mode,
+                    test_mode,
                 )?);
             }
         }
@@ -717,5 +768,16 @@ Rustdoc did not scrape the following examples because they require dev-dependenc
         let scrape_proposals = self.create_docscrape_proposals(&doc_units)?;
         let scrape_units = self.proposals_to_units(scrape_proposals)?;
         Ok(scrape_units)
+    }
+}
+
+/// Converts [`UserIntent`] to [`CompileMode`] for root units.
+fn to_compile_mode(intent: UserIntent) -> CompileMode {
+    match intent {
+        UserIntent::Test | UserIntent::Bench => CompileMode::Test,
+        UserIntent::Build => CompileMode::Build,
+        UserIntent::Check { test } => CompileMode::Check { test },
+        UserIntent::Doc { .. } => CompileMode::Doc,
+        UserIntent::Doctest => CompileMode::Doctest,
     }
 }

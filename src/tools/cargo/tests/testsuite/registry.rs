@@ -2,16 +2,17 @@
 
 use std::fmt::Write;
 use std::fs::{self, File};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::Mutex;
 
+use crate::prelude::*;
+use crate::utils::cargo_process;
 use cargo::core::SourceId;
-use cargo_test_support::cargo_process;
+use cargo_test_support::assert_deterministic_mtime;
 use cargo_test_support::paths;
-use cargo_test_support::prelude::*;
 use cargo_test_support::registry::{
-    self, registry_path, Dependency, Package, RegistryBuilder, Response, TestRegistry,
+    self, Dependency, Package, RegistryBuilder, Response, TestRegistry, registry_path,
 };
 use cargo_test_support::{basic_manifest, project, str};
 use cargo_test_support::{git, t};
@@ -2431,14 +2432,10 @@ fn disallow_network_http() {
     p.cargo("check --frozen")
         .with_status(101)
         .with_stderr_data(str![[r#"
-[UPDATING] `dummy-registry` index
-[ERROR] failed to get `foo` as a dependency of package `bar v0.5.0 ([ROOT]/foo)`
-
-Caused by:
-  failed to query replaced source registry `crates-io`
-
-Caused by:
-  attempting to make an HTTP request, but --frozen was specified
+[ERROR] no matching package named `foo` found
+location searched: `dummy-registry` index (which is replacing registry `crates-io`)
+required by package `bar v0.5.0 ([ROOT]/foo)`
+As a reminder, you're using offline mode (--frozen) which can sometimes cause surprising resolution failures, if this error is too confusing you may wish to retry without `--frozen`.
 
 "#]])
         .run();
@@ -2467,19 +2464,10 @@ fn disallow_network_git() {
     p.cargo("check --frozen")
         .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] failed to get `foo` as a dependency of package `bar v0.5.0 ([ROOT]/foo)`
-
-Caused by:
-  failed to load source for dependency `foo`
-
-Caused by:
-  Unable to update registry `crates-io`
-
-Caused by:
-  failed to update replaced source registry `crates-io`
-
-Caused by:
-  attempting to make an HTTP request, but --frozen was specified
+[ERROR] no matching package named `foo` found
+location searched: `dummy-registry` index (which is replacing registry `crates-io`)
+required by package `bar v0.5.0 ([ROOT]/foo)`
+As a reminder, you're using offline mode (--frozen) which can sometimes cause surprising resolution failures, if this error is too confusing you may wish to retry without `--frozen`.
 
 "#]])
         .run();
@@ -3097,6 +3085,79 @@ fn readonly_registry_still_works() {
     }
 }
 
+#[cargo_test(ignore_windows = "On Windows setting file attributes is a bit complicated")]
+fn inaccessible_registry_cache_still_works() {
+    Package::new("foo", "0.1.0").publish();
+    Package::new("fo2", "0.1.0").publish();
+
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                [package]
+                name = "a"
+                version = "0.5.0"
+                edition = "2015"
+                authors = []
+
+                [dependencies]
+                foo = '0.1.0'
+                fo2 = '0.1.0'
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+
+    p.cargo("generate-lockfile").run();
+    p.cargo("fetch --locked").run();
+
+    let cache_path = inner_dir(&paths::cargo_home().join("registry/index")).join(".cache");
+    let f_cache_path = cache_path.join("3/f");
+
+    // Remove the permissions from the cache path that contains the "foo" crate
+    set_permissions(&f_cache_path, 0o000);
+
+    // Now run a build and make sure we properly build and warn the user
+    p.cargo("build")
+        .with_stderr_data(str![[r#"
+[WARNING] failed to write cache, path: [ROOT]/home/.cargo/registry/index/-[HASH]/.cache/3/f/fo[..], [ERROR] Permission denied (os error 13)
+[COMPILING] fo[..] v0.1.0
+[COMPILING] fo[..] v0.1.0
+[COMPILING] a v0.5.0 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .run();
+    // make sure we add the permissions to the files afterwards so "cargo clean" can remove them (#6934)
+    set_permissions(&f_cache_path, 0o777);
+
+    #[cfg_attr(windows, allow(unused_variables))]
+    fn set_permissions(path: &Path, permissions: u32) {
+        #[cfg(not(windows))]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = t!(path.metadata()).permissions();
+            perms.set_mode(permissions);
+            t!(fs::set_permissions(path, perms));
+        }
+
+        #[cfg(windows)]
+        panic!("This test is not supported on windows. See the reason in the #[cargo_test] macro");
+    }
+
+    fn inner_dir(path: &Path) -> PathBuf {
+        for entry in t!(path.read_dir()) {
+            let path = t!(entry).path();
+
+            if path.is_dir() {
+                return path;
+            }
+        }
+
+        panic!("could not find inner directory of {path:?}");
+    }
+}
+
 #[cargo_test]
 fn registry_index_rejected_http() {
     let _server = setup_http();
@@ -3635,11 +3696,12 @@ fn sparse_retry_multiple() {
             let remain = 3 - retry;
             write!(
                 &mut expected,
-                "[WARNING] spurious network error ({remain} tries remaining): \
+                "[WARNING] spurious network error ({remain} {} remaining): \
                 failed to get successful HTTP response from \
                 `http://127.0.0.1:[..]/{ab}/{cd}/{name}` (127.0.0.1), got 500\n\
                 body:\n\
-                internal server error\n"
+                internal server error\n",
+                if remain != 1 { "tries" } else { "try" }
             )
             .unwrap();
         }
@@ -3726,9 +3788,9 @@ internal server error
 fn rand_prefix() -> String {
     use rand::Rng;
     const CHARS: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     (0..5)
-        .map(|_| CHARS[rng.gen_range(0..CHARS.len())] as char)
+        .map(|_| CHARS[rng.random_range(0..CHARS.len())] as char)
         .collect()
 }
 
@@ -3787,11 +3849,12 @@ fn dl_retry_multiple() {
             let remain = 3 - retry;
             write!(
                 &mut expected,
-                "[WARNING] spurious network error ({remain} tries remaining): \
+                "[WARNING] spurious network error ({remain} {} remaining): \
                 failed to get successful HTTP response from \
                 `http://127.0.0.1:[..]/dl/{name}/1.0.0/download` (127.0.0.1), got 500\n\
                 body:\n\
-                internal server error\n"
+                internal server error\n",
+                if remain != 1 { "tries" } else { "try" }
             )
             .unwrap();
         }
@@ -3817,6 +3880,57 @@ fn dl_retry_multiple() {
     p.cargo("fetch")
         .with_stderr_data(IntoData::unordered(expected))
         .run();
+}
+
+#[cargo_test]
+fn retry_too_many_requests() {
+    let fail_count = Mutex::new(0);
+    let _registry = RegistryBuilder::new()
+        .http_index()
+        .add_responder("/index/3/b/bar", move |req, server| {
+            let mut fail_count = fail_count.lock().unwrap();
+            if *fail_count < 1 {
+                *fail_count += 1;
+                server.too_many_requests(req, std::time::Duration::from_secs(1))
+            } else {
+                server.index(req)
+            }
+        })
+        .build();
+
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                [package]
+                name = "foo"
+                version = "0.0.1"
+                edition = "2015"
+                authors = []
+
+                [dependencies]
+                bar = ">= 0.0.0"
+            "#,
+        )
+        .file("src/main.rs", "fn main() {}")
+        .build();
+
+    Package::new("bar", "0.0.1").publish();
+
+    p.cargo("check")
+    .with_stderr_data(str![[r#"
+[UPDATING] `dummy-registry` index
+[WARNING] spurious network error (3 tries remaining): failed to get successful HTTP response from `[..]/index/3/b/bar` ([..]), got 429
+body:
+too many requests, try again in 1 seconds
+[LOCKING] 1 package to latest compatible version
+[DOWNLOADING] crates ...
+[DOWNLOADED] bar v0.0.1 (registry `dummy-registry`)
+[CHECKING] bar v0.0.1
+[CHECKING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]]).run();
 }
 
 #[cargo_test]
@@ -4160,7 +4274,7 @@ Please slow down
 [WARNING] spurious network error (2 tries remaining): failed to get successful HTTP response from `http://127.0.0.1:[..]/index/3/b/bar` (127.0.0.1), got 503
 body:
 Please slow down
-[WARNING] spurious network error (1 tries remaining): failed to get successful HTTP response from `http://127.0.0.1:[..]/index/3/b/bar` (127.0.0.1), got 503
+[WARNING] spurious network error (1 try remaining): failed to get successful HTTP response from `http://127.0.0.1:[..]/index/3/b/bar` (127.0.0.1), got 503
 body:
 Please slow down
 [ERROR] failed to get `bar` as a dependency of package `foo v0.1.0 ([ROOT]/foo)`
@@ -4225,7 +4339,7 @@ Please slow down
 [WARNING] spurious network error (2 tries remaining): failed to get successful HTTP response from `http://127.0.0.1:[..]/dl/bar/1.0.0/download` (127.0.0.1), got 503
 body:
 Please slow down
-[WARNING] spurious network error (1 tries remaining): failed to get successful HTTP response from `http://127.0.0.1:[..]/dl/bar/1.0.0/download` (127.0.0.1), got 503
+[WARNING] spurious network error (1 try remaining): failed to get successful HTTP response from `http://127.0.0.1:[..]/dl/bar/1.0.0/download` (127.0.0.1), got 503
 body:
 Please slow down
 [ERROR] failed to download from `http://127.0.0.1:[..]/dl/bar/1.0.0/download`
@@ -4539,4 +4653,45 @@ required by package `foo v0.0.1 ([ROOT]/foo)`
 
 "#]])
         .run();
+}
+
+#[cargo_test]
+fn deterministic_mtime() {
+    let registry = registry::init();
+    Package::new("foo", "0.1.0")
+        // content doesn't matter, we just want to check mtime
+        .file("Cargo.lock", "")
+        .file(".cargo_vcs_info.json", "")
+        .file("src/lib.rs", "")
+        .publish();
+
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                [package]
+                name = "a"
+                edition = "2015"
+
+                [dependencies]
+                foo = '0.1.0'
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+
+    p.cargo("fetch").run();
+
+    let id = SourceId::for_registry(registry.index_url()).unwrap();
+    let hash = cargo::util::hex::short_hash(&id);
+    let pkg_root = paths::cargo_home()
+        .join("registry")
+        .join("src")
+        .join(format!("-{hash}"))
+        .join("foo-0.1.0");
+
+    // Generated files should have deterministic mtime after unpacking.
+    assert_deterministic_mtime(pkg_root.join("Cargo.lock"));
+    assert_deterministic_mtime(pkg_root.join("Cargo.toml"));
+    assert_deterministic_mtime(pkg_root.join(".cargo_vcs_info.json"));
 }

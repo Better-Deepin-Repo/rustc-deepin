@@ -1,5 +1,7 @@
+r[macro]
 # Macros
 
+r[macro.intro]
 The functionality and syntax of Rust can be extended with custom definitions
 called macros. They are given names, and invoked through a consistent
 syntax: `some_extension!(...)`.
@@ -10,37 +12,53 @@ There are two ways to define new macros:
 * [Procedural Macros] define function-like macros, custom derives, and custom
   attributes using functions that operate on input tokens.
 
-## Macro Invocation
+r[macro.invocation]
+## Macro invocation
 
-> **<sup>Syntax</sup>**\
-> _MacroInvocation_ :\
-> &nbsp;&nbsp; [_SimplePath_] `!` _DelimTokenTree_
->
-> _DelimTokenTree_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp;  `(` _TokenTree_<sup>\*</sup> `)`\
-> &nbsp;&nbsp; | `[` _TokenTree_<sup>\*</sup> `]`\
-> &nbsp;&nbsp; | `{` _TokenTree_<sup>\*</sup> `}`
->
-> _TokenTree_ :\
-> &nbsp;&nbsp; [_Token_]<sub>_except [delimiters]_</sub> | _DelimTokenTree_
->
-> _MacroInvocationSemi_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; [_SimplePath_] `!` `(` _TokenTree_<sup>\*</sup> `)` `;`\
-> &nbsp;&nbsp; | [_SimplePath_] `!` `[` _TokenTree_<sup>\*</sup> `]` `;`\
-> &nbsp;&nbsp; | [_SimplePath_] `!` `{` _TokenTree_<sup>\*</sup> `}`
+r[macro.invocation.syntax]
+```grammar,macros
+MacroInvocation ->
+    SimplePath `!` DelimTokenTree
 
+DelimTokenTree ->
+      `(` TokenTree* `)`
+    | `[` TokenTree* `]`
+    | `{` TokenTree* `}`
+
+TokenTree ->
+    Token _except [delimiters][lex.token.delim]_ | DelimTokenTree
+
+MacroInvocationSemi ->
+      SimplePath `!` `(` TokenTree* `)` `;`
+    | SimplePath `!` `[` TokenTree* `]` `;`
+    | SimplePath `!` `{` TokenTree* `}`
+```
+
+r[macro.invocation.intro]
 A macro invocation expands a macro at compile time and replaces the
 invocation with the result of the macro. Macros may be invoked in the
 following situations:
 
+r[macro.invocation.expr]
 * [Expressions] and [statements]
+
+r[macro.invocation.pattern]
 * [Patterns]
+
+r[macro.invocation.type]
 * [Types]
+
+r[macro.invocation.item]
 * [Items] including [associated items]
+
+r[macro.invocation.nested]
 * [`macro_rules`] transcribers
+
+r[macro.invocation.extern]
 * [External blocks]
 
-When used as an item or a statement, the _MacroInvocationSemi_ form is used
+r[macro.invocation.item-statement]
+When used as an item or a statement, the [MacroInvocationSemi] form is used
 where a semicolon is required at the end when not using curly braces.
 [Visibility qualifiers] are never allowed before a macro invocation or
 [`macro_rules`] definition.
@@ -90,8 +108,6 @@ example!();
 
 [Macros by Example]: macros-by-example.md
 [Procedural Macros]: procedural-macros.md
-[_SimplePath_]: paths.md#simple-paths
-[_Token_]: tokens.md
 [associated items]: items/associated-items.md
 [delimiters]: tokens.md#delimiters
 [expressions]: expressions.md

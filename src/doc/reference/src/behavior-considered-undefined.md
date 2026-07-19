@@ -1,6 +1,5 @@
-## Behavior considered undefined
-
 r[undefined]
+# Behavior considered undefined
 
 r[undefined.general]
 Rust code is incorrect if it exhibits any of the behaviors in the following
@@ -16,19 +15,10 @@ behaviors. `unsafe` code that satisfies this property for any safe client is
 called *sound*; if `unsafe` code can be misused by safe code to exhibit
 undefined behavior, it is *unsound*.
 
-<div class="warning">
-
-***Warning:*** The following list is not exhaustive; it may grow or shrink.
-There is no formal model of Rust's semantics for what is and is not allowed in
-unsafe code, so there may be more behavior considered unsafe. We also reserve
-the right to make some of the behavior in that list defined in the future. In
-other words, this list does not say that anything will *definitely* always be
-undefined in all future Rust version (but we might make such commitments for
-some list items in the future).
-
-Please read the [Rustonomicon] before writing unsafe code.
-
-</div>
+> [!WARNING]
+> The following list is not exhaustive; it may grow or shrink. There is no formal model of Rust's semantics for what is and is not allowed in unsafe code, so there may be more behavior considered unsafe. We also reserve the right to make some of the behavior in that list defined in the future. In other words, this list does not say that anything will *definitely* always be undefined in all future Rust version (but we might make such commitments for some list items in the future).
+>
+> Please read the [Rustonomicon] before writing unsafe code.
 
 r[undefined.race]
 * Data races.
@@ -44,22 +34,18 @@ r[undefined.place-projection]
   [array/slice index expression][project-slice].
 
 r[undefined.alias]
-* Breaking the [pointer aliasing rules]. `Box<T>`, `&mut T` and `&T` follow
-  LLVM’s scoped [noalias] model, except if the `&T` contains an
-  [`UnsafeCell<U>`]. References and boxes must not be [dangling] while they are
-  live. The exact liveness duration is not specified, but some bounds exist:
+* Breaking the pointer aliasing rules. The exact aliasing rules are not determined yet, but here is an outline of the general principles:
+  `&T` must point to memory that is not mutated while they are live (except for data inside an [`UnsafeCell<U>`]),
+  and `&mut T` must point to memory that is not read or written by any pointer not derived from the reference and that no other reference points to while they are live.
+  `Box<T>` is treated similar to `&'static mut T` for the purpose of these rules.
+  The exact liveness duration is not specified, but some bounds exist:
   * For references, the liveness duration is upper-bounded by the syntactic
-    lifetime assigned by the borrow checker; it cannot be live any *longer* than
-    that lifetime.
-  * Each time a reference or box is passed to or returned from a function, it is
-    considered live.
-  * When a reference (but not a `Box`!) is passed to a function, it is live at
-    least as long as that function call, again except if the `&T` contains an
-    [`UnsafeCell<U>`].
+    lifetime assigned by the borrow checker; it cannot be live any *longer* than that lifetime.
+  * Each time a reference or box is dereferenced or reborrowed, it is considered live.
+  * Each time a reference or box is passed to or returned from a function, it is considered live.
+  * When a reference (but not a `Box`!) is passed to a function, it is live at least as long as that function call, again except if the `&T` contains an [`UnsafeCell<U>`].
 
-  All this also applies when values of these
-  types are passed in a (nested) field of a compound type, but not behind
-  pointer indirections.
+  All this also applies when values of these types are passed in a (nested) field of a compound type, but not behind pointer indirections.
 
 r[undefined.immutable]
 * Mutating immutable bytes.
@@ -78,7 +64,7 @@ r[undefined.target-feature]
   does not support (see [`target_feature`]), *except* if the platform explicitly documents this to be safe.
 
 r[undefined.call]
-* Calling a function with the wrong call ABI or unwinding from a function with the wrong unwind ABI.
+* Calling a function with the wrong [call ABI][abi], or unwinding past a stack frame that does not allow unwinding (e.g. by calling a `"C-unwind"` function imported or transmuted as a `"C"` function or function pointer).
 
 r[undefined.invalid]
 * Producing an [invalid value][invalid-values]. "Producing" a
@@ -93,25 +79,26 @@ r[undefined.asm]
 r[undefined.const-transmute-ptr2int]
 * **In [const context](const_eval.md#const-context)**: transmuting or otherwise
   reinterpreting a pointer (reference, raw pointer, or function pointer) into
-  some allocated object as a non-pointer type (such as integers).
+  some allocation as a non-pointer type (such as integers).
   'Reinterpreting' refers to loading the pointer value at integer type without a
   cast, e.g. by doing raw pointer casts or using a union.
 
-> **Note**: Undefined behavior affects the entire program. For example, calling
-> a function in C that exhibits undefined behavior of C means your entire
-> program contains undefined behaviour that can also affect the Rust code. And
-> vice versa, undefined behavior in Rust can cause adverse affects on code
-> executed by any FFI calls to other languages.
+r[undefined.runtime]
+* Violating assumptions of the Rust runtime. Most assumptions of the Rust runtime are currently not explicitly documented.
+  * For assumptions specifically related to unwinding, see the [panic documentation][unwinding-ffi].
+  * The runtime assumes that a Rust stack frame is not deallocated without executing destructors for local variables owned by the stack frame. This assumption can be violated by C functions like `longjmp`.
 
-### Pointed-to bytes
+> [!NOTE]
+> Undefined behavior affects the entire program. For example, calling a function in C that exhibits undefined behavior of C means your entire program contains undefined behaviour that can also affect the Rust code. And vice versa, undefined behavior in Rust can cause adverse affects on code executed by any FFI calls to other languages.
 
 r[undefined.pointed-to]
+## Pointed-to bytes
+
 The span of bytes a pointer or reference "points to" is determined by the pointer value and the size of the pointee type (using `size_of_val`).
 
-### Places based on misaligned pointers
-[based on a misaligned pointer]: #places-based-on-misaligned-pointers
-
 r[undefined.misaligned]
+## Places based on misaligned pointers
+[based on a misaligned pointer]: #places-based-on-misaligned-pointers
 
 r[undefined.misaligned.general]
 A place is said to be "based on a misaligned pointer" if the last `*` projection
@@ -149,10 +136,9 @@ more aligned than the type that contains it, i.e., `repr(packed)`. This means
 that being based on an aligned pointer is always sufficient to ensure that the
 new reference is aligned, but it is not always necessary.
 
-### Dangling pointers
-[dangling]: #dangling-pointers
-
 r[undefined.dangling]
+## Dangling pointers
+[dangling]: #dangling-pointers
 
 r[undefined.dangling.general]
 A reference/pointer is "dangling" if not all of the bytes it
@@ -172,10 +158,9 @@ In particular, the dynamic size of a Rust value (as determined by `size_of_val`)
 must never exceed `isize::MAX`, since it is impossible for a single allocation
 to be larger than `isize::MAX`.
 
-### Invalid values
-[invalid-values]: #invalid-values
-
 r[undefined.validity]
+## Invalid values
+[invalid-values]: #invalid-values
 
 r[undefined.validity.general]
 The Rust compiler assumes that all values produced during program execution are
@@ -197,7 +182,7 @@ r[undefined.validity.never]
 
 r[undefined.validity.scalar]
 * An integer (`i*`/`u*`), floating point value (`f*`), or raw pointer must be
-  initialized, i.e., must not be obtained from [uninitialized memory][undef].
+  initialized, i.e., must not be obtained from uninitialized memory.
 
 r[undefined.validity.str]
 * A `str` value is treated like `[u8]`, i.e. it must be initialized.
@@ -215,7 +200,7 @@ r[undefined.validity.union]
   Further details are [still being debated](https://github.com/rust-lang/unsafe-code-guidelines/issues/438).
 
 r[undefined.validity.reference-box]
-* A reference or [`Box<T>`] must be aligned, it cannot be [dangling], and it must point to a valid value
+* A reference or [`Box<T>`] must be aligned and non-null, it cannot be [dangling], and it must point to a valid value
   (in case of dynamically sized types, using the actual dynamic type of the
   pointee as determined by the metadata).
   Note that the last point (about pointing to a valid value) remains a subject of some debate.
@@ -233,8 +218,8 @@ r[undefined.validity.valid-range]
 * If a type has a custom range of a valid values, then a valid value must be in that range.
   In the standard library, this affects [`NonNull<T>`] and [`NonZero<T>`].
 
-  > **Note**: `rustc` achieves this with the unstable
-  > `rustc_layout_scalar_valid_range_*` attributes.
+  > [!NOTE]
+  > `rustc` achieves this with the unstable `rustc_layout_scalar_valid_range_*` attributes.
 
 r[undefined.validity.undef]
 **Note:** Uninitialized memory is also implicitly invalid for any type that has
@@ -244,9 +229,7 @@ reading uninitialized memory is permitted are inside `union`s and in "padding"
 
 [`bool`]: types/boolean.md
 [`const`]: items/constant-items.md
-[noalias]: http://llvm.org/docs/LangRef.html#noalias
-[pointer aliasing rules]: http://llvm.org/docs/LangRef.html#pointer-aliasing-rules
-[undef]: http://llvm.org/docs/LangRef.html#undefined-values
+[abi]: items/external-blocks.md#abi
 [`target_feature`]: attributes/codegen.md#the-target_feature-attribute
 [`UnsafeCell<U>`]: std::cell::UnsafeCell
 [Rustonomicon]: ../nomicon/index.html
@@ -259,5 +242,6 @@ reading uninitialized memory is permitted are inside `union`s and in "padding"
 [project-field]: expressions/field-expr.md
 [project-tuple]: expressions/tuple-expr.md#tuple-indexing-expressions
 [project-slice]: expressions/array-expr.md#array-and-slice-indexing-expressions
+[unwinding-ffi]: panic.md#unwinding-across-ffi-boundaries
 [const-promoted]: destructors.md#constant-promotion
 [lifetime-extended]: destructors.md#temporary-lifetime-extension

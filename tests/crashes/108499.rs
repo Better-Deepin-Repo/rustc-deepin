@@ -1,4 +1,5 @@
 //@ known-bug: #108499
+//@ ignore-hurd
 
 // at lower recursion limits the recursion limit is reached before the bug happens
 #![recursion_limit = "2000"]

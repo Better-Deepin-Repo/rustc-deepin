@@ -1,7 +1,9 @@
 use std::ffi::OsString;
+use std::fmt::Write as _;
 use std::iter;
 use std::path::Path;
 
+use crate::core::MaybePackage;
 use crate::core::compiler::UnitOutput;
 use crate::core::{TargetKind, Workspace};
 use crate::ops;
@@ -69,10 +71,20 @@ pub fn run(
                 names.join(", ")
             )
         } else {
-            anyhow::bail!(
-                "`cargo run` can run at most one executable, but \
+            let mut message = "`cargo run` can run at most one executable, but \
                  multiple were specified"
-            )
+                .to_owned();
+            write!(&mut message, "\nhelp: available targets:")?;
+            for (pkg, bin) in &bins {
+                write!(
+                    &mut message,
+                    "\n    {} `{}` in package `{}`",
+                    bin.kind().description(),
+                    bin.name(),
+                    pkg.name()
+                )?;
+            }
+            anyhow::bail!(message)
         }
     }
 
@@ -84,7 +96,7 @@ pub fn run(
     let UnitOutput {
         unit,
         path,
-        script_meta,
+        script_metas,
     } = &compile.binaries[0];
     let exe = match path.strip_prefix(gctx.cwd()) {
         Ok(path) if path.file_name() == Some(path.as_os_str()) => Path::new(".").join(path),
@@ -92,7 +104,13 @@ pub fn run(
         Err(_) => path.to_path_buf(),
     };
     let pkg = bins[0].0;
-    let mut process = compile.target_process(exe, unit.kind, pkg, *script_meta)?;
+    let mut process = compile.target_process(exe, unit.kind, pkg, script_metas.as_ref())?;
+
+    if let MaybePackage::Package(pkg) = ws.root_maybe()
+        && pkg.manifest().is_embedded()
+    {
+        process.arg0(pkg.manifest_path());
+    }
 
     // Sets the working directory of the child process to the current working
     // directory of the parent process.

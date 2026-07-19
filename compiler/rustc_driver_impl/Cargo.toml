@@ -1,10 +1,12 @@
 [package]
 name = "rustc_driver_impl"
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 # tidy-alphabetical-start
+jiff = { version = "0.2.5", default-features = false, features = ["std"] }
+rustc_abi = { path = "../rustc_abi" }
 rustc_ast = { path = "../rustc_ast" }
 rustc_ast_lowering = { path = "../rustc_ast_lowering" }
 rustc_ast_passes = { path = "../rustc_ast_passes" }
@@ -39,21 +41,20 @@ rustc_parse = { path = "../rustc_parse" }
 rustc_passes = { path = "../rustc_passes" }
 rustc_pattern_analysis = { path = "../rustc_pattern_analysis" }
 rustc_privacy = { path = "../rustc_privacy" }
+rustc_public = { path = "../rustc_public", features = ["rustc_internal"] }
 rustc_query_system = { path = "../rustc_query_system" }
 rustc_resolve = { path = "../rustc_resolve" }
 rustc_session = { path = "../rustc_session" }
-rustc_smir = { path = "../rustc_smir" }
 rustc_span = { path = "../rustc_span" }
 rustc_target = { path = "../rustc_target" }
 rustc_trait_selection = { path = "../rustc_trait_selection" }
 rustc_ty_utils = { path = "../rustc_ty_utils" }
 serde_json = "1.0.59"
 shlex = "1.0"
-time = { version = "0.3.36", default-features = false, features = ["alloc", "formatting", "macros"] }
 tracing = { version = "0.1.35" }
 # tidy-alphabetical-end
 
-[target.'cfg(unix)'.dependencies]
+[target.'cfg(all(unix, any(target_env = "gnu", target_os = "macos")))'.dependencies]
 # tidy-alphabetical-start
 libc = "0.2"
 # tidy-alphabetical-end
@@ -65,7 +66,10 @@ ctrlc = "3.4.4"
 
 [features]
 # tidy-alphabetical-start
+check_only = ['rustc_interface/check_only']
 llvm = ['rustc_interface/llvm']
+llvm_enzyme = ['rustc_interface/llvm_enzyme']
+llvm_offload = ['rustc_interface/llvm_offload']
 max_level_info = ['rustc_log/max_level_info']
 rustc_randomized_layouts = [
     'rustc_index/rustc_randomized_layouts',

@@ -15,16 +15,16 @@ extern crate test_macros;
 #[cfg_eval]
 #[print_attr]
 struct S1 {
-    #[cfg(FALSE)]
+    #[cfg(false)]
     field_false: u8,
     #[cfg(all(/*true*/))]
     #[cfg_attr(FALSE, unknown_attr)]
-    #[cfg_attr(all(/*true*/), allow())]
+    #[cfg_attr(all(/*true*/), allow())] //~ WARN unused attribute
     field_true: u8,
 }
 
 #[cfg_eval]
-#[cfg(FALSE)]
+#[cfg(false)]
 struct S2 {}
 
 fn main() {
@@ -33,5 +33,5 @@ fn main() {
     // expression. `#[cfg]` is not supported inside parenthesized expressions, so this will
     // produce an error when attribute collection runs.
     let _ = #[cfg_eval] #[print_attr] #[cfg_attr(not(FALSE), rustc_dummy)]
-    (#[cfg(FALSE)] 0, #[cfg(all(/*true*/))] 1,);
+    (#[cfg(false)] 0, #[cfg(all(/*true*/))] 1,);
 }

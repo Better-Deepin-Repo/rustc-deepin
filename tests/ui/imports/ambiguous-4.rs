@@ -1,4 +1,5 @@
-//@ build-pass
+//@ edition:2015
+//@ check-pass
 //@ aux-build: ../ambiguous-4-extern.rs
 
 extern crate ambiguous_4_extern;

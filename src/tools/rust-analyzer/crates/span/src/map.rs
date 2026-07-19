@@ -6,8 +6,8 @@ use std::{fmt, hash::Hash};
 use stdx::{always, itertools::Itertools};
 
 use crate::{
-    EditionedFileId, ErasedFileAstId, Span, SpanAnchor, SpanData, SyntaxContextId, TextRange,
-    TextSize, ROOT_ERASED_FILE_AST_ID,
+    EditionedFileId, ErasedFileAstId, ROOT_ERASED_FILE_AST_ID, Span, SpanAnchor, SpanData,
+    SyntaxContext, TextRange, TextSize,
 };
 
 /// Maps absolute text ranges for the corresponding file to the relevant span data.
@@ -41,13 +41,13 @@ where
 
     /// Pushes a new span onto the [`SpanMap`].
     pub fn push(&mut self, offset: TextSize, span: SpanData<S>) {
-        if cfg!(debug_assertions) {
-            if let Some(&(last_offset, _)) = self.spans.last() {
-                assert!(
-                    last_offset < offset,
-                    "last_offset({last_offset:?}) must be smaller than offset({offset:?})"
-                );
-            }
+        if cfg!(debug_assertions)
+            && let Some(&(last_offset, _)) = self.spans.last()
+        {
+            assert!(
+                last_offset < offset,
+                "last_offset({last_offset:?}) must be smaller than offset({offset:?})"
+            );
         }
         self.spans.push((offset, span));
     }
@@ -156,6 +156,44 @@ where
     }
 }
 
+#[cfg(not(no_salsa_async_drops))]
+impl<S> Drop for SpanMap<S> {
+    fn drop(&mut self) {
+        struct SendPtr(*mut [()]);
+        unsafe impl Send for SendPtr {}
+        static SPAN_MAP_DROP_THREAD: std::sync::OnceLock<
+            std::sync::mpsc::Sender<(SendPtr, fn(SendPtr))>,
+        > = std::sync::OnceLock::new();
+        SPAN_MAP_DROP_THREAD
+            .get_or_init(|| {
+                let (sender, receiver) = std::sync::mpsc::channel::<(SendPtr, fn(SendPtr))>();
+                std::thread::Builder::new()
+                    .name("SpanMapDropper".to_owned())
+                    .spawn(move || receiver.iter().for_each(|(b, drop)| drop(b)))
+                    .unwrap();
+                sender
+            })
+            .send((
+                unsafe {
+                    SendPtr(std::mem::transmute::<*mut [(TextSize, SpanData<S>)], *mut [()]>(
+                        Box::<[(TextSize, SpanData<S>)]>::into_raw(
+                            std::mem::take(&mut self.spans).into_boxed_slice(),
+                        ),
+                    ))
+                },
+                |b: SendPtr| {
+                    _ = unsafe {
+                        Box::from_raw(std::mem::transmute::<
+                            *mut [()],
+                            *mut [(TextSize, SpanData<S>)],
+                        >(b.0))
+                    }
+                },
+            ))
+            .unwrap();
+    }
+}
+
 #[derive(PartialEq, Eq, Hash, Debug)]
 pub struct RealSpanMap {
     file_id: EditionedFileId,
@@ -169,7 +207,7 @@ impl fmt::Display for RealSpanMap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "RealSpanMap({:?}):", self.file_id)?;
         for span in self.pairs.iter() {
-            writeln!(f, "{}: {}", u32::from(span.0), span.1.into_raw())?;
+            writeln!(f, "{}: {:#?}", u32::from(span.0), span.1)?;
         }
         Ok(())
     }
@@ -208,7 +246,7 @@ impl RealSpanMap {
         Span {
             range: range - offset,
             anchor: SpanAnchor { file_id: self.file_id, ast_id },
-            ctx: SyntaxContextId::ROOT,
+            ctx: SyntaxContext::root(self.file_id.edition()),
         }
     }
 }

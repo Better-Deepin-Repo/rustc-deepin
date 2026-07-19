@@ -2,9 +2,9 @@
 
 use std::fs;
 
+use crate::prelude::*;
 use cargo_test_support::git;
 use cargo_test_support::paths;
-use cargo_test_support::prelude::*;
 use cargo_test_support::registry::{self, Package};
 use cargo_test_support::{basic_manifest, project, str};
 
@@ -357,6 +357,63 @@ fn patch_to_git() {
         .run();
 }
 
+#[cargo_test(public_network_test)]
+fn patch_to_git_pull_request() {
+    Package::new("bar", "0.1.0").publish();
+
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                [package]
+                name = "foo"
+                version = "0.0.1"
+                edition = "2015"
+                authors = []
+
+                [dependencies]
+                bar = "0.1"
+
+                [patch.crates-io]
+                bar = { git = 'https://github.com/rust-lang/does-not-exist/pull/123' }
+            "#,
+        )
+        .file(
+            "src/lib.rs",
+            "extern crate bar; pub fn foo() { bar::bar(); }",
+        )
+        .build();
+
+    p.cargo("check -v")
+        .with_status(101)
+        .with_stderr_data(format!(
+            r#"[UPDATING] git repository `https://github.com/rust-lang/does-not-exist/pull/123`
+...
+[ERROR] failed to load source for dependency `bar`
+
+Caused by:
+  Unable to update https://github.com/rust-lang/does-not-exist/pull/123
+
+Caused by:
+  failed to clone into: [ROOT]/home/.cargo/git/db/123-[HASH]
+
+Caused by:
+  network failure seems to have happened
+  if a proxy or similar is necessary `net.git-fetch-with-cli` may help here
+  https://doc.rust-lang.org/cargo/reference/config.html#netgit-fetch-with-cli
+
+  [NOTE] GitHub url https://github.com/rust-lang/does-not-exist/pull/123 is not a repository. 
+  [HELP] Replace the dependency with 
+         `git = "https://github.com/rust-lang/does-not-exist.git" rev = "refs/pull/123/head"` 
+     to specify pull requests as dependencies' revision.
+
+Caused by:
+...
+"#
+        ))
+        .run();
+}
+
 #[cargo_test]
 fn unused() {
     Package::new("bar", "0.1.0").publish();
@@ -386,11 +443,11 @@ fn unused() {
     p.cargo("check")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[WARNING] Patch `bar v0.2.0 ([ROOT]/foo/bar)` was not used in the crate graph.
-Check that the patched package version and available features are compatible
-with the dependency requirements. If the patch has a different version from
-what is locked in the Cargo.lock file, run `cargo update` to use the new
-version. This may also occur with an optional dependency that is not enabled.
+[WARNING] patch `bar v0.2.0 ([ROOT]/foo/bar)` was not used in the crate graph
+[HELP] Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
 [LOCKING] 1 package to latest compatible version
 [ADDING] bar v0.1.0 (available: v0.2.0)
 [DOWNLOADING] crates ...
@@ -403,11 +460,11 @@ version. This may also occur with an optional dependency that is not enabled.
         .run();
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[WARNING] Patch `bar v0.2.0 ([ROOT]/foo/bar)` was not used in the crate graph.
-Check that the patched package version and available features are compatible
-with the dependency requirements. If the patch has a different version from
-what is locked in the Cargo.lock file, run `cargo update` to use the new
-version. This may also occur with an optional dependency that is not enabled.
+[WARNING] patch `bar v0.2.0 ([ROOT]/foo/bar)` was not used in the crate graph
+[HELP] Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
@@ -459,15 +516,15 @@ fn unused_with_mismatch_source_being_patched() {
     p.cargo("check")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[WARNING] Patch `bar v0.2.0 ([ROOT]/foo/bar)` was not used in the crate graph.
-Perhaps you misspelled the source URL being patched.
-Possible URLs for `[patch.<URL>]`:
-    crates-io
-[WARNING] Patch `bar v0.3.0 ([ROOT]/foo/baz)` was not used in the crate graph.
-Check that the patched package version and available features are compatible
-with the dependency requirements. If the patch has a different version from
-what is locked in the Cargo.lock file, run `cargo update` to use the new
-version. This may also occur with an optional dependency that is not enabled.
+[WARNING] patch `bar v0.2.0 ([ROOT]/foo/bar)` was not used in the crate graph
+  |
+  = [HELP] perhaps you meant one of the following:
+          	crates-io
+[WARNING] patch `bar v0.3.0 ([ROOT]/foo/baz)` was not used in the crate graph
+[HELP] Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
 [LOCKING] 1 package to latest compatible version
 [ADDING] bar v0.1.0 (available: v0.3.0)
 [DOWNLOADING] crates ...
@@ -562,11 +619,11 @@ fn unused_from_config() {
     p.cargo("check")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[WARNING] Patch `bar v0.2.0 ([ROOT]/foo/bar)` was not used in the crate graph.
-Check that the patched package version and available features are compatible
-with the dependency requirements. If the patch has a different version from
-what is locked in the Cargo.lock file, run `cargo update` to use the new
-version. This may also occur with an optional dependency that is not enabled.
+[WARNING] patch `bar v0.2.0 ([ROOT]/foo/bar)` was not used in the crate graph
+[HELP] Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
 [LOCKING] 1 package to latest compatible version
 [ADDING] bar v0.1.0 (available: v0.2.0)
 [DOWNLOADING] crates ...
@@ -579,11 +636,11 @@ version. This may also occur with an optional dependency that is not enabled.
         .run();
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[WARNING] Patch `bar v0.2.0 ([ROOT]/foo/bar)` was not used in the crate graph.
-Check that the patched package version and available features are compatible
-with the dependency requirements. If the patch has a different version from
-what is locked in the Cargo.lock file, run `cargo update` to use the new
-version. This may also occur with an optional dependency that is not enabled.
+[WARNING] patch `bar v0.2.0 ([ROOT]/foo/bar)` was not used in the crate graph
+[HELP] Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
@@ -636,11 +693,11 @@ fn unused_git() {
         .with_stderr_data(str![[r#"
 [UPDATING] git repository `[ROOTURL]/override`
 [UPDATING] `dummy-registry` index
-[WARNING] Patch `bar v0.2.0 ([ROOTURL]/override#[..])` was not used in the crate graph.
-Check that the patched package version and available features are compatible
-with the dependency requirements. If the patch has a different version from
-what is locked in the Cargo.lock file, run `cargo update` to use the new
-version. This may also occur with an optional dependency that is not enabled.
+[WARNING] patch `bar v0.2.0 ([ROOTURL]/override#[..])` was not used in the crate graph
+[HELP] Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
 [LOCKING] 1 package to latest compatible version
 [ADDING] bar v0.1.0 (available: v0.2.0)
 [DOWNLOADING] crates ...
@@ -653,11 +710,11 @@ version. This may also occur with an optional dependency that is not enabled.
         .run();
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[WARNING] Patch `bar v0.2.0 ([ROOTURL]/override#[..])` was not used in the crate graph.
-Check that the patched package version and available features are compatible
-with the dependency requirements. If the patch has a different version from
-what is locked in the Cargo.lock file, run `cargo update` to use the new
-version. This may also occur with an optional dependency that is not enabled.
+[WARNING] patch `bar v0.2.0 ([ROOTURL]/override#[..])` was not used in the crate graph
+[HELP] Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
@@ -870,22 +927,22 @@ fn add_ignored_patch() {
 
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[WARNING] Patch `bar v0.1.1 ([ROOT]/foo/bar)` was not used in the crate graph.
-Check that the patched package version and available features are compatible
-with the dependency requirements. If the patch has a different version from
-what is locked in the Cargo.lock file, run `cargo update` to use the new
-version. This may also occur with an optional dependency that is not enabled.
+[WARNING] patch `bar v0.1.1 ([ROOT]/foo/bar)` was not used in the crate graph
+[HELP] Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
         .run();
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[WARNING] Patch `bar v0.1.1 ([ROOT]/foo/bar)` was not used in the crate graph.
-Check that the patched package version and available features are compatible
-with the dependency requirements. If the patch has a different version from
-what is locked in the Cargo.lock file, run `cargo update` to use the new
-version. This may also occur with an optional dependency that is not enabled.
+[WARNING] patch `bar v0.1.1 ([ROOT]/foo/bar)` was not used in the crate graph
+[HELP] Check that the patched package version and available features are compatible
+      with the dependency requirements. If the patch has a different version from
+      what is locked in the Cargo.lock file, run `cargo update` to use the new
+      version. This may also occur with an optional dependency that is not enabled.
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
@@ -928,20 +985,28 @@ fn add_patch_with_features() {
         .file("bar/src/lib.rs", r#""#)
         .build();
 
-    p.cargo("check").with_stderr_data(str![[r#"
-[WARNING] patch for `bar` uses the features mechanism. default-features and features will not take effect because the patch dependency does not support this mechanism
+    p.cargo("check")
+        .with_stderr_data(str![[r#"
+[WARNING] unused field in patch for `bar`: `features`
+  |
+  = [HELP] configure `features` in the `dependencies` entry
 [UPDATING] `dummy-registry` index
 [LOCKING] 1 package to latest compatible version
 [CHECKING] bar v0.1.0 ([ROOT]/foo/bar)
 [CHECKING] foo v0.0.1 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
-"#]]).run();
-    p.cargo("check").with_stderr_data(str![[r#"
-[WARNING] patch for `bar` uses the features mechanism. default-features and features will not take effect because the patch dependency does not support this mechanism
+"#]])
+        .run();
+    p.cargo("check")
+        .with_stderr_data(str![[r#"
+[WARNING] unused field in patch for `bar`: `features`
+  |
+  = [HELP] configure `features` in the `dependencies` entry
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
-"#]]).run();
+"#]])
+        .run();
 }
 
 #[cargo_test]
@@ -970,20 +1035,28 @@ fn add_patch_with_setting_default_features() {
         .file("bar/src/lib.rs", r#""#)
         .build();
 
-    p.cargo("check").with_stderr_data(str![[r#"
-[WARNING] patch for `bar` uses the features mechanism. default-features and features will not take effect because the patch dependency does not support this mechanism
+    p.cargo("check")
+        .with_stderr_data(str![[r#"
+[WARNING] unused field in patch for `bar`: `features`, `default-features`
+  |
+  = [HELP] configure `features`, `default-features` in the `dependencies` entry
 [UPDATING] `dummy-registry` index
 [LOCKING] 1 package to latest compatible version
 [CHECKING] bar v0.1.0 ([ROOT]/foo/bar)
 [CHECKING] foo v0.0.1 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
-"#]]).run();
-    p.cargo("check").with_stderr_data(str![[r#"
-[WARNING] patch for `bar` uses the features mechanism. default-features and features will not take effect because the patch dependency does not support this mechanism
+"#]])
+        .run();
+    p.cargo("check")
+        .with_stderr_data(str![[r#"
+[WARNING] unused field in patch for `bar`: `features`, `default-features`
+  |
+  = [HELP] configure `features`, `default-features` in the `dependencies` entry
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
-"#]]).run();
+"#]])
+        .run();
 }
 
 #[cargo_test]
@@ -1868,10 +1941,10 @@ fn two_semver_compatible() {
     p.cargo("check").run();
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[WARNING] Patch `bar v0.1.1 ([ROOTURL]/override#[..])` was not used in the crate graph.
-Perhaps you misspelled the source URL being patched.
-Possible URLs for `[patch.<URL>]`:
-    [ROOT]/foo/bar
+[WARNING] patch `bar v0.1.1 ([ROOTURL]/override#[..])` was not used in the crate graph
+  |
+  = [HELP] perhaps you meant one of the following:
+          	[ROOT]/foo/bar
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
@@ -1924,10 +1997,10 @@ fn multipatch_select_big() {
     p.cargo("check").run();
     p.cargo("check")
         .with_stderr_data(str![[r#"
-[WARNING] Patch `bar v0.1.0 ([ROOTURL]/override#[..])` was not used in the crate graph.
-Perhaps you misspelled the source URL being patched.
-Possible URLs for `[patch.<URL>]`:
-    [ROOT]/foo/bar
+[WARNING] patch `bar v0.1.0 ([ROOTURL]/override#[..])` was not used in the crate graph
+  |
+  = [HELP] perhaps you meant one of the following:
+          	[ROOT]/foo/bar
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
@@ -2048,7 +2121,7 @@ fn update_unused_new_version() {
     p.cargo("check")
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[WARNING] Patch `bar v0.1.4 ([ROOT]/bar)` was not used in the crate graph.
+[WARNING] patch `bar v0.1.4 ([ROOT]/bar)` was not used in the crate graph
 ...
 "#]])
         .run();

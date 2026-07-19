@@ -1,6 +1,6 @@
 use clippy_utils::diagnostics::span_lint_and_then;
 use rustc_errors::Applicability;
-use rustc_hir::{BindingMode, Mutability, Node, Pat, PatKind};
+use rustc_hir::{BindingMode, Mutability, Node, Pat, PatKind, Pinnedness};
 use rustc_lint::{LateContext, LateLintPass};
 use rustc_session::declare_lint_pass;
 
@@ -37,12 +37,11 @@ declare_lint_pass!(NeedlessBorrowedRef => [NEEDLESS_BORROWED_REFERENCE]);
 
 impl<'tcx> LateLintPass<'tcx> for NeedlessBorrowedRef {
     fn check_pat(&mut self, cx: &LateContext<'tcx>, ref_pat: &'tcx Pat<'_>) {
-        if let PatKind::Ref(pat, Mutability::Not) = ref_pat.kind
+        if let PatKind::Ref(pat, Pinnedness::Not, Mutability::Not) = ref_pat.kind
             && !ref_pat.span.from_expansion()
             && cx
                 .tcx
-                .hir()
-                .parent_iter(ref_pat.hir_id)
+                .hir_parent_iter(ref_pat.hir_id)
                 .map_while(|(_, parent)| if let Node::Pat(pat) = parent { Some(pat) } else { None })
                 // Do not lint patterns that are part of an OR `|` pattern, the binding mode must match in all arms
                 .all(|pat| !matches!(pat.kind, PatKind::Or(_)))

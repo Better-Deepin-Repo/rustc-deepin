@@ -2,9 +2,10 @@
 // Alignment of 128 bit types is not currently handled, this will
 // need to be fixed when PowerPC vector support is added.
 
-use crate::abi::call::{Align, ArgAbi, FnAbi, Reg, RegKind, Uniform};
-use crate::abi::{Endian, HasDataLayout, TyAbiInterface};
-use crate::spec::HasTargetSpec;
+use rustc_abi::{Endian, HasDataLayout, TyAbiInterface};
+
+use crate::callconv::{Align, ArgAbi, FnAbi, Reg, RegKind, Uniform};
+use crate::spec::{Env, HasTargetSpec, Os};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ABI {
@@ -51,6 +52,10 @@ where
         // Not touching this...
         return;
     }
+    if !is_ret && arg.layout.pass_indirectly_in_non_rustic_abis(cx) {
+        arg.make_indirect();
+        return;
+    }
     if !arg.layout.is_aggregate() {
         arg.extend_integer_width_to(64);
         return;
@@ -58,8 +63,10 @@ where
 
     // The AIX ABI expect byval for aggregates
     // See https://github.com/llvm/llvm-project/blob/main/clang/lib/CodeGen/Targets/PPC.cpp.
+    // The incoming parameter is represented as a pointer in the IR,
+    // the alignment is associated with the size of the register. (align 8 for 64bit)
     if !is_ret && abi == AIX {
-        arg.pass_by_stack_offset(None);
+        arg.pass_by_stack_offset(Some(Align::from_bytes(8).unwrap()));
         return;
     }
 
@@ -86,7 +93,7 @@ where
         // Aggregates larger than i64 should be padded at the tail to fill out a whole number
         // of i64s or i128s, depending on the aggregate alignment. Always use an array for
         // this, even if there is only a single element.
-        let reg = if arg.layout.align.abi.bytes() > 8 { Reg::i128() } else { Reg::i64() };
+        let reg = if arg.layout.align.bytes() > 8 { Reg::i128() } else { Reg::i64() };
         arg.cast_to(Uniform::consecutive(
             reg,
             size.align_to(Align::from_bytes(reg.size.bytes()).unwrap()),
@@ -99,9 +106,9 @@ where
     Ty: TyAbiInterface<'a, C> + Copy,
     C: HasDataLayout + HasTargetSpec,
 {
-    let abi = if cx.target_spec().env == "musl" || cx.target_spec().os == "freebsd" {
+    let abi = if cx.target_spec().env == Env::Musl || cx.target_spec().os == Os::FreeBsd {
         ELFv2
-    } else if cx.target_spec().os == "aix" {
+    } else if cx.target_spec().os == Os::Aix {
         AIX
     } else {
         match cx.data_layout().endian {

@@ -9,16 +9,17 @@
 
 //! This program implements a rustc driver that retrieves MIR bodies with
 //! borrowck information. This cannot be done in a straightforward way because
-//! `get_body_with_borrowck_facts`–the function for retrieving a MIR body with
-//! borrowck facts–can panic if the body is stolen before it is invoked.
+//! `get_bodies_with_borrowck_facts`–the function for retrieving MIR bodies with
+//! borrowck facts–can panic if the bodies are stolen before it is invoked.
 //! Therefore, the driver overrides `mir_borrowck` query (this is done in the
-//! `config` callback), which retrieves the body that is about to be borrow
-//! checked and stores it in a thread local `MIR_BODIES`. Then, `after_analysis`
+//! `config` callback), which retrieves the bodies that are about to be borrow
+//! checked and stores them in a thread local `MIR_BODIES`. Then, `after_analysis`
 //! callback triggers borrow checking of all MIR bodies by retrieving
 //! `optimized_mir` and pulls out the MIR bodies with the borrowck information
 //! from the thread local storage.
 
 extern crate rustc_borrowck;
+extern crate rustc_data_structures;
 extern crate rustc_driver;
 extern crate rustc_hir;
 extern crate rustc_interface;
@@ -30,6 +31,7 @@ use std::collections::HashMap;
 use std::thread_local;
 
 use rustc_borrowck::consumers::{self, BodyWithBorrowckFacts, ConsumerOptions};
+use rustc_data_structures::fx::FxHashMap;
 use rustc_driver::Compilation;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::LocalDefId;
@@ -47,8 +49,7 @@ fn main() {
         rustc_args.push("-Zpolonius".to_owned());
         let mut callbacks = CompilerCalls::default();
         // Call the Rust compiler with our callbacks.
-        rustc_driver::RunCompiler::new(&rustc_args, &mut callbacks).run();
-        Ok(())
+        rustc_driver::run_compiler(&rustc_args, &mut callbacks);
     });
     std::process::exit(exit_code);
 }
@@ -68,7 +69,6 @@ impl rustc_driver::Callbacks for CompilerCalls {
     fn after_analysis<'tcx>(&mut self, _compiler: &Compiler, tcx: TyCtxt<'tcx>) -> Compilation {
         tcx.sess.dcx().abort_if_errors();
         // Collect definition ids of MIR bodies.
-        let hir = tcx.hir();
         let mut bodies = Vec::new();
 
         let crate_items = tcx.hir_crate_items(());
@@ -80,7 +80,7 @@ impl rustc_driver::Callbacks for CompilerCalls {
 
         for id in crate_items.trait_items() {
             if matches!(tcx.def_kind(id.owner_id), DefKind::AssocFn) {
-                let trait_item = hir.trait_item(id);
+                let trait_item = tcx.hir_trait_item(id);
                 if let rustc_hir::TraitItemKind::Fn(_, trait_fn) = &trait_item.kind {
                     if let rustc_hir::TraitFn::Provided(_) = trait_fn {
                         bodies.push(trait_item.owner_id);
@@ -131,13 +131,15 @@ thread_local! {
 
 fn mir_borrowck<'tcx>(tcx: TyCtxt<'tcx>, def_id: LocalDefId) -> ProvidedValue<'tcx> {
     let opts = ConsumerOptions::PoloniusInputFacts;
-    let body_with_facts = consumers::get_body_with_borrowck_facts(tcx, def_id, opts);
+    let bodies_with_facts = consumers::get_bodies_with_borrowck_facts(tcx, def_id, opts);
     // SAFETY: The reader casts the 'static lifetime to 'tcx before using it.
-    let body_with_facts: BodyWithBorrowckFacts<'static> =
-        unsafe { std::mem::transmute(body_with_facts) };
+    let bodies_with_facts: FxHashMap<LocalDefId, BodyWithBorrowckFacts<'static>> =
+        unsafe { std::mem::transmute(bodies_with_facts) };
     MIR_BODIES.with(|state| {
         let mut map = state.borrow_mut();
-        assert!(map.insert(def_id, body_with_facts).is_none());
+        for (def_id, body_with_facts) in bodies_with_facts {
+            assert!(map.insert(def_id, body_with_facts).is_none());
+        }
     });
     let mut providers = Providers::default();
     rustc_borrowck::provide(&mut providers);

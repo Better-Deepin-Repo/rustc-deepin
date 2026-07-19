@@ -1,5 +1,6 @@
 //@revisions: e2021 e2015
 //@[e2021]edition: 2021
+//@[e2015]edition: 2015
 trait Foo<T> {
     fn id(me: T) -> T;
 }
@@ -11,7 +12,7 @@ impl Foo<i64> {
 //[e2015]~| WARNING trait objects without an explicit `dyn` are deprecated
 //[e2015]~| WARNING this is accepted in the current edition (Rust 2015) but is a hard error in Rust 2021!
 //[e2015]~| WARNING this is accepted in the current edition (Rust 2015) but is a hard error in Rust 2021!
-//[e2015]~| ERROR the trait `Foo` cannot be made into an object
+//[e2015]~| ERROR the trait `Foo` is not dyn compatible
     fn id(me: i64) -> i64 {me}
 }
 

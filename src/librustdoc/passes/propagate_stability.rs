@@ -6,8 +6,8 @@
 //! [`core::error`] module is marked as stable since 1.81.0, so we want to show
 //! [`core::error::Error`] as stable since 1.81.0 as well.
 
-use rustc_attr_parsing::{Stability, StabilityLevel};
 use rustc_hir::def_id::CRATE_DEF_ID;
+use rustc_hir::{Stability, StabilityLevel};
 
 use crate::clean::{Crate, Item, ItemId, ItemKind};
 use crate::core::DocContext;
@@ -36,7 +36,38 @@ impl DocFolder for StabilityPropagator<'_, '_> {
 
         let stability = match item.item_id {
             ItemId::DefId(def_id) => {
-                let own_stability = self.cx.tcx.lookup_stability(def_id);
+                let item_stability = self.cx.tcx.lookup_stability(def_id);
+                let inline_stability =
+                    item.inline_stmt_id.and_then(|did| self.cx.tcx.lookup_stability(did));
+                let is_glob_export = item.inline_stmt_id.map(|id| {
+                    let hir_id = self.cx.tcx.local_def_id_to_hir_id(id);
+                    matches!(
+                        self.cx.tcx.hir_node(hir_id),
+                        rustc_hir::Node::Item(rustc_hir::Item {
+                            kind: rustc_hir::ItemKind::Use(_, rustc_hir::UseKind::Glob),
+                            ..
+                        })
+                    )
+                });
+                let own_stability = if let Some(item_stab) = item_stability
+                    && let StabilityLevel::Stable { since: _, allowed_through_unstable_modules } =
+                        item_stab.level
+                    && let Some(mut inline_stab) = inline_stability
+                    && let StabilityLevel::Stable {
+                        since: inline_since,
+                        allowed_through_unstable_modules: _,
+                    } = inline_stab.level
+                    && let Some(is_global_export) = is_glob_export
+                    && !is_global_export
+                {
+                    inline_stab.level = StabilityLevel::Stable {
+                        since: inline_since,
+                        allowed_through_unstable_modules,
+                    };
+                    Some(inline_stab)
+                } else {
+                    item_stability
+                };
 
                 let (ItemKind::StrippedItem(box kind) | kind) = &item.kind;
                 match kind {
@@ -75,7 +106,8 @@ impl DocFolder for StabilityPropagator<'_, '_> {
                     | ItemKind::RequiredAssocTypeItem(..)
                     | ItemKind::AssocTypeItem(..)
                     | ItemKind::PrimitiveItem(..)
-                    | ItemKind::KeywordItem => own_stability,
+                    | ItemKind::KeywordItem
+                    | ItemKind::AttributeItem => own_stability,
 
                     ItemKind::StrippedItem(..) => unreachable!(),
                 }
@@ -100,13 +132,21 @@ fn merge_stability(
     parent_stability: Option<Stability>,
 ) -> Option<Stability> {
     if let Some(own_stab) = own_stability
-        && let StabilityLevel::Stable { since: own_since, allowed_through_unstable_modules: false } =
+        && let StabilityLevel::Stable { since: own_since, allowed_through_unstable_modules: None } =
             own_stab.level
         && let Some(parent_stab) = parent_stability
         && (parent_stab.is_unstable()
             || parent_stab.stable_since().is_some_and(|parent_since| parent_since > own_since))
     {
         parent_stability
+    } else if let Some(mut own_stab) = own_stability
+        && let StabilityLevel::Stable { since, allowed_through_unstable_modules: Some(_) } =
+            own_stab.level
+        && parent_stability.is_some_and(|stab| stab.is_stable())
+    {
+        // this property does not apply transitively through re-exports
+        own_stab.level = StabilityLevel::Stable { since, allowed_through_unstable_modules: None };
+        Some(own_stab)
     } else {
         own_stability
     }

@@ -1,17 +1,14 @@
+r[items.extern-crate]
 # Extern crate declarations
 
-r[items.extern-crate]
-
 r[items.extern-crate.syntax]
-> **<sup>Syntax:<sup>**\
-> _ExternCrate_ :\
-> &nbsp;&nbsp; `extern` `crate` _CrateRef_ _AsClause_<sup>?</sup> `;`
->
-> _CrateRef_ :\
-> &nbsp;&nbsp; [IDENTIFIER] | `self`
->
-> _AsClause_ :\
-> &nbsp;&nbsp; `as` ( [IDENTIFIER] | `_` )
+```grammar,items
+ExternCrate -> `extern` `crate` CrateRef AsClause? `;`
+
+CrateRef -> IDENTIFIER | `self`
+
+AsClause -> `as` ( IDENTIFIER | `_` )
+```
 
 r[items.extern-crate.intro]
 An _`extern crate` declaration_ specifies a dependency on an external crate.
@@ -63,9 +60,8 @@ Here is an example:
 extern crate hello_world; // hyphen replaced with an underscore
 ```
 
-## Underscore Imports
-
 r[items.extern-crate.underscore]
+## Underscore imports
 
 r[items.extern-crate.underscore.intro]
 An external crate dependency can be declared without binding its name in scope
@@ -77,32 +73,44 @@ r[items.extern-crate.underscore.macro_use]
 The [`macro_use` attribute] works as usual and imports the macro names
 into the [`macro_use` prelude].
 
+<!-- template:attributes -->
+r[items.extern-crate.no_link]
 ## The `no_link` attribute
 
-r[items.extern-crate.no_link]
+r[items.extern-crate.no_link.intro]
+The *`no_link` [attribute][attributes]* may be applied to an `extern crate` item to prevent linking the crate.
 
-The *`no_link` attribute* may be specified on an `extern crate` item to
-prevent linking the crate into the output. This is commonly used to load a
-crate to access only its macros.
+> [!NOTE]
+> This is helpful, e.g., when only the macros of a crate are needed.
 
-[IDENTIFIER]: ../identifiers.md
+> [!EXAMPLE]
+> <!-- ignore: requires external crates -->
+> ```rust,ignore
+> #[no_link]
+> extern crate other_crate;
+>
+> other_crate::some_macro!();
+> ```
+
+r[items.extern-crate.no_link.syntax]
+The `no_link` attribute uses the [MetaWord] syntax.
+
+r[items.extern-crate.no_link.allowed-positions]
+The `no_link` attribute may only be applied to an `extern crate` declaration.
+
+> [!NOTE]
+> `rustc` ignores use in other positions but lints against it. This may become an error in the future.
+
+r[items.extern-crate.no_link.duplicates]
+Only the first use of `no_link` on an `extern crate` declaration has effect.
+
+> [!NOTE]
+> `rustc` lints against any use following the first. This may become an error in the future.
+
+[identifier]: ../identifiers.md
 [RFC 940]: https://github.com/rust-lang/rfcs/blob/master/text/0940-hyphens-considered-harmful.md
 [`macro_use` attribute]: ../macros-by-example.md#the-macro_use-attribute
 [extern prelude]: ../names/preludes.md#extern-prelude
 [`macro_use` prelude]: ../names/preludes.md#macro_use-prelude
 [`crate_name` attributes]: ../crates-and-source-files.md#the-crate_name-attribute
 [type namespace]: ../names/namespaces.md
-
-<script>
-(function() {
-    var fragments = {
-        "#extern-prelude": "../names/preludes.html#extern-prelude",
-    };
-    var target = fragments[window.location.hash];
-    if (target) {
-        var url = window.location.toString();
-        var base = url.substring(0, url.lastIndexOf('/'));
-        window.location.replace(base + "/" + target);
-    }
-})();
-</script>

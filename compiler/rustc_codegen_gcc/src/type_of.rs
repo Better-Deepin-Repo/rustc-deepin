@@ -3,7 +3,9 @@ use std::fmt::Write;
 use gccjit::{Struct, Type};
 use rustc_abi as abi;
 use rustc_abi::Primitive::*;
-use rustc_abi::{BackendRepr, FieldsShape, Integer, PointeeInfo, Size, Variants};
+use rustc_abi::{
+    BackendRepr, FieldsShape, Integer, PointeeInfo, Reg, Size, TyAbiInterface, Variants,
+};
 use rustc_codegen_ssa::traits::{
     BaseTypeCodegenMethods, DerivedTypeCodegenMethods, LayoutTypeCodegenMethods,
 };
@@ -11,8 +13,7 @@ use rustc_middle::bug;
 use rustc_middle::ty::layout::{LayoutOf, TyAndLayout};
 use rustc_middle::ty::print::with_no_trimmed_paths;
 use rustc_middle::ty::{self, CoroutineArgsExt, Ty, TypeVisitableExt};
-use rustc_target::abi::TyAbiInterface;
-use rustc_target::abi::call::{CastTarget, FnAbi, Reg};
+use rustc_target::callconv::{CastTarget, FnAbi};
 
 use crate::abi::{FnAbiGcc, FnAbiGccExt, GccType};
 use crate::context::CodegenCx;
@@ -62,7 +63,7 @@ fn uncached_gcc_type<'gcc, 'tcx>(
 ) -> Type<'gcc> {
     match layout.backend_repr {
         BackendRepr::Scalar(_) => bug!("handled elsewhere"),
-        BackendRepr::Vector { ref element, count } => {
+        BackendRepr::SimdVector { ref element, count } => {
             let element = layout.scalar_gcc_type_at(cx, element, Size::ZERO);
             let element =
                 // NOTE: gcc doesn't allow pointer types in vectors.
@@ -83,7 +84,7 @@ fn uncached_gcc_type<'gcc, 'tcx>(
                 false,
             );
         }
-        BackendRepr::Uninhabited | BackendRepr::Memory { .. } => {}
+        BackendRepr::Memory { .. } => {}
     }
 
     let name = match *layout.ty.kind() {
@@ -101,10 +102,10 @@ fn uncached_gcc_type<'gcc, 'tcx>(
             let mut name = with_no_trimmed_paths!(layout.ty.to_string());
             if let (&ty::Adt(def, _), &Variants::Single { index }) =
                 (layout.ty.kind(), &layout.variants)
+                && def.is_enum()
+                && !def.variants().is_empty()
             {
-                if def.is_enum() && !def.variants().is_empty() {
-                    write!(&mut name, "::{}", def.variant(index).name).unwrap();
-                }
+                write!(&mut name, "::{}", def.variant(index).name).unwrap();
             }
             if let (&ty::Coroutine(_, _), &Variants::Single { index }) =
                 (layout.ty.kind(), &layout.variants)
@@ -177,19 +178,16 @@ pub trait LayoutGccExt<'tcx> {
 impl<'tcx> LayoutGccExt<'tcx> for TyAndLayout<'tcx> {
     fn is_gcc_immediate(&self) -> bool {
         match self.backend_repr {
-            BackendRepr::Scalar(_) | BackendRepr::Vector { .. } => true,
-            BackendRepr::ScalarPair(..) | BackendRepr::Uninhabited | BackendRepr::Memory { .. } => {
-                false
-            }
+            BackendRepr::Scalar(_) | BackendRepr::SimdVector { .. } => true,
+            BackendRepr::ScalarPair(..) | BackendRepr::Memory { .. } => false,
         }
     }
 
     fn is_gcc_scalar_pair(&self) -> bool {
         match self.backend_repr {
             BackendRepr::ScalarPair(..) => true,
-            BackendRepr::Uninhabited
-            | BackendRepr::Scalar(_)
-            | BackendRepr::Vector { .. }
+            BackendRepr::Scalar(_)
+            | BackendRepr::SimdVector { .. }
             | BackendRepr::Memory { .. } => false,
         }
     }
@@ -219,7 +217,7 @@ impl<'tcx> LayoutGccExt<'tcx> for TyAndLayout<'tcx> {
             let ty = match *self.ty.kind() {
                 // NOTE: we cannot remove this match like in the LLVM codegen because the call
                 // to fn_ptr_backend_type handle the on-stack attribute.
-                // TODO(antoyo): find a less hackish way to hande the on-stack attribute.
+                // TODO(antoyo): find a less hackish way to handle the on-stack attribute.
                 ty::FnPtr(sig_tys, hdr) => cx
                     .fn_ptr_backend_type(cx.fn_abi_of_fn_ptr(sig_tys.with(hdr), ty::List::empty())),
                 _ => self.scalar_gcc_type_at(cx, scalar, Size::ZERO),
@@ -242,7 +240,7 @@ impl<'tcx> LayoutGccExt<'tcx> for TyAndLayout<'tcx> {
 
         // Make sure lifetimes are erased, to avoid generating distinct LLVM
         // types for Rust types that only differ in the choice of lifetimes.
-        let normal_ty = cx.tcx.erase_regions(self.ty);
+        let normal_ty = cx.tcx.erase_and_anonymize_regions(self.ty);
 
         let mut defer = None;
         let ty = if self.ty != normal_ty {
@@ -266,10 +264,10 @@ impl<'tcx> LayoutGccExt<'tcx> for TyAndLayout<'tcx> {
     }
 
     fn immediate_gcc_type<'gcc>(&self, cx: &CodegenCx<'gcc, 'tcx>) -> Type<'gcc> {
-        if let BackendRepr::Scalar(ref scalar) = self.backend_repr {
-            if scalar.is_bool() {
-                return cx.type_i1();
-            }
+        if let BackendRepr::Scalar(ref scalar) = self.backend_repr
+            && scalar.is_bool()
+        {
+            return cx.type_i1();
         }
         self.gcc_type(cx)
     }

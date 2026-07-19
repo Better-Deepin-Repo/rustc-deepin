@@ -5,15 +5,16 @@ use std::{env, fs};
 
 use crate::core::compiler::{CompileKind, DefaultExecutor, Executor, UnitOutput};
 use crate::core::{Dependency, Edition, Package, PackageId, SourceId, Target, Workspace};
-use crate::ops::{common_for_install_and_uninstall::*, FilterRule};
 use crate::ops::{CompileFilter, Packages};
+use crate::ops::{FilterRule, common_for_install_and_uninstall::*};
 use crate::sources::source::Source;
 use crate::sources::{GitSource, PathSource, SourceConfigMap};
+use crate::util::context::FeatureUnification;
 use crate::util::errors::CargoResult;
 use crate::util::{Filesystem, GlobalContext, Rustc};
 use crate::{drop_println, ops};
 
-use anyhow::{bail, Context as _};
+use anyhow::{Context as _, bail};
 use cargo_util::paths;
 use cargo_util_schemas::core::PartialVersion;
 use itertools::Itertools;
@@ -188,7 +189,7 @@ impl<'gctx> InstallablePackage<'gctx> {
             lockfile_path.clone(),
         )?;
 
-        if gctx.locked() {
+        if !gctx.lock_update_allowed() {
             // When --lockfile-path is set, check that passed lock file exists
             // (unlike the usual flag behavior, lockfile won't be created as we imply --locked)
             if let Some(requested_lockfile_path) = ws.requested_lockfile_path() {
@@ -201,10 +202,8 @@ impl<'gctx> InstallablePackage<'gctx> {
             // If we're installing in --locked mode and there's no `Cargo.lock` published
             // ie. the bin was published before https://github.com/rust-lang/cargo/pull/7026
             } else if !ws.root().join("Cargo.lock").exists() {
-                gctx.shell().warn(format!(
-                    "no Cargo.lock file published in {}",
-                    pkg.to_string()
-                ))?;
+                gctx.shell()
+                    .warn(format!("no Cargo.lock file published in {}", pkg))?;
             }
         }
         let pkg = if source_id.is_git() {
@@ -317,7 +316,15 @@ impl<'gctx> InstallablePackage<'gctx> {
     fn install_one(mut self, dry_run: bool) -> CargoResult<bool> {
         self.gctx.shell().status("Installing", &self.pkg)?;
 
+        // Normalize to absolute path for consistency throughout.
+        // See: https://github.com/rust-lang/cargo/issues/16023
         let dst = self.root.join("bin").into_path_unlocked();
+        let cwd = self.gctx.cwd();
+        let dst = if dst.is_absolute() {
+            paths::normalize_path(dst.as_path())
+        } else {
+            paths::normalize_path(&cwd.join(&dst))
+        };
 
         let mut td_opt = None;
         let mut needs_cleanup = false;
@@ -342,7 +349,7 @@ impl<'gctx> InstallablePackage<'gctx> {
         let compile = ops::compile_ws(&self.ws, &self.opts, &exec).with_context(|| {
             if let Some(td) = td_opt.take() {
                 // preserve the temporary directory, so the user can inspect it
-                drop(td.into_path());
+                drop(td.keep());
             }
 
             format!(
@@ -377,12 +384,12 @@ impl<'gctx> InstallablePackage<'gctx> {
             // behavior for this fallback case as well.
             if let CompileFilter::Only { bins, examples, .. } = &self.opts.filter {
                 let mut any_specific = false;
-                if let FilterRule::Just(ref v) = bins {
+                if let FilterRule::Just(v) = bins {
                     if !v.is_empty() {
                         any_specific = true;
                     }
                 }
-                if let FilterRule::Just(ref v) = examples {
+                if let FilterRule::Just(v) = examples {
                     if !v.is_empty() {
                         any_specific = true;
                     }
@@ -656,7 +663,15 @@ pub fn install(
     lockfile_path: Option<&Path>,
 ) -> CargoResult<()> {
     let root = resolve_root(root, gctx)?;
+    // Normalize to absolute path for consistency throughout.
+    // See: https://github.com/rust-lang/cargo/issues/16023
     let dst = root.join("bin").into_path_unlocked();
+    let cwd = gctx.cwd();
+    let dst = if dst.is_absolute() {
+        paths::normalize_path(dst.as_path())
+    } else {
+        paths::normalize_path(&cwd.join(&dst))
+    };
     let map = SourceConfigMap::new(gctx)?;
 
     let current_rust_version = if opts.honor_rust_version.unwrap_or(true) {
@@ -862,6 +877,7 @@ fn make_ws_rustc_target<'gctx>(
         ws.set_resolve_honors_rust_version(Some(false));
         ws
     };
+    ws.set_resolve_feature_unification(FeatureUnification::Selected);
     ws.set_ignore_lock(gctx.lock_update_allowed());
     ws.set_requested_lockfile_path(lockfile_path.map(|p| p.to_path_buf()));
     // if --lockfile-path is set, imply --locked

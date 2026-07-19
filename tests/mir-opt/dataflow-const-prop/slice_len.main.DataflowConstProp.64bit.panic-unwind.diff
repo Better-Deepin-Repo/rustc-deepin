@@ -36,7 +36,7 @@
           StorageDead(_3);
           StorageLive(_6);
           _6 = const 1_usize;
--         _7 = Len((*_2));
+-         _7 = PtrMetadata(copy _2);
 -         _8 = Lt(copy _6, copy _7);
 -         assert(move _8, "index out of bounds: the length is {} but the index is {}", move _7, copy _6) -> [success: bb1, unwind continue];
 +         _7 = const 3_usize;
@@ -55,7 +55,7 @@
           _10 = const main::SLICE;
           StorageLive(_11);
           _11 = const 1_usize;
--         _12 = Len((*_10));
+-         _12 = PtrMetadata(copy _10);
 -         _13 = Lt(copy _11, copy _12);
 -         assert(move _13, "index out of bounds: the length is {} but the index is {}", move _12, copy _11) -> [success: bb2, unwind continue];
 +         _12 = const 3_usize;

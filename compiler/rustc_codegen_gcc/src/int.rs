@@ -2,13 +2,17 @@
 //! This module exists because some integer types are not supported on some gcc platforms, e.g.
 //! 128-bit integers on 32-bit platforms and thus require to be handled manually.
 
-use gccjit::{BinaryOp, ComparisonOp, FunctionType, Location, RValue, ToRValue, Type, UnaryOp};
+// cSpell:words cmpti divti modti mulodi muloti udivti umodti
+
+use gccjit::{
+    BinaryOp, CType, ComparisonOp, FunctionType, Location, RValue, ToRValue, Type, UnaryOp,
+};
+use rustc_abi::{CanonAbi, Endian, ExternAbi};
 use rustc_codegen_ssa::common::{IntPredicate, TypeKind};
 use rustc_codegen_ssa::traits::{BackendTypes, BaseTypeCodegenMethods, BuilderMethods, OverflowOp};
 use rustc_middle::ty::{self, Ty};
-use rustc_target::abi::Endian;
-use rustc_target::abi::call::{ArgAbi, ArgAttributes, Conv, FnAbi, PassMode};
-use rustc_target::spec;
+use rustc_target::callconv::{ArgAbi, ArgAttributes, FnAbi, PassMode};
+use rustc_type_ir::{Interner, TyKind};
 
 use crate::builder::{Builder, ToGccComp};
 use crate::common::{SignType, TypeReflection};
@@ -79,18 +83,17 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                 let a_size = a_type.get_size();
                 let b_size = b_type.get_size();
                 match a_size.cmp(&b_size) {
-                    std::cmp::Ordering::Less => {
-                        let a = self.context.new_cast(self.location, a, b_type);
-                        a >> b
-                    }
                     std::cmp::Ordering::Equal => a >> b,
-                    std::cmp::Ordering::Greater => {
+                    _ => {
+                        // NOTE: it is OK to cast even if b has a type bigger than a because b has
+                        // been masked by codegen_ssa before calling Builder::lshr or
+                        // Builder::ashr.
                         let b = self.context.new_cast(self.location, b, a_type);
                         a >> b
                     }
                 }
             }
-        } else if a_type.is_vector() && a_type.is_vector() {
+        } else if a_type.is_vector() && b_type.is_vector() {
             a >> b
         } else if a_native && !b_native {
             self.gcc_lshr(a, self.gcc_int_cast(b, a_type))
@@ -166,9 +169,9 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                 if a_type.is_vector() {
                     // Vector types need to be bitcast.
                     // TODO(antoyo): perhaps use __builtin_convertvector for vector casting.
-                    b = self.context.new_bitcast(self.location, b, a.get_type());
+                    b = self.context.new_bitcast(self.location, b, a_type);
                 } else {
-                    b = self.context.new_cast(self.location, b, a.get_type());
+                    b = self.context.new_cast(self.location, b, a_type);
                 }
             }
             self.context.new_binary_op(self.location, operation, a_type, a, b)
@@ -215,13 +218,22 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         operation_name: &str,
         signed: bool,
         a: RValue<'gcc>,
-        b: RValue<'gcc>,
+        mut b: RValue<'gcc>,
     ) -> RValue<'gcc> {
         let a_type = a.get_type();
         let b_type = b.get_type();
         if (self.is_native_int_type_or_bool(a_type) && self.is_native_int_type_or_bool(b_type))
             || (a_type.is_vector() && b_type.is_vector())
         {
+            if !a_type.is_compatible_with(b_type) {
+                if a_type.is_vector() {
+                    // Vector types need to be bitcast.
+                    // TODO(antoyo): perhaps use __builtin_convertvector for vector casting.
+                    b = self.context.new_bitcast(self.location, b, a_type);
+                } else {
+                    b = self.context.new_cast(self.location, b, a_type);
+                }
+            }
             self.context.new_binary_op(self.location, operation, a_type, a, b)
         } else {
             debug_assert!(a_type.dyncast_array().is_some());
@@ -275,83 +287,31 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         // TODO(antoyo): remove duplication with intrinsic?
         let name = if self.is_native_int_type(lhs.get_type()) {
             match oop {
+                OverflowOp::Add => "__builtin_add_overflow",
+                OverflowOp::Sub => "__builtin_sub_overflow",
+                OverflowOp::Mul => "__builtin_mul_overflow",
+            }
+        } else {
+            let (func_name, width) = match oop {
                 OverflowOp::Add => match new_kind {
-                    Int(I8) => "__builtin_add_overflow",
-                    Int(I16) => "__builtin_add_overflow",
-                    Int(I32) => "__builtin_sadd_overflow",
-                    Int(I64) => "__builtin_saddll_overflow",
-                    Int(I128) => "__builtin_add_overflow",
-
-                    Uint(U8) => "__builtin_add_overflow",
-                    Uint(U16) => "__builtin_add_overflow",
-                    Uint(U32) => "__builtin_uadd_overflow",
-                    Uint(U64) => "__builtin_uaddll_overflow",
-                    Uint(U128) => "__builtin_add_overflow",
-
+                    Int(I128) => ("__rust_i128_addo", 128),
+                    Uint(U128) => ("__rust_u128_addo", 128),
                     _ => unreachable!(),
                 },
                 OverflowOp::Sub => match new_kind {
-                    Int(I8) => "__builtin_sub_overflow",
-                    Int(I16) => "__builtin_sub_overflow",
-                    Int(I32) => "__builtin_ssub_overflow",
-                    Int(I64) => "__builtin_ssubll_overflow",
-                    Int(I128) => "__builtin_sub_overflow",
-
-                    Uint(U8) => "__builtin_sub_overflow",
-                    Uint(U16) => "__builtin_sub_overflow",
-                    Uint(U32) => "__builtin_usub_overflow",
-                    Uint(U64) => "__builtin_usubll_overflow",
-                    Uint(U128) => "__builtin_sub_overflow",
-
+                    Int(I128) => ("__rust_i128_subo", 128),
+                    Uint(U128) => ("__rust_u128_subo", 128),
                     _ => unreachable!(),
                 },
                 OverflowOp::Mul => match new_kind {
-                    Int(I8) => "__builtin_mul_overflow",
-                    Int(I16) => "__builtin_mul_overflow",
-                    Int(I32) => "__builtin_smul_overflow",
-                    Int(I64) => "__builtin_smulll_overflow",
-                    Int(I128) => "__builtin_mul_overflow",
-
-                    Uint(U8) => "__builtin_mul_overflow",
-                    Uint(U16) => "__builtin_mul_overflow",
-                    Uint(U32) => "__builtin_umul_overflow",
-                    Uint(U64) => "__builtin_umulll_overflow",
-                    Uint(U128) => "__builtin_mul_overflow",
-
+                    Int(I32) => ("__mulosi4", 32),
+                    Int(I64) => ("__mulodi4", 64),
+                    Int(I128) => ("__rust_i128_mulo", 128), // TODO(antoyo): use __muloti4d instead?
+                    Uint(U128) => ("__rust_u128_mulo", 128),
                     _ => unreachable!(),
                 },
-            }
-        } else {
-            match new_kind {
-                Int(I128) | Uint(U128) => {
-                    let func_name = match oop {
-                        OverflowOp::Add => match new_kind {
-                            Int(I128) => "__rust_i128_addo",
-                            Uint(U128) => "__rust_u128_addo",
-                            _ => unreachable!(),
-                        },
-                        OverflowOp::Sub => match new_kind {
-                            Int(I128) => "__rust_i128_subo",
-                            Uint(U128) => "__rust_u128_subo",
-                            _ => unreachable!(),
-                        },
-                        OverflowOp::Mul => match new_kind {
-                            Int(I128) => "__rust_i128_mulo", // TODO(antoyo): use __muloti4d instead?
-                            Uint(U128) => "__rust_u128_mulo",
-                            _ => unreachable!(),
-                        },
-                    };
-                    return self.operation_with_overflow(func_name, lhs, rhs);
-                }
-                _ => match oop {
-                    OverflowOp::Mul => match new_kind {
-                        Int(I32) => "__mulosi4",
-                        Int(I64) => "__mulodi4",
-                        _ => unreachable!(),
-                    },
-                    _ => unimplemented!("overflow operation for {:?}", new_kind),
-                },
-            }
+            };
+            return self.operation_with_overflow(func_name, lhs, rhs, width);
         };
 
         let intrinsic = self.context.get_builtin_function(name);
@@ -360,84 +320,105 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
             // TODO(antoyo): is it correct to use rhs type instead of the parameter typ?
             .new_local(self.location, rhs.get_type(), "binopResult")
             .get_address(self.location);
+        let new_type = type_kind_to_gcc_type(new_kind);
+        let new_type = self.context.new_c_type(new_type);
+        let lhs = self.context.new_cast(self.location, lhs, new_type);
+        let rhs = self.context.new_cast(self.location, rhs, new_type);
+        let res = self.context.new_cast(self.location, res, new_type.make_pointer());
         let overflow = self.overflow_call(intrinsic, &[lhs, rhs, res], None);
         (res.dereference(self.location).to_rvalue(), overflow)
     }
 
+    /// Non-`__builtin_*` overflow operations with a `fn(T, T, &mut i32) -> T` signature.
     pub fn operation_with_overflow(
         &self,
         func_name: &str,
         lhs: RValue<'gcc>,
         rhs: RValue<'gcc>,
+        width: u64,
     ) -> (RValue<'gcc>, RValue<'gcc>) {
         let a_type = lhs.get_type();
         let b_type = rhs.get_type();
         debug_assert!(a_type.dyncast_array().is_some());
         debug_assert!(b_type.dyncast_array().is_some());
+        let overflow_type = self.i32_type;
+        let overflow_param_type = overflow_type.make_pointer();
+        let res_type = a_type;
+
+        let overflow_value =
+            self.current_func().new_local(self.location, overflow_type, "overflow");
+        let overflow_addr = overflow_value.get_address(self.location);
+
         let param_a = self.context.new_parameter(self.location, a_type, "a");
         let param_b = self.context.new_parameter(self.location, b_type, "b");
-        let result_field = self.context.new_field(self.location, a_type, "result");
-        let overflow_field = self.context.new_field(self.location, self.bool_type, "overflow");
+        let param_overflow =
+            self.context.new_parameter(self.location, overflow_param_type, "overflow");
 
-        let ret_ty = Ty::new_tup(self.tcx, &[self.tcx.types.i128, self.tcx.types.bool]);
+        let a_elem_type = a_type.dyncast_array().expect("non-array a value");
+        debug_assert!(a_elem_type.is_integral());
+        let res_ty = match width {
+            32 => self.tcx.types.i32,
+            64 => self.tcx.types.i64,
+            128 => self.tcx.types.i128,
+            _ => unreachable!("unexpected integer size"),
+        };
         let layout = self
             .tcx
-            .layout_of(ty::TypingEnv::fully_monomorphized().as_query_input(ret_ty))
+            .layout_of(ty::TypingEnv::fully_monomorphized().as_query_input(res_ty))
             .unwrap();
 
         let arg_abi = ArgAbi { layout, mode: PassMode::Direct(ArgAttributes::new()) };
         let mut fn_abi = FnAbi {
-            args: vec![arg_abi.clone(), arg_abi.clone()].into_boxed_slice(),
+            args: vec![arg_abi.clone(), arg_abi.clone(), arg_abi.clone()].into_boxed_slice(),
             ret: arg_abi,
             c_variadic: false,
-            fixed_count: 2,
-            conv: Conv::C,
+            fixed_count: 3,
+            conv: CanonAbi::C,
             can_unwind: false,
         };
-        fn_abi.adjust_for_foreign_abi(self.cx, spec::abi::Abi::C { unwind: false }).unwrap();
+        fn_abi.adjust_for_foreign_abi(self.cx, ExternAbi::C { unwind: false });
 
-        let indirect = matches!(fn_abi.ret.mode, PassMode::Indirect { .. });
+        let ret_indirect = matches!(fn_abi.ret.mode, PassMode::Indirect { .. });
 
-        let return_type = self
-            .context
-            .new_struct_type(self.location, "result_overflow", &[result_field, overflow_field]);
-        let result = if indirect {
-            let return_value =
-                self.current_func().new_local(self.location, return_type.as_type(), "return_value");
-            let return_param_type = return_type.as_type().make_pointer();
-            let return_param =
-                self.context.new_parameter(self.location, return_param_type, "return_value");
+        let call = if ret_indirect {
+            let res_value = self.current_func().new_local(self.location, res_type, "result_value");
+            let res_addr = res_value.get_address(self.location);
+            let res_param_type = res_type.make_pointer();
+            let param_res = self.context.new_parameter(self.location, res_param_type, "result");
+
             let func = self.context.new_function(
                 self.location,
                 FunctionType::Extern,
                 self.type_void(),
-                &[return_param, param_a, param_b],
+                &[param_res, param_a, param_b, param_overflow],
                 func_name,
                 false,
             );
-            self.llbb().add_eval(
-                self.location,
-                self.context.new_call(self.location, func, &[
-                    return_value.get_address(self.location),
-                    lhs,
-                    rhs,
-                ]),
-            );
-            return_value.to_rvalue()
+            let _void =
+                self.context.new_call(self.location, func, &[res_addr, lhs, rhs, overflow_addr]);
+            res_value.to_rvalue()
         } else {
             let func = self.context.new_function(
                 self.location,
                 FunctionType::Extern,
-                return_type.as_type(),
-                &[param_a, param_b],
+                res_type,
+                &[param_a, param_b, param_overflow],
                 func_name,
                 false,
             );
-            self.context.new_call(self.location, func, &[lhs, rhs])
+            self.context.new_call(self.location, func, &[lhs, rhs, overflow_addr])
         };
-        let overflow = result.access_field(self.location, overflow_field);
-        let int_result = result.access_field(self.location, result_field);
-        (int_result, overflow)
+        // NOTE: we must assign the result of the operation to a variable at this point to make
+        // sure it will be evaluated by libgccjit now.
+        // Otherwise, it will only be evaluated when the rvalue for the call is used somewhere else
+        // and overflow_value will not be initialized at the correct point in the program.
+        let result = self.current_func().new_local(self.location, res_type, "result");
+        self.block.add_assignment(self.location, result, call);
+
+        (
+            result.to_rvalue(),
+            self.context.new_cast(self.location, overflow_value, self.bool_type).to_rvalue(),
+        )
     }
 
     pub fn gcc_icmp(
@@ -470,11 +451,27 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
             let lhs_low = self.context.new_cast(self.location, self.low(lhs), unsigned_type);
             let rhs_low = self.context.new_cast(self.location, self.low(rhs), unsigned_type);
 
+            let mut lhs_high = self.high(lhs);
+            let mut rhs_high = self.high(rhs);
+
+            match op {
+                IntPredicate::IntUGT
+                | IntPredicate::IntUGE
+                | IntPredicate::IntULT
+                | IntPredicate::IntULE => {
+                    lhs_high = self.context.new_cast(self.location, lhs_high, unsigned_type);
+                    rhs_high = self.context.new_cast(self.location, rhs_high, unsigned_type);
+                }
+                // TODO(antoyo): we probably need to handle signed comparison for unsigned
+                // integers.
+                _ => (),
+            }
+
             let condition = self.context.new_comparison(
                 self.location,
                 ComparisonOp::LessThan,
-                self.high(lhs),
-                self.high(rhs),
+                lhs_high,
+                rhs_high,
             );
             self.llbb().end_with_conditional(self.location, condition, block1, block2);
 
@@ -488,8 +485,8 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
             let condition = self.context.new_comparison(
                 self.location,
                 ComparisonOp::GreaterThan,
-                self.high(lhs),
-                self.high(rhs),
+                lhs_high,
+                rhs_high,
             );
             block2.end_with_conditional(self.location, condition, block3, block4);
 
@@ -613,7 +610,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         }
     }
 
-    pub fn gcc_xor(&self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
+    pub fn gcc_xor(&self, a: RValue<'gcc>, mut b: RValue<'gcc>) -> RValue<'gcc> {
         let a_type = a.get_type();
         let b_type = b.get_type();
         if a_type.is_vector() && b_type.is_vector() {
@@ -621,6 +618,9 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
             a ^ b
         } else if self.is_native_int_type_or_bool(a_type) && self.is_native_int_type_or_bool(b_type)
         {
+            if !a_type.is_compatible_with(b_type) {
+                b = self.context.new_cast(self.location, b, a_type);
+            }
             a ^ b
         } else {
             self.concat_low_high_rvalues(
@@ -649,18 +649,16 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
                 let a_size = a_type.get_size();
                 let b_size = b_type.get_size();
                 match a_size.cmp(&b_size) {
-                    std::cmp::Ordering::Less => {
-                        let a = self.context.new_cast(self.location, a, b_type);
-                        a << b
-                    }
                     std::cmp::Ordering::Equal => a << b,
-                    std::cmp::Ordering::Greater => {
+                    _ => {
+                        // NOTE: it is OK to cast even if b has a type bigger than a because b has
+                        // been masked by codegen_ssa before calling Builder::shl.
                         let b = self.context.new_cast(self.location, b, a_type);
                         a << b
                     }
                 }
             }
-        } else if a_type.is_vector() && a_type.is_vector() {
+        } else if a_type.is_vector() && b_type.is_vector() {
             a << b
         } else if a_native && !b_native {
             self.gcc_shl(a, self.gcc_int_cast(b, a_type))
@@ -869,6 +867,7 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
         let value_type = value.get_type();
         if self.is_native_int_type_or_bool(dest_typ) && self.is_native_int_type_or_bool(value_type)
         {
+            // TODO: use self.location.
             self.context.new_cast(None, value, dest_typ)
         } else if self.is_native_int_type_or_bool(dest_typ) {
             self.context.new_cast(None, self.low(value), dest_typ)
@@ -907,8 +906,11 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
 
         debug_assert!(value_type.dyncast_array().is_some());
         let name_suffix = match self.type_kind(dest_typ) {
+            // cSpell:disable
             TypeKind::Float => "tisf",
             TypeKind::Double => "tidf",
+            TypeKind::FP128 => "titf",
+            // cSpell:enable
             kind => panic!("cannot cast a non-native integer to type {:?}", kind),
         };
         let sign = if signed { "" } else { "un" };
@@ -950,8 +952,10 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
 
         debug_assert!(dest_typ.dyncast_array().is_some());
         let name_suffix = match self.type_kind(value_type) {
+            // cSpell:disable
             TypeKind::Float => "sfti",
             TypeKind::Double => "dfti",
+            // cSpell:enable
             kind => panic!("cannot cast a {:?} to non-native integer", kind),
         };
         let sign = if signed { "" } else { "uns" };
@@ -1027,5 +1031,27 @@ impl<'gcc, 'tcx> CodegenCx<'gcc, 'tcx> {
             self.context.new_rvalue_from_long(native_int_type, last),
         ];
         self.context.new_array_constructor(None, typ, &values)
+    }
+}
+
+fn type_kind_to_gcc_type<I: Interner>(kind: TyKind<I>) -> CType {
+    use rustc_middle::ty::IntTy::*;
+    use rustc_middle::ty::UintTy::*;
+    use rustc_middle::ty::{Int, Uint};
+
+    match kind {
+        Int(I8) => CType::Int8t,
+        Int(I16) => CType::Int16t,
+        Int(I32) => CType::Int32t,
+        Int(I64) => CType::Int64t,
+        Int(I128) => CType::Int128t,
+
+        Uint(U8) => CType::UInt8t,
+        Uint(U16) => CType::UInt16t,
+        Uint(U32) => CType::UInt32t,
+        Uint(U64) => CType::UInt64t,
+        Uint(U128) => CType::UInt128t,
+
+        _ => unimplemented!("Kind: {:?}", kind),
     }
 }

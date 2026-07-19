@@ -6,8 +6,6 @@ APIs to use unstable APIs internally in the rustc standard library.
 **NOTE**: this section is for *library* features, not *language* features. For instructions on
 stabilizing a language feature see [Stabilizing Features](./stabilization_guide.md).
 
-<!-- toc -->
-
 ## unstable
 
 The `#[unstable(feature = "foo", issue = "1234", reason = "lorem ipsum")]`
@@ -34,7 +32,8 @@ Previously, due to a [rustc bug], stable items inside unstable modules were
 available to stable code in that location.
 As of <!-- date-check --> September 2024, items with [accidentally stabilized
 paths] are marked with the `#[rustc_allowed_through_unstable_modules]` attribute
-to prevent code dependent on those paths from breaking.
+to prevent code dependent on those paths from breaking. Do *not* add this attribute
+to any more items unless that is needed to avoid breaking changes.
 
 The `unstable` attribute may also have the `soft` value, which makes it a
 future-incompatible deny-by-default lint instead of a hard error. This is used
@@ -181,5 +180,13 @@ against the current version of `rustc`. If `since` is in a future version, then
 the `deprecated_in_future` lint is triggered which is default `allow`, but most
 of the standard library raises it to a warning with
 `#![warn(deprecated_in_future)]`.
+
+## unstable_feature_bound
+The `#[unstable_feature_bound(foo)]` attribute can be used together with `#[unstable]` attribute to mark an `impl` of stable type and stable trait as unstable. In std/core, an item annotated with `#[unstable_feature_bound(foo)]` can only be used by another item that is also annotated with `#[unstable_feature_bound(foo)]`. Outside of std/core, using an item with `#[unstable_feature_bound(foo)]` requires the feature to be enabled with `#![feature(foo)]` attribute on the crate.
+
+Currently, the items that can be annotated with `#[unstable_feature_bound]` are:
+- `impl`
+- free function
+- trait
 
 [blog]: https://www.ralfj.de/blog/2018/07/19/const.html

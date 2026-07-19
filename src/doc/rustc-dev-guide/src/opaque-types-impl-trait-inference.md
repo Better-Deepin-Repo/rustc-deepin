@@ -13,13 +13,16 @@ it can work across functions and function bodies.
 To help explain how it works, let's consider an example.
 
 ```rust
+#![feature(type_alias_impl_trait)]
 mod m {
     pub type Seq<T> = impl IntoIterator<Item = T>;
 
+    #[define_opaque(Seq)]
     pub fn produce_singleton<T>(t: T) -> Seq<T> {
         vec![t]
     }
 
+    #[define_opaque(Seq)]
     pub fn produce_doubleton<T>(t: T, u: T) -> Seq<T> {
         vec![t, u]
     }
@@ -78,7 +81,7 @@ If that fails, we reveal the hidden type of the opaque type,
 but only to prove this specific trait bound, not in general.
 Revealing is done by invoking the `type_of` query on the `DefId` of the opaque type.
 The query will internally request the hidden types from the defining function(s)
-and return that (see [the section on `type_of`](#Within-the-type_of-query) for more details).
+and return that (see [the section on `type_of`](#within-the-type_of-query) for more details).
 
 #### Flowchart of type checking steps
 

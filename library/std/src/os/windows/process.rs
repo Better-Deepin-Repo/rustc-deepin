@@ -344,6 +344,41 @@ pub trait CommandExt: Sealed {
         &mut self,
         attribute_list: &ProcThreadAttributeList<'_>,
     ) -> io::Result<process::Child>;
+
+    /// When true, sets the `STARTF_RUNFULLSCREEN` flag on the [STARTUPINFO][1] struct before passing it to `CreateProcess`.
+    ///
+    /// [1]: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-startupinfoa
+    #[unstable(feature = "windows_process_extensions_startupinfo", issue = "141010")]
+    fn startupinfo_fullscreen(&mut self, enabled: bool) -> &mut process::Command;
+
+    /// When true, sets the `STARTF_UNTRUSTEDSOURCE` flag on the [STARTUPINFO][1] struct before passing it to `CreateProcess`.
+    ///
+    /// [1]: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-startupinfoa
+    #[unstable(feature = "windows_process_extensions_startupinfo", issue = "141010")]
+    fn startupinfo_untrusted_source(&mut self, enabled: bool) -> &mut process::Command;
+
+    /// When specified, sets the following flags on the [STARTUPINFO][1] struct before passing it to `CreateProcess`:
+    /// - If `Some(true)`, sets `STARTF_FORCEONFEEDBACK`
+    /// - If `Some(false)`, sets `STARTF_FORCEOFFFEEDBACK`
+    /// - If `None`, does not set any flags
+    ///
+    /// [1]: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-startupinfoa
+    #[unstable(feature = "windows_process_extensions_startupinfo", issue = "141010")]
+    fn startupinfo_force_feedback(&mut self, enabled: Option<bool>) -> &mut process::Command;
+
+    /// If this flag is set to `true`, each inheritable handle in the calling
+    /// process is inherited by the new process. If the flag is `false`, the
+    /// handles are not inherited.
+    ///
+    /// The default value for this flag is `true`.
+    ///
+    /// **Note** that inherited handles have the same value and access rights
+    /// as the original handles. For additional discussion of inheritable handles,
+    /// see the [Remarks][1] section of the `CreateProcessW` documentation.
+    ///
+    /// [1]: https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw#remarks
+    #[unstable(feature = "windows_process_extensions_inherit_handles", issue = "146407")]
+    fn inherit_handles(&mut self, inherit_handles: bool) -> &mut process::Command;
 }
 
 #[stable(feature = "windows_process_extensions", since = "1.16.0")]
@@ -384,6 +419,26 @@ impl CommandExt for process::Command {
         self.as_inner_mut()
             .spawn_with_attributes(sys::process::Stdio::Inherit, true, Some(attribute_list))
             .map(process::Child::from_inner)
+    }
+
+    fn startupinfo_fullscreen(&mut self, enabled: bool) -> &mut process::Command {
+        self.as_inner_mut().startupinfo_fullscreen(enabled);
+        self
+    }
+
+    fn startupinfo_untrusted_source(&mut self, enabled: bool) -> &mut process::Command {
+        self.as_inner_mut().startupinfo_untrusted_source(enabled);
+        self
+    }
+
+    fn startupinfo_force_feedback(&mut self, enabled: Option<bool>) -> &mut process::Command {
+        self.as_inner_mut().startupinfo_force_feedback(enabled);
+        self
+    }
+
+    fn inherit_handles(&mut self, inherit_handles: bool) -> &mut process::Command {
+        self.as_inner_mut().inherit_handles(inherit_handles);
+        self
     }
 }
 
@@ -500,11 +555,7 @@ impl<'a> ProcThreadAttributeListBuilder<'a> {
     /// [1]: <https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-updateprocthreadattribute#parameters>
     pub fn attribute<T>(self, attribute: usize, value: &'a T) -> Self {
         unsafe {
-            self.raw_attribute(
-                attribute,
-                ptr::addr_of!(*value).cast::<c_void>(),
-                crate::mem::size_of::<T>(),
-            )
+            self.raw_attribute(attribute, ptr::addr_of!(*value).cast::<c_void>(), size_of::<T>())
         }
     }
 
@@ -535,7 +586,7 @@ impl<'a> ProcThreadAttributeListBuilder<'a> {
     ///     pub Y: i16,
     /// }
     ///
-    /// extern "system" {
+    /// unsafe extern "system" {
     ///     fn CreatePipe(
     ///         hreadpipe: *mut HANDLE,
     ///         hwritepipe: *mut HANDLE,
@@ -574,7 +625,7 @@ impl<'a> ProcThreadAttributeListBuilder<'a> {
     ///         .raw_attribute(
     ///             PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
     ///             h_pc as *const c_void,
-    ///             std::mem::size_of::<isize>(),
+    ///             size_of::<isize>(),
     ///         )
     ///         .finish()?
     /// };
@@ -590,10 +641,10 @@ impl<'a> ProcThreadAttributeListBuilder<'a> {
         value_ptr: *const T,
         value_size: usize,
     ) -> Self {
-        self.attributes.insert(attribute, ProcThreadAttributeValue {
-            ptr: value_ptr.cast::<c_void>(),
-            size: value_size,
-        });
+        self.attributes.insert(
+            attribute,
+            ProcThreadAttributeValue { ptr: value_ptr.cast::<c_void>(), size: value_size },
+        );
         self
     }
 

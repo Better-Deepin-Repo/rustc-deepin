@@ -1,10 +1,11 @@
-use cargo::core::dependency::DepKind;
+use cargo::CargoResult;
 use cargo::core::PackageIdSpec;
 use cargo::core::PackageIdSpecQuery;
 use cargo::core::Resolve;
 use cargo::core::Workspace;
-use cargo::ops::cargo_remove::remove;
+use cargo::core::dependency::DepKind;
 use cargo::ops::cargo_remove::RemoveOptions;
+use cargo::ops::cargo_remove::remove;
 use cargo::ops::resolve_ws;
 use cargo::util::command_prelude::*;
 use cargo::util::print_available_packages;
@@ -13,7 +14,6 @@ use cargo::util::toml_mut::dependency::MaybeWorkspace;
 use cargo::util::toml_mut::dependency::Source;
 use cargo::util::toml_mut::manifest::DepTable;
 use cargo::util::toml_mut::manifest::LocalManifest;
-use cargo::CargoResult;
 
 pub fn cli() -> clap::Command {
     clap::Command::new("remove")
@@ -25,7 +25,10 @@ pub fn cli() -> clap::Command {
             .required(true)
             .num_args(1..)
             .value_name("DEP_ID")
-            .help("Dependencies to be removed")])
+            .help("Dependencies to be removed")
+            .add(clap_complete::ArgValueCandidates::new(
+                get_direct_dependencies_pkg_name_candidates,
+            ))])
         .arg_dry_run("Don't actually write the manifest")
         .arg_silent_suggestion()
         .next_help_heading("Section")
@@ -53,7 +56,7 @@ pub fn cli() -> clap::Command {
         .arg_manifest_path()
         .arg_lockfile_path()
         .after_help(color_print::cstr!(
-            "Run `<cyan,bold>cargo help remove</>` for more detailed information.\n"
+            "Run `<bright-cyan,bold>cargo help remove</>` for more detailed information.\n"
         ))
 }
 

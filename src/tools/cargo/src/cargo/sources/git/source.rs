@@ -1,21 +1,21 @@
 //! See [`GitSource`].
 
-use crate::core::global_cache_tracker;
 use crate::core::GitReference;
 use crate::core::SourceId;
+use crate::core::global_cache_tracker;
 use crate::core::{Dependency, Package, PackageId};
-use crate::sources::git::utils::rev_to_oid;
+use crate::sources::IndexSummary;
+use crate::sources::RecursivePathSource;
 use crate::sources::git::utils::GitRemote;
+use crate::sources::git::utils::rev_to_oid;
 use crate::sources::source::MaybePackage;
 use crate::sources::source::QueryKind;
 use crate::sources::source::Source;
-use crate::sources::IndexSummary;
-use crate::sources::RecursivePathSource;
+use crate::util::GlobalContext;
 use crate::util::cache_lock::CacheLockMode;
 use crate::util::errors::CargoResult;
 use crate::util::hex::short_hash;
 use crate::util::interning::InternedString;
-use crate::util::GlobalContext;
 use anyhow::Context as _;
 use cargo_util::paths::exclude_from_backups_and_indexing;
 use std::fmt::{self, Debug, Formatter};
@@ -299,10 +299,16 @@ impl<'gctx> Source for GitSource<'gctx> {
             // If we're in offline mode, we're not locked, and we have a
             // database, then try to resolve our reference with the preexisting
             // repository.
-            (Revision::Deferred(git_ref), Some(db)) if self.gctx.offline() => {
+            (Revision::Deferred(git_ref), Some(db)) if !self.gctx.network_allowed() => {
+                let offline_flag = self
+                    .gctx
+                    .offline_flag()
+                    .expect("always present when `!network_allowed`");
                 let rev = db.resolve(&git_ref).with_context(|| {
-                    "failed to lookup reference in preexisting repository, and \
-                         can't check for updates in offline mode (--offline)"
+                    format!(
+                        "failed to lookup reference in preexisting repository, and \
+                         can't check for updates in offline mode ({offline_flag})"
+                    )
                 })?;
                 (db, rev)
             }
@@ -312,9 +318,9 @@ impl<'gctx> Source for GitSource<'gctx> {
             // situation that we have a locked revision but the database
             // doesn't have it.
             (locked_rev, db) => {
-                if self.gctx.offline() {
+                if let Some(offline_flag) = self.gctx.offline_flag() {
                     anyhow::bail!(
-                        "can't checkout from '{}': you are in the offline mode (--offline)",
+                        "can't checkout from '{}': you are in the offline mode ({offline_flag})",
                         self.remote.url()
                     );
                 }
@@ -366,8 +372,7 @@ impl<'gctx> Source for GitSource<'gctx> {
     fn download(&mut self, id: PackageId) -> CargoResult<MaybePackage> {
         trace!(
             "getting packages for package ID `{}` from `{:?}`",
-            id,
-            self.remote
+            id, self.remote
         );
         self.mark_used()?;
         self.path_source

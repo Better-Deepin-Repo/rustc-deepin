@@ -1,6 +1,6 @@
 use crate::spec::{
-    Cc, LinkSelfContainedDefault, LinkerFlavor, PanicStrategy, RelocModel, TargetOptions, TlsModel,
-    add_link_args, cvs,
+    BinaryFormat, Cc, LinkSelfContainedDefault, LinkerFlavor, PanicStrategy, RelocModel,
+    TargetOptions, TlsModel, add_link_args, cvs,
 };
 
 pub(crate) fn options() -> TargetOptions {
@@ -53,6 +53,7 @@ pub(crate) fn options() -> TargetOptions {
 
     TargetOptions {
         is_like_wasm: true,
+        binary_format: BinaryFormat::Wasm,
         families: cvs!["wasm"],
 
         // we allow dynamic linking, but only cdylibs. Basically we allow a
@@ -79,11 +80,6 @@ pub(crate) fn options() -> TargetOptions {
         // Wasm doesn't have atomics yet, so tell LLVM that we're in a single
         // threaded model which will legalize atomics to normal operations.
         singlethread: true,
-
-        // Symbol visibility takes care of this for the WebAssembly.
-        // Additionally the only known linker, LLD, doesn't support the script
-        // arguments just yet
-        limit_rdylib_exports: false,
 
         // we use the LLD shipped with the Rust toolchain by default
         linker: Some("rust-lld".into()),

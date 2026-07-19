@@ -1,11 +1,11 @@
 error: `filter_map()` will run forever if the iterator repeatedly produces an `Err`
-  --> tests/ui/lines_filter_map_ok.rs:9:31
+  --> tests/ui/lines_filter_map_ok.rs:10:31
    |
 LL |     BufReader::new(f).lines().filter_map(Result::ok).for_each(|_| ());
    |                               ^^^^^^^^^^^^^^^^^^^^^^ help: replace with: `map_while(Result::ok)`
    |
 note: this expression returning a `std::io::Lines` may produce an infinite number of `Err` in case of a read error
-  --> tests/ui/lines_filter_map_ok.rs:9:5
+  --> tests/ui/lines_filter_map_ok.rs:10:5
    |
 LL |     BufReader::new(f).lines().filter_map(Result::ok).for_each(|_| ());
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -13,25 +13,25 @@ LL |     BufReader::new(f).lines().filter_map(Result::ok).for_each(|_| ());
    = help: to override `-D warnings` add `#[allow(clippy::lines_filter_map_ok)]`
 
 error: `flat_map()` will run forever if the iterator repeatedly produces an `Err`
-  --> tests/ui/lines_filter_map_ok.rs:12:31
+  --> tests/ui/lines_filter_map_ok.rs:13:31
    |
 LL |     BufReader::new(f).lines().flat_map(Result::ok).for_each(|_| ());
    |                               ^^^^^^^^^^^^^^^^^^^^ help: replace with: `map_while(Result::ok)`
    |
 note: this expression returning a `std::io::Lines` may produce an infinite number of `Err` in case of a read error
-  --> tests/ui/lines_filter_map_ok.rs:12:5
+  --> tests/ui/lines_filter_map_ok.rs:13:5
    |
 LL |     BufReader::new(f).lines().flat_map(Result::ok).for_each(|_| ());
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 error: `flatten()` will run forever if the iterator repeatedly produces an `Err`
-  --> tests/ui/lines_filter_map_ok.rs:15:31
+  --> tests/ui/lines_filter_map_ok.rs:16:31
    |
 LL |     BufReader::new(f).lines().flatten().for_each(|_| ());
    |                               ^^^^^^^^^ help: replace with: `map_while(Result::ok)`
    |
 note: this expression returning a `std::io::Lines` may produce an infinite number of `Err` in case of a read error
-  --> tests/ui/lines_filter_map_ok.rs:15:5
+  --> tests/ui/lines_filter_map_ok.rs:16:5
    |
 LL |     BufReader::new(f).lines().flatten().for_each(|_| ());
    |     ^^^^^^^^^^^^^^^^^^^^^^^^^

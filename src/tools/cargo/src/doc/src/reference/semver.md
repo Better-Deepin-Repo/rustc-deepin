@@ -577,7 +577,7 @@ fn main() {
     let p = Packed { a: 1, b: 2 };
     // Some assumption about the size of the type.
     // Without `packed`, this fails since the size is 4.
-    const _: () = assert!(std::mem::size_of::<Packed>() == 3); // Error: evaluation of constant value failed
+    const _: () = assert!(std::mem::size_of::<Packed>() == 3); // Error: assertion failed
 }
 ```
 
@@ -696,7 +696,7 @@ fn main() {
     let p = Packed { a: 1, b: 2 };
     // Some assumption about the size of the type.
     // The alignment has changed from 8 to 4.
-    const _: () = assert!(std::mem::align_of::<Packed>() == 8); // Error: evaluation of constant value failed
+    const _: () = assert!(std::mem::align_of::<Packed>() == 8); // Error: assertion failed
 }
 ```
 
@@ -734,7 +734,7 @@ fn main() {
     let p = Packed { a: 1, b: 2 };
     // Some assumption about the size of the type.
     // The alignment has changed from 8 to 4.
-    const _: () = assert!(std::mem::align_of::<Packed>() == 8); // Error: evaluation of constant value failed
+    const _: () = assert!(std::mem::align_of::<Packed>() == 8); // Error: assertion failed
 }
 ```
 
@@ -766,7 +766,7 @@ pub struct SpecificLayout {
 // Example usage that will break.
 use updated_crate::SpecificLayout;
 
-extern "C" {
+unsafe extern "C" {
     // This C function is assuming a specific layout defined in a C header.
     fn c_fn_get_b(x: &SpecificLayout) -> u32;
 }
@@ -820,7 +820,7 @@ pub struct SpecificLayout {
 // Example usage that will break.
 use updated_crate::SpecificLayout;
 
-extern "C" {
+unsafe extern "C" {
     // This C function is assuming a specific layout defined in a C header.
     fn c_fn_get_b(x: &SpecificLayout) -> u32; // Error: is not FFI-safe
 }
@@ -941,7 +941,7 @@ pub struct Transparent<T>(T);
 #![deny(improper_ctypes)]
 use updated_crate::Transparent;
 
-extern "C" {
+unsafe extern "C" {
     fn c_fn() -> Transparent<f64>; // Error: is not FFI-safe
 }
 
@@ -1341,7 +1341,7 @@ struct Foo;
 impl Trait for Foo {}
 
 fn main() {
-    let obj: Box<dyn Trait> = Box::new(Foo); // Error: cannot be made into an object
+    let obj: Box<dyn Trait> = Box::new(Foo); // Error: the trait `Trait` is not dyn compatible
 }
 ```
 
@@ -2018,6 +2018,10 @@ previous releases). Just keep in mind that some large projects may not be able
 to update their Rust toolchain rapidly.
 
 Mitigation strategies:
+* Document your package’s minimum-supported Rust version by setting
+  [`package.rust-version`], allowing Cargo’s dependency resolution to
+  attempt to [select older versions of your package] when needed.
+  Be sure to consider the [support expectations] when doing so.
 * Use [Cargo features] to make the new features opt-in.
 * Provide a large window of support for older releases.
 * Copy the source of new standard library items if possible so that you
@@ -2028,6 +2032,9 @@ Mitigation strategies:
   [`#[cfg(accessible(..))]`][cfg-accessible] features which provide an opt-in
   mechanism for new features. These are currently unstable and only available
   in the nightly channel.
+
+[select older versions of your package]: https://doc.rust-lang.org/cargo/reference/resolver.html#rust-version
+[support expectations]: https://doc.rust-lang.org/cargo/reference/rust-version.html#support-expectations
 
 ### Possibly-breaking: changing the platform and environment requirements {#env-change-requirements}
 
@@ -2296,6 +2303,7 @@ document what your commitments are.
 
 [`cfg` attribute]: ../../reference/conditional-compilation.md#the-cfg-attribute
 [`no_std`]: ../../reference/names/preludes.html#the-no_std-attribute
+[`package.rust-version`]: https://doc.rust-lang.org/cargo/reference/rust-version.html
 [`pub use`]: ../../reference/items/use-declarations.html
 [Cargo feature]: features.md
 [Cargo features]: features.md

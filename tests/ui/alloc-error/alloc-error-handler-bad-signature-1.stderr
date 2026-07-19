@@ -2,7 +2,7 @@ error[E0308]: mismatched types
   --> $DIR/alloc-error-handler-bad-signature-1.rs:10:1
    |
 LL |    #[alloc_error_handler]
-   |    ---------------------- in this procedural macro expansion
+   |    ---------------------- in this attribute macro expansion
 LL | // fn oom(
 LL | ||     info: &Layout,
 LL | || ) -> ()
@@ -18,13 +18,12 @@ LL | fn oom(
    |    ^^^
 LL |     info: &Layout,
    |     -------------
-   = note: this error originates in the attribute macro `alloc_error_handler` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error[E0308]: mismatched types
   --> $DIR/alloc-error-handler-bad-signature-1.rs:10:1
    |
 LL |    #[alloc_error_handler]
-   |    ---------------------- in this procedural macro expansion
+   |    ---------------------- in this attribute macro expansion
 LL | // fn oom(
 LL | ||     info: &Layout,
 LL | || ) -> ()
@@ -35,7 +34,6 @@ LL | |  }
    |
    = note:   expected type `!`
            found unit type `()`
-   = note: this error originates in the attribute macro `alloc_error_handler` (in Nightly builds, run with -Z macro-backtrace for more info)
 
 error: aborting due to 2 previous errors
 

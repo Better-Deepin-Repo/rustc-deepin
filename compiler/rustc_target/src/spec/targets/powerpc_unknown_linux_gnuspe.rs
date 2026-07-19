@@ -1,5 +1,8 @@
-use crate::abi::Endian;
-use crate::spec::{Cc, LinkerFlavor, Lld, StackProbeType, Target, TargetOptions, base};
+use rustc_abi::Endian;
+
+use crate::spec::{
+    Abi, Arch, Cc, LinkerFlavor, Lld, StackProbeType, Target, TargetMetadata, TargetOptions, base,
+};
 
 pub(crate) fn target() -> Target {
     let mut base = base::linux_gnu::opts();
@@ -9,7 +12,7 @@ pub(crate) fn target() -> Target {
 
     Target {
         llvm_target: "powerpc-unknown-linux-gnuspe".into(),
-        metadata: crate::spec::TargetMetadata {
+        metadata: TargetMetadata {
             description: Some("PowerPC SPE Linux".into()),
             tier: Some(3),
             host_tools: Some(false),
@@ -17,10 +20,11 @@ pub(crate) fn target() -> Target {
         },
         pointer_width: 32,
         data_layout: "E-m:e-p:32:32-Fn32-i64:64-n32".into(),
-        arch: "powerpc".into(),
+        arch: Arch::PowerPC,
         options: TargetOptions {
-            abi: "spe".into(),
+            abi: Abi::Spe,
             endian: Endian::Big,
+            features: "+secure-plt,+msync".into(),
             mcount: "_mcount".into(),
             ..base
         },

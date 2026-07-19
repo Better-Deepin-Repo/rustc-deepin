@@ -1,10 +1,12 @@
+//@ add-minicore
 //@ compile-flags: --crate-type=rlib --target=aarch64-unknown-linux-gnu
 //@ needs-llvm-components: aarch64
-#![feature(no_core, lang_items)]
+//@ ignore-backends: gcc
+#![feature(no_core)]
 #![no_core]
 
-#[lang="sized"]
-trait Sized {}
+extern crate minicore;
+use minicore::*;
 
 pub fn main() {
     #[target_feature(enable = "pacg")]

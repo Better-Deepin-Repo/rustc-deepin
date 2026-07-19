@@ -2,9 +2,9 @@
 
 use std::fs;
 
+use crate::prelude::*;
 use cargo_test_support::paths;
-use cargo_test_support::prelude::*;
-use cargo_test_support::registry::{registry_path, Package};
+use cargo_test_support::registry::{Package, registry_path};
 use cargo_test_support::{basic_manifest, project, str, t};
 
 fn setup() {
@@ -74,7 +74,7 @@ fn simple() {
 fn not_found() {
     setup();
     // Publish a package so that the directory hierarchy is created.
-    // Note, however, that we declare a dependency on baZ.
+    // Note, however, that we declare a dependency on baz.
     Package::new("bar", "0.0.1").local(true).publish();
 
     let p = project()

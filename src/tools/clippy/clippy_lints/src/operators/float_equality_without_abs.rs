@@ -34,10 +34,11 @@ pub(crate) fn check<'tcx>(
             val_r,
         ) = lhs.kind
 
-        // right hand side matches either f32::EPSILON or f64::EPSILON
+        // right hand side matches _::EPSILON
         && let ExprKind::Path(ref epsilon_path) = rhs.kind
         && let Res::Def(DefKind::AssocConst, def_id) = cx.qpath_res(epsilon_path, rhs.hir_id)
-        && ([sym::f32_epsilon, sym::f64_epsilon].into_iter().any(|sym| cx.tcx.is_diagnostic_item(sym, def_id)))
+        && let Some(sym) = cx.tcx.get_diagnostic_name(def_id)
+        && matches!(sym, sym::f16_epsilon | sym::f32_epsilon | sym::f64_epsilon | sym::f128_epsilon)
 
         // values of the subtractions on the left hand side are of the type float
         && let t_val_l = cx.typeck_results().expr_ty(val_l)
@@ -50,7 +51,7 @@ pub(crate) fn check<'tcx>(
         // format the suggestion
         let suggestion = format!(
             "{}.abs()",
-            sugg::make_assoc(AssocOp::Subtract, &sug_l, &sug_r).maybe_par()
+            sugg::make_assoc(AssocOp::Binary(BinOpKind::Sub), &sug_l, &sug_r).maybe_paren()
         );
         // spans the lint
         span_lint_and_then(

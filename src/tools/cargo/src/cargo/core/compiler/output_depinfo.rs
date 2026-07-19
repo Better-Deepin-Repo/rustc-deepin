@@ -6,12 +6,12 @@ use std::collections::{BTreeSet, HashSet};
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use super::{fingerprint, BuildRunner, FileFlavor, Unit};
-use crate::util::{internal, CargoResult};
+use super::{BuildRunner, FileFlavor, Unit, fingerprint};
+use crate::util::{CargoResult, internal};
 use cargo_util::paths;
 use tracing::debug;
 
-/// Bacially just normalizes a given path and converts it to a string.
+/// Basically just normalizes a given path and converts it to a string.
 fn render_filename<P: AsRef<Path>>(path: P, basedir: Option<&str>) -> CargoResult<String> {
     fn wrap_path(path: &Path) -> CargoResult<String> {
         path.to_str()
@@ -58,7 +58,7 @@ fn add_deps_for_unit(
         let dep_info_loc = fingerprint::dep_info_loc(build_runner, unit);
         if let Some(paths) = fingerprint::parse_dep_info(
             unit.pkg.root(),
-            build_runner.files().host_root(),
+            build_runner.files().host_build_root(),
             &dep_info_loc,
         )? {
             for path in paths.files.into_keys() {
@@ -75,18 +75,29 @@ fn add_deps_for_unit(
     }
 
     // Add rerun-if-changed dependencies
-    if let Some(metadata) = build_runner.find_build_script_metadata(unit) {
-        if let Some(output) = build_runner
-            .build_script_outputs
-            .lock()
-            .unwrap()
-            .get(metadata)
-        {
-            for path in &output.rerun_if_changed {
-                // The paths we have saved from the unit are of arbitrary relativeness and may be
-                // relative to the crate root of the dependency.
-                let path = unit.pkg.root().join(path);
-                deps.insert(path);
+    if let Some(metadata_vec) = build_runner.find_build_script_metadatas(unit) {
+        for metadata in metadata_vec {
+            if let Some(output) = build_runner
+                .build_script_outputs
+                .lock()
+                .unwrap()
+                .get(metadata)
+            {
+                for path in &output.rerun_if_changed {
+                    let package_root = unit.pkg.root();
+
+                    let path = if path.as_os_str().is_empty() {
+                        // Joining with an empty path causes Rust to add a trailing path separator.
+                        // On Windows, this would add an invalid trailing backslash to the .d file.
+                        package_root.to_path_buf()
+                    } else {
+                        // The paths we have saved from the unit are of arbitrary relativeness and
+                        // may be relative to the crate root of the dependency.
+                        package_root.join(path)
+                    };
+
+                    deps.insert(path);
+                }
             }
         }
     }
@@ -141,11 +152,12 @@ pub fn output_depinfo(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> Ca
         .map(|f| render_filename(f, basedir))
         .collect::<CargoResult<Vec<_>>>()?;
 
-    for output in build_runner
-        .outputs(unit)?
-        .iter()
-        .filter(|o| !matches!(o.flavor, FileFlavor::DebugInfo | FileFlavor::Auxiliary))
-    {
+    for output in build_runner.outputs(unit)?.iter().filter(|o| {
+        !matches!(
+            o.flavor,
+            FileFlavor::DebugInfo | FileFlavor::Auxiliary | FileFlavor::Sbom
+        )
+    }) {
         if let Some(ref link_dst) = output.hardlink {
             let output_path = link_dst.with_extension("d");
             if success {

@@ -1,8 +1,8 @@
 use rustc_ast::ast::LitIntType;
 use rustc_ast::{MetaItemInner, MetaItemLit, Path, Safety, StrStyle};
+use rustc_data_structures::thin_vec::thin_vec;
 use rustc_span::symbol::{Ident, kw};
 use rustc_span::{DUMMY_SP, create_default_session_globals_then};
-use thin_vec::thin_vec;
 
 use super::*;
 
@@ -276,10 +276,13 @@ fn test_parse_ok() {
         let mi = dummy_meta_item_list!(not, [a]);
         assert_eq!(Cfg::parse(&mi), Ok(!word_cfg("a")));
 
-        let mi = dummy_meta_item_list!(not, [dummy_meta_item_list!(any, [
-            dummy_meta_item_word("a"),
-            dummy_meta_item_list!(all, [b, c]),
-        ]),]);
+        let mi = dummy_meta_item_list!(
+            not,
+            [dummy_meta_item_list!(
+                any,
+                [dummy_meta_item_word("a"), dummy_meta_item_list!(all, [b, c]),]
+            ),]
+        );
         assert_eq!(Cfg::parse(&mi), Ok(!(word_cfg("a") | (word_cfg("b") & word_cfg("c")))));
 
         let mi = dummy_meta_item_list!(all, [a, b, c]);
@@ -302,18 +305,16 @@ fn test_parse_err() {
         let mi = dummy_meta_item_list!(foo, []);
         assert!(Cfg::parse(&mi).is_err());
 
-        let mi =
-            dummy_meta_item_list!(
-                all,
-                [dummy_meta_item_list!(foo, []), dummy_meta_item_word("b"),]
-            );
+        let mi = dummy_meta_item_list!(
+            all,
+            [dummy_meta_item_list!(foo, []), dummy_meta_item_word("b"),]
+        );
         assert!(Cfg::parse(&mi).is_err());
 
-        let mi =
-            dummy_meta_item_list!(
-                any,
-                [dummy_meta_item_word("a"), dummy_meta_item_list!(foo, []),]
-            );
+        let mi = dummy_meta_item_list!(
+            any,
+            [dummy_meta_item_word("a"), dummy_meta_item_list!(foo, []),]
+        );
         assert!(Cfg::parse(&mi).is_err());
 
         let mi = dummy_meta_item_list!(not, [dummy_meta_item_list!(foo, []),]);

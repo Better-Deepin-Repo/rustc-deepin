@@ -1,4 +1,7 @@
-use rustc_ast::{self as ast, Attribute, attr, token};
+use rustc_ast as ast;
+use rustc_ast::token::{self, MetaVarKind};
+use rustc_ast::tokenstream::ParserRange;
+use rustc_ast::{Attribute, attr};
 use rustc_errors::codes::*;
 use rustc_errors::{Diag, PResult};
 use rustc_span::{BytePos, Span};
@@ -6,10 +9,10 @@ use thin_vec::ThinVec;
 use tracing::debug;
 
 use super::{
-    AttrWrapper, Capturing, FnParseMode, ForceCollect, Parser, ParserRange, PathStyle, Trailing,
-    UsePreAttrPos,
+    AttrWrapper, Capturing, FnParseMode, ForceCollect, Parser, PathStyle, Trailing, UsePreAttrPos,
 };
-use crate::{errors, exp, fluent_generated as fluent, maybe_whole};
+use crate::parser::FnContext;
+use crate::{errors, exp, fluent_generated as fluent};
 
 // Public for rustfmt usage
 #[derive(Debug)]
@@ -125,12 +128,29 @@ impl<'a> Parser<'a> {
         let lo = self.token.span;
         // Attributes can't have attributes of their own [Editor's note: not with that attitude]
         self.collect_tokens_no_attrs(|this| {
+            let pound_hi = this.token.span.hi();
             assert!(this.eat(exp!(Pound)), "parse_attribute called in non-attribute position");
 
+            let not_lo = this.token.span.lo();
             let style =
-                if this.eat(exp!(Not)) { ast::AttrStyle::Inner } else { ast::AttrStyle::Outer };
+                if this.eat(exp!(Bang)) { ast::AttrStyle::Inner } else { ast::AttrStyle::Outer };
 
-            this.expect(exp!(OpenBracket))?;
+            let mut bracket_res = this.expect(exp!(OpenBracket));
+            // If `#!` is not followed by `[`
+            if let Err(err) = &mut bracket_res
+                && style == ast::AttrStyle::Inner
+                && pound_hi == not_lo
+            {
+                err.note(
+                    "the token sequence `#!` here looks like the start of \
+                    a shebang interpreter directive but it is not",
+                );
+                err.help(
+                    "if you meant this to be a shebang interpreter directive, \
+                    move it to the very start of the file",
+                );
+            }
+            bracket_res?;
             let item = this.parse_attr_item(ForceCollect::No)?;
             this.expect(exp!(CloseBracket))?;
             let attr_sp = lo.to(this.prev_token.span);
@@ -181,7 +201,7 @@ impl<'a> Parser<'a> {
             AttrWrapper::empty(),
             true,
             false,
-            FnParseMode { req_name: |_| true, req_body: true },
+            FnParseMode { req_name: |_, _| true, context: FnContext::Free, req_body: true },
             ForceCollect::No,
         ) {
             Ok(Some(item)) => {
@@ -269,7 +289,12 @@ impl<'a> Parser<'a> {
     ///     PATH `=` UNSUFFIXED_LIT
     /// The delimiters or `=` are still put into the resulting token stream.
     pub fn parse_attr_item(&mut self, force_collect: ForceCollect) -> PResult<'a, ast::AttrItem> {
-        maybe_whole!(self, NtMeta, |attr| attr.into_inner());
+        if let Some(item) = self.eat_metavar_seq_with_matcher(
+            |mv_kind| matches!(mv_kind, MetaVarKind::Meta { .. }),
+            |this| this.parse_attr_item(force_collect),
+        ) {
+            return Ok(item);
+        }
 
         // Attr items don't have attributes.
         self.collect_tokens(None, AttrWrapper::empty(), force_collect, |this, _empty_attrs| {
@@ -305,7 +330,7 @@ impl<'a> Parser<'a> {
         loop {
             let start_pos = self.num_bump_calls;
             // Only try to parse if it is an inner attribute (has `!`).
-            let attr = if self.check(exp!(Pound)) && self.look_ahead(1, |t| t == &token::Not) {
+            let attr = if self.check(exp!(Pound)) && self.look_ahead(1, |t| t == &token::Bang) {
                 Some(self.parse_attribute(InnerAttrPolicy::Permitted)?)
             } else if let token::DocComment(comment_kind, attr_style, data) = self.token.kind {
                 if attr_style == ast::AttrStyle::Inner {
@@ -352,29 +377,8 @@ impl<'a> Parser<'a> {
         Ok(lit)
     }
 
-    /// Parses `cfg_attr(pred, attr_item_list)` where `attr_item_list` is comma-delimited.
-    pub fn parse_cfg_attr(
-        &mut self,
-    ) -> PResult<'a, (ast::MetaItemInner, Vec<(ast::AttrItem, Span)>)> {
-        let cfg_predicate = self.parse_meta_item_inner()?;
-        self.expect(exp!(Comma))?;
-
-        // Presumably, the majority of the time there will only be one attr.
-        let mut expanded_attrs = Vec::with_capacity(1);
-        while self.token != token::Eof {
-            let lo = self.token.span;
-            let item = self.parse_attr_item(ForceCollect::Yes)?;
-            expanded_attrs.push((item, lo.to(self.prev_token.span)));
-            if !self.eat(exp!(Comma)) {
-                break;
-            }
-        }
-
-        Ok((cfg_predicate, expanded_attrs))
-    }
-
     /// Matches `COMMASEP(meta_item_inner)`.
-    pub(crate) fn parse_meta_seq_top(&mut self) -> PResult<'a, ThinVec<ast::MetaItemInner>> {
+    pub fn parse_meta_seq_top(&mut self) -> PResult<'a, ThinVec<ast::MetaItemInner>> {
         // Presumably, the majority of the time there will only be one attr.
         let mut nmis = ThinVec::with_capacity(1);
         while self.token != token::Eof {
@@ -396,18 +400,17 @@ impl<'a> Parser<'a> {
         &mut self,
         unsafe_allowed: AllowLeadingUnsafe,
     ) -> PResult<'a, ast::MetaItem> {
-        // We can't use `maybe_whole` here because it would bump in the `None`
-        // case, which we don't want.
-        if let token::Interpolated(nt) = &self.token.kind
-            && let token::NtMeta(attr_item) = &**nt
-        {
-            match attr_item.meta(attr_item.path.span) {
-                Some(meta) => {
-                    self.bump();
-                    return Ok(meta);
-                }
-                None => self.unexpected()?,
-            }
+        if let Some(MetaVarKind::Meta { has_meta_form }) = self.token.is_metavar_seq() {
+            return if has_meta_form {
+                let attr_item = self
+                    .eat_metavar_seq(MetaVarKind::Meta { has_meta_form: true }, |this| {
+                        this.parse_attr_item(ForceCollect::No)
+                    })
+                    .unwrap();
+                Ok(attr_item.meta(attr_item.path.span).unwrap())
+            } else {
+                self.unexpected_any()
+            };
         }
 
         let lo = self.token.span;
@@ -464,7 +467,7 @@ impl<'a> Parser<'a> {
 
         let mut err = errors::InvalidMetaItem {
             span: self.token.span,
-            token: self.token.clone(),
+            descr: super::token_descr(&self.token),
             quote_ident_sugg: None,
         };
 

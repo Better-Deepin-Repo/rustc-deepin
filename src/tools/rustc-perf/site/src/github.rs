@@ -2,10 +2,12 @@ pub mod client;
 pub mod comparison_summary;
 
 use crate::api::github::Commit;
+use crate::job_queue::should_use_job_queue;
 use crate::load::{MissingReason, SiteCtxt, TryCommit};
-use std::time::Duration;
-
+use chrono::{DateTime, Utc};
 use serde::Deserialize;
+use std::sync::LazyLock;
+use std::time::Duration;
 
 type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -25,23 +27,22 @@ use database::Connection;
 
 /// Enqueues try build artifacts and posts a message about them on the original rollup PR
 pub async fn unroll_rollup(
-    ci_client: client::Client,
-    main_repo_client: client::Client,
+    gh_client: client::Client,
     rollup_merges: impl Iterator<Item = &Commit>,
     previous_master: &str,
     rollup_pr_number: u32,
 ) -> Result<(), String> {
-    let commit_link = |sha: &str| format!("https://github.com/rust-lang-ci/rust/commit/{sha}");
+    let commit_link = |sha: &str| format!("https://github.com/rust-lang/rust/commit/{sha}");
 
     let format_commit = |s: &str, truncate: bool| {
-        let display = truncate.then(|| s.split_at(10).0).unwrap_or(s);
+        let display = if truncate { s.split_at(10).0 } else { s };
         format!("[{display}]({})", commit_link(s))
     };
 
     // Sort rolled up commits by their PR number in ascending order, so that they have the
     // same ordering as in the rollup PR description.
     let mut unrolled_builds: Vec<UnrolledCommit> =
-        enqueue_unrolled_try_builds(ci_client, rollup_merges, previous_master).await?;
+        enqueue_unrolled_try_builds(&gh_client, rollup_merges, previous_master).await?;
     // The number should really be an integer, but if not, we will just sort the "non-integer" PRs
     // first.
     unrolled_builds.sort_by_cached_key(|commit| commit.original_pr_number.parse::<u64>().ok());
@@ -92,14 +93,14 @@ pub async fn unroll_rollup(
         {mapping}\n\n*previous master*: {previous_master}\n\nIn the case of a perf regression, \
         run the following command for each PR you suspect might be the cause: `@rust-timer build $SHA`\n\
         {COMMENT_MARK_ROLLUP}");
-    main_repo_client.post_comment(rollup_pr_number, msg).await;
+    gh_client.post_comment(rollup_pr_number, msg).await;
     Ok(())
 }
 
 /// Enqueues try builds on the try-perf branch for every rollup merge in `rollup_merges`.
 /// Returns a mapping between the rollup merge commit and the try build sha.
 async fn enqueue_unrolled_try_builds<'a>(
-    client: client::Client,
+    client: &client::Client,
     rollup_merges: impl Iterator<Item = &'a Commit>,
     previous_master: &str,
 ) -> Result<Vec<UnrolledCommit<'a>>, String> {
@@ -195,12 +196,10 @@ pub struct UnrolledCommit<'a> {
     pub sha: Option<String>,
 }
 
-lazy_static::lazy_static! {
-    static ref ROLLUP_PR_NUMBER: regex::Regex =
-        regex::Regex::new(r"^Auto merge of #(\d+)").unwrap();
-    static ref ROLLEDUP_PR_NUMBER: regex::Regex =
-        regex::Regex::new(r"^Rollup merge of #(\d+)").unwrap();
-}
+static ROLLUP_PR_NUMBER: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^Auto merge of #(\d+)").unwrap());
+static ROLLEDUP_PR_NUMBER: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"^Rollup merge of #(\d+)").unwrap());
 
 // Gets the pr number for the associated rollup PR message. Returns None if this is not a rollup PR
 pub async fn rollup_pr_number(
@@ -235,16 +234,34 @@ pub async fn rollup_pr_number(
         .then_some(issue.number))
 }
 
+async fn attach_shas_to_try_benchmark_request(
+    conn: &dyn database::pool::Connection,
+    pr_number: u32,
+    commit: &TryCommit,
+    commit_date: DateTime<Utc>,
+) {
+    if let Err(e) = conn
+        .attach_shas_to_try_benchmark_request(
+            pr_number,
+            &commit.sha,
+            &commit.parent_sha,
+            commit_date,
+        )
+        .await
+    {
+        log::error!("Failed to add shas to try commit: {e:?}");
+    }
+}
+
 pub async fn enqueue_shas(
     ctxt: &SiteCtxt,
-    main_client: &client::Client,
-    ci_client: &client::Client,
+    gh_client: &client::Client,
     pr_number: u32,
     commits: impl Iterator<Item = &str>,
 ) -> Result<(), String> {
     let mut msg = String::new();
     for commit in commits {
-        let mut commit_response = ci_client
+        let mut commit_response = gh_client
             .get_commit(commit)
             .await
             .map_err(|e| e.to_string())?;
@@ -261,14 +278,25 @@ pub async fn enqueue_shas(
             parent_sha: commit_response.parents.remove(0).sha,
         };
         let conn = ctxt.conn().await;
-        let queued = conn
-            .pr_attach_commit(
+
+        let queued = if should_use_job_queue(pr_number) {
+            attach_shas_to_try_benchmark_request(
+                &*conn,
+                pr_number,
+                &try_commit,
+                commit_response.commit.committer.date,
+            )
+            .await;
+            true
+        } else {
+            conn.pr_attach_commit(
                 pr_number,
                 &try_commit.sha,
                 &try_commit.parent_sha,
                 Some(commit_response.commit.committer.date),
             )
-            .await;
+            .await
+        };
         if queued {
             if !msg.is_empty() {
                 msg.push('\n');
@@ -300,7 +328,7 @@ It will probably take at least ~{:.1} hours until the benchmark run finishes."#,
 
     if !msg.is_empty() {
         msg.push_str(&format!("\n{COMMENT_MARK_TEMPORARY}"));
-        main_client.post_comment(pr_number, msg).await;
+        gh_client.post_comment(pr_number, msg).await;
     }
 
     Ok(())
@@ -412,7 +440,7 @@ pub(crate) async fn untriaged_perf_regressions() -> Result<Vec<PullRequest>, Box
 
 /// Get the title of a PR with the given number
 pub(crate) async fn pr_title(pr: u32) -> String {
-    let url = format!("https://api.github.com/repos/rust-lang/rust/pulls/{}", pr);
+    let url = format!("https://api.github.com/repos/rust-lang/rust/pulls/{pr}");
     let request = github_request(&url);
 
     async fn send(request: reqwest::RequestBuilder) -> Result<String, BoxedError> {
@@ -424,7 +452,7 @@ pub(crate) async fn pr_title(pr: u32) -> String {
             .ok_or_else(malformed_json_error)?
             .to_owned())
     }
-    let request_dbg = format!("{:?}", request);
+    let request_dbg = format!("{request:?}");
     match send(request).await {
         Ok(t) => t,
         Err(e) => {
@@ -441,8 +469,7 @@ fn github_request(url: &str) -> reqwest::RequestBuilder {
         .header("Content-Type", "application/json")
         .header("User-Agent", "rustc-perf");
     if let Ok(token) = std::env::var("GITHUB_TOKEN") {
-        let mut value =
-            reqwest::header::HeaderValue::from_str(&format!("token {}", token)).unwrap();
+        let mut value = reqwest::header::HeaderValue::from_str(&format!("token {token}")).unwrap();
         value.set_sensitive(true);
         request = request.header("Authorization", value);
     }

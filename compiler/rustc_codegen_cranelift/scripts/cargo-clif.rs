@@ -12,11 +12,15 @@ fn main() {
         sysroot = sysroot.parent().unwrap();
     }
 
-    let mut rustflags = vec!["-Cpanic=abort".to_owned(), "-Zpanic-abort-tests".to_owned()];
+    let mut rustflags = vec![];
+    if !cfg!(support_panic_unwind) {
+        rustflags.push("-Cpanic=abort".to_owned());
+        rustflags.push("-Zpanic-abort-tests".to_owned());
+    }
     if let Some(name) = option_env!("BUILTIN_BACKEND") {
         rustflags.push(format!("-Zcodegen-backend={name}"));
     } else {
-        let dylib = sysroot.join(if cfg!(windows) { "bin" } else { "lib" }).join(
+        let dylib = sysroot.join("lib").join(
             env::consts::DLL_PREFIX.to_string()
                 + "rustc_codegen_cranelift"
                 + env::consts::DLL_SUFFIX,
@@ -50,19 +54,7 @@ fn main() {
                 .chain([
                     "--".to_string(),
                     "-Zunstable-options".to_string(),
-                    "-Cllvm-args=mode=jit".to_string(),
-                ])
-                .collect()
-        }
-        Some("lazy-jit") => {
-            rustflags.push("-Cprefer-dynamic".to_owned());
-            args.remove(0);
-            IntoIterator::into_iter(["rustc".to_string()])
-                .chain(args)
-                .chain([
-                    "--".to_string(),
-                    "-Zunstable-options".to_string(),
-                    "-Cllvm-args=mode=jit-lazy".to_string(),
+                    "-Cllvm-args=jit-mode".to_string(),
                 ])
                 .collect()
         }

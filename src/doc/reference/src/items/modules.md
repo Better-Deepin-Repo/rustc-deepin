@@ -1,15 +1,15 @@
+r[items.mod]
 # Modules
 
-r[items.mod]
-
 r[items.mod.syntax]
-> **<sup>Syntax:</sup>**\
-> _Module_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `unsafe`<sup>?</sup> `mod` [IDENTIFIER] `;`\
-> &nbsp;&nbsp; | `unsafe`<sup>?</sup> `mod` [IDENTIFIER] `{`\
-> &nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; [_InnerAttribute_]<sup>\*</sup>\
-> &nbsp;&nbsp; &nbsp;&nbsp;&nbsp;&nbsp; [_Item_]<sup>\*</sup>\
-> &nbsp;&nbsp; &nbsp;&nbsp; `}`
+```grammar,items
+Module ->
+      `unsafe`? `mod` IDENTIFIER `;`
+    | `unsafe`? `mod` IDENTIFIER `{`
+        InnerAttribute*
+        Item*
+      `}`
+```
 
 r[items.mod.intro]
 A module is a container for zero or more [items].
@@ -55,9 +55,8 @@ keyword, but it is rejected at a semantic level. This allows macros to consume
 the syntax and make use of the `unsafe` keyword, before removing it from the
 token stream.
 
-## Module Source Filenames
-
 r[items.mod.outlined]
+## Module source filenames
 
 r[items.mod.outlined.intro]
 A module without a body is loaded from an external file. When the module does
@@ -82,14 +81,11 @@ contents in a file named `mod.rs` within that directory. The above example can
 alternately be expressed with `crate::util`'s contents in a file named
 `util/mod.rs`. It is not allowed to have both `util.rs` and `util/mod.rs`.
 
-> **Note**: Prior to `rustc` 1.30, using `mod.rs` files was the way to load
-> a module with nested children. It is encouraged to use the new naming
-> convention as it is more consistent, and avoids having many files named
-> `mod.rs` within a project.
-
-### The `path` attribute
+> [!NOTE]
+> Prior to `rustc` 1.30, using `mod.rs` files was the way to load a module with nested children. It is encouraged to use the new naming convention as it is more consistent, and avoids having many files named `mod.rs` within a project.
 
 r[items.mod.outlined.path]
+### The `path` attribute
 
 r[items.mod.outlined.path.intro]
 The directories and files used for loading external file modules can be
@@ -150,9 +146,8 @@ mod thread {
 }
 ```
 
-## Attributes on Modules
-
 r[items.mod.attributes]
+## Attributes on modules
 
 r[items.mod.attributes.intro]
 Modules, like all items, accept outer attributes. They also accept inner
@@ -164,31 +159,14 @@ The built-in attributes that have meaning on a module are [`cfg`],
 [`deprecated`], [`doc`], [the lint check attributes], [`path`], and
 [`no_implicit_prelude`]. Modules also accept macro attributes.
 
-[_InnerAttribute_]: ../attributes.md
-[_Item_]: ../items.md
 [`cfg`]: ../conditional-compilation.md
 [`deprecated`]: ../attributes/diagnostics.md#the-deprecated-attribute
 [`doc`]: ../../rustdoc/the-doc-attribute.html
 [`no_implicit_prelude`]: ../names/preludes.md#the-no_implicit_prelude-attribute
 [`path`]: #the-path-attribute
-[IDENTIFIER]: ../identifiers.md
 [attribute]: ../attributes.md
 [items]: ../items.md
 [module path]: ../paths.md
 [scopes chapter]: ../names/scopes.md
 [the lint check attributes]: ../attributes/diagnostics.md#lint-check-attributes
 [type namespace]: ../names/namespaces.md
-
-<script>
-(function() {
-    var fragments = {
-        "#prelude-items": "../names/preludes.html",
-    };
-    var target = fragments[window.location.hash];
-    if (target) {
-        var url = window.location.toString();
-        var base = url.substring(0, url.lastIndexOf('/'));
-        window.location.replace(base + "/" + target);
-    }
-})();
-</script>

@@ -1,11 +1,12 @@
-//@ build-pass (FIXME(62277): could be check-pass?)
+//@ add-minicore
+//@ check-pass
 
-#![feature(no_core, lang_items)]
+#![feature(no_core)]
 #![no_core]
 #![crate_type = "lib"]
 
-#[lang = "sized"]
-trait Sized {}
+extern crate minicore;
+use minicore::*;
 
 extern "C" {
     pub static A: u32;

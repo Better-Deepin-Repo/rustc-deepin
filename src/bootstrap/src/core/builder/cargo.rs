@@ -3,16 +3,15 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
 use super::{Builder, Kind};
+use crate::core::build_steps::test;
 use crate::core::build_steps::tool::SourceType;
-use crate::core::build_steps::{compile, test};
 use crate::core::config::SplitDebuginfo;
 use crate::core::config::flags::Color;
-use crate::utils::helpers::{
-    self, LldThreads, add_link_lib_path, check_cfg_arg, linker_args, linker_flags,
-};
+use crate::utils::build_stamp;
+use crate::utils::helpers::{self, LldThreads, check_cfg_arg, linker_args, linker_flags};
 use crate::{
-    BootstrapCommand, CLang, Compiler, DocTests, DryRun, EXTRA_CHECK_CFGS, GitRepo, Mode,
-    TargetSelection, command, prepare_behaviour_dump_dir, t,
+    BootstrapCommand, CLang, Compiler, Config, DryRun, EXTRA_CHECK_CFGS, GitRepo, Mode,
+    RemapScheme, TargetSelection, command, prepare_behaviour_dump_dir, t,
 };
 
 /// Represents flag values in `String` form with whitespace delimiter to pass it to the compiler
@@ -26,9 +25,7 @@ struct Rustflags(String, TargetSelection);
 
 impl Rustflags {
     fn new(target: TargetSelection) -> Rustflags {
-        let mut ret = Rustflags(String::new(), target);
-        ret.propagate_cargo_env("RUSTFLAGS");
-        ret
+        Rustflags(String::new(), target)
     }
 
     /// By default, cargo will pick up on various variables in the environment. However, bootstrap
@@ -61,6 +58,16 @@ impl Rustflags {
         self.0.push_str(arg);
         self
     }
+
+    fn propagate_rustflag_envs(&mut self, build_compiler_stage: u32) {
+        self.propagate_cargo_env("RUSTFLAGS");
+        if build_compiler_stage != 0 {
+            self.env("RUSTFLAGS_NOT_BOOTSTRAP");
+        } else {
+            self.env("RUSTFLAGS_BOOTSTRAP");
+            self.arg("--cfg=bootstrap");
+        }
+    }
 }
 
 /// Flags that are passed to the `rustc` shim binary. These flags will only be applied when
@@ -89,17 +96,22 @@ impl HostFlags {
 #[derive(Debug)]
 pub struct Cargo {
     command: BootstrapCommand,
+    args: Vec<OsString>,
     compiler: Compiler,
     target: TargetSelection,
     rustflags: Rustflags,
     rustdocflags: Rustflags,
     hostflags: HostFlags,
     allow_features: String,
+    release_build: bool,
+    build_compiler_stage: u32,
+    extra_rustflags: Vec<String>,
 }
 
 impl Cargo {
     /// Calls [`Builder::cargo`] and [`Cargo::configure_linker`] to prepare an invocation of `cargo`
     /// to be run.
+    #[track_caller]
     pub fn new(
         builder: &Builder<'_>,
         compiler: Compiler,
@@ -111,9 +123,8 @@ impl Cargo {
         let mut cargo = builder.cargo(compiler, mode, source_type, target, cmd_kind);
 
         match cmd_kind {
-            // No need to configure the target linker for these command types,
-            // as they don't invoke rustc at all.
-            Kind::Clean | Kind::Suggest | Kind::Format | Kind::Setup => {}
+            // No need to configure the target linker for these command types.
+            Kind::Clean | Kind::Check | Kind::Format | Kind::Setup => {}
             _ => {
                 cargo.configure_linker(builder);
             }
@@ -122,12 +133,21 @@ impl Cargo {
         cargo
     }
 
+    pub fn release_build(&mut self, release_build: bool) {
+        self.release_build = release_build;
+    }
+
+    pub fn compiler(&self) -> Compiler {
+        self.compiler
+    }
+
     pub fn into_cmd(self) -> BootstrapCommand {
         self.into()
     }
 
     /// Same as [`Cargo::new`] except this one doesn't configure the linker with
     /// [`Cargo::configure_linker`].
+    #[track_caller]
     pub fn new_for_mir_opt_tests(
         builder: &Builder<'_>,
         compiler: Compiler,
@@ -150,7 +170,7 @@ impl Cargo {
     }
 
     pub fn arg(&mut self, arg: impl AsRef<OsStr>) -> &mut Cargo {
-        self.command.arg(arg.as_ref());
+        self.args.push(arg.as_ref().into());
         self
     }
 
@@ -175,6 +195,32 @@ impl Cargo {
         self
     }
 
+    /// Append a value to an env var of the cargo command instance.
+    /// If the variable was unset previously, this is equivalent to [`Cargo::env`].
+    /// If the variable was already set, this will append `delimiter` and then `value` to it.
+    ///
+    /// Note that this only considers the existence of the env. var. configured on this `Cargo`
+    /// instance. It does not look at the environment of this process.
+    pub fn append_to_env(
+        &mut self,
+        key: impl AsRef<OsStr>,
+        value: impl AsRef<OsStr>,
+        delimiter: impl AsRef<OsStr>,
+    ) -> &mut Cargo {
+        assert_ne!(key.as_ref(), "RUSTFLAGS");
+        assert_ne!(key.as_ref(), "RUSTDOCFLAGS");
+
+        let key = key.as_ref();
+        if let Some((_, Some(previous_value))) = self.command.get_envs().find(|(k, _)| *k == key) {
+            let mut combined: OsString = previous_value.to_os_string();
+            combined.push(delimiter.as_ref());
+            combined.push(value.as_ref());
+            self.env(key, combined)
+        } else {
+            self.env(key, value)
+        }
+    }
+
     pub fn add_rustc_lib_path(&mut self, builder: &Builder<'_>) {
         builder.add_rustc_lib_path(self.compiler, &mut self.command);
     }
@@ -196,6 +242,8 @@ impl Cargo {
         self
     }
 
+    // FIXME(onur-ozkan): Add coverage to make sure modifications to this function
+    // doesn't cause cache invalidations (e.g., #130108).
     fn configure_linker(&mut self, builder: &Builder<'_>) -> &mut Cargo {
         let target = self.target;
         let compiler = self.compiler;
@@ -206,7 +254,7 @@ impl Cargo {
         // dynamic libraries. We use this by default on Unix platforms to ensure
         // that our nightlies behave the same on Windows, that is they work out
         // of the box. This can be disabled by setting `rpath = false` in `[rust]`
-        // table of `config.toml`
+        // table of `bootstrap.toml`
         //
         // Ok, so the astute might be wondering "why isn't `-C rpath` used
         // here?" and that is indeed a good question to ask. This codegen
@@ -236,7 +284,11 @@ impl Cargo {
                 // flesh out rpath support more fully in the future.
                 self.rustflags.arg("-Zosx-rpath-install-name");
                 Some(format!("-Wl,-rpath,@loader_path/../{libdir}"))
-            } else if !target.is_windows() && !target.contains("aix") && !target.contains("xous") {
+            } else if !target.is_windows()
+                && !target.contains("cygwin")
+                && !target.contains("aix")
+                && !target.contains("xous")
+            {
                 self.rustflags.arg("-Clink-args=-Wl,-z,origin");
                 Some(format!("-Wl,-rpath,$ORIGIN/../{libdir}"))
             } else {
@@ -264,11 +316,13 @@ impl Cargo {
             self.rustdocflags.arg(&arg);
         }
 
-        if !builder.config.dry_run()
-            && builder.cc.borrow()[&target].args().iter().any(|arg| arg == "-gz")
-        {
+        if !builder.config.dry_run() && builder.cc[&target].args().iter().any(|arg| arg == "-gz") {
             self.rustflags.arg("-Clink-arg=-gz");
         }
+
+        // Ignore linker warnings for now. These are complicated to fix and don't affect the build.
+        // FIXME: we should really investigate these...
+        self.rustflags.arg("-Alinker-messages");
 
         // Throughout the build Cargo can execute a number of build scripts
         // compiling C/C++ code and we need to pass compilers, archivers, flags, etc
@@ -307,8 +361,15 @@ impl Cargo {
             let cc = ccacheify(&builder.cc(target));
             self.command.env(format!("CC_{triple_underscored}"), &cc);
 
-            let cflags = builder.cflags(target, GitRepo::Rustc, CLang::C).join(" ");
-            self.command.env(format!("CFLAGS_{triple_underscored}"), &cflags);
+            // Extend `CXXFLAGS_$TARGET` with our extra flags.
+            let env = format!("CFLAGS_{triple_underscored}");
+            let mut cflags =
+                builder.cc_unhandled_cflags(target, GitRepo::Rustc, CLang::C).join(" ");
+            if let Ok(var) = std::env::var(&env) {
+                cflags.push(' ');
+                cflags.push_str(&var);
+            }
+            self.command.env(env, &cflags);
 
             if let Some(ar) = builder.ar(target) {
                 let ranlib = format!("{} s", ar.display());
@@ -319,10 +380,17 @@ impl Cargo {
 
             if let Ok(cxx) = builder.cxx(target) {
                 let cxx = ccacheify(&cxx);
-                let cxxflags = builder.cflags(target, GitRepo::Rustc, CLang::Cxx).join(" ");
-                self.command
-                    .env(format!("CXX_{triple_underscored}"), &cxx)
-                    .env(format!("CXXFLAGS_{triple_underscored}"), cxxflags);
+                self.command.env(format!("CXX_{triple_underscored}"), &cxx);
+
+                // Extend `CXXFLAGS_$TARGET` with our extra flags.
+                let env = format!("CXXFLAGS_{triple_underscored}");
+                let mut cxxflags =
+                    builder.cc_unhandled_cflags(target, GitRepo::Rustc, CLang::Cxx).join(" ");
+                if let Ok(var) = std::env::var(&env) {
+                    cxxflags.push(' ');
+                    cxxflags.push_str(&var);
+                }
+                self.command.env(&env, cxxflags);
             }
         }
 
@@ -332,6 +400,39 @@ impl Cargo {
 
 impl From<Cargo> for BootstrapCommand {
     fn from(mut cargo: Cargo) -> BootstrapCommand {
+        if cargo.release_build {
+            cargo.args.insert(0, "--release".into());
+        }
+
+        for arg in &cargo.extra_rustflags {
+            cargo.rustflags.arg(arg);
+            cargo.rustdocflags.arg(arg);
+        }
+
+        // Propagate the envs here at the very end to make sure they override any previously set flags.
+        cargo.rustflags.propagate_rustflag_envs(cargo.build_compiler_stage);
+        cargo.rustdocflags.propagate_rustflag_envs(cargo.build_compiler_stage);
+
+        cargo.rustdocflags.propagate_cargo_env("RUSTDOCFLAGS");
+
+        if cargo.build_compiler_stage == 0 {
+            cargo.rustdocflags.env("RUSTDOCFLAGS_BOOTSTRAP");
+            if let Ok(s) = env::var("CARGOFLAGS_BOOTSTRAP") {
+                cargo.args(s.split_whitespace());
+            }
+        } else {
+            cargo.rustdocflags.env("RUSTDOCFLAGS_NOT_BOOTSTRAP");
+            if let Ok(s) = env::var("CARGOFLAGS_NOT_BOOTSTRAP") {
+                cargo.args(s.split_whitespace());
+            }
+        }
+
+        if let Ok(s) = env::var("CARGOFLAGS") {
+            cargo.args(s.split_whitespace());
+        }
+
+        cargo.command.args(cargo.args);
+
         let rustflags = &cargo.rustflags.0;
         if !rustflags.is_empty() {
             cargo.command.env("RUSTFLAGS", rustflags);
@@ -350,12 +451,14 @@ impl From<Cargo> for BootstrapCommand {
         if !cargo.allow_features.is_empty() {
             cargo.command.env("RUSTC_ALLOW_FEATURES", cargo.allow_features);
         }
+
         cargo.command
     }
 }
 
 impl Builder<'_> {
     /// Like [`Builder::cargo`], but only passes flags that are valid for all commands.
+    #[track_caller]
     pub fn bare_cargo(
         &self,
         compiler: Compiler,
@@ -393,6 +496,15 @@ impl Builder<'_> {
         let out_dir = self.stage_out(compiler, mode);
         cargo.env("CARGO_TARGET_DIR", &out_dir);
 
+        // Bootstrap makes a lot of assumptions about the artifacts produced in the target
+        // directory. If users override the "build directory" using `build-dir`
+        // (https://doc.rust-lang.org/nightly/cargo/reference/unstable.html#build-dir), then
+        // bootstrap couldn't find these artifacts. So we forcefully override that option to our
+        // target directory here.
+        // In the future, we could attempt to read the build-dir location from Cargo and actually
+        // respect it.
+        cargo.env("CARGO_BUILD_BUILD_DIR", &out_dir);
+
         // Found with `rg "init_env_logger\("`. If anyone uses `init_env_logger`
         // from out of tree it shouldn't matter, since x.py is only used for
         // building in-tree.
@@ -419,13 +531,6 @@ impl Builder<'_> {
             assert_eq!(target, compiler.host);
         }
 
-        if self.config.rust_optimize.is_release() &&
-        // cargo bench/install do not accept `--release` and miri doesn't want it
-        !matches!(cmd_kind, Kind::Bench | Kind::Install | Kind::Miri | Kind::MiriSetup | Kind::MiriTest)
-        {
-            cargo.arg("--release");
-        }
-
         // Remove make-related flags to ensure Cargo can correctly set things up
         cargo.env_remove("MAKEFLAGS");
         cargo.env_remove("MFLAGS");
@@ -438,6 +543,7 @@ impl Builder<'_> {
     /// scoped by `mode`'s output directory, it will pass the `--target` flag for the specified
     /// `target`, and will be executing the Cargo command `cmd`. `cmd` can be `miri-cmd` for
     /// commands to be run with Miri.
+    #[track_caller]
     fn cargo(
         &self,
         compiler: Compiler,
@@ -454,13 +560,19 @@ impl Builder<'_> {
         // Codegen backends are not yet tracked by -Zbinary-dep-depinfo,
         // so we need to explicitly clear out if they've been updated.
         for backend in self.codegen_backends(compiler) {
-            self.clear_if_dirty(&out_dir, &backend);
+            build_stamp::clear_if_dirty(self, &out_dir, &backend);
+        }
+
+        if self.config.cmd.timings() {
+            cargo.arg("--timings");
         }
 
         if cmd_kind == Kind::Doc {
             let my_out = match mode {
                 // This is the intended out directory for compiler documentation.
-                Mode::Rustc | Mode::ToolRustc => self.compiler_doc_out(target),
+                Mode::Rustc | Mode::ToolRustcPrivate | Mode::ToolBootstrap | Mode::ToolTarget => {
+                    self.compiler_doc_out(target)
+                }
                 Mode::Std => {
                     if self.config.cmd.json() {
                         out_dir.join(target).join("json-doc")
@@ -470,14 +582,11 @@ impl Builder<'_> {
                 }
                 _ => panic!("doc mode {mode:?} not expected"),
             };
-            let rustdoc = self.rustdoc(compiler);
-            self.clear_if_dirty(&my_out, &rustdoc);
+            let rustdoc = self.rustdoc_for_compiler(compiler);
+            build_stamp::clear_if_dirty(self, &my_out, &rustdoc);
         }
 
-        let profile_var = |name: &str| {
-            let profile = if self.config.rust_optimize.is_release() { "RELEASE" } else { "DEV" };
-            format!("CARGO_PROFILE_{}_{}", profile, name)
-        };
+        let profile_var = |name: &str| cargo_profile_var(name, &self.config);
 
         // See comment in rustc_llvm/build.rs for why this is necessary, largely llvm-config
         // needs to not accidentally link to libLLVM in stage0/lib.
@@ -502,7 +611,7 @@ impl Builder<'_> {
             }
         }
 
-        let stage = if compiler.stage == 0 && self.local_rebuild {
+        let build_compiler_stage = if compiler.stage == 0 && self.local_rebuild {
             // Assume the local-rebuild rustc already has stage1 features.
             1
         } else {
@@ -510,35 +619,25 @@ impl Builder<'_> {
         };
 
         // We synthetically interpret a stage0 compiler used to build tools as a
-        // "raw" compiler in that it's the exact snapshot we download. Normally
-        // the stage0 build means it uses libraries build by the stage0
-        // compiler, but for tools we just use the precompiled libraries that
-        // we've downloaded
-        let use_snapshot = mode == Mode::ToolBootstrap;
-        assert!(!use_snapshot || stage == 0 || self.local_rebuild);
+        // "raw" compiler in that it's the exact snapshot we download. For things like
+        // ToolRustcPrivate, we would have to use the artificial stage0-sysroot compiler instead.
+        let use_snapshot =
+            mode == Mode::ToolBootstrap || (mode == Mode::ToolTarget && build_compiler_stage == 0);
+        assert!(!use_snapshot || build_compiler_stage == 0 || self.local_rebuild);
 
-        let maybe_sysroot = self.sysroot(compiler);
-        let sysroot = if use_snapshot { self.rustc_snapshot_sysroot() } else { &maybe_sysroot };
+        let sysroot = if use_snapshot {
+            self.rustc_snapshot_sysroot().to_path_buf()
+        } else {
+            self.sysroot(compiler)
+        };
         let libdir = self.rustc_libdir(compiler);
 
         let sysroot_str = sysroot.as_os_str().to_str().expect("sysroot should be UTF-8");
-        if self.is_verbose() && !matches!(self.config.dry_run, DryRun::SelfCheck) {
+        if self.is_verbose() && !matches!(self.config.get_dry_run(), DryRun::SelfCheck) {
             println!("using sysroot {sysroot_str}");
         }
 
         let mut rustflags = Rustflags::new(target);
-        if stage != 0 {
-            if let Ok(s) = env::var("CARGOFLAGS_NOT_BOOTSTRAP") {
-                cargo.args(s.split_whitespace());
-            }
-            rustflags.env("RUSTFLAGS_NOT_BOOTSTRAP");
-        } else {
-            if let Ok(s) = env::var("CARGOFLAGS_BOOTSTRAP") {
-                cargo.args(s.split_whitespace());
-            }
-            rustflags.env("RUSTFLAGS_BOOTSTRAP");
-            rustflags.arg("--cfg=bootstrap");
-        }
 
         if cmd_kind == Kind::Clippy {
             // clippy overwrites sysroot if we pass it to cargo.
@@ -554,6 +653,8 @@ impl Builder<'_> {
                 // If an explicit setting is given, use that
                 setting
             }
+            // Per compiler-team#938, v0 mangling is used on nightly
+            None if self.config.channel == "dev" || self.config.channel == "nightly" => true,
             None => {
                 if mode == Mode::Std {
                     // The standard library defaults to the legacy scheme
@@ -569,7 +670,8 @@ impl Builder<'_> {
         // sysroot. Passing this cfg enables raw-dylib support instead, which makes the native
         // library unnecessary. This can be removed when windows-rs enables raw-dylib
         // unconditionally.
-        if let Mode::Rustc | Mode::ToolRustc = mode {
+        if let Mode::Rustc | Mode::ToolRustcPrivate | Mode::ToolBootstrap | Mode::ToolTarget = mode
+        {
             rustflags.arg("--cfg=windows_raw_dylib");
         }
 
@@ -579,12 +681,21 @@ impl Builder<'_> {
             rustflags.arg("-Csymbol-mangling-version=legacy");
         }
 
+        // Always enable move/copy annotations for profiler visibility (non-stage0 only).
+        // Note that -Zannotate-moves is only effective with debugging info enabled.
+        if build_compiler_stage >= 1 {
+            if let Some(limit) = self.config.rust_annotate_moves_size_limit {
+                rustflags.arg(&format!("-Zannotate-moves={limit}"));
+            } else {
+                rustflags.arg("-Zannotate-moves");
+            }
+        }
+
         // FIXME: the following components don't build with `-Zrandomize-layout` yet:
-        // - wasm-component-ld, due to the `wast`crate
         // - rust-analyzer, due to the rowan crate
-        // so we exclude entire categories of steps here due to lack of fine-grained control over
+        // so we exclude an entire category of steps here due to lack of fine-grained control over
         // rustflags.
-        if self.config.rust_randomize_layout && mode != Mode::ToolStd && mode != Mode::ToolRustc {
+        if self.config.rust_randomize_layout && mode != Mode::ToolRustcPrivate {
             rustflags.arg("-Zrandomize-layout");
         }
 
@@ -605,27 +716,33 @@ impl Builder<'_> {
         // cargo would implicitly add it, it was discover that sometimes bootstrap only use
         // `rustflags` without `cargo` making it required.
         rustflags.arg("-Zunstable-options");
+
+        // Add parallel frontend threads configuration
+        if let Some(threads) = self.config.rust_parallel_frontend_threads {
+            rustflags.arg(&format!("-Zthreads={threads}"));
+        }
+
         for (restricted_mode, name, values) in EXTRA_CHECK_CFGS {
             if restricted_mode.is_none() || *restricted_mode == Some(mode) {
                 rustflags.arg(&check_cfg_arg(name, *values));
+
+                if *name == "bootstrap" {
+                    // Cargo doesn't pass RUSTFLAGS to proc_macros:
+                    // https://github.com/rust-lang/cargo/issues/4423
+                    // Thus, if we are on stage 0, we explicitly set `--cfg=bootstrap`.
+                    // We also declare that the flag is expected, which we need to do to not
+                    // get warnings about it being unexpected.
+                    hostflags.arg(check_cfg_arg(name, *values));
+                }
             }
         }
 
         // FIXME(rust-lang/cargo#5754) we shouldn't be using special command arguments
         // to the host invocation here, but rather Cargo should know what flags to pass rustc
         // itself.
-        if stage == 0 {
+        if build_compiler_stage == 0 {
             hostflags.arg("--cfg=bootstrap");
         }
-        // Cargo doesn't pass RUSTFLAGS to proc_macros:
-        // https://github.com/rust-lang/cargo/issues/4423
-        // Thus, if we are on stage 0, we explicitly set `--cfg=bootstrap`.
-        // We also declare that the flag is expected, which we need to do to not
-        // get warnings about it being unexpected.
-        hostflags.arg("-Zunstable-options");
-        hostflags.arg("--check-cfg=cfg(bootstrap)");
-        // #[cfg(bootstrap)] as we are transition `test` to userspace cfg
-        hostflags.arg("--check-cfg=cfg(test)");
 
         // Debian-specific stuff here
         // set linker flags from LDFLAGS
@@ -643,24 +760,31 @@ impl Builder<'_> {
         // but this breaks CI. At the very least, stage0 `rustdoc` needs `--cfg bootstrap`. See
         // #71458.
         let mut rustdocflags = rustflags.clone();
-        rustdocflags.propagate_cargo_env("RUSTDOCFLAGS");
-        if stage == 0 {
-            rustdocflags.env("RUSTDOCFLAGS_BOOTSTRAP");
-        } else {
-            rustdocflags.env("RUSTDOCFLAGS_NOT_BOOTSTRAP");
-        }
-
-        if let Ok(s) = env::var("CARGOFLAGS") {
-            cargo.args(s.split_whitespace());
-        }
 
         match mode {
-            Mode::Std | Mode::ToolBootstrap | Mode::ToolStd => {}
-            Mode::Rustc | Mode::Codegen | Mode::ToolRustc => {
-                // Build proc macros both for the host and the target
+            Mode::Std | Mode::ToolBootstrap | Mode::ToolStd | Mode::ToolTarget => {}
+            Mode::Rustc | Mode::Codegen | Mode::ToolRustcPrivate => {
+                // Build proc macros both for the host and the target unless proc-macros are not
+                // supported by the target.
                 if target != compiler.host && cmd_kind != Kind::Check {
-                    cargo.arg("-Zdual-proc-macros");
-                    rustflags.arg("-Zdual-proc-macros");
+                    let error = self
+                        .rustc_cmd(compiler)
+                        .arg("--target")
+                        .arg(target.rustc_target_arg())
+                        .arg("--print=file-names")
+                        .arg("--crate-type=proc-macro")
+                        .arg("-")
+                        .stdin(std::process::Stdio::null())
+                        .run_capture(self)
+                        .stderr();
+
+                    let not_supported = error
+                        .lines()
+                        .any(|line| line.contains("unsupported crate type `proc-macro`"));
+                    if !not_supported {
+                        cargo.arg("-Zdual-proc-macros");
+                        rustflags.arg("-Zdual-proc-macros");
+                    }
                 }
             }
         }
@@ -678,7 +802,7 @@ impl Builder<'_> {
         // feature on the rustc side.
         cargo.arg("-Zbinary-dep-depinfo");
         let allow_features = match mode {
-            Mode::ToolBootstrap | Mode::ToolStd => {
+            Mode::ToolBootstrap | Mode::ToolStd | Mode::ToolTarget => {
                 // Restrict the allowed features so we don't depend on nightly
                 // accidentally.
                 //
@@ -698,13 +822,19 @@ impl Builder<'_> {
                 "binary-dep-depinfo,proc_macro_span,proc_macro_span_shrink,proc_macro_diagnostic"
                     .to_string()
             }
-            Mode::Std | Mode::Rustc | Mode::Codegen | Mode::ToolRustc => String::new(),
+            Mode::Std | Mode::Rustc | Mode::Codegen | Mode::ToolRustcPrivate => String::new(),
         };
 
         cargo.arg("-j").arg(self.jobs().to_string());
 
         // Make cargo emit diagnostics relative to the rustc src dir.
         cargo.arg(format!("-Zroot-dir={}", self.src.display()));
+
+        if self.config.compile_time_deps {
+            // Build only build scripts and proc-macros for rust-analyzer when requested.
+            cargo.arg("-Zunstable-options");
+            cargo.arg("--compile-time-deps");
+        }
 
         // FIXME: Temporary fix for https://github.com/rust-lang/cargo/issues/3005
         // Force cargo to output binaries with disambiguating hashes in the name
@@ -739,11 +869,17 @@ impl Builder<'_> {
             // rustc step and one that we just built. This isn't always a
             // problem, somehow -- not really clear why -- but we know that this
             // fixes things.
-            Mode::ToolRustc => metadata.push_str("tool-rustc"),
+            Mode::ToolRustcPrivate => metadata.push_str("tool-rustc"),
             // Same for codegen backends.
             Mode::Codegen => metadata.push_str("codegen"),
             _ => {}
         }
+        // `rustc_driver`'s version number is always `0.0.0`, which can cause linker search path
+        // problems on side-by-side installs because we don't include the version number of the
+        // `rustc_driver` being built. This can cause builds of different version numbers to produce
+        // `librustc_driver*.so` artifacts that end up with identical filename hashes.
+        metadata.push_str(&self.version);
+
         cargo.env("__CARGO_DEFAULT_LIB_METADATA", &metadata);
 
         if cmd_kind == Kind::Clippy {
@@ -751,8 +887,6 @@ impl Builder<'_> {
         }
 
         rustflags.arg("-Zmacro-backtrace");
-
-        let want_rustdoc = self.doc_tests != DocTests::No;
 
         // Clear the output directory if the real rustc we're using has changed;
         // Cargo cannot detect this as it thinks rustc is bootstrap/debug/rustc.
@@ -763,11 +897,11 @@ impl Builder<'_> {
         // Only clear out the directory if we're compiling std; otherwise, we
         // should let Cargo take care of things for us (via depdep info)
         if !self.config.dry_run() && mode == Mode::Std && cmd_kind == Kind::Build {
-            self.clear_if_dirty(&out_dir, &self.rustc(compiler));
+            build_stamp::clear_if_dirty(self, &out_dir, &self.rustc(compiler));
         }
 
         let rustdoc_path = match cmd_kind {
-            Kind::Doc | Kind::Test | Kind::MiriTest => self.rustdoc(compiler),
+            Kind::Doc | Kind::Test | Kind::MiriTest => self.rustdoc_for_compiler(compiler),
             _ => PathBuf::from("/path/to/nowhere/rustdoc/not/required"),
         };
 
@@ -780,13 +914,17 @@ impl Builder<'_> {
         cargo
             .env("RUSTBUILD_NATIVE_DIR", self.native_dir(target))
             .env("RUSTC_REAL", self.rustc(compiler))
-            .env("RUSTC_STAGE", stage.to_string())
+            .env("RUSTC_STAGE", build_compiler_stage.to_string())
             .env("RUSTC_SYSROOT", sysroot)
-            .env("RUSTC_LIBDIR", libdir)
+            .env("RUSTC_LIBDIR", &libdir)
+            .env("RUSTDOC_LIBDIR", libdir)
             .env("RUSTDOC", self.bootstrap_out.join("rustdoc"))
             .env("RUSTDOC_REAL", rustdoc_path)
-            .env("RUSTC_ERROR_METADATA_DST", self.extended_error_dir())
-            .env("RUSTC_BREAK_ON_ICE", "1");
+            .env("RUSTC_ERROR_METADATA_DST", self.extended_error_dir());
+
+        if self.config.rust_break_on_ice {
+            cargo.env("RUSTC_BREAK_ON_ICE", "1");
+        }
 
         // Set RUSTC_WRAPPER to the bootstrap shim, which switches between beta and in-tree
         // sysroot depending on whether we're building build scripts.
@@ -804,7 +942,7 @@ impl Builder<'_> {
 
         // If this is for `miri-test`, prepare the sysroots.
         if cmd_kind == Kind::MiriTest {
-            self.ensure(compile::Std::new(compiler, compiler.host));
+            self.std(compiler, compiler.host);
             let host_sysroot = self.sysroot(compiler);
             let miri_sysroot = test::Miri::build_miri_sysroot(self, compiler, target);
             cargo.env("MIRI_SYSROOT", &miri_sysroot);
@@ -817,15 +955,10 @@ impl Builder<'_> {
             rustflags.arg(&format!("-Zstack-protector={stack_protector}"));
         }
 
-        if !matches!(cmd_kind, Kind::Build | Kind::Check | Kind::Clippy | Kind::Fix) && want_rustdoc
-        {
-            cargo.env("RUSTDOC_LIBDIR", self.rustc_libdir(compiler));
-        }
-
         let debuginfo_level = match mode {
             Mode::Rustc | Mode::Codegen => self.config.rust_debuginfo_level_rustc,
             Mode::Std => self.config.rust_debuginfo_level_std,
-            Mode::ToolBootstrap | Mode::ToolStd | Mode::ToolRustc => {
+            Mode::ToolBootstrap | Mode::ToolStd | Mode::ToolRustcPrivate | Mode::ToolTarget => {
                 self.config.rust_debuginfo_level_tools
             }
         };
@@ -835,11 +968,14 @@ impl Builder<'_> {
         }
         cargo.env(
             profile_var("DEBUG_ASSERTIONS"),
-            if mode == Mode::Std {
-                self.config.std_debug_assertions.to_string()
-            } else {
-                self.config.rustc_debug_assertions.to_string()
-            },
+            match mode {
+                Mode::Std => self.config.std_debug_assertions,
+                Mode::Rustc | Mode::Codegen => self.config.rustc_debug_assertions,
+                Mode::ToolBootstrap | Mode::ToolStd | Mode::ToolRustcPrivate | Mode::ToolTarget => {
+                    self.config.tools_debug_assertions
+                }
+            }
+            .to_string(),
         );
         cargo.env(
             profile_var("OVERFLOW_CHECKS"),
@@ -878,19 +1014,55 @@ impl Builder<'_> {
             hostflags.arg(format!("-Ctarget-feature={sign}crt-static"));
         }
 
-        if let Some(map_to) = self.build.debuginfo_map_to(GitRepo::Rustc) {
-            let map = format!("{}={}", self.build.src.display(), map_to);
-            cargo.env("RUSTC_DEBUGINFO_MAP", map);
+        // `rustc` needs to know the remapping scheme, in order to know how to reverse it (unremap)
+        // later. Two env vars are set and made available to the compiler
+        //
+        // - `CFG_VIRTUAL_RUST_SOURCE_BASE_DIR`: `rust-src` remap scheme (`NonCompiler`)
+        // - `CFG_VIRTUAL_RUSTC_DEV_SOURCE_BASE_DIR`: `rustc-dev` remap scheme (`Compiler`)
+        //
+        // Keep this scheme in sync with `rustc_metadata::rmeta::decoder`'s
+        // `try_to_translate_virtual_to_real`.
+        //
+        // `RUSTC_DEBUGINFO_MAP` is used to pass through to the underlying rustc
+        // `--remap-path-prefix`.
+        match mode {
+            Mode::Rustc | Mode::Codegen => {
+                if let Some(ref map_to) =
+                    self.build.debuginfo_map_to(GitRepo::Rustc, RemapScheme::NonCompiler)
+                {
+                    cargo.env("CFG_VIRTUAL_RUST_SOURCE_BASE_DIR", map_to);
+                }
 
-            // `rustc` needs to know the virtual `/rustc/$hash` we're mapping to,
-            // in order to opportunistically reverse it later.
-            cargo.env("CFG_VIRTUAL_RUST_SOURCE_BASE_DIR", map_to);
+                if let Some(ref map_to) =
+                    self.build.debuginfo_map_to(GitRepo::Rustc, RemapScheme::Compiler)
+                {
+                    // When building compiler sources, we want to apply the compiler remap scheme.
+                    cargo.env(
+                        "RUSTC_DEBUGINFO_MAP",
+                        format!("{}={}", self.build.src.display(), map_to),
+                    );
+                    cargo.env("CFG_VIRTUAL_RUSTC_DEV_SOURCE_BASE_DIR", map_to);
+                }
+            }
+            Mode::Std
+            | Mode::ToolBootstrap
+            | Mode::ToolRustcPrivate
+            | Mode::ToolStd
+            | Mode::ToolTarget => {
+                if let Some(ref map_to) =
+                    self.build.debuginfo_map_to(GitRepo::Rustc, RemapScheme::NonCompiler)
+                {
+                    cargo.env(
+                        "RUSTC_DEBUGINFO_MAP",
+                        format!("{}={}", self.build.src.display(), map_to),
+                    );
+                }
+            }
         }
 
         if self.config.rust_remap_debuginfo {
             let mut env_var = OsString::new();
-            if self.config.vendor {
-                let vendor = self.build.src.join("vendor");
+            if let Some(vendor) = self.build.vendored_crates_path() {
                 env_var.push(vendor);
                 env_var.push("=/rust/deps");
             } else {
@@ -946,12 +1118,16 @@ impl Builder<'_> {
         // Tools that use compiler libraries may inherit the `-lLLVM` link
         // requirement, but the `-L` library path is not propagated across
         // separate Cargo projects. We can add LLVM's library path to the
-        // platform-specific environment variable as a workaround.
-        if mode == Mode::ToolRustc || mode == Mode::Codegen {
-            if let Some(llvm_config) = self.llvm_config(target) {
-                let llvm_libdir =
-                    command(llvm_config).arg("--libdir").run_capture_stdout(self).stdout();
-                add_link_lib_path(vec![llvm_libdir.trim().into()], &mut cargo);
+        // rustc args as a workaround.
+        if (mode == Mode::ToolRustcPrivate || mode == Mode::Codegen)
+            && let Some(llvm_config) = self.llvm_config(target)
+        {
+            let llvm_libdir =
+                command(llvm_config).cached().arg("--libdir").run_capture_stdout(self).stdout();
+            if target.is_msvc() {
+                rustflags.arg(&format!("-Clink-arg=-LIBPATH:{llvm_libdir}"));
+            } else {
+                rustflags.arg(&format!("-Clink-arg=-L{llvm_libdir}"));
             }
         }
 
@@ -959,7 +1135,12 @@ impl Builder<'_> {
         // efficient initial-exec TLS model. This doesn't work with `dlopen`,
         // so we can't use it by default in general, but we can use it for tools
         // and our own internal libraries.
-        if !mode.must_support_dlopen() && !target.triple.starts_with("powerpc-") {
+        //
+        // Cygwin only supports emutls.
+        if !mode.must_support_dlopen()
+            && !target.triple.starts_with("powerpc-")
+            && !target.triple.contains("cygwin")
+        {
             cargo.env("RUSTC_TLS_MODEL_INITIAL_EXEC", "1");
         }
 
@@ -989,7 +1170,7 @@ impl Builder<'_> {
             cargo.env("RUSTC_BACKTRACE_ON_ICE", "1");
         }
 
-        if self.is_verbose() {
+        if self.verbosity >= 2 {
             // This provides very useful logs especially when debugging build cache-related stuff.
             cargo.env("CARGO_LOG", "cargo::core::compiler::fingerprint=info");
         }
@@ -1005,8 +1186,11 @@ impl Builder<'_> {
         // so this line allows the use of custom libcs.
         cargo.env("LIBC_CHECK_CFG", "1");
 
+        let mut lint_flags = Vec::new();
+
+        // Lints for all in-tree code: compiler, rustdoc, cranelift, gcc,
+        // clippy, rustfmt, rust-analyzer, etc.
         if source_type == SourceType::InTree {
-            let mut lint_flags = Vec::new();
             // When extending this list, add the new lints to the RUSTFLAGS of the
             // build_bootstrap function of src/bootstrap/bootstrap.py as well as
             // some code doesn't go through this `rustc` wrapper.
@@ -1018,30 +1202,33 @@ impl Builder<'_> {
                 rustdocflags.arg("-Dwarnings");
             }
 
-            // This does not use RUSTFLAGS due to caching issues with Cargo.
-            // Clippy is treated as an "in tree" tool, but shares the same
-            // cache as other "submodule" tools. With these options set in
-            // RUSTFLAGS, that causes *every* shared dependency to be rebuilt.
-            // By injecting this into the rustc wrapper, this circumvents
-            // Cargo's fingerprint detection. This is fine because lint flags
-            // are always ignored in dependencies. Eventually this should be
-            // fixed via better support from Cargo.
-            cargo.env("RUSTC_LINT_FLAGS", lint_flags.join(" "));
-
             rustdocflags.arg("-Wrustdoc::invalid_codeblock_attributes");
         }
 
+        // Lints just for `compiler/` crates.
         if mode == Mode::Rustc {
-            rustflags.arg("-Wrustc::internal");
-            // cfg(bootstrap) - remove this check when lint is in bootstrap compiler
-            if stage != 0 {
-                rustflags.arg("-Drustc::symbol_intern_string_literal");
-            }
+            lint_flags.push("-Wrustc::internal");
+            lint_flags.push("-Drustc::symbol_intern_string_literal");
             // FIXME(edition_2024): Change this to `-Wrust_2024_idioms` when all
             // of the individual lints are satisfied.
-            rustflags.arg("-Wkeyword_idents_2024");
-            rustflags.arg("-Wunsafe_op_in_unsafe_fn");
+            lint_flags.push("-Wkeyword_idents_2024");
+            lint_flags.push("-Wunreachable_pub");
+            lint_flags.push("-Wunsafe_op_in_unsafe_fn");
+            lint_flags.push("-Wunused_crate_dependencies");
         }
+
+        // This does not use RUSTFLAGS for two reasons.
+        // - Due to caching issues with Cargo. Clippy is treated as an "in
+        //   tree" tool, but shares the same cache as other "submodule" tools.
+        //   With these options set in RUSTFLAGS, that causes *every* shared
+        //   dependency to be rebuilt. By injecting this into the rustc
+        //   wrapper, this circumvents Cargo's fingerprint detection. This is
+        //   fine because lint flags are always ignored in dependencies.
+        //   Eventually this should be fixed via better support from Cargo.
+        // - RUSTFLAGS is ignored for proc macro crates that are being built on
+        //   the host (because `--target` is given). But we want the lint flags
+        //   to be applied to proc macro crates.
+        cargo.env("RUSTC_LINT_FLAGS", lint_flags.join(" "));
 
         if self.config.rust_frame_pointers {
             rustflags.arg("-Cforce-frame-pointers=true");
@@ -1069,6 +1256,11 @@ impl Builder<'_> {
         // the stage 1 compiler.
         if cfg!(windows) && mode == Mode::Std && self.config.ehcont_guard && compiler.stage >= 1 {
             rustflags.arg("-Zehcont-guard");
+        }
+
+        // Optionally override the rc.exe when compiling rustc on Windows.
+        if let Some(windows_rc) = &self.config.windows_rc {
+            cargo.env("RUSTC_WINDOWS_RC", windows_rc);
         }
 
         // For `cargo doc` invocations, make rustdoc print the Rust version into the docs
@@ -1125,8 +1317,9 @@ impl Builder<'_> {
             cargo.env("WINAPI_NO_BUNDLED_LIBRARIES", "1");
         }
 
-        for _ in 0..self.verbosity {
-            cargo.arg("-v");
+        // verbose cargo output is very noisy, so only enable it with -vv
+        for _ in 0..self.verbosity.saturating_sub(1) {
+            cargo.arg("--verbose");
         }
 
         match (mode, self.config.rust_codegen_units_std, self.config.rust_codegen_units) {
@@ -1172,12 +1365,11 @@ impl Builder<'_> {
                 _ => None,
             };
 
-            if let Some(limit) = limit {
-                if stage == 0
-                    || self.config.default_codegen_backend(target).unwrap_or_default() == "llvm"
-                {
-                    rustflags.arg(&format!("-Cllvm-args=-import-instr-limit={limit}"));
-                }
+            if let Some(limit) = limit
+                && (build_compiler_stage == 0
+                    || self.config.default_codegen_backend(target).is_llvm())
+            {
+                rustflags.arg(&format!("-Cllvm-args=-import-instr-limit={limit}"));
             }
         }
 
@@ -1201,20 +1393,39 @@ impl Builder<'_> {
             // so that it'll be available when downstream consumers of std try to use it.
             rustflags.arg("-Zinline-mir-preserve-debug");
 
-            // FIXME: always pass this after the next `#[cfg(bootstrap)]` update.
-            if compiler.stage != 0 {
-                rustflags.arg("-Zmir_strip_debuginfo=locals-in-tiny-functions");
-            }
+            rustflags.arg("-Zmir_strip_debuginfo=locals-in-tiny-functions");
         }
+
+        // take target-specific extra rustflags if any otherwise take `rust.rustflags`
+        let extra_rustflags = self
+            .config
+            .target_config
+            .get(&target)
+            .map(|t| &t.rustflags)
+            .unwrap_or(&self.config.rust_rustflags)
+            .clone();
+
+        let release_build = self.config.rust_optimize.is_release() &&
+            // cargo bench/install do not accept `--release` and miri doesn't want it
+            !matches!(cmd_kind, Kind::Bench | Kind::Install | Kind::Miri | Kind::MiriSetup | Kind::MiriTest);
 
         Cargo {
             command: cargo,
+            args: vec![],
             compiler,
             target,
             rustflags,
             rustdocflags,
             hostflags,
             allow_features,
+            release_build,
+            build_compiler_stage,
+            extra_rustflags,
         }
     }
+}
+
+pub fn cargo_profile_var(name: &str, config: &Config) -> String {
+    let profile = if config.rust_optimize.is_release() { "RELEASE" } else { "DEV" };
+    format!("CARGO_PROFILE_{profile}_{name}")
 }

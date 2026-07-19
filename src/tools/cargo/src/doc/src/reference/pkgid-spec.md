@@ -9,12 +9,14 @@ is a string which is used to uniquely refer to one package within a graph of
 packages.
 
 The specification may be fully qualified, such as
-`https://github.com/rust-lang/crates.io-index#regex@1.4.3` or it may be
+`registry+https://github.com/rust-lang/crates.io-index#regex@1.4.3` or it may be
 abbreviated, such as `regex`. The abbreviated form may be used as long as it
 uniquely identifies a single package in the dependency graph. If there is
 ambiguity, additional qualifiers can be added to make it unique. For example,
 if there are two versions of the `regex` package in the graph, then it can be
 qualified with a version to make it unique, such as `regex@1.4.3`.
+
+Package ID specifications output by cargo, for example in [cargo metadata](../commands/cargo-metadata.md) output, are fully qualified.
 
 ### Specification grammar
 
@@ -27,8 +29,8 @@ query = ( "branch" | "tag" | "rev" ) "=" ref
 pkgname := name [ ("@" | ":" ) semver ]
 semver := digits [ "." digits [ "." digits [ "-" prerelease ] [ "+" build ]]]
 
-kind = "registry" | "git" | "file"
-proto := "http" | "git" | ...
+kind = "registry" | "git" | "path"
+proto := "http" | "git" | "file" | ...
 ```
 
 Here, brackets indicate that the contents are optional.

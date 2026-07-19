@@ -2,9 +2,9 @@
 
 use crate::{
     core::features::cargo_docs_link,
-    util::{context::ConfigKey, CanonicalUrl, CargoResult, GlobalContext, IntoUrl},
+    util::{CanonicalUrl, CargoResult, GlobalContext, IntoUrl, context::ConfigKey},
 };
-use anyhow::{bail, Context as _};
+use anyhow::{Context as _, bail};
 use cargo_credential::{
     Action, CacheControl, Credential, CredentialResponse, LoginOptions, Operation, RegistryInfo,
     Secret,
@@ -42,7 +42,7 @@ pub struct RegistryConfig {
     _protocol: Option<String>,
 }
 
-/// The `[registry]` table, which more keys than the `[registries.NAME]` tables.
+/// The `[registry]` table, which has more keys than the `[registries.NAME]` tables.
 ///
 /// Note: nesting `RegistryConfig` inside this struct and using `serde(flatten)` *should* work
 /// but fails with "invalid type: sequence, expected a value" when attempting to deserialize.
@@ -167,9 +167,12 @@ fn credential_provider(
                             secret_key.definition
                         ))?;
                     } else {
-                        warn(format!("{sid} has a `token` configured in {} that will be ignored \
+                        warn(format!(
+                            "{sid} has a `token` configured in {} that will be ignored \
                         because a `secret_key` is also configured, and the `cargo:paseto` provider is \
-                        configured with higher precedence", token.definition))?;
+                        configured with higher precedence",
+                            token.definition
+                        ))?;
                     }
                 }
                 (_, _) => {
@@ -395,8 +398,8 @@ pub struct AuthorizationError {
     pub login_url: Option<Url>,
     /// Specific reason indicating what failed
     reason: AuthorizationErrorReason,
-    /// Should the _TOKEN environment variable name be included when displaying this error?
-    display_token_env_help: bool,
+    /// Should `cargo login` and the `_TOKEN` env var be included when displaying this error?
+    supports_cargo_token_credential_provider: bool,
 }
 
 impl AuthorizationError {
@@ -409,15 +412,16 @@ impl AuthorizationError {
         // Only display the _TOKEN environment variable suggestion if the `cargo:token` credential
         // provider is available for the source. Otherwise setting the environment variable will
         // have no effect.
-        let display_token_env_help = credential_provider(gctx, &sid, false, false)?
-            .iter()
-            .any(|p| p.first().map(String::as_str) == Some("cargo:token"));
+        let supports_cargo_token_credential_provider =
+            credential_provider(gctx, &sid, false, false)?
+                .iter()
+                .any(|p| p.first().map(String::as_str) == Some("cargo:token"));
         Ok(AuthorizationError {
             sid,
             default_registry: gctx.default_registry()?,
             login_url,
             reason,
-            display_token_env_help,
+            supports_cargo_token_credential_provider,
         })
     }
 }
@@ -432,20 +436,30 @@ impl fmt::Display for AuthorizationError {
                 ""
             };
             write!(f, "{}, please run `cargo login{args}`", self.reason)?;
-            if self.display_token_env_help {
+            if self.supports_cargo_token_credential_provider {
                 write!(f, "\nor use environment variable CARGO_REGISTRY_TOKEN")?;
             }
             Ok(())
         } else if let Some(name) = self.sid.alt_registry_key() {
-            let key = ConfigKey::from_str(&format!("registries.{name}.token"));
             write!(
                 f,
-                "{} for `{}`, please run `cargo login --registry {name}`",
+                "{} for `{}`",
                 self.reason,
-                self.sid.display_registry_name(),
+                self.sid.display_registry_name()
             )?;
-            if self.display_token_env_help {
-                write!(f, "\nor use environment variable {}", key.as_env_key())?;
+            if self.supports_cargo_token_credential_provider {
+                let key = ConfigKey::from_str(&format!("registries.{name}.token"));
+                write!(
+                    f,
+                    ", please run `cargo login --registry {name}`\n\
+                    or use environment variable {}",
+                    key.as_env_key()
+                )?;
+            } else {
+                write!(
+                    f,
+                    "\nYou may need to log in using this registry's credential provider"
+                )?;
             }
             Ok(())
         } else if self.reason == AuthorizationErrorReason::TokenMissing {
@@ -497,6 +511,27 @@ static BUILT_IN_PROVIDERS: &[&'static str] = &[
     "cargo:libsecret",
 ];
 
+/// Retrieves a cached instance of `LibSecretCredential`.
+/// Must be cached to avoid repeated load/unload cycles, which are not supported by `glib`.
+#[cfg(target_os = "linux")]
+fn get_credential_libsecret()
+-> CargoResult<&'static cargo_credential_libsecret::LibSecretCredential> {
+    static CARGO_CREDENTIAL_LIBSECRET: std::sync::OnceLock<
+        cargo_credential_libsecret::LibSecretCredential,
+    > = std::sync::OnceLock::new();
+    // Unfortunately `get_or_try_init` is not yet stable. This workaround is not threadsafe but
+    // loading libsecret twice will only temporary increment the ref counter, which is decrement
+    // again when `drop` is called.
+    match CARGO_CREDENTIAL_LIBSECRET.get() {
+        Some(lib) => Ok(lib),
+        None => {
+            let _ = CARGO_CREDENTIAL_LIBSECRET
+                .set(cargo_credential_libsecret::LibSecretCredential::new()?);
+            Ok(CARGO_CREDENTIAL_LIBSECRET.get().unwrap())
+        }
+    }
+}
+
 fn credential_action(
     gctx: &GlobalContext,
     sid: &SourceId,
@@ -529,7 +564,8 @@ fn credential_action(
             }
             "cargo:paseto" => bail!("cargo:paseto requires -Zasymmetric-token"),
             "cargo:token-from-stdout" => Box::new(BasicProcessCredential {}),
-            "cargo:libsecret" => Box::new(cargo_credential_libsecret::LibSecretCredential {}),
+            #[cfg(target_os = "linux")]
+            "cargo:libsecret" => Box::new(get_credential_libsecret()?),
             name if BUILT_IN_PROVIDERS.contains(&name) => {
                 Box::new(cargo_credential::UnsupportedCredential {})
             }
@@ -555,7 +591,7 @@ fn credential_action(
                         "credential provider `{}` failed action `{action}`",
                         args.join(" ")
                     )
-                })
+                });
             }
         }
     }
@@ -639,7 +675,9 @@ fn auth_token_optional(
         operation_independent,
     } = credential_response
     else {
-        bail!("credential provider produced unexpected response for `get` request: {credential_response:?}")
+        bail!(
+            "credential provider produced unexpected response for `get` request: {credential_response:?}"
+        )
     };
     let token = Secret::from(token);
     tracing::trace!("found token");
@@ -679,7 +717,9 @@ pub fn logout(gctx: &GlobalContext, sid: &SourceId) -> CargoResult<()> {
     }
     let credential_response = credential_response?;
     let CredentialResponse::Logout = credential_response else {
-        bail!("credential provider produced unexpected response for `logout` request: {credential_response:?}")
+        bail!(
+            "credential provider produced unexpected response for `logout` request: {credential_response:?}"
+        )
     };
     Ok(())
 }
@@ -694,7 +734,9 @@ pub fn login(
     let credential_response =
         credential_action(gctx, sid, Action::Login(options), vec![], args, false)?;
     let CredentialResponse::Login = credential_response else {
-        bail!("credential provider produced unexpected response for `login` request: {credential_response:?}")
+        bail!(
+            "credential provider produced unexpected response for `login` request: {credential_response:?}"
+        )
     };
     Ok(())
 }

@@ -9,13 +9,13 @@ use rustc_middle::infer::canonical::{
     Canonical, CanonicalQueryInput, CanonicalQueryResponse, QueryResponse,
 };
 use rustc_middle::traits::query::NoSolution;
-use rustc_middle::ty::{self, GenericArg, Ty, TyCtxt, TypeFoldable, TypeVisitableExt, Upcast};
+use rustc_middle::ty::{self, GenericArg, Ty, TyCtxt, TypeFoldable, Upcast};
 use rustc_span::DUMMY_SP;
 use tracing::instrument;
 
 use crate::infer::at::ToTrace;
 use crate::traits::query::evaluate_obligation::InferCtxtExt as _;
-use crate::traits::{self, Obligation, ObligationCause, ObligationCtxt, SelectionContext};
+use crate::traits::{self, Obligation, ObligationCause, ObligationCtxt};
 
 #[extension(pub trait InferCtxtExt<'tcx>)]
 impl<'tcx> InferCtxt<'tcx> {
@@ -25,30 +25,34 @@ impl<'tcx> InferCtxt<'tcx> {
             let Ok(()) = ocx.eq(&ObligationCause::dummy(), param_env, a, b) else {
                 return false;
             };
-            ocx.select_where_possible().is_empty()
+            ocx.try_evaluate_obligations().is_empty()
         })
     }
 
     fn type_is_copy_modulo_regions(&self, param_env: ty::ParamEnv<'tcx>, ty: Ty<'tcx>) -> bool {
         let ty = self.resolve_vars_if_possible(ty);
-
-        // FIXME(#132279): This should be removed as it causes us to incorrectly
-        // handle opaques in their defining scope.
-        if !(param_env, ty).has_infer() {
-            return self.tcx.type_is_copy_modulo_regions(self.typing_env(param_env), ty);
-        }
-
-        let copy_def_id = self.tcx.require_lang_item(LangItem::Copy, None);
-
-        // This can get called from typeck (by euv), and `moves_by_default`
-        // rightly refuses to work with inference variables, but
-        // moves_by_default has a cache, which we want to use in other
-        // cases.
+        let copy_def_id = self.tcx.require_lang_item(LangItem::Copy, DUMMY_SP);
         traits::type_known_to_meet_bound_modulo_regions(self, param_env, ty, copy_def_id)
     }
 
+    fn type_is_clone_modulo_regions(&self, param_env: ty::ParamEnv<'tcx>, ty: Ty<'tcx>) -> bool {
+        let ty = self.resolve_vars_if_possible(ty);
+        let clone_def_id = self.tcx.require_lang_item(LangItem::Clone, DUMMY_SP);
+        traits::type_known_to_meet_bound_modulo_regions(self, param_env, ty, clone_def_id)
+    }
+
+    fn type_is_use_cloned_modulo_regions(
+        &self,
+        param_env: ty::ParamEnv<'tcx>,
+        ty: Ty<'tcx>,
+    ) -> bool {
+        let ty = self.resolve_vars_if_possible(ty);
+        let use_cloned_def_id = self.tcx.require_lang_item(LangItem::UseCloned, DUMMY_SP);
+        traits::type_known_to_meet_bound_modulo_regions(self, param_env, ty, use_cloned_def_id)
+    }
+
     fn type_is_sized_modulo_regions(&self, param_env: ty::ParamEnv<'tcx>, ty: Ty<'tcx>) -> bool {
-        let lang_item = self.tcx.require_lang_item(LangItem::Sized, None);
+        let lang_item = self.tcx.require_lang_item(LangItem::Sized, DUMMY_SP);
         traits::type_known_to_meet_bound_modulo_regions(self, param_env, ty, lang_item)
     }
 
@@ -106,9 +110,6 @@ impl<'tcx> InferCtxt<'tcx> {
     /// - If this returns `Some([errors..])`, then the trait has an impl for
     /// the self type, but some nested obligations do not hold.
     /// - If this returns `None`, no implementation that applies could be found.
-    ///
-    /// FIXME(-Znext-solver): Due to the recursive nature of the new solver,
-    /// this will probably only ever return `Some([])` or `None`.
     fn type_implements_trait_shallow(
         &self,
         trait_def_id: DefId,
@@ -116,20 +117,29 @@ impl<'tcx> InferCtxt<'tcx> {
         param_env: ty::ParamEnv<'tcx>,
     ) -> Option<Vec<traits::FulfillmentError<'tcx>>> {
         self.probe(|_snapshot| {
-            let mut selcx = SelectionContext::new(self);
-            match selcx.select(&Obligation::new(
+            let ocx = ObligationCtxt::new_with_diagnostics(self);
+            ocx.register_obligation(Obligation::new(
                 self.tcx,
                 ObligationCause::dummy(),
                 param_env,
                 ty::TraitRef::new(self.tcx, trait_def_id, [ty]),
-            )) {
-                Ok(Some(selection)) => {
-                    let ocx = ObligationCtxt::new_with_diagnostics(self);
-                    ocx.register_obligations(selection.nested_obligations());
-                    Some(ocx.select_all_or_error())
+            ));
+            let errors = ocx.try_evaluate_obligations();
+            // Find the original predicate in the list of predicates that could definitely not be fulfilled.
+            // If it is in that list, then we know this doesn't even shallowly implement the trait.
+            // If it is not in that list, it was fulfilled, but there may be nested obligations, which we don't care about here.
+            for error in &errors {
+                let Some(trait_clause) = error.obligation.predicate.as_trait_clause() else {
+                    continue;
+                };
+                let Some(bound_ty) = trait_clause.self_ty().no_bound_vars() else { continue };
+                if trait_clause.def_id() == trait_def_id
+                    && ocx.eq(&ObligationCause::dummy(), param_env, bound_ty, ty).is_ok()
+                {
+                    return None;
                 }
-                Ok(None) | Err(_) => None,
             }
+            Some(errors)
         })
     }
 }
@@ -162,10 +172,9 @@ impl<'tcx> InferCtxtBuilder<'tcx> {
         R: Debug + TypeFoldable<TyCtxt<'tcx>>,
         Canonical<'tcx, QueryResponse<'tcx, R>>: ArenaAllocatable<'tcx>,
     {
-        let (infcx, key, canonical_inference_vars) =
-            self.build_with_canonical(DUMMY_SP, canonical_key);
+        let (infcx, key, var_values) = self.build_with_canonical(DUMMY_SP, canonical_key);
         let ocx = ObligationCtxt::new(&infcx);
         let value = operation(&ocx, key)?;
-        ocx.make_canonicalized_query_response(canonical_inference_vars, value)
+        ocx.make_canonicalized_query_response(var_values, value)
     }
 }

@@ -25,7 +25,7 @@ a separate "probe", to not leak inference constraints to the other candidates.
 We then try to merge the assembled candidates via `EvalCtxt::merge_candidates`.
 
 
-## Important concepts and design pattern
+## Important concepts and design patterns
 
 ### `EvalCtxt::add_goal`
 
@@ -64,13 +64,13 @@ eagerly instantiates `'a` with a placeholder and then recursively proves
 Some goals can be proven in multiple ways. In these cases we try each option in
 a separate "probe" and then attempt to merge the resulting responses by using
 `EvalCtxt::try_merge_responses`. If merging the responses fails, we use
-`EvalCtxt::flounder` instead, returning ambiguity. For some goals, we try
+`EvalCtxt::flounder` instead, returning ambiguity. For some goals, we try to
 incompletely prefer some choices over others in case `EvalCtxt::try_merge_responses`
 fails.
 
 ## Learning more
 
 The solver should be fairly self-contained. I hope that the above information provides a
-good foundation when looking at the code itself. Please reach out on zulip if you get stuck
+good foundation when looking at the code itself. Please reach out on Zulip if you get stuck
 while doing so or there are some quirks and design decisions which were unclear and deserve
 better comments or should be mentioned here.

@@ -4,8 +4,8 @@ use crate::grammar::attributes::ATTRIBUTE_FIRST;
 
 use super::*;
 
+pub(super) use atom::{EXPR_RECOVERY_SET, LITERAL_FIRST, literal, parse_asm_expr};
 pub(crate) use atom::{block_expr, match_arm_list};
-pub(super) use atom::{literal, LITERAL_FIRST};
 
 #[derive(PartialEq, Eq)]
 pub(super) enum Semicolon {
@@ -58,7 +58,7 @@ pub(super) fn stmt(p: &mut Parser<'_>, semicolon: Semicolon) {
     // }
     attributes::outer_attrs(p);
 
-    if p.at(T![let]) {
+    if p.at(T![let]) || (p.at(T![super]) && p.nth_at(1, T![let])) {
         let_stmt(p, semicolon);
         m.complete(p, LET_STMT);
         return;
@@ -77,44 +77,45 @@ pub(super) fn stmt(p: &mut Parser<'_>, semicolon: Semicolon) {
         return;
     }
 
-    if let Some((cm, blocklike)) = expr_stmt(p, Some(m)) {
-        if !(p.at(T!['}']) || (semicolon != Semicolon::Required && p.at(EOF))) {
-            // test no_semi_after_block
-            // fn foo() {
-            //     if true {}
-            //     loop {}
-            //     match () {}
-            //     while true {}
-            //     for _ in () {}
-            //     {}
-            //     {}
-            //     macro_rules! test {
-            //          () => {}
-            //     }
-            //     test!{}
-            // }
-            let m = cm.precede(p);
-            match semicolon {
-                Semicolon::Required => {
-                    if blocklike.is_block() {
-                        p.eat(T![;]);
-                    } else {
-                        p.expect(T![;]);
-                    }
-                }
-                Semicolon::Optional => {
+    if let Some((cm, blocklike)) = expr_stmt(p, Some(m))
+        && !(p.at(T!['}']) || (semicolon != Semicolon::Required && p.at(EOF)))
+    {
+        // test no_semi_after_block
+        // fn foo() {
+        //     if true {}
+        //     loop {}
+        //     match () {}
+        //     while true {}
+        //     for _ in () {}
+        //     {}
+        //     {}
+        //     macro_rules! test {
+        //          () => {}
+        //     }
+        //     test!{}
+        // }
+        let m = cm.precede(p);
+        match semicolon {
+            Semicolon::Required => {
+                if blocklike.is_block() {
                     p.eat(T![;]);
+                } else {
+                    p.expect(T![;]);
                 }
-                Semicolon::Forbidden => (),
             }
-            m.complete(p, EXPR_STMT);
+            Semicolon::Optional => {
+                p.eat(T![;]);
+            }
+            Semicolon::Forbidden => (),
         }
+        m.complete(p, EXPR_STMT);
     }
 }
 
 // test let_stmt
-// fn f() { let x: i32 = 92; }
+// fn f() { let x: i32 = 92; super let y; super::foo; }
 pub(super) fn let_stmt(p: &mut Parser<'_>, with_semi: Semicolon) {
+    p.eat(T![super]);
     p.bump(T![let]);
     patterns::pattern(p);
     if p.at(T![:]) {
@@ -133,12 +134,11 @@ pub(super) fn let_stmt(p: &mut Parser<'_>, with_semi: Semicolon) {
     if p.at(T![else]) {
         // test_err let_else_right_curly_brace
         // fn func() { let Some(_) = {Some(1)} else { panic!("h") };}
-        if let Some(expr) = expr_after_eq {
-            if BlockLike::is_blocklike(expr.kind()) {
-                p.error(
-                    "right curly brace `}` before `else` in a `let...else` statement not allowed",
-                )
-            }
+        if let Some(expr) = expr_after_eq
+            && let Some(token) = expr.last_token(p)
+            && token == T!['}']
+        {
+            p.error("right curly brace `}` before `else` in a `let...else` statement not allowed")
         }
 
         // test let_else
@@ -339,13 +339,20 @@ fn lhs(p: &mut Parser<'_>, r: Restrictions) -> Option<(CompletedMarker, BlockLik
         //     // raw reference operator
         //     let _ = &raw mut foo;
         //     let _ = &raw const foo;
+        //     let _ = &raw foo;
         // }
         T![&] => {
             m = p.start();
             p.bump(T![&]);
-            if p.at_contextual_kw(T![raw]) && [T![mut], T![const]].contains(&p.nth(1)) {
-                p.bump_remap(T![raw]);
-                p.bump_any();
+            if p.at_contextual_kw(T![raw]) {
+                if [T![mut], T![const]].contains(&p.nth(1)) {
+                    p.bump_remap(T![raw]);
+                    p.bump_any();
+                } else if p.nth_at(1, SyntaxKind::IDENT) {
+                    // we treat raw as keyword in this case
+                    // &raw foo;
+                    p.bump_remap(T![raw]);
+                }
             } else {
                 p.eat(T![mut]);
             }
@@ -423,6 +430,11 @@ fn postfix_expr(
             // }
             T!['('] if allow_calls => call_expr(p, lhs),
             T!['['] if allow_calls => index_expr(p, lhs),
+            // test_err postfix_dot_expr_ambiguity
+            // fn foo() {
+            //     x.
+            //     ()
+            // }
             T![.] => match postfix_dot_expr::<false>(p, lhs) {
                 Ok(it) => it,
                 Err(it) => {
@@ -451,6 +463,7 @@ fn postfix_dot_expr<const FLOAT_RECOVERY: bool>(
 
     if PATH_NAME_REF_KINDS.contains(p.nth(nth1))
         && (p.nth(nth2) == T!['('] || p.nth_at(nth2, T![::]))
+        || p.nth(nth1) == T!['(']
     {
         return Ok(method_call_expr::<FLOAT_RECOVERY>(p, lhs));
     }
@@ -519,19 +532,26 @@ fn method_call_expr<const FLOAT_RECOVERY: bool>(
     lhs: CompletedMarker,
 ) -> CompletedMarker {
     if FLOAT_RECOVERY {
-        assert!(p.at_ts(PATH_NAME_REF_KINDS) && (p.nth(1) == T!['('] || p.nth_at(1, T![::])));
-    } else {
         assert!(
-            p.at(T![.])
-                && PATH_NAME_REF_KINDS.contains(p.nth(1))
-                && (p.nth(2) == T!['('] || p.nth_at(2, T![::]))
+            p.at_ts(PATH_NAME_REF_KINDS) && (p.nth(1) == T!['('] || p.nth_at(1, T![::]))
+                || p.current() == T!['(']
+        );
+    } else {
+        assert!(p.at(T![.]));
+        assert!(
+            PATH_NAME_REF_KINDS.contains(p.nth(1)) && (p.nth(2) == T!['('] || p.nth_at(2, T![::]))
+                || p.nth(1) == T!['(']
         );
     }
     let m = lhs.precede(p);
     if !FLOAT_RECOVERY {
         p.bump(T![.]);
     }
-    name_ref_mod_path(p);
+    if p.at_ts(PATH_NAME_REF_KINDS) {
+        name_ref_mod_path(p);
+    } else {
+        p.error("expected method name, field name or number");
+    }
     generic_args::opt_generic_arg_list_expr(p);
     if p.at(T!['(']) {
         arg_list(p);
@@ -669,6 +689,8 @@ fn path_expr(p: &mut Parser<'_>, r: Restrictions) -> (CompletedMarker, BlockLike
 //     S { x };
 //     S { x, y: 32, };
 //     S { x, y: 32, ..Default::default() };
+//     S { x, y: 32, .. };
+//     S { .. };
 //     S { x: ::default() };
 //     TupleStruct { 0: 1 };
 // }
@@ -700,6 +722,8 @@ pub(crate) fn record_expr_field_list(p: &mut Parser<'_>) {
                 // fn main() {
                 //     S { field ..S::default() }
                 //     S { 0 ..S::default() }
+                //     S { field .. }
+                //     S { 0 .. }
                 // }
                 name_ref_or_index(p);
                 p.error("expected `:`");
@@ -730,7 +754,13 @@ pub(crate) fn record_expr_field_list(p: &mut Parser<'_>) {
                 //     S { .. } = S {};
                 // }
 
-                // We permit `.. }` on the left-hand side of a destructuring assignment.
+                // test struct_initializer_with_defaults
+                // fn foo() {
+                //     let _s = S { .. };
+                // }
+
+                // We permit `.. }` on the left-hand side of a destructuring assignment
+                // or defaults values.
                 if !p.at(T!['}']) {
                     expr(p);
 
@@ -739,6 +769,12 @@ pub(crate) fn record_expr_field_list(p: &mut Parser<'_>) {
                         // fn foo() {
                         //     S { ..x, };
                         //     S { ..x, a: 0 }
+                        // }
+
+                        // test_err comma_after_default_values_syntax
+                        // fn foo() {
+                        //     S { .., };
+                        //     S { .., a: 0 }
                         // }
 
                         // Do not bump, so we can support additional fields after this comma.

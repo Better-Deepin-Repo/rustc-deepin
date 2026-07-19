@@ -1,19 +1,19 @@
 warning: impl trait in impl method captures fewer lifetimes than in trait
-  --> $DIR/refine-captures.rs:8:31
+  --> $DIR/refine-captures.rs:6:31
    |
 LL |     fn test() -> impl Sized + use<> {}
    |                               ^^^^^
    |
    = note: add `#[allow(refining_impl_trait)]` if it is intended for this to be part of the public API of this crate
    = note: we are soliciting feedback, see issue #121718 <https://github.com/rust-lang/rust/issues/121718> for more information
-   = note: `#[warn(refining_impl_trait_internal)]` on by default
+   = note: `#[warn(refining_impl_trait_internal)]` (part of `#[warn(refining_impl_trait)]`) on by default
 help: modify the `use<..>` bound to capture the same lifetimes that the trait does
    |
 LL |     fn test() -> impl Sized + use<'a> {}
-   |                               ~~~~~~~
+   |                                   ++
 
 warning: impl trait in impl method captures fewer lifetimes than in trait
-  --> $DIR/refine-captures.rs:22:31
+  --> $DIR/refine-captures.rs:20:31
    |
 LL |     fn test() -> impl Sized + use<> {}
    |                               ^^^^^
@@ -23,10 +23,10 @@ LL |     fn test() -> impl Sized + use<> {}
 help: modify the `use<..>` bound to capture the same lifetimes that the trait does
    |
 LL |     fn test() -> impl Sized + use<'a> {}
-   |                               ~~~~~~~
+   |                                   ++
 
 warning: impl trait in impl method captures fewer lifetimes than in trait
-  --> $DIR/refine-captures.rs:27:31
+  --> $DIR/refine-captures.rs:25:31
    |
 LL |     fn test() -> impl Sized + use<'b> {}
    |                               ^^^^^^^
@@ -36,10 +36,10 @@ LL |     fn test() -> impl Sized + use<'b> {}
 help: modify the `use<..>` bound to capture the same lifetimes that the trait does
    |
 LL |     fn test() -> impl Sized + use<'a, 'b> {}
-   |                               ~~~~~~~~~~~
+   |                                    ++++
 
 error: `impl Trait` must mention all type parameters in scope in `use<...>`
-  --> $DIR/refine-captures.rs:32:18
+  --> $DIR/refine-captures.rs:30:18
    |
 LL | impl<T> TypeParam<T> for u64 {
    |      - type parameter is implicitly captured by this `impl Trait`

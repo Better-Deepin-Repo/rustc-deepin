@@ -1,6 +1,7 @@
 //@ run-pass
 //@ needs-unwind
-//@ ignore-emscripten no threads support
+//@ needs-threads
+//@ ignore-backends: gcc
 
 // Issue #787
 // Don't try to clean up uninitialized locals

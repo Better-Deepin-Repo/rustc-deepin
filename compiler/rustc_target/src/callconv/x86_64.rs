@@ -1,10 +1,13 @@
 // The classification code for the x86_64 ABI is taken from the clay language
 // https://github.com/jckarter/clay/blob/db0bd2702ab0b6e48965cd85f8859bbd5f60e48e/compiler/externals.cpp
 
-use rustc_abi::{BackendRepr, HasDataLayout, Size, TyAbiInterface, TyAndLayout};
+use rustc_abi::{
+    BackendRepr, HasDataLayout, Primitive, Reg, RegKind, Size, TyAbiInterface, TyAndLayout,
+    Variants,
+};
 
-use crate::abi;
-use crate::abi::call::{ArgAbi, CastTarget, FnAbi, Reg, RegKind};
+use crate::callconv::{ArgAbi, CastTarget, FnAbi};
+use crate::spec::HasTargetSpec;
 
 /// Classification of "eightbyte" components.
 // N.B., the order of the variants is from general to specific,
@@ -49,14 +52,12 @@ where
         }
 
         let mut c = match layout.backend_repr {
-            BackendRepr::Uninhabited => return Ok(()),
-
             BackendRepr::Scalar(scalar) => match scalar.primitive() {
-                abi::Int(..) | abi::Pointer(_) => Class::Int,
-                abi::Float(_) => Class::Sse,
+                Primitive::Int(..) | Primitive::Pointer(_) => Class::Int,
+                Primitive::Float(_) => Class::Sse,
             },
 
-            BackendRepr::Vector { .. } => Class::Sse,
+            BackendRepr::SimdVector { .. } => Class::Sse,
 
             BackendRepr::ScalarPair(..) | BackendRepr::Memory { .. } => {
                 for i in 0..layout.fields.count() {
@@ -65,8 +66,8 @@ where
                 }
 
                 match &layout.variants {
-                    abi::Variants::Single { .. } | abi::Variants::Empty => {}
-                    abi::Variants::Multiple { variants, .. } => {
+                    Variants::Single { .. } | Variants::Empty => {}
+                    Variants::Multiple { variants, .. } => {
                         // Treat enum variants like union members.
                         for variant_idx in variants.indices() {
                             classify(cx, layout.for_variant(cx, variant_idx), cls, off)?;
@@ -94,7 +95,7 @@ where
         Ok(())
     }
 
-    let n = ((arg.layout.size.bytes() + 7) / 8) as usize;
+    let n = arg.layout.size.bytes().div_ceil(8) as usize;
     if n > MAX_EIGHTBYTES {
         return Err(Memory);
     }
@@ -175,14 +176,20 @@ const MAX_SSE_REGS: usize = 8; // XMM0-7
 pub(crate) fn compute_abi_info<'a, Ty, C>(cx: &C, fn_abi: &mut FnAbi<'a, Ty>)
 where
     Ty: TyAbiInterface<'a, C> + Copy,
-    C: HasDataLayout,
+    C: HasDataLayout + HasTargetSpec,
 {
     let mut int_regs = MAX_INT_REGS;
     let mut sse_regs = MAX_SSE_REGS;
 
     let mut x86_64_arg_or_ret = |arg: &mut ArgAbi<'a, Ty>, is_arg: bool| {
         if !arg.layout.is_sized() {
+            // FIXME: Update int_regs?
             // Not touching this...
+            return;
+        }
+        if is_arg && arg.layout.pass_indirectly_in_non_rustic_abis(cx) {
+            int_regs = int_regs.saturating_sub(1);
+            arg.make_indirect();
             return;
         }
         let mut cls_or_mem = classify_arg(cx, arg);
@@ -236,7 +243,7 @@ where
                 if arg.layout.is_aggregate() {
                     let size = arg.layout.size;
                     arg.cast_to(cast_target(cls, size));
-                } else {
+                } else if is_arg || cx.target_spec().is_like_darwin {
                     arg.extend_integer_width_to(32);
                 }
             }

@@ -1,9 +1,9 @@
 //! Functionality for obtaining data related to traits from the DB.
 
-use crate::{defs::Definition, RootDatabase};
-use hir::{db::HirDatabase, AsAssocItem, Semantics};
+use crate::{RootDatabase, defs::Definition};
+use hir::{AsAssocItem, Semantics, db::HirDatabase};
 use rustc_hash::FxHashSet;
-use syntax::{ast, AstNode};
+use syntax::{AstNode, ast};
 
 /// Given the `impl` block, attempts to find the trait this `impl` corresponds to.
 pub fn resolve_target_trait(
@@ -113,9 +113,8 @@ fn assoc_item_of_trait(
 
 #[cfg(test)]
 mod tests {
-    use expect_test::{expect, Expect};
-    use hir::FilePosition;
-    use hir::Semantics;
+    use expect_test::{Expect, expect};
+    use hir::{EditionedFileId, FilePosition, Semantics};
     use span::Edition;
     use syntax::ast::{self, AstNode};
     use test_fixture::ChangeFixture;
@@ -123,19 +122,23 @@ mod tests {
     use crate::RootDatabase;
 
     /// Creates analysis from a multi-file fixture, returns positions marked with $0.
-    pub(crate) fn position(ra_fixture: &str) -> (RootDatabase, FilePosition) {
-        let change_fixture = ChangeFixture::parse(ra_fixture);
+    pub(crate) fn position(
+        #[rust_analyzer::rust_fixture] ra_fixture: &str,
+    ) -> (RootDatabase, FilePosition) {
         let mut database = RootDatabase::default();
+        let change_fixture = ChangeFixture::parse(ra_fixture);
         database.apply_change(change_fixture.change);
         let (file_id, range_or_offset) =
             change_fixture.file_position.expect("expected a marker ($0)");
+        let file_id = EditionedFileId::from_span_guess_origin(&database, file_id);
         let offset = range_or_offset.expect_offset();
         (database, FilePosition { file_id, offset })
     }
 
-    fn check_trait(ra_fixture: &str, expect: Expect) {
+    fn check_trait(#[rust_analyzer::rust_fixture] ra_fixture: &str, expect: Expect) {
         let (db, position) = position(ra_fixture);
         let sema = Semantics::new(&db);
+
         let file = sema.parse(position.file_id);
         let impl_block: ast::Impl =
             sema.find_node_at_offset_with_descend(file.syntax(), position.offset).unwrap();
@@ -147,9 +150,10 @@ mod tests {
         expect.assert_eq(&actual);
     }
 
-    fn check_missing_assoc(ra_fixture: &str, expect: Expect) {
+    fn check_missing_assoc(#[rust_analyzer::rust_fixture] ra_fixture: &str, expect: Expect) {
         let (db, position) = position(ra_fixture);
         let sema = Semantics::new(&db);
+
         let file = sema.parse(position.file_id);
         let impl_block: ast::Impl =
             sema.find_node_at_offset_with_descend(file.syntax(), position.offset).unwrap();

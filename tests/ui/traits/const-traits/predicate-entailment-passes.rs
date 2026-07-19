@@ -3,36 +3,25 @@
 
 #![feature(const_trait_impl)]
 
-#[const_trait] trait Bar {}
+const trait Bar {}
 impl const Bar for () {}
 
-
-#[const_trait] trait TildeConst {
-    type Bar<T> where T: ~const Bar;
-
-    fn foo<T>() where T: ~const Bar;
+const trait TildeConst {
+    fn foo<T>() where T: [const] Bar;
 }
 impl TildeConst for () {
-    type Bar<T> = () where T: Bar;
-
     fn foo<T>() where T: Bar {}
 }
 
 
-#[const_trait] trait AlwaysConst {
-    type Bar<T> where T: const Bar;
-
+const trait AlwaysConst {
     fn foo<T>() where T: const Bar;
 }
 impl AlwaysConst for i32 {
-    type Bar<T> = () where T: Bar;
-
     fn foo<T>() where T: Bar {}
 }
 impl const AlwaysConst for u32 {
-    type Bar<T> = () where T: ~const Bar;
-
-    fn foo<T>() where T: ~const Bar {}
+    fn foo<T>() where T: [const] Bar {}
 }
 
 fn main() {}

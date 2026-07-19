@@ -56,6 +56,7 @@ pub struct TomlManifest {
     pub build_dependencies2: Option<BTreeMap<PackageName, InheritableDependency>>,
     pub target: Option<BTreeMap<String, TomlPlatform>>,
     pub lints: Option<InheritableLints>,
+    pub hints: Option<Hints>,
 
     pub workspace: Option<TomlWorkspace>,
     pub profile: Option<TomlProfiles>,
@@ -85,6 +86,7 @@ impl TomlManifest {
                 .map(|_| "build-dependencies"),
             self.target.as_ref().map(|_| "target"),
             self.lints.as_ref().map(|_| "lints"),
+            self.hints.as_ref().map(|_| "hints"),
         ]
         .into_iter()
         .flatten()
@@ -171,18 +173,18 @@ pub struct InheritablePackage {
 /// are serialized to a TOML file. For example, you cannot have values after
 /// the field `metadata`, since it is a table and values cannot appear after
 /// tables.
-#[derive(Deserialize, Serialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug, Default)]
 #[serde(rename_all = "kebab-case")]
 #[cfg_attr(feature = "unstable-schema", derive(schemars::JsonSchema))]
 pub struct TomlPackage {
     pub edition: Option<InheritableString>,
     #[cfg_attr(feature = "unstable-schema", schemars(with = "Option<String>"))]
     pub rust_version: Option<InheritableRustVersion>,
-    #[cfg_attr(feature = "unstable-schema", schemars(with = "String"))]
-    pub name: PackageName,
+    #[cfg_attr(feature = "unstable-schema", schemars(with = "Option<String>"))]
+    pub name: Option<PackageName>,
     pub version: Option<InheritableSemverVersion>,
     pub authors: Option<InheritableVecString>,
-    pub build: Option<StringOrBool>,
+    pub build: Option<TomlPackageBuild>,
     pub metabuild: Option<StringOrVec>,
     pub default_target: Option<String>,
     pub forced_target: Option<String>,
@@ -226,41 +228,13 @@ pub struct TomlPackage {
 impl TomlPackage {
     pub fn new(name: PackageName) -> Self {
         Self {
-            name,
-
-            edition: None,
-            rust_version: None,
-            version: None,
-            authors: None,
-            build: None,
-            metabuild: None,
-            default_target: None,
-            forced_target: None,
-            links: None,
-            exclude: None,
-            include: None,
-            publish: None,
-            workspace: None,
-            im_a_teapot: None,
-            autolib: None,
-            autobins: None,
-            autoexamples: None,
-            autotests: None,
-            autobenches: None,
-            default_run: None,
-            description: None,
-            homepage: None,
-            documentation: None,
-            readme: None,
-            keywords: None,
-            categories: None,
-            license: None,
-            license_file: None,
-            repository: None,
-            resolver: None,
-            metadata: None,
-            _invalid_cargo_features: None,
+            name: Some(name),
+            ..Default::default()
         }
+    }
+
+    pub fn normalized_name(&self) -> Result<&PackageName, UnresolvedError> {
+        self.name.as_ref().ok_or(UnresolvedError)
     }
 
     pub fn normalized_edition(&self) -> Result<Option<&String>, UnresolvedError> {
@@ -282,12 +256,13 @@ impl TomlPackage {
         self.authors.as_ref().map(|v| v.normalized()).transpose()
     }
 
-    pub fn normalized_build(&self) -> Result<Option<&String>, UnresolvedError> {
-        let readme = self.build.as_ref().ok_or(UnresolvedError)?;
-        match readme {
-            StringOrBool::Bool(false) => Ok(None),
-            StringOrBool::Bool(true) => Err(UnresolvedError),
-            StringOrBool::String(value) => Ok(Some(value)),
+    pub fn normalized_build(&self) -> Result<Option<&[String]>, UnresolvedError> {
+        let build = self.build.as_ref().ok_or(UnresolvedError)?;
+        match build {
+            TomlPackageBuild::Auto(false) => Ok(None),
+            TomlPackageBuild::Auto(true) => Err(UnresolvedError),
+            TomlPackageBuild::SingleScript(value) => Ok(Some(std::slice::from_ref(value))),
+            TomlPackageBuild::MultipleScript(scripts) => Ok(Some(scripts)),
         }
     }
 
@@ -375,6 +350,17 @@ impl<T> InheritableField<T> {
             InheritableField::Inherit(_) => None,
             InheritableField::Value(defined) => Some(defined),
         }
+    }
+
+    pub fn into_value(self) -> Option<T> {
+        match self {
+            Self::Inherit(_) => None,
+            Self::Value(defined) => Some(defined),
+        }
+    }
+
+    pub fn is_inherited(&self) -> bool {
+        matches!(self, Self::Inherit(_))
     }
 }
 
@@ -700,6 +686,10 @@ impl InheritableDependency {
             InheritableDependency::Inherit(_) => Err(UnresolvedError),
         }
     }
+
+    pub fn is_inherited(&self) -> bool {
+        matches!(self, InheritableDependency::Inherit(_))
+    }
 }
 
 impl<'de> de::Deserialize<'de> for InheritableDependency {
@@ -804,12 +794,26 @@ impl<'de, P: Deserialize<'de> + Clone> de::Deserialize<'de> for TomlDependency<P
     where
         D: de::Deserializer<'de>,
     {
+        use serde::de::Error as _;
+        let expected = "a version string like \"0.9.8\" or a \
+                     detailed dependency like { version = \"0.9.8\" }";
         UntaggedEnumVisitor::new()
-            .expecting(
-                "a version string like \"0.9.8\" or a \
-                     detailed dependency like { version = \"0.9.8\" }",
-            )
+            .expecting(expected)
             .string(|value| Ok(TomlDependency::Simple(value.to_owned())))
+            .bool(|value| {
+                let expected = format!("invalid type: boolean `{value}`, expected {expected}");
+                let err = if value {
+                    format!(
+                        "{expected}\n\
+                    note: if you meant to use a workspace member, you can write\n \
+                      dep.workspace = {value}"
+                    )
+                } else {
+                    expected
+                };
+
+                Err(serde_untagged::de::Error::custom(err))
+            })
             .map(|value| value.deserialize().map(TomlDependency::Detailed))
             .deserialize(deserializer)
     }
@@ -935,6 +939,8 @@ pub struct TomlProfile {
     pub build_override: Option<Box<TomlProfile>>,
     /// Unstable feature `-Ztrim-paths`.
     pub trim_paths: Option<TomlTrimPaths>,
+    /// Unstable feature `hint-mostly-unused`
+    pub hint_mostly_unused: Option<bool>,
 }
 
 impl TomlProfile {
@@ -1026,10 +1032,15 @@ impl TomlProfile {
         if let Some(v) = &profile.trim_paths {
             self.trim_paths = Some(v.clone())
         }
+
+        if let Some(v) = profile.hint_mostly_unused {
+            self.hint_mostly_unused = Some(v);
+        }
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[cfg_attr(feature = "unstable-schema", derive(schemars::JsonSchema))]
 pub enum ProfilePackageSpec {
     Spec(PackageIdSpec),
     All,
@@ -1171,7 +1182,7 @@ impl<'de> de::Deserialize<'de> for TomlDebugInfo {
                         return Err(serde_untagged::de::Error::invalid_value(
                             Unexpected::Signed(value),
                             &expecting,
-                        ))
+                        ));
                     }
                 };
                 Ok(debuginfo)
@@ -1187,7 +1198,7 @@ impl<'de> de::Deserialize<'de> for TomlDebugInfo {
                         return Err(serde_untagged::de::Error::invalid_value(
                             Unexpected::Str(value),
                             &expecting,
-                        ))
+                        ));
                     }
                 };
                 Ok(debuginfo)
@@ -1377,6 +1388,7 @@ macro_rules! str_newtype {
         /// Verified string newtype
         #[derive(Serialize, Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[serde(transparent)]
+        #[cfg_attr(feature = "unstable-schema", derive(schemars::JsonSchema))]
         pub struct $name<T: AsRef<str> = String>(T);
 
         impl<T: AsRef<str>> $name<T> {
@@ -1524,7 +1536,8 @@ impl TomlPlatform {
 #[derive(Serialize, Debug, Clone)]
 #[cfg_attr(feature = "unstable-schema", derive(schemars::JsonSchema))]
 pub struct InheritableLints {
-    #[serde(skip_serializing_if = "is_false")]
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(feature = "unstable-schema", schemars(default))]
     pub workspace: bool,
     #[serde(flatten)]
     pub lints: TomlLints,
@@ -1538,10 +1551,6 @@ impl InheritableLints {
             Ok(&self.lints)
         }
     }
-}
-
-fn is_false(b: &bool) -> bool {
-    !b
 }
 
 impl<'de> Deserialize<'de> for InheritableLints {
@@ -1666,6 +1675,17 @@ pub enum TomlLintLevel {
     Allow,
 }
 
+#[derive(Serialize, Deserialize, Debug, Default, Clone)]
+#[serde(rename_all = "kebab-case")]
+#[cfg_attr(feature = "unstable-schema", derive(schemars::JsonSchema))]
+pub struct Hints {
+    #[cfg_attr(
+        feature = "unstable-schema",
+        schemars(with = "Option<TomlValueWrapper>")
+    )]
+    pub mostly_unused: Option<toml::Value>,
+}
+
 #[derive(Copy, Clone, Debug)]
 pub struct InvalidCargoFeatures {}
 
@@ -1723,6 +1743,34 @@ impl<'de> Deserialize<'de> for StringOrBool {
         UntaggedEnumVisitor::new()
             .bool(|b| Ok(StringOrBool::Bool(b)))
             .string(|s| Ok(StringOrBool::String(s.to_owned())))
+            .deserialize(deserializer)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Eq, PartialEq)]
+#[serde(untagged)]
+#[cfg_attr(feature = "unstable-schema", derive(schemars::JsonSchema))]
+pub enum TomlPackageBuild {
+    /// If build scripts are disabled or enabled.
+    /// If true, `build.rs` in the root folder will be the build script.
+    Auto(bool),
+
+    /// Path of Build Script if there's just one script.
+    SingleScript(String),
+
+    /// Vector of paths if multiple build script are to be used.
+    MultipleScript(Vec<String>),
+}
+
+impl<'de> Deserialize<'de> for TomlPackageBuild {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: de::Deserializer<'de>,
+    {
+        UntaggedEnumVisitor::new()
+            .bool(|b| Ok(TomlPackageBuild::Auto(b)))
+            .string(|s| Ok(TomlPackageBuild::SingleScript(s.to_owned())))
+            .seq(|value| value.deserialize().map(TomlPackageBuild::MultipleScript))
             .deserialize(deserializer)
     }
 }
@@ -1787,5 +1835,5 @@ pub struct UnresolvedError;
 fn dump_manifest_schema() {
     let schema = schemars::schema_for!(crate::manifest::TomlManifest);
     let dump = serde_json::to_string_pretty(&schema).unwrap();
-    snapbox::assert_data_eq!(dump, snapbox::file!("../../manifest.schema.json"));
+    snapbox::assert_data_eq!(dump, snapbox::file!("../../manifest.schema.json").raw());
 }

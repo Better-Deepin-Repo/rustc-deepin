@@ -5,7 +5,7 @@
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-extern "C" {
+unsafe extern "C" {
     #[link_name = "llvm.x86.xsave"]
     fn xsave(p: *mut u8, hi: u32, lo: u32);
     #[link_name = "llvm.x86.xrstor"]
@@ -160,36 +160,41 @@ pub unsafe fn _xrstors(mem_addr: *const u8, rs_mask: u64) {
 }
 
 #[cfg(test)]
+pub(crate) use tests::XsaveArea;
+
+#[cfg(test)]
 mod tests {
-    use std::{fmt, prelude::v1::*};
+    use std::boxed::Box;
 
     use crate::core_arch::x86::*;
     use stdarch_test::simd_test;
 
-    #[repr(align(64))]
     #[derive(Debug)]
-    struct XsaveArea {
-        // max size for 256-bit registers is 800 bytes:
-        // see https://software.intel.com/en-us/node/682996
-        // max size for 512-bit registers is 2560 bytes:
-        // FIXME: add source
-        data: [u8; 2560],
+    pub(crate) struct XsaveArea {
+        data: Box<[AlignedArray]>,
     }
+
+    #[repr(align(64))]
+    #[derive(Copy, Clone, Debug)]
+    struct AlignedArray([u8; 64]);
 
     impl XsaveArea {
-        fn new() -> XsaveArea {
-            XsaveArea { data: [0; 2560] }
+        #[target_feature(enable = "xsave")]
+        pub(crate) fn new() -> XsaveArea {
+            // `CPUID.(EAX=0DH,ECX=0):ECX` contains the size required to hold all supported xsave
+            // components. `EBX` contains the size required to hold all xsave components currently
+            // enabled in `XCR0`. We are using `ECX` to ensure enough space in all scenarios
+            let CpuidResult { ecx, .. } = unsafe { __cpuid(0x0d) };
+
+            XsaveArea {
+                data: vec![AlignedArray([0; 64]); ecx.div_ceil(64) as usize].into_boxed_slice(),
+            }
         }
-        fn ptr(&mut self) -> *mut u8 {
-            self.data.as_mut_ptr()
+        pub(crate) fn ptr(&mut self) -> *mut u8 {
+            self.data.as_mut_ptr().cast()
         }
     }
 
-    // We cannot test for `_xsave`, `xrstor`, `_xsetbv`, `_xsaveopt`, `_xsaves`, `_xrstors` as they
-    // are privileged instructions and will need access to kernel mode to execute and test them.
-    // see https://github.com/rust-lang/stdarch/issues/209
-
-    #[cfg_attr(stdarch_intel_sde, ignore)]
     #[simd_test(enable = "xsave")]
     #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
     unsafe fn test_xsave() {
@@ -212,7 +217,6 @@ mod tests {
         assert_eq!(xcr, xcr_cpy);
     }
 
-    #[cfg_attr(stdarch_intel_sde, ignore)]
     #[simd_test(enable = "xsave,xsaveopt")]
     #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
     unsafe fn test_xsaveopt() {

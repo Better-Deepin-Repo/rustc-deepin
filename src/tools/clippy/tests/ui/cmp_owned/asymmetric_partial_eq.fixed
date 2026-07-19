@@ -1,6 +1,6 @@
 #![allow(
     unused,
-    clippy::needless_if,
+    clippy::needless_ifs,
     clippy::redundant_clone,
     clippy::derive_partial_eq_without_eq
 )] // See #5700
@@ -44,7 +44,9 @@ mod borrowed_eq_owned {
         let borrowed = Borrowed {};
 
         if borrowed == owned {}
+        //~^ cmp_owned
         if borrowed == owned {}
+        //~^ cmp_owned
     }
 }
 
@@ -63,7 +65,9 @@ mod owned_eq_borrowed {
         let borrowed = Borrowed {};
 
         if owned == borrowed {}
+        //~^ cmp_owned
         if owned == borrowed {}
+        //~^ cmp_owned
     }
 }
 
@@ -90,7 +94,9 @@ mod issue_4874 {
         let borrowed = Borrowed {};
 
         if borrowed == "Hi" {}
+        //~^ cmp_owned
         if borrowed == "Hi" {}
+        //~^ cmp_owned
     }
 }
 

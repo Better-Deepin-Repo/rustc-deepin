@@ -1,6 +1,5 @@
 #![warn(rust_2018_idioms, unused_lifetimes)]
 #![allow(clippy::assertions_on_constants)]
-#![feature(path_file_prefix)]
 
 use std::cmp::Ordering;
 use std::ffi::OsStr;
@@ -59,8 +58,8 @@ fn explore_directory(dir: &Path) -> Vec<String> {
                             missing_files.push(path.to_str().unwrap().to_string());
                         }
                     },
-                    _ => continue,
-                };
+                    _ => {},
+                }
             }
         }
     }

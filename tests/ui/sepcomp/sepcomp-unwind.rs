@@ -2,7 +2,8 @@
 //@ needs-unwind
 #![allow(dead_code)]
 //@ compile-flags: -C codegen-units=3
-//@ ignore-emscripten no threads support
+//@ needs-threads
+//@ ignore-backends: gcc
 
 // Test unwinding through multiple compilation units.
 
@@ -26,10 +27,10 @@ mod a {
 
 mod b {
     pub fn g() {
-        ::a::f();
+        crate::a::f();
     }
 }
 
 fn main() {
-    thread::spawn(move|| { ::b::g() }).join().unwrap_err();
+    thread::spawn(move|| { b::g() }).join().unwrap_err();
 }

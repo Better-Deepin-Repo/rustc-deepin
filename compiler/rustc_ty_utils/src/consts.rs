@@ -4,7 +4,7 @@ use rustc_abi::{FIRST_VARIANT, VariantIdx};
 use rustc_errors::ErrorGuaranteed;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::LocalDefId;
-use rustc_middle::mir::interpret::{LitToConstError, LitToConstInput};
+use rustc_middle::mir::interpret::LitToConstInput;
 use rustc_middle::query::Providers;
 use rustc_middle::thir::visit;
 use rustc_middle::thir::visit::Visitor;
@@ -22,16 +22,13 @@ fn destructure_const<'tcx>(
     tcx: TyCtxt<'tcx>,
     const_: ty::Const<'tcx>,
 ) -> ty::DestructuredConst<'tcx> {
-    let ty::ConstKind::Value(ct_ty, valtree) = const_.kind() else {
+    let ty::ConstKind::Value(cv) = const_.kind() else {
         bug!("cannot destructure constant {:?}", const_)
     };
 
-    let branches = match valtree {
-        ty::ValTree::Branch(b) => b,
-        _ => bug!("cannot destructure constant {:?}", const_),
-    };
+    let branches = cv.valtree.unwrap_branch();
 
-    let (fields, variant) = match ct_ty.kind() {
+    let (fields, variant) = match cv.ty.kind() {
         ty::Array(inner_ty, _) | ty::Slice(inner_ty) => {
             // construct the consts for the elements of the array/slice
             let field_consts = branches
@@ -116,24 +113,20 @@ fn recurse_build<'tcx>(
         | &ExprKind::ValueTypeAscription { source, .. } => {
             recurse_build(tcx, body, source, root_span)?
         }
+        &ExprKind::PlaceUnwrapUnsafeBinder { .. }
+        | &ExprKind::ValueUnwrapUnsafeBinder { .. }
+        | &ExprKind::WrapUnsafeBinder { .. } => {
+            todo!("FIXME(unsafe_binders)")
+        }
         &ExprKind::Literal { lit, neg } => {
             let sp = node.span;
-            match tcx.at(sp).lit_to_const(LitToConstInput { lit: &lit.node, ty: node.ty, neg }) {
-                Ok(c) => c,
-                Err(LitToConstError::Reported(guar)) => ty::Const::new_error(tcx, guar),
-                Err(LitToConstError::TypeError) => {
-                    bug!("encountered type error in lit_to_const")
-                }
-            }
+            tcx.at(sp).lit_to_const(LitToConstInput { lit: lit.node, ty: node.ty, neg })
         }
         &ExprKind::NonHirLiteral { lit, user_ty: _ } => {
-            let val = ty::ValTree::from_scalar_int(lit);
+            let val = ty::ValTree::from_scalar_int(tcx, lit);
             ty::Const::new_value(tcx, val, node.ty)
         }
-        &ExprKind::ZstLiteral { user_ty: _ } => {
-            let val = ty::ValTree::zst();
-            ty::Const::new_value(tcx, val, node.ty)
-        }
+        &ExprKind::ZstLiteral { user_ty: _ } => ty::Const::zero_sized(tcx, node.ty),
         &ExprKind::NamedConst { def_id, args, user_ty: _ } => {
             let uneval = ty::UnevaluatedConst::new(def_id, args);
             ty::Const::new_unevaluated(tcx, uneval)
@@ -233,11 +226,17 @@ fn recurse_build<'tcx>(
         ExprKind::Yield { .. } => {
             error(GenericConstantTooComplexSub::YieldNotSupported(node.span))?
         }
-        ExprKind::Continue { .. } | ExprKind::Break { .. } | ExprKind::Loop { .. } => {
+        ExprKind::Continue { .. }
+        | ExprKind::ConstContinue { .. }
+        | ExprKind::Break { .. }
+        | ExprKind::Loop { .. }
+        | ExprKind::LoopMatch { .. } => {
             error(GenericConstantTooComplexSub::LoopNotSupported(node.span))?
         }
         ExprKind::Box { .. } => error(GenericConstantTooComplexSub::BoxNotSupported(node.span))?,
-
+        ExprKind::ByUse { .. } => {
+            error(GenericConstantTooComplexSub::ByUseNotSupported(node.span))?
+        }
         ExprKind::Unary { .. } => unreachable!(),
         // we handle valid unary/binary ops above
         ExprKind::Binary { .. } => {
@@ -265,7 +264,6 @@ fn recurse_build<'tcx>(
         ExprKind::VarRef { .. }
         | ExprKind::UpvarRef { .. }
         | ExprKind::StaticRef { .. }
-        | ExprKind::OffsetOf { .. }
         | ExprKind::ThreadLocalRef(_) => {
             error(GenericConstantTooComplexSub::OperationNotSupported(node.span))?
         }
@@ -324,6 +322,7 @@ impl<'a, 'tcx> IsThirPolymorphic<'a, 'tcx> {
             | thir::ExprKind::Box { .. }
             | thir::ExprKind::If { .. }
             | thir::ExprKind::Call { .. }
+            | thir::ExprKind::ByUse { .. }
             | thir::ExprKind::Deref { .. }
             | thir::ExprKind::Binary { .. }
             | thir::ExprKind::LogicalOp { .. }
@@ -333,6 +332,7 @@ impl<'a, 'tcx> IsThirPolymorphic<'a, 'tcx> {
             | thir::ExprKind::NeverToAny { .. }
             | thir::ExprKind::PointerCoercion { .. }
             | thir::ExprKind::Loop { .. }
+            | thir::ExprKind::LoopMatch { .. }
             | thir::ExprKind::Let { .. }
             | thir::ExprKind::Match { .. }
             | thir::ExprKind::Block { .. }
@@ -346,6 +346,7 @@ impl<'a, 'tcx> IsThirPolymorphic<'a, 'tcx> {
             | thir::ExprKind::RawBorrow { .. }
             | thir::ExprKind::Break { .. }
             | thir::ExprKind::Continue { .. }
+            | thir::ExprKind::ConstContinue { .. }
             | thir::ExprKind::Return { .. }
             | thir::ExprKind::Become { .. }
             | thir::ExprKind::Array { .. }
@@ -353,13 +354,15 @@ impl<'a, 'tcx> IsThirPolymorphic<'a, 'tcx> {
             | thir::ExprKind::Adt(_)
             | thir::ExprKind::PlaceTypeAscription { .. }
             | thir::ExprKind::ValueTypeAscription { .. }
+            | thir::ExprKind::PlaceUnwrapUnsafeBinder { .. }
+            | thir::ExprKind::ValueUnwrapUnsafeBinder { .. }
+            | thir::ExprKind::WrapUnsafeBinder { .. }
             | thir::ExprKind::Closure(_)
             | thir::ExprKind::Literal { .. }
             | thir::ExprKind::NonHirLiteral { .. }
             | thir::ExprKind::ZstLiteral { .. }
             | thir::ExprKind::StaticRef { .. }
             | thir::ExprKind::InlineAsm(_)
-            | thir::ExprKind::OffsetOf { .. }
             | thir::ExprKind::ThreadLocalRef(_)
             | thir::ExprKind::Yield { .. } => false,
         }
@@ -371,7 +374,8 @@ impl<'a, 'tcx> IsThirPolymorphic<'a, 'tcx> {
 
         match pat.kind {
             thir::PatKind::Constant { value } => value.has_non_region_param(),
-            thir::PatKind::Range(box thir::PatRange { lo, hi, .. }) => {
+            thir::PatKind::Range(ref range) => {
+                let &thir::PatRange { lo, hi, .. } = range.as_ref();
                 lo.has_non_region_param() || hi.has_non_region_param()
             }
             _ => false,

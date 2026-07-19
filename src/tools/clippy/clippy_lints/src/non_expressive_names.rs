@@ -5,7 +5,6 @@ use rustc_ast::ast::{
 };
 use rustc_ast::visit::{Visitor, walk_block, walk_expr, walk_pat};
 use rustc_lint::{EarlyContext, EarlyLintPass, LintContext};
-use rustc_middle::lint::in_external_macro;
 use rustc_session::impl_lint_pass;
 use rustc_span::symbol::{Ident, Symbol};
 use rustc_span::{Span, sym};
@@ -209,7 +208,8 @@ impl SimilarNamesNameVisitor<'_, '_, '_> {
 
     fn check_ident(&mut self, ident: Ident) {
         let interned_name = ident.name.as_str();
-        if interned_name.chars().any(char::is_uppercase) {
+        // name can be empty if it comes from recovery
+        if interned_name.chars().any(char::is_uppercase) || interned_name.is_empty() {
             return;
         }
         if interned_name.chars().all(|c| c.is_ascii_digit() || c == '_') {
@@ -248,6 +248,11 @@ impl SimilarNamesNameVisitor<'_, '_, '_> {
                 continue;
             }
 
+            // Skip similarity check if both names are exactly 3 characters
+            if count == 3 && existing_name.len == 3 {
+                continue;
+            }
+
             let dissimilar = match existing_name.len.cmp(&count) {
                 Ordering::Greater => existing_name.len - count != 1 || levenstein_not_1(interned_name, existing_str),
                 Ordering::Less => count - existing_name.len != 1 || levenstein_not_1(existing_str, interned_name),
@@ -270,10 +275,10 @@ impl SimilarNamesNameVisitor<'_, '_, '_> {
             return;
         }
         self.0.names.push(ExistingName {
-            exemptions: get_exemptions(interned_name).unwrap_or(&[]),
             interned: ident.name,
             span: ident.span,
             len: count,
+            exemptions: get_exemptions(interned_name).unwrap_or(&[]),
         });
     }
 
@@ -381,7 +386,7 @@ impl<'tcx> Visitor<'tcx> for SimilarNamesLocalVisitor<'_, 'tcx> {
 
 impl EarlyLintPass for NonExpressiveNames {
     fn check_item(&mut self, cx: &EarlyContext<'_>, item: &Item) {
-        if in_external_macro(cx.sess(), item.span) {
+        if item.span.in_external_macro(cx.sess().source_map()) {
             return;
         }
 
@@ -396,7 +401,7 @@ impl EarlyLintPass for NonExpressiveNames {
     }
 
     fn check_impl_item(&mut self, cx: &EarlyContext<'_>, item: &AssocItem) {
-        if in_external_macro(cx.sess(), item.span) {
+        if item.span.in_external_macro(cx.sess().source_map()) {
             return;
         }
 

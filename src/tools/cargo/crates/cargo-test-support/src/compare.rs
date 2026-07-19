@@ -44,7 +44,7 @@
 use crate::cross_compile::try_alternate;
 use crate::paths;
 use crate::rustc_host;
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use snapbox::Data;
 use snapbox::IntoData;
 use std::fmt;
@@ -229,6 +229,15 @@ fn add_regex_redactions(subs: &mut snapbox::Redactions) {
     .unwrap();
     subs.insert("[HASH]", regex!(r"/[a-z0-9\-_]+-(?<redacted>[0-9a-f]{16})"))
         .unwrap();
+    // Match multi-part hashes like `06/b451d0d6f88b1d` used in directory paths
+    subs.insert("[HASH]", regex!(r"/(?<redacted>[a-f0-9]{2}\/[0-9a-f]{14})"))
+        .unwrap();
+    // Match file name hashes like `foo-06b451d0d6f88b1d`
+    subs.insert("[HASH]", regex!(r"[a-z0-9]+-(?<redacted>[a-f0-9]{16})"))
+        .unwrap();
+    // Match path hashes like `../06b451d0d6f88b1d/..` used in directory paths
+    subs.insert("[HASH]", regex!(r"\/(?<redacted>[0-9a-f]{16})\/"))
+        .unwrap();
     subs.insert(
         "[AVG_ELAPSED]",
         regex!(r"(?<redacted>[0-9]+(\.[0-9]+)?) ns/iter"),
@@ -329,6 +338,7 @@ static E2E_LITERAL_REDACTIONS: &[(&str, &str)] = &[
     ("[BLOCKING]", "    Blocking"),
     ("[GENERATED]", "   Generated"),
     ("[OPENING]", "     Opening"),
+    ("[MERGING]", "     Merging"),
 ];
 
 /// Checks that the given string contains the given contiguous lines

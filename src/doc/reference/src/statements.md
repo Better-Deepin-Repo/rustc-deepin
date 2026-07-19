@@ -1,15 +1,15 @@
+r[statement]
 # Statements
 
-r[statement]
-
 r[statement.syntax]
-> **<sup>Syntax</sup>**\
-> _Statement_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `;`\
-> &nbsp;&nbsp; | [_Item_]\
-> &nbsp;&nbsp; | [_LetStatement_]\
-> &nbsp;&nbsp; | [_ExpressionStatement_]\
-> &nbsp;&nbsp; | [_MacroInvocationSemi_]
+```grammar,statements
+Statement ->
+      `;`
+    | Item
+    | LetStatement
+    | ExpressionStatement
+    | OuterAttribute* MacroInvocationSemi
+```
 
 r[statement.intro]
 A *statement* is a component of a [block], which is in turn a component of an outer [expression] or [function].
@@ -17,18 +17,16 @@ A *statement* is a component of a [block], which is in turn a component of an ou
 r[statement.kind]
 Rust has two kinds of statement: [declaration statements](#declaration-statements) and [expression statements](#expression-statements).
 
-## Declaration statements
-
 r[statement.decl]
+## Declaration statements
 
 A *declaration statement* is one that introduces one or more *names* into the enclosing statement block.
 The declared names may denote new variables or new [items][item].
 
 The two kinds of declaration statements are item declarations and `let` statements.
 
-### Item declarations
-
 r[statement.item]
+### Item declarations
 
 r[statement.item.intro]
 An *item declaration statement* has a syntactic form identical to an [item declaration][item] within a [module].
@@ -55,19 +53,18 @@ fn outer() {
 }
 ```
 
+r[statement.let]
 ### `let` statements
 
-r[statement.let]
-
 r[statement.let.syntax]
-> **<sup>Syntax</sup>**\
-> _LetStatement_ :\
-> &nbsp;&nbsp; [_OuterAttribute_]<sup>\*</sup> `let` [_PatternNoTopAlt_]
->     ( `:` [_Type_] )<sup>?</sup> (`=` [_Expression_] [†](#let-else-restriction)
->     ( `else` [_BlockExpression_]) <sup>?</sup> ) <sup>?</sup> `;`
->
-> <span id="let-else-restriction">† When an `else` block is specified, the
-> _Expression_ must not be a [_LazyBooleanExpression_], or end with a `}`.</span>
+```grammar,statements
+LetStatement ->
+    OuterAttribute* `let` PatternNoTopAlt ( `:` Type )?
+    (
+          `=` Expression
+        | `=` Expression _except [LazyBooleanExpression] or end with a `}`_ `else` BlockExpression
+    )? `;`
+```
 
 r[statement.let.intro]
 A *`let` statement* introduces a new set of [variables], given by a [pattern].
@@ -98,15 +95,15 @@ let [u, v] = [v[0], v[1]] else { // This pattern is irrefutable, so the compiler
 };
 ```
 
+r[statement.expr]
 ## Expression statements
 
-r[statement.expr]
-
 r[statement.expr.syntax]
-> **<sup>Syntax</sup>**\
-> _ExpressionStatement_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; [_ExpressionWithoutBlock_][expression] `;`\
-> &nbsp;&nbsp; | [_ExpressionWithBlock_][expression] `;`<sup>?</sup>
+```grammar,statements
+ExpressionStatement ->
+      ExpressionWithoutBlock `;`
+    | ExpressionWithBlock `;`?
+```
 
 r[statement.expr.intro]
 An *expression statement* is one that evaluates an [expression] and ignores its result.
@@ -118,7 +115,7 @@ This can cause an ambiguity between it being parsed as a standalone statement an
 in this case, it is parsed as a statement.
 
 r[statement.expr.constraint-block]
-The type of [_ExpressionWithBlock_][expression] expressions when used as statements must be the unit type.
+The type of [ExpressionWithBlock] expressions when used as statements must be the unit type.
 
 ```rust
 # let mut v = vec![1, 2, 3];
@@ -148,9 +145,8 @@ if true {
 };
 ```
 
-## Attributes on Statements
-
 r[statement.attribute]
+## Attributes on statements
 
 Statements accept [outer attributes].
 The attributes that have meaning on a statement are [`cfg`], and [the lint check attributes].
@@ -169,13 +165,3 @@ The attributes that have meaning on a statement are [`cfg`], and [the lint check
 [the lint check attributes]: attributes/diagnostics.md#lint-check-attributes
 [pattern]: patterns.md
 [scope]: names/scopes.md
-[_BlockExpression_]: expressions/block-expr.md
-[_ExpressionStatement_]: #expression-statements
-[_Expression_]: expressions.md
-[_Item_]: items.md
-[_LazyBooleanExpression_]: expressions/operator-expr.md#lazy-boolean-operators
-[_LetStatement_]: #let-statements
-[_MacroInvocationSemi_]: macros.md#macro-invocation
-[_OuterAttribute_]: attributes.md
-[_PatternNoTopAlt_]: patterns.md
-[_Type_]: types.md

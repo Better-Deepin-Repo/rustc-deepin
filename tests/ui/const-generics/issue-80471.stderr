@@ -4,7 +4,7 @@ error[E0741]: `Nat` must implement `ConstParamTy` to be used as the type of a co
 LL | fn foo<const N: Nat>() {}
    |                 ^^^
    |
-help: add `#[derive(ConstParamTy)]` to the struct
+help: add `#[derive(ConstParamTy)]` to the enum
    |
 LL + #[derive(ConstParamTy)]
 LL | enum Nat {

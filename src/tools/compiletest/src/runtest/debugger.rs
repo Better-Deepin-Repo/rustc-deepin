@@ -1,9 +1,9 @@
 use std::fmt::Write;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
 
-use crate::common::Config;
+use camino::{Utf8Path, Utf8PathBuf};
+
 use crate::runtest::ProcRes;
 
 /// Representation of information to invoke a debugger and check its output
@@ -15,11 +15,11 @@ pub(super) struct DebuggerCommands {
     /// Contains the source line number to check and the line itself
     check_lines: Vec<(usize, String)>,
     /// Source file name
-    file: PathBuf,
+    file: Utf8PathBuf,
 }
 
 impl DebuggerCommands {
-    pub fn parse_from(file: &Path, config: &Config, debugger_prefix: &str) -> Result<Self, String> {
+    pub fn parse_from(file: &Utf8Path, debugger_prefix: &str) -> Result<Self, String> {
         let command_directive = format!("{debugger_prefix}-command");
         let check_directive = format!("{debugger_prefix}-check");
 
@@ -27,7 +27,7 @@ impl DebuggerCommands {
         let mut commands = vec![];
         let mut check_lines = vec![];
         let mut counter = 0;
-        let reader = BufReader::new(File::open(file).unwrap());
+        let reader = BufReader::new(File::open(file.as_std_path()).unwrap());
         for (line_no, line) in reader.lines().enumerate() {
             counter += 1;
             let line = line.map_err(|e| format!("Error while parsing debugger commands: {}", e))?;
@@ -38,19 +38,19 @@ impl DebuggerCommands {
                 continue;
             }
 
-            let Some(line) = line.trim_start().strip_prefix("//").map(str::trim_start) else {
+            let Some(line) = line.trim_start().strip_prefix("//@").map(str::trim_start) else {
                 continue;
             };
 
-            if let Some(command) = config.parse_name_value_directive(&line, &command_directive) {
+            if let Some(command) = parse_name_value(&line, &command_directive) {
                 commands.push(command);
             }
-            if let Some(pattern) = config.parse_name_value_directive(&line, &check_directive) {
+            if let Some(pattern) = parse_name_value(&line, &check_directive) {
                 check_lines.push((line_no, pattern));
             }
         }
 
-        Ok(Self { commands, breakpoint_lines, check_lines, file: file.to_owned() })
+        Ok(Self { commands, breakpoint_lines, check_lines, file: file.to_path_buf() })
     }
 
     /// Given debugger output and lines to check, ensure that every line is
@@ -81,10 +81,10 @@ impl DebuggerCommands {
         if missing.is_empty() {
             Ok(())
         } else {
-            let fname = self.file.file_name().unwrap().to_string_lossy();
+            let fname = self.file.file_name().unwrap();
             let mut msg = format!(
                 "check directive(s) from `{}` not found in debugger output. errors:",
-                self.file.display()
+                self.file
             );
 
             for (src_lineno, err_line) in missing {
@@ -102,6 +102,18 @@ impl DebuggerCommands {
 
             Err(msg)
         }
+    }
+}
+
+/// Split off from the main `parse_name_value_directive`, so that improvements
+/// to directive handling aren't held back by debuginfo test commands.
+fn parse_name_value(line: &str, name: &str) -> Option<String> {
+    if let Some(after_name) = line.strip_prefix(name)
+        && let Some(value) = after_name.strip_prefix(':')
+    {
+        Some(value.to_owned())
+    } else {
+        None
     }
 }
 

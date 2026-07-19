@@ -18,8 +18,10 @@ either.workspace = true
 arrayvec.workspace = true
 itertools.workspace = true
 smallvec.workspace = true
-tracing.workspace = true
+tracing = { workspace = true, features = ["attributes"] }
 triomphe.workspace = true
+
+ra-ap-rustc_type_ir.workspace = true
 
 # local deps
 base-db.workspace = true
@@ -35,6 +37,9 @@ span.workspace = true
 
 [dev-dependencies]
 expect-test.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tracing-tree.workspace = true
 
 # local deps
 test-utils.workspace = true

@@ -1,6 +1,5 @@
-# Closure types
-
 r[type.closure]
+# Closure types
 
 r[type.closure.intro]
 A [closure expression] produces a closure value with a unique, anonymous type that cannot be written out.
@@ -55,14 +54,11 @@ so that the call to `f` works as if it were:
 
 <!-- ignore: continuation of above -->
 ```rust,ignore
-// Note: This is not valid Rust due to the duplicate mutable borrows.
-// This is only provided as an illustration.
-f(Closure{ left_top: &mut rect.left_top, right_bottom_x: &mut rect.left_top.x });
+f(Closure{ left_top: &mut rect.left_top, right_bottom_x: &mut rect.right_bottom.x });
 ```
 
-## Capture modes
-
 r[type.closure.capture]
+## Capture modes
 
 r[type.closure.capture.intro]
 A *capture mode* determines how a [place expression] from the environment is borrowed or moved into the closure.
@@ -82,9 +78,9 @@ The mode is not affected by the code surrounding the closure, such as the lifeti
 [place expression]: ../expressions.md#place-expressions-and-value-expressions
 [shared reference]: pointer.md#references--and-mut
 
+r[type.closure.capture.copy]
 ### `Copy` values
 
-r[type.closure.capture.copy]
 Values that implement [`Copy`] that are moved into the closure are captured with the `ImmBorrow` mode.
 
 ```rust
@@ -94,12 +90,12 @@ let c = || {
 };
 ```
 
+r[type.closure.async.input]
 ### Async input capture
 
-r[type.closure.async.input]
 Async closures always capture all input arguments, regardless of whether or not they are used within the body.
 
-## Capture Precision
+## Capture precision
 
 r[type.closure.capture.precision.capture-path]
 A *capture path* is a sequence starting with a variable from the environment followed by zero or more place projections that were applied to that variable.
@@ -132,9 +128,9 @@ This closure captures an immutable borrow of `s.f1.1`.
 [dereference]: ../expressions/operator-expr.md#the-dereference-operator
 [array or slice index]: ../expressions/array-expr.md#array-and-slice-indexing-expressions
 
+r[type.closure.capture.precision.shared-prefix]
 ### Shared prefix
 
-r[type.closure.capture.precision.shared-prefix]
 In the case where a capture path and one of the ancestor’s of that path are both captured by a closure, the ancestor path is captured with the highest capture mode among the two captures, `CaptureMode = max(AncestorCaptureMode, DescendantCaptureMode)`, using the strict weak ordering:
 
 `ImmBorrow < UniqueImmBorrow < MutBorrow < ByValue`
@@ -158,9 +154,9 @@ c();
 
 Overall this closure will capture `u` by `ByValue`.
 
+r[type.closure.capture.precision.dereference-shared]
 ### Rightmost shared reference truncation
 
-r[type.closure.capture.precision.dereference-shared]
 The capture path is truncated at the rightmost dereference in the capture path if the dereference is applied to a shared reference.
 
 This truncation is allowed because fields that are read through a shared reference will always be read via a shared reference or a copy.
@@ -186,9 +182,9 @@ fn foo<'a, 'b>(m: &'a MyStruct<'b>) -> impl FnMut() + 'static {
 
 If this were to capture `m`, then the closure would no longer outlive `'static`, since `m` is constrained to `'a`. Instead, it captures `(*(*m).a)` by `ImmBorrow`.
 
+r[type.closure.capture.precision.wildcard]
 ### Wildcard pattern bindings
 
-r[type.closure.capture.precision.wildcard]
 Closures only capture data that needs to be read.
 Binding a value with a [wildcard pattern] does not count as a read, and thus won't be captured.
 For example, the following closures will not capture `x`:
@@ -207,7 +203,7 @@ c();
 ```
 
 This also includes destructuring of tuples, structs, and enums.
-Fields matched with the [_RestPattern_] or [_StructPatternEtCetera_] are also not considered as read, and thus those fields will not be captured.
+Fields matched with the [RestPattern] or [StructPatternEtCetera] are also not considered as read, and thus those fields will not be captured.
 The following illustrates some of these:
 
 ```rust
@@ -266,13 +262,11 @@ let c = || {
 };
 ```
 
-[_RestPattern_]: ../patterns.md#rest-patterns
-[_StructPatternEtCetera_]: ../patterns.md#struct-patterns
 [wildcard pattern]: ../patterns.md#wildcard-pattern
 
+r[type.closure.capture.precision.move-dereference]
 ### Capturing references in move contexts
 
-r[type.closure.capture.precision.move-dereference]
 Because it is not allowed to move fields out of a reference, `move` closures will only capture the prefix of a capture path that runs up to, but not including, the first dereference of a reference.
 The reference itself will be moved into the closure.
 
@@ -287,9 +281,9 @@ let mut c = move || {
 c();
 ```
 
+r[type.closure.capture.precision.raw-pointer-dereference]
 ### Raw pointer dereference
 
-r[type.closure.capture.precision.raw-pointer-dereference]
 Because it is `unsafe` to dereference a raw pointer, closures will only capture the prefix of a capture path that runs up to, but not including, the first dereference of a raw pointer.
 
 ```rust
@@ -304,9 +298,9 @@ let c = || unsafe {
 c();
 ```
 
+r[type.closure.capture.precision.union]
 ### Union fields
 
-r[type.closure.capture.precision.union]
 Because it is `unsafe` to access a union field, closures will only capture the prefix of a capture path that runs up to the union itself.
 
 ```rust
@@ -330,9 +324,9 @@ let mut c = || {
 c();
 ```
 
+r[type.closure.capture.precision.unaligned]
 ### Reference into unaligned `struct`s
 
-r[type.closure.capture.precision.unaligned]
 Because it is [undefined behavior] to create references to unaligned fields in a structure,
 closures will only capture the prefix of the capture path that runs up to, but not including, the first field access into a structure that uses [the `packed` representation].
 This includes all fields, even those that are aligned, to protect against compatibility concerns should any of the fields in the structure change in the future.
@@ -381,9 +375,9 @@ c();
 [undefined behavior]: ../behavior-considered-undefined.md
 [the `packed` representation]: ../type-layout.md#the-alignment-modifiers
 
+r[type.closure.capture.precision.box-deref]
 ### `Box` vs other `Deref` implementations
 
-r[type.closure.capture.precision.box-deref]
 The implementation of the [`Deref`] trait for [`Box`] is treated differently from other `Deref` implementations, as it is considered a special entity.
 
 For example, let us look at examples involving `Rc` and `Box`. The `*rc` is desugared to a call to the trait method `deref` defined on `Rc`, but since `*box` is treated differently, it is possible to do a precise capture of the contents of the `Box`.
@@ -391,9 +385,9 @@ For example, let us look at examples involving `Rc` and `Box`. The `*rc` is desu
 [`Box`]: ../special-types-and-traits.md#boxt
 [`Deref`]: ../special-types-and-traits.md#deref-and-derefmut
 
+r[type.closure.capture.precision.box-non-move.not-moved]
 #### `Box` with non-`move` closure
 
-r[type.closure.capture.precision.box-non-move.not-moved]
 In a non-`move` closure, if the contents of the `Box` are not moved into the closure body, the contents of the `Box` are precisely captured.
 
 ```rust
@@ -429,9 +423,9 @@ let c_box = || {
 c_box();
 ```
 
+r[type.closure.capture.precision.box-move.read]
 #### `Box` with move closure
 
-r[type.closure.capture.precision.box-move.read]
 Similarly to moving contents of a `Box` in a non-`move` closure, reading the contents of a `Box` in a `move` closure will capture the `Box` entirely.
 
 ```rust
@@ -443,9 +437,9 @@ let c_box = move || {
 };
 ```
 
+r[type.closure.unique-immutable]
 ## Unique immutable borrows in captures
 
-r[type.closure.unique-immutable]
 Captures can occur by a special kind of borrow called a _unique immutable borrow_,
 which cannot be used anywhere else in the language and cannot be written out explicitly.
 It occurs when modifying the referent of a mutable reference, as in the following example:
@@ -472,9 +466,8 @@ So a unique immutable borrow is used: it borrows `x` immutably, but like a mutab
 
 In the above example, uncommenting the declaration of `y` will produce an error because it would violate the uniqueness of the closure's borrow of `x`; the declaration of z is valid because the closure's lifetime has expired at the end of the block, releasing the borrow.
 
-## Call traits and coercions
-
 r[type.closure.call]
+## Call traits and coercions
 
 r[type.closure.call.intro]
 Closure types all implement [`FnOnce`], indicating that they can be called once
@@ -489,10 +482,8 @@ r[type.closure.call.fn]
 * A closure which does not mutate or move out of any captured variables
   implements [`Fn`], indicating that it can be called by shared reference.
 
-> Note: `move` closures may still implement [`Fn`] or [`FnMut`], even though
-> they capture variables by move. This is because the traits implemented by a
-> closure type are determined by what the closure does with captured values,
-> not how it captures them.
+> [!NOTE]
+> `move` closures may still implement [`Fn`] or [`FnMut`], even though they capture variables by move. This is because the traits implemented by a closure type are determined by what the closure does with captured values, not how it captures them.
 
 r[type.closure.non-capturing]
 *Non-capturing closures* are closures that don't capture anything from their
@@ -509,9 +500,8 @@ let bo: Binop = add;
 x = bo(5,7);
 ```
 
-### Async closure traits
-
 r[type.closure.async.traits]
+### Async closure traits
 
 r[type.closure.async.traits.fn-family]
 Async closures have a further restriction of whether or not they implement [`FnMut`] or [`Fn`].
@@ -568,9 +558,8 @@ If the async closure is lending to its `Future`, then [`FnMut`] and [`Fn`] are *
 r[type.closure.async.traits.async-family]
 Async closures implement [`AsyncFn`], [`AsyncFnMut`], and [`AsyncFnOnce`] in an analogous way as regular closures implement [`Fn`], [`FnMut`], and [`FnOnce`]; that is, depending on the use of the captured variables in its body.
 
-### Other traits
-
 r[type.closure.traits]
+### Other traits
 
 r[type.closure.traits.intro]
 All closure types implement [`Sized`]. Additionally, closure types implement the
@@ -585,7 +574,6 @@ r[type.closure.traits.behavior]
 The rules for [`Send`] and [`Sync`] match those for normal struct types, while
 [`Clone`] and [`Copy`] behave as if [derived]. For [`Clone`], the order of
 cloning of the captured values is left unspecified.
-
 
 Because captures are often by reference, the following general rules arise:
 
@@ -605,9 +593,9 @@ Because captures are often by reference, the following general rules arise:
 [closure expression]: ../expressions/closure-expr.md
 [derived]: ../attributes/derive.md
 
-## Drop Order
-
 r[type.closure.drop-order]
+## Drop order
+
 If a closure captures a field of a composite types such as structs, tuples, and enums by value, the field's lifetime would now be tied to the closure. As a result, it is possible for disjoint fields of a composite types to be dropped at different times.
 
 ```rust
@@ -623,11 +611,11 @@ If a closure captures a field of a composite types such as structs, tuples, and 
 } // tuple.1 dropped here -----------------------------+
 ```
 
+r[type.closure.capture.precision.edition2018.entirety]
 ## Edition 2018 and before
 
 ### Closure types difference
 
-r[type.closure.capture.precision.edition2018.entirety]
 In Edition 2018 and before, closures always capture a variable in its entirety, without its precise capture path. This means that for the example used in the [Closure types](#closure-types) section, the generated closure type would instead look something like this:
 
 <!-- ignore: simplified -->
@@ -653,9 +641,9 @@ and the call to `f` would work as follows:
 f(Closure { rect: rect });
 ```
 
+r[type.closure.capture.precision.edition2018.composite]
 ### Capture precision difference
 
-r[type.closure.capture.precision.edition2018.composite]
 Composite types such as structs, tuples, and enums are always captured in its entirety,
 not by individual fields. As a result, it may be necessary to borrow into a local variable in order to capture a single field:
 
@@ -685,9 +673,9 @@ If the `move` keyword is used, then all captures are by move or, for `Copy` type
 r[type.closure.capture.precision.edition2018.wildcard]
 Regardless of if the data will be read by the closure, i.e. in case of wild card patterns, if a variable defined outside the closure is mentioned within the closure the variable will be captured in its entirety.
 
+r[type.closure.capture.precision.edition2018.drop-order]
 ### Drop order difference
 
-r[type.closure.capture.precision.edition2018.drop-order]
 As composite types are captured in their entirety, a closure which captures one of those composite types by value would drop the entire captured variable at the same time as the closure gets dropped.
 
 ```rust

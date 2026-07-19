@@ -4,6 +4,8 @@
 //!
 //! Hints may be compile time or runtime.
 
+use crate::marker::Destruct;
+use crate::mem::MaybeUninit;
 use crate::{intrinsics, ub_checks};
 
 /// Informs the compiler that the site which is calling this function is not
@@ -52,7 +54,7 @@ use crate::{intrinsics, ub_checks};
 ///             // Safety: `divisor` can't be zero because of `prepare_inputs`,
 ///             // but the compiler does not know about this. We *promise*
 ///             // that we always call `prepare_inputs`.
-///             std::hint::unreachable_unchecked()
+///             unsafe { std::hint::unreachable_unchecked() }
 ///         }
 ///         // The compiler would normally introduce a check here that prevents
 ///         // a division by zero. However, if `divisor` was zero, the branch
@@ -97,7 +99,7 @@ use crate::{intrinsics, ub_checks};
 #[inline]
 #[stable(feature = "unreachable", since = "1.27.0")]
 #[rustc_const_stable(feature = "const_unreachable_unchecked", since = "1.57.0")]
-#[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
+#[track_caller]
 pub const unsafe fn unreachable_unchecked() -> ! {
     ub_checks::assert_unsafe_precondition!(
         check_language_ub,
@@ -230,7 +232,7 @@ pub const unsafe fn assert_unchecked(cond: bool) {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore-wasm
 /// use std::sync::atomic::{AtomicBool, Ordering};
 /// use std::sync::Arc;
 /// use std::{hint, thread};
@@ -266,39 +268,29 @@ pub const unsafe fn assert_unchecked(cond: bool) {
 #[inline(always)]
 #[stable(feature = "renamed_spin_loop", since = "1.49.0")]
 pub fn spin_loop() {
-    #[cfg(target_arch = "x86")]
-    {
-        // SAFETY: the `cfg` attr ensures that we only execute this on x86 targets.
-        unsafe { crate::arch::x86::_mm_pause() };
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    {
-        // SAFETY: the `cfg` attr ensures that we only execute this on x86_64 targets.
-        unsafe { crate::arch::x86_64::_mm_pause() };
-    }
-
-    #[cfg(target_arch = "riscv32")]
-    {
-        crate::arch::riscv32::pause();
-    }
-
-    #[cfg(target_arch = "riscv64")]
-    {
-        crate::arch::riscv64::pause();
-    }
-
-    #[cfg(any(target_arch = "aarch64", target_arch = "arm64ec"))]
-    {
-        // SAFETY: the `cfg` attr ensures that we only execute this on aarch64 targets.
-        unsafe { crate::arch::aarch64::__isb(crate::arch::aarch64::SY) };
-    }
-
-    #[cfg(all(target_arch = "arm", target_feature = "v6"))]
-    {
-        // SAFETY: the `cfg` attr ensures that we only execute this on arm targets
-        // with support for the v6 feature.
-        unsafe { crate::arch::arm::__yield() };
+    crate::cfg_select! {
+        target_arch = "x86" => {
+            // SAFETY: the `cfg` attr ensures that we only execute this on x86 targets.
+            crate::arch::x86::_mm_pause()
+        }
+        target_arch = "x86_64" => {
+            // SAFETY: the `cfg` attr ensures that we only execute this on x86_64 targets.
+            crate::arch::x86_64::_mm_pause()
+        }
+        target_arch = "riscv32" => crate::arch::riscv32::pause(),
+        target_arch = "riscv64" => crate::arch::riscv64::pause(),
+        any(target_arch = "aarch64", target_arch = "arm64ec") => {
+            // SAFETY: the `cfg` attr ensures that we only execute this on aarch64 targets.
+            unsafe { crate::arch::aarch64::__isb(crate::arch::aarch64::SY) }
+        }
+        all(target_arch = "arm", target_feature = "v6") => {
+            // SAFETY: the `cfg` attr ensures that we only execute this on arm targets
+            // with support for the v6 feature.
+            unsafe { crate::arch::arm::__yield() }
+        }
+        target_arch = "loongarch32" => crate::arch::loongarch32::ibar::<0>(),
+        target_arch = "loongarch64" => crate::arch::loongarch64::ibar::<0>(),
+        _ => { /* do nothing */ }
     }
 }
 
@@ -318,6 +310,10 @@ pub fn spin_loop() {
 /// identity function. As such, it **must not be relied upon to control critical program behavior.**
 /// This also means that this function does not offer any guarantees for cryptographic or security
 /// purposes.
+///
+/// This limitation is not specific to `black_box`; there is no mechanism in the entire Rust
+/// language that can provide the guarantees required for constant-time cryptography.
+/// (There is also no such mechanism in LLVM, so the same is true for every other LLVM-based compiler.)
 ///
 /// </div>
 ///
@@ -468,9 +464,11 @@ pub fn spin_loop() {
 /// // No assumptions can be made about either operand, so the multiplication is not optimized out.
 /// let y = black_box(5) * black_box(10);
 /// ```
+///
+/// During constant evaluation, `black_box` is treated as a no-op.
 #[inline]
 #[stable(feature = "bench_black_box", since = "1.66.0")]
-#[rustc_const_unstable(feature = "const_black_box", issue = "none")]
+#[rustc_const_stable(feature = "const_black_box", since = "1.86.0")]
 pub const fn black_box<T>(dummy: T) -> T {
     crate::intrinsics::black_box(dummy)
 }
@@ -596,4 +594,232 @@ pub const fn black_box<T>(dummy: T) -> T {
 #[inline(always)]
 pub const fn must_use<T>(value: T) -> T {
     value
+}
+
+/// Hints to the compiler that a branch condition is likely to be true.
+/// Returns the value passed to it.
+///
+/// It can be used with `if` or boolean `match` expressions.
+///
+/// When used outside of a branch condition, it may still influence a nearby branch, but
+/// probably will not have any effect.
+///
+/// It can also be applied to parts of expressions, such as `likely(a) && unlikely(b)`, or to
+/// compound expressions, such as `likely(a && b)`. When applied to compound expressions, it has
+/// the following effect:
+/// ```text
+///     likely(!a) => !unlikely(a)
+///     likely(a && b) => likely(a) && likely(b)
+///     likely(a || b) => a || likely(b)
+/// ```
+///
+/// See also the function [`cold_path()`] which may be more appropriate for idiomatic Rust code.
+///
+/// # Examples
+///
+/// ```
+/// #![feature(likely_unlikely)]
+/// use core::hint::likely;
+///
+/// fn foo(x: i32) {
+///     if likely(x > 0) {
+///         println!("this branch is likely to be taken");
+///     } else {
+///         println!("this branch is unlikely to be taken");
+///     }
+///
+///     match likely(x > 0) {
+///         true => println!("this branch is likely to be taken"),
+///         false => println!("this branch is unlikely to be taken"),
+///     }
+///
+///     // Use outside of a branch condition may still influence a nearby branch
+///     let cond = likely(x != 0);
+///     if cond {
+///         println!("this branch is likely to be taken");
+///     }
+/// }
+/// ```
+#[unstable(feature = "likely_unlikely", issue = "136873")]
+#[inline(always)]
+pub const fn likely(b: bool) -> bool {
+    crate::intrinsics::likely(b)
+}
+
+/// Hints to the compiler that a branch condition is unlikely to be true.
+/// Returns the value passed to it.
+///
+/// It can be used with `if` or boolean `match` expressions.
+///
+/// When used outside of a branch condition, it may still influence a nearby branch, but
+/// probably will not have any effect.
+///
+/// It can also be applied to parts of expressions, such as `likely(a) && unlikely(b)`, or to
+/// compound expressions, such as `unlikely(a && b)`. When applied to compound expressions, it has
+/// the following effect:
+/// ```text
+///     unlikely(!a) => !likely(a)
+///     unlikely(a && b) => a && unlikely(b)
+///     unlikely(a || b) => unlikely(a) || unlikely(b)
+/// ```
+///
+/// See also the function [`cold_path()`] which may be more appropriate for idiomatic Rust code.
+///
+/// # Examples
+///
+/// ```
+/// #![feature(likely_unlikely)]
+/// use core::hint::unlikely;
+///
+/// fn foo(x: i32) {
+///     if unlikely(x > 0) {
+///         println!("this branch is unlikely to be taken");
+///     } else {
+///         println!("this branch is likely to be taken");
+///     }
+///
+///     match unlikely(x > 0) {
+///         true => println!("this branch is unlikely to be taken"),
+///         false => println!("this branch is likely to be taken"),
+///     }
+///
+///     // Use outside of a branch condition may still influence a nearby branch
+///     let cond = unlikely(x != 0);
+///     if cond {
+///         println!("this branch is likely to be taken");
+///     }
+/// }
+/// ```
+#[unstable(feature = "likely_unlikely", issue = "136873")]
+#[inline(always)]
+pub const fn unlikely(b: bool) -> bool {
+    crate::intrinsics::unlikely(b)
+}
+
+/// Hints to the compiler that given path is cold, i.e., unlikely to be taken. The compiler may
+/// choose to optimize paths that are not cold at the expense of paths that are cold.
+///
+/// # Examples
+///
+/// ```
+/// #![feature(cold_path)]
+/// use core::hint::cold_path;
+///
+/// fn foo(x: &[i32]) {
+///     if let Some(first) = x.get(0) {
+///         // this is the fast path
+///     } else {
+///         // this path is unlikely
+///         cold_path();
+///     }
+/// }
+///
+/// fn bar(x: i32) -> i32 {
+///     match x {
+///         1 => 10,
+///         2 => 100,
+///         3 => { cold_path(); 1000 }, // this branch is unlikely
+///         _ => { cold_path(); 10000 }, // this is also unlikely
+///     }
+/// }
+/// ```
+#[unstable(feature = "cold_path", issue = "136873")]
+#[inline(always)]
+pub const fn cold_path() {
+    crate::intrinsics::cold_path()
+}
+
+/// Returns either `true_val` or `false_val` depending on the value of
+/// `condition`, with a hint to the compiler that `condition` is unlikely to be
+/// correctly predicted by a CPU’s branch predictor.
+///
+/// This method is functionally equivalent to
+/// ```ignore (this is just for illustrative purposes)
+/// fn select_unpredictable<T>(b: bool, true_val: T, false_val: T) -> T {
+///     if b { true_val } else { false_val }
+/// }
+/// ```
+/// but might generate different assembly. In particular, on platforms with
+/// a conditional move or select instruction (like `cmov` on x86 or `csel`
+/// on ARM) the optimizer might use these instructions to avoid branches,
+/// which can benefit performance if the branch predictor is struggling
+/// with predicting `condition`, such as in an implementation of binary
+/// search.
+///
+/// Note however that this lowering is not guaranteed (on any platform) and
+/// should not be relied upon when trying to write cryptographic constant-time
+/// code. Also be aware that this lowering might *decrease* performance if
+/// `condition` is well-predictable. It is advisable to perform benchmarks to
+/// tell if this function is useful.
+///
+/// # Examples
+///
+/// Distribute values evenly between two buckets:
+/// ```
+/// use std::hash::BuildHasher;
+/// use std::hint;
+///
+/// fn append<H: BuildHasher>(hasher: &H, v: i32, bucket_one: &mut Vec<i32>, bucket_two: &mut Vec<i32>) {
+///     let hash = hasher.hash_one(&v);
+///     let bucket = hint::select_unpredictable(hash % 2 == 0, bucket_one, bucket_two);
+///     bucket.push(v);
+/// }
+/// # let hasher = std::collections::hash_map::RandomState::new();
+/// # let mut bucket_one = Vec::new();
+/// # let mut bucket_two = Vec::new();
+/// # append(&hasher, 42, &mut bucket_one, &mut bucket_two);
+/// # assert_eq!(bucket_one.len() + bucket_two.len(), 1);
+/// ```
+#[inline(always)]
+#[stable(feature = "select_unpredictable", since = "1.88.0")]
+#[rustc_const_unstable(feature = "const_select_unpredictable", issue = "145938")]
+pub const fn select_unpredictable<T>(condition: bool, true_val: T, false_val: T) -> T
+where
+    T: [const] Destruct,
+{
+    // FIXME(https://github.com/rust-lang/unsafe-code-guidelines/issues/245):
+    // Change this to use ManuallyDrop instead.
+    let mut true_val = MaybeUninit::new(true_val);
+    let mut false_val = MaybeUninit::new(false_val);
+
+    struct DropOnPanic<T> {
+        // Invariant: valid pointer and points to an initialized value that is not further used,
+        // i.e. it can be dropped by this guard.
+        inner: *mut T,
+    }
+
+    impl<T> Drop for DropOnPanic<T> {
+        fn drop(&mut self) {
+            // SAFETY: Must be guaranteed on construction of local type `DropOnPanic`.
+            unsafe { self.inner.drop_in_place() }
+        }
+    }
+
+    let true_ptr = true_val.as_mut_ptr();
+    let false_ptr = false_val.as_mut_ptr();
+
+    // SAFETY: The value that is not selected is dropped, and the selected one
+    // is returned. This is necessary because the intrinsic doesn't drop the
+    // value that is  not selected.
+    unsafe {
+        // Extract the selected value first, ensure it is dropped as well if dropping the unselected
+        // value panics. We construct a temporary by-pointer guard around the selected value while
+        // dropping the unselected value. Arguments overlap here, so we can not use mutable
+        // reference for these arguments.
+        let guard = crate::intrinsics::select_unpredictable(condition, true_ptr, false_ptr);
+        let drop = crate::intrinsics::select_unpredictable(condition, false_ptr, true_ptr);
+
+        // SAFETY: both pointers are well-aligned and point to initialized values inside a
+        // `MaybeUninit` each. In both possible values for `condition` the pointer `guard` and
+        // `drop` do not alias (even though the two argument pairs we have selected from did alias
+        // each other).
+        let guard = DropOnPanic { inner: guard };
+        drop.drop_in_place();
+        crate::mem::forget(guard);
+
+        // Note that it is important to use the values here. Reading from the pointer we got makes
+        // LLVM forget the !unpredictable annotation sometimes (in tests, integer sized values in
+        // particular seemed to confuse it, also observed in llvm/llvm-project #82340).
+        crate::intrinsics::select_unpredictable(condition, true_val, false_val).assume_init()
+    }
 }

@@ -3,7 +3,7 @@
 use std::env;
 use std::fs;
 
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
 use cargo_test_support::{basic_lib_manifest, basic_manifest, git, project, sleep_ms};
@@ -948,7 +948,7 @@ fn virtual_default_member_is_not_a_member() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [ERROR] package `[ROOT]/foo/something-else` is listed in default-members but is not a member
-for workspace at [ROOT]/foo/Cargo.toml.
+for workspace at `[ROOT]/foo/Cargo.toml`.
 
 "#]])
         .run();
@@ -1114,12 +1114,11 @@ fn new_warning_with_corrupt_ws() {
     let p = project().file("Cargo.toml", "asdf").build();
     p.cargo("new bar").with_stderr_data(str![[r#"
 [CREATING] binary (application) `bar` package
-[ERROR] expected `.`, `=`
+[ERROR] key with no value, expected `=`
  --> Cargo.toml:1:5
   |
 1 | asdf
   |     ^
-  |
 [WARNING] compiling this new package may not work due to invalid workspace configuration
 
 [NOTE] see more `Cargo.toml` keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -1395,12 +1394,11 @@ fn error_if_parent_cargo_toml_is_invalid() {
         .cwd("bar")
         .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] expected `.`, `=`
+[ERROR] key with no value, expected `=`
  --> ../Cargo.toml:1:9
   |
 1 | Totally not a TOML file
   |         ^
-  |
 
 "#]])
         .run();
@@ -1731,7 +1729,7 @@ fn excluded_default_members_still_must_be_members() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [ERROR] package `[ROOT]/foo/bar` is listed in default-members but is not a member
-for workspace at [ROOT]/foo/Cargo.toml.
+for workspace at `[ROOT]/foo/Cargo.toml`.
 
 "#]])
         .run();
@@ -1968,7 +1966,7 @@ fn glob_syntax_invalid_members() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [ERROR] failed to load manifest for workspace member `[ROOT]/foo/crates/bar`
-referenced by workspace at `[ROOT]/foo/Cargo.toml`
+referenced via `crates/*` by workspace at `[ROOT]/foo/Cargo.toml`
 
 Caused by:
   failed to read `[ROOT]/foo/crates/bar/Cargo.toml`
@@ -2620,6 +2618,139 @@ fn ensure_correct_workspace_when_nested() {
         .with_stdout_data(str![[r#"
 foo v0.1.0 ([ROOT]/foo/sub/foo)
 └── bar v0.1.0 ([ROOT]/foo)
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn nonexistence_package_together_with_workspace() {
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+            [package]
+            name = "foo"
+            version = "0.1.0"
+            authors = []
+            edition = "2021"
+
+            [workspace]
+            members = ["baz"]
+        "#,
+        )
+        .file("src/lib.rs", "")
+        .file("baz/Cargo.toml", &basic_manifest("baz", "0.1.0"))
+        .file("baz/src/lib.rs", "");
+
+    let p = p.build();
+
+    p.cargo("check --package nonexistence --workspace")
+        .with_status(101)
+        .with_stderr_data(
+            str![[r#"
+[ERROR] package(s) `nonexistence` not found in workspace `[ROOT]/foo`
+
+"#]]
+            .unordered(),
+        )
+        .run();
+    // With pattern *
+    p.cargo("check --package nonpattern* --workspace")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] package pattern(s) `nonpattern*` not found in workspace `[ROOT]/foo`
+
+"#]])
+        .run();
+
+    p.cargo("package --package nonexistence --workspace")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] package(s) `nonexistence` not found in workspace `[ROOT]/foo`
+
+"#]])
+        .run();
+    // With pattern *
+    p.cargo("package --package nonpattern* --workspace")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] package pattern(s) `nonpattern*` not found in workspace `[ROOT]/foo`
+
+"#]])
+        .run();
+
+    p.cargo("publish --dry-run --package nonexistence --workspace")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] package(s) `nonexistence` not found in workspace `[ROOT]/foo`
+
+"#]])
+        .run();
+    // With pattern *
+    p.cargo("publish --dry-run --package nonpattern* --workspace")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] package pattern(s) `nonpattern*` not found in workspace `[ROOT]/foo`
+
+"#]])
+        .run();
+
+    p.cargo("tree --package nonexistence  --workspace")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] package(s) `nonexistence` not found in workspace `[ROOT]/foo`
+
+"#]])
+        .run();
+    // With pattern *
+    p.cargo("tree --package nonpattern*  --workspace")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] package pattern(s) `nonpattern*` not found in workspace `[ROOT]/foo`
+
+"#]])
+        .run();
+}
+
+// A failing case from <https://github.com/rust-lang/cargo/issues/15625>
+#[cargo_test]
+fn fix_only_check_manifest_path_member() {
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+            [workspace]
+            members = ["foo", "bar"]
+            resolver = "3"
+            "#,
+        )
+        .file(
+            "foo/Cargo.toml",
+            r#"
+            [package]
+            name = "foo"
+            version = "0.1.0"
+            edition = "2021"
+            "#,
+        )
+        .file("foo/src/main.rs", "fn main() {}")
+        .file(
+            "bar/Cargo.toml",
+            r#"
+            [package]
+            name = "bar"
+            version = "0.1.0"
+            edition = "2021"
+            "#,
+        )
+        .file("bar/src/main.rs", "fn main() {}")
+        .build();
+
+    p.cargo("fix --manifest-path foo/Cargo.toml --allow-no-vcs")
+        .with_stderr_data(str![[r#"
+[CHECKING] foo v0.1.0 ([ROOT]/foo/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
         .run();

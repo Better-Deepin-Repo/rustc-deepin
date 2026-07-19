@@ -1,3 +1,4 @@
+//@ edition:2015
 // ensures that 'use foo:*' doesn't import non-public item
 
 use m1::*;
@@ -7,11 +8,11 @@ mod foo {
 }
 mod a {
     pub mod b {
-        use foo::foo;
+        use crate::foo::foo;
         type Bar = isize;
     }
     pub mod sub {
-        use a::b::*;
+        use crate::a::b::*;
         fn sub() -> Bar { 1 }
         //~^ ERROR cannot find type `Bar` in this scope
     }

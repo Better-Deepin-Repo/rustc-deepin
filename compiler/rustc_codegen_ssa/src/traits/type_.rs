@@ -1,15 +1,15 @@
-use rustc_abi::{AddressSpace, Float, Integer};
+use rustc_abi::{AddressSpace, Float, Integer, Primitive, Reg, Scalar};
 use rustc_middle::bug;
+use rustc_middle::ty::Ty;
 use rustc_middle::ty::layout::{HasTyCtxt, HasTypingEnv, TyAndLayout};
-use rustc_middle::ty::{self, Ty};
-use rustc_target::callconv::{ArgAbi, CastTarget, FnAbi, Reg};
+use rustc_target::callconv::{ArgAbi, CastTarget, FnAbi};
 
 use super::BackendTypes;
 use super::misc::MiscCodegenMethods;
 use crate::common::TypeKind;
 use crate::mir::place::PlaceRef;
 
-pub trait BaseTypeCodegenMethods<'tcx>: BackendTypes {
+pub trait BaseTypeCodegenMethods: BackendTypes {
     fn type_i8(&self) -> Self::Type;
     fn type_i16(&self) -> Self::Type;
     fn type_i32(&self) -> Self::Type;
@@ -41,13 +41,13 @@ pub trait BaseTypeCodegenMethods<'tcx>: BackendTypes {
 }
 
 pub trait DerivedTypeCodegenMethods<'tcx>:
-    BaseTypeCodegenMethods<'tcx> + MiscCodegenMethods<'tcx> + HasTyCtxt<'tcx> + HasTypingEnv<'tcx>
+    BaseTypeCodegenMethods + MiscCodegenMethods<'tcx> + HasTyCtxt<'tcx> + HasTypingEnv<'tcx>
 {
     fn type_int(&self) -> Self::Type {
-        match &self.sess().target.c_int_width[..] {
-            "16" => self.type_i16(),
-            "32" => self.type_i32(),
-            "64" => self.type_i64(),
+        match &self.sess().target.c_int_width {
+            16 => self.type_i16(),
+            32 => self.type_i32(),
+            64 => self.type_i64(),
             width => bug!("Unsupported c_int_width: {}", width),
         }
     }
@@ -85,25 +85,27 @@ pub trait DerivedTypeCodegenMethods<'tcx>:
         ty.is_freeze(self.tcx(), self.typing_env())
     }
 
-    fn type_has_metadata(&self, ty: Ty<'tcx>) -> bool {
-        if ty.is_sized(self.tcx(), self.typing_env()) {
-            return false;
+    fn type_from_primitive(&self, p: Primitive) -> Self::Type {
+        use Primitive::*;
+        match p {
+            Int(i, _) => self.type_from_integer(i),
+            Float(f) => self.type_from_float(f),
+            Pointer(address_space) => self.type_ptr_ext(address_space),
         }
+    }
 
-        let tail = self.tcx().struct_tail_for_codegen(ty, self.typing_env());
-        match tail.kind() {
-            ty::Foreign(..) => false,
-            ty::Str | ty::Slice(..) | ty::Dynamic(..) => true,
-            _ => bug!("unexpected unsized tail: {:?}", tail),
-        }
+    fn type_from_scalar(&self, s: Scalar) -> Self::Type {
+        // `MaybeUninit` being `repr(transparent)` somewhat implies that the type
+        // of a scalar has to be the type of its primitive (which is true in LLVM,
+        // where noundef is a parameter attribute or metadata) but if we ever get
+        // a backend where that's no longer true, every use of this will need to
+        // to carefully scrutinized and re-evaluated.
+        self.type_from_primitive(s.primitive())
     }
 }
 
 impl<'tcx, T> DerivedTypeCodegenMethods<'tcx> for T where
-    Self: BaseTypeCodegenMethods<'tcx>
-        + MiscCodegenMethods<'tcx>
-        + HasTyCtxt<'tcx>
-        + HasTypingEnv<'tcx>
+    Self: BaseTypeCodegenMethods + MiscCodegenMethods<'tcx> + HasTyCtxt<'tcx> + HasTypingEnv<'tcx>
 {
 }
 
@@ -152,9 +154,9 @@ pub trait LayoutTypeCodegenMethods<'tcx>: BackendTypes {
 // For backends that support CFI using type membership (i.e., testing whether a given pointer is
 // associated with a type identifier).
 pub trait TypeMembershipCodegenMethods<'tcx>: BackendTypes {
-    fn add_type_metadata(&self, _function: Self::Function, _typeid: String) {}
-    fn set_type_metadata(&self, _function: Self::Function, _typeid: String) {}
-    fn typeid_metadata(&self, _typeid: String) -> Option<Self::Metadata> {
+    fn add_type_metadata(&self, _function: Self::Function, _typeid: &[u8]) {}
+    fn set_type_metadata(&self, _function: Self::Function, _typeid: &[u8]) {}
+    fn typeid_metadata(&self, _typeid: &[u8]) -> Option<Self::Metadata> {
         None
     }
     fn add_kcfi_type_metadata(&self, _function: Self::Function, _typeid: u32) {}
@@ -174,7 +176,6 @@ pub trait ArgAbiBuilderMethods<'tcx>: BackendTypes {
         val: Self::Value,
         dst: PlaceRef<'tcx, Self::Value>,
     );
-    fn arg_memory_ty(&self, arg_abi: &ArgAbi<'tcx, Ty<'tcx>>) -> Self::Type;
 }
 
 pub trait TypeCodegenMethods<'tcx> = DerivedTypeCodegenMethods<'tcx>

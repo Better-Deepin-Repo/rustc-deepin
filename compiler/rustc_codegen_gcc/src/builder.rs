@@ -12,7 +12,7 @@ use rustc_abi::{Align, HasDataLayout, Size, TargetDataLayout, WrappingRange};
 use rustc_apfloat::{Float, Round, Status, ieee};
 use rustc_codegen_ssa::MemFlags;
 use rustc_codegen_ssa::common::{
-    AtomicOrdering, AtomicRmwBinOp, IntPredicate, RealPredicate, SynchronizationScope, TypeKind,
+    AtomicRmwBinOp, IntPredicate, RealPredicate, SynchronizationScope, TypeKind,
 };
 use rustc_codegen_ssa::mir::operand::{OperandRef, OperandValue};
 use rustc_codegen_ssa::mir::place::PlaceRef;
@@ -26,14 +26,15 @@ use rustc_middle::middle::codegen_fn_attrs::CodegenFnAttrs;
 use rustc_middle::ty::layout::{
     FnAbiError, FnAbiOfHelpers, FnAbiRequest, HasTyCtxt, HasTypingEnv, LayoutError, LayoutOfHelpers,
 };
-use rustc_middle::ty::{self, Instance, Ty, TyCtxt};
+use rustc_middle::ty::{self, AtomicOrdering, Instance, Ty, TyCtxt};
 use rustc_span::Span;
 use rustc_span::def_id::DefId;
-use rustc_target::abi::call::FnAbi;
-use rustc_target::spec::{HasTargetSpec, HasWasmCAbiOpt, HasX86AbiOpt, Target, WasmCAbi, X86Abi};
+use rustc_target::callconv::FnAbi;
+use rustc_target::spec::{HasTargetSpec, HasX86AbiOpt, Target, X86Abi};
 
 use crate::common::{SignType, TypeReflection, type_is_pointer};
 use crate::context::CodegenCx;
+use crate::errors;
 use crate::intrinsic::llvm;
 use crate::type_of::LayoutGccExt;
 
@@ -45,7 +46,7 @@ enum ExtremumOperation {
     Min,
 }
 
-pub struct Builder<'a: 'gcc, 'gcc, 'tcx> {
+pub struct Builder<'a, 'gcc, 'tcx> {
     pub cx: &'a CodegenCx<'gcc, 'tcx>,
     pub block: Block<'gcc>,
     pub location: Option<Location<'gcc>>,
@@ -75,7 +76,7 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
 
         let load_ordering = match order {
             // TODO(antoyo): does this make sense?
-            AtomicOrdering::AcquireRelease | AtomicOrdering::Release => AtomicOrdering::Acquire,
+            AtomicOrdering::AcqRel | AtomicOrdering::Release => AtomicOrdering::Acquire,
             _ => order,
         };
         let previous_value =
@@ -155,14 +156,11 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         // NOTE: not sure why, but we have the wrong type here.
         let int_type = compare_exchange.get_param(2).to_rvalue().get_type();
         let src = self.context.new_bitcast(self.location, src, int_type);
-        self.context.new_call(self.location, compare_exchange, &[
-            dst,
-            expected,
-            src,
-            weak,
-            order,
-            failure_order,
-        ])
+        self.context.new_call(
+            self.location,
+            compare_exchange,
+            &[dst, expected, src, weak, order, failure_order],
+        )
     }
 
     pub fn assign(&self, lvalue: LValue<'gcc>, value: RValue<'gcc>) {
@@ -371,16 +369,8 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         let previous_arg_count = args.len();
         let orig_args = args;
         let args = {
-            let function_address_names = self.function_address_names.borrow();
-            let original_function_name = function_address_names.get(&func_ptr);
             func_ptr = llvm::adjust_function(self.context, &func_name, func_ptr, args);
-            llvm::adjust_intrinsic_arguments(
-                self,
-                gcc_func,
-                args.into(),
-                &func_name,
-                original_function_name,
-            )
+            llvm::adjust_intrinsic_arguments(self, gcc_func, args.into(), &func_name)
         };
         let args_adjusted = args.len() != previous_arg_count;
         let args = self.check_ptr_call("call", func_ptr, &args);
@@ -513,9 +503,9 @@ fn set_rvalue_location<'a, 'gcc, 'tcx>(
     bx: &mut Builder<'a, 'gcc, 'tcx>,
     rvalue: RValue<'gcc>,
 ) -> RValue<'gcc> {
-    if bx.location.is_some() {
+    if let Some(location) = bx.location {
         #[cfg(feature = "master")]
-        rvalue.set_location(bx.location.unwrap());
+        rvalue.set_location(location);
     }
     rvalue
 }
@@ -531,8 +521,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         self.block
     }
 
-    fn append_block(cx: &'a CodegenCx<'gcc, 'tcx>, func: RValue<'gcc>, name: &str) -> Block<'gcc> {
-        let func = cx.rvalue_as_function(func);
+    fn append_block(_: &'a CodegenCx<'gcc, 'tcx>, func: Function<'gcc>, name: &str) -> Block<'gcc> {
         func.new_block(name)
     }
 
@@ -550,15 +539,16 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
     }
 
     fn ret(&mut self, mut value: RValue<'gcc>) {
-        if self.structs_as_pointer.borrow().contains(&value) {
-            // NOTE: hack to workaround a limitation of the rustc API: see comment on
-            // CodegenCx.structs_as_pointer
-            value = value.dereference(self.location).to_rvalue();
-        }
         let expected_return_type = self.current_func().get_return_type();
-        if !expected_return_type.is_compatible_with(value.get_type()) {
-            // NOTE: due to opaque pointers now being used, we need to cast here.
-            value = self.context.new_cast(self.location, value, expected_return_type);
+        let value_type = value.get_type();
+        if !expected_return_type.is_compatible_with(value_type) {
+            // NOTE: due to opaque pointers now being used, we need to (bit)cast here.
+            if self.is_native_int_type(value_type) && self.is_native_int_type(expected_return_type)
+            {
+                value = self.context.new_cast(self.location, value, expected_return_type);
+            } else {
+                value = self.context.new_bitcast(self.location, value, expected_return_type);
+            }
         }
         self.llbb().end_with_return(self.location, value);
     }
@@ -579,11 +569,28 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
     ) {
         let mut gcc_cases = vec![];
         let typ = self.val_ty(value);
-        for (on_val, dest) in cases {
-            let on_val = self.const_uint_big(typ, on_val);
-            gcc_cases.push(self.context.new_case(on_val, on_val, dest));
+        // FIXME(FractalFir): This is a workaround for a libgccjit limitation.
+        // Currently, libgccjit can't directly create 128 bit integers.
+        // Since switch cases must be values, and casts are not constant, we can't use 128 bit switch cases.
+        // In such a case, we will simply fall back to an if-ladder.
+        // This *may* be slower than a native switch, but a slow working solution is better than none at all.
+        if typ.is_i128(self) || typ.is_u128(self) {
+            for (on_val, dest) in cases {
+                let on_val = self.const_uint_big(typ, on_val);
+                let is_case =
+                    self.context.new_comparison(self.location, ComparisonOp::Equals, value, on_val);
+                let next_block = self.current_func().new_block("case");
+                self.block.end_with_conditional(self.location, is_case, dest, next_block);
+                self.block = next_block;
+            }
+            self.block.end_with_jump(self.location, default_block);
+        } else {
+            for (on_val, dest) in cases {
+                let on_val = self.const_uint_big(typ, on_val);
+                gcc_cases.push(self.context.new_case(on_val, on_val, dest));
+            }
+            self.block.end_with_switch(self.location, value, default_block, &gcc_cases);
         }
-        self.block.end_with_switch(self.location, value, default_block, &gcc_cases);
     }
 
     #[cfg(feature = "master")]
@@ -661,31 +668,38 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
     }
 
     fn add(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        self.gcc_add(a, b)
+        self.assign_to_var(self.gcc_add(a, b))
     }
 
     fn fadd(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        a + b
+        self.assign_to_var(a + b)
     }
 
+    // TODO(antoyo): should we also override the `unchecked_` versions?
     fn sub(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        self.gcc_sub(a, b)
+        self.assign_to_var(self.gcc_sub(a, b))
     }
 
     fn fsub(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        a - b
+        self.assign_to_var(a - b)
     }
 
     fn mul(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        self.gcc_mul(a, b)
+        self.assign_to_var(self.gcc_mul(a, b))
     }
 
     fn fmul(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        self.cx.context.new_binary_op(self.location, BinaryOp::Mult, a.get_type(), a, b)
+        self.assign_to_var(self.cx.context.new_binary_op(
+            self.location,
+            BinaryOp::Mult,
+            a.get_type(),
+            a,
+            b,
+        ))
     }
 
     fn udiv(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        self.gcc_udiv(a, b)
+        self.assign_to_var(self.gcc_udiv(a, b))
     }
 
     fn exactudiv(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
@@ -694,11 +708,11 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         let a = self.gcc_int_cast(a, a_type);
         let b_type = b.get_type().to_unsigned(self);
         let b = self.gcc_int_cast(b, b_type);
-        a / b
+        self.assign_to_var(self.gcc_udiv(a, b))
     }
 
     fn sdiv(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        self.gcc_sdiv(a, b)
+        self.assign_to_var(self.gcc_sdiv(a, b))
     }
 
     fn exactsdiv(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
@@ -706,20 +720,20 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         // FIXME(antoyo): rustc_codegen_ssa::mir::intrinsic uses different types for a and b but they
         // should be the same.
         let typ = a.get_type().to_signed(self);
-        let b = self.context.new_cast(self.location, b, typ);
-        a / b
+        let b = self.gcc_int_cast(b, typ);
+        self.assign_to_var(self.gcc_sdiv(a, b))
     }
 
     fn fdiv(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        a / b
+        self.assign_to_var(a / b)
     }
 
     fn urem(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        self.gcc_urem(a, b)
+        self.assign_to_var(self.gcc_urem(a, b))
     }
 
     fn srem(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        self.gcc_srem(a, b)
+        self.assign_to_var(self.gcc_srem(a, b))
     }
 
     fn frem(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
@@ -758,7 +772,15 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
 
         #[cfg(feature = "master")]
         match self.cx.type_kind(a_type) {
-            TypeKind::Half | TypeKind::Float => {
+            TypeKind::Half => {
+                let fmodf = self.context.get_builtin_function("fmodf");
+                let f32_type = self.type_f32();
+                let a = self.context.new_cast(self.location, a, f32_type);
+                let b = self.context.new_cast(self.location, b, f32_type);
+                let result = self.context.new_call(self.location, fmodf, &[a, b]);
+                return self.context.new_cast(self.location, result, a_type);
+            }
+            TypeKind::Float => {
                 let fmodf = self.context.get_builtin_function("fmodf");
                 return self.context.new_call(self.location, fmodf, &[a, b]);
             }
@@ -767,8 +789,20 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
                 return self.context.new_call(self.location, fmod, &[a, b]);
             }
             TypeKind::FP128 => {
-                let fmodl = self.context.get_builtin_function("fmodl");
-                return self.context.new_call(self.location, fmodl, &[a, b]);
+                // TODO(antoyo): use get_simple_function_f128_2args.
+                let f128_type = self.type_f128();
+                let fmodf128 = self.context.new_function(
+                    None,
+                    gccjit::FunctionType::Extern,
+                    f128_type,
+                    &[
+                        self.context.new_parameter(None, f128_type, "a"),
+                        self.context.new_parameter(None, f128_type, "b"),
+                    ],
+                    "fmodf128",
+                    false,
+                );
+                return self.context.new_call(self.location, fmodf128, &[a, b]);
             }
             _ => (),
         }
@@ -835,49 +869,28 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         set_rvalue_location(self, self.gcc_not(a))
     }
 
-    fn unchecked_sadd(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        set_rvalue_location(self, self.gcc_add(a, b))
-    }
-
-    fn unchecked_uadd(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        set_rvalue_location(self, self.gcc_add(a, b))
-    }
-
-    fn unchecked_ssub(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        set_rvalue_location(self, self.gcc_sub(a, b))
-    }
-
-    fn unchecked_usub(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        // TODO(antoyo): should generate poison value?
-        set_rvalue_location(self, self.gcc_sub(a, b))
-    }
-
-    fn unchecked_smul(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        set_rvalue_location(self, self.gcc_mul(a, b))
-    }
-
-    fn unchecked_umul(&mut self, a: RValue<'gcc>, b: RValue<'gcc>) -> RValue<'gcc> {
-        set_rvalue_location(self, self.gcc_mul(a, b))
-    }
-
     fn fadd_fast(&mut self, lhs: RValue<'gcc>, rhs: RValue<'gcc>) -> RValue<'gcc> {
         // NOTE: it seems like we cannot enable fast-mode for a single operation in GCC.
-        set_rvalue_location(self, lhs + rhs)
+        let result = set_rvalue_location(self, lhs + rhs);
+        self.assign_to_var(result)
     }
 
     fn fsub_fast(&mut self, lhs: RValue<'gcc>, rhs: RValue<'gcc>) -> RValue<'gcc> {
         // NOTE: it seems like we cannot enable fast-mode for a single operation in GCC.
-        set_rvalue_location(self, lhs - rhs)
+        let result = set_rvalue_location(self, lhs - rhs);
+        self.assign_to_var(result)
     }
 
     fn fmul_fast(&mut self, lhs: RValue<'gcc>, rhs: RValue<'gcc>) -> RValue<'gcc> {
         // NOTE: it seems like we cannot enable fast-mode for a single operation in GCC.
-        set_rvalue_location(self, lhs * rhs)
+        let result = set_rvalue_location(self, lhs * rhs);
+        self.assign_to_var(result)
     }
 
     fn fdiv_fast(&mut self, lhs: RValue<'gcc>, rhs: RValue<'gcc>) -> RValue<'gcc> {
         // NOTE: it seems like we cannot enable fast-mode for a single operation in GCC.
-        set_rvalue_location(self, lhs / rhs)
+        let result = set_rvalue_location(self, lhs / rhs);
+        self.assign_to_var(result)
     }
 
     fn frem_fast(&mut self, lhs: RValue<'gcc>, rhs: RValue<'gcc>) -> RValue<'gcc> {
@@ -889,22 +902,22 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
 
     fn fadd_algebraic(&mut self, lhs: RValue<'gcc>, rhs: RValue<'gcc>) -> RValue<'gcc> {
         // NOTE: it seems like we cannot enable fast-mode for a single operation in GCC.
-        lhs + rhs
+        self.assign_to_var(lhs + rhs)
     }
 
     fn fsub_algebraic(&mut self, lhs: RValue<'gcc>, rhs: RValue<'gcc>) -> RValue<'gcc> {
         // NOTE: it seems like we cannot enable fast-mode for a single operation in GCC.
-        lhs - rhs
+        self.assign_to_var(lhs - rhs)
     }
 
     fn fmul_algebraic(&mut self, lhs: RValue<'gcc>, rhs: RValue<'gcc>) -> RValue<'gcc> {
         // NOTE: it seems like we cannot enable fast-mode for a single operation in GCC.
-        lhs * rhs
+        self.assign_to_var(lhs * rhs)
     }
 
     fn fdiv_algebraic(&mut self, lhs: RValue<'gcc>, rhs: RValue<'gcc>) -> RValue<'gcc> {
         // NOTE: it seems like we cannot enable fast-mode for a single operation in GCC.
-        lhs / rhs
+        self.assign_to_var(lhs / rhs)
     }
 
     fn frem_algebraic(&mut self, lhs: RValue<'gcc>, rhs: RValue<'gcc>) -> RValue<'gcc> {
@@ -915,7 +928,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
     fn checked_binop(
         &mut self,
         oop: OverflowOp,
-        typ: Ty<'_>,
+        typ: Ty<'tcx>,
         lhs: Self::Value,
         rhs: Self::Value,
     ) -> (Self::Value, Self::Value) {
@@ -930,24 +943,39 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
             .get_address(self.location)
     }
 
-    fn dynamic_alloca(&mut self, _len: RValue<'gcc>, _align: Align) -> RValue<'gcc> {
-        unimplemented!();
-    }
-
     fn load(&mut self, pointee_ty: Type<'gcc>, ptr: RValue<'gcc>, align: Align) -> RValue<'gcc> {
         let block = self.llbb();
         let function = block.get_function();
+        // NOTE(FractalFir): In some cases, we *should* skip the call to get_aligned.
+        // For example, calling `get_aligned` on a i8 is pointless(since it can only be 1 aligned)
+        // Calling get_aligned on a `u128`/`i128` causes the attribute to become "stacked"
+        //
+        // From GCCs perspective:
+        // __int128_t  __attribute__((aligned(16)))  __attribute__((aligned(16)))
+        // and:
+        // __int128_t  __attribute__((aligned(16)))
+        // are 2 distinct, incompatible types.
+        //
+        // So, we skip the call to `get_aligned` in such a case. *Ideally*, we could do this for all the types,
+        // but the GCC APIs to facilitate this just aren't quite there yet.
+
+        // This checks that we only skip `get_aligned` on 128 bit ints if they have the correct alignment.
+        // Otherwise, this may be an under-aligned load, so we will still call get_aligned.
+        let mut can_skip_align = (pointee_ty == self.cx.u128_type
+            || pointee_ty == self.cx.i128_type)
+            && align == self.int128_align;
+        // We can skip the call to `get_aligned` for byte-sized types with alignment of 1.
+        can_skip_align = can_skip_align
+            || (pointee_ty == self.cx.u8_type || pointee_ty == self.cx.i8_type)
+                && align.bytes() == 1;
+        // Skip the call to `get_aligned` when possible.
+        let aligned_type =
+            if can_skip_align { pointee_ty } else { pointee_ty.get_aligned(align.bytes()) };
+
+        let ptr = self.context.new_cast(self.location, ptr, aligned_type.make_pointer());
         // NOTE: instead of returning the dereference here, we have to assign it to a variable in
         // the current basic block. Otherwise, it could be used in another basic block, causing a
         // dereference after a drop, for instance.
-        // FIXME(antoyo): this check that we don't call get_aligned() a second time on a type.
-        // Ideally, we shouldn't need to do this check.
-        let aligned_type = if pointee_ty == self.cx.u128_type || pointee_ty == self.cx.i128_type {
-            pointee_ty
-        } else {
-            pointee_ty.get_aligned(align.bytes())
-        };
-        let ptr = self.context.new_cast(self.location, ptr, aligned_type.make_pointer());
         let deref = ptr.dereference(self.location).to_rvalue();
         let loaded_value = function.new_local(
             self.location,
@@ -960,7 +988,11 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
 
     fn volatile_load(&mut self, ty: Type<'gcc>, ptr: RValue<'gcc>) -> RValue<'gcc> {
         let ptr = self.context.new_cast(self.location, ptr, ty.make_volatile().make_pointer());
-        ptr.dereference(self.location).to_rvalue()
+        // (FractalFir): We insert a local here, to ensure this volatile load can't move across
+        // blocks.
+        let local = self.current_func().new_local(self.location, ty, "volatile_tmp");
+        self.block.add_assignment(self.location, local, ptr.dereference(self.location).to_rvalue());
+        local.to_rvalue()
     }
 
     fn atomic_load(
@@ -1016,21 +1048,25 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
             OperandValue::Ref(place.val)
         } else if place.layout.is_gcc_immediate() {
             let load = self.load(place.layout.gcc_type(self), place.val.llval, place.val.align);
-            if let abi::BackendRepr::Scalar(ref scalar) = place.layout.backend_repr {
-                scalar_load_metadata(self, load, scalar);
-            }
-            OperandValue::Immediate(self.to_immediate(load, place.layout))
+            OperandValue::Immediate(
+                if let abi::BackendRepr::Scalar(ref scalar) = place.layout.backend_repr {
+                    scalar_load_metadata(self, load, scalar);
+                    self.to_immediate_scalar(load, *scalar)
+                } else {
+                    load
+                },
+            )
         } else if let abi::BackendRepr::ScalarPair(ref a, ref b) = place.layout.backend_repr {
             let b_offset = a.size(self).align_to(b.align(self).abi);
 
             let mut load = |i, scalar: &abi::Scalar, align| {
-                let llptr = if i == 0 {
+                let ptr = if i == 0 {
                     place.val.llval
                 } else {
                     self.inbounds_ptradd(place.val.llval, self.const_usize(b_offset.bytes()))
                 };
                 let llty = place.layout.scalar_pair_element_gcc_type(self, i);
-                let load = self.load(llty, llptr, align);
+                let load = self.load(llty, ptr, align);
                 scalar_load_metadata(self, load, scalar);
                 if scalar.is_bool() { self.trunc(load, self.type_i1()) } else { load }
             };
@@ -1043,7 +1079,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
             OperandValue::Ref(place.val)
         };
 
-        OperandRef { val, layout: place.layout }
+        OperandRef { val, layout: place.layout, move_annotation: None }
     }
 
     fn write_operand_repeatedly(
@@ -1076,9 +1112,11 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         let align = dest.val.align.restrict_for_offset(dest.layout.field(self.cx(), 0).size);
         cg_elem.val.store(self, PlaceRef::new_sized_aligned(current_val, cg_elem.layout, align));
 
-        let next = self.inbounds_gep(self.backend_type(cg_elem.layout), current.to_rvalue(), &[
-            self.const_usize(1),
-        ]);
+        let next = self.inbounds_gep(
+            self.backend_type(cg_elem.layout),
+            current.to_rvalue(),
+            &[self.const_usize(1)],
+        );
         self.llbb().add_assignment(self.location, current, next);
         self.br(header_bb);
 
@@ -1102,18 +1140,24 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         val: RValue<'gcc>,
         ptr: RValue<'gcc>,
         align: Align,
-        _flags: MemFlags,
+        flags: MemFlags,
     ) -> RValue<'gcc> {
         let ptr = self.check_store(val, ptr);
         let destination = ptr.dereference(self.location);
         // NOTE: libgccjit does not support specifying the alignment on the assignment, so we cast
         // to type so it gets the proper alignment.
         let destination_type = destination.to_rvalue().get_type().unqualified();
-        let aligned_type = destination_type.get_aligned(align.bytes()).make_pointer();
-        let aligned_destination = self.cx.context.new_bitcast(self.location, ptr, aligned_type);
-        let aligned_destination = aligned_destination.dereference(self.location);
-        self.llbb().add_assignment(self.location, aligned_destination, val);
-        // TODO(antoyo): handle align and flags.
+        let align = if flags.contains(MemFlags::UNALIGNED) { 1 } else { align.bytes() };
+        let mut modified_destination_type = destination_type.get_aligned(align);
+        if flags.contains(MemFlags::VOLATILE) {
+            modified_destination_type = modified_destination_type.make_volatile();
+        }
+
+        let modified_ptr =
+            self.cx.context.new_cast(self.location, ptr, modified_destination_type.make_pointer());
+        let modified_destination = modified_ptr.dereference(self.location);
+        self.llbb().add_assignment(self.location, modified_destination, val);
+        // TODO(antoyo): handle `MemFlags::NONTEMPORAL`.
         // NOTE: dummy value here since it's never used. FIXME(antoyo): API should not return a value here?
         // When adding support for NONTEMPORAL, make sure to not just emit MOVNT on x86; see the
         // LLVM backend for details.
@@ -1236,13 +1280,13 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
     }
 
     fn ptrtoint(&mut self, value: RValue<'gcc>, dest_ty: Type<'gcc>) -> RValue<'gcc> {
-        let usize_value = self.cx.const_bitcast(value, self.cx.type_isize());
+        let usize_value = self.cx.context.new_cast(None, value, self.cx.type_isize());
         self.intcast(usize_value, dest_ty, false)
     }
 
     fn inttoptr(&mut self, value: RValue<'gcc>, dest_ty: Type<'gcc>) -> RValue<'gcc> {
         let usize_value = self.intcast(value, self.cx.type_isize(), false);
-        self.cx.const_bitcast(usize_value, dest_ty)
+        self.cx.context.new_cast(None, usize_value, dest_ty)
     }
 
     fn bitcast(&mut self, value: RValue<'gcc>, dest_ty: Type<'gcc>) -> RValue<'gcc> {
@@ -1251,11 +1295,19 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
 
     fn intcast(
         &mut self,
-        value: RValue<'gcc>,
+        mut value: RValue<'gcc>,
         dest_typ: Type<'gcc>,
-        _is_signed: bool,
+        is_signed: bool,
     ) -> RValue<'gcc> {
-        // NOTE: is_signed is for value, not dest_typ.
+        let value_type = value.get_type();
+        if is_signed && !value_type.is_signed(self.cx) {
+            let signed_type = value_type.to_signed(self.cx);
+            value = self.gcc_int_cast(value, signed_type);
+        } else if !is_signed && value_type.is_signed(self.cx) {
+            let unsigned_type = value_type.to_unsigned(self.cx);
+            value = self.gcc_int_cast(value, unsigned_type);
+        }
+
         self.gcc_int_cast(value, dest_typ)
     }
 
@@ -1286,7 +1338,50 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
     }
 
     fn fcmp(&mut self, op: RealPredicate, lhs: RValue<'gcc>, rhs: RValue<'gcc>) -> RValue<'gcc> {
-        self.context.new_comparison(self.location, op.to_gcc_comparison(), lhs, rhs)
+        // LLVM has a concept of "unordered compares", where eg ULT returns true if either the two
+        // arguments are unordered (i.e. either is NaN), or the lhs is less than the rhs. GCC does
+        // not natively have this concept, so in some cases we must manually handle NaNs
+        let must_handle_nan = match op {
+            RealPredicate::RealPredicateFalse => unreachable!(),
+            RealPredicate::RealOEQ => false,
+            RealPredicate::RealOGT => false,
+            RealPredicate::RealOGE => false,
+            RealPredicate::RealOLT => false,
+            RealPredicate::RealOLE => false,
+            RealPredicate::RealONE => false,
+            RealPredicate::RealORD => unreachable!(),
+            RealPredicate::RealUNO => unreachable!(),
+            RealPredicate::RealUEQ => false,
+            RealPredicate::RealUGT => true,
+            RealPredicate::RealUGE => true,
+            RealPredicate::RealULT => true,
+            RealPredicate::RealULE => true,
+            RealPredicate::RealUNE => false,
+            RealPredicate::RealPredicateTrue => unreachable!(),
+        };
+
+        let cmp = self.context.new_comparison(self.location, op.to_gcc_comparison(), lhs, rhs);
+
+        if must_handle_nan {
+            let is_nan = self.context.new_binary_op(
+                self.location,
+                BinaryOp::LogicalOr,
+                self.cx.bool_type,
+                // compare a value to itself to check whether it is NaN
+                self.context.new_comparison(self.location, ComparisonOp::NotEquals, lhs, lhs),
+                self.context.new_comparison(self.location, ComparisonOp::NotEquals, rhs, rhs),
+            );
+
+            self.context.new_binary_op(
+                self.location,
+                BinaryOp::LogicalOr,
+                self.cx.bool_type,
+                is_nan,
+                cmp,
+            )
+        } else {
+            cmp
+        }
     }
 
     /* Miscellaneous instructions */
@@ -1298,6 +1393,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         _src_align: Align,
         size: RValue<'gcc>,
         flags: MemFlags,
+        _tt: Option<rustc_ast::expand::typetree::FncTree>, // Autodiff TypeTrees are LLVM-only, ignored in GCC backend
     ) {
         assert!(!flags.contains(MemFlags::NONTEMPORAL), "non-temporal memcpy not supported");
         let size = self.intcast(size, self.type_size_t(), false);
@@ -1385,7 +1481,6 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         variable.to_rvalue()
     }
 
-    #[allow(dead_code)]
     fn va_arg(&mut self, _list: RValue<'gcc>, _ty: Type<'gcc>) -> RValue<'gcc> {
         unimplemented!();
     }
@@ -1427,16 +1522,6 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
             element.get_address(self.location)
         } else if value_type.dyncast_vector().is_some() {
             panic!();
-        } else if let Some(pointer_type) = value_type.get_pointee() {
-            if let Some(struct_type) = pointer_type.is_struct() {
-                // NOTE: hack to workaround a limitation of the rustc API: see comment on
-                // CodegenCx.structs_as_pointer
-                aggregate_value
-                    .dereference_field(self.location, struct_type.get_field(idx as i32))
-                    .to_rvalue()
-            } else {
-                panic!("Unexpected type {:?}", value_type);
-            }
         } else if let Some(struct_type) = value_type.is_struct() {
             aggregate_value
                 .access_field(self.location, struct_type.get_field(idx as i32))
@@ -1456,21 +1541,18 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         assert_eq!(idx as usize as u64, idx);
         let value_type = aggregate_value.get_type();
 
+        let new_val = self.current_func().new_local(None, value_type, "aggregate_value");
+        self.block.add_assignment(None, new_val, aggregate_value);
+
         let lvalue = if value_type.dyncast_array().is_some() {
             let index = self
                 .context
                 .new_rvalue_from_long(self.u64_type, i64::try_from(idx).expect("i64::try_from"));
-            self.context.new_array_access(self.location, aggregate_value, index)
+            self.context.new_array_access(self.location, new_val, index)
         } else if value_type.dyncast_vector().is_some() {
             panic!();
-        } else if let Some(pointer_type) = value_type.get_pointee() {
-            if let Some(struct_type) = pointer_type.is_struct() {
-                // NOTE: hack to workaround a limitation of the rustc API: see comment on
-                // CodegenCx.structs_as_pointer
-                aggregate_value.dereference_field(self.location, struct_type.get_field(idx as i32))
-            } else {
-                panic!("Unexpected type {:?}", value_type);
-            }
+        } else if let Some(struct_type) = value_type.is_struct() {
+            new_val.access_field(None, struct_type.get_field(idx as i32))
         } else {
             panic!("Unexpected type {:?}", value_type);
         };
@@ -1487,19 +1569,16 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
 
         self.llbb().add_assignment(self.location, lvalue, value);
 
-        aggregate_value
+        new_val.to_rvalue()
     }
 
-    fn set_personality_fn(&mut self, _personality: RValue<'gcc>) {
+    fn set_personality_fn(&mut self, _personality: Function<'gcc>) {
         #[cfg(feature = "master")]
-        {
-            let personality = self.rvalue_as_function(_personality);
-            self.current_func().set_personality_function(personality);
-        }
+        self.current_func().set_personality_function(_personality);
     }
 
     #[cfg(feature = "master")]
-    fn cleanup_landing_pad(&mut self, pers_fn: RValue<'gcc>) -> (RValue<'gcc>, RValue<'gcc>) {
+    fn cleanup_landing_pad(&mut self, pers_fn: Function<'gcc>) -> (RValue<'gcc>, RValue<'gcc>) {
         self.set_personality_fn(pers_fn);
 
         // NOTE: insert the current block in a variable so that a later call to invoke knows to
@@ -1520,7 +1599,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
     }
 
     #[cfg(not(feature = "master"))]
-    fn cleanup_landing_pad(&mut self, _pers_fn: RValue<'gcc>) -> (RValue<'gcc>, RValue<'gcc>) {
+    fn cleanup_landing_pad(&mut self, _pers_fn: Function<'gcc>) -> (RValue<'gcc>, RValue<'gcc>) {
         let value1 = self
             .current_func()
             .new_local(self.location, self.u8_type.make_pointer(), "landing_pad0")
@@ -1530,9 +1609,9 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         (value1, value2)
     }
 
-    fn filter_landing_pad(&mut self, pers_fn: RValue<'gcc>) -> (RValue<'gcc>, RValue<'gcc>) {
+    fn filter_landing_pad(&mut self, pers_fn: Function<'gcc>) {
         // TODO(antoyo): generate the correct landing pad
-        self.cleanup_landing_pad(pers_fn)
+        self.cleanup_landing_pad(pers_fn);
     }
 
     #[cfg(feature = "master")]
@@ -1602,6 +1681,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         dst: RValue<'gcc>,
         src: RValue<'gcc>,
         order: AtomicOrdering,
+        ret_ptr: bool,
     ) -> RValue<'gcc> {
         let size = get_maybe_pointer_size(src);
         let name = match op {
@@ -1629,6 +1709,9 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         let atomic_function = self.context.get_builtin_function(name);
         let order = self.context.new_rvalue_from_int(self.i32_type, order.to_gcc());
 
+        // FIXME: If `ret_ptr` is true and `src` is an integer, we should really tell GCC
+        // that this is a pointer operation that needs to preserve provenance -- but like LLVM,
+        // GCC does not currently seems to support that.
         let void_ptr_type = self.context.new_type::<*mut ()>();
         let volatile_void_ptr_type = void_ptr_type.make_volatile();
         let dst = self.context.new_cast(self.location, dst, volatile_void_ptr_type);
@@ -1636,7 +1719,8 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         let new_src_type = atomic_function.get_param(1).to_rvalue().get_type();
         let src = self.context.new_bitcast(self.location, src, new_src_type);
         let res = self.context.new_call(self.location, atomic_function, &[dst, src, order]);
-        self.context.new_cast(self.location, res, src.get_type())
+        let res_type = if ret_ptr { void_ptr_type } else { src.get_type() };
+        self.context.new_cast(self.location, res, res_type)
     }
 
     fn atomic_fence(&mut self, order: AtomicOrdering, scope: SynchronizationScope) {
@@ -1688,6 +1772,20 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
         call
     }
 
+    fn tail_call(
+        &mut self,
+        _llty: Self::Type,
+        _fn_attrs: Option<&CodegenFnAttrs>,
+        _fn_abi: &FnAbi<'tcx, Ty<'tcx>>,
+        _llfn: Self::Value,
+        _args: &[Self::Value],
+        _funclet: Option<&Self::Funclet>,
+        _instance: Option<Instance<'tcx>>,
+    ) {
+        // FIXME: implement support for explicit tail calls like rustc_codegen_llvm.
+        self.tcx.dcx().emit_fatal(errors::ExplicitTailCallsUnsupported);
+    }
+
     fn zext(&mut self, value: RValue<'gcc>, dest_typ: Type<'gcc>) -> RValue<'gcc> {
         // FIXME(antoyo): this does not zero-extend.
         self.gcc_int_cast(value, dest_typ)
@@ -1713,7 +1811,7 @@ impl<'a, 'gcc, 'tcx> BuilderMethods<'a, 'tcx> for Builder<'a, 'gcc, 'tcx> {
 
     fn to_immediate_scalar(&mut self, val: Self::Value, scalar: abi::Scalar) -> Self::Value {
         if scalar.is_bool() {
-            return self.trunc(val, self.cx().type_i1());
+            return self.unchecked_utrunc(val, self.cx().type_i1());
         }
         val
     }
@@ -1901,6 +1999,15 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         v2: RValue<'gcc>,
         mask: RValue<'gcc>,
     ) -> RValue<'gcc> {
+        // NOTE: if the `mask` is a constant value, the following code will copy it in many places,
+        // which will make GCC create a lot (+4000) local variables in some cases.
+        // So we assign it to an explicit local variable once to avoid this.
+        let func = self.current_func();
+        let mask_var = func.new_local(self.location, mask.get_type(), "mask");
+        let block = self.block;
+        block.add_assignment(self.location, mask_var, mask);
+        let mask = mask_var.to_rvalue();
+
         // TODO(antoyo): use a recursive unqualified() here.
         let vector_type = v1.get_type().unqualified().dyncast_vector().expect("vector type");
         let element_type = vector_type.get_element_type();
@@ -1917,18 +2024,35 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
             self.int_type
         };
 
-        let vector_type =
-            mask.get_type().dyncast_vector().expect("simd_shuffle mask should be of vector type");
-        let mask_num_units = vector_type.get_num_units();
-        let mut mask_elements = vec![];
-        for i in 0..mask_num_units {
-            let index = self.context.new_rvalue_from_long(self.cx.type_u32(), i as _);
-            mask_elements.push(self.context.new_cast(
-                self.location,
-                self.extract_element(mask, index).to_rvalue(),
-                mask_element_type,
-            ));
-        }
+        // NOTE: this condition is needed because we call shuffle_vector in the implementation of
+        // simd_gather.
+        let mut mask_elements = if let Some(vector_type) = mask.get_type().dyncast_vector() {
+            let mask_num_units = vector_type.get_num_units();
+            let mut mask_elements = vec![];
+            for i in 0..mask_num_units {
+                let index = self.context.new_rvalue_from_long(self.cx.type_u32(), i as _);
+                mask_elements.push(self.context.new_cast(
+                    self.location,
+                    self.extract_element(mask, index).to_rvalue(),
+                    mask_element_type,
+                ));
+            }
+            mask_elements
+        } else {
+            let struct_type = mask.get_type().is_struct().expect("mask should be of struct type");
+            let mask_num_units = struct_type.get_field_count();
+            let mut mask_elements = vec![];
+            for i in 0..mask_num_units {
+                let field = struct_type.get_field(i as i32);
+                mask_elements.push(self.context.new_cast(
+                    self.location,
+                    mask.access_field(self.location, field).to_rvalue(),
+                    mask_element_type,
+                ));
+            }
+            mask_elements
+        };
+        let mask_num_units = mask_elements.len();
 
         // NOTE: the mask needs to be the same length as the input vectors, so add the missing
         // elements in the mask if needed.
@@ -2294,6 +2418,15 @@ impl<'a, 'gcc, 'tcx> Builder<'a, 'gcc, 'tcx> {
         let res = then_vals | else_vals;
         self.bitcast_if_needed(res, result_type)
     }
+
+    // GCC doesn't like deeply nested expressions.
+    // By assigning intermediate expressions to a variable, this allow us to avoid deeply nested
+    // expressions and GCC will use much less RAM.
+    fn assign_to_var(&self, value: RValue<'gcc>) -> RValue<'gcc> {
+        let var = self.current_func().new_local(self.location, value.get_type(), "opResult");
+        self.llbb().add_assignment(self.location, var, value);
+        var.to_rvalue()
+    }
 }
 
 fn difference_or_zero<'gcc>(
@@ -2328,12 +2461,6 @@ impl<'tcx> HasTypingEnv<'tcx> for Builder<'_, '_, 'tcx> {
 impl<'tcx> HasTargetSpec for Builder<'_, '_, 'tcx> {
     fn target_spec(&self) -> &Target {
         self.cx.target_spec()
-    }
-}
-
-impl<'tcx> HasWasmCAbiOpt for Builder<'_, '_, 'tcx> {
-    fn wasm_c_abi_opt(&self) -> WasmCAbi {
-        self.cx.wasm_c_abi_opt()
     }
 }
 
@@ -2389,7 +2516,7 @@ impl ToGccComp for RealPredicate {
 }
 
 #[repr(C)]
-#[allow(non_camel_case_types)]
+#[expect(non_camel_case_types)]
 enum MemOrdering {
     __ATOMIC_RELAXED,
     __ATOMIC_CONSUME,
@@ -2408,12 +2535,11 @@ impl ToGccOrdering for AtomicOrdering {
         use MemOrdering::*;
 
         let ordering = match self {
-            AtomicOrdering::Unordered => __ATOMIC_RELAXED,
             AtomicOrdering::Relaxed => __ATOMIC_RELAXED, // TODO(antoyo): check if that's the same.
             AtomicOrdering::Acquire => __ATOMIC_ACQUIRE,
             AtomicOrdering::Release => __ATOMIC_RELEASE,
-            AtomicOrdering::AcquireRelease => __ATOMIC_ACQ_REL,
-            AtomicOrdering::SequentiallyConsistent => __ATOMIC_SEQ_CST,
+            AtomicOrdering::AcqRel => __ATOMIC_ACQ_REL,
+            AtomicOrdering::SeqCst => __ATOMIC_SEQ_CST,
         };
         ordering as i32
     }
@@ -2428,9 +2554,5 @@ fn get_maybe_pointer_size(value: RValue<'_>) -> u32 {
 #[cfg(not(feature = "master"))]
 fn get_maybe_pointer_size(value: RValue<'_>) -> u32 {
     let type_ = value.get_type();
-    if type_.get_pointee().is_some() {
-        std::mem::size_of::<*const ()>() as _
-    } else {
-        type_.get_size()
-    }
+    if type_.get_pointee().is_some() { size_of::<*const ()>() as _ } else { type_.get_size() }
 }

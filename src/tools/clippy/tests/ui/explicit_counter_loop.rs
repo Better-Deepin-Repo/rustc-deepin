@@ -1,31 +1,34 @@
 #![warn(clippy::explicit_counter_loop)]
-#![allow(clippy::uninlined_format_args, clippy::useless_vec)]
-//@no-rustfix
+#![allow(clippy::useless_vec)]
+//@no-rustfix: suggestion does not remove the `+= 1`
 fn main() {
     let mut vec = vec![1, 2, 3, 4];
     let mut _index = 0;
     for _v in &vec {
-        //~^ ERROR: the variable `_index` is used as a loop counter
-        //~| NOTE: `-D clippy::explicit-counter-loop` implied by `-D warnings`
+        //~^ explicit_counter_loop
+
         _index += 1
     }
 
     let mut _index = 1;
     _index = 0;
     for _v in &vec {
-        //~^ ERROR: the variable `_index` is used as a loop counter
+        //~^ explicit_counter_loop
+
         _index += 1
     }
 
     let mut _index = 0;
     for _v in &mut vec {
-        //~^ ERROR: the variable `_index` is used as a loop counter
+        //~^ explicit_counter_loop
+
         _index += 1;
     }
 
     let mut _index = 0;
     for _v in vec {
-        //~^ ERROR: the variable `_index` is used as a loop counter
+        //~^ explicit_counter_loop
+
         _index += 1;
     }
 
@@ -86,13 +89,13 @@ mod issue_1219 {
         for _v in &vec {
             index += 1
         }
-        println!("index: {}", index);
+        println!("index: {index}");
 
         // should not trigger the lint because the count is conditional #1219
         let text = "banana";
         let mut count = 0;
         for ch in text.chars() {
-            println!("{}", count);
+            println!("{count}");
             if ch == 'a' {
                 continue;
             }
@@ -103,7 +106,7 @@ mod issue_1219 {
         let text = "banana";
         let mut count = 0;
         for ch in text.chars() {
-            println!("{}", count);
+            println!("{count}");
             if ch == 'a' {
                 count += 1;
             }
@@ -113,8 +116,9 @@ mod issue_1219 {
         let text = "banana";
         let mut count = 0;
         for ch in text.chars() {
-            //~^ ERROR: the variable `count` is used as a loop counter
-            println!("{}", count);
+            //~^ explicit_counter_loop
+
+            println!("{count}");
             count += 1;
             if ch == 'a' {
                 continue;
@@ -125,8 +129,9 @@ mod issue_1219 {
         let text = "banana";
         let mut count = 0;
         for ch in text.chars() {
-            //~^ ERROR: the variable `count` is used as a loop counter
-            println!("{}", count);
+            //~^ explicit_counter_loop
+
+            println!("{count}");
             count += 1;
             for i in 0..2 {
                 let _ = 123;
@@ -137,7 +142,7 @@ mod issue_1219 {
         let text = "banana";
         let mut count = 0;
         for ch in text.chars() {
-            println!("{}", count);
+            println!("{count}");
             count += 1;
             for i in 0..2 {
                 count += 1;
@@ -152,7 +157,7 @@ mod issue_3308 {
         let mut skips = 0;
         let erasures = vec![];
         for i in 0..10 {
-            println!("{}", skips);
+            println!("{skips}");
             while erasures.contains(&(i + skips)) {
                 skips += 1;
             }
@@ -161,7 +166,7 @@ mod issue_3308 {
         // should not trigger the lint because the count is incremented multiple times
         let mut skips = 0;
         for i in 0..10 {
-            println!("{}", skips);
+            println!("{skips}");
             let mut j = 0;
             while j < 5 {
                 skips += 1;
@@ -172,7 +177,7 @@ mod issue_3308 {
         // should not trigger the lint because the count is incremented multiple times
         let mut skips = 0;
         for i in 0..10 {
-            println!("{}", skips);
+            println!("{skips}");
             for j in 0..5 {
                 skips += 1;
             }
@@ -184,7 +189,8 @@ mod issue_1670 {
     pub fn test() {
         let mut count = 0;
         for _i in 3..10 {
-            //~^ ERROR: the variable `count` is used as a loop counter
+            //~^ explicit_counter_loop
+
             count += 1;
         }
     }
@@ -199,7 +205,7 @@ mod issue_4732 {
         for _v in slice {
             index += 1
         }
-        let _closure = || println!("index: {}", index);
+        let _closure = || println!("index: {index}");
     }
 }
 
@@ -211,7 +217,7 @@ mod issue_4677 {
         let mut count = 0;
         for _i in slice {
             count += 1;
-            println!("{}", count);
+            println!("{count}");
         }
     }
 }
@@ -225,7 +231,8 @@ mod issue_7920 {
 
         // should suggest `enumerate`
         for _item in slice {
-            //~^ ERROR: the variable `idx_usize` is used as a loop counter
+            //~^ explicit_counter_loop
+
             if idx_usize == index_usize {
                 break;
             }
@@ -238,8 +245,8 @@ mod issue_7920 {
 
         // should suggest `zip`
         for _item in slice {
-            //~^ ERROR: the variable `idx_u32` is used as a loop counter
-            //~| NOTE: `idx_u32` is of type `u32`, making it ineligible for `Iterator::enumera
+            //~^ explicit_counter_loop
+
             if idx_u32 == index_u32 {
                 break;
             }
@@ -284,6 +291,7 @@ mod issue_13123 {
         let mut vec = vec![1, 2, 3, 4];
         let mut _index = 0;
         'label: for v in vec {
+            //~^ explicit_counter_loop
             _index += 1;
             if v == 1 {
                 break 'label;

@@ -1,24 +1,26 @@
 // Targets the Cortex-R4F/R5F processor (ARMv7-R)
 
-use crate::abi::Endian;
+use rustc_abi::Endian;
+
 use crate::spec::{
-    Cc, FloatAbi, LinkerFlavor, Lld, PanicStrategy, RelocModel, Target, TargetOptions,
+    Abi, Arch, Cc, FloatAbi, LinkerFlavor, Lld, PanicStrategy, RelocModel, Target, TargetMetadata,
+    TargetOptions,
 };
 
 pub(crate) fn target() -> Target {
     Target {
         llvm_target: "armebv7r-none-eabihf".into(),
-        metadata: crate::spec::TargetMetadata {
+        metadata: TargetMetadata {
             description: Some("Bare Armv7-R, Big Endian, hardfloat".into()),
-            tier: Some(2),
+            tier: Some(3),
             host_tools: Some(false),
             std: Some(false),
         },
         pointer_width: 32,
         data_layout: "E-m:e-p:32:32-Fi8-i64:64-v128:64:128-a:0:32-n32-S64".into(),
-        arch: "arm".into(),
+        arch: Arch::Arm,
         options: TargetOptions {
-            abi: "eabihf".into(),
+            abi: Abi::EabiHf,
             llvm_floatabi: Some(FloatAbi::Hard),
             endian: Endian::Big,
             linker_flavor: LinkerFlavor::Gnu(Cc::No, Lld::Yes),

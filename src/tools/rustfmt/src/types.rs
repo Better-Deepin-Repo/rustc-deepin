@@ -1,7 +1,6 @@
 use std::ops::Deref;
 
 use rustc_ast::ast::{self, FnRetTy, Mutability, Term};
-use rustc_ast::ptr;
 use rustc_span::{BytePos, Pos, Span, symbol::kw};
 use tracing::debug;
 
@@ -9,8 +8,7 @@ use crate::comment::{combine_strs_with_missing_comments, contains_comment};
 use crate::config::lists::*;
 use crate::config::{IndentStyle, StyleEdition, TypeDensity};
 use crate::expr::{
-    ExprType, RhsAssignKind, format_expr, rewrite_assign_rhs, rewrite_call, rewrite_tuple,
-    rewrite_unary_prefix,
+    ExprType, RhsAssignKind, format_expr, rewrite_assign_rhs, rewrite_tuple, rewrite_unary_prefix,
 };
 use crate::lists::{
     ListFormatting, ListItem, Separator, definitive_tactic, itemize_list, write_list,
@@ -18,6 +16,7 @@ use crate::lists::{
 use crate::macros::{MacroPosition, rewrite_macro};
 use crate::overflow;
 use crate::pairs::{PairParts, rewrite_pair};
+use crate::patterns::rewrite_range_pat;
 use crate::rewrite::{Rewrite, RewriteContext, RewriteError, RewriteErrorExt, RewriteResult};
 use crate::shape::Shape;
 use crate::source_map::SpanUtils;
@@ -38,7 +37,7 @@ pub(crate) enum PathContext {
 pub(crate) fn rewrite_path(
     context: &RewriteContext<'_>,
     path_context: PathContext,
-    qself: &Option<ptr::P<ast::QSelf>>,
+    qself: &Option<Box<ast::QSelf>>,
     path: &ast::Path,
     shape: Shape,
 ) -> RewriteResult {
@@ -462,8 +461,9 @@ impl Rewrite for ast::WherePredicate {
     }
 
     fn rewrite_result(&self, context: &RewriteContext<'_>, shape: Shape) -> RewriteResult {
+        let attrs_str = self.attrs.rewrite_result(context, shape)?;
         // FIXME: dead spans?
-        let result = match self.kind {
+        let pred_str = &match self.kind {
             ast::WherePredicateKind::BoundPredicate(ast::WhereBoundPredicate {
                 ref bound_generic_params,
                 ref bounded_ty,
@@ -497,6 +497,38 @@ impl Rewrite for ast::WherePredicate {
                 rewrite_assign_rhs(context, lhs_ty_str, &**rhs_ty, &RhsAssignKind::Ty, shape)?
             }
         };
+
+        let mut result = String::with_capacity(attrs_str.len() + pred_str.len() + 1);
+        result.push_str(&attrs_str);
+        let pred_start = self.span.lo();
+        let line_len = last_line_width(&attrs_str) + 1 + first_line_width(&pred_str);
+        if let Some(last_attr) = self.attrs.last().filter(|last_attr| {
+            contains_comment(context.snippet(mk_sp(last_attr.span.hi(), pred_start)))
+        }) {
+            result = combine_strs_with_missing_comments(
+                context,
+                &result,
+                &pred_str,
+                mk_sp(last_attr.span.hi(), pred_start),
+                Shape {
+                    width: shape.width.min(context.config.inline_attribute_width()),
+                    ..shape
+                },
+                !last_attr.is_doc_comment(),
+            )?;
+        } else {
+            if !self.attrs.is_empty() {
+                if context.config.inline_attribute_width() < line_len
+                    || self.attrs.len() > 1
+                    || self.attrs.last().is_some_and(|a| a.is_doc_comment())
+                {
+                    result.push_str(&shape.indent.to_string_with_newline(context.config));
+                } else {
+                    result.push(' ');
+                }
+            }
+            result.push_str(&pred_str);
+        }
 
         Ok(result)
     }
@@ -655,7 +687,7 @@ impl Rewrite for ast::GenericParam {
 
         let param_start = if let ast::GenericParamKind::Const {
             ref ty,
-            kw_span,
+            span,
             default,
         } = &self.kind
         {
@@ -677,7 +709,7 @@ impl Rewrite for ast::GenericParam {
                     default.rewrite_result(context, Shape::legacy(budget, shape.indent))?;
                 param.push_str(&rewrite);
             }
-            kw_span.lo()
+            span.lo()
         } else {
             param.push_str(rewrite_ident(context, self.ident));
             self.ident.span.lo()
@@ -800,12 +832,6 @@ impl Rewrite for ast::Ty {
                             .offset_left(4)
                             .max_width_error(shape.width, self.span())?;
                         (shape, "dyn ")
-                    }
-                    ast::TraitObjectSyntax::DynStar => {
-                        let shape = shape
-                            .offset_left(5)
-                            .max_width_error(shape.width, self.span())?;
-                        (shape, "dyn* ")
                     }
                     ast::TraitObjectSyntax::None => (shape, ""),
                 };
@@ -981,10 +1007,10 @@ impl Rewrite for ast::Ty {
                     })
                 }
             }
-            ast::TyKind::BareFn(ref bare_fn) => rewrite_bare_fn(bare_fn, self.span, context, shape),
+            ast::TyKind::FnPtr(ref fn_ptr) => rewrite_fn_ptr(fn_ptr, self.span, context, shape),
             ast::TyKind::Never => Ok(String::from("!")),
             ast::TyKind::MacCall(ref mac) => {
-                rewrite_macro(mac, None, context, shape, MacroPosition::Expression)
+                rewrite_macro(mac, context, shape, MacroPosition::Expression)
             }
             ast::TyKind::ImplicitSelf => Ok(String::from("")),
             ast::TyKind::ImplTrait(_, ref it) => {
@@ -1004,13 +1030,6 @@ impl Rewrite for ast::Ty {
             }
             ast::TyKind::CVarArgs => Ok("...".to_owned()),
             ast::TyKind::Dummy | ast::TyKind::Err(_) => Ok(context.snippet(self.span).to_owned()),
-            ast::TyKind::Typeof(ref anon_const) => rewrite_call(
-                context,
-                "typeof",
-                &[anon_const.value.clone()],
-                self.span,
-                shape,
-            ),
             ast::TyKind::Pat(ref ty, ref pat) => {
                 let ty = ty.rewrite_result(context, shape)?;
                 let pat = pat.rewrite_result(context, shape)?;
@@ -1018,7 +1037,11 @@ impl Rewrite for ast::Ty {
             }
             ast::TyKind::UnsafeBinder(ref binder) => {
                 let mut result = String::new();
-                if let Some(ref lifetime_str) =
+                if binder.generic_params.is_empty() {
+                    // We always want to write `unsafe<>` since `unsafe<> Ty`
+                    // and `Ty` are distinct types.
+                    result.push_str("unsafe<> ")
+                } else if let Some(ref lifetime_str) =
                     rewrite_bound_params(context, shape, &binder.generic_params)
                 {
                     result.push_str("unsafe<");
@@ -1045,8 +1068,36 @@ impl Rewrite for ast::Ty {
     }
 }
 
-fn rewrite_bare_fn(
-    bare_fn: &ast::BareFnTy,
+impl Rewrite for ast::TyPat {
+    fn rewrite(&self, context: &RewriteContext<'_>, shape: Shape) -> Option<String> {
+        self.rewrite_result(context, shape).ok()
+    }
+
+    fn rewrite_result(&self, context: &RewriteContext<'_>, shape: Shape) -> RewriteResult {
+        match self.kind {
+            ast::TyPatKind::Range(ref lhs, ref rhs, ref end_kind) => {
+                rewrite_range_pat(context, shape, lhs, rhs, end_kind, self.span)
+            }
+            ast::TyPatKind::Or(ref variants) => {
+                let mut first = true;
+                let mut s = String::new();
+                for variant in variants {
+                    if first {
+                        first = false
+                    } else {
+                        s.push_str(" | ");
+                    }
+                    s.push_str(&variant.rewrite_result(context, shape)?);
+                }
+                Ok(s)
+            }
+            ast::TyPatKind::NotNull | ast::TyPatKind::Err(_) => Err(RewriteError::Unknown),
+        }
+    }
+}
+
+fn rewrite_fn_ptr(
+    fn_ptr: &ast::FnPtrTy,
     span: Span,
     context: &RewriteContext<'_>,
     shape: Shape,
@@ -1055,7 +1106,7 @@ fn rewrite_bare_fn(
 
     let mut result = String::with_capacity(128);
 
-    if let Some(ref lifetime_str) = rewrite_bound_params(context, shape, &bare_fn.generic_params) {
+    if let Some(ref lifetime_str) = rewrite_bound_params(context, shape, &fn_ptr.generic_params) {
         result.push_str("for<");
         // 6 = "for<> ".len(), 4 = "for<".
         // This doesn't work out so nicely for multiline situation with lots of
@@ -1064,10 +1115,10 @@ fn rewrite_bare_fn(
         result.push_str("> ");
     }
 
-    result.push_str(crate::utils::format_safety(bare_fn.safety));
+    result.push_str(crate::utils::format_safety(fn_ptr.safety));
 
     result.push_str(&format_extern(
-        bare_fn.ext,
+        fn_ptr.ext,
         context.config.force_explicit_abi(),
     ));
 
@@ -1085,9 +1136,9 @@ fn rewrite_bare_fn(
     };
 
     let rewrite = format_function_type(
-        bare_fn.decl.inputs.iter(),
-        &bare_fn.decl.output,
-        bare_fn.decl.c_variadic(),
+        fn_ptr.decl.inputs.iter(),
+        &fn_ptr.decl.output,
+        fn_ptr.decl.c_variadic(),
         span,
         context,
         func_ty_shape,
@@ -1280,7 +1331,7 @@ fn join_bounds_inner(
     }
 }
 
-pub(crate) fn opaque_ty(ty: &Option<ptr::P<ast::Ty>>) -> Option<&ast::GenericBounds> {
+pub(crate) fn opaque_ty(ty: &Option<Box<ast::Ty>>) -> Option<&ast::GenericBounds> {
     ty.as_ref().and_then(|t| match &t.kind {
         ast::TyKind::ImplTrait(_, bounds) => Some(bounds),
         _ => None,

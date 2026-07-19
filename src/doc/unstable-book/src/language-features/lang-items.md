@@ -37,7 +37,7 @@ Most lang items are defined by `core`, but if you're trying to build
 an executable without the `std` crate, you might run into the need
 for lang item definitions.
 
-[personality]: https://github.com/rust-lang/rust/blob/master/library/std/src/sys/personality/gcc.rs
+[personality]: https://github.com/rust-lang/rust/blob/HEAD/library/std/src/sys/personality/gcc.rs
 
 ## Example: Implementing a `Box`
 
@@ -46,14 +46,15 @@ allocation. A freestanding program that uses the `Box` sugar for dynamic
 allocations via `malloc` and `free`:
 
 ```rust,ignore (libc-is-finicky)
-#![feature(lang_items, start, core_intrinsics, rustc_private, panic_unwind, rustc_attrs)]
+#![feature(lang_items, core_intrinsics, rustc_private, panic_unwind, rustc_attrs)]
 #![allow(internal_features)]
 #![no_std]
+#![no_main]
 
 extern crate libc;
 extern crate unwind;
 
-use core::ffi::c_void;
+use core::ffi::{c_int, c_void};
 use core::intrinsics;
 use core::panic::PanicInfo;
 use core::ptr::NonNull;
@@ -91,8 +92,8 @@ unsafe fn allocate(size: usize, _align: usize) -> *mut u8 {
     p
 }
 
-#[start]
-fn main(_argc: isize, _argv: *const *const u8) -> isize {
+#[no_mangle]
+extern "C" fn main(_argc: c_int, _argv: *const *const u8) -> c_int {
     let _x = Box::new(1);
 
     0
@@ -112,4 +113,4 @@ return a valid pointer, and so needs to do the check internally.
 
 An up-to-date list of all language items can be found [here] in the compiler code.
 
-[here]: https://github.com/rust-lang/rust/blob/master/compiler/rustc_hir/src/lang_items.rs
+[here]: https://github.com/rust-lang/rust/blob/HEAD/compiler/rustc_hir/src/lang_items.rs

@@ -4,15 +4,14 @@ Subject: ubuntu-disable-ppc64el-asm-tests
 
 Forwarded: not-needed
 ---
- compiler/rustc_lint/src/builtin.rs      | 5 ++++-
- compiler/rustc_lint_defs/src/builtin.rs | 2 ++
- 2 files changed, 6 insertions(+), 1 deletion(-)
+ compiler/rustc_lint/src/builtin.rs | 5 ++++-
+ 1 file changed, 4 insertions(+), 1 deletion(-)
 
 diff --git a/compiler/rustc_lint/src/builtin.rs b/compiler/rustc_lint/src/builtin.rs
-index 6e82395..7577812 100644
+index dd0aa84..f54d4f4 100644
 --- a/compiler/rustc_lint/src/builtin.rs
 +++ b/compiler/rustc_lint/src/builtin.rs
-@@ -2750,7 +2750,10 @@ declare_lint! {
+@@ -2796,7 +2796,10 @@ declare_lint! {
      /// ### Example
      ///
      /// ```rust,compile_fail
@@ -24,21 +23,3 @@ index 6e82395..7577812 100644
      /// use std::arch::asm;
      ///
      /// fn main() {
-diff --git a/compiler/rustc_lint_defs/src/builtin.rs b/compiler/rustc_lint_defs/src/builtin.rs
-index 2f23ab2..fa2585d 100644
---- a/compiler/rustc_lint_defs/src/builtin.rs
-+++ b/compiler/rustc_lint_defs/src/builtin.rs
-@@ -2927,11 +2927,13 @@ declare_lint! {
-     ///
-     /// use std::arch::naked_asm;
-     ///
-+    /// #[cfg(not(any(target_arch = "powerpc64", target_arch = "s390x")))]
-     /// #[naked]
-     /// pub fn default_abi() -> u32 {
-     ///     unsafe { naked_asm!(""); }
-     /// }
-     ///
-+    /// #[cfg(not(any(target_arch = "powerpc64", target_arch = "s390x")))]
-     /// #[naked]
-     /// pub extern "Rust" fn rust_abi() -> u32 {
-     ///     unsafe { naked_asm!(""); }

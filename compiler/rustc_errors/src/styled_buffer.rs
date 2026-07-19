@@ -89,6 +89,19 @@ impl StyledBuffer {
         }
     }
 
+    pub(crate) fn replace(&mut self, line: usize, start: usize, end: usize, string: &str) {
+        if start == end {
+            return;
+        }
+        if start > self.lines[line].len() || end > self.lines[line].len() {
+            return;
+        }
+        let _ = self.lines[line].drain(start..(end - string.chars().count()));
+        for (i, c) in string.chars().enumerate() {
+            self.lines[line][start + i] = StyledChar::new(c, Style::LineNumber);
+        }
+    }
+
     /// For given `line` inserts `string` with `style` before old content of that line,
     /// adding lines if needed
     pub(crate) fn prepend(&mut self, line: usize, string: &str, style: Style) {
@@ -140,12 +153,11 @@ impl StyledBuffer {
     /// 1. That line and column exist in `StyledBuffer`
     /// 2. `overwrite` is `true` or existing style is `Style::NoStyle` or `Style::Quotation`
     fn set_style(&mut self, line: usize, col: usize, style: Style, overwrite: bool) {
-        if let Some(ref mut line) = self.lines.get_mut(line) {
-            if let Some(StyledChar { style: s, .. }) = line.get_mut(col) {
-                if overwrite || matches!(s, Style::NoStyle | Style::Quotation) {
-                    *s = style;
-                }
-            }
+        if let Some(ref mut line) = self.lines.get_mut(line)
+            && let Some(StyledChar { style: s, .. }) = line.get_mut(col)
+            && (overwrite || matches!(s, Style::NoStyle | Style::Quotation))
+        {
+            *s = style;
         }
     }
 }

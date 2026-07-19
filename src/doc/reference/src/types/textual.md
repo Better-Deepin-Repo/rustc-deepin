@@ -1,6 +1,5 @@
-# Textual types
-
 r[type.text]
+# Textual types
 
 r[type.text.intro]
 The types `char` and `str` hold textual data.
@@ -24,11 +23,11 @@ is valid UTF-8. Calling a `str` method with a non-UTF-8 buffer can cause
 
 r[type.text.str-unsized]
 Since `str` is a [dynamically sized type], it can only be instantiated through a
-pointer type, such as `&str`.
-
-## Layout and bit validity
+pointer type, such as `&str`. The layout of `&str` is the same as the layout of
+`&[u8]`.
 
 r[type.text.layout]
+## Layout and bit validity
 
 r[type.layout.char-layout]
 `char` is guaranteed to have the same size and alignment as `u32` on all platforms.

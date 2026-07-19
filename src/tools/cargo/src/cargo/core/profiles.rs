@@ -21,17 +21,17 @@
 //! The precedence is explained in [`ProfileMaker`].
 //! The algorithm happens within [`ProfileMaker::get_profile`].
 
+use crate::core::Feature;
 use crate::core::compiler::{CompileKind, CompileTarget, Unit};
 use crate::core::dependency::Artifact;
 use crate::core::resolver::features::FeaturesFor;
-use crate::core::Feature;
 use crate::core::{
     PackageId, PackageIdSpec, PackageIdSpecQuery, Resolve, Shell, Target, Workspace,
 };
 use crate::util::interning::InternedString;
 use crate::util::toml::validate_profile;
-use crate::util::{closest_msg, context, CargoResult, GlobalContext};
-use anyhow::{bail, Context as _};
+use crate::util::{CargoResult, GlobalContext, closest_msg, context};
+use anyhow::{Context as _, bail};
 use cargo_util_schemas::manifest::TomlTrimPaths;
 use cargo_util_schemas::manifest::TomlTrimPathsValue;
 use cargo_util_schemas::manifest::{
@@ -93,7 +93,7 @@ impl Profiles {
         // Merge with predefined profiles.
         use std::collections::btree_map::Entry;
         for (predef_name, mut predef_prof) in Self::predefined_profiles().into_iter() {
-            match profiles.entry(InternedString::new(predef_name)) {
+            match profiles.entry(predef_name.into()) {
                 Entry::Vacant(vac) => {
                     vac.insert(predef_prof);
                 }
@@ -119,9 +119,9 @@ impl Profiles {
     /// Returns the hard-coded directory names for built-in profiles.
     fn predefined_dir_names() -> HashMap<InternedString, InternedString> {
         [
-            (InternedString::new("dev"), InternedString::new("debug")),
-            (InternedString::new("test"), InternedString::new("debug")),
-            (InternedString::new("bench"), InternedString::new("release")),
+            ("dev".into(), "debug".into()),
+            ("test".into(), "debug".into()),
+            ("bench".into(), "release".into()),
         ]
         .into()
     }
@@ -134,12 +134,12 @@ impl Profiles {
         trim_paths_enabled: bool,
     ) {
         profile_makers.by_name.insert(
-            InternedString::new("dev"),
+            "dev".into(),
             ProfileMaker::new(Profile::default_dev(), profiles.get("dev").cloned()),
         );
 
         profile_makers.by_name.insert(
-            InternedString::new("release"),
+            "release".into(),
             ProfileMaker::new(
                 Profile::default_release(trim_paths_enabled),
                 profiles.get("release").cloned(),
@@ -185,7 +185,7 @@ impl Profiles {
         match &profile.dir_name {
             None => {}
             Some(dir_name) => {
-                self.dir_names.insert(name, InternedString::new(dir_name));
+                self.dir_names.insert(name, dir_name.into());
             }
         }
 
@@ -230,7 +230,7 @@ impl Profiles {
                 self.get_profile_maker(&inherits_name).unwrap().clone()
             }
             Some(inherits_name) => {
-                let inherits_name = InternedString::new(&inherits_name);
+                let inherits_name = inherits_name.into();
                 if !set.insert(inherits_name) {
                     bail!(
                         "profile inheritance loop detected with profile `{}` inheriting `{}`",
@@ -297,7 +297,7 @@ impl Profiles {
                 CompileKind::Target(target) => target.short_name(),
             };
             if target.contains("-apple-") {
-                profile.split_debuginfo = Some(InternedString::new("unpacked"));
+                profile.split_debuginfo = Some("unpacked".into());
             }
         }
 
@@ -330,6 +330,7 @@ impl Profiles {
         result.root = for_unit_profile.root;
         result.debuginfo = for_unit_profile.debuginfo;
         result.opt_level = for_unit_profile.opt_level;
+        result.debug_assertions = for_unit_profile.debug_assertions;
         result.trim_paths = for_unit_profile.trim_paths.clone();
         result
     }
@@ -391,6 +392,11 @@ impl Profiles {
             .get(name)
             .ok_or_else(|| anyhow::format_err!("profile `{}` is not defined", name))
     }
+
+    /// Returns an iterator over all profile names known to Cargo.
+    pub fn profile_names(&self) -> impl Iterator<Item = InternedString> + '_ {
+        self.by_name.keys().copied()
+    }
 }
 
 /// An object used for handling the profile hierarchy.
@@ -450,7 +456,7 @@ impl ProfileMaker {
             // basically turning down the optimization level and avoid limiting
             // codegen units. This ensures that we spend little time optimizing as
             // well as enabling parallelism by not constraining codegen units.
-            profile.opt_level = InternedString::new("0");
+            profile.opt_level = "0".into();
             profile.codegen_units = None;
 
             // For build dependencies, we usually don't need debuginfo, and
@@ -526,12 +532,12 @@ fn merge_toml_overrides(
 /// Does not merge overrides (see `merge_toml_overrides`).
 fn merge_profile(profile: &mut Profile, toml: &TomlProfile) {
     if let Some(ref opt_level) = toml.opt_level {
-        profile.opt_level = InternedString::new(&opt_level.0);
+        profile.opt_level = opt_level.0.as_str().into();
     }
     match toml.lto {
         Some(StringOrBool::Bool(b)) => profile.lto = Lto::Bool(b),
         Some(StringOrBool::String(ref n)) if is_off(n.as_str()) => profile.lto = Lto::Off,
-        Some(StringOrBool::String(ref n)) => profile.lto = Lto::Named(InternedString::new(n)),
+        Some(StringOrBool::String(ref n)) => profile.lto = Lto::Named(n.into()),
         None => {}
     }
     if toml.codegen_backend.is_some() {
@@ -547,7 +553,7 @@ fn merge_profile(profile: &mut Profile, toml: &TomlProfile) {
         profile.debug_assertions = debug_assertions;
     }
     if let Some(split_debuginfo) = &toml.split_debuginfo {
-        profile.split_debuginfo = Some(InternedString::new(split_debuginfo));
+        profile.split_debuginfo = Some(split_debuginfo.into());
     }
     if let Some(rpath) = toml.rpath {
         profile.rpath = rpath;
@@ -556,6 +562,7 @@ fn merge_profile(profile: &mut Profile, toml: &TomlProfile) {
         profile.panic = match panic.as_str() {
             "unwind" => PanicStrategy::Unwind,
             "abort" => PanicStrategy::Abort,
+            "immediate-abort" => PanicStrategy::ImmediateAbort,
             // This should be validated in TomlProfile::validate
             _ => panic!("Unexpected panic setting `{}`", panic),
         };
@@ -572,17 +579,16 @@ fn merge_profile(profile: &mut Profile, toml: &TomlProfile) {
     if let Some(trim_paths) = &toml.trim_paths {
         profile.trim_paths = Some(trim_paths.clone());
     }
+    if let Some(hint_mostly_unused) = toml.hint_mostly_unused {
+        profile.hint_mostly_unused = Some(hint_mostly_unused);
+    }
     profile.strip = match toml.strip {
-        Some(StringOrBool::Bool(true)) => {
-            Strip::Resolved(StripInner::Named(InternedString::new("symbols")))
-        }
+        Some(StringOrBool::Bool(true)) => Strip::Resolved(StripInner::Named("symbols".into())),
         Some(StringOrBool::Bool(false)) => Strip::Resolved(StripInner::None),
         Some(StringOrBool::String(ref n)) if n.as_str() == "none" => {
             Strip::Resolved(StripInner::None)
         }
-        Some(StringOrBool::String(ref n)) => {
-            Strip::Resolved(StripInner::Named(InternedString::new(n)))
-        }
+        Some(StringOrBool::String(ref n)) => Strip::Resolved(StripInner::Named(n.into())),
         None => Strip::Deferred(StripInner::None),
     };
 }
@@ -619,19 +625,21 @@ pub struct Profile {
     pub incremental: bool,
     pub panic: PanicStrategy,
     pub strip: Strip,
-    #[serde(skip_serializing_if = "Vec::is_empty")] // remove when `rustflags` is stablized
+    #[serde(skip_serializing_if = "Vec::is_empty")] // remove when `rustflags` is stabilized
     // Note that `rustflags` is used for the cargo-feature `profile_rustflags`
     pub rustflags: Vec<InternedString>,
-    // remove when `-Ztrim-paths` is stablized
+    // remove when `-Ztrim-paths` is stabilized
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trim_paths: Option<TomlTrimPaths>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint_mostly_unused: Option<bool>,
 }
 
 impl Default for Profile {
     fn default() -> Profile {
         Profile {
-            name: InternedString::new(""),
-            opt_level: InternedString::new("0"),
+            name: "".into(),
+            opt_level: "0".into(),
             root: ProfileRoot::Debug,
             lto: Lto::Bool(false),
             codegen_backend: None,
@@ -646,6 +654,7 @@ impl Default for Profile {
             strip: Strip::Deferred(StripInner::None),
             rustflags: vec![],
             trim_paths: None,
+            hint_mostly_unused: None,
         }
     }
 }
@@ -675,6 +684,7 @@ compact_debug! {
                 strip
                 rustflags
                 trim_paths
+                hint_mostly_unused
             )]
         }
     }
@@ -705,7 +715,7 @@ impl Profile {
     /// Returns a built-in `dev` profile.
     fn default_dev() -> Profile {
         Profile {
-            name: InternedString::new("dev"),
+            name: "dev".into(),
             root: ProfileRoot::Debug,
             debuginfo: DebugInfo::Resolved(TomlDebugInfo::Full),
             debug_assertions: true,
@@ -719,9 +729,9 @@ impl Profile {
     fn default_release(trim_paths_enabled: bool) -> Profile {
         let trim_paths = trim_paths_enabled.then(|| TomlTrimPathsValue::Object.into());
         Profile {
-            name: InternedString::new("release"),
+            name: "release".into(),
             root: ProfileRoot::Release,
-            opt_level: InternedString::new("3"),
+            opt_level: "3".into(),
             trim_paths,
             ..Profile::default()
         }
@@ -864,10 +874,11 @@ impl serde::ser::Serialize for Lto {
 
 /// The `panic` setting.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum PanicStrategy {
     Unwind,
     Abort,
+    ImmediateAbort,
 }
 
 impl fmt::Display for PanicStrategy {
@@ -875,6 +886,7 @@ impl fmt::Display for PanicStrategy {
         match *self {
             PanicStrategy::Unwind => "unwind",
             PanicStrategy::Abort => "abort",
+            PanicStrategy::ImmediateAbort => "immediate-abort",
         }
         .fmt(f)
     }
@@ -1169,12 +1181,19 @@ impl UnitFor {
         } else {
             self.panic_setting
         };
+        let artifact_target_for_features =
+            // build.rs and proc-macros are always for host.
+            if dep_target.proc_macro() || parent.target.is_custom_build() {
+                None
+            } else {
+                self.artifact_target_for_features
+            };
         UnitFor {
             host: self.host || dep_for_host,
             host_features,
             panic_setting,
             root_compile_kind,
-            artifact_target_for_features: self.artifact_target_for_features,
+            artifact_target_for_features,
         }
     }
 
@@ -1269,13 +1288,13 @@ fn merge_config_profiles(
             profile.merge(&config_profile);
         }
         if let Some(inherits) = &profile.inherits {
-            check_to_add.insert(InternedString::new(inherits));
+            check_to_add.insert(inherits.into());
         }
     }
     // Add the built-in profiles. This is important for things like `cargo
     // test` which implicitly use the "dev" profile for dependencies.
-    for name in &["dev", "release", "test", "bench"] {
-        check_to_add.insert(InternedString::new(name));
+    for name in ["dev", "release", "test", "bench"] {
+        check_to_add.insert(name.into());
     }
     // Add config-only profiles.
     // Need to iterate repeatedly to get all the inherits values.
@@ -1286,7 +1305,7 @@ fn merge_config_profiles(
             if !profiles.contains_key(name.as_str()) {
                 if let Some(config_profile) = get_config_profile(ws, &name)? {
                     if let Some(inherits) = &config_profile.inherits {
-                        check_to_add.insert(InternedString::new(inherits));
+                        check_to_add.insert(inherits.into());
                     }
                     profiles.insert(name, config_profile);
                 }
@@ -1414,7 +1433,12 @@ fn validate_packages_unmatched(
             })
             .collect();
         if name_matches.is_empty() {
-            let suggestion = closest_msg(&spec.name(), resolve.iter(), |p| p.name().as_str());
+            let suggestion = closest_msg(
+                &spec.name(),
+                resolve.iter(),
+                |p| p.name().as_str(),
+                "package",
+            );
             shell.warn(format!(
                 "profile package spec `{}` in profile `{}` did not match any packages{}",
                 spec, name, suggestion

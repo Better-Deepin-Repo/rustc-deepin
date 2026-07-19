@@ -2,41 +2,43 @@
 //! format that works for our parser.
 
 use std::fmt;
+use std::hash::Hash;
 
-use span::Edition;
+use rustc_hash::FxHashMap;
+use span::{Edition, SpanData};
 use syntax::{SyntaxKind, SyntaxKind::*, T};
 
-use tt::buffer::TokenBuffer;
-
-pub fn to_parser_input<S: Copy + fmt::Debug>(
-    edition: Edition,
-    buffer: &TokenBuffer<'_, S>,
+pub fn to_parser_input<Ctx: Copy + fmt::Debug + PartialEq + Eq + Hash>(
+    buffer: tt::TokenTreesView<'_, SpanData<Ctx>>,
+    span_to_edition: &mut dyn FnMut(Ctx) -> Edition,
 ) -> parser::Input {
-    let mut res = parser::Input::default();
+    let mut res = parser::Input::with_capacity(buffer.len());
 
-    let mut current = buffer.begin();
+    let mut current = buffer.cursor();
+    let mut syntax_context_to_edition_cache = FxHashMap::default();
+    let mut ctx_edition =
+        |ctx| *syntax_context_to_edition_cache.entry(ctx).or_insert_with(|| span_to_edition(ctx));
 
     while !current.eof() {
-        let cursor = current;
-        let tt = cursor.token_tree();
+        let tt = current.token_tree();
 
         // Check if it is lifetime
-        if let Some(tt::buffer::TokenTreeRef::Leaf(tt::Leaf::Punct(punct), _)) = tt {
-            if punct.char == '\'' {
-                let next = cursor.bump();
-                match next.token_tree() {
-                    Some(tt::buffer::TokenTreeRef::Leaf(tt::Leaf::Ident(_ident), _)) => {
-                        res.push(LIFETIME_IDENT);
-                        current = next.bump();
-                        continue;
-                    }
-                    _ => panic!("Next token must be ident : {:#?}", next.token_tree()),
+        if let Some(tt::TokenTree::Leaf(tt::Leaf::Punct(punct))) = tt
+            && punct.char == '\''
+        {
+            current.bump();
+            match current.token_tree() {
+                Some(tt::TokenTree::Leaf(tt::Leaf::Ident(ident))) => {
+                    res.push(LIFETIME_IDENT, ctx_edition(ident.span.ctx));
+                    current.bump();
+                    continue;
                 }
+                _ => panic!("Next token must be ident"),
             }
         }
 
-        current = match tt {
-            Some(tt::buffer::TokenTreeRef::Leaf(leaf, _)) => {
+        match tt {
+            Some(tt::TokenTree::Leaf(leaf)) => {
                 match leaf {
                     tt::Leaf::Literal(lit) => {
                         let kind = match lit.kind {
@@ -51,7 +53,7 @@ pub fn to_parser_input<S: Copy + fmt::Debug>(
                             tt::LitKind::CStr | tt::LitKind::CStrRaw(_) => SyntaxKind::C_STRING,
                             tt::LitKind::Err(_) => SyntaxKind::ERROR,
                         };
-                        res.push(kind);
+                        res.push(kind, ctx_edition(lit.span.ctx));
 
                         if kind == FLOAT_NUMBER && !lit.symbol.as_str().ends_with('.') {
                             // Tag the token as joint if it is float with a fractional part
@@ -60,56 +62,56 @@ pub fn to_parser_input<S: Copy + fmt::Debug>(
                             res.was_joint();
                         }
                     }
-                    tt::Leaf::Ident(ident) => match ident.sym.as_str() {
-                        "_" => res.push(T![_]),
-                        i if i.starts_with('\'') => res.push(LIFETIME_IDENT),
-                        _ if ident.is_raw.yes() => res.push(IDENT),
-                        text => match SyntaxKind::from_keyword(text, edition) {
-                            Some(kind) => res.push(kind),
-                            None => {
-                                let contextual_keyword =
-                                    SyntaxKind::from_contextual_keyword(text, edition)
-                                        .unwrap_or(SyntaxKind::IDENT);
-                                res.push_ident(contextual_keyword);
-                            }
-                        },
-                    },
+                    tt::Leaf::Ident(ident) => {
+                        let edition = ctx_edition(ident.span.ctx);
+                        match ident.sym.as_str() {
+                            "_" => res.push(T![_], edition),
+                            i if i.starts_with('\'') => res.push(LIFETIME_IDENT, edition),
+                            _ if ident.is_raw.yes() => res.push(IDENT, edition),
+                            text => match SyntaxKind::from_keyword(text, edition) {
+                                Some(kind) => res.push(kind, edition),
+                                None => {
+                                    let contextual_keyword =
+                                        SyntaxKind::from_contextual_keyword(text, edition)
+                                            .unwrap_or(SyntaxKind::IDENT);
+                                    res.push_ident(contextual_keyword, edition);
+                                }
+                            },
+                        }
+                    }
                     tt::Leaf::Punct(punct) => {
                         let kind = SyntaxKind::from_char(punct.char)
                             .unwrap_or_else(|| panic!("{punct:#?} is not a valid punct"));
-                        res.push(kind);
+                        res.push(kind, ctx_edition(punct.span.ctx));
                         if punct.spacing == tt::Spacing::Joint {
                             res.was_joint();
                         }
                     }
                 }
-                cursor.bump()
+                current.bump();
             }
-            Some(tt::buffer::TokenTreeRef::Subtree(subtree, _)) => {
+            Some(tt::TokenTree::Subtree(subtree)) => {
                 if let Some(kind) = match subtree.delimiter.kind {
                     tt::DelimiterKind::Parenthesis => Some(T!['(']),
                     tt::DelimiterKind::Brace => Some(T!['{']),
                     tt::DelimiterKind::Bracket => Some(T!['[']),
                     tt::DelimiterKind::Invisible => None,
                 } {
-                    res.push(kind);
+                    res.push(kind, ctx_edition(subtree.delimiter.open.ctx));
                 }
-                cursor.subtree().unwrap()
+                current.bump();
             }
-            None => match cursor.end() {
-                Some(subtree) => {
-                    if let Some(kind) = match subtree.delimiter.kind {
-                        tt::DelimiterKind::Parenthesis => Some(T![')']),
-                        tt::DelimiterKind::Brace => Some(T!['}']),
-                        tt::DelimiterKind::Bracket => Some(T![']']),
-                        tt::DelimiterKind::Invisible => None,
-                    } {
-                        res.push(kind);
-                    }
-                    cursor.bump()
+            None => {
+                let subtree = current.end();
+                if let Some(kind) = match subtree.delimiter.kind {
+                    tt::DelimiterKind::Parenthesis => Some(T![')']),
+                    tt::DelimiterKind::Brace => Some(T!['}']),
+                    tt::DelimiterKind::Bracket => Some(T![']']),
+                    tt::DelimiterKind::Invisible => None,
+                } {
+                    res.push(kind, ctx_edition(subtree.delimiter.close.ctx));
                 }
-                None => continue,
-            },
+            }
         };
     }
 

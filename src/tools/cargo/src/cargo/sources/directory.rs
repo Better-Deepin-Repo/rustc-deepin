@@ -4,16 +4,16 @@ use std::path::{Path, PathBuf};
 use std::task::Poll;
 
 use crate::core::{Dependency, Package, PackageId, SourceId};
+use crate::sources::IndexSummary;
+use crate::sources::PathSource;
 use crate::sources::source::MaybePackage;
 use crate::sources::source::QueryKind;
 use crate::sources::source::Source;
-use crate::sources::IndexSummary;
-use crate::sources::PathSource;
-use crate::util::errors::CargoResult;
 use crate::util::GlobalContext;
+use crate::util::errors::CargoResult;
 
 use anyhow::Context as _;
-use cargo_util::{paths, Sha256};
+use cargo_util::{Sha256, paths};
 use serde::Deserialize;
 
 /// `DirectorySource` contains a number of crates on the file system. It was
@@ -32,7 +32,7 @@ use serde::Deserialize;
 ///   level of `Cargo.toml` to ensure the integrity when a directory source was
 ///   created (usually by `cargo vendor`). A failure to find or parse a single
 ///   checksum results in a denial of loading any package in this source.
-/// * Otherwise, there is no other restrction of the name of directories. At
+/// * Otherwise, there is no other restriction of the name of directories. At
 ///   this moment, it is `cargo vendor` that defines the layout and the name of
 ///   each directory.
 ///

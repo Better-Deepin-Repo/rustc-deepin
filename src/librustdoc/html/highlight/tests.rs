@@ -1,9 +1,9 @@
 use expect_test::expect_file;
 use rustc_data_structures::fx::FxIndexMap;
 use rustc_span::create_default_session_globals_then;
+use test::Bencher;
 
 use super::{DecorationInfo, write_code};
-use crate::html::format::Buffer;
 
 const STYLE: &str = r#"
 <style>
@@ -22,9 +22,9 @@ fn test_html_highlighting() {
     create_default_session_globals_then(|| {
         let src = include_str!("fixtures/sample.rs");
         let html = {
-            let mut out = Buffer::new();
-            write_code(&mut out, src, None, None);
-            format!("{STYLE}<pre><code>{}</code></pre>\n", out.into_inner())
+            let mut out = String::new();
+            write_code(&mut out, src, None, None, None);
+            format!("{STYLE}<pre><code>{out}</code></pre>\n")
         };
         expect_file!["fixtures/sample.html"].assert_eq(&html);
     });
@@ -36,9 +36,9 @@ fn test_dos_backline() {
         let src = "pub fn foo() {\r\n\
     println!(\"foo\");\r\n\
 }\r\n";
-        let mut html = Buffer::new();
-        write_code(&mut html, src, None, None);
-        expect_file!["fixtures/dos_line.html"].assert_eq(&html.into_inner());
+        let mut html = String::new();
+        write_code(&mut html, src, None, None, None);
+        expect_file!["fixtures/dos_line.html"].assert_eq(&html);
     });
 }
 
@@ -50,9 +50,9 @@ use self::whatever;
 let x = super::b::foo;
 let y = Self::whatever;";
 
-        let mut html = Buffer::new();
-        write_code(&mut html, src, None, None);
-        expect_file!["fixtures/highlight.html"].assert_eq(&html.into_inner());
+        let mut html = String::new();
+        write_code(&mut html, src, None, None, None);
+        expect_file!["fixtures/highlight.html"].assert_eq(&html);
     });
 }
 
@@ -60,9 +60,9 @@ let y = Self::whatever;";
 fn test_union_highlighting() {
     create_default_session_globals_then(|| {
         let src = include_str!("fixtures/union.rs");
-        let mut html = Buffer::new();
-        write_code(&mut html, src, None, None);
-        expect_file!["fixtures/union.html"].assert_eq(&html.into_inner());
+        let mut html = String::new();
+        write_code(&mut html, src, None, None, None);
+        expect_file!["fixtures/union.html"].assert_eq(&html);
     });
 }
 
@@ -77,8 +77,21 @@ let a = 4;";
         decorations.insert("example", vec![(0, 10), (11, 21)]);
         decorations.insert("example2", vec![(22, 32)]);
 
-        let mut html = Buffer::new();
-        write_code(&mut html, src, None, Some(DecorationInfo(decorations)));
-        expect_file!["fixtures/decorations.html"].assert_eq(&html.into_inner());
+        let mut html = String::new();
+        write_code(&mut html, src, None, Some(&DecorationInfo(decorations)), None);
+        expect_file!["fixtures/decorations.html"].assert_eq(&html);
+    });
+}
+
+#[bench]
+fn bench_html_highlighting(b: &mut Bencher) {
+    let src = include_str!("../../../../compiler/rustc_ast/src/visit.rs");
+
+    create_default_session_globals_then(|| {
+        b.iter(|| {
+            let mut out = String::new();
+            write_code(&mut out, src, None, None, None);
+            out
+        });
     });
 }

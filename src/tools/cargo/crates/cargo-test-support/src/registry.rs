@@ -39,16 +39,16 @@
 //!     "#)
 //!     .build();
 //!
-//! p.cargo("run").with_stdout_data(str!["24"]).run();
+//! // p.cargo("run").with_stdout_data(str!["24"]).run();
 //! ```
 
 use crate::git::repo;
 use crate::paths;
 use crate::publish::{create_index_line, write_to_index};
-use cargo_util::paths::append;
 use cargo_util::Sha256;
-use flate2::write::GzEncoder;
+use cargo_util::paths::append;
 use flate2::Compression;
+use flate2::write::GzEncoder;
 use pasetors::keys::{AsymmetricPublicKey, AsymmetricSecretKey};
 use pasetors::paserk::FormatAsPaserk;
 use pasetors::token::UntrustedToken;
@@ -64,7 +64,7 @@ use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 use url::Url;
 
-/// Path to the local index for psuedo-crates.io.
+/// Path to the local index for pseudo-crates.io.
 ///
 /// This is a Git repo
 /// initialized with a `config.json` file pointing to `dl_path` for downloads
@@ -282,14 +282,14 @@ impl RegistryBuilder {
         self
     }
 
-    /// Sets whether or not to initialize as an alternative registry.
+    /// Initializes as an alternative registry with the given name.
     #[must_use]
     pub fn alternative_named(mut self, alt: &str) -> Self {
         self.alternative = Some(alt.to_string());
         self
     }
 
-    /// Sets whether or not to initialize as an alternative registry.
+    /// Initializes as an alternative registry named "alternative".
     #[must_use]
     pub fn alternative(self) -> Self {
         self.alternative_named("alternative")
@@ -578,6 +578,7 @@ pub struct Package {
     links: Option<String>,
     rust_version: Option<String>,
     cargo_features: Vec<String>,
+    pubtime: Option<String>,
     v: Option<u32>,
 }
 
@@ -622,7 +623,7 @@ struct PackageFile {
 
 const DEFAULT_MODE: u32 = 0o644;
 
-/// Setup a local psuedo-crates.io [`TestRegistry`]
+/// Setup a local pseudo-crates.io [`TestRegistry`]
 ///
 /// This is implicitly called by [`Package::new`].
 ///
@@ -646,15 +647,15 @@ pub struct HttpServerHandle {
 
 impl HttpServerHandle {
     pub fn index_url(&self) -> Url {
-        Url::parse(&format!("sparse+http://{}/index/", self.addr.to_string())).unwrap()
+        Url::parse(&format!("sparse+http://{}/index/", self.addr)).unwrap()
     }
 
     pub fn api_url(&self) -> Url {
-        Url::parse(&format!("http://{}/", self.addr.to_string())).unwrap()
+        Url::parse(&format!("http://{}/", self.addr)).unwrap()
     }
 
     pub fn dl_url(&self) -> Url {
-        Url::parse(&format!("http://{}/dl", self.addr.to_string())).unwrap()
+        Url::parse(&format!("http://{}/dl", self.addr)).unwrap()
     }
 
     fn stop(&self) {
@@ -892,7 +893,7 @@ impl HttpServer {
 
         // - The URL matches the registry base URL
         if footer.url != "https://github.com/rust-lang/crates.io-index"
-            && footer.url != &format!("sparse+http://{}/index/", self.addr.to_string())
+            && footer.url != &format!("sparse+http://{}/index/", self.addr)
         {
             return false;
         }
@@ -1054,6 +1055,19 @@ impl HttpServer {
             code: 500,
             headers: vec![],
             body: br#"internal server error"#.to_vec(),
+        }
+    }
+
+    /// Return too many requests (HTTP 429)
+    pub fn too_many_requests(&self, _req: &Request, delay: std::time::Duration) -> Response {
+        Response {
+            code: 429,
+            headers: vec![format!("Retry-After: {}", delay.as_secs())],
+            body: format!(
+                "too many requests, try again in {} seconds",
+                delay.as_secs()
+            )
+            .into_bytes(),
         }
     }
 
@@ -1230,6 +1244,7 @@ fn save_new_crate(
         new_crate.links,
         new_crate.rust_version.as_deref(),
         None,
+        None,
     );
 
     write_to_index(registry_path, &new_crate.name, line, false);
@@ -1260,6 +1275,7 @@ impl Package {
             links: None,
             rust_version: None,
             cargo_features: Vec::new(),
+            pubtime: None,
             v: None,
         }
     }
@@ -1447,6 +1463,12 @@ impl Package {
         self
     }
 
+    /// The publish time for the package in ISO8601 with UTC timezone (e.g. 2025-11-12T19:30:12Z)
+    pub fn pubtime(&mut self, time: &str) -> &mut Package {
+        self.pubtime = Some(time.to_owned());
+        self
+    }
+
     /// Sets the index schema version for this package.
     ///
     /// See `cargo::sources::registry::IndexPackage` for more information.
@@ -1523,6 +1545,7 @@ impl Package {
                 self.yanked,
                 self.links.clone(),
                 self.rust_version.as_deref(),
+                self.pubtime.as_deref(),
                 self.v,
             )
         };

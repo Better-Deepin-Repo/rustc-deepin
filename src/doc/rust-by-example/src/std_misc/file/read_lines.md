@@ -5,7 +5,7 @@
 This might be a reasonable first attempt for a beginner's first
 implementation for reading lines from a file.
 
-```rust,norun
+```rust,no_run
 use std::fs::read_to_string;
 
 fn read_lines(filename: &str) -> Vec<String> {
@@ -23,11 +23,11 @@ Since the method `lines()` returns an iterator over the lines in the file,
 we can also perform a map inline and collect the results, yielding a more
 concise and fluent expression.
 
-```rust,norun
+```rust,no_run
 use std::fs::read_to_string;
 
 fn read_lines(filename: &str) -> Vec<String> {
-    read_to_string(filename) 
+    read_to_string(filename)
         .unwrap()  // panic on possible file-reading errors
         .lines()  // split the string into an iterator of string slices
         .map(String::from)  // make each slice into a string

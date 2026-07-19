@@ -18,30 +18,38 @@ use indexmap::IndexSet;
 use itertools::Itertools;
 use toml_edit::Item as TomlItem;
 
-use crate::core::dependency::DepKind;
-use crate::core::registry::PackageRegistry;
+use crate::CargoResult;
+use crate::GlobalContext;
+use crate::core::Feature;
 use crate::core::FeatureValue;
 use crate::core::Features;
 use crate::core::Package;
+use crate::core::PackageId;
 use crate::core::Registry;
 use crate::core::Shell;
 use crate::core::Summary;
 use crate::core::Workspace;
+use crate::core::dependency::DepKind;
+use crate::core::registry::PackageRegistry;
+use crate::ops::resolve_ws;
 use crate::sources::source::QueryKind;
+use crate::util::OptVersionReq;
 use crate::util::cache_lock::CacheLockMode;
+use crate::util::edit_distance;
 use crate::util::style;
 use crate::util::toml::lookup_path_base;
 use crate::util::toml_mut::dependency::Dependency;
 use crate::util::toml_mut::dependency::GitSource;
 use crate::util::toml_mut::dependency::MaybeWorkspace;
 use crate::util::toml_mut::dependency::PathSource;
+use crate::util::toml_mut::dependency::RegistrySource;
 use crate::util::toml_mut::dependency::Source;
 use crate::util::toml_mut::dependency::WorkspaceSource;
 use crate::util::toml_mut::manifest::DepTable;
 use crate::util::toml_mut::manifest::LocalManifest;
-use crate::CargoResult;
-use crate::GlobalContext;
 use crate_spec::CrateSpec;
+
+const MAX_FEATURE_PRINTS: usize = 30;
 
 /// Information on what dependencies should be added
 #[derive(Clone, Debug)]
@@ -157,45 +165,74 @@ pub fn add(workspace: &Workspace<'_>, options: &AddOptions<'_>) -> CargoResult<(
             activated.retain(|f| !unknown_features.contains(f));
 
             let mut message = format!(
-                "unrecognized feature{} for crate {}: {}\n",
+                "unrecognized feature{} for crate {}: {}",
                 if unknown_features.len() == 1 { "" } else { "s" },
                 dep.name,
                 unknown_features.iter().format(", "),
             );
             if activated.is_empty() && deactivated.is_empty() {
-                write!(message, "no features available for crate {}", dep.name)?;
+                write!(message, "\n\nno features available for crate {}", dep.name)?;
             } else {
-                if !deactivated.is_empty() {
-                    writeln!(
-                        message,
-                        "disabled features:\n    {}",
-                        deactivated
-                            .iter()
-                            .map(|s| s.to_string())
-                            .coalesce(|x, y| if x.len() + y.len() < 78 {
-                                Ok(format!("{x}, {y}"))
-                            } else {
-                                Err((x, y))
-                            })
-                            .into_iter()
-                            .format("\n    ")
-                    )?
+                let mut suggested = false;
+                for unknown_feature in &unknown_features {
+                    let suggestion = edit_distance::closest_msg(
+                        unknown_feature,
+                        deactivated.iter().chain(activated.iter()),
+                        |dep| *dep,
+                        "feature",
+                    );
+                    if !suggestion.is_empty() {
+                        write!(message, "{suggestion}")?;
+                        suggested = true;
+                    }
                 }
-                if !activated.is_empty() {
-                    writeln!(
-                        message,
-                        "enabled features:\n    {}",
-                        activated
-                            .iter()
-                            .map(|s| s.to_string())
-                            .coalesce(|x, y| if x.len() + y.len() < 78 {
-                                Ok(format!("{x}, {y}"))
-                            } else {
-                                Err((x, y))
-                            })
-                            .into_iter()
-                            .format("\n    ")
-                    )?
+                if !deactivated.is_empty() && !suggested {
+                    if deactivated.len() <= MAX_FEATURE_PRINTS {
+                        write!(
+                            message,
+                            "\n\ndisabled features:\n    {}",
+                            deactivated
+                                .iter()
+                                .map(|s| s.to_string())
+                                .coalesce(|x, y| if x.len() + y.len() < 78 {
+                                    Ok(format!("{x}, {y}"))
+                                } else {
+                                    Err((x, y))
+                                })
+                                .into_iter()
+                                .format("\n    ")
+                        )?;
+                    } else {
+                        write!(
+                            message,
+                            "\n\n{} disabled features available",
+                            deactivated.len()
+                        )?;
+                    }
+                }
+                if !activated.is_empty() && !suggested {
+                    if deactivated.len() + activated.len() <= MAX_FEATURE_PRINTS {
+                        writeln!(
+                            message,
+                            "\n\nenabled features:\n    {}",
+                            activated
+                                .iter()
+                                .map(|s| s.to_string())
+                                .coalesce(|x, y| if x.len() + y.len() < 78 {
+                                    Ok(format!("{x}, {y}"))
+                                } else {
+                                    Err((x, y))
+                                })
+                                .into_iter()
+                                .format("\n    ")
+                        )?;
+                    } else {
+                        writeln!(
+                            message,
+                            "\n\n{} enabled features available",
+                            activated.len()
+                        )?;
+                    }
                 }
             }
             anyhow::bail!(message.trim().to_owned());
@@ -241,11 +278,11 @@ pub fn add(workspace: &Workspace<'_>, options: &AddOptions<'_>) -> CargoResult<(
         }
     }
 
-    if options.gctx.locked() {
+    if let Some(locked_flag) = options.gctx.locked_flag() {
         let new_raw_manifest = manifest.to_string();
         if original_raw_manifest != new_raw_manifest {
             anyhow::bail!(
-                "the manifest file {} needs to be updated but --locked was passed to prevent this",
+                "the manifest file {} needs to be updated but {locked_flag} was passed to prevent this",
                 manifest.path.display()
             );
         }
@@ -439,6 +476,13 @@ fn resolve_dependency(
                 src = src.set_version(v);
             }
             dependency = dependency.set_source(src);
+        } else if let Some((registry, public_source)) =
+            get_public_dependency(spec, manifest, ws, section, gctx, &dependency)?
+        {
+            if let Some(registry) = registry {
+                dependency = dependency.set_registry(registry);
+            }
+            dependency = dependency.set_source(public_source);
         } else {
             let latest =
                 get_latest_dependency(spec, &dependency, honor_rust_version, gctx, registry)?;
@@ -469,6 +513,125 @@ fn resolve_dependency(
         dependency = dependency.clear_version();
     }
 
+    let query = query_dependency(ws, gctx, &mut dependency)?;
+    let dependency = populate_available_features(dependency, &query, registry)?;
+
+    Ok(dependency)
+}
+
+fn get_public_dependency(
+    spec: &Package,
+    manifest: &LocalManifest,
+    ws: &Workspace<'_>,
+    section: &DepTable,
+    gctx: &GlobalContext,
+    dependency: &Dependency,
+) -> CargoResult<Option<(Option<String>, Source)>> {
+    if spec
+        .manifest()
+        .unstable_features()
+        .require(Feature::public_dependency())
+        .is_err()
+    {
+        return Ok(None);
+    }
+
+    let (package_set, resolve) = resolve_ws(ws, true)?;
+
+    let mut latest: Option<(PackageId, OptVersionReq)> = None;
+
+    for (_, path, dep) in manifest.get_dependencies(ws, ws.unstable_features()) {
+        if path != *section {
+            continue;
+        }
+
+        let Some(mut dep) = dep.ok() else {
+            continue;
+        };
+
+        let dep = query_dependency(ws, gctx, &mut dep)?;
+        let Some(dep_pkgid) = package_set
+            .package_ids()
+            .filter(|package_id| {
+                package_id.name() == dep.package_name()
+                    && dep.version_req().matches(package_id.version())
+            })
+            .max_by_key(|x| x.version())
+        else {
+            continue;
+        };
+
+        let mut pkg_ids_and_reqs = Vec::new();
+        let mut pkg_id_queue = VecDeque::new();
+        let mut examined = BTreeSet::new();
+        pkg_id_queue.push_back(dep_pkgid);
+
+        while let Some(dep_pkgid) = pkg_id_queue.pop_front() {
+            let got_deps = resolve.deps(dep_pkgid).filter_map(|(id, deps)| {
+                deps.iter()
+                    .find(|dep| dep.is_public() && dep.kind() == DepKind::Normal)
+                    .map(|dep| (id, dep))
+            });
+
+            for (pkg_id, got_dep) in got_deps {
+                if got_dep.package_name() == dependency.name.as_str() {
+                    pkg_ids_and_reqs.push((pkg_id, got_dep.version_req().clone()));
+                }
+
+                if examined.insert(pkg_id.clone()) {
+                    pkg_id_queue.push_back(pkg_id)
+                }
+            }
+        }
+
+        for (pkg_id, req) in pkg_ids_and_reqs {
+            if let Some((old_pkg_id, _)) = &latest
+                && old_pkg_id.version() >= pkg_id.version()
+            {
+                continue;
+            }
+            latest = Some((pkg_id, req))
+        }
+    }
+
+    let Some((pkg_id, version_req)) = latest else {
+        return Ok(None);
+    };
+
+    let source = pkg_id.source_id();
+    if source.is_git() {
+        Ok(Some((
+            Option::<String>::None,
+            Source::Git(GitSource::new(source.as_encoded_url().to_string())),
+        )))
+    } else if let Some(path) = source.local_path() {
+        Ok(Some((None, Source::Path(PathSource::new(path)))))
+    } else {
+        let toml_source = match version_req {
+            crate::util::OptVersionReq::Any => {
+                Source::Registry(RegistrySource::new(pkg_id.version().to_string()))
+            }
+            crate::util::OptVersionReq::Req(version_req)
+            | crate::util::OptVersionReq::Locked(_, version_req)
+            | crate::util::OptVersionReq::Precise(_, version_req) => {
+                Source::Registry(RegistrySource::new(version_req.to_string()))
+            }
+        };
+        Ok(Some((
+            source
+                .alt_registry_key()
+                .map(|x| x.to_owned())
+                .filter(|_| !source.is_crates_io()),
+            toml_source,
+        )))
+    }
+}
+
+fn query_dependency(
+    ws: &Workspace<'_>,
+    gctx: &GlobalContext,
+    dependency: &mut Dependency,
+) -> CargoResult<crate::core::Dependency> {
     let query = dependency.query(gctx)?;
     let query = match query {
         MaybeWorkspace::Workspace(_workspace) => {
@@ -479,22 +642,23 @@ fn resolve_dependency(
                 ws.unstable_features(),
             )?;
             if let Some(features) = dep.features.clone() {
-                dependency = dependency.set_inherited_features(features);
+                *dependency = dependency.clone().set_inherited_features(features);
             }
             let query = dep.query(gctx)?;
             match query {
                 MaybeWorkspace::Workspace(_) => {
-                    unreachable!("This should have been caught when parsing a workspace root")
+                    anyhow::bail!(
+                        "dependency ({}) specified without \
+                        providing a local path, Git repository, or version",
+                        dependency.toml_key()
+                    );
                 }
                 MaybeWorkspace::Other(query) => query,
             }
         }
         MaybeWorkspace::Other(query) => query,
     };
-
-    let dependency = populate_available_features(dependency, &query, registry)?;
-
-    Ok(dependency)
+    Ok(query)
 }
 
 fn fuzzy_lookup(
@@ -608,8 +772,11 @@ fn get_existing_dependency(
     }
 
     let mut possible: Vec<_> = manifest
-        .get_dependency_versions(dep_key, ws, unstable_features)
-        .map(|(path, dep)| {
+        .get_dependencies(ws, unstable_features)
+        .filter_map(|(key, path, dep)| {
+            if key.as_str() != dep_key {
+                return None;
+            }
             let key = if path == *section {
                 (Key::Existing, true)
             } else if dep.is_err() {
@@ -622,7 +789,7 @@ fn get_existing_dependency(
                 };
                 (key, path.target().is_some())
             };
-            (key, dep)
+            Some((key, dep))
         })
         .collect();
     possible.sort_by_key(|(key, _)| *key);
@@ -781,7 +948,7 @@ fn latest_compatible<'s>(
                 .unwrap_or(true)
         })
         .map(|(s, _)| s)
-        .last()
+        .next_back()
         .copied()
 }
 
@@ -920,7 +1087,7 @@ fn populate_dependency(mut dependency: Dependency, arg: &DepOp) -> Dependency {
 /// Track presentation-layer information with the editable representation of a `[dependencies]`
 /// entry (Dependency)
 pub struct DependencyUI {
-    /// Editable representation of a `[depednencies]` entry
+    /// Editable representation of a `[dependencies]` entry
     dep: Dependency,
     /// The version of the crate that we pulled `available_features` from
     available_version: Option<semver::Version>,
@@ -1114,7 +1281,6 @@ fn print_dep_table_msg(shell: &mut Shell, dep: &DependencyUI) -> CargoResult<()>
 
         writeln!(stderr, "{prefix}Features{suffix}:")?;
 
-        const MAX_FEATURE_PRINTS: usize = 30;
         let total_activated = activated.len();
         let total_deactivated = deactivated.len();
 

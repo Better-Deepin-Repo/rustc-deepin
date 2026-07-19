@@ -2,10 +2,10 @@
 
 use std::fs;
 
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::{
-    basic_manifest, paths, project, project_in_home, rustc_host, str, RawOutput,
+    RawOutput, basic_manifest, paths, project, project_in_home, rustc_host, str,
 };
 use snapbox::assert_data_eq;
 
@@ -1441,12 +1441,12 @@ fn env_rustflags_misspelled() {
     for cmd in &["check", "build", "run", "test", "bench"] {
         p.cargo(cmd)
             .env("RUST_FLAGS", "foo")
-            .with_stderr_data(
-                "\
-[WARNING] Cargo does not read `RUST_FLAGS` environment variable. Did you mean `RUSTFLAGS`?
+            .with_stderr_data(str![[r#"
+[WARNING] ignoring environment variable `RUST_FLAGS`
+  |
+  = [HELP] rust flags are passed via `RUSTFLAGS`
 ...
-",
-            )
+"#]])
             .run();
     }
 }
@@ -1471,7 +1471,9 @@ fn env_rustflags_misspelled_build_script() {
     p.cargo("check")
         .env("RUST_FLAGS", "foo")
         .with_stderr_data(str![[r#"
-[WARNING] Cargo does not read `RUST_FLAGS` environment variable. Did you mean `RUSTFLAGS`?
+[WARNING] ignoring environment variable `RUST_FLAGS`
+  |
+  = [HELP] rust flags are passed via `RUSTFLAGS`
 [COMPILING] foo v0.0.1 ([ROOT]/foo)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 

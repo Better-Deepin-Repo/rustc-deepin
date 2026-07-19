@@ -3,7 +3,7 @@ use std::cmp::min;
 
 use itertools::Itertools;
 use rustc_ast::token::{Delimiter, Lit, LitKind};
-use rustc_ast::{ForLoopKind, MatchKind, ast, ptr, token};
+use rustc_ast::{ForLoopKind, MatchKind, ast, token};
 use rustc_span::{BytePos, Span};
 use tracing::debug;
 
@@ -137,6 +137,10 @@ pub(crate) fn format_expr(
         ast::ExprKind::Tup(ref items) => {
             rewrite_tuple(context, items.iter(), expr.span, shape, items.len() == 1)
         }
+        ast::ExprKind::Use(_, _) => {
+            // FIXME: properly implement this
+            Ok(context.snippet(expr.span()).to_owned())
+        }
         ast::ExprKind::Let(ref pat, ref expr, _span, _) => rewrite_let(context, shape, pat, expr),
         ast::ExprKind::If(..)
         | ast::ExprKind::ForLoop { .. }
@@ -217,7 +221,7 @@ pub(crate) fn format_expr(
                 Ok(format!("break{id_str}"))
             }
         }
-        ast::ExprKind::Yield(ref opt_expr) => {
+        ast::ExprKind::Yield(ast::YieldKind::Prefix(ref opt_expr)) => {
             if let Some(ref expr) = *opt_expr {
                 rewrite_unary_prefix(context, "yield ", &**expr, shape)
             } else {
@@ -239,9 +243,10 @@ pub(crate) fn format_expr(
         ast::ExprKind::Try(..)
         | ast::ExprKind::Field(..)
         | ast::ExprKind::MethodCall(..)
-        | ast::ExprKind::Await(_, _) => rewrite_chain(expr, context, shape),
+        | ast::ExprKind::Await(_, _)
+        | ast::ExprKind::Yield(ast::YieldKind::Postfix(_)) => rewrite_chain(expr, context, shape),
         ast::ExprKind::MacCall(ref mac) => {
-            rewrite_macro(mac, None, context, shape, MacroPosition::Expression).or_else(|_| {
+            rewrite_macro(mac, context, shape, MacroPosition::Expression).or_else(|_| {
                 wrap_str(
                     context.snippet(expr.span).to_owned(),
                     context.config.max_width(),
@@ -1363,7 +1368,7 @@ fn choose_separator_tactic(context: &RewriteContext<'_>, span: Span) -> Option<S
 pub(crate) fn rewrite_call(
     context: &RewriteContext<'_>,
     callee: &str,
-    args: &[ptr::P<ast::Expr>],
+    args: &[Box<ast::Expr>],
     span: Span,
     shape: Shape,
 ) -> RewriteResult {
@@ -1629,7 +1634,7 @@ fn struct_lit_can_be_aligned(fields: &[ast::ExprField], has_base: bool) -> bool 
 fn rewrite_struct_lit<'a>(
     context: &RewriteContext<'_>,
     path: &ast::Path,
-    qself: &Option<ptr::P<ast::QSelf>>,
+    qself: &Option<Box<ast::QSelf>>,
     fields: &'a [ast::ExprField],
     struct_rest: &ast::StructRest,
     attrs: &[ast::Attribute],
@@ -2053,7 +2058,7 @@ fn rewrite_assignment(
     context: &RewriteContext<'_>,
     lhs: &ast::Expr,
     rhs: &ast::Expr,
-    op: Option<&ast::BinOp>,
+    op: Option<&ast::AssignOp>,
     shape: Shape,
 ) -> RewriteResult {
     let operator_str = match op {
@@ -2284,8 +2289,10 @@ fn rewrite_expr_addrof(
 ) -> RewriteResult {
     let operator_str = match (mutability, borrow_kind) {
         (ast::Mutability::Not, ast::BorrowKind::Ref) => "&",
+        (ast::Mutability::Not, ast::BorrowKind::Pin) => "&pin const ",
         (ast::Mutability::Not, ast::BorrowKind::Raw) => "&raw const ",
         (ast::Mutability::Mut, ast::BorrowKind::Ref) => "&mut ",
+        (ast::Mutability::Mut, ast::BorrowKind::Pin) => "&pin mut ",
         (ast::Mutability::Mut, ast::BorrowKind::Raw) => "&raw mut ",
     };
     rewrite_unary_prefix(context, operator_str, expr, shape)

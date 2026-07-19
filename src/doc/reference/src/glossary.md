@@ -11,6 +11,14 @@ The alignment of a value specifies what addresses values are preferred to
 start at. Always a power of two. References to a value must be aligned.
 [More][alignment].
 
+r[glossary.abi]
+### Application binary interface (ABI)
+
+An *application binary interface* (ABI) defines how compiled code interacts with other compiled code. With [`extern` blocks] and [`extern fn`], *ABI strings* affect:
+
+- **Calling convention**: How function arguments are passed, values are returned (e.g., in registers or on the stack), and who is responsible for cleaning up the stack.
+- **Unwinding**: Whether stack unwinding is allowed. For example, the `"C-unwind"` ABI allows unwinding across the FFI boundary, while the `"C"` ABI does not.
+
 ### Arity
 
 Arity refers to the number of arguments a function or operator takes.
@@ -62,10 +70,7 @@ root, including through [paths] of public modules.
 
 ### Dispatch
 
-Dispatch is the mechanism to determine which specific version of code is actually
-run when it involves polymorphism. Two major forms of dispatch are static dispatch and
-dynamic dispatch. While Rust favors static dispatch, it also supports dynamic dispatch
-through a mechanism called ‘trait objects’.
+Dispatch is the mechanism to determine which specific version of code is actually run when it involves polymorphism. Two major forms of dispatch are static dispatch and dynamic dispatch. Rust supports dynamic dispatch through the use of [trait objects][type.trait-object].
 
 ### Dynamically sized type
 
@@ -290,6 +295,8 @@ uninhabited type is "empty" in the sense that there are no values of the type. T
 example of an uninhabited type is the [never type] `!`, or an enum with no variants
 `enum Never { }`. Opposite of [Inhabited](#inhabited).
 
+[`extern` blocks]: items.extern
+[`extern fn`]: items.fn.extern
 [alignment]: type-layout.md#size-and-alignment
 [associated item]: #associated-item
 [attributes]: attributes.md
@@ -331,17 +338,3 @@ example of an uninhabited type is the [never type] `!`, or an enum with no varia
 [unions]: items/unions.md
 [variable bindings]: patterns.md
 [visibility rules]: visibility-and-privacy.md
-
-<script>
-(function() {
-    var fragments = {
-        "#object-safe-traits": "glossary.html#dyn-compatible-traits",
-    };
-    var target = fragments[window.location.hash];
-    if (target) {
-        var url = window.location.toString();
-        var base = url.substring(0, url.lastIndexOf('/'));
-        window.location.replace(base + "/" + target);
-    }
-})();
-</script>

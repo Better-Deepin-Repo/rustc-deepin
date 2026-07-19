@@ -27,7 +27,7 @@ pub(super) struct SimplifyComparisonIntegral;
 
 impl<'tcx> crate::MirPass<'tcx> for SimplifyComparisonIntegral {
     fn is_enabled(&self, sess: &rustc_session::Session) -> bool {
-        sess.mir_opt_level() > 0
+        sess.mir_opt_level() > 0 && sess.opts.unstable_opts.unsound_mir_opts
     }
 
     fn run_pass(&self, tcx: TyCtxt<'tcx>, body: &mut Body<'tcx>) {
@@ -74,9 +74,9 @@ impl<'tcx> crate::MirPass<'tcx> for SimplifyComparisonIntegral {
             }
 
             // delete comparison statement if it the value being switched on was moved, which means
-            // it can not be user later on
+            // it can not be used later on
             if opt.can_remove_bin_op_stmt {
-                bb.statements[opt.bin_op_stmt_idx].make_nop();
+                bb.statements[opt.bin_op_stmt_idx].make_nop(true);
             } else {
                 // if the integer being compared to a const integral is being moved into the
                 // comparison, e.g `_2 = Eq(move _3, const 'x');`
@@ -89,10 +89,10 @@ impl<'tcx> crate::MirPass<'tcx> for SimplifyComparisonIntegral {
 
                 use Operand::*;
                 match rhs {
-                    Rvalue::BinaryOp(_, box (ref mut left @ Move(_), Constant(_))) => {
+                    Rvalue::BinaryOp(_, box (left @ Move(_), Constant(_))) => {
                         *left = Copy(opt.to_switch_on);
                     }
-                    Rvalue::BinaryOp(_, box (Constant(_), ref mut right @ Move(_))) => {
+                    Rvalue::BinaryOp(_, box (Constant(_), right @ Move(_))) => {
                         *right = Copy(opt.to_switch_on);
                     }
                     _ => (),
@@ -113,10 +113,13 @@ impl<'tcx> crate::MirPass<'tcx> for SimplifyComparisonIntegral {
                 // if we have StorageDeads to remove then make sure to insert them at the top of
                 // each target
                 for bb_idx in new_targets.all_targets() {
-                    storage_deads_to_insert.push((*bb_idx, Statement {
-                        source_info: terminator.source_info,
-                        kind: StatementKind::StorageDead(opt.to_switch_on.local),
-                    }));
+                    storage_deads_to_insert.push((
+                        *bb_idx,
+                        Statement::new(
+                            terminator.source_info,
+                            StatementKind::StorageDead(opt.to_switch_on.local),
+                        ),
+                    ));
                 }
             }
 
@@ -133,12 +136,16 @@ impl<'tcx> crate::MirPass<'tcx> for SimplifyComparisonIntegral {
         }
 
         for (idx, bb_idx) in storage_deads_to_remove {
-            body.basic_blocks_mut()[bb_idx].statements[idx].make_nop();
+            body.basic_blocks_mut()[bb_idx].statements[idx].make_nop(true);
         }
 
         for (idx, stmt) in storage_deads_to_insert {
             body.basic_blocks_mut()[idx].statements.insert(0, stmt);
         }
+    }
+
+    fn is_required(&self) -> bool {
+        false
     }
 }
 

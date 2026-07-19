@@ -101,8 +101,9 @@ fn convert_to_hir_projections_and_truncate_for_capture(
                 variant = Some(*idx);
                 continue;
             }
+            ProjectionElem::UnwrapUnsafeBinder(_) => HirProjectionKind::UnwrapUnsafeBinder,
             // These do not affect anything, they just make sure we know the right type.
-            ProjectionElem::OpaqueCast(_) | ProjectionElem::Subtype(..) => continue,
+            ProjectionElem::OpaqueCast(_) => continue,
             ProjectionElem::Index(..)
             | ProjectionElem::ConstantIndex { .. }
             | ProjectionElem::Subslice { .. } => {
@@ -158,7 +159,7 @@ fn find_capture_matching_projections<'a, 'tcx>(
 ) -> Option<(usize, &'a Capture<'tcx>)> {
     let hir_projections = convert_to_hir_projections_and_truncate_for_capture(projections);
 
-    upvars.get_by_key_enumerated(var_hir_id.0).find(|(_, capture)| {
+    upvars.get_by_key_enumerated(var_hir_id.0.local_id).find(|(_, capture)| {
         let possible_ancestor_proj_kinds: Vec<_> =
             capture.captured_place.place.projections.iter().map(|proj| proj.kind).collect();
         is_ancestor_or_same_capture(&possible_ancestor_proj_kinds, &hir_projections)
@@ -215,11 +216,11 @@ fn to_upvars_resolved_place_builder<'tcx>(
 /// Supports only HIR projection kinds that represent a path that might be
 /// captured by a closure or a coroutine, i.e., an `Index` or a `Subslice`
 /// projection kinds are unsupported.
-fn strip_prefix<'a, 'tcx>(
+fn strip_prefix<'tcx>(
     mut base_ty: Ty<'tcx>,
-    projections: &'a [PlaceElem<'tcx>],
+    projections: &[PlaceElem<'tcx>],
     prefix_projections: &[HirProjection<'tcx>],
-) -> impl Iterator<Item = PlaceElem<'tcx>> + 'a {
+) -> impl Iterator<Item = PlaceElem<'tcx>> {
     let mut iter = projections
         .iter()
         .copied()
@@ -239,6 +240,9 @@ fn strip_prefix<'a, 'tcx>(
             HirProjectionKind::OpaqueCast => {
                 assert_matches!(iter.next(), Some(ProjectionElem::OpaqueCast(..)));
             }
+            HirProjectionKind::UnwrapUnsafeBinder => {
+                assert_matches!(iter.next(), Some(ProjectionElem::UnwrapUnsafeBinder(..)));
+            }
             HirProjectionKind::Index | HirProjectionKind::Subslice => {
                 bug!("unexpected projection kind: {:?}", projection);
             }
@@ -257,7 +261,7 @@ impl<'tcx> PlaceBuilder<'tcx> {
                 self.projection
             ),
             PlaceBase::Upvar { var_hir_id, closure_def_id: _ } => span_bug!(
-                cx.tcx.hir().span(var_hir_id.0),
+                cx.tcx.hir_span(var_hir_id.0),
                 "could not resolve upvar: {var_hir_id:?} + {:?}",
                 self.projection
             ),
@@ -419,7 +423,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         let expr = &self.thir[expr_id];
         debug!("expr_as_place(block={:?}, expr={:?}, mutability={:?})", block, expr, mutability);
 
-        let this = self;
+        let this = self; // See "LET_THIS_SELF".
         let expr_span = expr.span;
         let source_info = this.source_info(expr_span);
         match expr.kind {
@@ -450,7 +454,6 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 index,
                 mutability,
                 fake_borrow_temps,
-                expr.temp_lifetime,
                 expr_span,
                 source_info,
             ),
@@ -483,24 +486,26 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                         });
 
                     let place = place_builder.to_place(this);
-                    this.cfg.push(block, Statement {
-                        source_info: ty_source_info,
-                        kind: StatementKind::AscribeUserType(
-                            Box::new((place, UserTypeProjection {
-                                base: annotation_index,
-                                projs: vec![],
-                            })),
-                            Variance::Invariant,
+                    this.cfg.push(
+                        block,
+                        Statement::new(
+                            ty_source_info,
+                            StatementKind::AscribeUserType(
+                                Box::new((
+                                    place,
+                                    UserTypeProjection { base: annotation_index, projs: vec![] },
+                                )),
+                                Variance::Invariant,
+                            ),
                         ),
-                    });
+                    );
                 }
                 block.and(place_builder)
             }
             ExprKind::ValueTypeAscription { source, ref user_ty, user_ty_span } => {
-                let source_expr = &this.thir[source];
-                let temp = unpack!(
-                    block = this.as_temp(block, source_expr.temp_lifetime, source, mutability)
-                );
+                let temp_lifetime =
+                    this.region_scope_tree.temporary_scope(this.thir[source].temp_scope_id);
+                let temp = unpack!(block = this.as_temp(block, temp_lifetime, source, mutability));
                 if let Some(user_ty) = user_ty {
                     let ty_source_info = this.source_info(user_ty_span);
                     let annotation_index =
@@ -509,18 +514,34 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                             user_ty: user_ty.clone(),
                             inferred_ty: expr.ty,
                         });
-                    this.cfg.push(block, Statement {
-                        source_info: ty_source_info,
-                        kind: StatementKind::AscribeUserType(
-                            Box::new((Place::from(temp), UserTypeProjection {
-                                base: annotation_index,
-                                projs: vec![],
-                            })),
-                            Variance::Invariant,
+                    this.cfg.push(
+                        block,
+                        Statement::new(
+                            ty_source_info,
+                            StatementKind::AscribeUserType(
+                                Box::new((
+                                    Place::from(temp),
+                                    UserTypeProjection { base: annotation_index, projs: vec![] },
+                                )),
+                                Variance::Invariant,
+                            ),
                         ),
-                    });
+                    );
                 }
                 block.and(PlaceBuilder::from(temp))
+            }
+
+            ExprKind::PlaceUnwrapUnsafeBinder { source } => {
+                let place_builder = unpack!(
+                    block = this.expr_as_place(block, source, mutability, fake_borrow_temps,)
+                );
+                block.and(place_builder.project(PlaceElem::UnwrapUnsafeBinder(expr.ty)))
+            }
+            ExprKind::ValueUnwrapUnsafeBinder { source } => {
+                let temp_lifetime =
+                    this.region_scope_tree.temporary_scope(this.thir[source].temp_scope_id);
+                let temp = unpack!(block = this.as_temp(block, temp_lifetime, source, mutability));
+                block.and(PlaceBuilder::from(temp).project(PlaceElem::UnwrapUnsafeBinder(expr.ty)))
             }
 
             ExprKind::Array { .. }
@@ -541,12 +562,14 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             | ExprKind::Match { .. }
             | ExprKind::If { .. }
             | ExprKind::Loop { .. }
+            | ExprKind::LoopMatch { .. }
             | ExprKind::Block { .. }
             | ExprKind::Let { .. }
             | ExprKind::Assign { .. }
             | ExprKind::AssignOp { .. }
             | ExprKind::Break { .. }
             | ExprKind::Continue { .. }
+            | ExprKind::ConstContinue { .. }
             | ExprKind::Return { .. }
             | ExprKind::Become { .. }
             | ExprKind::Literal { .. }
@@ -557,14 +580,15 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             | ExprKind::ConstBlock { .. }
             | ExprKind::StaticRef { .. }
             | ExprKind::InlineAsm { .. }
-            | ExprKind::OffsetOf { .. }
             | ExprKind::Yield { .. }
             | ExprKind::ThreadLocalRef(_)
-            | ExprKind::Call { .. } => {
+            | ExprKind::Call { .. }
+            | ExprKind::ByUse { .. }
+            | ExprKind::WrapUnsafeBinder { .. } => {
                 // these are not places, so we need to make a temporary.
                 debug_assert!(!matches!(Category::of(&expr.kind), Some(Category::Place)));
-                let temp =
-                    unpack!(block = this.as_temp(block, expr.temp_lifetime, expr_id, mutability));
+                let temp_lifetime = this.region_scope_tree.temporary_scope(expr.temp_scope_id);
+                let temp = unpack!(block = this.as_temp(block, temp_lifetime, expr_id, mutability));
                 block.and(PlaceBuilder::from(temp))
             }
         }
@@ -597,7 +621,6 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         index: ExprId,
         mutability: Mutability,
         fake_borrow_temps: Option<&mut Vec<Local>>,
-        temp_lifetime: TempLifetime,
         expr_span: Span,
         source_info: SourceInfo,
     ) -> BlockAnd<PlaceBuilder<'tcx>> {
@@ -611,7 +634,11 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         // Making this a *fresh* temporary means we do not have to worry about
         // the index changing later: Nothing will ever change this temporary.
         // The "retagging" transformation (for Stacked Borrows) relies on this.
-        let idx = unpack!(block = self.as_temp(block, temp_lifetime, index, Mutability::Not));
+        // Using the enclosing temporary scope for the index ensures it will live past where this
+        // place is used. This lifetime may be larger than strictly necessary but it means we don't
+        // need to pass a scope for operands to `as_place`.
+        let index_lifetime = self.region_scope_tree.temporary_scope(self.thir[index].temp_scope_id);
+        let idx = unpack!(block = self.as_temp(block, index_lifetime, index, Mutability::Not));
 
         block = self.bounds_check(block, &base_place, idx, expr_span, source_info);
 
@@ -630,6 +657,69 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         block.and(base_place.index(idx))
     }
 
+    /// Given a place that's either an array or a slice, returns an operand
+    /// with the length of the array/slice.
+    ///
+    /// For arrays it'll be `Operand::Constant` with the actual length;
+    /// For slices it'll be `Operand::Move` of a local using `PtrMetadata`.
+    pub(in crate::builder) fn len_of_slice_or_array(
+        &mut self,
+        block: BasicBlock,
+        place: Place<'tcx>,
+        span: Span,
+        source_info: SourceInfo,
+    ) -> Operand<'tcx> {
+        let place_ty = place.ty(&self.local_decls, self.tcx).ty;
+        match place_ty.kind() {
+            ty::Array(_elem_ty, len_const) => {
+                // We know how long an array is, so just use that as a constant
+                // directly -- no locals needed. We do need one statement so
+                // that borrow- and initialization-checking consider it used,
+                // though. FIXME: Do we really *need* to count this as a use?
+                // Could partial array tracking work off something else instead?
+                self.cfg.push_fake_read(block, source_info, FakeReadCause::ForIndex, place);
+                let const_ = Const::Ty(self.tcx.types.usize, *len_const);
+                Operand::Constant(Box::new(ConstOperand { span, user_ty: None, const_ }))
+            }
+            ty::Slice(_elem_ty) => {
+                let ptr_or_ref = if let [PlaceElem::Deref] = place.projection[..]
+                    && let local_ty = self.local_decls[place.local].ty
+                    && local_ty.is_trivially_pure_clone_copy()
+                {
+                    // It's extremely common that we have something that can be
+                    // directly passed to `PtrMetadata`, so avoid an unnecessary
+                    // temporary and statement in those cases. Note that we can
+                    // only do that for `Copy` types -- not `&mut [_]` -- because
+                    // the MIR we're building here needs to pass NLL later.
+                    Operand::Copy(Place::from(place.local))
+                } else {
+                    let ptr_ty = Ty::new_imm_ptr(self.tcx, place_ty);
+                    let slice_ptr = self.temp(ptr_ty, span);
+                    self.cfg.push_assign(
+                        block,
+                        source_info,
+                        slice_ptr,
+                        Rvalue::RawPtr(RawPtrKind::FakeForPtrMetadata, place),
+                    );
+                    Operand::Move(slice_ptr)
+                };
+
+                let len = self.temp(self.tcx.types.usize, span);
+                self.cfg.push_assign(
+                    block,
+                    source_info,
+                    len,
+                    Rvalue::UnaryOp(UnOp::PtrMetadata, ptr_or_ref),
+                );
+
+                Operand::Move(len)
+            }
+            _ => {
+                span_bug!(span, "len called on place of type {place_ty:?}")
+            }
+        }
+    }
+
     fn bounds_check(
         &mut self,
         block: BasicBlock,
@@ -638,25 +728,25 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         expr_span: Span,
         source_info: SourceInfo,
     ) -> BasicBlock {
-        let usize_ty = self.tcx.types.usize;
-        let bool_ty = self.tcx.types.bool;
-        // bounds check:
-        let len = self.temp(usize_ty, expr_span);
-        let lt = self.temp(bool_ty, expr_span);
+        let slice = slice.to_place(self);
 
         // len = len(slice)
-        self.cfg.push_assign(block, source_info, len, Rvalue::Len(slice.to_place(self)));
+        let len = self.len_of_slice_or_array(block, slice, expr_span, source_info);
+
         // lt = idx < len
+        let bool_ty = self.tcx.types.bool;
+        let lt = self.temp(bool_ty, expr_span);
         self.cfg.push_assign(
             block,
             source_info,
             lt,
             Rvalue::BinaryOp(
                 BinOp::Lt,
-                Box::new((Operand::Copy(Place::from(index)), Operand::Copy(len))),
+                Box::new((Operand::Copy(Place::from(index)), len.to_copy())),
             ),
         );
-        let msg = BoundsCheck { len: Operand::Move(len), index: Operand::Copy(Place::from(index)) };
+        let msg = BoundsCheck { len, index: Operand::Copy(Place::from(index)) };
+
         // assert!(lt, "...")
         self.assert(block, Operand::Move(lt), true, msg, expr_span)
     }
@@ -711,9 +801,9 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     ProjectionElem::Field(..)
                     | ProjectionElem::Downcast(..)
                     | ProjectionElem::OpaqueCast(..)
-                    | ProjectionElem::Subtype(..)
                     | ProjectionElem::ConstantIndex { .. }
-                    | ProjectionElem::Subslice { .. } => (),
+                    | ProjectionElem::Subslice { .. }
+                    | ProjectionElem::UnwrapUnsafeBinder(_) => (),
                 }
             }
         }

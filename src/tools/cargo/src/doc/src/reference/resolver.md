@@ -3,11 +3,12 @@
 One of Cargo's primary tasks is to determine the versions of dependencies to
 use based on the version requirements specified in each package. This process
 is called "dependency resolution" and is performed by the "resolver". The
-result of the resolution is stored in the `Cargo.lock` file which "locks" the
+result of the resolution is stored in the [`Cargo.lock` file] which "locks" the
 dependencies to specific versions, and keeps them fixed over time.
 The [`cargo tree`] command can be used to visualize the result of the
 resolver.
 
+[`Cargo.lock` file]: ../guide/cargo-toml-vs-cargo-lock.md
 [dependency specifications]: specifying-dependencies.md
 [dependency specification]: specifying-dependencies.md
 [`cargo tree`]: ../commands/cargo-tree.md
@@ -23,11 +24,11 @@ This pseudo-code approximates what Cargo's resolver does:
 pub fn resolve(workspace: &[Package], policy: Policy) -> Option<ResolveGraph> {
     let dep_queue = Queue::new(workspace);
     let resolved = ResolveGraph::new();
-    resolve_next(pkq_queue, resolved, policy)
+    resolve_next(dep_queue, resolved, policy)
 }
 
 fn resolve_next(dep_queue: Queue, resolved: ResolveGraph, policy: Policy) -> Option<ResolveGraph> {
-    let Some(dep_spec) = policy.pick_next_dep(dep_queue) else {
+    let Some(dep_spec) = policy.pick_next_dep(&mut dep_queue) else {
         // Done
         return Some(resolved);
     };
@@ -39,15 +40,15 @@ fn resolve_next(dep_queue: Queue, resolved: ResolveGraph, policy: Policy) -> Opt
     let dep_versions = dep_spec.lookup_versions()?;
     let mut dep_versions = policy.filter_versions(dep_spec, dep_versions);
     while let Some(dep_version) = policy.pick_next_version(&mut dep_versions) {
-        if policy.needs_version_unification(dep_version, &resolved) {
+        if policy.needs_version_unification(&dep_version, &resolved) {
             continue;
         }
 
         let mut dep_queue = dep_queue.clone();
-        dep_queue.enqueue(dep_version.dependencies);
+        dep_queue.enqueue(&dep_version.dependencies);
         let mut resolved = resolved.clone();
         resolved.register(dep_version);
-        if let Some(resolved) = resolve_next(dep_queue, resolved) {
+        if let Some(resolved) = resolve_next(dep_queue, resolved, policy) {
             return Some(resolved);
         }
     }
@@ -189,7 +190,7 @@ These incompatibilities usually manifest as a compile-time error, but
 sometimes they will only appear as a runtime misbehavior. For example, let's
 say there is a common library named `foo` that ends up appearing with both
 version `1.0.0` and `2.0.0` in the resolve graph. If [`downcast_ref`] is used
-on a object created by a library using version `1.0.0`, and the code calling
+on an object created by a library using version `1.0.0`, and the code calling
 `downcast_ref` is downcasting to a type from version `2.0.0`, the downcast
 will fail at runtime.
 
@@ -203,6 +204,30 @@ ecosystem if you publish a SemVer-incompatible version of a popular library.
 [semver trick]: https://github.com/dtolnay/semver-trick
 [`downcast_ref`]: ../../std/any/trait.Any.html#method.downcast_ref
 
+### Lock file
+
+Cargo gives the highest priority to versions contained in the [`Cargo.lock` file], when used.
+This is intended to balance reproducible builds with adjusting to changes in the manifest.
+
+For example, if you had a package in the resolve graph with:
+```toml
+[dependencies]
+bitflags = "*"
+```
+If at the time your `Cargo.lock` file is generated, the greatest version of
+`bitflags` is `1.2.1`, then the package will use `1.2.1` and recorded in the `Cargo.lock` file.
+
+By the time Cargo next runs, `bitflags` `1.3.5` is out.
+When resolving dependencies,
+`1.2.1` will still be used because it is present in your `Cargo.lock` file.
+
+The package is then edited to:
+```toml
+[dependencies]
+bitflags = "1.3.0"
+```
+`bitflags` `1.2.1` does not match this version requirement and so that entry in your `Cargo.lock` file is ignored and version `1.3.5` will now be used and recorded in your `Cargo.lock` file.
+
 ### Rust version
 
 To support developing software with a minimum supported [Rust version],
@@ -210,7 +235,7 @@ the resolver can take into account a dependency version's compatibility with you
 This is controlled by the config field [`resolver.incompatible-rust-versions`].
 
 With the `fallback` setting, the resolver will prefer packages with a Rust version that is
-equal to or greater than your own Rust version.
+less than or equal to your own Rust version.
 For example, you are using Rust 1.85 to develop the following package:
 ```toml
 [package]
@@ -697,19 +722,3 @@ circumstances:
   dependency.
 
 [`cargo install`]: ../commands/cargo-install.md
-
-<script>
-(function() {
-    var fragments = {
-        "#version-metadata": "specifying-dependencies.html#version-metadata",
-        "#pre-releases": "specifying-dependencies.html#pre-releases",
-        "#other-constraints": "#constraints-and-heuristics",
-    };
-    var target = fragments[window.location.hash];
-    if (target) {
-        var url = window.location.toString();
-        var base = url.substring(0, url.lastIndexOf('/'));
-        window.location.replace(base + "/" + target);
-    }
-})();
-</script>

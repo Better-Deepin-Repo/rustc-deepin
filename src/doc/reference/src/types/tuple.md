@@ -1,12 +1,12 @@
+r[type.tuple]
 # Tuple types
 
-r[type.tuple]
-
 r[type.tuple.syntax]
-> **<sup>Syntax</sup>**\
-> _TupleType_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `(` `)`\
-> &nbsp;&nbsp; | `(` ( [_Type_] `,` )<sup>+</sup> [_Type_]<sup>?</sup> `)`
+```grammar,types
+TupleType ->
+      `(` `)`
+    | `(` ( Type `,` )+ Type? `)`
+```
 
 r[type.tuple.intro]
 *Tuple types* are a family of structural types[^1] for heterogeneous lists of other types.
@@ -52,7 +52,6 @@ Tuple fields can be accessed by either a [tuple index expression] or [pattern ma
 [^1]: Structural types are always equivalent if their internal types are equivalent.
       For a nominal version of tuples, see [tuple structs].
 
-[_Type_]: ../types.md#type-expressions
 [parenthesized type]: ../types.md#parenthesized-types
 [pattern matching]: ../patterns.md#tuple-patterns
 [tuple expression]: ../expressions/tuple-expr.md#tuple-expressions

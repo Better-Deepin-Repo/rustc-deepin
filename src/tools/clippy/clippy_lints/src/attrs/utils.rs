@@ -17,20 +17,20 @@ pub(super) fn is_word(nmi: &MetaItemInner, expected: Symbol) -> bool {
 }
 
 pub(super) fn is_lint_level(symbol: Symbol, attr_id: AttrId) -> bool {
-    Level::from_symbol(symbol, Some(attr_id)).is_some()
+    Level::from_symbol(symbol, || Some(attr_id)).is_some()
 }
 
 pub(super) fn is_relevant_item(cx: &LateContext<'_>, item: &Item<'_>) -> bool {
-    if let ItemKind::Fn(_, _, eid) = item.kind {
-        is_relevant_expr(cx, cx.tcx.typeck_body(eid), cx.tcx.hir().body(eid).value)
+    if let ItemKind::Fn { body: eid, .. } = item.kind {
+        is_relevant_expr(cx, cx.tcx.typeck_body(eid), cx.tcx.hir_body(eid).value)
     } else {
-        true
+        false
     }
 }
 
 pub(super) fn is_relevant_impl(cx: &LateContext<'_>, item: &ImplItem<'_>) -> bool {
     match item.kind {
-        ImplItemKind::Fn(_, eid) => is_relevant_expr(cx, cx.tcx.typeck_body(eid), cx.tcx.hir().body(eid).value),
+        ImplItemKind::Fn(_, eid) => is_relevant_expr(cx, cx.tcx.typeck_body(eid), cx.tcx.hir_body(eid).value),
         _ => false,
     }
 }
@@ -39,18 +39,20 @@ pub(super) fn is_relevant_trait(cx: &LateContext<'_>, item: &TraitItem<'_>) -> b
     match item.kind {
         TraitItemKind::Fn(_, TraitFn::Required(_)) => true,
         TraitItemKind::Fn(_, TraitFn::Provided(eid)) => {
-            is_relevant_expr(cx, cx.tcx.typeck_body(eid), cx.tcx.hir().body(eid).value)
+            is_relevant_expr(cx, cx.tcx.typeck_body(eid), cx.tcx.hir_body(eid).value)
         },
         _ => false,
     }
 }
 
 fn is_relevant_block(cx: &LateContext<'_>, typeck_results: &ty::TypeckResults<'_>, block: &Block<'_>) -> bool {
-    block.stmts.first().map_or(
-        block
-            .expr
-            .as_ref()
-            .is_some_and(|e| is_relevant_expr(cx, typeck_results, e)),
+    block.stmts.first().map_or_else(
+        || {
+            block
+                .expr
+                .as_ref()
+                .is_some_and(|e| is_relevant_expr(cx, typeck_results, e))
+        },
         |stmt| match &stmt.kind {
             StmtKind::Let(_) => true,
             StmtKind::Expr(expr) | StmtKind::Semi(expr) => is_relevant_expr(cx, typeck_results, expr),

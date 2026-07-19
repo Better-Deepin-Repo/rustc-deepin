@@ -15,13 +15,14 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use anyhow::bail;
-use cargo_util::paths;
 use cargo_util::ProcessBuilder;
 use cargo_util::Sha256;
+use cargo_util::paths;
+use serde::Serialize;
 
-use crate::core::manifest::ManifestMetadata;
-use crate::CargoResult;
 use crate::CARGO_ENV;
+use crate::CargoResult;
+use crate::core::manifest::ManifestMetadata;
 
 /// The current format version of [`EncodedDepInfo`].
 const CURRENT_ENCODED_DEP_INFO_VERSION: u8 = 1;
@@ -51,9 +52,9 @@ pub struct RustcDepInfo {
 pub enum DepInfoPathType {
     /// src/, e.g. src/lib.rs
     PackageRootRelative,
-    /// target/debug/deps/lib...
+    /// {build-dir}/debug/deps/lib...
     /// or an absolute path /.../sysroot/...
-    TargetRootRelative,
+    BuildRootRelative,
 }
 
 /// Same as [`RustcDepInfo`] except avoids absolute paths as much as possible to
@@ -126,7 +127,7 @@ impl EncodedDepInfo {
         for _ in 0..nfiles {
             let ty = match read_u8(bytes)? {
                 0 => DepInfoPathType::PackageRootRelative,
-                1 => DepInfoPathType::TargetRootRelative,
+                1 => DepInfoPathType::BuildRootRelative,
                 _ => return None,
             };
             let path_bytes = read_bytes(bytes)?;
@@ -210,7 +211,7 @@ impl EncodedDepInfo {
         for (ty, file, checksum_info) in self.files.iter() {
             match ty {
                 DepInfoPathType::PackageRootRelative => dst.push(0),
-                DepInfoPathType::TargetRootRelative => dst.push(1),
+                DepInfoPathType::BuildRootRelative => dst.push(1),
             }
             write_bytes(dst, paths::path2bytes(file)?);
             write_bool(dst, checksum_info.is_some());
@@ -292,14 +293,14 @@ pub fn translate_dep_info(
     cargo_dep_info: &Path,
     rustc_cwd: &Path,
     pkg_root: &Path,
-    target_root: &Path,
+    build_root: &Path,
     rustc_cmd: &ProcessBuilder,
     allow_package: bool,
     env_config: &Arc<HashMap<String, OsString>>,
 ) -> CargoResult<()> {
     let depinfo = parse_rustc_dep_info(rustc_dep_info)?;
 
-    let target_root = crate::util::try_canonicalize(target_root)?;
+    let build_root = crate::util::try_canonicalize(build_root)?;
     let pkg_root = crate::util::try_canonicalize(pkg_root)?;
     let mut on_disk_info = EncodedDepInfo::default();
     on_disk_info.env = depinfo.env;
@@ -351,8 +352,8 @@ pub fn translate_dep_info(
         let canon_file =
             crate::util::try_canonicalize(&abs_file).unwrap_or_else(|_| abs_file.clone());
 
-        let (ty, path) = if let Ok(stripped) = canon_file.strip_prefix(&target_root) {
-            (DepInfoPathType::TargetRootRelative, stripped)
+        let (ty, path) = if let Ok(stripped) = canon_file.strip_prefix(&build_root) {
+            (DepInfoPathType::BuildRootRelative, stripped)
         } else if let Ok(stripped) = canon_file.strip_prefix(&pkg_root) {
             if !allow_package {
                 return None;
@@ -362,7 +363,7 @@ pub fn translate_dep_info(
             // It's definitely not target root relative, but this is an absolute path (since it was
             // joined to rustc_cwd) and as such re-joining it later to the target root will have no
             // effect.
-            (DepInfoPathType::TargetRootRelative, &*abs_file)
+            (DepInfoPathType::BuildRootRelative, &*abs_file)
         };
         Some((ty, path.to_owned()))
     };
@@ -472,7 +473,7 @@ pub fn parse_rustc_dep_info(rustc_dep_info: &Path) -> CargoResult<RustcDepInfo> 
 /// indicates that the crate should likely be rebuilt.
 pub fn parse_dep_info(
     pkg_root: &Path,
-    target_root: &Path,
+    build_root: &Path,
     dep_info: &Path,
 ) -> CargoResult<Option<RustcDepInfo>> {
     let Ok(data) = paths::read_bytes(dep_info) else {
@@ -487,7 +488,7 @@ pub fn parse_dep_info(
     ret.files
         .extend(info.files.into_iter().map(|(ty, path, checksum_info)| {
             (
-                make_absolute_path(ty, pkg_root, target_root, path),
+                make_absolute_path(ty, pkg_root, build_root, path),
                 checksum_info.and_then(|(file_len, checksum)| {
                     Checksum::from_str(&checksum).ok().map(|c| (file_len, c))
                 }),
@@ -499,14 +500,22 @@ pub fn parse_dep_info(
 fn make_absolute_path(
     ty: DepInfoPathType,
     pkg_root: &Path,
-    target_root: &Path,
+    build_root: &Path,
     path: PathBuf,
 ) -> PathBuf {
-    match ty {
-        DepInfoPathType::PackageRootRelative => pkg_root.join(path),
-        // N.B. path might be absolute here in which case the join will have no effect
-        DepInfoPathType::TargetRootRelative => target_root.join(path),
+    let relative_to = match ty {
+        DepInfoPathType::PackageRootRelative => pkg_root,
+        // N.B. path might be absolute here in which case the join below will have no effect
+        DepInfoPathType::BuildRootRelative => build_root,
+    };
+
+    if path.as_os_str().is_empty() {
+        // Joining with an empty path causes Rust to add a trailing path separator. On Windows, this
+        // would add an invalid trailing backslash to the .d file.
+        return relative_to.to_path_buf();
     }
+
+    relative_to.join(path)
 }
 
 /// Some algorithms are here to ensure compatibility with possible rustc outputs.
@@ -660,6 +669,15 @@ impl fmt::Display for Checksum {
     }
 }
 
+impl Serialize for Checksum {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum InvalidChecksum {
     #[error("algorithm portion incorrect, expected `sha256`, or `blake3`")]
@@ -678,7 +696,7 @@ mod encoded_dep_info {
     fn gen_test(checksum: bool) {
         let checksum = checksum.then_some((768, "c01efc669f09508b55eced32d3c88702578a7c3e".into()));
         let lib_rs = (
-            DepInfoPathType::TargetRootRelative,
+            DepInfoPathType::BuildRootRelative,
             PathBuf::from("src/lib.rs"),
             checksum.clone(),
         );
@@ -691,7 +709,7 @@ mod encoded_dep_info {
         assert_eq!(EncodedDepInfo::parse(&data).unwrap(), depinfo);
 
         let mod_rs = (
-            DepInfoPathType::TargetRootRelative,
+            DepInfoPathType::BuildRootRelative,
             PathBuf::from("src/mod.rs"),
             checksum.clone(),
         );
@@ -756,7 +774,7 @@ mod encoded_dep_info {
             0x72, 0x75, 0x73, 0x74, // path bytes: "rust"
             0x00, 0x00, 0x00, 0x00, // # of env vars
         ];
-        // Cargo can't recognize v0 after `-Zchecksum-freshess` added.
+        // Cargo can't recognize v0 after `-Zchecksum-freshness` added.
         assert!(EncodedDepInfo::parse(&data).is_none());
     }
 }

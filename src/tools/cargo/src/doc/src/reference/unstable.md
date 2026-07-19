@@ -66,6 +66,7 @@ Each new feature described below should explain how to use it.
     * [-Z allow-features](#allow-features) --- Provides a way to restrict which unstable features are used.
 * Build scripts and linking
     * [Metabuild](#metabuild) --- Provides declarative build scripts.
+    * [Multiple Build Scripts](#multiple-build-scripts) --- Allows use of multiple build scripts.
 * Resolver and features
     * [no-index-update](#no-index-update) --- Prevents cargo from updating the index cache.
     * [avoid-dev-deps](#avoid-dev-deps) --- Prevents the resolver from including dev-dependencies during resolution.
@@ -74,39 +75,50 @@ Each new feature described below should explain how to use it.
     * [public-dependency](#public-dependency) --- Allows dependencies to be classified as either public or private.
     * [msrv-policy](#msrv-policy) --- MSRV-aware resolver and version selection
     * [precise-pre-release](#precise-pre-release) --- Allows pre-release versions to be selected with `update --precise`
+    * [sbom](#sbom) --- Generates SBOM pre-cursor files for compiled artifacts
     * [update-breaking](#update-breaking) --- Allows upgrading to breaking versions with `update --breaking`
+    * [feature-unification](#feature-unification) --- Enable new feature unification modes in workspaces
+    * [lockfile-publish-time] --- Limit resolver to packages older than the specified time
 * Output behavior
     * [artifact-dir](#artifact-dir) --- Adds a directory where artifacts are copied to.
+    * [build-dir-new-layout](#build-dir-new-layout) --- Enables the new build-dir filesystem layout
     * [Different binary name](#different-binary-name) --- Assign a name to the built binary that is separate from the crate name.
     * [root-dir](#root-dir) --- Controls the root directory relative to which paths are printed
 * Compile behavior
     * [mtime-on-use](#mtime-on-use) --- Updates the last-modified timestamp on every dependency every time it is used, to provide a mechanism to delete unused artifacts.
-    * [doctest-xcompile](#doctest-xcompile) --- Supports running doctests with the `--target` flag.
     * [build-std](#build-std) --- Builds the standard library instead of using pre-built binaries.
     * [build-std-features](#build-std-features) --- Sets features to use with the standard library.
     * [binary-dep-depinfo](#binary-dep-depinfo) --- Causes the dep-info file to track binary dependencies.
     * [checksum-freshness](#checksum-freshness) --- When passed, the decision as to whether a crate needs to be rebuilt is made using file checksums instead of the file mtime.
     * [panic-abort-tests](#panic-abort-tests) --- Allows running tests with the "abort" panic strategy.
     * [host-config](#host-config) --- Allows setting `[target]`-like configuration settings for host build targets.
+    * [no-embed-metadata](#no-embed-metadata) --- Passes `-Zembed-metadata=no` to the compiler, which avoid embedding metadata into rlib and dylib artifacts, to save disk space.
     * [target-applies-to-host](#target-applies-to-host) --- Alters whether certain flags will be passed to host build targets.
     * [gc](#gc) --- Global cache garbage collection.
     * [open-namespaces](#open-namespaces) --- Allow multiple packages to participate in the same API namespace
+    * [panic-immediate-abort](#panic-immediate-abort) --- Passes `-Cpanic=immediate-abort` to the compiler.
+    * [compile-time-deps](#compile-time-deps) --- Perma-unstable feature for rust-analyzer
 * rustdoc
     * [rustdoc-map](#rustdoc-map) --- Provides mappings for documentation to link to external sites like [docs.rs](https://docs.rs/).
     * [scrape-examples](#scrape-examples) --- Shows examples within documentation.
     * [output-format](#output-format-for-rustdoc) --- Allows documentation to also be emitted in the experimental [JSON format](https://doc.rust-lang.org/nightly/nightly-rustc/rustdoc_json_types/).
+    * [rustdoc-depinfo](#rustdoc-depinfo) --- Use dep-info files in rustdoc rebuild detection.
+    * [rustdoc-mergeable-info](#rustdoc-mergeable-info) --- Use rustdoc mergeable cross-crate-info files.
 * `Cargo.toml` extensions
     * [Profile `rustflags` option](#profile-rustflags-option) --- Passed directly to rustc.
+    * [Profile `hint-mostly-unused` option](#profile-hint-mostly-unused-option) --- Hint that a dependency is mostly unused, to optimize compilation time.
     * [codegen-backend](#codegen-backend) --- Select the codegen backend used by rustc.
     * [per-package-target](#per-package-target) --- Sets the `--target` to use for each individual package.
     * [artifact dependencies](#artifact-dependencies) --- Allow build artifacts to be included into other build artifacts and build them for different targets.
     * [Profile `trim-paths` option](#profile-trim-paths-option) --- Control the sanitization of file paths in build outputs.
     * [`[lints.cargo]`](#lintscargo) --- Allows configuring lints for Cargo.
     * [path bases](#path-bases) --- Named base directories for path dependencies.
+    * [`unstable-editions`](#unstable-editions) --- Allows use of editions that are not yet stable.
 * Information and metadata
-    * [Build-plan](#build-plan) --- Emits JSON information on which commands will be run.
     * [unit-graph](#unit-graph) --- Emits JSON for Cargo's internal graph structure.
     * [`cargo rustc --print`](#rustc---print) --- Calls rustc with `--print` to display information from rustc.
+    * [Build analysis](#build-analysis) --- Record and persist detailed build metrics across runs, with new commands to query past builds.
+    * [`rustc-unicode`](#rustc-unicode) --- Enables `rustc`'s unicode error format in Cargo's error messages 
 * Configuration
     * [config-include](#config-include) --- Adds the ability for config files to include other files.
     * [`cargo config`](#cargo-config) --- Adds a new subcommand for viewing config files.
@@ -117,9 +129,11 @@ Each new feature described below should explain how to use it.
     * [gitoxide](#gitoxide) --- Use `gitoxide` instead of `git2` for a set of operations.
     * [script](#script) --- Enable support for single-file `.rs` packages.
     * [lockfile-path](#lockfile-path) --- Allows to specify a path to lockfile other than the default path `<workspace_root>/Cargo.lock`.
-    * [package-workspace](#package-workspace) --- Allows for packaging and publishing multiple crates in a workspace.
     * [native-completions](#native-completions) --- Move cargo shell completions to native completions.
     * [warnings](#warnings) --- controls warning behavior; options for allowing or denying warnings.
+    * [Package message format](#package-message-format) --- Message format for `cargo package`.
+    * [`fix-edition`](#fix-edition) --- A permanently unstable edition migration helper.
+    * [Plumbing subcommands](https://github.com/crate-ci/cargo-plumbing) --- Low, level commands that act as APIs for Cargo, like `cargo metadata`
 
 ## allow-features
 
@@ -244,41 +258,6 @@ artifact-dir = "out"
 The `-Zroot-dir` flag sets the root directory relative to which paths are printed.
 This affects both diagnostics and paths emitted by the `file!()` macro.
 
-## doctest-xcompile
-* Tracking Issue: [#7040](https://github.com/rust-lang/cargo/issues/7040)
-* Tracking Rustc Issue: [#64245](https://github.com/rust-lang/rust/issues/64245)
-
-This flag changes `cargo test`'s behavior when handling doctests when
-a target is passed. Currently, if a target is passed that is different
-from the host cargo will simply skip testing doctests. If this flag is
-present, cargo will continue as normal, passing the tests to doctest,
-while also passing it a `--target` option, as well as enabling
-`-Zunstable-features --enable-per-target-ignores` and passing along
-information from `.cargo/config.toml`. See the rustc issue for more information.
-
-```sh
-cargo test --target foo -Zdoctest-xcompile
-```
-
-## Build-plan
-* Tracking Issue: [#5579](https://github.com/rust-lang/cargo/issues/5579)
-
-<div class="warning">
-
-> The build-plan feature is deprecated and may be removed in a future version.
-> See <https://github.com/rust-lang/cargo/issues/7614>.
-
-</div>
-
-The `--build-plan` argument for the `build` command will output JSON with
-information about which commands would be run without actually executing
-anything. This can be useful when integrating with another build tool.
-Example:
-
-```sh
-cargo +nightly build --build-plan -Z unstable-options
-```
-
 ## Metabuild
 * Tracking Issue: [rust-lang/rust#49803](https://github.com/rust-lang/rust/issues/49803)
 * RFC: [#2196](https://github.com/rust-lang/rfcs/blob/master/text/2196-metabuild.md)
@@ -311,6 +290,28 @@ extra-info = "qwerty"
 
 Metabuild packages should have a public function called `metabuild` that
 performs the same actions as a regular `build.rs` script would perform.
+
+## Multiple Build Scripts
+* Tracking Issue: [#14903](https://github.com/rust-lang/cargo/issues/14903)
+* Original Pull Request: [#15630](https://github.com/rust-lang/cargo/pull/15630)
+
+Multiple Build Scripts feature allows you to have multiple build scripts in your package.
+
+Include `cargo-features` at the top of `Cargo.toml` and add `multiple-build-scripts` to enable feature.
+Add the paths of the build scripts as an array in `package.build`. For example:
+
+```toml
+cargo-features = ["multiple-build-scripts"]
+
+[package]
+name = "mypackage"
+version = "0.0.1"
+build = ["foo.rs", "bar.rs"]
+```
+
+**Accessing Output Directories**:  Output directory of each build script can be accessed by using `<script-name>_OUT_DIR` 
+  where the `<script-name>` is the file-stem of the build script, exactly as-is.
+  For example, `bar_OUT_DIR` for script at `foo/bar.rs`. (Only set during compilation, can be accessed via `env!` macro)
 
 ## public-dependency
 * Tracking Issue: [#44663](https://github.com/rust-lang/rust/issues/44663)
@@ -395,6 +396,99 @@ my-dependency = "0.1.1"
 It's possible to update `my-dependency` to a pre-release with `update -Zunstable-options my-dependency --precise 0.1.2-pre.0`.
 This is because `0.1.2-pre.0` is considered compatible with `0.1.1`.
 It would not be possible to upgrade to `0.2.0-pre.0` from `0.1.1` in the same way.
+
+## sbom
+* Tracking Issue: [#13709](https://github.com/rust-lang/cargo/pull/13709)
+* RFC: [#3553](https://github.com/rust-lang/rfcs/pull/3553)
+
+The `sbom` build config allows to generate so-called SBOM pre-cursor files
+alongside each compiled artifact. A Software Bill Of Material (SBOM) tool can
+incorporate these generated files to collect important information from the cargo
+build process that are difficult or impossible to obtain in another way.
+
+To enable this feature either set the `sbom` field in the `.cargo/config.toml`
+
+```toml
+[unstable]
+sbom = true
+
+[build]
+sbom = true
+```
+
+or set the `CARGO_BUILD_SBOM` environment variable to `true`. The functionality
+is available behind the flag `-Z sbom`.
+
+The generated output files are in JSON format and follow the naming scheme
+`<artifact>.cargo-sbom.json`. The JSON file contains information about dependencies,
+target, features and the used `rustc` compiler.
+
+SBOM pre-cursor files are generated for all executable and linkable outputs
+that are uplifted into the target or artifact directories.
+
+### Environment variables Cargo sets for crates
+
+* `CARGO_SBOM_PATH` -- a list of generated SBOM precursor files, separated by the platform PATH separator. The list can be split with `std::env::split_paths`.
+
+### SBOM pre-cursor schema
+
+```json5
+{
+  // Schema version.
+  "version": 1,
+  // Index into the crates array for the root crate.
+  "root": 0,
+  // Array of all crates. There may be duplicates of the same crate if that
+  // crate is compiled differently (different opt-level, features, etc).
+  "crates": [
+    {
+      // Fully qualified package ID specification
+      "id": "path+file:///sample-package#0.1.0",
+      // List of target kinds: bin, lib, rlib, dylib, cdylib, staticlib, proc-macro, example, test, bench, custom-build
+      "kind": ["bin"],
+      // Enabled feature flags.
+      "features": [],
+      // Dependencies for this crate.
+      "dependencies": [
+        {
+          // Index in to the crates array.
+          "index": 1,
+          // Dependency kind: 
+          // Normal: A dependency linked to the artifact produced by this crate.
+          // Build: A compile-time dependency used to build this crate (build-script or proc-macro).
+          "kind": "normal"
+        },
+        {
+          // A crate can depend on another crate with both normal and build edges.
+          "index": 1,
+          "kind": "build"
+        }
+      ]
+    },
+    {
+      "id": "registry+https://github.com/rust-lang/crates.io-index#zerocopy@0.8.16",
+      "kind": ["bin"],
+      "features": [],
+      "dependencies": []
+    }
+  ],
+  // Information about rustc used to perform the compilation.
+  "rustc": {
+    // Compiler version
+    "version": "1.86.0-nightly",
+    // Compiler wrapper
+    "wrapper": null,
+    // Compiler workspace wrapper
+    "workspace_wrapper": null,
+    // Commit hash for rustc
+    "commit_hash": "bef3c3b01f690de16738b1c9f36470fbfc6ac623",
+    // Host target triple
+    "host": "x86_64-pc-windows-msvc",
+    // Verbose version string: `rustc -vV`
+    "verbose_version": "rustc 1.86.0-nightly (bef3c3b01 2025-02-04)\nbinary: rustc\ncommit-hash: bef3c3b01f690de16738b1c9f36470fbfc6ac623\ncommit-date: 2025-02-04\nhost: x86_64-pc-windows-msvc\nrelease: 1.86.0-nightly\nLLVM version: 19.1.7\n"
+  }
+}
+```
 
 ## update-breaking
 
@@ -548,28 +642,79 @@ like to stabilize it somehow!
 
 This feature requires the `-Zconfig-include` command-line option.
 
-The `include` key in a config file can be used to load another config file. It
-takes a string for a path to another file relative to the config file, or an
-array of config file paths. Only path ending with `.toml` is accepted.
+The `include` key in a config file can be used to load another config file.
+For example:
 
 ```toml
-# a path ending with `.toml`
-include = "path/to/mordor.toml"
+# .cargo/config.toml
+include = ["other-config.toml"]
 
-# or an array of paths
-include = ["frodo.toml", "samwise.toml"]
+[build]
+jobs = 4
 ```
 
-Unlike other config values, the merge behavior of the `include` key is
-different. When a config file contains an `include` key:
+```toml
+# .cargo/other-config.toml
+[build]
+rustflags = ["-W", "unsafe-code"]
+```
 
-1. The config values are first loaded from the `include` path.
-    * If the value of the `include` key is an array of paths, the config values
-      are loaded and merged from left to right for each path.
-    * Recurse this step if the config values from the `include` path also
-      contain an `include` key.
-2. Then, the config file's own values are merged on top of the config
-   from the `include` path.
+### Documentation updates
+
+> put this after `## Command-line overrides` before `## Config-relative paths`
+> to emphasize its special nature than other config keys.
+
+#### Including extra configuration files
+
+Configuration can include other configuration files using the top-level `include` key.
+This allows sharing configuration across multiple projects
+or splitting complex configurations into multiple files.
+
+##### `include`
+
+* Type: array of strings or tables
+* Default: none
+* Environment: not supported
+
+Loads additional configuration files.
+Paths are relative to the configuration file that includes them.
+Only paths ending with `.toml` are accepted.
+
+Supports the following formats:
+
+```toml
+# array of paths
+include = [
+    "frodo.toml",
+    "samwise.toml",
+]
+
+# inline tables for more control
+include = [
+    { path = "required.toml" },
+    { path = "optional.toml", optional = true },
+]
+```
+
+> **Note:** For better readability and to avoid confusion, it is recommended to:
+> - Place `include` at the top of the configuration file
+> - Put one include per line for clearer version control diffs
+> - Use inline table syntax when optional includes are needed
+
+When using table syntax, the following fields are supported:
+
+* `path` (string, required): Path to the config file to include.
+* `optional` (boolean, default: false): If `true`, missing files are silently
+  skipped instead of causing an error.
+
+The merge behavior of `include` is different from other config values:
+
+1. Config values are first loaded from the `include` paths.
+    * Included files are loaded left to right,
+      with values from later files taking precedence over earlier ones.
+    * This step recurses if included config files also contain `include` keys.
+2. Then, the config file's own values are merged on top of the included config,
+   taking highest precedence.
 
 ## target-applies-to-host
 * Original Pull Request: [#9322](https://github.com/rust-lang/cargo/pull/9322)
@@ -811,6 +956,37 @@ profile-rustflags = true
 [profile.release]
 rustflags = [ "-C", "..." ]
 ```
+
+## Profile `hint-mostly-unused` option
+* Tracking Issue: [#15644](https://github.com/rust-lang/cargo/issues/15644)
+
+This feature provides a new option in the `[profile]` section to enable the
+rustc `hint-mostly-unused` option. This is primarily useful to enable for
+specific dependencies:
+
+```toml
+[profile.dev.package.huge-mostly-unused-dependency]
+hint-mostly-unused = true
+```
+
+To enable this feature, pass `-Zprofile-hint-mostly-unused`. However, since
+this option is a hint, using it without passing `-Zprofile-hint-mostly-unused`
+will only warn and ignore the profile option. Versions of Cargo prior to the
+introduction of this feature will give an "unused manifest key" warning, but
+will otherwise function without erroring. This allows using the hint in a
+crate's `Cargo.toml` without mandating the use of a newer Cargo to build it.
+
+A crate can also provide this hint automatically for crates that depend on it,
+using the `[hints]` table (which will likewise be ignored by older Cargo):
+
+```toml
+[hints]
+mostly-unused = true
+```
+
+This will cause the crate to default to hint-mostly-unused, unless overridden
+via `profile`, which takes precedence, and which can only be specified in the
+top-level crate being built.
 
 ## rustdoc-map
 * Tracking Issue: [#8296](https://github.com/rust-lang/cargo/issues/8296)
@@ -1360,6 +1536,10 @@ Differences between `cargo run --manifest-path <path>` and `cargo <path>`
 - `cargo <path>` runs with the config for `<path>` and not the current dir, more like `cargo install --path <path>`
 - `cargo <path>` is at a verbosity level below the normal default.  Pass `-v` to get normal output.
 
+When running a package with an embedded manifest,
+[`arg0`](https://doc.rust-lang.org/std/os/unix/process/trait.CommandExt.html#tymethod.arg0) will be the scripts path.
+To get the executable's path, see [`current_exe`](https://doc.rust-lang.org/std/env/fn.current_exe.html).
+
 ### Documentation Updates
 
 ## Profile `trim-paths` option
@@ -1462,36 +1642,18 @@ This will not affect any hard-coded paths in the source code, such as in strings
 
 * Tracking Issue: [#12633](https://github.com/rust-lang/cargo/issues/12633)
 
-The `-Zgc` flag enables garbage-collection within cargo's global cache within the cargo home directory.
-This includes downloaded dependencies such as compressed `.crate` files, extracted `src` directories, registry index caches, and git dependencies.
-When `-Zgc` is present, cargo will track the last time any index and dependency was used,
-and then uses those timestamps to manually or automatically delete cache entries that have not been used for a while.
-
-```sh
-cargo build -Zgc
-```
-
-### Automatic garbage collection
-
-Automatic deletion happens on commands that are already doing a significant amount of work,
-such as all of the build commands (`cargo build`, `cargo test`, `cargo check`, etc.), and `cargo fetch`.
-The deletion happens just after resolution and packages have been downloaded.
-Automatic deletion is only done once per day (see `gc.auto.frequency` to configure).
-Automatic deletion is disabled if cargo is offline such as with `--offline` or `--frozen` to avoid deleting artifacts that may need to be used if you are offline for a long period of time.
+The `-Zgc` flag is used to enable certain features related to garbage-collection of cargo's global cache within the cargo home directory.
 
 #### Automatic gc configuration
 
-The automatic gc behavior can be specified via a cargo configuration setting.
+The `-Zgc` flag will enable Cargo to read extra configuration options related to garbage collection.
 The settings available are:
 
 ```toml
 # Example config.toml file.
 
-# This table defines the behavior for automatic garbage collection.
-[gc.auto]
-# The maximum frequency that automatic garbage collection happens.
-# Can be "never" to disable automatic-gc, or "always" to run on every command.
-frequency = "1 day"
+# Sub-table for defining specific settings for cleaning the global cache.
+[cache.global-clean]
 # Anything older than this duration will be deleted in the source cache.
 max-src-age = "1 month"
 # Anything older than this duration will be deleted in the compressed crate cache.
@@ -1504,9 +1666,13 @@ max-git-co-age = "1 month"
 max-git-db-age = "3 months"
 ```
 
+Note that the [`cache.auto-clean-frequency`] option was stabilized in Rust 1.88.
+
+[`cache.auto-clean-frequency`]: config.md#cacheauto-clean-frequency
+
 ### Manual garbage collection with `cargo clean`
 
-Manual deletion can be done with the `cargo clean gc` command.
+Manual deletion can be done with the `cargo clean gc -Zgc` command.
 Deletion of cache contents can be performed by passing one of the cache options:
 
 - `--max-src-age=DURATION` --- Deletes source cache files that have not been used since the given age.
@@ -1525,9 +1691,9 @@ A DURATION is specified in the form "N seconds/minutes/days/weeks/months" where 
 A SIZE is specified in the form "N *suffix*" where *suffix* is B, kB, MB, GB, kiB, MiB, or GiB, and N is an integer or floating point number. If no suffix is specified, the number is the number of bytes.
 
 ```sh
-cargo clean gc
-cargo clean gc --max-download-age=1week
-cargo clean gc --max-git-size=0 --max-download-size=100MB
+cargo clean gc -Zgc
+cargo clean gc -Zgc --max-download-age=1week
+cargo clean gc -Zgc --max-git-size=0 --max-download-size=100MB
 ```
 
 ## open-namespaces
@@ -1542,6 +1708,40 @@ cargo-features = ["open-namespaces"]
 
 [package]
 # ...
+```
+
+## panic-immediate-abort
+
+* Tracking Issue: [#16042](https://github.com/rust-lang/cargo/issues/16042)
+* Upstream Tracking Issue: [rust-lang/rust#147286](https://github.com/rust-lang/rust/issues/147286)
+
+Extends the `panic` profile setting to support the
+[`immediate-abort`](../../rustc/codegen-options/index.html#panic) panic strategy.
+This can be enabled like so:
+
+```toml
+# Cargo.toml
+cargo-features = ["panic-immediate-abort"]
+
+[package]
+# ...
+
+[profile.release]
+panic = "immediate-abort"
+```
+
+To set this in a profile in Cargo configuration,
+you need to use either `-Z panic-immediate-abort` CLI flag
+or the `[unstable]` table to enable it.
+For example,
+
+```toml
+# .cargo/config.toml
+[unstable]
+panic-immediate-abort = true
+
+[profile.release]
+panic = "immediate-abort"
 ```
 
 ## `[lints.cargo]`
@@ -1636,48 +1836,6 @@ Example:
 cargo +nightly metadata --lockfile-path=$LOCKFILES_ROOT/my-project/Cargo.lock -Z unstable-options
 ```
 
-## package-workspace
-* Tracking Issue: [#10948](https://github.com/rust-lang/cargo/issues/10948)
-
-This allows cargo to package (or publish) multiple crates in a workspace, even
-if they have inter-dependencies. For example, consider a workspace containing
-packages `foo` and `dep`, where `foo` depends on `dep`. Then
-
-```sh
-cargo +nightly -Zpackage-workspace package -p foo -p dep
-```
-
-will package both `foo` and `dep`, while
-
-```sh
-cargo +nightly -Zpackage-workspace publish -p foo -p dep
-```
-
-will publish both `foo` and `dep`.
-If `foo` and `dep` are the only crates in the workspace, you can use the `--workspace`
-flag instead of specifying the crates individually:
-
-```sh
-cargo +nightly -Zpackage-workspace package --workspace
-cargo +nightly -Zpackage-workspace publish --workspace
-```
-
-#### Lock-file behavior
-
-When packaging a binary at the same time as one of its dependencies, the binary
-will be packaged with a lock-file pointing at the dependency's registry entry
-*as though the dependency were already published*, even though it has not yet
-been. In this case, `cargo` needs to know the registry that the dependency
-will eventually be published on. `cargo` will attempt to infer this registry
-by examining the [the `publish` field](manifest.md#the-publish-field), falling back
-to `crates.io` if no `publish` field is set. To explicitly set the registry,
-pass a `--registry` or `--index` flag.
-
-```sh
-cargo +nightly -Zpackage-workspace --registry=my-registry package -p foo -p dep
-cargo +nightly -Zpackage-workspace --index=https://example.com package -p foo -p dep
-```
-
 ## native-completions
 * Original Issue: [#6645](https://github.com/rust-lang/cargo/issues/6645)
 * Tracking Issue: [#14520](https://github.com/rust-lang/cargo/issues/14520)
@@ -1705,10 +1863,10 @@ When in doubt, you can discuss this in [#14520](https://github.com/rust-lang/car
 
 ### How to use native-completions feature:
 - bash:
-  Add `source <(CARGO_COMPLETE=bash cargo +nightly)` to your .bashrc.
+  Add `source <(CARGO_COMPLETE=bash cargo +nightly)` to `~/.local/share/bash-completion/completions/cargo`.
 
 - zsh:
-  Add `source <(CARGO_COMPLETE=zsh cargo +nightly)` to your .zshrc.
+  Add `source <(CARGO_COMPLETE=zsh cargo +nightly)` to your `.zshrc`.
   
 - fish:
   Add `source (CARGO_COMPLETE=fish cargo +nightly | psub)` to `$XDG_CONFIG_HOME/fish/completions/cargo.fish`
@@ -1740,6 +1898,180 @@ Controls how Cargo handles warnings. Allowed values are:
 * `warn`: warnings are emitted as warnings (default).
 * `allow`: warnings are hidden.
 * `deny`: if warnings are emitted, an error will be raised at the end of the operation and the process will exit with a failure exit code. 
+
+## feature unification
+
+* RFC: [#3692](https://github.com/rust-lang/rfcs/blob/master/text/3692-feature-unification.md)
+* Tracking Issue: [#14774](https://github.com/rust-lang/cargo/issues/14774)
+
+The `-Z feature-unification` enables the `resolver.feature-unification`
+configuration option to control how features are unified across a workspace.
+If the `-Z feature-unification` unstable flag is not enabled,
+then the `resolver.feature-unification` configuration will be ignored.
+
+### `resolver.feature-unification`
+
+* Type: string
+* Default: `"selected"`
+* Environment: `CARGO_RESOLVER_FEATURE_UNIFICATION`
+
+Specify which packages participate in [feature unification](../reference/features.html#feature-unification).
+
+* `selected`: Merge dependency features from all packages specified for the current build.
+* `workspace`: Merge dependency features across all workspace members,
+  regardless of which packages are specified for the current build.
+* `package`: Dependency features are considered on a package-by-package basis,
+  preferring duplicate builds of dependencies when different sets of features are activated by the packages.
+
+## pubtime
+
+* Original Issue: [#15491](https://github.com/rust-lang/cargo/issues/15491)
+* Tracking Issue: [#16270](https://github.com/rust-lang/cargo/issues/16270)
+
+Documentation updates:
+- Add `pubtime` field to the Index Summary description
+
+## lockfile-publish-time
+
+* Original Issue: [#5221](https://github.com/rust-lang/cargo/issues/5221)
+* Tracking Issue: [#16271](https://github.com/rust-lang/cargo/issues/16271)
+
+With `cargo generate-lockfile -Zunstable-options --publish-time <time>`,
+package resolution will not consider any package newer than the specified time.
+
+## Package message format
+
+* Original Issue: [#11666](https://github.com/rust-lang/cargo/issues/11666)
+* Tracking Issue: [#15353](https://github.com/rust-lang/cargo/issues/15353)
+
+The `--message-format` flag in `cargo package` controls the output message format.
+Currently, it only works with the `--list` flag and affects the file listing format,
+Requires `-Zunstable-options`.
+See [`cargo package --message-format`](../commands/cargo-package.md#option-cargo-package---message-format)
+for more information.
+
+## rustdoc depinfo
+
+* Original Issue: [#12266](https://github.com/rust-lang/cargo/issues/12266)
+* Tracking Issue: [#15370](https://github.com/rust-lang/cargo/issues/15370)
+
+The `-Z rustdoc-depinfo` flag leverages rustdoc's dep-info files to determine
+whether documentations are required to re-generate. This can be combined with
+`-Z checksum-freshness` to detect checksum changes rather than file mtime.
+
+## no-embed-metadata
+* Original Pull Request: [#15378](https://github.com/rust-lang/cargo/pull/15378)
+* Tracking Issue: [#15495](https://github.com/rust-lang/cargo/issues/15495)
+
+The default behavior of Rust is to embed crate metadata into `rlib` and `dylib` artifacts.
+Since Cargo also passes `--emit=metadata` to these intermediate artifacts to enable pipelined
+compilation, this means that a lot of metadata ends up being duplicated on disk, which wastes
+disk space in the target directory.
+
+This feature tells Cargo to pass the `-Zembed-metadata=no` flag to the compiler, which instructs
+it not to embed metadata within rlib and dylib artifacts. In this case, the metadata will only
+be stored in `.rmeta` files.
+
+```console
+cargo +nightly -Zno-embed-metadata build
+```
+
+## `unstable-editions`
+
+The `unstable-editions` value in the `cargo-features` list allows a `Cargo.toml` manifest to specify an edition that is not yet stable.
+
+```toml
+cargo-features = ["unstable-editions"]
+
+[package]
+name = "my-package"
+edition = "future"
+```
+
+When new editions are introduced, the `unstable-editions` feature is required until the edition is stabilized.
+
+The special "future" edition is a home for new features that are under development, and is permanently unstable. The "future" edition also has no new behavior by itself. Each change in the future edition requires an opt-in such as a `#![feature(...)]` attribute.
+
+## `fix-edition`
+
+`-Zfix-edition` is a permanently unstable flag to assist with testing edition migrations, particularly with the use of crater. It only works with the `cargo fix` subcommand. It takes two different forms:
+
+- `-Zfix-edition=start=$INITIAL` --- This form checks if the current edition is equal to the given number. If not, it exits with success (because we want to ignore older editions). If it is, then it runs the equivalent of `cargo check`. This is intended to be used with crater's "start" toolchain to set a baseline for the "before" toolchain.
+- `-Zfix-edition=end=$INITIAL,$NEXT` --- This form checks if the current edition is equal to the given `$INITIAL` value. If not, it exits with success. If it is, then it performs an edition migration to the edition specified in `$NEXT`. Afterwards, it will modify `Cargo.toml` to add the appropriate `cargo-features = ["unstable-edition"]`, update the `edition` field, and run the equivalent of `cargo check` to verify that the migration works on the new edition.
+
+For example:
+
+```console
+cargo +nightly fix -Zfix-edition=end=2024,future
+```
+
+## section-timings
+* Original Pull Request: [#15780](https://github.com/rust-lang/cargo/pull/15780)
+* Tracking Issue: [#15817](https://github.com/rust-lang/cargo/issues/15817)
+
+This feature can be used to extend the output of `cargo build --timings`. It will tell rustc
+to produce timings of individual compilation sections, which will be then displayed in the timings
+HTML/JSON output.
+
+```console
+cargo +nightly -Zsection-timings build --timings
+```
+
+## Build analysis
+
+* Original Issue: [rust-lang/rust-project-goals#332](https://github.com/rust-lang/rust-project-goals/pull/332)
+* Tracking Issue: [#15844](https://github.com/rust-lang/cargo/issues/15844)
+
+The `-Zbuild-analysis` feature records and persists detailed build metrics
+(timings, rebuild reasons, etc.) across runs, with new commands to query past builds.
+
+```toml
+# Example config.toml file.
+
+# Enable the build metric collection
+[build.analysis]
+enabled = true
+```
+
+## build-dir-new-layout
+
+* Tracking Issue: [#15010](https://github.com/rust-lang/cargo/issues/15010)
+
+Enables the new build-dir filesystem layout.
+This layout change unblocks work towards caching and locking improvements.
+
+
+## compile-time-deps
+
+This permanently-unstable flag to only build proc-macros and build scripts (and their required dependencies),
+as well as run the build scripts.
+
+It is intended for use by tools like rust-analyzer and will never be stabilized.
+
+Example:
+
+```console
+cargo +nightly build --compile-time-deps -Z unstable-options
+cargo +nightly check --compile-time-deps --all-targets -Z unstable-options
+```
+
+# `rustc-unicode`
+* Tracking Issue: [rust#148607](https://github.com/rust-lang/rust/issues/148607)
+
+Enable `rustc`'s unicode error format in Cargo's error messages
+
+## rustdoc mergeable info
+
+* Original Pull Request: [#16309](https://github.com/rust-lang/cargo/pull/16309)
+* Tracking issue: [#16306](https://github.com/rust-lang/cargo/issues/16306)
+* Tracking rustc issue: [rust-lang/rust#130676](https://github.com/rust-lang/rust/issues/130676)
+
+The `-Z rustdoc-mergeable-info` leverage rustdoc's mergeable crate info,
+so that `cargo doc` can merge cross-crate information
+(like the search index, source files index, etc.)
+from separate output directories,
+and run `rustdoc` in parallel.
+
 # Stabilized and removed features
 
 ## Compile progress
@@ -1993,3 +2325,25 @@ The 2024 edition has been stabilized in the 1.85 release.
 See the [`edition` field](manifest.md#the-edition-field) for more information on setting the edition.
 See [`cargo fix --edition`](../commands/cargo-fix.md) and [The Edition Guide](../../edition-guide/index.html) for more information on migrating existing projects.
 
+## Automatic garbage collection
+
+Support for automatically deleting old files was stabilized in Rust 1.88.
+More information can be found in the [config chapter](config.md#cache).
+
+## doctest-xcompile
+
+Doctest cross-compiling is now unconditionally enabled starting in Rust 1.89. Running doctests with `cargo test` will now honor the `--target` flag.
+
+## package-workspace
+
+Multi-package publishing has been stabilized in Rust 1.90.0.
+
+## build-dir
+
+Support for `build.build-dir` was stabilized in the 1.91 release.
+See the [config documentation](config.md#buildbuild-dir) for information about changing the build-dir
+
+## Build-plan
+
+The `--build-plan` argument for the `build` command has been removed in 1.93.0-nightly.
+See <https://github.com/rust-lang/cargo/issues/7614> for the reason for its removal.

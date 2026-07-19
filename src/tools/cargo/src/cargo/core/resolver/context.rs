@@ -1,12 +1,12 @@
+use super::RequestedFeatures;
 use super::dep_cache::RegistryQueryer;
 use super::errors::ActivateResult;
 use super::types::{ActivationsKey, ConflictMap, ConflictReason, FeaturesSet, ResolveOpts};
-use super::RequestedFeatures;
 use crate::core::{Dependency, PackageId, Summary};
-use crate::util::interning::InternedString;
 use crate::util::Graph;
+use crate::util::interning::{INTERNED_DEFAULT, InternedString};
 use anyhow::format_err;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use tracing::debug;
 
 // A `Context` is basically a bunch of local resolution information which is
@@ -121,6 +121,7 @@ impl ResolverContext {
             }
         }
         debug!("checking if {} is already activated", summary.package_id());
+        let empty_features = BTreeSet::new();
         match &opts.features {
             // This returns `false` for CliFeatures just for simplicity. It
             // would take a bit of work to compare since they are not in the
@@ -135,16 +136,16 @@ impl ResolverContext {
                 features,
                 uses_default_features,
             } => {
-                let has_default_feature = summary.features().contains_key("default");
-                Ok(match self.resolve_features.get(&id) {
-                    Some(prev) => {
-                        features.is_subset(prev)
-                            && (!uses_default_features
-                                || prev.contains("default")
-                                || !has_default_feature)
-                    }
-                    None => features.is_empty() && (!uses_default_features || !has_default_feature),
-                })
+                let has_default_feature = summary.features().contains_key(&INTERNED_DEFAULT);
+                let prev = self
+                    .resolve_features
+                    .get(&id)
+                    .map(|f| &**f)
+                    .unwrap_or(&empty_features);
+                Ok(features.is_subset(prev)
+                    && (!uses_default_features
+                        || prev.contains(&INTERNED_DEFAULT)
+                        || !has_default_feature))
             }
         }
     }

@@ -10,8 +10,8 @@ use super::dependency::Dependency;
 use crate::core::dependency::DepKind;
 use crate::core::{FeatureValue, Features, Workspace};
 use crate::util::closest;
-use crate::util::interning::InternedString;
-use crate::util::toml::{is_embedded, ScriptSource};
+use crate::util::frontmatter::ScriptSource;
+use crate::util::toml::is_embedded;
 use crate::{CargoResult, GlobalContext};
 
 /// Dependency table to add deps to.
@@ -277,11 +277,11 @@ impl LocalManifest {
         let mut embedded = None;
         if is_embedded(path) {
             let source = ScriptSource::parse(&data)?;
-            if let Some(frontmatter) = source.frontmatter() {
-                embedded = Some(Embedded::exists(&data, frontmatter));
-                data = frontmatter.to_owned();
-            } else if let Some(shebang) = source.shebang() {
-                embedded = Some(Embedded::after(&data, shebang));
+            if let Some(frontmatter) = source.frontmatter_span() {
+                embedded = Some(Embedded::exists(frontmatter));
+                data = source.frontmatter().unwrap().to_owned();
+            } else if let Some(shebang) = source.shebang_span() {
+                embedded = Some(Embedded::after(shebang));
                 data = String::new();
             } else {
                 embedded = Some(Embedded::start());
@@ -327,12 +327,11 @@ impl LocalManifest {
     }
 
     /// Lookup a dependency.
-    pub fn get_dependency_versions<'s>(
+    pub fn get_dependencies<'s>(
         &'s self,
-        dep_key: &'s str,
         ws: &'s Workspace<'_>,
         unstable_features: &'s Features,
-    ) -> impl Iterator<Item = (DepTable, CargoResult<Dependency>)> + 's {
+    ) -> impl Iterator<Item = (String, DepTable, CargoResult<Dependency>)> + 's {
         let crate_root = self.path.parent().expect("manifest path is absolute");
         self.get_sections()
             .into_iter()
@@ -341,13 +340,7 @@ impl LocalManifest {
                 Some(
                     table
                         .into_iter()
-                        .filter_map(|(key, item)| {
-                            if key.as_str() == dep_key {
-                                Some((table_path.clone(), key, item))
-                            } else {
-                                None
-                            }
-                        })
+                        .map(|(key, item)| (table_path.clone(), key, item))
                         .collect::<Vec<_>>(),
                 )
             })
@@ -361,7 +354,7 @@ impl LocalManifest {
                     &dep_key,
                     &dep_item,
                 );
-                (table_path, dep)
+                (dep_key, table_path, dep)
             })
     }
 
@@ -452,7 +445,7 @@ impl LocalManifest {
         Ok(())
     }
 
-    /// Allow mutating depedencies, wherever they live.
+    /// Allow mutating dependencies, wherever they live.
     /// Copied from cargo-edit.
     pub fn get_dependency_tables_mut(
         &mut self,
@@ -533,7 +526,7 @@ impl LocalManifest {
                 .filter_map(|v| v.as_array())
             {
                 for value in values.iter().filter_map(|v| v.as_str()) {
-                    let value = FeatureValue::new(InternedString::new(value));
+                    let value = FeatureValue::new(value.into());
                     if let FeatureValue::Dep { dep_name } = &value {
                         if dep_name.as_str() == dep_key {
                             return true;
@@ -592,31 +585,13 @@ impl Embedded {
         Self::Implicit(0)
     }
 
-    fn after(input: &str, after: &str) -> Self {
-        let span = substr_span(input, after);
-        let end = span.end;
-        Self::Implicit(end)
+    fn after(after: std::ops::Range<usize>) -> Self {
+        Self::Implicit(after.end)
     }
 
-    fn exists(input: &str, exists: &str) -> Self {
-        let span = substr_span(input, exists);
-        Self::Explicit(span)
+    fn exists(exists: std::ops::Range<usize>) -> Self {
+        Self::Explicit(exists)
     }
-}
-
-fn substr_span(haystack: &str, needle: &str) -> std::ops::Range<usize> {
-    let haystack_start_ptr = haystack.as_ptr();
-    let haystack_end_ptr = haystack[haystack.len()..haystack.len()].as_ptr();
-
-    let needle_start_ptr = needle.as_ptr();
-    let needle_end_ptr = needle[needle.len()..needle.len()].as_ptr();
-
-    assert!(needle_end_ptr < haystack_end_ptr);
-    assert!(haystack_start_ptr <= needle_start_ptr);
-    let start = needle_start_ptr as usize - haystack_start_ptr as usize;
-    let end = start + needle.len();
-
-    start..end
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -637,7 +612,7 @@ fn fix_feature_activations(
         .enumerate()
         .filter_map(|(idx, value)| value.as_str().map(|s| (idx, s)))
         .filter_map(|(idx, value)| {
-            let parsed_value = FeatureValue::new(InternedString::new(value));
+            let parsed_value = FeatureValue::new(value.into());
             match status {
                 DependencyStatus::None => match (parsed_value, explicit_dep_activation) {
                     (FeatureValue::Feature(dep_name), false)
@@ -666,7 +641,7 @@ fn fix_feature_activations(
     if status == DependencyStatus::Required {
         for value in feature_values.iter_mut() {
             let parsed_value = if let Some(value) = value.as_str() {
-                FeatureValue::new(InternedString::new(value))
+                FeatureValue::new(value.into())
             } else {
                 continue;
             };

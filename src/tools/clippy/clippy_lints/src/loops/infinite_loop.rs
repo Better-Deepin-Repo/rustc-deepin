@@ -1,12 +1,13 @@
 use clippy_utils::diagnostics::span_lint_and_then;
 use clippy_utils::{fn_def_id, is_from_proc_macro, is_lint_allowed};
 use hir::intravisit::{Visitor, walk_expr};
-use hir::{Expr, ExprKind, FnRetTy, FnSig, Node, TyKind};
 use rustc_ast::Label;
 use rustc_errors::Applicability;
-use rustc_hir as hir;
+use rustc_hir::{
+    self as hir, Closure, ClosureKind, CoroutineDesugaring, CoroutineKind, CoroutineSource, Expr, ExprKind, FnRetTy,
+    FnSig, Node, TyKind,
+};
 use rustc_lint::{LateContext, LintContext};
-use rustc_middle::lint::in_external_macro;
 use rustc_span::sym;
 
 use super::INFINITE_LOOP;
@@ -30,7 +31,11 @@ pub(super) fn check<'tcx>(
         return;
     }
 
-    if in_external_macro(cx.sess(), expr.span) || is_from_proc_macro(cx, expr) {
+    if is_inside_unawaited_async_block(cx, expr) {
+        return;
+    }
+
+    if expr.span.in_external_macro(cx.sess().source_map()) || is_from_proc_macro(cx, expr) {
         return;
     }
 
@@ -38,8 +43,8 @@ pub(super) fn check<'tcx>(
         cx,
         label,
         inner_labels: label.into_iter().collect(),
-        is_finite: false,
         loop_depth: 0,
+        is_finite: false,
     };
     loop_visitor.visit_block(loop_block);
 
@@ -61,21 +66,62 @@ pub(super) fn check<'tcx>(
     }
 }
 
+/// Check if the given expression is inside an async block that is not being awaited.
+/// This helps avoid false positives when async blocks are spawned or assigned to variables.
+fn is_inside_unawaited_async_block(cx: &LateContext<'_>, expr: &Expr<'_>) -> bool {
+    let current_hir_id = expr.hir_id;
+    for (_, parent_node) in cx.tcx.hir_parent_iter(current_hir_id) {
+        if let Node::Expr(Expr {
+            kind:
+                ExprKind::Closure(Closure {
+                    kind:
+                        ClosureKind::Coroutine(CoroutineKind::Desugared(
+                            CoroutineDesugaring::Async,
+                            CoroutineSource::Block | CoroutineSource::Closure,
+                        )),
+                    ..
+                }),
+            ..
+        }) = parent_node
+        {
+            return !is_async_block_awaited(cx, expr);
+        }
+    }
+    false
+}
+
+fn is_async_block_awaited(cx: &LateContext<'_>, async_expr: &Expr<'_>) -> bool {
+    for (_, parent_node) in cx.tcx.hir_parent_iter(async_expr.hir_id) {
+        if let Node::Expr(Expr {
+            kind: ExprKind::Match(_, _, hir::MatchSource::AwaitDesugar),
+            ..
+        }) = parent_node
+        {
+            return true;
+        }
+    }
+    false
+}
+
 fn get_parent_fn_ret_ty<'tcx>(cx: &LateContext<'tcx>, expr: &Expr<'_>) -> Option<FnRetTy<'tcx>> {
-    for (_, parent_node) in cx.tcx.hir().parent_iter(expr.hir_id) {
+    for (_, parent_node) in cx.tcx.hir_parent_iter(expr.hir_id) {
         match parent_node {
             // Skip `Coroutine` closures, these are the body of `async fn`, not async closures.
             // This is because we still need to backtrack one parent node to get the `OpaqueDef` ty.
             Node::Expr(Expr {
                 kind:
-                    ExprKind::Closure(hir::Closure {
-                        kind: hir::ClosureKind::Coroutine(_),
+                    ExprKind::Closure(Closure {
+                        kind: ClosureKind::Coroutine(_),
                         ..
                     }),
                 ..
             }) => (),
             Node::Item(hir::Item {
-                kind: hir::ItemKind::Fn(FnSig { decl, .. }, _, _),
+                kind:
+                    hir::ItemKind::Fn {
+                        sig: FnSig { decl, .. },
+                        ..
+                    },
                 ..
             })
             | Node::TraitItem(hir::TraitItem {
@@ -87,7 +133,7 @@ fn get_parent_fn_ret_ty<'tcx>(cx: &LateContext<'tcx>, expr: &Expr<'_>) -> Option
                 ..
             })
             | Node::Expr(Expr {
-                kind: ExprKind::Closure(hir::Closure { fn_decl: decl, .. }),
+                kind: ExprKind::Closure(Closure { fn_decl: decl, .. }),
                 ..
             }) => return Some(decl.output),
             _ => (),

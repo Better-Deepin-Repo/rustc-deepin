@@ -4,15 +4,13 @@ use crate::core::compiler::build_runner::BuildRunner;
 use crate::core::compiler::unit::Unit;
 use crate::core::compiler::{BuildContext, CompileKind};
 use crate::sources::CRATES_IO_REGISTRY;
-use crate::util::errors::{internal, CargoResult};
+use crate::util::errors::{CargoResult, internal};
 use cargo_util::ProcessBuilder;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::hash;
 use url::Url;
-
-use super::CompileMode;
 
 const DOCS_RS_URL: &'static str = "https://docs.rs/";
 
@@ -245,12 +243,11 @@ pub fn add_root_urls(
 }
 
 /// Adds unstable flag [`--output-format`][1] to the given `rustdoc`
-/// invocation. This is for unstable feature [`-Zunstable-features`].
+/// invocation. This is for unstable feature `-Zunstable-features`.
 ///
 /// [1]: https://doc.rust-lang.org/nightly/rustdoc/unstable-features.html?highlight=output-format#-w--output-format-output-format
 pub fn add_output_format(
     build_runner: &BuildRunner<'_, '_>,
-    unit: &Unit,
     rustdoc: &mut ProcessBuilder,
 ) -> CargoResult<()> {
     let gctx = build_runner.bcx.gctx;
@@ -259,7 +256,7 @@ pub fn add_output_format(
         return Ok(());
     }
 
-    if let CompileMode::Doc { json: true, .. } = unit.mode {
+    if build_runner.bcx.build_config.intent.wants_doc_json_output() {
         rustdoc.arg("-Zunstable-options");
         rustdoc.arg("--output-format=json");
     }

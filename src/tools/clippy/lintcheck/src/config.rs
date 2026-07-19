@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::num::NonZero;
 use std::path::PathBuf;
 
+#[expect(clippy::struct_excessive_bools)]
 #[derive(Parser, Clone, Debug)]
 #[command(args_conflicts_with_subcommands = true)]
 pub(crate) struct LintcheckConfig {
@@ -11,6 +12,9 @@ pub(crate) struct LintcheckConfig {
         short = 'j',
         value_name = "N",
         default_value_t = 0,
+        default_value_if("perf", "true", Some("1")), // Limit jobs to 1 when benchmarking
+        conflicts_with("perf"),
+        required = false,
         hide_default_value = true
     )]
     pub max_jobs: usize,
@@ -46,6 +50,11 @@ pub(crate) struct LintcheckConfig {
     /// Run clippy on the dependencies of crates specified in crates-toml
     #[clap(long, conflicts_with("max_jobs"))]
     pub recursive: bool,
+    /// Also produce a `perf.data` file, implies --jobs=1,
+    /// the `perf.data` file can be found at
+    /// `target/lintcheck/sources/<package>-<version>/perf.data`
+    #[clap(long)]
+    pub perf: bool,
     #[command(subcommand)]
     pub subcommand: Option<Commands>,
 }
@@ -59,6 +68,9 @@ pub(crate) enum Commands {
         /// This will limit the number of warnings that will be printed for each lint
         #[clap(long)]
         truncate: bool,
+        /// Write the diff summary to a JSON file if there are any changes
+        #[clap(long, value_name = "PATH")]
+        write_summary: Option<PathBuf>,
     },
     /// Create a lintcheck crates TOML file containing the top N popular crates
     Popular {
@@ -107,7 +119,7 @@ impl LintcheckConfig {
             } else {
                 std::thread::available_parallelism().map_or(1, NonZero::get)
             };
-        };
+        }
 
         for lint_name in &mut config.lint_filter {
             *lint_name = format!(

@@ -1,4 +1,4 @@
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::str;
 
@@ -259,7 +259,7 @@ fn explicit_bin_within_namespace() {
         .run();
 }
 
-#[cargo_test]
+#[cargo_test(nightly, reason = "-Zscript is unstable")]
 #[cfg(unix)]
 fn namespaced_script_name() {
     let p = cargo_test_support::project()
@@ -289,7 +289,7 @@ fn main() {}
   "edition": "2021",
   "features": {},
   "homepage": null,
-  "id": "path+[ROOTURL]/foo#foo::bar@0.0.0",
+  "id": "path+[ROOTURL]/foo/foo::bar.rs#foo::bar@0.0.0",
   "keywords": [],
   "license": null,
   "license_file": null,
@@ -314,7 +314,7 @@ fn main() {}
         "bin"
       ],
       "name": "foo::bar",
-      "src_path": "[ROOT]/home/.cargo/target/[HASH]/foo::bar.rs",
+      "src_path": "[ROOT]/foo/foo::bar.rs",
       "test": true
     }
   ],
@@ -447,8 +447,9 @@ fn publish_namespaced() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo::bar v0.0.1 ([ROOT]/foo)
 [ERROR] failed to prepare local package for uploading
 

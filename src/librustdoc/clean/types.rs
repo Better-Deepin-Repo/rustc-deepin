@@ -1,18 +1,19 @@
-use std::borrow::Cow;
+use std::fmt::Write;
 use std::hash::Hash;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock as OnceCell};
 use std::{fmt, iter};
 
 use arrayvec::ArrayVec;
+use itertools::Either;
 use rustc_abi::{ExternAbi, VariantIdx};
-use rustc_attr_parsing::{ConstStability, Deprecation, Stability, StableSince};
 use rustc_data_structures::fx::{FxHashSet, FxIndexMap, FxIndexSet};
+use rustc_data_structures::thin_vec::ThinVec;
+use rustc_hir::attrs::{AttributeKind, DeprecatedSince, Deprecation};
 use rustc_hir::def::{CtorKind, DefKind, Res};
 use rustc_hir::def_id::{CrateNum, DefId, LOCAL_CRATE, LocalDefId};
 use rustc_hir::lang_items::LangItem;
-use rustc_hir::{BodyId, Mutability};
-use rustc_hir_analysis::check::intrinsic::intrinsic_operation_unsafety;
+use rustc_hir::{BodyId, ConstStability, Mutability, Stability, StableSince, find_attr};
 use rustc_index::IndexVec;
 use rustc_metadata::rendered_const;
 use rustc_middle::span_bug;
@@ -23,9 +24,8 @@ use rustc_resolve::rustdoc::{
 };
 use rustc_session::Session;
 use rustc_span::hygiene::MacroKind;
-use rustc_span::symbol::{Ident, Symbol, kw, sym};
+use rustc_span::symbol::{Symbol, kw, sym};
 use rustc_span::{DUMMY_SP, FileName, Loc};
-use thin_vec::ThinVec;
 use tracing::{debug, trace};
 use {rustc_ast as ast, rustc_hir as hir};
 
@@ -41,6 +41,7 @@ use crate::clean::utils::{is_literal_expr, print_evaluated_const};
 use crate::core::DocContext;
 use crate::formats::cache::Cache;
 use crate::formats::item_type::ItemType;
+use crate::html::format::HrefInfo;
 use crate::html::render::Context;
 use crate::passes::collect_intra_doc_links::UrlFragment;
 
@@ -106,7 +107,7 @@ impl From<DefId> for ItemId {
 }
 
 /// The crate currently being documented.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub(crate) struct Crate {
     pub(crate) module: Item,
     /// Only here so that they can be filtered through the rustdoc passes.
@@ -199,50 +200,62 @@ impl ExternalCrate {
             .unwrap_or(Unknown) // Well, at least we tried.
     }
 
-    pub(crate) fn keywords(&self, tcx: TyCtxt<'_>) -> ThinVec<(DefId, Symbol)> {
+    fn mapped_root_modules<T>(
+        &self,
+        tcx: TyCtxt<'_>,
+        f: impl Fn(DefId, TyCtxt<'_>) -> Option<(DefId, T)>,
+    ) -> impl Iterator<Item = (DefId, T)> {
         let root = self.def_id();
 
-        let as_keyword = |res: Res<!>| {
-            if let Res::Def(DefKind::Mod, def_id) = res {
-                let mut keyword = None;
-                let meta_items = tcx
-                    .get_attrs(def_id, sym::doc)
-                    .flat_map(|attr| attr.meta_item_list().unwrap_or_default());
-                for meta in meta_items {
-                    if meta.has_name(sym::keyword) {
-                        if let Some(v) = meta.value_str() {
-                            keyword = Some(v);
-                            break;
-                        }
-                    }
-                }
-                return keyword.map(|p| (def_id, p));
-            }
-            None
-        };
         if root.is_local() {
-            tcx.hir()
-                .root_module()
-                .item_ids
-                .iter()
-                .filter_map(|&id| {
-                    let item = tcx.hir().item(id);
-                    match item.kind {
-                        hir::ItemKind::Mod(_) => {
-                            as_keyword(Res::Def(DefKind::Mod, id.owner_id.to_def_id()))
-                        }
-                        _ => None,
-                    }
-                })
-                .collect()
+            Either::Left(
+                tcx.hir_root_module()
+                    .item_ids
+                    .iter()
+                    .filter(move |&&id| matches!(tcx.hir_item(id).kind, hir::ItemKind::Mod(..)))
+                    .filter_map(move |&id| f(id.owner_id.into(), tcx)),
+            )
         } else {
-            tcx.module_children(root).iter().map(|item| item.res).filter_map(as_keyword).collect()
+            Either::Right(
+                tcx.module_children(root)
+                    .iter()
+                    .filter_map(|item| {
+                        if let Res::Def(DefKind::Mod, did) = item.res { Some(did) } else { None }
+                    })
+                    .filter_map(move |did| f(did, tcx)),
+            )
         }
     }
 
-    pub(crate) fn primitives(&self, tcx: TyCtxt<'_>) -> ThinVec<(DefId, PrimitiveType)> {
-        let root = self.def_id();
+    pub(crate) fn keywords(&self, tcx: TyCtxt<'_>) -> impl Iterator<Item = (DefId, Symbol)> {
+        self.retrieve_keywords_or_documented_attributes(tcx, sym::keyword)
+    }
+    pub(crate) fn documented_attributes(
+        &self,
+        tcx: TyCtxt<'_>,
+    ) -> impl Iterator<Item = (DefId, Symbol)> {
+        self.retrieve_keywords_or_documented_attributes(tcx, sym::attribute)
+    }
 
+    fn retrieve_keywords_or_documented_attributes(
+        &self,
+        tcx: TyCtxt<'_>,
+        name: Symbol,
+    ) -> impl Iterator<Item = (DefId, Symbol)> {
+        let as_target = move |did: DefId, tcx: TyCtxt<'_>| -> Option<(DefId, Symbol)> {
+            tcx.get_attrs(did, sym::doc)
+                .flat_map(|attr| attr.meta_item_list().unwrap_or_default())
+                .filter(|meta| meta.has_name(name))
+                .find_map(|meta| meta.value_str())
+                .map(|value| (did, value))
+        };
+        self.mapped_root_modules(tcx, as_target)
+    }
+
+    pub(crate) fn primitives(
+        &self,
+        tcx: TyCtxt<'_>,
+    ) -> impl Iterator<Item = (DefId, PrimitiveType)> {
         // Collect all inner modules which are tagged as implementations of
         // primitives.
         //
@@ -260,41 +273,21 @@ impl ExternalCrate {
         // Also note that this does not attempt to deal with modules tagged
         // duplicately for the same primitive. This is handled later on when
         // rendering by delegating everything to a hash map.
-        let as_primitive = |res: Res<!>| {
-            let Res::Def(DefKind::Mod, def_id) = res else { return None };
-            tcx.get_attrs(def_id, sym::rustc_doc_primitive)
-                .map(|attr| {
-                    let attr_value = attr.value_str().expect("syntax should already be validated");
-                    let Some(prim) = PrimitiveType::from_symbol(attr_value) else {
-                        span_bug!(
-                            attr.span,
-                            "primitive `{attr_value}` is not a member of `PrimitiveType`"
-                        );
-                    };
+        fn as_primitive(def_id: DefId, tcx: TyCtxt<'_>) -> Option<(DefId, PrimitiveType)> {
+            tcx.get_attrs(def_id, sym::rustc_doc_primitive).next().map(|attr| {
+                let attr_value = attr.value_str().expect("syntax should already be validated");
+                let Some(prim) = PrimitiveType::from_symbol(attr_value) else {
+                    span_bug!(
+                        attr.span(),
+                        "primitive `{attr_value}` is not a member of `PrimitiveType`"
+                    );
+                };
 
-                    (def_id, prim)
-                })
-                .next()
-        };
-
-        if root.is_local() {
-            tcx.hir()
-                .root_module()
-                .item_ids
-                .iter()
-                .filter_map(|&id| {
-                    let item = tcx.hir().item(id);
-                    match item.kind {
-                        hir::ItemKind::Mod(_) => {
-                            as_primitive(Res::Def(DefKind::Mod, id.owner_id.to_def_id()))
-                        }
-                        _ => None,
-                    }
-                })
-                .collect()
-        } else {
-            tcx.module_children(root).iter().map(|item| item.res).filter_map(as_primitive).collect()
+                (def_id, prim)
+            })
         }
+
+        self.mapped_root_modules(tcx, as_primitive)
     }
 }
 
@@ -314,26 +307,31 @@ pub(crate) enum ExternalLocation {
 /// directly to the AST's concept of an item; it's a strict superset.
 #[derive(Clone)]
 pub(crate) struct Item {
+    pub(crate) inner: Box<ItemInner>,
+}
+
+// Why does the `Item`/`ItemInner` split exist? `Vec<Item>`s are common, and
+// without the split `Item` would be a large type (100+ bytes) which results in
+// lots of wasted space in the unused parts of a `Vec<Item>`. With the split,
+// `Item` is just 8 bytes, and the wasted space is avoided, at the cost of an
+// extra allocation per item. This is a performance win.
+#[derive(Clone)]
+pub(crate) struct ItemInner {
     /// The name of this item.
     /// Optional because not every item has a name, e.g. impls.
     pub(crate) name: Option<Symbol>,
-    pub(crate) inner: Box<ItemInner>,
-    pub(crate) item_id: ItemId,
-    /// This is the `LocalDefId` of the `use` statement if the item was inlined.
-    /// The crate metadata doesn't hold this information, so the `use` statement
-    /// always belongs to the current crate.
-    pub(crate) inline_stmt_id: Option<LocalDefId>,
-    pub(crate) cfg: Option<Arc<Cfg>>,
-}
-
-#[derive(Clone)]
-pub(crate) struct ItemInner {
     /// Information about this item that is specific to what kind of item it is.
     /// E.g., struct vs enum vs function.
     pub(crate) kind: ItemKind,
     pub(crate) attrs: Attributes,
     /// The effective stability, filled out by the `propagate-stability` pass.
     pub(crate) stability: Option<Stability>,
+    pub(crate) item_id: ItemId,
+    /// This is the `LocalDefId` of the `use` statement if the item was inlined.
+    /// The crate metadata doesn't hold this information, so the `use` statement
+    /// always belongs to the current crate.
+    pub(crate) inline_stmt_id: Option<LocalDefId>,
+    pub(crate) cfg: Option<Arc<Cfg>>,
 }
 
 impl std::ops::Deref for Item {
@@ -365,10 +363,7 @@ impl fmt::Debug for Item {
 pub(crate) fn rustc_span(def_id: DefId, tcx: TyCtxt<'_>) -> Span {
     Span::new(def_id.as_local().map_or_else(
         || tcx.def_span(def_id),
-        |local| {
-            let hir = tcx.hir();
-            hir.span_with_body(tcx.local_def_id_to_hir_id(local))
-        },
+        |local| tcx.hir_span_with_body(tcx.local_def_id_to_hir_id(local)),
     ))
 }
 
@@ -400,14 +395,29 @@ impl Item {
     }
 
     pub(crate) fn deprecation(&self, tcx: TyCtxt<'_>) -> Option<Deprecation> {
-        self.def_id().and_then(|did| tcx.lookup_deprecation(did))
+        self.def_id().and_then(|did| tcx.lookup_deprecation(did)).or_else(|| {
+            // `allowed_through_unstable_modules` is a bug-compatibility hack for old rustc
+            // versions; the paths that are exposed through it are "deprecated" because they
+            // were never supposed to work at all.
+            let stab = self.stability(tcx)?;
+            if let rustc_hir::StabilityLevel::Stable {
+                allowed_through_unstable_modules: Some(note),
+                ..
+            } = stab.level
+            {
+                Some(Deprecation {
+                    since: DeprecatedSince::Unspecified,
+                    note: Some(note),
+                    suggestion: None,
+                })
+            } else {
+                None
+            }
+        })
     }
 
     pub(crate) fn inner_docs(&self, tcx: TyCtxt<'_>) -> bool {
-        self.item_id
-            .as_def_id()
-            .map(|did| inner_docs(tcx.get_attrs_unchecked(did)))
-            .unwrap_or(false)
+        self.item_id.as_def_id().map(|did| inner_docs(tcx.get_all_attrs(did))).unwrap_or(false)
     }
 
     pub(crate) fn span(&self, tcx: TyCtxt<'_>) -> Option<Span> {
@@ -452,14 +462,14 @@ impl Item {
         kind: ItemKind,
         cx: &mut DocContext<'_>,
     ) -> Item {
-        let hir_attrs = cx.tcx.get_attrs_unchecked(def_id);
+        let hir_attrs = cx.tcx.get_all_attrs(def_id);
 
         Self::from_def_id_and_attrs_and_parts(
             def_id,
             name,
             kind,
             Attributes::from_hir(hir_attrs),
-            hir_attrs.cfg(cx.tcx, &cx.cache.hidden_cfg),
+            None,
         )
     }
 
@@ -473,32 +483,62 @@ impl Item {
         trace!("name={name:?}, def_id={def_id:?} cfg={cfg:?}");
 
         Item {
-            item_id: def_id.into(),
-            inner: Box::new(ItemInner { kind, attrs, stability: None }),
-            name,
-            cfg,
-            inline_stmt_id: None,
+            inner: Box::new(ItemInner {
+                item_id: def_id.into(),
+                kind,
+                attrs,
+                stability: None,
+                name,
+                cfg,
+                inline_stmt_id: None,
+            }),
         }
+    }
+
+    /// If the item has doc comments from a reexport, returns the item id of that reexport,
+    /// otherwise returns returns the item id.
+    ///
+    /// This is used as a key for caching intra-doc link resolution,
+    /// to prevent two reexports of the same item from using the same cache.
+    pub(crate) fn item_or_reexport_id(&self) -> ItemId {
+        // added documentation on a reexport is always prepended.
+        self.attrs
+            .doc_strings
+            .first()
+            .map(|x| x.item_id)
+            .flatten()
+            .map(ItemId::from)
+            .unwrap_or(self.item_id)
     }
 
     pub(crate) fn links(&self, cx: &Context<'_>) -> Vec<RenderedLink> {
         use crate::html::format::{href, link_tooltip};
 
-        let Some(links) = cx.cache().intra_doc_links.get(&self.item_id) else { return vec![] };
+        let Some(links) = cx.cache().intra_doc_links.get(&self.item_or_reexport_id()) else {
+            return vec![];
+        };
         links
             .iter()
-            .filter_map(|ItemLink { link: s, link_text, page_id: id, ref fragment }| {
+            .filter_map(|ItemLink { link: s, link_text, page_id: id, fragment }| {
                 debug!(?id);
-                if let Ok((mut href, ..)) = href(*id, cx) {
-                    debug!(?href);
-                    if let Some(ref fragment) = *fragment {
-                        fragment.render(&mut href, cx.tcx())
+                if let Ok(HrefInfo { mut url, .. }) = href(*id, cx) {
+                    debug!(?url);
+                    match fragment {
+                        Some(UrlFragment::Item(def_id)) => {
+                            write!(url, "{}", crate::html::format::fragment(*def_id, cx.tcx()))
+                                .unwrap();
+                        }
+                        Some(UrlFragment::UserWritten(raw)) => {
+                            url.push('#');
+                            url.push_str(raw);
+                        }
+                        None => {}
                     }
                     Some(RenderedLink {
                         original_text: s.clone(),
                         new_text: link_text.clone(),
-                        tooltip: link_tooltip(*id, fragment, cx),
-                        href,
+                        tooltip: link_tooltip(*id, fragment, cx).to_string(),
+                        href: url,
                     })
                 } else {
                     None
@@ -575,6 +615,20 @@ impl Item {
     pub(crate) fn is_keyword(&self) -> bool {
         self.type_() == ItemType::Keyword
     }
+    pub(crate) fn is_attribute(&self) -> bool {
+        self.type_() == ItemType::Attribute
+    }
+    /// Returns `true` if the item kind is one of the following:
+    ///
+    /// * `ItemType::Primitive`
+    /// * `ItemType::Keyword`
+    /// * `ItemType::Attribute`
+    ///
+    /// They are considered fake because they only exist thanks to their
+    /// `#[doc(primitive|keyword|attribute)]` attribute.
+    pub(crate) fn is_fake_item(&self) -> bool {
+        matches!(self.type_(), ItemType::Primitive | ItemType::Keyword | ItemType::Attribute)
+    }
     pub(crate) fn is_stripped(&self) -> bool {
         match self.kind {
             StrippedItem(..) => true,
@@ -588,6 +642,9 @@ impl Item {
             UnionItem(ref union_) => Some(union_.has_stripped_entries()),
             EnumItem(ref enum_) => Some(enum_.has_stripped_entries()),
             VariantItem(ref v) => v.has_stripped_entries(),
+            TypeAliasItem(ref type_alias) => {
+                type_alias.inner_type.as_ref().and_then(|t| t.has_stripped_entries())
+            }
             _ => None,
         }
     }
@@ -614,7 +671,7 @@ impl Item {
     }
 
     pub(crate) fn is_non_exhaustive(&self) -> bool {
-        self.attrs.other_attrs.iter().any(|a| a.has_name(sym::non_exhaustive))
+        find_attr!(&self.attrs.other_attrs, AttributeKind::NonExhaustive(..))
     }
 
     /// Returns a documentation-level item type from the item.
@@ -640,7 +697,17 @@ impl Item {
         ) -> hir::FnHeader {
             let sig = tcx.fn_sig(def_id).skip_binder();
             let constness = if tcx.is_const_fn(def_id) {
-                hir::Constness::Const
+                // rustc's `is_const_fn` returns `true` for associated functions that have an `impl const` parent
+                // or that have a `const trait` parent. Do not display those as `const` in rustdoc because we
+                // won't be printing correct syntax plus the syntax is unstable.
+                if let Some(assoc) = tcx.opt_associated_item(def_id)
+                    && let ty::AssocContainer::Trait | ty::AssocContainer::TraitImpl(_) =
+                        assoc.container
+                {
+                    hir::Constness::NotConst
+                } else {
+                    hir::Constness::Const
+                }
             } else {
                 hir::Constness::NotConst
             };
@@ -648,17 +715,26 @@ impl Item {
                 ty::Asyncness::Yes => hir::IsAsync::Async(DUMMY_SP),
                 ty::Asyncness::No => hir::IsAsync::NotAsync,
             };
-            hir::FnHeader { safety: sig.safety(), abi: sig.abi(), constness, asyncness }
+            hir::FnHeader {
+                safety: if tcx.codegen_fn_attrs(def_id).safe_target_features {
+                    hir::HeaderSafety::SafeTargetFeatures
+                } else {
+                    sig.safety().into()
+                },
+                abi: sig.abi(),
+                constness,
+                asyncness,
+            }
         }
         let header = match self.kind {
             ItemKind::ForeignFunctionItem(_, safety) => {
                 let def_id = self.def_id().unwrap();
                 let abi = tcx.fn_sig(def_id).skip_binder().abi();
                 hir::FnHeader {
-                    safety: if abi == ExternAbi::RustIntrinsic {
-                        intrinsic_operation_unsafety(tcx, def_id.expect_local())
+                    safety: if tcx.codegen_fn_attrs(def_id).safe_target_features {
+                        hir::HeaderSafety::SafeTargetFeatures
                     } else {
-                        safety
+                        safety.into()
                     },
                     abi,
                     constness: if tcx.is_const_fn(def_id) {
@@ -693,7 +769,9 @@ impl Item {
             // Primitives and Keywords are written in the source code as private modules.
             // The modules need to be private so that nobody actually uses them, but the
             // keywords and primitives that they are documenting are public.
-            ItemKind::KeywordItem | ItemKind::PrimitiveItem(_) => return Some(Visibility::Public),
+            ItemKind::KeywordItem | ItemKind::PrimitiveItem(_) | ItemKind::AttributeItem => {
+                return Some(Visibility::Public);
+            }
             // Variant fields inherit their enum's visibility.
             StructFieldItem(..) if is_field_vis_inherited(tcx, def_id) => {
                 return None;
@@ -708,17 +786,13 @@ impl Item {
             | RequiredAssocTypeItem(..)
             | RequiredMethodItem(..)
             | MethodItem(..) => {
-                let assoc_item = tcx.associated_item(def_id);
-                let is_trait_item = match assoc_item.container {
-                    ty::AssocItemContainer::Trait => true,
-                    ty::AssocItemContainer::Impl => {
-                        // Trait impl items always inherit the impl's visibility --
-                        // we don't want to show `pub`.
-                        tcx.impl_trait_ref(tcx.parent(assoc_item.def_id)).is_some()
+                match tcx.associated_item(def_id).container {
+                    // Trait impl items always inherit the impl's visibility --
+                    // we don't want to show `pub`.
+                    ty::AssocContainer::Trait | ty::AssocContainer::TraitImpl(_) => {
+                        return None;
                     }
-                };
-                if is_trait_item {
-                    return None;
+                    ty::AssocContainer::InherentImpl => {}
                 }
             }
             _ => {}
@@ -728,101 +802,6 @@ impl Item {
             None => def_id,
         };
         Some(tcx.visibility(def_id))
-    }
-
-    pub(crate) fn attributes(
-        &self,
-        tcx: TyCtxt<'_>,
-        cache: &Cache,
-        keep_as_is: bool,
-    ) -> Vec<String> {
-        const ALLOWED_ATTRIBUTES: &[Symbol] =
-            &[sym::export_name, sym::link_section, sym::no_mangle, sym::non_exhaustive];
-
-        use rustc_abi::IntegerType;
-
-        let mut attrs: Vec<String> = self
-            .attrs
-            .other_attrs
-            .iter()
-            .filter_map(|attr| {
-                if keep_as_is {
-                    Some(rustc_hir_pretty::attribute_to_string(&tcx, attr))
-                } else if ALLOWED_ATTRIBUTES.contains(&attr.name_or_empty()) {
-                    Some(
-                        rustc_hir_pretty::attribute_to_string(&tcx, attr)
-                            .replace("\\\n", "")
-                            .replace('\n', "")
-                            .replace("  ", " "),
-                    )
-                } else {
-                    None
-                }
-            })
-            .collect();
-        if !keep_as_is
-            && let Some(def_id) = self.def_id()
-            && let ItemType::Struct | ItemType::Enum | ItemType::Union = self.type_()
-        {
-            let adt = tcx.adt_def(def_id);
-            let repr = adt.repr();
-            let mut out = Vec::new();
-            if repr.c() {
-                out.push("C");
-            }
-            if repr.transparent() {
-                // Render `repr(transparent)` iff the non-1-ZST field is public or at least one
-                // field is public in case all fields are 1-ZST fields.
-                let render_transparent = cache.document_private
-                    || adt
-                        .all_fields()
-                        .find(|field| {
-                            let ty =
-                                field.ty(tcx, ty::GenericArgs::identity_for_item(tcx, field.did));
-                            tcx.layout_of(
-                                ty::TypingEnv::post_analysis(tcx, field.did).as_query_input(ty),
-                            )
-                            .is_ok_and(|layout| !layout.is_1zst())
-                        })
-                        .map_or_else(
-                            || adt.all_fields().any(|field| field.vis.is_public()),
-                            |field| field.vis.is_public(),
-                        );
-
-                if render_transparent {
-                    out.push("transparent");
-                }
-            }
-            if repr.simd() {
-                out.push("simd");
-            }
-            let pack_s;
-            if let Some(pack) = repr.pack {
-                pack_s = format!("packed({})", pack.bytes());
-                out.push(&pack_s);
-            }
-            let align_s;
-            if let Some(align) = repr.align {
-                align_s = format!("align({})", align.bytes());
-                out.push(&align_s);
-            }
-            let int_s;
-            if let Some(int) = repr.int {
-                int_s = match int {
-                    IntegerType::Pointer(is_signed) => {
-                        format!("{}size", if is_signed { 'i' } else { 'u' })
-                    }
-                    IntegerType::Fixed(size, is_signed) => {
-                        format!("{}{}", if is_signed { 'i' } else { 'u' }, size.size().bytes() * 8)
-                    }
-                };
-                out.push(&int_s);
-            }
-            if !out.is_empty() {
-                attrs.push(format!("#[repr({})]", out.join(", ")));
-            }
-        }
-        attrs
     }
 
     pub fn is_doc_hidden(&self) -> bool {
@@ -883,7 +862,12 @@ pub(crate) enum ItemKind {
     AssocTypeItem(Box<TypeAlias>, Vec<GenericBound>),
     /// An item that has been stripped by a rustdoc pass
     StrippedItem(Box<ItemKind>),
+    /// This item represents a module with a `#[doc(keyword = "...")]` attribute which is used
+    /// to generate documentation for Rust keywords.
     KeywordItem,
+    /// This item represents a module with a `#[doc(attribute = "...")]` attribute which is used
+    /// to generate documentation for Rust builtin attributes.
+    AttributeItem,
 }
 
 impl ItemKind {
@@ -924,32 +908,9 @@ impl ItemKind {
             | RequiredAssocTypeItem(..)
             | AssocTypeItem(..)
             | StrippedItem(_)
-            | KeywordItem => [].iter(),
+            | KeywordItem
+            | AttributeItem => [].iter(),
         }
-    }
-
-    /// Returns `true` if this item does not appear inside an impl block.
-    pub(crate) fn is_non_assoc(&self) -> bool {
-        matches!(
-            self,
-            StructItem(_)
-                | UnionItem(_)
-                | EnumItem(_)
-                | TraitItem(_)
-                | ModuleItem(_)
-                | ExternCrateItem { .. }
-                | FunctionItem(_)
-                | TypeAliasItem(_)
-                | StaticItem(_)
-                | ConstantItem(_)
-                | TraitAliasItem(_)
-                | ForeignFunctionItem(_, _)
-                | ForeignStaticItem(_, _)
-                | ForeignTypeItem
-                | MacroItem(_)
-                | ProcMacroItem(_)
-                | PrimitiveItem(_)
-        )
     }
 }
 
@@ -959,147 +920,15 @@ pub(crate) struct Module {
     pub(crate) span: Span,
 }
 
-pub(crate) trait AttributesExt {
-    type AttributeIterator<'a>: Iterator<Item = ast::MetaItemInner>
-    where
-        Self: 'a;
-    type Attributes<'a>: Iterator<Item = &'a hir::Attribute>
-    where
-        Self: 'a;
-
-    fn lists(&self, name: Symbol) -> Self::AttributeIterator<'_>;
-
-    fn iter(&self) -> Self::Attributes<'_>;
-
-    fn cfg(&self, tcx: TyCtxt<'_>, hidden_cfg: &FxHashSet<Cfg>) -> Option<Arc<Cfg>> {
-        let sess = tcx.sess;
-        let doc_cfg_active = tcx.features().doc_cfg();
-        let doc_auto_cfg_active = tcx.features().doc_auto_cfg();
-
-        fn single<T: IntoIterator>(it: T) -> Option<T::Item> {
-            let mut iter = it.into_iter();
-            let item = iter.next()?;
-            if iter.next().is_some() {
-                return None;
-            }
-            Some(item)
-        }
-
-        let mut cfg = if doc_cfg_active || doc_auto_cfg_active {
-            let mut doc_cfg = self
-                .iter()
-                .filter(|attr| attr.has_name(sym::doc))
-                .flat_map(|attr| attr.meta_item_list().unwrap_or_default())
-                .filter(|attr| attr.has_name(sym::cfg))
-                .peekable();
-            if doc_cfg.peek().is_some() && doc_cfg_active {
-                doc_cfg
-                    .filter_map(|attr| Cfg::parse(&attr).ok())
-                    .fold(Cfg::True, |cfg, new_cfg| cfg & new_cfg)
-            } else if doc_auto_cfg_active {
-                // If there is no `doc(cfg())`, then we retrieve the `cfg()` attributes (because
-                // `doc(cfg())` overrides `cfg()`).
-                self.iter()
-                    .filter(|attr| attr.has_name(sym::cfg))
-                    .filter_map(|attr| single(attr.meta_item_list()?))
-                    .filter_map(|attr| {
-                        Cfg::parse_without(attr.meta_item()?, hidden_cfg).ok().flatten()
-                    })
-                    .fold(Cfg::True, |cfg, new_cfg| cfg & new_cfg)
-            } else {
-                Cfg::True
-            }
-        } else {
-            Cfg::True
-        };
-
-        for attr in self.iter() {
-            // #[doc]
-            if attr.doc_str().is_none() && attr.has_name(sym::doc) {
-                // #[doc(...)]
-                if let Some(list) = attr.meta_item_list() {
-                    for item in list {
-                        // #[doc(hidden)]
-                        if !item.has_name(sym::cfg) {
-                            continue;
-                        }
-                        // #[doc(cfg(...))]
-                        if let Some(cfg_mi) = item
-                            .meta_item()
-                            .and_then(|item| rustc_expand::config::parse_cfg(item, sess))
-                        {
-                            match Cfg::parse(cfg_mi) {
-                                Ok(new_cfg) => cfg &= new_cfg,
-                                Err(e) => {
-                                    sess.dcx().span_err(e.span, e.msg);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // treat #[target_feature(enable = "feat")] attributes as if they were
-        // #[doc(cfg(target_feature = "feat"))] attributes as well
-        for attr in self.lists(sym::target_feature) {
-            if attr.has_name(sym::enable) {
-                if attr.value_str().is_some() {
-                    // Clone `enable = "feat"`, change to `target_feature = "feat"`.
-                    // Unwrap is safe because `value_str` succeeded above.
-                    let mut meta = attr.meta_item().unwrap().clone();
-                    meta.path = ast::Path::from_ident(Ident::with_dummy_span(sym::target_feature));
-
-                    if let Ok(feat_cfg) = Cfg::parse(&ast::MetaItemInner::MetaItem(meta)) {
-                        cfg &= feat_cfg;
-                    }
-                }
-            }
-        }
-
-        if cfg == Cfg::True { None } else { Some(Arc::new(cfg)) }
-    }
-}
-
-impl AttributesExt for [hir::Attribute] {
-    type AttributeIterator<'a> = impl Iterator<Item = ast::MetaItemInner> + 'a;
-    type Attributes<'a> = impl Iterator<Item = &'a hir::Attribute> + 'a;
-
-    fn lists(&self, name: Symbol) -> Self::AttributeIterator<'_> {
-        self.iter()
-            .filter(move |attr| attr.has_name(name))
-            .filter_map(ast::attr::AttributeExt::meta_item_list)
-            .flatten()
-    }
-
-    fn iter(&self) -> Self::Attributes<'_> {
-        self.iter()
-    }
-}
-
-impl AttributesExt for [(Cow<'_, hir::Attribute>, Option<DefId>)] {
-    type AttributeIterator<'a>
-        = impl Iterator<Item = ast::MetaItemInner> + 'a
-    where
-        Self: 'a;
-    type Attributes<'a>
-        = impl Iterator<Item = &'a hir::Attribute> + 'a
-    where
-        Self: 'a;
-
-    fn lists(&self, name: Symbol) -> Self::AttributeIterator<'_> {
-        AttributesExt::iter(self)
-            .filter(move |attr| attr.has_name(name))
-            .filter_map(hir::Attribute::meta_item_list)
-            .flatten()
-    }
-
-    fn iter(&self) -> Self::Attributes<'_> {
-        self.iter().map(move |(attr, _)| match attr {
-            Cow::Borrowed(attr) => *attr,
-            Cow::Owned(attr) => attr,
-        })
-    }
+pub(crate) fn hir_attr_lists<'a, I: IntoIterator<Item = &'a hir::Attribute>>(
+    attrs: I,
+    name: Symbol,
+) -> impl Iterator<Item = ast::MetaItemInner> + use<'a, I> {
+    attrs
+        .into_iter()
+        .filter(move |attr| attr.has_name(name))
+        .filter_map(ast::attr::AttributeExt::meta_item_list)
+        .flatten()
 }
 
 pub(crate) trait NestedAttributesExt {
@@ -1164,8 +993,8 @@ pub(crate) struct Attributes {
 }
 
 impl Attributes {
-    pub(crate) fn lists(&self, name: Symbol) -> impl Iterator<Item = ast::MetaItemInner> + '_ {
-        self.other_attrs.lists(name)
+    pub(crate) fn lists(&self, name: Symbol) -> impl Iterator<Item = ast::MetaItemInner> {
+        hir_attr_lists(&self.other_attrs[..], name)
     }
 
     pub(crate) fn has_doc_flag(&self, flag: Symbol) -> bool {
@@ -1174,10 +1003,10 @@ impl Attributes {
                 continue;
             }
 
-            if let Some(items) = attr.meta_item_list() {
-                if items.iter().filter_map(|i| i.meta_item()).any(|it| it.has_name(flag)) {
-                    return true;
-                }
+            if let Some(items) = attr.meta_item_list()
+                && items.iter().filter_map(|i| i.meta_item()).any(|it| it.has_name(flag))
+            {
+                return true;
             }
         }
 
@@ -1232,7 +1061,9 @@ impl Attributes {
     pub(crate) fn get_doc_aliases(&self) -> Box<[Symbol]> {
         let mut aliases = FxIndexSet::default();
 
-        for attr in self.other_attrs.lists(sym::doc).filter(|a| a.has_name(sym::alias)) {
+        for attr in
+            hir_attr_lists(&self.other_attrs[..], sym::doc).filter(|a| a.has_name(sym::alias))
+        {
             if let Some(values) = attr.meta_item_list() {
                 for l in values {
                     if let Some(lit) = l.lit()
@@ -1254,7 +1085,7 @@ pub(crate) enum GenericBound {
     TraitBound(PolyTrait, hir::TraitBoundModifiers),
     Outlives(Lifetime),
     /// `use<'a, T>` precise-capturing bound syntax
-    Use(Vec<Symbol>),
+    Use(Vec<PreciseCapturingArg>),
 }
 
 impl GenericBound {
@@ -1263,14 +1094,17 @@ impl GenericBound {
     }
 
     pub(crate) fn maybe_sized(cx: &mut DocContext<'_>) -> GenericBound {
-        Self::sized_with(cx, hir::TraitBoundModifiers {
-            polarity: hir::BoundPolarity::Maybe(DUMMY_SP),
-            constness: hir::BoundConstness::Never,
-        })
+        Self::sized_with(
+            cx,
+            hir::TraitBoundModifiers {
+                polarity: hir::BoundPolarity::Maybe(DUMMY_SP),
+                constness: hir::BoundConstness::Never,
+            },
+        )
     }
 
     fn sized_with(cx: &mut DocContext<'_>, modifiers: hir::TraitBoundModifiers) -> GenericBound {
-        let did = cx.tcx.require_lang_item(LangItem::Sized, None);
+        let did = cx.tcx.require_lang_item(LangItem::Sized, DUMMY_SP);
         let empty = ty::Binder::dummy(ty::GenericArgs::empty());
         let path = clean_middle_path(cx, did, false, ThinVec::new(), empty);
         inline::record_extern_fqn(cx, did, ItemType::Trait);
@@ -1282,11 +1116,19 @@ impl GenericBound {
     }
 
     pub(crate) fn is_sized_bound(&self, cx: &DocContext<'_>) -> bool {
+        self.is_bounded_by_lang_item(cx, LangItem::Sized)
+    }
+
+    pub(crate) fn is_meta_sized_bound(&self, cx: &DocContext<'_>) -> bool {
+        self.is_bounded_by_lang_item(cx, LangItem::MetaSized)
+    }
+
+    fn is_bounded_by_lang_item(&self, cx: &DocContext<'_>, lang_item: LangItem) -> bool {
         if let GenericBound::TraitBound(
             PolyTrait { ref trait_, .. },
             rustc_hir::TraitBoundModifiers::NONE,
         ) = *self
-            && Some(trait_.def_id()) == cx.tcx.lang_items().sized_trait()
+            && cx.tcx.is_lang_item(trait_.def_id(), lang_item)
         {
             return true;
         }
@@ -1315,18 +1157,33 @@ impl Lifetime {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+pub(crate) enum PreciseCapturingArg {
+    Lifetime(Lifetime),
+    Param(Symbol),
+}
+
+impl PreciseCapturingArg {
+    pub(crate) fn name(self) -> Symbol {
+        match self {
+            PreciseCapturingArg::Lifetime(lt) => lt.0,
+            PreciseCapturingArg::Param(param) => param,
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum WherePredicate {
     BoundPredicate { ty: Type, bounds: Vec<GenericBound>, bound_params: Vec<GenericParamDef> },
     RegionPredicate { lifetime: Lifetime, bounds: Vec<GenericBound> },
-    EqPredicate { lhs: Type, rhs: Term },
+    EqPredicate { lhs: QPathData, rhs: Term },
 }
 
 impl WherePredicate {
     pub(crate) fn get_bounds(&self) -> Option<&[GenericBound]> {
-        match *self {
-            WherePredicate::BoundPredicate { ref bounds, .. } => Some(bounds),
-            WherePredicate::RegionPredicate { ref bounds, .. } => Some(bounds),
+        match self {
+            WherePredicate::BoundPredicate { bounds, .. } => Some(bounds),
+            WherePredicate::RegionPredicate { bounds, .. } => Some(bounds),
             _ => None,
         }
     }
@@ -1337,7 +1194,7 @@ pub(crate) enum GenericParamDefKind {
     Lifetime { outlives: ThinVec<Lifetime> },
     Type { bounds: ThinVec<GenericBound>, default: Option<Box<Type>>, synthetic: bool },
     // Option<Box<String>> makes this type smaller than `Option<String>` would.
-    Const { ty: Box<Type>, default: Option<Box<String>>, synthetic: bool },
+    Const { ty: Box<Type>, default: Option<Box<String>> },
 }
 
 impl GenericParamDefKind {
@@ -1398,34 +1255,30 @@ pub(crate) struct Function {
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub(crate) struct FnDecl {
-    pub(crate) inputs: Arguments,
+    pub(crate) inputs: Vec<Parameter>,
     pub(crate) output: Type,
     pub(crate) c_variadic: bool,
 }
 
 impl FnDecl {
     pub(crate) fn receiver_type(&self) -> Option<&Type> {
-        self.inputs.values.first().and_then(|v| v.to_receiver())
+        self.inputs.first().and_then(|v| v.to_receiver())
     }
 }
 
+/// A function parameter.
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
-pub(crate) struct Arguments {
-    pub(crate) values: Vec<Argument>,
-}
-
-#[derive(Clone, PartialEq, Eq, Debug, Hash)]
-pub(crate) struct Argument {
+pub(crate) struct Parameter {
+    pub(crate) name: Option<Symbol>,
     pub(crate) type_: Type,
-    pub(crate) name: Symbol,
     /// This field is used to represent "const" arguments from the `rustc_legacy_const_generics`
     /// feature. More information in <https://github.com/rust-lang/rust/issues/83167>.
     pub(crate) is_const: bool,
 }
 
-impl Argument {
+impl Parameter {
     pub(crate) fn to_receiver(&self) -> Option<&Type> {
-        if self.name == kw::SelfLower { Some(&self.type_) } else { None }
+        if self.name == Some(kw::SelfLower) { Some(&self.type_) } else { None }
     }
 }
 
@@ -1529,10 +1382,14 @@ impl Type {
         matches!(self, Type::BorrowedRef { .. })
     }
 
-    /// Check if two types are "the same" for documentation purposes.
+    fn is_type_alias(&self) -> bool {
+        matches!(self, Type::Path { path: Path { res: Res::Def(DefKind::TyAlias, _), .. } })
+    }
+
+    /// Check if this type is a subtype of another type for documentation purposes.
     ///
     /// This is different from `Eq`, because it knows that things like
-    /// `Placeholder` are possible matches for everything.
+    /// `Infer` and generics have special subtyping rules.
     ///
     /// This relation is not commutative when generics are involved:
     ///
@@ -1543,8 +1400,8 @@ impl Type {
     /// let cache = Cache::new(false);
     /// let generic = Type::Generic(rustc_span::symbol::sym::Any);
     /// let unit = Type::Primitive(PrimitiveType::Unit);
-    /// assert!(!generic.is_same(&unit, &cache));
-    /// assert!(unit.is_same(&generic, &cache));
+    /// assert!(!generic.is_doc_subtype_of(&unit, &cache));
+    /// assert!(unit.is_doc_subtype_of(&generic, &cache));
     /// ```
     ///
     /// An owned type is also the same as its borrowed variants (this is commutative),
@@ -1557,10 +1414,20 @@ impl Type {
         } else {
             (self, other)
         };
+
+        // FIXME: `Cache` does not have the data required to unwrap type aliases,
+        // so we just assume they are equal.
+        // This is only remotely acceptable because we were previously
+        // assuming all types were equal when used
+        // as a generic parameter of a type in `Deref::Target`.
+        if self_cleared.is_type_alias() || other_cleared.is_type_alias() {
+            return true;
+        }
+
         match (self_cleared, other_cleared) {
             // Recursive cases.
             (Type::Tuple(a), Type::Tuple(b)) => {
-                a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.is_doc_subtype_of(b, cache))
+                a.iter().eq_by(b, |a, b| a.is_doc_subtype_of(b, cache))
             }
             (Type::Slice(a), Type::Slice(b)) => a.is_doc_subtype_of(b, cache),
             (Type::Array(a, al), Type::Array(b, bl)) => al == bl && a.is_doc_subtype_of(b, cache),
@@ -1584,9 +1451,7 @@ impl Type {
                 a.def_id() == b.def_id()
                     && a.generics()
                         .zip(b.generics())
-                        .map(|(ag, bg)| {
-                            ag.iter().zip(bg.iter()).all(|(at, bt)| at.is_doc_subtype_of(bt, cache))
-                        })
+                        .map(|(ag, bg)| ag.zip(bg).all(|(at, bt)| at.is_doc_subtype_of(bt, cache)))
                         .unwrap_or(true)
             }
             // Other cases, such as primitives, just use recursion.
@@ -1659,7 +1524,7 @@ impl Type {
         }
     }
 
-    pub(crate) fn generics(&self) -> Option<Vec<&Type>> {
+    pub(crate) fn generics(&self) -> Option<impl Iterator<Item = &Type>> {
         match self {
             Type::Path { path, .. } => path.generics(),
             _ => None,
@@ -1674,25 +1539,17 @@ impl Type {
         matches!(self, Type::Tuple(v) if v.is_empty())
     }
 
-    pub(crate) fn projection(&self) -> Option<(&Type, DefId, PathSegment)> {
-        if let QPath(box QPathData { self_type, trait_, assoc, .. }) = self {
-            Some((self_type, trait_.as_ref()?.def_id(), assoc.clone()))
-        } else {
-            None
-        }
-    }
-
     /// Use this method to get the [DefId] of a [clean] AST node, including [PrimitiveType]s.
     ///
     /// [clean]: crate::clean
     pub(crate) fn def_id(&self, cache: &Cache) -> Option<DefId> {
-        let t: PrimitiveType = match *self {
-            Type::Path { ref path } => return Some(path.def_id()),
-            DynTrait(ref bounds, _) => return bounds.first().map(|b| b.trait_.def_id()),
-            Primitive(p) => return cache.primitive_locations.get(&p).cloned(),
+        let t: PrimitiveType = match self {
+            Type::Path { path } => return Some(path.def_id()),
+            DynTrait(bounds, _) => return bounds.first().map(|b| b.trait_.def_id()),
+            Primitive(p) => return cache.primitive_locations.get(p).cloned(),
             BorrowedRef { type_: box Generic(..), .. } => PrimitiveType::Reference,
-            BorrowedRef { ref type_, .. } => return type_.def_id(cache),
-            Tuple(ref tys) => {
+            BorrowedRef { type_, .. } => return type_.def_id(cache),
+            Tuple(tys) => {
                 if tys.is_empty() {
                     PrimitiveType::Unit
                 } else {
@@ -1704,7 +1561,7 @@ impl Type {
             Array(..) => PrimitiveType::Array,
             Type::Pat(..) => PrimitiveType::Pat,
             RawPointer(..) => PrimitiveType::RawPointer,
-            QPath(box QPathData { ref self_type, .. }) => return self_type.def_id(cache),
+            QPath(box QPathData { self_type, .. }) => return self_type.def_id(cache),
             Generic(_) | SelfTy | Infer | ImplTrait(_) | UnsafeBinder(_) => return None,
         };
         Primitive(t).def_id(cache)
@@ -1716,7 +1573,7 @@ pub(crate) struct QPathData {
     pub assoc: PathSegment,
     pub self_type: Type,
     /// FIXME: compute this field on demand.
-    pub should_show_cast: bool,
+    pub should_fully_qualify: bool,
     pub trait_: Option<Path>,
 }
 
@@ -1873,7 +1730,7 @@ impl PrimitiveType {
             .copied()
     }
 
-    pub(crate) fn all_impls(tcx: TyCtxt<'_>) -> impl Iterator<Item = DefId> + '_ {
+    pub(crate) fn all_impls(tcx: TyCtxt<'_>) -> impl Iterator<Item = DefId> {
         Self::simplified_types()
             .values()
             .flatten()
@@ -1936,7 +1793,7 @@ impl PrimitiveType {
                 let e = ExternalCrate { crate_num };
                 let crate_name = e.name(tcx);
                 debug!(?crate_num, ?crate_name);
-                for &(def_id, prim) in &e.primitives(tcx) {
+                for (def_id, prim) in e.primitives(tcx) {
                     // HACK: try to link to std instead where possible
                     if crate_name == sym::core && primitive_locations.contains_key(&prim) {
                         continue;
@@ -1950,43 +1807,6 @@ impl PrimitiveType {
             }
             primitive_locations
         })
-    }
-}
-
-impl From<ast::IntTy> for PrimitiveType {
-    fn from(int_ty: ast::IntTy) -> PrimitiveType {
-        match int_ty {
-            ast::IntTy::Isize => PrimitiveType::Isize,
-            ast::IntTy::I8 => PrimitiveType::I8,
-            ast::IntTy::I16 => PrimitiveType::I16,
-            ast::IntTy::I32 => PrimitiveType::I32,
-            ast::IntTy::I64 => PrimitiveType::I64,
-            ast::IntTy::I128 => PrimitiveType::I128,
-        }
-    }
-}
-
-impl From<ast::UintTy> for PrimitiveType {
-    fn from(uint_ty: ast::UintTy) -> PrimitiveType {
-        match uint_ty {
-            ast::UintTy::Usize => PrimitiveType::Usize,
-            ast::UintTy::U8 => PrimitiveType::U8,
-            ast::UintTy::U16 => PrimitiveType::U16,
-            ast::UintTy::U32 => PrimitiveType::U32,
-            ast::UintTy::U64 => PrimitiveType::U64,
-            ast::UintTy::U128 => PrimitiveType::U128,
-        }
-    }
-}
-
-impl From<ast::FloatTy> for PrimitiveType {
-    fn from(float_ty: ast::FloatTy) -> PrimitiveType {
-        match float_ty {
-            ast::FloatTy::F16 => PrimitiveType::F16,
-            ast::FloatTy::F32 => PrimitiveType::F32,
-            ast::FloatTy::F64 => PrimitiveType::F64,
-            ast::FloatTy::F128 => PrimitiveType::F128,
-        }
     }
 }
 
@@ -2090,7 +1910,7 @@ impl Enum {
         self.variants.iter().any(|f| f.is_stripped())
     }
 
-    pub(crate) fn variants(&self) -> impl Iterator<Item = &Item> {
+    pub(crate) fn non_stripped_variants(&self) -> impl Iterator<Item = &Item> {
         self.variants.iter().filter(|v| !v.is_stripped())
     }
 }
@@ -2129,9 +1949,8 @@ impl Discriminant {
     /// Will be `None` in the case of cross-crate reexports, and may be
     /// simplified
     pub(crate) fn expr(&self, tcx: TyCtxt<'_>) -> Option<String> {
-        self.expr.map(|body| {
-            rendered_const(tcx, tcx.hir().body(body), tcx.hir().body_owner_def_id(body))
-        })
+        self.expr
+            .map(|body| rendered_const(tcx, tcx.hir_body(body), tcx.hir_body_owner_def_id(body)))
     }
     pub(crate) fn value(&self, tcx: TyCtxt<'_>, with_underscores: bool) -> String {
         print_evaluated_const(tcx, self.value, with_underscores, false).unwrap()
@@ -2218,17 +2037,13 @@ impl Path {
         self.segments.last().map(|seg| &seg.args)
     }
 
-    pub(crate) fn generics(&self) -> Option<Vec<&Type>> {
+    pub(crate) fn generics(&self) -> Option<impl Iterator<Item = &Type>> {
         self.segments.last().and_then(|seg| {
             if let GenericArgs::AngleBracketed { ref args, .. } = seg.args {
-                Some(
-                    args.iter()
-                        .filter_map(|arg| match arg {
-                            GenericArg::Type(ty) => Some(ty),
-                            _ => None,
-                        })
-                        .collect(),
-                )
+                Some(args.iter().filter_map(|arg| match arg {
+                    GenericArg::Type(ty) => Some(ty),
+                    _ => None,
+                }))
             } else {
                 None
             }
@@ -2256,8 +2071,12 @@ impl GenericArg {
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub(crate) enum GenericArgs {
-    AngleBracketed { args: Box<[GenericArg]>, constraints: ThinVec<AssocItemConstraint> },
-    Parenthesized { inputs: Box<[Type]>, output: Option<Box<Type>> },
+    /// `<args, constraints = ..>`
+    AngleBracketed { args: ThinVec<GenericArg>, constraints: ThinVec<AssocItemConstraint> },
+    /// `(inputs) -> output`
+    Parenthesized { inputs: ThinVec<Type>, output: Option<Box<Type>> },
+    /// `(..)`
+    ReturnTypeNotation,
 }
 
 impl GenericArgs {
@@ -2267,9 +2086,10 @@ impl GenericArgs {
                 args.is_empty() && constraints.is_empty()
             }
             GenericArgs::Parenthesized { inputs, output } => inputs.is_empty() && output.is_none(),
+            GenericArgs::ReturnTypeNotation => false,
         }
     }
-    pub(crate) fn constraints<'a>(&'a self) -> Box<dyn Iterator<Item = AssocItemConstraint> + 'a> {
+    pub(crate) fn constraints(&self) -> Box<dyn Iterator<Item = AssocItemConstraint> + '_> {
         match self {
             GenericArgs::AngleBracketed { constraints, .. } => {
                 Box::new(constraints.iter().cloned())
@@ -2281,7 +2101,7 @@ impl GenericArgs {
                         assoc: PathSegment {
                             name: sym::Output,
                             args: GenericArgs::AngleBracketed {
-                                args: Vec::new().into_boxed_slice(),
+                                args: ThinVec::new(),
                                 constraints: ThinVec::new(),
                             },
                         },
@@ -2291,6 +2111,7 @@ impl GenericArgs {
                     })
                     .into_iter(),
             ),
+            GenericArgs::ReturnTypeNotation => Box::new([].into_iter()),
         }
     }
 }
@@ -2302,8 +2123,10 @@ impl<'a> IntoIterator for &'a GenericArgs {
         match self {
             GenericArgs::AngleBracketed { args, .. } => Box::new(args.iter().cloned()),
             GenericArgs::Parenthesized { inputs, .. } => {
+                // FIXME: This isn't really right, since `Fn(A, B)` is `Fn<(A, B)>`
                 Box::new(inputs.iter().cloned().map(GenericArg::Type))
             }
+            GenericArgs::ReturnTypeNotation => Box::new([].into_iter()),
         }
     }
 }
@@ -2319,6 +2142,17 @@ pub(crate) enum TypeAliasInnerType {
     Enum { variants: IndexVec<VariantIdx, Item>, is_non_exhaustive: bool },
     Union { fields: Vec<Item> },
     Struct { ctor_kind: Option<CtorKind>, fields: Vec<Item> },
+}
+
+impl TypeAliasInnerType {
+    fn has_stripped_entries(&self) -> Option<bool> {
+        Some(match self {
+            Self::Enum { variants, .. } => variants.iter().any(|v| v.is_stripped()),
+            Self::Union { fields } | Self::Struct { fields, .. } => {
+                fields.iter().any(|f| f.is_stripped())
+            }
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -2406,20 +2240,6 @@ pub(crate) enum ConstantKind {
     Infer,
 }
 
-impl Constant {
-    pub(crate) fn expr(&self, tcx: TyCtxt<'_>) -> String {
-        self.kind.expr(tcx)
-    }
-
-    pub(crate) fn value(&self, tcx: TyCtxt<'_>) -> Option<String> {
-        self.kind.value(tcx)
-    }
-
-    pub(crate) fn is_literal(&self, tcx: TyCtxt<'_>) -> bool {
-        self.kind.is_literal(tcx)
-    }
-}
-
 impl ConstantKind {
     pub(crate) fn expr(&self, tcx: TyCtxt<'_>) -> String {
         match *self {
@@ -2427,9 +2247,9 @@ impl ConstantKind {
             ConstantKind::Path { ref path } => path.to_string(),
             ConstantKind::Extern { def_id } => print_inlined_const(tcx, def_id),
             ConstantKind::Local { body, .. } | ConstantKind::Anonymous { body } => {
-                rendered_const(tcx, tcx.hir().body(body), tcx.hir().body_owner_def_id(body))
+                rendered_const(tcx, tcx.hir_body(body), tcx.hir_body_owner_def_id(body))
             }
-            ConstantKind::Infer { .. } => "_".to_string(),
+            ConstantKind::Infer => "_".to_string(),
         }
     }
 
@@ -2474,7 +2294,7 @@ impl Impl {
         self.trait_
             .as_ref()
             .map(|t| t.def_id())
-            .map(|did| tcx.provided_trait_methods(did).map(|meth| meth.name).collect())
+            .map(|did| tcx.provided_trait_methods(did).map(|meth| meth.name()).collect())
             .unwrap_or_default()
     }
 
@@ -2595,15 +2415,16 @@ mod size_asserts {
 
     use super::*;
     // tidy-alphabetical-start
-    static_assert_size!(Crate, 56); // frequently moved by-value
+    static_assert_size!(Crate, 16); // frequently moved by-value
     static_assert_size!(DocFragment, 32);
     static_assert_size!(GenericArg, 32);
-    static_assert_size!(GenericArgs, 32);
+    static_assert_size!(GenericArgs, 24);
     static_assert_size!(GenericParamDef, 40);
     static_assert_size!(Generics, 16);
-    static_assert_size!(Item, 48);
+    static_assert_size!(Item, 8);
+    static_assert_size!(ItemInner, 144);
     static_assert_size!(ItemKind, 48);
-    static_assert_size!(PathSegment, 40);
+    static_assert_size!(PathSegment, 32);
     static_assert_size!(Type, 32);
     // tidy-alphabetical-end
 }

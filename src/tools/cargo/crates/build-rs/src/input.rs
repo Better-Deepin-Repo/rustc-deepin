@@ -162,7 +162,7 @@ mod cfg {
     #[doc = requires_msrv!("1.85")]
     #[track_caller]
     pub fn cargo_cfg_feature() -> Vec<String> {
-        to_strings(var_or_panic(&cargo_cfg_var("target_feature")), ',')
+        to_strings(var_or_panic(&cargo_cfg_var("feature")), ',')
     }
 
     #[cfg(any())]
@@ -172,11 +172,6 @@ mod cfg {
     }
 
     /// If we are compiling with debug assertions enabled.
-    ///
-    /// Build scripts are not passed this cfg because
-    /// this cfg is always true and misleading.
-    /// That is because Cargo queries rustc without any profile settings.
-    #[cfg(any())]
     #[track_caller]
     pub fn cargo_cfg_debug_assertions() -> bool {
         ENV.is_present("CARGO_CFG_DEBUG_ASSERTIONS")

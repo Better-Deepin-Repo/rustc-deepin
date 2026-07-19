@@ -1,7 +1,7 @@
 //! Tests for the `cargo metadata` command.
 
+use crate::prelude::*;
 use cargo_test_support::paths;
-use cargo_test_support::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::{
     basic_bin_manifest, basic_lib_manifest, main_file, project, rustc_host, str,
@@ -77,6 +77,7 @@ fn cargo_metadata_simple() {
     "root": "path+[ROOTURL]/foo#0.5.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.5.0"
@@ -190,6 +191,7 @@ crate-type = ["lib", "staticlib"]
     "root": "path+[ROOTURL]/foo#0.5.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.5.0"
@@ -293,6 +295,7 @@ optional_feat = []
     "root": "path+[ROOTURL]/foo#0.5.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.5.0"
@@ -612,6 +615,7 @@ fn cargo_metadata_with_deps_and_version() {
     "root": "path+[ROOTURL]/foo#0.5.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.5.0"
@@ -919,6 +923,7 @@ name = "ex"
     "root": "path+[ROOTURL]/foo#0.1.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.1.0"
@@ -1028,6 +1033,7 @@ crate-type = ["rlib", "dylib"]
     "root": "path+[ROOTURL]/foo#0.1.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.1.0"
@@ -1188,6 +1194,7 @@ fn workspace_metadata() {
     "root": null
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo/bar#0.5.0",
@@ -1224,7 +1231,7 @@ fn workspace_metadata_with_dependencies_no_deps() {
                 name = "bar"
                 version = "0.5.0"
                 authors = ["wycats@example.com"]
-                
+
                 [dependencies]
                 baz = { path = "../baz/" }
                 artifact = { path = "../artifact/", artifact = "bin" }
@@ -1410,6 +1417,7 @@ fn workspace_metadata_with_dependencies_no_deps() {
   ],
   "resolve": null,
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo/bar#0.5.0",
@@ -1474,13 +1482,13 @@ fn workspace_metadata_with_dependencies_and_resolve() {
                 name = "artifact"
                 version = "0.5.0"
                 authors = []
-                
+
                 [lib]
                 crate-type = ["staticlib", "cdylib", "rlib"]
-                
+
                 [[bin]]
                 name = "bar-name"
-                
+
                 [[bin]]
                 name = "baz-name"
             "#,
@@ -1494,10 +1502,10 @@ fn workspace_metadata_with_dependencies_and_resolve() {
                 name = "bin-only-artifact"
                 version = "0.5.0"
                 authors = []
-                
+
                 [[bin]]
                 name = "a-name"
-                
+
                 [[bin]]
                 name = "b-name"
             "#,
@@ -2044,6 +2052,7 @@ fn workspace_metadata_with_dependencies_and_resolve() {
     "root": null
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo/bar#0.5.0",
@@ -2102,7 +2111,6 @@ fn cargo_metadata_with_invalid_authors_field() {
   |
 3 |                 authors = ""
   |                           ^^
-  |
 
 "#]])
         .run();
@@ -2129,7 +2137,6 @@ fn cargo_metadata_with_invalid_version_field() {
   |
 3 |                 version = 1
   |                           ^
-  |
 
 "#]])
         .run();
@@ -2156,7 +2163,6 @@ fn cargo_metadata_with_invalid_publish_field() {
   |
 3 |                 publish = "foo"
   |                           ^^^^^
-  |
 
 "#]])
         .run();
@@ -2284,6 +2290,7 @@ fn cargo_metadata_no_deps_path_to_cargo_toml_relative() {
   ],
   "resolve": null,
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.5.0"
@@ -2360,6 +2367,7 @@ fn cargo_metadata_no_deps_path_to_cargo_toml_absolute() {
   ],
   "resolve": null,
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.5.0"
@@ -2386,7 +2394,7 @@ fn cargo_metadata_no_deps_path_to_cargo_toml_parent_relative() {
         .cwd(p.root().parent().unwrap())
         .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] the manifest-path must be a path to a Cargo.toml file
+[ERROR] the manifest-path must be a path to a Cargo.toml file: `[ROOT]/foo`
 
 "#]])
         .run();
@@ -2404,7 +2412,7 @@ fn cargo_metadata_no_deps_path_to_cargo_toml_parent_absolute() {
         .cwd(p.root().parent().unwrap())
         .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] the manifest-path must be a path to a Cargo.toml file
+[ERROR] the manifest-path must be a path to a Cargo.toml file: `[ROOT]/foo`
 
 "#]])
         .run();
@@ -2469,6 +2477,7 @@ fn cargo_metadata_no_deps_cwd() {
   ],
   "resolve": null,
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.5.0"
@@ -2609,6 +2618,7 @@ fn package_metadata() {
   ],
   "resolve": null,
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.1.0"
@@ -2703,6 +2713,7 @@ fn package_publish() {
   ],
   "resolve": null,
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.1.0"
@@ -2800,6 +2811,7 @@ fn cargo_metadata_path_to_cargo_toml_project() {
     "root": "path+[ROOTURL]/foo/target/package/bar-0.5.0#bar@0.5.0"
   },
   "target_directory": "[ROOT]/foo/target/package/bar-0.5.0/target",
+  "build_directory": "[ROOT]/foo/target/package/bar-0.5.0/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo/target/package/bar-0.5.0#bar@0.5.0"
@@ -2892,6 +2904,7 @@ fn package_edition_2018() {
     "root": "path+[ROOTURL]/foo#0.1.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.1.0"
@@ -3044,6 +3057,7 @@ fn target_edition_2018() {
     "root": "path+[ROOTURL]/foo#0.1.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.1.0"
@@ -3284,6 +3298,7 @@ fn rename_dependency() {
     "root": "path+[ROOTURL]/foo#0.0.1"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.0.1"
@@ -3389,6 +3404,7 @@ fn metadata_links() {
     "root": "path+[ROOTURL]/foo#0.5.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.5.0"
@@ -3496,6 +3512,7 @@ fn deps_with_bin_only() {
     "root": "path+[ROOTURL]/foo#0.1.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.1.0"
@@ -3825,21 +3842,15 @@ fn filter_platform() {
         .run();
     clear();
 
-    // Filter on host, removes alt and cfg.
-    p.cargo("metadata --filter-platform")
-        .arg(&host_target)
-        .with_stderr_data(
-            str![[r#"
+    let host_filtered_stderr = str![[r#"
 [WARNING] please specify `--format-version` flag explicitly to avoid compatibility problems
 [DOWNLOADING] crates ...
 [DOWNLOADED] normal-dep v0.0.1 (registry `dummy-registry`)
 [DOWNLOADED] host-dep v0.0.1 (registry `dummy-registry`)
 
-"#]]
-            .unordered(),
-        )
-        .with_stdout_data(
-            str![[r#"
+"#]];
+
+    let host_filtered_stdout = str![[r#"
 {
   "packages": [
     {
@@ -3928,10 +3939,21 @@ fn filter_platform() {
   },
   "...": "{...}"
 }
-"#]]
-            .is_json()
-            .unordered(),
-        )
+"#]];
+
+    // Filter on host, removes alt and cfg.
+    p.cargo("metadata --filter-platform")
+        .arg(&host_target)
+        .with_stderr_data(host_filtered_stderr.clone().unordered())
+        .with_stdout_data(host_filtered_stdout.clone().is_json().unordered())
+        .run();
+    clear();
+
+    // Filter on host-tuple, should produce same result as explicit host target.
+    p.cargo("metadata --filter-platform")
+        .arg("host-tuple")
+        .with_stderr_data(host_filtered_stderr.unordered())
+        .with_stdout_data(host_filtered_stdout.is_json().unordered())
         .run();
     clear();
 
@@ -4160,6 +4182,7 @@ fn dep_kinds() {
     "root": "path+[ROOTURL]/foo#0.1.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.1.0"
@@ -4277,6 +4300,7 @@ fn dep_kinds_workspace() {
     "root": "path+[ROOTURL]/foo#0.1.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.1.0"
@@ -4285,6 +4309,43 @@ fn dep_kinds_workspace() {
     "path+[ROOTURL]/foo/bar#0.1.0",
     "path+[ROOTURL]/foo#0.1.0",
     "path+[ROOTURL]/foo/dep#0.5.0"
+  ],
+  "workspace_root": "[ROOT]/foo"
+}
+"#]]
+            .is_json(),
+        )
+        .run();
+}
+
+#[cargo_test]
+fn build_dir() {
+    let p = project()
+        .file("src/main.rs", r#"fn main() { println!("Hello, World!") }"#)
+        .file(
+            ".cargo/config.toml",
+            r#"
+            [build]
+            build-dir = "build-dir"
+            "#,
+        )
+        .build();
+
+    p.cargo("metadata")
+        .with_stdout_data(
+            str![[r#"
+{
+  "metadata": null,
+  "packages": "{...}",
+  "resolve": "{...}",
+  "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/build-dir",
+  "version": 1,
+  "workspace_default_members": [
+    "path+[ROOTURL]/foo#0.0.1"
+  ],
+  "workspace_members": [
+    "path+[ROOTURL]/foo#0.0.1"
   ],
   "workspace_root": "[ROOT]/foo"
 }
@@ -4343,7 +4404,7 @@ fn workspace_metadata_with_dependencies_no_deps_artifact() {
                 name = "bar"
                 version = "0.5.0"
                 authors = ["wycats@example.com"]
-                
+
                 [dependencies]
                 baz = { path = "../baz/" }
                 baz-renamed = { path = "../baz/" }
@@ -4543,6 +4604,7 @@ fn workspace_metadata_with_dependencies_no_deps_artifact() {
   ],
   "resolve": null,
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo/bar#0.5.0",
@@ -4828,6 +4890,7 @@ fn versionless_packages() {
     "root": null
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo/bar#0.0.0",
@@ -4940,6 +5003,7 @@ local-time = 1979-05-27
     "root": "path+[ROOTURL]/foo#0.0.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.0.0"
@@ -4953,4 +5017,35 @@ local-time = 1979-05-27
             .is_json(),
         )
         .run();
+}
+
+#[cargo_test]
+fn metadata_ignores_build_target_configuration() -> anyhow::Result<()> {
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                [package]
+                name = "foo"
+
+                [target.'cfg(something)'.dependencies]
+                foobar = "0.0.1"
+           "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+    Package::new("foobar", "0.0.1").publish();
+
+    let output1 = p
+        .cargo("metadata -q --format-version 1")
+        .exec_with_output()?;
+    let output2 = p
+        .cargo("metadata -q --format-version 1")
+        .env("CARGO_BUILD_TARGET", rustc_host())
+        .exec_with_output()?;
+    assert!(
+        output1.stdout == output2.stdout,
+        "metadata should not change when `CARGO_BUILD_TARGET` is set",
+    );
+    Ok(())
 }

@@ -1,6 +1,6 @@
 //! Tests for `cargo-features` definitions.
 
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
 use cargo_test_support::{project, registry};
@@ -173,7 +173,71 @@ fn unknown_feature() {
 [ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
 
 Caused by:
-  unknown cargo feature `foo`
+  unknown Cargo.toml feature `foo`
+
+  See https://doc.rust-lang.org/nightly/cargo/reference/unstable.html for more information.
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn wrong_kind_of_feature() {
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                cargo-features = ["build-dir"]
+
+                [package]
+                name = "a"
+                version = "0.0.1"
+                edition = "2015"
+                authors = []
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+    p.cargo("check")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
+
+Caused by:
+  unknown Cargo.toml feature `build-dir`
+
+  See https://doc.rust-lang.org/nightly/cargo/reference/unstable.html for more information.
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn feature_syntax() {
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                cargo-features = ["bad_feature"]
+
+                [package]
+                name = "a"
+                version = "0.0.1"
+                edition = "2015"
+                authors = []
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .build();
+    p.cargo("check")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] failed to parse manifest at `[ROOT]/foo/Cargo.toml`
+
+Caused by:
+  unknown Cargo.toml feature `bad_feature`
+
+  Feature names must use '-' instead of '_'.
 
 "#]])
         .run();
@@ -634,8 +698,9 @@ fn publish_allowed() {
         .masquerade_as_nightly_cargo(&["test-dummy-unstable"])
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no description, license, license-file, documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no description, license, license-file, documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] a v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [VERIFYING] a v0.0.1 ([ROOT]/foo)
@@ -643,8 +708,8 @@ See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] a v0.0.1 ([ROOT]/foo)
 [UPLOADED] a v0.0.1 to registry `crates-io`
-[NOTE] waiting for `a v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for a v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] a v0.0.1 at registry `crates-io`
 
 "#]])
@@ -675,7 +740,6 @@ fn wrong_position() {
   |
 6 |                 cargo-features = ["test-dummy-unstable"]
   |                                  ^^^^^^^^^^^^^^^^^^^^^^^
-  |
 
 "#]])
         .run();

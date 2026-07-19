@@ -4,28 +4,27 @@ use either::{Left, Right};
 use rustc_abi::{Align, HasDataLayout, Size, TargetDataLayout};
 use rustc_errors::DiagCtxtHandle;
 use rustc_hir::def_id::DefId;
-use rustc_infer::infer::TyCtxtInferExt;
-use rustc_infer::infer::at::ToTrace;
-use rustc_infer::traits::ObligationCause;
+use rustc_hir::limit::Limit;
 use rustc_middle::mir::interpret::{ErrorHandled, InvalidMetaKind, ReportedErrorInfo};
 use rustc_middle::query::TyCtxtAt;
 use rustc_middle::ty::layout::{
-    self, FnAbiError, FnAbiOfHelpers, FnAbiRequest, LayoutError, LayoutOfHelpers, TyAndLayout,
+    self, FnAbiError, FnAbiOf, FnAbiOfHelpers, FnAbiRequest, LayoutError, LayoutOf,
+    LayoutOfHelpers, TyAndLayout,
 };
-use rustc_middle::ty::{self, GenericArgsRef, Ty, TyCtxt, TypeFoldable, TypingEnv, Variance};
+use rustc_middle::ty::{
+    self, GenericArgsRef, Ty, TyCtxt, TypeFoldable, TypeVisitableExt, TypingEnv, Variance,
+};
 use rustc_middle::{mir, span_bug};
-use rustc_session::Limit;
 use rustc_span::Span;
 use rustc_target::callconv::FnAbi;
-use rustc_trait_selection::traits::ObligationCtxt;
-use tracing::{debug, instrument, trace};
+use tracing::{debug, trace};
 
 use super::{
     Frame, FrameInfo, GlobalId, InterpErrorInfo, InterpErrorKind, InterpResult, MPlaceTy, Machine,
     MemPlaceMeta, Memory, OpTy, Place, PlaceTy, PointerArithmetic, Projectable, Provenance,
     err_inval, interp_ok, throw_inval, throw_ub, throw_ub_custom,
 };
-use crate::{ReportErrorExt, fluent_generated as fluent, util};
+use crate::{ReportErrorExt, enter_trace_span, fluent_generated as fluent, util};
 
 pub struct InterpCx<'tcx, M: Machine<'tcx>> {
     /// Stores the `Machine` instance.
@@ -87,10 +86,31 @@ impl<'tcx, M: Machine<'tcx>> LayoutOfHelpers<'tcx> for InterpCx<'tcx, M> {
     #[inline]
     fn handle_layout_err(
         &self,
-        err: LayoutError<'tcx>,
+        mut err: LayoutError<'tcx>,
         _: Span,
         _: Ty<'tcx>,
     ) -> InterpErrorKind<'tcx> {
+        // FIXME(#149283): This is really hacky and is only used to hide type
+        // system bugs. We use it as a temporary fix for #149081.
+        //
+        // While it's expected that we sometimes get ambiguity errors when
+        // entering another generic environment while the current environment
+        // itself is still generic, we should never fail to entirely prove
+        // something.
+        match err {
+            LayoutError::NormalizationFailure(ty, _) => {
+                if ty.has_non_region_param() {
+                    err = LayoutError::TooGeneric(ty);
+                }
+            }
+
+            LayoutError::Unknown(_)
+            | LayoutError::SizeOverflow(_)
+            | LayoutError::InvalidSimd { .. }
+            | LayoutError::TooGeneric(_)
+            | LayoutError::ReferencesError(_)
+            | LayoutError::Cycle(_) => {}
+        }
         err_inval!(Layout(err))
     }
 }
@@ -106,10 +126,44 @@ impl<'tcx, M: Machine<'tcx>> FnAbiOfHelpers<'tcx> for InterpCx<'tcx, M> {
     ) -> InterpErrorKind<'tcx> {
         match err {
             FnAbiError::Layout(err) => err_inval!(Layout(err)),
-            FnAbiError::AdjustForForeignAbi(err) => {
-                err_inval!(FnAbiAdjustForForeignAbi(err))
-            }
         }
+    }
+}
+
+impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
+    /// This inherent method takes priority over the trait method with the same name in LayoutOf,
+    /// and allows wrapping the actual [LayoutOf::layout_of] with a tracing span.
+    /// See [LayoutOf::layout_of] for the original documentation.
+    #[inline(always)]
+    pub fn layout_of(&self, ty: Ty<'tcx>) -> Result<TyAndLayout<'tcx>, InterpErrorKind<'tcx>> {
+        let _trace = enter_trace_span!(M, layouting::layout_of, ty = ?ty.kind());
+        LayoutOf::layout_of(self, ty)
+    }
+
+    /// This inherent method takes priority over the trait method with the same name in FnAbiOf,
+    /// and allows wrapping the actual [FnAbiOf::fn_abi_of_fn_ptr] with a tracing span.
+    /// See [FnAbiOf::fn_abi_of_fn_ptr] for the original documentation.
+    #[inline(always)]
+    pub fn fn_abi_of_fn_ptr(
+        &self,
+        sig: ty::PolyFnSig<'tcx>,
+        extra_args: &'tcx ty::List<Ty<'tcx>>,
+    ) -> <Self as FnAbiOfHelpers<'tcx>>::FnAbiOfResult {
+        let _trace = enter_trace_span!(M, layouting::fn_abi_of_fn_ptr, ?sig, ?extra_args);
+        FnAbiOf::fn_abi_of_fn_ptr(self, sig, extra_args)
+    }
+
+    /// This inherent method takes priority over the trait method with the same name in FnAbiOf,
+    /// and allows wrapping the actual [FnAbiOf::fn_abi_of_instance] with a tracing span.
+    /// See [FnAbiOf::fn_abi_of_instance] for the original documentation.
+    #[inline(always)]
+    pub fn fn_abi_of_instance(
+        &self,
+        instance: ty::Instance<'tcx>,
+        extra_args: &'tcx ty::List<Ty<'tcx>>,
+    ) -> <Self as FnAbiOfHelpers<'tcx>>::FnAbiOfResult {
+        let _trace = enter_trace_span!(M, layouting::fn_abi_of_instance, ?instance, ?extra_args);
+        FnAbiOf::fn_abi_of_instance(self, instance, extra_args)
     }
 }
 
@@ -264,7 +318,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
             let def = instance.def_id();
             &self.tcx.promoted_mir(def)[promoted]
         } else {
-            M::load_mir(self, instance)?
+            M::load_mir(self, instance)
         };
         // do not continue if typeck errors occurred (can only occur in local crate)
         if let Some(err) = body.tainted_by_errors {
@@ -275,7 +329,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
 
     /// Call this on things you got out of the MIR (so it is as generic as the current
     /// stack frame), to bring it into the proper environment for this interpreter.
-    pub(super) fn instantiate_from_current_frame_and_normalize_erasing_regions<
+    pub fn instantiate_from_current_frame_and_normalize_erasing_regions<
         T: TypeFoldable<TyCtxt<'tcx>>,
     >(
         &self,
@@ -286,13 +340,16 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
 
     /// Call this on things you got out of the MIR (so it is as generic as the provided
     /// stack frame), to bring it into the proper environment for this interpreter.
-    pub(super) fn instantiate_from_frame_and_normalize_erasing_regions<
-        T: TypeFoldable<TyCtxt<'tcx>>,
-    >(
+    pub fn instantiate_from_frame_and_normalize_erasing_regions<T: TypeFoldable<TyCtxt<'tcx>>>(
         &self,
         frame: &Frame<'tcx, M::Provenance, M::FrameExtra>,
         value: T,
     ) -> Result<T, ErrorHandled> {
+        let _trace = enter_trace_span!(
+            M,
+            "instantiate_from_frame_and_normalize_erasing_regions",
+            %frame.instance
+        );
         frame
             .instance
             .try_instantiate_mir_and_normalize_erasing_regions(
@@ -309,6 +366,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         def: DefId,
         args: GenericArgsRef<'tcx>,
     ) -> InterpResult<'tcx, ty::Instance<'tcx>> {
+        let _trace = enter_trace_span!(M, resolve::try_resolve, def = ?def);
         trace!("resolve: {:?}, {:#?}", def, args);
         trace!("typing_env: {:#?}", self.typing_env);
         trace!("args: {:#?}", args);
@@ -321,40 +379,6 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 ReportedErrorInfo::non_const_eval_error(error_guaranteed)
             )),
         }
-    }
-
-    /// Check if the two things are equal in the current param_env, using an infcx to get proper
-    /// equality checks.
-    #[instrument(level = "trace", skip(self), ret)]
-    pub(super) fn eq_in_param_env<T>(&self, a: T, b: T) -> bool
-    where
-        T: PartialEq + TypeFoldable<TyCtxt<'tcx>> + ToTrace<'tcx>,
-    {
-        // Fast path: compare directly.
-        if a == b {
-            return true;
-        }
-        // Slow path: spin up an inference context to check if these traits are sufficiently equal.
-        let (infcx, param_env) = self.tcx.infer_ctxt().build_with_typing_env(self.typing_env);
-        let ocx = ObligationCtxt::new(&infcx);
-        let cause = ObligationCause::dummy_with_span(self.cur_span());
-        // equate the two trait refs after normalization
-        let a = ocx.normalize(&cause, param_env, a);
-        let b = ocx.normalize(&cause, param_env, b);
-
-        if let Err(terr) = ocx.eq(&cause, param_env, a, b) {
-            trace!(?terr);
-            return false;
-        }
-
-        let errors = ocx.select_all_or_error();
-        if !errors.is_empty() {
-            trace!(?errors);
-            return false;
-        }
-
-        // All good.
-        true
     }
 
     /// Walks up the callstack from the intrinsic's callsite, searching for the first callsite in a
@@ -405,7 +429,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
     /// Returns the actual dynamic size and alignment of the place at the given type.
     /// Only the "meta" (metadata) part of the place matters.
     /// This can fail to provide an answer for extern types.
-    pub(super) fn size_and_align_of(
+    pub(super) fn size_and_align_from_meta(
         &self,
         metadata: &MemPlaceMeta<M::Provenance>,
         layout: &TyAndLayout<'tcx>,
@@ -431,7 +455,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 // adjust alignment and size for them?
                 let field = layout.field(self, layout.fields.count() - 1);
                 let Some((unsized_size, mut unsized_align)) =
-                    self.size_and_align_of(metadata, &field)?
+                    self.size_and_align_from_meta(metadata, &field)?
                 else {
                     // A field with an extern type. We don't know the actual dynamic size
                     // or the alignment.
@@ -441,10 +465,10 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 // # First compute the dynamic alignment
 
                 // Packed type alignment needs to be capped.
-                if let ty::Adt(def, _) = layout.ty.kind() {
-                    if let Some(packed) = def.repr().pack {
-                        unsized_align = unsized_align.min(packed);
-                    }
+                if let ty::Adt(def, _) = layout.ty.kind()
+                    && let Some(packed) = def.repr().pack
+                {
+                    unsized_align = unsized_align.min(packed);
                 }
 
                 // Choose max of two known alignments (combined value must
@@ -468,7 +492,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 }
                 interp_ok(Some((full_size, full_align)))
             }
-            ty::Dynamic(expected_trait, _, ty::Dyn) => {
+            ty::Dynamic(expected_trait, _) => {
                 let vtable = metadata.unwrap_meta().to_pointer(self)?;
                 // Read size and align from vtable (already checks size).
                 interp_ok(Some(self.get_vtable_size_and_align(vtable, Some(expected_trait))?))
@@ -493,11 +517,11 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         }
     }
     #[inline]
-    pub fn size_and_align_of_mplace(
+    pub fn size_and_align_of_val(
         &self,
-        mplace: &MPlaceTy<'tcx, M::Provenance>,
+        val: &impl Projectable<'tcx, M::Provenance>,
     ) -> InterpResult<'tcx, Option<(Size, Align)>> {
-        self.size_and_align_of(&mplace.meta(), &mplace.layout)
+        self.size_and_align_from_meta(&val.meta(), &val.layout())
     }
 
     /// Jump to the given block.
@@ -581,8 +605,8 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         span: Span,
         layout: Option<TyAndLayout<'tcx>>,
     ) -> InterpResult<'tcx, OpTy<'tcx, M::Provenance>> {
-        M::eval_mir_constant(self, *val, span, layout, |ecx, val, span, layout| {
-            let const_val = val.eval(*ecx.tcx, ecx.typing_env, span).map_err(|err| {
+        let _trace = enter_trace_span!(M, const_eval::eval_mir_constant, ?val);
+        let const_val = val.eval(*self.tcx, self.typing_env, span).map_err(|err| {
                 if M::ALL_CONSTS_ARE_PRECHECKED {
                     match err {
                         ErrorHandled::TooGeneric(..) => {},
@@ -598,11 +622,10 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                         }
                     }
                 }
-                err.emit_note(*ecx.tcx);
+                err.emit_note(*self.tcx);
                 err
             })?;
-            ecx.const_val_to_op(const_val, val.ty(), layout)
-        })
+        self.const_val_to_op(const_val, val.ty(), layout)
     }
 
     #[must_use]

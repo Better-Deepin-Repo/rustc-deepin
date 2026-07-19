@@ -2,16 +2,10 @@
 
 // tidy-alphabetical-start
 #![allow(internal_features)]
-#![allow(unused_parens)]
-#![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
-#![doc(rust_logo)]
 #![feature(min_specialization)]
 #![feature(rustc_attrs)]
-#![feature(rustdoc_internals)]
-#![warn(unreachable_pub)]
 // tidy-alphabetical-end
 
-use field_offset::offset_of;
 use rustc_data_structures::stable_hasher::HashStable;
 use rustc_data_structures::sync::AtomicU64;
 use rustc_middle::arena::Arena;
@@ -27,8 +21,8 @@ use rustc_middle::ty::TyCtxt;
 use rustc_query_system::dep_graph::SerializedDepNodeIndex;
 use rustc_query_system::ich::StableHashingContext;
 use rustc_query_system::query::{
-    CycleError, HashResult, QueryCache, QueryConfig, QueryMap, QueryMode, QueryState,
-    get_query_incr, get_query_non_incr,
+    CycleError, HashResult, QueryCache, QueryConfig, QueryMap, QueryMode, QueryStackDeferred,
+    QueryState, get_query_incr, get_query_non_incr,
 };
 use rustc_query_system::{HandleCycleError, Value};
 use rustc_span::{ErrorGuaranteed, Span};
@@ -61,7 +55,7 @@ impl<'tcx, C: QueryCache, const ANON: bool, const DEPTH_LIMIT: bool, const FEEDA
     for DynamicConfig<'tcx, C, ANON, DEPTH_LIMIT, FEEDABLE>
 {
     fn clone(&self) -> Self {
-        DynamicConfig { dynamic: self.dynamic }
+        *self
     }
 }
 
@@ -85,11 +79,20 @@ where
     }
 
     #[inline(always)]
-    fn query_state<'a>(self, qcx: QueryCtxt<'tcx>) -> &'a QueryState<Self::Key>
+    fn query_state<'a>(
+        self,
+        qcx: QueryCtxt<'tcx>,
+    ) -> &'a QueryState<Self::Key, QueryStackDeferred<'tcx>>
     where
         QueryCtxt<'tcx>: 'a,
     {
-        self.dynamic.query_state.apply(&qcx.tcx.query_system.states)
+        // Safety:
+        // This is just manually doing the subfield referencing through pointer math.
+        unsafe {
+            &*(&qcx.tcx.query_system.states as *const QueryStates<'tcx>)
+                .byte_add(self.dynamic.query_state)
+                .cast::<QueryState<Self::Key, QueryStackDeferred<'tcx>>>()
+        }
     }
 
     #[inline(always)]
@@ -97,7 +100,13 @@ where
     where
         'tcx: 'a,
     {
-        self.dynamic.query_cache.apply(&qcx.tcx.query_system.caches)
+        // Safety:
+        // This is just manually doing the subfield referencing through pointer math.
+        unsafe {
+            &*(&qcx.tcx.query_system.caches as *const QueryCaches<'tcx>)
+                .byte_add(self.dynamic.query_cache)
+                .cast::<Self::Cache>()
+        }
     }
 
     #[inline(always)]
@@ -221,10 +230,9 @@ pub fn query_system<'a>(
     }
 }
 
-rustc_middle::rustc_query_append! { define_queries! }
+rustc_middle::rustc_with_all_queries! { define_queries! }
 
 pub fn provide(providers: &mut rustc_middle::util::Providers) {
-    providers.hooks.alloc_self_profile_query_strings =
-        |tcx| alloc_self_profile_query_strings(tcx.tcx);
-    providers.hooks.query_key_hash_verify_all = |tcx| query_key_hash_verify_all(tcx.tcx);
+    providers.hooks.alloc_self_profile_query_strings = alloc_self_profile_query_strings;
+    providers.hooks.query_key_hash_verify_all = query_key_hash_verify_all;
 }

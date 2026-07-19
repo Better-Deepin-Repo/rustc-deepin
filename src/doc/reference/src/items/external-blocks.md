@@ -1,22 +1,23 @@
+r[items.extern]
 # External blocks
 
-r[items.extern]
-
 r[items.extern.syntax]
-> **<sup>Syntax</sup>**\
-> _ExternBlock_ :\
-> &nbsp;&nbsp; `unsafe`<sup>?</sup>[^unsafe-2024] `extern` [_Abi_]<sup>?</sup> `{`\
-> &nbsp;&nbsp; &nbsp;&nbsp; [_InnerAttribute_]<sup>\*</sup>\
-> &nbsp;&nbsp; &nbsp;&nbsp; _ExternalItem_<sup>\*</sup>\
-> &nbsp;&nbsp; `}`
->
-> _ExternalItem_ :\
-> &nbsp;&nbsp; [_OuterAttribute_]<sup>\*</sup> (\
-> &nbsp;&nbsp; &nbsp;&nbsp; &nbsp;&nbsp; [_MacroInvocationSemi_]\
-> &nbsp;&nbsp; &nbsp;&nbsp; | ( [_Visibility_]<sup>?</sup> ( [_StaticItem_] | [_Function_] ) )\
-> &nbsp;&nbsp; )
->
-> [^unsafe-2024]: Starting with the 2024 Edition, the `unsafe` keyword is required semantically.
+```grammar,items
+ExternBlock ->
+    `unsafe`?[^unsafe-2024] `extern` Abi? `{`
+        InnerAttribute*
+        ExternalItem*
+    `}`
+
+ExternalItem ->
+    OuterAttribute* (
+        MacroInvocationSemi
+      | Visibility? StaticItem
+      | Visibility? Function
+    )
+```
+
+[^unsafe-2024]: Starting with the 2024 Edition, the `unsafe` keyword is required semantically.
 
 r[items.extern.intro]
 External blocks provide _declarations_ of items that are not _defined_ in the
@@ -27,8 +28,8 @@ r[items.extern.allowed-kinds]
 Two kinds of item _declarations_ are allowed in external blocks: [functions] and
 [statics].
 
-r[items.extern.fn-safety]
-Calling functions or accessing statics that are declared in external blocks is only allowed in an `unsafe` context.
+r[items.extern.safety]
+Calling unsafe functions or accessing unsafe statics that are declared in external blocks is only allowed in an [`unsafe` context].
 
 r[items.extern.namespace]
 The external block defines its functions and statics in the [value namespace] of the module or block where it is located.
@@ -37,11 +38,11 @@ r[items.extern.unsafe-required]
 The `unsafe` keyword is semantically required to appear before the `extern` keyword on external blocks.
 
 r[items.extern.edition2024]
-> **Edition differences**: Prior to the 2024 edition, the `unsafe` keyword is optional. The `safe` and `unsafe` item qualifiers are only allowed if the external block itself is marked as `unsafe`.
-
-## Functions
+> [!EDITION-2024]
+> Prior to the 2024 edition, the `unsafe` keyword is optional. The `safe` and `unsafe` item qualifiers are only allowed if the external block itself is marked as `unsafe`.
 
 r[items.extern.fn]
+## Functions
 
 r[items.extern.fn.body]
 Functions within external blocks are declared in the same way as other Rust
@@ -71,9 +72,8 @@ type `extern "abi" for<'l1, ..., 'lm> fn(A1, ..., An) -> R`, where `'l1`,
 ... `'lm` are its lifetime parameters, `A1`, ..., `An` are the declared types of
 its parameters, `R` is the declared return type.
 
-## Statics
-
 r[items.extern.static]
+## Statics
 
 r[items.extern.static.intro]
 Statics within external blocks are declared in the same way as [statics] outside of external blocks,
@@ -94,74 +94,143 @@ the static to be initialized before Rust code reads from it.
 Once Rust code runs, mutating an immutable static (from inside or outside Rust) is UB,
 except if the mutation happens to bytes inside of an `UnsafeCell`.
 
+r[items.extern.abi]
 ## ABI
 
-r[items.extern.abi]
-
 r[items.extern.abi.intro]
-By default external blocks assume that the library they are calling uses the
-standard C ABI on the specific platform. Other ABIs may be specified using an
-`abi` string, as shown here:
+The `extern` keyword can be followed by an optional [ABI] string. The ABI specifies the calling convention of the functions in the block. The calling convention defines a low-level interface for functions, such as how arguments are placed in registers or on the stack, how return values are passed, and who is responsible for cleaning up the stack.
 
-```rust
-# #[cfg(any(windows, target_arch = "x86"))]
-// Interface to the Windows API
-unsafe extern "stdcall" { }
-```
+> [!EXAMPLE]
+> ```rust
+> // Interface to the Windows API.
+> unsafe extern "system" { /* ... */ }
+> ```
+
+r[items.extern.abi.default]
+If the ABI string is not specified, it defaults to `"C"`.
+
+> [!NOTE]
+> The `extern` syntax without an explicit ABI is being phased out, so it's better to always write the ABI explicitly.
+>
+> For more details, see [Rust issue #134986](https://github.com/rust-lang/rust/issues/134986).
 
 r[items.extern.abi.standard]
-There are three ABI strings which are cross-platform, and which all compilers
-are guaranteed to support:
+The following ABI strings are supported on all platforms:
 
 r[items.extern.abi.rust]
-* `unsafe extern "Rust"` -- The default ABI when you write a normal `fn foo()` in any
-  Rust code.
+* `unsafe extern "Rust"` --- The native calling convention for Rust functions and closures. This is the default when a function is declared without using [`extern fn`]. The Rust ABI offers no stability guarantees.
 
 r[items.extern.abi.c]
-* `unsafe extern "C"` -- This is the same as `extern fn foo()`; whatever the default
-  your C compiler supports.
+* `unsafe extern "C"` --- The "C" ABI matches the default ABI chosen by the dominant C compiler for the target.
 
 r[items.extern.abi.system]
-* `unsafe extern "system"` -- Usually the same as `extern "C"`, except on Win32, in
-  which case it's `"stdcall"`, or what you should use to link to the Windows
-  API itself
+* `unsafe extern "system"` --- This is equivalent to `extern "C"` except on Windows x86_32 where it is equivalent to `"stdcall"` for non-variadic functions, and equivalent to `"C"` for variadic functions.
+
+  > [!NOTE]
+  > As the correct underlying ABI on Windows is target-specific, it's best to use `extern "system"` when attempting to link Windows API functions that don't use an explicitly defined ABI.
+
+r[items.extern.abi.unwind]
+* `extern "C-unwind"` and `extern "system-unwind"` --- Identical to `"C"` and `"system"`, respectively, but with [different behavior][unwind-behavior] when the callee unwinds (by panicking or throwing a C++ style exception).
 
 r[items.extern.abi.platform]
 There are also some platform-specific ABI strings:
 
 r[items.extern.abi.cdecl]
-* `unsafe extern "cdecl"` -- The default for x86\_32 C code.
+* `unsafe extern "cdecl"` --- The calling convention typically used with x86_32 C code.
+  * Only available on x86_32 targets.
+  * Corresponds to MSVC's `__cdecl` and GCC and clang's `__attribute__((cdecl))`.
+
+  > [!NOTE]
+  > For details, see:
+  >
+  > - <https://learn.microsoft.com/en-us/cpp/cpp/cdecl>
+  > - <https://en.wikipedia.org/wiki/X86_calling_conventions#cdecl>
 
 r[items.extern.abi.stdcall]
-* `unsafe extern "stdcall"` -- The default for the Win32 API on x86\_32.
+* `unsafe extern "stdcall"` --- The calling convention typically used by the [Win32 API] on x86_32.
+  * Only available on x86_32 targets.
+  * Corresponds to MSVC's `__stdcall` and GCC and clang's `__attribute__((stdcall))`.
+
+  > [!NOTE]
+  > For details, see:
+  >
+  > - <https://learn.microsoft.com/en-us/cpp/cpp/stdcall>
+  > - <https://en.wikipedia.org/wiki/X86_calling_conventions#stdcall>
 
 r[items.extern.abi.win64]
-* `unsafe extern "win64"` -- The default for C code on x86\_64 Windows.
+* `unsafe extern "win64"` --- The Windows x64 ABI.
+  * Only available on x86_64 targets.
+  * "win64" is the same as the "C" ABI on Windows x86_64 targets.
+  * Corresponds to GCC and clang's `__attribute__((ms_abi))`.
+
+  > [!NOTE]
+  > For details, see:
+  >
+  > - <https://learn.microsoft.com/en-us/cpp/build/x64-software-conventions>
+  > - <https://en.wikipedia.org/wiki/X86_calling_conventions#Microsoft_x64_calling_convention>
 
 r[items.extern.abi.sysv64]
-* `unsafe extern "sysv64"` -- The default for C code on non-Windows x86\_64.
+* `unsafe extern "sysv64"` --- The System V ABI.
+  * Only available on x86_64 targets.
+  * "sysv64" is the same as the "C" ABI on non-Windows x86_64 targets.
+  * Corresponds to GCC and clang's `__attribute__((sysv_abi))`.
+
+  > [!NOTE]
+  > For details, see:
+  >
+  > - <https://wiki.osdev.org/System_V_ABI>
+  > - <https://en.wikipedia.org/wiki/X86_calling_conventions#System_V_AMD64_ABI>
 
 r[items.extern.abi.aapcs]
-* `unsafe extern "aapcs"` -- The default for ARM.
+* `unsafe extern "aapcs"` --- The soft-float ABI for ARM.
+  * Only available on ARM32 targets.
+  * "aapcs" is the same as the "C" ABI on soft-float ARM32.
+  * Corresponds to clang's `__attribute__((pcs("aapcs")))`.
+
+  > [!NOTE]
+  > For details, see:
+  >
+  > - [Arm Procedure Call Standard](https://developer.arm.com/documentation/107656/0101/Getting-started-with-Armv8-M-based-systems/Procedure-Call-Standard-for-Arm-Architecture--AAPCS-)
 
 r[items.extern.abi.fastcall]
-* `unsafe extern "fastcall"` -- The `fastcall` ABI -- corresponds to MSVC's
-  `__fastcall` and GCC and clang's `__attribute__((fastcall))`
+* `unsafe extern "fastcall"` --- A "fast" variant of stdcall that passes some arguments in registers.
+  * Only available on x86_32 targets.
+  * Corresponds to MSVC's `__fastcall` and GCC and clang's `__attribute__((fastcall))`.
 
-r[items.extern.abi.vectorcall]
-* `unsafe extern "vectorcall"` -- The `vectorcall` ABI -- corresponds to MSVC's
-  `__vectorcall` and clang's `__attribute__((vectorcall))`
+  > [!NOTE]
+  > For details, see:
+  >
+  > - <https://learn.microsoft.com/en-us/cpp/cpp/fastcall>
+  > - <https://en.wikipedia.org/wiki/X86_calling_conventions#Microsoft_fastcall>
 
 r[items.extern.abi.thiscall]
-* `unsafe extern "thiscall"` -- The default for C++ member functions on MSVC -- corresponds to MSVC's
-  `__thiscall` and GCC and clang's `__attribute__((thiscall))`
+* `unsafe extern "thiscall"` --- The calling convention typically used on C++ class member functions on x86_32 MSVC.
+  * Only available on x86_32 targets.
+  * Corresponds to MSVC's `__thiscall` and GCC and clang's `__attribute__((thiscall))`.
+
+  > [!NOTE]
+  > For details, see:
+  >
+  > - <https://en.wikipedia.org/wiki/X86_calling_conventions#thiscall>
+  > - <https://learn.microsoft.com/en-us/cpp/cpp/thiscall>
 
 r[items.extern.abi.efiapi]
-* `unsafe extern "efiapi"` -- The ABI used for [UEFI] functions.
+* `unsafe extern "efiapi"` --- The ABI used for [UEFI] functions.
+  * Only available on x86 and ARM targets (32bit and 64bit).
 
-## Variadic functions
+r[items.extern.abi.platform-unwind-variants]
+Like `"C"` and `"system"`, most platform-specific ABI strings also have a [corresponding `-unwind` variant][unwind-behavior]; specifically, these are:
+
+* `"aapcs-unwind"`
+* `"cdecl-unwind"`
+* `"fastcall-unwind"`
+* `"stdcall-unwind"`
+* `"sysv64-unwind"`
+* `"thiscall-unwind"`
+* `"win64-unwind"`
 
 r[items.extern.variadic]
+## Variadic functions
 
 Functions within external blocks may be variadic by specifying `...` as the
 last argument. The variadic parameter may optionally be specified with an
@@ -169,29 +238,44 @@ identifier.
 
 ```rust
 unsafe extern "C" {
-    safe fn foo(...);
+    unsafe fn foo(...);
     unsafe fn bar(x: i32, ...);
     unsafe fn with_name(format: *const u8, args: ...);
+    // SAFETY: This function guarantees it will not access
+    // variadic arguments.
+    safe fn ignores_variadic_arguments(x: i32, ...);
 }
 ```
 
-## Attributes on extern blocks
+> [!WARNING]
+> The `safe` qualifier should not be used on a function in an `extern` block unless that function guarantees that it will not access the variadic arguments at all. Passing an unexpected number of arguments or arguments of unexpected type to a variadic function may lead to [undefined behavior][undefined].
+
+r[items.extern.variadic.conventions]
+Variadic parameters can only be specified within `extern` blocks with the following ABI strings or their corresponding [`-unwind` variants][items.fn.extern.unwind]:
+
+- `"aapcs"`
+- `"C"`
+- `"cdecl"`
+- `"efiapi"`
+- `"system"`
+- `"sysv64"`
+- `"win64"`
 
 r[items.extern.attributes]
+## Attributes on extern blocks
 
 r[items.extern.attributes.intro]
 The following [attributes] control the behavior of external blocks.
 
-### The `link` attribute
-
 r[items.extern.attributes.link]
+### The `link` attribute
 
 r[items.extern.attributes.link.intro]
 The *`link` attribute* specifies the name of a native library that the
 compiler should link with for the items within an `extern` block.
 
 r[items.extern.attributes.link.syntax]
-It uses the [_MetaListNameValueStr_] syntax to specify its inputs. The `name` key is the
+It uses the [MetaListNameValueStr] syntax to specify its inputs. The `name` key is the
 name of the native library to link. The `kind` key is an optional value which
 specifies the kind of library with the following possible values:
 
@@ -258,9 +342,8 @@ this to satisfy the linking requirements of extern blocks elsewhere in your
 code (including upstream crates) instead of adding the attribute to each extern
 block.
 
-#### Linking modifiers: `bundle`
-
 r[items.extern.attributes.link.modifiers.bundle]
+#### Linking modifiers: `bundle`
 
 r[items.extern.attributes.link.modifiers.bundle.allowed-kinds]
 This modifier is only compatible with the `static` linking kind.
@@ -288,9 +371,8 @@ The default for this modifier is `+bundle`.
 More implementation details about this modifier can be found in
 [`bundle` documentation for rustc].
 
-#### Linking modifiers: `whole-archive`
-
 r[items.extern.attributes.link.modifiers.whole-archive]
+#### Linking modifiers: `whole-archive`
 
 r[items.extern.attributes.link.modifiers.whole-archive.allowed-kinds]
 This modifier is only compatible with the `static` linking kind.
@@ -306,9 +388,8 @@ The default for this modifier is `-whole-archive`.
 More implementation details about this modifier can be found in
 [`whole-archive` documentation for rustc].
 
-### Linking modifiers: `verbatim`
-
 r[items.extern.attributes.link.modifiers.verbatim]
+### Linking modifiers: `verbatim`
 
 r[items.extern.attributes.link.modifiers.verbatim.allowed-kinds]
 This modifier is compatible with all linking kinds.
@@ -328,9 +409,8 @@ The default for this modifier is `-verbatim`.
 More implementation details about this modifier can be found in
 [`verbatim` documentation for rustc].
 
-#### `dylib` versus `raw-dylib`
-
 r[items.extern.attributes.link.kind-raw-dylib]
+#### `dylib` versus `raw-dylib`
 
 r[items.extern.attributes.link.kind-raw-dylib.intro]
 On Windows, linking against a dynamic library requires that an import library
@@ -349,9 +429,8 @@ r[items.extern.attributes.link.kind-raw-dylib.platform-specific]
 `raw-dylib` is only supported on Windows. Using it when targeting other
 platforms will result in a compiler error.
 
-#### The `import_name_type` key
-
 r[items.extern.attributes.link.import_name_type]
+#### The `import_name_type` key
 
 r[items.extern.attributes.link.import_name_type.intro]
 On x86 Windows, names of functions are "decorated" (i.e., have a specific prefix
@@ -386,31 +465,41 @@ r[items.extern.attributes.link.import_name_type.platform-specific]
 The `import_name_type` key is only supported on x86 Windows. Using it when
 targeting other platforms will result in a compiler error.
 
+<!-- template:attributes -->
+r[items.extern.attributes.link_name]
 ### The `link_name` attribute
 
-r[items.extern.attributes.link_name]
-
 r[items.extern.attributes.link_name.intro]
-The *`link_name` attribute* may be specified on declarations inside an `extern`
-block to indicate the symbol to import for the given function or static.
+The *`link_name` [attribute][attributes]* may be applied to declarations inside an `extern` block to specify the symbol to import for the given function or static.
+
+> [!EXAMPLE]
+> ```rust
+> unsafe extern "C" {
+>     #[link_name = "actual_symbol_name"]
+>     safe fn name_in_rust();
+> }
+> ```
 
 r[items.extern.attributes.link_name.syntax]
-It uses the [_MetaNameValueStr_] syntax to specify the name of the symbol.
+The `link_name` attribute uses the [MetaNameValueStr] syntax.
 
-```rust
-unsafe extern {
-    #[link_name = "actual_symbol_name"]
-    safe fn name_in_rust();
-}
-```
+r[items.extern.attributes.link_name.allowed-positions]
+The `link_name` attribute may only be applied to a function or static item in an `extern` block.
 
-r[items.extern.attributes.link_name.exclusive]
-Using this attribute with the `link_ordinal` attribute will result in a
-compiler error.
+> [!NOTE]
+> `rustc` ignores use in other positions but lints against it. This may become an error in the future.
 
-### The `link_ordinal` attribute
+r[items.extern.attributes.link_name.duplicates]
+Only the last use of `link_name` on an item has effect.
+
+> [!NOTE]
+> `rustc` lints against any use preceding the last. This may become an error in the future.
+
+r[items.extern.attributes.link_name.link_ordinal]
+The `link_name` attribute may not be used with the [`link_ordinal`] attribute.
 
 r[items.extern.attributes.link_ordinal]
+### The `link_ordinal` attribute
 
 r[items.extern.attributes.link_ordinal.intro]
 The *`link_ordinal` attribute* can be applied on declarations inside an `extern`
@@ -439,32 +528,27 @@ r[items.extern.attributes.link_ordinal.exclusive]
 Using this attribute with the `link_name` attribute will result in a
 compiler error.
 
-### Attributes on function parameters
-
 r[items.extern.attributes.fn-parameters]
+### Attributes on function parameters
 
 Attributes on extern function parameters follow the same rules and
 restrictions as [regular function parameters].
 
-[IDENTIFIER]: ../identifiers.md
+[ABI]: glossary.abi
+[PE Format]: https://learn.microsoft.com/windows/win32/debug/pe-format#import-name-type
 [UEFI]: https://uefi.org/specifications
 [WebAssembly module]: https://webassembly.github.io/spec/core/syntax/modules.html
-[functions]: functions.md
-[statics]: static-items.md
-[_Abi_]: functions.md
-[_Function_]: functions.md
-[_InnerAttribute_]: ../attributes.md
-[_MacroInvocationSemi_]: ../macros.md#macro-invocation
-[_MetaListNameValueStr_]: ../attributes.md#meta-item-attribute-syntax
-[_MetaNameValueStr_]: ../attributes.md#meta-item-attribute-syntax
-[_OuterAttribute_]: ../attributes.md
-[_StaticItem_]: static-items.md
-[_Visibility_]: ../visibility-and-privacy.md
-[attributes]: ../attributes.md
-[regular function parameters]: functions.md#attributes-on-function-parameters
 [`bundle` documentation for rustc]: ../../rustc/command-line-arguments.html#linking-modifiers-bundle
-[`whole-archive` documentation for rustc]: ../../rustc/command-line-arguments.html#linking-modifiers-whole-archive
-[`verbatim` documentation for rustc]: ../../rustc/command-line-arguments.html#linking-modifiers-verbatim
 [`dylib` versus `raw-dylib`]: #dylib-versus-raw-dylib
-[PE Format]: https://learn.microsoft.com/windows/win32/debug/pe-format#import-name-type
+[`extern fn`]: items.fn.extern
+[`unsafe` context]: ../unsafe-keyword.md
+[`verbatim` documentation for rustc]: ../../rustc/command-line-arguments.html#linking-modifiers-verbatim
+[`whole-archive` documentation for rustc]: ../../rustc/command-line-arguments.html#linking-modifiers-whole-archive
+[attributes]: ../attributes.md
+[functions]: functions.md
+[regular function parameters]: functions.md#attributes-on-function-parameters
+[statics]: static-items.md
+[unwind-behavior]: functions.md#unwinding
 [value namespace]: ../names/namespaces.md
+[win32 api]: https://learn.microsoft.com/en-us/windows/win32/api/
+[`link_ordinal`]: items.extern.attributes.link_ordinal

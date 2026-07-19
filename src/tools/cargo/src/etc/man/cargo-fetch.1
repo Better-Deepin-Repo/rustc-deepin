@@ -25,12 +25,24 @@ you plan to use Cargo without a network with the \fB\-\-offline\fR flag.
 .sp
 \fB\-\-target\fR \fItriple\fR
 .RS 4
-Fetch for the given architecture. The default is all architectures. The general format of the triple is
-\fB<arch><sub>\-<vendor>\-<sys>\-<abi>\fR\&. Run \fBrustc \-\-print target\-list\fR for a
-list of supported targets. This flag may be specified multiple times.
+Fetch for the specified target architecture. Flag may be specified multiple times. The default is all architectures. The general format of the triple is
+\fB<arch><sub>\-<vendor>\-<sys>\-<abi>\fR\&.
 .sp
-This may also be specified with the \fBbuild.target\fR
-\fIconfig value\fR <https://doc.rust\-lang.org/cargo/reference/config.html>\&.
+Possible values:
+.sp
+.RS 4
+\h'-04'\(bu\h'+03'Any supported target in \fBrustc \-\-print target\-list\fR\&.
+.RE
+.sp
+.RS 4
+\h'-04'\(bu\h'+03'\fB"host\-tuple"\fR, which will internally be substituted by the host\[cq]s target. This can be particularly useful if you\[cq]re cross\-compiling some crates, and don\[cq]t want to specify your host\[cq]s machine as a target (for instance, an \fBxtask\fR in a shared project that may be worked on by many hosts).
+.RE
+.sp
+.RS 4
+\h'-04'\(bu\h'+03'A path to a custom target specification. See \fICustom Target Lookup Path\fR <https://doc.rust\-lang.org/rustc/targets/custom.html#custom\-target\-lookup\-path> for more information.
+.RE
+.sp
+This may also be specified with the \fBbuild.target\fR \fIconfig value\fR <https://doc.rust\-lang.org/cargo/reference/config.html>\&.
 .sp
 Note that specifying this flag makes Cargo run in a different mode where the
 target artifacts are placed in a separate directory. See the
@@ -60,16 +72,16 @@ May also be specified with the \fBterm.quiet\fR
 Control when colored output is used. Valid values:
 .sp
 .RS 4
-\h'-04'\(bu\h'+02'\fBauto\fR (default): Automatically detect if color support is available on the
+\h'-04'\(bu\h'+03'\fBauto\fR (default): Automatically detect if color support is available on the
 terminal.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+02'\fBalways\fR: Always display colors.
+\h'-04'\(bu\h'+03'\fBalways\fR: Always display colors.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+02'\fBnever\fR: Never display colors.
+\h'-04'\(bu\h'+03'\fBnever\fR: Never display colors.
 .RE
 .sp
 May also be specified with the \fBterm.color\fR
@@ -90,11 +102,11 @@ existing \fBCargo.lock\fR file was originally generated. Cargo will exit with an
 error when either of the following scenarios arises:
 .sp
 .RS 4
-\h'-04'\(bu\h'+02'The lock file is missing.
+\h'-04'\(bu\h'+03'The lock file is missing.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+02'Cargo attempted to change the lock file due to a different dependency resolution.
+\h'-04'\(bu\h'+03'Cargo attempted to change the lock file due to a different dependency resolution.
 .RE
 .sp
 It may be used in environments where deterministic builds are desired,
@@ -180,11 +192,11 @@ details on environment variables that Cargo reads.
 .SH "EXIT STATUS"
 .sp
 .RS 4
-\h'-04'\(bu\h'+02'\fB0\fR: Cargo succeeded.
+\h'-04'\(bu\h'+03'\fB0\fR: Cargo succeeded.
 .RE
 .sp
 .RS 4
-\h'-04'\(bu\h'+02'\fB101\fR: Cargo failed to complete.
+\h'-04'\(bu\h'+03'\fB101\fR: Cargo failed to complete.
 .RE
 .SH "EXAMPLES"
 .sp

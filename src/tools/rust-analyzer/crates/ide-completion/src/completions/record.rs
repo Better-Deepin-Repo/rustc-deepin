@@ -1,14 +1,14 @@
 //! Complete fields in record literals and patterns.
 use ide_db::SymbolKind;
 use syntax::{
-    ast::{self, Expr},
     SmolStr,
+    ast::{self, Expr},
 };
 
 use crate::{
-    context::{DotAccess, DotAccessExprCtx, DotAccessKind, PatternContext},
     CompletionContext, CompletionItem, CompletionItemKind, CompletionRelevance,
     CompletionRelevancePostfixMatch, Completions,
+    context::{DotAccess, DotAccessExprCtx, DotAccessKind, PatternContext},
 };
 
 pub(crate) fn complete_record_pattern_fields(
@@ -28,7 +28,11 @@ pub(crate) fn complete_record_pattern_fields(
                     record_pat.record_pat_field_list().and_then(|fl| fl.fields().next()).is_some();
 
                 match were_fields_specified {
-                    false => un.fields(ctx.db).into_iter().map(|f| (f, f.ty(ctx.db))).collect(),
+                    false => un
+                        .fields(ctx.db)
+                        .into_iter()
+                        .map(|f| (f, f.ty(ctx.db).to_type(ctx.db)))
+                        .collect(),
                     true => return,
                 }
             }
@@ -56,7 +60,11 @@ pub(crate) fn complete_record_expr_fields(
                 record_expr.record_expr_field_list().and_then(|fl| fl.fields().next()).is_some();
 
             match were_fields_specified {
-                false => un.fields(ctx.db).into_iter().map(|f| (f, f.ty(ctx.db))).collect(),
+                false => un
+                    .fields(ctx.db)
+                    .into_iter()
+                    .map(|f| (f, f.ty(ctx.db).to_type(ctx.db)))
+                    .collect(),
                 true => return,
             }
         }
@@ -88,12 +96,12 @@ pub(crate) fn complete_record_expr_fields(
 pub(crate) fn add_default_update(
     acc: &mut Completions,
     ctx: &CompletionContext<'_>,
-    ty: Option<hir::TypeInfo>,
+    ty: Option<hir::TypeInfo<'_>>,
 ) {
     let default_trait = ctx.famous_defs().core_default_Default();
     let impls_default_trait = default_trait
         .zip(ty.as_ref())
-        .map_or(false, |(default_trait, ty)| ty.original.impls_trait(ctx.db, default_trait, &[]));
+        .is_some_and(|(default_trait, ty)| ty.original.impls_trait(ctx.db, default_trait, &[]));
     if impls_default_trait {
         // FIXME: This should make use of scope_def like completions so we get all the other goodies
         // that is we should handle this like actually completing the default function
@@ -117,7 +125,7 @@ pub(crate) fn add_default_update(
 fn complete_fields(
     acc: &mut Completions,
     ctx: &CompletionContext<'_>,
-    missing_fields: Vec<(hir::Field, hir::Type)>,
+    missing_fields: Vec<(hir::Field, hir::Type<'_>)>,
 ) {
     for (field, ty) in missing_fields {
         // This should call something else, we shouldn't be synthesizing a DotAccess here
@@ -127,10 +135,7 @@ fn complete_fields(
                 receiver: None,
                 receiver_ty: None,
                 kind: DotAccessKind::Field { receiver_is_ambiguous_float_literal: false },
-                ctx: DotAccessExprCtx {
-                    in_block_expr: false,
-                    in_breakable: crate::context::BreakableKind::None,
-                },
+                ctx: DotAccessExprCtx { in_block_expr: false, in_breakable: None },
             },
             None,
             field,
@@ -144,8 +149,8 @@ mod tests {
     use ide_db::SnippetCap;
 
     use crate::{
-        tests::{check_edit, check_edit_with_config, TEST_CONFIG},
         CompletionConfig,
+        tests::{TEST_CONFIG, check_edit, check_edit_with_config},
     };
 
     #[test]
@@ -168,6 +173,33 @@ fn create_foo(foo_desc: &FooDesc) -> () { () }
 
 fn baz() {
     let foo = create_foo(&FooDesc { bar: ${1:()} }$0);
+}
+            "#,
+        )
+    }
+
+    #[test]
+    fn literal_struct_completion_shorthand() {
+        check_edit(
+            "FooDesc{}",
+            r#"
+struct FooDesc { pub bar: bool, n: i32 }
+
+fn create_foo(foo_desc: &FooDesc) -> () { () }
+
+fn baz() {
+    let bar = true;
+    let foo = create_foo(&$0);
+}
+            "#,
+            r#"
+struct FooDesc { pub bar: bool, n: i32 }
+
+fn create_foo(foo_desc: &FooDesc) -> () { () }
+
+fn baz() {
+    let bar = true;
+    let foo = create_foo(&FooDesc { bar$1, n: ${2:()} }$0);
 }
             "#,
         )

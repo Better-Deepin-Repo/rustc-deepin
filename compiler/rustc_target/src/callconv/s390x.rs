@@ -1,13 +1,14 @@
 // Reference: ELF Application Binary Interface s390x Supplement
 // https://github.com/IBM/s390x-abi
 
-use crate::abi::call::{ArgAbi, FnAbi, Reg, RegKind};
-use crate::abi::{BackendRepr, HasDataLayout, TyAbiInterface};
-use crate::spec::HasTargetSpec;
+use rustc_abi::{BackendRepr, HasDataLayout, TyAbiInterface};
+
+use crate::callconv::{ArgAbi, FnAbi, Reg, RegKind};
+use crate::spec::{Env, HasTargetSpec, Os};
 
 fn classify_ret<Ty>(ret: &mut ArgAbi<'_, Ty>) {
     let size = ret.layout.size;
-    if size.bits() <= 128 && matches!(ret.layout.backend_repr, BackendRepr::Vector { .. }) {
+    if size.bits() <= 128 && matches!(ret.layout.backend_repr, BackendRepr::SimdVector { .. }) {
         return;
     }
     if !ret.layout.is_aggregate() && size.bits() <= 64 {
@@ -28,19 +29,31 @@ where
     }
     if arg.is_ignore() {
         // s390x-unknown-linux-{gnu,musl,uclibc} doesn't ignore ZSTs.
-        if cx.target_spec().os == "linux"
-            && matches!(&*cx.target_spec().env, "gnu" | "musl" | "uclibc")
+        if cx.target_spec().os == Os::Linux
+            && matches!(cx.target_spec().env, Env::Gnu | Env::Musl | Env::Uclibc)
             && arg.layout.is_zst()
         {
             arg.make_indirect_from_ignore();
         }
         return;
     }
+    if arg.layout.pass_indirectly_in_non_rustic_abis(cx) {
+        arg.make_indirect();
+        return;
+    }
 
     let size = arg.layout.size;
-    if size.bits() <= 128 && arg.layout.is_single_vector_element(cx, size) {
-        arg.cast_to(Reg { kind: RegKind::Vector, size });
-        return;
+    if size.bits() <= 128 {
+        if let BackendRepr::SimdVector { .. } = arg.layout.backend_repr {
+            // pass non-wrapped vector types using `PassMode::Direct`
+            return;
+        }
+
+        if arg.layout.is_single_vector_element(cx, size) {
+            // pass non-transparent wrappers around a vector as `PassMode::Cast`
+            arg.cast_to(Reg { kind: RegKind::Vector, size });
+            return;
+        }
     }
     if !arg.layout.is_aggregate() && size.bits() <= 64 {
         arg.extend_integer_width_to(64);

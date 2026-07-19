@@ -6,6 +6,7 @@ from __future__ import absolute_import, division, print_function
 import shlex
 import sys
 import os
+import re
 
 rust_dir = os.path.dirname(os.path.abspath(__file__))
 rust_dir = os.path.dirname(rust_dir)
@@ -44,10 +45,14 @@ o("optimize-tests", "rust.optimize-tests", "build tests with optimizations")
 o("verbose-tests", "rust.verbose-tests", "enable verbose output when running tests")
 o(
     "ccache",
-    "llvm.ccache",
-    "invoke gcc/clang via ccache to reuse object files between builds",
+    "build.ccache",
+    "invoke gcc/clang/rustc via ccache to reuse object files between builds",
 )
-o("sccache", None, "invoke gcc/clang via sccache to reuse object files between builds")
+o(
+    "sccache",
+    None,
+    "invoke gcc/clang/rustc via sccache to reuse object files between builds",
+)
 o("local-rust", None, "use an installed rustc rather than downloading a snapshot")
 v("local-rust-root", None, "set prefix for local rust binary")
 o(
@@ -246,6 +251,11 @@ v(
     "mips64el-unknown-linux-muslabi64 install directory",
 )
 v(
+    "musl-root-powerpc64",
+    "target.powerpc64-unknown-linux-musl.musl-root",
+    "powerpc64-unknown-linux-musl install directory",
+)
+v(
     "musl-root-powerpc64le",
     "target.powerpc64le-unknown-linux-musl.musl-root",
     "powerpc64le-unknown-linux-musl install directory",
@@ -264,6 +274,11 @@ v(
     "musl-root-loongarch64",
     "target.loongarch64-unknown-linux-musl.musl-root",
     "loongarch64-unknown-linux-musl install directory",
+)
+v(
+    "musl-root-wali-wasm32",
+    "target.wasm32-wali-linux-musl.musl-root",
+    "wasm32-wali-linux-musl install directory",
 )
 v(
     "qemu-armhf-rootfs",
@@ -288,7 +303,7 @@ v(
 v("release-channel", "rust.channel", "the name of the release channel to build")
 v(
     "release-description",
-    "rust.description",
+    "build.description",
     "optional descriptive string for version output",
 )
 v("dist-compression-formats", None, "List of compression formats to use")
@@ -325,6 +340,11 @@ o(
     "don't truncate options when printing them in this configure script",
 )
 v("set", None, "set arbitrary key/value pairs in TOML configuration")
+v(
+    "parallel-frontend-threads",
+    "rust.parallel-frontend-threads",
+    "number of parallel threads for rustc compilation",
+)
 
 
 def p(msg):
@@ -358,8 +378,8 @@ if "--help" in sys.argv or "-h" in sys.argv:
             print("\t\t" + option.desc)
     print("")
     print("This configure script is a thin configuration shim over the true")
-    print("configuration system, `config.toml`. You can explore the comments")
-    print("in `config.example.toml` next to this configure script to see")
+    print("configuration system, `bootstrap.toml`. You can explore the comments")
+    print("in `bootstrap.example.toml` next to this configure script to see")
     print("more information about what each option is. Additionally you can")
     print("pass `--set` as an argument to set arbitrary key/value pairs")
     print("in the TOML configuration if desired")
@@ -510,7 +530,7 @@ def apply_args(known_args, option_checking, config):
         build_triple = build(known_args)
 
         if option.name == "sccache":
-            set("llvm.ccache", "sccache", config)
+            set("build.ccache", "sccache", config)
         elif option.name == "local-rust":
             for path in os.environ["PATH"].split(os.pathsep):
                 if os.path.exists(path + "/rustc"):
@@ -558,8 +578,8 @@ def apply_args(known_args, option_checking, config):
             raise RuntimeError("unhandled option {}".format(option.name))
 
 
-# "Parse" the `config.example.toml` file into the various sections, and we'll
-# use this as a template of a `config.toml` to write out which preserves
+# "Parse" the `bootstrap.example.toml` file into the various sections, and we'll
+# use this as a template of a `bootstrap.toml` to write out which preserves
 # all the various comments and whatnot.
 #
 # Note that the `target` section is handled separately as we'll duplicate it
@@ -571,16 +591,31 @@ def parse_example_config(known_args, config):
     section_order = [None]
     targets = {}
     top_level_keys = []
+    comment_lines = []
 
-    with open(rust_dir + "/config.example.toml") as example_config:
+    with open(rust_dir + "/bootstrap.example.toml") as example_config:
         example_lines = example_config.read().split("\n")
     for line in example_lines:
-        if cur_section is None:
-            if line.count("=") == 1:
-                top_level_key = line.split("=")[0]
-                top_level_key = top_level_key.strip(" #")
-                top_level_keys.append(top_level_key)
-        if line.startswith("["):
+        if line.count("=") >= 1 and not line.startswith("# "):
+            key = line.split("=")[0]
+            key = key.strip(" #")
+            parts = key.split(".")
+            if len(parts) > 1:
+                cur_section = parts[0]
+                if cur_section not in sections:
+                    sections[cur_section] = ["[" + cur_section + "]"]
+                    section_order.append(cur_section)
+            elif cur_section is None:
+                top_level_keys.append(key)
+            # put the comment lines within the start of
+            # a new section, not outside it.
+            sections[cur_section] += comment_lines
+            comment_lines = []
+            # remove just the `section.` part from the line, if present.
+            sections[cur_section].append(
+                re.sub("(#?)([a-zA-Z_-]+\\.)?(.*)", "\\1\\3", line)
+            )
+        elif line.startswith("["):
             cur_section = line[1:-1]
             if cur_section.startswith("target"):
                 cur_section = "target"
@@ -591,8 +626,9 @@ def parse_example_config(known_args, config):
             sections[cur_section] = [line]
             section_order.append(cur_section)
         else:
-            sections[cur_section].append(line)
+            comment_lines.append(line)
 
+    sections[cur_section] += comment_lines
     # Fill out the `targets` array by giving all configured targets a copy of the
     # `target` section we just loaded from the example config
     configured_targets = [build(known_args)]
@@ -708,19 +744,29 @@ def configure_file(sections, top_level_keys, targets, config):
 
 
 def write_uncommented(target, f):
+    """Writes each block in 'target' that is not composed entirely of comments to 'f'.
+
+    A block is a sequence of non-empty lines separated by empty lines.
+    """
     block = []
-    is_comment = True
+
+    def flush(last):
+        # If the block is entirely made of comments, ignore it
+        entire_block_comments = all(ln.startswith("#") or ln == "" for ln in block)
+        if not entire_block_comments and len(block) > 0:
+            for line in block:
+                f.write(line + "\n")
+            # Required to output a newline before the start of a new section
+            if last:
+                f.write("\n")
+        block.clear()
 
     for line in target:
         block.append(line)
         if len(line) == 0:
-            if not is_comment:
-                for ln in block:
-                    f.write(ln + "\n")
-            block = []
-            is_comment = True
-            continue
-        is_comment = is_comment and line.startswith("#")
+            flush(last=False)
+
+    flush(last=True)
     return f
 
 
@@ -746,8 +792,8 @@ def quit_if_file_exists(file):
 
 
 if __name__ == "__main__":
-    # If 'config.toml' already exists, exit the script at this point
-    quit_if_file_exists("config.toml")
+    # If 'bootstrap.toml' already exists, exit the script at this point
+    quit_if_file_exists("bootstrap.toml")
 
     if "GITHUB_ACTIONS" in os.environ:
         print("::group::Configure the build")
@@ -757,11 +803,11 @@ if __name__ == "__main__":
     p("")
     section_order, sections, targets = parse_args(sys.argv[1:])
 
-    # Now that we've built up our `config.toml`, write it all out in the same
+    # Now that we've built up our `bootstrap.toml`, write it all out in the same
     # order that we read it in.
     p("")
-    p("writing `config.toml` in current directory")
-    with bootstrap.output("config.toml") as f:
+    p("writing `bootstrap.toml` in current directory")
+    with bootstrap.output("bootstrap.toml") as f:
         write_config_toml(f, section_order, targets, sections)
 
     with bootstrap.output("Makefile") as f:
@@ -772,6 +818,6 @@ if __name__ == "__main__":
         f.write(contents)
 
     p("")
-    p("run `python {}/x.py --help`".format(rust_dir))
+    p("run `{} {}/x.py --help`".format(os.path.basename(sys.executable), rust_dir))
     if "GITHUB_ACTIONS" in os.environ:
         print("::endgroup::")

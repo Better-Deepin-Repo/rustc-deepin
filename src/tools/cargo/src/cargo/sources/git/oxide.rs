@@ -1,8 +1,9 @@
 //! This module contains all code sporting `gitoxide` for operations on `git` repositories and it mirrors
 //! `utils` closely for now. One day it can be renamed into `utils` once `git2` isn't required anymore.
 
+use crate::util::HumanBytes;
 use crate::util::network::http::HttpTimeout;
-use crate::util::{human_readable_bytes, network, MetricsCounter, Progress};
+use crate::util::{MetricsCounter, Progress, network};
 use crate::{CargoResult, GlobalContext};
 use cargo_util::paths;
 use gix::bstr::{BString, ByteSlice};
@@ -18,14 +19,17 @@ use tracing::debug;
 pub fn with_retry_and_progress(
     repo_path: &std::path::Path,
     gctx: &GlobalContext,
-    cb: &(dyn Fn(
+    repo_remote_url: &str,
+    cb: &(
+         dyn Fn(
         &std::path::Path,
         &AtomicBool,
         &mut gix::progress::tree::Item,
         &mut dyn FnMut(&gix::bstr::BStr),
     ) -> Result<(), crate::sources::git::fetch::Error>
-          + Send
-          + Sync),
+             + Send
+             + Sync
+     ),
 ) -> CargoResult<()> {
     std::thread::scope(|s| {
         let mut progress_bar = Progress::new("Fetch", gctx);
@@ -51,7 +55,7 @@ pub fn with_retry_and_progress(
                         *urls.borrow_mut() = Some(url.to_owned());
                     },
                 );
-                amend_authentication_hints(res, urls.get_mut().take())
+                amend_authentication_hints(res, repo_remote_url, urls.get_mut().take())
             });
             translate_progress_to_bar(&mut progress_bar, root, is_shallow)?;
             thread.join().expect("no panic in scoped thread")
@@ -148,8 +152,8 @@ fn translate_progress_to_bar(
                 counter.add(received_bytes, now);
                 last_percentage_update = now;
             }
-            let (rate, unit) = human_readable_bytes(counter.rate() as u64);
-            let msg = format!(", {rate:.2}{unit}/s");
+            let rate = HumanBytes(counter.rate() as u64);
+            let msg = format!(", {rate:.2}/s");
 
             progress_bar.tick(
                 (total_objects * (num_phases - 2)) + objects,
@@ -177,6 +181,7 @@ fn translate_progress_to_bar(
 
 fn amend_authentication_hints(
     res: Result<(), crate::sources::git::fetch::Error>,
+    remote_url: &str,
     last_url_for_authentication: Option<gix::bstr::BString>,
 ) -> CargoResult<()> {
     let Err(err) = res else { return Ok(()) };
@@ -186,6 +191,7 @@ fn amend_authentication_hints(
         ) => Some(err),
         _ => None,
     };
+
     if let Some(e) = e {
         let auth_message = match e {
             gix::protocol::handshake::Error::Credentials(_) => {
@@ -200,10 +206,14 @@ fn amend_authentication_hints(
                     .into()
             }
             gix::protocol::handshake::Error::Transport(_) => {
-                let msg = concat!(
-                    "network failure seems to have happened\n",
-                    "if a proxy or similar is necessary `net.git-fetch-with-cli` may help here\n",
-                    "https://doc.rust-lang.org/cargo/reference/config.html#netgit-fetch-with-cli"
+                let msg = format!(
+                    concat!(
+                        "network failure seems to have happened\n",
+                        "if a proxy or similar is necessary `net.git-fetch-with-cli` may help here\n",
+                        "https://doc.rust-lang.org/cargo/reference/config.html#netgit-fetch-with-cli",
+                        "{}"
+                    ),
+                    super::utils::note_github_pull_request(remote_url).unwrap_or_default()
                 );
                 return Err(anyhow::Error::from(err).context(msg));
             }
@@ -271,7 +281,7 @@ pub fn open_repo(
 /// Convert `git` related cargo configuration into the respective `git` configuration which can be
 /// used when opening new repositories.
 pub fn cargo_config_to_gitoxide_overrides(gctx: &GlobalContext) -> CargoResult<Vec<BString>> {
-    use gix::config::tree::{gitoxide, Core, Http, Key};
+    use gix::config::tree::{Core, Http, Key, gitoxide};
     let timeout = HttpTimeout::new(gctx)?;
     let http = gctx.http_config()?;
 

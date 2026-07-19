@@ -1,3 +1,4 @@
+//@ edition:2015
 #![feature(rustc_attrs)]
 
 macro_rules! test { ($nm:ident,
@@ -5,7 +6,7 @@ macro_rules! test { ($nm:ident,
                      $i:item) => (mod $nm { #[$a] $i }); }
 
 test!(a,
-      #[cfg(FALSE)],
+      #[cfg(false)],
       pub fn bar() { });
 
 test!(b,

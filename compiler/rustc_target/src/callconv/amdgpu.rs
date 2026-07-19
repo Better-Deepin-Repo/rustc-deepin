@@ -1,5 +1,6 @@
-use crate::abi::call::{ArgAbi, FnAbi};
-use crate::abi::{HasDataLayout, TyAbiInterface};
+use rustc_abi::{HasDataLayout, TyAbiInterface};
+
+use crate::callconv::{ArgAbi, FnAbi};
 
 fn classify_ret<'a, Ty, C>(_cx: &C, ret: &mut ArgAbi<'a, Ty>)
 where
@@ -9,11 +10,15 @@ where
     ret.extend_integer_width_to(32);
 }
 
-fn classify_arg<'a, Ty, C>(_cx: &C, arg: &mut ArgAbi<'a, Ty>)
+fn classify_arg<'a, Ty, C>(cx: &C, arg: &mut ArgAbi<'a, Ty>)
 where
     Ty: TyAbiInterface<'a, C> + Copy,
     C: HasDataLayout,
 {
+    if arg.layout.pass_indirectly_in_non_rustic_abis(cx) {
+        arg.make_indirect();
+        return;
+    }
     arg.extend_integer_width_to(32);
 }
 

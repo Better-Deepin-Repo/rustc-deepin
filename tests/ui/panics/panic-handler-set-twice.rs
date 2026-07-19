@@ -5,7 +5,8 @@
 
 #![feature(std_panic)]
 
-//@ ignore-emscripten no threads support
+//@ needs-threads
+//@ ignore-backends: gcc
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::panic;

@@ -1,18 +1,18 @@
 //! See [`CompilationFiles`].
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use lazycell::LazyCell;
 use tracing::debug;
 
 use super::{BuildContext, BuildRunner, CompileKind, FileFlavor, Layout};
 use crate::core::compiler::{CompileMode, CompileTarget, CrateType, FileType, Unit};
 use crate::core::{Target, TargetKind, Workspace};
-use crate::util::{self, CargoResult, StableHasher};
+use crate::util::{self, CargoResult, OnceExt, StableHasher};
 
 /// This is a generic version number that can be changed to make
 /// backwards-incompatible changes to any file structures in the output
@@ -128,7 +128,7 @@ pub struct CompilationFiles<'a, 'gctx> {
     /// Metadata hash to use for each unit.
     metas: HashMap<Unit, Metadata>,
     /// For each Unit, a list all files produced.
-    outputs: HashMap<Unit, LazyCell<Arc<Vec<OutputFile>>>>,
+    outputs: HashMap<Unit, OnceCell<Arc<Vec<OutputFile>>>>,
 }
 
 /// Info about a single file emitted by the compiler.
@@ -168,7 +168,7 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
         let outputs = metas
             .keys()
             .cloned()
-            .map(|unit| (unit, LazyCell::new()))
+            .map(|unit| (unit, OnceCell::new()))
             .collect();
         CompilationFiles {
             ws: build_runner.bcx.ws,
@@ -199,8 +199,8 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
     }
 
     /// Gets the short hash based only on the `PackageId`.
-    /// Used for the metadata when `metadata` returns `None`.
-    pub fn target_short_hash(&self, unit: &Unit) -> String {
+    /// Used for the metadata when `c_extra_filename` returns `None`.
+    fn target_short_hash(&self, unit: &Unit) -> String {
         let hashable = unit.pkg.package_id().stable_hash(self.ws.root());
         util::short_hash(&(METADATA_VERSION, hashable))
     }
@@ -211,13 +211,17 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
         // Docscrape units need to have doc/ set as the out_dir so sources for reverse-dependencies
         // will be put into doc/ and not into deps/ where the *.examples files are stored.
         if unit.mode.is_doc() || unit.mode.is_doc_scrape() {
-            self.layout(unit.kind).doc().to_path_buf()
+            self.layout(unit.kind)
+                .artifact_dir()
+                .expect("artifact-dir was not locked")
+                .doc()
+                .to_path_buf()
         } else if unit.mode.is_doc_test() {
             panic!("doc tests do not have an out dir");
         } else if unit.target.is_custom_build() {
             self.build_script_dir(unit)
-        } else if unit.target.is_example() {
-            self.layout(unit.kind).examples().to_path_buf()
+        } else if unit.target.is_example() && !self.ws.gctx().cli_unstable().build_dir_new_layout {
+            self.layout(unit.kind).build_dir().examples().to_path_buf()
         } else if unit.artifact.is_true() {
             self.artifact_dir(unit)
         } else {
@@ -230,45 +234,70 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
         self.export_dir.clone()
     }
 
-    /// Directory name to use for a package in the form `NAME-HASH`.
+    /// Directory name to use for a package in the form `{NAME}/{HASH}`.
     ///
     /// Note that some units may share the same directory, so care should be
     /// taken in those cases!
     fn pkg_dir(&self, unit: &Unit) -> String {
+        let separator = match self.ws.gctx().cli_unstable().build_dir_new_layout {
+            true => "/",
+            false => "-",
+        };
         let name = unit.pkg.package_id().name();
         let meta = self.metas[unit];
         if let Some(c_extra_filename) = meta.c_extra_filename() {
-            format!("{}-{}", name, c_extra_filename)
+            format!("{}{}{}", name, separator, c_extra_filename)
         } else {
-            format!("{}-{}", name, self.target_short_hash(unit))
+            format!("{}{}{}", name, separator, self.target_short_hash(unit))
         }
     }
 
     /// Returns the final artifact path for the host (`/…/target/debug`)
-    pub fn host_dest(&self) -> &Path {
-        self.host.dest()
+    pub fn host_dest(&self) -> Option<&Path> {
+        self.host.artifact_dir().map(|v| v.dest())
     }
 
-    /// Returns the root of the build output tree for the host (`/…/target`)
-    pub fn host_root(&self) -> &Path {
-        self.host.root()
+    /// Returns the root of the build output tree for the host (`/…/build-dir`)
+    pub fn host_build_root(&self) -> &Path {
+        self.host.build_dir().root()
     }
 
     /// Returns the host `deps` directory path.
-    pub fn host_deps(&self) -> &Path {
-        self.host.deps()
+    pub fn host_deps(&self, unit: &Unit) -> PathBuf {
+        let dir = self.pkg_dir(unit);
+        self.host.build_dir().deps(&dir)
     }
 
     /// Returns the directories where Rust crate dependencies are found for the
     /// specified unit.
-    pub fn deps_dir(&self, unit: &Unit) -> &Path {
-        self.layout(unit.kind).deps()
+    pub fn deps_dir(&self, unit: &Unit) -> PathBuf {
+        let dir = self.pkg_dir(unit);
+        self.layout(unit.kind).build_dir().deps(&dir)
+    }
+
+    /// Returns the directories where Rust crate dependencies are found for the
+    /// specified unit. (new layout)
+    ///
+    /// New features should consider using this so we can avoid their migrations.
+    pub fn deps_dir_new_layout(&self, unit: &Unit) -> PathBuf {
+        let dir = self.pkg_dir(unit);
+        self.layout(unit.kind).build_dir().deps_new_layout(&dir)
     }
 
     /// Directory where the fingerprint for the given unit should go.
     pub fn fingerprint_dir(&self, unit: &Unit) -> PathBuf {
         let dir = self.pkg_dir(unit);
-        self.layout(unit.kind).fingerprint().join(dir)
+        self.layout(unit.kind).build_dir().fingerprint(&dir)
+    }
+
+    /// Directory where incremental output for the given unit should go.
+    pub fn incremental_dir(&self, unit: &Unit) -> &Path {
+        self.layout(unit.kind).build_dir().incremental()
+    }
+
+    /// Directory where timing output should go.
+    pub fn timings_dir(&self) -> Option<&Path> {
+        self.host.artifact_dir().map(|v| v.timings())
     }
 
     /// Returns the path for a file in the fingerprint directory.
@@ -303,7 +332,9 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
         assert!(!unit.mode.is_run_custom_build());
         assert!(self.metas.contains_key(unit));
         let dir = self.pkg_dir(unit);
-        self.layout(CompileKind::Host).build().join(dir)
+        self.layout(CompileKind::Host)
+            .build_dir()
+            .build_script(&dir)
     }
 
     /// Returns the directory for compiled artifacts files.
@@ -327,7 +358,11 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
                 invalid
             ),
         };
-        self.layout(unit.kind).artifact().join(dir).join(kind)
+        self.layout(unit.kind)
+            .build_dir()
+            .artifact()
+            .join(dir)
+            .join(kind)
     }
 
     /// Returns the directory where information about running a build script
@@ -337,7 +372,9 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
         assert!(unit.target.is_custom_build());
         assert!(unit.mode.is_run_custom_build());
         let dir = self.pkg_dir(unit);
-        self.layout(unit.kind).build().join(dir)
+        self.layout(unit.kind)
+            .build_dir()
+            .build_script_execution(&dir)
     }
 
     /// Returns the "`OUT_DIR`" directory for running a build script.
@@ -354,15 +391,18 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
         target: &Target,
         kind: CompileKind,
         bcx: &BuildContext<'_, '_>,
-    ) -> CargoResult<PathBuf> {
+    ) -> CargoResult<Option<PathBuf>> {
         assert!(target.is_bin());
-        let dest = self.layout(kind).dest();
+        let Some(dest) = self.layout(kind).artifact_dir().map(|v| v.dest()) else {
+            return Ok(None);
+        };
         let info = bcx.target_data.info(kind);
         let (file_types, _) = info
             .rustc_outputs(
                 CompileMode::Build,
                 &TargetKind::Bin,
                 bcx.target_data.short_name(&kind),
+                bcx.gctx,
             )
             .expect("target must support `bin`");
 
@@ -371,7 +411,7 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
             .find(|file_type| file_type.flavor == FileFlavor::Normal)
             .expect("target must support `bin`");
 
-        Ok(dest.join(file_type.uplift_filename(target)))
+        Ok(Some(dest.join(file_type.uplift_filename(target))))
     }
 
     /// Returns the filenames that the given unit will generate.
@@ -423,11 +463,14 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
         let filename = file_type.uplift_filename(&unit.target);
         let uplift_path = if unit.target.is_example() {
             // Examples live in their own little world.
-            self.layout(unit.kind).examples().join(filename)
+            self.layout(unit.kind)
+                .artifact_dir()?
+                .examples()
+                .join(filename)
         } else if unit.target.is_custom_build() {
             self.build_script_dir(unit).join(filename)
         } else {
-            self.layout(unit.kind).dest().join(filename)
+            self.layout(unit.kind).artifact_dir()?.dest().join(filename)
         };
         if from_path == uplift_path {
             // This can happen with things like examples that reside in the
@@ -447,8 +490,12 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
         bcx: &BuildContext<'a, 'gctx>,
     ) -> CargoResult<Arc<Vec<OutputFile>>> {
         let ret = match unit.mode {
-            CompileMode::Doc { json, .. } => {
-                let path = if json {
+            _ if unit.skip_non_compile_time_dep => {
+                // This skips compilations so no outputs
+                vec![]
+            }
+            CompileMode::Doc => {
+                let path = if bcx.build_config.intent.wants_doc_json_output() {
                     self.out_dir(unit)
                         .join(format!("{}.json", unit.target.crate_name()))
                 } else {
@@ -457,12 +504,27 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
                         .join("index.html")
                 };
 
-                vec![OutputFile {
+                let mut outputs = vec![OutputFile {
                     path,
                     hardlink: None,
                     export_path: None,
                     flavor: FileFlavor::Normal,
-                }]
+                }];
+
+                if bcx.gctx.cli_unstable().rustdoc_mergeable_info {
+                    // `-Zrustdoc-mergeable-info` always uses the new layout.
+                    outputs.push(OutputFile {
+                        path: self
+                            .deps_dir_new_layout(unit)
+                            .join(unit.target.crate_name())
+                            .with_extension("json"),
+                        hardlink: None,
+                        export_path: None,
+                        flavor: FileFlavor::DocParts,
+                    })
+                }
+
+                outputs
             }
             CompileMode::RunCustomBuild => {
                 // At this time, this code path does not handle build script
@@ -492,14 +554,35 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
                     flavor: FileFlavor::Normal,
                 }]
             }
-            CompileMode::Test
-            | CompileMode::Build
-            | CompileMode::Bench
-            | CompileMode::Check { .. } => self.calc_outputs_rustc(unit, bcx)?,
+            CompileMode::Test | CompileMode::Build | CompileMode::Check { .. } => {
+                let mut outputs = self.calc_outputs_rustc(unit, bcx)?;
+                if bcx.build_config.sbom && bcx.gctx.cli_unstable().sbom {
+                    let sbom_files: Vec<_> = outputs
+                        .iter()
+                        .filter(|o| matches!(o.flavor, FileFlavor::Normal | FileFlavor::Linkable))
+                        .map(|output| OutputFile {
+                            path: Self::append_sbom_suffix(&output.path),
+                            hardlink: output.hardlink.as_ref().map(Self::append_sbom_suffix),
+                            export_path: output.export_path.as_ref().map(Self::append_sbom_suffix),
+                            flavor: FileFlavor::Sbom,
+                        })
+                        .collect();
+                    outputs.extend(sbom_files.into_iter());
+                }
+                outputs
+            }
         };
         debug!("Target filenames: {:?}", ret);
 
         Ok(Arc::new(ret))
+    }
+
+    /// Append the SBOM suffix to the file name.
+    fn append_sbom_suffix(link: &PathBuf) -> PathBuf {
+        const SBOM_FILE_EXTENSION: &str = ".cargo-sbom.json";
+        let mut link_buf = link.clone().into_os_string();
+        link_buf.push(SBOM_FILE_EXTENSION);
+        PathBuf::from(link_buf)
     }
 
     /// Computes the actual, full pathnames for all the files generated by rustc.
@@ -516,7 +599,7 @@ impl<'a, 'gctx: 'a> CompilationFiles<'a, 'gctx> {
         let info = bcx.target_data.info(unit.kind);
         let triple = bcx.target_data.short_name(&unit.kind);
         let (file_types, unsupported) =
-            info.rustc_outputs(unit.mode, unit.target.kind(), triple)?;
+            info.rustc_outputs(unit.mode, unit.target.kind(), triple, bcx.gctx)?;
         if file_types.is_empty() {
             if !unsupported.is_empty() {
                 let unsupported_strs: Vec<_> = unsupported.iter().map(|ct| ct.as_str()).collect();

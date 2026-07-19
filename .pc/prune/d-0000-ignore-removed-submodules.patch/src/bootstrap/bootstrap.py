@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 import sys
+import sysconfig
 import tarfile
 import tempfile
 
@@ -311,6 +312,12 @@ def default_build_triple(verbose):
 
     kernel, cputype, processor = uname.decode(default_encoding).split(maxsplit=2)
 
+    # ON NetBSD, use `uname -p` to set the CPU type
+    if kernel == "NetBSD":
+        cputype = (
+            subprocess.check_output(["uname", "-p"]).strip().decode(default_encoding)
+        )
+
     # The goal here is to come up with the same triple as LLVM would,
     # at least for the subset of platforms we're willing to target.
     kerneltype_mapper = {
@@ -333,7 +340,11 @@ def default_build_triple(verbose):
         if ostype == "Android":
             kernel = "linux-android"
         else:
-            kernel = "unknown-linux-gnu"
+            python_soabi = sysconfig.get_config_var("SOABI")
+            if python_soabi is not None and "musl" in python_soabi:
+                kernel = "unknown-linux-musl"
+            else:
+                kernel = "unknown-linux-gnu"
     elif kernel == "SunOS":
         kernel = "pc-solaris"
         # On Solaris, uname -m will return a machine classification instead
@@ -394,6 +405,7 @@ def default_build_triple(verbose):
         "i686": "i686",
         "i686-AT386": "i686",
         "i786": "i686",
+        "loongarch32": "loongarch32",
         "loongarch64": "loongarch64",
         "m68k": "m68k",
         "csky": "csky",
@@ -427,10 +439,16 @@ def default_build_triple(verbose):
             kernel = "linux-androideabi"
         else:
             kernel += "eabihf"
-    elif cputype in {"armv7l", "armv8l"}:
+    elif cputype in {"armv6hf", "earmv6hf"}:
+        cputype = "armv6"
+        if kernel == "unknown-netbsd":
+            kernel += "-eabihf"
+    elif cputype in {"armv7l", "earmv7hf", "armv8l"}:
         cputype = "armv7"
         if kernel == "linux-android":
             kernel = "linux-androideabi"
+        elif kernel == "unknown-netbsd":
+            kernel += "-eabihf"
         else:
             kernel += "eabihf"
     elif cputype == "mips":
@@ -578,6 +596,7 @@ class RustBuild(object):
         self.download_url = (
             os.getenv("RUSTUP_DIST_SERVER") or self.stage0_data["dist_server"]
         )
+        self.jobs = self.get_toml("jobs", "build") or "default"
 
         self.build = args.build or self.build_triple()
 
@@ -726,7 +745,7 @@ class RustBuild(object):
 
     def should_fix_bins_and_dylibs(self):
         """Whether or not `fix_bin_or_dylib` needs to be run; can only be True
-        on NixOS or if config.toml has `build.patch-binaries-for-nix` set.
+        on NixOS or if bootstrap.toml has `build.patch-binaries-for-nix` set.
         """
         if self._should_fix_bins_and_dylibs is not None:
             return self._should_fix_bins_and_dylibs
@@ -775,7 +794,7 @@ class RustBuild(object):
                         "The IN_NIX_SHELL environment variable is `{}`;".format(
                             in_nix_shell
                         ),
-                        "you may need to set `patch-binaries-for-nix=true` in config.toml",
+                        "you may need to set `patch-binaries-for-nix=true` in bootstrap.toml",
                     )
 
             return is_nixos
@@ -884,7 +903,7 @@ class RustBuild(object):
         return os.path.join(self.build_dir, self.build, subdir)
 
     def get_toml(self, key, section=None):
-        """Returns the value of the given key in config.toml, otherwise returns None
+        """Returns the value of the given key in bootstrap.toml, otherwise returns None
 
         >>> rb = RustBuild()
         >>> rb.config_toml = 'key1 = "value1"\\nkey2 = "value2"'
@@ -1021,6 +1040,9 @@ class RustBuild(object):
         # See also: <https://github.com/rust-lang/rust/issues/70208>.
         if "CARGO_BUILD_TARGET" in env:
             del env["CARGO_BUILD_TARGET"]
+        # if in CI, don't use incremental build when building bootstrap.
+        if "GITHUB_ACTIONS" in env:
+            env["CARGO_INCREMENTAL"] = "0"
         env["CARGO_TARGET_DIR"] = build_dir
         env["RUSTC"] = self.rustc()
         env["LD_LIBRARY_PATH"] = (
@@ -1118,17 +1140,22 @@ class RustBuild(object):
         if "RUSTFLAGS_BOOTSTRAP" in env:
             env["RUSTFLAGS"] += " " + env["RUSTFLAGS_BOOTSTRAP"]
 
-        env["PATH"] = os.path.join(self.bin_root(), "bin") + os.pathsep + env["PATH"]
         if not os.path.isfile(self.cargo()):
             raise Exception("no cargo executable found at `{}`".format(self.cargo()))
         args = [
             self.cargo(),
             "build",
+            "--jobs=" + self.jobs,
             "--manifest-path",
             os.path.join(self.rust_root, "src/bootstrap/Cargo.toml"),
             "-Zroot-dir=" + self.rust_root,
         ]
-        args.extend("--verbose" for _ in range(self.verbose))
+        # verbose cargo output is very noisy, so only enable it with -vv
+        args.extend("--verbose" for _ in range(self.verbose - 1))
+
+        if "BOOTSTRAP_TRACING" in env:
+            args.append("--features=tracing")
+
         if self.use_locked_deps:
             args.append("--locked")
         if self.use_vendored_sources:
@@ -1158,6 +1185,30 @@ class RustBuild(object):
         config = self.get_toml("build")
         return config or default_build_triple(self.verbose)
 
+    def is_git_repository(self, repo_path):
+        return os.path.isdir(os.path.join(repo_path, ".git"))
+
+    def get_latest_commit(self):
+        repo_path = self.rust_root
+        author_email = self.stage0_data.get("git_merge_commit_email")
+        if not self.is_git_repository(repo_path):
+            return "<commit>"
+        cmd = [
+            "git",
+            "rev-list",
+            "--author",
+            author_email,
+            "-n1",
+            "HEAD",
+        ]
+        try:
+            commit = subprocess.check_output(
+                cmd, universal_newlines=True, cwd=repo_path
+            ).strip()
+            return commit or "<commit>"
+        except subprocess.CalledProcessError:
+            return "<commit>"
+
     def check_vendored_status(self):
         """Check that vendoring is configured properly"""
         # keep this consistent with the equivalent check in bootstrap:
@@ -1170,7 +1221,8 @@ class RustBuild(object):
                 eprint("      use vendored sources by default.")
 
         cargo_dir = os.path.join(self.rust_root, ".cargo")
-        url = "https://ci-artifacts.rust-lang.org/rustc-builds/<commit>/rustc-nightly-src.tar.xz"
+        commit = self.get_latest_commit()
+        url = f"https://ci-artifacts.rust-lang.org/rustc-builds/{commit}/rustc-nightly-src.tar.xz"
         if self.use_vendored_sources:
             vendor_dir = os.path.join(self.rust_root, "vendor")
             if not os.path.exists(vendor_dir):
@@ -1246,17 +1298,23 @@ def bootstrap(args):
             "unless you put them in place manually."
         )
 
-    # Read from `--config`, then `RUST_BOOTSTRAP_CONFIG`, then `./config.toml`,
-    # then `config.toml` in the root directory.
+    # Read from `--config` first, followed by `RUST_BOOTSTRAP_CONFIG`.
+    # If neither is set, check `./bootstrap.toml`, then `bootstrap.toml` in the root directory.
+    # If those are unavailable, fall back to `./config.toml`, then `config.toml` for
+    # backward compatibility.
     toml_path = args.config or os.getenv("RUST_BOOTSTRAP_CONFIG")
     using_default_path = toml_path is None
     if using_default_path:
-        toml_path = "config.toml"
+        toml_path = "bootstrap.toml"
         if not os.path.exists(toml_path):
-            toml_path = os.path.join(rust_root, toml_path)
+            toml_path = os.path.join(rust_root, "bootstrap.toml")
+            if not os.path.exists(toml_path):
+                toml_path = "config.toml"
+                if not os.path.exists(toml_path):
+                    toml_path = os.path.join(rust_root, "config.toml")
 
     # Give a hard error if `--config` or `RUST_BOOTSTRAP_CONFIG` are set to a missing path,
-    # but not if `config.toml` hasn't been created.
+    # but not if `bootstrap.toml` hasn't been created.
     if not using_default_path or os.path.exists(toml_path):
         with open(toml_path) as config:
             config_toml = config.read()
@@ -1274,7 +1332,9 @@ def bootstrap(args):
         # profiles to be renamed while maintaining back compatibility
         # Keep in sync with `profile_aliases` in config.rs
         profile_aliases = {"user": "dist"}
-        include_file = "config.{}.toml".format(profile_aliases.get(profile) or profile)
+        include_file = "bootstrap.{}.toml".format(
+            profile_aliases.get(profile) or profile
+        )
         include_dir = os.path.join(rust_root, "src", "bootstrap", "defaults")
         include_path = os.path.join(include_dir, include_file)
 
@@ -1294,7 +1354,7 @@ def bootstrap(args):
     build.check_vendored_status()
 
     if not os.path.exists(build.build_dir):
-        os.makedirs(build.build_dir)
+        os.makedirs(os.path.realpath(build.build_dir))
 
     # Fetch/build the bootstrap
     build.download_toolchain()
@@ -1306,9 +1366,6 @@ def bootstrap(args):
     args = [build.bootstrap_binary()]
     args.extend(sys.argv[1:])
     env = os.environ.copy()
-    # The Python process ID is used when creating a Windows job object
-    # (see src\bootstrap\src\utils\job.rs)
-    env["BOOTSTRAP_PARENT_ID"] = str(os.getpid())
     env["BOOTSTRAP_PYTHON"] = sys.executable
     run(args, env=env, verbose=build.verbose, is_bootstrap=True)
 
@@ -1322,11 +1379,26 @@ def main():
         sys.argv[1] = "-h"
 
     args = parse_args(sys.argv)
-    help_triggered = args.help or len(sys.argv) == 1
 
-    # If the user is asking for help, let them know that the whole download-and-build
+    # Root help (e.g., x.py --help) prints help from the saved file to save the time
+    if len(sys.argv) == 1 or sys.argv[1] in ["-h", "--help"]:
+        try:
+            with open(
+                os.path.join(os.path.dirname(__file__), "../etc/xhelp"), "r"
+            ) as f:
+                # The file from bootstrap func already has newline.
+                print(f.read(), end="")
+                sys.exit(0)
+        except Exception as error:
+            eprint(
+                f"ERROR: unable to run help: {error}\n",
+                "x.py run generate-help may solve the problem.",
+            )
+            sys.exit(1)
+
+    # If the user is asking for other helps, let them know that the whole download-and-build
     # process has to happen before anything is printed out.
-    if help_triggered:
+    if args.help:
         eprint(
             "INFO: Downloading and building bootstrap before processing --help command.\n"
             "      See src/bootstrap/README.md for help with common commands."
@@ -1344,13 +1416,14 @@ def main():
             eprint(error)
         success_word = "unsuccessfully"
 
-    if not help_triggered:
+    if not args.help:
         eprint(
             "Build completed",
             success_word,
             "in",
             format_build_time(time() - start_time),
         )
+
     sys.exit(exit_code)
 
 

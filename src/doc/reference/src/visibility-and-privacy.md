@@ -1,15 +1,15 @@
-# Visibility and Privacy
-
 r[vis]
+# Visibility and privacy
 
 r[vis.syntax]
-> **<sup>Syntax<sup>**\
-> _Visibility_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `pub`\
-> &nbsp;&nbsp; | `pub` `(` `crate` `)`\
-> &nbsp;&nbsp; | `pub` `(` `self` `)`\
-> &nbsp;&nbsp; | `pub` `(` `super` `)`\
-> &nbsp;&nbsp; | `pub` `(` `in` [_SimplePath_] `)`
+```grammar,items
+Visibility ->
+      `pub`
+    | `pub` `(` `crate` `)`
+    | `pub` `(` `self` `)`
+    | `pub` `(` `super` `)`
+    | `pub` `(` `in` SimplePath `)`
+```
 
 r[vis.intro]
 These two terms are often used interchangeably, and what they are attempting to
@@ -152,9 +152,8 @@ For a Rust program to pass the privacy checking pass, all paths must be valid
 accesses given the two rules above. This includes all use statements,
 expressions, types, etc.
 
-## `pub(in path)`, `pub(crate)`, `pub(super)`, and `pub(self)`
-
 r[vis.scoped]
+## `pub(in path)`, `pub(crate)`, `pub(super)`, and `pub(self)`
 
 r[vis.scoped.intro]
 In addition to public and private, Rust allows users to declare an item as
@@ -178,9 +177,8 @@ r[vis.scoped.self]
 to `pub(in self)` or not using `pub` at all.
 
 r[vis.scoped.edition2018]
-> **Edition differences**: Starting with the 2018 edition, paths for
-> `pub(in path)` must start with `crate`, `self`, or `super`. The 2015 edition
-> may also use paths starting with `::` or modules from the crate root.
+> [!EDITION-2018]
+> Starting with the 2018 edition, paths for `pub(in path)` must start with `crate`, `self`, or `super`. The 2015 edition may also use paths starting with `::` or modules from the crate root.
 
 Here's an example:
 
@@ -234,14 +232,11 @@ fn bar() {
 fn main() { bar() }
 ```
 
-> **Note:** This syntax only adds another restriction to the visibility of an
-> item. It does not guarantee that the item is visible within all parts of the
-> specified scope. To access an item, all of its parent items up to the
-> current scope must still be visible as well.
-
-## Re-exporting and Visibility
+> [!NOTE]
+> This syntax only adds another restriction to the visibility of an item. It does not guarantee that the item is visible within all parts of the specified scope. To access an item, all of its parent items up to the current scope must still be visible as well.
 
 r[vis.reexports]
+## Re-exporting and visibility
 
 r[vis.reexports.intro]
 Rust allows publicly re-exporting items through a `pub use` directive. Because
@@ -268,5 +263,3 @@ r[vis.reexports.private-item]
 When re-exporting a private item, it can be thought of as allowing the "privacy
 chain" being short-circuited through the reexport instead of passing through
 the namespace hierarchy as it normally would.
-
-[_SimplePath_]: paths.md#simple-paths

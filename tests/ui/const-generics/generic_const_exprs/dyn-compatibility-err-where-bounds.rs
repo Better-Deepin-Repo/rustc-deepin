@@ -13,9 +13,8 @@ impl Foo for () {
 }
 
 fn use_dyn(v: &dyn Foo) {
-    //~^ ERROR the trait `Foo` cannot be made into an object
+    //~^ ERROR the trait `Foo` is not dyn compatible
     v.test();
-    //~^ ERROR the trait `Foo` cannot be made into an object
 }
 
 fn main() {}

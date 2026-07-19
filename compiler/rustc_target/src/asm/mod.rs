@@ -1,12 +1,11 @@
 use std::fmt;
-use std::str::FromStr;
 
+use rustc_abi::Size;
 use rustc_data_structures::fx::{FxHashMap, FxIndexSet};
 use rustc_macros::{Decodable, Encodable, HashStable_Generic};
 use rustc_span::Symbol;
 
-use crate::abi::Size;
-use crate::spec::{RelocModel, Target};
+use crate::spec::{Arch, RelocModel, Target};
 
 pub struct ModifierInfo {
     pub modifier: char,
@@ -39,12 +38,12 @@ macro_rules! def_reg_class {
                 }
             }
 
-            pub fn parse(name: rustc_span::Symbol) -> Result<Self, &'static str> {
+            pub fn parse(name: rustc_span::Symbol) -> Result<Self, &'static [rustc_span::Symbol]> {
                 match name {
                     $(
                         rustc_span::sym::$class => Ok(Self::$class),
                     )*
-                    _ => Err("unknown register class"),
+                    _ => Err(&[$(rustc_span::sym::$class),*]),
                 }
             }
         }
@@ -226,6 +225,7 @@ pub enum InlineAsmArch {
     RiscV64,
     Nvptx64,
     Hexagon,
+    LoongArch32,
     LoongArch64,
     Mips,
     Mips64,
@@ -244,37 +244,36 @@ pub enum InlineAsmArch {
     CSKY,
 }
 
-impl FromStr for InlineAsmArch {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<InlineAsmArch, ()> {
-        match s {
-            "x86" => Ok(Self::X86),
-            "x86_64" => Ok(Self::X86_64),
-            "arm" => Ok(Self::Arm),
-            "aarch64" => Ok(Self::AArch64),
-            "arm64ec" => Ok(Self::Arm64EC),
-            "riscv32" => Ok(Self::RiscV32),
-            "riscv64" => Ok(Self::RiscV64),
-            "nvptx64" => Ok(Self::Nvptx64),
-            "powerpc" => Ok(Self::PowerPC),
-            "powerpc64" => Ok(Self::PowerPC64),
-            "hexagon" => Ok(Self::Hexagon),
-            "loongarch64" => Ok(Self::LoongArch64),
-            "mips" | "mips32r6" => Ok(Self::Mips),
-            "mips64" | "mips64r6" => Ok(Self::Mips64),
-            "s390x" => Ok(Self::S390x),
-            "sparc" => Ok(Self::Sparc),
-            "sparc64" => Ok(Self::Sparc64),
-            "spirv" => Ok(Self::SpirV),
-            "wasm32" => Ok(Self::Wasm32),
-            "wasm64" => Ok(Self::Wasm64),
-            "bpf" => Ok(Self::Bpf),
-            "avr" => Ok(Self::Avr),
-            "msp430" => Ok(Self::Msp430),
-            "m68k" => Ok(Self::M68k),
-            "csky" => Ok(Self::CSKY),
-            _ => Err(()),
+impl InlineAsmArch {
+    pub fn from_arch(arch: &Arch) -> Option<Self> {
+        match arch {
+            Arch::X86 => Some(Self::X86),
+            Arch::X86_64 => Some(Self::X86_64),
+            Arch::Arm => Some(Self::Arm),
+            Arch::Arm64EC => Some(Self::Arm64EC),
+            Arch::AArch64 => Some(Self::AArch64),
+            Arch::RiscV32 => Some(Self::RiscV32),
+            Arch::RiscV64 => Some(Self::RiscV64),
+            Arch::Nvptx64 => Some(Self::Nvptx64),
+            Arch::Hexagon => Some(Self::Hexagon),
+            Arch::LoongArch32 => Some(Self::LoongArch32),
+            Arch::LoongArch64 => Some(Self::LoongArch64),
+            Arch::Mips | Arch::Mips32r6 => Some(Self::Mips),
+            Arch::Mips64 | Arch::Mips64r6 => Some(Self::Mips64),
+            Arch::PowerPC => Some(Self::PowerPC),
+            Arch::PowerPC64 | Arch::PowerPC64LE => Some(Self::PowerPC64),
+            Arch::S390x => Some(Self::S390x),
+            Arch::Sparc => Some(Self::Sparc),
+            Arch::Sparc64 => Some(Self::Sparc64),
+            Arch::SpirV => Some(Self::SpirV),
+            Arch::Wasm32 => Some(Self::Wasm32),
+            Arch::Wasm64 => Some(Self::Wasm64),
+            Arch::Bpf => Some(Self::Bpf),
+            Arch::Avr => Some(Self::Avr),
+            Arch::Msp430 => Some(Self::Msp430),
+            Arch::M68k => Some(Self::M68k),
+            Arch::CSky => Some(Self::CSKY),
+            Arch::AmdGpu | Arch::Xtensa | Arch::Other(_) => None,
         }
     }
 }
@@ -365,7 +364,9 @@ impl InlineAsmReg {
                 Self::PowerPC(PowerPCInlineAsmReg::parse(name)?)
             }
             InlineAsmArch::Hexagon => Self::Hexagon(HexagonInlineAsmReg::parse(name)?),
-            InlineAsmArch::LoongArch64 => Self::LoongArch(LoongArchInlineAsmReg::parse(name)?),
+            InlineAsmArch::LoongArch32 | InlineAsmArch::LoongArch64 => {
+                Self::LoongArch(LoongArchInlineAsmReg::parse(name)?)
+            }
             InlineAsmArch::Mips | InlineAsmArch::Mips64 => {
                 Self::Mips(MipsInlineAsmReg::parse(name)?)
             }
@@ -635,7 +636,7 @@ impl InlineAsmRegClass {
         }
     }
 
-    pub fn parse(arch: InlineAsmArch, name: Symbol) -> Result<Self, &'static str> {
+    pub fn parse(arch: InlineAsmArch, name: Symbol) -> Result<Self, &'static [rustc_span::Symbol]> {
         Ok(match arch {
             InlineAsmArch::X86 | InlineAsmArch::X86_64 => {
                 Self::X86(X86InlineAsmRegClass::parse(name)?)
@@ -652,7 +653,9 @@ impl InlineAsmRegClass {
                 Self::PowerPC(PowerPCInlineAsmRegClass::parse(name)?)
             }
             InlineAsmArch::Hexagon => Self::Hexagon(HexagonInlineAsmRegClass::parse(name)?),
-            InlineAsmArch::LoongArch64 => Self::LoongArch(LoongArchInlineAsmRegClass::parse(name)?),
+            InlineAsmArch::LoongArch32 | InlineAsmArch::LoongArch64 => {
+                Self::LoongArch(LoongArchInlineAsmRegClass::parse(name)?)
+            }
             InlineAsmArch::Mips | InlineAsmArch::Mips64 => {
                 Self::Mips(MipsInlineAsmRegClass::parse(name)?)
             }
@@ -860,7 +863,7 @@ pub fn allocatable_registers(
             hexagon::fill_reg_map(arch, reloc_model, target_features, target, &mut map);
             map
         }
-        InlineAsmArch::LoongArch64 => {
+        InlineAsmArch::LoongArch32 | InlineAsmArch::LoongArch64 => {
             let mut map = loongarch::regclass_map();
             loongarch::fill_reg_map(arch, reloc_model, target_features, target, &mut map);
             map
@@ -934,6 +937,7 @@ pub enum InlineAsmClobberAbi {
     LoongArch,
     PowerPC,
     S390x,
+    Bpf,
     Msp430,
 }
 
@@ -991,7 +995,7 @@ impl InlineAsmClobberAbi {
                 "C" | "system" => Ok(InlineAsmClobberAbi::Avr),
                 _ => Err(&["C", "system"]),
             },
-            InlineAsmArch::LoongArch64 => match name {
+            InlineAsmArch::LoongArch32 | InlineAsmArch::LoongArch64 => match name {
                 "C" | "system" => Ok(InlineAsmClobberAbi::LoongArch),
                 _ => Err(&["C", "system"]),
             },
@@ -1001,6 +1005,10 @@ impl InlineAsmClobberAbi {
             },
             InlineAsmArch::S390x => match name {
                 "C" | "system" => Ok(InlineAsmClobberAbi::S390x),
+                _ => Err(&["C", "system"]),
+            },
+            InlineAsmArch::Bpf => match name {
+                "C" | "system" => Ok(InlineAsmClobberAbi::Bpf),
                 _ => Err(&["C", "system"]),
             },
             InlineAsmArch::Msp430 => match name {
@@ -1240,20 +1248,32 @@ impl InlineAsmClobberAbi {
                     r3, r4, r5, r6, r7,
                     r8, r9, r10, r11, r12,
 
-                    // f0-f13
+                    // f0-f13 and their vsx overlays.
                     f0, f1, f2, f3, f4, f5, f6, f7,
                     f8, f9, f10, f11, f12, f13,
+                    vs0, vs1, vs2, vs3, vs4, vs5, vs6, vs7,
+                    vs8, vs9, vs10, vs11, vs12, vs13,
+
+                    // vs14-31, the fpr portion is saved, but the rest of the register is volatile.
+                    // We can't express that here, so mark the entire vsx register as volatile.
+                    vs14, vs15, vs16, vs17, vs18, vs19, vs20,
+                    vs21, vs22, vs23, vs24, vs25, vs26, vs27,
+                    vs28, vs29, vs30, vs31,
 
                     // v0-v19
                     v0, v1, v2, v3, v4, v5, v6, v7,
                     v8, v9, v10, v11, v12, v13, v14,
                     v15, v16, v17, v18, v19,
 
-                    // cr0-cr1, cr5-cr7, xer
+                    // cr0-cr1, cr5-cr7, ctr, lr, xer
                     cr0, cr1,
                     cr5, cr6, cr7,
+                    ctr,
+                    lr,
                     xer,
-                    // lr and ctr are reserved
+
+                    // These are only supported on PowerPC SPE targets.
+                    spe_acc,
                 }
             },
             InlineAsmClobberAbi::S390x => clobbered_regs! {
@@ -1276,6 +1296,14 @@ impl InlineAsmClobberAbi {
                     // a0-a1 are reserved, other access registers are volatile
                     a2, a3, a4, a5, a6, a7,
                     a8, a9, a10, a11, a12, a13, a14, a15,
+                }
+            },
+            InlineAsmClobberAbi::Bpf => clobbered_regs! {
+                Bpf BpfInlineAsmReg {
+                    // Refs: Section 1.1 "Registers and calling convention" in BPF ABI Recommended Conventions and Guidelines v1.0
+                    // https://www.kernel.org/doc/html/latest/bpf/standardization/abi.html#registers-and-calling-convention
+
+                    r0, r1, r2, r3, r4, r5,
                 }
             },
             InlineAsmClobberAbi::Msp430 => clobbered_regs! {

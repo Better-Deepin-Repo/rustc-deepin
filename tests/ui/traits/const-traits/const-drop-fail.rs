@@ -1,8 +1,10 @@
-//@ compile-flags: -Znext-solver
-//@ revisions: stock precise
+//@[new_precise] compile-flags: -Znext-solver
+//@[new_stock] compile-flags: -Znext-solver
+//@ revisions: new_stock old_stock new_precise old_precise
+//@ ignore-backends: gcc
 
 #![feature(const_trait_impl, const_destruct)]
-#![cfg_attr(precise, feature(const_precise_live_drops))]
+#![cfg_attr(any(new_precise, old_precise), feature(const_precise_live_drops))]
 
 use std::marker::{Destruct, PhantomData};
 
@@ -20,7 +22,7 @@ impl const Drop for ConstImplWithDropGlue {
     fn drop(&mut self) {}
 }
 
-const fn check<T: ~const Destruct>(_: T) {}
+const fn check<T: [const] Destruct>(_: T) {}
 
 macro_rules! check_all {
     ($($exp:expr),*$(,)?) => {$(

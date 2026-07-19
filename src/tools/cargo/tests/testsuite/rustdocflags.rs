@@ -1,6 +1,6 @@
 //! Tests for setting custom rustdoc flags.
 
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::rustc_host;
 use cargo_test_support::rustc_host_env;
@@ -115,7 +115,9 @@ fn rustdocflags_misspelled() {
     p.cargo("doc")
         .env("RUSTDOC_FLAGS", "foo")
         .with_stderr_data(str![[r#"
-[WARNING] Cargo does not read `RUSTDOC_FLAGS` environment variable. Did you mean `RUSTDOCFLAGS`?
+[WARNING] ignoring environment variable `RUSTDOC_FLAGS`
+  |
+  = [HELP] rustdoc flags are passed via `RUSTDOCFLAGS`
 ...
 "#]])
         .run();

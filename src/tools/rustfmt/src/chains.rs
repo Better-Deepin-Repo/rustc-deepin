@@ -58,7 +58,7 @@
 use std::borrow::Cow;
 use std::cmp::min;
 
-use rustc_ast::{ast, ptr};
+use rustc_ast::ast;
 use rustc_span::{BytePos, Span, symbol};
 use tracing::debug;
 
@@ -187,11 +187,12 @@ enum ChainItemKind {
     MethodCall(
         ast::PathSegment,
         Vec<ast::GenericArg>,
-        ThinVec<ptr::P<ast::Expr>>,
+        ThinVec<Box<ast::Expr>>,
     ),
     StructField(symbol::Ident),
     TupleField(symbol::Ident, bool),
     Await,
+    Yield,
     Comment(String, CommentPosition),
 }
 
@@ -203,6 +204,7 @@ impl ChainItemKind {
             | ChainItemKind::StructField(..)
             | ChainItemKind::TupleField(..)
             | ChainItemKind::Await
+            | ChainItemKind::Yield
             | ChainItemKind::Comment(..) => false,
         }
     }
@@ -257,6 +259,10 @@ impl ChainItemKind {
                 let span = mk_sp(nested.span.hi(), expr.span.hi());
                 (ChainItemKind::Await, span)
             }
+            ast::ExprKind::Yield(ast::YieldKind::Postfix(ref nested)) => {
+                let span = mk_sp(nested.span.hi(), expr.span.hi());
+                (ChainItemKind::Yield, span)
+            }
             _ => {
                 return (
                     ChainItemKind::Parent {
@@ -306,6 +312,7 @@ impl Rewrite for ChainItem {
                 rewrite_ident(context, ident)
             ),
             ChainItemKind::Await => ".await".to_owned(),
+            ChainItemKind::Yield => ".yield".to_owned(),
             ChainItemKind::Comment(ref comment, _) => {
                 rewrite_comment(comment, false, shape, context.config)?
             }
@@ -336,7 +343,7 @@ impl ChainItem {
     fn rewrite_method_call(
         method_name: symbol::Ident,
         types: &[ast::GenericArg],
-        args: &[ptr::P<ast::Expr>],
+        args: &[Box<ast::Expr>],
         span: Span,
         context: &RewriteContext<'_>,
         shape: Shape,
@@ -508,7 +515,8 @@ impl Chain {
             }),
             ast::ExprKind::Field(ref subexpr, _)
             | ast::ExprKind::Try(ref subexpr)
-            | ast::ExprKind::Await(ref subexpr, _) => Some(SubExpr {
+            | ast::ExprKind::Await(ref subexpr, _)
+            | ast::ExprKind::Yield(ast::YieldKind::Postfix(ref subexpr)) => Some(SubExpr {
                 expr: Self::convert_try(subexpr, context),
                 is_method_call_receiver: false,
             }),

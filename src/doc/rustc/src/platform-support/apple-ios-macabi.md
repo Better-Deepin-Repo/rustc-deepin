@@ -9,9 +9,9 @@ Apple Mac Catalyst targets.
 
 ## Target maintainers
 
-- [@badboy](https://github.com/badboy)
-- [@BlackHoleFox](https://github.com/BlackHoleFox)
-- [@madsmtm](https://github.com/madsmtm)
+[@badboy](https://github.com/badboy)
+[@BlackHoleFox](https://github.com/BlackHoleFox)
+[@madsmtm](https://github.com/madsmtm)
 
 ## Requirements
 
@@ -20,7 +20,8 @@ These targets are cross-compiled, and require the corresponding macOS SDK
 iOS-specific headers, as provided by Xcode 11 or higher.
 
 The path to the SDK can be passed to `rustc` using the common `SDKROOT`
-environment variable.
+environment variable, or will be inferred when compiling on host macOS using
+roughly the same logic as `xcrun --sdk macosx --show-sdk-path`.
 
 ### OS version
 
@@ -54,6 +55,17 @@ Rust programs can be built for these targets by specifying `--target`, if
 ```console
 $ rustc --target aarch64-apple-ios-macabi your-code.rs
 ```
+
+The target can be differentiated from the iOS targets with the
+`target_env = "macabi"` cfg (or `target_abi = "macabi"` before Rust 1.91.0).
+
+```rust
+if cfg!(target_env = "macabi") {
+    // Do something only on Mac Catalyst.
+}
+```
+
+This is similar to the `TARGET_OS_MACCATALYST` define in C code.
 
 ## Testing
 

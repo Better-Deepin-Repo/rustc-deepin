@@ -89,7 +89,6 @@ fn test(x: bool) {
       //^^^^ expected (), got &'static str
     }
     match x { true => true, false => 0 }
-  //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected (), got bool
                                    //^ expected bool, got i32
     ()
 }
@@ -149,6 +148,56 @@ fn create() -> Option<(i32, Thing)> {
 fn consume() -> Option<()> {
     let (number, thing) = create()?;
     Some(())
+}
+"#,
+    );
+}
+
+#[test]
+fn method_call_on_field() {
+    check(
+        r#"
+struct S {
+    field: fn(f32) -> u32,
+    field2: u32
+}
+
+fn main() {
+    let s = S { field: |_| 0, field2: 0 };
+    s.field(0);
+         // ^ expected f32, got i32
+ // ^^^^^^^^^^ type: u32
+    s.field2(0);
+          // ^ type: i32
+ // ^^^^^^^^^^^ type: {unknown}
+    s.not_a_field(0);
+               // ^ type: i32
+ // ^^^^^^^^^^^^^^^^ type: {unknown}
+}
+"#,
+    );
+}
+
+#[test]
+fn method_call_on_assoc() {
+    check(
+        r#"
+struct S;
+
+impl S {
+    fn not_a_method() -> f32 { 0.0 }
+    fn not_a_method2(this: Self, param: f32) -> Self { this }
+    fn not_a_method3(param: f32) -> Self { S }
+}
+
+fn main() {
+    S.not_a_method(0);
+ // ^^^^^^^^^^^^^^^^^ type: f32
+    S.not_a_method2(0);
+                 // ^ expected f32, got i32
+ // ^^^^^^^^^^^^^^^^^^ type: S
+    S.not_a_method3(0);
+ // ^^^^^^^^^^^^^^^^^^ type: S
 }
 "#,
     );

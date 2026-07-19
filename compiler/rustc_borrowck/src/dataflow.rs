@@ -1,8 +1,7 @@
 use std::fmt;
 
 use rustc_data_structures::fx::FxIndexMap;
-use rustc_data_structures::graph;
-use rustc_index::bit_set::BitSet;
+use rustc_index::bit_set::{DenseBitSet, MixedBitSet};
 use rustc_middle::mir::{
     self, BasicBlock, Body, CallReturnPlaces, Location, Place, TerminatorEdges,
 };
@@ -45,7 +44,7 @@ impl<'a, 'tcx> Analysis<'tcx> for Borrowck<'a, 'tcx> {
     }
 
     fn apply_early_statement_effect(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         stmt: &mir::Statement<'tcx>,
         loc: Location,
@@ -56,7 +55,7 @@ impl<'a, 'tcx> Analysis<'tcx> for Borrowck<'a, 'tcx> {
     }
 
     fn apply_primary_statement_effect(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         stmt: &mir::Statement<'tcx>,
         loc: Location,
@@ -67,7 +66,7 @@ impl<'a, 'tcx> Analysis<'tcx> for Borrowck<'a, 'tcx> {
     }
 
     fn apply_early_terminator_effect(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         term: &mir::Terminator<'tcx>,
         loc: Location,
@@ -78,7 +77,7 @@ impl<'a, 'tcx> Analysis<'tcx> for Borrowck<'a, 'tcx> {
     }
 
     fn apply_primary_terminator_effect<'mir>(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         term: &'mir mir::Terminator<'tcx>,
         loc: Location,
@@ -93,7 +92,7 @@ impl<'a, 'tcx> Analysis<'tcx> for Borrowck<'a, 'tcx> {
     }
 
     fn apply_call_return_effect(
-        &mut self,
+        &self,
         _state: &mut Self::Domain,
         _block: BasicBlock,
         _return_places: CallReturnPlaces<'_, 'tcx>,
@@ -180,26 +179,35 @@ pub struct Borrows<'a, 'tcx> {
 }
 
 struct OutOfScopePrecomputer<'a, 'tcx> {
-    visited: BitSet<mir::BasicBlock>,
+    visited: DenseBitSet<mir::BasicBlock>,
     visit_stack: Vec<mir::BasicBlock>,
     body: &'a Body<'tcx>,
     regioncx: &'a RegionInferenceContext<'tcx>,
     borrows_out_of_scope_at_location: FxIndexMap<Location, Vec<BorrowIndex>>,
 }
 
-impl<'a, 'tcx> OutOfScopePrecomputer<'a, 'tcx> {
-    fn new(body: &'a Body<'tcx>, regioncx: &'a RegionInferenceContext<'tcx>) -> Self {
-        OutOfScopePrecomputer {
-            visited: BitSet::new_empty(body.basic_blocks.len()),
+impl<'tcx> OutOfScopePrecomputer<'_, 'tcx> {
+    fn compute(
+        body: &Body<'tcx>,
+        regioncx: &RegionInferenceContext<'tcx>,
+        borrow_set: &BorrowSet<'tcx>,
+    ) -> FxIndexMap<Location, Vec<BorrowIndex>> {
+        let mut prec = OutOfScopePrecomputer {
+            visited: DenseBitSet::new_empty(body.basic_blocks.len()),
             visit_stack: vec![],
             body,
             regioncx,
             borrows_out_of_scope_at_location: FxIndexMap::default(),
+        };
+        for (borrow_index, borrow_data) in borrow_set.iter_enumerated() {
+            let borrow_region = borrow_data.region;
+            let location = borrow_data.reserve_location;
+            prec.precompute_borrows_out_of_scope(borrow_index, borrow_region, location);
         }
-    }
-}
 
-impl<'tcx> OutOfScopePrecomputer<'_, 'tcx> {
+        prec.borrows_out_of_scope_at_location
+    }
+
     fn precompute_borrows_out_of_scope(
         &mut self,
         borrow_index: BorrowIndex,
@@ -280,19 +288,11 @@ pub fn calculate_borrows_out_of_scope_at_location<'tcx>(
     regioncx: &RegionInferenceContext<'tcx>,
     borrow_set: &BorrowSet<'tcx>,
 ) -> FxIndexMap<Location, Vec<BorrowIndex>> {
-    let mut prec = OutOfScopePrecomputer::new(body, regioncx);
-    for (borrow_index, borrow_data) in borrow_set.iter_enumerated() {
-        let borrow_region = borrow_data.region;
-        let location = borrow_data.reserve_location;
-
-        prec.precompute_borrows_out_of_scope(borrow_index, borrow_region, location);
-    }
-
-    prec.borrows_out_of_scope_at_location
+    OutOfScopePrecomputer::compute(body, regioncx, borrow_set)
 }
 
 struct PoloniusOutOfScopePrecomputer<'a, 'tcx> {
-    visited: BitSet<mir::BasicBlock>,
+    visited: DenseBitSet<mir::BasicBlock>,
     visit_stack: Vec<mir::BasicBlock>,
     body: &'a Body<'tcx>,
     regioncx: &'a RegionInferenceContext<'tcx>,
@@ -300,62 +300,33 @@ struct PoloniusOutOfScopePrecomputer<'a, 'tcx> {
     loans_out_of_scope_at_location: FxIndexMap<Location, Vec<BorrowIndex>>,
 }
 
-impl<'a, 'tcx> PoloniusOutOfScopePrecomputer<'a, 'tcx> {
-    fn new(body: &'a Body<'tcx>, regioncx: &'a RegionInferenceContext<'tcx>) -> Self {
-        Self {
-            visited: BitSet::new_empty(body.basic_blocks.len()),
+impl<'tcx> PoloniusOutOfScopePrecomputer<'_, 'tcx> {
+    fn compute(
+        body: &Body<'tcx>,
+        regioncx: &RegionInferenceContext<'tcx>,
+        borrow_set: &BorrowSet<'tcx>,
+    ) -> FxIndexMap<Location, Vec<BorrowIndex>> {
+        // The in-tree polonius analysis computes loans going out of scope using the
+        // set-of-loans model.
+        let mut prec = PoloniusOutOfScopePrecomputer {
+            visited: DenseBitSet::new_empty(body.basic_blocks.len()),
             visit_stack: vec![],
             body,
             regioncx,
             loans_out_of_scope_at_location: FxIndexMap::default(),
+        };
+        for (loan_idx, loan_data) in borrow_set.iter_enumerated() {
+            let loan_issued_at = loan_data.reserve_location;
+            prec.precompute_loans_out_of_scope(loan_idx, loan_issued_at);
         }
-    }
-}
 
-impl<'tcx> PoloniusOutOfScopePrecomputer<'_, 'tcx> {
+        prec.loans_out_of_scope_at_location
+    }
+
     /// Loans are in scope while they are live: whether they are contained within any live region.
     /// In the location-insensitive analysis, a loan will be contained in a region if the issuing
     /// region can reach it in the subset graph. So this is a reachability problem.
-    fn precompute_loans_out_of_scope(
-        &mut self,
-        loan_idx: BorrowIndex,
-        issuing_region: RegionVid,
-        loan_issued_at: Location,
-    ) {
-        let sccs = self.regioncx.constraint_sccs();
-        let universal_regions = self.regioncx.universal_regions();
-
-        // We first handle the cases where the loan doesn't go out of scope, depending on the
-        // issuing region's successors.
-        for successor in graph::depth_first_search(&self.regioncx.region_graph(), issuing_region) {
-            // 1. Via applied member constraints
-            //
-            // The issuing region can flow into the choice regions, and they are either:
-            // - placeholders or free regions themselves,
-            // - or also transitively outlive a free region.
-            //
-            // That is to say, if there are applied member constraints here, the loan escapes the
-            // function and cannot go out of scope. We could early return here.
-            //
-            // For additional insurance via fuzzing and crater, we verify that the constraint's min
-            // choice indeed escapes the function. In the future, we could e.g. turn this check into
-            // a debug assert and early return as an optimization.
-            let scc = sccs.scc(successor);
-            for constraint in self.regioncx.applied_member_constraints(scc) {
-                if universal_regions.is_universal_region(constraint.min_choice) {
-                    return;
-                }
-            }
-
-            // 2. Via regions that are live at all points: placeholders and free regions.
-            //
-            // If the issuing region outlives such a region, its loan escapes the function and
-            // cannot go out of scope. We can early return.
-            if self.regioncx.is_region_live_at_all_points(successor) {
-                return;
-            }
-        }
-
+    fn precompute_loans_out_of_scope(&mut self, loan_idx: BorrowIndex, loan_issued_at: Location) {
         let first_block = loan_issued_at.block;
         let first_bb_data = &self.body.basic_blocks[first_block];
 
@@ -461,34 +432,12 @@ impl<'a, 'tcx> Borrows<'a, 'tcx> {
         regioncx: &RegionInferenceContext<'tcx>,
         borrow_set: &'a BorrowSet<'tcx>,
     ) -> Self {
-        let mut borrows_out_of_scope_at_location =
-            calculate_borrows_out_of_scope_at_location(body, regioncx, borrow_set);
-
-        // The in-tree polonius analysis computes loans going out of scope using the set-of-loans
-        // model, and makes sure they're identical to the existing computation of the set-of-points
-        // model.
-        if tcx.sess.opts.unstable_opts.polonius.is_next_enabled() {
-            let mut polonius_prec = PoloniusOutOfScopePrecomputer::new(body, regioncx);
-            for (loan_idx, loan_data) in borrow_set.iter_enumerated() {
-                let issuing_region = loan_data.region;
-                let loan_issued_at = loan_data.reserve_location;
-
-                polonius_prec.precompute_loans_out_of_scope(
-                    loan_idx,
-                    issuing_region,
-                    loan_issued_at,
-                );
-            }
-
-            assert_eq!(
-                borrows_out_of_scope_at_location, polonius_prec.loans_out_of_scope_at_location,
-                "polonius loan scopes differ from NLL borrow scopes, for body {:?}",
-                body.span,
-            );
-
-            borrows_out_of_scope_at_location = polonius_prec.loans_out_of_scope_at_location;
-        }
-
+        let borrows_out_of_scope_at_location =
+            if !tcx.sess.opts.unstable_opts.polonius.is_next_enabled() {
+                calculate_borrows_out_of_scope_at_location(body, regioncx, borrow_set)
+            } else {
+                PoloniusOutOfScopePrecomputer::compute(body, regioncx, borrow_set)
+            };
         Borrows { tcx, body, borrow_set, borrows_out_of_scope_at_location }
     }
 
@@ -559,7 +508,7 @@ impl<'a, 'tcx> Borrows<'a, 'tcx> {
     }
 }
 
-type BorrowsDomain = BitSet<BorrowIndex>;
+type BorrowsDomain = MixedBitSet<BorrowIndex>;
 
 /// Forward dataflow computation of the set of borrows that are in scope at a particular location.
 /// - we gen the introduced loans
@@ -575,7 +524,7 @@ impl<'tcx> rustc_mir_dataflow::Analysis<'tcx> for Borrows<'_, 'tcx> {
 
     fn bottom_value(&self, _: &mir::Body<'tcx>) -> Self::Domain {
         // bottom = nothing is reserved or activated yet;
-        BitSet::new_empty(self.borrow_set.len())
+        MixedBitSet::new_empty(self.borrow_set.len())
     }
 
     fn initialize_start_block(&self, _: &mir::Body<'tcx>, _: &mut Self::Domain) {
@@ -584,7 +533,7 @@ impl<'tcx> rustc_mir_dataflow::Analysis<'tcx> for Borrows<'_, 'tcx> {
     }
 
     fn apply_early_statement_effect(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         _statement: &mir::Statement<'tcx>,
         location: Location,
@@ -593,7 +542,7 @@ impl<'tcx> rustc_mir_dataflow::Analysis<'tcx> for Borrows<'_, 'tcx> {
     }
 
     fn apply_primary_statement_effect(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         stmt: &mir::Statement<'tcx>,
         location: Location,
@@ -628,7 +577,6 @@ impl<'tcx> rustc_mir_dataflow::Analysis<'tcx> for Borrows<'_, 'tcx> {
 
             mir::StatementKind::FakeRead(..)
             | mir::StatementKind::SetDiscriminant { .. }
-            | mir::StatementKind::Deinit(..)
             | mir::StatementKind::StorageLive(..)
             | mir::StatementKind::Retag { .. }
             | mir::StatementKind::PlaceMention(..)
@@ -642,7 +590,7 @@ impl<'tcx> rustc_mir_dataflow::Analysis<'tcx> for Borrows<'_, 'tcx> {
     }
 
     fn apply_early_terminator_effect(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         _terminator: &mir::Terminator<'tcx>,
         location: Location,
@@ -651,7 +599,7 @@ impl<'tcx> rustc_mir_dataflow::Analysis<'tcx> for Borrows<'_, 'tcx> {
     }
 
     fn apply_primary_terminator_effect<'mir>(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         terminator: &'mir mir::Terminator<'tcx>,
         _location: Location,

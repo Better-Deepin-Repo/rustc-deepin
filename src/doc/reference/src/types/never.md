@@ -1,10 +1,10 @@
+r[type.never]
 # Never type
 
-r[type.never]
-
 r[type.never.syntax]
-> **<sup>Syntax</sup>**\
-> _NeverType_ : `!`
+```grammar,types
+NeverType -> `!`
+```
 
 r[type.never.intro]
 The never type `!` is a type with no values, representing the result of

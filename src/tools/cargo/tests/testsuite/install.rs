@@ -7,17 +7,17 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::thread;
 
+use crate::prelude::*;
+use crate::utils::cargo_process;
 use cargo_test_support::compare::assert_e2e;
 use cargo_test_support::cross_compile;
 use cargo_test_support::git;
-use cargo_test_support::prelude::*;
 use cargo_test_support::registry::{self, Package};
 use cargo_test_support::str;
-use cargo_test_support::{
-    basic_manifest, cargo_process, project, project_in, symlink_supported, t,
-};
+use cargo_test_support::{basic_manifest, project, project_in, symlink_supported, t};
 use cargo_util::{ProcessBuilder, ProcessError};
 
+use crate::utils::cross_compile::disabled as cross_compile_disabled;
 use cargo_test_support::install::{assert_has_installed_exe, assert_has_not_installed_exe, exe};
 use cargo_test_support::paths;
 
@@ -397,6 +397,20 @@ fn bad_version() {
 }
 
 #[cargo_test]
+fn missing_at_symbol_before_version() {
+    pkg("foo", "0.0.1");
+    cargo_process("install foo=0.2.0")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[ERROR] invalid character `=` in package name: `foo=0.2.0`, characters must be Unicode XID characters (numbers, `-`, `_`, or most letters)
+
+[HELP] if this is meant to be a package name followed by a version, insert an `@` like `foo@=0.2.0`
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
 fn bad_paths() {
     cargo_process("install")
         .with_status(101)
@@ -484,6 +498,157 @@ fn install_location_precedence() {
 
     cargo_process("install foo").run();
     assert_has_installed_exe(&t4, "foo");
+}
+
+#[cargo_test]
+fn relative_install_location_without_trailing_slash() {
+    let p = project().file("src/main.rs", "fn main() {}").build();
+
+    let root = paths::root();
+    let root_t1 = root.join("t1");
+    let p_path = p.root().to_path_buf();
+    let project_t1 = p_path.join("t1");
+
+    fs::create_dir(root.join(".cargo")).unwrap();
+    fs::write(
+        root.join(".cargo/config.toml"),
+        r#"
+            [install]
+            root = "t1"
+        "#,
+    )
+    .unwrap();
+
+    let mut cmd = cargo_process("install --path .");
+    cmd.cwd(p.root());
+    cmd.with_stderr_data(str![[r#"
+[WARNING] the `install.root` value `t1` defined in [ROOT]/.cargo/config.toml without a trailing slash is deprecated
+  |
+  = [NOTE] a future version of Cargo will treat it as relative to the configuration directory
+  = [HELP] add a trailing slash (`t1/`) to adopt the correct behavior and silence this warning
+  = [NOTE] see more at https://doc.rust-lang.org/cargo/reference/config.html#config-relative-paths
+[INSTALLING] foo v0.0.1 ([ROOT]/foo)
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `release` profile [optimized] target(s) in [ELAPSED]s
+[INSTALLING] [ROOT]/foo/t1/bin/foo[EXE]
+[INSTALLED] package `foo v0.0.1 ([ROOT]/foo)` (executable `foo[EXE]`)
+[WARNING] be sure to add `[ROOT]/foo/t1/bin` to your PATH to be able to run the installed binaries
+
+"#]])
+        .run();
+
+    // NOTE: the install location is relative to the CWD, not the config file
+    assert_has_not_installed_exe(&root_t1, "foo");
+    assert_has_installed_exe(&project_t1, "foo");
+}
+
+#[cargo_test]
+fn cli_root_argument_without_deprecation_warning() {
+    // Verify that using the --root CLI argument does not produce the deprecation warning.
+    let p = project().file("src/main.rs", "fn main() {}").build();
+
+    let root = paths::root();
+    let root_t1 = root.join("t1");
+    let p_path = p.root().to_path_buf();
+    let project_t1 = p_path.join("t1");
+
+    cargo_process("install --path . --root")
+        .arg("t1")
+        .cwd(p.root())
+        .with_stderr_data(str![[r#"
+[INSTALLING] foo v0.0.1 ([ROOT]/foo)
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `release` profile [optimized] target(s) in [ELAPSED]s
+[INSTALLING] [ROOT]/foo/t1/bin/foo[EXE]
+[INSTALLED] package `foo v0.0.1 ([ROOT]/foo)` (executable `foo[EXE]`)
+[WARNING] be sure to add `[ROOT]/foo/t1/bin` to your PATH to be able to run the installed binaries
+
+"#]])
+        .run();
+    assert_has_not_installed_exe(&root_t1, "foo");
+    assert_has_installed_exe(&project_t1, "foo");
+}
+
+#[cargo_test]
+fn relative_install_location_with_trailing_slash() {
+    let p = project().file("src/main.rs", "fn main() {}").build();
+
+    let root = paths::root();
+    let root_t1 = root.join("t1");
+    let p_path = p.root().to_path_buf();
+    let project_t1 = p_path.join("t1");
+
+    fs::create_dir(root.join(".cargo")).unwrap();
+    fs::write(
+        root.join(".cargo/config.toml"),
+        r#"
+            [install]
+            root = "t1/"
+        "#,
+    )
+    .unwrap();
+
+    let mut cmd = cargo_process("install --path .");
+    cmd.cwd(p.root());
+    cmd.with_stderr_data(str![[r#"
+[INSTALLING] foo v0.0.1 ([ROOT]/foo)
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `release` profile [optimized] target(s) in [ELAPSED]s
+[INSTALLING] [ROOT]/t1/bin/foo[EXE]
+[INSTALLED] package `foo v0.0.1 ([ROOT]/foo)` (executable `foo[EXE]`)
+[WARNING] be sure to add `[ROOT]/t1/bin` to your PATH to be able to run the installed binaries
+
+"#]])
+        .run();
+
+    assert_has_installed_exe(&root_t1, "foo");
+    assert_has_not_installed_exe(&project_t1, "foo");
+}
+
+#[cargo_test]
+fn relative_install_location_with_path_set() {
+    // Test that when the absolute install path is in PATH, no warning is shown
+    let p = project().file("src/main.rs", "fn main() {}").build();
+
+    let root = paths::root();
+    let p_path = p.root().to_path_buf();
+    let project_t1 = p_path.join("t1");
+
+    fs::create_dir(root.join(".cargo")).unwrap();
+    fs::write(
+        root.join(".cargo/config.toml"),
+        r#"
+            [install]
+            root = "t1"
+        "#,
+    )
+    .unwrap();
+
+    // Add the absolute path to PATH environment variable
+    let install_bin_path = project_t1.join("bin");
+    let mut path = path();
+    path.push(install_bin_path);
+    let new_path = env::join_paths(path).unwrap();
+
+    let mut cmd = cargo_process("install --path .");
+    cmd.cwd(p.root());
+    cmd.env("PATH", new_path);
+    cmd.with_stderr_data(str![[r#"
+[WARNING] the `install.root` value `t1` defined in [ROOT]/.cargo/config.toml without a trailing slash is deprecated
+  |
+  = [NOTE] a future version of Cargo will treat it as relative to the configuration directory
+  = [HELP] add a trailing slash (`t1/`) to adopt the correct behavior and silence this warning
+  = [NOTE] see more at https://doc.rust-lang.org/cargo/reference/config.html#config-relative-paths
+[INSTALLING] foo v0.0.1 ([ROOT]/foo)
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `release` profile [optimized] target(s) in [ELAPSED]s
+[INSTALLING] [ROOT]/foo/t1/bin/foo[EXE]
+[INSTALLED] package `foo v0.0.1 ([ROOT]/foo)` (executable `foo[EXE]`)
+
+"#]])
+        .run();
+
+    assert_has_installed_exe(&project_t1, "foo");
 }
 
 #[cargo_test]
@@ -752,7 +917,7 @@ fn multiple_crates_git_all() {
         )
         .build();
 
-    cargo_process(&format!("install --git {} bin1 bin2", p.url().to_string())).run();
+    cargo_process(&format!("install --git {} bin1 bin2", p.url())).run();
 }
 
 #[cargo_test]
@@ -1106,11 +1271,11 @@ Caused by:
   invalid TOML found for metadata
 
 Caused by:
-  TOML parse error at line 1, column 1
+  TOML parse error at line 1, column 4
     |
   1 | v1]
-    | ^
-  invalid key
+    |    ^
+  key with no value, expected `=`
 
 "#]])
         .run();
@@ -1590,7 +1755,7 @@ fn install_target_native() {
 
 #[cargo_test]
 fn install_target_foreign() {
-    if cross_compile::disabled() {
+    if cross_compile_disabled() {
         return;
     }
 
@@ -1942,15 +2107,19 @@ fn git_repo_replace() {
     path.push(".cargo/.crates.toml");
 
     assert_ne!(old_rev, new_rev);
-    assert!(fs::read_to_string(path.clone())
-        .unwrap()
-        .contains(&format!("{}", old_rev)));
+    assert!(
+        fs::read_to_string(path.clone())
+            .unwrap()
+            .contains(&format!("{}", old_rev))
+    );
     cargo_process("install --force --git")
         .arg(p.url().to_string())
         .run();
-    assert!(fs::read_to_string(path)
-        .unwrap()
-        .contains(&format!("{}", new_rev)));
+    assert!(
+        fs::read_to_string(path)
+            .unwrap()
+            .contains(&format!("{}", new_rev))
+    );
 }
 
 #[cargo_test]
@@ -2134,7 +2303,7 @@ fn git_install_reads_workspace_manifest() {
         )
         .build();
 
-    cargo_process(&format!("install --git {}", p.url().to_string()))
+    cargo_process(&format!("install --git {}", p.url()))
         .with_status(101)
         .with_stderr_data(str![[r#"
 [UPDATING] git repository `[ROOTURL]/foo`
@@ -2143,13 +2312,11 @@ fn git_install_reads_workspace_manifest() {
   |
 6 |             incremental = 3
   |                           ^
-  |
 [ERROR] invalid type: integer `3`, expected a boolean
  --> home/.cargo/git/checkouts/foo-[HASH]/[..]/Cargo.toml:6:27
   |
 6 |             incremental = 3
   |                           ^
-  |
 
 "#]])
         .run();
@@ -2767,7 +2934,7 @@ fn dry_run_incompatible_package() {
 }
 
 #[cargo_test]
-fn dry_run_incompatible_package_dependecy() {
+fn dry_run_incompatible_package_dependency() {
     let p = project()
         .file(
             "Cargo.toml",
@@ -2884,4 +3051,59 @@ fn dry_run_remove_orphan() {
     assert_has_installed_exe(paths::cargo_home(), "client");
     // Ensure server is still installed after the dry run
     assert_has_installed_exe(paths::cargo_home(), "server");
+}
+
+#[cargo_test]
+fn prefixed_v_in_version() {
+    pkg("foo", "0.0.1");
+    cargo_process("install foo@v0.0.1")
+        .with_status(1)
+        .with_stderr_data(str![[r#"
+[ERROR] invalid value 'foo@v0.0.1' for '[CRATE[@<VER>]]...': the version provided, `v0.0.1` is not a valid SemVer requirement
+
+[HELP] try changing the version to `0.0.1`
+
+For more information, try '--help'.
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn emoji_name() {
+    pkg("foo", "0.0.1");
+    cargo_process("install 🦀")
+        .with_status(101)
+        .with_stdout_data("")
+        .with_stderr_data(str![[r#"
+[ERROR] invalid character `🦀` in package name: `🦀`, the first character must be a Unicode XID start character (most letters or `_`)
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn starts_with_number_case() {
+    pkg("foo", "0.0.1");
+    cargo_process("install 23898932983")
+        .with_status(101)
+        .with_stdout_data("")
+        .with_stderr_data(str![[r#"
+[ERROR] invalid character `2` in package name: `23898932983`, the name cannot start with a digit
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn mistaken_flag_case() {
+    pkg("foo", "0.0.1");
+    cargo_process("install ––path .") // en dashes
+        .with_status(101)
+        .with_stdout_data("")
+        .with_stderr_data(str![[r#"
+[ERROR] invalid character `–` in package name: `––path`, the first character must be a Unicode XID start character (most letters or `_`)
+
+"#]])
+        .run();
 }

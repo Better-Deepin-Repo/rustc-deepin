@@ -73,7 +73,7 @@
 //! about the format of the registry:
 //!
 //! 1. Each crate will have one file corresponding to it. Each version for a
-//!    crate will just be a line in this file (see [`IndexPackage`] for its
+//!    crate will just be a line in this file (see [`cargo_util_schemas::index::IndexPackage`] for its
 //!    representation).
 //! 2. There will be two tiers of directories for crate names, under which
 //!    crates corresponding to those tiers will be located.
@@ -125,7 +125,7 @@
 //!
 //! Each file in the index is the history of one crate over time. Each line in
 //! the file corresponds to one version of a crate, stored in JSON format (see
-//! the [`IndexPackage`] structure).
+//! the [`cargo_util_schemas::index::IndexPackage`] structure).
 //!
 //! As new versions are published, new lines are appended to this file. **The
 //! only modifications to this file that should happen over time are yanks of a
@@ -181,7 +181,6 @@
 //!         ...
 //! ```
 //!
-//! [`IndexPackage`]: index::IndexPackage
 
 use std::collections::HashSet;
 use std::fs;
@@ -190,8 +189,9 @@ use std::io;
 use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::task::{ready, Poll};
+use std::task::{Poll, ready};
 
+use annotate_snippets::Level;
 use anyhow::Context as _;
 use cargo_util::paths::{self, exclude_from_backups_and_indexing};
 use flate2::read::GzDecoder;
@@ -203,15 +203,15 @@ use tracing::debug;
 use crate::core::dependency::Dependency;
 use crate::core::global_cache_tracker;
 use crate::core::{Package, PackageId, SourceId};
+use crate::sources::PathSource;
 use crate::sources::source::MaybePackage;
 use crate::sources::source::QueryKind;
 use crate::sources::source::Source;
-use crate::sources::PathSource;
 use crate::util::cache_lock::CacheLockMode;
 use crate::util::interning::InternedString;
 use crate::util::network::PollExt;
-use crate::util::{hex, VersionExt};
-use crate::util::{restricted_names, CargoResult, Filesystem, GlobalContext, LimitErrorReader};
+use crate::util::{CargoResult, Filesystem, GlobalContext, LimitErrorReader, restricted_names};
+use crate::util::{VersionExt, hex};
 
 /// The `.cargo-ok` file is used to track if the source is already unpacked.
 /// See [`RegistrySource::unpack_package`] for more.
@@ -248,6 +248,8 @@ pub struct RegistrySource<'gctx> {
     source_id: SourceId,
     /// The path where crate files are extracted (`$CARGO_HOME/registry/src/$REG-HASH`).
     src_path: Filesystem,
+    /// Path to the cache of `.crate` files (`$CARGO_HOME/registry/cache/$REG-HASH`).
+    cache_path: Filesystem,
     /// Local reference to [`GlobalContext`] for convenience.
     gctx: &'gctx GlobalContext,
     /// Abstraction for interfacing to the different registry kinds.
@@ -406,7 +408,7 @@ pub trait RegistryData {
     ///
     /// Returns a [`File`] handle to the `.crate` file, positioned at the start.
     fn finish_download(&mut self, pkg: PackageId, checksum: &str, data: &[u8])
-        -> CargoResult<File>;
+    -> CargoResult<File>;
 
     /// Returns whether or not the `.crate` file is already downloaded.
     fn is_crate_downloaded(&self, _pkg: PackageId) -> bool {
@@ -532,6 +534,7 @@ impl<'gctx> RegistrySource<'gctx> {
         RegistrySource {
             name: name.into(),
             src_path: gctx.registry_source_path().join(name),
+            cache_path: gctx.registry_cache_path().join(name),
             gctx,
             source_id,
             index: index::RegistryIndex::new(source_id, ops.index_path(), gctx),
@@ -592,7 +595,7 @@ impl<'gctx> RegistrySource<'gctx> {
     /// which case deleting the directory might be the safe thing to do. That
     /// is probably unlikely, though.
     ///
-    /// To be safe, we deletes the directory and starts over again if an empty
+    /// To be safe, we delete the directory and start over again if an empty
     /// `.cargo-ok` file is found.
     ///
     /// [CVE-2022-36113]: https://blog.rust-lang.org/2022/09/14/cargo-cves.html#arbitrary-file-corruption-cve-2022-36113
@@ -630,60 +633,9 @@ impl<'gctx> RegistrySource<'gctx> {
             Err(e) => anyhow::bail!("unable to read .cargo-ok file at {path:?}: {e}"),
         }
         dst.create_dir()?;
-        let mut tar = {
-            let size_limit = max_unpack_size(self.gctx, tarball.metadata()?.len());
-            let gz = GzDecoder::new(tarball);
-            let gz = LimitErrorReader::new(gz, size_limit);
-            let mut tar = Archive::new(gz);
-            set_mask(&mut tar);
-            tar
-        };
-        let mut bytes_written = 0;
-        let prefix = unpack_dir.file_name().unwrap();
-        let parent = unpack_dir.parent().unwrap();
-        for entry in tar.entries()? {
-            let mut entry = entry.context("failed to iterate over archive")?;
-            let entry_path = entry
-                .path()
-                .context("failed to read entry path")?
-                .into_owned();
 
-            // We're going to unpack this tarball into the global source
-            // directory, but we want to make sure that it doesn't accidentally
-            // (or maliciously) overwrite source code from other crates. Cargo
-            // itself should never generate a tarball that hits this error, and
-            // crates.io should also block uploads with these sorts of tarballs,
-            // but be extra sure by adding a check here as well.
-            if !entry_path.starts_with(prefix) {
-                anyhow::bail!(
-                    "invalid tarball downloaded, contains \
-                     a file at {:?} which isn't under {:?}",
-                    entry_path,
-                    prefix
-                )
-            }
-            // Prevent unpacking the lockfile from the crate itself.
-            if entry_path
-                .file_name()
-                .map_or(false, |p| p == PACKAGE_SOURCE_LOCK)
-            {
-                continue;
-            }
-            // Unpacking failed
-            bytes_written += entry.size();
-            let mut result = entry.unpack_in(parent).map_err(anyhow::Error::from);
-            if cfg!(windows) && restricted_names::is_windows_reserved_path(&entry_path) {
-                result = result.with_context(|| {
-                    format!(
-                        "`{}` appears to contain a reserved Windows path, \
-                        it cannot be extracted on Windows",
-                        entry_path.display()
-                    )
-                });
-            }
-            result
-                .with_context(|| format!("failed to unpack entry at `{}`", entry_path.display()))?;
-        }
+        let bytes_written = unpack(self.gctx, tarball, unpack_dir, &|_| true)?;
+        update_mtime_for_generated_files(unpack_dir);
 
         // Now that we've finished unpacking, create and write to the lock file to indicate that
         // unpacking was successful.
@@ -706,6 +658,30 @@ impl<'gctx> RegistrySource<'gctx> {
             });
 
         Ok(unpack_dir.to_path_buf())
+    }
+
+    /// Unpacks the `.crate` tarball of the package in a given directory.
+    ///
+    /// Returns the path to the crate tarball directory,
+    /// which is always `<unpack_dir>/<pkg>-<version>`.
+    ///
+    /// This holds an assumption that the associated tarball already exists.
+    pub fn unpack_package_in(
+        &self,
+        pkg: &PackageId,
+        unpack_dir: &Path,
+        include: &dyn Fn(&Path) -> bool,
+    ) -> CargoResult<PathBuf> {
+        let path = self.cache_path.join(pkg.tarball_name());
+        let path = self
+            .gctx
+            .assert_package_cache_locked(CacheLockMode::DownloadExclusive, &path);
+        let dst = unpack_dir.join(format!("{}-{}", pkg.name(), pkg.version()));
+        let tarball =
+            File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+        unpack(self.gctx, &tarball, &dst, include)?;
+        update_mtime_for_generated_files(&dst);
+        Ok(dst)
     }
 
     /// Turns the downloaded `.crate` tarball file into a [`Package`].
@@ -776,16 +752,17 @@ impl<'gctx> Source for RegistrySource<'gctx> {
         // updated, so we fall back to performing a lazy update.
         if kind == QueryKind::Exact && req.is_locked() && !self.ops.is_updated() {
             debug!("attempting query without update");
-            ready!(self
-                .index
-                .query_inner(dep.package_name(), &req, &mut *self.ops, &mut |s| {
-                    if matches!(s, IndexSummary::Candidate(_) | IndexSummary::Yanked(_))
-                        && dep.matches(s.as_summary())
-                    {
-                        // We are looking for a package from a lock file so we do not care about yank
-                        callback(s)
-                    }
-                },))?;
+            ready!(
+                self.index
+                    .query_inner(dep.package_name(), &req, &mut *self.ops, &mut |s| {
+                        if matches!(s, IndexSummary::Candidate(_) | IndexSummary::Yanked(_))
+                            && dep.matches(s.as_summary())
+                        {
+                            // We are looking for a package from a lock file so we do not care about yank
+                            callback(s)
+                        }
+                    },)
+            )?;
             if called {
                 Poll::Ready(Ok(()))
             } else {
@@ -795,53 +772,62 @@ impl<'gctx> Source for RegistrySource<'gctx> {
             }
         } else {
             let mut precise_yanked_in_use = false;
-            ready!(self
-                .index
-                .query_inner(dep.package_name(), &req, &mut *self.ops, &mut |s| {
-                    let matched = match kind {
-                        QueryKind::Exact | QueryKind::RejectedVersions => {
-                            if req.is_precise() && self.gctx.cli_unstable().unstable_options {
-                                dep.matches_prerelease(s.as_summary())
-                            } else {
-                                dep.matches(s.as_summary())
+            ready!(
+                self.index
+                    .query_inner(dep.package_name(), &req, &mut *self.ops, &mut |s| {
+                        let matched = match kind {
+                            QueryKind::Exact | QueryKind::RejectedVersions => {
+                                if req.is_precise() && self.gctx.cli_unstable().unstable_options {
+                                    dep.matches_prerelease(s.as_summary())
+                                } else {
+                                    dep.matches(s.as_summary())
+                                }
+                            }
+                            QueryKind::AlternativeNames => true,
+                            QueryKind::Normalized => true,
+                        };
+                        if !matched {
+                            return;
+                        }
+                        // Next filter out all yanked packages. Some yanked packages may
+                        // leak through if they're in a whitelist (aka if they were
+                        // previously in `Cargo.lock`
+                        match s {
+                            s @ _ if kind == QueryKind::RejectedVersions => callback(s),
+                            s @ IndexSummary::Candidate(_) => callback(s),
+                            s @ IndexSummary::Yanked(_) => {
+                                if self.yanked_whitelist.contains(&s.package_id()) {
+                                    callback(s);
+                                } else if req.is_precise() {
+                                    precise_yanked_in_use = true;
+                                    callback(s);
+                                }
+                            }
+                            IndexSummary::Unsupported(summary, v) => {
+                                tracing::debug!(
+                                    "unsupported schema version {} ({} {})",
+                                    v,
+                                    summary.name(),
+                                    summary.version()
+                                );
+                            }
+                            IndexSummary::Invalid(summary) => {
+                                tracing::debug!(
+                                    "invalid ({} {})",
+                                    summary.name(),
+                                    summary.version()
+                                );
+                            }
+                            IndexSummary::Offline(summary) => {
+                                tracing::debug!(
+                                    "offline ({} {})",
+                                    summary.name(),
+                                    summary.version()
+                                );
                             }
                         }
-                        QueryKind::AlternativeNames => true,
-                        QueryKind::Normalized => true,
-                    };
-                    if !matched {
-                        return;
-                    }
-                    // Next filter out all yanked packages. Some yanked packages may
-                    // leak through if they're in a whitelist (aka if they were
-                    // previously in `Cargo.lock`
-                    match s {
-                        s @ _ if kind == QueryKind::RejectedVersions => callback(s),
-                        s @ IndexSummary::Candidate(_) => callback(s),
-                        s @ IndexSummary::Yanked(_) => {
-                            if self.yanked_whitelist.contains(&s.package_id()) {
-                                callback(s);
-                            } else if req.is_precise() {
-                                precise_yanked_in_use = true;
-                                callback(s);
-                            }
-                        }
-                        IndexSummary::Unsupported(summary, v) => {
-                            tracing::debug!(
-                                "unsupported schema version {} ({} {})",
-                                v,
-                                summary.name(),
-                                summary.version()
-                            );
-                        }
-                        IndexSummary::Invalid(summary) => {
-                            tracing::debug!("invalid ({} {})", summary.name(), summary.version());
-                        }
-                        IndexSummary::Offline(summary) => {
-                            tracing::debug!("offline ({} {})", summary.name(), summary.version());
-                        }
-                    }
-                }))?;
+                    })
+            )?;
             if precise_yanked_in_use {
                 let name = dep.package_name();
                 let version = req
@@ -849,10 +835,17 @@ impl<'gctx> Source for RegistrySource<'gctx> {
                     .expect("--precise <yanked-version> in use");
                 if self.selected_precise_yanked.insert((name, version.clone())) {
                     let mut shell = self.gctx.shell();
-                    shell.warn(format_args!(
-                        "selected package `{name}@{version}` was yanked by the author"
-                    ))?;
-                    shell.note("if possible, try a compatible non-yanked version")?;
+                    shell.print_report(
+                        &[Level::WARNING
+                            .secondary_title(format!(
+                                "selected package `{name}@{version}` was yanked by the author"
+                            ))
+                            .element(
+                                Level::HELP
+                                    .message("if possible, try a compatible non-yanked version"),
+                            )],
+                        false,
+                    )?;
                 }
             }
             if called {
@@ -863,14 +856,14 @@ impl<'gctx> Source for RegistrySource<'gctx> {
                 // Attempt to handle misspellings by searching for a chain of related
                 // names to the original name. The resolver will later
                 // reject any candidates that have the wrong name, and with this it'll
-                // along the way produce helpful "did you mean?" suggestions.
-                // For now we only try the canonical lysing `-` to `_` and vice versa.
+                // have enough information to offer "a similar crate exists" suggestions.
+                // For now we only try canonicalizing `-` to `_` and vice versa.
                 // More advanced fuzzy searching become in the future.
                 for name_permutation in [
                     dep.package_name().replace('-', "_"),
                     dep.package_name().replace('_', "-"),
                 ] {
-                    let name_permutation = InternedString::new(&name_permutation);
+                    let name_permutation = name_permutation.into();
                     if name_permutation == dep.package_name() {
                         continue;
                     }
@@ -1045,4 +1038,93 @@ fn max_unpack_size(gctx: &GlobalContext, size: u64) -> u64 {
 fn set_mask<R: Read>(tar: &mut Archive<R>) {
     #[cfg(unix)]
     tar.set_mask(crate::util::get_umask());
+}
+
+/// Unpack a tarball with zip bomb and overwrite protections.
+fn unpack(
+    gctx: &GlobalContext,
+    tarball: &File,
+    unpack_dir: &Path,
+    include: &dyn Fn(&Path) -> bool,
+) -> CargoResult<u64> {
+    let mut tar = {
+        let size_limit = max_unpack_size(gctx, tarball.metadata()?.len());
+        let gz = GzDecoder::new(tarball);
+        let gz = LimitErrorReader::new(gz, size_limit);
+        let mut tar = Archive::new(gz);
+        set_mask(&mut tar);
+        tar
+    };
+    let mut bytes_written = 0;
+    let prefix = unpack_dir.file_name().unwrap();
+    let parent = unpack_dir.parent().unwrap();
+    for entry in tar.entries()? {
+        let mut entry = entry.context("failed to iterate over archive")?;
+        let entry_path = entry
+            .path()
+            .context("failed to read entry path")?
+            .into_owned();
+
+        if let Ok(path) = entry_path.strip_prefix(prefix) {
+            if !include(path) {
+                continue;
+            }
+        } else {
+            // We're going to unpack this tarball into the global source
+            // directory, but we want to make sure that it doesn't accidentally
+            // (or maliciously) overwrite source code from other crates. Cargo
+            // itself should never generate a tarball that hits this error, and
+            // crates.io should also block uploads with these sorts of tarballs,
+            // but be extra sure by adding a check here as well.
+            anyhow::bail!(
+                "invalid tarball downloaded, contains \
+                     a file at {entry_path:?} which isn't under {prefix:?}",
+            )
+        }
+
+        // Prevent unpacking the lockfile from the crate itself.
+        if entry_path
+            .file_name()
+            .map_or(false, |p| p == PACKAGE_SOURCE_LOCK)
+        {
+            continue;
+        }
+        // Unpacking failed
+        bytes_written += entry.size();
+        let mut result = entry.unpack_in(parent).map_err(anyhow::Error::from);
+        if cfg!(windows) && restricted_names::is_windows_reserved_path(&entry_path) {
+            result = result.with_context(|| {
+                format!(
+                    "`{}` appears to contain a reserved Windows path, \
+                        it cannot be extracted on Windows",
+                    entry_path.display()
+                )
+            });
+        }
+        result.with_context(|| format!("failed to unpack entry at `{}`", entry_path.display()))?;
+    }
+
+    Ok(bytes_written)
+}
+
+/// Workaround for rust-lang/cargo#16237
+///
+/// Generated files should have the same deterministic mtime as other files.
+/// However, since we forgot to set mtime for those files when uploading, they
+/// always have older mtime (1973-11-29) that prevents zip from packing (requiring >1980)
+///
+/// This workaround updates mtime after we unpack the tarball at the destination.
+fn update_mtime_for_generated_files(pkg_root: &Path) {
+    const GENERATED_FILES: &[&str] = &["Cargo.lock", "Cargo.toml", ".cargo_vcs_info.json"];
+    // Hardcoded value be removed once alexcrichton/tar-rs#420 is merged and released.
+    // See also rust-lang/cargo#16237
+    const DETERMINISTIC_TIMESTAMP: i64 = 1153704088;
+
+    for file in GENERATED_FILES {
+        let path = pkg_root.join(file);
+        let mtime = filetime::FileTime::from_unix_time(DETERMINISTIC_TIMESTAMP, 0);
+        if let Err(e) = filetime::set_file_mtime(&path, mtime) {
+            tracing::trace!("failed to set deterministic mtime for {path:?}: {e}");
+        }
+    }
 }

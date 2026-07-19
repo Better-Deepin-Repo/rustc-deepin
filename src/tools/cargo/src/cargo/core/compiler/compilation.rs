@@ -5,13 +5,14 @@ use std::ffi::{OsStr, OsString};
 use std::path::PathBuf;
 
 use cargo_platform::CfgExpr;
-use cargo_util::{paths, ProcessBuilder};
+use cargo_util::{ProcessBuilder, paths};
 
-use crate::core::compiler::apply_env_config;
-use crate::core::compiler::BuildContext;
-use crate::core::compiler::{CompileKind, Unit, UnitHash};
 use crate::core::Package;
-use crate::util::{context, CargoResult, GlobalContext};
+use crate::core::compiler::BuildContext;
+use crate::core::compiler::RustdocFingerprint;
+use crate::core::compiler::apply_env_config;
+use crate::core::compiler::{CompileKind, Unit, UnitHash};
+use crate::util::{CargoResult, GlobalContext, context};
 
 /// Represents the kind of process we are creating.
 #[derive(Debug)]
@@ -45,7 +46,7 @@ pub struct Doctest {
     /// The script metadata, if this unit's package has a build script.
     ///
     /// This is used for indexing [`Compilation::extra_env`].
-    pub script_meta: Option<UnitHash>,
+    pub script_metas: Option<Vec<UnitHash>>,
 
     /// Environment variables to set in the rustdoc process.
     pub env: HashMap<String, OsString>,
@@ -61,7 +62,7 @@ pub struct UnitOutput {
     /// The script metadata, if this unit's package has a build script.
     ///
     /// This is used for indexing [`Compilation::extra_env`].
-    pub script_meta: Option<UnitHash>,
+    pub script_metas: Option<Vec<UnitHash>>,
 }
 
 /// A structure returning the result of a compilation.
@@ -106,6 +107,11 @@ pub struct Compilation<'gctx> {
     /// Libraries to test with rustdoc.
     pub to_doc_test: Vec<Doctest>,
 
+    /// Rustdoc fingerprint files to determine whether we need to run `rustdoc --merge=finalize`.
+    ///
+    /// See `-Zrustdoc-mergeable-info` for more.
+    pub rustdoc_fingerprints: Option<HashMap<CompileKind, RustdocFingerprint>>,
+
     /// The target host triple.
     pub host: String,
 
@@ -123,8 +129,8 @@ pub struct Compilation<'gctx> {
     /// The linker to use for each host or target.
     target_linkers: HashMap<CompileKind, Option<PathBuf>>,
 
-    /// The total number of warnings emitted by the compilation.
-    pub warning_count: usize,
+    /// The total number of lint warnings emitted by the compilation.
+    pub lint_warning_count: usize,
 }
 
 impl<'gctx> Compilation<'gctx> {
@@ -143,6 +149,7 @@ impl<'gctx> Compilation<'gctx> {
             root_crate_names: Vec::new(),
             extra_env: HashMap::new(),
             to_doc_test: Vec::new(),
+            rustdoc_fingerprints: None,
             gctx: bcx.gctx,
             host: bcx.host_triple().to_string(),
             rustc_process,
@@ -162,7 +169,7 @@ impl<'gctx> Compilation<'gctx> {
                 .chain(Some(&CompileKind::Host))
                 .map(|kind| Ok((*kind, target_linker(bcx, *kind)?)))
                 .collect::<CargoResult<HashMap<_, _>>>()?,
-            warning_count: 0,
+            lint_warning_count: 0,
         })
     }
 
@@ -197,14 +204,14 @@ impl<'gctx> Compilation<'gctx> {
     pub fn rustdoc_process(
         &self,
         unit: &Unit,
-        script_meta: Option<UnitHash>,
+        script_metas: Option<&Vec<UnitHash>>,
     ) -> CargoResult<ProcessBuilder> {
         let mut rustdoc = ProcessBuilder::new(&*self.gctx.rustdoc()?);
         if self.gctx.extra_verbose() {
             rustdoc.display_env_vars();
         }
         let cmd = fill_rustc_tool_env(rustdoc, unit);
-        let mut cmd = self.fill_env(cmd, &unit.pkg, script_meta, unit.kind, ToolKind::Rustdoc)?;
+        let mut cmd = self.fill_env(cmd, &unit.pkg, script_metas, unit.kind, ToolKind::Rustdoc)?;
         cmd.retry_with_argfile(true);
         unit.target.edition().cmd_edition_arg(&mut cmd);
 
@@ -248,7 +255,7 @@ impl<'gctx> Compilation<'gctx> {
     /// target platform. This is typically used for `cargo run` and `cargo
     /// test`.
     ///
-    /// `script_meta` is the metadata for the `RunCustomBuild` unit that this
+    /// `script_metas` is the metadata for the `RunCustomBuild` unit that this
     /// unit used for its build script. Use `None` if the package did not have
     /// a build script.
     pub fn target_process<T: AsRef<OsStr>>(
@@ -256,7 +263,7 @@ impl<'gctx> Compilation<'gctx> {
         cmd: T,
         kind: CompileKind,
         pkg: &Package,
-        script_meta: Option<UnitHash>,
+        script_metas: Option<&Vec<UnitHash>>,
     ) -> CargoResult<ProcessBuilder> {
         let builder = if let Some((runner, args)) = self.target_runner(kind) {
             let mut builder = ProcessBuilder::new(runner);
@@ -267,7 +274,7 @@ impl<'gctx> Compilation<'gctx> {
             ProcessBuilder::new(cmd)
         };
         let tool_kind = ToolKind::TargetProcess;
-        let mut builder = self.fill_env(builder, pkg, script_meta, kind, tool_kind)?;
+        let mut builder = self.fill_env(builder, pkg, script_metas, kind, tool_kind)?;
 
         if let Some(client) = self.gctx.jobserver_from_env() {
             builder.inherit_jobserver(client);
@@ -285,7 +292,7 @@ impl<'gctx> Compilation<'gctx> {
         &self,
         mut cmd: ProcessBuilder,
         pkg: &Package,
-        script_meta: Option<UnitHash>,
+        script_metas: Option<&Vec<UnitHash>>,
         kind: CompileKind,
         tool_kind: ToolKind,
     ) -> CargoResult<ProcessBuilder> {
@@ -305,12 +312,14 @@ impl<'gctx> Compilation<'gctx> {
             }
             search_path.push(self.deps_output[&CompileKind::Host].clone());
         } else {
-            search_path.extend(super::filter_dynamic_search_path(
-                self.native_dirs.iter(),
-                &self.root_output[&kind],
-            ));
+            if let Some(path) = self.root_output.get(&kind) {
+                search_path.extend(super::filter_dynamic_search_path(
+                    self.native_dirs.iter(),
+                    path,
+                ));
+                search_path.push(path.clone());
+            }
             search_path.push(self.deps_output[&kind].clone());
-            search_path.push(self.root_output[&kind].clone());
             // For build-std, we don't want to accidentally pull in any shared
             // libs from the sysroot that ships with rustc. This may not be
             // required (at least I cannot craft a situation where it
@@ -343,10 +352,12 @@ impl<'gctx> Compilation<'gctx> {
         let search_path = paths::join_paths(&search_path, paths::dylib_path_envvar())?;
 
         cmd.env(paths::dylib_path_envvar(), &search_path);
-        if let Some(meta) = script_meta {
-            if let Some(env) = self.extra_env.get(&meta) {
-                for (k, v) in env {
-                    cmd.env(k, v);
+        if let Some(meta_vec) = script_metas {
+            for meta in meta_vec {
+                if let Some(env) = self.extra_env.get(meta) {
+                    for (k, v) in env {
+                        cmd.env(k, v);
+                    }
                 }
             }
         }

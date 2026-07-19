@@ -4,8 +4,8 @@ Author: Ximin Luo <infinity0@debian.org>
 Forwarded: not-needed
 ---
 This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
---- a/library/std/src/sys_common/net/tests.rs
-+++ b/library/std/src/sys_common/net/tests.rs
+--- a/library/std/src/sys/net/connection/socket/tests.rs
++++ b/library/std/src/sys/net/connection/socket/tests.rs
 @@ -11,8 +11,10 @@
      for sa in lh {
          *addrs.entry(sa).or_insert(0) += 1;

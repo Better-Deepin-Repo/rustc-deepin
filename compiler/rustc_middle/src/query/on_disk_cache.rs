@@ -1,33 +1,35 @@
 use std::collections::hash_map::Entry;
 use std::mem;
+use std::sync::Arc;
 
-use rustc_data_structures::fx::{FxHashMap, FxIndexSet};
+use rustc_data_structures::fx::{FxHashMap, FxIndexMap, FxIndexSet};
 use rustc_data_structures::memmap::Mmap;
-use rustc_data_structures::sync::{HashMapExt, Lock, Lrc, RwLock};
+use rustc_data_structures::sync::{HashMapExt, Lock, RwLock};
 use rustc_data_structures::unhash::UnhashMap;
 use rustc_data_structures::unord::{UnordMap, UnordSet};
 use rustc_hir::def_id::{CrateNum, DefId, DefIndex, LOCAL_CRATE, LocalDefId, StableCrateId};
 use rustc_hir::definitions::DefPathHash;
 use rustc_index::{Idx, IndexVec};
 use rustc_macros::{Decodable, Encodable};
-use rustc_middle::dep_graph::{DepNodeIndex, SerializedDepNodeIndex};
-use rustc_middle::mir::interpret::{AllocDecodingSession, AllocDecodingState};
-use rustc_middle::mir::mono::MonoItem;
-use rustc_middle::mir::{self, interpret};
-use rustc_middle::ty::codec::{RefDecodable, TyDecoder, TyEncoder};
-use rustc_middle::ty::{self, Ty, TyCtxt};
-use rustc_query_system::query::QuerySideEffects;
+use rustc_query_system::query::QuerySideEffect;
 use rustc_serialize::opaque::{FileEncodeResult, FileEncoder, IntEncodedWithFixedSize, MemDecoder};
 use rustc_serialize::{Decodable, Decoder, Encodable, Encoder};
 use rustc_session::Session;
 use rustc_span::hygiene::{
-    ExpnId, HygieneDecodeContext, HygieneEncodeContext, SyntaxContext, SyntaxContextData,
+    ExpnId, HygieneDecodeContext, HygieneEncodeContext, SyntaxContext, SyntaxContextKey,
 };
 use rustc_span::source_map::Spanned;
 use rustc_span::{
-    BytePos, CachingSourceMapView, ExpnData, ExpnHash, Pos, RelativeBytePos, SourceFile, Span,
-    SpanDecoder, SpanEncoder, StableSourceFileId, Symbol,
+    BytePos, ByteSymbol, CachingSourceMapView, ExpnData, ExpnHash, Pos, RelativeBytePos,
+    SourceFile, Span, SpanDecoder, SpanEncoder, StableSourceFileId, Symbol,
 };
+
+use crate::dep_graph::{DepNodeIndex, SerializedDepNodeIndex};
+use crate::mir::interpret::{AllocDecodingSession, AllocDecodingState};
+use crate::mir::mono::MonoItem;
+use crate::mir::{self, interpret};
+use crate::ty::codec::{RefDecodable, TyDecoder, TyEncoder};
+use crate::ty::{self, Ty, TyCtxt};
 
 const TAG_FILE_FOOTER: u128 = 0xC0FFEE_C0FFEE_C0FFEE_C0FFEE_C0FFEE;
 
@@ -40,10 +42,10 @@ const TAG_RELATIVE_SPAN: u8 = 2;
 const TAG_SYNTAX_CONTEXT: u8 = 0;
 const TAG_EXPN_DATA: u8 = 1;
 
-// Tags for encoding Symbol's
+// Tags for encoding Symbols and ByteSymbols
 const SYMBOL_STR: u8 = 0;
 const SYMBOL_OFFSET: u8 = 1;
-const SYMBOL_PREINTERNED: u8 = 2;
+const SYMBOL_PREDEFINED: u8 = 2;
 
 /// Provides an interface to incremental compilation data cached from the
 /// previous compilation session. This data will eventually include the results
@@ -53,20 +55,20 @@ pub struct OnDiskCache {
     // The complete cache data in serialized form.
     serialized_data: RwLock<Option<Mmap>>,
 
-    // Collects all `QuerySideEffects` created during the current compilation
+    // Collects all `QuerySideEffect` created during the current compilation
     // session.
-    current_side_effects: Lock<FxHashMap<DepNodeIndex, QuerySideEffects>>,
+    current_side_effects: Lock<FxIndexMap<DepNodeIndex, QuerySideEffect>>,
 
     file_index_to_stable_id: FxHashMap<SourceFileIndex, EncodedSourceFileId>,
 
     // Caches that are populated lazily during decoding.
-    file_index_to_file: Lock<FxHashMap<SourceFileIndex, Lrc<SourceFile>>>,
+    file_index_to_file: Lock<FxHashMap<SourceFileIndex, Arc<SourceFile>>>,
 
     // A map from dep-node to the position of the cached query result in
     // `serialized_data`.
     query_result_index: FxHashMap<SerializedDepNodeIndex, AbsoluteBytePos>,
 
-    // A map from dep-node to the position of any associated `QuerySideEffects` in
+    // A map from dep-node to the position of any associated `QuerySideEffect` in
     // `serialized_data`.
     prev_side_effects_index: FxHashMap<SerializedDepNodeIndex, AbsoluteBytePos>,
 
@@ -251,7 +253,7 @@ impl OnDiskCache {
                 source_map: CachingSourceMapView::new(tcx.sess.source_map()),
                 file_to_file_index,
                 hygiene_context: &hygiene_encode_context,
-                symbol_table: Default::default(),
+                symbol_index_table: Default::default(),
             };
 
             // Encode query results.
@@ -268,10 +270,10 @@ impl OnDiskCache {
                 .current_side_effects
                 .borrow()
                 .iter()
-                .map(|(dep_node_index, side_effects)| {
+                .map(|(dep_node_index, side_effect)| {
                     let pos = AbsoluteBytePos::new(encoder.position());
                     let dep_node_index = SerializedDepNodeIndex::new(dep_node_index.index());
-                    encoder.encode_tagged(dep_node_index, side_effects);
+                    encoder.encode_tagged(dep_node_index, side_effect);
 
                     (dep_node_index, pos)
                 })
@@ -326,15 +328,18 @@ impl OnDiskCache {
 
             // Encode the file footer.
             let footer_pos = encoder.position() as u64;
-            encoder.encode_tagged(TAG_FILE_FOOTER, &Footer {
-                file_index_to_stable_id,
-                query_result_index,
-                side_effects_index,
-                interpret_alloc_index,
-                syntax_contexts,
-                expn_data,
-                foreign_expn_data,
-            });
+            encoder.encode_tagged(
+                TAG_FILE_FOOTER,
+                &Footer {
+                    file_index_to_stable_id,
+                    query_result_index,
+                    side_effects_index,
+                    interpret_alloc_index,
+                    syntax_contexts,
+                    expn_data,
+                    foreign_expn_data,
+                },
+            );
 
             // Encode the position of the footer as the last 8 bytes of the
             // file so we know where to look for it.
@@ -347,24 +352,23 @@ impl OnDiskCache {
         })
     }
 
-    /// Loads a `QuerySideEffects` created during the previous compilation session.
-    pub fn load_side_effects(
+    /// Loads a `QuerySideEffect` created during the previous compilation session.
+    pub fn load_side_effect(
         &self,
         tcx: TyCtxt<'_>,
         dep_node_index: SerializedDepNodeIndex,
-    ) -> QuerySideEffects {
-        let side_effects: Option<QuerySideEffects> =
+    ) -> Option<QuerySideEffect> {
+        let side_effect: Option<QuerySideEffect> =
             self.load_indexed(tcx, dep_node_index, &self.prev_side_effects_index);
-
-        side_effects.unwrap_or_default()
+        side_effect
     }
 
-    /// Stores a `QuerySideEffects` emitted during the current compilation session.
-    /// Anything stored like this will be available via `load_side_effects` in
+    /// Stores a `QuerySideEffect` emitted during the current compilation session.
+    /// Anything stored like this will be available via `load_side_effect` in
     /// the next compilation session.
-    pub fn store_side_effects(&self, dep_node_index: DepNodeIndex, side_effects: QuerySideEffects) {
+    pub fn store_side_effect(&self, dep_node_index: DepNodeIndex, side_effect: QuerySideEffect) {
         let mut current_side_effects = self.current_side_effects.borrow_mut();
-        let prev = current_side_effects.insert(dep_node_index, side_effects);
+        let prev = current_side_effects.insert(dep_node_index, side_effect);
         debug_assert!(prev.is_none());
     }
 
@@ -388,21 +392,6 @@ impl OnDiskCache {
         let opt_value = self.load_indexed(tcx, dep_node_index, &self.query_result_index);
         debug_assert_eq!(opt_value.is_some(), self.loadable_from_disk(dep_node_index));
         opt_value
-    }
-
-    /// Stores side effect emitted during computation of an anonymous query.
-    /// Since many anonymous queries can share the same `DepNode`, we aggregate
-    /// them -- as opposed to regular queries where we assume that there is a
-    /// 1:1 relationship between query-key and `DepNode`.
-    pub fn store_side_effects_for_anon_node(
-        &self,
-        dep_node_index: DepNodeIndex,
-        side_effects: QuerySideEffects,
-    ) {
-        let mut current_side_effects = self.current_side_effects.borrow_mut();
-
-        let x = current_side_effects.entry(dep_node_index).or_default();
-        x.append(side_effects);
     }
 
     fn load_indexed<'tcx, T>(
@@ -453,7 +442,7 @@ impl OnDiskCache {
 pub struct CacheDecoder<'a, 'tcx> {
     tcx: TyCtxt<'tcx>,
     opaque: MemDecoder<'a>,
-    file_index_to_file: &'a Lock<FxHashMap<SourceFileIndex, Lrc<SourceFile>>>,
+    file_index_to_file: &'a Lock<FxHashMap<SourceFileIndex, Arc<SourceFile>>>,
     file_index_to_stable_id: &'a FxHashMap<SourceFileIndex, EncodedSourceFileId>,
     alloc_decoding_session: AllocDecodingSession<'a>,
     syntax_contexts: &'a FxHashMap<u32, AbsoluteBytePos>,
@@ -464,10 +453,10 @@ pub struct CacheDecoder<'a, 'tcx> {
 
 impl<'a, 'tcx> CacheDecoder<'a, 'tcx> {
     #[inline]
-    fn file_index_to_file(&self, index: SourceFileIndex) -> Lrc<SourceFile> {
+    fn file_index_to_file(&self, index: SourceFileIndex) -> Arc<SourceFile> {
         let CacheDecoder { tcx, file_index_to_file, file_index_to_stable_id, .. } = *self;
 
-        Lrc::clone(file_index_to_file.borrow_mut().entry(index).or_insert_with(|| {
+        Arc::clone(file_index_to_file.borrow_mut().entry(index).or_insert_with(|| {
             let source_file_id = &file_index_to_stable_id[&index];
             let source_file_cnum = tcx.stable_crate_id_to_crate_num(source_file_id.stable_crate_id);
 
@@ -489,6 +478,30 @@ impl<'a, 'tcx> CacheDecoder<'a, 'tcx> {
                 .source_file_by_stable_id(source_file_id.stable_source_file_id)
                 .expect("failed to lookup `SourceFile` in new context")
         }))
+    }
+
+    // copy&paste impl from rustc_metadata
+    #[inline]
+    fn decode_symbol_or_byte_symbol<S>(
+        &mut self,
+        new_from_index: impl Fn(u32) -> S,
+        read_and_intern_str_or_byte_str_this: impl Fn(&mut Self) -> S,
+        read_and_intern_str_or_byte_str_opaque: impl Fn(&mut MemDecoder<'a>) -> S,
+    ) -> S {
+        let tag = self.read_u8();
+
+        match tag {
+            SYMBOL_STR => read_and_intern_str_or_byte_str_this(self),
+            SYMBOL_OFFSET => {
+                // read str offset
+                let pos = self.read_usize();
+
+                // move to str offset and read
+                self.opaque.with_position(pos, |d| read_and_intern_str_or_byte_str_opaque(d))
+            }
+            SYMBOL_PREDEFINED => new_from_index(self.read_u32()),
+            _ => unreachable!(),
+        }
     }
 }
 
@@ -513,8 +526,7 @@ where
     value
 }
 
-impl<'a, 'tcx> TyDecoder for CacheDecoder<'a, 'tcx> {
-    type I = TyCtxt<'tcx>;
+impl<'a, 'tcx> TyDecoder<'tcx> for CacheDecoder<'a, 'tcx> {
     const CLEAR_CROSS_CRATE: bool = false;
 
     #[inline]
@@ -559,7 +571,7 @@ impl<'a, 'tcx> TyDecoder for CacheDecoder<'a, 'tcx> {
     }
 }
 
-rustc_middle::implement_ty_decoder!(CacheDecoder<'a, 'tcx>);
+crate::implement_ty_decoder!(CacheDecoder<'a, 'tcx>);
 
 // This ensures that the `Decodable<opaque::Decoder>::decode` specialization for `Vec<u8>` is used
 // when a `CacheDecoder` is passed to `Decodable::decode`. Unfortunately, we have to manually opt
@@ -578,7 +590,7 @@ impl<'a, 'tcx> SpanDecoder for CacheDecoder<'a, 'tcx> {
             // We look up the position of the associated `SyntaxData` and decode it.
             let pos = syntax_contexts.get(&id).unwrap();
             this.with_position(pos.to_usize(), |decoder| {
-                let data: SyntaxContextData = decode_tagged(decoder, TAG_SYNTAX_CONTEXT);
+                let data: SyntaxContextKey = decode_tagged(decoder, TAG_SYNTAX_CONTEXT);
                 data
             })
         })
@@ -633,64 +645,47 @@ impl<'a, 'tcx> SpanDecoder for CacheDecoder<'a, 'tcx> {
         let parent = Option::<LocalDefId>::decode(self);
         let tag: u8 = Decodable::decode(self);
 
-        if tag == TAG_PARTIAL_SPAN {
-            return Span::new(BytePos(0), BytePos(0), ctxt, parent);
-        } else if tag == TAG_RELATIVE_SPAN {
-            let dlo = u32::decode(self);
-            let dto = u32::decode(self);
+        let (lo, hi) = match tag {
+            TAG_PARTIAL_SPAN => (BytePos(0), BytePos(0)),
+            TAG_RELATIVE_SPAN => {
+                let dlo = u32::decode(self);
+                let dto = u32::decode(self);
 
-            let enclosing = self.tcx.source_span_untracked(parent.unwrap()).data_untracked();
-            let span = Span::new(
-                enclosing.lo + BytePos::from_u32(dlo),
-                enclosing.lo + BytePos::from_u32(dto),
-                ctxt,
-                parent,
-            );
+                let enclosing = self.tcx.source_span_untracked(parent.unwrap()).data_untracked();
+                (enclosing.lo + BytePos::from_u32(dlo), enclosing.lo + BytePos::from_u32(dto))
+            }
+            TAG_FULL_SPAN => {
+                let file_lo_index = SourceFileIndex::decode(self);
+                let line_lo = usize::decode(self);
+                let col_lo = RelativeBytePos::decode(self);
+                let len = BytePos::decode(self);
 
-            return span;
-        } else {
-            debug_assert_eq!(tag, TAG_FULL_SPAN);
-        }
-
-        let file_lo_index = SourceFileIndex::decode(self);
-        let line_lo = usize::decode(self);
-        let col_lo = RelativeBytePos::decode(self);
-        let len = BytePos::decode(self);
-
-        let file_lo = self.file_index_to_file(file_lo_index);
-        let lo = file_lo.lines()[line_lo - 1] + col_lo;
-        let lo = file_lo.absolute_position(lo);
-        let hi = lo + len;
+                let file_lo = self.file_index_to_file(file_lo_index);
+                let lo = file_lo.lines()[line_lo - 1] + col_lo;
+                let lo = file_lo.absolute_position(lo);
+                let hi = lo + len;
+                (lo, hi)
+            }
+            _ => unreachable!(),
+        };
 
         Span::new(lo, hi, ctxt, parent)
     }
 
-    // copy&paste impl from rustc_metadata
-    #[inline]
     fn decode_symbol(&mut self) -> Symbol {
-        let tag = self.read_u8();
+        self.decode_symbol_or_byte_symbol(
+            Symbol::new,
+            |this| Symbol::intern(this.read_str()),
+            |opaque| Symbol::intern(opaque.read_str()),
+        )
+    }
 
-        match tag {
-            SYMBOL_STR => {
-                let s = self.read_str();
-                Symbol::intern(s)
-            }
-            SYMBOL_OFFSET => {
-                // read str offset
-                let pos = self.read_usize();
-
-                // move to str offset and read
-                self.opaque.with_position(pos, |d| {
-                    let s = d.read_str();
-                    Symbol::intern(s)
-                })
-            }
-            SYMBOL_PREINTERNED => {
-                let symbol_index = self.read_u32();
-                Symbol::new_from_decoded(symbol_index)
-            }
-            _ => unreachable!(),
-        }
+    fn decode_byte_symbol(&mut self) -> ByteSymbol {
+        self.decode_symbol_or_byte_symbol(
+            ByteSymbol::new,
+            |this| ByteSymbol::intern(this.read_byte_str()),
+            |opaque| ByteSymbol::intern(opaque.read_byte_str()),
+        )
     }
 
     fn decode_crate_num(&mut self) -> CrateNum {
@@ -804,7 +799,7 @@ impl_ref_decoder! {<'tcx>
     rustc_span::def_id::DefId,
     rustc_span::def_id::LocalDefId,
     (rustc_middle::middle::exported_symbols::ExportedSymbol<'tcx>, rustc_middle::middle::exported_symbols::SymbolExportInfo),
-    ty::DeducedParamAttrs,
+    rustc_middle::middle::deduced_param_attrs::DeducedParamAttrs,
 }
 
 //- ENCODING -------------------------------------------------------------------
@@ -819,12 +814,13 @@ pub struct CacheEncoder<'a, 'tcx> {
     source_map: CachingSourceMapView<'tcx>,
     file_to_file_index: FxHashMap<*const SourceFile, SourceFileIndex>,
     hygiene_context: &'a HygieneEncodeContext,
-    symbol_table: FxHashMap<Symbol, usize>,
+    // Used for both `Symbol`s and `ByteSymbol`s.
+    symbol_index_table: FxHashMap<u32, usize>,
 }
 
 impl<'a, 'tcx> CacheEncoder<'a, 'tcx> {
     #[inline]
-    fn source_file_index(&mut self, source_file: Lrc<SourceFile>) -> SourceFileIndex {
+    fn source_file_index(&mut self, source_file: Arc<SourceFile>) -> SourceFileIndex {
         self.file_to_file_index[&(&raw const *source_file)]
     }
 
@@ -841,6 +837,34 @@ impl<'a, 'tcx> CacheEncoder<'a, 'tcx> {
 
         let end_pos = self.position();
         ((end_pos - start_pos) as u64).encode(self);
+    }
+
+    // copy&paste impl from rustc_metadata
+    fn encode_symbol_or_byte_symbol(
+        &mut self,
+        index: u32,
+        emit_str_or_byte_str: impl Fn(&mut Self),
+    ) {
+        // if symbol/byte symbol is predefined, emit tag and symbol index
+        if Symbol::is_predefined(index) {
+            self.encoder.emit_u8(SYMBOL_PREDEFINED);
+            self.encoder.emit_u32(index);
+        } else {
+            // otherwise write it as string or as offset to it
+            match self.symbol_index_table.entry(index) {
+                Entry::Vacant(o) => {
+                    self.encoder.emit_u8(SYMBOL_STR);
+                    let pos = self.encoder.position();
+                    o.insert(pos);
+                    emit_str_or_byte_str(self);
+                }
+                Entry::Occupied(o) => {
+                    let x = *o.get();
+                    self.emit_u8(SYMBOL_OFFSET);
+                    self.emit_usize(x);
+                }
+            }
+        }
     }
 
     #[inline]
@@ -901,28 +925,14 @@ impl<'a, 'tcx> SpanEncoder for CacheEncoder<'a, 'tcx> {
         len.encode(self);
     }
 
-    // copy&paste impl from rustc_metadata
-    fn encode_symbol(&mut self, symbol: Symbol) {
-        // if symbol preinterned, emit tag and symbol index
-        if symbol.is_preinterned() {
-            self.encoder.emit_u8(SYMBOL_PREINTERNED);
-            self.encoder.emit_u32(symbol.as_u32());
-        } else {
-            // otherwise write it as string or as offset to it
-            match self.symbol_table.entry(symbol) {
-                Entry::Vacant(o) => {
-                    self.encoder.emit_u8(SYMBOL_STR);
-                    let pos = self.encoder.position();
-                    o.insert(pos);
-                    self.emit_str(symbol.as_str());
-                }
-                Entry::Occupied(o) => {
-                    let x = *o.get();
-                    self.emit_u8(SYMBOL_OFFSET);
-                    self.emit_usize(x);
-                }
-            }
-        }
+    fn encode_symbol(&mut self, sym: Symbol) {
+        self.encode_symbol_or_byte_symbol(sym.as_u32(), |this| this.emit_str(sym.as_str()));
+    }
+
+    fn encode_byte_symbol(&mut self, byte_sym: ByteSymbol) {
+        self.encode_symbol_or_byte_symbol(byte_sym.as_u32(), |this| {
+            this.emit_byte_str(byte_sym.as_byte_str())
+        });
     }
 
     fn encode_crate_num(&mut self, crate_num: CrateNum) {
@@ -938,8 +948,7 @@ impl<'a, 'tcx> SpanEncoder for CacheEncoder<'a, 'tcx> {
     }
 }
 
-impl<'a, 'tcx> TyEncoder for CacheEncoder<'a, 'tcx> {
-    type I = TyCtxt<'tcx>;
+impl<'a, 'tcx> TyEncoder<'tcx> for CacheEncoder<'a, 'tcx> {
     const CLEAR_CROSS_CRATE: bool = false;
 
     #[inline]

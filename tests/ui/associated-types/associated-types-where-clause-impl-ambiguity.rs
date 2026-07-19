@@ -1,3 +1,4 @@
+//@ edition:2015
 //@ run-pass
 #![allow(dead_code)]
 #![allow(unused_imports)]
@@ -20,7 +21,7 @@ trait Iterator {
 }
 
 trait IteratorExt: Iterator + Sized {
-    fn by_ref(&mut self) -> ByRef<Self> {
+    fn by_ref(&mut self) -> ByRef<'_, Self> {
         ByRef(self)
     }
 }

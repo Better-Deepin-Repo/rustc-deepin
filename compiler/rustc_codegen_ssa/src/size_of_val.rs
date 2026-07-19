@@ -5,6 +5,7 @@ use rustc_hir::LangItem;
 use rustc_middle::bug;
 use rustc_middle::ty::print::{with_no_trimmed_paths, with_no_visible_paths};
 use rustc_middle::ty::{self, Ty};
+use rustc_span::DUMMY_SP;
 use tracing::{debug, trace};
 
 use crate::common::IntPredicate;
@@ -20,7 +21,7 @@ pub fn size_and_align_of_dst<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
     trace!("size_and_align_of_dst(ty={}, info={:?}): layout: {:?}", t, info, layout);
     if layout.is_sized() {
         let size = bx.const_usize(layout.size.bytes());
-        let align = bx.const_usize(layout.align.abi.bytes());
+        let align = bx.const_usize(layout.align.bytes());
         return (size, align);
     }
     match t.kind() {
@@ -45,15 +46,10 @@ pub fn size_and_align_of_dst<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
             // The info in this case is the length of the str, so the size is that
             // times the unit size.
             (
-                // All slice sizes must fit into `isize`, so this multiplication cannot (signed)
-                // wrap.
-                // NOTE: ideally, we want the effects of both `unchecked_smul` and `unchecked_umul`
-                // (resulting in `mul nsw nuw` in LLVM IR), since we know that the multiplication
-                // cannot signed wrap, and that both operands are non-negative. But at the time of
-                // writing, the `LLVM-C` binding can't do this, and it doesn't seem to enable any
-                // further optimizations.
-                bx.unchecked_smul(info.unwrap(), bx.const_usize(unit.size.bytes())),
-                bx.const_usize(unit.align.abi.bytes()),
+                // All slice sizes must fit into `isize`, so this multiplication cannot
+                // wrap -- neither signed nor unsigned.
+                bx.unchecked_sumul(info.unwrap(), bx.const_usize(unit.size.bytes())),
+                bx.const_usize(unit.align.bytes()),
             )
         }
         ty::Foreign(_) => {
@@ -67,7 +63,7 @@ pub fn size_and_align_of_dst<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 
             // Obtain the panic entry point.
             let (fn_abi, llfn, _instance) =
-                common::build_langcall(bx, None, LangItem::PanicNounwind);
+                common::build_langcall(bx, DUMMY_SP, LangItem::PanicNounwind);
 
             // Generate the call. Cannot use `do_call` since we don't have a MIR terminator so we
             // can't create a `TerminationCodegenHelper`. (But we are in good company, this code is
@@ -86,7 +82,7 @@ pub fn size_and_align_of_dst<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 
             // This function does not return so we can now return whatever we want.
             let size = bx.const_usize(layout.size.bytes());
-            let align = bx.const_usize(layout.align.abi.bytes());
+            let align = bx.const_usize(layout.align.bytes());
             (size, align)
         }
         ty::Adt(..) | ty::Tuple(..) => {
@@ -98,7 +94,7 @@ pub fn size_and_align_of_dst<'a, 'tcx, Bx: BuilderMethods<'a, 'tcx>>(
 
             let i = layout.fields.count() - 1;
             let unsized_offset_unadjusted = layout.fields.offset(i).bytes();
-            let sized_align = layout.align.abi.bytes();
+            let sized_align = layout.align.bytes();
             debug!(
                 "DST {} offset of dyn field: {}, statically sized align: {}",
                 t, unsized_offset_unadjusted, sized_align

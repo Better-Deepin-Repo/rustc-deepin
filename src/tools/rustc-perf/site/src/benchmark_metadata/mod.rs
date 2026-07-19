@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 use hashbrown::HashMap;
 use rust_embed::RustEmbed;
 
@@ -23,9 +25,8 @@ pub struct CompileBenchmarkMetadata {
 struct EmbeddedCompileBenchmarks;
 
 pub fn get_compile_benchmarks_metadata() -> &'static HashMap<String, CompileBenchmarkMetadata> {
-    lazy_static::lazy_static! {
-        static ref METADATA: HashMap<String, CompileBenchmarkMetadata> = load_compile_benchmark_metadata();
-    }
+    static METADATA: LazyLock<HashMap<String, CompileBenchmarkMetadata>> =
+        LazyLock::new(load_compile_benchmark_metadata);
     &METADATA
 }
 
@@ -55,10 +56,7 @@ fn load_compile_benchmark_metadata() -> HashMap<String, CompileBenchmarkMetadata
             } = metadata;
             let perf_config: BenchmarkConfig =
                 serde_json::from_value(perf_config).unwrap_or_else(|error| {
-                    panic!(
-                        "Cannot deserialize perf-config.json for benchmark {name}: {:?}",
-                        error
-                    );
+                    panic!("Cannot deserialize perf-config.json for benchmark {name}: {error:?}");
                 });
 
             let metadata = CompileBenchmarkMetadata {

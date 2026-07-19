@@ -154,7 +154,8 @@
         target_os = "emscripten",
         target_os = "wasi",
         target_env = "sgx",
-        target_os = "xous"
+        target_os = "xous",
+        target_os = "trusty",
     ))
 ))]
 mod tests;
@@ -167,8 +168,6 @@ use crate::num::NonZero;
 use crate::path::Path;
 use crate::sys::pipe::{AnonPipe, read2};
 use crate::sys::process as imp;
-#[stable(feature = "command_access", since = "1.57.0")]
-pub use crate::sys_common::process::CommandEnvs;
 use crate::sys_common::{AsInner, AsInnerMut, FromInner, IntoInner};
 use crate::{fmt, fs, str};
 
@@ -217,6 +216,7 @@ use crate::{fmt, fs, str};
 ///
 /// [`wait`]: Child::wait
 #[stable(feature = "process", since = "1.0.0")]
+#[cfg_attr(not(test), rustc_diagnostic_item = "Child")]
 pub struct Child {
     pub(crate) handle: imp::Process,
 
@@ -268,8 +268,8 @@ impl AsInner<imp::Process> for Child {
     }
 }
 
-impl FromInner<(imp::Process, imp::StdioPipes)> for Child {
-    fn from_inner((handle, io): (imp::Process, imp::StdioPipes)) -> Child {
+impl FromInner<(imp::Process, StdioPipes)> for Child {
+    fn from_inner((handle, io): (imp::Process, StdioPipes)) -> Child {
         Child {
             handle,
             stdin: io.stdin.map(ChildStdin::from_inner),
@@ -294,6 +294,15 @@ impl fmt::Debug for Child {
             .field("stderr", &self.stderr)
             .finish_non_exhaustive()
     }
+}
+
+/// The pipes connected to a spawned process.
+///
+/// Used to pass pipe handles between this module and [`imp`].
+pub(crate) struct StdioPipes {
+    pub stdin: Option<AnonPipe>,
+    pub stdout: Option<AnonPipe>,
+    pub stderr: Option<AnonPipe>,
 }
 
 /// A handle to a child process's standard input (stdin).
@@ -532,6 +541,7 @@ impl fmt::Debug for ChildStderr {
 /// to be changed (for example, by adding arguments) prior to spawning:
 ///
 /// ```
+/// # if cfg!(not(all(target_vendor = "apple", not(target_os = "macos")))) {
 /// use std::process::Command;
 ///
 /// let output = if cfg!(target_os = "windows") {
@@ -548,6 +558,7 @@ impl fmt::Debug for ChildStderr {
 /// };
 ///
 /// let hello = output.stdout;
+/// # }
 /// ```
 ///
 /// `Command` can be reused to spawn multiple processes. The builder methods
@@ -868,13 +879,17 @@ impl Command {
     ///
     /// # Examples
     ///
+    /// Prevent any inherited `GIT_DIR` variable from changing the target of the `git` command,
+    /// while allowing all other variables, like `GIT_AUTHOR_NAME`.
+    ///
     /// ```no_run
     /// use std::process::Command;
     ///
-    /// Command::new("ls")
-    ///     .env_remove("PATH")
-    ///     .spawn()
-    ///     .expect("ls command failed to start");
+    /// Command::new("git")
+    ///     .arg("commit")
+    ///     .env_remove("GIT_DIR")
+    ///     .spawn()?;
+    /// # std::io::Result::Ok(())
     /// ```
     #[stable(feature = "process", since = "1.0.0")]
     pub fn env_remove<K: AsRef<OsStr>>(&mut self, key: K) -> &mut Command {
@@ -896,13 +911,17 @@ impl Command {
     ///
     /// # Examples
     ///
+    /// The behavior of `sort` is affected by `LANG` and `LC_*` environment variables.
+    /// Clearing the environment makes `sort`'s behavior independent of the parent processes' language.
+    ///
     /// ```no_run
     /// use std::process::Command;
     ///
-    /// Command::new("ls")
+    /// Command::new("sort")
+    ///     .arg("file.txt")
     ///     .env_clear()
-    ///     .spawn()
-    ///     .expect("ls command failed to start");
+    ///     .spawn()?;
+    /// # std::io::Result::Ok(())
     /// ```
     #[stable(feature = "process", since = "1.0.0")]
     pub fn env_clear(&mut self) -> &mut Command {
@@ -1063,7 +1082,7 @@ impl Command {
     /// ```
     #[stable(feature = "process", since = "1.0.0")]
     pub fn output(&mut self) -> io::Result<Output> {
-        let (status, stdout, stderr) = self.inner.output()?;
+        let (status, stdout, stderr) = imp::output(&mut self.inner)?;
         Ok(Output { status: ExitStatus(status), stdout, stderr })
     }
 
@@ -1164,7 +1183,7 @@ impl Command {
     /// ```
     #[stable(feature = "command_access", since = "1.57.0")]
     pub fn get_envs(&self) -> CommandEnvs<'_> {
-        self.inner.get_envs()
+        CommandEnvs { iter: self.inner.get_envs() }
     }
 
     /// Returns the working directory for the child process.
@@ -1186,6 +1205,30 @@ impl Command {
     #[stable(feature = "command_access", since = "1.57.0")]
     pub fn get_current_dir(&self) -> Option<&Path> {
         self.inner.get_current_dir()
+    }
+
+    /// Returns whether the environment will be cleared for the child process.
+    ///
+    /// This returns `true` if [`Command::env_clear`] was called, and `false` otherwise.
+    /// When `true`, the child process will not inherit any environment variables from
+    /// its parent process.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(command_resolved_envs)]
+    /// use std::process::Command;
+    ///
+    /// let mut cmd = Command::new("ls");
+    /// assert_eq!(cmd.get_env_clear(), false);
+    ///
+    /// cmd.env_clear();
+    /// assert_eq!(cmd.get_env_clear(), true);
+    /// ```
+    #[must_use]
+    #[unstable(feature = "command_resolved_envs", issue = "149070")]
+    pub fn get_env_clear(&self) -> bool {
+        self.inner.get_env_clear()
     }
 }
 
@@ -1254,6 +1297,48 @@ impl<'a> ExactSizeIterator for CommandArgs<'a> {
     }
 }
 
+/// An iterator over the command environment variables.
+///
+/// This struct is created by
+/// [`Command::get_envs`][crate::process::Command::get_envs]. See its
+/// documentation for more.
+#[must_use = "iterators are lazy and do nothing unless consumed"]
+#[stable(feature = "command_access", since = "1.57.0")]
+pub struct CommandEnvs<'a> {
+    iter: imp::CommandEnvs<'a>,
+}
+
+#[stable(feature = "command_access", since = "1.57.0")]
+impl<'a> Iterator for CommandEnvs<'a> {
+    type Item = (&'a OsStr, Option<&'a OsStr>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.iter.next()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.iter.size_hint()
+    }
+}
+
+#[stable(feature = "command_access", since = "1.57.0")]
+impl<'a> ExactSizeIterator for CommandEnvs<'a> {
+    fn len(&self) -> usize {
+        self.iter.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.iter.is_empty()
+    }
+}
+
+#[stable(feature = "command_access", since = "1.57.0")]
+impl<'a> fmt::Debug for CommandEnvs<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.iter.fmt(f)
+    }
+}
+
 /// The output of a finished process.
 ///
 /// This is returned in a Result by either the [`output`] method of a
@@ -1276,6 +1361,40 @@ pub struct Output {
     pub stderr: Vec<u8>,
 }
 
+impl Output {
+    /// Returns an error if a nonzero exit status was received.
+    ///
+    /// If the [`Command`] exited successfully,
+    /// `self` is returned.
+    ///
+    /// This is equivalent to calling [`exit_ok`](ExitStatus::exit_ok)
+    /// on [`Output.status`](Output::status).
+    ///
+    /// Note that this will throw away the [`Output::stderr`] field in the error case.
+    /// If the child process outputs useful informantion to stderr, you can:
+    /// * Use `cmd.stderr(Stdio::inherit())` to forward the
+    ///   stderr child process to the parent's stderr,
+    ///   usually printing it to console where the user can see it.
+    ///   This is usually correct for command-line applications.
+    /// * Capture `stderr` using a custom error type.
+    ///   This is usually correct for libraries.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(exit_status_error)]
+    /// # #[cfg(all(unix, not(target_os = "android"), not(all(target_vendor = "apple", not(target_os = "macos")))))] {
+    /// use std::process::Command;
+    /// assert!(Command::new("false").output().unwrap().exit_ok().is_err());
+    /// # }
+    /// ```
+    #[unstable(feature = "exit_status_error", issue = "84908")]
+    pub fn exit_ok(self) -> Result<Self, ExitStatusError> {
+        self.status.exit_ok()?;
+        Ok(self)
+    }
+}
+
 // If either stderr or stdout are valid utf8 strings it prints the valid
 // strings, otherwise it prints the byte sequence instead
 #[stable(feature = "process_output_debug", since = "1.7.0")]
@@ -1283,13 +1402,13 @@ impl fmt::Debug for Output {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         let stdout_utf8 = str::from_utf8(&self.stdout);
         let stdout_debug: &dyn fmt::Debug = match stdout_utf8 {
-            Ok(ref str) => str,
+            Ok(ref s) => s,
             Err(_) => &self.stdout,
         };
 
         let stderr_utf8 = str::from_utf8(&self.stderr);
         let stderr_debug: &dyn fmt::Debug = match stderr_utf8 {
-            Ok(ref str) => str,
+            Ok(ref s) => s,
             Err(_) => &self.stderr,
         };
 
@@ -1611,7 +1730,7 @@ impl From<io::Stdout> for Stdio {
     /// # Ok(())
     /// # }
     /// #
-    /// # if cfg!(unix) {
+    /// # if cfg!(all(unix, not(target_os = "android"), not(all(target_vendor = "apple", not(target_os = "macos"))))) {
     /// #     test().unwrap();
     /// # }
     /// ```
@@ -1640,12 +1759,26 @@ impl From<io::Stderr> for Stdio {
     /// # Ok(())
     /// # }
     /// #
-    /// # if cfg!(unix) {
+    /// # if cfg!(all(unix, not(target_os = "android"), not(all(target_vendor = "apple", not(target_os = "macos"))))) {
     /// #     test().unwrap();
     /// # }
     /// ```
     fn from(inherit: io::Stderr) -> Stdio {
         Stdio::from_inner(inherit.into())
+    }
+}
+
+#[stable(feature = "anonymous_pipe", since = "1.87.0")]
+impl From<io::PipeWriter> for Stdio {
+    fn from(pipe: io::PipeWriter) -> Self {
+        Stdio::from_inner(pipe.into_inner().into())
+    }
+}
+
+#[stable(feature = "anonymous_pipe", since = "1.87.0")]
+impl From<io::PipeReader> for Stdio {
+    fn from(pipe: io::PipeReader) -> Self {
+        Stdio::from_inner(pipe.into_inner().into())
     }
 }
 
@@ -1702,7 +1835,7 @@ impl ExitStatus {
     ///
     /// ```
     /// #![feature(exit_status_error)]
-    /// # if cfg!(unix) {
+    /// # if cfg!(all(unix, not(all(target_vendor = "apple", not(target_os = "macos"))))) {
     /// use std::process::Command;
     ///
     /// let status = Command::new("ls")
@@ -1809,10 +1942,10 @@ impl crate::sealed::Sealed for ExitStatusError {}
 ///
 /// ```
 /// #![feature(exit_status_error)]
-/// # if cfg!(unix) {
+/// # if cfg!(all(unix, not(target_os = "android"), not(all(target_vendor = "apple", not(target_os = "macos"))))) {
 /// use std::process::{Command, ExitStatusError};
 ///
-/// fn run(cmd: &str) -> Result<(),ExitStatusError> {
+/// fn run(cmd: &str) -> Result<(), ExitStatusError> {
 ///     Command::new(cmd).status().unwrap().exit_ok()?;
 ///     Ok(())
 /// }
@@ -1852,7 +1985,7 @@ impl ExitStatusError {
     ///
     /// ```
     /// #![feature(exit_status_error)]
-    /// # #[cfg(unix)] {
+    /// # #[cfg(all(unix, not(target_os = "android"), not(all(target_vendor = "apple", not(target_os = "macos")))))] {
     /// use std::process::Command;
     ///
     /// let bad = Command::new("false").status().unwrap().exit_ok().unwrap_err();
@@ -1877,7 +2010,7 @@ impl ExitStatusError {
     /// ```
     /// #![feature(exit_status_error)]
     ///
-    /// # if cfg!(unix) {
+    /// # if cfg!(all(unix, not(target_os = "android"), not(all(target_vendor = "apple", not(target_os = "macos"))))) {
     /// use std::num::NonZero;
     /// use std::process::Command;
     ///
@@ -1994,9 +2127,9 @@ impl ExitCode {
     ///
     /// Note that this has the same caveats as [`process::exit()`][exit], namely that this function
     /// terminates the process immediately, so no destructors on the current stack or any other
-    /// thread's stack will be run. If a clean shutdown is needed, it is recommended to simply
-    /// return this ExitCode from the `main` function, as demonstrated in the [type
-    /// documentation](#examples).
+    /// thread's stack will be run. Also see those docs for some important notes on interop with C
+    /// code. If a clean shutdown is needed, it is recommended to simply return this ExitCode from
+    /// the `main` function, as demonstrated in the [type documentation](#examples).
     ///
     /// # Differences from `process::exit()`
     ///
@@ -2107,6 +2240,7 @@ impl Child {
     /// [`ErrorKind`]: io::ErrorKind
     /// [`InvalidInput`]: io::ErrorKind::InvalidInput
     #[stable(feature = "process", since = "1.0.0")]
+    #[cfg_attr(not(test), rustc_diagnostic_item = "child_kill")]
     pub fn kill(&mut self) -> io::Result<()> {
         self.handle.kill()
     }
@@ -2127,6 +2261,7 @@ impl Child {
     /// ```
     #[must_use]
     #[stable(feature = "process_id", since = "1.3.0")]
+    #[cfg_attr(not(test), rustc_diagnostic_item = "child_id")]
     pub fn id(&self) -> u32 {
         self.handle.id()
     }
@@ -2300,6 +2435,33 @@ impl Child {
 ///
 /// process::exit(0x0100);
 /// ```
+///
+/// ### Safe interop with C code
+///
+/// On Unix, this function is currently implemented using the `exit` C function [`exit`][C-exit]. As
+/// of C23, the C standard does not permit multiple threads to call `exit` concurrently. Rust
+/// mitigates this with a lock, but if C code calls `exit`, that can still cause undefined behavior.
+/// Note that returning from `main` is equivalent to calling `exit`.
+///
+/// Therefore, it is undefined behavior to have two concurrent threads perform the following
+/// without synchronization:
+/// - One thread calls Rust's `exit` function or returns from Rust's `main` function
+/// - Another thread calls the C function `exit` or `quick_exit`, or returns from C's `main` function
+///
+/// Note that if a binary contains multiple copies of the Rust runtime (e.g., when combining
+/// multiple `cdylib` or `staticlib`), they each have their own separate lock, so from the
+/// perspective of code running in one of the Rust runtimes, the "outside" Rust code is basically C
+/// code, and concurrent `exit` again causes undefined behavior.
+///
+/// Individual C implementations might provide more guarantees than the standard and permit concurrent
+/// calls to `exit`; consult the documentation of your C implementation for details.
+///
+/// For some of the on-going discussion to make `exit` thread-safe in C, see:
+/// - [Rust issue #126600](https://github.com/rust-lang/rust/issues/126600)
+/// - [Austin Group Bugzilla (for POSIX)](https://austingroupbugs.net/view.php?id=1845)
+/// - [GNU C library Bugzilla](https://sourceware.org/bugzilla/show_bug.cgi?id=31997)
+///
+/// [C-exit]: https://en.cppreference.com/w/c/program/exit
 #[stable(feature = "rust1", since = "1.0.0")]
 #[cfg_attr(not(test), rustc_diagnostic_item = "process_exit")]
 pub fn exit(code: i32) -> ! {
@@ -2310,14 +2472,10 @@ pub fn exit(code: i32) -> ! {
 /// Terminates the process in an abnormal fashion.
 ///
 /// The function will never return and will immediately terminate the current
-/// process in a platform specific "abnormal" manner.
-///
-/// Note that because this function never returns, and that it terminates the
-/// process, no destructors on the current stack or any other thread's stack
-/// will be run.
-///
-/// Rust IO buffers (eg, from `BufWriter`) will not be flushed.
-/// Likewise, C stdio buffers will (on most platforms) not be flushed.
+/// process in a platform specific "abnormal" manner. As a consequence,
+/// no destructors on the current stack or any other thread's stack
+/// will be run, Rust IO buffers (eg, from `BufWriter`) will not be flushed,
+/// and C stdio buffers will (on most platforms) not be flushed.
 ///
 /// This is in contrast to the default behavior of [`panic!`] which unwinds
 /// the current thread's stack and calls all destructors.
@@ -2371,6 +2529,8 @@ pub fn exit(code: i32) -> ! {
 /// [panic hook]: crate::panic::set_hook
 #[stable(feature = "process_abort", since = "1.17.0")]
 #[cold]
+#[cfg_attr(not(test), rustc_diagnostic_item = "process_abort")]
+#[cfg_attr(miri, track_caller)] // even without panics, this helps for Miri backtraces
 pub fn abort() -> ! {
     crate::sys::abort_internal();
 }
@@ -2408,7 +2568,7 @@ pub fn id() -> u32 {
 #[rustc_on_unimplemented(on(
     cause = "MainFunctionType",
     message = "`main` has invalid return type `{Self}`",
-    label = "`main` can only return types that implement `{Termination}`"
+    label = "`main` can only return types that implement `{This}`"
 ))]
 pub trait Termination {
     /// Is called to get the representation of the value as status code.

@@ -10,8 +10,6 @@ RUST_LONG_VERSION := $(shell echo '$(DEB_VERSION_UPSTREAM)' | sed -re 's/([^+]+)
 LIBSTD_PKG := libstd-rust-$(RUST_VERSION)
 # Sed expression that matches the "rustc" we have in our Build-Depends field
 SED_RUSTC_BUILDDEP := sed -ne "/^Build-Depends:/,/^[^[:space:]\#]/{/^ *rustc:native .*,/p}" debian/control
-# Version of /usr/bin/rustc
-LOCAL_RUST_VERSION := $(shell rustc --version --verbose | sed -ne 's/^release: //p')
 
 include /usr/share/dpkg/buildflags.mk
 # needed for cross-compilation to avoid passing host CFLAGS to the BUILD
@@ -34,8 +32,8 @@ export RUST_LONG_VERSION
 DEB_DESTDIR := $(CURDIR)/debian/tmp
 
 # Use system LLVM (comment out to use vendored LLVM)
-LLVM_VERSION = 19
-OLD_LLVM_VERSION = 18
+LLVM_VERSION = 21
+OLD_LLVM_VERSION = 19
 # Cargo-specific flags
 export LIBSSH2_SYS_USE_PKG_CONFIG=1
 # Make it easier to test against a custom LLVM
@@ -54,15 +52,18 @@ ifeq (armhf,$(DEB_TARGET_ARCH))
 CLANG_RT_ARCH = armhf
 endif
 
-ifneq (,$(filter $(DEB_TARGET_ARCH),sparc64 mips64el hurd-i386 hurd-amd64))
+ifneq (,$(filter $(DEB_TARGET_ARCH),armel sparc64 mips64el hurd-i386 hurd-amd64 x32))
 # sparc64: see https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=1061125
 # mips64el: has profiler, but buggy atm (32-bit overflow in some counter?)
+# armel, x32: has profiler, but no builtins support upstream, so disabled for now
 CLANG_RT_ARCH =
 PROFILER = "false"
 PROFILER_PATH = ""
+COMPILER_RT_PATH = "false"
 else
 PROFILER = "true"
 PROFILER_PATH = profiler = \"/usr/lib/llvm-$(LLVM_VERSION)/lib/clang/$(LLVM_VERSION)/lib/linux/libclang_rt.profile-$(CLANG_RT_ARCH).a\"
+COMPILER_RT_PATH = \"/usr/lib/llvm-$(LLVM_VERSION)/lib/clang/$(LLVM_VERSION)/lib/linux/libclang_rt.builtins-$(CLANG_RT_ARCH).a\"
 endif
 
 ifneq (,$(filter parallel=%,$(DEB_BUILD_OPTIONS)))
@@ -73,6 +74,12 @@ RUSTBUILD = $(RUSTBUILD_COMMON) $(NJOBS)
 # force reproducibility
 RUSTBUILD_DOCS = $(RUSTBUILD_COMMON) -j1
 RUSTBUILD_FLAGS = --stage 2 --config debian/config.toml --on-fail env
+
+# 1.90 had no locking support yet, but 1.91.1 requires it, drop this with 1.92 again
+ifneq (,$(filter $(DEB_TARGET_ARCH),hurd-i386 hurd-amd64))
+RUSTBUILD_FLAGS = --stage 2 --config debian/config.toml --on-fail env --bypass-bootstrap-lock
+endif
+
 # rust-tidy depends on lots of modules that we strip out of the build.
 # it also tries to access the network for some reason. so just disable it.
 RUSTBUILD_TEST = $(RUSTBUILD) test --no-fail-fast --exclude src/tools/tidy
@@ -86,6 +93,9 @@ RUSTBUILD_TEST_FLAGS =
 # TODO: remove when we update cargo to 1.55 / 0.56
 # upstream bug still exists and is under investigation, but is hidden by newer cargo
 export CARGO_PROFILE_RELEASE_BUILD_OVERRIDE_OPT_LEVEL=0
+
+# keep in sync with d/prune-unused-deps
+RUSTC_WORKSPACES=. src/bootstrap library src/tools/clippy/clippy_test_deps src/tools/rust-analyzer src/tools/cargo src/tools/rustbook
 
 update-version:
 	oldver=$(shell $(SED_RUSTC_BUILDDEP) | sed -ne 's/.*(<= \(.*\)).*/\1/gp' | $(SED_VERSION_SHORT)); \
@@ -152,6 +162,12 @@ BUILD_WASM := true
 WASM_TARGETS := "wasm32-unknown-unknown,wasm32-wasip1,wasm32-wasip2"
 ifneq (,$(findstring nowasm,$(DEB_BUILD_PROFILES)))
   BUILD_WASM := false
+endif
+
+BUILD_BPF := true
+BPF_TARGETS := "bpfeb-unknown-none,bpfel-unknown-none"
+ifneq (,$(findstring pkg.rustc.nobpf,$(DEB_BUILD_PROFILES)))
+  BUILD_BPF := false
 endif
 
 WINDOWS_SUPPORT := amd64 i386
@@ -238,6 +254,7 @@ debian/config.toml: debian/config.toml.in debian/rules
 		-DPROFILER="$(PROFILER)" \
 		-DPROFILER_PATH="$(PROFILER_PATH)" \
 		-DWINDOWS_ARCH="$(WINDOWS_ARCH)" \
+		-DCOMPILER_RT_PATH="$(COMPILER_RT_PATH)" \
 		"$<" > "$@"
 	if $(DOWNLOAD_BOOTSTRAP) || [ $(HAVE_BINARY_TARBALL) != 0 ]; \
 	  then sed -i -e '/^rustc = /d' -e '/^cargo = /d' "$@"; fi
@@ -247,12 +264,12 @@ debian/config.toml: debian/config.toml.in debian/rules
 		sed -i -e 's/^debuginfo-level = .*/debuginfo-level = 0/g' "$@"; \
 	fi
 
-check-no-old-llvm:
+debian/check-no-old-llvm.stamp:
 	# fail the build if we have any instances of OLD_LLVM_VERSION in debian, except for debian/changelog
 	! grep --color=always -i '\(clang\|ll\(..\|d\)\)-\?$(subst .,\.,$(OLD_LLVM_VERSION))' --exclude=changelog --exclude=copyright --exclude='*.patch' --exclude-dir='.debhelper' -R debian
-.PHONY: check-no-old-llvm
+	touch "$@"
 
-extra-vendor:
+debian/extra-vendor.stamp:
 	if [ -d extra ]; then \
 	  cd extra; \
 	  for c in *; do \
@@ -263,14 +280,16 @@ extra-vendor:
 	    cp -r ./"$$c" ../vendor/; \
 	  done; \
 	fi
+	touch "$@"
 
-.PHONY: extra-vendor
-
-debian/dh_auto_configure.stamp: debian/config.toml check-no-old-llvm extra-vendor
+debian/dh_auto_configure.stamp: debian/config.toml debian/check-no-old-llvm.stamp debian/extra-vendor.stamp
 	# fail the build if we accidentally vendored openssl, indicates we pulled in unnecessary dependencies
 	test ! -e vendor/openssl-src-*
 	# fail the build if our version contains ~exp and we are not releasing to experimental
-	v="$(DEB_VERSION)"; test "$$v" = "$${v%~exp*}" -o "$(DEB_DISTRIBUTION)" = "experimental" -o "$(DEB_DISTRIBUTION)" = "UNRELEASED"
+	v="$(DEB_VERSION)"; test "$$v" = "$${v%~exp*}" \
+	  -o "$(DEB_DISTRIBUTION)" = "experimental" \
+	  -o "$(DEB_DISTRIBUTION)" = "UNRELEASED" \
+	  -o "$(DEB_DISTRIBUTION)" = "unreleased"
 	$(PRECONFIGURE_CHECK)
 	if [ -d stage0 ]; then mkdir -p build && ln -sfT ../stage0 build/cache; fi
 	# work around #842634
@@ -278,18 +297,13 @@ debian/dh_auto_configure.stamp: debian/config.toml check-no-old-llvm extra-vendo
 	  debian/ensure-patch -N debian/patches-unused/d-test-host-duplicates.patch; fi
 
 	# allow lock changes during build, but keep originals around in case we need them for rust-src
-	# keep in sync with d/prune-unused-deps
-	for ws in . src/bootstrap library src/tools/rust-analyzer src/tools/cargo src/tools/rustbook; do \
+	for ws in ${RUSTC_WORKSPACES}; do \
 	  if [ -f "$$ws/Cargo.lock" ]; then mv "$$ws/Cargo.lock" "$$ws/Cargo.lock.orig"; fi \
 	done
 	# We patched some crates so have to rm the checksums
-	find vendor -name .cargo-checksum.json -execdir "$(CURDIR)/debian/prune-checksums" "{}" +
-	# Link against system liblzma, see https://github.com/alexcrichton/xz2-rs/issues/16
-	for c in vendor/lzma-sys-*; do \
-		echo 'fn main() { println!("cargo:rustc-link-lib=lzma"); }' > "$$c/build.rs"; \
-	done
+	find vendor -name .cargo-checksum.json -execdir cp "{}" "{}.orig" \; -execdir "$(CURDIR)/debian/prune-checksums" "{}" +
 	# We don't run ./configure because we use debian/config.toml directly
-	ln -sf debian/config.toml config.toml
+	ln -sf debian/config.toml bootstrap.toml
 	touch "$@"
 
 override_dh_auto_configure-arch: debian/dh_auto_configure.stamp
@@ -300,9 +314,31 @@ ifeq (true,$(BUILD_DOCS))
 endif
 
 override_dh_auto_clean:
+	if [ -e debian/extra-vendor.stamp -a -d extra ]; then \
+	  cd extra; \
+	  for c in *; do \
+	    echo "removing extra vendored dependency '$$c'"; \
+	    rm -rf ../vendor/"$$c"; \
+	    if [ -e ../vendor/"$$c".backup ]; then \
+	      mv -v ../vendor/"$$c".backup ../vendor/"$$c" ; \
+	    fi ; \
+	  done; \
+	fi
 	$(RM) -rf build tmp debian/cargo_home config.stamp config.mk Makefile
 	$(RM) -rf $(TEST_LOG) debian/config.toml debian/*.stamp
-	$(RM) -rf $(SRC_CLEAN) config.toml
+	$(RM) -rf $(SRC_CLEAN) bootstrap.toml
+	# keep in sync with d/prune-unused-deps
+	for ws in ${RUSTC_WORKSPACES}; do \
+	  if [ -f "$$ws/Cargo.lock.orig" ]; then mv "$$ws/Cargo.lock.orig" "$$ws/Cargo.lock"; fi \
+	done
+	# We removed some checksums that we need to restore here
+	find vendor -name .cargo-checksum.json.orig -execdir mv "{}" ".cargo-checksum.json" \;
+	# undo debian/scripts/build-wit-bindgen.sh
+	rm -f vendor/wit-bindgen-*/src/rt/wit_bindgen_*.rs
+	rm -f vendor/wit-bindgen-*/src/rt/wit_bindgen_*.o
+	rm -f vendor/wit-bindgen-*/src/rt/wit_bindgen_*.c
+	rm -f vendor/wit-bindgen-*/src/rt/libwit_bindgen_cabi.a
+
 
 debian/dh_auto_build.stamp:
 	$(RUSTBUILD) build $(RUSTBUILD_FLAGS)
@@ -317,9 +353,17 @@ endif
 
 override_dh_auto_build-indep: debian/dh_auto_build.stamp
 ifeq (true,$(BUILD_WASM))
+	debian/scripts/build-wit-bindgen.sh 0.45.1
+	debian/scripts/build-wit-bindgen.sh 0.46.0
 	$(RUSTBUILD) build $(RUSTBUILD_FLAGS) \
 	  --host $(DEB_BUILD_RUST_TYPE) \
 	  --target $(WASM_TARGETS) \
+	  library/std
+endif
+ifeq (true,$(BUILD_BPF))
+	$(RUSTBUILD) build $(RUSTBUILD_FLAGS) \
+	  --host $(DEB_BUILD_RUST_TYPE) \
+	  --target $(BPF_TARGETS) \
 	  library/std
 endif
 ifeq (true,$(BUILD_DOCS))
@@ -330,15 +374,10 @@ endif
 TEST_LOG = debian/rustc-tests.log
 # This is advertised as "5 tests failed" in README.Debian because our counting
 # method is imprecise and in practise we count some failures twice.
-# temporarily bumped from 8 to 10 to account for test output changes depending
-# on build path length, bump down again once 1.78 is imported
 FAILURES_ALLOWED = 10
 ifneq (,$(filter $(DEB_BUILD_ARCH), armhf))
 # temporarily bumped from 12 to 15, see above
   FAILURES_ALLOWED = 15
-endif
-ifneq (,$(filter $(DEB_BUILD_ARCH), armel mips mips64el))
-  FAILURES_ALLOWED = 24
 endif
 # workaround broken gdb 13.1 - revert to 24 once fixed
 # #1031946 / #1032785
@@ -348,10 +387,11 @@ endif
 ifneq (,$(filter $(DEB_BUILD_ARCH), ppc64 s390x riscv64))
   FAILURES_ALLOWED = 40
 endif
-ifneq (,$(filter $(DEB_BUILD_ARCH), loong64 powerpc powerpcspe sparc64 x32 hurd-i386 hurd-amd64))
+ifneq (,$(filter $(DEB_BUILD_ARCH), armel loong64 mips mips64el powerpc powerpcspe sparc64 x32 hurd-i386 hurd-amd64))
   FAILURES_ALLOWED = 180
 endif
 FAILED_TESTS = grep "FAILED\|^command did not execute successfully" $(TEST_LOG) | grep -v '^test result: FAILED' | grep -v 'FAILED (allowed)'
+FAILED_TEST_COMMANDS = grep "^[0-9]\+ command(s) did not execute successfully" $(TEST_LOG)
 # ignore debuginfo failures on armhf due to regression in GDB 11.2
 # https://sourceware.org/bugzilla/show_bug.cgi?id=29272
 ifneq (,$(filter $(DEB_BUILD_ARCH), armhf))
@@ -367,17 +407,23 @@ override_dh_auto_test-arch:
 	done
 ifeq (, $(filter nocheck,$(DEB_BUILD_PROFILES)))
 ifeq (, $(filter nocheck,$(DEB_BUILD_OPTIONS)))
-	{ $(RUSTBUILD_TEST) $(RUSTBUILD_FLAGS) $(RUSTBUILD_TEST_FLAGS); echo $$?; } | tee -a $(TEST_LOG)
+	{ $(RUSTBUILD_TEST) $(RUSTBUILD_FLAGS) $(RUSTBUILD_TEST_FLAGS) 2>&1; echo $$?; } | tee -a $(TEST_LOG)
+ifneq (,$(filter $(DEB_BUILD_ARCH), x32))
+	echo "Skipping test suite analysis on x32.."
+else
 	# test that the log has at least 1 pass, to prevent e.g. #57709
 	grep -l "^test .* \.\.\. ok$$" $(TEST_LOG)
 	echo "==== Debian rustc test report ===="; \
 	echo "Specific test failures:"; \
 	$(FAILED_TESTS); \
+	echo "Failed test invocations:"; \
+	$(FAILED_TEST_COMMANDS); \
 	num_failures=$$($(FAILED_TESTS) | wc -l); \
+	num_invocations=$$($(FAILED_TEST_COMMANDS)); \
 	exit_code=$$(tail -n1 $(TEST_LOG)); \
 	echo "Summary: exit code $$exit_code, counted $$num_failures tests failed."; \
 	echo -n "$(FAILURES_ALLOWED) maximum allowed. "; \
-	if test "$$num_failures" -eq 0 -a "$$exit_code" -ne 0; then \
+	if test "$$num_failures" -eq 0 -a "$$exit_code" -ne 0 -a -z "$$num_invocations"; then \
 	  echo "Aborting just in case, because we missed counting some test failures."; \
 	  echo "This could happen if we failed to build the tests, or if the testsuite runner is buggy."; \
 	  false; \
@@ -391,6 +437,7 @@ ifeq (, $(filter nocheck,$(DEB_BUILD_OPTIONS)))
 # don't continue if RUSTBUILD_TEST_FLAGS is non-empty
 	test -z "$(RUSTBUILD_TEST_FLAGS)"
 # don't run windows tests yet
+endif
 endif
 endif
 
@@ -461,6 +508,12 @@ ifeq (true,$(BUILD_WASM))
 	DESTDIR=$(DEB_DESTDIR) $(RUSTBUILD) install $(RUSTBUILD_FLAGS) \
 	  --host $(DEB_BUILD_RUST_TYPE) \
 	  --target $(WASM_TARGETS) \
+	  library/std
+endif
+ifeq (true,$(BUILD_BPF))
+	DESTDIR=$(DEB_DESTDIR) $(RUSTBUILD) install $(RUSTBUILD_FLAGS) \
+	  --host $(DEB_BUILD_RUST_TYPE) \
+	  --target $(BPF_TARGETS) \
 	  library/std
 endif
 ifeq (true,$(BUILD_DOCS))

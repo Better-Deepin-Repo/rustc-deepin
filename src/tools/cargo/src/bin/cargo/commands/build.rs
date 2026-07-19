@@ -35,21 +35,21 @@ pub fn cli() -> Command {
         .arg_target_triple("Build for the target triple")
         .arg_target_dir()
         .arg_artifact_dir()
-        .arg_build_plan()
         .arg_unit_graph()
         .arg_timings()
+        .arg_compile_time_deps()
         .arg_manifest_path()
         .arg_lockfile_path()
         .arg_ignore_rust_version()
         .after_help(color_print::cstr!(
-            "Run `<cyan,bold>cargo help build</>` for more detailed information.\n"
+            "Run `<bright-cyan,bold>cargo help build</>` for more detailed information.\n"
         ))
 }
 
 pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
     let ws = args.workspace(gctx)?;
     let mut compile_opts =
-        args.compile_options(gctx, CompileMode::Build, Some(&ws), ProfileChecking::Custom)?;
+        args.compile_options(gctx, UserIntent::Build, Some(&ws), ProfileChecking::Custom)?;
 
     if let Some(artifact_dir) = args.value_of_path("artifact-dir", gctx) {
         // If the user specifies `--artifact-dir`, use that

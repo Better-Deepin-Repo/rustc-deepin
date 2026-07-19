@@ -8,7 +8,7 @@ mod libc {
     #[allow(non_camel_case_types)]
     pub type pthread_key_t = ffi::c_uint;
 
-    extern "C" {
+    unsafe extern "C" {
         pub fn pthread_key_create(
             key: *mut pthread_key_t,
             destructor: unsafe extern "C" fn(*mut ffi::c_void),
@@ -25,7 +25,9 @@ pub type Key = libc::pthread_key_t;
 #[inline]
 pub fn create(dtor: Option<unsafe extern "C" fn(*mut u8)>) -> Key {
     let mut key = 0;
-    assert_eq!(unsafe { libc::pthread_key_create(&mut key, mem::transmute(dtor)) }, 0);
+    if unsafe { libc::pthread_key_create(&mut key, mem::transmute(dtor)) } != 0 {
+        rtabort!("out of TLS keys");
+    }
     key
 }
 

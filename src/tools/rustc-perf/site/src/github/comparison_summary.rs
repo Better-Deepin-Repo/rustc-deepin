@@ -70,7 +70,7 @@ pub async fn post_finished(ctxt: &SiteCtxt) {
 /// Posts a comment to GitHub summarizing the comparison of the queued commit with its parent
 ///
 /// `is_master_commit` is used to differentiate messages for try runs and post-merge runs.
-async fn post_comparison_comment(
+pub async fn post_comparison_comment(
     ctxt: &SiteCtxt,
     commit: QueuedCommit,
     is_master_commit: bool,
@@ -214,7 +214,7 @@ async fn summarize_run(
         if has_broken_benchmarks {
             " - BENCHMARK(S) FAILED"
         } else if is_regression {
-            " - ACTION NEEDED"
+            " - please read the text below"
         } else {
             " - no action needed"
         },
@@ -325,8 +325,8 @@ fn write_metric_summary(
         match visibility {
             DefaultMetricVisibility::Shown => {
                 message.push_str(
-                    "This is a highly reliable metric that was used to determine the \
-                overall result at the top of this comment.\n\n",
+                    "Our most reliable metric. Used to determine the overall result above. \
+                However, even this metric can be noisy.\n\n",
                 );
                 write_summary_table(&primary, &secondary, false, message);
             }
@@ -351,8 +351,8 @@ fn write_metric_summary(
                 // `<details>` means it is hidden, requiring a click to reveal.
                 message.push_str(&format!("<details>\n<summary>{summary}</summary>\n\n"));
                 message.push_str(
-                    "This is a less reliable metric that may be of interest but was not \
-                used to determine the overall result at the top of this comment.\n\n",
+                    "A less reliable metric. May be of interest, but not \
+                used to determine the overall result above.\n\n",
                 );
                 write_summary_table(&primary, &secondary, false, message);
                 message.push_str("</details>\n");
@@ -363,18 +363,24 @@ fn write_metric_summary(
 
 fn master_run_body(is_regression: bool) -> String {
     if is_regression {
-        "
-**Next Steps**: If you can justify the \
-regressions found in this perf run, please indicate this with \
-`@rustbot label: +perf-regression-triaged` along with \
-sufficient written justification. If you cannot justify the regressions \
-please open an issue or create a new PR that fixes the regressions, \
-add a comment linking to the newly created issue or PR, \
-and then add the `perf-regression-triaged` label to this PR.
+        r#"
+Our benchmarks found a performance regression caused by this PR.
+This might be an actual regression, but it can also be just noise.
+
+**Next Steps**:
+
+- If the regression was expected or you think it can be justified,
+please write a comment with sufficient written justification, and add
+`@rustbot label: +perf-regression-triaged` to it, to mark the regression as triaged.
+- If you think that you know of a way to resolve the regression, try to create
+a new PR with a fix for the regression.
+- If you do not understand the regression or you think that it is just noise,
+you can ask the `@rust-lang/wg-compiler-performance` working group for help (members of this group
+were already notified of this PR).
 
 @rustbot label: +perf-regression
 cc @rust-lang/wg-compiler-performance
-"
+"#
     } else {
         "
 @rustbot label: -perf-regression
@@ -386,11 +392,10 @@ cc @rust-lang/wg-compiler-performance
 fn try_run_body(is_regression: bool) -> String {
     let next_steps = if is_regression {
         "\n\n**Next Steps**: If you can justify the regressions found in \
-            this try perf run, please indicate this with \
-            `@rustbot label: +perf-regression-triaged` along with \
-            sufficient written justification. If you cannot justify the regressions \
-            please fix the regressions and do another perf run. If the next run \
-            shows neutral or positive results, the label will be automatically removed."
+            this try perf run, please do so in sufficient writing \
+            along with `@rustbot label: +perf-regression-triaged`. If not, \
+            please fix the regressions and do another perf run. If its results \
+            are neutral or positive, the label will be automatically removed."
     } else {
         ""
     };
@@ -398,11 +403,10 @@ fn try_run_body(is_regression: bool) -> String {
     let sign = if is_regression { "+" } else { "-" };
     format!(
         "
-Benchmarking this pull request likely means that it is \
-perf-sensitive, so we're automatically marking it as not fit \
-for rolling up. While you can manually mark this PR as fit \
-for rollup, we strongly recommend not doing so since this PR may lead to changes in \
-compiler perf.{next_steps}
+Benchmarking this pull request means it may be perf-sensitive – \
+we'll automatically label it not fit for rolling up. \
+You can override this, but we strongly advise not to, \
+due to possible changes in compiler perf.{next_steps}
 
 @bors rollup=never
 @rustbot label: -S-waiting-on-perf {sign}perf-regression",

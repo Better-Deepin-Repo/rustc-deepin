@@ -7,17 +7,17 @@
 //! The [`FileLock`] type represents a locked file, and provides access to the
 //! file.
 
+use std::fs::TryLockError;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Display, Path, PathBuf};
 
+use crate::util::GlobalContext;
 use crate::util::errors::CargoResult;
 use crate::util::style;
-use crate::util::GlobalContext;
 use anyhow::Context as _;
 use cargo_util::paths;
-use sys::*;
 
 /// A locked file.
 ///
@@ -76,6 +76,29 @@ impl FileLock {
         }
         Ok(())
     }
+
+    /// Renames the file and updates the internal path.
+    ///
+    /// This method performs a filesystem rename operation using [`std::fs::rename`]
+    /// while keeping the FileLock's internal path synchronized with the actual
+    /// file location.
+    ///
+    /// ## Difference from `std::fs::rename`
+    ///
+    /// - `std::fs::rename(old, new)` only moves the file on the filesystem
+    /// - `FileLock::rename(new)` moves the file AND updates `self.path` to point to the new location
+    pub fn rename<P: AsRef<Path>>(&mut self, new_path: P) -> CargoResult<()> {
+        let new_path = new_path.as_ref();
+        std::fs::rename(&self.path, new_path).with_context(|| {
+            format!(
+                "failed to rename {} to {}",
+                self.path.display(),
+                new_path.display()
+            )
+        })?;
+        self.path = new_path.to_path_buf();
+        Ok(())
+    }
 }
 
 impl Read for FileLock {
@@ -103,7 +126,7 @@ impl Write for FileLock {
 impl Drop for FileLock {
     fn drop(&mut self) {
         if let Some(f) = self.f.take() {
-            if let Err(e) = unlock(&f) {
+            if let Err(e) = f.unlock() {
                 tracing::warn!("failed to release lock: {e:?}");
             }
         }
@@ -142,7 +165,7 @@ impl Drop for FileLock {
 ///
 /// [`flock`]: https://linux.die.net/man/2/flock
 /// [`LockFileEx`]: https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-lockfileex
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Filesystem {
     root: PathBuf,
 }
@@ -216,9 +239,7 @@ impl Filesystem {
         let mut opts = OpenOptions::new();
         opts.read(true).write(true).create(true);
         let (path, f) = self.open(path.as_ref(), &opts, true)?;
-        acquire(gctx, msg, &path, &|| try_lock_exclusive(&f), &|| {
-            lock_exclusive(&f)
-        })?;
+        acquire(gctx, msg, &path, &|| f.try_lock(), &|| f.lock())?;
         Ok(FileLock { f: Some(f), path })
     }
 
@@ -233,7 +254,7 @@ impl Filesystem {
         let mut opts = OpenOptions::new();
         opts.read(true).write(true).create(true);
         let (path, f) = self.open(path.as_ref(), &opts, true)?;
-        if try_acquire(&path, &|| try_lock_exclusive(&f))? {
+        if try_acquire(&path, &|| f.try_lock())? {
             Ok(Some(FileLock { f: Some(f), path }))
         } else {
             Ok(None)
@@ -259,8 +280,8 @@ impl Filesystem {
         P: AsRef<Path>,
     {
         let (path, f) = self.open(path.as_ref(), &OpenOptions::new().read(true), false)?;
-        acquire(gctx, msg, &path, &|| try_lock_shared(&f), &|| {
-            lock_shared(&f)
+        acquire(gctx, msg, &path, &|| f.try_lock_shared(), &|| {
+            f.lock_shared()
         })?;
         Ok(FileLock { f: Some(f), path })
     }
@@ -279,8 +300,8 @@ impl Filesystem {
         let mut opts = OpenOptions::new();
         opts.read(true).write(true).create(true);
         let (path, f) = self.open(path.as_ref(), &opts, true)?;
-        acquire(gctx, msg, &path, &|| try_lock_shared(&f), &|| {
-            lock_shared(&f)
+        acquire(gctx, msg, &path, &|| f.try_lock_shared(), &|| {
+            f.lock_shared()
         })?;
         Ok(FileLock { f: Some(f), path })
     }
@@ -296,7 +317,7 @@ impl Filesystem {
         let mut opts = OpenOptions::new();
         opts.read(true).write(true).create(true);
         let (path, f) = self.open(path.as_ref(), &opts, true)?;
-        if try_acquire(&path, &|| try_lock_shared(&f))? {
+        if try_acquire(&path, &|| f.try_lock_shared())? {
             Ok(Some(FileLock { f: Some(f), path }))
         } else {
             Ok(None)
@@ -335,7 +356,7 @@ impl PartialEq<Filesystem> for Path {
     }
 }
 
-fn try_acquire(path: &Path, lock_try: &dyn Fn() -> io::Result<()>) -> CargoResult<bool> {
+fn try_acquire(path: &Path, lock_try: &dyn Fn() -> Result<(), TryLockError>) -> CargoResult<bool> {
     // File locking on Unix is currently implemented via `flock`, which is known
     // to be broken on NFS. We could in theory just ignore errors that happen on
     // NFS, but apparently the failure mode [1] for `flock` on NFS is **blocking
@@ -352,22 +373,21 @@ fn try_acquire(path: &Path, lock_try: &dyn Fn() -> io::Result<()>) -> CargoResul
     }
 
     match lock_try() {
-        Ok(()) => return Ok(true),
+        Ok(()) => Ok(true),
 
         // In addition to ignoring NFS which is commonly not working we also
         // just ignore locking on filesystems that look like they don't
         // implement file locking.
-        Err(e) if error_unsupported(&e) => return Ok(true),
+        Err(TryLockError::Error(e)) if error_unsupported(&e) => Ok(true),
 
-        Err(e) => {
-            if !error_contended(&e) {
-                let e = anyhow::Error::from(e);
-                let cx = format!("failed to lock file: {}", path.display());
-                return Err(e.context(cx));
-            }
+        Err(TryLockError::Error(e)) => {
+            let e = anyhow::Error::from(e);
+            let cx = format!("failed to lock file: {}", path.display());
+            Err(e.context(cx))
         }
+
+        Err(TryLockError::WouldBlock) => Ok(false),
     }
-    Ok(false)
 }
 
 /// Acquires a lock on a file in a "nice" manner.
@@ -389,13 +409,12 @@ fn acquire(
     gctx: &GlobalContext,
     msg: &str,
     path: &Path,
-    lock_try: &dyn Fn() -> io::Result<()>,
+    lock_try: &dyn Fn() -> Result<(), TryLockError>,
     lock_block: &dyn Fn() -> io::Result<()>,
 ) -> CargoResult<()> {
-    if cfg!(debug_assertions) {
-        // Force borrow to catch invalid borrows outside of contention situations
-        gctx.shell().verbosity();
-    }
+    // Ensure `shell` is not already in use,
+    // regardless of whether we hit contention or not
+    gctx.debug_assert_shell_not_borrowed();
     if try_acquire(path, lock_try)? {
         return Ok(());
     }
@@ -408,7 +427,7 @@ fn acquire(
 }
 
 #[cfg(all(target_os = "linux", not(target_env = "musl")))]
-fn is_on_nfs_mount(path: &Path) -> bool {
+pub fn is_on_nfs_mount(path: &Path) -> bool {
     use std::ffi::CString;
     use std::mem;
     use std::os::unix::prelude::*;
@@ -426,164 +445,27 @@ fn is_on_nfs_mount(path: &Path) -> bool {
 }
 
 #[cfg(any(not(target_os = "linux"), target_env = "musl"))]
-fn is_on_nfs_mount(_path: &Path) -> bool {
+pub fn is_on_nfs_mount(_path: &Path) -> bool {
     false
 }
 
 #[cfg(unix)]
-mod sys {
-    use std::fs::File;
-    use std::io::{Error, Result};
-    use std::os::unix::io::AsRawFd;
-
-    pub(super) fn lock_shared(file: &File) -> Result<()> {
-        flock(file, libc::LOCK_SH)
-    }
-
-    pub(super) fn lock_exclusive(file: &File) -> Result<()> {
-        flock(file, libc::LOCK_EX)
-    }
-
-    pub(super) fn try_lock_shared(file: &File) -> Result<()> {
-        flock(file, libc::LOCK_SH | libc::LOCK_NB)
-    }
-
-    pub(super) fn try_lock_exclusive(file: &File) -> Result<()> {
-        flock(file, libc::LOCK_EX | libc::LOCK_NB)
-    }
-
-    pub(super) fn unlock(file: &File) -> Result<()> {
-        flock(file, libc::LOCK_UN)
-    }
-
-    pub(super) fn error_contended(err: &Error) -> bool {
-        err.raw_os_error().map_or(false, |x| x == libc::EWOULDBLOCK)
-    }
-
-    pub(super) fn error_unsupported(err: &Error) -> bool {
-        match err.raw_os_error() {
-            // Unfortunately, depending on the target, these may or may not be the same.
-            // For targets in which they are the same, the duplicate pattern causes a warning.
-            #[allow(unreachable_patterns)]
-            Some(libc::ENOTSUP | libc::EOPNOTSUPP) => true,
-            Some(libc::ENOSYS) => true,
-            _ => false,
-        }
-    }
-
-    #[cfg(not(target_os = "solaris"))]
-    fn flock(file: &File, flag: libc::c_int) -> Result<()> {
-        let ret = unsafe { libc::flock(file.as_raw_fd(), flag) };
-        if ret < 0 {
-            Err(Error::last_os_error())
-        } else {
-            Ok(())
-        }
-    }
-
-    #[cfg(target_os = "solaris")]
-    fn flock(file: &File, flag: libc::c_int) -> Result<()> {
-        // Solaris lacks flock(), so try to emulate using fcntl()
-        let mut flock = libc::flock {
-            l_type: 0,
-            l_whence: 0,
-            l_start: 0,
-            l_len: 0,
-            l_sysid: 0,
-            l_pid: 0,
-            l_pad: [0, 0, 0, 0],
-        };
-        flock.l_type = if flag & libc::LOCK_UN != 0 {
-            libc::F_UNLCK
-        } else if flag & libc::LOCK_EX != 0 {
-            libc::F_WRLCK
-        } else if flag & libc::LOCK_SH != 0 {
-            libc::F_RDLCK
-        } else {
-            panic!("unexpected flock() operation")
-        };
-
-        let mut cmd = libc::F_SETLKW;
-        if (flag & libc::LOCK_NB) != 0 {
-            cmd = libc::F_SETLK;
-        }
-
-        let ret = unsafe { libc::fcntl(file.as_raw_fd(), cmd, &flock) };
-
-        if ret < 0 {
-            Err(Error::last_os_error())
-        } else {
-            Ok(())
-        }
+fn error_unsupported(err: &std::io::Error) -> bool {
+    match err.raw_os_error() {
+        // Unfortunately, depending on the target, these may or may not be the same.
+        // For targets in which they are the same, the duplicate pattern causes a warning.
+        #[allow(unreachable_patterns)]
+        Some(libc::ENOTSUP | libc::EOPNOTSUPP) => true,
+        Some(libc::ENOSYS) => true,
+        _ => err.kind() == std::io::ErrorKind::Unsupported,
     }
 }
 
 #[cfg(windows)]
-mod sys {
-    use std::fs::File;
-    use std::io::{Error, Result};
-    use std::mem;
-    use std::os::windows::io::AsRawHandle;
-
-    use windows_sys::Win32::Foundation::HANDLE;
-    use windows_sys::Win32::Foundation::{ERROR_INVALID_FUNCTION, ERROR_LOCK_VIOLATION};
-    use windows_sys::Win32::Storage::FileSystem::{
-        LockFileEx, UnlockFile, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY,
-    };
-
-    pub(super) fn lock_shared(file: &File) -> Result<()> {
-        lock_file(file, 0)
-    }
-
-    pub(super) fn lock_exclusive(file: &File) -> Result<()> {
-        lock_file(file, LOCKFILE_EXCLUSIVE_LOCK)
-    }
-
-    pub(super) fn try_lock_shared(file: &File) -> Result<()> {
-        lock_file(file, LOCKFILE_FAIL_IMMEDIATELY)
-    }
-
-    pub(super) fn try_lock_exclusive(file: &File) -> Result<()> {
-        lock_file(file, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY)
-    }
-
-    pub(super) fn error_contended(err: &Error) -> bool {
-        err.raw_os_error()
-            .map_or(false, |x| x == ERROR_LOCK_VIOLATION as i32)
-    }
-
-    pub(super) fn error_unsupported(err: &Error) -> bool {
-        err.raw_os_error()
-            .map_or(false, |x| x == ERROR_INVALID_FUNCTION as i32)
-    }
-
-    pub(super) fn unlock(file: &File) -> Result<()> {
-        unsafe {
-            let ret = UnlockFile(file.as_raw_handle() as HANDLE, 0, 0, !0, !0);
-            if ret == 0 {
-                Err(Error::last_os_error())
-            } else {
-                Ok(())
-            }
-        }
-    }
-
-    fn lock_file(file: &File, flags: u32) -> Result<()> {
-        unsafe {
-            let mut overlapped = mem::zeroed();
-            let ret = LockFileEx(
-                file.as_raw_handle() as HANDLE,
-                flags,
-                0,
-                !0,
-                !0,
-                &mut overlapped,
-            );
-            if ret == 0 {
-                Err(Error::last_os_error())
-            } else {
-                Ok(())
-            }
-        }
+fn error_unsupported(err: &std::io::Error) -> bool {
+    use windows_sys::Win32::Foundation::ERROR_INVALID_FUNCTION;
+    match err.raw_os_error() {
+        Some(code) if code == ERROR_INVALID_FUNCTION as i32 => true,
+        _ => err.kind() == std::io::ErrorKind::Unsupported,
     }
 }

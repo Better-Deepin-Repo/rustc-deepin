@@ -49,7 +49,7 @@
 use alloc::boxed::Box;
 use core::any::Any;
 use core::ffi::{c_int, c_uint, c_void};
-use core::mem::{self, ManuallyDrop};
+use core::mem::ManuallyDrop;
 
 // NOTE(nbdd0121): The `canary` field is part of stable ABI.
 #[repr(C)]
@@ -61,6 +61,7 @@ struct Exception {
     // and its destructor is executed by the C++ runtime. When we take the Box
     // out of the exception, we need to leave the exception in a valid state
     // for its destructor to run without double-dropping the Box.
+    // We also construct this as None for copies of the exception.
     data: Option<Box<dyn Any + Send>>,
 }
 
@@ -111,18 +112,18 @@ struct Exception {
 mod imp {
     #[repr(transparent)]
     #[derive(Copy, Clone)]
-    pub struct ptr_t(*mut u8);
+    pub(super) struct ptr_t(*mut u8);
 
     impl ptr_t {
-        pub const fn null() -> Self {
+        pub(super) const fn null() -> Self {
             Self(core::ptr::null_mut())
         }
 
-        pub const fn new(ptr: *mut u8) -> Self {
+        pub(super) const fn new(ptr: *mut u8) -> Self {
             Self(ptr)
         }
 
-        pub const fn raw(self) -> *mut u8 {
+        pub(super) const fn raw(self) -> *mut u8 {
             self.0
         }
     }
@@ -133,18 +134,18 @@ mod imp {
     // On 64-bit systems, SEH represents pointers as 32-bit offsets from `__ImageBase`.
     #[repr(transparent)]
     #[derive(Copy, Clone)]
-    pub struct ptr_t(u32);
+    pub(super) struct ptr_t(u32);
 
-    extern "C" {
-        pub static __ImageBase: u8;
+    unsafe extern "C" {
+        static __ImageBase: u8;
     }
 
     impl ptr_t {
-        pub const fn null() -> Self {
+        pub(super) const fn null() -> Self {
             Self(0)
         }
 
-        pub fn new(ptr: *mut u8) -> Self {
+        pub(super) fn new(ptr: *mut u8) -> Self {
             // We need to expose the provenance of the pointer because it is not carried by
             // the `u32`, while the FFI needs to have this provenance to excess our statics.
             //
@@ -159,7 +160,7 @@ mod imp {
             Self(offset as u32)
         }
 
-        pub const fn raw(self) -> u32 {
+        pub(super) const fn raw(self) -> u32 {
             self.0
         }
     }
@@ -168,7 +169,7 @@ mod imp {
 use imp::ptr_t;
 
 #[repr(C)]
-pub struct _ThrowInfo {
+struct _ThrowInfo {
     pub attributes: c_uint,
     pub pmfnUnwind: ptr_t,
     pub pForwardCompat: ptr_t,
@@ -176,13 +177,13 @@ pub struct _ThrowInfo {
 }
 
 #[repr(C)]
-pub struct _CatchableTypeArray {
+struct _CatchableTypeArray {
     pub nCatchableTypes: c_int,
     pub arrayOfCatchableTypes: [ptr_t; 1],
 }
 
 #[repr(C)]
-pub struct _CatchableType {
+struct _CatchableType {
     pub properties: c_uint,
     pub pType: ptr_t,
     pub thisDisplacement: _PMD,
@@ -191,14 +192,14 @@ pub struct _CatchableType {
 }
 
 #[repr(C)]
-pub struct _PMD {
+struct _PMD {
     pub mdisp: c_int,
     pub pdisp: c_int,
     pub vdisp: c_int,
 }
 
 #[repr(C)]
-pub struct _TypeDescriptor {
+struct _TypeDescriptor {
     pub pVFTable: *const u8,
     pub spare: *mut u8,
     pub name: [u8; 11],
@@ -225,11 +226,11 @@ static mut CATCHABLE_TYPE: _CatchableType = _CatchableType {
     properties: 0,
     pType: ptr_t::null(),
     thisDisplacement: _PMD { mdisp: 0, pdisp: -1, vdisp: 0 },
-    sizeOrOffset: mem::size_of::<Exception>() as c_int,
+    sizeOrOffset: size_of::<Exception>() as c_int,
     copyFunction: ptr_t::null(),
 };
 
-extern "C" {
+unsafe extern "C" {
     // The leading `\x01` byte here is actually a magical signal to LLVM to
     // *not* apply any other mangling like prefixing with a `_` character.
     //
@@ -264,32 +265,45 @@ static mut TYPE_DESCRIPTOR: _TypeDescriptor = _TypeDescriptor {
 // runtime under a try/catch block and the panic that we generate here will be
 // used as the result of the exception copy. This is used by the C++ runtime to
 // support capturing exceptions with std::exception_ptr, which we can't support
-// because Box<dyn Any> isn't clonable.
+// because Box<dyn Any> isn't clonable. Thus we throw an exception without data,
+// which the C++ runtime will attempt to copy, which will once again fail, and
+// a std::bad_exception instance ends up in the std::exception_ptr instance.
+// The lack of data doesn't matter because the exception will never be rethrown
+// - it is purely used to signal to the C++ runtime that copying failed.
 macro_rules! define_cleanup {
     ($abi:tt $abi2:tt) => {
         unsafe extern $abi fn exception_cleanup(e: *mut Exception) {
-            if let Exception { data: Some(b), .. } = e.read() {
-                drop(b);
-                super::__rust_drop_panic();
+            unsafe {
+                if let Exception { data: Some(b), .. } = e.read() {
+                    drop(b);
+                    super::__rust_drop_panic();
+                }
             }
         }
         unsafe extern $abi2 fn exception_copy(
             _dest: *mut Exception, _src: *mut Exception
         ) -> *mut Exception {
-            panic!("Rust panics cannot be copied");
+            unsafe {
+                throw_exception(None);
+            }
         }
     }
 }
-cfg_if::cfg_if! {
-   if #[cfg(target_arch = "x86")] {
+cfg_select! {
+   target_arch = "x86" => {
        define_cleanup!("thiscall" "thiscall-unwind");
-   } else {
+   }
+   _ => {
        define_cleanup!("C" "C-unwind");
    }
 }
 
-pub unsafe fn panic(data: Box<dyn Any + Send>) -> u32 {
-    use core::intrinsics::atomic_store_seqcst;
+pub(crate) unsafe fn panic(data: Box<dyn Any + Send>) -> u32 {
+    unsafe { throw_exception(Some(data)) }
+}
+
+unsafe fn throw_exception(data: Option<Box<dyn Any + Send>>) -> ! {
+    use core::intrinsics::{AtomicOrdering, atomic_store};
 
     // _CxxThrowException executes entirely on this stack frame, so there's no
     // need to otherwise transfer `data` to the heap. We just pass a stack
@@ -298,8 +312,7 @@ pub unsafe fn panic(data: Box<dyn Any + Send>) -> u32 {
     // The ManuallyDrop is needed here since we don't want Exception to be
     // dropped when unwinding. Instead it will be dropped by exception_cleanup
     // which is invoked by the C++ runtime.
-    let mut exception =
-        ManuallyDrop::new(Exception { canary: (&raw const TYPE_DESCRIPTOR), data: Some(data) });
+    let mut exception = ManuallyDrop::new(Exception { canary: (&raw const TYPE_DESCRIPTOR), data });
     let throw_ptr = (&raw mut exception) as *mut _;
 
     // This... may seems surprising, and justifiably so. On 32-bit MSVC the
@@ -322,45 +335,53 @@ pub unsafe fn panic(data: Box<dyn Any + Send>) -> u32 {
     //
     // In any case, we basically need to do something like this until we can
     // express more operations in statics (and we may never be able to).
-    atomic_store_seqcst(
-        (&raw mut THROW_INFO.pmfnUnwind).cast(),
-        ptr_t::new(exception_cleanup as *mut u8).raw(),
-    );
-    atomic_store_seqcst(
-        (&raw mut THROW_INFO.pCatchableTypeArray).cast(),
-        ptr_t::new((&raw mut CATCHABLE_TYPE_ARRAY).cast()).raw(),
-    );
-    atomic_store_seqcst(
-        (&raw mut CATCHABLE_TYPE_ARRAY.arrayOfCatchableTypes[0]).cast(),
-        ptr_t::new((&raw mut CATCHABLE_TYPE).cast()).raw(),
-    );
-    atomic_store_seqcst(
-        (&raw mut CATCHABLE_TYPE.pType).cast(),
-        ptr_t::new((&raw mut TYPE_DESCRIPTOR).cast()).raw(),
-    );
-    atomic_store_seqcst(
-        (&raw mut CATCHABLE_TYPE.copyFunction).cast(),
-        ptr_t::new(exception_copy as *mut u8).raw(),
-    );
+    unsafe {
+        #[allow(function_casts_as_integer)]
+        atomic_store::<_, { AtomicOrdering::SeqCst }>(
+            (&raw mut THROW_INFO.pmfnUnwind).cast(),
+            ptr_t::new(exception_cleanup as *mut u8).raw(),
+        );
+        atomic_store::<_, { AtomicOrdering::SeqCst }>(
+            (&raw mut THROW_INFO.pCatchableTypeArray).cast(),
+            ptr_t::new((&raw mut CATCHABLE_TYPE_ARRAY).cast()).raw(),
+        );
+        atomic_store::<_, { AtomicOrdering::SeqCst }>(
+            (&raw mut CATCHABLE_TYPE_ARRAY.arrayOfCatchableTypes[0]).cast(),
+            ptr_t::new((&raw mut CATCHABLE_TYPE).cast()).raw(),
+        );
+        atomic_store::<_, { AtomicOrdering::SeqCst }>(
+            (&raw mut CATCHABLE_TYPE.pType).cast(),
+            ptr_t::new((&raw mut TYPE_DESCRIPTOR).cast()).raw(),
+        );
+        #[allow(function_casts_as_integer)]
+        atomic_store::<_, { AtomicOrdering::SeqCst }>(
+            (&raw mut CATCHABLE_TYPE.copyFunction).cast(),
+            ptr_t::new(exception_copy as *mut u8).raw(),
+        );
+    }
 
-    extern "system-unwind" {
+    unsafe extern "system-unwind" {
         fn _CxxThrowException(pExceptionObject: *mut c_void, pThrowInfo: *mut u8) -> !;
     }
 
-    _CxxThrowException(throw_ptr, (&raw mut THROW_INFO) as *mut _);
+    unsafe {
+        _CxxThrowException(throw_ptr, (&raw mut THROW_INFO) as *mut _);
+    }
 }
 
-pub unsafe fn cleanup(payload: *mut u8) -> Box<dyn Any + Send> {
-    // A null payload here means that we got here from the catch (...) of
-    // __rust_try. This happens when a non-Rust foreign exception is caught.
-    if payload.is_null() {
-        super::__rust_foreign_exception();
+pub(crate) unsafe fn cleanup(payload: *mut u8) -> Box<dyn Any + Send> {
+    unsafe {
+        // A null payload here means that we got here from the catch (...) of
+        // __rust_try. This happens when a non-Rust foreign exception is caught.
+        if payload.is_null() {
+            super::__rust_foreign_exception();
+        }
+        let exception = payload as *mut Exception;
+        let canary = (&raw const (*exception).canary).read();
+        if !core::ptr::eq(canary, &raw const TYPE_DESCRIPTOR) {
+            // A foreign Rust exception.
+            super::__rust_foreign_exception();
+        }
+        (*exception).data.take().unwrap()
     }
-    let exception = payload as *mut Exception;
-    let canary = (&raw const (*exception).canary).read();
-    if !core::ptr::eq(canary, &raw const TYPE_DESCRIPTOR) {
-        // A foreign Rust exception.
-        super::__rust_foreign_exception();
-    }
-    (*exception).data.take().unwrap()
 }

@@ -76,7 +76,7 @@ system:
   detail.
 * `TERM` --- If this is set to `dumb`, it disables the progress bar.
 * `BROWSER` --- The web browser to execute to open documentation with [`cargo
-  doc`]'s' `--open` flag, see [`doc.browser`] for more details.
+  doc`]'s `--open` flag, see [`doc.browser`] for more details.
 * `RUSTFMT` --- Instead of running `rustfmt`,
   [`cargo fmt`](https://github.com/rust-lang/rustfmt) will execute this specified
   `rustfmt` instance instead.
@@ -95,16 +95,19 @@ In summary, the supported environment variables are:
 * `CARGO_BUILD_RUSTDOC` --- The `rustdoc` executable, see [`build.rustdoc`].
 * `CARGO_BUILD_TARGET` --- The default target platform, see [`build.target`].
 * `CARGO_BUILD_TARGET_DIR` --- The default output directory, see [`build.target-dir`].
+* `CARGO_BUILD_BUILD_DIR` --- The default build directory, see [`build.build-dir`].
 * `CARGO_BUILD_RUSTFLAGS` --- Extra `rustc` flags, see [`build.rustflags`].
 * `CARGO_BUILD_RUSTDOCFLAGS` --- Extra `rustdoc` flags, see [`build.rustdocflags`].
 * `CARGO_BUILD_INCREMENTAL` --- Incremental compilation, see [`build.incremental`].
 * `CARGO_BUILD_DEP_INFO_BASEDIR` --- Dep-info relative directory, see [`build.dep-info-basedir`].
+* `CARGO_CACHE_AUTO_CLEAN_FREQUENCY` --- Configures how often automatic cache cleaning runs, see [`cache.auto-clean-frequency`].
 * `CARGO_CARGO_NEW_VCS` --- The default source control system with [`cargo new`], see [`cargo-new.vcs`].
 * `CARGO_FUTURE_INCOMPAT_REPORT_FREQUENCY` --- How often we should generate a future incompat report notification, see [`future-incompat-report.frequency`].
 * `CARGO_HTTP_DEBUG` --- Enables HTTP debugging, see [`http.debug`].
 * `CARGO_HTTP_PROXY` --- Enables HTTP proxy, see [`http.proxy`].
 * `CARGO_HTTP_TIMEOUT` --- The HTTP timeout, see [`http.timeout`].
 * `CARGO_HTTP_CAINFO` --- The TLS certificate Certificate Authority file, see [`http.cainfo`].
+* `CARGO_HTTP_PROXY_CAINFO` --- The proxy TLS certificate Certificate Authority file, see [`http.proxy-cainfo`].
 * `CARGO_HTTP_CHECK_REVOKE` --- Disables TLS certificate revocation checks, see [`http.check-revoke`].
 * `CARGO_HTTP_SSL_VERSION` --- The TLS version to use, see [`http.ssl-version`].
 * `CARGO_HTTP_LOW_SPEED_LIMIT` --- The HTTP low-speed limit, see [`http.low-speed-limit`].
@@ -158,11 +161,13 @@ In summary, the supported environment variables are:
 [`build.rustdoc`]: config.md#buildrustdoc
 [`build.target`]: config.md#buildtarget
 [`build.target-dir`]: config.md#buildtarget-dir
+[`build.build-dir`]: config.md#buildbuild-dir
 [`build.rustflags`]: config.md#buildrustflags
 [`build.rustdocflags`]: config.md#buildrustdocflags
 [`build.incremental`]: config.md#buildincremental
 [`build.dep-info-basedir`]: config.md#builddep-info-basedir
 [`doc.browser`]: config.md#docbrowser
+[`cache.auto-clean-frequency`]: config.md#cacheauto-clean-frequency
 [`cargo-new.name`]: config.md#cargo-newname
 [`cargo-new.email`]: config.md#cargo-newemail
 [`cargo-new.vcs`]: config.md#cargo-newvcs
@@ -171,6 +176,7 @@ In summary, the supported environment variables are:
 [`http.proxy`]: config.md#httpproxy
 [`http.timeout`]: config.md#httptimeout
 [`http.cainfo`]: config.md#httpcainfo
+[`http.proxy-cainfo`]: config.md#httpproxy-cainfo
 [`http.check-revoke`]: config.md#httpcheck-revoke
 [`http.ssl-version`]: config.md#httpssl-version
 [`http.low-speed-limit`]: config.md#httplow-speed-limit
@@ -350,14 +356,14 @@ let out_dir = env::var("OUT_DIR").unwrap();
     * `CARGO_CFG_TARGET_ARCH=x86_64` --- The CPU [target architecture].
     * `CARGO_CFG_TARGET_VENDOR=apple` --- The [target vendor].
     * `CARGO_CFG_TARGET_ENV=gnu` --- The [target environment] ABI.
-    * `CARGO_CFG_TARGET_ABI=sim` --- The [target ABI].
+    * `CARGO_CFG_TARGET_ABI=eabihf` --- The [target ABI].
     * `CARGO_CFG_TARGET_POINTER_WIDTH=64` --- The CPU [pointer width].
     * `CARGO_CFG_TARGET_ENDIAN=little` --- The CPU [target endianness].
     * `CARGO_CFG_TARGET_FEATURE=mmx,sse` --- List of CPU [target features] enabled.
   > Note that different [target triples][Target Triple] have different sets of `cfg` values,
   > hence variables present in one target triple might not be available in the other.
   >
-  > Some cfg values like `debug_assertions` and `test` are not available.
+  > Some cfg values like `test` are not available.
 * `OUT_DIR` --- the folder in which all output and intermediate artifacts should
   be placed. This folder is inside the build directory for the package being built,
   and it is unique for the package in question.
@@ -377,7 +383,7 @@ let out_dir = env::var("OUT_DIR").unwrap();
   [`release`] profile. Using this environment variable is not recommended.
   Using other environment variables like `OPT_LEVEL` provide a more correct
   view of the actual settings being used.
-* `DEP_<name>_<key>` --- For more information about this set of environment variables,
+* `DEP_<links>_<key>` --- For more information about this set of environment variables,
   see build script documentation about [`links`][links].
 * `RUSTC`, `RUSTDOC` --- the compiler and documentation generator that Cargo has
   resolved to use, passed to the build script so it might use it as well.

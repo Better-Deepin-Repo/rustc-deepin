@@ -19,13 +19,6 @@
 //! [RFC]: <https://github.com/rust-lang/rfcs/pull/2256>
 //! [Swift]: <https://github.com/apple/swift/blob/13d593df6f359d0cb2fc81cfaac273297c539455/lib/Syntax/README.md>
 
-#![cfg_attr(feature = "in-rust-tree", feature(rustc_private))]
-
-#[cfg(not(feature = "in-rust-tree"))]
-extern crate ra_ap_rustc_lexer as rustc_lexer;
-#[cfg(feature = "in-rust-tree")]
-extern crate rustc_lexer;
-
 mod parsing;
 mod ptr;
 mod syntax_error;
@@ -61,11 +54,11 @@ pub use crate::{
 };
 pub use parser::{Edition, SyntaxKind, T};
 pub use rowan::{
-    api::Preorder, Direction, GreenNode, NodeOrToken, SyntaxText, TextRange, TextSize,
-    TokenAtOffset, WalkEvent,
+    Direction, GreenNode, NodeOrToken, SyntaxText, TextRange, TextSize, TokenAtOffset, WalkEvent,
+    api::Preorder,
 };
-pub use rustc_lexer::unescape;
-pub use smol_str::{format_smolstr, SmolStr, SmolStrBuilder, ToSmolStr};
+pub use rustc_literal_escaper as unescape;
+pub use smol_str::{SmolStr, SmolStrBuilder, ToSmolStr, format_smolstr};
 
 /// `Parse` is the result of the parsing: a syntax tree and a collection of
 /// errors.
@@ -74,7 +67,7 @@ pub use smol_str::{format_smolstr, SmolStr, SmolStrBuilder, ToSmolStr};
 /// files.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Parse<T> {
-    green: GreenNode,
+    green: Option<GreenNode>,
     errors: Option<Arc<[SyntaxError]>>,
     _ty: PhantomData<fn() -> T>,
 }
@@ -88,14 +81,14 @@ impl<T> Clone for Parse<T> {
 impl<T> Parse<T> {
     fn new(green: GreenNode, errors: Vec<SyntaxError>) -> Parse<T> {
         Parse {
-            green,
+            green: Some(green),
             errors: if errors.is_empty() { None } else { Some(errors.into()) },
             _ty: PhantomData,
         }
     }
 
     pub fn syntax_node(&self) -> SyntaxNode {
-        SyntaxNode::new_root(self.green.clone())
+        SyntaxNode::new_root(self.green.as_ref().unwrap().clone())
     }
 
     pub fn errors(&self) -> Vec<SyntaxError> {
@@ -107,8 +100,10 @@ impl<T> Parse<T> {
 
 impl<T: AstNode> Parse<T> {
     /// Converts this parse result into a parse result for an untyped syntax tree.
-    pub fn to_syntax(self) -> Parse<SyntaxNode> {
-        Parse { green: self.green, errors: self.errors, _ty: PhantomData }
+    pub fn to_syntax(mut self) -> Parse<SyntaxNode> {
+        let green = self.green.take();
+        let errors = self.errors.take();
+        Parse { green, errors, _ty: PhantomData }
     }
 
     /// Gets the parsed syntax tree as a typed ast node.
@@ -131,9 +126,9 @@ impl<T: AstNode> Parse<T> {
 }
 
 impl Parse<SyntaxNode> {
-    pub fn cast<N: AstNode>(self) -> Option<Parse<N>> {
+    pub fn cast<N: AstNode>(mut self) -> Option<Parse<N>> {
         if N::cast(self.syntax_node()).is_some() {
-            Some(Parse { green: self.green, errors: self.errors, _ty: PhantomData })
+            Some(Parse { green: self.green.take(), errors: self.errors.take(), _ty: PhantomData })
         } else {
             None
         }
@@ -169,7 +164,7 @@ impl Parse<SourceFile> {
             edition,
         )
         .map(|(green_node, errors, _reparsed_range)| Parse {
-            green: green_node,
+            green: Some(green_node),
             errors: if errors.is_empty() { None } else { Some(errors.into()) },
             _ty: PhantomData,
         })
@@ -202,6 +197,28 @@ impl ast::Expr {
             root.kind()
         );
         Parse::new(green, errors)
+    }
+}
+
+#[cfg(not(no_salsa_async_drops))]
+impl<T> Drop for Parse<T> {
+    fn drop(&mut self) {
+        let Some(green) = self.green.take() else {
+            return;
+        };
+        static PARSE_DROP_THREAD: std::sync::OnceLock<std::sync::mpsc::Sender<GreenNode>> =
+            std::sync::OnceLock::new();
+        PARSE_DROP_THREAD
+            .get_or_init(|| {
+                let (sender, receiver) = std::sync::mpsc::channel::<GreenNode>();
+                std::thread::Builder::new()
+                    .name("ParseNodeDropper".to_owned())
+                    .spawn(move || receiver.iter().for_each(drop))
+                    .unwrap();
+                sender
+            })
+            .send(green)
+            .unwrap();
     }
 }
 
@@ -265,7 +282,7 @@ fn api_walkthrough() {
     assert!(parse.errors().is_empty());
 
     // The `tree` method returns an owned syntax node of type `SourceFile`.
-    // Owned nodes are cheap: inside, they are `Rc` handles to the underling data.
+    // Owned nodes are cheap: inside, they are `Rc` handles to the underlying data.
     let file: SourceFile = parse.tree();
 
     // `SourceFile` is the root of the syntax tree. We can iterate file's items.

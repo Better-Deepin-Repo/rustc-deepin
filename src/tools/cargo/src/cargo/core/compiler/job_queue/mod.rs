@@ -122,8 +122,7 @@ use std::sync::Arc;
 use std::thread::{self, Scope};
 use std::time::Duration;
 
-use anyhow::{format_err, Context as _};
-use cargo_util::ProcessBuilder;
+use anyhow::{Context as _, format_err};
 use jobserver::{Acquired, HelperThread};
 use semver::Version;
 use tracing::{debug, trace};
@@ -131,21 +130,20 @@ use tracing::{debug, trace};
 pub use self::job::Freshness::{self, Dirty, Fresh};
 pub use self::job::{Job, Work};
 pub use self::job_state::JobState;
-use super::build_runner::OutputFile;
 use super::custom_build::Severity;
-use super::timings::Timings;
-use super::{BuildContext, BuildPlan, BuildRunner, CompileMode, Unit};
+use super::timings::{SectionTiming, Timings};
+use super::{BuildContext, BuildRunner, CompileMode, Unit};
 use crate::core::compiler::descriptive_pkg_name;
 use crate::core::compiler::future_incompat::{
     self, FutureBreakageItem, FutureIncompatReportPackage,
 };
 use crate::core::resolver::ResolveBehavior;
 use crate::core::{PackageId, Shell, TargetKind};
+use crate::util::CargoResult;
 use crate::util::context::WarningHandling;
 use crate::util::diagnostic_server::{self, DiagnosticPrinter};
 use crate::util::errors::AlreadyPrintedError;
 use crate::util::machine_message::{self, Message as _};
-use crate::util::CargoResult;
 use crate::util::{self, internal};
 use crate::util::{DependencyQueue, GlobalContext, Progress, ProgressStyle, Queue};
 
@@ -209,11 +207,13 @@ struct DrainState<'gctx> {
 pub struct WarningCount {
     /// total number of warnings
     pub total: usize,
+    /// number of lint warnings
+    pub lints: usize,
     /// number of warnings that were suppressed because they
     /// were duplicates of a previous warning
     pub duplicates: usize,
     /// number of fixable warnings set to `NotAllowed`
-    /// if any errors have been seen ofr the current
+    /// if any errors have been seen for the current
     /// target
     pub fixable: FixableWarnings,
 }
@@ -344,7 +344,6 @@ enum Artifact {
 
 enum Message {
     Run(JobId, String),
-    BuildPlanMsg(String, ProcessBuilder, Arc<Vec<OutputFile>>),
     Stdout(String),
     Stderr(String),
 
@@ -353,12 +352,14 @@ enum Message {
         id: JobId,
         level: String,
         diag: String,
+        lint: bool,
         fixable: bool,
     },
     // This handles duplicate output that is suppressed, for showing
     // only a count of duplicate messages instead
     WarningCount {
         id: JobId,
+        lint: bool,
         emitted: bool,
         fixable: bool,
     },
@@ -374,6 +375,7 @@ enum Message {
     Token(io::Result<Acquired>),
     Finish(JobId, Artifact, CargoResult<()>),
     FutureIncompatReport(JobId, Vec<FutureBreakageItem>),
+    SectionTiming(JobId, SectionTiming),
 }
 
 impl<'gctx> JobQueue<'gctx> {
@@ -470,11 +472,7 @@ impl<'gctx> JobQueue<'gctx> {
     /// necessary dependencies, in order. Freshness is propagated as far as
     /// possible along each dependency chain.
     #[tracing::instrument(skip_all)]
-    pub fn execute(
-        mut self,
-        build_runner: &mut BuildRunner<'_, '_>,
-        plan: &mut BuildPlan,
-    ) -> CargoResult<()> {
+    pub fn execute(mut self, build_runner: &mut BuildRunner<'_, '_>) -> CargoResult<()> {
         self.queue.queue_finished();
 
         let progress =
@@ -531,12 +529,12 @@ impl<'gctx> JobQueue<'gctx> {
             .take()
             .map(move |srv| srv.start(move |msg| messages.push(Message::FixDiagnostic(msg))));
 
-        thread::scope(move |scope| {
-            match state.drain_the_queue(build_runner, plan, scope, &helper) {
+        thread::scope(
+            move |scope| match state.drain_the_queue(build_runner, scope, &helper) {
                 Some(err) => Err(err),
                 None => Ok(()),
-            }
-        })
+            },
+        )
     }
 }
 
@@ -575,18 +573,16 @@ impl<'gctx> DrainState<'gctx> {
         while self.has_extra_tokens() && !self.pending_queue.is_empty() {
             let (unit, job, _) = self.pending_queue.pop().unwrap();
             *self.counts.get_mut(&unit.pkg.package_id()).unwrap() -= 1;
-            if !build_runner.bcx.build_config.build_plan {
-                // Print out some nice progress information.
-                // NOTE: An error here will drop the job without starting it.
-                // That should be OK, since we want to exit as soon as
-                // possible during an error.
-                self.note_working_on(
-                    build_runner.bcx.gctx,
-                    build_runner.bcx.ws.root(),
-                    &unit,
-                    job.freshness(),
-                )?;
-            }
+            // Print out some nice progress information.
+            // NOTE: An error here will drop the job without starting it.
+            // That should be OK, since we want to exit as soon as
+            // possible during an error.
+            self.note_working_on(
+                build_runner.bcx.gctx,
+                build_runner.bcx.ws.root(),
+                &unit,
+                job.freshness(),
+            )?;
             self.run(&unit, job, build_runner, scope);
         }
 
@@ -600,7 +596,6 @@ impl<'gctx> DrainState<'gctx> {
     fn handle_event(
         &mut self,
         build_runner: &mut BuildRunner<'_, '_>,
-        plan: &mut BuildPlan,
         event: Message,
     ) -> Result<(), ErrorToHandle> {
         let warning_handling = build_runner.bcx.gctx.warning_handling()?;
@@ -611,10 +606,8 @@ impl<'gctx> DrainState<'gctx> {
                     .gctx
                     .shell()
                     .verbose(|c| c.status("Running", &cmd))?;
-                self.timings.unit_start(id, self.active[&id].clone());
-            }
-            Message::BuildPlanMsg(module_name, cmd, filenames) => {
-                plan.update(&module_name, &cmd, &filenames)?;
+                self.timings
+                    .unit_start(build_runner, id, self.active[&id].clone());
             }
             Message::Stdout(out) => {
                 writeln!(build_runner.bcx.gctx.shell().out(), "{}", out)?;
@@ -628,11 +621,12 @@ impl<'gctx> DrainState<'gctx> {
                 id,
                 level,
                 diag,
+                lint,
                 fixable,
             } => {
                 let emitted = self.diag_dedupe.emit_diag(&diag)?;
                 if level == "warning" {
-                    self.bump_warning_count(id, emitted, fixable);
+                    self.bump_warning_count(id, lint, emitted, fixable);
                 }
                 if level == "error" {
                     let cnts = self.warning_count.entry(id).or_default();
@@ -644,14 +638,18 @@ impl<'gctx> DrainState<'gctx> {
                 if warning_handling != WarningHandling::Allow {
                     build_runner.bcx.gctx.shell().warn(warning)?;
                 }
-                self.bump_warning_count(id, true, false);
+                let lint = false;
+                let emitted = true;
+                let fixable = false;
+                self.bump_warning_count(id, lint, emitted, fixable);
             }
             Message::WarningCount {
                 id,
+                lint,
                 emitted,
                 fixable,
             } => {
-                self.bump_warning_count(id, emitted, fixable);
+                self.bump_warning_count(id, lint, emitted, fixable);
             }
             Message::FixDiagnostic(msg) => {
                 self.print.print(&msg)?;
@@ -700,13 +698,22 @@ impl<'gctx> DrainState<'gctx> {
                 }
             }
             Message::FutureIncompatReport(id, items) => {
-                let package_id = self.active[&id].pkg.package_id();
+                let unit = &self.active[&id];
+                let package_id = unit.pkg.package_id();
+                let is_local = unit.is_local();
                 self.per_package_future_incompat_reports
-                    .push(FutureIncompatReportPackage { package_id, items });
+                    .push(FutureIncompatReportPackage {
+                        package_id,
+                        is_local,
+                        items,
+                    });
             }
             Message::Token(acquired_token) => {
                 let token = acquired_token.context("failed to acquire jobserver token")?;
                 self.tokens.push(token);
+            }
+            Message::SectionTiming(id, section) => {
+                self.timings.unit_section_timing(build_runner, id, &section);
             }
         }
 
@@ -746,7 +753,6 @@ impl<'gctx> DrainState<'gctx> {
     fn drain_the_queue<'s>(
         mut self,
         build_runner: &mut BuildRunner<'_, '_>,
-        plan: &mut BuildPlan,
         scope: &'s Scope<'s, '_>,
         jobserver_helper: &HelperThread,
     ) -> Option<anyhow::Error> {
@@ -786,7 +792,7 @@ impl<'gctx> DrainState<'gctx> {
             // don't actually use, and if this happens just relinquish it back
             // to the jobserver itself.
             for event in self.wait_for_events() {
-                if let Err(event_err) = self.handle_event(build_runner, plan, event) {
+                if let Err(event_err) = self.handle_event(build_runner, event) {
                     self.handle_error(&mut build_runner.bcx.gctx.shell(), &mut errors, event_err);
                 }
             }
@@ -812,7 +818,11 @@ impl<'gctx> DrainState<'gctx> {
         }
 
         let time_elapsed = util::elapsed(build_runner.bcx.gctx.creation_time().elapsed());
-        if let Err(e) = self.timings.finished(build_runner, &errors.to_error()) {
+        if let Err(e) = self
+            .timings
+            .finished(build_runner, &errors.to_error())
+            .context("failed to render timing report")
+        {
             self.handle_error(&mut build_runner.bcx.gctx.shell(), &mut errors, e);
         }
         if build_runner.bcx.build_config.emit_json() {
@@ -837,14 +847,12 @@ impl<'gctx> DrainState<'gctx> {
             let message = format!(
                 "{profile_link}`{profile_name}` profile [{opt_type}]{profile_link:#} target(s) in {time_elapsed}",
             );
-            if !build_runner.bcx.build_config.build_plan {
-                // It doesn't really matter if this fails.
-                let _ = build_runner.bcx.gctx.shell().status("Finished", message);
-                future_incompat::save_and_display_report(
-                    build_runner.bcx,
-                    &self.per_package_future_incompat_reports,
-                );
-            }
+            // It doesn't really matter if this fails.
+            let _ = build_runner.bcx.gctx.shell().status("Finished", message);
+            future_incompat::save_and_display_report(
+                build_runner.bcx,
+                &self.per_package_future_incompat_reports,
+            );
 
             None
         } else {
@@ -854,7 +862,7 @@ impl<'gctx> DrainState<'gctx> {
     }
 
     fn handle_error(
-        &self,
+        &mut self,
         shell: &mut Shell,
         err_state: &mut ErrorsDuringDrain,
         new_err: impl Into<ErrorToHandle>,
@@ -863,6 +871,7 @@ impl<'gctx> DrainState<'gctx> {
         if new_err.print_always || err_state.count == 0 {
             crate::display_error(&new_err.error, shell);
             if err_state.count == 0 && !self.active.is_empty() {
+                self.progress.indicate_error();
                 let _ = shell.warn("build failed, waiting for other jobs to finish...");
             }
             err_state.count += 1;
@@ -974,28 +983,30 @@ impl<'gctx> DrainState<'gctx> {
         show_warnings: bool,
     ) -> CargoResult<()> {
         let outputs = build_runner.build_script_outputs.lock().unwrap();
-        let Some(metadata) = build_runner.find_build_script_metadata(unit) else {
+        let Some(metadata_vec) = build_runner.find_build_script_metadatas(unit) else {
             return Ok(());
         };
         let bcx = &mut build_runner.bcx;
-        if let Some(output) = outputs.get(metadata) {
-            if !output.log_messages.is_empty()
-                && (show_warnings
-                    || output
-                        .log_messages
-                        .iter()
-                        .any(|(severity, _)| *severity == Severity::Error))
-            {
-                let msg_with_package =
-                    |msg: &str| format!("{}@{}: {}", unit.pkg.name(), unit.pkg.version(), msg);
+        for metadata in metadata_vec {
+            if let Some(output) = outputs.get(metadata) {
+                if !output.log_messages.is_empty()
+                    && (show_warnings
+                        || output
+                            .log_messages
+                            .iter()
+                            .any(|(severity, _)| *severity == Severity::Error))
+                {
+                    let msg_with_package =
+                        |msg: &str| format!("{}@{}: {}", unit.pkg.name(), unit.pkg.version(), msg);
 
-                for (severity, message) in output.log_messages.iter() {
-                    match severity {
-                        Severity::Error => {
-                            bcx.gctx.shell().error(msg_with_package(message))?;
-                        }
-                        Severity::Warning => {
-                            bcx.gctx.shell().warn(msg_with_package(message))?;
+                    for (severity, message) in output.log_messages.iter() {
+                        match severity {
+                            Severity::Error => {
+                                bcx.gctx.shell().error(msg_with_package(message))?;
+                            }
+                            Severity::Warning => {
+                                bcx.gctx.shell().warn(msg_with_package(message))?;
+                            }
                         }
                     }
                 }
@@ -1005,9 +1016,12 @@ impl<'gctx> DrainState<'gctx> {
         Ok(())
     }
 
-    fn bump_warning_count(&mut self, id: JobId, emitted: bool, fixable: bool) {
+    fn bump_warning_count(&mut self, id: JobId, lint: bool, emitted: bool, fixable: bool) {
         let cnts = self.warning_count.entry(id).or_default();
         cnts.total += 1;
+        if lint {
+            cnts.lints += 1;
+        }
         if !emitted {
             cnts.duplicates += 1;
         // Don't add to fixable if it's already been emitted
@@ -1040,7 +1054,7 @@ impl<'gctx> DrainState<'gctx> {
             Some(count) if count.total > 0 => count,
             None | Some(_) => return,
         };
-        runner.compilation.warning_count += count.total;
+        runner.compilation.lint_warning_count += count.lints;
         let unit = &self.active[&id];
         let mut message = descriptive_pkg_name(&unit.pkg.name(), &unit.target, &unit.mode);
         message.push_str(" generated ");
@@ -1072,15 +1086,8 @@ impl<'gctx> DrainState<'gctx> {
                         Some(wrapper) if wrapper == clippy => "cargo clippy --fix",
                         _ => "cargo fix",
                     };
-                    let mut args = {
-                        let named = unit.target.description_named();
-                        // if its a lib we need to add the package to fix
-                        if unit.target.is_lib() {
-                            format!("{} -p {}", named, unit.pkg.name())
-                        } else {
-                            named
-                        }
-                    };
+                    let mut args =
+                        format!("{} -p {}", unit.target.description_named(), unit.pkg.name());
                     if unit.mode.is_rustc_test()
                         && !(unit.target.is_test() || unit.target.is_bench())
                     {
@@ -1116,10 +1123,12 @@ impl<'gctx> DrainState<'gctx> {
                 unit.show_warnings(build_runner.bcx.gctx),
             )?;
         }
-        let unlocked = self.queue.finish(unit, &artifact);
+        let unblocked = self.queue.finish(unit, &artifact);
         match artifact {
-            Artifact::All => self.timings.unit_finished(id, unlocked),
-            Artifact::Metadata => self.timings.unit_rmeta_finished(id, unlocked),
+            Artifact::All => self.timings.unit_finished(build_runner, id, unblocked),
+            Artifact::Metadata => self
+                .timings
+                .unit_rmeta_finished(build_runner, id, unblocked),
         }
         Ok(())
     }

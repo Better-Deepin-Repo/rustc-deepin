@@ -4,10 +4,11 @@ use std::fs;
 use std::path::Path;
 use std::str::from_utf8;
 
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
+use crate::utils::cargo_process;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
-use cargo_test_support::{basic_manifest, cargo_process, paths, project};
+use cargo_test_support::{basic_manifest, paths, project};
 
 #[cargo_test]
 fn help() {
@@ -142,10 +143,10 @@ fn help_alias() {
         .with_stderr_data(str![[r#"
 [ERROR] no such command: `empty-alias`
 
-	Did you mean `empty-alias`?
+[HELP] a command with a similar name exists: `empty-alias`
 
-	View all installed commands with `cargo --list`
-	Find a package to install `empty-alias` with `cargo search cargo-empty-alias`
+[HELP] view all installed commands with `cargo --list`
+[HELP] find a package to install `empty-alias` with `cargo search cargo-empty-alias`
 
 "#]])
         .run();

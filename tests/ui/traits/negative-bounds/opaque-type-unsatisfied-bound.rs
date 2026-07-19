@@ -18,3 +18,4 @@ fn weird1() -> impl !Sized + Sized {}
 //~^ ERROR the trait bound `(): !Sized` is not satisfied
 fn weird2() -> impl !Sized {}
 //~^ ERROR the trait bound `(): !Sized` is not satisfied
+//~| ERROR the size for values of type

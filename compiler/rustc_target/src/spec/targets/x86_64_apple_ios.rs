@@ -1,13 +1,13 @@
-use crate::spec::base::apple::{Arch, TargetAbi, base};
-use crate::spec::{SanitizerSet, Target, TargetOptions};
+use crate::spec::base::apple::{Arch, TargetEnv, base};
+use crate::spec::{Os, SanitizerSet, Target, TargetMetadata, TargetOptions};
 
 pub(crate) fn target() -> Target {
     // x86_64-apple-ios is a simulator target, even though it isn't declared
     // that way in the target name like the other ones...
-    let (opts, llvm_target, arch) = base("ios", Arch::X86_64, TargetAbi::Simulator);
+    let (opts, llvm_target, arch) = base(Os::IOs, Arch::X86_64, TargetEnv::Simulator);
     Target {
         llvm_target,
-        metadata: crate::spec::TargetMetadata {
+        metadata: TargetMetadata {
             description: Some("x86_64 Apple iOS Simulator".into()),
             tier: Some(2),
             host_tools: Some(false),

@@ -4,9 +4,9 @@
 //! are splitting the hir.
 
 use hir_def::{
-    hir::{BindingId, LabelId},
     AdtId, AssocItemId, DefWithBodyId, EnumVariantId, FieldId, GenericDefId, GenericParamId,
     ModuleDefId, VariantId,
+    hir::{BindingId, LabelId},
 };
 
 use crate::{
@@ -30,17 +30,15 @@ macro_rules! from_id {
 }
 
 from_id![
-    (base_db::CrateId, crate::Crate),
+    (base_db::Crate, crate::Crate),
     (hir_def::ModuleId, crate::Module),
     (hir_def::StructId, crate::Struct),
     (hir_def::UnionId, crate::Union),
     (hir_def::EnumId, crate::Enum),
     (hir_def::TypeAliasId, crate::TypeAlias),
     (hir_def::TraitId, crate::Trait),
-    (hir_def::TraitAliasId, crate::TraitAlias),
     (hir_def::StaticId, crate::Static),
     (hir_def::ConstId, crate::Const),
-    (hir_def::InTypeConstId, crate::InTypeConst),
     (hir_def::FunctionId, crate::Function),
     (hir_def::ImplId, crate::Impl),
     (hir_def::TypeOrConstParamId, crate::TypeOrConstParam),
@@ -49,6 +47,7 @@ from_id![
     (hir_def::LifetimeParamId, crate::LifetimeParam),
     (hir_def::MacroId, crate::Macro),
     (hir_def::ExternCrateId, crate::ExternCrateDecl),
+    (hir_def::ExternBlockId, crate::ExternBlock),
 ];
 
 impl From<AdtId> for Adt {
@@ -113,7 +112,6 @@ impl From<ModuleDefId> for ModuleDef {
             ModuleDefId::ConstId(it) => ModuleDef::Const(it.into()),
             ModuleDefId::StaticId(it) => ModuleDef::Static(it.into()),
             ModuleDefId::TraitId(it) => ModuleDef::Trait(it.into()),
-            ModuleDefId::TraitAliasId(it) => ModuleDef::TraitAlias(it.into()),
             ModuleDefId::TypeAliasId(it) => ModuleDef::TypeAlias(it.into()),
             ModuleDefId::BuiltinType(it) => ModuleDef::BuiltinType(it.into()),
             ModuleDefId::MacroId(it) => ModuleDef::Macro(it.into()),
@@ -131,7 +129,6 @@ impl From<ModuleDef> for ModuleDefId {
             ModuleDef::Const(it) => ModuleDefId::ConstId(it.into()),
             ModuleDef::Static(it) => ModuleDefId::StaticId(it.into()),
             ModuleDef::Trait(it) => ModuleDefId::TraitId(it.into()),
-            ModuleDef::TraitAlias(it) => ModuleDefId::TraitAliasId(it.into()),
             ModuleDef::TypeAlias(it) => ModuleDefId::TypeAliasId(it.into()),
             ModuleDef::BuiltinType(it) => ModuleDefId::BuiltinType(it.into()),
             ModuleDef::Macro(it) => ModuleDefId::MacroId(it.into()),
@@ -146,7 +143,6 @@ impl From<DefWithBody> for DefWithBodyId {
             DefWithBody::Static(it) => DefWithBodyId::StaticId(it.id),
             DefWithBody::Const(it) => DefWithBodyId::ConstId(it.id),
             DefWithBody::Variant(it) => DefWithBodyId::VariantId(it.into()),
-            DefWithBody::InTypeConst(it) => DefWithBodyId::InTypeConstId(it.id),
         }
     }
 }
@@ -158,7 +154,6 @@ impl From<DefWithBodyId> for DefWithBody {
             DefWithBodyId::StaticId(it) => DefWithBody::Static(it.into()),
             DefWithBodyId::ConstId(it) => DefWithBody::Const(it.into()),
             DefWithBodyId::VariantId(it) => DefWithBody::Variant(it.into()),
-            DefWithBodyId::InTypeConstId(it) => DefWithBody::InTypeConst(it.into()),
         }
     }
 }
@@ -179,10 +174,10 @@ impl From<GenericDef> for GenericDefId {
             GenericDef::Function(it) => GenericDefId::FunctionId(it.id),
             GenericDef::Adt(it) => GenericDefId::AdtId(it.into()),
             GenericDef::Trait(it) => GenericDefId::TraitId(it.id),
-            GenericDef::TraitAlias(it) => GenericDefId::TraitAliasId(it.id),
             GenericDef::TypeAlias(it) => GenericDefId::TypeAliasId(it.id),
             GenericDef::Impl(it) => GenericDefId::ImplId(it.id),
             GenericDef::Const(it) => GenericDefId::ConstId(it.id),
+            GenericDef::Static(it) => GenericDefId::StaticId(it.id),
         }
     }
 }
@@ -193,10 +188,10 @@ impl From<GenericDefId> for GenericDef {
             GenericDefId::FunctionId(it) => GenericDef::Function(it.into()),
             GenericDefId::AdtId(it) => GenericDef::Adt(it.into()),
             GenericDefId::TraitId(it) => GenericDef::Trait(it.into()),
-            GenericDefId::TraitAliasId(it) => GenericDef::TraitAlias(it.into()),
             GenericDefId::TypeAliasId(it) => GenericDef::TypeAlias(it.into()),
             GenericDefId::ImplId(it) => GenericDef::Impl(it.into()),
             GenericDefId::ConstId(it) => GenericDef::Const(it.into()),
+            GenericDefId::StaticId(it) => GenericDef::Static(it.into()),
         }
     }
 }

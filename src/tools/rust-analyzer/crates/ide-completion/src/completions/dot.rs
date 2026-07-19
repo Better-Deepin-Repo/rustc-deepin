@@ -1,43 +1,77 @@
 //! Completes references after dot (fields and method calls).
 
-use hir::{sym, Name};
+use std::ops::ControlFlow;
+
+use hir::{Complete, Function, HasContainer, ItemContainer, MethodCandidateCallback};
 use ide_db::FxHashSet;
 use syntax::SmolStr;
 
 use crate::{
+    CompletionItem, CompletionItemKind, Completions,
     context::{
         CompletionContext, DotAccess, DotAccessExprCtx, DotAccessKind, PathCompletionCtx,
         PathExprCtx, Qualified,
     },
-    CompletionItem, CompletionItemKind, Completions,
 };
 
 /// Complete dot accesses, i.e. fields or methods.
 pub(crate) fn complete_dot(
     acc: &mut Completions,
     ctx: &CompletionContext<'_>,
-    dot_access: &DotAccess,
+    dot_access: &DotAccess<'_>,
 ) {
     let receiver_ty = match dot_access {
         DotAccess { receiver_ty: Some(receiver_ty), .. } => &receiver_ty.original,
         _ => return,
     };
 
+    let has_parens = matches!(dot_access.kind, DotAccessKind::Method);
+    let traits_in_scope = ctx.traits_in_scope();
+
     // Suggest .await syntax for types that implement Future trait
-    if receiver_ty.impls_into_future(ctx.db) {
+    if let Some(future_output) = receiver_ty.into_future_output(ctx.db) {
+        let await_str = SmolStr::new_static("await");
         let mut item = CompletionItem::new(
             CompletionItemKind::Keyword,
             ctx.source_range(),
-            SmolStr::new_static("await"),
+            await_str.clone(),
             ctx.edition,
         );
         item.detail("expr.await");
         item.add_to(acc, ctx.db);
-    }
 
-    let is_field_access = matches!(dot_access.kind, DotAccessKind::Field { .. });
-    let is_method_access_with_parens =
-        matches!(dot_access.kind, DotAccessKind::Method { has_parens: true });
+        if ctx.config.enable_auto_await {
+            // Completions that skip `.await`, e.g. `.await.foo()`.
+            let dot_access_kind = match &dot_access.kind {
+                DotAccessKind::Field { receiver_is_ambiguous_float_literal: _ } => {
+                    DotAccessKind::Field { receiver_is_ambiguous_float_literal: false }
+                }
+                it @ DotAccessKind::Method => *it,
+            };
+            let dot_access = DotAccess {
+                receiver: dot_access.receiver.clone(),
+                receiver_ty: Some(hir::TypeInfo {
+                    original: future_output.clone(),
+                    adjusted: None,
+                }),
+                kind: dot_access_kind,
+                ctx: dot_access.ctx,
+            };
+            complete_fields(
+                acc,
+                ctx,
+                &future_output,
+                |acc, field, ty| {
+                    acc.add_field(ctx, &dot_access, Some(await_str.clone()), field, &ty)
+                },
+                |acc, field, ty| acc.add_tuple_field(ctx, Some(await_str.clone()), field, &ty),
+                has_parens,
+            );
+            complete_methods(ctx, &future_output, &traits_in_scope, |func| {
+                acc.add_method(ctx, &dot_access, func, Some(await_str.clone()), None)
+            });
+        }
+    }
 
     complete_fields(
         acc,
@@ -45,18 +79,55 @@ pub(crate) fn complete_dot(
         receiver_ty,
         |acc, field, ty| acc.add_field(ctx, dot_access, None, field, &ty),
         |acc, field, ty| acc.add_tuple_field(ctx, None, field, &ty),
-        is_field_access,
-        is_method_access_with_parens,
+        has_parens,
     );
+    complete_methods(ctx, receiver_ty, &traits_in_scope, |func| {
+        acc.add_method(ctx, dot_access, func, None, None)
+    });
 
-    complete_methods(ctx, receiver_ty, |func| acc.add_method(ctx, dot_access, func, None, None));
+    if ctx.config.enable_auto_iter && !receiver_ty.strip_references().impls_iterator(ctx.db) {
+        // FIXME:
+        // Checking for the existence of `iter()` is complicated in our setup, because we need to substitute
+        // its return type, so we instead check for `<&Self as IntoIterator>::IntoIter`.
+        // Does <&receiver_ty as IntoIterator>::IntoIter` exist? Assume `iter` is valid
+        let iter = receiver_ty
+            .autoderef(ctx.db)
+            .map(|ty| ty.strip_references().add_reference(hir::Mutability::Shared))
+            .find_map(|ty| ty.into_iterator_iter(ctx.db))
+            .map(|ty| (ty, SmolStr::new_static("iter()")));
+        // Does <receiver_ty as IntoIterator>::IntoIter` exist?
+        let into_iter = || {
+            receiver_ty
+                .clone()
+                .into_iterator_iter(ctx.db)
+                .map(|ty| (ty, SmolStr::new_static("into_iter()")))
+        };
+        if let Some((iter, iter_sym)) = iter.or_else(into_iter) {
+            // Skip iterators, e.g. complete `.iter().filter_map()`.
+            let dot_access_kind = match &dot_access.kind {
+                DotAccessKind::Field { receiver_is_ambiguous_float_literal: _ } => {
+                    DotAccessKind::Field { receiver_is_ambiguous_float_literal: false }
+                }
+                it @ DotAccessKind::Method => *it,
+            };
+            let dot_access = DotAccess {
+                receiver: dot_access.receiver.clone(),
+                receiver_ty: Some(hir::TypeInfo { original: iter.clone(), adjusted: None }),
+                kind: dot_access_kind,
+                ctx: dot_access.ctx,
+            };
+            complete_methods(ctx, &iter, &traits_in_scope, |func| {
+                acc.add_method(ctx, &dot_access, func, Some(iter_sym.clone()), None)
+            });
+        }
+    }
 }
 
 pub(crate) fn complete_undotted_self(
     acc: &mut Completions,
     ctx: &CompletionContext<'_>,
-    path_ctx: &PathCompletionCtx,
-    expr_ctx: &PathExprCtx,
+    path_ctx: &PathCompletionCtx<'_>,
+    expr_ctx: &PathExprCtx<'_>,
 ) {
     if !ctx.config.enable_self_on_the_fly {
         return;
@@ -92,31 +163,28 @@ pub(crate) fn complete_undotted_self(
                         in_breakable: expr_ctx.in_breakable,
                     },
                 },
-                Some(Name::new_symbol_root(sym::self_.clone())),
+                Some(SmolStr::new_static("self")),
                 field,
                 &ty,
             )
         },
-        |acc, field, ty| {
-            acc.add_tuple_field(ctx, Some(Name::new_symbol_root(sym::self_.clone())), field, &ty)
-        },
-        true,
+        |acc, field, ty| acc.add_tuple_field(ctx, Some(SmolStr::new_static("self")), field, &ty),
         false,
     );
-    complete_methods(ctx, &ty, |func| {
+    complete_methods(ctx, &ty, &ctx.traits_in_scope(), |func| {
         acc.add_method(
             ctx,
             &DotAccess {
                 receiver: None,
                 receiver_ty: None,
-                kind: DotAccessKind::Method { has_parens: false },
+                kind: DotAccessKind::Field { receiver_is_ambiguous_float_literal: false },
                 ctx: DotAccessExprCtx {
                     in_block_expr: expr_ctx.in_block_expr,
                     in_breakable: expr_ctx.in_breakable,
                 },
             },
             func,
-            Some(Name::new_symbol_root(sym::self_.clone())),
+            Some(SmolStr::new_static("self")),
             None,
         )
     });
@@ -125,18 +193,16 @@ pub(crate) fn complete_undotted_self(
 fn complete_fields(
     acc: &mut Completions,
     ctx: &CompletionContext<'_>,
-    receiver: &hir::Type,
-    mut named_field: impl FnMut(&mut Completions, hir::Field, hir::Type),
-    mut tuple_index: impl FnMut(&mut Completions, usize, hir::Type),
-    is_field_access: bool,
-    is_method_access_with_parens: bool,
+    receiver: &hir::Type<'_>,
+    mut named_field: impl FnMut(&mut Completions, hir::Field, hir::Type<'_>),
+    mut tuple_index: impl FnMut(&mut Completions, usize, hir::Type<'_>),
+    has_parens: bool,
 ) {
     let mut seen_names = FxHashSet::default();
     for receiver in receiver.autoderef(ctx.db) {
         for (field, ty) in receiver.fields(ctx.db) {
             if seen_names.insert(field.name(ctx.db))
-                && (is_field_access
-                    || (is_method_access_with_parens && (ty.is_fn() || ty.is_closure())))
+                && (!has_parens || ty.is_fn() || ty.is_closure())
             {
                 named_field(acc, field, ty);
             }
@@ -145,8 +211,7 @@ fn complete_fields(
             // Tuples are always the last type in a deref chain, so just check if the name is
             // already seen without inserting into the hashset.
             if !seen_names.contains(&hir::Name::new_tuple_field(i))
-                && (is_field_access
-                    || (is_method_access_with_parens && (ty.is_fn() || ty.is_closure())))
+                && (!has_parens || ty.is_fn() || ty.is_closure())
             {
                 // Tuple fields are always public (tuple struct fields are handled above).
                 tuple_index(acc, i, ty);
@@ -157,46 +222,68 @@ fn complete_fields(
 
 fn complete_methods(
     ctx: &CompletionContext<'_>,
-    receiver: &hir::Type,
-    mut f: impl FnMut(hir::Function),
+    receiver: &hir::Type<'_>,
+    traits_in_scope: &FxHashSet<hir::TraitId>,
+    f: impl FnMut(hir::Function),
 ) {
-    let mut seen_methods = FxHashSet::default();
-    receiver.iterate_method_candidates_with_traits(
+    struct Callback<'a, F> {
+        ctx: &'a CompletionContext<'a>,
+        f: F,
+        // We deliberately deduplicate by function ID and not name, because while inherent methods cannot be
+        // duplicated, trait methods can. And it is still useful to show all of them (even when there
+        // is also an inherent method, especially considering that it may be private, and filtered later).
+        seen_methods: FxHashSet<Function>,
+    }
+
+    impl<F> MethodCandidateCallback for Callback<'_, F>
+    where
+        F: FnMut(hir::Function),
+    {
+        // We don't want to exclude inherent trait methods - that is, methods of traits available from
+        // `where` clauses or `dyn Trait`.
+        fn on_inherent_method(&mut self, func: hir::Function) -> ControlFlow<()> {
+            if func.self_param(self.ctx.db).is_some() && self.seen_methods.insert(func) {
+                (self.f)(func);
+            }
+            ControlFlow::Continue(())
+        }
+
+        fn on_trait_method(&mut self, func: hir::Function) -> ControlFlow<()> {
+            // This needs to come before the `seen_methods` test, so that if we see the same method twice,
+            // once as inherent and once not, we will include it.
+            if let ItemContainer::Trait(trait_) = func.container(self.ctx.db)
+                && (self.ctx.exclude_traits.contains(&trait_)
+                    || trait_.complete(self.ctx.db) == Complete::IgnoreMethods)
+            {
+                return ControlFlow::Continue(());
+            }
+
+            if func.self_param(self.ctx.db).is_some() && self.seen_methods.insert(func) {
+                (self.f)(func);
+            }
+
+            ControlFlow::Continue(())
+        }
+    }
+
+    receiver.iterate_method_candidates_split_inherent(
         ctx.db,
         &ctx.scope,
-        &ctx.traits_in_scope(),
-        Some(ctx.module),
+        traits_in_scope,
         None,
-        |func| {
-            if func.self_param(ctx.db).is_some() && seen_methods.insert(func.name(ctx.db)) {
-                f(func);
-            }
-            None::<()>
-        },
+        Callback { ctx, f, seen_methods: FxHashSet::default() },
     );
 }
 
 #[cfg(test)]
 mod tests {
-    use expect_test::{expect, Expect};
+    use expect_test::expect;
 
-    use crate::tests::{
-        check_edit, completion_list_no_kw, completion_list_no_kw_with_private_editable,
-    };
-
-    fn check(ra_fixture: &str, expect: Expect) {
-        let actual = completion_list_no_kw(ra_fixture);
-        expect.assert_eq(&actual);
-    }
-
-    fn check_with_private_editable(ra_fixture: &str, expect: Expect) {
-        let actual = completion_list_no_kw_with_private_editable(ra_fixture);
-        expect.assert_eq(&actual);
-    }
+    use crate::tests::{check_edit, check_no_kw, check_with_private_editable};
 
     #[test]
     fn test_struct_field_and_method_completion() {
-        check(
+        check_no_kw(
             r#"
 struct S { foo: u32 }
 impl S {
@@ -213,7 +300,7 @@ fn foo(s: S) { s.$0 }
 
     #[test]
     fn no_unstable_method_on_stable() {
-        check(
+        check_no_kw(
             r#"
 //- /main.rs crate:main deps:std
 fn foo(s: std::S) { s.$0 }
@@ -230,7 +317,7 @@ impl S {
 
     #[test]
     fn unstable_method_on_nightly() {
-        check(
+        check_no_kw(
             r#"
 //- toolchain:nightly
 //- /main.rs crate:main deps:std
@@ -250,7 +337,7 @@ impl S {
 
     #[test]
     fn test_struct_field_completion_self() {
-        check(
+        check_no_kw(
             r#"
 struct S { the_field: (u32,) }
 impl S {
@@ -266,7 +353,7 @@ impl S {
 
     #[test]
     fn test_struct_field_completion_autoderef() {
-        check(
+        check_no_kw(
             r#"
 struct A { the_field: (u32, i32) }
 impl A {
@@ -282,7 +369,7 @@ impl A {
 
     #[test]
     fn test_no_struct_field_completion_for_method_call() {
-        check(
+        check_no_kw(
             r#"
 struct A { the_field: u32 }
 fn foo(a: A) { a.$0() }
@@ -293,7 +380,7 @@ fn foo(a: A) { a.$0() }
 
     #[test]
     fn test_visibility_filtering() {
-        check(
+        check_no_kw(
             r#"
 //- /lib.rs crate:lib new_source_root:local
 pub mod m {
@@ -312,7 +399,7 @@ fn foo(a: lib::m::A) { a.$0 }
             "#]],
         );
 
-        check(
+        check_no_kw(
             r#"
 //- /lib.rs crate:lib new_source_root:library
 pub mod m {
@@ -331,7 +418,7 @@ fn foo(a: lib::m::A) { a.$0 }
             "#]],
         );
 
-        check(
+        check_no_kw(
             r#"
 //- /lib.rs crate:lib new_source_root:library
 pub mod m {
@@ -348,7 +435,7 @@ fn foo(a: lib::m::A) { a.$0 }
             "#]],
         );
 
-        check(
+        check_no_kw(
             r#"
 //- /lib.rs crate:lib new_source_root:local
 pub struct A {}
@@ -366,7 +453,7 @@ fn foo(a: lib::A) { a.$0 }
                 me pub_method() fn(&self)
             "#]],
         );
-        check(
+        check_no_kw(
             r#"
 //- /lib.rs crate:lib new_source_root:library
 pub struct A {}
@@ -488,7 +575,7 @@ fn foo(a: lib::A) { a.$0 }
 
     #[test]
     fn test_local_impls() {
-        check(
+        check_no_kw(
             r#"
 pub struct A {}
 mod m {
@@ -509,7 +596,6 @@ fn foo(a: A) {
 }
 "#,
             expect![[r#"
-                me local_method()      fn(&self)
                 me pub_module_method() fn(&self)
             "#]],
         );
@@ -517,7 +603,7 @@ fn foo(a: A) {
 
     #[test]
     fn test_doc_hidden_filtering() {
-        check(
+        check_no_kw(
             r#"
 //- /lib.rs crate:lib deps:dep
 fn foo(a: dep::A) { a.$0 }
@@ -544,7 +630,7 @@ impl A {
 
     #[test]
     fn test_union_field_completion() {
-        check(
+        check_no_kw(
             r#"
 union U { field: u8, other: u16 }
 fn foo(u: U) { u.$0 }
@@ -558,7 +644,7 @@ fn foo(u: U) { u.$0 }
 
     #[test]
     fn test_method_completion_only_fitting_impls() {
-        check(
+        check_no_kw(
             r#"
 struct A<T> {}
 impl A<u32> {
@@ -577,7 +663,7 @@ fn foo(a: A<u32>) { a.$0 }
 
     #[test]
     fn test_trait_method_completion() {
-        check(
+        check_no_kw(
             r#"
 struct A {}
 trait Trait { fn the_method(&self); }
@@ -607,7 +693,7 @@ fn foo(a: A) { a.the_method();$0 }
 
     #[test]
     fn test_trait_method_completion_deduplicated() {
-        check(
+        check_no_kw(
             r"
 struct A {}
 trait Trait { fn the_method(&self); }
@@ -622,7 +708,7 @@ fn foo(a: &A) { a.$0 }
 
     #[test]
     fn completes_trait_method_from_other_module() {
-        check(
+        check_no_kw(
             r"
 struct A {}
 mod m {
@@ -640,7 +726,7 @@ fn foo(a: A) { a.$0 }
 
     #[test]
     fn test_no_non_self_method() {
-        check(
+        check_no_kw(
             r#"
 struct A {}
 impl A {
@@ -656,7 +742,7 @@ fn foo(a: A) {
 
     #[test]
     fn test_tuple_field_completion() {
-        check(
+        check_no_kw(
             r#"
 fn foo() {
    let b = (0, 3.14);
@@ -672,7 +758,7 @@ fn foo() {
 
     #[test]
     fn test_tuple_struct_field_completion() {
-        check(
+        check_no_kw(
             r#"
 struct S(i32, f64);
 fn foo() {
@@ -689,7 +775,7 @@ fn foo() {
 
     #[test]
     fn test_tuple_field_inference() {
-        check(
+        check_no_kw(
             r#"
 pub struct S;
 impl S { pub fn blah(&self) {} }
@@ -698,8 +784,7 @@ struct T(S);
 
 impl T {
     fn foo(&self) {
-        // FIXME: This doesn't work without the trailing `a` as `0.` is a float
-        self.0.a$0
+        self.0.$0
     }
 }
 "#,
@@ -711,7 +796,7 @@ impl T {
 
     #[test]
     fn test_field_no_same_name() {
-        check(
+        check_no_kw(
             r#"
 //- minicore: deref
 struct A { field: u8 }
@@ -734,7 +819,7 @@ fn test(a: A) {
 
     #[test]
     fn test_tuple_field_no_same_index() {
-        check(
+        check_no_kw(
             r#"
 //- minicore: deref
 struct A(u8);
@@ -757,7 +842,7 @@ fn test(a: A) {
 
     #[test]
     fn test_tuple_struct_deref_to_tuple_no_same_index() {
-        check(
+        check_no_kw(
             r#"
 //- minicore: deref
 struct A(u8);
@@ -779,7 +864,7 @@ fn test(a: A) {
 
     #[test]
     fn test_completion_works_in_consts() {
-        check(
+        check_no_kw(
             r#"
 struct A { the_field: u32 }
 const X: u32 = {
@@ -794,7 +879,7 @@ const X: u32 = {
 
     #[test]
     fn works_in_simple_macro_1() {
-        check(
+        check_no_kw(
             r#"
 macro_rules! m { ($e:expr) => { $e } }
 struct A { the_field: u32 }
@@ -811,7 +896,7 @@ fn foo(a: A) {
     #[test]
     fn works_in_simple_macro_2() {
         // this doesn't work yet because the macro doesn't expand without the token -- maybe it can be fixed with better recovery
-        check(
+        check_no_kw(
             r#"
 macro_rules! m { ($e:expr) => { $e } }
 struct A { the_field: u32 }
@@ -827,7 +912,7 @@ fn foo(a: A) {
 
     #[test]
     fn works_in_simple_macro_recursive_1() {
-        check(
+        check_no_kw(
             r#"
 macro_rules! m { ($e:expr) => { $e } }
 struct A { the_field: u32 }
@@ -843,7 +928,7 @@ fn foo(a: A) {
 
     #[test]
     fn macro_expansion_resilient() {
-        check(
+        check_no_kw(
             r#"
 macro_rules! d {
     () => {};
@@ -869,7 +954,7 @@ fn foo(a: A) {
 
     #[test]
     fn test_method_completion_issue_3547() {
-        check(
+        check_no_kw(
             r#"
 struct HashSet<T> {}
 impl<T> HashSet<T> {
@@ -888,7 +973,7 @@ fn foo() {
 
     #[test]
     fn completes_method_call_when_receiver_is_a_macro_call() {
-        check(
+        check_no_kw(
             r#"
 struct S;
 impl S { fn foo(&self) {} }
@@ -903,7 +988,7 @@ fn main() { make_s!().f$0; }
 
     #[test]
     fn completes_after_macro_call_in_submodule() {
-        check(
+        check_no_kw(
             r#"
 macro_rules! empty {
     () => {};
@@ -931,7 +1016,7 @@ mod foo {
 
     #[test]
     fn issue_8931() {
-        check(
+        check_no_kw(
             r#"
 //- minicore: fn
 struct S;
@@ -958,7 +1043,7 @@ impl S {
 
     #[test]
     fn completes_bare_fields_and_methods_in_methods() {
-        check(
+        check_no_kw(
             r#"
 struct Foo { field: i32 }
 
@@ -972,7 +1057,7 @@ impl Foo { fn foo(&self) { $0 } }"#,
                 bt u32              u32
             "#]],
         );
-        check(
+        check_no_kw(
             r#"
 struct Foo(i32);
 
@@ -990,7 +1075,7 @@ impl Foo { fn foo(&mut self) { $0 } }"#,
 
     #[test]
     fn macro_completion_after_dot() {
-        check(
+        check_no_kw(
             r#"
 macro_rules! m {
     ($e:expr) => { $e };
@@ -1015,7 +1100,7 @@ fn f() {
 
     #[test]
     fn completes_method_call_when_receiver_type_has_errors_issue_10297() {
-        check(
+        check_no_kw(
             r#"
 //- minicore: iterator, sized
 struct Vec<T>;
@@ -1066,7 +1151,7 @@ fn main() {
 
     #[test]
     fn issue_12484() {
-        check(
+        check_no_kw(
             r#"
 //- minicore: sized
 trait SizeUser {
@@ -1088,7 +1173,7 @@ fn test(thing: impl Encrypt) {
 
     #[test]
     fn only_consider_same_type_once() {
-        check(
+        check_no_kw(
             r#"
 //- minicore: deref
 struct A(u8);
@@ -1114,7 +1199,7 @@ fn test(a: A) {
 
     #[test]
     fn no_inference_var_in_completion() {
-        check(
+        check_no_kw(
             r#"
 struct S<T>(T);
 fn test(s: S<Unknown>) {
@@ -1129,7 +1214,7 @@ fn test(s: S<Unknown>) {
 
     #[test]
     fn assoc_impl_1() {
-        check(
+        check_no_kw(
             r#"
 //- minicore: deref
 fn main() {
@@ -1170,7 +1255,7 @@ impl<F: core::ops::Deref<Target = impl Bar>> Foo<F> {
 
     #[test]
     fn assoc_impl_2() {
-        check(
+        check_no_kw(
             r#"
 //- minicore: deref
 fn main() {
@@ -1206,7 +1291,7 @@ impl<B: Bar, F: core::ops::Deref<Target = B>> Foo<F> {
 
     #[test]
     fn test_struct_function_field_completion() {
-        check(
+        check_no_kw(
             r#"
 struct S { va_field: u32, fn_field: fn() }
 fn foo() { S { va_field: 0, fn_field: || {} }.fi$0() }
@@ -1231,7 +1316,7 @@ fn foo() { (S { va_field: 0, fn_field: || {} }.fn_field)() }
 
     #[test]
     fn test_tuple_function_field_completion() {
-        check(
+        check_no_kw(
             r#"
 struct B(u32, fn())
 fn foo() {
@@ -1265,20 +1350,261 @@ fn foo() {
 
     #[test]
     fn test_fn_field_dot_access_method_has_parens_false() {
-        check(
+        check_no_kw(
             r#"
 struct Foo { baz: fn() }
 impl Foo {
-    fn bar<T>(self, t: T): T { t }
+    fn bar<T>(self, t: T) -> T { t }
 }
 
 fn baz() {
     let foo = Foo{ baz: || {} };
-    foo.ba$0::<>;
+    foo.ba$0;
 }
 "#,
             expect![[r#"
-                me bar(…) fn(self, T)
+                fd baz                fn()
+                me bar(…) fn(self, T) -> T
+            "#]],
+        );
+
+        check_edit(
+            "baz",
+            r#"
+struct Foo { baz: fn() }
+impl Foo {
+    fn bar<T>(self, t: T) -> T { t }
+}
+
+fn baz() {
+    let foo = Foo{ baz: || {} };
+    foo.ba$0;
+}
+"#,
+            r#"
+struct Foo { baz: fn() }
+impl Foo {
+    fn bar<T>(self, t: T) -> T { t }
+}
+
+fn baz() {
+    let foo = Foo{ baz: || {} };
+    (foo.baz)();
+}
+"#,
+        );
+
+        check_edit(
+            "bar",
+            r#"
+struct Foo { baz: fn() }
+impl Foo {
+    fn bar<T>(self, t: T) -> T { t }
+}
+
+fn baz() {
+    let foo = Foo{ baz: || {} };
+    foo.ba$0;
+}
+"#,
+            r#"
+struct Foo { baz: fn() }
+impl Foo {
+    fn bar<T>(self, t: T) -> T { t }
+}
+
+fn baz() {
+    let foo = Foo{ baz: || {} };
+    foo.bar(${1:t})$0;
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn skip_iter() {
+        check_no_kw(
+            r#"
+        //- minicore: iterator, clone, builtin_impls
+        fn foo() {
+            [].$0
+        }
+        "#,
+            expect![[r#"
+                me clone() (as Clone)                                             fn(&self) -> Self
+                me fmt(…) (use core::fmt::Debug) fn(&self, &mut Formatter<'_>) -> Result<(), Error>
+                me into_iter() (as IntoIterator)       fn(self) -> <Self as IntoIterator>::IntoIter
+            "#]],
+        );
+        check_no_kw(
+            r#"
+//- minicore: iterator
+struct MyIntoIter;
+impl IntoIterator for MyIntoIter {
+    type Item = ();
+    type IntoIter = MyIterator;
+    fn into_iter(self) -> Self::IntoIter {
+        MyIterator
+    }
+}
+
+struct MyIterator;
+impl Iterator for MyIterator {
+    type Item = ();
+    fn next(&mut self) -> Self::Item {}
+}
+
+fn foo() {
+    MyIntoIter.$0
+}
+"#,
+            expect![[r#"
+                me into_iter() (as IntoIterator)                fn(self) -> <Self as IntoIterator>::IntoIter
+                me into_iter().by_ref() (as Iterator)                             fn(&mut self) -> &mut Self
+                me into_iter().into_iter() (as IntoIterator)    fn(self) -> <Self as IntoIterator>::IntoIter
+                me into_iter().next() (as Iterator)        fn(&mut self) -> Option<<Self as Iterator>::Item>
+                me into_iter().nth(…) (as Iterator) fn(&mut self, usize) -> Option<<Self as Iterator>::Item>
+            "#]],
+        );
+        check_no_kw(
+            r#"
+//- minicore: iterator, deref
+struct Foo;
+impl Foo { fn iter(&self) -> Iter { Iter } }
+impl IntoIterator for &Foo {
+    type Item = ();
+    type IntoIter = Iter;
+    fn into_iter(self) -> Self::IntoIter { Iter }
+}
+struct Ref;
+impl core::ops::Deref for Ref {
+    type Target = Foo;
+    fn deref(&self) -> &Self::Target { &Foo }
+}
+struct Iter;
+impl Iterator for Iter {
+    type Item = ();
+    fn next(&mut self) -> Option<Self::Item> { None }
+}
+fn foo() {
+    Ref.$0
+}
+"#,
+            expect![[r#"
+                me deref() (use core::ops::Deref)                 fn(&self) -> &<Self as Deref>::Target
+                me into_iter() (as IntoIterator)           fn(self) -> <Self as IntoIterator>::IntoIter
+                me iter()                                                             fn(&self) -> Iter
+                me iter().by_ref() (as Iterator)                             fn(&mut self) -> &mut Self
+                me iter().into_iter() (as IntoIterator)    fn(self) -> <Self as IntoIterator>::IntoIter
+                me iter().next() (as Iterator)        fn(&mut self) -> Option<<Self as Iterator>::Item>
+                me iter().nth(…) (as Iterator) fn(&mut self, usize) -> Option<<Self as Iterator>::Item>
+            "#]],
+        );
+    }
+
+    #[test]
+    fn skip_await() {
+        check_no_kw(
+            r#"
+//- minicore: future
+struct Foo;
+impl Foo {
+    fn foo(self) {}
+}
+
+async fn foo() -> Foo { Foo }
+
+async fn bar() {
+    foo().$0
+}
+"#,
+            expect![[r#"
+    me await.foo()                                                                      fn(self)
+    me into_future() (use core::future::IntoFuture) fn(self) -> <Self as IntoFuture>::IntoFuture
+"#]],
+        );
+        check_edit(
+            "foo",
+            r#"
+//- minicore: future
+struct Foo;
+impl Foo {
+    fn foo(self) {}
+}
+
+async fn foo() -> Foo { Foo }
+
+async fn bar() {
+    foo().$0
+}
+"#,
+            r#"
+struct Foo;
+impl Foo {
+    fn foo(self) {}
+}
+
+async fn foo() -> Foo { Foo }
+
+async fn bar() {
+    foo().await.foo();$0
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn receiver_without_deref_impl_completion() {
+        check_no_kw(
+            r#"
+//- minicore: receiver
+#![feature(arbitrary_self_types)]
+
+use core::ops::Receiver;
+
+struct Foo;
+
+impl Foo {
+    fn foo(self: Bar) {}
+}
+
+struct Bar;
+
+impl Receiver for Bar {
+    type Target = Foo;
+}
+
+fn main() {
+    let bar = Bar;
+    bar.$0
+}
+"#,
+            expect![[r#"
+                me foo() fn(self: Bar)
+            "#]],
+        );
+    }
+
+    #[test]
+    fn no_iter_suggestion_on_iterator() {
+        check_no_kw(
+            r#"
+//- minicore: iterator
+struct MyIter;
+impl Iterator for MyIter {
+    type Item = ();
+    fn next(&mut self) -> Option<Self::Item> { None }
+}
+
+fn main() {
+    MyIter.$0
+}
+"#,
+            expect![[r#"
+                me by_ref() (as Iterator)                             fn(&mut self) -> &mut Self
+                me into_iter() (as IntoIterator)    fn(self) -> <Self as IntoIterator>::IntoIter
+                me next() (as Iterator)        fn(&mut self) -> Option<<Self as Iterator>::Item>
+                me nth(…) (as Iterator) fn(&mut self, usize) -> Option<<Self as Iterator>::Item>
             "#]],
         );
     }

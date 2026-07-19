@@ -50,12 +50,13 @@ use std::fs;
 use std::os;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::LazyLock;
 use std::sync::OnceLock;
 use std::thread::JoinHandle;
 use std::time::{self, Duration};
 
-use anyhow::{bail, Result};
-use cargo_util::{is_ci, ProcessError};
+use anyhow::{Result, bail};
+use cargo_util::{ProcessError, is_ci};
 use snapbox::IntoData as _;
 use url::Url;
 
@@ -110,15 +111,13 @@ pub mod install;
 pub mod paths;
 pub mod publish;
 pub mod registry;
-pub mod tools;
 
 pub mod prelude {
-    pub use crate::cargo_test;
-    pub use crate::paths::CargoPathExt;
     pub use crate::ArgLineCommandExt;
-    pub use crate::CargoCommandExt;
     pub use crate::ChannelChangerCommandExt;
     pub use crate::TestEnvCommandExt;
+    pub use crate::cargo_test;
+    pub use crate::paths::CargoPathExt;
     pub use snapbox::IntoData;
 }
 
@@ -415,6 +414,16 @@ impl Project {
             .join(paths::get_lib_filename(name, kind))
     }
 
+    /// Path to a dynamic library.
+    /// ex: `/path/to/cargo/target/cit/t0/foo/target/debug/examples/libex.dylib`
+    pub fn dylib(&self, name: &str) -> PathBuf {
+        self.target_debug_dir().join(format!(
+            "{}{name}{}",
+            env::consts::DLL_PREFIX,
+            env::consts::DLL_SUFFIX
+        ))
+    }
+
     /// Path to a debug binary.
     ///
     /// ex: `$CARGO_TARGET_TMPDIR/cit/t0/foo/target/debug/foo`
@@ -479,28 +488,6 @@ impl Project {
         let mut p = process(program);
         p.cwd(self.root());
         execs().with_process_builder(p)
-    }
-
-    /// Creates a `ProcessBuilder` to run cargo.
-    ///
-    /// Arguments can be separated by spaces.
-    ///
-    /// For `cargo run`, see [`Project::rename_run`].
-    ///
-    /// # Example:
-    ///
-    /// ```no_run
-    /// # let p = cargo_test_support::project().build();
-    /// p.cargo("build --bin foo").run();
-    /// ```
-    pub fn cargo(&self, cmd: &str) -> Execs {
-        let cargo = cargo_exe();
-        let mut execs = self.process(&cargo);
-        if let Some(ref mut p) = execs.process_builder {
-            p.env("CARGO", cargo);
-            p.arg_line(cmd);
-        }
-        execs
     }
 
     /// Safely run a process after `cargo build`.
@@ -611,11 +598,6 @@ pub fn main_file(println: &str, externed_deps: &[&str]) -> String {
     buf
 }
 
-/// Path to the cargo binary
-pub fn cargo_exe() -> PathBuf {
-    snapbox::cmd::cargo_bin("cargo")
-}
-
 /// This is the raw output from the process.
 ///
 /// This is similar to `std::process::Output`, however the `status` is
@@ -633,8 +615,8 @@ pub struct RawOutput {
 ///
 /// Construct with
 /// - [`execs`]
-/// - [`cargo_process`]
 /// - [`Project`] methods
+/// - `cargo_process` in testsuite
 #[must_use]
 #[derive(Clone)]
 pub struct Execs {
@@ -1283,6 +1265,28 @@ pub fn basic_lib_manifest(name: &str) -> String {
     )
 }
 
+/// Gets a valid target spec JSON from rustc.
+///
+/// To avoid any hardcoded value, this fetches `x86_64-unknown-none` target
+/// spec JSON directly from `rustc`, as Cargo shouldn't know the JSON schema.
+pub fn target_spec_json() -> &'static str {
+    static TARGET_SPEC_JSON: LazyLock<String> = LazyLock::new(|| {
+        let json = std::process::Command::new("rustc")
+            .env("RUSTC_BOOTSTRAP", "1")
+            .arg("--print")
+            .arg("target-spec-json")
+            .arg("-Zunstable-options")
+            .arg("--target")
+            .arg("x86_64-unknown-none")
+            .output()
+            .expect("rustc --print target-spec-json")
+            .stdout;
+        String::from_utf8(json).expect("utf8 target spec json")
+    });
+
+    TARGET_SPEC_JSON.as_str()
+}
+
 struct RustcInfo {
     verbose_version: String,
     host: String,
@@ -1485,20 +1489,6 @@ impl TestEnvCommandExt for snapbox::cmd::Command {
     }
 }
 
-/// Test the cargo command
-pub trait CargoCommandExt {
-    fn cargo_ui() -> Self;
-}
-
-impl CargoCommandExt for snapbox::cmd::Command {
-    fn cargo_ui() -> Self {
-        Self::new(cargo_exe())
-            .with_assert(compare::assert_ui())
-            .env("CARGO_TERM_COLOR", "always")
-            .test_env()
-    }
-}
-
 /// Add a list of arguments as a line
 pub trait ArgLineCommandExt: Sized {
     fn arg_line(mut self, s: &str) -> Self {
@@ -1524,19 +1514,16 @@ impl ArgLineCommandExt for &mut ProcessBuilder {
     }
 }
 
-impl ArgLineCommandExt for snapbox::cmd::Command {
+impl ArgLineCommandExt for &mut Execs {
     fn arg<S: AsRef<std::ffi::OsStr>>(self, s: S) -> Self {
         self.arg(s)
     }
 }
 
-/// Run `cargo $arg_line`, see [`Execs`]
-pub fn cargo_process(arg_line: &str) -> Execs {
-    let cargo = cargo_exe();
-    let mut p = process(&cargo);
-    p.env("CARGO", cargo);
-    p.arg_line(arg_line);
-    execs().with_process_builder(p)
+impl ArgLineCommandExt for snapbox::cmd::Command {
+    fn arg<S: AsRef<std::ffi::OsStr>>(self, s: S) -> Self {
+        self.arg(s)
+    }
 }
 
 /// Run `git $arg_line`, see [`ProcessBuilder`]
@@ -1616,6 +1603,7 @@ pub fn no_such_file_err_msg() -> String {
 /// Helper to retry a function `n` times.
 ///
 /// The function should return `Some` when it is ready.
+#[track_caller]
 pub fn retry<F, R>(n: u32, mut f: F) -> R
 where
     F: FnMut() -> Option<R>,
@@ -1644,6 +1632,7 @@ fn retry_fails() {
 }
 
 /// Helper that waits for a thread to finish, up to `n` tenths of a second.
+#[track_caller]
 pub fn thread_wait_timeout<T>(n: u32, thread: JoinHandle<T>) -> T {
     retry(n, || thread.is_finished().then_some(()));
     thread.join().unwrap()
@@ -1651,6 +1640,7 @@ pub fn thread_wait_timeout<T>(n: u32, thread: JoinHandle<T>) -> T {
 
 /// Helper that runs some function, and waits up to `n` tenths of a second for
 /// it to finish.
+#[track_caller]
 pub fn threaded_timeout<F, R>(n: u32, f: F) -> R
 where
     F: FnOnce() -> R + Send + 'static,
@@ -1727,6 +1717,7 @@ pub fn assert_deps(project: &Project, fingerprint: &str, test_cb: impl Fn(&Path,
     }
 }
 
+#[track_caller]
 pub fn assert_deps_contains(project: &Project, fingerprint: &str, expected: &[(u8, &str)]) {
     assert_deps(project, fingerprint, |info_path, entries| {
         for (e_kind, e_path) in expected {
@@ -1743,4 +1734,22 @@ pub fn assert_deps_contains(project: &Project, fingerprint: &str, expected: &[(u
             }
         }
     })
+}
+
+#[track_caller]
+pub fn assert_deterministic_mtime(path: impl AsRef<Path>) {
+    // Hardcoded value be removed once alexcrichton/tar-rs#420 is merged and released.
+    // See also rust-lang/cargo#16237
+    const DETERMINISTIC_TIMESTAMP: u64 = 1153704088;
+
+    let path = path.as_ref();
+    let mtime = path.metadata().unwrap().modified().unwrap();
+    let timestamp = mtime
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    assert_eq!(
+        timestamp, DETERMINISTIC_TIMESTAMP,
+        "expected deterministic mtime for {path:?}, got {timestamp}"
+    );
 }

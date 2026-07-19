@@ -1,13 +1,13 @@
 //! Utilities to help with working with sqlite.
 
-use crate::util::interning::InternedString;
 use crate::CargoResult;
+use crate::util::interning::InternedString;
 use rusqlite::types::{FromSql, FromSqlError, ToSql, ToSqlOutput};
 use rusqlite::{Connection, TransactionBehavior};
 
 impl FromSql for InternedString {
     fn column_result(value: rusqlite::types::ValueRef<'_>) -> Result<Self, FromSqlError> {
-        value.as_str().map(InternedString::new)
+        value.as_str().map(InternedString::from)
     }
 }
 

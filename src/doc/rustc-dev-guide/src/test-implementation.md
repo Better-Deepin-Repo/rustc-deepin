@@ -1,7 +1,5 @@
 # The `#[test]` attribute
 
-<!-- toc -->
-
 
 
 Many Rust programmers rely on a built-in attribute called `#[test]`. All
@@ -83,7 +81,7 @@ with your hand-written one, it will not share a [Symbol][Symbol]. This
 technique prevents name collision during code generation and is the foundation
 of Rust's [`macro`] hygiene.
 
-## Step 2: Harness Generation
+## Step 2: Harness generation
 
 Now that our tests are accessible from the root of our crate, we need to do
 something with them using [`rustc_ast`][ast] generates a module like so:
@@ -106,7 +104,7 @@ called [`test`][test] that is part of Rust core, that implements all of the
 runtime for testing. [`test`][test]'s interface is unstable, so the only stable way
 to interact with it is through the `#[test]` macro.
 
-## Step 3: Test Object Generation
+## Step 3: Test object generation
 
 If you've written tests in Rust before, you may be familiar with some of the
 optional attributes available on test functions. For example, a test can be
@@ -159,7 +157,7 @@ $ rustc my_mod.rs -Z unpretty=hir
 [`TestDesc`]: https://doc.rust-lang.org/test/struct.TestDesc.html
 [ast]: ./ast-validation.md
 [Ident]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_span/symbol/struct.Ident.html
-[rustc_ast]: https://github.com/rust-lang/rust/tree/master/compiler/rustc_ast
+[rustc_ast]: https://github.com/rust-lang/rust/tree/HEAD/compiler/rustc_ast
 [Symbol]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_span/symbol/struct.Symbol.html
 [test]: https://doc.rust-lang.org/test/index.html
 [tdaf]: https://doc.rust-lang.org/test/struct.TestDescAndFn.html

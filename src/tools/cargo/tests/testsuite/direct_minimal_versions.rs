@@ -2,7 +2,7 @@
 //!
 //! Note: Some tests are located in the resolver-tests package.
 
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
@@ -46,7 +46,7 @@ fn simple() {
     );
     assert!(
         !lock.contains("1.1.0"),
-        "dep maximimal version cannot be present"
+        "dep maximal version cannot be present"
     );
 }
 
@@ -139,7 +139,7 @@ fn yanked() {
     );
     assert!(
         !lock.contains("1.2.0"),
-        "dep maximimal version cannot be present"
+        "dep maximal version cannot be present"
     );
 }
 
@@ -189,7 +189,7 @@ fn indirect() {
     );
     assert!(
         !lock.contains("1.1.0"),
-        "direct maximimal version cannot be present"
+        "direct maximal version cannot be present"
     );
     assert!(
         !lock.contains("2.0.0"),

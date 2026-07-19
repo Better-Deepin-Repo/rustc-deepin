@@ -3,27 +3,26 @@ use cargo::util::print_available_packages;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 
-use cargo::core::dependency::DepKind;
+use cargo::CargoResult;
 use cargo::core::FeatureValue;
-use cargo::ops::cargo_add::add;
+use cargo::core::dependency::DepKind;
 use cargo::ops::cargo_add::AddOptions;
 use cargo::ops::cargo_add::DepOp;
+use cargo::ops::cargo_add::add;
 use cargo::ops::resolve_ws;
 use cargo::util::command_prelude::*;
-use cargo::util::interning::InternedString;
 use cargo::util::toml_mut::manifest::DepTable;
-use cargo::CargoResult;
 
 pub fn cli() -> Command {
     clap::Command::new("add")
         .about("Add dependencies to a Cargo.toml manifest file")
         .override_usage(
             color_print::cstr!("\
-       <cyan,bold>cargo add</> <cyan>[OPTIONS] <<DEP>>[@<<VERSION>>] ...</>
-       <cyan,bold>cargo add</> <cyan>[OPTIONS]</> <cyan,bold>--path</> <cyan><<PATH>> ...</>
-       <cyan,bold>cargo add</> <cyan>[OPTIONS]</> <cyan,bold>--git</> <cyan><<URL>> ...</>"
+       <bright-cyan,bold>cargo add</> <cyan>[OPTIONS] <<DEP>>[@<<VERSION>>] ...</>
+       <bright-cyan,bold>cargo add</> <cyan>[OPTIONS]</> <bright-cyan,bold>--path</> <cyan><<PATH>> ...</>
+       <bright-cyan,bold>cargo add</> <cyan>[OPTIONS]</> <bright-cyan,bold>--git</> <cyan><<URL>> ...</>"
         ))
-        .after_help(color_print::cstr!("Run `<cyan,bold>cargo help add</>` for more detailed information.\n"))
+        .after_help(color_print::cstr!("Run `<bright-cyan,bold>cargo help add</>` for more detailed information.\n"))
         .group(clap::ArgGroup::new("selected").multiple(true).required(true))
         .args([
             clap::Arg::new("crates")
@@ -100,7 +99,11 @@ Example uses:
                 .value_name("PATH")
                 .help("Filesystem path to local crate to add")
                 .group("selected")
-                .conflicts_with("git"),
+                .conflicts_with("git")
+                .add(clap_complete::engine::ArgValueCompleter::new(
+                    clap_complete::engine::PathCompleter::any()
+                        .filter(|path| path.join("Cargo.toml").exists()),
+                )),
             clap::Arg::new("base")
                 .long("base")
                 .action(ArgAction::Set)
@@ -283,7 +286,7 @@ fn parse_dependencies(gctx: &GlobalContext, matches: &ArgMatches) -> CargoResult
         .map(String::as_str)
         .flat_map(parse_feature)
     {
-        let parsed_value = FeatureValue::new(InternedString::new(feature));
+        let parsed_value = FeatureValue::new(feature.into());
         match parsed_value {
             FeatureValue::Feature(_) => {
                 if 1 < crates.len() {
@@ -297,7 +300,10 @@ fn parse_dependencies(gctx: &GlobalContext, matches: &ArgMatches) -> CargoResult
                             )
                         })
                         .collect::<Vec<_>>();
-                    anyhow::bail!("feature `{feature}` must be qualified by the dependency it's being activated for, like {}", candidates.join(", "));
+                    anyhow::bail!(
+                        "feature `{feature}` must be qualified by the dependency it's being activated for, like {}",
+                        candidates.join(", ")
+                    );
                 }
                 crates
                     .first_mut()
@@ -315,7 +321,9 @@ fn parse_dependencies(gctx: &GlobalContext, matches: &ArgMatches) -> CargoResult
                 ..
             } => {
                 if infer_crate_name {
-                    anyhow::bail!("`{feature}` is unsupported when inferring the crate name, use `{dep_feature}`");
+                    anyhow::bail!(
+                        "`{feature}` is unsupported when inferring the crate name, use `{dep_feature}`"
+                    );
                 }
                 if dep_feature.contains('/') {
                     anyhow::bail!("multiple slashes in feature `{feature}` is not allowed");

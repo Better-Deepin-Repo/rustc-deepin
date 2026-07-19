@@ -34,7 +34,7 @@
 //! impl<T, I: Iterator<Item=T>> SpecExtend<T> for I { /* default impl */ }
 //! ```
 //!
-//! We get that the generic pamameters for `impl2` are `[T, std::vec::IntoIter<T>]`.
+//! We get that the generic parameters for `impl2` are `[T, std::vec::IntoIter<T>]`.
 //! `T` is constrained to be `<I as Iterator>::Item`, so we check only
 //! `std::vec::IntoIter<T>` for repeated parameters, which it doesn't have. The
 //! predicates of `impl1` are only `T: Sized`, which is also a predicate of
@@ -68,7 +68,6 @@
 use rustc_data_structures::fx::FxHashSet;
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_infer::infer::TyCtxtInferExt;
-use rustc_infer::infer::outlives::env::OutlivesEnvironment;
 use rustc_infer::traits::ObligationCause;
 use rustc_infer::traits::specialization_graph::Node;
 use rustc_middle::ty::trait_def::TraitSpecializationKind;
@@ -77,7 +76,6 @@ use rustc_middle::ty::{
 };
 use rustc_span::{ErrorGuaranteed, Span};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
-use rustc_trait_selection::traits::outlives_bounds::InferCtxtExt as _;
 use rustc_trait_selection::traits::{self, ObligationCtxt, translate_args_with_cause, wf};
 use tracing::{debug, instrument};
 
@@ -95,7 +93,7 @@ pub(super) fn check_min_specialization(
 }
 
 fn parent_specialization_node(tcx: TyCtxt<'_>, impl1_def_id: LocalDefId) -> Option<Node> {
-    let trait_ref = tcx.impl_trait_ref(impl1_def_id)?;
+    let trait_ref = tcx.impl_trait_ref(impl1_def_id);
     let trait_def = tcx.trait_def(trait_ref.skip_binder().def_id);
 
     let impl2_node = trait_def.ancestors(tcx, impl1_def_id.to_def_id()).ok()?.nth(1)?;
@@ -121,7 +119,6 @@ fn check_always_applicable(
     impl2_node: Node,
 ) -> Result<(), ErrorGuaranteed> {
     let span = tcx.def_span(impl1_def_id);
-    let mut res = check_has_items(tcx, impl1_def_id, impl2_node, span);
 
     let (impl1_args, impl2_args) = get_impl_args(tcx, impl1_def_id, impl2_node)?;
     let impl2_def_id = impl2_node.def_id();
@@ -133,11 +130,10 @@ fn check_always_applicable(
         unconstrained_parent_impl_args(tcx, impl2_def_id, impl2_args)
     };
 
-    res = res.and(check_static_lifetimes(tcx, &parent_args, span));
-    res = res.and(check_duplicate_params(tcx, impl1_args, parent_args, span));
-    res = res.and(check_predicates(tcx, impl1_def_id, impl1_args, impl2_node, impl2_args, span));
-
-    res
+    check_has_items(tcx, impl1_def_id, impl2_node, span)
+        .and(check_static_lifetimes(tcx, &parent_args, span))
+        .and(check_duplicate_params(tcx, impl1_args, parent_args, span))
+        .and(check_predicates(tcx, impl1_def_id, impl1_args, impl2_node, impl2_args, span))
 }
 
 fn check_has_items(
@@ -176,7 +172,6 @@ fn get_impl_args(
     let ocx = ObligationCtxt::new_with_diagnostics(infcx);
     let param_env = tcx.param_env(impl1_def_id);
     let impl1_span = tcx.def_span(impl1_def_id);
-    let assumed_wf_types = ocx.assumed_wf_types_and_report_errors(param_env, impl1_def_id)?;
 
     let impl1_args = GenericArgs::identity_for_item(tcx, impl1_def_id);
     let impl2_args = translate_args_with_cause(
@@ -188,15 +183,14 @@ fn get_impl_args(
         &ObligationCause::misc(impl1_span, impl1_def_id),
     );
 
-    let errors = ocx.select_all_or_error();
+    let errors = ocx.evaluate_obligations_error_on_ambiguity();
     if !errors.is_empty() {
         let guar = ocx.infcx.err_ctxt().report_fulfillment_errors(errors);
         return Err(guar);
     }
 
-    let implied_bounds = infcx.implied_bounds_tys(param_env, impl1_def_id, &assumed_wf_types);
-    let outlives_env = OutlivesEnvironment::with_bounds(param_env, implied_bounds);
-    let _ = ocx.resolve_regions_and_report_errors(impl1_def_id, &outlives_env);
+    let assumed_wf_types = ocx.assumed_wf_types_and_report_errors(param_env, impl1_def_id)?;
+    let _ = ocx.resolve_regions_and_report_errors(impl1_def_id, param_env, assumed_wf_types);
     let Ok(impl2_args) = infcx.fully_resolve(impl2_args) else {
         let span = tcx.def_span(impl1_def_id);
         let guar = tcx.dcx().emit_err(GenericArgsOnOverriddenImpl { span });
@@ -221,7 +215,7 @@ fn unconstrained_parent_impl_args<'tcx>(
     let impl_generic_predicates = tcx.predicates_of(impl_def_id);
     let mut unconstrained_parameters = FxHashSet::default();
     let mut constrained_params = FxHashSet::default();
-    let impl_trait_ref = tcx.impl_trait_ref(impl_def_id).map(ty::EarlyBinder::instantiate_identity);
+    let impl_trait_ref = tcx.impl_trait_ref(impl_def_id).instantiate_identity();
 
     // Unfortunately the functions in `constrained_generic_parameters` don't do
     // what we want here. We want only a list of constrained parameters while
@@ -230,7 +224,7 @@ fn unconstrained_parent_impl_args<'tcx>(
     for (clause, _) in impl_generic_predicates.predicates.iter() {
         if let ty::ClauseKind::Projection(proj) = clause.kind().skip_binder() {
             let unbound_trait_ref = proj.projection_term.trait_ref(tcx);
-            if Some(unbound_trait_ref) == impl_trait_ref {
+            if unbound_trait_ref == impl_trait_ref {
                 continue;
             }
 
@@ -281,7 +275,7 @@ fn check_duplicate_params<'tcx>(
     span: Span,
 ) -> Result<(), ErrorGuaranteed> {
     let mut base_params = cgp::parameters_for(tcx, parent_args, true);
-    base_params.sort_by_key(|param| param.0);
+    base_params.sort_unstable();
     if let (_, [duplicate, ..]) = base_params.partition_dedup() {
         let param = impl1_args[duplicate.0 as usize];
         return Err(tcx
@@ -379,10 +373,13 @@ fn check_predicates<'tcx>(
         .map(|(c, _span)| c.as_predicate());
 
     // Include the well-formed predicates of the type parameters of the impl.
-    for arg in tcx.impl_trait_ref(impl1_def_id).unwrap().instantiate_identity().args {
+    for arg in tcx.impl_trait_ref(impl1_def_id).instantiate_identity().args {
+        let Some(term) = arg.as_term() else {
+            continue;
+        };
         let infcx = &tcx.infer_ctxt().build(TypingMode::non_body_analysis());
         let obligations =
-            wf::obligations(infcx, tcx.param_env(impl1_def_id), impl1_def_id, 0, arg, span)
+            wf::obligations(infcx, tcx.param_env(impl1_def_id), impl1_def_id, 0, term, span)
                 .unwrap();
 
         assert!(!obligations.has_infer());
@@ -393,43 +390,11 @@ fn check_predicates<'tcx>(
 
     let mut res = Ok(());
     for (clause, span) in impl1_predicates {
-        if !impl2_predicates.iter().any(|pred2| trait_predicates_eq(clause.as_predicate(), *pred2))
-        {
+        if !impl2_predicates.iter().any(|&pred2| clause.as_predicate() == pred2) {
             res = res.and(check_specialization_on(tcx, clause, span))
         }
     }
     res
-}
-
-/// Checks if some predicate on the specializing impl (`predicate1`) is the same
-/// as some predicate on the base impl (`predicate2`).
-///
-/// This basically just checks syntactic equivalence, but is a little more
-/// forgiving since we want to equate `T: Tr` with `T: ~const Tr` so this can work:
-///
-/// ```ignore (illustrative)
-/// #[rustc_specialization_trait]
-/// trait Specialize { }
-///
-/// impl<T: Bound> Tr for T { }
-/// impl<T: ~const Bound + Specialize> const Tr for T { }
-/// ```
-///
-/// However, we *don't* want to allow the reverse, i.e., when the bound on the
-/// specializing impl is not as const as the bound on the base impl:
-///
-/// ```ignore (illustrative)
-/// impl<T: ~const Bound> const Tr for T { }
-/// impl<T: Bound + Specialize> const Tr for T { } // should be T: ~const Bound
-/// ```
-///
-/// So we make that check in this function and try to raise a helpful error message.
-fn trait_predicates_eq<'tcx>(
-    predicate1: ty::Predicate<'tcx>,
-    predicate2: ty::Predicate<'tcx>,
-) -> bool {
-    // FIXME(const_trait_impl)
-    predicate1 == predicate2
 }
 
 #[instrument(level = "debug", skip(tcx))]
@@ -502,6 +467,7 @@ fn trait_specialization_kind<'tcx>(
         | ty::ClauseKind::ConstArgHasType(..)
         | ty::ClauseKind::WellFormed(_)
         | ty::ClauseKind::ConstEvaluatable(..)
+        | ty::ClauseKind::UnstableFeature(_)
         | ty::ClauseKind::HostEffect(..) => None,
     }
 }

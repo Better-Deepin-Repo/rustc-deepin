@@ -3,11 +3,11 @@
 use std::fs;
 use std::sync::{Arc, Mutex};
 
+use crate::prelude::*;
 use cargo_test_support::git::{self, repo};
-use cargo_test_support::prelude::*;
 use cargo_test_support::registry::{self, Package, RegistryBuilder, Response};
+use cargo_test_support::{Project, paths};
 use cargo_test_support::{basic_manifest, project, publish, str};
-use cargo_test_support::{paths, Project};
 
 const CLEAN_FOO_JSON: &str = r#"
     {
@@ -114,14 +114,15 @@ fn simple() {
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `crates-io`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `crates-io`
 
 "#]])
@@ -156,8 +157,9 @@ fn duplicate_version() {
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
 [WARNING] crate foo@0.0.1 already exists on crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [VERIFYING] foo v0.0.1 ([ROOT]/foo)
@@ -207,15 +209,14 @@ fn simple_publish_with_http() {
 
     p.cargo("publish --no-verify --token sekrit --registry dummy-registry")
         .with_stderr_data(str![[r#"
+[WARNING] `cargo publish --token` is deprecated in favor of using `cargo login` and environment variables
 [UPDATING] `dummy-registry` index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `dummy-registry`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `dummy-registry`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `dummy-registry`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `dummy-registry`
 
 "#]])
@@ -251,14 +252,12 @@ fn simple_publish_with_asymmetric() {
         .masquerade_as_nightly_cargo(&["asymmetric-token"])
         .with_stderr_data(str![[r#"
 [UPDATING] `dummy-registry` index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `dummy-registry`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `dummy-registry`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `dummy-registry`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `dummy-registry`
 
 "#]])
@@ -307,14 +306,15 @@ or use environment variable CARGO_REGISTRY_TOKEN
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `crates-io`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `crates-io`
 
 "#]])
@@ -351,15 +351,14 @@ fn simple_with_index() {
         .arg("--index")
         .arg(registry.index_url().as_str())
         .with_stderr_data(str![[r#"
+[WARNING] `cargo publish --token` is deprecated in favor of using `cargo login` and environment variables
 [UPDATING] `[ROOT]/registry` index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `[ROOT]/registry`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `[ROOT]/registry`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `[ROOT]/registry`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `[ROOT]/registry`
 
 "#]])
@@ -398,10 +397,13 @@ fn git_deps() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[ERROR] all dependencies must have a version specified when publishing.
-dependency `foo` does not specify a version
-Note: The published dependency will use the version from crates.io,
-the `git` specification will be removed from the dependency declaration.
+[ERROR] failed to verify manifest at `[ROOT]/foo/Cargo.toml`
+
+Caused by:
+  all dependencies must have a version requirement specified when publishing.
+  dependency `foo` does not specify a version
+  Note: The published dependency will use the version from crates.io,
+  the `git` specification will be removed from the dependency declaration.
 
 "#]])
         .run();
@@ -438,10 +440,13 @@ fn path_dependency_no_version() {
         .with_status(101)
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[ERROR] all dependencies must have a version specified when publishing.
-dependency `bar` does not specify a version
-Note: The published dependency will use the version from crates.io,
-the `path` specification will be removed from the dependency declaration.
+[ERROR] failed to verify manifest at `[ROOT]/foo/Cargo.toml`
+
+Caused by:
+  all dependencies must have a version requirement specified when publishing.
+  dependency `bar` does not specify a version
+  Note: The published dependency will use the version from crates.io,
+  the `path` specification will be removed from the dependency declaration.
 
 "#]])
         .run();
@@ -558,8 +563,8 @@ fn publish_clean() {
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `crates-io`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `crates-io`
 
 "#]])
@@ -607,8 +612,8 @@ fn publish_in_sub_repo() {
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo/bar)
 [UPLOADED] foo v0.0.1 to registry `crates-io`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `crates-io`
 
 "#]])
@@ -656,8 +661,8 @@ fn publish_when_ignored() {
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `crates-io`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `crates-io`
 
 "#]])
@@ -704,8 +709,8 @@ fn ignore_when_crate_ignored() {
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo/bar)
 [UPLOADED] foo v0.0.1 to registry `crates-io`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `crates-io`
 
 "#]])
@@ -775,8 +780,6 @@ fn dry_run() {
         .arg(registry.index_url().as_str())
         .with_stderr_data(str![[r#"
 [UPDATING] `[ROOT]/registry` index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [VERIFYING] foo v0.0.1 ([ROOT]/foo)
@@ -895,8 +898,8 @@ fn publish_allowed_registry() {
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `alternative`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `alternative`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `alternative`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `alternative`
 
 "#]])
@@ -956,8 +959,8 @@ fn publish_implicitly_to_only_allowed_registry() {
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `alternative`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `alternative`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `alternative`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `alternative`
 
 "#]])
@@ -974,6 +977,60 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
             ".cargo_vcs_info.json",
         ],
     );
+}
+
+#[allow(dead_code)]
+fn publish_when_both_publish_and_index_specified() {
+    let registry = RegistryBuilder::new()
+        .http_api()
+        .http_index()
+        .alternative()
+        .build();
+
+    let p = project().build();
+
+    let _ = repo(&paths::root().join("foo"))
+        .file(
+            "Cargo.toml",
+            r#"
+                [package]
+                name = "foo"
+                version = "0.0.1"
+                edition = "2015"
+                authors = []
+                license = "MIT"
+                description = "foo"
+                documentation = "foo"
+                homepage = "foo"
+                repository = "foo"
+                publish = ["registry"]
+            "#,
+        )
+        .file("src/main.rs", "fn main() {}")
+        .build();
+
+    p.cargo("publish")
+        .arg("--index")
+        .arg(registry.index_url().as_str())
+        .arg("--token")
+        .arg(registry.token())
+        .with_stderr_data(str![[r#"
+[WARNING] `cargo publish --token` is deprecated in favor of using `cargo login` and environment variables
+[WARNING] `--index` will ignore registries set by `package.publish` in Cargo.toml, and may cause unexpected push to prohibited registry
+[HELP] use `--registry` instead or set `publish = true` in Cargo.toml to suppress this warning
+[UPDATING] [..] index
+[PACKAGING] foo v0.0.1 ([ROOT]/foo)
+[PACKAGED] 5 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[VERIFYING] foo v0.0.1 ([ROOT]/foo)
+[COMPILING] foo v0.0.1 ([ROOT]/foo/target/package/foo-0.0.1)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+[UPLOADING] foo v0.0.1 ([ROOT]/foo)
+[UPLOADED] foo v0.0.1 to registry [..]
+[NOTE] waiting for foo v0.0.1 to be available at registry [..]
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
+[PUBLISHED] foo v0.0.1 at registry [..]
+"#]])
+        .run();
 }
 
 #[allow(dead_code)]
@@ -1011,6 +1068,7 @@ fn publish_failed_with_index_and_only_allowed_registry() {
         .arg(registry.index_url().as_str())
         .with_status(101)
         .with_stderr_data(str![[r#"
+...
 [ERROR] command-line argument --index requires --token to be specified
 
 "#]])
@@ -1115,8 +1173,9 @@ The registry `alternative` is not listed in the `package.publish` value in Cargo
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [VERIFYING] foo v0.0.1 ([ROOT]/foo)
@@ -1124,8 +1183,8 @@ See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `crates-io`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `crates-io`
 
 "#]])
@@ -1166,8 +1225,9 @@ fn publish_with_select_features() {
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [VERIFYING] foo v0.0.1 ([ROOT]/foo)
@@ -1175,8 +1235,8 @@ See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `crates-io`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `crates-io`
 
 "#]])
@@ -1217,8 +1277,9 @@ fn publish_with_all_features() {
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [VERIFYING] foo v0.0.1 ([ROOT]/foo)
@@ -1226,8 +1287,8 @@ See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `crates-io`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `crates-io`
 
 "#]])
@@ -1329,19 +1390,19 @@ error[E0425]: cannot find function `newfunc` in crate `bar`
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [UPDATING] crates.io index
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [VERIFYING] foo v0.0.1 ([ROOT]/foo)
-[COMPILING] bar v1.0.0
 [COMPILING] foo v0.0.1 ([ROOT]/foo/target/package/foo-0.0.1)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `crates-io`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `crates-io`
 
 "#]])
@@ -1426,8 +1487,9 @@ or use environment variable CARGO_REGISTRY_TOKEN
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [VERIFYING] foo v0.0.1 ([ROOT]/foo)
@@ -1541,15 +1603,16 @@ fn publish_git_with_version() {
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo v0.1.0 ([ROOT]/foo)
 [UPDATING] crates.io index
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.1.0 ([ROOT]/foo)
 [UPLOADED] foo v0.1.0 to registry `crates-io`
-[NOTE] waiting for `foo v0.1.0` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.1.0 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.1.0 at registry `crates-io`
 
 "#]])
@@ -1804,8 +1867,8 @@ fn publish_dev_dep_stripping() {
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.1.0 ([ROOT]/foo)
 [UPLOADED] foo v0.1.0 to registry `crates-io`
-[NOTE] waiting for `foo v0.1.0` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.1.0 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.1.0 at registry `crates-io`
 
 "#]])
@@ -2137,14 +2200,15 @@ fn credentials_ambiguous_filename() {
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
 [WARNING] both `[ROOT]/home/.cargo/credentials` and `[ROOT]/home/.cargo/credentials.toml` exist. Using `[ROOT]/home/.cargo/credentials`
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `crates-io`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `crates-io`
 
 "#]])
@@ -2256,7 +2320,7 @@ fn api_error_json() {
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
-[ERROR] failed to publish to registry at http://127.0.0.1:[..]/
+[ERROR] failed to publish foo v0.0.1 to registry at http://127.0.0.1:[..]/
 
 Caused by:
   the remote server responded with an error (status 403 Forbidden): you must be logged in
@@ -2304,7 +2368,7 @@ fn api_error_200() {
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
-[ERROR] failed to publish to registry at http://127.0.0.1:[..]/
+[ERROR] failed to publish foo v0.0.1 to registry at http://127.0.0.1:[..]/
 
 Caused by:
   the remote server responded with an [ERROR] max upload size is 123
@@ -2352,7 +2416,7 @@ fn api_error_code() {
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
-[ERROR] failed to publish to registry at http://127.0.0.1:[..]/
+[ERROR] failed to publish foo v0.0.1 to registry at http://127.0.0.1:[..]/
 
 Caused by:
   failed to get a 200 OK response, got 400
@@ -2409,7 +2473,7 @@ fn api_curl_error() {
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
-[ERROR] failed to publish to registry at http://127.0.0.1:[..]/
+[ERROR] failed to publish foo v0.0.1 to registry at http://127.0.0.1:[..]/
 
 Caused by:
   [52] Server returned nothing (no headers, no data) (Empty reply from server)
@@ -2457,7 +2521,7 @@ fn api_other_error() {
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
-[ERROR] failed to publish to registry at http://127.0.0.1:[..]/
+[ERROR] failed to publish foo v0.0.1 to registry at http://127.0.0.1:[..]/
 
 Caused by:
   invalid response body from server
@@ -2505,14 +2569,15 @@ fn in_package_workspace() {
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] li v0.0.1 ([ROOT]/foo/li)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] li v0.0.1 ([ROOT]/foo/li)
 [UPLOADED] li v0.0.1 to registry `crates-io`
-[NOTE] waiting for `li v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for li v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] li v0.0.1 at registry `crates-io`
 
 "#]])
@@ -2523,8 +2588,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
 
 #[allow(dead_code)]
 fn with_duplicate_spec_in_members() {
-    // Use local registry for faster test times since no publish will occur
-    let registry = registry::init();
+    let registry = RegistryBuilder::new().http_api().http_index().build();
 
     let p = project()
         .file(
@@ -2569,9 +2633,25 @@ fn with_duplicate_spec_in_members() {
 
     p.cargo("publish --no-verify")
         .replace_crates_io(registry.index_url())
-        .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] the `-p` argument must be specified to select a single package to publish
+[UPDATING] crates.io index
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
+[PACKAGING] bar v0.0.1 ([ROOT]/foo/bar)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
+[PACKAGING] li v0.0.1 ([ROOT]/foo/li)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[UPLOADING] bar v0.0.1 ([ROOT]/foo/bar)
+[UPLOADED] bar v0.0.1 to registry `crates-io`
+[UPLOADING] li v0.0.1 ([ROOT]/foo/li)
+[UPLOADED] li v0.0.1 to registry `crates-io`
+[NOTE] waiting for bar v0.0.1 or li v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crates should be available shortly
+[PUBLISHED] bar v0.0.1 and li v0.0.1 at registry `crates-io`
 
 "#]])
         .run();
@@ -2613,14 +2693,15 @@ fn in_package_workspace_with_members_with_features_old() {
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] li v0.0.1 ([ROOT]/foo/li)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] li v0.0.1 ([ROOT]/foo/li)
 [UPLOADED] li v0.0.1 to registry `crates-io`
-[NOTE] waiting for `li v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for li v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] li v0.0.1 at registry `crates-io`
 
 "#]])
@@ -2631,8 +2712,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
 
 #[allow(dead_code)]
 fn in_virtual_workspace() {
-    // Use local registry for faster test times since no publish will occur
-    let registry = registry::init();
+    let registry = RegistryBuilder::new().http_api().http_index().build();
 
     let p = project()
         .file(
@@ -2659,9 +2739,18 @@ fn in_virtual_workspace() {
 
     p.cargo("publish --no-verify")
         .replace_crates_io(registry.index_url())
-        .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] the `-p` argument must be specified in the root of a virtual workspace
+[UPDATING] crates.io index
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
+[PACKAGING] foo v0.0.1 ([ROOT]/foo/foo)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[UPLOADING] foo v0.0.1 ([ROOT]/foo/foo)
+[UPLOADED] foo v0.0.1 to registry `crates-io`
+[NOTE] waiting for foo v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
+[PUBLISHED] foo v0.0.1 at registry `crates-io`
 
 "#]])
         .run();
@@ -2669,8 +2758,7 @@ fn in_virtual_workspace() {
 
 #[allow(dead_code)]
 fn in_virtual_workspace_with_p() {
-    // `publish` generally requires a remote registry
-    let registry = registry::RegistryBuilder::new().http_api().build();
+    let registry = RegistryBuilder::new().http_api().http_index().build();
 
     let p = project()
         .file(
@@ -2712,14 +2800,15 @@ fn in_virtual_workspace_with_p() {
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] li v0.0.1 ([ROOT]/foo/li)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] li v0.0.1 ([ROOT]/foo/li)
 [UPLOADED] li v0.0.1 to registry `crates-io`
-[NOTE] waiting for `li v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for li v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] li v0.0.1 at registry `crates-io`
 
 "#]])
@@ -2764,7 +2853,7 @@ fn in_package_workspace_not_found() {
         .with_stderr_data(str![[r#"
 [ERROR] package ID specification `li` did not match any packages
 
-	Did you mean `foo`?
+[HELP] a package with a similar name exists: `foo`
 
 "#]])
         .run();
@@ -2772,8 +2861,7 @@ fn in_package_workspace_not_found() {
 
 #[allow(dead_code)]
 fn in_package_workspace_found_multiple() {
-    // Use local registry for faster test times since no publish will occur
-    let registry = registry::init();
+    let registry = RegistryBuilder::new().http_api().http_index().build();
 
     let p = project()
         .file(
@@ -2818,19 +2906,33 @@ fn in_package_workspace_found_multiple() {
 
     p.cargo("publish -p li* --no-verify")
         .replace_crates_io(registry.index_url())
-        .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] the `-p` argument must be specified to select a single package to publish
+[UPDATING] crates.io index
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
+[PACKAGING] li v0.0.1 ([ROOT]/foo/li)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
+[PACKAGING] lii v0.0.1 ([ROOT]/foo/lii)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[UPLOADING] li v0.0.1 ([ROOT]/foo/li)
+[UPLOADED] li v0.0.1 to registry `crates-io`
+[UPLOADING] lii v0.0.1 ([ROOT]/foo/lii)
+[UPLOADED] lii v0.0.1 to registry `crates-io`
+[NOTE] waiting for li v0.0.1 or lii v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crates should be available shortly
+[PUBLISHED] li v0.0.1 and lii v0.0.1 at registry `crates-io`
 
 "#]])
         .run();
 }
 
 #[allow(dead_code)]
-// https://github.com/rust-lang/cargo/issues/10536
 fn publish_path_dependency_without_workspace() {
-    // Use local registry for faster test times since no publish will occur
-    let registry = registry::init();
+    let registry = RegistryBuilder::new().http_api().http_index().build();
 
     let p = project()
         .file(
@@ -2866,7 +2968,7 @@ fn publish_path_dependency_without_workspace() {
         .with_stderr_data(str![[r#"
 [ERROR] package ID specification `bar` did not match any packages
 
-	Did you mean `foo`?
+[HELP] a package with a similar name exists: `foo`
 
 "#]])
         .run();
@@ -2896,8 +2998,9 @@ fn http_api_not_noop() {
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [VERIFYING] foo v0.0.1 ([ROOT]/foo)
@@ -2905,8 +3008,8 @@ See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
 [UPLOADED] foo v0.0.1 to registry `crates-io`
-[NOTE] waiting for `foo v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for foo v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.0.1 at registry `crates-io`
 
 "#]])
@@ -2977,14 +3080,15 @@ fn wait_for_first_publish() {
         .with_status(0)
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] delay v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] delay v0.0.1 ([ROOT]/foo)
 [UPLOADED] delay v0.0.1 to registry `crates-io`
-[NOTE] waiting for `delay v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for delay v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] delay v0.0.1 at registry `crates-io`
 
 "#]])
@@ -3070,14 +3174,15 @@ fn wait_for_first_publish_underscore() {
         .with_status(0)
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] delay_with_underscore v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] delay_with_underscore v0.0.1 ([ROOT]/foo)
 [UPLOADED] delay_with_underscore v0.0.1 to registry `crates-io`
-[NOTE] waiting for `delay_with_underscore v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for delay_with_underscore v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] delay_with_underscore v0.0.1 at registry `crates-io`
 
 "#]])
@@ -3170,14 +3275,15 @@ fn wait_for_subsequent_publish() {
         .with_status(0)
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] delay v0.0.2 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] delay v0.0.2 ([ROOT]/foo)
 [UPLOADED] delay v0.0.2 to registry `crates-io`
-[NOTE] waiting for `delay v0.0.2` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for delay v0.0.2 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] delay v0.0.2 at registry `crates-io`
 
 "#]])
@@ -3240,8 +3346,9 @@ fn skip_wait_for_publish() {
         .masquerade_as_nightly_cargo(&["publish-timeout"])
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
@@ -3288,16 +3395,18 @@ fn timeout_waiting_for_publish() {
         .with_status(0)
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] delay v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] delay v0.0.1 ([ROOT]/foo)
 [UPLOADED] delay v0.0.1 to registry `crates-io`
-[NOTE] waiting for `delay v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
-[WARNING] timed out waiting for `delay v0.0.1` to be available in registry `crates-io`
-[NOTE] the registry may have a backlog that is delaying making the crate available. The crate should be available soon.
+[NOTE] waiting for delay v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
+[WARNING] timed out waiting for delay v0.0.1 to be available in registry `crates-io`
+  |
+  = [NOTE] the registry may have a backlog that is delaying making the crate available. The crate should be available soon.
 
 "#]])
         .run();
@@ -3373,31 +3482,35 @@ fn timeout_waiting_for_dependency_publish() {
         )
         .build();
 
-    p.cargo("publish --no-verify -Zpublish-timeout -Zpackage-workspace")
+    p.cargo("publish --no-verify -Zpublish-timeout")
         .replace_crates_io(registry.index_url())
-        .masquerade_as_nightly_cargo(&["publish-timeout", "package-workspace"])
+        .masquerade_as_nightly_cargo(&["publish-timeout"])
         .with_status(101)
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] dep v0.0.1 ([ROOT]/foo/dep)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] main v0.0.1 ([ROOT]/foo/main)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] other v0.0.1 ([ROOT]/foo/other)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] dep v0.0.1 ([ROOT]/foo/dep)
 [UPLOADED] dep v0.0.1 to registry `crates-io`
-[NOTE] waiting for `dep v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
-[WARNING] timed out waiting for `dep v0.0.1` to be available in registry `crates-io`
-[NOTE] the registry may have a backlog that is delaying making the crate available. The crate should be available soon.
-[ERROR] unable to publish `main v0.0.1` and `other v0.0.1` due to time out while waiting for published dependencies to be available.
+[NOTE] waiting for dep v0.0.1 to be available at registry `crates-io`.
+      2 remaining crates to be published
+[WARNING] timed out waiting for dep v0.0.1 to be available in registry `crates-io`
+  |
+  = [NOTE] the registry may have a backlog that is delaying making the crate available. The crate should be available soon.
+[ERROR] unable to publish main v0.0.1 and other v0.0.1 due to a timeout while waiting for published dependencies to be available.
 
 "#]])
         .run();
@@ -3420,60 +3533,23 @@ fn package_selection() {
         .file("b/src/lib.rs", "#[test] fn b() {}")
         .build();
 
-    p.cargo("publish --no-verify --dry-run -Zpackage-workspace --workspace")
+    p.cargo("publish --no-verify --dry-run --workspace")
         .replace_crates_io(registry.index_url())
-        .masquerade_as_nightly_cargo(&["package-workspace"])
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no description, license, license-file, documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no description, license, license-file, documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] a v0.1.0 ([ROOT]/foo/a)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
-[WARNING] manifest has no description, license, license-file, documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no description, license, license-file, documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] b v0.1.0 ([ROOT]/foo/b)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] a v0.1.0 ([ROOT]/foo/a)
 [WARNING] aborting upload due to dry run
 [UPLOADING] b v0.1.0 ([ROOT]/foo/b)
-[WARNING] aborting upload due to dry run
-
-"#]])
-        .with_stdout_data(str![[r#""#]])
-        .run();
-
-    p.cargo("publish --no-verify --dry-run -Zpackage-workspace --package a --package b")
-        .replace_crates_io(registry.index_url())
-        .masquerade_as_nightly_cargo(&["package-workspace"])
-        .with_stderr_data(str![[r#"
-[UPDATING] crates.io index
-[WARNING] manifest has no description, license, license-file, documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
-[PACKAGING] a v0.1.0 ([ROOT]/foo/a)
-[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
-[WARNING] manifest has no description, license, license-file, documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
-[PACKAGING] b v0.1.0 ([ROOT]/foo/b)
-[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
-[UPLOADING] a v0.1.0 ([ROOT]/foo/a)
-[WARNING] aborting upload due to dry run
-[UPLOADING] b v0.1.0 ([ROOT]/foo/b)
-[WARNING] aborting upload due to dry run
-
-"#]])
-        .with_stdout_data(str![[r#""#]])
-        .run();
-
-    p.cargo("publish --no-verify --dry-run -Zpackage-workspace --workspace --exclude b")
-        .replace_crates_io(registry.index_url())
-        .masquerade_as_nightly_cargo(&["package-workspace"])
-        .with_stderr_data(str![[r#"
-[UPDATING] crates.io index
-[WARNING] manifest has no description, license, license-file, documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
-[PACKAGING] a v0.1.0 ([ROOT]/foo/a)
-[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
-[UPLOADING] a v0.1.0 ([ROOT]/foo/a)
 [WARNING] aborting upload due to dry run
 
 "#]])
@@ -3482,35 +3558,38 @@ See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for
 
     p.cargo("publish --no-verify --dry-run --package a --package b")
         .replace_crates_io(registry.index_url())
-        .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] the `--package (multiple occurrences)` flag is unstable, and only available on the nightly channel of Cargo, but this is the `stable` channel
-See https://doc.rust-lang.org/book/appendix-07-nightly-rust.html for more information about Rust release channels.
-See https://github.com/rust-lang/cargo/issues/10948 for more information about the `--package (multiple occurrences)` flag.
+[UPDATING] crates.io index
+[WARNING] manifest has no description, license, license-file, documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
+[PACKAGING] a v0.1.0 ([ROOT]/foo/a)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[WARNING] manifest has no description, license, license-file, documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
+[PACKAGING] b v0.1.0 ([ROOT]/foo/b)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[UPLOADING] a v0.1.0 ([ROOT]/foo/a)
+[WARNING] aborting upload due to dry run
+[UPLOADING] b v0.1.0 ([ROOT]/foo/b)
+[WARNING] aborting upload due to dry run
 
 "#]])
         .with_stdout_data(str![[r#""#]])
         .run();
 
-    p.cargo("publish --no-verify --dry-run --workspace")
+    p.cargo("publish --no-verify --dry-run --workspace --exclude b")
         .replace_crates_io(registry.index_url())
-        .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] the `--workspace` flag is unstable, and only available on the nightly channel of Cargo, but this is the `stable` channel
-See https://doc.rust-lang.org/book/appendix-07-nightly-rust.html for more information about Rust release channels.
-See https://github.com/rust-lang/cargo/issues/10948 for more information about the `--workspace` flag.
-
-"#]])
-        .with_stdout_data(str![[r#""#]])
-        .run();
-
-    p.cargo("publish --no-verify --dry-run --exclude b")
-        .replace_crates_io(registry.index_url())
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] the `--exclude` flag is unstable, and only available on the nightly channel of Cargo, but this is the `stable` channel
-See https://doc.rust-lang.org/book/appendix-07-nightly-rust.html for more information about Rust release channels.
-See https://github.com/rust-lang/cargo/issues/10948 for more information about the `--exclude` flag.
+[UPDATING] crates.io index
+[WARNING] manifest has no description, license, license-file, documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
+[PACKAGING] a v0.1.0 ([ROOT]/foo/a)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[UPLOADING] a v0.1.0 ([ROOT]/foo/a)
+[WARNING] aborting upload due to dry run
 
 "#]])
         .with_stdout_data(str![[r#""#]])
@@ -3551,14 +3630,15 @@ fn wait_for_git_publish() {
         .with_status(0)
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
-[WARNING] manifest has no documentation, homepage or repository.
-See https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info.
+[WARNING] manifest has no documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
 [PACKAGING] delay v0.0.2 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] delay v0.0.2 ([ROOT]/foo)
 [UPLOADED] delay v0.0.2 to registry `crates-io`
-[NOTE] waiting for `delay v0.0.2` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for delay v0.0.2 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] delay v0.0.2 at registry `crates-io`
 
 "#]])
@@ -3613,7 +3693,7 @@ fn invalid_token() {
 [PACKAGING] foo v0.0.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
 [UPLOADING] foo v0.0.1 ([ROOT]/foo)
-[ERROR] failed to publish to registry at http://127.0.0.1:[..]/
+[ERROR] failed to publish foo v0.0.1 to registry at http://127.0.0.1:[..]/
 
 Caused by:
   token contains invalid characters.
@@ -3723,26 +3803,10 @@ fn workspace_with_local_deps_project() -> Project {
 
 #[cargo_test]
 fn workspace_with_local_deps() {
-    let crates_io = registry::init();
-    let p = workspace_with_local_deps_project();
-
-    p.cargo("publish")
-        .replace_crates_io(crates_io.index_url())
-        .with_status(101)
-        .with_stderr_data(str![[r#"
-[ERROR] the `-p` argument must be specified to select a single package to publish
-
-"#]])
-        .run();
-}
-
-#[cargo_test]
-fn workspace_with_local_deps_nightly() {
     let registry = RegistryBuilder::new().http_api().http_index().build();
     let p = workspace_with_local_deps_project();
 
-    p.cargo("publish -Zpackage-workspace")
-        .masquerade_as_nightly_cargo(&["package-workspace"])
+    p.cargo("publish")
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
@@ -3766,24 +3830,23 @@ fn workspace_with_local_deps_nightly() {
 [VERIFYING] level1 v0.0.1 ([ROOT]/foo/level1)
 [UPDATING] crates.io index
 [UNPACKING] level2 v0.0.1 (registry `[ROOT]/foo/target/package/tmp-registry`)
-[COMPILING] level3 v0.0.1
 [COMPILING] level2 v0.0.1
 [COMPILING] level1 v0.0.1 ([ROOT]/foo/target/package/level1-0.0.1)
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] level3 v0.0.1 ([ROOT]/foo/level3)
 [UPLOADED] level3 v0.0.1 to registry `crates-io`
-[NOTE] waiting for `level3 v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for level3 v0.0.1 to be available at registry `crates-io`.
+      2 remaining crates to be published
 [PUBLISHED] level3 v0.0.1 at registry `crates-io`
 [UPLOADING] level2 v0.0.1 ([ROOT]/foo/level2)
 [UPLOADED] level2 v0.0.1 to registry `crates-io`
-[NOTE] waiting for `level2 v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for level2 v0.0.1 to be available at registry `crates-io`.
+      1 remaining crate to be published
 [PUBLISHED] level2 v0.0.1 at registry `crates-io`
 [UPLOADING] level1 v0.0.1 ([ROOT]/foo/level1)
 [UPLOADED] level1 v0.0.1 to registry `crates-io`
-[NOTE] waiting for `level1 v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for level1 v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] level1 v0.0.1 at registry `crates-io`
 
 "#]])
@@ -3849,8 +3912,7 @@ fn workspace_parallel() {
         .file("c/src/lib.rs", "")
         .build();
 
-    p.cargo("publish -Zpackage-workspace")
-        .masquerade_as_nightly_cargo(&["package-workspace"])
+    p.cargo("publish")
         .replace_crates_io(registry.index_url())
         .with_stderr_data(
             str![[r#"
@@ -3877,17 +3939,17 @@ fn workspace_parallel() {
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADED] b v0.0.1 to registry `crates-io`
 [UPLOADED] a v0.0.1 to registry `crates-io`
-[NOTE] waiting for `a v0.0.1` or `b v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
-[PUBLISHED] a v0.0.1, b v0.0.1 at registry `crates-io`
+[NOTE] waiting for a v0.0.1 or b v0.0.1 to be available at registry `crates-io`.
+      1 remaining crate to be published
+[PUBLISHED] a v0.0.1 and b v0.0.1 at registry `crates-io`
 [UPLOADING] c v0.0.1 ([ROOT]/foo/c)
 [UPLOADED] c v0.0.1 to registry `crates-io`
-[NOTE] waiting for `c v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for c v0.0.1 to be available at registry `crates-io`
 [PUBLISHED] c v0.0.1 at registry `crates-io`
 [UPLOADING] a v0.0.1 ([ROOT]/foo/a)
 [UPLOADING] b v0.0.1 ([ROOT]/foo/b)
 [UPDATING] crates.io index
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 
 "#]]
             .unordered(),
@@ -3939,8 +4001,7 @@ fn workspace_missing_dependency() {
         .file("b/src/lib.rs", "")
         .build();
 
-    p.cargo("publish -Zpackage-workspace -p b")
-        .masquerade_as_nightly_cargo(&["package-workspace"])
+    p.cargo("publish -p b")
         .replace_crates_io(registry.index_url())
         .with_status(101)
         .with_stderr_data(str![[r#"
@@ -3957,8 +4018,7 @@ Caused by:
 "#]])
         .run();
 
-    p.cargo("publish -Zpackage-workspace -p a")
-        .masquerade_as_nightly_cargo(&["package-workspace"])
+    p.cargo("publish -p a")
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
@@ -3969,16 +4029,15 @@ Caused by:
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [UPLOADING] a v0.0.1 ([ROOT]/foo/a)
 [UPLOADED] a v0.0.1 to registry `crates-io`
-[NOTE] waiting for `a v0.0.1` to be available at registry `crates-io`.
-You may press ctrl-c to skip waiting; the crate should be available shortly.
+[NOTE] waiting for a v0.0.1 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] a v0.0.1 at registry `crates-io`
 
 "#]])
         .run();
 
     // Publishing the whole workspace now will fail, as `a` is already published.
-    p.cargo("publish -Zpackage-workspace")
-        .masquerade_as_nightly_cargo(&["package-workspace"])
+    p.cargo("publish")
         .replace_crates_io(registry.index_url())
         .with_status(101)
         .with_stderr_data(str![[r#"
@@ -3991,11 +4050,7 @@ You may press ctrl-c to skip waiting; the crate should be available shortly.
 
 #[cargo_test]
 fn one_unpublishable_package() {
-    let _alt_reg = registry::RegistryBuilder::new()
-        .http_api()
-        .http_index()
-        .alternative()
-        .build();
+    let registry = RegistryBuilder::new().http_api().http_index().build();
 
     let p = project()
         .file(
@@ -4019,7 +4074,7 @@ fn one_unpublishable_package() {
             publish = false
 
             [dependencies]
-            dep = { path = "../dep", version = "0.1.0", registry = "alternative" }
+            dep = { path = "../dep", version = "0.1.0" }
         "#,
         )
         .file("main/src/main.rs", "fn main() {}")
@@ -4034,18 +4089,509 @@ fn one_unpublishable_package() {
             license = "MIT"
             description = "dep"
             repository = "bar"
-            publish = ["alternative"]
         "#,
         )
         .file("dep/src/lib.rs", "")
         .build();
 
-    p.cargo("publish -Zpackage-workspace")
-        .masquerade_as_nightly_cargo(&["package-workspace"])
+    p.cargo("publish")
+        .replace_crates_io(registry.index_url())
+        .with_stderr_data(str![[r#"
+[UPDATING] crates.io index
+[PACKAGING] dep v0.1.0 ([ROOT]/foo/dep)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[VERIFYING] dep v0.1.0 ([ROOT]/foo/dep)
+[COMPILING] dep v0.1.0 ([ROOT]/foo/target/package/dep-0.1.0)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+[UPLOADING] dep v0.1.0 ([ROOT]/foo/dep)
+[UPLOADED] dep v0.1.0 to registry `crates-io`
+[NOTE] waiting for dep v0.1.0 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
+[PUBLISHED] dep v0.1.0 at registry `crates-io`
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn virtual_ws_with_multiple_unpublishable_package() {
+    let registry = RegistryBuilder::new().http_api().http_index().build();
+
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+            [workspace]
+            members = ["dep", "main", "publishable"]
+            "#,
+        )
+        .file(
+            "main/Cargo.toml",
+            r#"
+            [package]
+            name = "main"
+            version = "0.0.1"
+            edition = "2015"
+            authors = []
+            license = "MIT"
+            description = "main"
+            repository = "bar"
+            publish = false
+
+            [dependencies]
+            dep = { path = "../dep", version = "0.1.0" }
+        "#,
+        )
+        .file("main/src/main.rs", "fn main() {}")
+        .file(
+            "dep/Cargo.toml",
+            r#"
+            [package]
+            name = "dep"
+            version = "0.1.0"
+            edition = "2015"
+            authors = []
+            license = "MIT"
+            description = "dep"
+            repository = "bar"
+            publish = false
+        "#,
+        )
+        .file("dep/src/lib.rs", "")
+        .file(
+            "publishable/Cargo.toml",
+            r#"
+            [package]
+            name = "publishable"
+            version = "0.1.0"
+            edition = "2015"
+            license = "MIT"
+            description = "foo"
+            repository = "foo"
+        "#,
+        )
+        .file("publishable/src/lib.rs", "")
+        .build();
+
+    p.cargo("publish")
+        .replace_crates_io(registry.index_url())
+        .with_stderr_data(str![[r#"
+[UPDATING] crates.io index
+[PACKAGING] publishable v0.1.0 ([ROOT]/foo/publishable)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[VERIFYING] publishable v0.1.0 ([ROOT]/foo/publishable)
+[COMPILING] publishable v0.1.0 ([ROOT]/foo/target/package/publishable-0.1.0)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+[UPLOADING] publishable v0.1.0 ([ROOT]/foo/publishable)
+[UPLOADED] publishable v0.1.0 to registry `crates-io`
+[NOTE] waiting for publishable v0.1.0 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
+[PUBLISHED] publishable v0.1.0 at registry `crates-io`
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn workspace_flag_with_unpublishable_packages() {
+    let registry = RegistryBuilder::new().http_api().http_index().build();
+
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+            [workspace]
+            members = ["publishable", "non-publishable"]
+
+            [package]
+            name = "cwd"
+            version = "0.0.0"
+            edition = "2015"
+            license = "MIT"
+            description = "foo"
+            repository = "foo"
+            publish = false
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .file(
+            "publishable/Cargo.toml",
+            r#"
+            [package]
+            name = "publishable"
+            version = "0.0.0"
+            edition = "2015"
+            license = "MIT"
+            description = "foo"
+            repository = "foo"
+            publish = true
+        "#,
+        )
+        .file("publishable/src/lib.rs", "")
+        .file(
+            "non-publishable/Cargo.toml",
+            r#"
+            [package]
+            name = "non-publishable"
+            version = "0.0.0"
+            edition = "2015"
+            license = "MIT"
+            description = "foo"
+            repository = "foo"
+            publish = false
+        "#,
+        )
+        .file("non-publishable/src/lib.rs", "")
+        .build();
+
+    p.cargo("publish --workspace")
+        .replace_crates_io(registry.index_url())
+        .with_stderr_data(str![[r#"
+[UPDATING] crates.io index
+[PACKAGING] publishable v0.0.0 ([ROOT]/foo/publishable)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[VERIFYING] publishable v0.0.0 ([ROOT]/foo/publishable)
+[COMPILING] publishable v0.0.0 ([ROOT]/foo/target/package/publishable-0.0.0)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+[UPLOADING] publishable v0.0.0 ([ROOT]/foo/publishable)
+[UPLOADED] publishable v0.0.0 to registry `crates-io`
+[NOTE] waiting for publishable v0.0.0 to be available at registry `crates-io`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
+[PUBLISHED] publishable v0.0.0 at registry `crates-io`
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn unpublishable_package_as_versioned_dev_dep() {
+    let registry = RegistryBuilder::new().http_api().http_index().build();
+
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+            [workspace]
+            members = ["dep", "main"]
+            "#,
+        )
+        .file(
+            "main/Cargo.toml",
+            r#"
+            [package]
+            name = "main"
+            version = "0.0.1"
+            edition = "2015"
+            license = "MIT"
+            description = "main"
+            repository = "bar"
+
+            [dev-dependencies]
+            dep = { path = "../dep", version = "0.1.0" }
+        "#,
+        )
+        .file("main/src/main.rs", "fn main() {}")
+        .file(
+            "dep/Cargo.toml",
+            r#"
+            [package]
+            name = "dep"
+            version = "0.1.0"
+            edition = "2015"
+            license = "MIT"
+            description = "dep"
+            repository = "bar"
+            publish = false
+        "#,
+        )
+        .file("dep/src/lib.rs", "")
+        .build();
+
+    // It is expected to find the versioned dev dep not being published,
+    // regardless with `--dry-run` or `--no-verify`.
+    p.cargo("publish")
+        .replace_crates_io(registry.index_url())
         .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] `main` cannot be published.
-`package.publish` must be set to `true` or a non-empty list in Cargo.toml to publish.
+[UPDATING] crates.io index
+[PACKAGING] main v0.0.1 ([ROOT]/foo/main)
+[UPDATING] crates.io index
+[ERROR] failed to prepare local package for uploading
+
+Caused by:
+  no matching package named `dep` found
+  location searched: crates.io index
+  required by package `main v0.0.1 ([ROOT]/foo/main)`
+
+"#]])
+        .run();
+
+    p.cargo("publish --dry-run")
+        .replace_crates_io(registry.index_url())
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[UPDATING] crates.io index
+[PACKAGING] main v0.0.1 ([ROOT]/foo/main)
+[UPDATING] crates.io index
+[ERROR] failed to prepare local package for uploading
+
+Caused by:
+  no matching package named `dep` found
+  location searched: crates.io index
+  required by package `main v0.0.1 ([ROOT]/foo/main)`
+
+"#]])
+        .run();
+
+    p.cargo("publish --no-verify")
+        .replace_crates_io(registry.index_url())
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[UPDATING] crates.io index
+[PACKAGING] main v0.0.1 ([ROOT]/foo/main)
+[UPDATING] crates.io index
+[ERROR] failed to prepare local package for uploading
+
+Caused by:
+  no matching package named `dep` found
+  location searched: crates.io index
+  required by package `main v0.0.1 ([ROOT]/foo/main)`
+
+"#]])
+        .run();
+}
+
+#[allow(dead_code)]
+fn all_unpublishable_packages() {
+    let registry = RegistryBuilder::new().http_api().http_index().build();
+
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+            [workspace]
+            members = ["non-publishable1", "non-publishable2"]
+            "#,
+        )
+        .file(
+            "non-publishable1/Cargo.toml",
+            r#"
+            [package]
+            name = "non-publishable1"
+            version = "0.0.0"
+            edition = "2015"
+            license = "MIT"
+            description = "foo"
+            repository = "foo"
+            publish = false
+        "#,
+        )
+        .file("non-publishable1/src/lib.rs", "")
+        .file(
+            "non-publishable2/Cargo.toml",
+            r#"
+            [package]
+            name = "non-publishable2"
+            version = "0.0.0"
+            edition = "2015"
+            license = "MIT"
+            description = "foo"
+            repository = "foo"
+            publish = false
+        "#,
+        )
+        .file("non-publishable2/src/lib.rs", "")
+        .build();
+
+    p.cargo("publish --workspace")
+        .replace_crates_io(registry.index_url())
+        .with_stderr_data(str![[r#"
+[WARNING] nothing to publish, but found 2 unpublishable packages
+  |
+  = [HELP] to publish packages, set `package.publish` to `true` or a non-empty list
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn checksum_changed() {
+    let registry = RegistryBuilder::new().http_api().http_index().build();
+
+    Package::new("dep", "1.0.0").publish();
+    Package::new("transitive", "1.0.0")
+        .dep("dep", "1.0.0")
+        .publish();
+
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+                [workspace]
+                members = ["dep"]
+
+                [package]
+                name = "foo"
+                version = "0.0.1"
+                edition = "2015"
+                authors = []
+                license = "MIT"
+                description = "foo"
+                documentation = "foo"
+
+                [dependencies]
+                dep = { path = "./dep", version = "1.0.0" }
+                transitive = "1.0.0"
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .file(
+            "dep/Cargo.toml",
+            r#"
+                [package]
+                name = "dep"
+                version = "1.0.0"
+                edition = "2015"
+            "#,
+        )
+        .file("dep/src/lib.rs", "")
+        .build();
+
+    p.cargo("check").run();
+
+    p.cargo("publish --dry-run --workspace")
+        .replace_crates_io(registry.index_url())
+        .with_stderr_data(str![[r#"
+[UPDATING] crates.io index
+[WARNING] crate dep@1.0.0 already exists on crates.io index
+[WARNING] manifest has no description, license, license-file, documentation, homepage or repository
+  |
+  = [NOTE] see https://doc.rust-lang.org/cargo/reference/manifest.html#package-metadata for more info
+[PACKAGING] dep v1.0.0 ([ROOT]/foo/dep)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[PACKAGING] foo v0.0.1 ([ROOT]/foo)
+[UPDATING] crates.io index
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[VERIFYING] dep v1.0.0 ([ROOT]/foo/dep)
+[COMPILING] dep v1.0.0 ([ROOT]/foo/target/package/dep-1.0.0)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+[VERIFYING] foo v0.0.1 ([ROOT]/foo)
+[UNPACKING] dep v1.0.0 (registry `[ROOT]/foo/target/package/tmp-registry`)
+[COMPILING] dep v1.0.0
+[COMPILING] transitive v1.0.0
+[COMPILING] foo v0.0.1 ([ROOT]/foo/target/package/foo-0.0.1)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+[UPLOADING] dep v1.0.0 ([ROOT]/foo/dep)
+[WARNING] aborting upload due to dry run
+[UPLOADING] foo v0.0.1 ([ROOT]/foo)
+[WARNING] aborting upload due to dry run
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn workspace_publish_rate_limit_error() {
+    let registry = registry::RegistryBuilder::new()
+        .http_api()
+        .http_index()
+        .add_responder("/api/v1/crates/new", |_req, _| {
+            // For simplicity, let's just return rate limit error for all requests
+            // This simulates hitting rate limit during workspace publish
+            Response {
+                code: 429,
+                headers: vec!["Retry-After: 3600".to_string()],
+                body: format!(
+                    "You have published too many new crates in a short period of time. Please try again after Fri, 18 Jul 2025 20:00:34 GMT or email help@crates.io to have your limit increased."
+                ).into_bytes(),
+            }
+        })
+        .build();
+
+    let p = project()
+        .file(
+            "Cargo.toml",
+            r#"
+            [workspace]
+            members = ["package_a", "package_b", "package_c"]
+            "#,
+        )
+        .file("src/lib.rs", "")
+        .file(
+            "package_a/Cargo.toml",
+            r#"
+            [package]
+            name = "package_a"
+            version = "0.1.0"
+            edition = "2015"
+            license = "MIT"
+            description = "package a"
+            repository = "https://github.com/test/package_a"
+            "#,
+        )
+        .file("package_a/src/lib.rs", "")
+        .file(
+            "package_b/Cargo.toml",
+            r#"
+            [package]
+            name = "package_b"
+            version = "0.1.0"
+            edition = "2015"
+            license = "MIT"
+            description = "package b"
+            repository = "https://github.com/test/package_b"
+            "#,
+        )
+        .file("package_b/src/lib.rs", "")
+        .file(
+            "package_c/Cargo.toml",
+            r#"
+            [package]
+            name = "package_c"
+            version = "0.1.0"
+            edition = "2015"
+            license = "MIT"
+            description = "package c"
+            repository = "https://github.com/test/package_c"
+
+            [dependencies]
+            package_a = { version = "0.1.0", path = "../package_a" }
+            "#,
+        )
+        .file("package_c/src/lib.rs", "")
+        .build();
+
+    // This demonstrates the improved error message after the fix
+    // The user now knows which package failed and what packages remain to be published
+    p.cargo("publish --workspace --no-verify")
+        .replace_crates_io(registry.index_url())
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[UPDATING] crates.io index
+[PACKAGING] package_a v0.1.0 ([ROOT]/foo/package_a)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[PACKAGING] package_b v0.1.0 ([ROOT]/foo/package_b)
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[PACKAGING] package_c v0.1.0 ([ROOT]/foo/package_c)
+[UPDATING] crates.io index
+[PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
+[UPLOADING] package_a v0.1.0 ([ROOT]/foo/package_a)
+[ERROR] failed to publish package_a v0.1.0 to registry at http://127.0.0.1:[..]/
+
+[NOTE] the following crates have not been published yet:
+  package_b v0.1.0 ([ROOT]/foo/package_b)
+  package_c v0.1.0 ([ROOT]/foo/package_c)
+
+Caused by:
+  failed to get a 200 OK response, got 429
+  headers:
+  	HTTP/1.1 429
+  	Content-Length: 172
+  	Connection: close
+  	Retry-After: 3600
+  	
+  body:
+  You have published too many new crates in a short period of time. Please try again after Fri, 18 Jul 2025 20:00:34 GMT or email help@crates.io to have your limit increased.
 
 "#]])
         .run();

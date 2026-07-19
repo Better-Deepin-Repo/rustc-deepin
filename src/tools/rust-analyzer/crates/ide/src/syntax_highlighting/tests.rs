@@ -1,14 +1,15 @@
 use std::time::Instant;
 
-use expect_test::{expect_file, ExpectFile};
-use ide_db::SymbolKind;
+use expect_test::{ExpectFile, expect_file};
+use ide_db::{MiniCore, SymbolKind};
 use span::Edition;
-use test_utils::{bench, bench_fixture, skip_slow_tests, AssertLinear};
+use test_utils::{AssertLinear, bench, bench_fixture, skip_slow_tests};
 
-use crate::{fixture, FileRange, HighlightConfig, HlTag, TextRange};
+use crate::{FileRange, HighlightConfig, HlTag, TextRange, fixture};
 
-const HL_CONFIG: HighlightConfig = HighlightConfig {
+const HL_CONFIG: HighlightConfig<'_> = HighlightConfig {
     strings: true,
+    comments: true,
     punctuation: true,
     specialize_punctuation: true,
     specialize_operator: true,
@@ -16,6 +17,7 @@ const HL_CONFIG: HighlightConfig = HighlightConfig {
     inject_doc_comment: true,
     macro_bang: true,
     syntactic_name_ref_highlighting: false,
+    minicore: MiniCore::default(),
 };
 
 #[test]
@@ -136,21 +138,10 @@ use self::foo as bar;
 fn test_highlighting() {
     check_highlighting(
         r#"
-//- minicore: derive, copy
+//- minicore: derive, copy, fn
 //- /main.rs crate:main deps:foo
 use inner::{self as inner_mod};
 mod inner {}
-
-pub mod ops {
-    #[lang = "fn_once"]
-    pub trait FnOnce<Args> {}
-
-    #[lang = "fn_mut"]
-    pub trait FnMut<Args>: FnOnce<Args> {}
-
-    #[lang = "fn"]
-    pub trait Fn<Args>: FnMut<Args> {}
-}
 
 struct Foo {
     x: u32,
@@ -218,7 +209,7 @@ fn const_param<const FOO: usize>() -> usize {
     FOO
 }
 
-use ops::Fn;
+use core::ops::Fn;
 fn baz<F: Fn() -> ()>(f: F) {
     f()
 }
@@ -397,7 +388,7 @@ mod __ {
 }
 
 macro_rules! void {
-    ($($tt:tt)*) => {}
+    ($($tt:tt)*) => {discard!($($tt:tt)*)}
 }
 
 struct __ where Self:;
@@ -420,6 +411,31 @@ void!('static 'self 'unsafe)
             false,
         );
     }
+}
+
+#[test]
+fn test_keyword_macro_edition_highlighting() {
+    check_highlighting(
+        r#"
+//- /main.rs crate:main edition:2018 deps:lib2015,lib2024
+lib2015::void_2015!(try async await gen);
+lib2024::void_2024!(try async await gen);
+//- /lib2015.rs crate:lib2015 edition:2015
+#[macro_export]
+macro_rules! void_2015 {
+    ($($tt:tt)*) => {discard!($($tt:tt)*)}
+}
+
+//- /lib2024.rs crate:lib2024 edition:2024
+#[macro_export]
+macro_rules! void_2024 {
+    ($($tt:tt)*) => {discard!($($tt:tt)*)}
+}
+
+"#,
+        expect_file![format!("./test_data/highlight_keywords_macros.html")],
+        false,
+    );
 }
 
 #[test]
@@ -465,6 +481,10 @@ macro_rules! toho {
 macro_rules! reuse_twice {
     ($literal:literal) => {{stringify!($literal); format_args!($literal)}};
 }
+
+use foo::bar as baz;
+trait Bar = Baz;
+trait Foo = Bar;
 
 fn main() {
     let a = '\n';
@@ -571,7 +591,7 @@ fn main() {
 fn test_unsafe_highlighting() {
     check_highlighting(
         r#"
-//- minicore: sized
+//- minicore: sized, asm
 macro_rules! id {
     ($($tt:tt)*) => {
         $($tt)*
@@ -582,76 +602,79 @@ macro_rules! unsafe_deref {
         *(&() as *const ())
     };
 }
-static mut MUT_GLOBAL: Struct = Struct { field: 0 };
-static GLOBAL: Struct = Struct { field: 0 };
-unsafe fn unsafe_fn() {}
 
 union Union {
-    a: u32,
-    b: f32,
+    field: u32,
 }
 
 struct Struct { field: i32 }
+
+static mut MUT_GLOBAL: Struct = Struct { field: 0 };
+unsafe fn unsafe_fn() {}
+
 impl Struct {
     unsafe fn unsafe_method(&self) {}
 }
 
-#[repr(packed)]
-struct Packed {
-    a: u16,
-}
-
 unsafe trait UnsafeTrait {}
-unsafe impl UnsafeTrait for Packed {}
+unsafe impl UnsafeTrait for Union {}
 impl !UnsafeTrait for () {}
 
 fn unsafe_trait_bound<T: UnsafeTrait>(_: T) {}
 
-trait DoTheAutoref {
-    fn calls_autoref(&self);
-}
-
-impl DoTheAutoref for u16 {
-    fn calls_autoref(&self) {}
+extern {
+    static EXTERN_STATIC: ();
 }
 
 fn main() {
-    let x = &5 as *const _ as *const usize;
-    let u = Union { b: 0 };
+    let x: *const usize;
+    let u: Union;
 
+    // id should be safe here, but unsafe_deref should not
     id! {
         unsafe { unsafe_deref!() }
     };
 
     unsafe {
+        // unsafe macro calls
         unsafe_deref!();
         id! { unsafe_deref!() };
 
         // unsafe fn and method calls
         unsafe_fn();
-        let b = u.b;
-        match u {
-            Union { b: 0 } => (),
-            Union { a } => (),
-        }
+        self::unsafe_fn();
+        (unsafe_fn as unsafe fn())();
         Struct { field: 0 }.unsafe_method();
 
+        u.field;
+        &u.field;
+        &raw const u.field;
+        // this should be safe!
+        let Union { field: _ };
+        // but not these
+        let Union { field };
+        let Union { field: field };
+        let Union { field: ref field };
+        let Union { field: (_ | ref field) };
+
         // unsafe deref
-        *x;
+        *&raw const*&*x;
 
         // unsafe access to a static mut
         MUT_GLOBAL.field;
-        GLOBAL.field;
+        &MUT_GLOBAL.field;
+        &raw const MUT_GLOBAL.field;
+        MUT_GLOBAL;
+        &MUT_GLOBAL;
+        &raw const MUT_GLOBAL;
+        EXTERN_STATIC;
+        &EXTERN_STATIC;
+        &raw const EXTERN_STATIC;
 
-        // unsafe ref of packed fields
-        let packed = Packed { a: 0 };
-        let a = &packed.a;
-        let ref a = packed.a;
-        let Packed { ref a } = packed;
-        let Packed { a: ref _a } = packed;
-
-        // unsafe auto ref of packed field
-        packed.a.calls_autoref();
+        core::arch::asm!(
+            "push {base}",
+            base = const 0
+        );
     }
 }
 "#,
@@ -718,6 +741,14 @@ fn test_highlight_doc_comment() {
 //! fn test() {}
 //! ```
 
+//! Syntactic name ref highlighting testing
+//! ```rust
+//! extern crate self;
+//! extern crate other as otter;
+//! extern crate core;
+//! trait T { type Assoc; }
+//! fn f<Arg>() -> use<Arg> where (): T<Assoc = ()> {}
+//! ```
 mod outline_module;
 
 /// ```
@@ -987,14 +1018,44 @@ impl t for foo {
 }
 
 #[test]
-fn test_injection() {
+fn test_injection_2() {
     check_highlighting(
         r##"
-fn fixture(ra_fixture: &str) {}
+fn fixture(#[rust_analyzer::rust_fixture] ra_fixture: &str) {}
 
 fn main() {
     fixture(r#"
-trait Foo {
+@@- /main.rs crate:main deps:other_crate
+fn test() {
+    let x = other_crate::foo::S::thing();
+    x;
+} //^ i128
+
+@@- /lib.rs crate:other_crate
+pub mod foo {
+    pub struct S;
+    impl S {
+        pub fn thing() -> i128 { 0 }
+    }
+}
+    "#);
+}
+"##,
+        expect_file!["./test_data/highlight_injection_2.html"],
+        false,
+    );
+}
+
+#[test]
+fn test_injection() {
+    check_highlighting(
+        r##"
+fn fixture(#[rust_analyzer::rust_fixture] ra_fixture: &str) {}
+
+fn main() {
+    fixture(r#"
+@@- minicore: sized
+trait Foo: Sized {
     fn foo() {
         println!("2 + 2 = {}", 4);
     }
@@ -1080,6 +1141,9 @@ pub struct Struct;
     );
 }
 
+// Rainbow highlighting uses a deterministic hash (fxhash) but the hashing does differ
+// depending on the pointer width so only runs this on 64-bit targets.
+#[cfg(target_pointer_width = "64")]
 #[test]
 fn test_rainbow_highlighting() {
     check_highlighting(
@@ -1188,10 +1252,23 @@ fn foo(x: &fn(&dyn Trait)) {}
 /// Highlights the code given by the `ra_fixture` argument, renders the
 /// result as HTML, and compares it with the HTML file given as `snapshot`.
 /// Note that the `snapshot` file is overwritten by the rendered HTML.
-fn check_highlighting(ra_fixture: &str, expect: ExpectFile, rainbow: bool) {
+fn check_highlighting_with_config(
+    #[rust_analyzer::rust_fixture] ra_fixture: &str,
+    config: HighlightConfig<'_>,
+    expect: ExpectFile,
+    rainbow: bool,
+) {
     let (analysis, file_id) = fixture::file(ra_fixture.trim());
-    let actual_html = &analysis.highlight_as_html(file_id, rainbow).unwrap();
+    let actual_html = &analysis.highlight_as_html_with_config(config, file_id, rainbow).unwrap();
     expect.assert_eq(actual_html)
+}
+
+fn check_highlighting(
+    #[rust_analyzer::rust_fixture] ra_fixture: &str,
+    expect: ExpectFile,
+    rainbow: bool,
+) {
+    check_highlighting_with_config(ra_fixture, HL_CONFIG, expect, rainbow)
 }
 
 #[test]
@@ -1265,7 +1342,7 @@ fn benchmark_syntax_highlighting_parser() {
             })
             .count()
     };
-    assert_eq!(hash, 1167);
+    assert_eq!(hash, 1606);
 }
 
 #[test]
@@ -1381,6 +1458,98 @@ fn main() {
 fn template() {}
 "#,
         expect_file!["./test_data/highlight_issue_18089.html"],
+        false,
+    );
+}
+
+#[test]
+fn issue_19357() {
+    check_highlighting(
+        r#"
+//- /foo.rs
+fn main() {
+    let x = &raw mut 5;
+}
+//- /main.rs
+"#,
+        expect_file!["./test_data/highlight_issue_19357.html"],
+        false,
+    );
+}
+
+#[test]
+fn test_comment_highlighting_disabled() {
+    // Test that comments are not highlighted when disabled
+    check_highlighting_with_config(
+        r#"
+// This is a regular comment
+/// This is a doc comment
+fn main() {
+    // Another comment
+    println!("Hello, world!");
+}
+"#,
+        HighlightConfig {
+            comments: false, // Disable comment highlighting
+            ..HL_CONFIG
+        },
+        expect_file!["./test_data/highlight_comments_disabled.html"],
+        false,
+    );
+}
+
+#[test]
+fn regression_20952() {
+    check_highlighting(
+        r#"
+//- minicore: fmt
+fn main() {
+    format_args!("{} {}, {} (подозрение на спам: {:.2}%)"б);
+}
+"#,
+        expect_file!["./test_data/regression_20952.html"],
+        false,
+    );
+}
+
+#[test]
+fn test_deprecated_highlighting() {
+    check_highlighting(
+        r#"
+//- /foo.rs crate:foo deps:bar
+#![deprecated]
+use crate as _;
+extern crate bar;
+#[deprecated]
+macro_rules! macro_ {
+    () => {};
+}
+#[deprecated]
+mod mod_ {}
+#[deprecated]
+fn func() {}
+#[deprecated]
+struct Struct {
+    #[deprecated]
+    field: u32
+}
+#[deprecated]
+enum Enum {
+    #[deprecated]
+    Variant
+}
+#[deprecated]
+const CONST: () = ();
+#[deprecated]
+trait Trait {}
+#[deprecated]
+type Alias = ();
+#[deprecated]
+static STATIC: () = ();
+//- /bar.rs crate:bar
+#![deprecated]
+        "#,
+        expect_file!["./test_data/highlight_deprecated.html"],
         false,
     );
 }

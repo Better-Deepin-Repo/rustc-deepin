@@ -1,15 +1,14 @@
 use std::assert_matches::assert_matches;
 
-use rustc_abi::Integer;
+use rustc_abi::{FieldIdx, Integer};
 use rustc_apfloat::ieee::{Double, Half, Quad, Single};
 use rustc_apfloat::{Float, FloatConvert};
 use rustc_middle::mir::CastKind;
 use rustc_middle::mir::interpret::{InterpResult, PointerArithmetic, Scalar};
 use rustc_middle::ty::adjustment::PointerCoercion;
-use rustc_middle::ty::layout::{IntegerExt, LayoutOf, TyAndLayout};
+use rustc_middle::ty::layout::{IntegerExt, TyAndLayout};
 use rustc_middle::ty::{self, FloatTy, Ty};
 use rustc_middle::{bug, span_bug};
-use rustc_type_ir::TyKind::*;
 use tracing::trace;
 
 use super::util::ensure_monomorphic_enough;
@@ -17,7 +16,8 @@ use super::{
     FnVal, ImmTy, Immediate, InterpCx, Machine, OpTy, PlaceTy, err_inval, interp_ok, throw_ub,
     throw_ub_custom,
 };
-use crate::fluent_generated as fluent;
+use crate::interpret::Writeable;
+use crate::{enter_trace_span, fluent_generated as fluent};
 
 impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
     pub fn cast(
@@ -74,20 +74,23 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 bug!("{cast_kind:?} casts are for borrowck only, not runtime MIR");
             }
 
-            CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer, _) => {
+            CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer(_), _) => {
                 // All reifications must be monomorphic, bail out otherwise.
                 ensure_monomorphic_enough(*self.tcx, src.layout.ty)?;
 
                 // The src operand does not matter, just its type
                 match *src.layout.ty.kind() {
                     ty::FnDef(def_id, args) => {
-                        let instance = ty::Instance::resolve_for_fn_ptr(
-                            *self.tcx,
-                            self.typing_env,
-                            def_id,
-                            args,
-                        )
-                        .ok_or_else(|| err_inval!(TooGeneric))?;
+                        let instance = {
+                            let _trace = enter_trace_span!(M, resolve::resolve_for_fn_ptr, ?def_id);
+                            ty::Instance::resolve_for_fn_ptr(
+                                *self.tcx,
+                                self.typing_env,
+                                def_id,
+                                args,
+                            )
+                            .ok_or_else(|| err_inval!(TooGeneric))?
+                        };
 
                         let fn_ptr = self.fn_ptr(FnVal::Instance(instance));
                         self.write_pointer(fn_ptr, dest)?;
@@ -114,12 +117,15 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 // The src operand does not matter, just its type
                 match *src.layout.ty.kind() {
                     ty::Closure(def_id, args) => {
-                        let instance = ty::Instance::resolve_closure(
-                            *self.tcx,
-                            def_id,
-                            args,
-                            ty::ClosureKind::FnOnce,
-                        );
+                        let instance = {
+                            let _trace = enter_trace_span!(M, resolve::resolve_closure, ?def_id);
+                            ty::Instance::resolve_closure(
+                                *self.tcx,
+                                def_id,
+                                args,
+                                ty::ClosureKind::FnOnce,
+                            )
+                        };
                         let fn_ptr = self.fn_ptr(FnVal::Instance(instance));
                         self.write_pointer(fn_ptr, dest)?;
                     }
@@ -127,21 +133,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 }
             }
 
-            CastKind::PointerCoercion(PointerCoercion::DynStar, _) => {
-                if let ty::Dynamic(data, _, ty::DynStar) = cast_ty.kind() {
-                    // Initial cast from sized to dyn trait
-                    let vtable = self.get_vtable_ptr(src.layout.ty, data)?;
-                    let vtable = Scalar::from_maybe_pointer(vtable, self);
-                    let data = self.read_immediate(src)?.to_scalar();
-                    let _assert_pointer_like = data.to_pointer(self)?;
-                    let val = Immediate::ScalarPair(data, vtable);
-                    self.write_immediate(val, dest)?;
-                } else {
-                    bug!()
-                }
-            }
-
-            CastKind::Transmute => {
+            CastKind::Transmute | CastKind::Subtype => {
                 assert!(src.layout.is_sized());
                 assert!(dest.layout.is_sized());
                 assert_eq!(cast_ty, dest.layout.ty); // we otherwise ignore `cast_ty` enirely...
@@ -182,9 +174,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         src: &ImmTy<'tcx, M::Provenance>,
         cast_to: TyAndLayout<'tcx>,
     ) -> InterpResult<'tcx, ImmTy<'tcx, M::Provenance>> {
-        use rustc_type_ir::TyKind::*;
-
-        let Float(fty) = src.layout.ty.kind() else {
+        let ty::Float(fty) = src.layout.ty.kind() else {
             bug!("FloatToFloat/FloatToInt cast: source type {} is not a float type", src.layout.ty)
         };
         let val = match fty {
@@ -203,7 +193,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         cast_to: TyAndLayout<'tcx>,
     ) -> InterpResult<'tcx, ImmTy<'tcx, M::Provenance>> {
         assert!(src.layout.ty.is_any_ptr());
-        assert!(cast_to.ty.is_unsafe_ptr());
+        assert!(cast_to.ty.is_raw_ptr());
         // Handle casting any ptr to raw ptr (might be a wide ptr).
         if cast_to.size == src.layout.size {
             // Thin or wide pointer that just has the ptr kind of target type changed.
@@ -212,7 +202,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
             // Casting the metadata away from a wide ptr.
             assert_eq!(src.layout.size, 2 * self.pointer_size());
             assert_eq!(cast_to.size, self.pointer_size());
-            assert!(src.layout.ty.is_unsafe_ptr());
+            assert!(src.layout.ty.is_raw_ptr());
             return match **src {
                 Immediate::ScalarPair(data, _) => interp_ok(ImmTy::from_scalar(data, cast_to)),
                 Immediate::Scalar(..) => span_bug!(
@@ -277,19 +267,19 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         let signed = src_layout.backend_repr.is_signed(); // Also asserts that abi is `Scalar`.
 
         let v = match src_layout.ty.kind() {
-            Uint(_) | RawPtr(..) | FnPtr(..) => scalar.to_uint(src_layout.size)?,
-            Int(_) => scalar.to_int(src_layout.size)? as u128, // we will cast back to `i128` below if the sign matters
-            Bool => scalar.to_bool()?.into(),
-            Char => scalar.to_char()?.into(),
+            ty::Uint(_) | ty::RawPtr(..) | ty::FnPtr(..) => scalar.to_uint(src_layout.size)?,
+            ty::Int(_) => scalar.to_int(src_layout.size)? as u128, // we will cast back to `i128` below if the sign matters
+            ty::Bool => scalar.to_bool()?.into(),
+            ty::Char => scalar.to_char()?.into(),
             _ => span_bug!(self.cur_span(), "invalid int-like cast from {}", src_layout.ty),
         };
 
         interp_ok(match *cast_ty.kind() {
             // int -> int
-            Int(_) | Uint(_) => {
+            ty::Int(_) | ty::Uint(_) => {
                 let size = match *cast_ty.kind() {
-                    Int(t) => Integer::from_int_ty(self, t).size(),
-                    Uint(t) => Integer::from_uint_ty(self, t).size(),
+                    ty::Int(t) => Integer::from_int_ty(self, t).size(),
+                    ty::Uint(t) => Integer::from_uint_ty(self, t).size(),
                     _ => bug!(),
                 };
                 let v = size.truncate(v);
@@ -297,7 +287,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
             }
 
             // signed int -> float
-            Float(fty) if signed => {
+            ty::Float(fty) if signed => {
                 let v = v as i128;
                 match fty {
                     FloatTy::F16 => Scalar::from_f16(Half::from_i128(v).value),
@@ -307,7 +297,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 }
             }
             // unsigned int -> float
-            Float(fty) => match fty {
+            ty::Float(fty) => match fty {
                 FloatTy::F16 => Scalar::from_f16(Half::from_u128(v).value),
                 FloatTy::F32 => Scalar::from_f32(Single::from_u128(v).value),
                 FloatTy::F64 => Scalar::from_f64(Double::from_u128(v).value),
@@ -315,7 +305,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
             },
 
             // u8 -> char
-            Char => Scalar::from_u32(u8::try_from(v).unwrap().into()),
+            ty::Char => Scalar::from_u32(u8::try_from(v).unwrap().into()),
 
             // Casts to bool are not permitted by rustc, no need to handle them here.
             _ => span_bug!(self.cur_span(), "invalid int to {} cast", cast_ty),
@@ -332,11 +322,9 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
             + FloatConvert<Double>
             + FloatConvert<Quad>,
     {
-        use rustc_type_ir::TyKind::*;
-
         match *dest_ty.kind() {
             // float -> uint
-            Uint(t) => {
+            ty::Uint(t) => {
                 let size = Integer::from_uint_ty(self, t).size();
                 // `to_u128` is a saturating cast, which is what we need
                 // (https://doc.rust-lang.org/nightly/nightly-rustc/rustc_apfloat/trait.Float.html#method.to_i128_r).
@@ -345,7 +333,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 Scalar::from_uint(v, size)
             }
             // float -> int
-            Int(t) => {
+            ty::Int(t) => {
                 let size = Integer::from_int_ty(self, t).size();
                 // `to_i128` is a saturating cast, which is what we need
                 // (https://doc.rust-lang.org/nightly/nightly-rustc/rustc_apfloat/trait.Float.html#method.to_i128_r).
@@ -353,7 +341,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 Scalar::from_int(v, size)
             }
             // float -> float
-            Float(fty) => match fty {
+            ty::Float(fty) => match fty {
                 FloatTy::F16 => {
                     Scalar::from_f16(self.adjust_nan(f.convert(&mut false).value, &[f]))
                 }
@@ -377,7 +365,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
     fn unsize_into_ptr(
         &mut self,
         src: &OpTy<'tcx, M::Provenance>,
-        dest: &PlaceTy<'tcx, M::Provenance>,
+        dest: &impl Writeable<'tcx, M::Provenance>,
         // The pointee types
         source_ty: Ty<'tcx>,
         cast_ty: Ty<'tcx>,
@@ -398,7 +386,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 );
                 self.write_immediate(val, dest)
             }
-            (ty::Dynamic(data_a, _, ty::Dyn), ty::Dynamic(data_b, _, ty::Dyn)) => {
+            (ty::Dynamic(data_a, _), ty::Dynamic(data_b, _)) => {
                 let val = self.read_immediate(src)?;
                 // MIR building generates odd NOP casts, prevent them from causing unexpected trouble.
                 // See <https://github.com/rust-lang/rust/issues/128880>.
@@ -414,42 +402,41 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
 
                 // Sanity-check that `supertrait_vtable_slot` in this type's vtable indeed produces
                 // our destination trait.
-                if cfg!(debug_assertions) {
-                    let vptr_entry_idx =
-                        self.tcx.supertrait_vtable_slot((src_pointee_ty, dest_pointee_ty));
-                    let vtable_entries = self.vtable_entries(data_a.principal(), ty);
-                    if let Some(entry_idx) = vptr_entry_idx {
-                        let Some(&ty::VtblEntry::TraitVPtr(upcast_trait_ref)) =
-                            vtable_entries.get(entry_idx)
-                        else {
-                            span_bug!(
-                                self.cur_span(),
-                                "invalid vtable entry index in {} -> {} upcast",
-                                src_pointee_ty,
-                                dest_pointee_ty
-                            );
-                        };
-                        let erased_trait_ref = upcast_trait_ref
-                            .map_bound(|r| ty::ExistentialTraitRef::erase_self_ty(*self.tcx, r));
-                        assert!(
-                            data_b
-                                .principal()
-                                .is_some_and(|b| self.eq_in_param_env(erased_trait_ref, b))
+                let vptr_entry_idx =
+                    self.tcx.supertrait_vtable_slot((src_pointee_ty, dest_pointee_ty));
+                let vtable_entries = self.vtable_entries(data_a.principal(), ty);
+                if let Some(entry_idx) = vptr_entry_idx {
+                    let Some(&ty::VtblEntry::TraitVPtr(upcast_trait_ref)) =
+                        vtable_entries.get(entry_idx)
+                    else {
+                        span_bug!(
+                            self.cur_span(),
+                            "invalid vtable entry index in {} -> {} upcast",
+                            src_pointee_ty,
+                            dest_pointee_ty
                         );
-                    } else {
-                        // In this case codegen would keep using the old vtable. We don't want to do
-                        // that as it has the wrong trait. The reason codegen can do this is that
-                        // one vtable is a prefix of the other, so we double-check that.
-                        let vtable_entries_b = self.vtable_entries(data_b.principal(), ty);
-                        assert!(&vtable_entries[..vtable_entries_b.len()] == vtable_entries_b);
                     };
-                }
+                    let erased_trait_ref =
+                        ty::ExistentialTraitRef::erase_self_ty(*self.tcx, upcast_trait_ref);
+                    assert_eq!(
+                        data_b.principal().map(|b| {
+                            self.tcx.normalize_erasing_late_bound_regions(self.typing_env, b)
+                        }),
+                        Some(erased_trait_ref),
+                    );
+                } else {
+                    // In this case codegen would keep using the old vtable. We don't want to do
+                    // that as it has the wrong trait. The reason codegen can do this is that
+                    // one vtable is a prefix of the other, so we double-check that.
+                    let vtable_entries_b = self.vtable_entries(data_b.principal(), ty);
+                    assert!(&vtable_entries[..vtable_entries_b.len()] == vtable_entries_b);
+                };
 
                 // Get the destination trait vtable and return that.
                 let new_vptr = self.get_vtable_ptr(ty, data_b)?;
                 self.write_immediate(Immediate::new_dyn_trait(old_data, new_vptr, self), dest)
             }
-            (_, &ty::Dynamic(data, _, ty::Dyn)) => {
+            (_, &ty::Dynamic(data, _)) => {
                 // Initial cast from sized to dyn trait
                 let vtable = self.get_vtable_ptr(src_pointee_ty, data)?;
                 let ptr = self.read_pointer(src)?;
@@ -475,10 +462,16 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
         &mut self,
         src: &OpTy<'tcx, M::Provenance>,
         cast_ty: TyAndLayout<'tcx>,
-        dest: &PlaceTy<'tcx, M::Provenance>,
+        dest: &impl Writeable<'tcx, M::Provenance>,
     ) -> InterpResult<'tcx> {
         trace!("Unsizing {:?} of type {} into {}", *src, src.layout.ty, cast_ty.ty);
         match (src.layout.ty.kind(), cast_ty.ty.kind()) {
+            (&ty::Pat(_, s_pat), &ty::Pat(cast_ty, c_pat)) if s_pat == c_pat => {
+                let src = self.project_field(src, FieldIdx::ZERO)?;
+                let dest = self.project_field(dest, FieldIdx::ZERO)?;
+                let cast_ty = self.layout_of(cast_ty)?;
+                self.unsize_into(&src, cast_ty, &dest)
+            }
             (&ty::Ref(_, s, _), &ty::Ref(_, c, _) | &ty::RawPtr(c, _))
             | (&ty::RawPtr(s, _), &ty::RawPtr(c, _)) => self.unsize_into_ptr(src, dest, s, c),
             (&ty::Adt(def_a, _), &ty::Adt(def_b, _)) => {
@@ -490,6 +483,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                 let mut found_cast_field = false;
                 for i in 0..src.layout.fields.count() {
                     let cast_ty_field = cast_ty.field(self, i);
+                    let i = FieldIdx::from_usize(i);
                     let src_field = self.project_field(src, i)?;
                     let dst_field = self.project_field(dest, i)?;
                     if src_field.layout.is_1zst() && cast_ty_field.is_1zst() {
@@ -515,7 +509,7 @@ impl<'tcx, M: Machine<'tcx>> InterpCx<'tcx, M> {
                     self.cur_span(),
                     "unsize_into: invalid conversion: {:?} -> {:?}",
                     src.layout,
-                    dest.layout
+                    dest.layout()
                 )
             }
         }

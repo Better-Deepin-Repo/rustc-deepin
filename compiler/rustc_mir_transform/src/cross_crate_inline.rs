@@ -1,4 +1,4 @@
-use rustc_attr_parsing::InlineAttr;
+use rustc_hir::attrs::InlineAttr;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::LocalDefId;
 use rustc_middle::mir::visit::Visitor;
@@ -34,6 +34,14 @@ fn cross_crate_inlinable(tcx: TyCtxt<'_>, def_id: LocalDefId) -> bool {
         return true;
     }
 
+    // FIXME(autodiff): replace this as per discussion in https://github.com/rust-lang/rust/pull/149033#discussion_r2535465880
+    if tcx.has_attr(def_id, sym::autodiff_forward)
+        || tcx.has_attr(def_id, sym::autodiff_reverse)
+        || tcx.has_attr(def_id, sym::rustc_autodiff)
+    {
+        return true;
+    }
+
     if tcx.has_attr(def_id, sym::rustc_intrinsic) {
         // Intrinsic fallback bodies are always cross-crate inlineable.
         // To ensure that the MIR inliner doesn't cluelessly try to inline fallback
@@ -46,8 +54,15 @@ fn cross_crate_inlinable(tcx: TyCtxt<'_>, def_id: LocalDefId) -> bool {
     // #[inline(never)] to force code generation.
     match codegen_fn_attrs.inline {
         InlineAttr::Never => return false,
-        InlineAttr::Hint | InlineAttr::Always => return true,
+        InlineAttr::Hint | InlineAttr::Always | InlineAttr::Force { .. } => return true,
         _ => {}
+    }
+
+    // If the crate is likely to be mostly unused, use cross-crate inlining to defer codegen until
+    // the function is referenced, in order to skip codegen for unused functions. This is
+    // intentionally after the check for `inline(never)`, so that `inline(never)` wins.
+    if tcx.sess.opts.unstable_opts.hint_mostly_unused {
+        return true;
     }
 
     let sig = tcx.fn_sig(def_id).instantiate_identity();
@@ -69,8 +84,9 @@ fn cross_crate_inlinable(tcx: TyCtxt<'_>, def_id: LocalDefId) -> bool {
     // Don't do any inference if codegen optimizations are disabled and also MIR inlining is not
     // enabled. This ensures that we do inference even if someone only passes -Zinline-mir,
     // which is less confusing than having to also enable -Copt-level=1.
-    if matches!(tcx.sess.opts.optimize, OptLevel::No) && !pm::should_run_pass(tcx, &inline::Inline)
-    {
+    let inliner_will_run = pm::should_run_pass(tcx, &inline::Inline, pm::Optimizations::Allowed)
+        || inline::ForceInline::should_run_pass_for_callee(tcx, def_id.to_def_id());
+    if matches!(tcx.sess.opts.optimize, OptLevel::No) && !inliner_will_run {
         return false;
     }
 
@@ -107,10 +123,7 @@ impl<'tcx> Visitor<'tcx> for CostChecker<'_, 'tcx> {
     fn visit_statement(&mut self, statement: &Statement<'tcx>, _: Location) {
         // Don't count StorageLive/StorageDead in the inlining cost.
         match statement.kind {
-            StatementKind::StorageLive(_)
-            | StatementKind::StorageDead(_)
-            | StatementKind::Deinit(_)
-            | StatementKind::Nop => {}
+            StatementKind::StorageLive(_) | StatementKind::StorageDead(_) | StatementKind::Nop => {}
             _ => self.statements += 1,
         }
     }
@@ -127,7 +140,16 @@ impl<'tcx> Visitor<'tcx> for CostChecker<'_, 'tcx> {
                     }
                 }
             }
-            TerminatorKind::Call { unwind, .. } => {
+            TerminatorKind::Call { ref func, unwind, .. } => {
+                // We track calls because they make our function not a leaf (and in theory, the
+                // number of calls indicates how likely this function is to perturb other CGUs).
+                // But intrinsics don't have a body that gets assigned to a CGU, so they are
+                // ignored.
+                if let Some((fn_def_id, _)) = func.const_fn_def()
+                    && self.tcx.has_attr(fn_def_id, sym::rustc_intrinsic)
+                {
+                    return;
+                }
                 self.calls += 1;
                 if let UnwindAction::Cleanup(_) = unwind {
                     self.landing_pads += 1;

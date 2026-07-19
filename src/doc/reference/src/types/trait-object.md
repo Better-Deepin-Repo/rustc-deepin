@@ -1,14 +1,12 @@
+r[type.trait-object]
 # Trait objects
 
-r[type.trait-object]
-
 r[type.trait-object.syntax]
-> **<sup>Syntax</sup>**\
-> _TraitObjectType_ :\
-> &nbsp;&nbsp; `dyn`<sup>?</sup> [_TypeParamBounds_]
->
-> _TraitObjectTypeOneBound_ :\
-> &nbsp;&nbsp; `dyn`<sup>?</sup> [_TraitBound_]
+```grammar,types
+TraitObjectType -> `dyn`? TypeParamBounds
+
+TraitObjectTypeOneBound -> `dyn`? TraitBound
+```
 
 r[type.trait-object.intro]
 A *trait object* is an opaque value of another type that implements a set of
@@ -40,21 +38,14 @@ For example, given a trait `Trait`, the following are all trait objects:
 * `dyn (Trait)`
 
 r[type.trait-object.syntax-edition2021]
-> **Edition differences**: Before the 2021 edition, the `dyn` keyword may be
-> omitted.
->
-> Note: For clarity, it is recommended to always use the `dyn` keyword on your
-> trait objects unless your codebase supports compiling with Rust 1.26 or lower.
+> [!EDITION-2021]
+> Before the 2021 edition, the `dyn` keyword may be omitted.
 
-r[type.trait-object.syntax-edition2015]
-> **Edition differences**: In the 2015 edition, if the first bound of the
-> trait object is a path that starts with `::`, then the `dyn` will be treated
-> as a part of the path. The first path can be put in parenthesis to get
-> around this. As such, if you want a trait object with the trait
-> `::your_module::Trait`, you should write it as `dyn (::your_module::Trait)`.
+r[type.trait-object.syntax-edition2018]
+> [!EDITION-2018]
+> In the 2015 edition, if the first bound of the trait object is a path that starts with `::`, then the `dyn` will be treated as a part of the path. The first path can be put in parenthesis to get around this. As such, if you want a trait object with the trait `::your_module::Trait`, you should write it as `dyn (::your_module::Trait)`.
 >
-> Beginning in the 2018 edition, `dyn` is a true keyword and is not allowed in
-> paths, so the parentheses are not necessary.
+> Beginning in the 2018 edition, `dyn` is a true keyword and is not allowed in paths, so the parentheses are not necessary.
 
 r[type.trait-object.alias]
 Two trait object types alias each other if the base traits alias each other and
@@ -103,17 +94,14 @@ fn main() {
 In this example, the trait `Printable` occurs as a trait object in both the
 type signature of `print`, and the cast expression in `main`.
 
-## Trait Object Lifetime Bounds
-
 r[type.trait-object.lifetime-bounds]
+## Trait object lifetime bounds
 
 Since a trait object can contain references, the lifetimes of those references
 need to be expressed as part of the trait object. This lifetime is written as
 `Trait + 'a`. There are [defaults] that allow this lifetime to usually be
 inferred with a sensible choice.
 
-[_TraitBound_]: ../trait-bounds.md
-[_TypeParamBounds_]: ../trait-bounds.md
 [auto traits]: ../special-types-and-traits.md#auto-traits
 [defaults]: ../lifetime-elision.md#default-trait-object-lifetimes
 [dyn compatible]: ../items/traits.md#dyn-compatibility

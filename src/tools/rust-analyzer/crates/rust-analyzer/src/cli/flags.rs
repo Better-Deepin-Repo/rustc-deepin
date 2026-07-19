@@ -53,7 +53,7 @@ xflags::xflags! {
 
         /// Batch typecheck project and print summary statistics
         cmd analysis-stats {
-            /// Directory with Cargo.toml.
+            /// Directory with Cargo.toml or rust-project.json.
             required path: PathBuf
 
             optional --output format: OutputFormat
@@ -62,8 +62,6 @@ xflags::xflags! {
             optional --randomize
             /// Run type inference in parallel.
             optional --parallel
-            /// Print the total length of all source and macro files (whitespace is not counted).
-            optional --source-stats
 
             /// Only analyze items matching this path.
             optional -o, --only path: String
@@ -71,18 +69,17 @@ xflags::xflags! {
             optional --with-deps
             /// Don't load sysroot crates (`std`, `core` & friends).
             optional --no-sysroot
-            /// Don't run cargo metadata on the sysroot to analyze its third-party dependencies.
-            /// Requires --no-sysroot to not be set.
-            optional --no-query-sysroot-metadata
             /// Don't set #[cfg(test)].
             optional --no-test
 
             /// Don't run build scripts or load `OUT_DIR` values by running `cargo check` before analysis.
             optional --disable-build-scripts
-            /// Don't use expand proc macros.
+            /// Don't expand proc macros.
             optional --disable-proc-macros
             /// Run the proc-macro-srv binary at the specified path.
             optional --proc-macro-srv path: PathBuf
+            /// Skip lang items fetching.
+            optional --skip-lang-items
             /// Skip body lowering.
             optional --skip-lowering
             /// Skip type inference.
@@ -106,7 +103,7 @@ xflags::xflags! {
 
         /// Run unit tests of the project using mir interpreter
         cmd run-tests {
-            /// Directory with Cargo.toml.
+            /// Directory with Cargo.toml or rust-project.json.
             required path: PathBuf
         }
 
@@ -120,28 +117,46 @@ xflags::xflags! {
         }
 
         cmd diagnostics {
-            /// Directory with Cargo.toml.
+            /// Directory with Cargo.toml or rust-project.json.
             required path: PathBuf
 
             /// Don't run build scripts or load `OUT_DIR` values by running `cargo check` before analysis.
             optional --disable-build-scripts
-            /// Don't use expand proc macros.
+            /// Don't expand proc macros.
+            optional --disable-proc-macros
+            /// Run the proc-macro-srv binary at the specified path.
+            optional --proc-macro-srv path: PathBuf
+
+            /// The minimum severity.
+            optional --severity severity: Severity
+        }
+
+        /// Report unresolved references
+        cmd unresolved-references {
+            /// Directory with Cargo.toml or rust-project.json.
+            required path: PathBuf
+
+            /// Don't run build scripts or load `OUT_DIR` values by running `cargo check` before analysis.
+            optional --disable-build-scripts
+            /// Don't expand proc macros.
             optional --disable-proc-macros
             /// Run the proc-macro-srv binary at the specified path.
             optional --proc-macro-srv path: PathBuf
         }
 
-        /// Report unresolved references
-        cmd unresolved-references {
-            /// Directory with Cargo.toml.
+        /// Prime caches, as rust-analyzer does typically at startup in interactive sessions.
+        cmd prime-caches {
+            /// Directory with Cargo.toml or rust-project.json.
             required path: PathBuf
 
             /// Don't run build scripts or load `OUT_DIR` values by running `cargo check` before analysis.
             optional --disable-build-scripts
-            /// Don't use expand proc macros.
+            /// Don't expand proc macros.
             optional --disable-proc-macros
             /// Run the proc-macro-srv binary at the specified path.
             optional --proc-macro-srv path: PathBuf
+            /// The number of threads to use. Defaults to the number of physical cores.
+            optional --num-threads num_threads: usize
         }
 
         cmd ssr {
@@ -202,6 +217,7 @@ pub enum RustAnalyzerCmd {
     RustcTests(RustcTests),
     Diagnostics(Diagnostics),
     UnresolvedReferences(UnresolvedReferences),
+    PrimeCaches(PrimeCaches),
     Ssr(Ssr),
     Search(Search),
     Lsif(Lsif),
@@ -234,16 +250,15 @@ pub struct AnalysisStats {
     pub output: Option<OutputFormat>,
     pub randomize: bool,
     pub parallel: bool,
-    pub source_stats: bool,
     pub only: Option<String>,
     pub with_deps: bool,
     pub no_sysroot: bool,
-    pub no_query_sysroot_metadata: bool,
     pub no_test: bool,
     pub disable_build_scripts: bool,
     pub disable_proc_macros: bool,
     pub proc_macro_srv: Option<PathBuf>,
     pub skip_lowering: bool,
+    pub skip_lang_items: bool,
     pub skip_inference: bool,
     pub skip_mir_stats: bool,
     pub skip_data_layout: bool,
@@ -272,6 +287,7 @@ pub struct Diagnostics {
     pub disable_build_scripts: bool,
     pub disable_proc_macros: bool,
     pub proc_macro_srv: Option<PathBuf>,
+    pub severity: Option<Severity>,
 }
 
 #[derive(Debug)]
@@ -281,6 +297,16 @@ pub struct UnresolvedReferences {
     pub disable_build_scripts: bool,
     pub disable_proc_macros: bool,
     pub proc_macro_srv: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub struct PrimeCaches {
+    pub path: PathBuf,
+
+    pub disable_build_scripts: bool,
+    pub disable_proc_macros: bool,
+    pub proc_macro_srv: Option<PathBuf>,
+    pub num_threads: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -354,6 +380,26 @@ impl FromStr for OutputFormat {
         match s {
             "csv" => Ok(Self::Csv),
             _ => Err(format!("unknown output format `{s}`")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Severity {
+    Weak,
+    Warning,
+    Error,
+}
+
+impl FromStr for Severity {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match &*s.to_ascii_lowercase() {
+            "weak" => Ok(Self::Weak),
+            "warning" => Ok(Self::Warning),
+            "error" => Ok(Self::Error),
+            _ => Err(format!("unknown severity `{s}`")),
         }
     }
 }

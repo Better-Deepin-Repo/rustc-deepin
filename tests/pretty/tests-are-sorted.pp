@@ -1,16 +1,15 @@
 #![feature(prelude_import)]
 #![no_std]
-#[prelude_import]
-use ::std::prelude::rust_2015::*;
 #[macro_use]
 extern crate std;
+#[prelude_import]
+use ::std::prelude::rust_2015::*;
 //@ compile-flags: --crate-type=lib --test --remap-path-prefix={{src-base}}/=/the/src/ --remap-path-prefix={{src-base}}\=/the/src/
 //@ pretty-compare-only
 //@ pretty-mode:expanded
 //@ pp-exact:tests-are-sorted.pp
 
 extern crate test;
-#[cfg(test)]
 #[rustc_test_marker = "m_test"]
 #[doc(hidden)]
 pub const m_test: test::TestDescAndFn =
@@ -35,7 +34,6 @@ pub const m_test: test::TestDescAndFn =
 fn m_test() {}
 
 extern crate test;
-#[cfg(test)]
 #[rustc_test_marker = "z_test"]
 #[doc(hidden)]
 pub const z_test: test::TestDescAndFn =
@@ -61,7 +59,6 @@ pub const z_test: test::TestDescAndFn =
 fn z_test() {}
 
 extern crate test;
-#[cfg(test)]
 #[rustc_test_marker = "a_test"]
 #[doc(hidden)]
 pub const a_test: test::TestDescAndFn =

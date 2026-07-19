@@ -15,14 +15,16 @@
 
 mod on_enter;
 
+use either::Either;
+use hir::EditionedFileId;
+use ide_db::{FilePosition, RootDatabase, base_db::RootQueryDb};
+use span::Edition;
 use std::iter;
 
-use ide_db::{base_db::SourceDatabase, FilePosition, RootDatabase};
-use span::{Edition, EditionedFileId};
 use syntax::{
-    algo::{ancestors_at_offset, find_node_at_offset},
-    ast::{self, edit::IndentLevel, AstToken},
     AstNode, Parse, SourceFile, SyntaxKind, TextRange, TextSize,
+    algo::{ancestors_at_offset, find_node_at_offset},
+    ast::{self, AstToken, edit::IndentLevel},
 };
 
 use ide_db::text_edit::TextEdit;
@@ -32,7 +34,7 @@ use crate::SourceChange;
 pub(crate) use on_enter::on_enter;
 
 // Don't forget to add new trigger characters to `server_capabilities` in `caps.rs`.
-pub(crate) const TRIGGER_CHARS: &str = ".=<>{(|";
+pub(crate) const TRIGGER_CHARS: &[char] = &['.', '=', '<', '>', '{', '(', '|', '+'];
 
 struct ExtendedTextEdit {
     edit: TextEdit,
@@ -51,22 +53,21 @@ struct ExtendedTextEdit {
 // - typing `{` in a use item adds a closing `}` in the right place
 // - typing `>` to complete a return type `->` will insert a whitespace after it
 //
-// VS Code::
+// #### VS Code
 //
 // Add the following to `settings.json`:
-// [source,json]
-// ----
+// ```json
 // "editor.formatOnType": true,
-// ----
+// ```
 //
-// image::https://user-images.githubusercontent.com/48062697/113166163-69758500-923a-11eb-81ee-eb33ec380399.gif[]
-// image::https://user-images.githubusercontent.com/48062697/113171066-105c2000-923f-11eb-87ab-f4a263346567.gif[]
+// ![On Typing Assists](https://user-images.githubusercontent.com/48062697/113166163-69758500-923a-11eb-81ee-eb33ec380399.gif)
+// ![On Typing Assists](https://user-images.githubusercontent.com/48062697/113171066-105c2000-923f-11eb-87ab-f4a263346567.gif)
 pub(crate) fn on_char_typed(
     db: &RootDatabase,
     position: FilePosition,
     char_typed: char,
 ) -> Option<SourceChange> {
-    if !stdx::always!(TRIGGER_CHARS.contains(char_typed)) {
+    if !TRIGGER_CHARS.contains(&char_typed) {
         return None;
     }
     // FIXME: We need to figure out the edition of the file here, but that means hitting the
@@ -74,7 +75,11 @@ pub(crate) fn on_char_typed(
     // FIXME: We are hitting the database here, if we are unlucky this call might block momentarily
     // causing the editor to feel sluggish!
     let edition = Edition::CURRENT_FIXME;
-    let file = &db.parse(EditionedFileId::new(position.file_id, edition));
+    let editioned_file_id_wrapper = EditionedFileId::from_span_guess_origin(
+        db,
+        span::EditionedFileId::new(position.file_id, edition),
+    );
+    let file = &db.parse(editioned_file_id_wrapper);
     let char_matches_position =
         file.tree().syntax().text().char_at(position.offset) == Some(char_typed);
     if !stdx::always!(char_matches_position) {
@@ -100,6 +105,7 @@ fn on_char_typed_(
         '>' => on_right_angle_typed(&file.tree(), offset),
         '{' | '(' | '<' => on_opening_delimiter_typed(file, offset, char_typed, edition),
         '|' => on_pipe_typed(&file.tree(), offset),
+        '+' => on_plus_typed(&file.tree(), offset),
         _ => None,
     }
     .map(conv)
@@ -174,7 +180,7 @@ fn on_delimited_node_typed(
     kinds: &[fn(SyntaxKind) -> bool],
 ) -> Option<TextEdit> {
     let t = reparsed.syntax().token_at_offset(offset).right_biased()?;
-    if t.prev_token().map_or(false, |t| t.kind().is_any_identifier()) {
+    if t.prev_token().is_some_and(|t| t.kind().is_any_identifier()) {
         return None;
     }
     let (filter, node) = t
@@ -401,6 +407,28 @@ fn on_pipe_typed(file: &SourceFile, offset: TextSize) -> Option<TextEdit> {
     Some(TextEdit::insert(after_lpipe, "|".to_owned()))
 }
 
+fn on_plus_typed(file: &SourceFile, offset: TextSize) -> Option<TextEdit> {
+    let plus_token = file.syntax().token_at_offset(offset).right_biased()?;
+    if plus_token.kind() != SyntaxKind::PLUS {
+        return None;
+    }
+    let mut ancestors = plus_token.parent_ancestors();
+    ancestors.next().and_then(ast::TypeBoundList::cast)?;
+    let trait_type =
+        ancestors.next().and_then(<Either<ast::DynTraitType, ast::ImplTraitType>>::cast)?;
+    let kind = ancestors.next()?.kind();
+
+    if ast::RefType::can_cast(kind) || ast::PtrType::can_cast(kind) || ast::RetType::can_cast(kind)
+    {
+        let mut builder = TextEdit::builder();
+        builder.insert(trait_type.syntax().text_range().start(), "(".to_owned());
+        builder.insert(trait_type.syntax().text_range().end(), ")".to_owned());
+        Some(builder.finish())
+    } else {
+        None
+    }
+}
+
 /// Adds a space after an arrow when `fn foo() { ... }` is turned into `fn foo() -> { ... }`
 fn on_right_angle_typed(file: &SourceFile, offset: TextSize) -> Option<TextEdit> {
     let file_text = file.syntax().text();
@@ -436,14 +464,18 @@ mod tests {
         })
     }
 
-    fn type_char(char_typed: char, ra_fixture_before: &str, ra_fixture_after: &str) {
+    fn type_char(
+        char_typed: char,
+        #[rust_analyzer::rust_fixture] ra_fixture_before: &str,
+        #[rust_analyzer::rust_fixture] ra_fixture_after: &str,
+    ) {
         let actual = do_type_char(char_typed, ra_fixture_before)
             .unwrap_or_else(|| panic!("typing `{char_typed}` did nothing"));
 
         assert_eq_text!(ra_fixture_after, &actual);
     }
 
-    fn type_char_noop(char_typed: char, ra_fixture_before: &str) {
+    fn type_char_noop(char_typed: char, #[rust_analyzer::rust_fixture] ra_fixture_before: &str) {
         let file_change = do_type_char(char_typed, ra_fixture_before);
         assert_eq!(file_change, None)
     }
@@ -889,7 +921,7 @@ fn main() {
         type_char_noop(
             '{',
             r##"
-fn check_with(ra_fixture: &str, expect: Expect) {
+fn check_with(#[rust_analyzer::rust_fixture] ra_fixture: &str, expect: Expect) {
     let base = r#"
 enum E { T(), R$0, C }
 use self::E::X;
@@ -1191,7 +1223,7 @@ fn f(n: a<>b::<d>::c) {}
         type_char_noop(
             '(',
             r##"
-fn check_with(ra_fixture: &str, expect: Expect) {
+fn check_with(#[rust_analyzer::rust_fixture] ra_fixture: &str, expect: Expect) {
     let base = r#"
 enum E { T(), R$0, C }
 use self::E::X;
@@ -1589,6 +1621,66 @@ fn foo() {
 fn foo() {
     let $0
 }
+"#,
+        );
+    }
+
+    #[test]
+    fn adds_parentheses_around_trait_object_in_ref_type() {
+        type_char(
+            '+',
+            r#"
+fn foo(x: &dyn A$0) {}
+"#,
+            r#"
+fn foo(x: &(dyn A+)) {}
+"#,
+        );
+        type_char(
+            '+',
+            r#"
+fn foo(x: &'static dyn A$0B) {}
+"#,
+            r#"
+fn foo(x: &'static (dyn A+B)) {}
+"#,
+        );
+        type_char_noop(
+            '+',
+            r#"
+fn foo(x: &(dyn A$0)) {}
+"#,
+        );
+        type_char_noop(
+            '+',
+            r#"
+fn foo(x: Box<dyn A$0>) {}
+"#,
+        );
+    }
+
+    #[test]
+    fn adds_parentheses_around_trait_object_in_ptr_type() {
+        type_char(
+            '+',
+            r#"
+fn foo(x: *const dyn A$0) {}
+"#,
+            r#"
+fn foo(x: *const (dyn A+)) {}
+"#,
+        );
+    }
+
+    #[test]
+    fn adds_parentheses_around_trait_object_in_return_type() {
+        type_char(
+            '+',
+            r#"
+fn foo(x: fn() -> dyn A$0) {}
+"#,
+            r#"
+fn foo(x: fn() -> (dyn A+)) {}
 "#,
         );
     }

@@ -1,8 +1,8 @@
 //! Tests for caching compiler diagnostics.
 
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
+use crate::utils::tools;
 use cargo_test_support::str;
-use cargo_test_support::tools;
 use cargo_test_support::{basic_manifest, is_coarse_mtime, project, registry::Package, sleep_ms};
 
 use super::messages::raw_rustc_output;
@@ -507,7 +507,7 @@ fn wacky_hashless_fingerprint() {
 [CHECKING] foo v0.0.1 ([ROOT]/foo)
 [WARNING] unused variable: `unused`
 ...
-[WARNING] `foo` (bin "a") generated 1 warning
+[WARNING] `foo` (bin "a") generated 1 warning[..]
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])

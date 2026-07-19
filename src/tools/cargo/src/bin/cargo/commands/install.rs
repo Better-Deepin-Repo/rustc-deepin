@@ -3,11 +3,12 @@ use crate::command_prelude::*;
 use anyhow::anyhow;
 use anyhow::bail;
 use anyhow::format_err;
+use cargo::CargoResult;
 use cargo::core::{GitReference, SourceId, Workspace};
 use cargo::ops;
 use cargo::util::IntoUrl;
 use cargo::util::VersionExt;
-use cargo::CargoResult;
+use cargo_util_schemas::manifest::PackageName;
 use itertools::Itertools;
 use semver::VersionReq;
 
@@ -65,7 +66,11 @@ pub fn cli() -> Command {
         .arg(
             opt("path", "Filesystem path to local crate to install from")
                 .value_name("PATH")
-                .conflicts_with_all(&["git", "index", "registry"]),
+                .conflicts_with_all(&["git", "index", "registry"])
+                .add(clap_complete::engine::ArgValueCompleter::new(
+                    clap_complete::engine::PathCompleter::any()
+                        .filter(|path| path.join("Cargo.toml").exists()),
+                )),
         )
         .arg(opt("root", "Directory to install packages into").value_name("DIR"))
         .arg(flag("force", "Force overwriting existing crates or binaries").short('f'))
@@ -100,7 +105,7 @@ pub fn cli() -> Command {
         .arg_timings()
         .arg_lockfile_path()
         .after_help(color_print::cstr!(
-            "Run `<cyan,bold>cargo help install</>` for more detailed information.\n"
+            "Run `<bright-cyan,bold>cargo help install</>` for more detailed information.\n"
         ))
 }
 
@@ -129,6 +134,22 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
         .collect::<crate::CargoResult<Vec<_>>>()?;
 
     for (crate_name, _) in krates.iter() {
+        let package_name = PackageName::new(crate_name);
+        if !crate_name.contains("@") && package_name.is_err() {
+            for (idx, ch) in crate_name.char_indices() {
+                if !(unicode_ident::is_xid_continue(ch) || ch == '-') {
+                    let mut suggested_crate_name = crate_name.to_string();
+                    suggested_crate_name.insert_str(idx, "@");
+                    if let Ok((_, Some(_))) = parse_crate(&suggested_crate_name.as_str()) {
+                        let err = package_name.unwrap_err();
+                        return Err(
+                            anyhow::format_err!("{err}\n\n\
+                                help: if this is meant to be a package name followed by a version, insert an `@` like `{suggested_crate_name}`").into());
+                    }
+                }
+            }
+        }
+
         if let Some(toolchain) = crate_name.strip_prefix("+") {
             return Err(anyhow!(
                 "invalid character `+` in package name: `+{toolchain}`
@@ -145,6 +166,12 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
                 )
                 .into());
             }
+        }
+
+        if crate_name != "."
+            && let Err(e) = package_name
+        {
+            return Err(anyhow::format_err!("{e}").into());
         }
     }
 
@@ -195,7 +222,7 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
 
     let mut compile_opts = args.compile_options(
         gctx,
-        CompileMode::Build,
+        UserIntent::Build,
         workspace.as_ref(),
         ProfileChecking::Custom,
     )?;
@@ -265,6 +292,12 @@ fn parse_semver_flag(v: &str) -> CargoResult<VersionReq> {
         .next()
         .ok_or_else(|| format_err!("no version provided for the `--version` flag"))?;
 
+    if let Some(stripped) = v.strip_prefix("v") {
+        bail!(
+            "the version provided, `{v}` is not a valid SemVer requirement\n\n\
+            help: try changing the version to `{stripped}`",
+        )
+    }
     let is_req = "<>=^~".contains(first) || v.contains('*');
     if is_req {
         match v.parse::<VersionReq>() {

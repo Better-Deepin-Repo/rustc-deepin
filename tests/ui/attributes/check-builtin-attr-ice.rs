@@ -39,6 +39,8 @@
 
 // Notably, `should_panic` is a `AttributeType::Normal` attribute that is checked separately.
 
+#![deny(unused_attributes)]
+
 struct Foo {
     #[should_panic::skip]
     //~^ ERROR failed to resolve

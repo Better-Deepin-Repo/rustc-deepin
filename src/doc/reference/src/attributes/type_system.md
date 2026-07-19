@@ -1,12 +1,10 @@
-# Type system attributes
-
 r[attributes.type-system]
+# Type system attributes
 
 The following [attributes] are used for changing how a type can be used.
 
-## The `non_exhaustive` attribute
-
 r[attributes.type-system.non_exhaustive]
+## The `non_exhaustive` attribute
 
 r[attributes.type-system.non_exhaustive.intro]
 The *`non_exhaustive` attribute* indicates that a type or variant may have
@@ -16,7 +14,7 @@ r[attributes.type-system.non_exhaustive.allowed-positions]
 It can be applied to [`struct`s][struct], [`enum`s][enum], and `enum` variants.
 
 r[attributes.type-system.non_exhaustive.syntax]
-The `non_exhaustive` attribute uses the [_MetaWord_] syntax and thus does not
+The `non_exhaustive` attribute uses the [MetaWord] syntax and thus does not
 take any inputs.
 
 r[attributes.type-system.non_exhaustive.same-crate]
@@ -82,7 +80,7 @@ r[attributes.type-system.non_exhaustive.construction]
 Non-exhaustive types cannot be constructed outside of the defining crate:
 
 - Non-exhaustive variants ([`struct`][struct] or [`enum` variant][enum]) cannot be constructed
-  with a [_StructExpression_] \(including with [functional update syntax]).
+  with a [StructExpression] \(including with [functional update syntax]).
 - The implicitly defined same-named constant of a [unit-like struct][struct],
   or the same-named constructor function of a [tuple struct][struct],
   has a [visibility] no greater than `pub(crate)`.
@@ -126,20 +124,15 @@ let message = Message::Send { from: 0, to: 1, contents: "foo".to_string(), };
 let message = Message::Reaction(0);
 
 // Cannot construct an instance of `Message::Quit`; if this were converted to
-// a tuple-variant `upstream` then this would fail to compile.
+// a tuple enum variant `upstream`, this would fail to compile.
 let message = Message::Quit;
 ```
 
 r[attributes.type-system.non_exhaustive.match]
 There are limitations when matching on non-exhaustive types outside of the defining crate:
 
-- When pattern matching on a non-exhaustive variant ([`struct`][struct] or [`enum` variant][enum]),
-  a [_StructPattern_] must be used which must include a `..`. A tuple variant's constructor's
-  [visibility] is reduced to be no greater than `pub(crate)`.
-- When pattern matching on a non-exhaustive [`enum`][enum], matching on a variant does not
-  contribute towards the exhaustiveness of the arms.
-
-The following examples of matching do not compile when outside the defining crate:
+- When pattern matching on a non-exhaustive variant ([`struct`][struct] or [`enum` variant][enum]), a [StructPattern] must be used which must include a `..`. A tuple enum variant's constructor's [visibility] is reduced to be no greater than `pub(crate)`.
+- When pattern matching on a non-exhaustive [`enum`][enum], matching on a variant does not contribute towards the exhaustiveness of the arms. The following examples of matching do not compile when outside the defining crate:
 
 <!-- ignore: requires external crates -->
 ```rust, ignore
@@ -208,11 +201,6 @@ let _ = EnumWithNonExhaustiveVariants::First as u8;
 
 Non-exhaustive types are always considered inhabited in downstream crates.
 
-[_MetaWord_]: ../attributes.md#meta-item-attribute-syntax
-[_StructExpression_]: ../expressions/struct-expr.md
-[_StructPattern_]: ../patterns.md#struct-patterns
-[_TupleStructPattern_]: ../patterns.md#tuple-struct-patterns
-[`if let`]: ../expressions/if-expr.md#if-let-expressions
 [`match`]: ../expressions/match-expr.md
 [attributes]: ../attributes.md
 [enum]: ../items/enumerations.md

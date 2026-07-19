@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
-use std::io::prelude::*;
 use std::io::SeekFrom;
+use std::io::prelude::*;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -14,19 +14,19 @@ use cargo_util::paths;
 use flate2::read::GzDecoder;
 use tar::Archive;
 
-use crate::core::compiler::BuildConfig;
-use crate::core::compiler::CompileMode;
-use crate::core::compiler::DefaultExecutor;
-use crate::core::compiler::Executor;
+use crate::CargoResult;
 use crate::core::Feature;
 use crate::core::Package;
 use crate::core::SourceId;
 use crate::core::Workspace;
+use crate::core::compiler::BuildConfig;
+use crate::core::compiler::DefaultExecutor;
+use crate::core::compiler::Executor;
+use crate::core::compiler::UserIntent;
 use crate::ops;
 use crate::sources::PathSource;
 use crate::util;
 use crate::util::FileLock;
-use crate::CargoResult;
 
 use super::PackageOpts;
 use super::TmpRegistry;
@@ -45,9 +45,11 @@ pub fn run_verify(
 
     tar.file().seek(SeekFrom::Start(0))?;
     let f = GzDecoder::new(tar.file());
-    let dst = tar
-        .parent()
-        .join(&format!("{}-{}", pkg.name(), pkg.version()));
+    let dst = ws.build_dir().as_path_unlocked().join(&format!(
+        "package/{}-{}",
+        pkg.name(),
+        pkg.version()
+    ));
     if dst.exists() {
         paths::remove_dir_all(&dst)?;
     }
@@ -63,7 +65,11 @@ pub fn run_verify(
     let mut src = PathSource::new(&dst, id, ws.gctx());
     let new_pkg = src.root_package()?;
     let pkg_fingerprint = hash_all(&dst)?;
-    let mut ws = Workspace::ephemeral(new_pkg, gctx, None, true)?;
+
+    // When packaging we use an ephemeral workspace but reuse the build cache to reduce
+    // verification time if the user has already compiled the dependencies and the fingerprint
+    // is unchanged.
+    let mut ws = Workspace::ephemeral(new_pkg, gctx, Some(ws.build_dir()), true)?;
     if let Some(local_reg) = local_reg {
         ws.add_local_overlay(
             local_reg.upstream,
@@ -94,7 +100,7 @@ pub fn run_verify(
                 opts.jobs.clone(),
                 opts.keep_going,
                 &opts.targets,
-                CompileMode::Build,
+                UserIntent::Build,
             )?,
             cli_features: opts.cli_features.clone(),
             spec: ops::Packages::Packages(Vec::new()),

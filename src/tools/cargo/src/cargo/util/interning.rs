@@ -47,7 +47,7 @@ impl<'a> From<&'a String> for InternedString {
 
 impl From<String> for InternedString {
     fn from(item: String) -> Self {
-        InternedString::from_cow(item.into())
+        InternedString::from(Cow::Owned(item))
     }
 }
 
@@ -69,24 +69,25 @@ impl<'a> PartialEq<&'a str> for InternedString {
     }
 }
 
-impl Eq for InternedString {}
-
-impl InternedString {
-    pub fn new(str: &str) -> InternedString {
-        InternedString::from_cow(str.into())
-    }
-
-    fn from_cow<'a>(str: Cow<'a, str>) -> InternedString {
+impl<'a> From<Cow<'a, str>> for InternedString {
+    fn from(cs: Cow<'a, str>) -> Self {
         let mut cache = interned_storage();
-        let s = cache.get(str.as_ref()).copied().unwrap_or_else(|| {
-            let s = str.into_owned().leak();
+        let s = cache.get(cs.as_ref()).copied().unwrap_or_else(|| {
+            let s = cs.into_owned().leak();
             cache.insert(s);
             s
         });
 
         InternedString { inner: s }
     }
+}
 
+impl Eq for InternedString {}
+
+impl InternedString {
+    pub fn new(s: &str) -> InternedString {
+        InternedString::from(Cow::Borrowed(s))
+    }
     pub fn as_str(&self) -> &'static str {
         self.inner
     }
@@ -175,7 +176,7 @@ impl<'de> serde::Deserialize<'de> for InternedString {
     {
         UntaggedEnumVisitor::new()
             .expecting("an String like thing")
-            .string(|value| Ok(InternedString::new(value)))
+            .string(|value| Ok(value.into()))
             .deserialize(deserializer)
     }
 }

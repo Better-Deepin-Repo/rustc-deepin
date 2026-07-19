@@ -88,12 +88,7 @@
 //! DefPaths which are much more robust in the face of changes to the code base.
 
 // tidy-alphabetical-start
-#![allow(internal_features)]
-#![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
-#![doc(rust_logo)]
-#![feature(let_chains)]
-#![feature(rustdoc_internals)]
-#![warn(unreachable_pub)]
+#![feature(assert_matches)]
 // tidy-alphabetical-end
 
 use rustc_hir::def::DefKind;
@@ -105,12 +100,15 @@ use rustc_middle::ty::{self, Instance, TyCtxt};
 use rustc_session::config::SymbolManglingVersion;
 use tracing::debug;
 
+mod export;
 mod hashed;
 mod legacy;
 mod v0;
 
 pub mod errors;
 pub mod test;
+
+pub use v0::mangle_internal_symbol;
 
 /// This function computes the symbol name for the given `instance` and the
 /// given instantiating crate. That is, if you know that instance X is
@@ -151,7 +149,7 @@ fn symbol_name_provider<'tcx>(tcx: TyCtxt<'tcx>, instance: Instance<'tcx>) -> ty
 
 pub fn typeid_for_trait_ref<'tcx>(
     tcx: TyCtxt<'tcx>,
-    trait_ref: ty::PolyExistentialTraitRef<'tcx>,
+    trait_ref: ty::ExistentialTraitRef<'tcx>,
 ) -> String {
     v0::mangle_typeid_for_trait_ref(tcx, trait_ref)
 }
@@ -178,45 +176,67 @@ fn compute_symbol_name<'tcx>(
 
     // FIXME(eddyb) Precompute a custom symbol name based on attributes.
     let attrs = if tcx.def_kind(def_id).has_codegen_attrs() {
-        tcx.codegen_fn_attrs(def_id)
+        &tcx.codegen_instance_attrs(instance.def)
     } else {
         CodegenFnAttrs::EMPTY
     };
 
-    // Foreign items by default use no mangling for their symbol name. There's a
-    // few exceptions to this rule though:
-    //
-    // * This can be overridden with the `#[link_name]` attribute
-    //
-    // * On the wasm32 targets there is a bug (or feature) in LLD [1] where the
-    //   same-named symbol when imported from different wasm modules will get
-    //   hooked up incorrectly. As a result foreign symbols, on the wasm target,
-    //   with a wasm import module, get mangled. Additionally our codegen will
-    //   deduplicate symbols based purely on the symbol name, but for wasm this
-    //   isn't quite right because the same-named symbol on wasm can come from
-    //   different modules. For these reasons if `#[link(wasm_import_module)]`
-    //   is present we mangle everything on wasm because the demangled form will
-    //   show up in the `wasm-import-name` custom attribute in LLVM IR.
-    //
-    // [1]: https://bugs.llvm.org/show_bug.cgi?id=44316
-    if tcx.is_foreign_item(def_id)
-        && (!tcx.sess.target.is_like_wasm
-            || !tcx.wasm_import_module_map(def_id.krate).contains_key(&def_id))
-    {
-        if let Some(name) = attrs.link_name {
+    if attrs.flags.contains(CodegenFnAttrFlags::RUSTC_STD_INTERNAL_SYMBOL) {
+        // Items marked as #[rustc_std_internal_symbol] need to have a fixed
+        // symbol name because it is used to import items from another crate
+        // without a direct dependency. As such it is not possible to look up
+        // the mangled name for the `Instance` from the crate metadata of the
+        // defining crate.
+        // Weak lang items automatically get #[rustc_std_internal_symbol]
+        // applied by the code computing the CodegenFnAttrs.
+        // We are mangling all #[rustc_std_internal_symbol] items as a
+        // combination of the rustc version and the unmangled linkage name.
+        // This is to ensure that if we link against a staticlib compiled by a
+        // different rustc version, we don't get symbol conflicts or even UB
+        // due to a different implementation/ABI. Rust staticlibs currently
+        // export all symbols, including those that are hidden in cdylibs.
+        // We are using the v0 symbol mangling scheme here as we need to be
+        // consistent across all crates and in some contexts the legacy symbol
+        // mangling scheme can't be used. For example both the GCC backend and
+        // Rust-for-Linux don't support some of the characters used by the
+        // legacy symbol mangling scheme.
+        let name = if let Some(name) = attrs.symbol_name { name } else { tcx.item_name(def_id) };
+
+        return v0::mangle_internal_symbol(tcx, name.as_str());
+    }
+
+    let wasm_import_module_exception_force_mangling = {
+        // * On the wasm32 targets there is a bug (or feature) in LLD [1] where the
+        //   same-named symbol when imported from different wasm modules will get
+        //   hooked up incorrectly. As a result foreign symbols, on the wasm target,
+        //   with a wasm import module, get mangled. Additionally our codegen will
+        //   deduplicate symbols based purely on the symbol name, but for wasm this
+        //   isn't quite right because the same-named symbol on wasm can come from
+        //   different modules. For these reasons if `#[link(wasm_import_module)]`
+        //   is present we mangle everything on wasm because the demangled form will
+        //   show up in the `wasm-import-name` custom attribute in LLVM IR.
+        //
+        // [1]: https://bugs.llvm.org/show_bug.cgi?id=44316
+        //
+        // So, on wasm if a foreign item loses its `#[no_mangle]`, it might *still*
+        // be mangled if we're forced to. Note: I don't like this.
+        // These kinds of exceptions should be added during the `codegen_attrs` query.
+        // However, we don't have the wasm import module map there yet.
+        tcx.is_foreign_item(def_id)
+            && tcx.sess.target.is_like_wasm
+            && tcx.wasm_import_module_map(def_id.krate).contains_key(&def_id.into())
+    };
+
+    if !wasm_import_module_exception_force_mangling {
+        if let Some(name) = attrs.symbol_name {
+            // Use provided name
             return name.to_string();
         }
-        return tcx.item_name(def_id).to_string();
-    }
 
-    if let Some(name) = attrs.export_name {
-        // Use provided name
-        return name.to_string();
-    }
-
-    if attrs.flags.contains(CodegenFnAttrFlags::NO_MANGLE) {
-        // Don't mangle
-        return tcx.item_name(def_id).to_string();
+        if attrs.flags.contains(CodegenFnAttrFlags::NO_MANGLE) {
+            // Don't mangle
+            return tcx.item_name(def_id).to_string();
+        }
     }
 
     // If we're dealing with an instance of a function that's inlined from
@@ -260,12 +280,45 @@ fn compute_symbol_name<'tcx>(
         tcx.symbol_mangling_version(mangling_version_crate)
     };
 
-    let symbol = match mangling_version {
-        SymbolManglingVersion::Legacy => legacy::mangle(tcx, instance, instantiating_crate),
-        SymbolManglingVersion::V0 => v0::mangle(tcx, instance, instantiating_crate),
-        SymbolManglingVersion::Hashed => hashed::mangle(tcx, instance, instantiating_crate, || {
-            v0::mangle(tcx, instance, instantiating_crate)
-        }),
+    let symbol = match tcx.is_exportable(def_id) {
+        true => format!(
+            "{}.{}",
+            v0::mangle(tcx, instance, instantiating_crate, true),
+            export::compute_hash_of_export_fn(tcx, instance)
+        ),
+        false => match mangling_version {
+            SymbolManglingVersion::Legacy => {
+                let mangled_name = legacy::mangle(tcx, instance, instantiating_crate);
+
+                let mangled_name_too_long = {
+                    // The PDB debug info format cannot store mangled symbol names for which its
+                    // internal record exceeds u16::MAX bytes, a limit multiple Rust projects have been
+                    // hitting due to the verbosity of legacy name mangling. Depending on the linker version
+                    // in use, such symbol names can lead to linker crashes or incomprehensible linker error
+                    // about a limit being hit.
+                    // Mangle those symbols with v0 mangling instead, which gives us more room to breathe
+                    // as v0 mangling is more compact.
+                    // Empirical testing has shown the limit for the symbol name to be 65521 bytes; use
+                    // 65000 bytes to leave some room for prefixes / suffixes as well as unknown scenarios
+                    // with a different limit.
+                    const MAX_SYMBOL_LENGTH: usize = 65000;
+
+                    tcx.sess.target.uses_pdb_debuginfo() && mangled_name.len() > MAX_SYMBOL_LENGTH
+                };
+
+                if mangled_name_too_long {
+                    v0::mangle(tcx, instance, instantiating_crate, false)
+                } else {
+                    mangled_name
+                }
+            }
+            SymbolManglingVersion::V0 => v0::mangle(tcx, instance, instantiating_crate, false),
+            SymbolManglingVersion::Hashed => {
+                hashed::mangle(tcx, instance, instantiating_crate, || {
+                    v0::mangle(tcx, instance, instantiating_crate, false)
+                })
+            }
+        },
     };
 
     debug_assert!(

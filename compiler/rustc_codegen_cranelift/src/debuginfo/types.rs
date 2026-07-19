@@ -6,7 +6,7 @@ use rustc_data_structures::fx::FxHashMap;
 use rustc_middle::ty::layout::LayoutOf;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 
-use crate::{DebugContext, FullyMonomorphizedLayoutCx, has_ptr_meta};
+use crate::{DebugContext, FullyMonomorphizedLayoutCx};
 
 #[derive(Default)]
 pub(crate) struct TypeDebugContext<'tcx> {
@@ -56,7 +56,7 @@ impl DebugContext {
             // ty::FnDef(..) | ty::FnPtr(..)
             // ty::Closure(..)
             // ty::Adt(def, ..)
-            ty::Tuple(components) => self.tuple_type(tcx, type_dbg, ty, *components),
+            ty::Tuple(components) => self.tuple_type(tcx, type_dbg, ty, components),
             // ty::Param(_)
             // FIXME implement remaining types and add unreachable!() to the fallback branch
             _ => self.placeholder_for_type(tcx, type_dbg, ty),
@@ -129,7 +129,7 @@ impl DebugContext {
 
         let name = type_names::compute_debuginfo_type_name(tcx, ptr_type, true);
 
-        if !has_ptr_meta(tcx, ptr_type) {
+        if !tcx.type_has_metadata(ptr_type, ty::TypingEnv::fully_monomorphized()) {
             let pointer_type_id =
                 self.dwarf.unit.add(self.dwarf.unit.root(), gimli::DW_TAG_pointer_type);
             let pointer_entry = self.dwarf.unit.get_mut(pointer_type_id);
@@ -152,7 +152,7 @@ impl DebugContext {
         components: &'tcx [Ty<'tcx>],
     ) -> UnitEntryId {
         let components = components
-            .into_iter()
+            .iter()
             .map(|&ty| (ty, self.debug_type(tcx, type_dbg, ty)))
             .collect::<Vec<_>>();
 
@@ -166,7 +166,7 @@ impl DebugContext {
         let tuple_entry = self.dwarf.unit.get_mut(tuple_type_id);
         tuple_entry.set(gimli::DW_AT_name, AttributeValue::StringRef(self.dwarf.strings.add(name)));
         tuple_entry.set(gimli::DW_AT_byte_size, AttributeValue::Udata(layout.size.bytes()));
-        tuple_entry.set(gimli::DW_AT_alignment, AttributeValue::Udata(layout.align.pref.bytes()));
+        tuple_entry.set(gimli::DW_AT_alignment, AttributeValue::Udata(layout.align.bytes()));
 
         for (i, (ty, dw_ty)) in components.into_iter().enumerate() {
             let member_id = self.dwarf.unit.add(tuple_type_id, gimli::DW_TAG_member);
@@ -178,9 +178,7 @@ impl DebugContext {
             member_entry.set(gimli::DW_AT_type, AttributeValue::UnitRef(dw_ty));
             member_entry.set(
                 gimli::DW_AT_alignment,
-                AttributeValue::Udata(
-                    FullyMonomorphizedLayoutCx(tcx).layout_of(ty).align.pref.bytes(),
-                ),
+                AttributeValue::Udata(FullyMonomorphizedLayoutCx(tcx).layout_of(ty).align.bytes()),
             );
             member_entry.set(
                 gimli::DW_AT_data_member_location,

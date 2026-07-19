@@ -6,7 +6,7 @@
 use stdarch_test::assert_instr;
 
 #[allow(improper_ctypes)]
-extern "C" {
+unsafe extern "C" {
     #[link_name = "llvm.x86.xsave64"]
     fn xsave64(p: *mut u8, hi: u32, lo: u32);
     #[link_name = "llvm.x86.xrstor64"]
@@ -126,34 +126,10 @@ pub unsafe fn _xrstors64(mem_addr: *const u8, rs_mask: u64) {
 
 #[cfg(test)]
 mod tests {
-    use crate::core_arch::x86_64::xsave;
-    use std::fmt;
+    use crate::core_arch::x86::*;
+    use crate::core_arch::x86_64::*;
     use stdarch_test::simd_test;
 
-    #[repr(align(64))]
-    #[derive(Debug)]
-    struct XsaveArea {
-        // max size for 256-bit registers is 800 bytes:
-        // see https://software.intel.com/en-us/node/682996
-        // max size for 512-bit registers is 2560 bytes:
-        // FIXME: add source
-        data: [u8; 2560],
-    }
-
-    impl XsaveArea {
-        fn new() -> XsaveArea {
-            XsaveArea { data: [0; 2560] }
-        }
-        fn ptr(&mut self) -> *mut u8 {
-            self.data.as_mut_ptr()
-        }
-    }
-
-    // We cannot test `_xsave64`, `_xrstor64`, `_xsaveopt64`, `_xsaves64` and `_xrstors64` directly
-    // as they are privileged instructions and will need access to the kernel to run and test them.
-    // See https://github.com/rust-lang/stdarch/issues/209
-
-    #[cfg_attr(stdarch_intel_sde, ignore)]
     #[simd_test(enable = "xsave")]
     #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
     unsafe fn test_xsave64() {
@@ -161,12 +137,11 @@ mod tests {
         let mut a = XsaveArea::new();
         let mut b = XsaveArea::new();
 
-        xsave::_xsave64(a.ptr(), m);
-        xsave::_xrstor64(a.ptr(), m);
-        xsave::_xsave64(b.ptr(), m);
+        _xsave64(a.ptr(), m);
+        _xrstor64(a.ptr(), m);
+        _xsave64(b.ptr(), m);
     }
 
-    #[cfg_attr(stdarch_intel_sde, ignore)]
     #[simd_test(enable = "xsave,xsaveopt")]
     #[cfg_attr(miri, ignore)] // Register saving/restoring is not supported in Miri
     unsafe fn test_xsaveopt64() {
@@ -174,9 +149,9 @@ mod tests {
         let mut a = XsaveArea::new();
         let mut b = XsaveArea::new();
 
-        xsave::_xsaveopt64(a.ptr(), m);
-        xsave::_xrstor64(a.ptr(), m);
-        xsave::_xsaveopt64(b.ptr(), m);
+        _xsaveopt64(a.ptr(), m);
+        _xrstor64(a.ptr(), m);
+        _xsaveopt64(b.ptr(), m);
     }
 
     #[simd_test(enable = "xsave,xsavec")]
@@ -186,8 +161,8 @@ mod tests {
         let mut a = XsaveArea::new();
         let mut b = XsaveArea::new();
 
-        xsave::_xsavec64(a.ptr(), m);
-        xsave::_xrstor64(a.ptr(), m);
-        xsave::_xsavec64(b.ptr(), m);
+        _xsavec64(a.ptr(), m);
+        _xrstor64(a.ptr(), m);
+        _xsavec64(b.ptr(), m);
     }
 }

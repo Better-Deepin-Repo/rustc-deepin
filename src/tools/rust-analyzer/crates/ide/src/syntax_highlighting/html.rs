@@ -1,21 +1,24 @@
 //! Renders a bit of code as HTML.
 
 use hir::Semantics;
+use ide_db::MiniCore;
 use oorandom::Rand32;
-use span::EditionedFileId;
 use stdx::format_to;
 use syntax::AstNode;
 
 use crate::{
-    syntax_highlighting::{highlight, HighlightConfig},
     FileId, RootDatabase,
+    syntax_highlighting::{HighlightConfig, highlight},
 };
 
-pub(crate) fn highlight_as_html(db: &RootDatabase, file_id: FileId, rainbow: bool) -> String {
+pub(crate) fn highlight_as_html_with_config(
+    db: &RootDatabase,
+    config: &HighlightConfig<'_>,
+    file_id: FileId,
+    rainbow: bool,
+) -> String {
     let sema = Semantics::new(db);
-    let file_id = sema
-        .attach_first_edition(file_id)
-        .unwrap_or_else(|| EditionedFileId::current_edition(file_id));
+    let file_id = sema.attach_first_edition(file_id);
     let file = sema.parse(file_id);
     let file = file.syntax();
     fn rainbowify(seed: u64) -> String {
@@ -28,21 +31,7 @@ pub(crate) fn highlight_as_html(db: &RootDatabase, file_id: FileId, rainbow: boo
         )
     }
 
-    let hl_ranges = highlight(
-        db,
-        HighlightConfig {
-            strings: true,
-            punctuation: true,
-            specialize_punctuation: true,
-            specialize_operator: true,
-            operator: true,
-            inject_doc_comment: true,
-            macro_bang: true,
-            syntactic_name_ref_highlighting: false,
-        },
-        file_id.into(),
-        None,
-    );
+    let hl_ranges = highlight(db, config, file_id.file_id(db), None);
     let text = file.to_string();
     let mut buf = String::new();
     buf.push_str(STYLE);
@@ -67,6 +56,26 @@ pub(crate) fn highlight_as_html(db: &RootDatabase, file_id: FileId, rainbow: boo
     buf
 }
 
+pub(crate) fn highlight_as_html(db: &RootDatabase, file_id: FileId, rainbow: bool) -> String {
+    highlight_as_html_with_config(
+        db,
+        &HighlightConfig {
+            strings: true,
+            comments: true,
+            punctuation: true,
+            specialize_punctuation: true,
+            specialize_operator: true,
+            operator: true,
+            inject_doc_comment: true,
+            macro_bang: true,
+            syntactic_name_ref_highlighting: false,
+            minicore: MiniCore::default(),
+        },
+        file_id,
+        rainbow,
+    )
+}
+
 //FIXME: like, real html escaping
 fn html_escape(text: &str) -> String {
     text.replace('<', "&lt;").replace('>', "&gt;")
@@ -88,12 +97,6 @@ pre                 { color: #DCDCCC; background: #3F3F3F; font-size: 22px; padd
 .string_literal     { color: #CC9393; }
 .field              { color: #94BFF3; }
 .function           { color: #93E0E3; }
-.function.unsafe    { color: #BC8383; }
-.trait.unsafe       { color: #BC8383; }
-.operator.unsafe    { color: #BC8383; }
-.mutable.unsafe     { color: #BC8383; text-decoration: underline; }
-.keyword.unsafe     { color: #BC8383; font-weight: bold; }
-.macro.unsafe       { color: #BC8383; }
 .parameter          { color: #94BFF3; }
 .text               { color: #DCDCCC; }
 .type               { color: #7CB8BB; }
@@ -115,6 +118,8 @@ pre                 { color: #DCDCCC; background: #3F3F3F; font-size: 22px; padd
 .control            { font-style: italic; }
 .reference          { font-style: italic; font-weight: bold; }
 .const              { font-weight: bolder; }
+.unsafe             { color: #BC8383; }
+.deprecated         { text-decoration: line-through; }
 
 .invalid_escape_sequence { color: #FC5555; text-decoration: wavy underline; }
 .unresolved_reference    { color: #FC5555; text-decoration: wavy underline; }

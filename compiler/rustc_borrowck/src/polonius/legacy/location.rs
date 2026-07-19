@@ -13,7 +13,7 @@ use tracing::debug;
 /// granularity through outlives relations; however, the rich location
 /// table serves another purpose: it compresses locations from
 /// multiple words into a single u32.
-pub struct LocationTable {
+pub struct PoloniusLocationTable {
     num_points: usize,
     statements_before_block: IndexVec<BasicBlock, usize>,
 }
@@ -30,7 +30,7 @@ pub enum RichLocation {
     Mid(Location),
 }
 
-impl LocationTable {
+impl PoloniusLocationTable {
     pub(crate) fn new(body: &Body<'_>) -> Self {
         let mut num_points = 0;
         let statements_before_block = body
@@ -43,8 +43,8 @@ impl LocationTable {
             })
             .collect();
 
-        debug!("LocationTable(statements_before_block={:#?})", statements_before_block);
-        debug!("LocationTable: num_points={:#?}", num_points);
+        debug!("PoloniusLocationTable(statements_before_block={:#?})", statements_before_block);
+        debug!("PoloniusLocationTable: num_points={:#?}", num_points);
 
         Self { num_points, statements_before_block }
     }
@@ -109,6 +109,6 @@ impl LocationTable {
 impl LocationIndex {
     fn is_start(self) -> bool {
         // even indices are start points; odd indices are mid points
-        (self.index() % 2) == 0
+        self.index().is_multiple_of(2)
     }
 }

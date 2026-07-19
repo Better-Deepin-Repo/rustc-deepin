@@ -1,85 +1,87 @@
+r[runtime]
 # The Rust runtime
 
 This section documents features that define some aspects of the Rust runtime.
 
-## The `panic_handler` attribute
-
-The *`panic_handler` attribute* can only be applied to a function with signature
-`fn(&PanicInfo) -> !`. The function marked with this [attribute] defines the behavior of panics. The
-[`PanicInfo`] struct contains information about the location of the panic. There must be a single
-`panic_handler` function in the dependency graph of a binary, dylib or cdylib crate.
-
-Below is shown a `panic_handler` function that logs the panic message and then halts the
-thread.
-
-<!-- ignore: test infrastructure can't handle no_std -->
-```rust,ignore
-#![no_std]
-
-use core::fmt::{self, Write};
-use core::panic::PanicInfo;
-
-struct Sink {
-    // ..
-#    _0: (),
-}
-#
-# impl Sink {
-#     fn new() -> Sink { Sink { _0: () }}
-# }
-#
-# impl fmt::Write for Sink {
-#     fn write_str(&mut self, _: &str) -> fmt::Result { Ok(()) }
-# }
-
-#[panic_handler]
-fn panic(info: &PanicInfo) -> ! {
-    let mut sink = Sink::new();
-
-    // logs "panicked at '$reason', src/main.rs:27:4" to some `sink`
-    let _ = writeln!(sink, "{}", info);
-
-    loop {}
-}
-```
-
-### Standard behavior
-
-The standard library provides an implementation of `panic_handler` that
-defaults to unwinding the stack but that can be [changed to abort the
-process][abort]. The standard library's panic behavior can be modified at
-runtime with the [set_hook] function.
-
+<!-- template:attributes -->
+r[runtime.global_allocator]
 ## The `global_allocator` attribute
 
-The *`global_allocator` attribute* is used on a [static item] implementing the
-[`GlobalAlloc`] trait to set the global allocator.
+r[runtime.global_allocator.intro]
+The *`global_allocator` [attribute][attributes]* selects a [memory allocator][std::alloc].
 
+> [!EXAMPLE]
+> ```rust
+> use core::alloc::{GlobalAlloc, Layout};
+> use std::alloc::System;
+>
+> struct MyAllocator;
+>
+> unsafe impl GlobalAlloc for MyAllocator {
+>     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+>         unsafe { System.alloc(layout) }
+>     }
+>     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+>         unsafe { System.dealloc(ptr, layout) }
+>     }
+> }
+>
+> #[global_allocator]
+> static GLOBAL: MyAllocator = MyAllocator;
+> ```
+
+r[runtime.global_allocator.syntax]
+The `global_allocator` attribute uses the [MetaWord] syntax.
+
+r[runtime.global_allocator.allowed-positions]
+The `global_allocator` attribute may only be applied to a [static item] whose type implements the [`GlobalAlloc`] trait.
+
+r[runtime.global_allocator.duplicates]
+The `global_allocator` attribute may only be used once on an item.
+
+r[runtime.global_allocator.single]
+The `global_allocator` attribute may only be used once in the crate graph.
+
+r[runtime.global_allocator.stdlib]
+The `global_allocator` attribute is exported from the [standard library prelude][core::prelude::v1].
+
+<!-- template:attributes -->
+r[runtime.windows_subsystem]
 ## The `windows_subsystem` attribute
 
-The *`windows_subsystem` attribute* may be applied at the crate level to set
-the [subsystem] when linking on a Windows target. It uses the
-[_MetaNameValueStr_] syntax to specify the subsystem with a value of either
-`console` or `windows`. This attribute is ignored on non-Windows targets, and
-for non-`bin` [crate types].
+r[runtime.windows_subsystem.intro]
+The *`windows_subsystem` [attribute][attributes]* sets the [subsystem] when linking on a Windows target.
 
-The "console" subsystem is the default. If a console process is run from an
-existing console then it will be attached to that console, otherwise a new
-console window will be created.
+> [!EXAMPLE]
+> ```rust
+> #![windows_subsystem = "windows"]
+> ```
 
-The "windows" subsystem is commonly used by GUI applications that do not want to
-display a console window on startup. It will run detached from any existing console.
+r[runtime.windows_subsystem.syntax]
+The `windows_subsystem` attribute uses the [MetaNameValueStr] syntax. Accepted values are `"console"` and `"windows"`.
 
-```rust
-#![windows_subsystem = "windows"]
-```
+r[runtime.windows_subsystem.allowed-positions]
+The `windows_subsystem` attribute may only be applied to the crate root.
 
-[_MetaNameValueStr_]: attributes.md#meta-item-attribute-syntax
+r[runtime.windows_subsystem.duplicates]
+Only the first use of `windows_subsystem` has effect.
+
+> [!NOTE]
+> `rustc` lints against any use following the first. This may become an error in the future.
+
+r[runtime.windows_subsystem.ignored]
+The `windows_subsystem` attribute is ignored on non-Windows targets and non-`bin` [crate types].
+
+r[runtime.windows_subsystem.console]
+The `"console"` subsystem is the default. If a console process is run from an existing console then it will be attached to that console; otherwise a new console window will be created.
+
+r[runtime.windows_subsystem.windows]
+The `"windows"` subsystem will run detached from any existing console.
+
+> [!NOTE]
+> The `"windows"` subsystem is commonly used by GUI applications that do not want to display a console window on startup.
+
 [`GlobalAlloc`]: alloc::alloc::GlobalAlloc
-[`PanicInfo`]: core::panic::PanicInfo
-[abort]: ../book/ch09-01-unrecoverable-errors-with-panic.html
-[attribute]: attributes.md
 [crate types]: linkage.md
-[set_hook]: std::panic::set_hook
 [static item]: items/static-items.md
 [subsystem]: https://msdn.microsoft.com/en-us/library/fcc1zstk.aspx

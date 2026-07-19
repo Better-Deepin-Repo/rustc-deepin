@@ -1,18 +1,20 @@
 use std::mem;
 
 use rustc_data_structures::fx::{FxHashMap, FxHashSet, FxIndexMap, FxIndexSet};
+use rustc_hir::StabilityLevel;
 use rustc_hir::def_id::{CrateNum, DefId, DefIdMap, DefIdSet};
+use rustc_metadata::creader::CStore;
 use rustc_middle::ty::{self, TyCtxt};
 use rustc_span::Symbol;
 use tracing::debug;
 
 use crate::clean::types::ExternalLocation;
 use crate::clean::{self, ExternalCrate, ItemId, PrimitiveType};
+use crate::config::RenderOptions;
 use crate::core::DocContext;
 use crate::fold::DocFolder;
 use crate::formats::Impl;
 use crate::formats::item_type::ItemType;
-use crate::html::format::join_with_double_colon;
 use crate::html::markdown::short_markdown_summary;
 use crate::html::render::IndexItem;
 use crate::html::render::search_index::get_function_type_for_search;
@@ -46,7 +48,7 @@ pub(crate) struct Cache {
 
     /// Similar to `paths`, but only holds external paths. This is only used for
     /// generating explicit hyperlinks to other crates.
-    pub(crate) external_paths: FxHashMap<DefId, (Vec<Symbol>, ItemType)>,
+    pub(crate) external_paths: FxIndexMap<DefId, (Vec<Symbol>, ItemType)>,
 
     /// Maps local `DefId`s of exported types to fully qualified paths.
     /// Unlike 'paths', this mapping ignores any renames that occur
@@ -124,8 +126,6 @@ pub(crate) struct Cache {
     ///
     /// Links are indexed by the DefId of the item they document.
     pub(crate) intra_doc_links: FxHashMap<ItemId, FxIndexSet<clean::ItemLink>>,
-    /// Cfg that have been hidden via #![doc(cfg_hide(...))]
-    pub(crate) hidden_cfg: FxHashSet<clean::cfg::Cfg>,
 
     /// Contains the list of `DefId`s which have been inlined. It is used when generating files
     /// to check if a stripped item should get its file generated or not: if it's inside a
@@ -139,6 +139,7 @@ struct CacheBuilder<'a, 'tcx> {
     /// This field is used to prevent duplicated impl blocks.
     impl_ids: DefIdMap<DefIdSet>,
     tcx: TyCtxt<'tcx>,
+    is_json_output: bool,
 }
 
 impl Cache {
@@ -146,9 +147,21 @@ impl Cache {
         Cache { document_private, document_hidden, ..Cache::default() }
     }
 
+    fn parent_stack_last_impl_and_trait_id(&self) -> (Option<DefId>, Option<DefId>) {
+        if let Some(ParentStackItem::Impl { item_id, trait_, .. }) = self.parent_stack.last() {
+            (item_id.as_def_id(), trait_.as_ref().map(|tr| tr.def_id()))
+        } else {
+            (None, None)
+        }
+    }
+
     /// Populates the `Cache` with more data. The returned `Crate` will be missing some data that was
     /// in `krate` due to the data being moved into the `Cache`.
-    pub(crate) fn populate(cx: &mut DocContext<'_>, mut krate: clean::Crate) -> clean::Crate {
+    pub(crate) fn populate(
+        cx: &mut DocContext<'_>,
+        mut krate: clean::Crate,
+        render_options: &RenderOptions,
+    ) -> clean::Crate {
         let tcx = cx.tcx;
 
         // Crawl the crate to build various caches used for the output
@@ -156,18 +169,32 @@ impl Cache {
         assert!(cx.external_traits.is_empty());
         cx.cache.traits = mem::take(&mut krate.external_traits);
 
+        let extern_url_takes_precedence = render_options.extern_html_root_takes_precedence;
+        let dst = &render_options.output;
+
+        // Make `--extern-html-root-url` support the same names as `--extern` whenever possible
+        let cstore = CStore::from_tcx(tcx);
+        for (name, extern_url) in &render_options.extern_html_root_urls {
+            if let Some(crate_num) = cstore.resolved_extern_crate(Symbol::intern(name)) {
+                let e = ExternalCrate { crate_num };
+                let location = e.location(Some(extern_url), extern_url_takes_precedence, dst, tcx);
+                cx.cache.extern_locations.insert(e.crate_num, location);
+            }
+        }
+
         // Cache where all our extern crates are located
-        // FIXME: this part is specific to HTML so it'd be nice to remove it from the common code
+        // This is also used in the JSON output.
         for &crate_num in tcx.crates(()) {
             let e = ExternalCrate { crate_num };
 
             let name = e.name(tcx);
-            let render_options = &cx.render_options;
-            let extern_url = render_options.extern_html_root_urls.get(name.as_str()).map(|u| &**u);
-            let extern_url_takes_precedence = render_options.extern_html_root_takes_precedence;
-            let dst = &render_options.output;
-            let location = e.location(extern_url, extern_url_takes_precedence, dst, tcx);
-            cx.cache.extern_locations.insert(e.crate_num, location);
+            cx.cache.extern_locations.entry(e.crate_num).or_insert_with(|| {
+                // falls back to matching by crates' own names, because
+                // transitive dependencies and injected crates may be loaded without `--extern`
+                let extern_url =
+                    render_options.extern_html_root_urls.get(name.as_str()).map(|u| &**u);
+                e.location(extern_url, extern_url_takes_precedence, dst, tcx)
+            });
             cx.cache.external_paths.insert(e.def_id(), (vec![name], ItemType::Module));
         }
 
@@ -183,8 +210,13 @@ impl Cache {
         }
 
         let (krate, mut impl_ids) = {
-            let mut cache_builder =
-                CacheBuilder { tcx, cache: &mut cx.cache, impl_ids: Default::default() };
+            let is_json_output = cx.is_json_output();
+            let mut cache_builder = CacheBuilder {
+                tcx,
+                cache: &mut cx.cache,
+                impl_ids: Default::default(),
+                is_json_output,
+            };
             krate = cache_builder.fold_crate(krate);
             (krate, cache_builder.impl_ids)
         };
@@ -281,7 +313,7 @@ impl DocFolder for CacheBuilder<'_, '_> {
 
         // Keep track of the fully qualified path for this item.
         let pushed = match item.name {
-            Some(n) if !n.is_empty() => {
+            Some(n) => {
                 self.cache.stack.push(n);
                 true
             }
@@ -306,7 +338,13 @@ impl DocFolder for CacheBuilder<'_, '_> {
             | clean::ProcMacroItem(..)
             | clean::VariantItem(..) => {
                 use rustc_data_structures::fx::IndexEntry as Entry;
-                if !self.cache.stripped_mod {
+
+                let skip_because_unstable = matches!(
+                    item.stability.map(|stab| stab.level),
+                    Some(StabilityLevel::Stable { allowed_through_unstable_modules: Some(_), .. })
+                );
+
+                if (!self.cache.stripped_mod && !skip_because_unstable) || self.is_json_output {
                     // Re-exported items mean that the same id can show up twice
                     // in the rustdoc ast that we're looking at. We know,
                     // however, that a re-exported item doesn't show up in the
@@ -344,7 +382,8 @@ impl DocFolder for CacheBuilder<'_, '_> {
             | clean::RequiredAssocTypeItem(..)
             | clean::AssocTypeItem(..)
             | clean::StrippedItem(..)
-            | clean::KeywordItem => {
+            | clean::KeywordItem
+            | clean::AttributeItem => {
                 // FIXME: Do these need handling?
                 // The person writing this comment doesn't know.
                 // So would rather leave them to an expert,
@@ -372,7 +411,6 @@ impl DocFolder for CacheBuilder<'_, '_> {
         // implementations elsewhere.
         let ret = if let clean::Item {
             inner: box clean::ItemInner { kind: clean::ImplItem(ref i), .. },
-            ..
         } = item
         {
             // Figure out the id of this impl. This may map to a
@@ -406,7 +444,9 @@ impl DocFolder for CacheBuilder<'_, '_> {
                 }
             }
 
-            if let Some(generics) = i.trait_.as_ref().and_then(|t| t.generics()) {
+            if let Some(trait_) = &i.trait_
+                && let Some(generics) = trait_.generics()
+            {
                 for bound in generics {
                     dids.extend(bound.def_id(self.cache));
                 }
@@ -544,12 +584,7 @@ fn add_item_to_search_index(tcx: TyCtxt<'_>, cache: &mut Cache, item: &clean::It
         clean::ItemKind::ImportItem(import) => import.source.did.unwrap_or(item_def_id),
         _ => item_def_id,
     };
-    let path = join_with_double_colon(parent_path);
-    let impl_id = if let Some(ParentStackItem::Impl { item_id, .. }) = cache.parent_stack.last() {
-        item_id.as_def_id()
-    } else {
-        None
-    };
+    let (impl_id, trait_parent) = cache.parent_stack_last_impl_and_trait_id();
     let search_type = get_function_type_for_search(
         item,
         tcx,
@@ -563,16 +598,19 @@ fn add_item_to_search_index(tcx: TyCtxt<'_>, cache: &mut Cache, item: &clean::It
         ty: item.type_(),
         defid: Some(defid),
         name,
-        path,
+        module_path: parent_path.to_vec(),
         desc,
         parent: parent_did,
         parent_idx: None,
-        exact_path: None,
+        trait_parent,
+        trait_parent_idx: None,
+        exact_module_path: None,
         impl_id,
         search_type,
         aliases,
         deprecation,
     };
+
     cache.search_index.push(index_item);
 }
 
@@ -581,19 +619,21 @@ fn add_item_to_search_index(tcx: TyCtxt<'_>, cache: &mut Cache, item: &clean::It
 /// See [`Cache::orphan_impl_items`].
 fn handle_orphan_impl_child(cache: &mut Cache, item: &clean::Item, parent_did: DefId) {
     let impl_generics = clean_impl_generics(cache.parent_stack.last());
-    let impl_id = if let Some(ParentStackItem::Impl { item_id, .. }) = cache.parent_stack.last() {
-        item_id.as_def_id()
-    } else {
-        None
+    let (impl_id, trait_parent) = cache.parent_stack_last_impl_and_trait_id();
+    let orphan_item = OrphanImplItem {
+        parent: parent_did,
+        trait_parent,
+        item: item.clone(),
+        impl_generics,
+        impl_id,
     };
-    let orphan_item =
-        OrphanImplItem { parent: parent_did, item: item.clone(), impl_generics, impl_id };
     cache.orphan_impl_items.push(orphan_item);
 }
 
 pub(crate) struct OrphanImplItem {
     pub(crate) parent: DefId,
     pub(crate) impl_id: Option<DefId>,
+    pub(crate) trait_parent: Option<DefId>,
     pub(crate) item: clean::Item,
     pub(crate) impl_generics: Option<(clean::Type, clean::Generics)>,
 }

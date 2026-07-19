@@ -10,7 +10,7 @@ use rustc_middle::bug;
 use rustc_middle::mir::CoroutineLayout;
 use rustc_middle::ty::layout::{LayoutOf, TyAndLayout};
 use rustc_middle::ty::{self, AdtDef, CoroutineArgs, CoroutineArgsExt, Ty, VariantDef};
-use rustc_span::Symbol;
+use rustc_span::{Span, Symbol};
 
 use super::type_map::{DINodeCreationResult, UniqueTypeId};
 use super::{SmallVec, size_and_align_of};
@@ -30,13 +30,14 @@ mod native;
 pub(super) fn build_enum_type_di_node<'ll, 'tcx>(
     cx: &CodegenCx<'ll, 'tcx>,
     unique_type_id: UniqueTypeId<'tcx>,
+    span: Span,
 ) -> DINodeCreationResult<'ll> {
     let enum_type = unique_type_id.expect_ty();
     let &ty::Adt(enum_adt_def, _) = enum_type.kind() else {
         bug!("build_enum_type_di_node() called with non-enum type: `{:?}`", enum_type)
     };
 
-    let enum_type_and_layout = cx.layout_of(enum_type);
+    let enum_type_and_layout = cx.spanned_layout_of(enum_type, span);
 
     if wants_c_like_enum_debuginfo(cx.tcx, enum_type_and_layout) {
         return build_c_style_enum_di_node(cx, enum_adt_def, enum_type_and_layout);
@@ -249,7 +250,7 @@ fn build_enum_variant_struct_type_di_node<'ll, 'tcx>(
                         cx,
                         struct_type_di_node,
                         &field_name,
-                        (field_layout.size, field_layout.align.abi),
+                        field_layout,
                         variant_layout.fields.offset(field_index),
                         di_flags,
                         type_di_node(cx, field_layout.ty),
@@ -332,7 +333,7 @@ fn build_coroutine_variant_struct_type_di_node<'ll, 'tcx>(
                         cx,
                         variant_struct_type_di_node,
                         &field_name,
-                        cx.size_and_align_of(field_type),
+                        cx.layout_of(field_type),
                         variant_layout.fields.offset(field_index),
                         DIFlags::FlagZero,
                         type_di_node(cx, field_type),
@@ -352,7 +353,7 @@ fn build_coroutine_variant_struct_type_di_node<'ll, 'tcx>(
                         cx,
                         variant_struct_type_di_node,
                         upvar_name.as_str(),
-                        cx.size_and_align_of(upvar_ty),
+                        cx.layout_of(upvar_ty),
                         coroutine_type_and_layout.fields.offset(index),
                         DIFlags::FlagZero,
                         type_di_node(cx, upvar_ty),

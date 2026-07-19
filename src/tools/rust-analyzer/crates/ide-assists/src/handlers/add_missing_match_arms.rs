@@ -1,15 +1,18 @@
 use std::iter::{self, Peekable};
 
 use either::Either;
-use hir::{sym, Adt, Crate, HasAttrs, ImportPathConfig, ModuleDef, Semantics};
-use ide_db::syntax_helpers::suggest_name;
+use hir::{Adt, AsAssocItem, Crate, FindPathConfig, HasAttrs, ModuleDef, Semantics};
 use ide_db::RootDatabase;
+use ide_db::assists::ExprFillDefaultMode;
+use ide_db::syntax_helpers::suggest_name;
 use ide_db::{famous_defs::FamousDefs, helpers::mod_path_to_ast};
 use itertools::Itertools;
-use syntax::ast::edit_in_place::Removable;
-use syntax::ast::{self, make, AstNode, MatchArmList, MatchExpr, Pat};
+use syntax::ToSmolStr;
+use syntax::ast::edit::{AstNodeEdit, IndentLevel};
+use syntax::ast::syntax_factory::SyntaxFactory;
+use syntax::ast::{self, AstNode, MatchArmList, MatchExpr, Pat, make};
 
-use crate::{utils, AssistContext, AssistId, AssistKind, Assists};
+use crate::{AssistContext, AssistId, Assists, utils};
 
 // Assist: add_missing_match_arms
 //
@@ -64,22 +67,31 @@ pub(crate) fn add_missing_match_arms(acc: &mut Assists, ctx: &AssistContext<'_>)
             }
             .map(move |pat| (pat, has_guard))
         })
-        .map(|(pat, has_guard)| {
+        .filter_map(|(pat, has_guard)| {
             has_catch_all_arm |= !has_guard && matches!(pat, Pat::WildcardPat(_));
-            pat
+            (!has_guard).then_some(pat)
         })
         // Exclude top level wildcards so that they are expanded by this assist, retains status quo in #8129.
         .filter(|pat| !matches!(pat, Pat::WildcardPat(_)))
         .collect();
 
-    let cfg = ctx.config.import_path_config();
+    let make = SyntaxFactory::with_mappings();
 
-    let module = ctx.sema.scope(expr.syntax())?.module();
+    let scope = ctx.sema.scope(expr.syntax())?;
+    let module = scope.module();
+    let cfg = ctx.config.find_path_config(ctx.sema.is_nightly(scope.krate()));
+    let self_ty = if ctx.config.prefer_self_ty {
+        scope
+            .containing_function()
+            .and_then(|function| function.as_assoc_item(ctx.db())?.implementing_ty(ctx.db()))
+    } else {
+        None
+    };
     let (mut missing_pats, is_non_exhaustive, has_hidden_variants): (
         Peekable<Box<dyn Iterator<Item = (ast::Pat, bool)>>>,
         bool,
         bool,
-    ) = if let Some(enum_def) = resolve_enum_def(&ctx.sema, &expr) {
+    ) = if let Some(enum_def) = resolve_enum_def(&ctx.sema, &expr, self_ty.as_ref()) {
         let is_non_exhaustive = enum_def.is_non_exhaustive(ctx.db(), module.krate());
 
         let variants = enum_def.variants(ctx.db());
@@ -91,14 +103,15 @@ pub(crate) fn add_missing_match_arms(acc: &mut Assists, ctx: &AssistContext<'_>)
             .into_iter()
             .filter_map(|variant| {
                 Some((
-                    build_pat(ctx, module, variant, cfg)?,
+                    build_pat(ctx, &make, module, variant, cfg)?,
                     variant.should_be_hidden(ctx.db(), module.krate()),
                 ))
             })
             .filter(|(variant_pat, _)| is_variant_missing(&top_lvl_pats, variant_pat));
 
-        let option_enum = FamousDefs(&ctx.sema, module.krate()).core_option_Option().map(lift_enum);
-        let missing_pats: Box<dyn Iterator<Item = _>> = if Some(enum_def) == option_enum {
+        let option_enum = FamousDefs(&ctx.sema, module.krate()).core_option_Option();
+        let missing_pats: Box<dyn Iterator<Item = _>> = if matches!(enum_def, ExtendedEnum::Enum { enum_: e, .. } if Some(e) == option_enum)
+        {
             // Match `Some` variant first.
             cov_mark::hit!(option_order);
             Box::new(missing_pats.rev())
@@ -106,7 +119,7 @@ pub(crate) fn add_missing_match_arms(acc: &mut Assists, ctx: &AssistContext<'_>)
             Box::new(missing_pats)
         };
         (missing_pats.peekable(), is_non_exhaustive, has_hidden_variants)
-    } else if let Some(enum_defs) = resolve_tuple_of_enum_def(&ctx.sema, &expr) {
+    } else if let Some(enum_defs) = resolve_tuple_of_enum_def(&ctx.sema, &expr, self_ty.as_ref()) {
         let is_non_exhaustive =
             enum_defs.iter().any(|enum_def| enum_def.is_non_exhaustive(ctx.db(), module.krate()));
 
@@ -142,10 +155,11 @@ pub(crate) fn add_missing_match_arms(acc: &mut Assists, ctx: &AssistContext<'_>)
                 let is_hidden = variants
                     .iter()
                     .any(|variant| variant.should_be_hidden(ctx.db(), module.krate()));
-                let patterns =
-                    variants.into_iter().filter_map(|variant| build_pat(ctx, module, variant, cfg));
+                let patterns = variants
+                    .into_iter()
+                    .filter_map(|variant| build_pat(ctx, &make, module, variant, cfg));
 
-                (ast::Pat::from(make::tuple_pat(patterns)), is_hidden)
+                (ast::Pat::from(make.tuple_pat(patterns)), is_hidden)
             })
             .filter(|(variant_pat, _)| is_variant_missing(&top_lvl_pats, variant_pat));
         (
@@ -153,7 +167,9 @@ pub(crate) fn add_missing_match_arms(acc: &mut Assists, ctx: &AssistContext<'_>)
             is_non_exhaustive,
             has_hidden_variants,
         )
-    } else if let Some((enum_def, len)) = resolve_array_of_enum_def(&ctx.sema, &expr) {
+    } else if let Some((enum_def, len)) =
+        resolve_array_of_enum_def(&ctx.sema, &expr, self_ty.as_ref())
+    {
         let is_non_exhaustive = enum_def.is_non_exhaustive(ctx.db(), module.krate());
         let variants = enum_def.variants(ctx.db());
 
@@ -174,9 +190,11 @@ pub(crate) fn add_missing_match_arms(acc: &mut Assists, ctx: &AssistContext<'_>)
                 let is_hidden = variants
                     .iter()
                     .any(|variant| variant.should_be_hidden(ctx.db(), module.krate()));
-                let patterns =
-                    variants.into_iter().filter_map(|variant| build_pat(ctx, module, variant, cfg));
-                (ast::Pat::from(make::slice_pat(patterns)), is_hidden)
+                let patterns = variants
+                    .into_iter()
+                    .filter_map(|variant| build_pat(ctx, &make, module, variant, cfg));
+
+                (ast::Pat::from(make.slice_pat(patterns)), is_hidden)
             })
             .filter(|(variant_pat, _)| is_variant_missing(&top_lvl_pats, variant_pat));
         (
@@ -197,12 +215,10 @@ pub(crate) fn add_missing_match_arms(acc: &mut Assists, ctx: &AssistContext<'_>)
     }
 
     acc.add(
-        AssistId("add_missing_match_arms", AssistKind::QuickFix),
+        AssistId::quick_fix("add_missing_match_arms"),
         "Fill match arms",
         ctx.sema.original_range(match_expr.syntax()).range,
-        |edit| {
-            let new_match_arm_list = match_arm_list.clone_for_update();
-
+        |builder| {
             // having any hidden variants means that we need a catch-all arm
             needs_catch_all_arm |= has_hidden_variants;
 
@@ -212,94 +228,103 @@ pub(crate) fn add_missing_match_arms(acc: &mut Assists, ctx: &AssistContext<'_>)
                     !hidden
                 })
                 .map(|(pat, _)| {
-                    make::match_arm(iter::once(pat), None, make::ext::expr_todo())
-                        .clone_for_update()
+                    make.match_arm(
+                        pat,
+                        None,
+                        match ctx.config.expr_fill_default {
+                            ExprFillDefaultMode::Todo => make::ext::expr_todo(),
+                            ExprFillDefaultMode::Underscore => make::ext::expr_underscore(),
+                            ExprFillDefaultMode::Default => make::ext::expr_todo(),
+                        },
+                    )
                 });
 
-            let catch_all_arm = new_match_arm_list
+            let mut arms: Vec<_> = match_arm_list
                 .arms()
-                .find(|arm| matches!(arm.pat(), Some(ast::Pat::WildcardPat(_))));
-            if let Some(arm) = catch_all_arm {
-                let is_empty_expr = arm.expr().map_or(true, |e| match e {
-                    ast::Expr::BlockExpr(b) => {
-                        b.statements().next().is_none() && b.tail_expr().is_none()
+                .filter(|arm| {
+                    if matches!(arm.pat(), Some(ast::Pat::WildcardPat(_))) {
+                        let is_empty_expr = arm.expr().is_none_or(|e| match e {
+                            ast::Expr::BlockExpr(b) => {
+                                b.statements().next().is_none() && b.tail_expr().is_none()
+                            }
+                            ast::Expr::TupleExpr(t) => t.fields().next().is_none(),
+                            _ => false,
+                        });
+                        if is_empty_expr {
+                            false
+                        } else {
+                            cov_mark::hit!(add_missing_match_arms_empty_expr);
+                            true
+                        }
+                    } else {
+                        true
                     }
-                    ast::Expr::TupleExpr(t) => t.fields().next().is_none(),
-                    _ => false,
-                });
-                if is_empty_expr {
-                    arm.remove();
-                } else {
-                    cov_mark::hit!(add_missing_match_arms_empty_expr);
-                }
-            }
+                })
+                .map(|arm| arm.reset_indent().indent(IndentLevel(1)))
+                .collect();
 
-            let mut added_arms = Vec::new();
-            let mut todo_placeholders = Vec::new();
-            for arm in missing_arms {
-                todo_placeholders.push(arm.expr().unwrap());
-                added_arms.push(arm);
-            }
+            let first_new_arm_idx = arms.len();
+            arms.extend(missing_arms);
 
             if needs_catch_all_arm && !has_catch_all_arm {
                 cov_mark::hit!(added_wildcard_pattern);
-                let arm = make::match_arm(
-                    iter::once(make::wildcard_pat().into()),
+                let arm = make.match_arm(
+                    make.wildcard_pat().into(),
                     None,
-                    make::ext::expr_todo(),
-                )
-                .clone_for_update();
-                todo_placeholders.push(arm.expr().unwrap());
-                added_arms.push(arm);
+                    match ctx.config.expr_fill_default {
+                        ExprFillDefaultMode::Todo => make::ext::expr_todo(),
+                        ExprFillDefaultMode::Underscore => make::ext::expr_underscore(),
+                        ExprFillDefaultMode::Default => make::ext::expr_todo(),
+                    },
+                );
+                arms.push(arm);
             }
 
-            let first_new_arm = added_arms.first().cloned();
-            let last_new_arm = added_arms.last().cloned();
+            let new_match_arm_list = make.match_arm_list(arms);
 
-            for arm in added_arms {
-                new_match_arm_list.add_arm(arm);
-            }
-
-            if let Some(cap) = ctx.config.snippet_cap {
-                if let Some(it) = first_new_arm.and_then(|arm| arm.syntax().descendants().find_map(ast::WildcardPat::cast)) {
-                    edit.add_placeholder_snippet(cap, it);
-                }
-
-                for placeholder in todo_placeholders {
-                    edit.add_placeholder_snippet(cap, placeholder);
-                }
-
-                if let Some(arm) = last_new_arm {
-                    edit.add_tabstop_after(cap, arm);
-                }
-            }
-
-            // FIXME: Hack for mutable syntax trees not having great support for macros
+            // FIXME: Hack for syntax trees not having great support for macros
             // Just replace the element that the original range came from
             let old_place = {
                 // Find the original element
                 let file = ctx.sema.parse(arm_list_range.file_id);
                 let old_place = file.syntax().covering_element(arm_list_range.range);
 
-                // Make `old_place` mut
                 match old_place {
-                    syntax::SyntaxElement::Node(it) => {
-                        syntax::SyntaxElement::from(edit.make_syntax_mut(it))
-                    }
+                    syntax::SyntaxElement::Node(it) => it,
                     syntax::SyntaxElement::Token(it) => {
-                        // Don't have a way to make tokens mut, so instead make the parent mut
-                        // and find the token again
-                        let parent =
-                            edit.make_syntax_mut(it.parent().expect("Token must have a parent."));
-                        let mut_token =
-                            parent.covering_element(it.text_range()).into_token().expect("Covering element cannot be found. Range may be beyond the current node's range");
-
-                        syntax::SyntaxElement::from(mut_token)
+                        // If a token is found, it is '{' or '}'
+                        // The parent is `{ ... }`
+                        it.parent().expect("Token must have a parent.")
                     }
                 }
             };
 
-            syntax::ted::replace(old_place, new_match_arm_list.syntax());
+            let mut editor = builder.make_editor(&old_place);
+            let new_match_arm_list = new_match_arm_list.indent(IndentLevel::from_node(&old_place));
+            editor.replace(old_place, new_match_arm_list.syntax());
+
+            if let Some(cap) = ctx.config.snippet_cap {
+                if let Some(it) = new_match_arm_list
+                    .arms()
+                    .nth(first_new_arm_idx)
+                    .and_then(|arm| arm.syntax().descendants().find_map(ast::WildcardPat::cast))
+                {
+                    editor.add_annotation(it.syntax(), builder.make_placeholder_snippet(cap));
+                }
+
+                for arm in new_match_arm_list.arms().skip(first_new_arm_idx) {
+                    if let Some(expr) = arm.expr() {
+                        editor.add_annotation(expr.syntax(), builder.make_placeholder_snippet(cap));
+                    }
+                }
+
+                if let Some(arm) = new_match_arm_list.arms().skip(first_new_arm_idx).last() {
+                    editor.add_annotation(arm.syntax(), builder.make_tabstop_after(cap));
+                }
+            }
+
+            editor.add_mappings(make.take());
+            builder.add_file_edits(ctx.vfs_file_id(), editor);
         },
     )
 }
@@ -359,49 +384,59 @@ fn does_pat_match_variant(pat: &Pat, var: &Pat) -> bool {
     }
 }
 
-#[derive(Eq, PartialEq, Clone, Copy)]
+#[derive(Eq, PartialEq, Clone)]
 enum ExtendedEnum {
     Bool,
-    Enum(hir::Enum),
+    Enum { enum_: hir::Enum, use_self: bool },
 }
 
 #[derive(Eq, PartialEq, Clone, Copy, Debug)]
 enum ExtendedVariant {
     True,
     False,
-    Variant(hir::Variant),
+    Variant { variant: hir::Variant, use_self: bool },
 }
 
 impl ExtendedVariant {
     fn should_be_hidden(self, db: &RootDatabase, krate: Crate) -> bool {
         match self {
-            ExtendedVariant::Variant(var) => {
-                var.attrs(db).has_doc_hidden() && var.module(db).krate() != krate
+            ExtendedVariant::Variant { variant: var, .. } => {
+                var.attrs(db).is_doc_hidden() && var.module(db).krate() != krate
             }
             _ => false,
         }
     }
-}
-
-fn lift_enum(e: hir::Enum) -> ExtendedEnum {
-    ExtendedEnum::Enum(e)
 }
 
 impl ExtendedEnum {
-    fn is_non_exhaustive(self, db: &RootDatabase, krate: Crate) -> bool {
+    fn enum_(
+        db: &RootDatabase,
+        enum_: hir::Enum,
+        enum_ty: &hir::Type<'_>,
+        self_ty: Option<&hir::Type<'_>>,
+    ) -> Self {
+        ExtendedEnum::Enum {
+            enum_,
+            use_self: self_ty.is_some_and(|self_ty| self_ty.could_unify_with_deeply(db, enum_ty)),
+        }
+    }
+
+    fn is_non_exhaustive(&self, db: &RootDatabase, krate: Crate) -> bool {
         match self {
-            ExtendedEnum::Enum(e) => {
-                e.attrs(db).by_key(&sym::non_exhaustive).exists() && e.module(db).krate() != krate
+            ExtendedEnum::Enum { enum_: e, .. } => {
+                e.attrs(db).is_non_exhaustive() && e.module(db).krate() != krate
             }
             _ => false,
         }
     }
 
-    fn variants(self, db: &RootDatabase) -> Vec<ExtendedVariant> {
-        match self {
-            ExtendedEnum::Enum(e) => {
-                e.variants(db).into_iter().map(ExtendedVariant::Variant).collect::<Vec<_>>()
-            }
+    fn variants(&self, db: &RootDatabase) -> Vec<ExtendedVariant> {
+        match *self {
+            ExtendedEnum::Enum { enum_: e, use_self } => e
+                .variants(db)
+                .into_iter()
+                .map(|variant| ExtendedVariant::Variant { variant, use_self })
+                .collect::<Vec<_>>(),
             ExtendedEnum::Bool => {
                 Vec::<ExtendedVariant>::from([ExtendedVariant::True, ExtendedVariant::False])
             }
@@ -409,9 +444,13 @@ impl ExtendedEnum {
     }
 }
 
-fn resolve_enum_def(sema: &Semantics<'_, RootDatabase>, expr: &ast::Expr) -> Option<ExtendedEnum> {
+fn resolve_enum_def(
+    sema: &Semantics<'_, RootDatabase>,
+    expr: &ast::Expr,
+    self_ty: Option<&hir::Type<'_>>,
+) -> Option<ExtendedEnum> {
     sema.type_of_expr(expr)?.adjusted().autoderef(sema.db).find_map(|ty| match ty.as_adt() {
-        Some(Adt::Enum(e)) => Some(ExtendedEnum::Enum(e)),
+        Some(Adt::Enum(e)) => Some(ExtendedEnum::enum_(sema.db, e, &ty, self_ty)),
         _ => ty.is_bool().then_some(ExtendedEnum::Bool),
     })
 }
@@ -419,6 +458,7 @@ fn resolve_enum_def(sema: &Semantics<'_, RootDatabase>, expr: &ast::Expr) -> Opt
 fn resolve_tuple_of_enum_def(
     sema: &Semantics<'_, RootDatabase>,
     expr: &ast::Expr,
+    self_ty: Option<&hir::Type<'_>>,
 ) -> Option<Vec<ExtendedEnum>> {
     sema.type_of_expr(expr)?
         .adjusted()
@@ -427,7 +467,7 @@ fn resolve_tuple_of_enum_def(
         .map(|ty| {
             ty.autoderef(sema.db).find_map(|ty| {
                 match ty.as_adt() {
-                    Some(Adt::Enum(e)) => Some(lift_enum(e)),
+                    Some(Adt::Enum(e)) => Some(ExtendedEnum::enum_(sema.db, e, &ty, self_ty)),
                     // For now we only handle expansion for a tuple of enums. Here
                     // we map non-enum items to None and rely on `collect` to
                     // convert Vec<Option<hir::Enum>> into Option<Vec<hir::Enum>>.
@@ -442,10 +482,11 @@ fn resolve_tuple_of_enum_def(
 fn resolve_array_of_enum_def(
     sema: &Semantics<'_, RootDatabase>,
     expr: &ast::Expr,
+    self_ty: Option<&hir::Type<'_>>,
 ) -> Option<(ExtendedEnum, usize)> {
     sema.type_of_expr(expr)?.adjusted().as_array(sema.db).and_then(|(ty, len)| {
         ty.autoderef(sema.db).find_map(|ty| match ty.as_adt() {
-            Some(Adt::Enum(e)) => Some((lift_enum(e), len)),
+            Some(Adt::Enum(e)) => Some((ExtendedEnum::enum_(sema.db, e, &ty, self_ty), len)),
             _ => ty.is_bool().then_some((ExtendedEnum::Bool, len)),
         })
     })
@@ -453,48 +494,64 @@ fn resolve_array_of_enum_def(
 
 fn build_pat(
     ctx: &AssistContext<'_>,
+    make: &SyntaxFactory,
     module: hir::Module,
     var: ExtendedVariant,
-    cfg: ImportPathConfig,
+    cfg: FindPathConfig,
 ) -> Option<ast::Pat> {
     let db = ctx.db();
     match var {
-        ExtendedVariant::Variant(var) => {
+        ExtendedVariant::Variant { variant: var, use_self } => {
             let edition = module.krate().edition(db);
-            let path = mod_path_to_ast(&module.find_path(db, ModuleDef::from(var), cfg)?, edition);
+            let path = if use_self {
+                make::path_from_segments(
+                    [
+                        make::path_segment(make::name_ref_self_ty()),
+                        make::path_segment(make::name_ref(
+                            &var.name(db).display(db, edition).to_smolstr(),
+                        )),
+                    ],
+                    false,
+                )
+            } else {
+                mod_path_to_ast(&module.find_path(db, ModuleDef::from(var), cfg)?, edition)
+            };
             let fields = var.fields(db);
-            let pat = match var.kind(db) {
+            let pat: ast::Pat = match var.kind(db) {
                 hir::StructKind::Tuple => {
-                    let mut name_generator = suggest_name::NameGenerator::new();
+                    let mut name_generator = suggest_name::NameGenerator::default();
                     let pats = fields.into_iter().map(|f| {
-                        let name = name_generator.for_type(&f.ty(db), db, edition);
+                        let name = name_generator.for_type(&f.ty(db).to_type(db), db, edition);
                         match name {
-                            Some(name) => make::ext::simple_ident_pat(make::name(&name)).into(),
-                            None => make::wildcard_pat().into(),
+                            Some(name) => make::ext::simple_ident_pat(make.name(&name)).into(),
+                            None => make.wildcard_pat().into(),
                         }
                     });
-                    make::tuple_struct_pat(path, pats).into()
+                    make.tuple_struct_pat(path, pats).into()
                 }
                 hir::StructKind::Record => {
-                    let pats = fields
+                    let fields = fields
                         .into_iter()
-                        .map(|f| make::name(f.name(db).as_str()))
-                        .map(|name| make::ext::simple_ident_pat(name).into());
-                    make::record_pat(path, pats).into()
+                        .map(|f| make.ident_pat(false, false, make.name(f.name(db).as_str())))
+                        .map(|ident| make.record_pat_field_shorthand(ident.into()));
+                    let fields = make.record_pat_field_list(fields, None);
+                    make.record_pat_with_fields(path, fields).into()
                 }
-                hir::StructKind::Unit => make::path_pat(path),
+                hir::StructKind::Unit => make.path_pat(path),
             };
             Some(pat)
         }
-        ExtendedVariant::True => Some(ast::Pat::from(make::literal_pat("true"))),
-        ExtendedVariant::False => Some(ast::Pat::from(make::literal_pat("false"))),
+        ExtendedVariant::True => Some(ast::Pat::from(make.literal_pat("true"))),
+        ExtendedVariant::False => Some(ast::Pat::from(make.literal_pat("false"))),
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::AssistConfig;
     use crate::tests::{
-        check_assist, check_assist_not_applicable, check_assist_target, check_assist_unresolved,
+        TEST_CONFIG, check_assist, check_assist_not_applicable, check_assist_target,
+        check_assist_unresolved, check_assist_with_config,
     };
 
     use super::add_missing_match_arms;
@@ -861,6 +918,39 @@ fn main() {
     }
 
     #[test]
+    fn partial_fill_option_with_indentation() {
+        check_assist(
+            add_missing_match_arms,
+            r#"
+//- minicore: option
+fn main() {
+    match None$0 {
+        None => {
+            foo(
+                "foo",
+                "bar",
+            );
+        }
+    }
+}
+"#,
+            r#"
+fn main() {
+    match None {
+        None => {
+            foo(
+                "foo",
+                "bar",
+            );
+        }
+        Some(${1:_}) => ${2:todo!()},$0
+    }
+}
+"#,
+        );
+    }
+
+    #[test]
     fn partial_fill_or_pat() {
         check_assist(
             add_missing_match_arms,
@@ -908,7 +998,8 @@ fn main() {
         A::Ds(_value) => { let x = 1; }
         A::Es(B::Xs) => (),
         A::As => ${1:todo!()},
-        A::Cs => ${2:todo!()},$0
+        A::Bs => ${2:todo!()},
+        A::Cs => ${3:todo!()},$0
     }
 }
 "#,
@@ -1383,6 +1474,9 @@ fn main() {
         );
     }
 
+    // FIXME: Preserving comments is quite hard in the current transitional syntax editing model.
+    // Once we migrate to new trivia model addressed in #6854, remove the ignore attribute.
+    #[ignore]
     #[test]
     fn add_missing_match_arms_preserves_comments() {
         check_assist(
@@ -1411,6 +1505,9 @@ fn foo(a: A) {
         );
     }
 
+    // FIXME: Preserving comments is quite hard in the current transitional syntax editing model.
+    // Once we migrate to new trivia model addressed in #6854, remove the ignore attribute.
+    #[ignore]
     #[test]
     fn add_missing_match_arms_preserves_comments_empty() {
         check_assist(
@@ -1508,10 +1605,10 @@ enum Test {
 
 fn foo(t: Test) {
     m!(match t {
-    Test::A => ${1:todo!()},
-    Test::B => ${2:todo!()},
-    Test::C => ${3:todo!()},$0
-});
+        Test::A => ${1:todo!()},
+        Test::B => ${2:todo!()},
+        Test::C => ${3:todo!()},$0
+    });
 }"#,
         );
     }
@@ -2071,6 +2168,113 @@ fn f() {
     }
 }
 "#,
+        );
+    }
+
+    #[test]
+    fn prefer_self() {
+        check_assist_with_config(
+            add_missing_match_arms,
+            AssistConfig { prefer_self_ty: true, ..TEST_CONFIG },
+            r#"
+enum Foo {
+    Bar,
+    Baz,
+}
+
+impl Foo {
+    fn qux(&self) {
+        match self {
+            $0_ => {}
+        }
+    }
+}
+            "#,
+            r#"
+enum Foo {
+    Bar,
+    Baz,
+}
+
+impl Foo {
+    fn qux(&self) {
+        match self {
+            Self::Bar => ${1:todo!()},
+            Self::Baz => ${2:todo!()},$0
+        }
+    }
+}
+            "#,
+        );
+    }
+
+    #[test]
+    fn prefer_self_with_generics() {
+        check_assist_with_config(
+            add_missing_match_arms,
+            AssistConfig { prefer_self_ty: true, ..TEST_CONFIG },
+            r#"
+enum Foo<T> {
+    Bar(T),
+    Baz,
+}
+
+impl<T> Foo<T> {
+    fn qux(&self) {
+        match self {
+            $0_ => {}
+        }
+    }
+}
+            "#,
+            r#"
+enum Foo<T> {
+    Bar(T),
+    Baz,
+}
+
+impl<T> Foo<T> {
+    fn qux(&self) {
+        match self {
+            Self::Bar(${1:_}) => ${2:todo!()},
+            Self::Baz => ${3:todo!()},$0
+        }
+    }
+}
+            "#,
+        );
+        check_assist_with_config(
+            add_missing_match_arms,
+            AssistConfig { prefer_self_ty: true, ..TEST_CONFIG },
+            r#"
+enum Foo<T> {
+    Bar(T),
+    Baz,
+}
+
+impl<T> Foo<T> {
+    fn qux(v: Foo<i32>) {
+        match v {
+            $0_ => {}
+        }
+    }
+}
+            "#,
+            r#"
+enum Foo<T> {
+    Bar(T),
+    Baz,
+}
+
+impl<T> Foo<T> {
+    fn qux(v: Foo<i32>) {
+        match v {
+            Foo::Bar(${1:_}) => ${2:todo!()},
+            Foo::Baz => ${3:todo!()},$0
+        }
+    }
+}
+            "#,
         );
     }
 }

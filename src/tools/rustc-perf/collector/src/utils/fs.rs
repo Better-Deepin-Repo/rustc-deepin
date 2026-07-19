@@ -2,9 +2,11 @@ use anyhow::Context;
 use std::collections::hash_map::DefaultHasher;
 use std::ffi::OsStr;
 use std::fs;
+use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 
 #[cfg(windows)]
 pub fn rename<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> anyhow::Result<()> {
@@ -27,7 +29,7 @@ pub fn rename<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> anyhow::Result<
         // mount points (e.g., if /tmp is in tmpfs instead of on
         // the same disk). We don't want to implement a full recursive solution
         // to copying directories, so just shell out to `mv`.
-        let ctx = format!("mv {:?} {:?}", from, to);
+        let ctx = format!("mv {from:?} {to:?}");
         let status = Command::new("mv")
             .arg(from)
             .arg(to)
@@ -43,8 +45,9 @@ pub fn rename<P: AsRef<Path>, Q: AsRef<Path>>(from: P, to: Q) -> anyhow::Result<
 
 /// Touch a file, resetting its modification time.
 pub fn touch(path: &Path) -> anyhow::Result<()> {
-    filetime::set_file_mtime(path, filetime::FileTime::now())
-        .with_context(|| format!("touching file {:?}", path))?;
+    let file = File::options().read(true).write(true).open(path)?;
+    file.set_modified(SystemTime::now())
+        .with_context(|| format!("touching file {path:?}"))?;
 
     Ok(())
 }
@@ -76,8 +79,7 @@ pub fn touch_all(path: &Path) -> anyhow::Result<()> {
         // We also delete the cmake caches to avoid errors when moving directories around.
         // This might be a bit slower but at least things build
         if path.file_name() == Some(OsStr::new("CMakeCache.txt")) {
-            fs::remove_file(path)
-                .with_context(|| format!("deleting cmake caches in {:?}", path))?;
+            fs::remove_file(path).with_context(|| format!("deleting cmake caches in {path:?}"))?;
         }
 
         if is_valid(path) {
@@ -127,7 +129,7 @@ pub fn robocopy(
         cmd.arg(arg.as_ref());
     }
 
-    let output = run_command_with_output(&mut cmd)?;
+    let output = run_command_with_output(&mut cmd, false)?;
 
     if output.status.code() >= Some(8) {
         // robocopy returns 0-7 on success

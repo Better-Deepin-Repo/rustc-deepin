@@ -1,14 +1,14 @@
 use ide_db::{
-    assists::{AssistId, AssistKind},
+    assists::AssistId,
     defs::Definition,
     search::{FileReference, SearchScope},
     syntax_helpers::suggest_name,
     text_edit::TextRange,
 };
 use itertools::Itertools;
-use syntax::SmolStr;
 use syntax::{
-    ast::{self, make, AstNode, FieldExpr, HasName, IdentPat},
+    T,
+    ast::{self, AstNode, FieldExpr, HasName, IdentPat, make},
     ted,
 };
 
@@ -66,7 +66,7 @@ pub(crate) fn destructure_tuple_binding_impl(
 
     if with_sub_pattern {
         acc.add(
-            AssistId("destructure_tuple_binding_in_sub_pattern", AssistKind::RefactorRewrite),
+            AssistId::refactor_rewrite("destructure_tuple_binding_in_sub_pattern"),
             "Destructure tuple in sub-pattern",
             data.ident_pat.syntax().text_range(),
             |edit| destructure_tuple_edit_impl(ctx, edit, &data, true),
@@ -74,7 +74,7 @@ pub(crate) fn destructure_tuple_binding_impl(
     }
 
     acc.add(
-        AssistId("destructure_tuple_binding", AssistKind::RefactorRewrite),
+        AssistId::refactor_rewrite("destructure_tuple_binding"),
         if with_sub_pattern { "Destructure tuple in place" } else { "Destructure tuple" },
         data.ident_pat.syntax().text_range(),
         |edit| destructure_tuple_edit_impl(ctx, edit, &data, false),
@@ -134,17 +134,8 @@ fn collect_data(ident_pat: IdentPat, ctx: &AssistContext<'_>) -> Option<TupleDat
             .map(|(_, refs)| refs.to_vec())
     });
 
-    let mut name_generator = {
-        let mut names = vec![];
-        if let Some(scope) = ctx.sema.scope(ident_pat.syntax()) {
-            scope.process_all_names(&mut |name, scope| {
-                if let hir::ScopeDef::Local(_) = scope {
-                    names.push(name.as_str().into())
-                }
-            })
-        }
-        suggest_name::NameGenerator::new_with_names(names.iter().map(|s: &SmolStr| s.as_str()))
-    };
+    let mut name_generator =
+        suggest_name::NameGenerator::new_from_scope_locals(ctx.sema.scope(ident_pat.syntax()));
 
     let field_names = field_types
         .into_iter()
@@ -152,7 +143,7 @@ fn collect_data(ident_pat: IdentPat, ctx: &AssistContext<'_>) -> Option<TupleDat
         .map(|(id, ty)| {
             match name_generator.for_type(&ty, ctx.db(), ctx.edition()) {
                 Some(name) => name,
-                None => name_generator.suggest_name(&format!("_{}", id)),
+                None => name_generator.suggest_name(&format!("_{id}")),
             }
             .to_string()
         })
@@ -189,6 +180,11 @@ fn edit_tuple_assignment(
             .map(|name| ast::Pat::from(make::ident_pat(is_ref, is_mut, make::name(name))));
         make::tuple_pat(fields).clone_for_update()
     };
+    let is_shorthand_field = ident_pat
+        .name()
+        .as_ref()
+        .and_then(ast::RecordPatField::for_field_name)
+        .is_some_and(|field| field.colon_token().is_none());
 
     if let Some(cap) = ctx.config.snippet_cap {
         // place cursor on first tuple name
@@ -200,12 +196,13 @@ fn edit_tuple_assignment(
         }
     }
 
-    AssignmentEdit { ident_pat, tuple_pat, in_sub_pattern }
+    AssignmentEdit { ident_pat, tuple_pat, in_sub_pattern, is_shorthand_field }
 }
 struct AssignmentEdit {
     ident_pat: ast::IdentPat,
     tuple_pat: ast::TuplePat,
     in_sub_pattern: bool,
+    is_shorthand_field: bool,
 }
 
 impl AssignmentEdit {
@@ -213,6 +210,9 @@ impl AssignmentEdit {
         // with sub_pattern: keep original tuple and add subpattern: `tup @ (_0, _1)`
         if self.in_sub_pattern {
             self.ident_pat.set_pat(Some(self.tuple_pat.into()))
+        } else if self.is_shorthand_field {
+            ted::insert(ted::Position::after(self.ident_pat.syntax()), self.tuple_pat.syntax());
+            ted::insert_raw(ted::Position::after(self.ident_pat.syntax()), make::token(T![:]));
         } else {
             ted::replace(self.ident_pat.syntax(), self.tuple_pat.syntax())
         }
@@ -810,6 +810,48 @@ fn main() {
     }
 
     #[test]
+    fn in_record_shorthand_field() {
+        check_assist(
+            assist,
+            r#"
+struct S { field: (i32, i32) }
+fn main() {
+    let S { $0field } = S { field: (2, 3) };
+    let v = field.0 + field.1;
+}
+            "#,
+            r#"
+struct S { field: (i32, i32) }
+fn main() {
+    let S { field: ($0_0, _1) } = S { field: (2, 3) };
+    let v = _0 + _1;
+}
+            "#,
+        )
+    }
+
+    #[test]
+    fn in_record_field() {
+        check_assist(
+            assist,
+            r#"
+struct S { field: (i32, i32) }
+fn main() {
+    let S { field: $0t } = S { field: (2, 3) };
+    let v = t.0 + t.1;
+}
+            "#,
+            r#"
+struct S { field: (i32, i32) }
+fn main() {
+    let S { field: ($0_0, _1) } = S { field: (2, 3) };
+    let v = _0 + _1;
+}
+            "#,
+        )
+    }
+
+    #[test]
     fn in_nested_tuple() {
         check_assist(
             assist,
@@ -1138,7 +1180,10 @@ fn main {
             destructure_tuple_binding_impl(acc, ctx, false)
         }
 
-        pub(crate) fn check_in_place_assist(ra_fixture_before: &str, ra_fixture_after: &str) {
+        pub(crate) fn check_in_place_assist(
+            #[rust_analyzer::rust_fixture] ra_fixture_before: &str,
+            #[rust_analyzer::rust_fixture] ra_fixture_after: &str,
+        ) {
             check_assist_by_label(
                 in_place_assist,
                 ra_fixture_before,
@@ -1148,7 +1193,10 @@ fn main {
             );
         }
 
-        pub(crate) fn check_sub_pattern_assist(ra_fixture_before: &str, ra_fixture_after: &str) {
+        pub(crate) fn check_sub_pattern_assist(
+            #[rust_analyzer::rust_fixture] ra_fixture_before: &str,
+            #[rust_analyzer::rust_fixture] ra_fixture_after: &str,
+        ) {
             check_assist_by_label(
                 assist,
                 ra_fixture_before,

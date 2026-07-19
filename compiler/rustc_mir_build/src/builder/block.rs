@@ -6,7 +6,7 @@ use rustc_span::Span;
 use tracing::debug;
 
 use crate::builder::ForGuard::OutsideGuard;
-use crate::builder::matches::{DeclareLetBindings, EmitStorageLive, ScheduleDrops};
+use crate::builder::matches::{DeclareLetBindings, ScheduleDrops};
 use crate::builder::{BlockAnd, BlockAndExtension, BlockFrame, Builder};
 
 impl<'a, 'tcx> Builder<'a, 'tcx> {
@@ -39,7 +39,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         expr: Option<ExprId>,
         region_scope: Scope,
     ) -> BlockAnd<()> {
-        let this = self;
+        let this = self; // See "LET_THIS_SELF".
 
         // This convoluted structure is to avoid using recursion as we walk down a list
         // of statements. Basically, the structure we get back is something like:
@@ -199,19 +199,6 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                             None,
                             Some((Some(&destination), initializer_span)),
                         );
-                        this.visit_primary_bindings(
-                            pattern,
-                            UserTypeProjections::none(),
-                            &mut |this, _, _, node, span, _, _| {
-                                this.storage_live_binding(
-                                    block,
-                                    node,
-                                    span,
-                                    OutsideGuard,
-                                    ScheduleDrops::Yes,
-                                );
-                            },
-                        );
                         let else_block_span = this.thir[*else_block].span;
                         let (matching, failure) =
                             this.in_if_then_scope(last_remainder_scope, else_block_span, |this| {
@@ -222,7 +209,6 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                                     None,
                                     initializer_span,
                                     DeclareLetBindings::No,
-                                    EmitStorageLive::No,
                                 )
                             });
                         matching.and(failure)
@@ -244,7 +230,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 StmtKind::Let {
                     remainder_scope,
                     init_scope,
-                    ref pattern,
+                    pattern,
                     initializer,
                     lint_level,
                     else_block: None,
@@ -295,20 +281,17 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                         });
 
                         debug!("ast_block_stmts: pattern={:?}", pattern);
-                        this.visit_primary_bindings(
-                            pattern,
-                            UserTypeProjections::none(),
-                            &mut |this, _, _, node, span, _, _| {
-                                this.storage_live_binding(
-                                    block,
-                                    node,
-                                    span,
-                                    OutsideGuard,
-                                    ScheduleDrops::Yes,
-                                );
-                                this.schedule_drop_for_binding(node, span, OutsideGuard);
-                            },
-                        )
+                        this.visit_primary_bindings(pattern, &mut |this, node, span| {
+                            this.storage_live_binding(
+                                block,
+                                node,
+                                span,
+                                false,
+                                OutsideGuard,
+                                ScheduleDrops::Yes,
+                            );
+                            this.schedule_drop_for_binding(node, span, OutsideGuard);
+                        })
                     }
 
                     // Enter the visibility scope, after evaluating the initializer.
@@ -331,8 +314,9 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             let expr = &this.thir[expr_id];
             let tail_result_is_ignored =
                 destination_ty.is_unit() || this.block_context.currently_ignores_tail_results();
-            this.block_context
-                .push(BlockFrame::TailExpr { tail_result_is_ignored, span: expr.span });
+            this.block_context.push(BlockFrame::TailExpr {
+                info: BlockTailInfo { tail_result_is_ignored, span: expr.span },
+            });
 
             block = this.expr_into_dest(destination, block, expr_id).into_block();
             let popped = this.block_context.pop();

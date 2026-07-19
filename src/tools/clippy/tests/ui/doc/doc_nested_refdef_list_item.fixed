@@ -69,3 +69,9 @@ pub struct NotEmpty;
 /// - [link]\: notdef
 ///   inner text
 pub struct NotEmptyTight;
+
+/// ## Heading
+///
+/// - [x] - Done
+/// - [ ] - Not Done
+pub struct GithubCheckboxes;

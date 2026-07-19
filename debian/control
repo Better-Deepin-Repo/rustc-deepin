@@ -13,25 +13,23 @@ Build-Depends:
  debhelper-compat (= 13),
  dpkg-dev (>= 1.17.14),
  python3:native,
- cargo:native (>= 1.84.0+dfsg)      <!pkg.rustc.dlstage0>,
- rustc:native (>= 1.84.0+dfsg) <!pkg.rustc.dlstage0>,
- rustc:native (<= 1.85.0+dfsg++)    <!pkg.rustc.dlstage0>,
- llvm-19-dev:native,
- llvm-19-tools:native,
+ cargo:native (>= 1.92.0+dfsg)      <!pkg.rustc.dlstage0>,
+ rustc:native (>= 1.92.0+dfsg) <!pkg.rustc.dlstage0>,
+ rustc:native (<= 1.93.1++)    <!pkg.rustc.dlstage0>,
+ llvm-21-dev:native,
+ llvm-21-tools:native,
  gcc-mingw-w64-x86-64-posix:native [amd64] <pkg.rustc.windows>,
  gcc-mingw-w64-i686-posix:native [i386] <pkg.rustc.windows>,
- libllvm19 (>= 1:19.0.0),
- libclang-rt-19-dev:native,
- libclang-rt-19-dev,
+ libllvm21 (>= 1:19.0.0),
+ libclang-rt-21-dev,
  cmake (>= 3.0),
 # needed by some vendor crates
  pkgconf:native,
  pkgconf,
+ liblzma-dev,
 # this is sometimes needed by rustc_llvm
  zlib1g-dev:native,
  zlib1g-dev,
-# used by rust-installer
- liblzma-dev:native,
 # used by cargo
  bash-completion,
  libcurl4-openssl-dev | libcurl4-gnutls-dev,
@@ -41,10 +39,11 @@ Build-Depends:
  libgit2-dev (>= 1.9),
  libgit2-dev (<< 1.10~~),
  libhttp-parser-dev,
+# used by rustbook
+ libonig-dev:native,
  libonig-dev,
 # test dependencies:
  binutils (>= 2.26) <!nocheck> | binutils-2.26 <!nocheck>,
-# temporarily disabled cause of #1066794 / t64 transition
  git <!nocheck>,
  procps <!nocheck>,
 # below are optional tools even for 'make check'
@@ -54,7 +53,8 @@ Build-Depends:
  ca-certificates <pkg.rustc.dlstage0>,
 Build-Depends-Indep:
  wasi-libc,
- clang-19:native,
+ clang-21:native,
+ lld-21:native,
 # see #1057780, gdb now Conflicts gdb-minimal
 #Build-Conflicts: gdb-minimal <!nocheck>
 Standards-Version: 4.7.0
@@ -89,7 +89,7 @@ Description: Rust systems programming language
  generic programming and meta-programming, in both static and dynamic
  styles.
 
-Package: libstd-rust-1.85
+Package: libstd-rust-1.93
 Section: libs
 Architecture: any
 Multi-Arch: same
@@ -117,7 +117,7 @@ Section: libdevel
 Architecture: any
 Multi-Arch: same
 Depends: ${shlibs:Depends}, ${misc:Depends},
- libstd-rust-1.85 (= ${binary:Version}),
+ libstd-rust-1.93 (= ${binary:Version}),
 Conflicts: rustup
 Description: Rust standard libraries - development files
  Rust is a curly-brace, block-structured expression language.  It
@@ -170,7 +170,7 @@ Depends: ${shlibs:Depends}, ${misc:Depends}
 # Embeds wasi-libc so doesn't need to depend on it
 # None of its licenses require source redistrib, so no need for Built-Using
 Recommends:
- lld-19, clang-19,
+ lld-21, clang-21,
 Suggests:
 # nodejs contains wasi-node for running the program
  nodejs (>= 12.16),
@@ -191,6 +191,31 @@ Description: Rust standard libraries - development files
  This package contains the standard Rust libraries including development files,
  needed to cross-compile Rust programs to the wasm32-unknown-unknown and
  wasm32-wasip1/wasm32-wasip2 targets.
+
+Package: libstd-rust-dev-bpf
+Section: libdevel
+Architecture: all
+Multi-Arch: foreign
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends:
+ lld-21, clang-21,
+Build-Profiles: <!pkg.rustc.nobpf>
+Description: Rust standard libraries - development files
+ Rust is a curly-brace, block-structured expression language.  It
+ visually resembles the C language family, but differs significantly
+ in syntactic and semantic details.  Its design is oriented toward
+ concerns of "programming in the large", that is, of creating and
+ maintaining boundaries - both abstract and operational - that
+ preserve large-system integrity, availability and concurrency.
+ .
+ It supports a mixture of imperative procedural, concurrent actor,
+ object-oriented and pure functional styles.  Rust also supports
+ generic programming and meta-programming, in both static and dynamic
+ styles.
+ .
+ This package contains the standard Rust libraries including development files,
+ needed to cross-compile Rust programs to the bpfeb-unknown-none and
+ bpfel-unknown-none targets.
 
 Package: rust-gdb
 Architecture: all
@@ -216,7 +241,7 @@ Description: Rust debugger (gdb)
 Package: rust-lldb
 Architecture: all
 # When updating, also update rust-lldb.links
-Depends: lldb-19, ${misc:Depends}, python3-lldb-19
+Depends: lldb-21, ${misc:Depends}, python3-lldb-21
 Replaces: rustc (<< 1.1.0+dfsg1-1)
 Description: Rust debugger (lldb)
  Rust is a curly-brace, block-structured expression language.  It
@@ -246,9 +271,9 @@ Replaces:
  rustc-mozilla (<< 1.71.1+dfsg1-1~exp1),
 Depends: ${shlibs:Depends}, ${misc:Depends},
 # lld and clang are needed for wasm compilation
- lld-19, clang-19,
+ lld-21, clang-21,
 # llvm is needed for llvm-dwp for split-debuginfo=packed
- llvm-19
+ llvm-21
 Description: Rust LLVM integration
  Rust is a curly-brace, block-structured expression language.  It
  visually resembles the C language family, but differs significantly
@@ -291,6 +316,7 @@ Description: Rust systems programming language - Documentation
 
 Package: rust-src
 Architecture: all
+Multi-Arch: foreign
 Depends: ${misc:Depends}
 Conflicts: rustup
 Description: Rust systems programming language - source code
@@ -313,7 +339,7 @@ Package: rust-clippy
 Architecture: any
 Multi-Arch: allowed
 Depends: ${misc:Depends}, ${shlibs:Depends},
- libstd-rust-1.85 (= ${binary:Version})
+ libstd-rust-1.93 (= ${binary:Version})
 Conflicts: rustup
 Recommends: cargo
 Description: Rust linter
@@ -342,7 +368,7 @@ Package: rustfmt
 Architecture: any
 Multi-Arch: allowed
 Depends: ${misc:Depends}, ${shlibs:Depends},
- libstd-rust-1.85 (= ${binary:Version}),
+ libstd-rust-1.93 (= ${binary:Version}),
 Conflicts: rustup
 Recommends: cargo
 Description: Rust formatting helper
@@ -366,9 +392,9 @@ Package: rust-analyzer
 Architecture: any
 Multi-Arch: allowed
 Depends: ${misc:Depends}, ${shlibs:Depends},
- libstd-rust-1.85 (= ${binary:Version}),
+ libstd-rust-1.93 (= ${binary:Version}),
 Conflicts: rustup
-Recommends: cargo
+Recommends: cargo, rust-src
 Description: Rust Language Server Protocol (LSP) implementation
  Rust is a curly-brace, block-structured expression language.  It
  visually resembles the C language family, but differs significantly

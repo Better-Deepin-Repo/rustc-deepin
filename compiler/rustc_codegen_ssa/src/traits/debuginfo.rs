@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use rustc_abi::Size;
 use rustc_middle::mir;
-use rustc_middle::ty::{Instance, PolyExistentialTraitRef, Ty};
+use rustc_middle::ty::{ExistentialTraitRef, Instance, Ty};
 use rustc_span::{SourceFile, Span, Symbol};
 use rustc_target::callconv::FnAbi;
 
@@ -13,7 +13,7 @@ pub trait DebugInfoCodegenMethods<'tcx>: BackendTypes {
     fn create_vtable_debuginfo(
         &self,
         ty: Ty<'tcx>,
-        trait_ref: Option<PolyExistentialTraitRef<'tcx>>,
+        trait_ref: Option<ExistentialTraitRef<'tcx>>,
         vtable: Self::Value,
     );
 
@@ -64,7 +64,7 @@ pub trait DebugInfoCodegenMethods<'tcx>: BackendTypes {
     ) -> Self::DIVariable;
 }
 
-pub trait DebugInfoBuilderMethods: BackendTypes {
+pub trait DebugInfoBuilderMethods<'tcx>: BackendTypes {
     // FIXME(eddyb) find a common convention for all of the debuginfo-related
     // names (choose between `dbg`, `debug`, `debuginfo`, `debug_info` etc.).
     fn dbg_var_addr(
@@ -77,11 +77,36 @@ pub trait DebugInfoBuilderMethods: BackendTypes {
         indirect_offsets: &[Size],
         // Byte range in the `dbg_var` covered by this fragment,
         // if this is a fragment of a composite `DIVariable`.
-        fragment: Option<Range<Size>>,
+        fragment: &Option<Range<Size>>,
+    );
+    fn dbg_var_value(
+        &mut self,
+        dbg_var: Self::DIVariable,
+        dbg_loc: Self::DILocation,
+        value: Self::Value,
+        direct_offset: Size,
+        // NB: each offset implies a deref (i.e. they're steps in a pointer chain).
+        indirect_offsets: &[Size],
+        // Byte range in the `dbg_var` covered by this fragment,
+        // if this is a fragment of a composite `DIVariable`.
+        fragment: &Option<Range<Size>>,
     );
     fn set_dbg_loc(&mut self, dbg_loc: Self::DILocation);
     fn clear_dbg_loc(&mut self);
-    fn get_dbg_loc(&self) -> Option<Self::DILocation>;
     fn insert_reference_to_gdb_debug_scripts_section_global(&mut self);
     fn set_var_name(&mut self, value: Self::Value, name: &str);
+
+    /// Hook to allow move/copy operations to be annotated for profiling.
+    ///
+    /// The `instance` parameter should be the monomorphized instance of the
+    /// `compiler_move` or `compiler_copy` function with the actual type and size.
+    ///
+    /// Default implementation does no annotation (just executes the closure).
+    fn with_move_annotation<R>(
+        &mut self,
+        _instance: Instance<'tcx>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        f(self)
+    }
 }

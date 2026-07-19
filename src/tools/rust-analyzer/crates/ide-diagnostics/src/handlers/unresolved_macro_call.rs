@@ -8,15 +8,13 @@ pub(crate) fn unresolved_macro_call(
     ctx: &DiagnosticsContext<'_>,
     d: &hir::UnresolvedMacroCall,
 ) -> Diagnostic {
-    // Use more accurate position if available.
-    let display_range = ctx.resolve_precise_location(&d.macro_call, d.precise_location);
+    let display_range = ctx.sema.diagnostics_display_range_for_range(d.range);
     let bang = if d.is_bang { "!" } else { "" };
     Diagnostic::new(
         DiagnosticCode::RustcHardError("unresolved-macro-call"),
         format!("unresolved macro `{}{bang}`", d.path.display(ctx.sema.db, ctx.edition)),
         display_range,
     )
-    .experimental()
 }
 
 #[cfg(test)]
@@ -77,7 +75,7 @@ self::m!(); self::m2!();
             r#"
     mod _test_inner {
         #![empty_attr]
-      //^^^^^^^^^^^^^^ error: unresolved macro `empty_attr`
+        // ^^^^^^^^^^ error: unresolved macro `empty_attr`
     }
 "#,
         );

@@ -28,19 +28,19 @@
 //! [build script]: https://doc.rust-lang.org/nightly/cargo/reference/build-scripts.html
 //! [`TargetKind::CustomBuild`]: crate::core::manifest::TargetKind::CustomBuild
 //! [`UnitGraph`]: super::unit_graph::UnitGraph
-//! [`CompileMode::RunCustomBuild`]: super::CompileMode
+//! [`CompileMode::RunCustomBuild`]: crate::core::compiler::CompileMode::RunCustomBuild
 //! [instructions]: https://doc.rust-lang.org/cargo/reference/build-scripts.html#outputs-of-the-build-script
 
-use super::{fingerprint, BuildRunner, Job, Unit, Work};
+use super::{BuildRunner, Job, Unit, Work, fingerprint, get_dynamic_search_path};
+use crate::core::compiler::CompileMode;
 use crate::core::compiler::artifact;
 use crate::core::compiler::build_runner::UnitHash;
-use crate::core::compiler::fingerprint::DirtyReason;
 use crate::core::compiler::job_queue::JobState;
-use crate::core::{profiles::ProfileRoot, PackageId, Target};
+use crate::core::{PackageId, Target, profiles::ProfileRoot};
 use crate::util::errors::CargoResult;
 use crate::util::internal;
 use crate::util::machine_message::{self, Message};
-use anyhow::{bail, Context as _};
+use anyhow::{Context as _, bail};
 use cargo_platform::Cfg;
 use cargo_util::paths;
 use cargo_util_schemas::manifest::RustVersion;
@@ -74,11 +74,76 @@ pub enum Severity {
 
 pub type LogMessage = (Severity, String);
 
+/// Represents a path added to the library search path.
+///
+/// We need to keep track of requests to add search paths within the cargo build directory
+/// separately from paths outside of Cargo. The reason is that we want to give precedence to linking
+/// against libraries within the Cargo build directory even if a similar library exists in the
+/// system (e.g. crate A adds `/usr/lib` to the search path and then a later build of crate B adds
+/// `target/debug/...` to satisfy its request to link against the library B that it built, but B is
+/// also found in `/usr/lib`).
+///
+/// There's some nuance here because we want to preserve relative order of paths of the same type.
+/// For example, if the build process would in declaration order emit the following linker line:
+/// ```bash
+/// -L/usr/lib -Ltarget/debug/build/crate1/libs -L/lib -Ltarget/debug/build/crate2/libs)
+/// ```
+///
+/// we want the linker to actually receive:
+/// ```bash
+/// -Ltarget/debug/build/crate1/libs -Ltarget/debug/build/crate2/libs) -L/usr/lib -L/lib
+/// ```
+///
+/// so that the library search paths within the crate artifacts directory come first but retain
+/// relative ordering while the system library paths come after while still retaining relative
+/// ordering among them; ordering is the order they are emitted within the build process,
+/// not lexicographic order.
+///
+/// WARNING: Even though this type implements PartialOrd + Ord, this is a lexicographic ordering.
+/// The linker line will require an explicit sorting algorithm. PartialOrd + Ord is derived because
+/// BuildOutput requires it but that ordering is different from the one for the linker search path,
+/// at least today. It may be worth reconsidering & perhaps it's ok if BuildOutput doesn't have
+/// a lexicographic ordering for the library_paths? I'm not sure the consequence of that.
+#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum LibraryPath {
+    /// The path is pointing within the output folder of the crate and takes priority over
+    /// external paths when passed to the linker.
+    CargoArtifact(PathBuf),
+    /// The path is pointing outside of the crate's build location. The linker will always
+    /// receive such paths after `CargoArtifact`.
+    External(PathBuf),
+}
+
+impl LibraryPath {
+    fn new(p: PathBuf, script_out_dir: &Path) -> Self {
+        let search_path = get_dynamic_search_path(&p);
+        if search_path.starts_with(script_out_dir) {
+            Self::CargoArtifact(p)
+        } else {
+            Self::External(p)
+        }
+    }
+
+    pub fn into_path_buf(self) -> PathBuf {
+        match self {
+            LibraryPath::CargoArtifact(p) | LibraryPath::External(p) => p,
+        }
+    }
+}
+
+impl AsRef<PathBuf> for LibraryPath {
+    fn as_ref(&self) -> &PathBuf {
+        match self {
+            LibraryPath::CargoArtifact(p) | LibraryPath::External(p) => p,
+        }
+    }
+}
+
 /// Contains the parsed output of a custom build script.
 #[derive(Clone, Debug, Hash, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct BuildOutput {
     /// Paths to pass to rustc with the `-L` flag.
-    pub library_paths: Vec<PathBuf>,
+    pub library_paths: Vec<LibraryPath>,
     /// Names and link kinds of libraries, suitable for the `-l` flag.
     pub library_links: Vec<String>,
     /// Linker arguments suitable to be passed to `-C link-arg=<args>`
@@ -196,10 +261,11 @@ pub enum LinkArgTarget {
 
 impl LinkArgTarget {
     /// Checks if this link type applies to a given [`Target`].
-    pub fn applies_to(&self, target: &Target) -> bool {
+    pub fn applies_to(&self, target: &Target, mode: CompileMode) -> bool {
+        let is_test = mode.is_any_test();
         match self {
             LinkArgTarget::All => true,
-            LinkArgTarget::Cdylib => target.is_cdylib(),
+            LinkArgTarget::Cdylib => !is_test && target.is_cdylib(),
             LinkArgTarget::Bin => target.is_bin(),
             LinkArgTarget::SingleBin(name) => target.is_bin() && target.name() == name,
             LinkArgTarget::Test => target.is_test(),
@@ -237,7 +303,7 @@ fn emit_build_output(
     let library_paths = output
         .library_paths
         .iter()
-        .map(|l| l.display().to_string())
+        .map(|l| l.as_ref().display().to_string())
         .collect::<Vec<_>>();
 
     let msg = machine_message::BuildScript {
@@ -273,8 +339,6 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
     let script_dir = build_runner.files().build_script_dir(build_script_unit);
     let script_out_dir = build_runner.files().build_script_out_dir(unit);
     let script_run_dir = build_runner.files().build_script_run_dir(unit);
-    let build_plan = bcx.build_config.build_plan;
-    let invocation_name = unit.buildkey();
 
     if let Some(deps) = unit.pkg.manifest().metabuild() {
         prepare_metabuild(build_runner, build_script_unit, deps)?;
@@ -340,9 +404,19 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         "feature",
         unit.features.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
     );
+    // Manually inject debug_assertions based on the profile setting.
+    // The cfg query from rustc doesn't include profile settings and would always be true,
+    // so we override it with the actual profile setting.
+    if unit.profile.debug_assertions {
+        cfg_map.insert("debug_assertions", Vec::new());
+    }
     for cfg in bcx.target_data.cfg(unit.kind) {
         match *cfg {
             Cfg::Name(ref n) => {
+                // Skip debug_assertions from rustc query; we use the profile setting instead
+                if n.as_str() == "debug_assertions" {
+                    continue;
+                }
                 cfg_map.insert(n.as_str(), Vec::new());
             }
             Cfg::KeyPair(ref k, ref v) => {
@@ -352,11 +426,6 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         }
     }
     for (k, v) in cfg_map {
-        if k == "debug_assertions" {
-            // This cfg is always true and misleading, so avoid setting it.
-            // That is because Cargo queries rustc without any profile settings.
-            continue;
-        }
         // FIXME: We should handle raw-idents somehow instead of predenting they
         // don't exist here
         let k = format!("CARGO_CFG_{}", super::envify(k));
@@ -409,7 +478,7 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
     let output_file = script_run_dir.join("output");
     let err_file = script_run_dir.join("stderr");
     let root_output_file = script_run_dir.join("root-output");
-    let host_target_root = build_runner.files().host_dest().to_path_buf();
+    let host_target_root = build_runner.files().host_dest().map(|v| v.to_path_buf());
     let all = (
         id,
         library_name.clone(),
@@ -460,7 +529,7 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         // along to this custom build command. We're also careful to augment our
         // dynamic library search path in case the build script depended on any
         // native dynamic libraries.
-        if !build_plan {
+        {
             let build_script_outputs = build_script_outputs.lock().unwrap();
             for (name, dep_id, dep_metadata) in lib_deps {
                 let script_output = build_script_outputs.get(dep_metadata).ok_or_else(|| {
@@ -477,19 +546,16 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
                     );
                 }
             }
-            if let Some(build_scripts) = build_scripts {
+            if let Some(build_scripts) = build_scripts
+                && let Some(ref host_target_root) = host_target_root
+            {
                 super::add_plugin_deps(
                     &mut cmd,
                     &build_script_outputs,
                     &build_scripts,
-                    &host_target_root,
+                    host_target_root,
                 )?;
             }
-        }
-
-        if build_plan {
-            state.build_plan(invocation_name, cmd.clone(), Arc::new(Vec::new()));
-            return Ok(());
         }
 
         // And now finally, run the build command itself!
@@ -497,8 +563,9 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         let timestamp = paths::set_invocation_time(&script_run_dir)?;
         let prefix = format!("[{} {}] ", id.name(), id.version());
         let mut log_messages_in_case_of_panic = Vec::new();
-        let output = cmd
-            .exec_with_streaming(
+        let span = tracing::debug_span!("build_script", process = cmd.to_string());
+        let output = span.in_scope(|| {
+            cmd.exec_with_streaming(
                 &mut |stdout| {
                     if let Some(error) = stdout.strip_prefix(CARGO_ERROR_SYNTAX) {
                         log_messages_in_case_of_panic.push((Severity::Error, error.to_owned()));
@@ -545,7 +612,8 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
                 }
 
                 build_error_context
-            });
+            })
+        });
 
         // If the build failed
         if let Err(error) = output {
@@ -637,11 +705,7 @@ fn build_work(build_runner: &mut BuildRunner<'_, '_>, unit: &Unit) -> CargoResul
         Ok(())
     });
 
-    let mut job = if build_runner.bcx.build_config.build_plan {
-        Job::new_dirty(Work::noop(), DirtyReason::FreshBuild)
-    } else {
-        fingerprint::prepare_target(build_runner, unit, false)?
-    };
+    let mut job = fingerprint::prepare_target(build_runner, unit, false)?;
     if job.freshness().is_dirty() {
         job.before(dirty);
     } else {
@@ -769,7 +833,9 @@ impl BuildOutput {
                         )
                     } else if flag.starts_with("metadata=") {
                         let old_format_flag = flag.strip_prefix("metadata=").unwrap();
-                        format!("Switch to the old `cargo:{old_format_flag}` syntax instead of `cargo::{flag}` (note the single colon).\n")
+                        format!(
+                            "Switch to the old `cargo:{old_format_flag}` syntax instead of `cargo::{flag}` (note the single colon).\n"
+                        )
                     } else {
                         String::new()
                     };
@@ -884,10 +950,16 @@ impl BuildOutput {
                 "rustc-flags" => {
                     let (paths, links) = BuildOutput::parse_rustc_flags(&value, &whence)?;
                     library_links.extend(links.into_iter());
-                    library_paths.extend(paths.into_iter());
+                    library_paths.extend(
+                        paths
+                            .into_iter()
+                            .map(|p| LibraryPath::new(p, script_out_dir)),
+                    );
                 }
                 "rustc-link-lib" => library_links.push(value.to_string()),
-                "rustc-link-search" => library_paths.push(PathBuf::from(value)),
+                "rustc-link-search" => {
+                    library_paths.push(LibraryPath::new(PathBuf::from(value), script_out_dir))
+                }
                 "rustc-link-arg-cdylib" | "rustc-cdylib-link-arg" => {
                     if !targets.iter().any(|target| target.is_cdylib()) {
                         log_messages.push((
@@ -994,7 +1066,8 @@ impl BuildOutput {
                         } else {
                             // Setting RUSTC_BOOTSTRAP would change the behavior of the crate.
                             // Abort with an error.
-                            bail!("Cannot set `RUSTC_BOOTSTRAP={}` from {}.\n\
+                            bail!(
+                                "Cannot set `RUSTC_BOOTSTRAP={}` from {}.\n\
                                 note: Crates cannot set `RUSTC_BOOTSTRAP` themselves, as doing so would subvert the stability guarantees of Rust for your project.\n\
                                 help: If you're sure you want to do this in your project, set the environment variable `RUSTC_BOOTSTRAP={}` before running cargo instead.",
                                 val,
@@ -1124,7 +1197,7 @@ fn prepare_metabuild(
     let path = unit
         .pkg
         .manifest()
-        .metabuild_path(build_runner.bcx.ws.target_dir());
+        .metabuild_path(build_runner.bcx.ws.build_dir());
     paths::create_dir_all(path.parent().unwrap())?;
     paths::write_if_changed(path, &output)?;
     Ok(())
@@ -1210,10 +1283,12 @@ pub fn build_map(build_runner: &mut BuildRunner<'_, '_>) -> CargoResult<()> {
 
         // If a package has a build script, add itself as something to inspect for linking.
         if !unit.target.is_custom_build() && unit.pkg.has_custom_build() {
-            let script_meta = build_runner
-                .find_build_script_metadata(unit)
+            let script_metas = build_runner
+                .find_build_script_metadatas(unit)
                 .expect("has_custom_build should have RunCustomBuild");
-            add_to_link(&mut ret, unit.pkg.package_id(), script_meta);
+            for script_meta in script_metas {
+                add_to_link(&mut ret, unit.pkg.package_id(), script_meta);
+            }
         }
 
         if unit.mode.is_run_custom_build() {

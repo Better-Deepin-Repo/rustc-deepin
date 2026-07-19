@@ -1,26 +1,41 @@
 use rustc_errors::codes::*;
-use rustc_errors::{Applicability, ElidedLifetimeInPathSubdiag, MultiSpan};
-use rustc_macros::{Diagnostic, Subdiagnostic};
+use rustc_errors::{
+    Applicability, Diag, DiagCtxtHandle, DiagMessage, Diagnostic, ElidedLifetimeInPathSubdiag,
+    EmissionGuarantee, IntoDiagArg, Level, LintDiagnostic, MultiSpan, Subdiagnostic,
+};
+use rustc_macros::{Diagnostic, LintDiagnostic, Subdiagnostic};
+use rustc_span::source_map::Spanned;
 use rustc_span::{Ident, Span, Symbol};
 
-use crate::Res;
 use crate::late::PatternSource;
+use crate::{Res, fluent_generated as fluent};
 
 #[derive(Diagnostic)]
 #[diag(resolve_generic_params_from_outer_item, code = E0401)]
+#[note]
 pub(crate) struct GenericParamsFromOuterItem {
     #[primary_span]
     #[label]
     pub(crate) span: Span,
     #[subdiagnostic]
     pub(crate) label: Option<GenericParamsFromOuterItemLabel>,
-    #[label(resolve_refer_to_type_directly)]
-    pub(crate) refer_to_type_directly: Option<Span>,
+    #[subdiagnostic]
+    pub(crate) refer_to_type_directly: Option<UseTypeDirectly>,
     #[subdiagnostic]
     pub(crate) sugg: Option<GenericParamsFromOuterItemSugg>,
     #[subdiagnostic]
     pub(crate) static_or_const: Option<GenericParamsFromOuterItemStaticOrConst>,
     pub(crate) is_self: bool,
+    #[subdiagnostic]
+    pub(crate) item: Option<GenericParamsFromOuterItemInnerItem>,
+}
+
+#[derive(Subdiagnostic)]
+#[label(resolve_generic_params_from_outer_item_inner_item)]
+pub(crate) struct GenericParamsFromOuterItemInnerItem {
+    #[primary_span]
+    pub(crate) span: Span,
+    pub(crate) descr: String,
 }
 
 #[derive(Subdiagnostic)]
@@ -44,8 +59,25 @@ pub(crate) enum GenericParamsFromOuterItemLabel {
 }
 
 #[derive(Subdiagnostic)]
-#[suggestion(resolve_suggestion, code = "{snippet}", applicability = "maybe-incorrect")]
+#[suggestion(
+    resolve_suggestion,
+    code = "{snippet}",
+    applicability = "maybe-incorrect",
+    style = "verbose"
+)]
 pub(crate) struct GenericParamsFromOuterItemSugg {
+    #[primary_span]
+    pub(crate) span: Span,
+    pub(crate) snippet: String,
+}
+#[derive(Subdiagnostic)]
+#[suggestion(
+    resolve_refer_to_type_directly,
+    code = "{snippet}",
+    applicability = "maybe-incorrect",
+    style = "verbose"
+)]
+pub(crate) struct UseTypeDirectly {
     #[primary_span]
     pub(crate) span: Span,
     pub(crate) snippet: String,
@@ -59,7 +91,7 @@ pub(crate) struct NameAlreadyUsedInParameterList {
     pub(crate) span: Span,
     #[label(resolve_first_use_of_name)]
     pub(crate) first_use_span: Span,
-    pub(crate) name: Symbol,
+    pub(crate) name: Ident,
 }
 
 #[derive(Diagnostic)]
@@ -142,7 +174,7 @@ pub(crate) struct VariableBoundWithDifferentMode {
     pub(crate) span: Span,
     #[label(resolve_first_binding_span)]
     pub(crate) first_binding_span: Span,
-    pub(crate) variable_name: Symbol,
+    pub(crate) variable_name: Ident,
 }
 
 #[derive(Diagnostic)]
@@ -151,7 +183,7 @@ pub(crate) struct IdentifierBoundMoreThanOnceInParameterList {
     #[primary_span]
     #[label]
     pub(crate) span: Span,
-    pub(crate) identifier: Symbol,
+    pub(crate) identifier: Ident,
 }
 
 #[derive(Diagnostic)]
@@ -160,7 +192,7 @@ pub(crate) struct IdentifierBoundMoreThanOnceInSamePattern {
     #[primary_span]
     #[label]
     pub(crate) span: Span,
-    pub(crate) identifier: Symbol,
+    pub(crate) identifier: Ident,
 }
 
 #[derive(Diagnostic)]
@@ -338,6 +370,16 @@ pub(crate) struct ForwardDeclaredGenericParam {
     #[primary_span]
     #[label]
     pub(crate) span: Span,
+    pub(crate) param: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag(resolve_forward_declared_generic_in_const_param_ty)]
+pub(crate) struct ForwardDeclaredGenericInConstParamTy {
+    #[primary_span]
+    #[label]
+    pub(crate) span: Span,
+    pub(crate) param: Symbol,
 }
 
 #[derive(Diagnostic)]
@@ -347,26 +389,19 @@ pub(crate) struct ParamInTyOfConstParam {
     #[label]
     pub(crate) span: Span,
     pub(crate) name: Symbol,
-    #[subdiagnostic]
-    pub(crate) param_kind: Option<ParamKindInTyOfConstParam>,
-}
-
-#[derive(Debug)]
-#[derive(Subdiagnostic)]
-pub(crate) enum ParamKindInTyOfConstParam {
-    #[note(resolve_type_param_in_ty_of_const_param)]
-    Type,
-    #[note(resolve_const_param_in_ty_of_const_param)]
-    Const,
-    #[note(resolve_lifetime_param_in_ty_of_const_param)]
-    Lifetime,
 }
 
 #[derive(Diagnostic)]
 #[diag(resolve_self_in_generic_param_default, code = E0735)]
 pub(crate) struct SelfInGenericParamDefault {
     #[primary_span]
-    #[label]
+    pub(crate) span: Span,
+}
+
+#[derive(Diagnostic)]
+#[diag(resolve_self_in_const_generic_ty)]
+pub(crate) struct SelfInConstGenericTy {
+    #[primary_span]
     pub(crate) span: Span,
 }
 
@@ -478,7 +513,7 @@ pub(crate) struct TraitImplDuplicate {
     pub(crate) old_span: Span,
     #[label(resolve_trait_item_span)]
     pub(crate) trait_item_span: Span,
-    pub(crate) name: Symbol,
+    pub(crate) name: Ident,
 }
 
 #[derive(Diagnostic)]
@@ -558,6 +593,22 @@ pub(crate) struct ProcMacroSameCrate {
     pub(crate) span: Span,
     #[help]
     pub(crate) is_test: bool,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_proc_macro_derive_resolution_fallback)]
+pub(crate) struct ProcMacroDeriveResolutionFallback {
+    #[label]
+    pub span: Span,
+    pub ns_descr: &'static str,
+    pub ident: Ident,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_macro_expanded_macro_exports_accessed_by_absolute_paths)]
+pub(crate) struct MacroExpandedMacroExportsAccessedByAbsolutePaths {
+    #[note]
+    pub definition: Span,
 }
 
 #[derive(Diagnostic)]
@@ -666,6 +717,12 @@ pub(crate) struct MacroSuggMovePosition {
 
 #[derive(Subdiagnostic)]
 pub(crate) enum MacroRulesNot {
+    #[label(resolve_macro_cannot_use_as_fn_like)]
+    Func {
+        #[primary_span]
+        span: Span,
+        ident: Ident,
+    },
     #[label(resolve_macro_cannot_use_as_attr)]
     Attr {
         #[primary_span]
@@ -756,11 +813,30 @@ pub(crate) struct CannotBeReexportedCratePublicNS {
     pub(crate) ident: Ident,
 }
 
+#[derive(LintDiagnostic)]
+#[diag(resolve_private_extern_crate_reexport, code = E0365)]
+pub(crate) struct PrivateExternCrateReexport {
+    pub ident: Ident,
+    #[suggestion(code = "pub ", style = "verbose", applicability = "maybe-incorrect")]
+    pub sugg: Span,
+}
+
 #[derive(Subdiagnostic)]
 #[help(resolve_consider_adding_macro_export)]
 pub(crate) struct ConsiderAddingMacroExport {
     #[primary_span]
     pub(crate) span: Span,
+}
+
+#[derive(Subdiagnostic)]
+#[suggestion(
+    resolve_consider_marking_as_pub_crate,
+    code = "pub(crate)",
+    applicability = "maybe-incorrect"
+)]
+pub(crate) struct ConsiderMarkingAsPubCrate {
+    #[primary_span]
+    pub(crate) vis_span: Span,
 }
 
 #[derive(Subdiagnostic)]
@@ -776,22 +852,6 @@ pub(crate) struct ConsiderMarkingAsPub {
 pub(crate) struct CannotGlobImportAllCrates {
     #[primary_span]
     pub(crate) span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(resolve_items_in_traits_are_not_importable)]
-pub(crate) struct ItemsInTraitsAreNotImportable {
-    #[primary_span]
-    pub(crate) span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(resolve_is_not_directly_importable, code = E0253)]
-pub(crate) struct IsNotDirectlyImportable {
-    #[primary_span]
-    #[label]
-    pub(crate) span: Span,
-    pub(crate) target: Ident,
 }
 
 #[derive(Subdiagnostic)]
@@ -824,13 +884,6 @@ pub(crate) struct UnexpectedResUseAtOpInSlicePatWithRangeSugg {
 #[derive(Diagnostic)]
 #[diag(resolve_extern_crate_loading_macro_not_at_crate_root, code = E0468)]
 pub(crate) struct ExternCrateLoadingMacroNotAtCrateRoot {
-    #[primary_span]
-    pub(crate) span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(resolve_bad_macro_import, code = E0466)]
-pub(crate) struct BadMacroImport {
     #[primary_span]
     pub(crate) span: Span,
 }
@@ -891,12 +944,12 @@ pub(crate) struct MacroExpandedExternCrateCannotShadowExternArguments {
 
 #[derive(Diagnostic)]
 #[diag(resolve_elided_anonymous_lifetime_report_error, code = E0637)]
-pub(crate) struct ElidedAnonymousLivetimeReportError {
+pub(crate) struct ElidedAnonymousLifetimeReportError {
     #[primary_span]
     #[label]
     pub(crate) span: Span,
     #[subdiagnostic]
-    pub(crate) suggestion: Option<ElidedAnonymousLivetimeReportErrorSuggestion>,
+    pub(crate) suggestion: Option<ElidedAnonymousLifetimeReportErrorSuggestion>,
 }
 
 #[derive(Diagnostic)]
@@ -910,10 +963,12 @@ pub(crate) struct LendingIteratorReportError {
 
 #[derive(Diagnostic)]
 #[diag(resolve_anonymous_lifetime_non_gat_report_error)]
-pub(crate) struct AnonymousLivetimeNonGatReportError {
+pub(crate) struct AnonymousLifetimeNonGatReportError {
     #[primary_span]
     #[label]
     pub(crate) lifetime: Span,
+    #[note]
+    pub(crate) decl: MultiSpan,
 }
 
 #[derive(Subdiagnostic)]
@@ -921,7 +976,7 @@ pub(crate) struct AnonymousLivetimeNonGatReportError {
     resolve_elided_anonymous_lifetime_report_error_suggestion,
     applicability = "machine-applicable"
 )]
-pub(crate) struct ElidedAnonymousLivetimeReportErrorSuggestion {
+pub(crate) struct ElidedAnonymousLifetimeReportErrorSuggestion {
     #[suggestion_part(code = "for<'a> ")]
     pub(crate) lo: Span,
     #[suggestion_part(code = "'a ")]
@@ -930,7 +985,7 @@ pub(crate) struct ElidedAnonymousLivetimeReportErrorSuggestion {
 
 #[derive(Diagnostic)]
 #[diag(resolve_explicit_anonymous_lifetime_report_error, code = E0637)]
-pub(crate) struct ExplicitAnonymousLivetimeReportError {
+pub(crate) struct ExplicitAnonymousLifetimeReportError {
     #[primary_span]
     #[label]
     pub(crate) span: Span,
@@ -947,6 +1002,7 @@ pub(crate) struct ImplicitElidedLifetimeNotAllowedHere {
 
 #[derive(Diagnostic)]
 #[diag(resolve_underscore_lifetime_is_reserved, code = E0637)]
+#[help]
 pub(crate) struct UnderscoreLifetimeIsReserved {
     #[primary_span]
     #[label]
@@ -963,20 +1019,11 @@ pub(crate) struct StaticLifetimeIsReserved {
 }
 
 #[derive(Diagnostic)]
-#[diag(resolve_attempt_to_define_builtin_macro_twice, code = E0773)]
-pub(crate) struct AttemptToDefineBuiltinMacroTwice {
-    #[primary_span]
-    pub(crate) span: Span,
-    #[note]
-    pub(crate) note_span: Span,
-}
-
-#[derive(Diagnostic)]
 #[diag(resolve_variable_is_not_bound_in_all_patterns, code = E0408)]
 pub(crate) struct VariableIsNotBoundInAllPatterns {
     #[primary_span]
     pub(crate) multispan: MultiSpan,
-    pub(crate) name: Symbol,
+    pub(crate) name: Ident,
 }
 
 #[derive(Subdiagnostic, Debug, Clone)]
@@ -984,7 +1031,7 @@ pub(crate) struct VariableIsNotBoundInAllPatterns {
 pub(crate) struct PatternDoesntBindName {
     #[primary_span]
     pub(crate) span: Span,
-    pub(crate) name: Symbol,
+    pub(crate) name: Ident,
 }
 
 #[derive(Subdiagnostic, Debug, Clone)]
@@ -994,12 +1041,25 @@ pub(crate) struct VariableNotInAllPatterns {
     pub(crate) span: Span,
 }
 
+#[derive(Subdiagnostic)]
+#[multipart_suggestion(
+    resolve_variable_is_a_typo,
+    applicability = "maybe-incorrect",
+    style = "verbose"
+)]
+pub(crate) struct PatternBindingTypo {
+    #[suggestion_part(code = "{typo}")]
+    pub(crate) spans: Vec<Span>,
+    pub(crate) typo: Symbol,
+}
+
 #[derive(Diagnostic)]
 #[diag(resolve_name_defined_multiple_time)]
 #[note]
 pub(crate) struct NameDefinedMultipleTime {
     #[primary_span]
     pub(crate) span: Span,
+    pub(crate) name: Symbol,
     pub(crate) descr: &'static str,
     pub(crate) container: &'static str,
     #[subdiagnostic]
@@ -1014,13 +1074,11 @@ pub(crate) enum NameDefinedMultipleTimeLabel {
     Reimported {
         #[primary_span]
         span: Span,
-        name: Symbol,
     },
     #[label(resolve_name_defined_multiple_time_redefined)]
     Redefined {
         #[primary_span]
         span: Span,
-        name: Symbol,
     },
 }
 
@@ -1030,14 +1088,12 @@ pub(crate) enum NameDefinedMultipleTimeOldBindingLabel {
     Import {
         #[primary_span]
         span: Span,
-        name: Symbol,
         old_kind: &'static str,
     },
     #[label(resolve_name_defined_multiple_time_old_binding_definition)]
     Definition {
         #[primary_span]
         span: Span,
-        name: Symbol,
         old_kind: &'static str,
     },
 }
@@ -1232,26 +1288,35 @@ pub(crate) struct IdentInScopeButItIsDesc<'a> {
     pub(crate) imported_ident_desc: &'a str,
 }
 
-#[derive(Subdiagnostic)]
-#[note(resolve_found_an_item_configured_out)]
 pub(crate) struct FoundItemConfigureOut {
-    #[primary_span]
     pub(crate) span: Span,
+    pub(crate) item_was: ItemWas,
 }
 
-#[derive(Subdiagnostic)]
-#[note(resolve_item_was_behind_feature)]
-pub(crate) struct ItemWasBehindFeature {
-    pub(crate) feature: Symbol,
-    #[primary_span]
-    pub(crate) span: Span,
+pub(crate) enum ItemWas {
+    BehindFeature { feature: Symbol, span: Span },
+    CfgOut { span: Span },
 }
 
-#[derive(Subdiagnostic)]
-#[note(resolve_item_was_cfg_out)]
-pub(crate) struct ItemWasCfgOut {
-    #[primary_span]
-    pub(crate) span: Span,
+impl Subdiagnostic for FoundItemConfigureOut {
+    fn add_to_diag<G: EmissionGuarantee>(self, diag: &mut Diag<'_, G>) {
+        let mut multispan: MultiSpan = self.span.into();
+        match self.item_was {
+            ItemWas::BehindFeature { feature, span } => {
+                let key = "feature".into();
+                let value = feature.into_diag_arg(&mut None);
+                let msg = diag.dcx.eagerly_translate_to_string(
+                    fluent::resolve_item_was_behind_feature,
+                    [(&key, &value)].into_iter(),
+                );
+                multispan.push_span_label(span, msg);
+            }
+            ItemWas::CfgOut { span } => {
+                multispan.push_span_label(span, fluent::resolve_item_was_cfg_out);
+            }
+        }
+        diag.span_note(multispan, fluent::resolve_found_an_item_configured_out);
+    }
 }
 
 #[derive(Diagnostic)]
@@ -1260,9 +1325,164 @@ pub(crate) struct TraitImplMismatch {
     #[primary_span]
     #[label]
     pub(crate) span: Span,
-    pub(crate) name: Symbol,
+    pub(crate) name: Ident,
     pub(crate) kind: &'static str,
     pub(crate) trait_path: String,
     #[label(resolve_trait_impl_mismatch_label_item)]
     pub(crate) trait_item_span: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_legacy_derive_helpers)]
+pub(crate) struct LegacyDeriveHelpers {
+    #[label]
+    pub span: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_unused_extern_crate)]
+pub(crate) struct UnusedExternCrate {
+    #[label]
+    pub span: Span,
+    #[suggestion(code = "", applicability = "machine-applicable", style = "verbose")]
+    pub removal_span: Span,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_reexport_private_dependency)]
+pub(crate) struct ReexportPrivateDependency {
+    pub name: Symbol,
+    pub kind: &'static str,
+    pub krate: Symbol,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_unused_label)]
+pub(crate) struct UnusedLabel;
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_unused_macro_use)]
+pub(crate) struct UnusedMacroUse;
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_macro_use_deprecated)]
+#[help]
+pub(crate) struct MacroUseDeprecated;
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_macro_is_private)]
+pub(crate) struct MacroIsPrivate {
+    pub ident: Ident,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_unused_macro_definition)]
+pub(crate) struct UnusedMacroDefinition {
+    pub name: Symbol,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_macro_rule_never_used)]
+pub(crate) struct MacroRuleNeverUsed {
+    pub n: usize,
+    pub name: Symbol,
+}
+
+pub(crate) struct UnstableFeature {
+    pub msg: DiagMessage,
+}
+
+impl<'a> LintDiagnostic<'a, ()> for UnstableFeature {
+    fn decorate_lint<'b>(self, diag: &'b mut Diag<'a, ()>) {
+        diag.primary_message(self.msg);
+    }
+}
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_extern_crate_not_idiomatic)]
+pub(crate) struct ExternCrateNotIdiomatic {
+    #[suggestion(style = "verbose", code = "{code}", applicability = "machine-applicable")]
+    pub span: Span,
+    pub code: &'static str,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_out_of_scope_macro_calls)]
+#[help]
+pub(crate) struct OutOfScopeMacroCalls {
+    #[label]
+    pub span: Span,
+    pub path: String,
+    pub location: String,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_redundant_import_visibility)]
+pub(crate) struct RedundantImportVisibility {
+    #[note]
+    pub span: Span,
+    #[help]
+    pub help: (),
+    pub import_vis: String,
+    pub max_vis: String,
+}
+
+#[derive(LintDiagnostic)]
+#[diag(resolve_unknown_diagnostic_attribute)]
+pub(crate) struct UnknownDiagnosticAttribute {
+    #[subdiagnostic]
+    pub typo: Option<UnknownDiagnosticAttributeTypoSugg>,
+}
+
+#[derive(Subdiagnostic)]
+#[suggestion(
+    resolve_unknown_diagnostic_attribute_typo_sugg,
+    style = "verbose",
+    code = "{typo_name}",
+    applicability = "machine-applicable"
+)]
+pub(crate) struct UnknownDiagnosticAttributeTypoSugg {
+    #[primary_span]
+    pub span: Span,
+    pub typo_name: Symbol,
+}
+
+// FIXME: Make this properly translatable.
+pub(crate) struct Ambiguity {
+    pub ident: Ident,
+    pub kind: &'static str,
+    pub b1_note: Spanned<String>,
+    pub b1_help_msgs: Vec<String>,
+    pub b2_note: Spanned<String>,
+    pub b2_help_msgs: Vec<String>,
+}
+
+impl Ambiguity {
+    fn decorate<'a>(self, diag: &mut Diag<'a, impl EmissionGuarantee>) {
+        diag.primary_message(format!("`{}` is ambiguous", self.ident));
+        diag.span_label(self.ident.span, "ambiguous name");
+        diag.note(format!("ambiguous because of {}", self.kind));
+        diag.span_note(self.b1_note.span, self.b1_note.node);
+        for help_msg in self.b1_help_msgs {
+            diag.help(help_msg);
+        }
+        diag.span_note(self.b2_note.span, self.b2_note.node);
+        for help_msg in self.b2_help_msgs {
+            diag.help(help_msg);
+        }
+    }
+}
+
+impl<'a, G: EmissionGuarantee> Diagnostic<'a, G> for Ambiguity {
+    fn into_diag(self, dcx: DiagCtxtHandle<'a>, level: Level) -> Diag<'a, G> {
+        let mut diag = Diag::new(dcx, level, "").with_span(self.ident.span).with_code(E0659);
+        self.decorate(&mut diag);
+        diag
+    }
+}
+
+impl<'a> LintDiagnostic<'a, ()> for Ambiguity {
+    fn decorate_lint<'b>(self, diag: &'b mut Diag<'a, ()>) {
+        self.decorate(diag);
+    }
 }

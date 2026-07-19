@@ -7,14 +7,14 @@ Content-Transfer-Encoding: 8bit
 
 Signed-off-by: Fabian Grünbichler <f.gruenbichler@proxmox.com>
 ---
- vendor/onig_sys-69.8.1/build.rs | 2 +-
+ vendor/onig_sys-69.9.1/build.rs | 2 +-
  1 file changed, 1 insertion(+), 1 deletion(-)
 
-diff --git a/vendor/onig_sys-69.8.1/build.rs b/vendor/onig_sys-69.8.1/build.rs
-index 138e9d8..be1e128 100644
---- a/vendor/onig_sys-69.8.1/build.rs
-+++ b/vendor/onig_sys-69.8.1/build.rs
-@@ -219,7 +219,7 @@ fn bindgen_headers(path: &str) {
+diff --git a/vendor/onig_sys-69.9.1/build.rs b/vendor/onig_sys-69.9.1/build.rs
+index 8db6bc7..fe481a1 100644
+--- a/vendor/onig_sys-69.9.1/build.rs
++++ b/vendor/onig_sys-69.9.1/build.rs
+@@ -221,7 +221,7 @@ fn bindgen_headers(path: &str) {
  
  pub fn main() {
      let link_type = link_type_override();

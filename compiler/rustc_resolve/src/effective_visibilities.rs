@@ -38,11 +38,11 @@ pub(crate) struct EffectiveVisibilitiesVisitor<'a, 'ra, 'tcx> {
 }
 
 impl Resolver<'_, '_> {
-    fn nearest_normal_mod(&mut self, def_id: LocalDefId) -> LocalDefId {
+    fn nearest_normal_mod(&self, def_id: LocalDefId) -> LocalDefId {
         self.get_nearest_non_block_module(def_id.to_def_id()).nearest_parent_mod().expect_local()
     }
 
-    fn private_vis_import(&mut self, binding: NameBinding<'_>) -> Visibility {
+    fn private_vis_import(&self, binding: NameBinding<'_>) -> Visibility {
         let NameBindingKind::Import { import, .. } = binding.kind else { unreachable!() };
         Visibility::Restricted(
             import
@@ -52,7 +52,7 @@ impl Resolver<'_, '_> {
         )
     }
 
-    fn private_vis_def(&mut self, def_id: LocalDefId) -> Visibility {
+    fn private_vis_def(&self, def_id: LocalDefId) -> Visibility {
         // For mod items `nearest_normal_mod` returns its argument, but we actually need its parent.
         let normal_mod_id = self.nearest_normal_mod(def_id);
         if normal_mod_id == def_id {
@@ -113,42 +113,40 @@ impl<'a, 'ra, 'tcx> EffectiveVisibilitiesVisitor<'a, 'ra, 'tcx> {
     /// Update effective visibilities of bindings in the given module,
     /// including their whole reexport chains.
     fn set_bindings_effective_visibilities(&mut self, module_id: LocalDefId) {
-        assert!(self.r.module_map.contains_key(&module_id.to_def_id()));
-        let module = self.r.get_module(module_id.to_def_id()).unwrap();
-        let resolutions = self.r.resolutions(module);
+        let module = self.r.expect_module(module_id.to_def_id());
+        for (_, name_resolution) in self.r.resolutions(module).borrow().iter() {
+            let Some(mut binding) = name_resolution.borrow().binding() else {
+                continue;
+            };
+            // Set the given effective visibility level to `Level::Direct` and
+            // sets the rest of the `use` chain to `Level::Reexported` until
+            // we hit the actual exported item.
+            //
+            // If the binding is ambiguous, put the root ambiguity binding and all reexports
+            // leading to it into the table. They are used by the `ambiguous_glob_reexports`
+            // lint. For all bindings added to the table this way `is_ambiguity` returns true.
+            let is_ambiguity =
+                |binding: NameBinding<'ra>, warn: bool| binding.ambiguity.is_some() && !warn;
+            let mut parent_id = ParentId::Def(module_id);
+            let mut warn_ambiguity = binding.warn_ambiguity;
+            while let NameBindingKind::Import { binding: nested_binding, .. } = binding.kind {
+                self.update_import(binding, parent_id);
 
-        for (_, name_resolution) in resolutions.borrow().iter() {
-            if let Some(mut binding) = name_resolution.borrow().binding() {
-                // Set the given effective visibility level to `Level::Direct` and
-                // sets the rest of the `use` chain to `Level::Reexported` until
-                // we hit the actual exported item.
-                //
-                // If the binding is ambiguous, put the root ambiguity binding and all reexports
-                // leading to it into the table. They are used by the `ambiguous_glob_reexports`
-                // lint. For all bindings added to the table this way `is_ambiguity` returns true.
-                let is_ambiguity =
-                    |binding: NameBinding<'ra>, warn: bool| binding.ambiguity.is_some() && !warn;
-                let mut parent_id = ParentId::Def(module_id);
-                let mut warn_ambiguity = binding.warn_ambiguity;
-                while let NameBindingKind::Import { binding: nested_binding, .. } = binding.kind {
-                    self.update_import(binding, parent_id);
-
-                    if is_ambiguity(binding, warn_ambiguity) {
-                        // Stop at the root ambiguity, further bindings in the chain should not
-                        // be reexported because the root ambiguity blocks any access to them.
-                        // (Those further bindings are most likely not ambiguities themselves.)
-                        break;
-                    }
-
-                    parent_id = ParentId::Import(binding);
-                    binding = nested_binding;
-                    warn_ambiguity |= nested_binding.warn_ambiguity;
+                if is_ambiguity(binding, warn_ambiguity) {
+                    // Stop at the root ambiguity, further bindings in the chain should not
+                    // be reexported because the root ambiguity blocks any access to them.
+                    // (Those further bindings are most likely not ambiguities themselves.)
+                    break;
                 }
-                if !is_ambiguity(binding, warn_ambiguity)
-                    && let Some(def_id) = binding.res().opt_def_id().and_then(|id| id.as_local())
-                {
-                    self.update_def(def_id, binding.vis.expect_local(), parent_id);
-                }
+
+                parent_id = ParentId::Import(binding);
+                binding = nested_binding;
+                warn_ambiguity |= nested_binding.warn_ambiguity;
+            }
+            if !is_ambiguity(binding, warn_ambiguity)
+                && let Some(def_id) = binding.res().opt_def_id().and_then(|id| id.as_local())
+            {
+                self.update_def(def_id, binding.vis.expect_local(), parent_id);
             }
         }
     }
@@ -251,7 +249,7 @@ impl<'a, 'ra, 'tcx> Visitor<'a> for EffectiveVisibilitiesVisitor<'a, 'ra, 'tcx> 
                 self.current_private_vis = prev_private_vis;
             }
 
-            ast::ItemKind::Enum(EnumDef { ref variants }, _) => {
+            ast::ItemKind::Enum(_, _, EnumDef { ref variants }) => {
                 self.set_bindings_effective_visibilities(def_id);
                 for variant in variants {
                     let variant_def_id = self.r.local_def_id(variant.id);
@@ -261,7 +259,7 @@ impl<'a, 'ra, 'tcx> Visitor<'a> for EffectiveVisibilitiesVisitor<'a, 'ra, 'tcx> 
                 }
             }
 
-            ast::ItemKind::Struct(ref def, _) | ast::ItemKind::Union(ref def, _) => {
+            ast::ItemKind::Struct(_, _, ref def) | ast::ItemKind::Union(_, _, ref def) => {
                 for field in def.fields() {
                     self.update_field(self.r.local_def_id(field.id), def_id);
                 }

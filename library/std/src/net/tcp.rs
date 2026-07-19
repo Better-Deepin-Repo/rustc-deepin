@@ -5,7 +5,8 @@
     not(any(
         target_os = "emscripten",
         all(target_os = "wasi", target_env = "p1"),
-        target_os = "xous"
+        target_os = "xous",
+        target_os = "trusty",
     ))
 ))]
 mod tests;
@@ -15,7 +16,8 @@ use crate::io::prelude::*;
 use crate::io::{self, BorrowedCursor, IoSlice, IoSliceMut};
 use crate::iter::FusedIterator;
 use crate::net::{Shutdown, SocketAddr, ToSocketAddrs};
-use crate::sys_common::{AsInner, FromInner, IntoInner, net as net_imp};
+use crate::sys::net as net_imp;
+use crate::sys_common::{AsInner, FromInner, IntoInner};
 use crate::time::Duration;
 
 /// A TCP stream between a local and a remote socket.
@@ -51,6 +53,12 @@ use crate::time::Duration;
 ///     Ok(())
 /// } // the stream is closed here
 /// ```
+///
+/// # Platform-specific Behavior
+///
+/// On Unix, writes to the underlying socket in `SOCK_STREAM` mode are made with
+/// `MSG_NOSIGNAL` flag. This suppresses the emission of the  `SIGPIPE` signal when writing
+/// to disconnected socket. In some cases, getting a `SIGPIPE` would trigger process termination.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct TcpStream(net_imp::TcpStream);
 
@@ -159,7 +167,7 @@ impl TcpStream {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<TcpStream> {
-        super::each_addr(addr, net_imp::TcpStream::connect).map(TcpStream)
+        net_imp::TcpStream::connect(addr).map(TcpStream)
     }
 
     /// Opens a TCP connection to a remote host with a timeout.
@@ -774,7 +782,7 @@ impl TcpListener {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<TcpListener> {
-        super::each_addr(addr, net_imp::TcpListener::bind).map(TcpListener)
+        net_imp::TcpListener::bind(addr).map(TcpListener)
     }
 
     /// Returns the local socket address of this listener.

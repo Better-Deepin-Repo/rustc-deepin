@@ -3,8 +3,8 @@
 //! Note that these tests will generally require setting `CARGO_CONTAINER_TESTS`
 //! or `CARGO_PUBLIC_NETWORK_TESTS`.
 
+use crate::prelude::*;
 use cargo_test_support::containers::Container;
-use cargo_test_support::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::str;
 
@@ -33,7 +33,7 @@ fn self_signed_should_fail() {
         .build();
     // I think the text here depends on the curl backend.
     let err_msg = if cfg!(target_os = "macos") {
-        "untrusted connection error; class=Ssl (16); code=Certificate (-17)"
+        "untrusted connection error; class=Ssl (16)[..]"
     } else if cfg!(unix) {
         "the SSL certificate is invalid; class=Ssl (16)[..]"
     } else if cfg!(windows) {

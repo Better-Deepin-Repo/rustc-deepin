@@ -4,7 +4,7 @@ use cargo::core::features;
 use cargo::core::shell::Shell;
 use cargo::util::network::http::http_handle;
 use cargo::util::network::http::needs_custom_http_transport;
-use cargo::util::{self, closest_msg, command_prelude, CargoResult};
+use cargo::util::{self, CargoResult, closest_msg, command_prelude};
 use cargo_util::{ProcessBuilder, ProcessError};
 use cargo_util_schemas::manifest::StringOrVec;
 use std::collections::BTreeMap;
@@ -79,7 +79,7 @@ fn setup_logger() -> Option<ChromeFlushGuard> {
         .with(fmt_layer)
         .with(profile_layer);
     registry.init();
-    tracing::trace!(start = humantime::format_rfc3339(std::time::SystemTime::now()).to_string());
+    tracing::trace!(start = jiff::Timestamp::now().to_string());
     profile_guard
 }
 
@@ -182,6 +182,44 @@ fn aliased_command(gctx: &GlobalContext, command: &str) -> CargoResult<Option<Ve
 
 /// List all runnable commands
 fn list_commands(gctx: &GlobalContext) -> BTreeMap<String, CommandInfo> {
+    let mut commands = third_party_subcommands(gctx);
+
+    for cmd in commands::builtin() {
+        commands.insert(
+            cmd.get_name().to_string(),
+            CommandInfo::BuiltIn {
+                about: cmd.get_about().map(|s| s.to_string()),
+            },
+        );
+    }
+
+    // Add the builtin_aliases and them descriptions to the
+    // `commands` `BTreeMap`.
+    for command in &BUILTIN_ALIASES {
+        commands.insert(
+            command.0.to_string(),
+            CommandInfo::BuiltIn {
+                about: Some(command.2.to_string()),
+            },
+        );
+    }
+
+    // Add the user-defined aliases
+    let alias_commands = user_defined_aliases(gctx);
+    commands.extend(alias_commands);
+
+    // `help` is special, so it needs to be inserted separately.
+    commands.insert(
+        "help".to_string(),
+        CommandInfo::BuiltIn {
+            about: Some("Displays help for a cargo command".to_string()),
+        },
+    );
+
+    commands
+}
+
+fn third_party_subcommands(gctx: &GlobalContext) -> BTreeMap<String, CommandInfo> {
     let prefix = "cargo-";
     let suffix = env::consts::EXE_SUFFIX;
     let mut commands = BTreeMap::new();
@@ -209,28 +247,11 @@ fn list_commands(gctx: &GlobalContext) -> BTreeMap<String, CommandInfo> {
             }
         }
     }
+    commands
+}
 
-    for cmd in commands::builtin() {
-        commands.insert(
-            cmd.get_name().to_string(),
-            CommandInfo::BuiltIn {
-                about: cmd.get_about().map(|s| s.to_string()),
-            },
-        );
-    }
-
-    // Add the builtin_aliases and them descriptions to the
-    // `commands` `BTreeMap`.
-    for command in &BUILTIN_ALIASES {
-        commands.insert(
-            command.0.to_string(),
-            CommandInfo::BuiltIn {
-                about: Some(command.2.to_string()),
-            },
-        );
-    }
-
-    // Add the user-defined aliases
+fn user_defined_aliases(gctx: &GlobalContext) -> BTreeMap<String, CommandInfo> {
+    let mut commands = BTreeMap::new();
     if let Ok(aliases) = gctx.get::<BTreeMap<String, StringOrVec>>("alias") {
         for (name, target) in aliases.iter() {
             commands.insert(
@@ -241,15 +262,6 @@ fn list_commands(gctx: &GlobalContext) -> BTreeMap<String, CommandInfo> {
             );
         }
     }
-
-    // `help` is special, so it needs to be inserted separately.
-    commands.insert(
-        "help".to_string(),
-        CommandInfo::BuiltIn {
-            about: Some("Displays help for a cargo subcommand".to_string()),
-        },
-    );
-
     commands
 }
 
@@ -270,24 +282,25 @@ fn execute_external_subcommand(gctx: &GlobalContext, cmd: &str, args: &[&OsStr])
                 && std::path::Path::new(cmd).is_file()
             {
                 let sep = std::path::MAIN_SEPARATOR;
-                format!("\n\tTo run the file `{cmd}`, provide a relative path like `.{sep}{cmd}`")
+                format!(
+                    "\nhelp: To run the file `{cmd}`, provide a relative path like `.{sep}{cmd}`"
+                )
             } else {
                 "".to_owned()
             };
             let err = if cmd.starts_with('+') {
                 anyhow::format_err!(
-                    "no such command: `{cmd}`\n\n\t\
-                    Cargo does not handle `+toolchain` directives.\n\t\
-                    Did you mean to invoke `cargo` through `rustup` instead?{script_suggestion}",
+                    "no such command: `{cmd}`\n\n\
+                    help: invoke `cargo` through `rustup` to handle `+toolchain` directives{script_suggestion}",
                 )
             } else {
                 let suggestions = list_commands(gctx);
-                let did_you_mean = closest_msg(cmd, suggestions.keys(), |c| c);
+                let did_you_mean = closest_msg(cmd, suggestions.keys(), |c| c, "command");
 
                 anyhow::format_err!(
-                    "no such command: `{cmd}`{did_you_mean}\n\n\t\
-                    View all installed commands with `cargo --list`\n\t\
-                    Find a package to install `{cmd}` with `cargo search cargo-{cmd}`{script_suggestion}",
+                    "no such command: `{cmd}`{did_you_mean}\n\n\
+                    help: view all installed commands with `cargo --list`\n\
+                    help: find a package to install `{cmd}` with `cargo search cargo-{cmd}`{script_suggestion}",
                 )
             };
 

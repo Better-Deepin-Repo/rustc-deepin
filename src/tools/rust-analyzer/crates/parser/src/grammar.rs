@@ -39,9 +39,9 @@ mod patterns;
 mod types;
 
 use crate::{
-    parser::{CompletedMarker, Marker, Parser},
     SyntaxKind::{self, *},
-    TokenSet, T,
+    T, TokenSet,
+    parser::{CompletedMarker, Marker, Parser},
 };
 
 pub(crate) mod entry {
@@ -94,7 +94,17 @@ pub(crate) mod entry {
 
         pub(crate) fn source_file(p: &mut Parser<'_>) {
             let m = p.start();
+            // test frontmatter
+            // #!/usr/bin/env cargo
+            //
+            // ---
+            // [dependencies]
+            // clap = { version = "4.2", features = ["derive"] }
+            // ---
+            //
+            // fn main() {}
             p.eat(SHEBANG);
+            p.eat(FRONTMATTER);
             items::mod_contents(p, false);
             m.complete(p, SOURCE_FILE);
         }

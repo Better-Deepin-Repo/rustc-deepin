@@ -1,7 +1,7 @@
 use hir::HirDisplay;
-use syntax::{ast, match_ast, AstNode, SyntaxKind, SyntaxToken, TextRange, TextSize};
+use syntax::{AstNode, SyntaxKind, SyntaxToken, TextRange, TextSize, ast, match_ast};
 
-use crate::{AssistContext, AssistId, AssistKind, Assists};
+use crate::{AssistContext, AssistId, Assists};
 
 // Assist: add_return_type
 //
@@ -18,14 +18,14 @@ use crate::{AssistContext, AssistId, AssistKind, Assists};
 pub(crate) fn add_return_type(acc: &mut Assists, ctx: &AssistContext<'_>) -> Option<()> {
     let (fn_type, tail_expr, builder_edit_pos) = extract_tail(ctx)?;
     let module = ctx.sema.scope(tail_expr.syntax())?.module();
-    let ty = ctx.sema.type_of_expr(&peel_blocks(tail_expr.clone()))?.original();
+    let ty = ctx.sema.type_of_expr(&peel_blocks(tail_expr.clone()))?.adjusted();
     if ty.is_unit() {
         return None;
     }
     let ty = ty.display_source_code(ctx.db(), module.into(), true).ok()?;
 
     acc.add(
-        AssistId("add_return_type", AssistKind::RefactorRewrite),
+        AssistId::refactor_rewrite("add_return_type"),
         match fn_type {
             FnType::Function => "Add this function's return type",
             FnType::Closure { .. } => "Add this closure's return type",
@@ -417,6 +417,21 @@ mod tests {
             5
         }
     }
+}"#,
+        );
+    }
+
+    #[test]
+    fn infer_coerced_return_type_closure() {
+        check_assist(
+            add_return_type,
+            r#"fn foo() {
+    let f = ||$0 {loop {}};
+    let _: fn() -> i8 = f;
+}"#,
+            r#"fn foo() {
+    let f = || -> i8 {loop {}};
+    let _: fn() -> i8 = f;
 }"#,
         );
     }

@@ -12,27 +12,27 @@ Forwarded: not-needed
  1 file changed, 2 insertions(+), 4 deletions(-)
 
 diff --git a/src/tools/cargo/Cargo.toml b/src/tools/cargo/Cargo.toml
-index 0a73f86..9898d05 100644
+index e9fb413..cee0a1c 100644
 --- a/src/tools/cargo/Cargo.toml
 +++ b/src/tools/cargo/Cargo.toml
-@@ -80,7 +80,7 @@ proptest = "1.5.0"
- pulldown-cmark = { version = "0.12.0", default-features = false, features = ["html"] }
- rand = "0.8.5"
- regex = "1.10.5"
--rusqlite = { version = "0.32.0", features = ["bundled"] }
-+rusqlite = { version = "0.32.0" }
- rustc-hash = "2.0.0"
- rustc-stable-hash = "0.1.1"
- rustfix = { version = "0.9.0", path = "crates/rustfix" }
-@@ -267,10 +267,8 @@ test = false
- doc = false
+@@ -83,7 +83,7 @@ proptest = "1.9.0"
+ pulldown-cmark = { version = "0.13.0", default-features = false, features = ["html"] }
+ rand = "0.9.2"
+ regex = "1.12.2"
+-rusqlite = { version = "0.37.0", features = ["bundled"] }
++rusqlite = { version = "0.37.0"}
+ rustc-hash = "2.1.1"
+ rustc-stable-hash = "0.1.2"
+ rustfix = { version = "0.9.2", path = "crates/rustfix" }
+@@ -278,10 +278,8 @@ doc = false
  
  [features]
+ default = ["http-transport-curl"]
 -vendored-openssl = ["openssl/vendored"]
 -vendored-libgit2 = ["libgit2-sys/vendored"]
 +# Debian: removed vendoring flags
  # This is primarily used by rust-lang/rust distributing cargo the executable.
 -all-static = ['vendored-openssl', 'curl/static-curl', 'curl/force-system-lib-on-osx', 'vendored-libgit2']
- 
- [lints]
- workspace = true
+ # Exactly one of 'http-transport-curl' or 'http-transport-reqwest' must be enabled
+ # when using Cargo as a library. By default, it is 'http-transport-curl'.
+ http-transport-curl = ["gix/blocking-http-transport-curl"]

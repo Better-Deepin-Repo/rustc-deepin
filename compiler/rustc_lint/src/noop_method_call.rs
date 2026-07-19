@@ -84,7 +84,7 @@ impl<'tcx> LateLintPass<'tcx> for NoopMethodCall {
             return;
         };
 
-        let Some(trait_id) = cx.tcx.trait_of_item(did) else { return };
+        let Some(trait_id) = cx.tcx.trait_of_assoc(did) else { return };
 
         let Some(trait_) = cx.tcx.get_diagnostic_name(trait_id) else { return };
 
@@ -128,13 +128,17 @@ impl<'tcx> LateLintPass<'tcx> for NoopMethodCall {
                 ty::Adt(def, _) => Some(cx.tcx.def_span(def.did()).shrink_to_lo()),
                 _ => None,
             };
-            cx.emit_span_lint(NOOP_METHOD_CALL, span, NoopMethodCallDiag {
-                method: call.ident.name,
-                orig_ty,
-                trait_,
-                label: span,
-                suggest_derive,
-            });
+            cx.emit_span_lint(
+                NOOP_METHOD_CALL,
+                span,
+                NoopMethodCallDiag {
+                    method: call.ident,
+                    orig_ty,
+                    trait_,
+                    label: span,
+                    suggest_derive,
+                },
+            );
         } else {
             match name {
                 // If `type_of(x) == T` and `x.borrow()` is used to get `&T`,

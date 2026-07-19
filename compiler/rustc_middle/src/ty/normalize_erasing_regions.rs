@@ -11,8 +11,10 @@ use rustc_macros::{HashStable, TyDecodable, TyEncodable};
 use tracing::{debug, instrument};
 
 use crate::traits::query::NoSolution;
-use crate::ty::fold::{FallibleTypeFolder, TypeFoldable, TypeFolder};
-use crate::ty::{self, EarlyBinder, GenericArgsRef, Ty, TyCtxt, TypeVisitableExt};
+use crate::ty::{
+    self, EarlyBinder, FallibleTypeFolder, GenericArgsRef, Ty, TyCtxt, TypeFoldable, TypeFolder,
+    TypeVisitableExt,
+};
 
 #[derive(Debug, Copy, Clone, HashStable, TyEncodable, TyDecodable)]
 pub enum NormalizationError<'tcx> {
@@ -49,7 +51,7 @@ impl<'tcx> TyCtxt<'tcx> {
 
         // Erase first before we do the real query -- this keeps the
         // cache from being too polluted.
-        let value = self.erase_regions(value);
+        let value = self.erase_and_anonymize_regions(value);
         debug!(?value);
 
         if !value.has_aliases() {
@@ -81,7 +83,7 @@ impl<'tcx> TyCtxt<'tcx> {
 
         // Erase first before we do the real query -- this keeps the
         // cache from being too polluted.
-        let value = self.erase_regions(value);
+        let value = self.erase_and_anonymize_regions(value);
         debug!(?value);
 
         if !value.has_aliases() {
@@ -165,10 +167,14 @@ impl<'tcx> NormalizeAfterErasingRegionsFolder<'tcx> {
         arg: ty::GenericArg<'tcx>,
     ) -> ty::GenericArg<'tcx> {
         let arg = self.typing_env.as_query_input(arg);
-        self.tcx.try_normalize_generic_arg_after_erasing_regions(arg).unwrap_or_else(|_| bug!(
-            "Failed to normalize {:?}, maybe try to call `try_normalize_erasing_regions` instead",
-            arg.value
-        ))
+        self.tcx.try_normalize_generic_arg_after_erasing_regions(arg).unwrap_or_else(|_| {
+            bug!(
+                "Failed to normalize {:?} in typing_env={:?}, \
+                maybe try to call `try_normalize_erasing_regions` instead",
+                arg.value,
+                self.typing_env,
+            )
+        })
     }
 }
 

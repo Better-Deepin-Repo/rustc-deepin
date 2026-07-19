@@ -6,17 +6,17 @@ use rustc_macros::{HashStable, Lift, TyDecodable, TyEncodable, TypeFoldable, Typ
 use rustc_session::RemapFileNameExt;
 use rustc_session::config::RemapPathScopeComponents;
 use rustc_span::{DUMMY_SP, Span, Symbol};
-use rustc_type_ir::visit::TypeVisitableExt;
+use rustc_type_ir::TypeVisitableExt;
 
 use super::interpret::ReportedErrorInfo;
-use crate::mir::interpret::{AllocId, ConstAllocation, ErrorHandled, Scalar, alloc_range};
+use crate::mir::interpret::{AllocId, AllocRange, ErrorHandled, GlobalAlloc, Scalar, alloc_range};
 use crate::mir::{Promoted, pretty_print_const_value};
 use crate::ty::print::{pretty_print_const, with_no_trimmed_paths};
 use crate::ty::{self, ConstKind, GenericArgsRef, ScalarInt, Ty, TyCtxt};
 
 ///////////////////////////////////////////////////////////////////////////
 /// Evaluated Constants
-
+///
 /// Represents the result of const evaluation via the `eval_to_allocation` query.
 /// Not to be confused with `ConstAllocation`, which directly refers to the underlying data!
 /// Here we indirect via an `AllocId`.
@@ -31,8 +31,8 @@ pub struct ConstAlloc<'tcx> {
 /// Represents a constant value in Rust. `Scalar` and `Slice` are optimizations for
 /// array length computations, enum discriminants and the pattern matching logic.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, TyEncodable, TyDecodable, Hash)]
-#[derive(HashStable, Lift)]
-pub enum ConstValue<'tcx> {
+#[derive(HashStable)]
+pub enum ConstValue {
     /// Used for types with `layout::abi::Scalar` ABI.
     ///
     /// Not using the enum `Value` to encode that this must not be `Uninit`.
@@ -50,7 +50,7 @@ pub enum ConstValue<'tcx> {
     Slice {
         /// The allocation storing the slice contents.
         /// This always points to the beginning of the allocation.
-        data: ConstAllocation<'tcx>,
+        alloc_id: AllocId,
         /// The metadata field of the reference.
         /// This is a "target usize", so we use `u64` as in the interpreter.
         meta: u64,
@@ -73,9 +73,9 @@ pub enum ConstValue<'tcx> {
 }
 
 #[cfg(target_pointer_width = "64")]
-rustc_data_structures::static_assert_size!(ConstValue<'_>, 24);
+rustc_data_structures::static_assert_size!(ConstValue, 24);
 
-impl<'tcx> ConstValue<'tcx> {
+impl ConstValue {
     #[inline]
     pub fn try_to_scalar(&self) -> Option<Scalar> {
         match *self {
@@ -96,11 +96,11 @@ impl<'tcx> ConstValue<'tcx> {
         self.try_to_scalar_int()?.try_into().ok()
     }
 
-    pub fn try_to_target_usize(&self, tcx: TyCtxt<'tcx>) -> Option<u64> {
+    pub fn try_to_target_usize(&self, tcx: TyCtxt<'_>) -> Option<u64> {
         Some(self.try_to_scalar_int()?.to_target_usize(tcx))
     }
 
-    pub fn try_to_bits_for_ty(
+    pub fn try_to_bits_for_ty<'tcx>(
         &self,
         tcx: TyCtxt<'tcx>,
         typing_env: ty::TypingEnv<'tcx>,
@@ -130,17 +130,20 @@ impl<'tcx> ConstValue<'tcx> {
     }
 
     /// Must only be called on constants of type `&str` or `&[u8]`!
-    pub fn try_get_slice_bytes_for_diagnostics(&self, tcx: TyCtxt<'tcx>) -> Option<&'tcx [u8]> {
-        let (data, start, end) = match self {
+    pub fn try_get_slice_bytes_for_diagnostics<'tcx>(
+        &self,
+        tcx: TyCtxt<'tcx>,
+    ) -> Option<&'tcx [u8]> {
+        let (alloc_id, start, len) = match self {
             ConstValue::Scalar(_) | ConstValue::ZeroSized => {
                 bug!("`try_get_slice_bytes` on non-slice constant")
             }
-            &ConstValue::Slice { data, meta } => (data, 0, meta),
+            &ConstValue::Slice { alloc_id, meta } => (alloc_id, 0, meta),
             &ConstValue::Indirect { alloc_id, offset } => {
                 // The reference itself is stored behind an indirection.
                 // Load the reference, and then load the actual slice contents.
                 let a = tcx.global_alloc(alloc_id).unwrap_memory().inner();
-                let ptr_size = tcx.data_layout.pointer_size;
+                let ptr_size = tcx.data_layout.pointer_size();
                 if a.size() < offset + 2 * ptr_size {
                     // (partially) dangling reference
                     return None;
@@ -166,34 +169,60 @@ impl<'tcx> ConstValue<'tcx> {
                     return Some(&[]);
                 }
                 // Non-empty slice, must have memory. We know this is a relative pointer.
-                let (inner_prov, offset) = ptr.into_parts();
-                let data = tcx.global_alloc(inner_prov?.alloc_id()).unwrap_memory();
-                (data, offset.bytes(), offset.bytes() + len)
+                let (inner_prov, offset) =
+                    ptr.into_pointer_or_addr().ok()?.prov_and_relative_offset();
+                (inner_prov.alloc_id(), offset.bytes(), len)
             }
         };
 
+        let data = tcx.global_alloc(alloc_id).unwrap_memory();
+
         // This is for diagnostics only, so we are okay to use `inspect_with_uninit_and_ptr_outside_interpreter`.
         let start = start.try_into().unwrap();
-        let end = end.try_into().unwrap();
+        let end = start + usize::try_from(len).unwrap();
         Some(data.inner().inspect_with_uninit_and_ptr_outside_interpreter(start..end))
     }
 
     /// Check if a constant may contain provenance information. This is used by MIR opts.
     /// Can return `true` even if there is no provenance.
-    pub fn may_have_provenance(&self, tcx: TyCtxt<'tcx>, size: Size) -> bool {
+    pub fn may_have_provenance(&self, tcx: TyCtxt<'_>, size: Size) -> bool {
         match *self {
             ConstValue::ZeroSized | ConstValue::Scalar(Scalar::Int(_)) => return false,
             ConstValue::Scalar(Scalar::Ptr(..)) => return true,
             // It's hard to find out the part of the allocation we point to;
             // just conservatively check everything.
-            ConstValue::Slice { data, meta: _ } => !data.inner().provenance().ptrs().is_empty(),
+            ConstValue::Slice { alloc_id, meta: _ } => {
+                !tcx.global_alloc(alloc_id).unwrap_memory().inner().provenance().ptrs().is_empty()
+            }
             ConstValue::Indirect { alloc_id, offset } => !tcx
                 .global_alloc(alloc_id)
                 .unwrap_memory()
                 .inner()
                 .provenance()
-                .range_empty(super::AllocRange::from(offset..offset + size), &tcx),
+                .range_empty(AllocRange::from(offset..offset + size), &tcx),
         }
+    }
+
+    /// Check if a constant only contains uninitialized bytes.
+    pub fn all_bytes_uninit(&self, tcx: TyCtxt<'_>) -> bool {
+        let ConstValue::Indirect { alloc_id, .. } = self else {
+            return false;
+        };
+        let alloc = tcx.global_alloc(*alloc_id);
+        let GlobalAlloc::Memory(alloc) = alloc else {
+            return false;
+        };
+        let init_mask = alloc.0.init_mask();
+        let init_range = init_mask.is_range_initialized(AllocRange {
+            start: Size::ZERO,
+            size: Size::from_bytes(alloc.0.len()),
+        });
+        if let Err(range) = init_range {
+            if range.size == alloc.0.size() {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -222,7 +251,7 @@ pub enum Const<'tcx> {
 
     /// This constant cannot go back into the type system, as it represents
     /// something the type system cannot handle (e.g. pointers).
-    Val(ConstValue<'tcx>, Ty<'tcx>),
+    Val(ConstValue, Ty<'tcx>),
 }
 
 impl<'tcx> Const<'tcx> {
@@ -250,7 +279,7 @@ impl<'tcx> Const<'tcx> {
                     // Dont use the outer ty as on invalid code we can wind up with them not being the same.
                     // this then results in allowing const eval to add `1_i64 + 1_usize` in cases where the mir
                     // was originally `({N: usize} + 1_usize)` under `generic_const_exprs`.
-                    ty::ConstKind::Value(ty, _) => ty,
+                    ty::ConstKind::Value(cv) => cv.ty,
                     _ => *ty,
                 }
             }
@@ -264,7 +293,7 @@ impl<'tcx> Const<'tcx> {
     pub fn is_required_const(&self) -> bool {
         match self {
             Const::Ty(_, c) => match c.kind() {
-                ty::ConstKind::Value(_, _) => false, // already a value, cannot error
+                ty::ConstKind::Value(_) => false, // already a value, cannot error
                 _ => true,
             },
             Const::Val(..) => false, // already a value, cannot error
@@ -276,11 +305,11 @@ impl<'tcx> Const<'tcx> {
     pub fn try_to_scalar(self) -> Option<Scalar> {
         match self {
             Const::Ty(_, c) => match c.kind() {
-                ty::ConstKind::Value(ty, valtree) if ty.is_primitive() => {
+                ty::ConstKind::Value(cv) if cv.ty.is_primitive() => {
                     // A valtree of a type where leaves directly represent the scalar const value.
                     // Just checking whether it is a leaf is insufficient as e.g. references are leafs
                     // but the leaf value is the value they point to, not the reference itself!
-                    Some(valtree.unwrap_leaf().into())
+                    Some(cv.valtree.unwrap_leaf().into())
                 }
                 _ => None,
             },
@@ -295,9 +324,7 @@ impl<'tcx> Const<'tcx> {
         match self {
             Const::Val(ConstValue::Scalar(Scalar::Int(x)), _) => Some(x),
             Const::Ty(_, c) => match c.kind() {
-                ty::ConstKind::Value(ty, valtree) if ty.is_primitive() => {
-                    Some(valtree.unwrap_leaf())
-                }
+                ty::ConstKind::Value(cv) if cv.ty.is_primitive() => Some(cv.valtree.unwrap_leaf()),
                 _ => None,
             },
             _ => None,
@@ -320,7 +347,7 @@ impl<'tcx> Const<'tcx> {
         tcx: TyCtxt<'tcx>,
         typing_env: ty::TypingEnv<'tcx>,
         span: Span,
-    ) -> Result<ConstValue<'tcx>, ErrorHandled> {
+    ) -> Result<ConstValue, ErrorHandled> {
         match self {
             Const::Ty(_, c) => {
                 if c.has_non_region_param() {
@@ -328,7 +355,7 @@ impl<'tcx> Const<'tcx> {
                 }
 
                 match c.kind() {
-                    ConstKind::Value(ty, val) => Ok(tcx.valtree_to_const_val((ty, val))),
+                    ConstKind::Value(cv) => Ok(tcx.valtree_to_const_val(cv)),
                     ConstKind::Expr(_) => {
                         bug!("Normalization of `ty::ConstKind::Expr` is unimplemented")
                     }
@@ -353,13 +380,13 @@ impl<'tcx> Const<'tcx> {
         typing_env: ty::TypingEnv<'tcx>,
     ) -> Option<Scalar> {
         if let Const::Ty(_, c) = self
-            && let ty::ConstKind::Value(ty, val) = c.kind()
-            && ty.is_primitive()
+            && let ty::ConstKind::Value(cv) = c.kind()
+            && cv.ty.is_primitive()
         {
             // Avoid the `valtree_to_const_val` query. Can only be done on primitive types that
             // are valtree leaves, and *not* on references. (References should return the
             // pointer here, which valtrees don't represent.)
-            Some(val.unwrap_leaf().into())
+            Some(cv.valtree.unwrap_leaf().into())
         } else {
             self.eval(tcx, typing_env, DUMMY_SP).ok()?.try_to_scalar()
         }
@@ -417,8 +444,13 @@ impl<'tcx> Const<'tcx> {
     }
 
     #[inline]
-    pub fn from_value(val: ConstValue<'tcx>, ty: Ty<'tcx>) -> Self {
+    pub fn from_value(val: ConstValue, ty: Ty<'tcx>) -> Self {
         Self::Val(val, ty)
+    }
+
+    #[inline]
+    pub fn from_ty_value(tcx: TyCtxt<'tcx>, val: ty::Value<'tcx>) -> Self {
+        Self::Ty(val.ty, ty::Const::new_value(tcx, val.valtree, val.ty))
     }
 
     pub fn from_bits(
@@ -460,31 +492,19 @@ impl<'tcx> Const<'tcx> {
         Self::Val(val, ty)
     }
 
-    pub fn from_ty_const(c: ty::Const<'tcx>, ty: Ty<'tcx>, tcx: TyCtxt<'tcx>) -> Self {
-        match c.kind() {
-            ty::ConstKind::Value(ty, valtree) => {
-                // Make sure that if `c` is normalized, then the return value is normalized.
-                let const_val = tcx.valtree_to_const_val((ty, valtree));
-                Self::Val(const_val, ty)
-            }
-            _ => Self::Ty(ty, c),
-        }
-    }
-
     /// Return true if any evaluation of this constant always returns the same value,
     /// taking into account even pointer identity tests.
     pub fn is_deterministic(&self) -> bool {
         // Some constants may generate fresh allocations for pointers they contain,
-        // so using the same constant twice can yield two different results:
-        // - valtrees purposefully generate new allocations
-        // - ConstValue::Slice also generate new allocations
+        // so using the same constant twice can yield two different results.
+        // Notably, valtrees purposefully generate new allocations.
         match self {
             Const::Ty(_, c) => match c.kind() {
                 ty::ConstKind::Param(..) => true,
                 // A valtree may be a reference. Valtree references correspond to a
                 // different allocation each time they are evaluated. Valtrees for primitive
                 // types are fine though.
-                ty::ConstKind::Value(ty, _) => ty.is_primitive(),
+                ty::ConstKind::Value(cv) => cv.ty.is_primitive(),
                 ty::ConstKind::Unevaluated(..) | ty::ConstKind::Expr(..) => false,
                 // This can happen if evaluation of a constant failed. The result does not matter
                 // much since compilation is doomed.
@@ -495,11 +515,11 @@ impl<'tcx> Const<'tcx> {
                 | ty::ConstKind::Placeholder(..) => bug!(),
             },
             Const::Unevaluated(..) => false,
-            // If the same slice appears twice in the MIR, we cannot guarantee that we will
-            // give the same `AllocId` to the data.
-            Const::Val(ConstValue::Slice { .. }, _) => false,
             Const::Val(
-                ConstValue::ZeroSized | ConstValue::Scalar(_) | ConstValue::Indirect { .. },
+                ConstValue::Slice { .. }
+                | ConstValue::ZeroSized
+                | ConstValue::Scalar(_)
+                | ConstValue::Indirect { .. },
                 _,
             ) => true,
         }
@@ -559,10 +579,10 @@ impl<'tcx> Display for Const<'tcx> {
 }
 
 ///////////////////////////////////////////////////////////////////////////
-/// Const-related utilities
+// Const-related utilities
 
 impl<'tcx> TyCtxt<'tcx> {
-    pub fn span_as_caller_location(self, span: Span) -> ConstValue<'tcx> {
+    pub fn span_as_caller_location(self, span: Span) -> ConstValue {
         let topmost = span.ctxt().outer_expn().expansion_cause().unwrap_or(span);
         let caller = self.sess.source_map().lookup_char_pos(topmost.lo());
         self.const_caller_location(

@@ -18,15 +18,17 @@ mod testdir;
 use std::{collections::HashMap, path::PathBuf, time::Instant};
 
 use lsp_types::{
+    CodeActionContext, CodeActionParams, CompletionParams, DidOpenTextDocumentParams,
+    DocumentFormattingParams, DocumentRangeFormattingParams, FileRename, FormattingOptions,
+    GotoDefinitionParams, HoverParams, InlayHint, InlayHintLabel, InlayHintParams,
+    PartialResultParams, Position, Range, RenameFilesParams, TextDocumentItem,
+    TextDocumentPositionParams, WorkDoneProgressParams,
     notification::DidOpenTextDocument,
     request::{
         CodeActionRequest, Completion, Formatting, GotoTypeDefinition, HoverRequest,
-        InlayHintRequest, InlayHintResolveRequest, WillRenameFiles, WorkspaceSymbolRequest,
+        InlayHintRequest, InlayHintResolveRequest, RangeFormatting, WillRenameFiles,
+        WorkspaceSymbolRequest,
     },
-    CodeActionContext, CodeActionParams, CompletionParams, DidOpenTextDocumentParams,
-    DocumentFormattingParams, FileRename, FormattingOptions, GotoDefinitionParams, HoverParams,
-    InlayHint, InlayHintLabel, InlayHintParams, PartialResultParams, Position, Range,
-    RenameFilesParams, TextDocumentItem, TextDocumentPositionParams, WorkDoneProgressParams,
 };
 use rust_analyzer::lsp::ext::{OnEnter, Runnables, RunnablesParams};
 use serde_json::json;
@@ -35,7 +37,7 @@ use stdx::format_to_acc;
 use test_utils::skip_slow_tests;
 use testdir::TestDir;
 
-use crate::support::{project, Project};
+use crate::support::{Project, project};
 
 #[test]
 fn completes_items_from_standard_library() {
@@ -254,7 +256,7 @@ fn main() {}
           {
             "args": {
               "cargoArgs": ["test", "--package", "foo", "--test", "spam"],
-              "executableArgs": ["test_eggs", "--exact", "--show-output"],
+              "executableArgs": ["test_eggs", "--exact", "--nocapture"],
               "overrideCargo": null,
               "cwd": server.path().join("foo"),
               "workspaceRoot": server.path().join("foo")
@@ -287,7 +289,7 @@ fn main() {}
               ],
               "executableArgs": [
                 "",
-                "--show-output"
+                "--nocapture"
               ]
             },
             "kind": "cargo",
@@ -661,6 +663,70 @@ fn main() {}
 }
 
 #[test]
+fn test_format_document_range() {
+    if skip_slow_tests() {
+        return;
+    }
+
+    let server = Project::with_fixture(
+        r#"
+//- /Cargo.toml
+[package]
+name = "foo"
+version = "0.0.0"
+
+//- /src/lib.rs
+fn main() {
+    let unit_offsets_cache = collect(dwarf.units  ())  ?;
+}
+"#,
+    )
+    .with_config(serde_json::json!({
+        "rustfmt": {
+            "overrideCommand": [ "rustfmt", "+nightly", ],
+            "rangeFormatting": { "enable": true }
+        },
+    }))
+    .server()
+    .wait_until_workspace_is_loaded();
+
+    server.request::<RangeFormatting>(
+        DocumentRangeFormattingParams {
+            range: Range {
+                end: Position { line: 1, character: 0 },
+                start: Position { line: 1, character: 0 },
+            },
+            text_document: server.doc_id("src/lib.rs"),
+            options: FormattingOptions {
+                tab_size: 4,
+                insert_spaces: false,
+                insert_final_newline: None,
+                trim_final_newlines: None,
+                trim_trailing_whitespace: None,
+                properties: HashMap::new(),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        },
+        json!([
+            {
+                "newText": "",
+                "range": {
+                    "start": { "character": 48, "line": 1 },
+                    "end": { "character": 50, "line": 1 },
+                },
+            },
+            {
+                "newText": "",
+                "range": {
+                    "start": { "character": 53, "line": 1 },
+                    "end": { "character": 55, "line": 1 },
+                },
+            }
+        ]),
+    );
+}
+
+#[test]
 fn test_missing_module_code_action() {
     if skip_slow_tests() {
         return;
@@ -814,7 +880,8 @@ fn main() {{}}
 
 #[test]
 fn diagnostics_dont_block_typing() {
-    if skip_slow_tests() {
+    if skip_slow_tests() || std::env::var("CI").is_ok() {
+        // FIXME: This test is failing too frequently (therefore we disable it on CI).
         return;
     }
 
@@ -909,10 +976,6 @@ version = \"0.0.0\"
 }
 
 fn out_dirs_check_impl(root_contains_symlink: bool) {
-    if skip_slow_tests() {
-        return;
-    }
-
     let mut server = Project::with_fixture(
         r###"
 //- /Cargo.toml
@@ -1064,31 +1127,27 @@ fn main() {
 
 #[test]
 fn out_dirs_check() {
+    if skip_slow_tests() {
+        return;
+    }
     out_dirs_check_impl(false);
 }
 
 #[test]
 #[cfg(not(windows))] // windows requires elevated permissions to create symlinks
 fn root_contains_symlink_out_dirs_check() {
+    if skip_slow_tests() {
+        return;
+    }
     out_dirs_check_impl(true);
 }
 
 #[test]
-#[cfg(any(feature = "sysroot-abi", rust_analyzer))]
 fn resolve_proc_macro() {
     use expect_test::expect;
-    use vfs::AbsPathBuf;
     if skip_slow_tests() {
         return;
     }
-
-    let sysroot = project_model::Sysroot::discover(
-        &AbsPathBuf::assert_utf8(std::env::current_dir().unwrap()),
-        &Default::default(),
-        project_model::SysrootQueryMetadata::CargoMetadata,
-    );
-
-    let proc_macro_server_path = sysroot.discover_proc_macro_srv().unwrap();
 
     let server = Project::with_fixture(
         r###"
@@ -1101,12 +1160,8 @@ edition = "2021"
 bar = {path = "../bar"}
 
 //- /foo/src/main.rs
-#![allow(internal_features)]
-#![feature(rustc_attrs, decl_macro)]
 use bar::Bar;
 
-#[rustc_builtin_macro]
-macro derive($item:item) {}
 trait Bar {
   fn bar();
 }
@@ -1163,11 +1218,10 @@ pub fn foo(_input: TokenStream) -> TokenStream {
             "buildScripts": {
                 "enable": true
             },
-            "sysroot": null,
+            "sysroot": "discover",
         },
         "procMacro": {
             "enable": true,
-            "server": proc_macro_server_path.as_path().as_str(),
         }
     }))
     .root("foo")
@@ -1178,7 +1232,7 @@ pub fn foo(_input: TokenStream) -> TokenStream {
     let res = server.send_request::<HoverRequest>(HoverParams {
         text_document_position_params: TextDocumentPositionParams::new(
             server.doc_id("foo/src/main.rs"),
-            Position::new(12, 9),
+            Position::new(8, 9),
         ),
         work_done_progress_params: Default::default(),
     });
@@ -1372,6 +1426,40 @@ pub fn foo() {}
 name = "bar"
 version = "0.0.0"
 
+[dependencies]
+foo = { path = "../foo" }
+
+//- /bar/src/lib.rs
+"#,
+    )
+    .root("foo")
+    .root("bar")
+    .root("baz")
+    .with_config(json!({
+       "files": {
+           "exclude": ["foo"]
+        }
+    }))
+    .server()
+    .wait_until_workspace_is_loaded();
+
+    server.request::<WorkspaceSymbolRequest>(Default::default(), json!([]));
+
+    let server = Project::with_fixture(
+        r#"
+//- /foo/Cargo.toml
+[package]
+name = "foo"
+version = "0.0.0"
+
+//- /foo/src/lib.rs
+pub fn foo() {}
+
+//- /bar/Cargo.toml
+[package]
+name = "bar"
+version = "0.0.0"
+
 //- /bar/src/lib.rs
 pub fn bar() {}
 
@@ -1388,7 +1476,7 @@ version = "0.0.0"
     .root("baz")
     .with_config(json!({
        "files": {
-           "excludeDirs": ["foo", "bar"]
+           "exclude": ["foo", "bar"]
         }
     }))
     .server()

@@ -1,6 +1,8 @@
 //! Tests for overriding warning behavior using `build.warnings` config option.
 
-use cargo_test_support::{cargo_test, project, str, tools, Project};
+use crate::prelude::*;
+use crate::utils::tools;
+use cargo_test_support::{Project, cargo_test, project, str};
 
 fn make_project_with_rustc_warning() -> Project {
     project()
@@ -46,9 +48,9 @@ fn rustc_caching_allow_first() {
 1 | fn main() { let x = 3; }
   |                 ^ [HELP] if this is intentional, prefix it with an underscore: `_x`
   |
-  = [NOTE] `#[warn(unused_variables)]` on by default
+  = [NOTE] `#[warn(unused_variables)]` [..]on by default
 
-[WARNING] `foo` (bin "foo") generated 1 warning
+[WARNING] `foo` (bin "foo") generated 1 warning[..]
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [ERROR] warnings are denied by `build.warnings` configuration
 
@@ -73,9 +75,9 @@ fn rustc_caching_deny_first() {
 1 | fn main() { let x = 3; }
   |                 ^ [HELP] if this is intentional, prefix it with an underscore: `_x`
   |
-  = [NOTE] `#[warn(unused_variables)]` on by default
+  = [NOTE] `#[warn(unused_variables)]` [..]on by default
 
-[WARNING] `foo` (bin "foo") generated 1 warning
+[WARNING] `foo` (bin "foo") generated 1 warning[..]
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [ERROR] warnings are denied by `build.warnings` configuration
 
@@ -110,9 +112,9 @@ fn config() {
 1 | fn main() { let x = 3; }
   |                 ^ [HELP] if this is intentional, prefix it with an underscore: `_x`
   |
-  = [NOTE] `#[warn(unused_variables)]` on by default
+  = [NOTE] `#[warn(unused_variables)]` [..]on by default
 
-[WARNING] `foo` (bin "foo") generated 1 warning
+[WARNING] `foo` (bin "foo") generated 1 warning[..]
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 [ERROR] warnings are denied by `build.warnings` configuration
 
@@ -134,9 +136,9 @@ fn config() {
 1 | fn main() { let x = 3; }
   |                 ^ [HELP] if this is intentional, prefix it with an underscore: `_x`
   |
-  = [NOTE] `#[warn(unused_variables)]` on by default
+  = [NOTE] `#[warn(unused_variables)]` [..]on by default
 
-[WARNING] `foo` (bin "foo") generated 1 warning
+[WARNING] `foo` (bin "foo") generated 1 warning[..]
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
@@ -158,9 +160,9 @@ fn requires_nightly() {
 1 | fn main() { let x = 3; }
   |                 ^ [HELP] if this is intentional, prefix it with an underscore: `_x`
   |
-  = [NOTE] `#[warn(unused_variables)]` on by default
+  = [NOTE] `#[warn(unused_variables)]` [..]on by default
 
-[WARNING] `foo` (bin "foo") generated 1 warning
+[WARNING] `foo` (bin "foo") generated 1 warning[..]
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
 
 "#]])
@@ -217,5 +219,73 @@ Caused by:
 
 "#]])
         .with_status(101)
+        .run();
+}
+
+#[cargo_test]
+fn hard_warning_deny() {
+    let p = project()
+        .file(
+            "Cargo.toml",
+            &format!(
+                r#"
+                [package]
+                name = "foo"
+                version = "0.0.1"
+                edition = "2021"
+            "#
+            ),
+        )
+        .file("src/main.rs", "fn main() {}")
+        .build();
+    p.cargo("rustc")
+        .masquerade_as_nightly_cargo(&["warnings"])
+        .arg("-Zwarnings")
+        .arg("--config")
+        .arg("build.warnings='deny'")
+        .arg("--")
+        .arg("-ox.rs")
+        .with_stderr_data(str![[r#"
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[WARNING] [..]
+
+[WARNING] [..]
+
+[WARNING] `foo` (bin "foo") generated 2 warnings
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .run();
+}
+
+#[cargo_test]
+fn hard_warning_allow() {
+    let p = project()
+        .file(
+            "Cargo.toml",
+            &format!(
+                r#"
+                [package]
+                name = "foo"
+                version = "0.0.1"
+                edition = "2021"
+            "#
+            ),
+        )
+        .file("src/main.rs", "fn main() {}")
+        .build();
+    p.cargo("rustc")
+        .masquerade_as_nightly_cargo(&["warnings"])
+        .arg("-Zwarnings")
+        .arg("--config")
+        .arg("build.warnings='allow'")
+        .arg("--")
+        .arg("-ox.rs")
+        .with_stderr_data(str![[r#"
+[COMPILING] foo v0.0.1 ([ROOT]/foo)
+[FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
+
+"#]])
+        .with_status(0)
         .run();
 }

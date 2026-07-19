@@ -8,10 +8,17 @@
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, clap::ValueEnum, serde::Deserialize)]
 #[value(rename_all = "PascalCase")]
 pub enum Profile {
+    /// Perform the equivalent of `cargo check`.
     Check,
+    /// Perform the equivalent of `cargo build`.
     Debug,
+    /// Perform the equivalent of `cargo doc`.
     Doc,
+    /// Perform the equivalent of `cargo doc` with `--output-format=json`.
+    DocJson,
+    /// Perform the equivalent of `cargo build --release`.
     Opt,
+    /// Perform the equivalent of `cargo clippy`.
     Clippy,
 }
 
@@ -21,8 +28,42 @@ impl Profile {
             Profile::Check,
             Profile::Debug,
             Profile::Doc,
+            Profile::DocJson,
             Profile::Opt,
             Profile::Clippy,
         ]
+    }
+
+    pub fn is_doc(&self) -> bool {
+        match self {
+            Profile::Doc | Profile::DocJson => true,
+            Profile::Check | Profile::Debug | Profile::Opt | Profile::Clippy => false,
+        }
+    }
+}
+
+impl From<Profile> for database::Profile {
+    fn from(value: Profile) -> Self {
+        match value {
+            Profile::Check => Self::Check,
+            Profile::Debug => Self::Debug,
+            Profile::Doc => Self::Doc,
+            Profile::DocJson => Self::DocJson,
+            Profile::Opt => Self::Opt,
+            Profile::Clippy => Self::Clippy,
+        }
+    }
+}
+
+impl From<database::Profile> for Profile {
+    fn from(value: database::Profile) -> Self {
+        match value {
+            database::Profile::Check => Self::Check,
+            database::Profile::Debug => Self::Debug,
+            database::Profile::Doc => Self::Doc,
+            database::Profile::DocJson => Self::DocJson,
+            database::Profile::Opt => Self::Opt,
+            database::Profile::Clippy => Self::Clippy,
+        }
     }
 }

@@ -27,6 +27,10 @@ impl<'tcx> crate::MirPass<'tcx> for MentionedItems {
         visitor.visit_body(body);
         body.set_mentioned_items(visitor.mentioned_items);
     }
+
+    fn is_required(&self) -> bool {
+        true
+    }
 }
 
 // This visitor is carefully in sync with the one in `rustc_monomorphize::collector`. We are
@@ -47,7 +51,7 @@ impl<'tcx> Visitor<'tcx> for MentionedItemsVisitor<'_, 'tcx> {
                 let ty = place.ty(self.body, self.tcx).ty;
                 self.mentioned_items.push(Spanned { node: MentionedItem::Drop(ty), span: span() });
             }
-            mir::TerminatorKind::InlineAsm { ref operands, .. } => {
+            mir::TerminatorKind::InlineAsm { operands, .. } => {
                 for op in operands {
                     match *op {
                         mir::InlineAsmOperand::SymFn { ref value } => {
@@ -70,8 +74,7 @@ impl<'tcx> Visitor<'tcx> for MentionedItemsVisitor<'_, 'tcx> {
         match *rvalue {
             // We need to detect unsizing casts that required vtables.
             mir::Rvalue::Cast(
-                mir::CastKind::PointerCoercion(PointerCoercion::Unsize, _)
-                | mir::CastKind::PointerCoercion(PointerCoercion::DynStar, _),
+                mir::CastKind::PointerCoercion(PointerCoercion::Unsize, _),
                 ref operand,
                 target_ty,
             ) => {
@@ -106,7 +109,7 @@ impl<'tcx> Visitor<'tcx> for MentionedItemsVisitor<'_, 'tcx> {
             }
             // And finally, function pointer reification casts.
             mir::Rvalue::Cast(
-                mir::CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer, _),
+                mir::CastKind::PointerCoercion(PointerCoercion::ReifyFnPointer(_), _),
                 ref operand,
                 _,
             ) => {

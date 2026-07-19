@@ -61,15 +61,16 @@ impl<'tcx> LateLintPass<'tcx> for MissingTraitMethods {
         if !is_lint_allowed(cx, MISSING_TRAIT_METHODS, item.hir_id())
             && span_is_local(item.span)
             && let ItemKind::Impl(Impl {
-                items,
-                of_trait: Some(trait_ref),
+                of_trait: Some(of_trait),
                 ..
             }) = item.kind
-            && let Some(trait_id) = trait_ref.trait_def_id()
+            && let Some(trait_id) = of_trait.trait_ref.trait_def_id()
         {
-            let trait_item_ids: DefIdSet = items
-                .iter()
-                .filter_map(|impl_item| impl_item.trait_item_def_id)
+            let trait_item_ids: DefIdSet = cx
+                .tcx
+                .associated_items(item.owner_id)
+                .in_definition_order()
+                .filter_map(|assoc_item| assoc_item.expect_trait_impl().ok())
                 .collect();
 
             for assoc in cx
@@ -81,7 +82,7 @@ impl<'tcx> LateLintPass<'tcx> for MissingTraitMethods {
                     cx,
                     MISSING_TRAIT_METHODS,
                     cx.tcx.def_span(item.owner_id),
-                    format!("missing trait method provided by default: `{}`", assoc.name),
+                    format!("missing trait method provided by default: `{}`", assoc.name()),
                     |diag| {
                         diag.span_help(cx.tcx.def_span(assoc.def_id), "implement the method");
                     },

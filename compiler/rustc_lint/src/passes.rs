@@ -23,9 +23,10 @@ macro_rules! late_lint_methods {
             fn check_stmt(a: &'tcx rustc_hir::Stmt<'tcx>);
             fn check_arm(a: &'tcx rustc_hir::Arm<'tcx>);
             fn check_pat(a: &'tcx rustc_hir::Pat<'tcx>);
+            fn check_lit(hir_id: rustc_hir::HirId, a: rustc_hir::Lit, negated: bool);
             fn check_expr(a: &'tcx rustc_hir::Expr<'tcx>);
             fn check_expr_post(a: &'tcx rustc_hir::Expr<'tcx>);
-            fn check_ty(a: &'tcx rustc_hir::Ty<'tcx>);
+            fn check_ty(a: &'tcx rustc_hir::Ty<'tcx, rustc_hir::AmbigArg>);
             fn check_generic_param(a: &'tcx rustc_hir::GenericParam<'tcx>);
             fn check_generics(a: &'tcx rustc_hir::Generics<'tcx>);
             fn check_poly_trait_ref(a: &'tcx rustc_hir::PolyTraitRef<'tcx>);
@@ -54,10 +55,10 @@ macro_rules! late_lint_methods {
 /// Each `check` method checks a single syntax node, and should not
 /// invoke methods recursively (unlike `Visitor`). By default they
 /// do nothing.
-//
+///
 // FIXME: eliminate the duplication with `Visitor`. But this also
 // contains a few lint-specific methods with no equivalent in `Visitor`.
-
+//
 macro_rules! declare_late_lint_pass {
     ([], [$($(#[$attr:meta])* fn $name:ident($($param:ident: $arg:ty),*);)*]) => (
         pub trait LateLintPass<'tcx>: LintPass {
@@ -91,7 +92,7 @@ macro_rules! expand_combined_late_lint_pass_methods {
 /// Combines multiple lints passes into a single lint pass, at compile time,
 /// for maximum speed. Each `check_foo` method in `$methods` within this pass
 /// simply calls `check_foo` once per `$pass`. Compare with
-/// `LateLintPassObjects`, which is similar, but combines lint passes at
+/// `RuntimeCombinedLateLintPass`, which is similar, but combines lint passes at
 /// runtime.
 #[macro_export]
 macro_rules! declare_combined_late_lint_pass {
@@ -122,10 +123,10 @@ macro_rules! declare_combined_late_lint_pass {
         #[allow(rustc::lint_pass_impl_without_macro)]
         impl $crate::LintPass for $name {
             fn name(&self) -> &'static str {
-                panic!()
+                stringify!($name)
             }
             fn get_lints(&self) -> LintVec {
-                panic!()
+                $name::get_lints()
             }
         }
     )
@@ -161,7 +162,9 @@ macro_rules! early_lint_methods {
                 c: rustc_span::Span,
                 d_: rustc_ast::NodeId);
             fn check_trait_item(a: &rustc_ast::AssocItem);
+            fn check_trait_item_post(a: &rustc_ast::AssocItem);
             fn check_impl_item(a: &rustc_ast::AssocItem);
+            fn check_impl_item_post(a: &rustc_ast::AssocItem);
             fn check_variant(a: &rustc_ast::Variant);
             fn check_attribute(a: &rustc_ast::Attribute);
             fn check_attributes(a: &[rustc_ast::Attribute]);

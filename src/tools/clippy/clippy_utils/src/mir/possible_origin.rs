@@ -1,14 +1,13 @@
 use super::transitive_relation::TransitiveRelation;
 use crate::ty::is_copy;
 use rustc_data_structures::fx::FxHashMap;
-use rustc_index::bit_set::BitSet;
+use rustc_index::bit_set::DenseBitSet;
 use rustc_lint::LateContext;
 use rustc_middle::mir;
 
 /// Collect possible borrowed for every `&mut` local.
 /// For example, `_1 = &mut _2` generate _1: {_2,...}
 /// Known Problems: not sure all borrowed are tracked
-#[allow(clippy::module_name_repetitions)]
 pub(super) struct PossibleOriginVisitor<'a, 'tcx> {
     possible_origin: TransitiveRelation,
     body: &'a mir::Body<'tcx>,
@@ -22,7 +21,7 @@ impl<'a, 'tcx> PossibleOriginVisitor<'a, 'tcx> {
         }
     }
 
-    pub fn into_map(self, cx: &LateContext<'tcx>) -> FxHashMap<mir::Local, BitSet<mir::Local>> {
+    pub fn into_map(self, cx: &LateContext<'tcx>) -> FxHashMap<mir::Local, DenseBitSet<mir::Local>> {
         let mut map = FxHashMap::default();
         for row in (1..self.body.local_decls.len()).map(mir::Local::from_usize) {
             if is_copy(cx, self.body.local_decls[row].ty) {

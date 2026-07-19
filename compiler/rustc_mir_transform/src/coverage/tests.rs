@@ -68,14 +68,13 @@ impl<'tcx> MockBlocks<'tcx> {
             BytePos(1)
         };
         let next_hi = next_lo + BytePos(1);
-        self.blocks.push(BasicBlockData {
-            statements: vec![],
-            terminator: Some(Terminator {
+        self.blocks.push(BasicBlockData::new(
+            Some(Terminator {
                 source_info: SourceInfo::outermost(Span::with_root_ctxt(next_lo, next_hi)),
                 kind,
             }),
-            is_cleanup: false,
-        })
+            false,
+        ))
     }
 
     fn link(&mut self, from_block: BasicBlock, to_block: BasicBlock) {
@@ -129,15 +128,18 @@ impl<'tcx> MockBlocks<'tcx> {
     }
 
     fn call(&mut self, some_from_block: Option<BasicBlock>) -> BasicBlock {
-        self.add_block_from(some_from_block, TerminatorKind::Call {
-            func: Operand::Copy(self.dummy_place.clone()),
-            args: [].into(),
-            destination: self.dummy_place.clone(),
-            target: Some(TEMP_BLOCK),
-            unwind: UnwindAction::Continue,
-            call_source: CallSource::Misc,
-            fn_span: DUMMY_SP,
-        })
+        self.add_block_from(
+            some_from_block,
+            TerminatorKind::Call {
+                func: Operand::Copy(self.dummy_place.clone()),
+                args: [].into(),
+                destination: self.dummy_place.clone(),
+                target: Some(TEMP_BLOCK),
+                unwind: UnwindAction::Continue,
+                call_source: CallSource::Misc,
+                fn_span: DUMMY_SP,
+            },
+        )
     }
 
     fn goto(&mut self, some_from_block: Option<BasicBlock>) -> BasicBlock {

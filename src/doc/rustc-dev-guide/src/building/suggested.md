@@ -1,9 +1,7 @@
-# Suggested Workflows
+# Suggested workflows
 
 The full bootstrapping process takes quite a while. Here are some suggestions to
 make your life easier.
-
-<!-- toc -->
 
 ## Installing a pre-push hook
 
@@ -20,7 +18,52 @@ your `.git/hooks` folder as `pre-push` (without the `.sh` extension!).
 
 You can also install the hook as a step of running `./x setup`!
 
+## Config extensions
+
+When working on different tasks, you might need to switch between different bootstrap configurations.
+Sometimes you may want to keep an old configuration for future use. But saving raw config values in
+random files and manually copying and pasting them can quickly become messy, especially if you have a
+long history of different configurations.
+
+To simplify managing multiple configurations, you can create config extensions.
+
+For example, you can create a simple config file named `cross.toml`:
+
+```toml
+[build]
+build = "x86_64-unknown-linux-gnu"
+host = ["i686-unknown-linux-gnu"]
+target = ["i686-unknown-linux-gnu"]
+
+
+[llvm]
+download-ci-llvm = false
+
+[target.x86_64-unknown-linux-gnu]
+llvm-config = "/path/to/llvm-19/bin/llvm-config"
+```
+
+Then, include this in your `bootstrap.toml`:
+
+```toml
+include = ["cross.toml"]
+```
+
+You can also include extensions within extensions recursively.
+
+**Note:** In the `include` field, the overriding logic follows a right-to-left order. For example,
+in `include = ["a.toml", "b.toml"]`, extension `b.toml` overrides `a.toml`. Also, parent extensions
+always overrides the inner ones.
+
 ## Configuring `rust-analyzer` for `rustc`
+
+### Checking the "library" tree
+
+Checking the "library" tree requires a stage1 compiler, which can be a heavy process on some computers.
+For this reason, bootstrap has a flag called `--skip-std-check-if-no-download-rustc` that skips checking the
+"library" tree if `rust.download-rustc` isn't available. If you want to avoid putting a heavy load on your computer
+with `rust-analyzer`, you can add the `--skip-std-check-if-no-download-rustc` flag to your `./x check` command in
+the `rust-analyzer` configuration.
 
 ### Project-local rust-analyzer setup
 
@@ -54,7 +97,7 @@ for two reasons:
   additional rebuilds in some cases.
 
 To avoid these problems:
-- Add `--build-dir=build-rust-analyzer` to all of the custom `x` commands in
+- Add `--build-dir=build/rust-analyzer` to all of the custom `x` commands in
   your editor's rust-analyzer configuration.
   (Feel free to choose a different directory name if desired.)
 - Modify the `rust-analyzer.rustfmt.overrideCommand` setting so that it points
@@ -63,10 +106,7 @@ To avoid these problems:
   copy of `rust-analyzer-proc-macro-srv` in that other build directory.
 
 Using separate build directories for command-line builds and rust-analyzer
-requires extra disk space, and also means that running `./x clean` on the
-command-line will not clean out the separate build directory. To clean the
-separate build directory, run `./x clean --build-dir=build-rust-analyzer`
-instead.
+requires extra disk space.
 
 ### Visual Studio Code
 
@@ -100,7 +140,7 @@ Task] instead:
 
 ### Neovim
 
-For Neovim users there are several options for configuring for rustc. The
+For Neovim users, there are a few options. The
 easiest way is by using [neoconf.nvim](https://github.com/folke/neoconf.nvim/),
 which allows for project-local configuration files with the native LSP. The
 steps for how to use it are below. Note that they require rust-analyzer to
@@ -120,10 +160,59 @@ create a `.vim/coc-settings.json`. The settings can be edited with
 [`src/etc/rust_analyzer_settings.json`].
 
 Another way is without a plugin, and creating your own logic in your
-configuration. To do this you must translate the JSON to Lua yourself. The
-translation is 1:1 and fairly straight-forward. It must be put in the
-`["rust-analyzer"]` key of the setup table, which is [shown
-here](https://github.com/neovim/nvim-lspconfig/blob/master/doc/server_configurations.md#rust_analyzer).
+configuration. The following code will work for any checkout of rust-lang/rust (newer than February 2025):
+
+```lua
+local function expand_config_variables(option)
+    local var_placeholders = {
+        ['${workspaceFolder}'] = function(_)
+            return vim.lsp.buf.list_workspace_folders()[1]
+        end,
+    }
+
+    if type(option) == "table" then
+        local mt = getmetatable(option)
+        local result = {}
+        for k, v in pairs(option) do
+            result[expand_config_variables(k)] = expand_config_variables(v)
+        end
+        return setmetatable(result, mt)
+    end
+    if type(option) ~= "string" then
+        return option
+    end
+    local ret = option
+    for key, fn in pairs(var_placeholders) do
+        ret = ret:gsub(key, fn)
+    end
+    return ret
+end
+lspconfig.rust_analyzer.setup {
+    root_dir = function()
+        local default = lspconfig.rust_analyzer.config_def.default_config.root_dir()
+        -- the default root detection uses the cargo workspace root.
+        -- but for rust-lang/rust, the standard library is in its own workspace.
+        -- use the git root instead.
+        local compiler_config = vim.fs.joinpath(default, "../src/bootstrap/defaults/config.compiler.toml")
+        if vim.fs.basename(default) == "library" and vim.uv.fs_stat(compiler_config) then
+            return vim.fs.dirname(default)
+        end
+        return default
+    end,
+    on_init = function(client)
+        local path = client.workspace_folders[1].name
+        local config = vim.fs.joinpath(path, "src/etc/rust_analyzer_zed.json")
+        if vim.uv.fs_stat(config) then
+            -- load rust-lang/rust settings
+            local file = io.open(config)
+            local json = vim.json.decode(file:read("*a"))
+            client.config.settings["rust-analyzer"] = expand_config_variables(json.lsp["rust-analyzer"].initialization_options)
+            client.notify("workspace/didChangeConfiguration", { settings = client.config.settings })
+        end
+        return true
+    end
+}
+```
 
 If you would like to use the build task that is described above, you may either
 make your own command in your config, or you can install a plugin such as
@@ -135,24 +224,34 @@ and follow the same instructions as above.
 ### Emacs
 
 Emacs provides support for rust-analyzer with project-local configuration
-through [Eglot](https://www.gnu.org/software/emacs/manual/html_node/eglot/).  
+through [Eglot](https://www.gnu.org/software/emacs/manual/html_node/eglot/).
 Steps for setting up Eglot with rust-analyzer can be [found
-here](https://rust-analyzer.github.io/manual.html#eglot).  
+here](https://rust-analyzer.github.io/manual.html#eglot).
 Having set up Emacs & Eglot for Rust development in general, you can run
 `./x setup editor` and select `emacs`, which will prompt you to create
 `.dir-locals.el` with the recommended configuration for Eglot.
-The recommended settings live at [`src/etc/rust_analyzer_eglot.el`].  
+The recommended settings live at [`src/etc/rust_analyzer_eglot.el`].
 For more information on project-specific Eglot configuration, consult [the
 manual](https://www.gnu.org/software/emacs/manual/html_node/eglot/Project_002dspecific-configuration.html).
 
 ### Helix
 
-Helix comes with built-in LSP and rust-analyzer support.  
+Helix comes with built-in LSP and rust-analyzer support.
 It can be configured through `languages.toml`, as described
-[here](https://docs.helix-editor.com/languages.html).  
+[here](https://docs.helix-editor.com/languages.html).
 You can run `./x setup editor` and select `helix`, which will prompt you to
 create `languages.toml` with the recommended configuration for Helix. The
-recommended settings live at [`src/etc/rust_analyzer_helix.toml`].  
+recommended settings live at [`src/etc/rust_analyzer_helix.toml`].
+
+### Zed
+
+Zed comes with built-in LSP and rust-analyzer support.
+It can be configured through `.zed/settings.json`, as described
+[here](https://zed.dev/docs/configuring-languages). Selecting `zed`
+in `./x setup editor` will prompt you to create a `.zed/settings.json`
+file which will configure Zed with the recommended configuration. The
+recommended `rust-analyzer` settings live
+at [`src/etc/rust_analyzer_zed.json`].
 
 ## Check, check, and check again
 
@@ -168,23 +267,6 @@ run the tests at some later time. You can then use `git bisect` to track down
 **precisely** which commit caused the problem. A nice side-effect of this style
 is that you are left with a fairly fine-grained set of commits at the end, all
 of which build and pass tests. This often helps reviewing.
-
-## `x suggest`
-
-The `x suggest` subcommand suggests (and runs) a subset of the extensive
-`rust-lang/rust` tests based on files you have changed. This is especially
-useful for new contributors who have not mastered the arcane `x` flags yet and
-more experienced contributors as a shorthand for reducing mental effort. In all
-cases it is useful not to run the full tests (which can take on the order of
-tens of minutes) and just run a subset which are relevant to your changes. For
-example, running `tidy` and `linkchecker` is useful when editing Markdown files,
-whereas UI tests are much less likely to be helpful. While `x suggest` is a
-useful tool, it does not guarantee perfect coverage (just as PR CI isn't a
-substitute for bors). See the [dedicated chapter](../tests/suggest-tests.md) for
-more information and contribution instructions. 
-
-Please note that `x suggest` is in a beta state currently and the tests that it
-will suggest are limited.
 
 ## Configuring `rustup` to use nightly
 
@@ -214,7 +296,17 @@ lets you use `cargo fmt`.
 [the section on vscode]: suggested.md#configuring-rust-analyzer-for-rustc
 [the section on rustup]: how-to-build-and-run.md?highlight=rustup#creating-a-rustup-toolchain
 
-## Faster builds with `--keep-stage`.
+## Faster Builds with CI-rustc
+
+If you are not working on the compiler, you often don't need to build the compiler tree.
+For example, you can skip building the compiler and only build the `library` tree or the
+tools under `src/tools`. To achieve that, you have to enable this by setting the `download-rustc`
+option in your configuration. This tells bootstrap to use the latest nightly compiler for `stage > 0`
+steps, meaning it will have two precompiled compilers: stage0 compiler and `download-rustc` compiler
+for `stage > 0` steps. This way, it will never need to build the in-tree compiler. As a result, your
+build time will be significantly reduced by not building the in-tree compiler.
+
+## Faster rebuilds with `--keep-stage-std`
 
 Sometimes just checking whether the compiler builds is not enough. A common
 example is that you need to add a `debug!` statement to inspect the value of
@@ -227,38 +319,26 @@ that is easily detected and fixed).
 The sequence of commands you want is as follows:
 
 - Initial build: `./x build library`
-  - As [documented previously], this will build a functional stage1 compiler as
-    part of running all stage0 commands (which include building a `std`
-    compatible with the stage1 compiler) as well as the first few steps of the
-    "stage 1 actions" up to "stage1 (sysroot stage1) builds std".
-- Subsequent builds: `./x build library --keep-stage 1`
-  - Note that we added the `--keep-stage 1` flag here
+- Subsequent builds: `./x build library --keep-stage-std=1`
+  - Note that we added the `--keep-stage-std=1` flag here
 
-[documented previously]: ./how-to-build-and-run.md#building-the-compiler
-
-As mentioned, the effect of `--keep-stage 1` is that we just _assume_ that the
+As mentioned, the effect of `--keep-stage-std=1` is that we just _assume_ that the
 old standard library can be re-used. If you are editing the compiler, this is
-almost always true: you haven't changed the standard library, after all. But
+often true: you haven't changed the standard library, after all. But
 sometimes, it's not true: for example, if you are editing the "metadata" part of
 the compiler, which controls how the compiler encodes types and other states
 into the `rlib` files, or if you are editing things that wind up in the metadata
 (such as the definition of the MIR).
 
 **The TL;DR is that you might get weird behavior from a compile when using
-`--keep-stage 1`** -- for example, strange [ICEs](../appendix/glossary.html#ice)
-or other panics. In that case, you should simply remove the `--keep-stage 1`
+`--keep-stage-std=1`** -- for example, strange [ICEs](../appendix/glossary.html#ice)
+or other panics. In that case, you should simply remove the `--keep-stage-std=1`
 from the command and rebuild. That ought to fix the problem.
 
-You can also use `--keep-stage 1` when running tests. Something like this:
+You can also use `--keep-stage-std=1` when running tests. Something like this:
 
 - Initial test run: `./x test tests/ui`
-- Subsequent test run: `./x test tests/ui --keep-stage 1`
-
-### Iterating the standard library with `--keep-stage`
-
-If you are making changes to the standard library, you can use `./x build
---keep-stage 0 library` to iteratively rebuild the standard library without
-rebuilding the compiler.
+- Subsequent test run: `./x test tests/ui --keep-stage-std=1`
 
 ## Using incremental compilation
 
@@ -270,7 +350,7 @@ subsequent rebuilds:
 ```
 
 If you don't want to include the flag with every command, you can enable it in
-the `config.toml`:
+the `bootstrap.toml`:
 
 ```toml
 [rust]
@@ -309,7 +389,7 @@ times, and having to update each clone individually.
 Fortunately, Git has a better solution called [worktrees]. This lets you create
 multiple "working trees", which all share the same Git database. Moreover,
 because all of the worktrees share the same object database, if you update a
-branch (e.g. master) in any of them, you can use the new commits from any of the
+branch (e.g. `main`) in any of them, you can use the new commits from any of the
 worktrees. One caveat, though, is that submodules do not get shared. They will
 still be cloned multiple times.
 
@@ -323,53 +403,46 @@ command:
 git worktree add ../rust2
 ```
 
-Creating a new worktree for a new branch based on `master` looks like:
+Creating a new worktree for a new branch based on `main` looks like:
 
 ```bash
-git worktree add -b my-feature ../rust2 master
+git worktree add -b my-feature ../rust2 main
 ```
 
 You can then use that rust2 folder as a separate workspace for modifying and
 building `rustc`!
 
-## Using nix-shell
+## Working with nix
 
-If you're using nix, you can use the following nix-shell to work on Rust:
+Several nix configurations are defined in `src/tools/nix-dev-shell`.
 
-```nix
-{ pkgs ? import <nixpkgs> {} }:
-pkgs.mkShell {
-  name = "rustc";
-  nativeBuildInputs = with pkgs; [
-    binutils cmake ninja pkg-config python3 git curl cacert patchelf nix
-  ];
-  buildInputs = with pkgs; [
-    openssl glibc.out glibc.static
-  ];
-  # Avoid creating text files for ICEs.
-  RUSTC_ICE = "0";
-  # Provide `libstdc++.so.6` for the self-contained lld.
-  LD_LIBRARY_PATH = "${with pkgs; lib.makeLibraryPath [
-    stdenv.cc.cc.lib
-  ]}";
-}
+If you're using direnv, you can create a symbol link to `src/tools/nix-dev-shell/envrc-flake` or `src/tools/nix-dev-shell/envrc-shell`
+
+```bash
+ln -s ./src/tools/nix-dev-shell/envrc-flake ./.envrc # Use flake
+```
+or
+```bash
+ln -s ./src/tools/nix-dev-shell/envrc-shell ./.envrc # Use nix-shell
 ```
 
+### Note
+
 Note that when using nix on a not-NixOS distribution, it may be necessary to set
-**`patch-binaries-for-nix = true` in `config.toml`**. Bootstrap tries to detect
+**`patch-binaries-for-nix = true` in `bootstrap.toml`**. Bootstrap tries to detect
 whether it's running in nix and enable patching automatically, but this
 detection can have false negatives.
 
-You can also use your nix shell to manage `config.toml`:
+You can also use your nix shell to manage `bootstrap.toml`:
 
 ```nix
 let
   config = pkgs.writeText "rustc-config" ''
-    # Your config.toml content goes here
+    # Your bootstrap.toml content goes here
   ''
 pkgs.mkShell {
   /* ... */
-  # This environment variable tells bootstrap where our config.toml is.
+  # This environment variable tells bootstrap where our bootstrap.toml is.
   RUST_BOOTSTRAP_CONFIG = config;
 }
 ```
@@ -378,14 +451,15 @@ pkgs.mkShell {
 
 If you use Bash, Zsh, Fish or PowerShell, you can find automatically-generated shell
 completion scripts for `x.py` in
-[`src/etc/completions`](https://github.com/rust-lang/rust/tree/master/src/etc/completions).
+[`src/etc/completions`](https://github.com/rust-lang/rust/tree/HEAD/src/etc/completions).
 
 You can use `source ./src/etc/completions/x.py.<extension>` to load completions
 for your shell of choice, or `& .\src\etc\completions\x.py.ps1` for PowerShell.
 Adding this to your shell's startup script (e.g. `.bashrc`) will automatically
 load this completion.
 
-[`src/etc/rust_analyzer_settings.json`]: https://github.com/rust-lang/rust/blob/master/src/etc/rust_analyzer_settings.json
-[`src/etc/rust_analyzer_eglot.el`]: https://github.com/rust-lang/rust/blob/master/src/etc/rust_analyzer_eglot.el
-[`src/etc/rust_analyzer_helix.toml`]: https://github.com/rust-lang/rust/blob/master/src/etc/rust_analyzer_helix.toml
-[`src/etc/pre-push.sh`]: https://github.com/rust-lang/rust/blob/master/src/etc/pre-push.sh
+[`src/etc/rust_analyzer_settings.json`]: https://github.com/rust-lang/rust/blob/HEAD/src/etc/rust_analyzer_settings.json
+[`src/etc/rust_analyzer_eglot.el`]: https://github.com/rust-lang/rust/blob/HEAD/src/etc/rust_analyzer_eglot.el
+[`src/etc/rust_analyzer_helix.toml`]: https://github.com/rust-lang/rust/blob/HEAD/src/etc/rust_analyzer_helix.toml
+[`src/etc/rust_analyzer_zed.json`]: https://github.com/rust-lang/rust/blob/HEAD/src/etc/rust_analyzer_zed.json
+[`src/etc/pre-push.sh`]: https://github.com/rust-lang/rust/blob/HEAD/src/etc/pre-push.sh

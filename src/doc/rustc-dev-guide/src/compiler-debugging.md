@@ -1,7 +1,5 @@
 # Debugging the compiler
 
-<!-- toc -->
-
 This chapter contains a few tips to debug the compiler. These tips aim to be
 useful no matter what you are working on.  Some of the other chapters have
 advice about specific parts of the compiler (e.g. the [Queries Debugging and
@@ -11,13 +9,13 @@ chapter](./backend/debugging.md)).
 ## Configuring the compiler
 
 By default, rustc is built without most debug information. To enable debug info,
-set `debug = true` in your config.toml.
+set `debug = true` in your bootstrap.toml.
 
 Setting `debug = true` turns on many different debug options (e.g., `debug-assertions`,
 `debug-logging`, etc.) which can be individually tweaked if you want to, but many people
 simply set `debug = true`.
 
-If you want to use GDB to debug rustc, please set `config.toml` with options:
+If you want to use GDB to debug rustc, please set `bootstrap.toml` with options:
 
 ```toml
 [rust]
@@ -35,14 +33,14 @@ debuginfo-level = 2
 
 The default configuration will enable `symbol-mangling-version` v0.
 This requires at least GDB v10.2,
-otherwise you need to disable new symbol-mangling-version in `config.toml`.
+otherwise you need to disable new symbol-mangling-version in `bootstrap.toml`.
 
 ```toml
 [rust]
 new-symbol-mangling = false
 ```
 
-> See the comments in `config.example.toml` for more info.
+> See the comments in `bootstrap.example.toml` for more info.
 
 You will need to rebuild the compiler after changing any configuration option.
 
@@ -160,7 +158,7 @@ error: internal compiler error: unexpected panic
 
 note: the compiler unexpectedly panicked. this is a bug.
 
-note: we would appreciate a bug report: https://github.com/rust-lang/rust/blob/master/CONTRIBUTING.md#bug-reports
+note: we would appreciate a bug report: https://github.com/rust-lang/rust/blob/HEAD/CONTRIBUTING.md#bug-reports
 
 note: rustc 1.24.0-dev running on x86_64-unknown-linux-gnu
 
@@ -275,7 +273,7 @@ Here are some notable ones:
 | `rustc_dump_def_parents` | Dumps the chain of `DefId` parents of certain definitions. |
 | `rustc_dump_item_bounds` | Dumps the [`item_bounds`] of an item. |
 | `rustc_dump_predicates` | Dumps the [`predicates_of`] an item. |
-| `rustc_dump_vtable` |  |
+| `rustc_dump_vtable` | Dumps the vtable layout of an impl, or a type alias of a dyn type. |
 | `rustc_hidden_type_of_opaques` | Dumps the [hidden type of each opaque types][opaq] in the crate. |
 | `rustc_layout` | [See this section](#debugging-type-layouts). |
 | `rustc_object_lifetime_default` | Dumps the [object lifetime defaults] of an item. |
@@ -286,7 +284,7 @@ Here are some notable ones:
 
 Right below you can find elaborate explainers on a selected few.
 
-[`builtin_attrs`]: https://github.com/rust-lang/rust/blob/master/compiler/rustc_feature/src/builtin_attrs.rs
+[`builtin_attrs`]: https://github.com/rust-lang/rust/blob/HEAD/compiler/rustc_feature/src/builtin_attrs.rs
 [`def_path_str`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html#method.def_path_str
 [`inferred_outlives_of`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html#method.inferred_outlives_of
 [`item_bounds`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_middle/ty/context/struct.TyCtxt.html#method.item_bounds
@@ -301,7 +299,8 @@ Right below you can find elaborate explainers on a selected few.
 
 Some compiler options for debugging specific features yield graphviz graphs -
 e.g. the `#[rustc_mir(borrowck_graphviz_postflow="suffix.dot")]` attribute
-dumps various borrow-checker dataflow graphs.
+on a function dumps various borrow-checker dataflow graphs in conjunction with
+`-Zdump-mir-dataflow`.
 
 These all produce `.dot` files. To view these files, install graphviz (e.g.
 `apt-get install graphviz`) and then run the following commands:
@@ -368,12 +367,12 @@ error: layout_of(&'a u32) = Layout {
 error: aborting due to previous error
 ```
 
-[`Layout`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_target/abi/struct.Layout.html
+[`Layout`]: https://doc.rust-lang.org/nightly/nightly-rustc/rustc_public/abi/struct.Layout.html
 
 
 ## Configuring CodeLLDB for debugging `rustc`
 
-If you are using VSCode, and have edited your `config.toml` to request debugging
+If you are using VSCode, and have edited your `bootstrap.toml` to request debugging
 level 1 or 2 for the parts of the code you're interested in, then you should be
 able to use the [CodeLLDB] extension in VSCode to debug it.
 

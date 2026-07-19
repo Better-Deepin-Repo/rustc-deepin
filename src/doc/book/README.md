@@ -27,7 +27,7 @@ Building the book requires [mdBook], ideally the same version that
 rust-lang/rust uses in [this file][rust-mdbook]. To get it:
 
 [mdBook]: https://github.com/rust-lang/mdBook
-[rust-mdbook]: https://github.com/rust-lang/rust/blob/master/src/tools/rustbook/Cargo.toml
+[rust-mdbook]: https://github.com/rust-lang/rust/blob/HEAD/src/tools/rustbook/Cargo.toml
 
 ```bash
 $ cargo install mdbook --locked --version <version_num>
@@ -39,7 +39,7 @@ look right, but you _will_ still be able to build the book. To use the plugins,
 you should run:
 
 ```bash
-$ cargo install --locked --path packages/mdbook-trpl
+$ cargo install --locked --path packages/mdbook-trpl --force
 ```
 
 ## Building

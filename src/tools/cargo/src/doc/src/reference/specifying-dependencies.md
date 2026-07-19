@@ -111,6 +111,8 @@ Here are some examples of comparison requirements:
 
 As shown in the examples above, multiple version requirements can be
 separated with a comma, e.g., `>= 1.2, < 1.5`.
+All requirements must be satisfied,
+so non-overlapping requirements like `<1.2, ^1.2.2` result in no matching versions.
 
 ### Pre-releases
 
@@ -163,18 +165,19 @@ is ignored and should not be used in version requirements.
 >
 > Avoid constraining the upper bound of a version to be anything less than the
 > next semver incompatible version
-> (e.g. avoid `">=2.0, <2.4"`) as other packages in the dependency tree may
+> (e.g. avoid `">=2.0, <2.4"`, `"2.0.*"`, or `~2.0`),
+> as other packages in the dependency tree may
 > require a newer version, leading to an unresolvable error (see [#9029]).
 > Consider whether controlling the version in your [`Cargo.lock`] would be more
 > appropriate.
 >
 > In some instances this won't matter or the benefits might outweigh the cost, including:
-> - When no one else depends on your package e.g. it only has a `[[bin]]`
+> - When no one else depends on your package; e.g. it only has a `[[bin]]`
 > - When depending on a pre-release package and wishing to avoid breaking
->   changes then a fully specified `"=1.2.3-alpha.3"` might be warranted (see
+>   changes, then a fully specified `"=1.2.3-alpha.3"` might be warranted (see
 >   [#2222])
 > - When a library re-exports a proc-macro but the proc-macro generates code that
->   calls into the re-exporting library then a fully specified `=1.2.3` might be
+>   calls into the re-exporting library, then a fully specified `=1.2.3` might be
 >   warranted to ensure the proc-macro isn't newer than the re-exporting library
 >   and generating code that uses parts of the API that don't exist within the
 >   current version
@@ -300,6 +303,18 @@ See [Multiple locations](#multiple-locations) section below for detailed explana
 > locations](#multiple-locations) section for a fallback alternative for `git`
 > and `path` dependencies.
 
+### Git submodules
+
+When cloning a `git` dependency,
+Cargo automatically fetches its submodules recursively
+so that all required code is available for the build.
+
+To skip fetching submodules unrelated to the build,
+you can set [`submodule.<name>.update = none`][submodule-update] in the dependency repo's `.gitmodules`.
+This requires write access to the repo and will disable submodule updates more generally.
+
+[submodule-update]: https://git-scm.com/docs/gitmodules#Documentation/gitmodules.txt-submodulenameupdate
+
 ### Accessing private Git repositories
 
 See [Git Authentication](../appendix/git-authentication.md) for help with Git authentication for private repos.
@@ -390,7 +405,7 @@ bitflags = { path = "my-bitflags", version = "1.0" }
 # version 1.0 from crates.io when published.
 smallvec = { git = "https://github.com/servo/rust-smallvec.git", version = "1.0" }
 
-# N.B. that if a version doesn't match, Cargo will fail to compile!
+# Note: if a version doesn't match, Cargo will fail to compile!
 ```
 
 One example where this can be useful is when you have split up a library into
@@ -654,22 +669,3 @@ rand = { workspace = true, optional = true }
 [workspace.dependencies]: workspaces.md#the-dependencies-table
 [optional]: features.md#optional-dependencies
 [features]: features.md
-
-<script>
-(function() {
-    var fragments = {
-        "#overriding-dependencies": "overriding-dependencies.html",
-        "#testing-a-bugfix": "overriding-dependencies.html#testing-a-bugfix",
-        "#working-with-an-unpublished-minor-version": "overriding-dependencies.html#working-with-an-unpublished-minor-version",
-        "#overriding-repository-url": "overriding-dependencies.html#overriding-repository-url",
-        "#prepublishing-a-breaking-change": "overriding-dependencies.html#prepublishing-a-breaking-change",
-        "#overriding-with-local-dependencies": "overriding-dependencies.html#paths-overrides",
-    };
-    var target = fragments[window.location.hash];
-    if (target) {
-        var url = window.location.toString();
-        var base = url.substring(0, url.lastIndexOf('/'));
-        window.location.replace(base + "/" + target);
-    }
-})();
-</script>

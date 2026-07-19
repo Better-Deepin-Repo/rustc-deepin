@@ -1,46 +1,43 @@
-# Macros By Example
-
 r[macro.decl]
+# Macros by example
 
 r[macro.decl.syntax]
-> **<sup>Syntax</sup>**\
-> _MacroRulesDefinition_ :\
-> &nbsp;&nbsp; `macro_rules` `!` [IDENTIFIER] _MacroRulesDef_
->
-> _MacroRulesDef_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `(` _MacroRules_ `)` `;`\
-> &nbsp;&nbsp; | `[` _MacroRules_ `]` `;`\
-> &nbsp;&nbsp; | `{` _MacroRules_ `}`
->
-> _MacroRules_ :\
-> &nbsp;&nbsp; _MacroRule_ ( `;` _MacroRule_ )<sup>\*</sup> `;`<sup>?</sup>
->
-> _MacroRule_ :\
-> &nbsp;&nbsp; _MacroMatcher_ `=>` _MacroTranscriber_
->
-> _MacroMatcher_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `(` _MacroMatch_<sup>\*</sup> `)`\
-> &nbsp;&nbsp; | `[` _MacroMatch_<sup>\*</sup> `]`\
-> &nbsp;&nbsp; | `{` _MacroMatch_<sup>\*</sup> `}`
->
-> _MacroMatch_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; [_Token_]<sub>_except `$` and [delimiters]_</sub>\
-> &nbsp;&nbsp; | _MacroMatcher_\
-> &nbsp;&nbsp; | `$` ( [IDENTIFIER_OR_KEYWORD] <sub>_except `crate`_</sub> | [RAW_IDENTIFIER] | `_` ) `:` _MacroFragSpec_\
-> &nbsp;&nbsp; | `$` `(` _MacroMatch_<sup>+</sup> `)` _MacroRepSep_<sup>?</sup> _MacroRepOp_
->
-> _MacroFragSpec_ :\
-> &nbsp;&nbsp; &nbsp;&nbsp; `block` | `expr` | `expr_2021` | `ident` | `item` | `lifetime` | `literal`\
-> &nbsp;&nbsp; | `meta` | `pat` | `pat_param` | `path` | `stmt` | `tt` | `ty` | `vis`
->
-> _MacroRepSep_ :\
-> &nbsp;&nbsp; [_Token_]<sub>_except [delimiters] and MacroRepOp_</sub>
->
-> _MacroRepOp_ :\
-> &nbsp;&nbsp; `*` | `+` | `?`
->
-> _MacroTranscriber_ :\
-> &nbsp;&nbsp; [_DelimTokenTree_]
+```grammar,macros
+MacroRulesDefinition ->
+    `macro_rules` `!` IDENTIFIER MacroRulesDef
+
+MacroRulesDef ->
+      `(` MacroRules `)` `;`
+    | `[` MacroRules `]` `;`
+    | `{` MacroRules `}`
+
+MacroRules ->
+    MacroRule ( `;` MacroRule )* `;`?
+
+MacroRule ->
+    MacroMatcher `=>` MacroTranscriber
+
+MacroMatcher ->
+      `(` MacroMatch* `)`
+    | `[` MacroMatch* `]`
+    | `{` MacroMatch* `}`
+
+MacroMatch ->
+      Token _except `$` and [delimiters][lex.token.delim]_
+    | MacroMatcher
+    | `$` ( IDENTIFIER_OR_KEYWORD _except `crate`_ | RAW_IDENTIFIER ) `:` MacroFragSpec
+    | `$` `(` MacroMatch+ `)` MacroRepSep? MacroRepOp
+
+MacroFragSpec ->
+      `block` | `expr` | `expr_2021` | `ident` | `item` | `lifetime` | `literal`
+    | `meta` | `pat` | `pat_param` | `path` | `stmt` | `tt` | `ty` | `vis`
+
+MacroRepSep -> Token _except [delimiters][lex.token.delim] and [MacroRepOp]_
+
+MacroRepOp -> `*` | `+` | `?`
+
+MacroTranscriber -> DelimTokenTree
+```
 
 r[macro.decl.intro]
 `macro_rules` allows users to define syntax extension in a declarative way.  We
@@ -53,9 +50,8 @@ the matcher and the transcriber must be surrounded by delimiters. Macros can
 expand to expressions, statements, items (including traits, impls, and foreign
 items), types, or patterns.
 
-## Transcribing
-
 r[macro.decl.transcription]
+## Transcribing
 
 r[macro.decl.transcription.intro]
 When a macro is invoked, the macro expander looks up macro invocations by name,
@@ -86,9 +82,8 @@ delimiters for the matcher will match any pair of delimiters. Thus, for
 instance, the matcher `(())` will match `{()}` but not `{{}}`. The character
 `$` cannot be matched or transcribed literally.
 
-### Forwarding a matched fragment
-
 r[macro.decl.transcription.fragment]
+### Forwarding a matched fragment
 
 When forwarding a matched fragment to another macro-by-example, matchers in
 the second macro will see an opaque AST of the fragment type. The second macro
@@ -126,9 +121,8 @@ macro_rules! bar {
 foo!(3);
 ```
 
-## Metavariables
-
 r[macro.decl.meta]
+## Metavariables
 
 r[macro.decl.meta.intro]
 In the matcher, `$` _name_ `:` _fragment-specifier_ matches a Rust syntax
@@ -137,46 +131,47 @@ fragment of the kind specified and binds it to the metavariable `$`_name_.
 r[macro.decl.meta.specifier]
 Valid fragment specifiers are:
 
-  * `block`: a [_BlockExpression_]
-  * `expr`: an [_Expression_]
-  * `expr_2021`: an [_Expression_] except [_UnderscoreExpression_] and [_ConstBlockExpression_] (see [macro.decl.meta.edition2024])
-  * `ident`: an [IDENTIFIER_OR_KEYWORD] or [RAW_IDENTIFIER]
-  * `item`: an [_Item_]
+  * `block`: a [BlockExpression]
+  * `expr`: an [Expression]
+  * `expr_2021`: an [Expression] except [UnderscoreExpression] and [ConstBlockExpression] (see [macro.decl.meta.edition2024])
+  * `ident`: an [IDENTIFIER_OR_KEYWORD] except `_`, [RAW_IDENTIFIER], or [`$crate`]
+  * `item`: an [Item]
   * `lifetime`: a [LIFETIME_TOKEN]
-  * `literal`: matches `-`<sup>?</sup>[_LiteralExpression_]
-  * `meta`: an [_Attr_], the contents of an attribute
-  * `pat`: a [_Pattern_] (see [macro.decl.meta.edition2021])
-  * `pat_param`: a [_PatternNoTopAlt_]
-  * `path`: a [_TypePath_] style path
-  * `stmt`: a [_Statement_] without the trailing semicolon (except for item statements that require semicolons)
-  * `tt`: a [_TokenTree_]&nbsp;(a single [token] or tokens in matching delimiters `()`, `[]`, or `{}`)
-  * `ty`: a [_Type_]
-  * `vis`: a possibly empty [_Visibility_] qualifier
+  * `literal`: matches `-`<sup>?</sup>[LiteralExpression]
+  * `meta`: an [Attr], the contents of an attribute
+  * `pat`: a [Pattern] (see [macro.decl.meta.edition2021])
+  * `pat_param`: a [PatternNoTopAlt]
+  * `path`: a [TypePath] style path
+  * `stmt`: a [Statement][grammar-Statement] without the trailing semicolon (except for item statements that require semicolons)
+  * `tt`: a [TokenTree]&nbsp;(a single [token] or tokens in matching delimiters `()`, `[]`, or `{}`)
+  * `ty`: a [Type][grammar-Type]
+  * `vis`: a possibly empty [Visibility] qualifier
 
 r[macro.decl.meta.transcription]
 In the transcriber, metavariables are referred to simply by `$`_name_, since
 the fragment kind is specified in the matcher. Metavariables are replaced with
 the syntax element that matched them.
+Metavariables can be transcribed more than once or not at all.
 
 r[macro.decl.meta.dollar-crate]
-The keyword metavariable `$crate` can be used to refer to the current crate; see [Hygiene] below. Metavariables can be
-transcribed more than once or not at all.
+The keyword metavariable [`$crate`] can be used to refer to the current crate.
 
 r[macro.decl.meta.edition2021]
-> **Edition differences**: Starting with the 2021 edition, `pat` fragment-specifiers match top-level or-patterns (that is, they accept [_Pattern_]).
+> [!EDITION-2021]
+> Starting with the 2021 edition, `pat` fragment-specifiers match top-level or-patterns (that is, they accept [Pattern]).
 >
-> Before the 2021 edition, they match exactly the same fragments as `pat_param` (that is, they accept [_PatternNoTopAlt_]).
+> Before the 2021 edition, they match exactly the same fragments as `pat_param` (that is, they accept [PatternNoTopAlt]).
 >
 > The relevant edition is the one in effect for the `macro_rules!` definition.
 
 r[macro.decl.meta.edition2024]
-> **Edition differences**: Before the 2024 edition, `expr` fragment specifiers do not match [_UnderscoreExpression_] or [_ConstBlockExpression_] at the top level. They are allowed within subexpressions.
+> [!EDITION-2024]
+> Before the 2024 edition, `expr` fragment specifiers do not match [UnderscoreExpression] or [ConstBlockExpression] at the top level. They are allowed within subexpressions.
 >
 > The `expr_2021` fragment specifier exists to maintain backwards compatibility with editions before 2024.
 
-## Repetitions
-
 r[macro.decl.repetition]
+## Repetitions
 
 r[macro.decl.repetition.intro]
 In both the matcher and transcriber, repetitions are indicated by placing the
@@ -225,9 +220,8 @@ compiler knows how to expand them properly:
     not have the same number. This requirement applies to every layer of nested
     repetitions.
 
-## Scoping, Exporting, and Importing
-
 r[macro.decl.scope]
+## Scoping, exporting, and importing
 
 r[macro.decl.scope.intro]
 For historical reasons, the scoping of macros by example does not work entirely
@@ -255,9 +249,8 @@ lazy_static!{lazy} // Textual lookup finds our macro first.
 self::lazy_static!{} // Path-based lookup ignores our macro, finds imported one.
 ```
 
-### Textual Scope
-
 r[macro.decl.scope.textual]
+### Textual scope
 
 r[macro.decl.scope.textual.intro]
 Textual scope is based largely on the order that things appear in source files,
@@ -333,82 +326,231 @@ fn foo() {
 // m!(); // Error: m is not in scope.
 ```
 
+<!-- template:attributes -->
+r[macro.decl.scope.macro_use]
 ### The `macro_use` attribute
 
-r[macro.decl.scope.macro_use]
+r[macro.decl.scope.macro_use.intro]
+The *`macro_use` [attribute][attributes]* has two purposes: it may be used on modules to extend the scope of macros defined within them, and it may be used on [`extern crate`][items.extern-crate] to import macros from another crate into the [`macro_use` prelude].
+
+> [!EXAMPLE]
+> ```rust
+> #[macro_use]
+> mod inner {
+>     macro_rules! m {
+>         () => {};
+>     }
+> }
+> m!();
+> ```
+>
+> ```rust,ignore
+> #[macro_use]
+> extern crate log;
+> ```
+
+r[macro.decl.scope.macro_use.syntax]
+When used on modules, the `macro_use` attribute uses the [MetaWord] syntax.
+
+When used on `extern crate`, it uses the [MetaWord] and [MetaListIdents] syntaxes. For more on how these syntaxes may be used, see [macro.decl.scope.macro_use.prelude].
+
+r[macro.decl.scope.macro_use.allowed-positions]
+The `macro_use` attribute may be applied to modules or `extern crate`.
+
+> [!NOTE]
+> `rustc` ignores use in other positions but lints against it. This may become an error in the future.
+
+r[macro.decl.scope.macro_use.extern-crate-self]
+The `macro_use` attribute may not be used on [`extern crate self`].
+
+r[macro.decl.scope.macro_use.duplicates]
+The `macro_use` attribute may be used any number of times on a form.
+
+Multiple instances of `macro_use` in the [MetaListIdents] syntax may be specified. The union of all specified macros will be imported.
+
+> [!NOTE]
+> On modules, `rustc` lints against any [MetaWord] `macro_use` attributes following the first.
+>
+> On `extern crate`, `rustc` lints against any `macro_use` attributes that have no effect due to not importing any macros not already imported by another `macro_use` attribute. If two or more [MetaListIdents] `macro_use` attributes import the same macro, the first is linted against. If any [MetaWord] `macro_use` attributes are present, all [MetaListIdents] `macro_use` attributes are linted against. If two or more [MetaWord] `macro_use` attributes are present, the ones following the first are linted against.
 
 r[macro.decl.scope.macro_use.mod-decl]
-The *`macro_use` attribute* has two purposes. First, it can be used to make a
-module's macro scope not end when the module is closed, by applying it to a
-module:
+When `macro_use` is used on a module, the module's macro scope extends beyond the module's lexical scope.
 
-```rust
-#[macro_use]
-mod inner {
-    macro_rules! m {
-        () => {};
-    }
-}
-
-m!();
-```
+> [!EXAMPLE]
+> ```rust
+> #[macro_use]
+> mod inner {
+>     macro_rules! m {
+>         () => {};
+>     }
+> }
+> m!(); // OK
+> ```
 
 r[macro.decl.scope.macro_use.prelude]
-Second, it can be used to import macros from another crate, by attaching it to
-an `extern crate` declaration appearing in the crate's root module. Macros
-imported this way are imported into the [`macro_use` prelude], not textually,
-which means that they can be shadowed by any other name. While macros imported
-by `#[macro_use]` can be used before the import statement, in case of a
-conflict, the last macro imported wins. Optionally, a list of macros to import
-can be specified using the [_MetaListIdents_] syntax; this is not supported
-when `#[macro_use]` is applied to a module.
+Specifying `macro_use` on an `extern crate` declaration in the crate root imports exported macros from that crate.
 
-<!-- ignore: requires external crates -->
-```rust,ignore
-#[macro_use(lazy_static)] // Or #[macro_use] to import all macros.
-extern crate lazy_static;
+Macros imported this way are imported into the [`macro_use` prelude], not textually, which means that they can be shadowed by any other name. Macros imported by `macro_use` can be used before the import statement.
 
-lazy_static!{}
-// self::lazy_static!{} // Error: lazy_static is not defined in `self`
-```
+> [!NOTE]
+> `rustc` currently prefers the last macro imported in case of conflict. Don't rely on this. This behavior is unusual, as imports in Rust are generally order-independent. This behavior of `macro_use` may change in the future.
+>
+> For details, see [Rust issue #148025](https://github.com/rust-lang/rust/issues/148025).
+
+When using the [MetaWord] syntax, all exported macros are imported. When using the [MetaListIdents] syntax, only the specified macros are imported.
+
+> [!EXAMPLE]
+> <!-- ignore: requires external crates -->
+> ```rust,ignore
+> #[macro_use(lazy_static)] // Or `#[macro_use]` to import all macros.
+> extern crate lazy_static;
+>
+> lazy_static!{}
+> // self::lazy_static!{} // ERROR: lazy_static is not defined in `self`.
+> ```
 
 r[macro.decl.scope.macro_use.export]
-Macros to be imported with `#[macro_use]` must be exported with
-`#[macro_export]`, which is described below.
+Macros to be imported with `macro_use` must be exported with [`macro_export`][macro.decl.scope.macro_export].
 
-### Path-Based Scope
+<!-- template:attributes -->
+r[macro.decl.scope.macro_export]
+### The `macro_export` attribute
 
-r[macro.decl.scope.path]
+r[macro.decl.scope.macro_export.intro]
+The *`macro_export` [attribute][attributes]* exports the macro from the crate and makes it available in the root of the crate for path-based resolution.
 
-r[macro.decl.scope.path.intro]
-By default, a macro has no path-based scope. However, if it has the
-`#[macro_export]` attribute, then it is declared in the crate root scope and can
-be referred to normally as such:
+> [!EXAMPLE]
+> ```rust
+> self::m!();
+> //  ^^^^ OK: Path-based lookup finds `m` in the current module.
+> m!(); // As above.
+>
+> mod inner {
+>     super::m!();
+>     crate::m!();
+> }
+>
+> mod mac {
+>     #[macro_export]
+>     macro_rules! m {
+>         () => {};
+>     }
+> }
+> ```
 
-```rust
-self::m!();
-m!(); // OK: Path-based lookup finds m in the current module.
+r[macro.decl.scope.macro_export.syntax]
+The `macro_export` attribute uses the [MetaWord] and [MetaListIdents] syntaxes. With the [MetaListIdents] syntax, it accepts a single [`local_inner_macros`][macro.decl.scope.macro_export.local_inner_macros] value.
 
-mod inner {
-    super::m!();
-    crate::m!();
-}
+r[macro.decl.scope.macro_export.allowed-positions]
+The `macro_export` attribute may be applied to `macro_rules` definitions.
 
-mod mac {
-    #[macro_export]
-    macro_rules! m {
-        () => {};
-    }
-}
-```
+> [!NOTE]
+> `rustc` ignores use in other positions but lints against it. This may become an error in the future.
 
-r[macro.decl.scope.path.export]
-Macros labeled with `#[macro_export]` are always `pub` and can be referred to
-by other crates, either by path or by `#[macro_use]` as described above.
+r[macro.decl.scope.macro_export.duplicates]
+Only the first use of `macro_export` on a macro has effect.
 
-## Hygiene
+> [!NOTE]
+> `rustc` lints against any use following the first.
+
+r[macro.decl.scope.macro_export.path-based]
+By default, macros only have [textual scope][macro.decl.scope.textual] and cannot be resolved by path. When the `macro_export` attribute is used, the macro is made available in the crate root and can be referred to by its path.
+
+> [!EXAMPLE]
+> Without `macro_export`, macros only have textual scope, so path-based resolution of the macro fails.
+>
+> ```rust,compile_fail,E0433
+> macro_rules! m {
+>     () => {};
+> }
+> self::m!(); // ERROR
+> crate::m!(); // ERROR
+> # fn main() {}
+> ```
+>
+> With `macro_export`, path-based resolution works.
+>
+> ```rust
+> #[macro_export]
+> macro_rules! m {
+>     () => {};
+> }
+> self::m!(); // OK
+> crate::m!(); // OK
+> # fn main() {}
+> ```
+
+r[macro.decl.scope.macro_export.export]
+The `macro_export` attribute causes a macro to be exported from the crate root so that it can be referred to in other crates by path.
+
+> [!EXAMPLE]
+> Given the following in a `log` crate:
+>
+> ```rust
+> #[macro_export]
+> macro_rules! warn {
+>     ($message:expr) => { eprintln!("WARN: {}", $message) };
+> }
+> ```
+>
+> From another crate, you can refer to the macro by path:
+>
+> <!-- ignore: requires external crates -->
+> ```rust,ignore
+> fn main() {
+>     log::warn!("example warning");
+> }
+> ```
+
+r[macro.decl.scope.macro_export.macro_use]
+`macro_export` allows the use of [`macro_use`][macro.decl.scope.macro_use] on an `extern crate` to import the macro into the [`macro_use` prelude].
+
+> [!EXAMPLE]
+> Given the following in a `log` crate:
+>
+> ```rust
+> #[macro_export]
+> macro_rules! warn {
+>     ($message:expr) => { eprintln!("WARN: {}", $message) };
+> }
+> ```
+>
+> Using `macro_use` in a dependent crate allows you to use the macro from the prelude:
+>
+> <!-- ignore: requires external crates -->
+> ```rust,ignore
+> #[macro_use]
+> extern crate log;
+>
+> pub mod util {
+>     pub fn do_thing() {
+>         // Resolved via macro prelude.
+>         warn!("example warning");
+>     }
+> }
+> ```
+
+r[macro.decl.scope.macro_export.local_inner_macros]
+Adding `local_inner_macros` to the `macro_export` attribute causes all single-segment macro invocations in the macro definition to have an implicit `$crate::` prefix.
+
+> [!NOTE]
+> This is intended primarily as a tool to migrate code written before [`$crate`] was added to the language to work with Rust 2018's path-based imports of macros. Its use is discouraged in new code.
+
+> [!EXAMPLE]
+> ```rust
+> #[macro_export(local_inner_macros)]
+> macro_rules! helped {
+>     () => { helper!() } // Automatically converted to $crate::helper!().
+> }
+>
+> #[macro_export]
+> macro_rules! helper {
+>     () => { () }
+> }
+> ```
 
 r[macro.decl.hygiene]
+## Hygiene
 
 r[macro.decl.hygiene.intro]
 Macros by example have _mixed-site hygiene_. This means that [loop labels], [block labels], and local variables are looked up at the macro definition site while other symbols are looked up at the macro invocation site. For example:
@@ -505,36 +647,11 @@ macro_rules! call_foo {
 fn foo() {}
 ```
 
-> **Version & Edition differences**: Prior to Rust 1.30, `$crate` and
-> `local_inner_macros` (below) were unsupported. They were added alongside
-> path-based imports of macros (described above), to ensure that helper macros
-> did not need to be manually imported by users of a macro-exporting crate.
-> Crates written for earlier versions of Rust that use helper macros need to be
-> modified to use `$crate` or `local_inner_macros` to work well with path-based
-> imports.
-
-r[macro.decl.hygiene.local_inner_macros]
-When a macro is exported, the `#[macro_export]` attribute can have the
-`local_inner_macros` keyword added to automatically prefix all contained macro
-invocations with `$crate::`. This is intended primarily as a tool to migrate
-code written before `$crate` was added to the language to work with Rust 2018's
-path-based imports of macros. Its use is discouraged in new code.
-
-```rust
-#[macro_export(local_inner_macros)]
-macro_rules! helped {
-    () => { helper!() } // Automatically converted to $crate::helper!().
-}
-
-#[macro_export]
-macro_rules! helper {
-    () => { () }
-}
-```
-
-## Follow-set Ambiguity Restrictions
+> [!NOTE]
+> Prior to Rust 1.30, `$crate` and [`local_inner_macros`][macro.decl.scope.macro_export.local_inner_macros] were unsupported. They were added alongside [path-based imports of macros][macro.decl.scope.macro_export], to ensure that helper macros did not need to be manually imported by users of a macro-exporting crate. Crates written for earlier versions of Rust that use helper macros need to be modified to use `$crate` or `local_inner_macros` to work well with path-based imports.
 
 r[macro.decl.follow-set]
+## Follow-set ambiguity restrictions
 
 r[macro.decl.follow-set.intro]
 The parser used by the macro system is reasonably powerful, but it is limited in
@@ -577,7 +694,8 @@ r[macro.decl.follow-set.token-other]
   * All other fragment specifiers have no restrictions.
 
 r[macro.decl.follow-set.edition2021]
-> **Edition differences**: Before the 2021 edition, `pat` may also be followed by `|`.
+> [!EDITION-2021]
+> Before the 2021 edition, `pat` may also be followed by `|`.
 
 r[macro.decl.follow-set.repetition]
 When repetitions are involved, then the rules apply to every possible number of
@@ -595,33 +713,14 @@ expansions, taking separators into account. This means:
 
 For more detail, see the [formal specification].
 
-[block labels]: expressions/loop-expr.md#labelled-block-expressions
+[`extern crate self`]: items.extern-crate.self
+[`macro_use` prelude]: names/preludes.md#macro_use-prelude
+[block labels]: expr.loop.block-labels
+[delimiters]: tokens.md#delimiters
+[formal specification]: macro-ambiguity.md
 [Hygiene]: #hygiene
-[IDENTIFIER]: identifiers.md
-[IDENTIFIER_OR_KEYWORD]: identifiers.md
-[RAW_IDENTIFIER]: identifiers.md
-[LIFETIME_TOKEN]: tokens.md#lifetimes-and-loop-labels
+[loop labels]: expressions/loop-expr.md#loop-labels
 [Metavariables]: #metavariables
 [Repetitions]: #repetitions
-[_Attr_]: attributes.md
-[_BlockExpression_]: expressions/block-expr.md
-[_ConstBlockExpression_]: expressions/block-expr.md#const-blocks
-[_DelimTokenTree_]: macros.md
-[_Expression_]: expressions.md
-[_Item_]: items.md
-[_LiteralExpression_]: expressions/literal-expr.md
-[loop labels]: expressions/loop-expr.md#loop-labels
-[_MetaListIdents_]: attributes.md#meta-item-attribute-syntax
-[_Pattern_]: patterns.md
-[_PatternNoTopAlt_]: patterns.md
-[_Statement_]: statements.md
-[_TokenTree_]: macros.md#macro-invocation
-[_Token_]: tokens.md
-[delimiters]: tokens.md#delimiters
-[_TypePath_]: paths.md#paths-in-types
-[_Type_]: types.md#type-expressions
-[_UnderscoreExpression_]: expressions/underscore-expr.md
-[_Visibility_]: visibility-and-privacy.md
-[formal specification]: macro-ambiguity.md
 [token]: tokens.md
-[`macro_use` prelude]: names/preludes.md#macro_use-prelude
+[`$crate`]: macro.decl.hygiene.crate

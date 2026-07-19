@@ -2,36 +2,39 @@
 //! metadata` or `rust-project.json`) into representation stored in the salsa
 //! database -- `CrateGraph`.
 
-use std::{collections::VecDeque, fmt, fs, iter, sync};
+use std::thread::Builder;
+use std::{collections::VecDeque, fmt, fs, iter, ops::Deref, sync, thread};
 
 use anyhow::Context;
 use base_db::{
-    CrateDisplayName, CrateGraph, CrateId, CrateName, CrateOrigin, Dependency, Env,
-    LangCrateOrigin, ProcMacroPaths, TargetLayoutLoadResult,
+    CrateBuilderId, CrateDisplayName, CrateGraphBuilder, CrateName, CrateOrigin,
+    CrateWorkspaceData, DependencyBuilder, Env, LangCrateOrigin, ProcMacroLoadingError,
+    ProcMacroPaths, target::TargetLoadResult,
 };
 use cfg::{CfgAtom, CfgDiff, CfgOptions};
-use intern::{sym, Symbol};
-use itertools::Itertools;
-use paths::{AbsPath, AbsPathBuf};
-use rustc_hash::FxHashMap;
+use intern::{Symbol, sym};
+use paths::{AbsPath, AbsPathBuf, Utf8Path, Utf8PathBuf};
+use rustc_hash::{FxHashMap, FxHashSet};
 use semver::Version;
 use span::{Edition, FileId};
 use toolchain::Tool;
 use tracing::instrument;
+use tracing::{debug, error, info};
 use triomphe::Arc;
 
 use crate::{
-    build_dependencies::BuildScriptOutput,
-    cargo_workspace::{DepKind, PackageData, RustLibSource},
+    CargoConfig, CargoWorkspace, CfgOverrides, InvocationStrategy, ManifestPath, Package,
+    ProjectJson, ProjectManifest, RustSourceWorkspaceConfig, Sysroot, TargetData, TargetKind,
+    WorkspaceBuildScripts,
+    build_dependencies::{BuildScriptOutput, ProcMacroDylibPath},
+    cargo_config_file::CargoConfigFile,
+    cargo_workspace::{CargoMetadataConfig, DepKind, FetchMetadata, PackageData, RustLibSource},
     env::{cargo_config_env, inject_cargo_env, inject_cargo_package_env, inject_rustc_tool_env},
     project_json::{Crate, CrateArrayIdx},
-    rustc_cfg::{self, RustcCfgConfig},
-    sysroot::{SysrootCrate, SysrootMode},
-    target_data_layout::{self, RustcDataLayoutConfig},
-    utf8_stdout, CargoConfig, CargoWorkspace, CfgOverrides, InvocationStrategy, ManifestPath,
-    Package, ProjectJson, ProjectManifest, Sysroot, TargetData, TargetKind, WorkspaceBuildScripts,
+    sysroot::RustLibSrcWorkspace,
+    toolchain_info::{QueryConfig, rustc_cfg, target_data, target_tuple, version},
+    utf8_stdout,
 };
-use tracing::{debug, error, info};
 
 pub type FileLoader<'a> = &'a mut dyn for<'b> FnMut(&'b AbsPath) -> Option<FileId>;
 
@@ -61,12 +64,17 @@ pub struct ProjectWorkspace {
     /// The toolchain version used by this workspace.
     pub toolchain: Option<Version>,
     /// The target data layout queried for workspace.
-    pub target_layout: TargetLayoutLoadResult,
+    pub target: TargetLoadResult,
     /// A set of cfg overrides for this workspace.
     pub cfg_overrides: CfgOverrides,
+    /// Additional includes to add for the VFS.
+    pub extra_includes: Vec<AbsPathBuf>,
+    /// Set `cfg(test)` for local crates
+    pub set_test: bool,
 }
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum ProjectWorkspaceKind {
     /// Project workspace was discovered by running `cargo metadata` and `rustc --print sysroot`.
     Cargo {
@@ -79,9 +87,6 @@ pub enum ProjectWorkspaceKind {
         /// The rustc workspace loaded for this workspace. An `Err(None)` means loading has been
         /// disabled or was otherwise not requested.
         rustc: Result<Box<(CargoWorkspace, WorkspaceBuildScripts)>, Option<String>>,
-        /// Environment variables set in the `.cargo/config` file.
-        cargo_config_extra_env: FxHashMap<String, String>,
-        set_test: bool,
     },
     /// Project workspace was specified using a `rust-project.json` file.
     Json(ProjectJson),
@@ -100,25 +105,24 @@ pub enum ProjectWorkspaceKind {
         file: ManifestPath,
         /// Is this file a cargo script file?
         cargo: Option<(CargoWorkspace, WorkspaceBuildScripts, Option<Arc<anyhow::Error>>)>,
-        /// Environment variables set in the `.cargo/config` file.
-        cargo_config_extra_env: FxHashMap<String, String>,
-        set_test: bool,
     },
 }
 
 impl fmt::Debug for ProjectWorkspace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Make sure this isn't too verbose.
-        let Self { kind, sysroot, rustc_cfg, toolchain, target_layout, cfg_overrides } = self;
+        let Self {
+            kind,
+            sysroot,
+            rustc_cfg,
+            toolchain,
+            target: target_layout,
+            cfg_overrides,
+            extra_includes,
+            set_test,
+        } = self;
         match kind {
-            ProjectWorkspaceKind::Cargo {
-                cargo,
-                error: _,
-                build_scripts,
-                rustc,
-                cargo_config_extra_env,
-                set_test,
-            } => f
+            ProjectWorkspaceKind::Cargo { cargo, error: _, build_scripts, rustc } => f
                 .debug_struct("Cargo")
                 .field("root", &cargo.workspace_root().file_name())
                 .field("n_packages", &cargo.packages().len())
@@ -129,9 +133,9 @@ impl fmt::Debug for ProjectWorkspace {
                 )
                 .field("n_rustc_cfg", &rustc_cfg.len())
                 .field("n_cfg_overrides", &cfg_overrides.len())
+                .field("n_extra_includes", &extra_includes.len())
                 .field("toolchain", &toolchain)
                 .field("data_layout", &target_layout)
-                .field("cargo_config_extra_env", &cargo_config_extra_env)
                 .field("set_test", set_test)
                 .field("build_scripts", &build_scripts.error().unwrap_or("ok"))
                 .finish(),
@@ -143,58 +147,33 @@ impl fmt::Debug for ProjectWorkspace {
                     .field("n_rustc_cfg", &rustc_cfg.len())
                     .field("toolchain", &toolchain)
                     .field("data_layout", &target_layout)
-                    .field("n_cfg_overrides", &cfg_overrides.len());
+                    .field("n_cfg_overrides", &cfg_overrides.len())
+                    .field("n_extra_includes", &extra_includes.len())
+                    .field("set_test", set_test);
 
                 debug_struct.finish()
             }
-            ProjectWorkspaceKind::DetachedFile {
-                file,
-                cargo: cargo_script,
-                cargo_config_extra_env,
-                set_test,
-            } => f
+            ProjectWorkspaceKind::DetachedFile { file, cargo: cargo_script } => f
                 .debug_struct("DetachedFiles")
                 .field("file", &file)
                 .field("cargo_script", &cargo_script.is_some())
                 .field("n_sysroot_crates", &sysroot.num_packages())
-                .field("cargo_script", &cargo_script.is_some())
                 .field("n_rustc_cfg", &rustc_cfg.len())
                 .field("toolchain", &toolchain)
                 .field("data_layout", &target_layout)
                 .field("n_cfg_overrides", &cfg_overrides.len())
-                .field("cargo_config_extra_env", &cargo_config_extra_env)
+                .field("n_extra_includes", &extra_includes.len())
                 .field("set_test", set_test)
                 .finish(),
         }
     }
 }
 
-fn get_toolchain_version(
-    current_dir: &AbsPath,
-    sysroot: &Sysroot,
-    tool: Tool,
-    extra_env: &FxHashMap<String, String>,
-    prefix: &str,
-) -> Result<Option<Version>, anyhow::Error> {
-    let cargo_version = utf8_stdout({
-        let mut cmd = Sysroot::tool(sysroot, tool);
-        cmd.envs(extra_env);
-        cmd.arg("--version").current_dir(current_dir);
-        cmd
-    })
-    .with_context(|| format!("Failed to query rust toolchain version at {current_dir}, is your toolchain setup correctly?"))?;
-    anyhow::Ok(
-        cargo_version
-            .get(prefix.len()..)
-            .and_then(|it| Version::parse(it.split_whitespace().next()?).ok()),
-    )
-}
-
 impl ProjectWorkspace {
     pub fn load(
         manifest: ProjectManifest,
         config: &CargoConfig,
-        progress: &dyn Fn(String),
+        progress: &(dyn Fn(String) + Sync),
     ) -> anyhow::Result<ProjectWorkspace> {
         ProjectWorkspace::load_inner(&manifest, config, progress)
             .with_context(|| format!("Failed to load the project at {manifest}"))
@@ -203,7 +182,7 @@ impl ProjectWorkspace {
     fn load_inner(
         manifest: &ProjectManifest,
         config: &CargoConfig,
-        progress: &dyn Fn(String),
+        progress: &(dyn Fn(String) + Sync),
     ) -> anyhow::Result<ProjectWorkspace> {
         let res = match manifest {
             ProjectManifest::ProjectJson(project_json) => {
@@ -214,180 +193,343 @@ impl ProjectWorkspace {
                 let project_location = project_json.parent().to_path_buf();
                 let project_json: ProjectJson =
                     ProjectJson::new(Some(project_json.clone()), &project_location, data);
-                ProjectWorkspace::load_inline(project_json, config)
+                ProjectWorkspace::load_inline(project_json, config, progress)
             }
             ProjectManifest::CargoScript(rust_file) => {
                 ProjectWorkspace::load_detached_file(rust_file, config)?
             }
             ProjectManifest::CargoToml(cargo_toml) => {
-                let sysroot = match (&config.sysroot, &config.sysroot_src) {
-                    (Some(RustLibSource::Discover), None) => Sysroot::discover(
-                        cargo_toml.parent(),
-                        &config.extra_env,
-                        config.sysroot_query_metadata,
-                    ),
-                    (Some(RustLibSource::Discover), Some(sysroot_src)) => {
-                        Sysroot::discover_with_src_override(
-                            cargo_toml.parent(),
-                            &config.extra_env,
-                            sysroot_src.clone(),
-                            config.sysroot_query_metadata,
-                        )
-                    }
-                    (Some(RustLibSource::Path(path)), None) => Sysroot::discover_sysroot_src_dir(
-                        path.clone(),
-                        config.sysroot_query_metadata,
-                    ),
-                    (Some(RustLibSource::Path(sysroot)), Some(sysroot_src)) => Sysroot::load(
-                        Some(sysroot.clone()),
-                        Some(sysroot_src.clone()),
-                        config.sysroot_query_metadata,
-                    ),
-                    (None, _) => Sysroot::empty(),
-                };
-                tracing::info!(workspace = %cargo_toml, src_root = ?sysroot.src_root(), root = ?sysroot.root(), "Using sysroot");
-
-                let rustc_dir = match &config.rustc_source {
-                    Some(RustLibSource::Path(path)) => ManifestPath::try_from(path.clone())
-                        .map_err(|p| Some(format!("rustc source path is not absolute: {p}"))),
-                    Some(RustLibSource::Discover) => {
-                        sysroot.discover_rustc_src().ok_or_else(|| {
-                            Some("Failed to discover rustc source for sysroot.".to_owned())
-                        })
-                    }
-                    None => Err(None),
-                };
-
-                let rustc =  rustc_dir.and_then(|rustc_dir| {
-                    info!(workspace = %cargo_toml, rustc_dir = %rustc_dir, "Using rustc source");
-                    match CargoWorkspace::fetch_metadata(
-                        &rustc_dir,
-                        cargo_toml.parent(),
-                        &CargoConfig {
-                            features: crate::CargoFeatures::default(),
-                            ..config.clone()
-                        },
-                        &sysroot,
-                        false,
-                        progress,
-                    ) {
-                        Ok((meta, _error)) => {
-                            let workspace = CargoWorkspace::new(meta, cargo_toml.clone());
-                            let buildscripts = WorkspaceBuildScripts::rustc_crates(
-                                &workspace,
-                                cargo_toml.parent(),
-                                &config.extra_env,
-                                &sysroot
-                            );
-                            Ok(Box::new((workspace, buildscripts)))
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                %e,
-                                "Failed to read Cargo metadata from rustc source at {rustc_dir}",
-                            );
-                            Err(Some(format!(
-                                "Failed to read Cargo metadata from rustc source at {rustc_dir}: {e}"
-                            )))
-                        }
-                    }
-                });
-
-                let toolchain = get_toolchain_version(
-                    cargo_toml.parent(),
-                    &sysroot,
-                    Tool::Cargo,
-                    &config.extra_env,
-                    "cargo ",
-                )?;
-                let rustc_cfg = rustc_cfg::get(
-                    config.target.as_deref(),
-                    &config.extra_env,
-                    RustcCfgConfig::Cargo(&sysroot, cargo_toml),
-                );
-
-                let cfg_overrides = config.cfg_overrides.clone();
-                let data_layout = target_data_layout::get(
-                    RustcDataLayoutConfig::Cargo(&sysroot, cargo_toml),
-                    config.target.as_deref(),
-                    &config.extra_env,
-                );
-                if let Err(e) = &data_layout {
-                    tracing::error!(%e, "failed fetching data layout for {cargo_toml:?} workspace");
-                }
-
-                let (meta, error) = CargoWorkspace::fetch_metadata(
-                    cargo_toml,
-                    cargo_toml.parent(),
-                    config,
-                    &sysroot,
-                        false,
-                        progress,
-                )
-                .with_context(|| {
-                    format!(
-                        "Failed to read Cargo metadata from Cargo.toml file {cargo_toml}, {toolchain:?}",
-                    )
-                })?;
-                let cargo = CargoWorkspace::new(meta, cargo_toml.clone());
-
-                let cargo_config_extra_env =
-                    cargo_config_env(cargo_toml, &config.extra_env, &sysroot);
-                ProjectWorkspace {
-                    kind: ProjectWorkspaceKind::Cargo {
-                        cargo,
-                        build_scripts: WorkspaceBuildScripts::default(),
-                        rustc,
-                        cargo_config_extra_env,
-                        error: error.map(Arc::new),
-                        set_test: config.set_test,
-                    },
-                    sysroot,
-                    rustc_cfg,
-                    cfg_overrides,
-                    toolchain,
-                    target_layout: data_layout
-                        .map(Arc::from)
-                        .map_err(|it| Arc::from(it.to_string())),
-                }
+                ProjectWorkspace::load_cargo(cargo_toml, config, progress)?
             }
         };
 
         Ok(res)
     }
 
-    pub fn load_inline(project_json: ProjectJson, config: &CargoConfig) -> ProjectWorkspace {
-        let sysroot = Sysroot::load(
-            project_json.sysroot.clone(),
-            project_json.sysroot_src.clone(),
-            config.sysroot_query_metadata,
-        );
-        let cfg_config = RustcCfgConfig::Rustc(&sysroot);
-        let data_layout_config = RustcDataLayoutConfig::Rustc(&sysroot);
-        let toolchain = match get_toolchain_version(
-            project_json.path(),
-            &sysroot,
-            Tool::Rustc,
-            &config.extra_env,
-            "rustc ",
-        ) {
-            Ok(it) => it,
-            Err(e) => {
-                tracing::error!("{e}");
-                None
+    fn load_cargo(
+        cargo_toml: &ManifestPath,
+        config: &CargoConfig,
+        progress: &(dyn Fn(String) + Sync),
+    ) -> Result<ProjectWorkspace, anyhow::Error> {
+        progress("discovering sysroot".to_owned());
+        let CargoConfig {
+            features,
+            rustc_source,
+            extra_args,
+            extra_env,
+            set_test,
+            cfg_overrides,
+            extra_includes,
+            sysroot,
+            sysroot_src,
+            target,
+            no_deps,
+            ..
+        } = config;
+        let workspace_dir = cargo_toml.parent();
+        let mut sysroot = match (sysroot, sysroot_src) {
+            (Some(RustLibSource::Discover), None) => Sysroot::discover(workspace_dir, extra_env),
+            (Some(RustLibSource::Discover), Some(sysroot_src)) => {
+                Sysroot::discover_with_src_override(workspace_dir, extra_env, sysroot_src.clone())
             }
+            (Some(RustLibSource::Path(path)), None) => {
+                Sysroot::discover_rust_lib_src_dir(path.clone())
+            }
+            (Some(RustLibSource::Path(sysroot)), Some(sysroot_src)) => {
+                Sysroot::new(Some(sysroot.clone()), Some(sysroot_src.clone()))
+            }
+            (None, _) => Sysroot::empty(),
         };
 
-        let target = config.target.as_deref();
-        let rustc_cfg = rustc_cfg::get(target, &config.extra_env, cfg_config);
-        let data_layout = target_data_layout::get(data_layout_config, target, &config.extra_env);
+        // Resolve the Cargo.toml to the workspace root as we base the `target` dir off of it.
+        let mut cmd = sysroot.tool(Tool::Cargo, workspace_dir, extra_env);
+        cmd.args(["locate-project", "--workspace", "--manifest-path", cargo_toml.as_str()]);
+        let cargo_toml = &match utf8_stdout(&mut cmd) {
+            Ok(output) => {
+                #[derive(serde_derive::Deserialize)]
+                struct Root {
+                    root: Utf8PathBuf,
+                }
+                match serde_json::from_str::<Root>(&output) {
+                    Ok(object) => ManifestPath::try_from(AbsPathBuf::assert(object.root))
+                        .expect("manifest path should be absolute"),
+                    Err(e) => {
+                        tracing::error!(%e, %cargo_toml, "failed fetching cargo workspace root");
+                        cargo_toml.clone()
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::error!(%e, %cargo_toml, "failed fetching cargo workspace root");
+                cargo_toml.clone()
+            }
+        };
+        let workspace_dir = cargo_toml.parent();
+
+        tracing::info!(workspace = %cargo_toml, src_root = ?sysroot.rust_lib_src_root(), root = ?sysroot.root(), "Using sysroot");
+        progress("querying project metadata".to_owned());
+        let config_file = CargoConfigFile::load(cargo_toml, extra_env, &sysroot);
+        let config_file_ = config_file.clone();
+        let toolchain_config = QueryConfig::Cargo(&sysroot, cargo_toml, &config_file_);
+        let targets =
+            target_tuple::get(toolchain_config, target.as_deref(), extra_env).unwrap_or_default();
+        let toolchain = version::get(toolchain_config, extra_env)
+            .inspect_err(|e| {
+                tracing::error!(%e,
+                    "failed fetching toolchain version for {cargo_toml:?} workspace"
+                )
+            })
+            .ok()
+            .flatten();
+
+        let fetch_metadata = FetchMetadata::new(
+            cargo_toml,
+            workspace_dir,
+            &CargoMetadataConfig {
+                features: features.clone(),
+                targets: targets.clone(),
+                extra_args: extra_args.clone(),
+                extra_env: extra_env.clone(),
+                toolchain_version: toolchain.clone(),
+                kind: "workspace",
+            },
+            &sysroot,
+            *no_deps,
+        );
+
+        // We spawn a bunch of processes to query various information about the workspace's
+        // toolchain and sysroot
+        // We can speed up loading a bit by spawning all of these processes in parallel (especially
+        // on systems were process spawning is delayed)
+        let join = thread::scope(|s| {
+            let rustc_cfg = Builder::new()
+                .name("ProjectWorkspace::rustc_cfg".to_owned())
+                .spawn_scoped(s, || {
+                    rustc_cfg::get(toolchain_config, targets.first().map(Deref::deref), extra_env)
+                })
+                .expect("failed to spawn thread");
+            let target_data = Builder::new()
+                .name("ProjectWorkspace::target_data".to_owned())
+                .spawn_scoped(s, || {
+                    target_data::get(toolchain_config, targets.first().map(Deref::deref), extra_env)
+                        .inspect_err(|e| {
+                            tracing::error!(%e,
+                                "failed fetching data layout for \
+                                {cargo_toml:?} workspace"
+                            )
+                        })
+                })
+                .expect("failed to spawn thread");
+
+            let rustc_dir = Builder::new()
+                .name("ProjectWorkspace::rustc_dir".to_owned())
+                .spawn_scoped(s, || {
+                    let rustc_dir = match rustc_source {
+                        Some(RustLibSource::Path(path)) => ManifestPath::try_from(path.clone())
+                            .map_err(|p| Some(format!("rustc source path is not absolute: {p}"))),
+                        Some(RustLibSource::Discover) => {
+                            sysroot.discover_rustc_src().ok_or_else(|| {
+                                Some("Failed to discover rustc source for sysroot.".to_owned())
+                            })
+                        }
+                        None => Err(None),
+                    };
+                    rustc_dir.and_then(|rustc_dir| {
+                    info!(workspace = %cargo_toml, rustc_dir = %rustc_dir, "Using rustc source");
+                    match FetchMetadata::new(
+                        &rustc_dir,
+                        workspace_dir,
+                        &CargoMetadataConfig {
+                            features: crate::CargoFeatures::default(),
+                            targets: targets.clone(),
+                            extra_args: extra_args.clone(),
+                            extra_env: extra_env.clone(),
+                            toolchain_version: toolchain.clone(),
+                            kind: "rustc-dev"
+                        },
+                        &sysroot,
+                        *no_deps,
+                    ).exec(true, progress) {
+                        Ok((meta, _error)) => {
+                            let workspace = CargoWorkspace::new(
+                                meta,
+                                cargo_toml.clone(),
+                                Env::default(),
+                                false,
+                            );
+                            let build_scripts = WorkspaceBuildScripts::rustc_crates(
+                                &workspace,
+                                workspace_dir,
+                                extra_env,
+                                &sysroot,
+                            );
+                            Ok(Box::new((workspace, build_scripts)))
+                        }
+                        Err(e) => {
+                            tracing::error!(
+                                %e,
+                                "Failed to read Cargo metadata from rustc source \
+                                at {rustc_dir}",
+                            );
+                            Err(Some(format!(
+                                "Failed to read Cargo metadata from rustc source \
+                                at {rustc_dir}: {e}"
+                            )))
+                        }
+                    }
+                })
+                })
+                .expect("failed to spawn thread");
+
+            let cargo_metadata = Builder::new()
+                .name("ProjectWorkspace::cargo_metadata".to_owned())
+                .spawn_scoped(s, || fetch_metadata.exec(false, progress))
+                .expect("failed to spawn thread");
+            let loaded_sysroot = Builder::new()
+                .name("ProjectWorkspace::loaded_sysroot".to_owned())
+                .spawn_scoped(s, || {
+                    sysroot.load_workspace(
+                        &RustSourceWorkspaceConfig::CargoMetadata(sysroot_metadata_config(
+                            config,
+                            &targets,
+                            toolchain.clone(),
+                        )),
+                        config.no_deps,
+                        progress,
+                    )
+                })
+                .expect("failed to spawn thread");
+            let cargo_env = Builder::new()
+                .name("ProjectWorkspace::cargo_env".to_owned())
+                .spawn_scoped(s, move || cargo_config_env(&config_file, &config.extra_env))
+                .expect("failed to spawn thread");
+            thread::Result::Ok((
+                rustc_cfg.join()?,
+                target_data.join()?,
+                rustc_dir.join()?,
+                loaded_sysroot.join()?,
+                cargo_metadata.join()?,
+                cargo_env.join()?,
+            ))
+        });
+
+        let (rustc_cfg, data_layout, mut rustc, loaded_sysroot, cargo_metadata, mut cargo_env) =
+            match join {
+                Ok(it) => it,
+                Err(e) => std::panic::resume_unwind(e),
+            };
+
+        for (key, value) in config.extra_env.iter() {
+            if let Some(value) = value {
+                cargo_env.insert(key.clone(), value.clone());
+            }
+        }
+
+        let (meta, error) = cargo_metadata.with_context(|| {
+            format!(
+                "Failed to read Cargo metadata from Cargo.toml file {cargo_toml}, {toolchain:?}",
+            )
+        })?;
+        let cargo = CargoWorkspace::new(meta, cargo_toml.clone(), cargo_env, false);
+        if let Some(loaded_sysroot) = loaded_sysroot {
+            tracing::info!(src_root = ?sysroot.rust_lib_src_root(), root = %loaded_sysroot, "Loaded sysroot");
+            sysroot.set_workspace(loaded_sysroot);
+        }
+
+        if !cargo.requires_rustc_private()
+            && let Err(e) = &mut rustc
+        {
+            // We don't need the rustc sources here,
+            // so just discard the error.
+            _ = e.take();
+        }
+
+        Ok(ProjectWorkspace {
+            kind: ProjectWorkspaceKind::Cargo {
+                cargo,
+                build_scripts: WorkspaceBuildScripts::default(),
+                rustc,
+                error: error.map(Arc::new),
+            },
+            sysroot,
+            rustc_cfg,
+            cfg_overrides: cfg_overrides.clone(),
+            toolchain,
+            target: data_layout.map_err(|it| it.to_string().into()),
+            extra_includes: extra_includes.clone(),
+            set_test: *set_test,
+        })
+    }
+
+    pub fn load_inline(
+        mut project_json: ProjectJson,
+        config: &CargoConfig,
+        progress: &(dyn Fn(String) + Sync),
+    ) -> ProjectWorkspace {
+        progress("discovering sysroot".to_owned());
+        let mut sysroot =
+            Sysroot::new(project_json.sysroot.clone(), project_json.sysroot_src.clone());
+
+        tracing::info!(workspace = %project_json.manifest_or_root(), src_root = ?sysroot.rust_lib_src_root(), root = ?sysroot.root(), "Using sysroot");
+        progress("querying project metadata".to_owned());
+        let sysroot_project = project_json.sysroot_project.take();
+        let query_config = QueryConfig::Rustc(&sysroot, project_json.path().as_ref());
+        let targets = target_tuple::get(query_config, config.target.as_deref(), &config.extra_env)
+            .unwrap_or_default();
+        let toolchain = version::get(query_config, &config.extra_env).ok().flatten();
+
+        // We spawn a bunch of processes to query various information about the workspace's
+        // toolchain and sysroot
+        // We can speed up loading a bit by spawning all of these processes in parallel (especially
+        // on systems were process spawning is delayed)
+        let join = thread::scope(|s| {
+            let rustc_cfg = s.spawn(|| {
+                rustc_cfg::get(query_config, targets.first().map(Deref::deref), &config.extra_env)
+            });
+            let data_layout = s.spawn(|| {
+                target_data::get(query_config, targets.first().map(Deref::deref), &config.extra_env)
+            });
+            let loaded_sysroot = s.spawn(|| {
+                if let Some(sysroot_project) = sysroot_project {
+                    sysroot.load_workspace(
+                        &RustSourceWorkspaceConfig::Json(*sysroot_project),
+                        config.no_deps,
+                        progress,
+                    )
+                } else {
+                    sysroot.load_workspace(
+                        &RustSourceWorkspaceConfig::CargoMetadata(sysroot_metadata_config(
+                            config,
+                            &targets,
+                            toolchain.clone(),
+                        )),
+                        config.no_deps,
+                        progress,
+                    )
+                }
+            });
+
+            thread::Result::Ok((rustc_cfg.join()?, data_layout.join()?, loaded_sysroot.join()?))
+        });
+
+        let (rustc_cfg, target_data, loaded_sysroot) = match join {
+            Ok(it) => it,
+            Err(e) => std::panic::resume_unwind(e),
+        };
+
+        if let Some(loaded_sysroot) = loaded_sysroot {
+            sysroot.set_workspace(loaded_sysroot);
+        }
+
         ProjectWorkspace {
             kind: ProjectWorkspaceKind::Json(project_json),
             sysroot,
             rustc_cfg,
             toolchain,
-            target_layout: data_layout.map(Arc::from).map_err(|it| Arc::from(it.to_string())),
+            target: target_data.map_err(|it| it.to_string().into()),
             cfg_overrides: config.cfg_overrides.clone(),
+            extra_includes: config.extra_includes.clone(),
+            set_test: config.set_test,
         }
     }
 
@@ -396,56 +538,68 @@ impl ProjectWorkspace {
         config: &CargoConfig,
     ) -> anyhow::Result<ProjectWorkspace> {
         let dir = detached_file.parent();
-        let sysroot = match &config.sysroot {
-            Some(RustLibSource::Path(path)) => {
-                Sysroot::discover_sysroot_src_dir(path.clone(), config.sysroot_query_metadata)
-            }
-            Some(RustLibSource::Discover) => {
-                Sysroot::discover(dir, &config.extra_env, config.sysroot_query_metadata)
-            }
+        let mut sysroot = match &config.sysroot {
+            Some(RustLibSource::Path(path)) => Sysroot::discover_rust_lib_src_dir(path.clone()),
+            Some(RustLibSource::Discover) => Sysroot::discover(dir, &config.extra_env),
             None => Sysroot::empty(),
         };
 
-        let toolchain =
-            match get_toolchain_version(dir, &sysroot, Tool::Rustc, &config.extra_env, "rustc ") {
-                Ok(it) => it,
-                Err(e) => {
-                    tracing::error!("{e}");
-                    None
-                }
-            };
+        let config_file = CargoConfigFile::load(detached_file, &config.extra_env, &sysroot);
+        let query_config = QueryConfig::Cargo(&sysroot, detached_file, &config_file);
+        let toolchain = version::get(query_config, &config.extra_env).ok().flatten();
+        let targets = target_tuple::get(query_config, config.target.as_deref(), &config.extra_env)
+            .unwrap_or_default();
+        let rustc_cfg = rustc_cfg::get(query_config, None, &config.extra_env);
+        let target_data = target_data::get(query_config, None, &config.extra_env);
 
-        let rustc_cfg = rustc_cfg::get(None, &config.extra_env, RustcCfgConfig::Rustc(&sysroot));
-        let data_layout = target_data_layout::get(
-            RustcDataLayoutConfig::Rustc(&sysroot),
-            None,
-            &config.extra_env,
+        let loaded_sysroot = sysroot.load_workspace(
+            &RustSourceWorkspaceConfig::CargoMetadata(sysroot_metadata_config(
+                config,
+                &targets,
+                toolchain.clone(),
+            )),
+            config.no_deps,
+            &|_| (),
         );
+        if let Some(loaded_sysroot) = loaded_sysroot {
+            sysroot.set_workspace(loaded_sysroot);
+        }
 
-        let cargo_script =
-            CargoWorkspace::fetch_metadata(detached_file, dir, config, &sysroot, false, &|_| ())
-                .ok()
-                .map(|(ws, error)| {
-                    (
-                        CargoWorkspace::new(ws, detached_file.clone()),
-                        WorkspaceBuildScripts::default(),
-                        error.map(Arc::new),
-                    )
-                });
+        let fetch_metadata = FetchMetadata::new(
+            detached_file,
+            dir,
+            &CargoMetadataConfig {
+                features: config.features.clone(),
+                targets,
+                extra_args: config.extra_args.clone(),
+                extra_env: config.extra_env.clone(),
+                toolchain_version: toolchain.clone(),
+                kind: "detached-file",
+            },
+            &sysroot,
+            config.no_deps,
+        );
+        let cargo_script = fetch_metadata.exec(false, &|_| ()).ok().map(|(ws, error)| {
+            let cargo_config_extra_env = cargo_config_env(&config_file, &config.extra_env);
+            (
+                CargoWorkspace::new(ws, detached_file.clone(), cargo_config_extra_env, false),
+                WorkspaceBuildScripts::default(),
+                error.map(Arc::new),
+            )
+        });
 
-        let cargo_config_extra_env = cargo_config_env(detached_file, &config.extra_env, &sysroot);
         Ok(ProjectWorkspace {
             kind: ProjectWorkspaceKind::DetachedFile {
                 file: detached_file.to_owned(),
                 cargo: cargo_script,
-                cargo_config_extra_env,
-                set_test: config.set_test,
             },
             sysroot,
             rustc_cfg,
             toolchain,
-            target_layout: data_layout.map(Arc::from).map_err(|it| Arc::from(it.to_string())),
+            target: target_data.map_err(|it| it.to_string().into()),
             cfg_overrides: config.cfg_overrides.clone(),
+            extra_includes: config.extra_includes.clone(),
+            set_test: config.set_test,
         })
     }
 
@@ -465,10 +619,16 @@ impl ProjectWorkspace {
         match &self.kind {
             ProjectWorkspaceKind::DetachedFile { cargo: Some((cargo, _, None)), .. }
             | ProjectWorkspaceKind::Cargo { cargo, error: None, .. } => {
-                WorkspaceBuildScripts::run_for_workspace(config, cargo, progress, &self.sysroot)
-                    .with_context(|| {
-                        format!("Failed to run build scripts for {}", cargo.workspace_root())
-                    })
+                WorkspaceBuildScripts::run_for_workspace(
+                    config,
+                    cargo,
+                    progress,
+                    &self.sysroot,
+                    self.toolchain.as_ref(),
+                )
+                .with_context(|| {
+                    format!("Failed to run build scripts for {}", cargo.workspace_root())
+                })
             }
             _ => Ok(WorkspaceBuildScripts::default()),
         }
@@ -556,7 +716,18 @@ impl ProjectWorkspace {
         }
     }
 
-    pub fn find_sysroot_proc_macro_srv(&self) -> anyhow::Result<AbsPathBuf> {
+    pub fn buildfiles(&self) -> Vec<AbsPathBuf> {
+        match &self.kind {
+            ProjectWorkspaceKind::Json(project) => project
+                .crates()
+                .filter_map(|(_, krate)| krate.build.as_ref().map(|build| build.build_file.clone()))
+                .map(|build_file| self.workspace_root().join(build_file))
+                .collect(),
+            _ => vec![],
+        }
+    }
+
+    pub fn find_sysroot_proc_macro_srv(&self) -> Option<anyhow::Result<AbsPathBuf>> {
         self.sysroot.discover_proc_macro_srv()
     }
 
@@ -565,8 +736,8 @@ impl ProjectWorkspace {
     /// the root is a member of the current workspace
     pub fn to_roots(&self) -> Vec<PackageRoot> {
         let mk_sysroot = || {
-            let mut r = match self.sysroot.mode() {
-                SysrootMode::Workspace(ws) => ws
+            let mut r = match self.sysroot.workspace() {
+                RustLibSrcWorkspace::Workspace { ws, .. } => ws
                     .packages()
                     .filter_map(|pkg| {
                         if ws[pkg].is_local {
@@ -587,12 +758,26 @@ impl ProjectWorkspace {
                         Some(PackageRoot { is_local: false, include, exclude })
                     })
                     .collect(),
-                SysrootMode::Stitched(_) | SysrootMode::Empty => vec![],
+                RustLibSrcWorkspace::Json(project_json) => project_json
+                    .crates()
+                    .map(|(_, krate)| PackageRoot {
+                        is_local: false,
+                        include: krate.include.clone(),
+                        exclude: krate.exclude.clone(),
+                    })
+                    .collect(),
+                RustLibSrcWorkspace::Stitched(_) => vec![],
+                RustLibSrcWorkspace::Empty => vec![],
             };
 
             r.push(PackageRoot {
                 is_local: false,
-                include: self.sysroot.src_root().map(|it| it.to_path_buf()).into_iter().collect(),
+                include: self
+                    .sysroot
+                    .rust_lib_src_root()
+                    .map(|it| it.to_path_buf())
+                    .into_iter()
+                    .collect(),
                 exclude: Vec::new(),
             });
             r
@@ -600,33 +785,21 @@ impl ProjectWorkspace {
         match &self.kind {
             ProjectWorkspaceKind::Json(project) => project
                 .crates()
-                .map(|(_, krate)| {
-                    let build_files = project
-                        .crates()
-                        .filter_map(|(_, krate)| {
-                            krate.build.as_ref().map(|build| build.build_file.clone())
-                        })
-                        // FIXME: PackageRoots dont allow specifying files, only directories
-                        .filter_map(|build_file| {
-                            self.workspace_root().join(build_file).parent().map(ToOwned::to_owned)
-                        });
-                    PackageRoot {
-                        is_local: krate.is_workspace_member,
-                        include: krate.include.iter().cloned().chain(build_files).collect(),
-                        exclude: krate.exclude.clone(),
-                    }
+                .map(|(_, krate)| PackageRoot {
+                    is_local: krate.is_workspace_member,
+                    include: krate
+                        .include
+                        .iter()
+                        .cloned()
+                        .chain(self.extra_includes.iter().cloned())
+                        .collect(),
+                    exclude: krate.exclude.clone(),
                 })
+                .collect::<FxHashSet<_>>()
+                .into_iter()
                 .chain(mk_sysroot())
-                .unique()
-                .collect(),
-            ProjectWorkspaceKind::Cargo {
-                cargo,
-                rustc,
-                build_scripts,
-                cargo_config_extra_env: _,
-                error: _,
-                set_test: _,
-            } => {
+                .collect::<Vec<_>>(),
+            ProjectWorkspaceKind::Cargo { cargo, rustc, build_scripts, error: _ } => {
                 cargo
                     .packages()
                     .map(|pkg| {
@@ -646,10 +819,16 @@ impl ProjectWorkspace {
                         // [lib]
                         // path = "../../src/lib.rs"
                         // ```
+                        //
+                        // or
+                        //
+                        // ```toml
+                        // [[bin]]
+                        // path = "../bin_folder/main.rs"
+                        // ```
                         let extra_targets = cargo[pkg]
                             .targets
                             .iter()
-                            .filter(|&&tgt| matches!(cargo[tgt].kind, TargetKind::Lib { .. }))
                             .filter_map(|&tgt| cargo[tgt].root.parent())
                             .map(|tgt| tgt.normalize().to_path_buf())
                             .filter(|path| !path.starts_with(&pkg_root));
@@ -657,12 +836,16 @@ impl ProjectWorkspace {
 
                         let mut exclude = vec![pkg_root.join(".git")];
                         if is_local {
+                            include.extend(self.extra_includes.iter().cloned());
+
                             exclude.push(pkg_root.join("target"));
                         } else {
                             exclude.push(pkg_root.join("tests"));
                             exclude.push(pkg_root.join("examples"));
                             exclude.push(pkg_root.join("benches"));
                         }
+                        include.sort();
+                        include.dedup();
                         PackageRoot { is_local, include, exclude }
                     })
                     .chain(mk_sysroot())
@@ -672,11 +855,6 @@ impl ProjectWorkspace {
                             include: vec![rustc[krate].manifest.parent().to_path_buf()],
                             exclude: Vec::new(),
                         })
-                    }))
-                    .chain(cargo.is_virtual_workspace().then(|| PackageRoot {
-                        is_local: true,
-                        include: vec![cargo.workspace_root().to_path_buf()],
-                        exclude: Vec::new(),
                     }))
                     .collect()
             }
@@ -704,10 +882,16 @@ impl ProjectWorkspace {
                         // [lib]
                         // path = "../../src/lib.rs"
                         // ```
+                        //
+                        // or
+                        //
+                        // ```toml
+                        // [[bin]]
+                        // path = "../bin_folder/main.rs"
+                        // ```
                         let extra_targets = cargo[pkg]
                             .targets
                             .iter()
-                            .filter(|&&tgt| matches!(cargo[tgt].kind, TargetKind::Lib { .. }))
                             .filter_map(|&tgt| cargo[tgt].root.parent())
                             .map(|tgt| tgt.normalize().to_path_buf())
                             .filter(|path| !path.starts_with(&pkg_root));
@@ -715,12 +899,16 @@ impl ProjectWorkspace {
 
                         let mut exclude = vec![pkg_root.join(".git")];
                         if is_local {
+                            include.extend(self.extra_includes.iter().cloned());
+
                             exclude.push(pkg_root.join("target"));
                         } else {
                             exclude.push(pkg_root.join("tests"));
                             exclude.push(pkg_root.join("examples"));
                             exclude.push(pkg_root.join("benches"));
                         }
+                        include.sort();
+                        include.dedup();
                         PackageRoot { is_local, include, exclude }
                     })
                 }))
@@ -749,11 +937,15 @@ impl ProjectWorkspace {
     pub fn to_crate_graph(
         &self,
         load: FileLoader<'_>,
-        extra_env: &FxHashMap<String, String>,
-    ) -> (CrateGraph, ProcMacroPaths) {
+        extra_env: &FxHashMap<String, Option<String>>,
+    ) -> (CrateGraphBuilder, ProcMacroPaths) {
         let _p = tracing::info_span!("ProjectWorkspace::to_crate_graph").entered();
 
         let Self { kind, sysroot, cfg_overrides, rustc_cfg, .. } = self;
+        let crate_ws_data = Arc::new(CrateWorkspaceData {
+            toolchain: self.toolchain.clone(),
+            target: self.target.clone(),
+        });
         let (crate_graph, proc_macros) = match kind {
             ProjectWorkspaceKind::Json(project) => project_json_to_crate_graph(
                 rustc_cfg.clone(),
@@ -762,25 +954,24 @@ impl ProjectWorkspace {
                 sysroot,
                 extra_env,
                 cfg_overrides,
+                self.set_test,
+                false,
+                crate_ws_data,
             ),
-            ProjectWorkspaceKind::Cargo {
-                cargo,
-                rustc,
-                build_scripts,
-                cargo_config_extra_env: _,
-                error: _,
-                set_test,
-            } => cargo_to_crate_graph(
-                load,
-                rustc.as_ref().map(|a| a.as_ref()).ok(),
-                cargo,
-                sysroot,
-                rustc_cfg.clone(),
-                cfg_overrides,
-                build_scripts,
-                *set_test,
-            ),
-            ProjectWorkspaceKind::DetachedFile { file, cargo: cargo_script, set_test, .. } => {
+            ProjectWorkspaceKind::Cargo { cargo, rustc, build_scripts, error: _ } => {
+                cargo_to_crate_graph(
+                    load,
+                    rustc.as_ref().map(|a| a.as_ref()).ok(),
+                    cargo,
+                    sysroot,
+                    rustc_cfg.clone(),
+                    cfg_overrides,
+                    build_scripts,
+                    self.set_test,
+                    crate_ws_data,
+                )
+            }
+            ProjectWorkspaceKind::DetachedFile { file, cargo: cargo_script, .. } => {
                 if let Some((cargo, build_scripts, _)) = cargo_script {
                     cargo_to_crate_graph(
                         &mut |path| load(path),
@@ -790,7 +981,8 @@ impl ProjectWorkspace {
                         rustc_cfg.clone(),
                         cfg_overrides,
                         build_scripts,
-                        *set_test,
+                        self.set_test,
+                        crate_ws_data,
                     )
                 } else {
                     detached_file_to_crate_graph(
@@ -799,7 +991,8 @@ impl ProjectWorkspace {
                         file,
                         sysroot,
                         cfg_overrides,
-                        *set_test,
+                        self.set_test,
+                        crate_ws_data,
                     )
                 }
             }
@@ -809,60 +1002,38 @@ impl ProjectWorkspace {
     }
 
     pub fn eq_ignore_build_data(&self, other: &Self) -> bool {
-        let Self { kind, sysroot, rustc_cfg, toolchain, target_layout, cfg_overrides, .. } = self;
+        let Self {
+            kind, sysroot, rustc_cfg, toolchain, target: target_layout, cfg_overrides, ..
+        } = self;
         let Self {
             kind: o_kind,
             sysroot: o_sysroot,
             rustc_cfg: o_rustc_cfg,
             toolchain: o_toolchain,
-            target_layout: o_target_layout,
+            target: o_target_layout,
             cfg_overrides: o_cfg_overrides,
             ..
         } = other;
         (match (kind, o_kind) {
             (
-                ProjectWorkspaceKind::Cargo {
-                    cargo,
-                    rustc,
-                    cargo_config_extra_env,
-                    build_scripts: _,
-                    error: _,
-                    set_test: _,
-                },
+                ProjectWorkspaceKind::Cargo { cargo, rustc, build_scripts: _, error: _ },
                 ProjectWorkspaceKind::Cargo {
                     cargo: o_cargo,
                     rustc: o_rustc,
-                    cargo_config_extra_env: o_cargo_config_extra_env,
                     build_scripts: _,
                     error: _,
-                    set_test: _,
                 },
-            ) => {
-                cargo == o_cargo
-                    && rustc == o_rustc
-                    && cargo_config_extra_env == o_cargo_config_extra_env
-            }
+            ) => cargo == o_cargo && rustc == o_rustc,
             (ProjectWorkspaceKind::Json(project), ProjectWorkspaceKind::Json(o_project)) => {
                 project == o_project
             }
             (
-                ProjectWorkspaceKind::DetachedFile {
-                    file,
-                    cargo: Some((cargo_script, _, _)),
-                    cargo_config_extra_env,
-                    set_test: _,
-                },
+                ProjectWorkspaceKind::DetachedFile { file, cargo: Some((cargo_script, _, _)) },
                 ProjectWorkspaceKind::DetachedFile {
                     file: o_file,
                     cargo: Some((o_cargo_script, _, _)),
-                    cargo_config_extra_env: o_cargo_config_extra_env,
-                    set_test: _,
                 },
-            ) => {
-                file == o_file
-                    && cargo_script == o_cargo_script
-                    && cargo_config_extra_env == o_cargo_config_extra_env
-            }
+            ) => file == o_file && cargo_script == o_cargo_script,
             _ => return false,
         }) && sysroot == o_sysroot
             && rustc_cfg == o_rustc_cfg
@@ -873,7 +1044,7 @@ impl ProjectWorkspace {
 
     /// Returns `true` if the project workspace is [`Json`].
     ///
-    /// [`Json`]: ProjectWorkspace::Json
+    /// [`Json`]: ProjectWorkspaceKind::Json
     #[must_use]
     pub fn is_json(&self) -> bool {
         matches!(self.kind, ProjectWorkspaceKind::Json { .. })
@@ -886,18 +1057,27 @@ fn project_json_to_crate_graph(
     load: FileLoader<'_>,
     project: &ProjectJson,
     sysroot: &Sysroot,
-    extra_env: &FxHashMap<String, String>,
+    extra_env: &FxHashMap<String, Option<String>>,
     override_cfg: &CfgOverrides,
-) -> (CrateGraph, ProcMacroPaths) {
-    let mut res = (CrateGraph::default(), ProcMacroPaths::default());
+    set_test: bool,
+    is_sysroot: bool,
+    crate_ws_data: Arc<CrateWorkspaceData>,
+) -> (CrateGraphBuilder, ProcMacroPaths) {
+    let mut res = (CrateGraphBuilder::default(), ProcMacroPaths::default());
     let (crate_graph, proc_macros) = &mut res;
-    let (public_deps, libproc_macro) =
-        sysroot_to_crate_graph(crate_graph, sysroot, rustc_cfg.clone(), load);
+    let (public_deps, libproc_macro) = sysroot_to_crate_graph(
+        crate_graph,
+        sysroot,
+        rustc_cfg.clone(),
+        load,
+        // FIXME: This looks incorrect but I don't think this matters.
+        crate_ws_data.clone(),
+    );
 
-    let r_a_cfg_flag = CfgAtom::Flag(sym::rust_analyzer.clone());
     let mut cfg_cache: FxHashMap<&str, Vec<CfgAtom>> = FxHashMap::default();
+    let project_root = Arc::new(project.project_root().to_path_buf());
 
-    let idx_to_crate_id: FxHashMap<CrateArrayIdx, CrateId> = project
+    let idx_to_crate_id: FxHashMap<CrateArrayIdx, _> = project
         .crates()
         .filter_map(|(idx, krate)| Some((idx, krate, load(&krate.root_module)?)))
         .map(
@@ -913,66 +1093,94 @@ fn project_json_to_crate_graph(
                     proc_macro_dylib_path,
                     is_proc_macro,
                     repository,
+                    is_workspace_member,
+                    proc_macro_cwd,
                     ..
                 },
                 file_id,
             )| {
-                let env = env.clone().into_iter().collect();
+                let mut env = env.clone().into_iter().collect::<Env>();
+                // Override existing env vars with those from `extra_env`
+                env.extend(
+                    extra_env
+                        .iter()
+                        .filter_map(|(k, v)| v.as_ref().map(|v| (k.clone(), v.clone()))),
+                );
 
                 let target_cfgs = match target.as_deref() {
                     Some(target) => cfg_cache.entry(target).or_insert_with(|| {
-                        rustc_cfg::get(Some(target), extra_env, RustcCfgConfig::Rustc(sysroot))
+                        rustc_cfg::get(
+                            QueryConfig::Rustc(sysroot, project.project_root().as_ref()),
+                            Some(target),
+                            extra_env,
+                        )
                     }),
                     None => &rustc_cfg,
                 };
 
-                let mut cfg_options = target_cfgs
-                    .iter()
-                    .chain(cfg.iter())
-                    .chain(iter::once(&r_a_cfg_flag))
-                    .cloned()
-                    .collect();
-                override_cfg.apply(
-                    &mut cfg_options,
-                    display_name
-                        .as_ref()
-                        .map(|it| it.canonical_name().as_str())
-                        .unwrap_or_default(),
-                );
+                let cfg_options = {
+                    let mut cfg_options: CfgOptions =
+                        target_cfgs.iter().chain(cfg.iter()).cloned().collect();
+
+                    if *is_workspace_member {
+                        if set_test && !is_sysroot {
+                            // Add test cfg for local crates
+                            cfg_options.insert_atom(sym::test);
+                        }
+                        cfg_options.insert_atom(sym::rust_analyzer);
+                    }
+
+                    override_cfg.apply(
+                        &mut cfg_options,
+                        display_name
+                            .as_ref()
+                            .map(|it| it.canonical_name().as_str())
+                            .unwrap_or_default(),
+                    );
+                    cfg_options
+                };
+
                 let crate_graph_crate_id = crate_graph.add_crate_root(
                     file_id,
                     *edition,
                     display_name.clone(),
                     version.clone(),
-                    Arc::new(cfg_options),
+                    cfg_options,
                     None,
                     env,
-                    *is_proc_macro,
                     if let Some(name) = display_name.clone() {
-                        CrateOrigin::Local {
-                            repo: repository.clone(),
-                            name: Some(name.canonical_name().to_owned()),
+                        if is_sysroot {
+                            CrateOrigin::Lang(LangCrateOrigin::from(name.canonical_name().as_str()))
+                        } else {
+                            CrateOrigin::Local {
+                                repo: repository.clone(),
+                                name: Some(name.canonical_name().to_owned()),
+                            }
                         }
                     } else {
                         CrateOrigin::Local { repo: None, name: None }
                     },
+                    *is_proc_macro,
+                    match proc_macro_cwd {
+                        Some(path) => Arc::new(path.clone()),
+                        None => project_root.clone(),
+                    },
+                    crate_ws_data.clone(),
                 );
                 debug!(
                     ?crate_graph_crate_id,
                     crate = display_name.as_ref().map(|name| name.canonical_name().as_str()),
                     "added root to crate graph"
                 );
-                if *is_proc_macro {
-                    if let Some(path) = proc_macro_dylib_path.clone() {
-                        let node = Ok((
-                            display_name
-                                .as_ref()
-                                .map(|it| it.canonical_name().as_str().to_owned())
-                                .unwrap_or_else(|| format!("crate{}", idx.0)),
-                            path,
-                        ));
-                        proc_macros.insert(crate_graph_crate_id, node);
-                    }
+                if *is_proc_macro && let Some(path) = proc_macro_dylib_path.clone() {
+                    let node = Ok((
+                        display_name
+                            .as_ref()
+                            .map(|it| it.canonical_name().as_str().to_owned())
+                            .unwrap_or_else(|| format!("crate{}", idx.0)),
+                        path,
+                    ));
+                    proc_macros.insert(crate_graph_crate_id, node);
                 }
                 (idx, crate_graph_crate_id)
             },
@@ -1006,35 +1214,38 @@ fn cargo_to_crate_graph(
     override_cfg: &CfgOverrides,
     build_scripts: &WorkspaceBuildScripts,
     set_test: bool,
-) -> (CrateGraph, ProcMacroPaths) {
+    crate_ws_data: Arc<CrateWorkspaceData>,
+) -> (CrateGraphBuilder, ProcMacroPaths) {
     let _p = tracing::info_span!("cargo_to_crate_graph").entered();
-    let mut res = (CrateGraph::default(), ProcMacroPaths::default());
-    let crate_graph = &mut res.0;
-    let proc_macros = &mut res.1;
-    let (public_deps, libproc_macro) =
-        sysroot_to_crate_graph(crate_graph, sysroot, rustc_cfg.clone(), load);
+    let mut res = (CrateGraphBuilder::default(), ProcMacroPaths::default());
+    let (crate_graph, proc_macros) = &mut res;
+    let (public_deps, libproc_macro) = sysroot_to_crate_graph(
+        crate_graph,
+        sysroot,
+        rustc_cfg.clone(),
+        load,
+        crate_ws_data.clone(),
+    );
+    let cargo_path = sysroot.tool_path(Tool::Cargo, cargo.workspace_root(), cargo.env());
 
     let cfg_options = CfgOptions::from_iter(rustc_cfg);
 
     // Mapping of a package to its library target
     let mut pkg_to_lib_crate = FxHashMap::default();
     let mut pkg_crates = FxHashMap::default();
-    // Does any crate signal to rust-analyzer that they need the rustc_private crates?
-    let mut has_private = false;
+    let workspace_proc_macro_cwd = Arc::new(cargo.workspace_root().to_path_buf());
 
     // Next, create crates for each package, target pair
     for pkg in cargo.packages() {
-        has_private |= cargo[pkg].metadata.rustc_private;
-
         let cfg_options = {
             let mut cfg_options = cfg_options.clone();
 
             if cargo[pkg].is_local {
-                if set_test {
+                if set_test && !cargo.is_sysroot() {
                     // Add test cfg for local crates
-                    cfg_options.insert_atom(sym::test.clone());
+                    cfg_options.insert_atom(sym::test);
                 }
-                cfg_options.insert_atom(sym::rust_analyzer.clone());
+                cfg_options.insert_atom(sym::rust_analyzer);
             }
 
             override_cfg.apply(&mut cfg_options, &cargo[pkg].name);
@@ -1043,7 +1254,10 @@ fn cargo_to_crate_graph(
 
         let mut lib_tgt = None;
         for &tgt in cargo[pkg].targets.iter() {
-            if !matches!(cargo[tgt].kind, TargetKind::Lib { .. }) && !cargo[pkg].is_member {
+            let pkg_data = &cargo[pkg];
+            if !matches!(cargo[tgt].kind, TargetKind::Lib { .. })
+                && (!pkg_data.is_member || cargo.is_sysroot())
+            {
                 // For non-workspace-members, Cargo does not resolve dev-dependencies, so we don't
                 // add any targets except the library target, since those will not work correctly if
                 // they use dev-dependencies.
@@ -1056,7 +1270,6 @@ fn cargo_to_crate_graph(
             let Some(file_id) = load(root) else { continue };
 
             let build_data = build_scripts.get_output(pkg);
-            let pkg_data = &cargo[pkg];
             let crate_id = add_target_crate_root(
                 crate_graph,
                 proc_macros,
@@ -1068,9 +1281,13 @@ fn cargo_to_crate_graph(
                 name,
                 kind,
                 if pkg_data.is_local {
-                    CrateOrigin::Local {
-                        repo: pkg_data.repository.clone(),
-                        name: Some(Symbol::intern(&pkg_data.name)),
+                    if cargo.is_sysroot() {
+                        CrateOrigin::Lang(LangCrateOrigin::from(&*pkg_data.name))
+                    } else {
+                        CrateOrigin::Local {
+                            repo: pkg_data.repository.clone(),
+                            name: Some(Symbol::intern(&pkg_data.name)),
+                        }
                     }
                 } else {
                     CrateOrigin::Library {
@@ -1078,6 +1295,13 @@ fn cargo_to_crate_graph(
                         name: Symbol::intern(&pkg_data.name),
                     }
                 },
+                crate_ws_data.clone(),
+                if pkg_data.is_member {
+                    workspace_proc_macro_cwd.clone()
+                } else {
+                    Arc::new(pkg_data.manifest.parent().to_path_buf())
+                },
+                &cargo_path,
             );
             if let TargetKind::Lib { .. } = kind {
                 lib_tgt = Some((crate_id, name.clone()));
@@ -1103,16 +1327,17 @@ fn cargo_to_crate_graph(
             public_deps.add_to_crate_graph(crate_graph, from);
 
             // Add dep edge of all targets to the package's lib target
-            if let Some((to, name)) = lib_tgt.clone() {
-                if to != from && kind != TargetKind::BuildScript {
-                    // (build script can not depend on its library target)
+            if let Some((to, name)) = lib_tgt.clone()
+                && to != from
+                && kind != TargetKind::BuildScript
+            {
+                // (build script can not depend on its library target)
 
-                    // For root projects with dashes in their name,
-                    // cargo metadata does not do any normalization,
-                    // so we do it ourselves currently
-                    let name = CrateName::normalize_dashes(&name);
-                    add_dep(crate_graph, from, name, to);
-                }
+                // For root projects with dashes in their name,
+                // cargo metadata does not do any normalization,
+                // so we do it ourselves currently
+                let name = CrateName::normalize_dashes(&name);
+                add_dep(crate_graph, from, name, to);
             }
         }
     }
@@ -1158,7 +1383,7 @@ fn cargo_to_crate_graph(
         add_dep(crate_graph, from, name, to);
     }
 
-    if has_private {
+    if cargo.requires_rustc_private() {
         // If the user provided a path to rustc sources, we add all the rustc_private crates
         // and create dependencies on them for the crates which opt-in to that
         if let Some((rustc_workspace, rustc_build_scripts)) = rustc {
@@ -1182,6 +1407,9 @@ fn cargo_to_crate_graph(
                 } else {
                     rustc_build_scripts
                 },
+                // FIXME: This looks incorrect but I don't think this causes problems.
+                crate_ws_data,
+                &cargo_path,
             );
         }
     }
@@ -1195,19 +1423,26 @@ fn detached_file_to_crate_graph(
     sysroot: &Sysroot,
     override_cfg: &CfgOverrides,
     set_test: bool,
-) -> (CrateGraph, ProcMacroPaths) {
+    crate_ws_data: Arc<CrateWorkspaceData>,
+) -> (CrateGraphBuilder, ProcMacroPaths) {
     let _p = tracing::info_span!("detached_file_to_crate_graph").entered();
-    let mut crate_graph = CrateGraph::default();
-    let (public_deps, _libproc_macro) =
-        sysroot_to_crate_graph(&mut crate_graph, sysroot, rustc_cfg.clone(), load);
+    let mut crate_graph = CrateGraphBuilder::default();
+    let (public_deps, _libproc_macro) = sysroot_to_crate_graph(
+        &mut crate_graph,
+        sysroot,
+        rustc_cfg.clone(),
+        load,
+        // FIXME: This looks incorrect but I don't think this causes problems.
+        crate_ws_data.clone(),
+    );
 
     let mut cfg_options = CfgOptions::from_iter(rustc_cfg);
     if set_test {
-        cfg_options.insert_atom(sym::test.clone());
+        cfg_options.insert_atom(sym::test);
     }
-    cfg_options.insert_atom(sym::rust_analyzer.clone());
+    cfg_options.insert_atom(sym::rust_analyzer);
     override_cfg.apply(&mut cfg_options, "");
-    let cfg_options = Arc::new(cfg_options);
+    let cfg_options = cfg_options;
 
     let file_id = match load(detached_file) {
         Some(file_id) => file_id,
@@ -1222,38 +1457,44 @@ fn detached_file_to_crate_graph(
         Edition::CURRENT,
         display_name.clone(),
         None,
-        cfg_options.clone(),
+        cfg_options,
         None,
         Env::default(),
-        false,
         CrateOrigin::Local {
             repo: None,
             name: display_name.map(|n| n.canonical_name().to_owned()),
         },
+        false,
+        Arc::new(detached_file.parent().to_path_buf()),
+        crate_ws_data,
     );
 
     public_deps.add_to_crate_graph(&mut crate_graph, detached_file_crate);
     (crate_graph, FxHashMap::default())
 }
 
+// FIXME: There shouldn't really be a need for duplicating all of this?
 fn handle_rustc_crates(
-    crate_graph: &mut CrateGraph,
+    crate_graph: &mut CrateGraphBuilder,
     proc_macros: &mut ProcMacroPaths,
-    pkg_to_lib_crate: &mut FxHashMap<Package, CrateId>,
+    pkg_to_lib_crate: &mut FxHashMap<Package, CrateBuilderId>,
     load: FileLoader<'_>,
     rustc_workspace: &CargoWorkspace,
     cargo: &CargoWorkspace,
     public_deps: &SysrootPublicDeps,
-    libproc_macro: Option<CrateId>,
-    pkg_crates: &FxHashMap<Package, Vec<(CrateId, TargetKind)>>,
+    libproc_macro: Option<CrateBuilderId>,
+    pkg_crates: &FxHashMap<Package, Vec<(CrateBuilderId, TargetKind)>>,
     cfg_options: &CfgOptions,
     override_cfg: &CfgOverrides,
     build_scripts: &WorkspaceBuildScripts,
+    crate_ws_data: Arc<CrateWorkspaceData>,
+    cargo_path: &Utf8Path,
 ) {
     let mut rustc_pkg_crates = FxHashMap::default();
     // The root package of the rustc-dev component is rustc_driver, so we match that
     let root_pkg =
         rustc_workspace.packages().find(|&package| rustc_workspace[package].name == "rustc_driver");
+    let workspace_proc_macro_cwd = Arc::new(cargo.workspace_root().to_path_buf());
     // The rustc workspace might be incomplete (such as if rustc-dev is not
     // installed for the current toolchain) and `rustc_source` is set to discover.
     if let Some(root_pkg) = root_pkg {
@@ -1267,14 +1508,15 @@ fn handle_rustc_crates(
             if rustc_pkg_crates.contains_key(&pkg) {
                 continue;
             }
-            for dep in &rustc_workspace[pkg].dependencies {
+            let pkg_data = &rustc_workspace[pkg];
+            for dep in &pkg_data.dependencies {
                 queue.push_back(dep.pkg);
             }
 
             let mut cfg_options = cfg_options.clone();
-            override_cfg.apply(&mut cfg_options, &rustc_workspace[pkg].name);
+            override_cfg.apply(&mut cfg_options, &pkg_data.name);
 
-            for &tgt in rustc_workspace[pkg].targets.iter() {
+            for &tgt in pkg_data.targets.iter() {
                 let kind @ TargetKind::Lib { is_proc_macro } = rustc_workspace[tgt].kind else {
                     continue;
                 };
@@ -1284,13 +1526,20 @@ fn handle_rustc_crates(
                         crate_graph,
                         proc_macros,
                         rustc_workspace,
-                        &rustc_workspace[pkg],
+                        pkg_data,
                         build_scripts.get_output(pkg).zip(Some(build_scripts.error().is_some())),
                         cfg_options.clone(),
                         file_id,
                         &rustc_workspace[tgt].name,
                         kind,
-                        CrateOrigin::Rustc { name: Symbol::intern(&rustc_workspace[pkg].name) },
+                        CrateOrigin::Rustc { name: Symbol::intern(&pkg_data.name) },
+                        crate_ws_data.clone(),
+                        if pkg_data.is_member {
+                            workspace_proc_macro_cwd.clone()
+                        } else {
+                            Arc::new(pkg_data.manifest.parent().to_path_buf())
+                        },
+                        cargo_path,
                     );
                     pkg_to_lib_crate.insert(pkg, crate_id);
                     // Add dependencies on core / std / alloc for this crate
@@ -1331,7 +1580,7 @@ fn handle_rustc_crates(
                     // This avoids the situation where `from` depends on e.g. `arrayvec`, but
                     // `rust_analyzer` thinks that it should use the one from the `rustc_source`
                     // instead of the one from `crates.io`
-                    if !crate_graph[*from].dependencies.iter().any(|d| d.name == name) {
+                    if !crate_graph[*from].basic.dependencies.iter().any(|d| d.name == name) {
                         add_dep(crate_graph, *from, name.clone(), to);
                     }
                 }
@@ -1341,32 +1590,36 @@ fn handle_rustc_crates(
 }
 
 fn add_target_crate_root(
-    crate_graph: &mut CrateGraph,
+    crate_graph: &mut CrateGraphBuilder,
     proc_macros: &mut ProcMacroPaths,
     cargo: &CargoWorkspace,
     pkg: &PackageData,
     build_data: Option<(&BuildScriptOutput, bool)>,
     cfg_options: CfgOptions,
     file_id: FileId,
-    cargo_name: &str,
+    cargo_crate_name: &str,
     kind: TargetKind,
     origin: CrateOrigin,
-) -> CrateId {
+    crate_ws_data: Arc<CrateWorkspaceData>,
+    proc_macro_cwd: Arc<AbsPathBuf>,
+    cargo_path: &Utf8Path,
+) -> CrateBuilderId {
     let edition = pkg.edition;
     let potential_cfg_options = if pkg.features.is_empty() {
         None
     } else {
         let mut potential_cfg_options = cfg_options.clone();
-        potential_cfg_options.extend(pkg.features.iter().map(|feat| CfgAtom::KeyValue {
-            key: sym::feature.clone(),
-            value: Symbol::intern(feat.0),
-        }));
+        potential_cfg_options.extend(
+            pkg.features
+                .iter()
+                .map(|feat| CfgAtom::KeyValue { key: sym::feature, value: Symbol::intern(feat.0) }),
+        );
         Some(potential_cfg_options)
     };
     let cfg_options = {
         let mut opts = cfg_options;
         for feature in pkg.active_features.iter() {
-            opts.insert_key_value(sym::feature.clone(), Symbol::intern(feature));
+            opts.insert_key_value(sym::feature, Symbol::intern(feature));
         }
         if let Some(cfgs) = build_data.map(|(it, _)| &it.cfgs) {
             opts.extend(cfgs.iter().cloned());
@@ -1374,37 +1627,49 @@ fn add_target_crate_root(
         opts
     };
 
-    let mut env = Env::default();
+    let mut env = cargo.env().clone();
     inject_cargo_package_env(&mut env, pkg);
-    inject_cargo_env(&mut env);
-    inject_rustc_tool_env(&mut env, cargo, cargo_name, kind);
+    inject_cargo_env(&mut env, cargo_path);
+    inject_rustc_tool_env(&mut env, cargo_crate_name, kind);
 
     if let Some(envs) = build_data.map(|(it, _)| &it.envs) {
-        for (k, v) in envs {
-            env.set(k, v.clone());
-        }
+        env.extend_from_other(envs);
     }
     let crate_id = crate_graph.add_crate_root(
         file_id,
         edition,
-        Some(CrateDisplayName::from_canonical_name(cargo_name)),
+        Some(CrateDisplayName::from_canonical_name(cargo_crate_name)),
         Some(pkg.version.to_string()),
-        Arc::new(cfg_options),
-        potential_cfg_options.map(Arc::new),
+        cfg_options,
+        potential_cfg_options,
         env,
-        matches!(kind, TargetKind::Lib { is_proc_macro: true }),
         origin,
+        matches!(kind, TargetKind::Lib { is_proc_macro: true }),
+        proc_macro_cwd,
+        crate_ws_data,
     );
     if let TargetKind::Lib { is_proc_macro: true } = kind {
         let proc_macro = match build_data {
             Some((BuildScriptOutput { proc_macro_dylib_path, .. }, has_errors)) => {
                 match proc_macro_dylib_path {
-                    Some(path) => Ok((cargo_name.to_owned(), path.clone())),
-                    None if has_errors => Err("failed to build proc-macro".to_owned()),
-                    None => Err("proc-macro crate build data is missing dylib path".to_owned()),
+                    ProcMacroDylibPath::Path(path) => {
+                        Ok((cargo_crate_name.to_owned(), path.clone()))
+                    }
+                    ProcMacroDylibPath::NotBuilt => Err(ProcMacroLoadingError::NotYetBuilt),
+                    ProcMacroDylibPath::NotProcMacro | ProcMacroDylibPath::DylibNotFound
+                        if has_errors =>
+                    {
+                        Err(ProcMacroLoadingError::FailedToBuild)
+                    }
+                    ProcMacroDylibPath::NotProcMacro => {
+                        Err(ProcMacroLoadingError::ExpectedProcMacroArtifact)
+                    }
+                    ProcMacroDylibPath::DylibNotFound => {
+                        Err(ProcMacroLoadingError::MissingDylibPath)
+                    }
                 }
             }
-            None => Err("proc-macro crate is missing its build data".to_owned()),
+            None => Err(ProcMacroLoadingError::NotYetBuilt),
         };
         proc_macros.insert(crate_id, proc_macro);
     }
@@ -1414,28 +1679,84 @@ fn add_target_crate_root(
 
 #[derive(Default, Debug)]
 struct SysrootPublicDeps {
-    deps: Vec<(CrateName, CrateId, bool)>,
+    deps: Vec<(CrateName, CrateBuilderId, bool)>,
 }
 
 impl SysrootPublicDeps {
     /// Makes `from` depend on the public sysroot crates.
-    fn add_to_crate_graph(&self, crate_graph: &mut CrateGraph, from: CrateId) {
+    fn add_to_crate_graph(&self, crate_graph: &mut CrateGraphBuilder, from: CrateBuilderId) {
         for (name, krate, prelude) in &self.deps {
             add_dep_with_prelude(crate_graph, from, name.clone(), *krate, *prelude, true);
         }
     }
 }
 
+fn extend_crate_graph_with_sysroot(
+    crate_graph: &mut CrateGraphBuilder,
+    mut sysroot_crate_graph: CrateGraphBuilder,
+    mut sysroot_proc_macros: ProcMacroPaths,
+) -> (SysrootPublicDeps, Option<CrateBuilderId>) {
+    let mut pub_deps = vec![];
+    let mut libproc_macro = None;
+    for cid in sysroot_crate_graph.iter() {
+        if let CrateOrigin::Lang(lang_crate) = sysroot_crate_graph[cid].basic.origin {
+            match lang_crate {
+                LangCrateOrigin::Test
+                | LangCrateOrigin::Alloc
+                | LangCrateOrigin::Core
+                | LangCrateOrigin::Std => pub_deps.push((
+                    CrateName::normalize_dashes(&lang_crate.to_string()),
+                    cid,
+                    !matches!(lang_crate, LangCrateOrigin::Test | LangCrateOrigin::Alloc),
+                )),
+                LangCrateOrigin::ProcMacro => libproc_macro = Some(cid),
+                LangCrateOrigin::Other => (),
+            }
+        }
+    }
+
+    let mut marker_set = vec![];
+    for &(_, cid, _) in pub_deps.iter() {
+        marker_set.extend(sysroot_crate_graph.transitive_deps(cid));
+    }
+    if let Some(cid) = libproc_macro {
+        marker_set.extend(sysroot_crate_graph.transitive_deps(cid));
+    }
+
+    marker_set.sort();
+    marker_set.dedup();
+
+    // Remove all crates except the ones we are interested in to keep the sysroot graph small.
+    let removed_mapping = sysroot_crate_graph.remove_crates_except(&marker_set);
+    sysroot_proc_macros = sysroot_proc_macros
+        .into_iter()
+        .filter_map(|(k, v)| Some((removed_mapping[k.into_raw().into_u32() as usize]?, v)))
+        .collect();
+    let mapping = crate_graph.extend(sysroot_crate_graph, &mut sysroot_proc_macros);
+
+    // Map the id through the removal mapping first, then through the crate graph extension mapping.
+    pub_deps.iter_mut().for_each(|(_, cid, _)| {
+        *cid = mapping[&removed_mapping[cid.into_raw().into_u32() as usize].unwrap()]
+    });
+    if let Some(libproc_macro) = &mut libproc_macro {
+        *libproc_macro =
+            mapping[&removed_mapping[libproc_macro.into_raw().into_u32() as usize].unwrap()];
+    }
+
+    (SysrootPublicDeps { deps: pub_deps }, libproc_macro)
+}
+
 fn sysroot_to_crate_graph(
-    crate_graph: &mut CrateGraph,
+    crate_graph: &mut CrateGraphBuilder,
     sysroot: &Sysroot,
     rustc_cfg: Vec<CfgAtom>,
     load: FileLoader<'_>,
-) -> (SysrootPublicDeps, Option<CrateId>) {
+    crate_ws_data: Arc<CrateWorkspaceData>,
+) -> (SysrootPublicDeps, Option<CrateBuilderId>) {
     let _p = tracing::info_span!("sysroot_to_crate_graph").entered();
-    match sysroot.mode() {
-        SysrootMode::Workspace(cargo) => {
-            let (mut cg, mut pm) = cargo_to_crate_graph(
+    match sysroot.workspace() {
+        RustLibSrcWorkspace::Workspace { ws: cargo, .. } => {
+            let (sysroot_cg, sysroot_pm) = cargo_to_crate_graph(
                 load,
                 None,
                 cargo,
@@ -1444,80 +1765,54 @@ fn sysroot_to_crate_graph(
                 &CfgOverrides {
                     global: CfgDiff::new(
                         vec![
-                            CfgAtom::Flag(sym::debug_assertions.clone()),
-                            CfgAtom::Flag(sym::miri.clone()),
+                            CfgAtom::Flag(sym::debug_assertions),
+                            CfgAtom::Flag(sym::miri),
+                            CfgAtom::Flag(sym::bootstrap),
                         ],
-                        vec![],
-                    )
-                    .unwrap(),
+                        vec![CfgAtom::Flag(sym::test)],
+                    ),
                     ..Default::default()
                 },
                 &WorkspaceBuildScripts::default(),
                 false,
+                crate_ws_data,
             );
 
-            let mut pub_deps = vec![];
-            let mut libproc_macro = None;
-            let diff = CfgDiff::new(vec![], vec![CfgAtom::Flag(sym::test.clone())]).unwrap();
-            for (cid, c) in cg.iter_mut() {
-                // uninject `test` flag so `core` keeps working.
-                Arc::make_mut(&mut c.cfg_options).apply_diff(diff.clone());
-                // patch the origin
-                if c.origin.is_local() {
-                    let lang_crate = LangCrateOrigin::from(
-                        c.display_name.as_ref().map_or("", |it| it.canonical_name().as_str()),
-                    );
-                    c.origin = CrateOrigin::Lang(lang_crate);
-                    match lang_crate {
-                        LangCrateOrigin::Test
-                        | LangCrateOrigin::Alloc
-                        | LangCrateOrigin::Core
-                        | LangCrateOrigin::Std => pub_deps.push((
-                            CrateName::normalize_dashes(&lang_crate.to_string()),
-                            cid,
-                            !matches!(lang_crate, LangCrateOrigin::Test | LangCrateOrigin::Alloc),
-                        )),
-                        LangCrateOrigin::ProcMacro => libproc_macro = Some(cid),
-                        LangCrateOrigin::Other => (),
-                    }
-                }
-            }
-
-            let mut marker_set = vec![];
-            for &(_, cid, _) in pub_deps.iter() {
-                marker_set.extend(cg.transitive_deps(cid));
-            }
-            if let Some(cid) = libproc_macro {
-                marker_set.extend(cg.transitive_deps(cid));
-            }
-
-            marker_set.sort();
-            marker_set.dedup();
-
-            // Remove all crates except the ones we are interested in to keep the sysroot graph small.
-            let removed_mapping = cg.remove_crates_except(&marker_set);
-            let mapping = crate_graph.extend(cg, &mut pm);
-
-            // Map the id through the removal mapping first, then through the crate graph extension mapping.
-            pub_deps.iter_mut().for_each(|(_, cid, _)| {
-                *cid = mapping[&removed_mapping[cid.into_raw().into_u32() as usize].unwrap()]
-            });
-            if let Some(libproc_macro) = &mut libproc_macro {
-                *libproc_macro = mapping
-                    [&removed_mapping[libproc_macro.into_raw().into_u32() as usize].unwrap()];
-            }
-
-            (SysrootPublicDeps { deps: pub_deps }, libproc_macro)
+            extend_crate_graph_with_sysroot(crate_graph, sysroot_cg, sysroot_pm)
         }
-        SysrootMode::Stitched(stitched) => {
-            let cfg_options = Arc::new({
+        RustLibSrcWorkspace::Json(project_json) => {
+            let (sysroot_cg, sysroot_pm) = project_json_to_crate_graph(
+                rustc_cfg,
+                load,
+                project_json,
+                &Sysroot::empty(),
+                &FxHashMap::default(),
+                &CfgOverrides {
+                    global: CfgDiff::new(
+                        vec![CfgAtom::Flag(sym::debug_assertions), CfgAtom::Flag(sym::miri)],
+                        vec![],
+                    ),
+                    ..Default::default()
+                },
+                false,
+                true,
+                crate_ws_data,
+            );
+
+            extend_crate_graph_with_sysroot(crate_graph, sysroot_cg, sysroot_pm)
+        }
+        RustLibSrcWorkspace::Stitched(stitched) => {
+            let cfg_options = {
                 let mut cfg_options = CfgOptions::default();
                 cfg_options.extend(rustc_cfg);
-                cfg_options.insert_atom(sym::debug_assertions.clone());
-                cfg_options.insert_atom(sym::miri.clone());
+                cfg_options.insert_atom(sym::debug_assertions);
+                cfg_options.insert_atom(sym::miri);
                 cfg_options
-            });
-            let sysroot_crates: FxHashMap<SysrootCrate, CrateId> = stitched
+            };
+            let sysroot_crates: FxHashMap<
+                crate::sysroot::stitched::RustLibSrcCrate,
+                CrateBuilderId,
+            > = stitched
                 .crates()
                 .filter_map(|krate| {
                     let file_id = load(&stitched[krate].root)?;
@@ -1531,8 +1826,10 @@ fn sysroot_to_crate_graph(
                         cfg_options.clone(),
                         None,
                         Env::default(),
-                        false,
                         CrateOrigin::Lang(LangCrateOrigin::from(&*stitched[krate].name)),
+                        false,
+                        Arc::new(stitched[krate].root.parent().to_path_buf()),
+                        crate_ws_data.clone(),
                     );
                     Some((krate, crate_id))
                 })
@@ -1562,26 +1859,36 @@ fn sysroot_to_crate_graph(
                 stitched.proc_macro().and_then(|it| sysroot_crates.get(&it).copied());
             (public_deps, libproc_macro)
         }
-        SysrootMode::Empty => (SysrootPublicDeps { deps: vec![] }, None),
+        RustLibSrcWorkspace::Empty => (SysrootPublicDeps { deps: vec![] }, None),
     }
 }
 
-fn add_dep(graph: &mut CrateGraph, from: CrateId, name: CrateName, to: CrateId) {
-    add_dep_inner(graph, from, Dependency::new(name, to))
+fn add_dep(
+    graph: &mut CrateGraphBuilder,
+    from: CrateBuilderId,
+    name: CrateName,
+    to: CrateBuilderId,
+) {
+    add_dep_inner(graph, from, DependencyBuilder::new(name, to))
 }
 
 fn add_dep_with_prelude(
-    graph: &mut CrateGraph,
-    from: CrateId,
+    graph: &mut CrateGraphBuilder,
+    from: CrateBuilderId,
     name: CrateName,
-    to: CrateId,
+    to: CrateBuilderId,
     prelude: bool,
     sysroot: bool,
 ) {
-    add_dep_inner(graph, from, Dependency::with_prelude(name, to, prelude, sysroot))
+    add_dep_inner(graph, from, DependencyBuilder::with_prelude(name, to, prelude, sysroot))
 }
 
-fn add_proc_macro_dep(crate_graph: &mut CrateGraph, from: CrateId, to: CrateId, prelude: bool) {
+fn add_proc_macro_dep(
+    crate_graph: &mut CrateGraphBuilder,
+    from: CrateBuilderId,
+    to: CrateBuilderId,
+    prelude: bool,
+) {
     add_dep_with_prelude(
         crate_graph,
         from,
@@ -1592,8 +1899,23 @@ fn add_proc_macro_dep(crate_graph: &mut CrateGraph, from: CrateId, to: CrateId, 
     );
 }
 
-fn add_dep_inner(graph: &mut CrateGraph, from: CrateId, dep: Dependency) {
+fn add_dep_inner(graph: &mut CrateGraphBuilder, from: CrateBuilderId, dep: DependencyBuilder) {
     if let Err(err) = graph.add_dep(from, dep) {
         tracing::warn!("{}", err)
+    }
+}
+
+fn sysroot_metadata_config(
+    config: &CargoConfig,
+    targets: &[String],
+    toolchain_version: Option<Version>,
+) -> CargoMetadataConfig {
+    CargoMetadataConfig {
+        features: Default::default(),
+        targets: targets.to_vec(),
+        extra_args: Default::default(),
+        extra_env: config.extra_env.clone(),
+        toolchain_version,
+        kind: "sysroot",
     }
 }

@@ -3,33 +3,28 @@
 use std::ops::Not;
 
 use cfg::{CfgExpr, CfgOptions};
-use hir_expand::{attrs::AttrId, ExpandErrorKind, MacroCallKind};
+use hir_expand::{ErasedAstId, ExpandErrorKind, MacroCallKind, attrs::AttrId, mod_path::ModPath};
 use la_arena::Idx;
 use syntax::ast;
 
-use crate::{
-    item_tree::{self, AttrOwner, ItemTreeId, TreeId},
-    nameres::LocalModuleId,
-    path::ModPath,
-    AstId,
-};
+use crate::{AstId, nameres::LocalModuleId};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DefDiagnosticKind {
     UnresolvedModule { ast: AstId<ast::Module>, candidates: Box<[String]> },
     UnresolvedExternCrate { ast: AstId<ast::ExternCrate> },
-    UnresolvedImport { id: ItemTreeId<item_tree::Use>, index: Idx<ast::UseTree> },
-    UnconfiguredCode { tree: TreeId, item: AttrOwner, cfg: CfgExpr, opts: CfgOptions },
+    UnresolvedImport { id: AstId<ast::Use>, index: Idx<ast::UseTree> },
+    UnconfiguredCode { ast_id: ErasedAstId, cfg: CfgExpr, opts: CfgOptions },
     UnresolvedMacroCall { ast: MacroCallKind, path: ModPath },
     UnimplementedBuiltinMacro { ast: AstId<ast::Macro> },
-    InvalidDeriveTarget { ast: AstId<ast::Item>, id: usize },
-    MalformedDerive { ast: AstId<ast::Adt>, id: usize },
+    InvalidDeriveTarget { ast: AstId<ast::Item>, id: AttrId },
+    MalformedDerive { ast: AstId<ast::Adt>, id: AttrId },
     MacroDefError { ast: AstId<ast::Macro>, message: String },
     MacroError { ast: AstId<ast::Item>, path: ModPath, err: ExpandErrorKind },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DefDiagnostics(Option<triomphe::Arc<Box<[DefDiagnostic]>>>);
+pub struct DefDiagnostics(Option<triomphe::ThinArc<(), DefDiagnostic>>);
 
 impl DefDiagnostics {
     pub fn new(diagnostics: Vec<DefDiagnostic>) -> Self {
@@ -37,12 +32,12 @@ impl DefDiagnostics {
             diagnostics
                 .is_empty()
                 .not()
-                .then(|| triomphe::Arc::new(diagnostics.into_boxed_slice())),
+                .then(|| triomphe::ThinArc::from_header_and_iter((), diagnostics.into_iter())),
         )
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &DefDiagnostic> {
-        self.0.as_ref().into_iter().flat_map(|it| &***it)
+        self.0.as_ref().into_iter().flat_map(|it| &it.slice)
     }
 }
 
@@ -76,7 +71,7 @@ impl DefDiagnostic {
 
     pub(super) fn unresolved_import(
         container: LocalModuleId,
-        id: ItemTreeId<item_tree::Use>,
+        id: AstId<ast::Use>,
         index: Idx<ast::UseTree>,
     ) -> Self {
         Self { in_module: container, kind: DefDiagnosticKind::UnresolvedImport { id, index } }
@@ -93,14 +88,13 @@ impl DefDiagnostic {
 
     pub fn unconfigured_code(
         container: LocalModuleId,
-        tree: TreeId,
-        item: AttrOwner,
+        ast_id: ErasedAstId,
         cfg: CfgExpr,
         opts: CfgOptions,
     ) -> Self {
         Self {
             in_module: container,
-            kind: DefDiagnosticKind::UnconfiguredCode { tree, item, cfg, opts },
+            kind: DefDiagnosticKind::UnconfiguredCode { ast_id, cfg, opts },
         }
     }
 
@@ -125,10 +119,7 @@ impl DefDiagnostic {
         ast: AstId<ast::Item>,
         id: AttrId,
     ) -> Self {
-        Self {
-            in_module: container,
-            kind: DefDiagnosticKind::InvalidDeriveTarget { ast, id: id.ast_index() },
-        }
+        Self { in_module: container, kind: DefDiagnosticKind::InvalidDeriveTarget { ast, id } }
     }
 
     pub(super) fn malformed_derive(
@@ -136,9 +127,6 @@ impl DefDiagnostic {
         ast: AstId<ast::Adt>,
         id: AttrId,
     ) -> Self {
-        Self {
-            in_module: container,
-            kind: DefDiagnosticKind::MalformedDerive { ast, id: id.ast_index() },
-        }
+        Self { in_module: container, kind: DefDiagnosticKind::MalformedDerive { ast, id } }
     }
 }

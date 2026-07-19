@@ -1,6 +1,6 @@
 //! Tests for profiles defined in config files.
 
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
 use cargo_test_support::registry::Package;
 use cargo_test_support::{basic_lib_manifest, paths, project, str};
 use cargo_util_schemas::manifest::TomlDebugInfo;
@@ -375,7 +375,6 @@ fn named_config_profile() {
     use cargo::core::compiler::CompileKind;
     use cargo::core::profiles::{Profiles, UnitFor};
     use cargo::core::{PackageId, Workspace};
-    use cargo::util::interning::InternedString;
     use std::fs;
     paths::root().join(".cargo").mkdir_p();
     fs::write(
@@ -421,7 +420,7 @@ fn named_config_profile() {
     )
     .unwrap();
     let gctx = GlobalContextBuilder::new().build();
-    let profile_name = InternedString::new("foo");
+    let profile_name = "foo".into();
     let ws = Workspace::new(&paths::root().join("Cargo.toml"), &gctx).unwrap();
     let profiles = Profiles::new(&ws, profile_name).unwrap();
 

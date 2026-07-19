@@ -45,7 +45,8 @@ pub struct CrateDepMultiple {
 #[derive(Subdiagnostic)]
 #[note(metadata_crate_dep_not_static)]
 pub struct NonStaticCrateDep {
-    pub crate_name: Symbol,
+    /// It's different from `crate_name` in main Diagnostic.
+    pub crate_name_: Symbol,
 }
 
 #[derive(Subdiagnostic)]
@@ -75,192 +76,21 @@ pub struct RequiredPanicStrategy {
 }
 
 #[derive(Diagnostic)]
+#[diag(metadata_incompatible_with_immediate_abort)]
+pub struct IncompatibleWithImmediateAbort {
+    pub crate_name: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag(metadata_incompatible_with_immediate_abort_core)]
+pub struct IncompatibleWithImmediateAbortCore;
+
+#[derive(Diagnostic)]
 #[diag(metadata_incompatible_panic_in_drop_strategy)]
 pub struct IncompatiblePanicInDropStrategy {
     pub crate_name: Symbol,
     pub found_strategy: PanicStrategy,
     pub desired_strategy: PanicStrategy,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_multiple_names_in_link)]
-pub struct MultipleNamesInLink {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_multiple_kinds_in_link)]
-pub struct MultipleKindsInLink {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_link_name_form)]
-pub struct LinkNameForm {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_link_kind_form)]
-pub struct LinkKindForm {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_link_modifiers_form)]
-pub struct LinkModifiersForm {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_link_cfg_form)]
-pub struct LinkCfgForm {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_wasm_import_form)]
-pub struct WasmImportForm {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_empty_link_name, code = E0454)]
-pub struct EmptyLinkName {
-    #[primary_span]
-    #[label]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_link_framework_apple, code = E0455)]
-pub struct LinkFrameworkApple {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_raw_dylib_only_windows, code = E0455)]
-pub struct RawDylibOnlyWindows {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_unknown_link_kind, code = E0458)]
-pub struct UnknownLinkKind<'a> {
-    #[primary_span]
-    #[label]
-    pub span: Span,
-    pub kind: &'a str,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_multiple_link_modifiers)]
-pub struct MultipleLinkModifiers {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_multiple_cfgs)]
-pub struct MultipleCfgs {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_link_cfg_single_predicate)]
-pub struct LinkCfgSinglePredicate {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_multiple_wasm_import)]
-pub struct MultipleWasmImport {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_unexpected_link_arg)]
-pub struct UnexpectedLinkArg {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_invalid_link_modifier)]
-pub struct InvalidLinkModifier {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_multiple_modifiers)]
-pub struct MultipleModifiers<'a> {
-    #[primary_span]
-    pub span: Span,
-    pub modifier: &'a str,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_bundle_needs_static)]
-pub struct BundleNeedsStatic {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_whole_archive_needs_static)]
-pub struct WholeArchiveNeedsStatic {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_as_needed_compatibility)]
-pub struct AsNeededCompatibility {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_unknown_link_modifier)]
-pub struct UnknownLinkModifier<'a> {
-    #[primary_span]
-    pub span: Span,
-    pub modifier: &'a str,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_incompatible_wasm_link)]
-pub struct IncompatibleWasmLink {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_link_requires_name, code = E0459)]
-pub struct LinkRequiresName {
-    #[primary_span]
-    #[label]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_raw_dylib_no_nul)]
-pub struct RawDylibNoNul {
-    #[primary_span]
-    pub span: Span,
 }
 
 #[derive(Diagnostic)]
@@ -300,15 +130,8 @@ pub struct NoLinkModOverride {
 }
 
 #[derive(Diagnostic)]
-#[diag(metadata_unsupported_abi_i686)]
-pub struct UnsupportedAbiI686 {
-    #[primary_span]
-    pub span: Span,
-}
-
-#[derive(Diagnostic)]
-#[diag(metadata_unsupported_abi)]
-pub struct UnsupportedAbi {
+#[diag(metadata_raw_dylib_unsupported_abi)]
+pub struct RawDylibUnsupportedAbi {
     #[primary_span]
     pub span: Span,
 }
@@ -329,6 +152,12 @@ pub struct FailWriteFile<'a> {
 #[derive(Diagnostic)]
 #[diag(metadata_crate_not_panic_runtime)]
 pub struct CrateNotPanicRuntime {
+    pub crate_name: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag(metadata_crate_not_compiler_builtins)]
+pub struct CrateNotCompilerBuiltins {
     pub crate_name: Symbol,
 }
 
@@ -520,6 +349,15 @@ impl<G: EmissionGuarantee> Diagnostic<'_, G> for MultipleCandidates {
 }
 
 #[derive(Diagnostic)]
+#[diag(metadata_full_metadata_not_found)]
+pub(crate) struct FullMetadataNotFound {
+    #[primary_span]
+    pub span: Span,
+    pub flavor: CrateFlavor,
+    pub crate_name: Symbol,
+}
+
+#[derive(Diagnostic)]
 #[diag(metadata_symbol_conflicts_current, code = E0519)]
 pub struct SymbolConflictsCurrent {
     #[primary_span]
@@ -698,37 +536,82 @@ pub struct LibFilenameForm<'a> {
 }
 
 #[derive(Diagnostic)]
-#[diag(metadata_multiple_import_name_type)]
-pub struct MultipleImportNameType {
+#[diag(metadata_wasm_c_abi)]
+pub(crate) struct WasmCAbi {
     #[primary_span]
     pub span: Span,
 }
 
 #[derive(Diagnostic)]
-#[diag(metadata_import_name_type_form)]
-pub struct ImportNameTypeForm {
+#[diag(metadata_incompatible_target_modifiers)]
+#[help]
+#[note]
+#[help(metadata_incompatible_target_modifiers_help_fix)]
+#[help(metadata_incompatible_target_modifiers_help_allow)]
+pub struct IncompatibleTargetModifiers {
     #[primary_span]
     pub span: Span,
+    pub extern_crate: Symbol,
+    pub local_crate: Symbol,
+    pub flag_name: String,
+    pub flag_name_prefixed: String,
+    pub local_value: String,
+    pub extern_value: String,
 }
 
 #[derive(Diagnostic)]
-#[diag(metadata_import_name_type_x86)]
-pub struct ImportNameTypeX86 {
+#[diag(metadata_incompatible_target_modifiers_l_missed)]
+#[help]
+#[note]
+#[help(metadata_incompatible_target_modifiers_help_fix_l_missed)]
+#[help(metadata_incompatible_target_modifiers_help_allow)]
+pub struct IncompatibleTargetModifiersLMissed {
     #[primary_span]
     pub span: Span,
+    pub extern_crate: Symbol,
+    pub local_crate: Symbol,
+    pub flag_name: String,
+    pub flag_name_prefixed: String,
+    pub extern_value: String,
 }
 
 #[derive(Diagnostic)]
-#[diag(metadata_unknown_import_name_type)]
-pub struct UnknownImportNameType<'a> {
+#[diag(metadata_incompatible_target_modifiers_r_missed)]
+#[help]
+#[note]
+#[help(metadata_incompatible_target_modifiers_help_fix_r_missed)]
+#[help(metadata_incompatible_target_modifiers_help_allow)]
+pub struct IncompatibleTargetModifiersRMissed {
     #[primary_span]
     pub span: Span,
-    pub import_name_type: &'a str,
+    pub extern_crate: Symbol,
+    pub local_crate: Symbol,
+    pub flag_name: String,
+    pub flag_name_prefixed: String,
+    pub local_value: String,
 }
 
 #[derive(Diagnostic)]
-#[diag(metadata_import_name_type_raw)]
-pub struct ImportNameTypeRaw {
+#[diag(metadata_unknown_target_modifier_unsafe_allowed)]
+pub struct UnknownTargetModifierUnsafeAllowed {
+    #[primary_span]
+    pub span: Span,
+    pub flag_name: String,
+}
+
+#[derive(Diagnostic)]
+#[diag(metadata_async_drop_types_in_dependency)]
+#[help]
+pub struct AsyncDropTypesInDependency {
+    #[primary_span]
+    pub span: Span,
+    pub extern_crate: Symbol,
+    pub local_crate: Symbol,
+}
+
+#[derive(Diagnostic)]
+#[diag(metadata_raw_dylib_malformed)]
+pub struct RawDylibMalformed {
     #[primary_span]
     pub span: Span,
 }

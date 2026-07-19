@@ -4,16 +4,21 @@
 //! module, and we use to statically check that we only produce snippet
 //! completions if we are allowed to.
 
-use hir::ImportPathConfig;
-use ide_db::{imports::insert_use::InsertUseConfig, SnippetCap};
+use hir::FindPathConfig;
+use ide_db::{
+    MiniCore, SnippetCap,
+    imports::{import_assets::ImportPathConfig, insert_use::InsertUseConfig},
+};
 
-use crate::{snippet::Snippet, CompletionFieldsToResolve};
+use crate::{CompletionFieldsToResolve, snippet::Snippet};
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CompletionConfig {
+#[derive(Clone, Debug)]
+pub struct CompletionConfig<'a> {
     pub enable_postfix_completions: bool,
     pub enable_imports_on_the_fly: bool,
     pub enable_self_on_the_fly: bool,
+    pub enable_auto_iter: bool,
+    pub enable_auto_await: bool,
     pub enable_private_editable: bool,
     pub enable_term_search: bool,
     pub term_search_fuel: u64,
@@ -28,6 +33,15 @@ pub struct CompletionConfig {
     pub snippets: Vec<Snippet>,
     pub limit: Option<usize>,
     pub fields_to_resolve: CompletionFieldsToResolve,
+    pub exclude_flyimport: Vec<(String, AutoImportExclusionType)>,
+    pub exclude_traits: &'a [String],
+    pub minicore: MiniCore<'a>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum AutoImportExclusionType {
+    Always,
+    Methods,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,7 +50,7 @@ pub enum CallableSnippets {
     AddParentheses,
 }
 
-impl CompletionConfig {
+impl CompletionConfig<'_> {
     pub fn postfix_snippets(&self) -> impl Iterator<Item = (&str, &Snippet)> {
         self.snippets
             .iter()
@@ -47,6 +61,15 @@ impl CompletionConfig {
         self.snippets
             .iter()
             .flat_map(|snip| snip.prefix_triggers.iter().map(move |trigger| (&**trigger, snip)))
+    }
+
+    pub fn find_path_config(&self, allow_unstable: bool) -> FindPathConfig {
+        FindPathConfig {
+            prefer_no_std: self.prefer_no_std,
+            prefer_prelude: self.prefer_prelude,
+            prefer_absolute: self.prefer_absolute,
+            allow_unstable,
+        }
     }
 
     pub fn import_path_config(&self) -> ImportPathConfig {

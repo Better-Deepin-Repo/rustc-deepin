@@ -2,13 +2,11 @@ use std::fmt::{Debug, Formatter};
 use std::ops::Range;
 
 use rustc_abi::{FieldIdx, VariantIdx};
-use rustc_data_structures::captures::Captures;
 use rustc_data_structures::fx::{FxHashMap, FxIndexSet, StdEntry};
 use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_index::IndexVec;
-use rustc_index::bit_set::BitSet;
-use rustc_middle::mir::tcx::PlaceTy;
-use rustc_middle::mir::visit::{MutatingUseContext, PlaceContext, Visitor};
+use rustc_index::bit_set::DenseBitSet;
+use rustc_middle::mir::visit::{PlaceContext, Visitor};
 use rustc_middle::mir::*;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use tracing::debug;
@@ -26,9 +24,7 @@ rustc_index::newtype_index!(
 
 rustc_index::newtype_index!(
     /// This index uniquely identifies a tracked place and therefore a slot in [`State`].
-    ///
-    /// It is an implementation detail of this module.
-    struct ValueIndex {}
+    pub struct ValueIndex {}
 );
 
 /// See [`State`].
@@ -126,7 +122,7 @@ impl<V: Clone + HasBottom> State<V> {
     pub fn all_bottom(&self) -> bool {
         match self {
             State::Unreachable => false,
-            State::Reachable(ref values) =>
+            State::Reachable(values) =>
             {
                 #[allow(rustc::potential_query_instability)]
                 values.map.values().all(V::is_bottom)
@@ -213,22 +209,9 @@ impl<V: Clone + HasBottom> State<V> {
     /// The target place must have been flooded before calling this method.
     pub fn insert_place_idx(&mut self, target: PlaceIndex, source: PlaceIndex, map: &Map<'_>) {
         let State::Reachable(values) = self else { return };
-
-        // If both places are tracked, we copy the value to the target.
-        // If the target is tracked, but the source is not, we do nothing, as invalidation has
-        // already been performed.
-        if let Some(target_value) = map.places[target].value_index {
-            if let Some(source_value) = map.places[source].value_index {
-                values.insert(target_value, values.get(source_value).clone());
-            }
-        }
-        for target_child in map.children(target) {
-            // Try to find corresponding child and recurse. Reasoning is similar as above.
-            let projection = map.places[target_child].proj_elem.unwrap();
-            if let Some(source_child) = map.projections.get(&(source, projection)) {
-                self.insert_place_idx(target_child, *source_child, map);
-            }
-        }
+        map.for_each_value_pair(target, source, &mut |target, source| {
+            values.insert(target, values.get(source).clone());
+        });
     }
 
     /// Helper method to interpret `target = result`.
@@ -350,7 +333,7 @@ impl<V: JoinSemiLattice + Clone> JoinSemiLattice for State<V> {
                 *self = other.clone();
                 true
             }
-            (State::Reachable(this), State::Reachable(ref other)) => this.join(other),
+            (State::Reachable(this), State::Reachable(other)) => this.join(other),
         }
     }
 }
@@ -399,12 +382,15 @@ impl<'tcx> Map<'tcx> {
         &mut self,
         tcx: TyCtxt<'tcx>,
         body: &Body<'tcx>,
-        exclude: BitSet<Local>,
+        exclude: DenseBitSet<Local>,
         value_limit: Option<usize>,
     ) {
         // Start by constructing the places for each bare local.
         for (local, decl) in body.local_decls.iter_enumerated() {
             if exclude.contains(local) {
+                continue;
+            }
+            if decl.ty.is_async_drop_in_place_coroutine(tcx) {
                 continue;
             }
 
@@ -676,11 +662,28 @@ impl<'tcx> Map<'tcx> {
         self.find_extra(place, [TrackElem::DerefLen])
     }
 
+    /// Locates the value corresponding to the given place.
+    pub fn value(&self, place: PlaceIndex) -> Option<ValueIndex> {
+        self.places[place].value_index
+    }
+
+    /// Locates the value corresponding to the given place.
+    pub fn find_value(&self, place: PlaceRef<'_>) -> Option<ValueIndex> {
+        self.value(self.find(place)?)
+    }
+
+    /// Locates the value corresponding to the given discriminant.
+    pub fn find_discr_value(&self, place: PlaceRef<'_>) -> Option<ValueIndex> {
+        self.value(self.find_discr(place)?)
+    }
+
+    /// Locates the value corresponding to the given length.
+    pub fn find_len_value(&self, place: PlaceRef<'_>) -> Option<ValueIndex> {
+        self.value(self.find_len(place)?)
+    }
+
     /// Iterate over all direct children.
-    fn children(
-        &self,
-        parent: PlaceIndex,
-    ) -> impl Iterator<Item = PlaceIndex> + Captures<'_> + Captures<'tcx> {
+    fn children(&self, parent: PlaceIndex) -> impl Iterator<Item = PlaceIndex> {
         Children::new(self, parent)
     }
 
@@ -691,7 +694,7 @@ impl<'tcx> Map<'tcx> {
     ///
     /// `tail_elem` allows to support discriminants that are not a place in MIR, but that we track
     /// as such.
-    fn for_each_aliasing_place(
+    pub fn for_each_aliasing_place(
         &self,
         place: PlaceRef<'_>,
         tail_elem: Option<TrackElem>,
@@ -747,11 +750,15 @@ impl<'tcx> Map<'tcx> {
         }
     }
 
+    /// Return the range of value indices inside this place.
+    pub fn values_inside(&self, root: PlaceIndex) -> &[ValueIndex] {
+        let range = self.inner_values[root].clone();
+        &self.inner_values_buffer[range]
+    }
+
     /// Invoke a function on each value in the given place and all descendants.
     fn for_each_value_inside(&self, root: PlaceIndex, f: &mut impl FnMut(ValueIndex)) {
-        let range = self.inner_values[root].clone();
-        let values = &self.inner_values_buffer[range];
-        for &v in values {
+        for &v in self.values_inside(root) {
             f(v)
         }
     }
@@ -777,6 +784,31 @@ impl<'tcx> Map<'tcx> {
             let elem = self.places[child].proj_elem.unwrap();
             if let Some(value) = project(elem, &value) {
                 self.for_each_projection_value(child, value, project, f);
+            }
+        }
+    }
+
+    /// Recursively iterates on each value contained in `target`, paired with matching projection
+    /// inside `source`.
+    pub fn for_each_value_pair(
+        &self,
+        target: PlaceIndex,
+        source: PlaceIndex,
+        f: &mut impl FnMut(ValueIndex, ValueIndex),
+    ) {
+        // If both places are tracked, we copy the value to the target.
+        // If the target is tracked, but the source is not, we do nothing, as invalidation has
+        // already been performed.
+        if let Some(target_value) = self.places[target].value_index
+            && let Some(source_value) = self.places[source].value_index
+        {
+            f(target_value, source_value)
+        }
+        for target_child in self.children(target) {
+            // Try to find corresponding child and recurse. Reasoning is similar as above.
+            let projection = self.places[target_child].proj_elem.unwrap();
+            if let Some(source_child) = self.projections.get(&(source, projection)) {
+                self.for_each_value_pair(target_child, *source_child, f);
             }
         }
     }
@@ -893,7 +925,7 @@ pub fn iter_fields<'tcx>(
                     let field_ty = f_def.ty(tcx, args);
                     let field_ty = tcx
                         .try_normalize_erasing_regions(typing_env, field_ty)
-                        .unwrap_or_else(|_| tcx.erase_regions(field_ty));
+                        .unwrap_or_else(|_| tcx.erase_and_anonymize_regions(field_ty));
                     f(variant, f_index.into(), field_ty);
                 }
             }
@@ -912,19 +944,14 @@ pub fn iter_fields<'tcx>(
 }
 
 /// Returns all locals with projections that have their reference or address taken.
-pub fn excluded_locals(body: &Body<'_>) -> BitSet<Local> {
+pub fn excluded_locals(body: &Body<'_>) -> DenseBitSet<Local> {
     struct Collector {
-        result: BitSet<Local>,
+        result: DenseBitSet<Local>,
     }
 
     impl<'tcx> Visitor<'tcx> for Collector {
         fn visit_place(&mut self, place: &Place<'tcx>, context: PlaceContext, _location: Location) {
-            if (context.is_borrow()
-                || context.is_address_of()
-                || context.is_drop()
-                || context == PlaceContext::MutatingUse(MutatingUseContext::AsmOutput))
-                && !place.is_indirect()
-            {
+            if context.may_observe_address() && !place.is_indirect() {
                 // A pointer to a place could be used to access other places with the same local,
                 // hence we have to exclude the local completely.
                 self.result.insert(place.local);
@@ -932,7 +959,7 @@ pub fn excluded_locals(body: &Body<'_>) -> BitSet<Local> {
         }
     }
 
-    let mut collector = Collector { result: BitSet::new_empty(body.local_decls.len()) };
+    let mut collector = Collector { result: DenseBitSet::new_empty(body.local_decls.len()) };
     collector.visit_body(body);
     collector.result
 }

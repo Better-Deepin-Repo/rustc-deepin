@@ -2,7 +2,7 @@ use crate::core::compiler::CompileKind;
 use crate::util::context::JobsConfig;
 use crate::util::interning::InternedString;
 use crate::util::{CargoResult, GlobalContext, RustfixDiagnosticServer};
-use anyhow::{bail, Context as _};
+use anyhow::{Context as _, bail};
 use cargo_util::ProcessBuilder;
 use serde::ser;
 use std::cell::RefCell;
@@ -21,14 +21,12 @@ pub struct BuildConfig {
     pub keep_going: bool,
     /// Build profile
     pub requested_profile: InternedString,
-    /// The mode we are compiling in.
-    pub mode: CompileMode,
+    /// The intent we are compiling in.
+    pub intent: UserIntent,
     /// `true` to print stdout in JSON format (for machine reading).
     pub message_format: MessageFormat,
     /// Force Cargo to do a full rebuild and treat each target as changed.
     pub force_rebuild: bool,
-    /// Output a build plan to stdout instead of actually compiling.
-    pub build_plan: bool,
     /// Output the unit graph to stdout instead of actually compiling.
     pub unit_graph: bool,
     /// `true` to avoid really compiling.
@@ -48,6 +46,10 @@ pub struct BuildConfig {
     pub future_incompat_report: bool,
     /// Which kinds of build timings to output (empty if none).
     pub timing_outputs: Vec<TimingOutput>,
+    /// Output SBOM precursor files.
+    pub sbom: bool,
+    /// Build compile time dependencies only, e.g., build scripts and proc macros
+    pub compile_time_deps_only: bool,
 }
 
 fn default_parallelism() -> CargoResult<u32> {
@@ -70,7 +72,7 @@ impl BuildConfig {
         jobs: Option<JobsConfig>,
         keep_going: bool,
         requested_targets: &[String],
-        mode: CompileMode,
+        intent: UserIntent,
     ) -> CargoResult<BuildConfig> {
         let cfg = gctx.build_config()?;
         let requested_kinds = CompileKind::from_requested_targets(gctx, requested_targets)?;
@@ -92,22 +94,33 @@ impl BuildConfig {
                 JobsConfig::String(j) => match j.as_str() {
                     "default" => default_parallelism()?,
                     _ => {
-                        anyhow::bail!(
-			    format!("could not parse `{j}`. Number of parallel jobs should be `default` or a number."))
+                        anyhow::bail!(format!(
+                            "could not parse `{j}`. Number of parallel jobs should be `default` or a number."
+                        ))
                     }
                 },
             },
+        };
+
+        // If sbom flag is set, it requires the unstable feature
+        let sbom = match (cfg.sbom, gctx.cli_unstable().sbom) {
+            (Some(sbom), true) => sbom,
+            (Some(_), false) => {
+                gctx.shell()
+                    .warn("ignoring 'sbom' config, pass `-Zsbom` to enable it")?;
+                false
+            }
+            (None, _) => false,
         };
 
         Ok(BuildConfig {
             requested_kinds,
             jobs,
             keep_going,
-            requested_profile: InternedString::new("dev"),
-            mode,
+            requested_profile: "dev".into(),
+            intent,
             message_format: MessageFormat::Human,
             force_rebuild: false,
-            build_plan: false,
             unit_graph: false,
             dry_run: false,
             primary_unit_rustc: None,
@@ -115,6 +128,8 @@ impl BuildConfig {
             export_dir: None,
             future_incompat_report: false,
             timing_outputs: Vec::new(),
+            sbom,
+            compile_time_deps_only: false,
         })
     }
 
@@ -122,10 +137,6 @@ impl BuildConfig {
     /// actually uses JSON is decided in `add_error_format`.
     pub fn emit_json(&self) -> bool {
         matches!(self.message_format, MessageFormat::Json { .. })
-    }
-
-    pub fn test(&self) -> bool {
-        self.mode == CompileMode::Test || self.mode == CompileMode::Bench
     }
 
     pub fn single_requested_kind(&self) -> CargoResult<CompileKind> {
@@ -153,37 +164,25 @@ pub enum MessageFormat {
     Short,
 }
 
-/// The general "mode" for what to do.
-///
-/// This is used for two purposes. The commands themselves pass this in to
-/// `compile_ws` to tell it the general execution strategy. This influences
-/// the default targets selected. The other use is in the `Unit` struct
-/// to indicate what is being done with a specific target.
+/// The specific action to be performed on each `Unit` of work.
 #[derive(Clone, Copy, PartialEq, Debug, Eq, Hash, PartialOrd, Ord)]
 pub enum CompileMode {
-    /// A target being built for a test.
+    /// Test with `rustc`.
     Test,
-    /// Building a target with `rustc` (lib or bin).
+    /// Compile with `rustc`.
     Build,
-    /// Building a target with `rustc` to emit `rmeta` metadata only. If
-    /// `test` is true, then it is also compiled with `--test` to check it like
+    /// Type-check with `rustc` by emitting `rmeta` metadata only.
+    ///
+    /// If `test` is true, then it is also compiled with `--test` to check it like
     /// a test.
     Check { test: bool },
-    /// Used to indicate benchmarks should be built. This is not used in
-    /// `Unit`, because it is essentially the same as `Test` (indicating
-    /// `--test` should be passed to rustc) and by using `Test` instead it
-    /// allows some de-duping of Units to occur.
-    Bench,
-    /// A target that will be documented with `rustdoc`.
-
-    /// If `deps` is true, then it will also document all dependencies.
-    /// if `json` is true, the documentation output is in json format.
-    Doc { deps: bool, json: bool },
-    /// A target that will be tested with `rustdoc`.
+    /// Document with `rustdoc`.
+    Doc,
+    /// Test with `rustdoc`.
     Doctest,
-    /// An example or library that will be scraped for function calls by `rustdoc`.
+    /// Scrape for function calls by `rustdoc`.
     Docscrape,
-    /// A marker for Units that represent the execution of a `build.rs` script.
+    /// Execute the binary built from the `build.rs` script.
     RunCustomBuild,
 }
 
@@ -197,7 +196,6 @@ impl ser::Serialize for CompileMode {
             Test => "test".serialize(s),
             Build => "build".serialize(s),
             Check { .. } => "check".serialize(s),
-            Bench => "bench".serialize(s),
             Doc { .. } => "doc".serialize(s),
             Doctest => "doctest".serialize(s),
             Docscrape => "docscrape".serialize(s),
@@ -232,19 +230,13 @@ impl CompileMode {
     pub fn is_any_test(self) -> bool {
         matches!(
             self,
-            CompileMode::Test
-                | CompileMode::Bench
-                | CompileMode::Check { test: true }
-                | CompileMode::Doctest
+            CompileMode::Test | CompileMode::Check { test: true } | CompileMode::Doctest
         )
     }
 
     /// Returns `true` if this is something that passes `--test` to rustc.
     pub fn is_rustc_test(self) -> bool {
-        matches!(
-            self,
-            CompileMode::Test | CompileMode::Bench | CompileMode::Check { test: true }
-        )
+        matches!(self, CompileMode::Test | CompileMode::Check { test: true })
     }
 
     /// Returns `true` if this is the *execution* of a `build.rs` script.
@@ -257,9 +249,74 @@ impl CompileMode {
     /// Note that this also returns `true` for building libraries, so you also
     /// have to check the target.
     pub fn generates_executable(self) -> bool {
+        matches!(self, CompileMode::Test | CompileMode::Build)
+    }
+}
+
+/// Represents the high-level operation requested by the user.
+///
+/// It determines which "Cargo targets" are selected by default and influences
+/// how they will be processed. This is derived from the Cargo command the user
+/// invoked (like `cargo build` or `cargo test`).
+///
+/// Unlike [`CompileMode`], which describes the specific compilation steps for
+/// individual units, [`UserIntent`] represents the overall goal of the build
+/// process as specified by the user.
+///
+/// For example, when a user runs `cargo test`, the intent is [`UserIntent::Test`],
+/// but this might result in multiple [`CompileMode`]s for different units.
+#[derive(Clone, Copy, Debug)]
+pub enum UserIntent {
+    /// Build benchmark binaries, e.g., `cargo bench`
+    Bench,
+    /// Build binaries and libraries, e.g., `cargo run`, `cargo install`, `cargo build`.
+    Build,
+    /// Perform type-check, e.g., `cargo check`.
+    Check { test: bool },
+    /// Document packages.
+    ///
+    /// If `deps` is true, then it will also document all dependencies.
+    /// if `json` is true, the documentation output is in json format.
+    Doc { deps: bool, json: bool },
+    /// Build doctest binaries, e.g., `cargo test --doc`
+    Doctest,
+    /// Build test binaries, e.g., `cargo test`
+    Test,
+}
+
+impl UserIntent {
+    /// Returns `true` if this is generating documentation.
+    pub fn is_doc(self) -> bool {
+        matches!(self, UserIntent::Doc { .. })
+    }
+
+    /// User wants rustdoc output in JSON format.
+    pub fn wants_doc_json_output(self) -> bool {
+        matches!(self, UserIntent::Doc { json: true, .. })
+    }
+
+    /// User wants to document also for dependencies.
+    pub fn wants_deps_docs(self) -> bool {
+        matches!(self, UserIntent::Doc { deps: true, .. })
+    }
+
+    /// Returns `true` if this is any type of test (test, benchmark, doc test, or
+    /// check test).
+    pub fn is_any_test(self) -> bool {
         matches!(
             self,
-            CompileMode::Test | CompileMode::Bench | CompileMode::Build
+            UserIntent::Test
+                | UserIntent::Bench
+                | UserIntent::Check { test: true }
+                | UserIntent::Doctest
+        )
+    }
+
+    /// Returns `true` if this is something that passes `--test` to rustc.
+    pub fn is_rustc_test(self) -> bool {
+        matches!(
+            self,
+            UserIntent::Test | UserIntent::Bench | UserIntent::Check { test: true }
         )
     }
 }

@@ -1,11 +1,7 @@
 //! Performance collection for rust-lang/rust compilation.
 //!
-//! This benchmarks a x.py build --stage 0 compiler/rustc invocation on the
+//! This benchmarks a `x.py build compiler/rustc` invocation on the
 //! latest master compiler.
-//!
-//! We don't run the (more typical) stage 1 library/test build because there's
-//! no real reason for us to compile the standard library twice, and it avoids
-//! having to think about how to deduplicate results.
 
 use crate::toolchain::Toolchain;
 use crate::utils::git::get_rustc_perf_commit;
@@ -91,18 +87,21 @@ async fn record(
     .arg("--set")
     .arg("rust.deny-warnings=false")
     .arg("--set")
-    .arg(&format!("build.rustc={}", fake_rustc.to_str().unwrap()))
+    .arg(format!("build.rustc={}", fake_rustc.to_str().unwrap()))
     .env("RUSTC_PERF_REAL_RUSTC", &toolchain.components.rustc)
     .arg("--set")
-    .arg(&format!(
+    .arg(format!(
         "build.cargo={}",
         toolchain.components.cargo.to_str().unwrap()
     ))
+    // Do not compile all default tools
+    .arg("--set")
+    .arg("build.extended=false")
     .status()
     .context("configuring")?;
     assert!(status.success(), "configure successful");
 
-    let output = crate::command_output(
+    let output = crate::command_output_stream(
         Command::new("python3")
             .arg(
                 checkout
@@ -112,9 +111,12 @@ async fn record(
             )
             .current_dir(checkout)
             .env("RUSTC_PERF_REAL_RUSTC", &toolchain.components.rustc)
+            // When overriding the stage0 compiler, we want to avoid bootstrap's target checks. See
+            // https://github.com/rust-lang/rust/pull/129651 for more details.
+            .env("BOOTSTRAP_SKIP_TARGET_SANITY", "1")
             .arg("build")
             .arg("--stage")
-            .arg("0")
+            .arg("1")
             // We want bootstrap and the Cargos it spawns to have no parallelism --
             // if multiple rustcs are competing for jobserver tokens, we introduce
             // quite a bit of variance.
@@ -141,6 +143,14 @@ async fn record(
         }
     }
 
+    // Sanity check
+    if timing_data.is_empty() {
+        return Err(anyhow::anyhow!(
+            "rustc benchmark failed to produce timing data\nSTDOUT:\n{}\n\nSTDERR:{timings}\n",
+            String::from_utf8_lossy(&output.stdout)
+        ));
+    }
+
     let version = get_rustc_perf_commit();
     let collection = conn.collection_id(&version).await;
 
@@ -153,37 +163,7 @@ async fn record(
 }
 
 fn checkout(artifact: &ArtifactId) -> anyhow::Result<()> {
-    if Path::new("rust").exists() {
-        let mut status = Command::new("git")
-            .current_dir("rust")
-            .arg("fetch")
-            .arg("origin")
-            .arg(match artifact {
-                ArtifactId::Commit(c) => c.sha.as_str(),
-                ArtifactId::Tag(id) => id.as_str(),
-            })
-            .status()
-            .context("git fetch origin")?;
-
-        if !status.success() {
-            log::warn!(
-                "git fetch origin {} failed, this will likely break the build",
-                artifact
-            );
-        }
-
-        // Regardless, we fetch the default branch. Upstream Rust started using `git merge-base`
-        // recently, which (reasonably) finds the wrong base if we think e.g. origin/master
-        // diverged thousands of commits ago.
-        status = Command::new("git")
-            .current_dir("rust")
-            .arg("fetch")
-            .arg("origin")
-            .arg("master")
-            .status()
-            .context("git fetch origin master")?;
-        assert!(status.success(), "git fetch successful");
-    } else {
+    if !Path::new("rust").exists() {
         let status = Command::new("git")
             .arg("clone")
             .arg("https://github.com/rust-lang/rust")
@@ -191,5 +171,36 @@ fn checkout(artifact: &ArtifactId) -> anyhow::Result<()> {
             .context("git clone")?;
         assert!(status.success(), "git clone successful");
     }
+
+    let mut status = Command::new("git")
+        .current_dir("rust")
+        .arg("fetch")
+        .arg("origin")
+        .arg(match artifact {
+            ArtifactId::Commit(c) => c.sha.as_str(),
+            ArtifactId::Tag(id) => id.as_str(),
+        })
+        .status()
+        .context("git fetch origin")?;
+
+    if !status.success() {
+        log::warn!(
+            "git fetch origin {} failed, this will likely break the build",
+            artifact
+        );
+    }
+
+    // Regardless, we fetch the default branch. Upstream Rust started using `git merge-base`
+    // recently, which (reasonably) finds the wrong base if we think e.g. origin/master
+    // diverged thousands of commits ago.
+    status = Command::new("git")
+        .current_dir("rust")
+        .arg("fetch")
+        .arg("origin")
+        .arg("HEAD")
+        .status()
+        .context("git fetch origin HEAD")?;
+    assert!(status.success(), "git fetch successful");
+
     Ok(())
 }

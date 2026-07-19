@@ -3795,35 +3795,6 @@ The tracking issue for this feature is: [#64797]
         deny_since: None,
     },
     Lint {
-        label: "cfg_boolean_literals",
-        description: r##"# `cfg_boolean_literals`
-
-The tracking issue for this feature is: [#131204]
-
-[#131204]: https://github.com/rust-lang/rust/issues/131204
-
-------------------------
-
-The `cfg_boolean_literals` feature makes it possible to use the `true`/`false`
-literal as cfg predicate. They always evaluate to true/false respectively.
-
-## Examples
-
-```rust
-#![feature(cfg_boolean_literals)]
-
-#[cfg(true)]
-const A: i32 = 5;
-
-#[cfg(all(false))]
-const A: i32 = 58 * 89;
-```
-"##,
-        default_severity: Severity::Allow,
-        warn_since: None,
-        deny_since: None,
-    },
-    Lint {
         label: "cfg_eval",
         description: r##"# `cfg_eval`
 
@@ -4487,20 +4458,6 @@ The tracking issue for this feature is: [#133214]
         deny_since: None,
     },
     Lint {
-        label: "const_eq_ignore_ascii_case",
-        description: r##"# `const_eq_ignore_ascii_case`
-
-The tracking issue for this feature is: [#131719]
-
-[#131719]: https://github.com/rust-lang/rust/issues/131719
-
-------------------------
-"##,
-        default_severity: Severity::Allow,
-        warn_since: None,
-        deny_since: None,
-    },
-    Lint {
         label: "const_eval_select",
         description: r##"# `const_eval_select`
 
@@ -4754,9 +4711,9 @@ The tracking issue for this feature is: [#133668]
         label: "const_trait_impl",
         description: r##"# `const_trait_impl`
 
-The tracking issue for this feature is: [#67792]
+The tracking issue for this feature is: [#143874]
 
-[#67792]: https://github.com/rust-lang/rust/issues/67792
+[#143874]: https://github.com/rust-lang/rust/issues/143874
 
 ------------------------
 "##,
@@ -5818,7 +5775,7 @@ The tracking issue for this feature is: [#120301]
 
 ------------------------
 
-Add the methods `from_mins`, `from_hours` and `from_days` to `Duration`.
+Add the methods `from_days` and `from_weeks` to `Duration`.
 "##,
         default_severity: Severity::Allow,
         warn_since: None,
@@ -7554,7 +7511,7 @@ Most lang items are defined by `core`, but if you're trying to build
 an executable without the `std` crate, you might run into the need
 for lang item definitions.
 
-[personality]: https://github.com/rust-lang/rust/blob/master/library/std/src/sys/personality/gcc.rs
+[personality]: https://github.com/rust-lang/rust/blob/HEAD/library/std/src/sys/personality/gcc.rs
 
 ## Example: Implementing a `Box`
 
@@ -7629,7 +7586,7 @@ return a valid pointer, and so needs to do the check internally.
 
 An up-to-date list of all language items can be found [here] in the compiler code.
 
-[here]: https://github.com/rust-lang/rust/blob/master/compiler/rustc_hir/src/lang_items.rs
+[here]: https://github.com/rust-lang/rust/blob/HEAD/compiler/rustc_hir/src/lang_items.rs
 "##,
         default_severity: Severity::Allow,
         warn_since: None,
@@ -9107,8 +9064,8 @@ The tracking issue for this feature is: [#27721]
         deny_since: None,
     },
     Lint {
-        label: "pattern_complexity",
-        description: r##"# `pattern_complexity`
+        label: "pattern_complexity_limit",
+        description: r##"# `pattern_complexity_limit`
 
 This feature has no tracking issue, and is therefore likely internal to the compiler, not being intended for general use.
 
@@ -10749,20 +10706,6 @@ The tracking issue for this feature is: [#77998]
         deny_since: None,
     },
     Lint {
-        label: "strict_overflow_ops",
-        description: r##"# `strict_overflow_ops`
-
-The tracking issue for this feature is: [#118260]
-
-[#118260]: https://github.com/rust-lang/rust/issues/118260
-
-------------------------
-"##,
-        default_severity: Severity::Allow,
-        warn_since: None,
-        deny_since: None,
-    },
-    Lint {
         label: "strict_provenance_atomic_ptr",
         description: r##"# `strict_provenance_atomic_ptr`
 
@@ -10780,9 +10723,9 @@ The tracking issue for this feature is: [#99108]
         label: "strict_provenance_lints",
         description: r##"# `strict_provenance_lints`
 
-The tracking issue for this feature is: [#95228]
+The tracking issue for this feature is: [#130351]
 
-[#95228]: https://github.com/rust-lang/rust/issues/95228
+[#130351]: https://github.com/rust-lang/rust/issues/130351
 -----
 
 The `strict_provenance_lints` feature allows to enable the `fuzzy_provenance_casts` and `lossy_provenance_casts` lints.
@@ -11903,34 +11846,6 @@ fn main() {}
         deny_since: None,
     },
     Lint {
-        label: "unchecked_neg",
-        description: r##"# `unchecked_neg`
-
-The tracking issue for this feature is: [#85122]
-
-[#85122]: https://github.com/rust-lang/rust/issues/85122
-
-------------------------
-"##,
-        default_severity: Severity::Allow,
-        warn_since: None,
-        deny_since: None,
-    },
-    Lint {
-        label: "unchecked_shifts",
-        description: r##"# `unchecked_shifts`
-
-The tracking issue for this feature is: [#85122]
-
-[#85122]: https://github.com/rust-lang/rust/issues/85122
-
-------------------------
-"##,
-        default_severity: Severity::Allow,
-        warn_since: None,
-        deny_since: None,
-    },
-    Lint {
         label: "unicode_internals",
         description: r##"# `unicode_internals`
 
@@ -12311,40 +12226,6 @@ fn main() {
 ```
 
 will unnecessarily extend the stack frame.
-"##,
-        default_severity: Severity::Allow,
-        warn_since: None,
-        deny_since: None,
-    },
-    Lint {
-        label: "unsized_tuple_coercion",
-        description: r##"# `unsized_tuple_coercion`
-
-The tracking issue for this feature is: [#42877]
-
-[#42877]: https://github.com/rust-lang/rust/issues/42877
-
-------------------------
-
-This is a part of [RFC0401]. According to the RFC, there should be an implementation like this:
-
-```rust,ignore (partial-example)
-impl<..., T, U: ?Sized> Unsized<(..., U)> for (..., T) where T: Unsized<U> {}
-```
-
-This implementation is currently gated behind `#[feature(unsized_tuple_coercion)]` to avoid insta-stability. Therefore you can use it like this:
-
-```rust
-#![feature(unsized_tuple_coercion)]
-
-fn main() {
-    let x : ([i32; 3], [i32; 3]) = ([1, 2, 3], [4, 5, 6]);
-    let y : &([i32; 3], [i32]) = &x;
-    assert_eq!(y.1[0], 4);
-}
-```
-
-[RFC0401]: https://github.com/rust-lang/rfcs/blob/master/text/0401-coercions.md
 "##,
         default_severity: Severity::Allow,
         warn_since: None,
@@ -15086,7 +14967,7 @@ cannot be represented as the underlying type without loss."##,
     },
     Lint {
         label: "clippy::manual_bits",
-        description: r##"Checks for usage of `std::mem::size_of::<T>() * 8` when
+        description: r##"Checks for usage of `size_of::<T>() * 8` when
 `T::BITS` is available."##,
         default_severity: Severity::Allow,
         warn_since: None,
@@ -17428,7 +17309,7 @@ count of elements of type `T`"##,
     },
     Lint {
         label: "clippy::size_of_ref",
-        description: r##"Checks for calls to `std::mem::size_of_val()` where the argument is
+        description: r##"Checks for calls to `size_of_val()` where the argument is
 a reference to a reference."##,
         default_severity: Severity::Allow,
         warn_since: None,

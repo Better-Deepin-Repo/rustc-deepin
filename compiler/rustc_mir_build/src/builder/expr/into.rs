@@ -4,16 +4,20 @@ use rustc_ast::{AsmMacro, InlineAsmOptions};
 use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_hir as hir;
+use rustc_hir::lang_items::LangItem;
 use rustc_middle::mir::*;
 use rustc_middle::span_bug;
 use rustc_middle::thir::*;
-use rustc_middle::ty::CanonicalUserTypeAnnotation;
+use rustc_middle::ty::{self, CanonicalUserTypeAnnotation, Ty};
+use rustc_span::DUMMY_SP;
 use rustc_span::source_map::Spanned;
+use rustc_trait_selection::infer::InferCtxtExt;
 use tracing::{debug, instrument};
 
 use crate::builder::expr::category::{Category, RvalueFunc};
-use crate::builder::matches::DeclareLetBindings;
+use crate::builder::matches::{DeclareLetBindings, HasMatchGuard};
 use crate::builder::{BlockAnd, BlockAndExtension, BlockFrame, Builder, NeedsTemporary};
+use crate::errors::{LoopMatchArmWithGuard, LoopMatchUnsupportedType};
 
 impl<'a, 'tcx> Builder<'a, 'tcx> {
     /// Compile `expr`, storing the result into `destination`, which
@@ -28,7 +32,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
         // since we frequently have to reference `self` from within a
         // closure, where `self` would be shadowed, it's easier to
         // just use the name `this` uniformly
-        let this = self;
+        let this = self; // See "LET_THIS_SELF".
         let expr = &this.thir[expr_id];
         let expr_span = expr.span;
         let source_info = this.source_info(expr_span);
@@ -155,8 +159,6 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 let condition_scope = this.local_scope();
                 let source_info = this.source_info(expr.span);
 
-                this.visit_coverage_branch_operation(op, expr.span);
-
                 // We first evaluate the left-hand side of the predicate ...
                 let (then_block, else_block) =
                     this.in_if_then_scope(condition_scope, expr.span, |this| {
@@ -220,10 +222,14 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 this.in_breakable_scope(Some(loop_block), destination, expr_span, move |this| {
                     // conduct the test, if necessary
                     let body_block = this.cfg.start_new_block();
-                    this.cfg.terminate(loop_block, source_info, TerminatorKind::FalseUnwind {
-                        real_target: body_block,
-                        unwind: UnwindAction::Continue,
-                    });
+                    this.cfg.terminate(
+                        loop_block,
+                        source_info,
+                        TerminatorKind::FalseUnwind {
+                            real_target: body_block,
+                            unwind: UnwindAction::Continue,
+                        },
+                    );
                     this.diverge_from(loop_block);
 
                     // The “return” value of the loop body must always be a unit. We therefore
@@ -232,6 +238,128 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     // Execute the body, branching back to the test.
                     let body_block_end = this.expr_into_dest(tmp, body_block, body).into_block();
                     this.cfg.goto(body_block_end, source_info, loop_block);
+
+                    // Loops are only exited by `break` expressions.
+                    None
+                })
+            }
+            ExprKind::LoopMatch {
+                state,
+                region_scope,
+                match_data: box LoopMatchMatchData { box ref arms, span: match_span, scrutinee },
+            } => {
+                // Intuitively, this is a combination of a loop containing a labeled block
+                // containing a match.
+                //
+                // The only new bit here is that the lowering of the match is wrapped in a
+                // `in_const_continuable_scope`, which makes the match arms and their target basic
+                // block available to the lowering of `#[const_continue]`.
+
+                fn is_supported_loop_match_type(ty: Ty<'_>) -> bool {
+                    match ty.kind() {
+                        ty::Uint(_) | ty::Int(_) | ty::Float(_) | ty::Bool | ty::Char => true,
+                        ty::Adt(adt_def, _) => match adt_def.adt_kind() {
+                            ty::AdtKind::Struct | ty::AdtKind::Union => false,
+                            ty::AdtKind::Enum => {
+                                adt_def.variants().iter().all(|v| v.fields.is_empty())
+                            }
+                        },
+                        _ => false,
+                    }
+                }
+
+                let state_ty = this.thir.exprs[state].ty;
+                if !is_supported_loop_match_type(state_ty) {
+                    let span = this.thir.exprs[state].span;
+                    this.tcx.dcx().emit_fatal(LoopMatchUnsupportedType { span, ty: state_ty })
+                }
+
+                let loop_block = this.cfg.start_new_block();
+
+                // Start the loop.
+                this.cfg.goto(block, source_info, loop_block);
+
+                this.in_breakable_scope(Some(loop_block), destination, expr_span, |this| {
+                    // Logic for `loop`.
+                    let mut body_block = this.cfg.start_new_block();
+                    this.cfg.terminate(
+                        loop_block,
+                        source_info,
+                        TerminatorKind::FalseUnwind {
+                            real_target: body_block,
+                            unwind: UnwindAction::Continue,
+                        },
+                    );
+                    this.diverge_from(loop_block);
+
+                    // Logic for `match`.
+                    let scrutinee_span = this.thir.exprs[scrutinee].span;
+                    let scrutinee_place_builder = unpack!(
+                        body_block = this.lower_scrutinee(body_block, scrutinee, scrutinee_span)
+                    );
+
+                    let match_start_span = match_span.shrink_to_lo().to(scrutinee_span);
+
+                    let mut patterns = Vec::with_capacity(arms.len());
+                    for &arm_id in arms.iter() {
+                        let arm = &this.thir[arm_id];
+
+                        if let Some(guard) = arm.guard {
+                            let span = this.thir.exprs[guard].span;
+                            this.tcx.dcx().emit_fatal(LoopMatchArmWithGuard { span })
+                        }
+
+                        patterns.push((&*arm.pattern, HasMatchGuard::No));
+                    }
+
+                    // The `built_tree` maps match arms to their basic block (where control flow
+                    // jumps to when a value matches the arm). This structure is stored so that a
+                    // `#[const_continue]` can figure out what basic block to jump to.
+                    let built_tree = this.lower_match_tree(
+                        body_block,
+                        scrutinee_span,
+                        &scrutinee_place_builder,
+                        match_start_span,
+                        patterns,
+                        false,
+                    );
+
+                    let state_place = scrutinee_place_builder.to_place(this);
+
+                    // This is logic for the labeled block: a block is a drop scope, hence
+                    // `in_scope`, and a labeled block can be broken out of with a `break 'label`,
+                    // hence the `in_breakable_scope`.
+                    //
+                    // Then `in_const_continuable_scope` stores information for the lowering of
+                    // `#[const_continue]`, and finally the match is lowered in the standard way.
+                    unpack!(
+                        body_block = this.in_scope(
+                            (region_scope, source_info),
+                            LintLevel::Inherited,
+                            move |this| {
+                                this.in_breakable_scope(None, state_place, expr_span, |this| {
+                                    Some(this.in_const_continuable_scope(
+                                        Box::from(arms),
+                                        built_tree.clone(),
+                                        state_place,
+                                        expr_span,
+                                        |this| {
+                                            this.lower_match_arms(
+                                                state_place,
+                                                scrutinee_place_builder,
+                                                scrutinee_span,
+                                                arms,
+                                                built_tree,
+                                                this.source_info(match_span),
+                                            )
+                                        },
+                                    ))
+                                })
+                            }
+                        )
+                    );
+
+                    this.cfg.goto(body_block, source_info, loop_block);
 
                     // Loops are only exited by `break` expressions.
                     None
@@ -254,32 +382,76 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
 
                 debug!("expr_into_dest: fn_span={:?}", fn_span);
 
-                this.cfg.terminate(block, source_info, TerminatorKind::Call {
-                    func: fun,
-                    args,
-                    unwind: UnwindAction::Continue,
-                    destination,
-                    // The presence or absence of a return edge affects control-flow sensitive
-                    // MIR checks and ultimately whether code is accepted or not. We can only
-                    // omit the return edge if a return type is visibly uninhabited to a module
-                    // that makes the call.
-                    target: expr
-                        .ty
-                        .is_inhabited_from(
-                            this.tcx,
-                            this.parent_module,
-                            this.infcx.typing_env(this.param_env),
-                        )
-                        .then_some(success),
-                    call_source: if from_hir_call {
-                        CallSource::Normal
-                    } else {
-                        CallSource::OverloadedOperator
+                this.cfg.terminate(
+                    block,
+                    source_info,
+                    TerminatorKind::Call {
+                        func: fun,
+                        args,
+                        unwind: UnwindAction::Continue,
+                        destination,
+                        target: Some(success),
+                        call_source: if from_hir_call {
+                            CallSource::Normal
+                        } else {
+                            CallSource::OverloadedOperator
+                        },
+                        fn_span,
                     },
-                    fn_span,
-                });
+                );
                 this.diverge_from(block);
                 success.unit()
+            }
+            ExprKind::ByUse { expr, span } => {
+                let place = unpack!(block = this.as_place(block, expr));
+                let ty = place.ty(&this.local_decls, this.tcx).ty;
+
+                if this.tcx.type_is_copy_modulo_regions(this.infcx.typing_env(this.param_env), ty) {
+                    this.cfg.push_assign(
+                        block,
+                        source_info,
+                        destination,
+                        Rvalue::Use(Operand::Copy(place)),
+                    );
+                    block.unit()
+                } else if this.infcx.type_is_use_cloned_modulo_regions(this.param_env, ty) {
+                    // Convert `expr.use` to a call like `Clone::clone(&expr)`
+                    let success = this.cfg.start_new_block();
+                    let clone_trait = this.tcx.require_lang_item(LangItem::Clone, span);
+                    let clone_fn = this.tcx.associated_item_def_ids(clone_trait)[0];
+                    let func = Operand::function_handle(this.tcx, clone_fn, [ty.into()], expr_span);
+                    let ref_ty = Ty::new_imm_ref(this.tcx, this.tcx.lifetimes.re_erased, ty);
+                    let ref_place = this.temp(ref_ty, span);
+                    this.cfg.push_assign(
+                        block,
+                        source_info,
+                        ref_place,
+                        Rvalue::Ref(this.tcx.lifetimes.re_erased, BorrowKind::Shared, place),
+                    );
+                    this.cfg.terminate(
+                        block,
+                        source_info,
+                        TerminatorKind::Call {
+                            func,
+                            args: [Spanned { node: Operand::Move(ref_place), span: DUMMY_SP }]
+                                .into(),
+                            destination,
+                            target: Some(success),
+                            unwind: UnwindAction::Unreachable,
+                            call_source: CallSource::Use,
+                            fn_span: expr_span,
+                        },
+                    );
+                    success.unit()
+                } else {
+                    this.cfg.push_assign(
+                        block,
+                        source_info,
+                        destination,
+                        Rvalue::Use(Operand::Move(place)),
+                    );
+                    block.unit()
+                }
             }
             ExprKind::Use { source } => this.expr_into_dest(destination, block, source),
             ExprKind::Borrow { arg, borrow_kind } => {
@@ -303,7 +475,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                     hir::Mutability::Not => this.as_read_only_place(block, arg),
                     hir::Mutability::Mut => this.as_place(block, arg),
                 };
-                let address_of = Rvalue::RawPtr(mutability, unpack!(block = place));
+                let address_of = Rvalue::RawPtr(mutability.into(), unpack!(block = place));
                 this.cfg.push_assign(block, source_info, destination, address_of);
                 block.unit()
             }
@@ -474,15 +646,9 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                                 }),
                             }
                         }
-                        thir::InlineAsmOperand::SymFn { value, span } => {
-                            mir::InlineAsmOperand::SymFn {
-                                value: Box::new(ConstOperand {
-                                    span,
-                                    user_ty: None,
-                                    const_: value,
-                                }),
-                            }
-                        }
+                        thir::InlineAsmOperand::SymFn { value } => mir::InlineAsmOperand::SymFn {
+                            value: Box::new(this.as_constant(&this.thir[value])),
+                        },
                         thir::InlineAsmOperand::SymStatic { def_id } => {
                             mir::InlineAsmOperand::SymStatic { def_id }
                         }
@@ -494,9 +660,11 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                             let tmp = this.get_unit_temp();
                             let target =
                                 this.ast_block(tmp, target, block, source_info).into_block();
-                            this.cfg.terminate(target, source_info, TerminatorKind::Goto {
-                                target: destination_block,
-                            });
+                            this.cfg.terminate(
+                                target,
+                                source_info,
+                                TerminatorKind::Goto { target: destination_block },
+                            );
 
                             mir::InlineAsmOperand::Label { target_index }
                         }
@@ -508,26 +676,27 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                 }
 
                 let asm_macro = match asm_macro {
-                    AsmMacro::Asm => InlineAsmMacro::Asm,
-                    AsmMacro::GlobalAsm => {
-                        span_bug!(expr_span, "unexpected global_asm! in inline asm")
-                    }
+                    AsmMacro::Asm | AsmMacro::GlobalAsm => InlineAsmMacro::Asm,
                     AsmMacro::NakedAsm => InlineAsmMacro::NakedAsm,
                 };
 
-                this.cfg.terminate(block, source_info, TerminatorKind::InlineAsm {
-                    asm_macro,
-                    template,
-                    operands,
-                    options,
-                    line_spans,
-                    targets: targets.into_boxed_slice(),
-                    unwind: if options.contains(InlineAsmOptions::MAY_UNWIND) {
-                        UnwindAction::Continue
-                    } else {
-                        UnwindAction::Unreachable
+                this.cfg.terminate(
+                    block,
+                    source_info,
+                    TerminatorKind::InlineAsm {
+                        asm_macro,
+                        template,
+                        operands,
+                        options,
+                        line_spans,
+                        targets: targets.into_boxed_slice(),
+                        unwind: if options.contains(InlineAsmOptions::MAY_UNWIND) {
+                            UnwindAction::Continue
+                        } else {
+                            UnwindAction::Unreachable
+                        },
                     },
-                });
+                );
                 if options.contains(InlineAsmOptions::MAY_UNWIND) {
                     this.diverge_from(block);
                 }
@@ -542,6 +711,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             }
 
             ExprKind::Continue { .. }
+            | ExprKind::ConstContinue { .. }
             | ExprKind::Break { .. }
             | ExprKind::Return { .. }
             | ExprKind::Become { .. } => {
@@ -554,7 +724,9 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             ExprKind::VarRef { .. }
             | ExprKind::UpvarRef { .. }
             | ExprKind::PlaceTypeAscription { .. }
-            | ExprKind::ValueTypeAscription { .. } => {
+            | ExprKind::ValueTypeAscription { .. }
+            | ExprKind::PlaceUnwrapUnsafeBinder { .. }
+            | ExprKind::ValueUnwrapUnsafeBinder { .. } => {
                 debug_assert!(Category::of(&expr.kind) == Some(Category::Place));
 
                 let place = unpack!(block = this.as_place(block, expr_id));
@@ -585,12 +757,11 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
                         this.as_operand(block, scope, value, LocalInfo::Boring, NeedsTemporary::No)
                 );
                 let resume = this.cfg.start_new_block();
-                this.cfg.terminate(block, source_info, TerminatorKind::Yield {
-                    value,
-                    resume,
-                    resume_arg: destination,
-                    drop: None,
-                });
+                this.cfg.terminate(
+                    block,
+                    source_info,
+                    TerminatorKind::Yield { value, resume, resume_arg: destination, drop: None },
+                );
                 this.coroutine_drop_cleanup(block);
                 resume.unit()
             }
@@ -613,7 +784,7 @@ impl<'a, 'tcx> Builder<'a, 'tcx> {
             | ExprKind::ConstParam { .. }
             | ExprKind::ThreadLocalRef(_)
             | ExprKind::StaticRef { .. }
-            | ExprKind::OffsetOf { .. } => {
+            | ExprKind::WrapUnsafeBinder { .. } => {
                 debug_assert!(match Category::of(&expr.kind).unwrap() {
                     // should be handled above
                     Category::Rvalue(RvalueFunc::Into) => false,

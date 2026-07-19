@@ -19,7 +19,8 @@ Target triplets available:
 
 ## Target maintainers
 
-- B I Mohammed Abbas ([@biabbas](https://github.com/biabbas))
+[@biabbas](https://github.com/biabbas)
+[@hax0kartik](https://github.com/hax0kartik)
 
 ## Requirements
 
@@ -33,7 +34,7 @@ Rust for each target can be cross-compiled with its specific target vsb configur
 
 ## Building the target
 
-You can build Rust with support for the targets by adding it to the `target` list in `config.toml`. In addition the workbench and wr-cc have to configured and activated.
+You can build Rust with support for the targets by adding it to the `target` list in `bootstrap.toml`. In addition the workbench and wr-cc have to configured and activated.
 
 ```toml
 [build]

@@ -2,11 +2,11 @@
 
 use std::fs;
 
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
 use cargo_test_support::{
-    basic_manifest, git, main_file, project,
+    Execs, basic_manifest, git, main_file, project,
     registry::{Package, RegistryBuilder},
-    str, Execs,
+    str,
 };
 
 #[cargo_test]
@@ -184,7 +184,7 @@ fn cargo_compile_offline_not_try_update() {
 [ERROR] no matching package named `not_cached_dep` found
 location searched: crates.io index
 required by package `bar v0.1.0 ([ROOT]/bar)`
-As a reminder, you're using offline mode (--offline) which can sometimes cause surprising resolution failures, if this error is too confusing you may wish to retry without the offline flag.
+As a reminder, you're using offline mode (--offline) which can sometimes cause surprising resolution failures, if this error is too confusing you may wish to retry without `--offline`.
 
 "#]])
         .run();
@@ -195,7 +195,7 @@ As a reminder, you're using offline mode (--offline) which can sometimes cause s
 [ERROR] no matching package named `not_cached_dep` found
 location searched: crates.io index
 required by package `bar v0.1.0 ([ROOT]/bar)`
-As a reminder, you're using offline mode (--offline) which can sometimes cause surprising resolution failures, if this error is too confusing you may wish to retry without the offline flag.
+As a reminder, you're using offline mode (--offline) which can sometimes cause surprising resolution failures, if this error is too confusing you may wish to retry without `--offline`.
 
 "#]]).run();
 }
@@ -384,13 +384,13 @@ fn update_offline_not_cached() {
 
     p.cargo("update --offline")
         .with_status(101)
-        .with_stderr_data(str![["
+        .with_stderr_data(str![[r#"
 [ERROR] no matching package named `bar` found
 location searched: [..]
 required by package `foo v0.0.1 ([ROOT]/foo)`
-As a reminder, you're using offline mode (--offline) which can sometimes cause surprising resolution failures, if this error is too confusing you may wish to retry without the offline flag.
+As a reminder, you're using offline mode (--offline) which can sometimes cause surprising resolution failures, if this error is too confusing you may wish to retry without `--offline`.
 
-"]])
+"#]])
         .run();
 }
 
@@ -607,7 +607,7 @@ candidate versions found which didn't match: 1.0.0
 location searched: `dummy-registry` index (which is replacing registry `crates-io`)
 required by package `foo v0.1.0 ([ROOT]/foo)`
 perhaps a crate was updated and forgotten to be re-vendored?
-As a reminder, you're using offline mode (--offline) which can sometimes cause surprising resolution failures, if this error is too confusing you may wish to retry without the offline flag.
+As a reminder, you're using offline mode (--offline) which can sometimes cause surprising resolution failures, if this error is too confusing you may wish to retry without `--offline`.
 
 "#]]
         )
@@ -754,7 +754,7 @@ fn main(){
 [ERROR] no matching package named `present_dep` found
 location searched: `dummy-registry` index (which is replacing registry `crates-io`)
 required by package `foo v0.1.0 ([ROOT]/foo)`
-As a reminder, you're using offline mode (--offline) which can sometimes cause surprising resolution failures, if this error is too confusing you may wish to retry without the offline flag.
+As a reminder, you're using offline mode (--offline) which can sometimes cause surprising resolution failures, if this error is too confusing you may wish to retry without `--offline`.
 
 "#]]
         )
@@ -767,8 +767,8 @@ fn offline_and_frozen_and_no_lock() {
     p.cargo("check --frozen --offline")
         .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] the lock file [ROOT]/foo/Cargo.lock needs to be updated but --frozen was passed to prevent this
-If you want to try to generate the lock file without accessing the network, remove the --frozen flag and use --offline instead.
+[ERROR] cannot create the lock file [ROOT]/foo/Cargo.lock because --frozen was passed to prevent this
+[HELP] to generate the lock file without accessing the network, remove the --frozen flag and use --offline instead.
 
 "#]])
         .run();
@@ -780,8 +780,8 @@ fn offline_and_locked_and_no_frozen() {
     p.cargo("check --locked --offline")
         .with_status(101)
         .with_stderr_data(str![[r#"
-[ERROR] the lock file [ROOT]/foo/Cargo.lock needs to be updated but --locked was passed to prevent this
-If you want to try to generate the lock file without accessing the network, remove the --locked flag and use --offline instead.
+[ERROR] cannot create the lock file [ROOT]/foo/Cargo.lock because --locked was passed to prevent this
+[HELP] to generate the lock file without accessing the network, remove the --locked flag and use --offline instead.
 
 "#]])
         .run();

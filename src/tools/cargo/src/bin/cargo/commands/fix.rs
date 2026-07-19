@@ -21,7 +21,7 @@ pub fn cli() -> Command {
         ))
         .arg(flag(
             "allow-dirty",
-            "Fix code even if the working directory is dirty",
+            "Fix code even if the working directory is dirty or has staged changes",
         ))
         .arg(flag(
             "allow-staged",
@@ -57,7 +57,7 @@ pub fn cli() -> Command {
         .arg_lockfile_path()
         .arg_ignore_rust_version()
         .after_help(color_print::cstr!(
-            "Run `<cyan,bold>cargo help fix</>` for more detailed information.\n"
+            "Run `<bright-cyan,bold>cargo help fix</>` for more detailed information.\n"
         ))
 }
 
@@ -67,7 +67,7 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
         args.get_one::<String>("profile").map(String::as_str),
         Some("test")
     );
-    let mode = CompileMode::Check { test };
+    let intent = UserIntent::Check { test };
 
     // Unlike other commands default `cargo fix` to all targets to fix as much
     // code as we can.
@@ -79,27 +79,37 @@ pub fn exec(gctx: &mut GlobalContext, args: &ArgMatches) -> CliResult {
     let lockfile_path = args.lockfile_path(gctx)?;
     ws.set_requested_lockfile_path(lockfile_path.clone());
 
-    let mut opts = args.compile_options(gctx, mode, Some(&ws), ProfileChecking::LegacyTestOnly)?;
+    let mut opts =
+        args.compile_options(gctx, intent, Some(&ws), ProfileChecking::LegacyTestOnly)?;
 
-    if !opts.filter.is_specific() {
-        // cargo fix with no target selection implies `--all-targets`.
+    let edition = args.flag("edition") || args.flag("edition-idioms");
+    if !opts.filter.is_specific() && edition {
+        // When `cargo fix` is run without specifying targets but with `--edition` or `--edition-idioms`,
+        // it should default to fixing all targets.
+        // See: https://github.com/rust-lang/cargo/issues/13527
         opts.filter = ops::CompileFilter::new_all_targets();
     }
 
-    ops::fix(
-        gctx,
-        &ws,
-        &root_manifest,
-        &mut ops::FixOptions {
-            edition: args.flag("edition"),
-            idioms: args.flag("edition-idioms"),
-            compile_opts: opts,
-            allow_dirty: args.flag("allow-dirty"),
-            allow_no_vcs: args.flag("allow-no-vcs"),
-            allow_staged: args.flag("allow-staged"),
-            broken_code: args.flag("broken-code"),
-            requested_lockfile_path: lockfile_path,
-        },
-    )?;
+    let allow_dirty = args.flag("allow-dirty");
+
+    let mut opts = ops::FixOptions {
+        edition: args
+            .flag("edition")
+            .then_some(ops::EditionFixMode::NextRelative),
+        idioms: args.flag("edition-idioms"),
+        compile_opts: opts,
+        allow_dirty,
+        allow_staged: allow_dirty || args.flag("allow-staged"),
+        allow_no_vcs: args.flag("allow-no-vcs"),
+        broken_code: args.flag("broken-code"),
+        requested_lockfile_path: lockfile_path,
+    };
+
+    if let Some(fe) = &gctx.cli_unstable().fix_edition {
+        ops::fix_edition(gctx, &ws, &mut opts, fe)?;
+    } else {
+        ops::fix(gctx, &ws, &mut opts)?;
+    }
+
     Ok(())
 }

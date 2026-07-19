@@ -1,9 +1,5 @@
-use rustc_index::bit_set::BitSet;
-use rustc_index::interval::SparseIntervalMatrix;
 use rustc_index::{Idx, IndexVec};
-use rustc_middle::mir::{self, BasicBlock, Body, Location};
-
-use crate::framework::{Analysis, Results, ResultsVisitor, visit_results};
+use rustc_middle::mir::{BasicBlock, Body, Location};
 
 /// Maps between a `Location` and a `PointIndex` (and vice versa).
 pub struct DenseLocationMap {
@@ -92,64 +88,4 @@ rustc_index::newtype_index! {
     #[orderable]
     #[debug_format = "PointIndex({})"]
     pub struct PointIndex {}
-}
-
-/// Add points depending on the result of the given dataflow analysis.
-pub fn save_as_intervals<'tcx, N, A>(
-    elements: &DenseLocationMap,
-    body: &mir::Body<'tcx>,
-    mut results: Results<'tcx, A>,
-) -> SparseIntervalMatrix<N, PointIndex>
-where
-    N: Idx,
-    A: Analysis<'tcx, Domain = BitSet<N>>,
-{
-    let values = SparseIntervalMatrix::new(elements.num_points());
-    let mut visitor = Visitor { elements, values };
-    visit_results(
-        body,
-        body.basic_blocks.reverse_postorder().iter().copied(),
-        &mut results,
-        &mut visitor,
-    );
-    visitor.values
-}
-
-struct Visitor<'a, N: Idx> {
-    elements: &'a DenseLocationMap,
-    values: SparseIntervalMatrix<N, PointIndex>,
-}
-
-impl<'mir, 'tcx, A, N> ResultsVisitor<'mir, 'tcx, A> for Visitor<'_, N>
-where
-    A: Analysis<'tcx, Domain = BitSet<N>>,
-    N: Idx,
-{
-    fn visit_after_primary_statement_effect(
-        &mut self,
-        _results: &mut Results<'tcx, A>,
-        state: &A::Domain,
-        _statement: &'mir mir::Statement<'tcx>,
-        location: Location,
-    ) {
-        let point = self.elements.point_from_location(location);
-        // Use internal iterator manually as it is much more efficient.
-        state.iter().for_each(|node| {
-            self.values.insert(node, point);
-        });
-    }
-
-    fn visit_after_primary_terminator_effect(
-        &mut self,
-        _results: &mut Results<'tcx, A>,
-        state: &A::Domain,
-        _terminator: &'mir mir::Terminator<'tcx>,
-        location: Location,
-    ) {
-        let point = self.elements.point_from_location(location);
-        // Use internal iterator manually as it is much more efficient.
-        state.iter().for_each(|node| {
-            self.values.insert(node, point);
-        });
-    }
 }

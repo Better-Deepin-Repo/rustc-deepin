@@ -2,11 +2,11 @@ use either::Either;
 use hir::InFile;
 use ide_db::FileRange;
 use syntax::{
-    ast::{self, HasArgList},
     AstNode, AstPtr,
+    ast::{self, HasArgList},
 };
 
-use crate::{adjusted_display_range, Diagnostic, DiagnosticCode, DiagnosticsContext};
+use crate::{Diagnostic, DiagnosticCode, DiagnosticsContext, adjusted_display_range};
 
 // Diagnostic: mismatched-tuple-struct-pat-arg-count
 //
@@ -26,6 +26,7 @@ pub(crate) fn mismatched_tuple_struct_pat_arg_count(
         message,
         invalid_args_range(ctx, d.expr_or_pat, d.expected, d.found),
     )
+    .stable()
 }
 
 // Diagnostic: mismatched-arg-count
@@ -40,8 +41,9 @@ pub(crate) fn mismatched_arg_count(
     Diagnostic::new(
         DiagnosticCode::RustcHardError("E0107"),
         message,
-        invalid_args_range(ctx, d.call_expr.map(AstPtr::wrap_left), d.expected, d.found),
+        invalid_args_range(ctx, d.call_expr, d.expected, d.found),
     )
+    .stable()
 }
 
 fn invalid_args_range(
@@ -482,6 +484,29 @@ fn foo((): (), (): ()) {
            // ^^ error: expected 2 arguments, found 3
     foo(1);
       // ^ error: expected 2 arguments, found 1
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn regression_17233() {
+        check_diagnostics(
+            r#"
+pub trait A {
+    type X: B;
+}
+pub trait B: A {
+    fn confused_name(self, _: i32);
+}
+
+pub struct Foo;
+impl Foo {
+    pub fn confused_name(&self) {}
+}
+
+pub fn repro<T: A>() {
+    Foo.confused_name();
 }
 "#,
         );

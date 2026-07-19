@@ -1,11 +1,8 @@
 use hir::ModuleDef;
-use ide_db::{
-    assists::{AssistId, AssistKind},
-    famous_defs::FamousDefs,
-};
+use ide_db::{assists::AssistId, famous_defs::FamousDefs};
 use syntax::{
-    ast::{self, HasGenericArgs, HasVisibility},
     AstNode, NodeOrToken, SyntaxKind, SyntaxNode, SyntaxToken, TextRange,
+    ast::{self, HasGenericArgs, HasVisibility},
 };
 
 use crate::{AssistContext, Assists};
@@ -60,7 +57,7 @@ pub(crate) fn sugar_impl_future_into_async(
     let future_output = unwrap_future_output(main_trait_path)?;
 
     acc.add(
-        AssistId("sugar_impl_future_into_async", AssistKind::RefactorRewrite),
+        AssistId::refactor_rewrite("sugar_impl_future_into_async"),
         "Convert `impl Future` into async",
         function.syntax().text_range(),
         |builder| {
@@ -135,17 +132,14 @@ pub(crate) fn desugar_async_into_impl_future(
 
     let scope = ctx.sema.scope(function.syntax())?;
     let module = scope.module();
+    let cfg = ctx.config.find_path_config(ctx.sema.is_nightly(module.krate()));
     let future_trait = FamousDefs(&ctx.sema, scope.krate()).core_future_Future()?;
-    let trait_path = module.find_path(
-        ctx.db(),
-        ModuleDef::Trait(future_trait),
-        ctx.config.import_path_config(),
-    )?;
+    let trait_path = module.find_path(ctx.db(), ModuleDef::Trait(future_trait), cfg)?;
     let edition = scope.krate().edition(ctx.db());
     let trait_path = trait_path.display(ctx.db(), edition);
 
     acc.add(
-        AssistId("desugar_async_into_impl_future", AssistKind::RefactorRewrite),
+        AssistId::refactor_rewrite("desugar_async_into_impl_future"),
         "Convert async into `impl Future`",
         function.syntax().text_range(),
         |builder| {

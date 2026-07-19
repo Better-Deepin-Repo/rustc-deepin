@@ -1,17 +1,17 @@
 //! Implementation of configuration for various sources.
 //!
 //! This module will parse the various `source.*` TOML configuration keys into a
-//! structure usable by Cargo itself. Currently this is primarily used to map
+//! structure usable by Cargo itself. Currently, this is primarily used to map
 //! sources to one another via the `replace-with` key in `.cargo/config`.
 
 use crate::core::{GitReference, PackageId, SourceId};
 use crate::sources::overlay::DependencyConfusionThreatOverlaySource;
 use crate::sources::source::Source;
-use crate::sources::{ReplacedSource, CRATES_IO_REGISTRY};
+use crate::sources::{CRATES_IO_REGISTRY, ReplacedSource};
 use crate::util::context::{self, ConfigRelativePath, OptValue};
 use crate::util::errors::CargoResult;
 use crate::util::{GlobalContext, IntoUrl};
-use anyhow::{bail, Context as _};
+use anyhow::{Context as _, bail};
 use std::collections::{HashMap, HashSet};
 use tracing::debug;
 use url::Url;

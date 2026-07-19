@@ -1,3 +1,5 @@
+//@ dont-require-annotations: HELP
+
 #![feature(default_field_values)]
 
 #[derive(Debug)]
@@ -17,9 +19,9 @@ pub struct Bar {
 
 #[derive(Default)]
 pub struct Qux<const C: i32> {
-    bar: S = Self::S, //~ ERROR generic `Self` types are currently not permitted in anonymous constants
+    bar: S = Self::S,
     baz: i32 = foo(),
-    bat: i32 = <Qux<{ C }> as T>::K, //~ ERROR generic parameters may not be used in const operations
+    bat: i32 = <Qux<{ C }> as T>::K,
     bay: i32 = C,
 }
 
@@ -47,18 +49,25 @@ enum E {
     Variant {} //~ ERROR the `#[default]` attribute may only be used on unit enum variants
 }
 
+union U
+{
+    x: i32 = 1,  //~ ERROR unions cannot have default field values
+    y: f32 = 2., //~ ERROR unions cannot have default field values
+}
+
 fn main () {
     let _ = Foo { .. }; // ok
     let _ = Foo::default(); // ok
-    let _ = Bar { .. }; //~ ERROR mandatory field
+    let _ = Bar { .. }; //~ ERROR missing field
+    let _ = Bar { baz: 0, .. }; //~ ERROR missing field
     let _ = Bar::default(); // silenced
     let _ = Bar { bar: S, .. }; // ok
     let _ = Qux::<4> { .. };
     let _ = Rak(..); //~ ERROR E0308
-    //~^ you might have meant to use `..` to skip providing
+    //~^ HELP you might have meant to use `..` to skip providing
     let _ = Rak(0, ..); //~ ERROR E0061
-    //~^ you might have meant to use `..` to skip providing
+    //~^ HELP you might have meant to use `..` to skip providing
     let _ = Rak(.., 0); //~ ERROR E0061
-    //~^ you might have meant to use `..` to skip providing
+    //~^ HELP you might have meant to use `..` to skip providing
     let _ = Rak { .. }; // ok
 }

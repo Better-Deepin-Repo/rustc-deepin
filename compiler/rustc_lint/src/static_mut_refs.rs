@@ -51,10 +51,10 @@ declare_lint! {
     /// This lint is "warn" by default on editions up to 2021, in 2024 is "deny".
     pub STATIC_MUT_REFS,
     Warn,
-    "shared references or mutable references of mutable static is discouraged",
+    "creating a shared reference to mutable static",
     @future_incompatible = FutureIncompatibleInfo {
         reason: FutureIncompatibilityReason::EditionError(Edition::Edition2024),
-        reference: "<https://doc.rust-lang.org/nightly/edition-guide/rust-2024/static-mut-references.html>",
+        reference: "<https://doc.rust-lang.org/edition-guide/rust-2024/static-mut-references.html>",
         explain_reason: false,
     };
     @edition Edition2024 => Deny;
@@ -108,7 +108,7 @@ impl<'tcx> LateLintPass<'tcx> for StaticMutRefs {
     fn check_stmt(&mut self, cx: &LateContext<'tcx>, stmt: &Stmt<'_>) {
         if let hir::StmtKind::Let(loc) = stmt.kind
             && let hir::PatKind::Binding(ba, _, _, _) = loc.pat.kind
-            && let hir::ByRef::Yes(m) = ba.0
+            && let hir::ByRef::Yes(_, m) = ba.0
             && let Some(init) = loc.init
             && let Some(err_span) = path_is_static_mut(init, init.span)
         {
@@ -157,11 +157,9 @@ fn emit_static_mut_refs(
         }
     };
 
-    cx.emit_span_lint(STATIC_MUT_REFS, span, RefOfMutStatic {
+    cx.emit_span_lint(
+        STATIC_MUT_REFS,
         span,
-        sugg,
-        shared_label,
-        shared_note,
-        mut_note,
-    });
+        RefOfMutStatic { span, sugg, shared_label, shared_note, mut_note },
+    );
 }

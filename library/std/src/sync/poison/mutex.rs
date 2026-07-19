@@ -1,6 +1,3 @@
-#[cfg(all(test, not(any(target_os = "emscripten", target_os = "wasi"))))]
-mod tests;
-
 use crate::cell::UnsafeCell;
 use crate::fmt;
 use crate::marker::PhantomData;
@@ -21,20 +18,69 @@ use crate::sys::sync as sys;
 /// # Poisoning
 ///
 /// The mutexes in this module implement a strategy called "poisoning" where a
-/// mutex is considered poisoned whenever a thread panics while holding the
-/// mutex. Once a mutex is poisoned, all other threads are unable to access the
-/// data by default as it is likely tainted (some invariant is not being
-/// upheld).
+/// mutex becomes poisoned if it recognizes that the thread holding it has
+/// panicked.
 ///
-/// For a mutex, this means that the [`lock`] and [`try_lock`] methods return a
+/// Once a mutex is poisoned, all other threads are unable to access the data by
+/// default as it is likely tainted (some invariant is not being upheld). For a
+/// mutex, this means that the [`lock`] and [`try_lock`] methods return a
 /// [`Result`] which indicates whether a mutex has been poisoned or not. Most
 /// usage of a mutex will simply [`unwrap()`] these results, propagating panics
 /// among threads to ensure that a possibly invalid invariant is not witnessed.
 ///
-/// A poisoned mutex, however, does not prevent all access to the underlying
-/// data. The [`PoisonError`] type has an [`into_inner`] method which will return
-/// the guard that would have otherwise been returned on a successful lock. This
-/// allows access to the data, despite the lock being poisoned.
+/// Poisoning is only advisory: the [`PoisonError`] type has an [`into_inner`]
+/// method which will return the guard that would have otherwise been returned
+/// on a successful lock. This allows access to the data, despite the lock being
+/// poisoned.
+///
+/// In addition, the panic detection is not ideal, so even unpoisoned mutexes
+/// need to be handled with care, since certain panics may have been skipped.
+/// Here is a non-exhaustive list of situations where this might occur:
+///
+/// - If a mutex is locked while a panic is underway, e.g. within a [`Drop`]
+///   implementation or a [panic hook], panicking for the second time while the
+///   lock is held will leave the mutex unpoisoned. Note that while double panic
+///   usually aborts the program, [`catch_unwind`] can prevent this.
+///
+/// - Locking and unlocking the mutex across different panic contexts, e.g. by
+///   storing the guard to a [`Cell`] within [`Drop::drop`] and accessing it
+///   outside, or vice versa, can affect poisoning status in an unexpected way.
+///
+/// - Foreign exceptions do not currently trigger poisoning even in absence of
+///   other panics.
+///
+/// While this rarely happens in realistic code, `unsafe` code cannot rely on
+/// poisoning for soundness, since the behavior of poisoning can depend on
+/// outside context. Here's an example of **incorrect** use of poisoning:
+///
+/// ```rust
+/// use std::sync::Mutex;
+///
+/// struct MutexBox<T> {
+///     data: Mutex<*mut T>,
+/// }
+///
+/// impl<T> MutexBox<T> {
+///     pub fn new(value: T) -> Self {
+///         Self {
+///             data: Mutex::new(Box::into_raw(Box::new(value))),
+///         }
+///     }
+///
+///     pub fn replace_with(&self, f: impl FnOnce(T) -> T) {
+///         let ptr = self.data.lock().expect("poisoned");
+///         // While `f` is running, the data is moved out of `*ptr`. If `f`
+///         // panics, `*ptr` keeps pointing at a dropped value. The intention
+///         // is that this will poison the mutex, so the following calls to
+///         // `replace_with` will panic without reading `*ptr`. But since
+///         // poisoning is not guaranteed to occur if this is run from a panic
+///         // hook, this can lead to use-after-free.
+///         unsafe {
+///             (*ptr).write(f((*ptr).read()));
+///         }
+///     }
+/// }
+/// ```
 ///
 /// [`new`]: Self::new
 /// [`lock`]: Self::lock
@@ -42,6 +88,9 @@ use crate::sys::sync as sys;
 /// [`unwrap()`]: Result::unwrap
 /// [`PoisonError`]: super::PoisonError
 /// [`into_inner`]: super::PoisonError::into_inner
+/// [panic hook]: crate::panic::set_hook
+/// [`catch_unwind`]: crate::panic::catch_unwind
+/// [`Cell`]: crate::cell::Cell
 ///
 /// # Examples
 ///
@@ -181,10 +230,29 @@ pub struct Mutex<T: ?Sized> {
     data: UnsafeCell<T>,
 }
 
-// these are the only places where `T: Send` matters; all other
-// functionality works fine on a single thread.
+/// `T` must be `Send` for a [`Mutex`] to be `Send` because it is possible to acquire
+/// the owned `T` from the `Mutex` via [`into_inner`].
+///
+/// [`into_inner`]: Mutex::into_inner
 #[stable(feature = "rust1", since = "1.0.0")]
 unsafe impl<T: ?Sized + Send> Send for Mutex<T> {}
+
+/// `T` must be `Send` for [`Mutex`] to be `Sync`.
+/// This ensures that the protected data can be accessed safely from multiple threads
+/// without causing data races or other unsafe behavior.
+///
+/// [`Mutex<T>`] provides mutable access to `T` to one thread at a time. However, it's essential
+/// for `T` to be `Send` because it's not safe for non-`Send` structures to be accessed in
+/// this manner. For instance, consider [`Rc`], a non-atomic reference counted smart pointer,
+/// which is not `Send`. With `Rc`, we can have multiple copies pointing to the same heap
+/// allocation with a non-atomic reference count. If we were to use `Mutex<Rc<_>>`, it would
+/// only protect one instance of `Rc` from shared access, leaving other copies vulnerable
+/// to potential data races.
+///
+/// Also note that it is not necessary for `T` to be `Sync` as `&T` is only made available
+/// to one thread at a time if `T` is not `Sync`.
+///
+/// [`Rc`]: crate::rc::Rc
 #[stable(feature = "rust1", since = "1.0.0")]
 unsafe impl<T: ?Sized + Send> Sync for Mutex<T> {}
 
@@ -211,8 +279,17 @@ pub struct MutexGuard<'a, T: ?Sized + 'a> {
     poison: poison::Guard,
 }
 
+/// A [`MutexGuard`] is not `Send` to maximize platform portability.
+///
+/// On platforms that use POSIX threads (commonly referred to as pthreads) there is a requirement to
+/// release mutex locks on the same thread they were acquired.
+/// For this reason, [`MutexGuard`] must not implement `Send` to prevent it being dropped from
+/// another thread.
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: ?Sized> !Send for MutexGuard<'_, T> {}
+
+/// `T` must be `Sync` for a [`MutexGuard<T>`] to be `Sync`
+/// because it is possible to get a `&T` from `&MutexGuard` (via `Deref`).
 #[stable(feature = "mutexguard", since = "1.19.0")]
 unsafe impl<T: ?Sized + Sync> Sync for MutexGuard<'_, T> {}
 
@@ -228,11 +305,11 @@ unsafe impl<T: ?Sized + Sync> Sync for MutexGuard<'_, T> {}
 /// The data protected by the mutex can be accessed through this guard via its
 /// [`Deref`] and [`DerefMut`] implementations.
 ///
-/// This structure is created by the [`map`] and [`try_map`] methods on
+/// This structure is created by the [`map`] and [`filter_map`] methods on
 /// [`MutexGuard`].
 ///
 /// [`map`]: MutexGuard::map
-/// [`try_map`]: MutexGuard::try_map
+/// [`filter_map`]: MutexGuard::filter_map
 /// [`Condvar`]: crate::sync::Condvar
 #[must_use = "if unused the Mutex will immediately unlock"]
 #[must_not_suspend = "holding a MappedMutexGuard across suspend \
@@ -324,6 +401,7 @@ impl<T> Mutex<T> {
     /// assert_eq!(mutex.get_cloned().unwrap(), 11);
     /// ```
     #[unstable(feature = "lock_value_accessors", issue = "133407")]
+    #[rustc_should_not_be_called_on_const_items]
     pub fn set(&self, value: T) -> Result<(), PoisonError<T>> {
         if mem::needs_drop::<T>() {
             // If the contained value has non-trivial destructor, we
@@ -361,6 +439,7 @@ impl<T> Mutex<T> {
     /// assert_eq!(mutex.get_cloned().unwrap(), 11);
     /// ```
     #[unstable(feature = "lock_value_accessors", issue = "133407")]
+    #[rustc_should_not_be_called_on_const_items]
     pub fn replace(&self, value: T) -> LockResult<T> {
         match self.lock() {
             Ok(mut guard) => Ok(mem::replace(&mut *guard, value)),
@@ -407,6 +486,7 @@ impl<T: ?Sized> Mutex<T> {
     /// assert_eq!(*mutex.lock().unwrap(), 10);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_should_not_be_called_on_const_items]
     pub fn lock(&self) -> LockResult<MutexGuard<'_, T>> {
         unsafe {
             self.inner.lock();
@@ -455,6 +535,7 @@ impl<T: ?Sized> Mutex<T> {
     /// assert_eq!(*mutex.lock().unwrap(), 10);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_should_not_be_called_on_const_items]
     pub fn try_lock(&self) -> TryLockResult<MutexGuard<'_, T>> {
         unsafe {
             if self.inner.try_lock() {
@@ -525,6 +606,7 @@ impl<T: ?Sized> Mutex<T> {
     /// ```
     #[inline]
     #[stable(feature = "mutex_unpoison", since = "1.77.0")]
+    #[rustc_should_not_be_called_on_const_items]
     pub fn clear_poison(&self) {
         self.poison.clear();
     }
@@ -534,7 +616,7 @@ impl<T: ?Sized> Mutex<T> {
     /// # Errors
     ///
     /// If another user of this mutex panicked while holding the mutex, then
-    /// this call will return an error containing the the underlying data
+    /// this call will return an error containing the underlying data
     /// instead.
     ///
     /// # Examples
@@ -557,7 +639,9 @@ impl<T: ?Sized> Mutex<T> {
     /// Returns a mutable reference to the underlying data.
     ///
     /// Since this call borrows the `Mutex` mutably, no actual locking needs to
-    /// take place -- the mutable borrow statically guarantees no locks exist.
+    /// take place -- the mutable borrow statically guarantees no new locks can be acquired
+    /// while this reference exists. Note that this method does not clear any previous abandoned locks
+    /// (e.g., via [`forget()`] on a [`MutexGuard`]).
     ///
     /// # Errors
     ///
@@ -574,10 +658,23 @@ impl<T: ?Sized> Mutex<T> {
     /// *mutex.get_mut().unwrap() = 10;
     /// assert_eq!(*mutex.lock().unwrap(), 10);
     /// ```
+    ///
+    /// [`forget()`]: mem::forget
     #[stable(feature = "mutex_get_mut", since = "1.6.0")]
     pub fn get_mut(&mut self) -> LockResult<&mut T> {
         let data = self.data.get_mut();
         poison::map_result(self.poison.borrow(), |()| data)
+    }
+
+    /// Returns a raw pointer to the underlying data.
+    ///
+    /// The returned pointer is always non-null and properly aligned, but it is
+    /// the user's responsibility to ensure that any reads and writes through it
+    /// are properly synchronized to avoid data races, and that it is not read
+    /// or written through after the mutex is dropped.
+    #[unstable(feature = "mutex_data_ptr", issue = "140368")]
+    pub const fn data_ptr(&self) -> *mut T {
+        self.data.get()
     }
 }
 
@@ -610,7 +707,7 @@ impl<T: ?Sized + fmt::Debug> fmt::Debug for Mutex<T> {
                 d.field("data", &&**err.get_ref());
             }
             Err(TryLockError::WouldBlock) => {
-                d.field("data", &format_args!("<locked>"));
+                d.field("data", &"<locked>");
             }
         }
         d.field("poisoned", &self.poison.get());
@@ -665,11 +762,13 @@ impl<T: ?Sized + fmt::Display> fmt::Display for MutexGuard<'_, T> {
     }
 }
 
-pub fn guard_lock<'a, T: ?Sized>(guard: &MutexGuard<'a, T>) -> &'a sys::Mutex {
+/// For use in [`nonpoison::condvar`](super::condvar).
+pub(super) fn guard_lock<'a, T: ?Sized>(guard: &MutexGuard<'a, T>) -> &'a sys::Mutex {
     &guard.lock.inner
 }
 
-pub fn guard_poison<'a, T: ?Sized>(guard: &MutexGuard<'a, T>) -> &'a poison::Flag {
+/// For use in [`nonpoison::condvar`](super::condvar).
+pub(super) fn guard_poison<'a, T: ?Sized>(guard: &MutexGuard<'a, T>) -> &'a poison::Flag {
     &guard.lock.poison
 }
 
@@ -689,7 +788,7 @@ impl<'a, T: ?Sized> MutexGuard<'a, T> {
         U: ?Sized,
     {
         // SAFETY: the conditions of `MutexGuard::new` were satisfied when the original guard
-        // was created, and have been upheld throughout `map` and/or `try_map`.
+        // was created, and have been upheld throughout `map` and/or `filter_map`.
         // The signature of the closure guarantees that it will not "leak" the lifetime of the reference
         // passed to it. If the closure panics, the guard will be dropped.
         let data = NonNull::from(f(unsafe { &mut *orig.lock.data.get() }));
@@ -710,17 +809,16 @@ impl<'a, T: ?Sized> MutexGuard<'a, T> {
     /// The `Mutex` is already locked, so this cannot fail.
     ///
     /// This is an associated function that needs to be used as
-    /// `MutexGuard::try_map(...)`. A method would interfere with methods of the
+    /// `MutexGuard::filter_map(...)`. A method would interfere with methods of the
     /// same name on the contents of the `MutexGuard` used through `Deref`.
-    #[doc(alias = "filter_map")]
     #[unstable(feature = "mapped_lock_guards", issue = "117108")]
-    pub fn try_map<U, F>(orig: Self, f: F) -> Result<MappedMutexGuard<'a, U>, Self>
+    pub fn filter_map<U, F>(orig: Self, f: F) -> Result<MappedMutexGuard<'a, U>, Self>
     where
         F: FnOnce(&mut T) -> Option<&mut U>,
         U: ?Sized,
     {
         // SAFETY: the conditions of `MutexGuard::new` were satisfied when the original guard
-        // was created, and have been upheld throughout `map` and/or `try_map`.
+        // was created, and have been upheld throughout `map` and/or `filter_map`.
         // The signature of the closure guarantees that it will not "leak" the lifetime of the reference
         // passed to it. If the closure panics, the guard will be dropped.
         match f(unsafe { &mut *orig.lock.data.get() }) {
@@ -797,7 +895,7 @@ impl<'a, T: ?Sized> MappedMutexGuard<'a, T> {
         U: ?Sized,
     {
         // SAFETY: the conditions of `MutexGuard::new` were satisfied when the original guard
-        // was created, and have been upheld throughout `map` and/or `try_map`.
+        // was created, and have been upheld throughout `map` and/or `filter_map`.
         // The signature of the closure guarantees that it will not "leak" the lifetime of the reference
         // passed to it. If the closure panics, the guard will be dropped.
         let data = NonNull::from(f(unsafe { orig.data.as_mut() }));
@@ -818,17 +916,16 @@ impl<'a, T: ?Sized> MappedMutexGuard<'a, T> {
     /// The `Mutex` is already locked, so this cannot fail.
     ///
     /// This is an associated function that needs to be used as
-    /// `MappedMutexGuard::try_map(...)`. A method would interfere with methods of the
+    /// `MappedMutexGuard::filter_map(...)`. A method would interfere with methods of the
     /// same name on the contents of the `MutexGuard` used through `Deref`.
-    #[doc(alias = "filter_map")]
     #[unstable(feature = "mapped_lock_guards", issue = "117108")]
-    pub fn try_map<U, F>(mut orig: Self, f: F) -> Result<MappedMutexGuard<'a, U>, Self>
+    pub fn filter_map<U, F>(mut orig: Self, f: F) -> Result<MappedMutexGuard<'a, U>, Self>
     where
         F: FnOnce(&mut T) -> Option<&mut U>,
         U: ?Sized,
     {
         // SAFETY: the conditions of `MutexGuard::new` were satisfied when the original guard
-        // was created, and have been upheld throughout `map` and/or `try_map`.
+        // was created, and have been upheld throughout `map` and/or `filter_map`.
         // The signature of the closure guarantees that it will not "leak" the lifetime of the reference
         // passed to it. If the closure panics, the guard will be dropped.
         match f(unsafe { orig.data.as_mut() }) {

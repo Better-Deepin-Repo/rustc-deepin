@@ -152,14 +152,15 @@ impl<'tcx> LateLintPass<'tcx> for LetUnderscore {
                 // We can't suggest `drop()` when we're on the top level.
                 drop_fn_start_end: can_use_init
                     .map(|init| (local.span.until(init.span), init.span.shrink_to_hi())),
-                is_assign_desugar: matches!(local.source, rustc_hir::LocalSource::AssignDesugar(_)),
+                is_assign_desugar: matches!(local.source, rustc_hir::LocalSource::AssignDesugar),
             };
             if is_sync_lock {
                 let span = MultiSpan::from_span(pat.span);
-                cx.emit_span_lint(LET_UNDERSCORE_LOCK, span, NonBindingLet::SyncLock {
-                    sub,
-                    pat: pat.span,
-                });
+                cx.emit_span_lint(
+                    LET_UNDERSCORE_LOCK,
+                    span,
+                    NonBindingLet::SyncLock { sub, pat: pat.span },
+                );
             // Only emit let_underscore_drop for top-level `_` patterns.
             } else if can_use_init.is_some() {
                 cx.emit_span_lint(LET_UNDERSCORE_DROP, local.span, NonBindingLet::DropType { sub });

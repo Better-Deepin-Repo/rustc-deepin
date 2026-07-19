@@ -14,6 +14,8 @@ ty_utils_borrow_not_supported = borrowing is not supported in generic constants
 
 ty_utils_box_not_supported = allocations are not allowed in generic constants
 
+ty_utils_by_use_not_supported = .use is not allowed in generic constants
+
 ty_utils_closure_and_return_not_supported = closures and function keywords are not supported in generic constants
 
 ty_utils_const_block_not_supported = const blocks are not supported in generic constants
@@ -42,8 +44,6 @@ ty_utils_logical_op_not_supported = unsupported operation in generic constants, 
 
 ty_utils_loop_not_supported = loops and loop control flow are not supported in generic constants
 
-ty_utils_multiple_array_fields_simd_type = monomorphising SIMD type `{$ty}` with more than one array field
-
 ty_utils_needs_drop_overflow = overflow while checking whether `{$query_ty}` requires drop
 
 ty_utils_never_to_any_not_supported = coercing the `never` type is not supported in generic constants
@@ -52,8 +52,6 @@ ty_utils_non_primitive_simd_type = monomorphising SIMD type `{$ty}` with a non-p
 
 ty_utils_operation_not_supported = unsupported operation in generic constants
 
-ty_utils_oversized_simd_type = monomorphising SIMD type `{$ty}` of length greater than {$max_lanes}
-
 ty_utils_pointer_not_supported = pointer casts are not allowed in generic constants
 
 ty_utils_tuple_not_supported = tuple construction is not supported in generic constants
@@ -61,5 +59,3 @@ ty_utils_tuple_not_supported = tuple construction is not supported in generic co
 ty_utils_unexpected_fnptr_associated_item = `FnPtr` trait with unexpected associated item
 
 ty_utils_yield_not_supported = coroutine control flow is not allowed in generic constants
-
-ty_utils_zero_length_simd_type = monomorphising SIMD type `{$ty}` of zero length

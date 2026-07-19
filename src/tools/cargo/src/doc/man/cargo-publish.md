@@ -28,8 +28,9 @@ following steps:
    and may timeout. In that case, you will need to check for completion
    manually. This timeout does not affect the upload.
 
-This command requires you to be authenticated with either the `--token` option
-or using {{man "cargo-login" 1}}.
+This command requires you to be authenticated using {{man "cargo-login" 1}}
+or environment variables of the [`registry.token`](../reference/config.html#registrytoken)
+and [`registries.<name>.token`](../reference/config.html#registriesnametoken) config fields.
 
 See [the reference](../reference/publishing.html) for more details about
 packaging and publishing.
@@ -43,8 +44,6 @@ packaging and publishing.
 {{#option "`--dry-run`" }}
 Perform all checks without uploading.
 {{/option}}
-
-{{> options-token }}
 
 {{#option "`--no-verify`" }}
 Don't verify the contents by building them.
@@ -68,64 +67,7 @@ which defaults to `crates-io`.
 
 {{/options}}
 
-### Package Selection
-
-By default, when no package selection options are given, the packages selected
-depend on the selected manifest file (based on the current working directory if
-`--manifest-path` is not given). If the manifest is the root of a workspace then
-the workspaces default members are selected, otherwise only the package defined
-by the manifest will be selected.
-
-The default members of a workspace can be set explicitly with the
-`workspace.default-members` key in the root manifest. If this is not set, a
-virtual workspace will include all workspace members (equivalent to passing
-`--workspace`), and a non-virtual workspace will include only the root crate itself.
-
-Selecting more than one package is unstable and available only on the
-[nightly channel](https://doc.rust-lang.org/book/appendix-07-nightly-rust.html)
-and requires the `-Z package-workspace` flag to enable.
-See <https://github.com/rust-lang/cargo/issues/10948> for more information.
-
-
-{{#options}}
-
-{{#option "`-p` _spec_..." "`--package` _spec_..."}}
-{{actionverb}} only the specified packages. See {{man "cargo-pkgid" 1}} for the
-SPEC format. This flag may be specified multiple times and supports common Unix
-glob patterns like `*`, `?` and `[]`. However, to avoid your shell accidentally 
-expanding glob patterns before Cargo handles them, you must use single quotes or
-double quotes around each pattern.
-{{/option}}
-
-Selecting more than one package with this option is unstable and available only
-on the
-[nightly channel](https://doc.rust-lang.org/book/appendix-07-nightly-rust.html)
-and requires the `-Z package-workspace` flag to enable.
-See <https://github.com/rust-lang/cargo/issues/10948> for more information.
-
-{{#option "`--workspace`" }}
-{{actionverb}} all members in the workspace.
-
-This option is unstable and available only on the
-[nightly channel](https://doc.rust-lang.org/book/appendix-07-nightly-rust.html)
-and requires the `-Z package-workspace` flag to enable.
-See <https://github.com/rust-lang/cargo/issues/10948> for more information.
-{{/option}}
-
-{{#option "`--exclude` _SPEC_..." }}
-Exclude the specified packages. Must be used in conjunction with the
-`--workspace` flag. This flag may be specified multiple times and supports
-common Unix glob patterns like `*`, `?` and `[]`. However, to avoid your shell
-accidentally expanding glob patterns before Cargo handles them, you must use
-single quotes or double quotes around each pattern.
-
-This option is unstable and available only on the
-[nightly channel](https://doc.rust-lang.org/book/appendix-07-nightly-rust.html)
-and requires the `-Z package-workspace` flag to enable.
-See <https://github.com/rust-lang/cargo/issues/10948> for more information.
-{{/option}}
-
-{{/options}}
+{{> section-package-selection }}
 
 ### Compilation Options
 

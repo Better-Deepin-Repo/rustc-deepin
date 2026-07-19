@@ -90,7 +90,7 @@ borrowck_lifetime_constraints_error =
     lifetime may not live long enough
 
 borrowck_limitations_implies_static =
-    due to current limitations in the borrow checker, this implies a `'static` lifetime
+    due to a current limitation of the type system, this implies a `'static` lifetime
 
 borrowck_move_closure_suggestion =
     consider adding 'move' keyword before the nested closure
@@ -161,13 +161,6 @@ borrowck_opaque_type_lifetime_mismatch =
     .label = lifetime `{$arg}` used here
     .prev_lifetime_label = lifetime `{$prev}` previously used here
     .note = if all non-lifetime generic parameters are the same, but the lifetime parameters differ, it is not possible to differentiate the opaque types
-
-borrowck_opaque_type_non_generic_param =
-    expected generic {$kind} parameter, found `{$ty}`
-    .label = {STREQ($ty, "'static") ->
-        [true] cannot use static lifetime; use a bound lifetime instead or remove the lifetime parameter from the opaque type
-        *[other] this generic parameter must be used with a generic {$kind} parameter
-    }
 
 borrowck_partial_var_move_by_use_in_closure =
     variable {$is_partial ->

@@ -1,8 +1,9 @@
 //! Tests for credential-process.
 
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
+use crate::utils::cargo_process;
 use cargo_test_support::registry::{Package, TestRegistry};
-use cargo_test_support::{basic_manifest, cargo_process, paths, project, registry, str, Project};
+use cargo_test_support::{Project, basic_manifest, paths, project, registry, str};
 
 fn toml_bin(proj: &Project, name: &str) -> String {
     proj.bin(name).display().to_string().replace('\\', "\\\\")
@@ -79,10 +80,35 @@ fn publish() {
 [UPLOADING] foo v0.1.0 ([ROOT]/foo)
 {"v":1,"registry":{"index-url":"[..]","name":"alternative"},"kind":"get","operation":"publish","name":"foo","vers":"0.1.0","cksum":"[..]"}
 [UPLOADED] foo v0.1.0 to registry `alternative`
-[NOTE] waiting for `foo v0.1.0` to be available at registry `alternative`.
-You may press ctrl-c [..]
+[NOTE] waiting for foo v0.1.0 to be available at registry `alternative`
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.1.0 at registry `alternative`
 
+"#]])
+        .run();
+}
+
+#[allow(dead_code)]
+fn credential_provider_auth_failure() {
+    let _reg = registry::RegistryBuilder::new()
+        .http_index()
+        .auth_required()
+        .alternative()
+        .no_configure_token()
+        .credential_provider(&["cargo:token-from-stdout", "true"])
+        .build();
+
+    cargo_process("install libc --registry=alternative")
+        .with_status(101)
+        .with_stderr_data(str![[r#"
+[UPDATING] `alternative` index
+[ERROR] token rejected for `alternative`
+You may need to log in using this registry's credential provider
+
+Caused by:
+  failed to get successful HTTP response from [..]
+  body:
+  [..]
 "#]])
         .run();
 }
@@ -95,7 +121,8 @@ fn basic_unsupported() {
         .credential_provider(&["cargo:token-from-stdout", "false"])
         .build();
 
-    cargo_process("login abcdefg")
+    cargo_process("login")
+        .with_stdin("abcdefg")
         .replace_crates_io(registry.index_url())
         .with_status(101)
         .with_stderr_data(str![[r#"
@@ -132,7 +159,8 @@ fn login() {
         ])
         .build();
 
-    cargo_process("login abcdefg -- cmd3 --cmd4")
+    cargo_process("login -- cmd3 --cmd4")
+        .with_stdin("abcdefg")
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
@@ -383,7 +411,8 @@ fn multiple_providers() {
     )
     .unwrap();
 
-    cargo_process("login -v abcdefg")
+    cargo_process("login -v")
+    .with_stdin("abcdefg")
         .replace_crates_io(server.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index
@@ -429,7 +458,8 @@ fn registry_provider_overrides_global() {
     )
     .unwrap();
 
-    cargo_process("login -v abcdefg")
+    cargo_process("login -v")
+        .with_stdin("abcdefg")
         .env("CARGO_REGISTRY_CREDENTIAL_PROVIDER", "cargo:token")
         .replace_crates_io(server.index_url())
         .with_stderr_data(str![[r#"
@@ -460,7 +490,7 @@ fn both_asymmetric_and_token() {
     )
     .unwrap();
 
-    cargo_process("login -Zasymmetric-token -v abcdefg")
+    cargo_process("login -Zasymmetric-token -v").with_stdin("abcdefg")
         .masquerade_as_nightly_cargo(&["asymmetric-token"])
         .replace_crates_io(server.index_url())
         .with_stderr_data(str![[r#"
@@ -525,7 +555,8 @@ fn token_caching() {
         .file("src/lib.rs", "")
         .build();
 
-    let output = r#"[UPDATING] `alternative` index
+    let output = str![[r#"
+[UPDATING] `alternative` index
 {"v":1,"registry":{"index-url":"[..]","name":"alternative"},"kind":"get","operation":"read"}
 [PACKAGING] foo v0.1.0 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
@@ -533,9 +564,10 @@ fn token_caching() {
 {"v":1,"registry":{"index-url":"[..]","name":"alternative"},"kind":"get","operation":"publish","name":"foo","vers":"0.1.0","cksum":"[..]"}
 [UPLOADED] foo v0.1.0 to registry `alternative`
 [NOTE] waiting [..]
-You may press ctrl-c [..]
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.1.0 at registry `alternative`
-"#;
+
+"#]];
 
     // The output should contain two JSON messages from the provider in both cases:
     // The first because the credential is expired, the second because the provider
@@ -544,7 +576,8 @@ You may press ctrl-c [..]
         .with_stderr_data(output)
         .run();
 
-    let output_non_independent = r#"[UPDATING] `alternative` index
+    let output_non_independent = str![[r#"
+[UPDATING] `alternative` index
 {"v":1,"registry":{"index-url":"[..]","name":"alternative"},"kind":"get","operation":"read"}
 [PACKAGING] foo v0.1.1 ([ROOT]/foo)
 [PACKAGED] 4 files, [FILE_SIZE]B ([FILE_SIZE]B compressed)
@@ -552,9 +585,10 @@ You may press ctrl-c [..]
 {"v":1,"registry":{"index-url":"[..]","name":"alternative"},"kind":"get","operation":"publish","name":"foo","vers":"0.1.1","cksum":"[..]"}
 [UPLOADED] foo v0.1.1 to registry `alternative`
 [NOTE] waiting [..]
-You may press ctrl-c [..]
+[HELP] you may press ctrl-c to skip waiting; the crate should be available shortly
 [PUBLISHED] foo v0.1.1 at registry `alternative`
-"#;
+
+"#]];
 
     p.change_file(
         "Cargo.toml",
@@ -675,7 +709,8 @@ fn unsupported_version() {
         .credential_provider(&[&provider])
         .build();
 
-    cargo_process("login abcdefg")
+    cargo_process("login")
+        .with_stdin("abcdefg")
         .replace_crates_io(registry.index_url())
         .with_status(101)
         .with_stderr_data(str![[r#"
@@ -707,7 +742,8 @@ fn alias_builtin_warning() {
     )
     .unwrap();
 
-    cargo_process("login abcdefg")
+    cargo_process("login")
+        .with_stdin("abcdefg")
         .replace_crates_io(registry.index_url())
         .with_stderr_data(str![[r#"
 [UPDATING] crates.io index

@@ -12,37 +12,38 @@ Forwarded: not-needed
  3 files changed, 12 deletions(-)
 
 diff --git a/compiler/rustc/Cargo.toml b/compiler/rustc/Cargo.toml
-index d24b630..2256524 100644
+index 8cef9e0..8e1e936c 100644
 --- a/compiler/rustc/Cargo.toml
 +++ b/compiler/rustc/Cargo.toml
-@@ -20,14 +20,8 @@ rustc_smir = { path = "../rustc_smir" }
- stable_mir = { path = "../stable_mir" }
- # tidy-alphabetical-end
+@@ -27,15 +27,9 @@ getrandom = "=0.3.3"
+ wasi = "=0.14.2"
+ 
  
 -[dependencies.tikv-jemalloc-sys]
--version = "0.6.0"
+-version = "0.6.1"
 -optional = true
--features = ['unprefixed_malloc_on_supported_platforms']
+-features = ['override_allocator_on_supported_platforms']
 -
  [features]
  # tidy-alphabetical-start
+ check_only = ['rustc_driver_impl/check_only']
 -jemalloc = ['dep:tikv-jemalloc-sys']
  llvm = ['rustc_driver_impl/llvm']
- max_level_info = ['rustc_driver_impl/max_level_info']
- rustc_randomized_layouts = ['rustc_driver_impl/rustc_randomized_layouts']
+ llvm_enzyme = ['rustc_driver_impl/llvm_enzyme']
+ llvm_offload = ['rustc_driver_impl/llvm_offload']
 diff --git a/src/tools/rust-analyzer/crates/profile/Cargo.toml b/src/tools/rust-analyzer/crates/profile/Cargo.toml
-index 2e3413f..f823aa1 100644
+index 4828419..f60282f 100644
 --- a/src/tools/rust-analyzer/crates/profile/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/profile/Cargo.toml
-@@ -15,7 +15,6 @@ doctest = false
- [dependencies]
- cfg-if = "1.0.0"
- libc.workspace = true
--jemalloc-ctl = { version = "0.5.0", package = "tikv-jemalloc-ctl", optional = true }
+@@ -14,7 +14,6 @@ doctest = false
  
- [target.'cfg(target_os = "linux")'.dependencies]
+ [dependencies]
+ cfg-if = "1.0.1"
+-jemalloc-ctl = { version = "0.5.4", package = "tikv-jemalloc-ctl", optional = true }
+ 
+ [target.'cfg(all(target_os = "linux", not(target_env = "ohos")))'.dependencies]
  perf-event = "=0.4.7"
-@@ -25,7 +24,6 @@ windows-sys = { version = "0.52", features = ["Win32_System_Threading", "Win32_S
+@@ -30,7 +29,6 @@ windows-sys = { version = "0.60", features = [
  
  [features]
  cpu_profiler = []
@@ -51,24 +52,24 @@ index 2e3413f..f823aa1 100644
  # Uncomment to enable for the whole crate graph
  # default = [ "cpu_profiler" ]
 diff --git a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-index fa9ff6b..ba1925d 100644
+index 2e48c5a..acee8c0 100644
 --- a/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
 +++ b/src/tools/rust-analyzer/crates/rust-analyzer/Cargo.toml
-@@ -78,9 +78,6 @@ paths.workspace = true
- [target.'cfg(windows)'.dependencies]
- windows-sys = { version = "0.52", features = ["Win32_System_Threading"] }
+@@ -83,9 +83,6 @@ windows-sys = { version = "0.60", features = [
+   "Win32_System_Threading",
+ ] }
  
 -[target.'cfg(not(target_env = "msvc"))'.dependencies]
--jemallocator = { version = "0.5.0", package = "tikv-jemallocator", optional = true }
+-jemallocator = { version = "0.5.4", package = "tikv-jemallocator", optional = true }
 -
  [dev-dependencies]
- expect-test = "1.4.0"
+ expect-test = "1.5.1"
  xshell.workspace = true
-@@ -90,7 +87,6 @@ test-fixture.workspace = true
+@@ -95,7 +92,6 @@ test-fixture.workspace = true
  syntax-bridge.workspace = true
  
  [features]
 -jemalloc = ["jemallocator", "profile/jemalloc"]
- force-always-assert = ["always-assert/force"]
- sysroot-abi = []
+ force-always-assert = ["stdx/force-always-assert"]
  in-rust-tree = [
+   "syntax/in-rust-tree",

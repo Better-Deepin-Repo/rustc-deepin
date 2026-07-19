@@ -407,20 +407,6 @@ fn verify_all_signatures() {
                 "__clrex",
                 "__dbg",
             ];
-            if !skip.contains(&rust.name) {
-                println!(
-                    "missing run-time test named `test_{}` for `{}`",
-                    {
-                        let mut id = rust.name;
-                        while id.starts_with('_') {
-                            id = &id[1..];
-                        }
-                        id
-                    },
-                    rust.name
-                );
-                all_valid = false;
-            }
         }
 
         // Skip some intrinsics that aren't NEON and are located in different
@@ -458,7 +444,6 @@ fn verify_all_signatures() {
                     && !rust.file.ends_with("v6.rs\"")
                     && !rust.file.ends_with("v7.rs\"")
                     && !rust.file.ends_with("v8.rs\"")
-                    && !rust.file.ends_with("tme.rs\"")
                     && !rust.file.ends_with("mte.rs\"")
                     && !rust.file.ends_with("ex.rs\"")
                     && !skip_intrinsic_verify.contains(&rust.name)

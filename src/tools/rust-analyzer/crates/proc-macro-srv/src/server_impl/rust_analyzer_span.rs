@@ -6,34 +6,18 @@
 //! change their representation to be compatible with rust-analyzer's.
 use std::{
     collections::{HashMap, HashSet},
-    iter,
     ops::{Bound, Range},
 };
 
 use intern::Symbol;
-use proc_macro::bridge::{self, server};
-use span::{Span, FIXUP_ERASED_FILE_AST_ID_MARKER};
-use tt::{TextRange, TextSize};
+use proc_macro::bridge::server;
+use span::{FIXUP_ERASED_FILE_AST_ID_MARKER, Span, TextRange, TextSize};
 
-use crate::server_impl::{
-    delim_to_external, delim_to_internal, literal_kind_to_external, literal_kind_to_internal,
-    token_stream::TokenStreamBuilder,
+use crate::{
+    bridge::{Diagnostic, ExpnGlobals, Literal, TokenTree},
+    server_impl::literal_from_str,
 };
-mod tt {
-    pub use tt::*;
 
-    pub type Subtree = ::tt::Subtree<super::Span>;
-    pub type TokenTree = ::tt::TokenTree<super::Span>;
-    pub type Leaf = ::tt::Leaf<super::Span>;
-    pub type Literal = ::tt::Literal<super::Span>;
-    pub type Punct = ::tt::Punct<super::Span>;
-    pub type Ident = ::tt::Ident<super::Span>;
-}
-
-type TokenStream = crate::server_impl::TokenStream<Span>;
-
-#[derive(Clone)]
-pub struct SourceFile;
 pub struct FreeFunctions;
 
 pub struct RaSpanServer {
@@ -48,8 +32,7 @@ pub struct RaSpanServer {
 
 impl server::Types for RaSpanServer {
     type FreeFunctions = FreeFunctions;
-    type TokenStream = TokenStream;
-    type SourceFile = SourceFile;
+    type TokenStream = crate::token_stream::TokenStream<Span>;
     type Span = Span;
     type Symbol = Symbol;
 }
@@ -66,73 +49,11 @@ impl server::FreeFunctions for RaSpanServer {
         self.tracked_paths.insert(path.into());
     }
 
-    fn literal_from_str(
-        &mut self,
-        s: &str,
-    ) -> Result<bridge::Literal<Self::Span, Self::Symbol>, ()> {
-        use proc_macro::bridge::LitKind;
-        use rustc_lexer::{LiteralKind, Token, TokenKind};
-
-        let mut tokens = rustc_lexer::tokenize(s);
-        let minus_or_lit = tokens.next().unwrap_or(Token { kind: TokenKind::Eof, len: 0 });
-
-        let lit = if minus_or_lit.kind == TokenKind::Minus {
-            let lit = tokens.next().ok_or(())?;
-            if !matches!(
-                lit.kind,
-                TokenKind::Literal {
-                    kind: LiteralKind::Int { .. } | LiteralKind::Float { .. },
-                    ..
-                }
-            ) {
-                return Err(());
-            }
-            lit
-        } else {
-            minus_or_lit
-        };
-
-        if tokens.next().is_some() {
-            return Err(());
-        }
-
-        let TokenKind::Literal { kind, suffix_start } = lit.kind else { return Err(()) };
-        let (kind, start_offset, end_offset) = match kind {
-            LiteralKind::Int { .. } => (LitKind::Integer, 0, 0),
-            LiteralKind::Float { .. } => (LitKind::Float, 0, 0),
-            LiteralKind::Char { terminated } => (LitKind::Char, 1, terminated as usize),
-            LiteralKind::Byte { terminated } => (LitKind::Byte, 2, terminated as usize),
-            LiteralKind::Str { terminated } => (LitKind::Str, 1, terminated as usize),
-            LiteralKind::ByteStr { terminated } => (LitKind::ByteStr, 2, terminated as usize),
-            LiteralKind::CStr { terminated } => (LitKind::CStr, 2, terminated as usize),
-            LiteralKind::RawStr { n_hashes } => (
-                LitKind::StrRaw(n_hashes.unwrap_or_default()),
-                2 + n_hashes.unwrap_or_default() as usize,
-                1 + n_hashes.unwrap_or_default() as usize,
-            ),
-            LiteralKind::RawByteStr { n_hashes } => (
-                LitKind::ByteStrRaw(n_hashes.unwrap_or_default()),
-                3 + n_hashes.unwrap_or_default() as usize,
-                1 + n_hashes.unwrap_or_default() as usize,
-            ),
-            LiteralKind::RawCStr { n_hashes } => (
-                LitKind::CStrRaw(n_hashes.unwrap_or_default()),
-                3 + n_hashes.unwrap_or_default() as usize,
-                1 + n_hashes.unwrap_or_default() as usize,
-            ),
-        };
-
-        let (lit, suffix) = s.split_at(suffix_start as usize);
-        let lit = &lit[start_offset..lit.len() - end_offset];
-        let suffix = match suffix {
-            "" | "_" => None,
-            suffix => Some(Symbol::intern(suffix)),
-        };
-
-        Ok(bridge::Literal { kind, symbol: Symbol::intern(lit), suffix, span: self.call_site })
+    fn literal_from_str(&mut self, s: &str) -> Result<Literal<Self::Span>, ()> {
+        literal_from_str(s, self.call_site)
     }
 
-    fn emit_diagnostic(&mut self, _: bridge::Diagnostic<Self::Span>) {
+    fn emit_diagnostic(&mut self, _: Diagnostic<Self::Span>) {
         // FIXME handle diagnostic
     }
 }
@@ -153,59 +74,9 @@ impl server::TokenStream for RaSpanServer {
     fn to_string(&mut self, stream: &Self::TokenStream) -> String {
         stream.to_string()
     }
-    fn from_token_tree(
-        &mut self,
-        tree: bridge::TokenTree<Self::TokenStream, Self::Span, Self::Symbol>,
-    ) -> Self::TokenStream {
-        match tree {
-            bridge::TokenTree::Group(group) => {
-                let group = tt::Subtree {
-                    delimiter: delim_to_internal(group.delimiter, group.span),
-                    token_trees: match group.stream {
-                        Some(stream) => stream.into_iter().collect(),
-                        None => Box::new([]),
-                    },
-                };
-                let tree = tt::TokenTree::from(group);
-                Self::TokenStream::from_iter(iter::once(tree))
-            }
 
-            bridge::TokenTree::Ident(ident) => {
-                let text = ident.sym;
-                let ident: tt::Ident = tt::Ident {
-                    sym: text,
-                    span: ident.span,
-                    is_raw: if ident.is_raw { tt::IdentIsRaw::Yes } else { tt::IdentIsRaw::No },
-                };
-                let leaf = tt::Leaf::from(ident);
-                let tree = tt::TokenTree::from(leaf);
-                Self::TokenStream::from_iter(iter::once(tree))
-            }
-
-            bridge::TokenTree::Literal(literal) => {
-                let literal = tt::Literal {
-                    symbol: literal.symbol,
-                    suffix: literal.suffix,
-                    span: literal.span,
-                    kind: literal_kind_to_internal(literal.kind),
-                };
-
-                let leaf: tt::Leaf = tt::Leaf::from(literal);
-                let tree = tt::TokenTree::from(leaf);
-                Self::TokenStream::from_iter(iter::once(tree))
-            }
-
-            bridge::TokenTree::Punct(p) => {
-                let punct = tt::Punct {
-                    char: p.ch as char,
-                    spacing: if p.joint { tt::Spacing::Joint } else { tt::Spacing::Alone },
-                    span: p.span,
-                };
-                let leaf = tt::Leaf::from(punct);
-                let tree = tt::TokenTree::from(leaf);
-                Self::TokenStream::from_iter(iter::once(tree))
-            }
-        }
+    fn from_token_tree(&mut self, tree: TokenTree<Self::Span>) -> Self::TokenStream {
+        Self::TokenStream::new(vec![tree])
     }
 
     fn expand_expr(&mut self, self_: &Self::TokenStream) -> Result<Self::TokenStream, ()> {
@@ -220,16 +91,17 @@ impl server::TokenStream for RaSpanServer {
     fn concat_trees(
         &mut self,
         base: Option<Self::TokenStream>,
-        trees: Vec<bridge::TokenTree<Self::TokenStream, Self::Span, Self::Symbol>>,
+        trees: Vec<TokenTree<Self::Span>>,
     ) -> Self::TokenStream {
-        let mut builder = TokenStreamBuilder::new();
-        if let Some(base) = base {
-            builder.push(base);
+        match base {
+            Some(mut base) => {
+                for tt in trees {
+                    base.push_tree(tt);
+                }
+                base
+            }
+            None => Self::TokenStream::new(trees),
         }
-        for tree in trees {
-            builder.push(self.from_token_tree(tree));
-        }
-        builder.build()
     }
 
     fn concat_streams(
@@ -237,70 +109,15 @@ impl server::TokenStream for RaSpanServer {
         base: Option<Self::TokenStream>,
         streams: Vec<Self::TokenStream>,
     ) -> Self::TokenStream {
-        let mut builder = TokenStreamBuilder::new();
-        if let Some(base) = base {
-            builder.push(base);
+        let mut stream = base.unwrap_or_default();
+        for s in streams {
+            stream.push_stream(s);
         }
-        for stream in streams {
-            builder.push(stream);
-        }
-        builder.build()
-    }
-
-    fn into_trees(
-        &mut self,
-        stream: Self::TokenStream,
-    ) -> Vec<bridge::TokenTree<Self::TokenStream, Self::Span, Self::Symbol>> {
         stream
-            .into_iter()
-            .map(|tree| match tree {
-                tt::TokenTree::Leaf(tt::Leaf::Ident(ident)) => {
-                    bridge::TokenTree::Ident(bridge::Ident {
-                        sym: ident.sym,
-                        is_raw: ident.is_raw.yes(),
-                        span: ident.span,
-                    })
-                }
-                tt::TokenTree::Leaf(tt::Leaf::Literal(lit)) => {
-                    bridge::TokenTree::Literal(bridge::Literal {
-                        span: lit.span,
-                        kind: literal_kind_to_external(lit.kind),
-                        symbol: lit.symbol,
-                        suffix: lit.suffix,
-                    })
-                }
-                tt::TokenTree::Leaf(tt::Leaf::Punct(punct)) => {
-                    bridge::TokenTree::Punct(bridge::Punct {
-                        ch: punct.char as u8,
-                        joint: punct.spacing == tt::Spacing::Joint,
-                        span: punct.span,
-                    })
-                }
-                tt::TokenTree::Subtree(subtree) => bridge::TokenTree::Group(bridge::Group {
-                    delimiter: delim_to_external(subtree.delimiter),
-                    stream: if subtree.token_trees.is_empty() {
-                        None
-                    } else {
-                        Some(subtree.token_trees.into_vec().into_iter().collect())
-                    },
-                    span: bridge::DelimSpan::from_single(subtree.delimiter.open),
-                }),
-            })
-            .collect()
     }
-}
 
-impl server::SourceFile for RaSpanServer {
-    fn eq(&mut self, _file1: &Self::SourceFile, _file2: &Self::SourceFile) -> bool {
-        // FIXME
-        true
-    }
-    fn path(&mut self, _file: &Self::SourceFile) -> String {
-        // FIXME
-        String::new()
-    }
-    fn is_real(&mut self, _file: &Self::SourceFile) -> bool {
-        true
+    fn into_trees(&mut self, stream: Self::TokenStream) -> Vec<TokenTree<Self::Span>> {
+        (*stream.0).clone()
     }
 }
 
@@ -308,9 +125,13 @@ impl server::Span for RaSpanServer {
     fn debug(&mut self, span: Self::Span) -> String {
         format!("{:?}", span)
     }
-    fn source_file(&mut self, _span: Self::Span) -> Self::SourceFile {
-        // FIXME stub, requires db
-        SourceFile {}
+    fn file(&mut self, _: Self::Span) -> String {
+        // FIXME
+        String::new()
+    }
+    fn local_file(&mut self, _: Self::Span) -> Option<String> {
+        // FIXME
+        None
     }
     fn save_span(&mut self, _span: Self::Span) -> usize {
         // FIXME, quote is incompatible with third-party tools
@@ -439,12 +260,12 @@ impl server::Span for RaSpanServer {
 
     fn line(&mut self, _span: Self::Span) -> usize {
         // FIXME requires db to resolve line index, THIS IS NOT INCREMENTAL
-        0
+        1
     }
 
     fn column(&mut self, _span: Self::Span) -> usize {
         // FIXME requires db to resolve line index, THIS IS NOT INCREMENTAL
-        0
+        1
     }
 }
 
@@ -456,8 +277,8 @@ impl server::Symbol for RaSpanServer {
 }
 
 impl server::Server for RaSpanServer {
-    fn globals(&mut self) -> bridge::ExpnGlobals<Self::Span> {
-        bridge::ExpnGlobals {
+    fn globals(&mut self) -> ExpnGlobals<Self::Span> {
+        ExpnGlobals {
             def_site: self.def_site,
             call_site: self.call_site,
             mixed_site: self.mixed_site,
@@ -470,95 +291,5 @@ impl server::Server for RaSpanServer {
 
     fn with_symbol_string(symbol: &Self::Symbol, f: impl FnOnce(&str)) {
         f(symbol.as_str())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use span::{EditionedFileId, FileId, SyntaxContextId};
-
-    use super::*;
-
-    #[test]
-    fn test_ra_server_to_string() {
-        let span = Span {
-            range: TextRange::empty(TextSize::new(0)),
-            anchor: span::SpanAnchor {
-                file_id: EditionedFileId::current_edition(FileId::from_raw(0)),
-                ast_id: span::ErasedFileAstId::from_raw(0),
-            },
-            ctx: SyntaxContextId::ROOT,
-        };
-        let s = TokenStream {
-            token_trees: vec![
-                tt::TokenTree::Leaf(tt::Leaf::Ident(tt::Ident {
-                    sym: Symbol::intern("struct"),
-                    span,
-                    is_raw: tt::IdentIsRaw::No,
-                })),
-                tt::TokenTree::Leaf(tt::Leaf::Ident(tt::Ident {
-                    sym: Symbol::intern("T"),
-                    span,
-                    is_raw: tt::IdentIsRaw::No,
-                })),
-                tt::TokenTree::Subtree(tt::Subtree {
-                    delimiter: tt::Delimiter {
-                        open: span,
-                        close: span,
-                        kind: tt::DelimiterKind::Brace,
-                    },
-                    token_trees: Box::new([tt::TokenTree::Leaf(tt::Leaf::Literal(tt::Literal {
-                        kind: tt::LitKind::Str,
-                        symbol: Symbol::intern("string"),
-                        suffix: None,
-                        span,
-                    }))]),
-                }),
-            ],
-        };
-
-        assert_eq!(s.to_string(), "struct T {\"string\"}");
-    }
-
-    #[test]
-    fn test_ra_server_from_str() {
-        let span = Span {
-            range: TextRange::empty(TextSize::new(0)),
-            anchor: span::SpanAnchor {
-                file_id: EditionedFileId::current_edition(FileId::from_raw(0)),
-                ast_id: span::ErasedFileAstId::from_raw(0),
-            },
-            ctx: SyntaxContextId::ROOT,
-        };
-        let subtree_paren_a = tt::TokenTree::Subtree(tt::Subtree {
-            delimiter: tt::Delimiter {
-                open: span,
-                close: span,
-                kind: tt::DelimiterKind::Parenthesis,
-            },
-            token_trees: Box::new([tt::TokenTree::Leaf(tt::Leaf::Ident(tt::Ident {
-                is_raw: tt::IdentIsRaw::No,
-                sym: Symbol::intern("a"),
-                span,
-            }))]),
-        });
-
-        let t1 = TokenStream::from_str("(a)", span).unwrap();
-        assert_eq!(t1.token_trees.len(), 1);
-        assert_eq!(t1.token_trees[0], subtree_paren_a);
-
-        let t2 = TokenStream::from_str("(a);", span).unwrap();
-        assert_eq!(t2.token_trees.len(), 2);
-        assert_eq!(t2.token_trees[0], subtree_paren_a);
-
-        let underscore = TokenStream::from_str("_", span).unwrap();
-        assert_eq!(
-            underscore.token_trees[0],
-            tt::TokenTree::Leaf(tt::Leaf::Ident(tt::Ident {
-                sym: Symbol::intern("_"),
-                span,
-                is_raw: tt::IdentIsRaw::No,
-            }))
-        );
     }
 }

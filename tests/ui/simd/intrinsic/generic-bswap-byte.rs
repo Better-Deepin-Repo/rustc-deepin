@@ -1,22 +1,21 @@
 //@ run-pass
-#![feature(repr_simd, intrinsics)]
-#![allow(non_camel_case_types)]
+//@ compile-flags: --cfg minisimd_const
+#![feature(repr_simd, core_intrinsics, const_trait_impl, const_cmp, const_index)]
 
-#[repr(simd)]
-#[derive(Copy, Clone)]
-struct i8x4([i8; 4]);
+#[path = "../../../auxiliary/minisimd.rs"]
+mod minisimd;
+use minisimd::*;
 
-#[repr(simd)]
-#[derive(Copy, Clone)]
-struct u8x4([u8; 4]);
+use std::intrinsics::simd::simd_bswap;
 
-extern "rust-intrinsic" {
-    fn simd_bswap<T>(x: T) -> T;
+const fn bswap() {
+    unsafe {
+        assert_eq!(simd_bswap(i8x4::from_array([0, 1, 2, 3])).into_array(), [0, 1, 2, 3]);
+        assert_eq!(simd_bswap(u8x4::from_array([0, 1, 2, 3])).into_array(), [0, 1, 2, 3]);
+    }
 }
 
 fn main() {
-    unsafe {
-        assert_eq!(simd_bswap(i8x4([0, 1, 2, 3])).0, [0, 1, 2, 3]);
-        assert_eq!(simd_bswap(u8x4([0, 1, 2, 3])).0, [0, 1, 2, 3]);
-    }
+    const { bswap() };
+    bswap();
 }

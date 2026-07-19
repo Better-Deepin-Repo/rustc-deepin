@@ -2,5 +2,6 @@
 //@ ignore-test
 //@ no-prefer-dynamic
 //@ compile-flags: -Ctarget-feature=+avx -Clto
+//@ ignore-backends: gcc
 
 fn main() {}

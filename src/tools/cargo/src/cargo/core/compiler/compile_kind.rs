@@ -3,7 +3,7 @@
 use crate::core::Target;
 use crate::util::errors::CargoResult;
 use crate::util::interning::InternedString;
-use crate::util::{try_canonicalize, GlobalContext, StableHasher};
+use crate::util::{GlobalContext, StableHasher, try_canonicalize};
 use anyhow::Context as _;
 use serde::Serialize;
 use std::collections::BTreeSet;
@@ -27,6 +27,20 @@ pub enum CompileKind {
     /// Attached to a unit to be compiled for a particular target. This is used
     /// for units when the `--target` flag is passed.
     Target(CompileTarget),
+}
+
+/// Fallback behavior in the
+/// [`CompileKind::from_requested_targets_with_fallback`] function when
+/// no targets are specified.
+pub enum CompileKindFallback {
+    /// The build configuration is consulted to find the default target, such as
+    /// `$CARGO_BUILD_TARGET` or reading `build.target`.
+    BuildConfig,
+
+    /// Only the host should be returned when targets aren't explicitly
+    /// specified. This is used by `cargo metadata` for example where "only
+    /// host" has a special meaning in terms of the returned metadata.
+    JustHost,
 }
 
 impl CompileKind {
@@ -54,25 +68,54 @@ impl CompileKind {
         gctx: &GlobalContext,
         targets: &[String],
     ) -> CargoResult<Vec<CompileKind>> {
+        CompileKind::from_requested_targets_with_fallback(
+            gctx,
+            targets,
+            CompileKindFallback::BuildConfig,
+        )
+    }
+
+    /// Same as [`CompileKind::from_requested_targets`] except that if `targets`
+    /// doesn't explicitly mention anything the behavior of what to return is
+    /// controlled by the `fallback` argument.
+    pub fn from_requested_targets_with_fallback(
+        gctx: &GlobalContext,
+        targets: &[String],
+        fallback: CompileKindFallback,
+    ) -> CargoResult<Vec<CompileKind>> {
         let dedup = |targets: &[String]| {
-            Ok(targets
+            let deduplicated_targets = targets
                 .iter()
-                .map(|value| Ok(CompileKind::Target(CompileTarget::new(value)?)))
+                .map(|value| {
+                    // This neatly substitutes the manually-specified `host-tuple` target directive
+                    // with the compiling machine's target triple.
+
+                    if value.as_str() == "host-tuple" {
+                        let host_triple = env!("RUST_HOST_TARGET");
+                        Ok(CompileKind::Target(CompileTarget::new(host_triple)?))
+                    } else {
+                        Ok(CompileKind::Target(CompileTarget::new(value.as_str())?))
+                    }
+                })
                 // First collect into a set to deduplicate any `--target` passed
                 // more than once...
                 .collect::<CargoResult<BTreeSet<_>>>()?
                 // ... then generate a flat list for everything else to use.
                 .into_iter()
-                .collect())
+                .collect();
+
+            Ok(deduplicated_targets)
         };
 
         if !targets.is_empty() {
             return dedup(targets);
         }
 
-        let kinds = match &gctx.build_config()?.target {
-            None => Ok(vec![CompileKind::Host]),
-            Some(build_target_config) => dedup(&build_target_config.values(gctx)?),
+        let kinds = match (fallback, &gctx.build_config()?.target) {
+            (_, None) | (CompileKindFallback::JustHost, _) => Ok(vec![CompileKind::Host]),
+            (CompileKindFallback::BuildConfig, Some(build_target_config)) => {
+                dedup(&build_target_config.values(gctx.cwd())?)
+            }
         };
 
         kinds

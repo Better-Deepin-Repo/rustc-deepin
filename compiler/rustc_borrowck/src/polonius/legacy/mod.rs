@@ -13,7 +13,7 @@ use tracing::debug;
 
 use crate::borrow_set::BorrowSet;
 use crate::constraints::OutlivesConstraint;
-use crate::type_check::MirTypeckRegionConstraints;
+use crate::handle_placeholders::LoweredConstraints;
 use crate::type_check::free_region_relations::UniversalRegionRelations;
 use crate::universal_regions::UniversalRegions;
 
@@ -36,16 +36,16 @@ pub use self::facts::*;
 ///
 /// The rest of the facts are emitted during typeck and liveness.
 pub(crate) fn emit_facts<'tcx>(
-    all_facts: &mut Option<AllFacts>,
+    facts: &mut Option<PoloniusFacts>,
     tcx: TyCtxt<'tcx>,
-    location_table: &LocationTable,
+    location_table: &PoloniusLocationTable,
     body: &Body<'tcx>,
     borrow_set: &BorrowSet<'tcx>,
     move_data: &MoveData<'tcx>,
     universal_region_relations: &UniversalRegionRelations<'tcx>,
-    constraints: &MirTypeckRegionConstraints<'tcx>,
+    constraints: &LoweredConstraints<'tcx>,
 ) {
-    let Some(facts) = all_facts else {
+    let Some(facts) = facts else {
         // We don't do anything if there are no facts to fill.
         return;
     };
@@ -67,9 +67,9 @@ pub(crate) fn emit_facts<'tcx>(
 
 /// Emit facts needed for move/init analysis: moves and assignments.
 fn emit_move_facts(
-    facts: &mut AllFacts,
+    facts: &mut PoloniusFacts,
     body: &Body<'_>,
-    location_table: &LocationTable,
+    location_table: &PoloniusLocationTable,
     move_data: &MoveData<'_>,
 ) {
     facts.path_is_var.extend(move_data.rev_lookup.iter_locals_enumerated().map(|(l, r)| (r, l)));
@@ -139,7 +139,7 @@ fn emit_move_facts(
 
 /// Emit universal regions facts, and their relations.
 fn emit_universal_region_facts(
-    facts: &mut AllFacts,
+    facts: &mut PoloniusFacts,
     borrow_set: &BorrowSet<'_>,
     universal_region_relations: &UniversalRegionRelations<'_>,
 ) {
@@ -187,10 +187,10 @@ pub(crate) fn emit_drop_facts<'tcx>(
     local: Local,
     kind: &GenericArg<'tcx>,
     universal_regions: &UniversalRegions<'tcx>,
-    all_facts: &mut Option<AllFacts>,
+    facts: &mut Option<PoloniusFacts>,
 ) {
     debug!("emit_drop_facts(local={:?}, kind={:?}", local, kind);
-    let Some(facts) = all_facts.as_mut() else { return };
+    let Some(facts) = facts.as_mut() else { return };
     let _prof_timer = tcx.prof.generic_activity("polonius_fact_generation");
     tcx.for_each_free_region(kind, |drop_live_region| {
         let region_vid = universal_regions.to_region_vid(drop_live_region);
@@ -201,9 +201,9 @@ pub(crate) fn emit_drop_facts<'tcx>(
 /// Emit facts about the outlives constraints: the `subset` base relation, i.e. not a transitive
 /// closure.
 fn emit_outlives_facts<'tcx>(
-    facts: &mut AllFacts,
-    location_table: &LocationTable,
-    constraints: &MirTypeckRegionConstraints<'tcx>,
+    facts: &mut PoloniusFacts,
+    location_table: &PoloniusLocationTable,
+    constraints: &LoweredConstraints<'tcx>,
 ) {
     facts.subset_base.extend(constraints.outlives_constraints.outlives().iter().flat_map(
         |constraint: &OutlivesConstraint<'_>| {

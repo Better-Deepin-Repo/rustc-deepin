@@ -6,7 +6,7 @@
 //! present, and if so we branch off into this module, which implements the attribute by
 //! implementing a custom lowering from THIR to MIR.
 //!
-//! The result of this lowering is returned "normally" from the `build_mir` hook, with the only
+//! The result of this lowering is returned "normally" from `build_mir`, with the only
 //! notable difference being that the `injected` field in the body is set. Various components of the
 //! MIR pipeline, like borrowck and the pass manager will then consult this field (via
 //! `body.should_skip()`) to skip the parts of the MIR pipeline that precede the MIR phase the user
@@ -19,10 +19,10 @@
 
 use rustc_data_structures::fx::FxHashMap;
 use rustc_hir::def_id::DefId;
-use rustc_hir::{Attribute, HirId};
+use rustc_hir::{HirId, attrs};
 use rustc_index::{IndexSlice, IndexVec};
+use rustc_middle::bug;
 use rustc_middle::mir::*;
-use rustc_middle::span_bug;
 use rustc_middle::thir::*;
 use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_span::Span;
@@ -39,7 +39,8 @@ pub(super) fn build_custom_mir<'tcx>(
     return_ty: Ty<'tcx>,
     return_ty_span: Span,
     span: Span,
-    attr: &Attribute,
+    dialect: Option<attrs::MirDialect>,
+    phase: Option<attrs::MirPhase>,
 ) -> Body<'tcx> {
     let mut body = Body {
         basic_blocks: BasicBlocks::new(IndexVec::new()),
@@ -72,7 +73,7 @@ pub(super) fn build_custom_mir<'tcx>(
         inlined_parent_scope: None,
         local_data: ClearCrossCrate::Set(SourceScopeLocalData { lint_root: hir_id }),
     });
-    body.injection_phase = Some(parse_attribute(attr));
+    body.injection_phase = Some(parse_attribute(dialect, phase));
 
     let mut pctxt = ParseCtxt {
         tcx,
@@ -98,39 +99,38 @@ pub(super) fn build_custom_mir<'tcx>(
     body
 }
 
-fn parse_attribute(attr: &Attribute) -> MirPhase {
-    let meta_items = attr.meta_item_list().unwrap();
-    let mut dialect: Option<String> = None;
-    let mut phase: Option<String> = None;
-
-    for nested in meta_items {
-        let name = nested.name_or_empty();
-        let value = nested.value_str().unwrap().as_str().to_string();
-        match name.as_str() {
-            "dialect" => {
-                assert!(dialect.is_none());
-                dialect = Some(value);
-            }
-            "phase" => {
-                assert!(phase.is_none());
-                phase = Some(value);
-            }
-            other => {
-                span_bug!(
-                    nested.span(),
-                    "Unexpected key while parsing custom_mir attribute: '{}'",
-                    other
-                );
-            }
-        }
-    }
-
+/// Turns the arguments passed to `#[custom_mir(..)]` into a proper
+/// [`MirPhase`]. Panics if this isn't possible for any reason.
+fn parse_attribute(dialect: Option<attrs::MirDialect>, phase: Option<attrs::MirPhase>) -> MirPhase {
     let Some(dialect) = dialect else {
+        // Caught during attribute checking.
         assert!(phase.is_none());
         return MirPhase::Built;
     };
 
-    MirPhase::parse(dialect, phase)
+    match dialect {
+        attrs::MirDialect::Built => {
+            // Caught during attribute checking.
+            assert!(phase.is_none(), "Cannot specify a phase for `Built` MIR");
+            MirPhase::Built
+        }
+        attrs::MirDialect::Analysis => match phase {
+            None | Some(attrs::MirPhase::Initial) => MirPhase::Analysis(AnalysisPhase::Initial),
+
+            Some(attrs::MirPhase::PostCleanup) => MirPhase::Analysis(AnalysisPhase::PostCleanup),
+
+            Some(attrs::MirPhase::Optimized) => {
+                // Caught during attribute checking.
+                bug!("`optimized` dialect is not compatible with the `analysis` dialect")
+            }
+        },
+
+        attrs::MirDialect::Runtime => match phase {
+            None | Some(attrs::MirPhase::Initial) => MirPhase::Runtime(RuntimePhase::Initial),
+            Some(attrs::MirPhase::PostCleanup) => MirPhase::Runtime(RuntimePhase::PostCleanup),
+            Some(attrs::MirPhase::Optimized) => MirPhase::Runtime(RuntimePhase::Optimized),
+        },
+    }
 }
 
 struct ParseCtxt<'a, 'tcx> {

@@ -1,12 +1,13 @@
 use rustc_codegen_ssa::traits::*;
+use rustc_hir::attrs::Linkage;
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::{DefId, LOCAL_CRATE};
 use rustc_middle::bug;
-use rustc_middle::mir::mono::{Linkage, Visibility};
+use rustc_middle::mir::mono::Visibility;
 use rustc_middle::ty::layout::{FnAbiOf, HasTypingEnv, LayoutOf};
 use rustc_middle::ty::{self, Instance, TypeVisitableExt};
 use rustc_session::config::CrateType;
-use rustc_target::spec::RelocModel;
+use rustc_target::spec::{Arch, RelocModel};
 use tracing::debug;
 
 use crate::context::CodegenCx;
@@ -16,7 +17,7 @@ use crate::{base, llvm};
 
 impl<'tcx> PreDefineCodegenMethods<'tcx> for CodegenCx<'_, 'tcx> {
     fn predefine_static(
-        &self,
+        &mut self,
         def_id: DefId,
         linkage: Linkage,
         visibility: Visibility,
@@ -38,17 +39,13 @@ impl<'tcx> PreDefineCodegenMethods<'tcx> for CodegenCx<'_, 'tcx> {
 
         llvm::set_linkage(g, base::linkage_to_llvm(linkage));
         llvm::set_visibility(g, base::visibility_to_llvm(visibility));
-        unsafe {
-            if self.should_assume_dso_local(g, false) {
-                llvm::LLVMRustSetDSOLocal(g, true);
-            }
-        }
+        self.assume_dso_local(g, false);
 
         self.instances.borrow_mut().insert(instance, g);
     }
 
     fn predefine_fn(
-        &self,
+        &mut self,
         instance: Instance<'tcx>,
         linkage: Linkage,
         visibility: Visibility,
@@ -59,8 +56,8 @@ impl<'tcx> PreDefineCodegenMethods<'tcx> for CodegenCx<'_, 'tcx> {
         let fn_abi = self.fn_abi_of_instance(instance, ty::List::empty());
         let lldecl = self.declare_fn(symbol_name, fn_abi, Some(instance));
         llvm::set_linkage(lldecl, base::linkage_to_llvm(linkage));
-        let attrs = self.tcx.codegen_fn_attrs(instance.def_id());
-        base::set_link_section(lldecl, attrs);
+        let attrs = self.tcx.codegen_instance_attrs(instance.def);
+        base::set_link_section(lldecl, &attrs);
         if (linkage == Linkage::LinkOnceODR || linkage == Linkage::WeakODR)
             && self.tcx.sess.target.supports_comdat()
         {
@@ -71,10 +68,7 @@ impl<'tcx> PreDefineCodegenMethods<'tcx> for CodegenCx<'_, 'tcx> {
         // compiler-rt, then we want to implicitly compile everything with hidden
         // visibility as we're going to link this object all over the place but
         // don't want the symbols to get exported.
-        if linkage != Linkage::Internal
-            && linkage != Linkage::Private
-            && self.tcx.is_compiler_builtins(LOCAL_CRATE)
-        {
+        if linkage != Linkage::Internal && self.tcx.is_compiler_builtins(LOCAL_CRATE) {
             llvm::set_visibility(lldecl, llvm::Visibility::Hidden);
         } else {
             llvm::set_visibility(lldecl, base::visibility_to_llvm(visibility));
@@ -82,9 +76,7 @@ impl<'tcx> PreDefineCodegenMethods<'tcx> for CodegenCx<'_, 'tcx> {
 
         debug!("predefine_fn: instance = {:?}", instance);
 
-        if self.should_assume_dso_local(lldecl, false) {
-            unsafe { llvm::LLVMRustSetDSOLocal(lldecl, true) };
-        }
+        self.assume_dso_local(lldecl, false);
 
         self.instances.borrow_mut().insert(instance, lldecl);
     }
@@ -93,11 +85,16 @@ impl<'tcx> PreDefineCodegenMethods<'tcx> for CodegenCx<'_, 'tcx> {
 impl CodegenCx<'_, '_> {
     /// Whether a definition or declaration can be assumed to be local to a group of
     /// libraries that form a single DSO or executable.
-    pub(crate) fn should_assume_dso_local(
-        &self,
-        llval: &llvm::Value,
-        is_declaration: bool,
-    ) -> bool {
+    /// Marks the local as DSO if so.
+    pub(crate) fn assume_dso_local(&self, llval: &llvm::Value, is_declaration: bool) -> bool {
+        let assume = self.should_assume_dso_local(llval, is_declaration);
+        if assume {
+            llvm::set_dso_local(llval);
+        }
+        assume
+    }
+
+    fn should_assume_dso_local(&self, llval: &llvm::Value, is_declaration: bool) -> bool {
         let linkage = llvm::get_linkage(llval);
         let visibility = llvm::get_visibility(llval);
 
@@ -119,12 +116,12 @@ impl CodegenCx<'_, '_> {
         }
 
         // PowerPC64 prefers TOC indirection to avoid copy relocations.
-        if matches!(&*self.tcx.sess.target.arch, "powerpc64" | "powerpc64le") {
+        if matches!(self.tcx.sess.target.arch, Arch::PowerPC64 | Arch::PowerPC64LE) {
             return false;
         }
 
         // Match clang by only supporting COFF and ELF for now.
-        if self.tcx.sess.target.is_like_osx {
+        if self.tcx.sess.target.is_like_darwin {
             return false;
         }
 
@@ -135,8 +132,8 @@ impl CodegenCx<'_, '_> {
         }
 
         // Thread-local variables generally don't support copy relocations.
-        let is_thread_local_var = unsafe { llvm::LLVMIsAGlobalVariable(llval) }
-            .is_some_and(|v| unsafe { llvm::LLVMIsThreadLocal(v) } == llvm::True);
+        let is_thread_local_var = llvm::LLVMIsAGlobalVariable(llval)
+            .is_some_and(|v| llvm::LLVMIsThreadLocal(v).is_true());
         if is_thread_local_var {
             return false;
         }

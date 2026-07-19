@@ -12,8 +12,8 @@ use serde::ser;
 
 use crate::core::PackageIdSpec;
 use crate::core::SourceId;
-use crate::util::interning::InternedString;
 use crate::util::CargoResult;
+use crate::util::interning::InternedString;
 
 static PACKAGE_ID_CACHE: OnceLock<Mutex<HashSet<&'static PackageIdInner>>> = OnceLock::new();
 
@@ -78,7 +78,7 @@ impl<'de> de::Deserialize<'de> for PackageId {
         let (field, rest) = string
             .split_once(' ')
             .ok_or_else(|| de::Error::custom("invalid serialized PackageId"))?;
-        let name = InternedString::new(field);
+        let name = field.into();
 
         let (field, rest) = rest
             .split_once(' ')

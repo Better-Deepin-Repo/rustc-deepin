@@ -9,35 +9,43 @@ These tests hang or make the box OOM
 
 Forwarded: no
 
-
 Signed-off-by: Fabian Grünbichler <git@fabian.gruenbichler.email>
 ---
- src/tools/compiletest/src/directive-list.rs           | 1 +
- src/tools/compiletest/src/header/tests.rs             | 1 +
- tests/crashes/115994.rs                               | 1 +
- tests/run-make/long-linker-command-lines/foo.rs       | 7 +++++++
- tests/ui/associated-consts/issue-93775.rs             | 1 +
- tests/ui/issues/issue-74564-if-expr-stack-overflow.rs | 1 +
- tests/ui/threads-sendsync/mpsc_stress.rs              | 1 +
- 7 files changed, 13 insertions(+)
+ src/tools/compiletest/src/directives/directive_names.rs | 6 ++++--
+ src/tools/compiletest/src/directives/tests.rs           | 1 +
+ tests/crashes/108499.rs                                 | 1 +
+ tests/run-make/long-linker-command-lines/foo.rs         | 7 +++++++
+ tests/ui/associated-consts/issue-93775.rs               | 1 +
+ tests/ui/issues/issue-74564-if-expr-stack-overflow.rs   | 1 +
+ tests/ui/threads-sendsync/mpsc_stress.rs                | 1 +
+ 7 files changed, 16 insertions(+), 2 deletions(-)
 
-diff --git a/src/tools/compiletest/src/directive-list.rs b/src/tools/compiletest/src/directive-list.rs
-index 01068af..7952c7a 100644
---- a/src/tools/compiletest/src/directive-list.rs
-+++ b/src/tools/compiletest/src/directive-list.rs
-@@ -58,6 +58,7 @@ const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
+diff --git a/src/tools/compiletest/src/directives/directive_names.rs b/src/tools/compiletest/src/directives/directive_names.rs
+index 7b1c0a1..a3f883d 100644
+--- a/src/tools/compiletest/src/directives/directive_names.rs
++++ b/src/tools/compiletest/src/directives/directive_names.rs
+@@ -79,6 +79,7 @@ pub(crate) const KNOWN_DIRECTIVE_NAMES: &[&str] = &[
      "ignore-gnu",
      "ignore-haiku",
      "ignore-horizon",
 +    "ignore-hurd",
+     "ignore-i586",
      "ignore-i686-pc-windows-gnu",
      "ignore-i686-pc-windows-msvc",
-     "ignore-illumos",
-diff --git a/src/tools/compiletest/src/header/tests.rs b/src/tools/compiletest/src/header/tests.rs
-index 618b66d..5708375 100644
---- a/src/tools/compiletest/src/header/tests.rs
-+++ b/src/tools/compiletest/src/header/tests.rs
-@@ -332,6 +332,7 @@ fn ignore_target() {
+@@ -306,5 +307,6 @@ pub(crate) const KNOWN_HTMLDOCCK_DIRECTIVE_NAMES: &[&str] = &[
+     "!snapshot",
+ ];
+ 
+-pub(crate) const KNOWN_JSONDOCCK_DIRECTIVE_NAMES: &[&str] =
+-    &["count", "!count", "has", "!has", "is", "!is", "ismany", "!ismany", "set", "!set"];
++pub(crate) const KNOWN_JSONDOCCK_DIRECTIVE_NAMES: &[&str] = &[
++    "count", "!count", "has", "!has", "is", "!is", "ismany", "!ismany", "set", "!set",
++];
+diff --git a/src/tools/compiletest/src/directives/tests.rs b/src/tools/compiletest/src/directives/tests.rs
+index 90e2cb7..53852e6 100644
+--- a/src/tools/compiletest/src/directives/tests.rs
++++ b/src/tools/compiletest/src/directives/tests.rs
+@@ -347,6 +347,7 @@ fn ignore_target() {
      assert!(check_ignore(&config, "//@ ignore-x86_64-unknown-linux-gnu"));
      assert!(check_ignore(&config, "//@ ignore-x86_64"));
      assert!(check_ignore(&config, "//@ ignore-linux"));
@@ -45,17 +53,16 @@ index 618b66d..5708375 100644
      assert!(check_ignore(&config, "//@ ignore-unix"));
      assert!(check_ignore(&config, "//@ ignore-gnu"));
      assert!(check_ignore(&config, "//@ ignore-64bit"));
-diff --git a/tests/crashes/115994.rs b/tests/crashes/115994.rs
-index 23d1507..e0714e5 100644
---- a/tests/crashes/115994.rs
-+++ b/tests/crashes/115994.rs
-@@ -1,5 +1,6 @@
- //@ known-bug: #115994
- //@ compile-flags: -Cdebuginfo=2 --crate-type lib
+diff --git a/tests/crashes/108499.rs b/tests/crashes/108499.rs
+index 4a0638c..658d631 100644
+--- a/tests/crashes/108499.rs
++++ b/tests/crashes/108499.rs
+@@ -1,4 +1,5 @@
+ //@ known-bug: #108499
 +//@ ignore-hurd
  
- // To prevent "overflow while adding drop-check rules".
- use std::mem::ManuallyDrop;
+ // at lower recursion limits the recursion limit is reached before the bug happens
+ #![recursion_limit = "2000"]
 diff --git a/tests/run-make/long-linker-command-lines/foo.rs b/tests/run-make/long-linker-command-lines/foo.rs
 index 5b30c06..9ef0d5a 100644
 --- a/tests/run-make/long-linker-command-lines/foo.rs
@@ -75,17 +82,17 @@ index 5b30c06..9ef0d5a 100644
      let ok = PathBuf::from("ok");
      if env::var("YOU_ARE_A_LINKER").is_ok() {
 diff --git a/tests/ui/associated-consts/issue-93775.rs b/tests/ui/associated-consts/issue-93775.rs
-index 88e88b5..0981abc 100644
+index a9b8d10..ac41a60 100644
 --- a/tests/ui/associated-consts/issue-93775.rs
 +++ b/tests/ui/associated-consts/issue-93775.rs
-@@ -4,6 +4,7 @@
- 
+@@ -7,6 +7,7 @@
  //@ build-pass
- // ignore-tidy-linelength
+ //@ revisions: current next
+ //@ ignore-compare-mode-next-solver (explicit revisions)
 +//@ ignore-hurd
+ //@[next] compile-flags: -Znext-solver
  
- // Regression for #93775, needs build-pass to test it.
- 
+ #![recursion_limit = "1001"]
 diff --git a/tests/ui/issues/issue-74564-if-expr-stack-overflow.rs b/tests/ui/issues/issue-74564-if-expr-stack-overflow.rs
 index c0ffed2..1e97353 100644
 --- a/tests/ui/issues/issue-74564-if-expr-stack-overflow.rs

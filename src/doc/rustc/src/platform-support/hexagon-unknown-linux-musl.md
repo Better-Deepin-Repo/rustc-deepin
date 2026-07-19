@@ -11,7 +11,7 @@ DSP architecture.
 
 ## Target maintainers
 
-- [Brian Cain](https://github.com/androm3da), `bcain@quicinc.com`
+[@androm3da](https://github.com/androm3da)
 
 ## Requirements
 The target is cross-compiled. This target supports `std`.  By default, code
@@ -39,12 +39,18 @@ dynamically linked executables.
 # /opt/clang+llvm-18.1.0-cross-hexagon-unknown-linux-musl/x86_64-linux-gnu/bin/qemu-hexagon -L /opt/clang+llvm-18.1.0-cross-hexagon-unknown-linux-musl/x86_64-linux-gnu/target/hexagon-unknown-linux-musl/usr/ ./hello
 ```
 
+## Linking
+
+This target selects `rust-lld` by default.  Another option to use is
+[eld](https://github.com/qualcomm/eld), which is also provided with
+the opensource hexagon toolchain and the Hexagon SDK.
+
 ## Building the target
 Because it is Tier 3, rust does not yet ship pre-compiled artifacts for this
 target.
 
 Therefore, you can build Rust with support for the target by adding it to the
-target list in `config.toml`, a sample configuration is shown below.
+target list in `bootstrap.toml`, a sample configuration is shown below.
 
 ```toml
 [build]

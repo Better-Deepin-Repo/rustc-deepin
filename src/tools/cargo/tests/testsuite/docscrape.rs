@@ -1,6 +1,6 @@
 //! Tests for the `cargo doc` command with `-Zrustdoc-scrape-examples`.
 
-use cargo_test_support::prelude::*;
+use crate::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::str;
 
@@ -698,7 +698,7 @@ fn use_dev_deps_if_explicitly_enabled() {
 
 #[cargo_test(nightly, reason = "rustdoc scrape examples flags are unstable")]
 fn only_scrape_documented_targets() {
-    // package bar has doc = false and should not be eligible for documtation.
+    // package bar has doc = false and should not be eligible for documentation.
     let p = project()
         .file(
             "Cargo.toml",

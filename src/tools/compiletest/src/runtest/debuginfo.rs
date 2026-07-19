@@ -1,16 +1,14 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
-use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
+use camino::Utf8Path;
 use tracing::debug;
 
 use super::debugger::DebuggerCommands;
 use super::{Debugger, Emit, ProcRes, TestCx, Truncated, WillExecute};
-use crate::common::Config;
 use crate::debuggers::{extract_gdb_version, is_android_gdb_target};
-use crate::util::logv;
 
 impl TestCx<'_> {
     pub(super) fn run_debuginfo_test(&self) {
@@ -22,18 +20,6 @@ impl TestCx<'_> {
     }
 
     fn run_debuginfo_cdb_test(&self) {
-        let config = Config {
-            target_rustcflags: self.cleanup_debug_info_options(&self.config.target_rustcflags),
-            host_rustcflags: self.cleanup_debug_info_options(&self.config.host_rustcflags),
-            ..self.config.clone()
-        };
-
-        let test_cx = TestCx { config: &config, ..*self };
-
-        test_cx.run_debuginfo_cdb_test_no_opt();
-    }
-
-    fn run_debuginfo_cdb_test_no_opt(&self) {
         let exe_file = self.make_exe_name();
 
         // Existing PDB files are update in-place. When changing the debuginfo
@@ -49,7 +35,7 @@ impl TestCx<'_> {
             std::fs::remove_file(pdb_file).unwrap();
         }
 
-        // compile test file (it should have 'compile-flags:-g' in the header)
+        // compile test file (it should have 'compile-flags:-g' in the directive)
         let should_run = self.run_if_enabled();
         let compile_result = self.compile_test(should_run, Emit::None);
         if !compile_result.status.success() {
@@ -60,7 +46,7 @@ impl TestCx<'_> {
         }
 
         // Parse debugger commands etc from test files
-        let dbg_cmds = DebuggerCommands::parse_from(&self.testpaths.file, self.config, "cdb")
+        let dbg_cmds = DebuggerCommands::parse_from(&self.testpaths.file, "cdb")
             .unwrap_or_else(|e| self.fatal(&e));
 
         // https://docs.microsoft.com/en-us/windows-hardware/drivers/debugger/debugger-commands
@@ -73,11 +59,11 @@ impl TestCx<'_> {
         let mut js_extension = self.testpaths.file.clone();
         js_extension.set_extension("cdb.js");
         if js_extension.exists() {
-            script_str.push_str(&format!(".scriptload \"{}\"\n", js_extension.to_string_lossy()));
+            script_str.push_str(&format!(".scriptload \"{}\"\n", js_extension));
         }
 
         // Set breakpoints on every line that contains the string "#break"
-        let source_file_name = self.testpaths.file.file_name().unwrap().to_string_lossy();
+        let source_file_name = self.testpaths.file.file_name().unwrap();
         for line in &dbg_cmds.breakpoint_lines {
             script_str.push_str(&format!("bp `{}:{}`\n", source_file_name, line));
         }
@@ -104,7 +90,7 @@ impl TestCx<'_> {
 
         let debugger_run_result = self.compose_and_run(
             cdb,
-            self.config.run_lib_path.to_str().unwrap(),
+            self.config.target_run_lib_path.as_path(),
             None, // aux_path
             None, // input
         );
@@ -119,23 +105,11 @@ impl TestCx<'_> {
     }
 
     fn run_debuginfo_gdb_test(&self) {
-        let config = Config {
-            target_rustcflags: self.cleanup_debug_info_options(&self.config.target_rustcflags),
-            host_rustcflags: self.cleanup_debug_info_options(&self.config.host_rustcflags),
-            ..self.config.clone()
-        };
-
-        let test_cx = TestCx { config: &config, ..*self };
-
-        test_cx.run_debuginfo_gdb_test_no_opt();
-    }
-
-    fn run_debuginfo_gdb_test_no_opt(&self) {
-        let dbg_cmds = DebuggerCommands::parse_from(&self.testpaths.file, self.config, "gdb")
+        let dbg_cmds = DebuggerCommands::parse_from(&self.testpaths.file, "gdb")
             .unwrap_or_else(|e| self.fatal(&e));
         let mut cmds = dbg_cmds.commands.join("\n");
 
-        // compile test file (it should have 'compile-flags:-g' in the header)
+        // compile test file (it should have 'compile-flags:-g' in the directive)
         let should_run = self.run_if_enabled();
         let compiler_run_result = self.compile_test(should_run, Emit::None);
         if !compiler_run_result.status.success() {
@@ -151,16 +125,11 @@ impl TestCx<'_> {
         if is_android_gdb_target(&self.config.target) {
             cmds = cmds.replace("run", "continue");
 
-            let tool_path = match self.config.android_cross_path.to_str() {
-                Some(x) => x.to_owned(),
-                None => self.fatal("cannot find android cross path"),
-            };
-
             // write debugger script
             let mut script_str = String::with_capacity(2048);
             script_str.push_str(&format!("set charset {}\n", Self::charset()));
-            script_str.push_str(&format!("set sysroot {}\n", tool_path));
-            script_str.push_str(&format!("file {}\n", exe_file.to_str().unwrap()));
+            script_str.push_str(&format!("set sysroot {}\n", &self.config.android_cross_path));
+            script_str.push_str(&format!("file {}\n", exe_file));
             script_str.push_str("target remote :5039\n");
             script_str.push_str(&format!(
                 "set solib-search-path \
@@ -169,12 +138,8 @@ impl TestCx<'_> {
             ));
             for line in &dbg_cmds.breakpoint_lines {
                 script_str.push_str(
-                    format!(
-                        "break {:?}:{}\n",
-                        self.testpaths.file.file_name().unwrap().to_string_lossy(),
-                        *line
-                    )
-                    .as_str(),
+                    format!("break {}:{}\n", self.testpaths.file.file_name().unwrap(), *line)
+                        .as_str(),
                 );
             }
             script_str.push_str(&cmds);
@@ -203,7 +168,7 @@ impl TestCx<'_> {
                 self.config.adb_test_dir.clone(),
                 if self.config.target.contains("aarch64") { "64" } else { "" },
                 self.config.adb_test_dir.clone(),
-                exe_file.file_name().unwrap().to_str().unwrap()
+                exe_file.file_name().unwrap()
             );
 
             debug!("adb arg: {}", adb_arg);
@@ -241,8 +206,9 @@ impl TestCx<'_> {
             let cmdline = {
                 let mut gdb = Command::new(&format!("{}-gdb", self.config.target));
                 gdb.args(debugger_opts);
-                let cmdline = self.make_cmdline(&gdb, "");
-                logv(self.config, format!("executing {}", cmdline));
+                // FIXME(jieyouxu): don't pass an empty Path
+                let cmdline = self.make_cmdline(&gdb, Utf8Path::new(""));
+                self.logv(format_args!("executing {cmdline}"));
                 cmdline
             };
 
@@ -254,14 +220,10 @@ impl TestCx<'_> {
                 cmdline,
             };
             if adb.kill().is_err() {
-                println!("Adb process is already finished.");
+                writeln!(self.stdout, "Adb process is already finished.");
             }
         } else {
-            let rust_src_root =
-                self.config.find_rust_src_root().expect("Could not find Rust source root");
-            let rust_pp_module_rel_path = Path::new("./src/etc");
-            let rust_pp_module_abs_path =
-                rust_src_root.join(rust_pp_module_rel_path).to_str().unwrap().to_owned();
+            let rust_pp_module_abs_path = self.config.src_root.join("src").join("etc");
             // write debugger script
             let mut script_str = String::with_capacity(2048);
             script_str.push_str(&format!("set charset {}\n", Self::charset()));
@@ -269,29 +231,34 @@ impl TestCx<'_> {
 
             match self.config.gdb_version {
                 Some(version) => {
-                    println!("NOTE: compiletest thinks it is using GDB version {}", version);
+                    writeln!(
+                        self.stdout,
+                        "NOTE: compiletest thinks it is using GDB version {}",
+                        version
+                    );
 
-                    if version > extract_gdb_version("7.4").unwrap() {
+                    if !self.props.disable_gdb_pretty_printers
+                        && version > extract_gdb_version("7.4").unwrap()
+                    {
                         // Add the directory containing the pretty printers to
                         // GDB's script auto loading safe path
                         script_str.push_str(&format!(
                             "add-auto-load-safe-path {}\n",
-                            rust_pp_module_abs_path.replace(r"\", r"\\")
+                            rust_pp_module_abs_path.as_str().replace(r"\", r"\\")
                         ));
-
-                        let output_base_dir = self.output_base_dir().to_str().unwrap().to_owned();
 
                         // Add the directory containing the output binary to
                         // include embedded pretty printers to GDB's script
                         // auto loading safe path
                         script_str.push_str(&format!(
                             "add-auto-load-safe-path {}\n",
-                            output_base_dir.replace(r"\", r"\\")
+                            self.output_base_dir().as_str().replace(r"\", r"\\")
                         ));
                     }
                 }
                 _ => {
-                    println!(
+                    writeln!(
+                        self.stdout,
                         "NOTE: compiletest does not know which version of \
                          GDB it is using"
                     );
@@ -303,12 +270,13 @@ impl TestCx<'_> {
             script_str.push_str("set print pretty off\n");
 
             // Add the pretty printer directory to GDB's source-file search path
-            script_str
-                .push_str(&format!("directory {}\n", rust_pp_module_abs_path.replace(r"\", r"\\")));
+            script_str.push_str(&format!(
+                "directory {}\n",
+                rust_pp_module_abs_path.as_str().replace(r"\", r"\\")
+            ));
 
             // Load the target executable
-            script_str
-                .push_str(&format!("file {}\n", exe_file.to_str().unwrap().replace(r"\", r"\\")));
+            script_str.push_str(&format!("file {}\n", exe_file.as_str().replace(r"\", r"\\")));
 
             // Force GDB to print values in the Rust format.
             script_str.push_str("set language rust\n");
@@ -317,7 +285,7 @@ impl TestCx<'_> {
             for line in &dbg_cmds.breakpoint_lines {
                 script_str.push_str(&format!(
                     "break '{}':{}\n",
-                    self.testpaths.file.file_name().unwrap().to_string_lossy(),
+                    self.testpaths.file.file_name().unwrap(),
                     *line
                 ));
             }
@@ -335,15 +303,17 @@ impl TestCx<'_> {
                 &["-quiet".as_ref(), "-batch".as_ref(), "-nx".as_ref(), &debugger_script];
 
             let mut gdb = Command::new(self.config.gdb.as_ref().unwrap());
+
+            // FIXME: we are propagating `PYTHONPATH` from the environment, not a compiletest flag!
             let pythonpath = if let Ok(pp) = std::env::var("PYTHONPATH") {
                 format!("{pp}:{rust_pp_module_abs_path}")
             } else {
-                rust_pp_module_abs_path
+                rust_pp_module_abs_path.to_string()
             };
             gdb.args(debugger_opts).env("PYTHONPATH", pythonpath);
 
             debugger_run_result =
-                self.compose_and_run(gdb, self.config.run_lib_path.to_str().unwrap(), None, None);
+                self.compose_and_run(gdb, self.config.target_run_lib_path.as_path(), None, None);
         }
 
         if !debugger_run_result.status.success() {
@@ -356,23 +326,11 @@ impl TestCx<'_> {
     }
 
     fn run_debuginfo_lldb_test(&self) {
-        if self.config.lldb_python_dir.is_none() {
-            self.fatal("Can't run LLDB test because LLDB's python path is not set.");
-        }
-
-        let config = Config {
-            target_rustcflags: self.cleanup_debug_info_options(&self.config.target_rustcflags),
-            host_rustcflags: self.cleanup_debug_info_options(&self.config.host_rustcflags),
-            ..self.config.clone()
+        let Some(ref lldb) = self.config.lldb else {
+            self.fatal("Can't run LLDB test because LLDB's path is not set.");
         };
 
-        let test_cx = TestCx { config: &config, ..*self };
-
-        test_cx.run_debuginfo_lldb_test_no_opt();
-    }
-
-    fn run_debuginfo_lldb_test_no_opt(&self) {
-        // compile test file (it should have 'compile-flags:-g' in the header)
+        // compile test file (it should have 'compile-flags:-g' in the directive)
         let should_run = self.run_if_enabled();
         let compile_result = self.compile_test(should_run, Emit::None);
         if !compile_result.status.success() {
@@ -386,10 +344,15 @@ impl TestCx<'_> {
 
         match self.config.lldb_version {
             Some(ref version) => {
-                println!("NOTE: compiletest thinks it is using LLDB version {}", version);
+                writeln!(
+                    self.stdout,
+                    "NOTE: compiletest thinks it is using LLDB version {}",
+                    version
+                );
             }
             _ => {
-                println!(
+                writeln!(
+                    self.stdout,
                     "NOTE: compiletest does not know which version of \
                      LLDB it is using"
                 );
@@ -397,32 +360,58 @@ impl TestCx<'_> {
         }
 
         // Parse debugger commands etc from test files
-        let dbg_cmds = DebuggerCommands::parse_from(&self.testpaths.file, self.config, "lldb")
+        let dbg_cmds = DebuggerCommands::parse_from(&self.testpaths.file, "lldb")
             .unwrap_or_else(|e| self.fatal(&e));
 
         // Write debugger script:
         // We don't want to hang when calling `quit` while the process is still running
         let mut script_str = String::from("settings set auto-confirm true\n");
 
+        // macOS has a system for restricting access to files and peripherals
+        // called Transparency, Consent, and Control (TCC), which can be
+        // configured using the "Security & Privacy" tab in your settings.
+        //
+        // This system is provenance-based: if Terminal.app is given access to
+        // your Desktop, and you launch a binary within Terminal.app, the new
+        // binary also has access to the files on your Desktop.
+        //
+        // By default though, LLDB launches binaries in very isolated
+        // contexts. This includes resetting any TCC grants that might
+        // otherwise have been inherited.
+        //
+        // In effect, this means that if the developer has placed the rust
+        // repository under one of the system-protected folders, they will get
+        // a pop-up _for each binary_ asking for permissions to access the
+        // folder - quite annoying.
+        //
+        // To avoid this, we tell LLDB to spawn processes with TCC grants
+        // inherited from the parent process.
+        //
+        // Setting this also avoids unnecessary overhead from XprotectService
+        // when running with the Developer Tool grant.
+        //
+        // TIP: If you want to allow launching `lldb ~/Desktop/my_binary`
+        // without being prompted, you can put this in your `~/.lldbinit` too.
+        if self.config.host.contains("darwin") {
+            script_str.push_str("settings set target.inherit-tcc true\n");
+        }
+
         // Make LLDB emit its version, so we have it documented in the test output
         script_str.push_str("version\n");
 
-        // Switch LLDB into "Rust mode"
-        let rust_src_root =
-            self.config.find_rust_src_root().expect("Could not find Rust source root");
-        let rust_pp_module_rel_path = Path::new("./src/etc");
-        let rust_pp_module_abs_path = rust_src_root.join(rust_pp_module_rel_path);
+        // Switch LLDB into "Rust mode".
+        let rust_pp_module_abs_path = self.config.src_root.join("src/etc");
 
         script_str.push_str(&format!(
             "command script import {}/lldb_lookup.py\n",
-            rust_pp_module_abs_path.to_str().unwrap()
+            rust_pp_module_abs_path
         ));
         File::open(rust_pp_module_abs_path.join("lldb_commands"))
             .and_then(|mut file| file.read_to_string(&mut script_str))
             .expect("Failed to read lldb_commands");
 
         // Set breakpoints on every line that contains the string "#break"
-        let source_file_name = self.testpaths.file.file_name().unwrap().to_string_lossy();
+        let source_file_name = self.testpaths.file.file_name().unwrap();
         for line in &dbg_cmds.breakpoint_lines {
             script_str.push_str(&format!(
                 "breakpoint set --file '{}' --line {}\n",
@@ -445,7 +434,7 @@ impl TestCx<'_> {
         let debugger_script = self.make_out_name("debugger.script");
 
         // Let LLDB execute the script via lldb_batchmode.py
-        let debugger_run_result = self.run_lldb(&exe_file, &debugger_script, &rust_src_root);
+        let debugger_run_result = self.run_lldb(lldb, &exe_file, &debugger_script);
 
         if !debugger_run_result.status.success() {
             self.fatal_proc_rec("Error while running LLDB", &debugger_run_result);
@@ -458,31 +447,21 @@ impl TestCx<'_> {
 
     fn run_lldb(
         &self,
-        test_executable: &Path,
-        debugger_script: &Path,
-        rust_src_root: &Path,
+        lldb: &Utf8Path,
+        test_executable: &Utf8Path,
+        debugger_script: &Utf8Path,
     ) -> ProcRes {
-        // Prepare the lldb_batchmode which executes the debugger script
-        let lldb_script_path = rust_src_root.join("src/etc/lldb_batchmode.py");
-        let pythonpath = if let Ok(pp) = std::env::var("PYTHONPATH") {
-            format!("{pp}:{}", self.config.lldb_python_dir.as_ref().unwrap())
-        } else {
-            self.config.lldb_python_dir.as_ref().unwrap().to_string()
-        };
-        self.run_command_to_procres(
-            Command::new(&self.config.python)
-                .arg(&lldb_script_path)
-                .arg(test_executable)
-                .arg(debugger_script)
-                .env("PYTHONUNBUFFERED", "1") // Help debugging #78665
-                .env("PYTHONPATH", pythonpath),
-        )
-    }
+        // Path containing `lldb_batchmode.py`, so that the `script` command can import it.
+        let pythonpath = self.config.src_root.join("src/etc");
 
-    fn cleanup_debug_info_options(&self, options: &Vec<String>) -> Vec<String> {
-        // Remove options that are either unwanted (-O) or may lead to duplicates due to RUSTFLAGS.
-        let options_to_remove = ["-O".to_owned(), "-g".to_owned(), "--debuginfo".to_owned()];
+        let mut cmd = Command::new(lldb);
+        cmd.arg("--one-line")
+            .arg("script --language python -- import lldb_batchmode; lldb_batchmode.main()")
+            .env("LLDB_BATCHMODE_TARGET_PATH", test_executable)
+            .env("LLDB_BATCHMODE_SCRIPT_PATH", debugger_script)
+            .env("PYTHONUNBUFFERED", "1") // Help debugging #78665
+            .env("PYTHONPATH", pythonpath);
 
-        options.iter().filter(|x| !options_to_remove.contains(x)).cloned().collect()
+        self.run_command_to_procres(&mut cmd)
     }
 }

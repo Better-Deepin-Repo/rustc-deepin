@@ -18,9 +18,14 @@ pub fn parse_prefix(_: &OsStr) -> Option<Prefix<'_>> {
     None
 }
 
+pub const HAS_PREFIXES: bool = true;
 pub const MAIN_SEP_STR: &str = "\\";
 pub const MAIN_SEP: char = '\\';
 
 pub(crate) fn absolute(_path: &Path) -> io::Result<PathBuf> {
     unsupported()
+}
+
+pub(crate) fn is_absolute(path: &Path) -> bool {
+    path.has_root() && path.prefix().is_some()
 }

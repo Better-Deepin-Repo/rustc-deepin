@@ -3,25 +3,27 @@ use std::iter;
 use either::Either;
 use hir::{HasCrate, Module, ModuleDef, Name, Variant};
 use ide_db::{
+    FxHashSet, RootDatabase,
     defs::Definition,
     helpers::mod_path_to_ast,
-    imports::insert_use::{insert_use, ImportScope, InsertUseConfig},
+    imports::insert_use::{ImportScope, InsertUseConfig, insert_use},
     path_transform::PathTransform,
     search::FileReference,
-    FxHashSet, RootDatabase,
 };
 use itertools::Itertools;
 use syntax::{
-    ast::{
-        self, edit::IndentLevel, edit_in_place::Indent, make, AstNode, HasAttrs, HasGenericParams,
-        HasName, HasVisibility,
-    },
-    match_ast, ted, Edition, SyntaxElement,
+    Edition, SyntaxElement,
     SyntaxKind::*,
     SyntaxNode, T,
+    ast::{
+        self, AstNode, HasAttrs, HasGenericParams, HasName, HasVisibility,
+        edit::{AstNodeEdit, IndentLevel},
+        make,
+    },
+    match_ast, ted,
 };
 
-use crate::{assist_context::SourceChangeBuilder, AssistContext, AssistId, AssistKind, Assists};
+use crate::{AssistContext, AssistId, Assists, assist_context::SourceChangeBuilder};
 
 // Assist: extract_struct_from_enum_variant
 //
@@ -54,7 +56,7 @@ pub(crate) fn extract_struct_from_enum_variant(
     let enum_hir = ctx.sema.to_def(&enum_ast)?;
     let target = variant.syntax().text_range();
     acc.add(
-        AssistId("extract_struct_from_enum_variant", AssistKind::RefactorRewrite),
+        AssistId::refactor_rewrite("extract_struct_from_enum_variant"),
         "Extract struct from enum variant",
         target,
         |builder| {
@@ -73,7 +75,7 @@ pub(crate) fn extract_struct_from_enum_variant(
                     def_file_references = Some(references);
                     continue;
                 }
-                builder.edit_file(file_id.file_id());
+                builder.edit_file(file_id.file_id(ctx.db()));
                 let processed = process_references(
                     ctx,
                     builder,
@@ -86,7 +88,7 @@ pub(crate) fn extract_struct_from_enum_variant(
                     apply_references(ctx.config.insert_use, path, node, import, edition)
                 });
             }
-            builder.edit_file(ctx.file_id());
+            builder.edit_file(ctx.vfs_file_id());
 
             let variant = builder.make_mut(variant.clone());
             if let Some(references) = def_file_references {
@@ -109,20 +111,30 @@ pub(crate) fn extract_struct_from_enum_variant(
             let generics = generic_params.as_ref().map(|generics| generics.clone_for_update());
 
             // resolve GenericArg in field_list to actual type
-            let field_list = field_list.clone_for_update();
-            if let Some((target_scope, source_scope)) =
+            let field_list = if let Some((target_scope, source_scope)) =
                 ctx.sema.scope(enum_ast.syntax()).zip(ctx.sema.scope(field_list.syntax()))
             {
-                PathTransform::generic_transformation(&target_scope, &source_scope)
-                    .apply(field_list.syntax());
-            }
+                let field_list = field_list.reset_indent();
+                let field_list =
+                    PathTransform::generic_transformation(&target_scope, &source_scope)
+                        .apply(field_list.syntax());
+                match_ast! {
+                    match field_list {
+                        ast::RecordFieldList(field_list) => Either::Left(field_list),
+                        ast::TupleFieldList(field_list) => Either::Right(field_list),
+                        _ => unreachable!(),
+                    }
+                }
+            } else {
+                field_list.clone_for_update()
+            };
 
             let def =
                 create_struct_def(variant_name.clone(), &variant, &field_list, generics, &enum_ast);
 
             let enum_ast = variant.parent_enum();
             let indent = enum_ast.indent_level();
-            def.reindent_to(indent);
+            let def = def.indent(indent);
 
             ted::insert_all(
                 ted::Position::before(enum_ast.syntax()),
@@ -170,7 +182,7 @@ fn existing_definition(db: &RootDatabase, variant_name: &ast::Name, variant: &Va
             ),
             _ => false,
         })
-        .any(|(name, _)| name.eq_ident(variant_name.text().as_str()))
+        .any(|(name, _)| name.as_str() == variant_name.text().trim_start_matches("r#"))
 }
 
 fn extract_generic_params(
@@ -203,12 +215,12 @@ fn tag_generics_in_variant(ty: &ast::Type, generics: &mut [(ast::GenericParam, b
                 ast::GenericParam::LifetimeParam(lt)
                     if matches!(token.kind(), T![lifetime_ident]) =>
                 {
-                    if let Some(lt) = lt.lifetime() {
-                        if lt.text().as_str() == token.text() {
-                            *tag = true;
-                            tagged_one = true;
-                            break;
-                        }
+                    if let Some(lt) = lt.lifetime()
+                        && lt.text().as_str() == token.text()
+                    {
+                        *tag = true;
+                        tagged_one = true;
+                        break;
                     }
                 }
                 param if matches!(token.kind(), T![ident]) => {
@@ -278,7 +290,7 @@ fn create_struct_def(
             field_list.clone().into()
         }
     };
-    field_list.reindent_to(IndentLevel::single());
+    let field_list = field_list.indent(IndentLevel::single());
 
     let strukt = make::struct_(enum_vis, name, generics, field_list).clone_for_update();
 
@@ -388,11 +400,12 @@ fn process_references(
             let segment = builder.make_mut(segment);
             let scope_node = builder.make_syntax_mut(scope_node);
             if !visited_modules.contains(&module) {
+                let cfg = ctx.config.find_path_config(ctx.sema.is_nightly(module.krate()));
                 let mod_path = module.find_use_path(
                     ctx.sema.db,
                     *enum_module_def,
                     ctx.config.insert_use.prefix_kind,
-                    ctx.config.import_path_config(),
+                    cfg,
                 );
                 if let Some(mut mod_path) = mod_path {
                     mod_path.pop_segment();
@@ -466,7 +479,7 @@ macro_rules! foo {
     };
 }
 
-struct TheVariant{ the_field: u8 }
+struct TheVariant { the_field: u8 }
 
 enum TheEnum {
     TheVariant(TheVariant),
@@ -490,7 +503,7 @@ enum Foo {
 }
 "#,
             r#"
-struct Bar{ node: Box<Foo> }
+struct Bar { node: Box<Foo> }
 
 enum Foo {
     Bar(Bar),
@@ -507,7 +520,7 @@ enum Foo {
 }
 "#,
             r#"
-struct Bar{ node: Box<Foo>, a: Arc<Box<Foo>> }
+struct Bar { node: Box<Foo>, a: Arc<Box<Foo>> }
 
 enum Foo {
     Bar(Bar),
@@ -548,7 +561,7 @@ enum A { One(One) }"#,
         check_assist(
             extract_struct_from_enum_variant,
             "enum A { $0One { foo: u32, bar: u32 } }",
-            r#"struct One{ foo: u32, bar: u32 }
+            r#"struct One { foo: u32, bar: u32 }
 
 enum A { One(One) }"#,
         );
@@ -559,7 +572,7 @@ enum A { One(One) }"#,
         check_assist(
             extract_struct_from_enum_variant,
             "enum A { $0One { foo: u32 } }",
-            r#"struct One{ foo: u32 }
+            r#"struct One { foo: u32 }
 
 enum A { One(One) }"#,
         );
@@ -570,7 +583,7 @@ enum A { One(One) }"#,
         check_assist(
             extract_struct_from_enum_variant,
             r"enum En<T> { Var { a: T$0 } }",
-            r#"struct Var<T>{ a: T }
+            r#"struct Var<T> { a: T }
 
 enum En<T> { Var(Var<T>) }"#,
         );
@@ -587,7 +600,7 @@ enum Enum { Variant{ field: u32$0 } }"#,
             r#"
 #[derive(Debug)]
 #[derive(Clone)]
-struct Variant{ field: u32 }
+struct Variant { field: u32 }
 
 #[derive(Debug)]
 #[derive(Clone)]
@@ -606,7 +619,7 @@ enum Enum {
     }
 }"#,
             r#"
-struct Variant{
+struct Variant {
     field: u32
 }
 
@@ -630,7 +643,7 @@ mod indenting {
 }"#,
             r#"
 mod indenting {
-    struct Variant{
+    struct Variant {
         field: u32
     }
 
@@ -656,7 +669,7 @@ enum A {
     }
 }"#,
             r#"
-struct One{
+struct One {
     // leading comment
     /// doc comment
     #[an_attr]
@@ -688,7 +701,7 @@ enum A {
     }
 }"#,
             r#"
-struct One{
+struct One {
     // comment
     /// doc
     #[attr]
@@ -735,7 +748,7 @@ enum A {
 /* comment */
 // other
 /// comment
-struct One{
+struct One {
     a: u32
 }
 
@@ -777,7 +790,7 @@ enum A {
             extract_struct_from_enum_variant,
             "enum A { $0One{ a: u32, pub(crate) b: u32, pub(super) c: u32, d: u32 } }",
             r#"
-struct One{ a: u32, pub(crate) b: u32, pub(super) c: u32, d: u32 }
+struct One { a: u32, pub(crate) b: u32, pub(super) c: u32, d: u32 }
 
 enum A { One(One) }"#,
         );
@@ -838,7 +851,7 @@ pub enum A { One(One) }"#,
             extract_struct_from_enum_variant,
             "pub(in something) enum A { $0One{ a: u32, b: u32 } }",
             r#"
-pub(in something) struct One{ pub(in something) a: u32, pub(in something) b: u32 }
+pub(in something) struct One { pub(in something) a: u32, pub(in something) b: u32 }
 
 pub(in something) enum A { One(One) }"#,
         );
@@ -850,7 +863,7 @@ pub(in something) enum A { One(One) }"#,
             extract_struct_from_enum_variant,
             "pub(crate) enum A { $0One{ a: u32, b: u32, c: u32 } }",
             r#"
-pub(crate) struct One{ pub(crate) a: u32, pub(crate) b: u32, pub(crate) c: u32 }
+pub(crate) struct One { pub(crate) a: u32, pub(crate) b: u32, pub(crate) c: u32 }
 
 pub(crate) enum A { One(One) }"#,
         );
@@ -921,7 +934,7 @@ fn f() {
 }
 "#,
             r#"
-struct V{ i: i32, j: i32 }
+struct V { i: i32, j: i32 }
 
 enum E {
     V(V)
@@ -1015,7 +1028,7 @@ fn f() {
 "#,
             r#"
 //- /main.rs
-struct V{ i: i32, j: i32 }
+struct V { i: i32, j: i32 }
 
 enum E {
     V(V)
@@ -1045,7 +1058,7 @@ fn foo() {
 }
 "#,
             r#"
-struct One{ a: u32, b: u32 }
+struct One { a: u32, b: u32 }
 
 enum A { One(One) }
 
@@ -1102,7 +1115,7 @@ enum X<'a, 'b, 'x> {
 }
 "#,
             r#"
-struct A<'a, 'x>{ a: &'a &'x mut () }
+struct A<'a, 'x> { a: &'a &'x mut () }
 
 enum X<'a, 'b, 'x> {
     A(A<'a, 'x>),
@@ -1124,7 +1137,7 @@ enum X<'b, T, V, const C: usize> {
 }
 "#,
             r#"
-struct A<'b, T, const C: usize>{ a: T, b: X<'b>, c: [u8; C] }
+struct A<'b, T, const C: usize> { a: T, b: X<'b>, c: [u8; C] }
 
 enum X<'b, T, V, const C: usize> {
     A(A<'b, T, C>),
@@ -1146,7 +1159,7 @@ enum X<'a, 'b> {
 }
 "#,
             r#"
-struct C{ c: () }
+struct C { c: () }
 
 enum X<'a, 'b> {
     A { a: &'a () },
@@ -1168,7 +1181,7 @@ enum En<T: TraitT, V: TraitV> {
 }
 "#,
             r#"
-struct A<T: TraitT>{ a: T }
+struct A<T: TraitT> { a: T }
 
 enum En<T: TraitT, V: TraitV> {
     A(A<T>),

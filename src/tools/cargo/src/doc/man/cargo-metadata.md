@@ -13,9 +13,9 @@ cargo-metadata --- Machine-readable metadata about the current package
 Output JSON to stdout containing information about the workspace members and
 resolved dependencies of the current package.
 
-The format of the output is subject to change in futures versions of Cargo. It
+The output format is subject to change in future versions of Cargo. It
 is recommended to include the `--format-version` flag to future-proof your code
-to ensure the output is in the format you are expecting. For more on the
+and ensure the output is in the format you are expecting. For more on the
 expectations, see ["Compatibility"](#compatibility).
 
 See the [cargo_metadata crate](https://crates.io/crates/cargo_metadata)
@@ -312,14 +312,16 @@ The JSON output has the following format:
                 ]
             }
         ],
-        /* The root package of the workspace.
-           This is null if this is a virtual workspace. Otherwise it is
-           the Package ID of the root package.
+        /* The package in the current working directory (if --manifest-path is not given).
+           This is null if there is a virtual workspace. Otherwise it is
+           the Package ID of the package.
         */
         "root": "file:///path/to/my-package#0.1.0",
     },
-    /* The absolute path to the build directory where Cargo places its output. */
+    /* The absolute path to the target directory where Cargo places its output. */
     "target_directory": "/path/to/my-package/target",
+    /* The absolute path to the build directory where Cargo places intermediate build artifacts. (unstable) */
+    "build_directory": "/path/to/my-package/build-dir",
     /* The version of the schema for this metadata structure.
        This will be changed if incompatible changes are ever made.
     */
@@ -359,7 +361,8 @@ possible value.
 
 {{#option "`--filter-platform` _triple_" }}
 This filters the `resolve` output to only include dependencies for the
-given [target triple](../appendix/glossary.html#target). 
+given [target triple](../appendix/glossary.html#target).
+A literal `"host-tuple"` can be used, which will internally be substituted by the host's target.
 Without this flag, the resolve includes all targets.
 
 Note that the dependencies listed in the "packages" array still includes all

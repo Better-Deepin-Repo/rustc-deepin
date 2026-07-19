@@ -1,5 +1,7 @@
 //! See [`Input`].
 
+use edition::Edition;
+
 use crate::SyntaxKind;
 
 #[allow(non_camel_case_types)]
@@ -12,22 +14,31 @@ type bits = u64;
 /// `Tokens` doesn't include whitespace and comments. Main input to the parser.
 ///
 /// Struct of arrays internally, but this shouldn't really matter.
-#[derive(Default)]
 pub struct Input {
     kind: Vec<SyntaxKind>,
     joint: Vec<bits>,
     contextual_kind: Vec<SyntaxKind>,
+    edition: Vec<Edition>,
 }
 
 /// `pub` impl used by callers to create `Tokens`.
 impl Input {
     #[inline]
-    pub fn push(&mut self, kind: SyntaxKind) {
-        self.push_impl(kind, SyntaxKind::EOF)
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            kind: Vec::with_capacity(capacity),
+            joint: Vec::with_capacity(capacity / size_of::<bits>()),
+            contextual_kind: Vec::with_capacity(capacity),
+            edition: Vec::with_capacity(capacity),
+        }
     }
     #[inline]
-    pub fn push_ident(&mut self, contextual_kind: SyntaxKind) {
-        self.push_impl(SyntaxKind::IDENT, contextual_kind)
+    pub fn push(&mut self, kind: SyntaxKind, edition: Edition) {
+        self.push_impl(kind, SyntaxKind::EOF, edition)
+    }
+    #[inline]
+    pub fn push_ident(&mut self, contextual_kind: SyntaxKind, edition: Edition) {
+        self.push_impl(SyntaxKind::IDENT, contextual_kind, edition)
     }
     /// Sets jointness for the last token we've pushed.
     ///
@@ -36,7 +47,7 @@ impl Input {
     /// the *previous* token was joint, with mbe, you know whether the *current*
     /// one is joint. This API allows for styles of usage:
     ///
-    /// ```
+    /// ```ignore
     /// // In text:
     /// tokens.was_joint(prev_joint);
     /// tokens.push(curr);
@@ -52,13 +63,14 @@ impl Input {
         self.joint[idx] |= 1 << b_idx;
     }
     #[inline]
-    fn push_impl(&mut self, kind: SyntaxKind, contextual_kind: SyntaxKind) {
+    fn push_impl(&mut self, kind: SyntaxKind, contextual_kind: SyntaxKind, edition: Edition) {
         let idx = self.len();
-        if idx % (bits::BITS as usize) == 0 {
+        if idx.is_multiple_of(bits::BITS as usize) {
             self.joint.push(0);
         }
         self.kind.push(kind);
         self.contextual_kind.push(contextual_kind);
+        self.edition.push(edition);
     }
 }
 
@@ -70,9 +82,12 @@ impl Input {
     pub(crate) fn contextual_kind(&self, idx: usize) -> SyntaxKind {
         self.contextual_kind.get(idx).copied().unwrap_or(SyntaxKind::EOF)
     }
+    pub(crate) fn edition(&self, idx: usize) -> Edition {
+        self.edition[idx]
+    }
     pub(crate) fn is_joint(&self, n: usize) -> bool {
         let (idx, b_idx) = self.bit_index(n);
-        self.joint[idx] & 1 << b_idx != 0
+        self.joint[idx] & (1 << b_idx) != 0
     }
 }
 

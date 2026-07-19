@@ -1,4 +1,3 @@
-use rustc_ast::ptr::P;
 use rustc_ast::token::Delimiter;
 use rustc_ast::tokenstream::{DelimSpan, TokenStream};
 use rustc_ast::*;
@@ -48,7 +47,7 @@ fn expand<'cx>(
     ExpandResult::Ready(MacEager::expr(
         cx.expr(
             sp,
-            ExprKind::MacCall(P(MacCall {
+            ExprKind::MacCall(Box::new(MacCall {
                 path: Path {
                     span: sp,
                     segments: cx
@@ -58,7 +57,7 @@ fn expand<'cx>(
                         .collect(),
                     tokens: None,
                 },
-                args: P(DelimArgs {
+                args: Box::new(DelimArgs {
                     dspan: DelimSpan::from_single(sp),
                     delim: Delimiter::Parenthesis,
                     tokens: tts,
@@ -74,11 +73,11 @@ pub(crate) fn use_panic_2021(mut span: Span) -> bool {
     // (To avoid using the edition of e.g. the assert!() or debug_assert!() definition.)
     loop {
         let expn = span.ctxt().outer_expn_data();
-        if let Some(features) = expn.allow_internal_unstable {
-            if features.iter().any(|&f| f == sym::edition_panic) {
-                span = expn.call_site;
-                continue;
-            }
+        if let Some(features) = expn.allow_internal_unstable
+            && features.contains(&sym::edition_panic)
+        {
+            span = expn.call_site;
+            continue;
         }
         break expn.edition >= Edition::Edition2021;
     }

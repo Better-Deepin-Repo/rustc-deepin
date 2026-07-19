@@ -17,20 +17,15 @@
 
 // tidy-alphabetical-start
 #![allow(internal_features)]
-#![doc(html_root_url = "https://doc.rust-lang.org/nightly/nightly-rustc/")]
-#![doc(rust_logo)]
+#![cfg_attr(target_arch = "loongarch64", feature(stdarch_loongarch))]
 #![feature(array_windows)]
-#![feature(cfg_match)]
+#![feature(cfg_select)]
 #![feature(core_io_borrowed_buf)]
-#![feature(hash_set_entry)]
 #![feature(if_let_guard)]
-#![feature(let_chains)]
+#![feature(map_try_insert)]
 #![feature(negative_impls)]
 #![feature(read_buf)]
-#![feature(round_char_boundary)]
 #![feature(rustc_attrs)]
-#![feature(rustdoc_internals)]
-#![warn(unreachable_pub)]
 // tidy-alphabetical-end
 
 // The code produced by the `Encodable`/`Decodable` derive macros refer to
@@ -67,7 +62,10 @@ mod span_encoding;
 pub use span_encoding::{DUMMY_SP, Span};
 
 pub mod symbol;
-pub use symbol::{Ident, MacroRulesNormalizedIdent, Symbol, kw, sym};
+pub use symbol::{
+    ByteSymbol, Ident, MacroRulesNormalizedIdent, Macros20NormalizedIdent, STDLIB_STABLE_CRATES,
+    Symbol, kw, sym,
+};
 
 mod analyze_source_file;
 pub mod fatal_error;
@@ -82,12 +80,14 @@ use std::io::{self, Read};
 use std::ops::{Add, Range, Sub};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::{fmt, iter};
 
 use md5::{Digest, Md5};
-use rustc_data_structures::fx::FxHashMap;
-use rustc_data_structures::stable_hasher::{Hash64, Hash128, HashStable, StableHasher};
-use rustc_data_structures::sync::{FreezeLock, FreezeWriteGuard, Lock, Lrc};
+use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
+use rustc_data_structures::sync::{FreezeLock, FreezeWriteGuard, Lock};
+use rustc_data_structures::unord::UnordMap;
+use rustc_hashes::{Hash64, Hash128};
 use sha1::Sha1;
 use sha2::Sha256;
 
@@ -103,29 +103,34 @@ pub struct SessionGlobals {
     span_interner: Lock<span_encoding::SpanInterner>,
     /// Maps a macro argument token into use of the corresponding metavariable in the macro body.
     /// Collisions are possible and processed in `maybe_use_metavar_location` on best effort basis.
-    metavar_spans: Lock<FxHashMap<Span, Span>>,
+    metavar_spans: MetavarSpansMap,
     hygiene_data: Lock<hygiene::HygieneData>,
 
     /// The session's source map, if there is one. This field should only be
     /// used in places where the `Session` is truly not available, such as
     /// `<Span as Debug>::fmt`.
-    source_map: Option<Lrc<SourceMap>>,
+    source_map: Option<Arc<SourceMap>>,
 }
 
 impl SessionGlobals {
-    pub fn new(edition: Edition, sm_inputs: Option<SourceMapInputs>) -> SessionGlobals {
+    pub fn new(
+        edition: Edition,
+        extra_symbols: &[&'static str],
+        sm_inputs: Option<SourceMapInputs>,
+    ) -> SessionGlobals {
         SessionGlobals {
-            symbol_interner: symbol::Interner::fresh(),
+            symbol_interner: symbol::Interner::with_extra_symbols(extra_symbols),
             span_interner: Lock::new(span_encoding::SpanInterner::default()),
             metavar_spans: Default::default(),
             hygiene_data: Lock::new(hygiene::HygieneData::new(edition)),
-            source_map: sm_inputs.map(|inputs| Lrc::new(SourceMap::with_inputs(inputs))),
+            source_map: sm_inputs.map(|inputs| Arc::new(SourceMap::with_inputs(inputs))),
         }
     }
 }
 
 pub fn create_session_globals_then<R>(
     edition: Edition,
+    extra_symbols: &[&'static str],
     sm_inputs: Option<SourceMapInputs>,
     f: impl FnOnce() -> R,
 ) -> R {
@@ -134,7 +139,7 @@ pub fn create_session_globals_then<R>(
         "SESSION_GLOBALS should never be overwritten! \
          Use another thread if you need another SessionGlobals"
     );
-    let session_globals = SessionGlobals::new(edition, sm_inputs);
+    let session_globals = SessionGlobals::new(edition, extra_symbols, sm_inputs);
     SESSION_GLOBALS.set(&session_globals, f)
 }
 
@@ -153,13 +158,14 @@ where
     F: FnOnce(&SessionGlobals) -> R,
 {
     if !SESSION_GLOBALS.is_set() {
-        let session_globals = SessionGlobals::new(edition, None);
+        let session_globals = SessionGlobals::new(edition, &[], None);
         SESSION_GLOBALS.set(&session_globals, || SESSION_GLOBALS.with(f))
     } else {
         SESSION_GLOBALS.with(f)
     }
 }
 
+#[inline]
 pub fn with_session_globals<R, F>(f: F) -> R
 where
     F: FnOnce(&SessionGlobals) -> R,
@@ -169,7 +175,7 @@ where
 
 /// Default edition, no source map.
 pub fn create_default_session_globals_then<R>(f: impl FnOnce() -> R) -> R {
-    create_session_globals_then(edition::DEFAULT_EDITION, None, f)
+    create_session_globals_then(edition::DEFAULT_EDITION, &[], None, f)
 }
 
 // If this ever becomes non thread-local, `decode_syntax_context`
@@ -177,14 +183,47 @@ pub fn create_default_session_globals_then<R>(f: impl FnOnce() -> R) -> R {
 // deserialization.
 scoped_tls::scoped_thread_local!(static SESSION_GLOBALS: SessionGlobals);
 
+#[derive(Default)]
+pub struct MetavarSpansMap(FreezeLock<UnordMap<Span, (Span, bool)>>);
+
+impl MetavarSpansMap {
+    pub fn insert(&self, span: Span, var_span: Span) -> bool {
+        match self.0.write().try_insert(span, (var_span, false)) {
+            Ok(_) => true,
+            Err(entry) => entry.entry.get().0 == var_span,
+        }
+    }
+
+    /// Read a span and record that it was read.
+    pub fn get(&self, span: Span) -> Option<Span> {
+        if let Some(mut mspans) = self.0.try_write() {
+            if let Some((var_span, read)) = mspans.get_mut(&span) {
+                *read = true;
+                Some(*var_span)
+            } else {
+                None
+            }
+        } else {
+            if let Some((span, true)) = self.0.read().get(&span) { Some(*span) } else { None }
+        }
+    }
+
+    /// Freeze the set, and return the spans which have been read.
+    ///
+    /// After this is frozen, no spans that have not been read can be read.
+    pub fn freeze_and_get_read_spans(&self) -> UnordMap<Span, Span> {
+        self.0.freeze().items().filter(|(_, (_, b))| *b).map(|(s1, (s2, _))| (*s1, *s2)).collect()
+    }
+}
+
 #[inline]
-pub fn with_metavar_spans<R>(f: impl FnOnce(&mut FxHashMap<Span, Span>) -> R) -> R {
-    with_session_globals(|session_globals| f(&mut session_globals.metavar_spans.lock()))
+pub fn with_metavar_spans<R>(f: impl FnOnce(&MetavarSpansMap) -> R) -> R {
+    with_session_globals(|session_globals| f(&session_globals.metavar_spans))
 }
 
 // FIXME: We should use this enum or something like it to get rid of the
 // use of magic `/rust/1.x/...` paths across the board.
-#[derive(Debug, Eq, PartialEq, Clone, Ord, PartialOrd, Decodable)]
+#[derive(Debug, Eq, PartialEq, Clone, Ord, PartialOrd, Decodable, Encodable)]
 pub enum RealFileName {
     LocalPath(PathBuf),
     /// For remapped paths (namely paths into libstd that have been mapped
@@ -207,28 +246,6 @@ impl Hash for RealFileName {
         // virtualized paths to sysroot crates (/rust/$hash or /rust/$version)
         // remain stable even if the corresponding local_path changes
         self.remapped_path_if_available().hash(state)
-    }
-}
-
-// This is functionally identical to #[derive(Encodable)], with the exception of
-// an added assert statement
-impl<S: Encoder> Encodable<S> for RealFileName {
-    fn encode(&self, encoder: &mut S) {
-        match *self {
-            RealFileName::LocalPath(ref local_path) => {
-                encoder.emit_u8(0);
-                local_path.encode(encoder);
-            }
-
-            RealFileName::Remapped { ref local_path, ref virtual_name } => {
-                encoder.emit_u8(1);
-                // For privacy and build reproducibility, we must not embed host-dependant path
-                // in artifacts if they have been remapped by --remap-path-prefix
-                assert!(local_path.is_none());
-                local_path.encode(encoder);
-                virtual_name.encode(encoder);
-            }
-        }
     }
 }
 
@@ -305,8 +322,8 @@ impl RealFileName {
 #[derive(Debug, Eq, PartialEq, Clone, Ord, PartialOrd, Hash, Decodable, Encodable)]
 pub enum FileName {
     Real(RealFileName),
-    /// Call to `quote!`.
-    QuoteExpansion(Hash64),
+    /// Strings provided as `--cfg [cfgspec]`.
+    CfgSpec(Hash64),
     /// Command line.
     Anon(Hash64),
     /// Hack in `src/librustc_ast/parse.rs`.
@@ -326,6 +343,16 @@ impl From<PathBuf> for FileName {
     fn from(p: PathBuf) -> Self {
         FileName::Real(RealFileName::LocalPath(p))
     }
+}
+
+#[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
+pub enum FileNameEmbeddablePreference {
+    /// If a remapped path is available, only embed the `virtual_path` and omit the `local_path`.
+    ///
+    /// Otherwise embed the local-path into the `virtual_path`.
+    RemappedOnly,
+    /// Embed the original path as well as its remapped `virtual_path` component if available.
+    LocalAndRemapped,
 }
 
 #[derive(Clone, Copy, Eq, PartialEq, Hash, Debug)]
@@ -353,7 +380,7 @@ impl fmt::Display for FileNameDisplay<'_> {
             Real(ref name) => {
                 write!(fmt, "{}", name.to_string_lossy(self.display_pref))
             }
-            QuoteExpansion(_) => write!(fmt, "<quote expansion>"),
+            CfgSpec(_) => write!(fmt, "<cfgspec>"),
             MacroExpansion(_) => write!(fmt, "<macro expansion>"),
             Anon(_) => write!(fmt, "<anon>"),
             ProcMacroSourceCode(_) => write!(fmt, "<proc-macro source code>"),
@@ -368,7 +395,7 @@ impl fmt::Display for FileNameDisplay<'_> {
 impl<'a> FileNameDisplay<'a> {
     pub fn to_string_lossy(&self) -> Cow<'a, str> {
         match self.inner {
-            FileName::Real(ref inner) => inner.to_string_lossy(self.display_pref),
+            FileName::Real(inner) => inner.to_string_lossy(self.display_pref),
             _ => Cow::from(self.to_string()),
         }
     }
@@ -384,13 +411,13 @@ impl FileName {
             | ProcMacroSourceCode(_)
             | CliCrateAttr(_)
             | Custom(_)
-            | QuoteExpansion(_)
+            | CfgSpec(_)
             | DocTest(_, _)
             | InlineAsm(_) => false,
         }
     }
 
-    pub fn prefer_remapped_unconditionaly(&self) -> FileNameDisplay<'_> {
+    pub fn prefer_remapped_unconditionally(&self) -> FileNameDisplay<'_> {
         FileNameDisplay { inner: self, display_pref: FileNameDisplayPreference::Remapped }
     }
 
@@ -425,7 +452,7 @@ impl FileName {
     pub fn cfg_spec_source_code(src: &str) -> FileName {
         let mut hasher = StableHasher::new();
         src.hash(&mut hasher);
-        FileName::QuoteExpansion(hasher.finish())
+        FileName::CfgSpec(hasher.finish())
     }
 
     pub fn cli_crate_attr_source_code(src: &str) -> FileName {
@@ -566,9 +593,26 @@ impl Span {
         !self.is_dummy() && sm.is_span_accessible(self)
     }
 
+    /// Returns whether this span originates in a foreign crate's external macro.
+    ///
+    /// This is used to test whether a lint should not even begin to figure out whether it should
+    /// be reported on the current node.
+    #[inline]
+    pub fn in_external_macro(self, sm: &SourceMap) -> bool {
+        self.ctxt().in_external_macro(sm)
+    }
+
     /// Returns `true` if `span` originates in a derive-macro's expansion.
     pub fn in_derive_expansion(self) -> bool {
         matches!(self.ctxt().outer_expn_data().kind, ExpnKind::Macro(MacroKind::Derive, _))
+    }
+
+    /// Return whether `span` is generated by `async` or `await`.
+    pub fn is_from_async_await(self) -> bool {
+        matches!(
+            self.ctxt().outer_expn_data().kind,
+            ExpnKind::Desugaring(DesugaringKind::Async | DesugaringKind::Await),
+        )
     }
 
     /// Gate suggestions that would not be appropriate in a context the user didn't write.
@@ -663,18 +707,23 @@ impl Span {
         if !ctxt.is_root() { ctxt.outer_expn_data().call_site.source_callsite() } else { self }
     }
 
-    /// The `Span` for the tokens in the previous macro expansion from which `self` was generated,
-    /// if any.
+    /// Returns the call-site span of the last macro expansion which produced this `Span`.
+    /// (see [`ExpnData::call_site`]). Returns `None` if this is not an expansion.
     pub fn parent_callsite(self) -> Option<Span> {
         let ctxt = self.ctxt();
         (!ctxt.is_root()).then(|| ctxt.outer_expn_data().call_site)
     }
 
-    /// Walk down the expansion ancestors to find a span that's contained within `outer`.
+    /// Find the first ancestor span that's contained within `outer`.
     ///
-    /// The span returned by this method may have a different [`SyntaxContext`] as `outer`.
+    /// This method traverses the macro expansion ancestors until it finds the first span
+    /// that's contained within `outer`.
+    ///
+    /// The span returned by this method may have a different [`SyntaxContext`] than `outer`.
     /// If you need to extend the span, use [`find_ancestor_inside_same_ctxt`] instead,
     /// because joining spans with different syntax contexts can create unexpected results.
+    ///
+    /// This is used to find the span of the macro call when a parent expr span, i.e. `outer`, is known.
     ///
     /// [`find_ancestor_inside_same_ctxt`]: Self::find_ancestor_inside_same_ctxt
     pub fn find_ancestor_inside(mut self, outer: Span) -> Option<Span> {
@@ -684,8 +733,10 @@ impl Span {
         Some(self)
     }
 
-    /// Walk down the expansion ancestors to find a span with the same [`SyntaxContext`] as
-    /// `other`.
+    /// Find the first ancestor span with the same [`SyntaxContext`] as `other`.
+    ///
+    /// This method traverses the macro expansion ancestors until it finds a span
+    /// that has the same [`SyntaxContext`] as `other`.
     ///
     /// Like [`find_ancestor_inside_same_ctxt`], but specifically for when spans might not
     /// overlap. Take care when using this, and prefer [`find_ancestor_inside`] or
@@ -701,8 +752,11 @@ impl Span {
         Some(self)
     }
 
-    /// Walk down the expansion ancestors to find a span that's contained within `outer` and
+    /// Find the first ancestor span that's contained within `outer` and
     /// has the same [`SyntaxContext`] as `outer`.
+    ///
+    /// This method traverses the macro expansion ancestors until it finds a span
+    /// that is both contained within `outer` and has the same [`SyntaxContext`] as `outer`.
     ///
     /// This method is the combination of [`find_ancestor_inside`] and
     /// [`find_ancestor_in_same_ctxt`] and should be preferred when extending the returned span.
@@ -717,43 +771,43 @@ impl Span {
         Some(self)
     }
 
-    /// Recursively walk down the expansion ancestors to find the oldest ancestor span with the same
-    /// [`SyntaxContext`] the initial span.
+    /// Find the first ancestor span that does not come from an external macro.
     ///
-    /// This method is suitable for peeling through *local* macro expansions to find the "innermost"
-    /// span that is still local and shares the same [`SyntaxContext`]. For example, given
+    /// This method traverses the macro expansion ancestors until it finds a span
+    /// that is either from user-written code or from a local macro (defined in the current crate).
     ///
-    /// ```ignore (illustrative example, contains type error)
-    ///  macro_rules! outer {
-    ///      ($x: expr) => {
-    ///          inner!($x)
-    ///      }
-    ///  }
+    /// External macros are those defined in dependencies or the standard library.
+    /// This method is useful for reporting errors in user-controllable code and avoiding
+    /// diagnostics inside external macros.
     ///
-    ///  macro_rules! inner {
-    ///      ($x: expr) => {
-    ///          format!("error: {}", $x)
-    ///          //~^ ERROR mismatched types
-    ///      }
-    ///  }
+    /// # See also
     ///
-    ///  fn bar(x: &str) -> Result<(), Box<dyn std::error::Error>> {
-    ///      Err(outer!(x))
-    ///  }
-    /// ```
-    ///
-    /// if provided the initial span of `outer!(x)` inside `bar`, this method will recurse
-    /// the parent callsites until we reach `format!("error: {}", $x)`, at which point it is the
-    /// oldest ancestor span that is both still local and shares the same [`SyntaxContext`] as the
-    /// initial span.
-    pub fn find_oldest_ancestor_in_same_ctxt(self) -> Span {
-        let mut cur = self;
-        while cur.eq_ctxt(self)
-            && let Some(parent_callsite) = cur.parent_callsite()
-        {
-            cur = parent_callsite;
+    /// - [`Self::find_ancestor_not_from_macro`]
+    /// - [`Self::in_external_macro`]
+    pub fn find_ancestor_not_from_extern_macro(mut self, sm: &SourceMap) -> Option<Span> {
+        while self.in_external_macro(sm) {
+            self = self.parent_callsite()?;
         }
-        cur
+        Some(self)
+    }
+
+    /// Find the first ancestor span that does not come from any macro expansion.
+    ///
+    /// This method traverses the macro expansion ancestors until it finds a span
+    /// that originates from user-written code rather than any macro-generated code.
+    ///
+    /// This method is useful for reporting errors at the exact location users wrote code
+    /// and providing suggestions at directly editable locations.
+    ///
+    /// # See also
+    ///
+    /// - [`Self::find_ancestor_not_from_extern_macro`]
+    /// - [`Span::from_expansion`]
+    pub fn find_ancestor_not_from_macro(mut self) -> Option<Span> {
+        while self.from_expansion() {
+            self = self.parent_callsite()?;
+        }
+        Some(self)
     }
 
     /// Edition of the crate from which this span came.
@@ -808,7 +862,7 @@ impl Span {
         self.ctxt()
             .outer_expn_data()
             .allow_internal_unstable
-            .is_some_and(|features| features.iter().any(|&f| f == feature))
+            .is_some_and(|features| features.contains(&feature))
     }
 
     /// Checks if this span arises from a compiler desugaring of kind `kind`.
@@ -872,8 +926,7 @@ impl Span {
 
     /// Check if you can select metavar spans for the given spans to get matching contexts.
     fn try_metavars(a: SpanData, b: SpanData, a_orig: Span, b_orig: Span) -> (SpanData, SpanData) {
-        let get = |mspans: &FxHashMap<_, _>, s| mspans.get(&s).copied();
-        match with_metavar_spans(|mspans| (get(mspans, a_orig), get(mspans, b_orig))) {
+        match with_metavar_spans(|mspans| (mspans.get(a_orig), mspans.get(b_orig))) {
             (None, None) => {}
             (Some(meta_a), None) => {
                 let meta_a = meta_a.data();
@@ -989,6 +1042,37 @@ impl Span {
         }
     }
 
+    /// Returns the `Span` within the syntax context of "within". This is useful when
+    /// "self" is an expansion from a macro variable, since this can be used for
+    /// providing extra macro expansion context for certain errors.
+    ///
+    /// ```text
+    /// macro_rules! m {
+    ///     ($ident:ident) => { ($ident,) }
+    /// }
+    ///
+    /// m!(outer_ident);
+    /// ```
+    ///
+    /// If "self" is the span of the outer_ident, and "within" is the span of the `($ident,)`
+    /// expr, then this will return the span of the `$ident` macro variable.
+    pub fn within_macro(self, within: Span, sm: &SourceMap) -> Option<Span> {
+        match Span::prepare_to_combine(self, within) {
+            // Only return something if it doesn't overlap with the original span,
+            // and the span isn't "imported" (i.e. from unavailable sources).
+            // FIXME: This does limit the usefulness of the error when the macro is
+            // from a foreign crate; we could also take into account `-Zmacro-backtrace`,
+            // which doesn't redact this span (but that would mean passing in even more
+            // args to this function, lol).
+            Ok((self_, _, parent))
+                if self_.hi < self.lo() || self.hi() < self_.lo && !sm.is_imported(within) =>
+            {
+                Some(Span::new(self_.lo, self_.hi, self_.ctxt, parent))
+            }
+            _ => None,
+        }
+    }
+
     pub fn from_inner(self, inner: InnerSpan) -> Span {
         let span = self.data();
         Span::new(
@@ -1014,7 +1098,7 @@ impl Span {
     /// Equivalent of `Span::mixed_site` from the proc macro API,
     /// except that the location is taken from the `self` span.
     pub fn with_mixed_site_ctxt(self, expn_id: ExpnId) -> Span {
-        self.with_ctxt_from_mark(expn_id, Transparency::SemiTransparent)
+        self.with_ctxt_from_mark(expn_id, Transparency::SemiOpaque)
     }
 
     /// Produces a span with the same location as `self` and context produced by a macro with the
@@ -1110,11 +1194,12 @@ rustc_index::newtype_index! {
 /// It is similar to rustc_type_ir's TyEncoder.
 pub trait SpanEncoder: Encoder {
     fn encode_span(&mut self, span: Span);
-    fn encode_symbol(&mut self, symbol: Symbol);
+    fn encode_symbol(&mut self, sym: Symbol);
+    fn encode_byte_symbol(&mut self, byte_sym: ByteSymbol);
     fn encode_expn_id(&mut self, expn_id: ExpnId);
     fn encode_syntax_context(&mut self, syntax_context: SyntaxContext);
-    /// As a local identifier, a `CrateNum` is only meaningful within its context, e.g. within a tcx.
-    /// Therefore, make sure to include the context when encode a `CrateNum`.
+    /// As a local identifier, a `CrateNum` is only meaningful within its context, e.g. within a
+    /// tcx. Therefore, make sure to include the context when encode a `CrateNum`.
     fn encode_crate_num(&mut self, crate_num: CrateNum);
     fn encode_def_index(&mut self, def_index: DefIndex);
     fn encode_def_id(&mut self, def_id: DefId);
@@ -1127,8 +1212,12 @@ impl SpanEncoder for FileEncoder {
         span.hi.encode(self);
     }
 
-    fn encode_symbol(&mut self, symbol: Symbol) {
-        self.emit_str(symbol.as_str());
+    fn encode_symbol(&mut self, sym: Symbol) {
+        self.emit_str(sym.as_str());
+    }
+
+    fn encode_byte_symbol(&mut self, byte_sym: ByteSymbol) {
+        self.emit_byte_str(byte_sym.as_byte_str());
     }
 
     fn encode_expn_id(&mut self, _expn_id: ExpnId) {
@@ -1162,6 +1251,12 @@ impl<E: SpanEncoder> Encodable<E> for Span {
 impl<E: SpanEncoder> Encodable<E> for Symbol {
     fn encode(&self, s: &mut E) {
         s.encode_symbol(*self);
+    }
+}
+
+impl<E: SpanEncoder> Encodable<E> for ByteSymbol {
+    fn encode(&self, s: &mut E) {
+        s.encode_byte_symbol(*self);
     }
 }
 
@@ -1206,6 +1301,7 @@ impl<E: SpanEncoder> Encodable<E> for AttrId {
 pub trait SpanDecoder: Decoder {
     fn decode_span(&mut self) -> Span;
     fn decode_symbol(&mut self) -> Symbol;
+    fn decode_byte_symbol(&mut self) -> ByteSymbol;
     fn decode_expn_id(&mut self) -> ExpnId;
     fn decode_syntax_context(&mut self) -> SyntaxContext;
     fn decode_crate_num(&mut self) -> CrateNum;
@@ -1224,6 +1320,10 @@ impl SpanDecoder for MemDecoder<'_> {
 
     fn decode_symbol(&mut self) -> Symbol {
         Symbol::intern(self.read_str())
+    }
+
+    fn decode_byte_symbol(&mut self) -> ByteSymbol {
+        ByteSymbol::intern(self.read_byte_str())
     }
 
     fn decode_expn_id(&mut self) -> ExpnId {
@@ -1260,6 +1360,12 @@ impl<D: SpanDecoder> Decodable<D> for Span {
 impl<D: SpanDecoder> Decodable<D> for Symbol {
     fn decode(s: &mut D) -> Symbol {
         s.decode_symbol()
+    }
+}
+
+impl<D: SpanDecoder> Decodable<D> for ByteSymbol {
+    fn decode(s: &mut D) -> ByteSymbol {
+        s.decode_byte_symbol()
     }
 }
 
@@ -1365,7 +1471,7 @@ pub enum ExternalSource {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum ExternalSourceKind {
     /// The external source has been loaded already.
-    Present(Lrc<String>),
+    Present(Arc<String>),
     /// No attempt has been made to load the external source.
     AbsentOk,
     /// A failed attempt has been made to load the external source.
@@ -1375,7 +1481,7 @@ pub enum ExternalSourceKind {
 impl ExternalSource {
     pub fn get_source(&self) -> Option<&str> {
         match self {
-            ExternalSource::Foreign { kind: ExternalSourceKind::Present(ref src), .. } => Some(src),
+            ExternalSource::Foreign { kind: ExternalSourceKind::Present(src), .. } => Some(src),
             _ => None,
         }
     }
@@ -1605,7 +1711,7 @@ pub struct SourceFile {
     /// (e.g., `<anon>`).
     pub name: FileName,
     /// The complete source code.
-    pub src: Option<Lrc<String>>,
+    pub src: Option<Arc<String>>,
     /// The source code's hash.
     pub src_hash: SourceFileHash,
     /// Used to enable cargo to use checksums to check if a crate is fresh rather
@@ -1617,8 +1723,10 @@ pub struct SourceFile {
     pub external_src: FreezeLock<ExternalSource>,
     /// The start position of this source in the `SourceMap`.
     pub start_pos: BytePos,
-    /// The byte length of this source.
-    pub source_len: RelativeBytePos,
+    /// The byte length of this source after normalization.
+    pub normalized_source_len: RelativeBytePos,
+    /// The byte length of this source before normalization.
+    pub unnormalized_source_len: u32,
     /// Locations of lines beginnings in the source code.
     pub lines: FreezeLock<SourceFileLines>,
     /// Locations of multi-byte characters in the source code.
@@ -1642,7 +1750,8 @@ impl Clone for SourceFile {
             checksum_hash: self.checksum_hash,
             external_src: self.external_src.clone(),
             start_pos: self.start_pos,
-            source_len: self.source_len,
+            normalized_source_len: self.normalized_source_len,
+            unnormalized_source_len: self.unnormalized_source_len,
             lines: self.lines.clone(),
             multibyte_chars: self.multibyte_chars.clone(),
             normalized_pos: self.normalized_pos.clone(),
@@ -1658,7 +1767,8 @@ impl<S: SpanEncoder> Encodable<S> for SourceFile {
         self.src_hash.encode(s);
         self.checksum_hash.encode(s);
         // Do not encode `start_pos` as it's global state for this session.
-        self.source_len.encode(s);
+        self.normalized_source_len.encode(s);
+        self.unnormalized_source_len.encode(s);
 
         // We are always in `Lines` form by the time we reach here.
         assert!(self.lines.read().is_lines());
@@ -1731,7 +1841,8 @@ impl<D: SpanDecoder> Decodable<D> for SourceFile {
         let name: FileName = Decodable::decode(d);
         let src_hash: SourceFileHash = Decodable::decode(d);
         let checksum_hash: Option<SourceFileHash> = Decodable::decode(d);
-        let source_len: RelativeBytePos = Decodable::decode(d);
+        let normalized_source_len: RelativeBytePos = Decodable::decode(d);
+        let unnormalized_source_len = Decodable::decode(d);
         let lines = {
             let num_lines: u32 = Decodable::decode(d);
             if num_lines > 0 {
@@ -1753,7 +1864,8 @@ impl<D: SpanDecoder> Decodable<D> for SourceFile {
         SourceFile {
             name,
             start_pos: BytePos::from_u32(0),
-            source_len,
+            normalized_source_len,
+            unnormalized_source_len,
             src: None,
             src_hash,
             checksum_hash,
@@ -1853,12 +1965,17 @@ impl SourceFile {
                 SourceFileHash::new_in_memory(checksum_hash_kind, src.as_bytes())
             }
         });
+        // Capture the original source length before normalization.
+        let unnormalized_source_len = u32::try_from(src.len()).map_err(|_| OffsetOverflowError)?;
+        if unnormalized_source_len > Self::MAX_FILE_SIZE {
+            return Err(OffsetOverflowError);
+        }
+
         let normalized_pos = normalize_src(&mut src);
 
         let stable_id = StableSourceFileId::from_filename_in_current_crate(&name);
-        let source_len = src.len();
-        let source_len = u32::try_from(source_len).map_err(|_| OffsetOverflowError)?;
-        if source_len > Self::MAX_FILE_SIZE {
+        let normalized_source_len = u32::try_from(src.len()).map_err(|_| OffsetOverflowError)?;
+        if normalized_source_len > Self::MAX_FILE_SIZE {
             return Err(OffsetOverflowError);
         }
 
@@ -1866,12 +1983,13 @@ impl SourceFile {
 
         Ok(SourceFile {
             name,
-            src: Some(Lrc::new(src)),
+            src: Some(Arc::new(src)),
             src_hash,
             checksum_hash,
             external_src: FreezeLock::frozen(ExternalSource::Unneeded),
             start_pos: BytePos::from_u32(0),
-            source_len: RelativeBytePos::from_u32(source_len),
+            normalized_source_len: RelativeBytePos::from_u32(normalized_source_len),
+            unnormalized_source_len,
             lines: FreezeLock::frozen(SourceFileLines::Lines(lines)),
             multibyte_chars,
             normalized_pos,
@@ -1985,7 +2103,7 @@ impl SourceFile {
                 } = &mut *external_src
                 {
                     *src_kind = if let Some(src) = src {
-                        ExternalSourceKind::Present(Lrc::new(src))
+                        ExternalSourceKind::Present(Arc::new(src))
                     } else {
                         ExternalSourceKind::AbsentErr
                     };
@@ -2055,7 +2173,7 @@ impl SourceFile {
 
     #[inline]
     pub fn end_position(&self) -> BytePos {
-        self.absolute_position(self.source_len)
+        self.absolute_position(self.normalized_source_len)
     }
 
     /// Finds the line containing the given position. The return value is the
@@ -2091,7 +2209,7 @@ impl SourceFile {
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.source_len.to_u32() == 0
+        self.normalized_source_len.to_u32() == 0
     }
 
     /// Calculates the original byte position relative to the start of the file
@@ -2425,7 +2543,7 @@ impl<D: Decoder> Decodable<D> for RelativeBytePos {
 #[derive(Debug, Clone)]
 pub struct Loc {
     /// Information about the original source.
-    pub file: Lrc<SourceFile>,
+    pub file: Arc<SourceFile>,
     /// The (1-based) line number.
     pub line: usize,
     /// The (0-based) column offset.
@@ -2437,13 +2555,13 @@ pub struct Loc {
 // Used to be structural records.
 #[derive(Debug)]
 pub struct SourceFileAndLine {
-    pub sf: Lrc<SourceFile>,
+    pub sf: Arc<SourceFile>,
     /// Index of line, starting from 0.
     pub line: usize,
 }
 #[derive(Debug)]
 pub struct SourceFileAndBytePos {
-    pub sf: Lrc<SourceFile>,
+    pub sf: Arc<SourceFile>,
     pub pos: BytePos,
 }
 
@@ -2460,7 +2578,7 @@ pub struct LineInfo {
 }
 
 pub struct FileLines {
-    pub file: Lrc<SourceFile>,
+    pub file: Arc<SourceFile>,
     pub lines: Vec<LineInfo>,
 }
 
@@ -2526,7 +2644,7 @@ pub trait HashStableContext {
     fn span_data_to_lines_and_cols(
         &mut self,
         span: &SpanData,
-    ) -> Option<(Lrc<SourceFile>, usize, BytePos, usize, BytePos)>;
+    ) -> Option<(StableSourceFileId, usize, BytePos, usize, BytePos)>;
     fn hashing_controls(&self) -> HashingControls;
 }
 
@@ -2583,7 +2701,7 @@ where
         };
 
         Hash::hash(&TAG_VALID_SPAN, hasher);
-        Hash::hash(&file.stable_id, hasher);
+        Hash::hash(&file, hasher);
 
         // Hash both the length and the end location (line/column) of a span. If we
         // hash only the length, for example, then two otherwise equal spans with

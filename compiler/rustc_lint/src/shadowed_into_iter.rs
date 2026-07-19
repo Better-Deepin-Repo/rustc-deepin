@@ -1,4 +1,4 @@
-use rustc_hir as hir;
+use rustc_hir::{self as hir, LangItem};
 use rustc_middle::ty::{self, Ty};
 use rustc_session::lint::FutureIncompatibilityReason;
 use rustc_session::{declare_lint, impl_lint_pass};
@@ -32,7 +32,7 @@ declare_lint! {
     "detects calling `into_iter` on arrays in Rust 2015 and 2018",
     @future_incompatible = FutureIncompatibleInfo {
         reason: FutureIncompatibilityReason::EditionSemanticsChange(Edition::Edition2021),
-        reference: "<https://doc.rust-lang.org/nightly/edition-guide/rust-2021/IntoIterator-for-arrays.html>",
+        reference: "<https://doc.rust-lang.org/edition-guide/rust-2021/IntoIterator-for-arrays.html>",
     };
 }
 
@@ -61,7 +61,7 @@ declare_lint! {
     "detects calling `into_iter` on boxed slices in Rust 2015, 2018, and 2021",
     @future_incompatible = FutureIncompatibleInfo {
         reason: FutureIncompatibilityReason::EditionSemanticsChange(Edition::Edition2024),
-        reference: "<https://doc.rust-lang.org/nightly/edition-guide/rust-2024/intoiterator-box-slice.html>"
+        reference: "<https://doc.rust-lang.org/edition-guide/rust-2024/intoiterator-box-slice.html>"
     };
 }
 
@@ -81,7 +81,7 @@ impl<'tcx> LateLintPass<'tcx> for ShadowedIntoIter {
         let Some(method_def_id) = cx.typeck_results().type_dependent_def_id(expr.hir_id) else {
             return;
         };
-        if Some(method_def_id) != cx.tcx.lang_items().into_iter_fn() {
+        if !cx.tcx.is_lang_item(method_def_id, LangItem::IntoIterIntoIter) {
             return;
         }
 
@@ -124,34 +124,39 @@ impl<'tcx> LateLintPass<'tcx> for ShadowedIntoIter {
                 return;
             };
 
+        // This check needs to avoid ICE from when `receiver_arg` is from macro expansion
+        // Which leads to empty span in span arithmetic below
+        // cc: https://github.com/rust-lang/rust/issues/147408
+        let span = receiver_arg.span.find_ancestor_in_same_ctxt(expr.span);
+
         // If this expression comes from the `IntoIter::into_iter` inside of a for loop,
         // we should just suggest removing the `.into_iter()` or changing it to `.iter()`
         // to disambiguate if we want to iterate by-value or by-ref.
         let sub = if let Some((_, hir::Node::Expr(parent_expr))) =
-            cx.tcx.hir().parent_iter(expr.hir_id).nth(1)
+            cx.tcx.hir_parent_iter(expr.hir_id).nth(1)
             && let hir::ExprKind::Match(arg, [_], hir::MatchSource::ForLoopDesugar) =
                 &parent_expr.kind
             && let hir::ExprKind::Call(path, [_]) = &arg.kind
-            && let hir::ExprKind::Path(hir::QPath::LangItem(hir::LangItem::IntoIterIntoIter, ..)) =
-                &path.kind
+            && let hir::ExprKind::Path(qpath) = path.kind
+            && cx.tcx.qpath_is_lang_item(qpath, LangItem::IntoIterIntoIter)
+            && let Some(span) = span
         {
             Some(ShadowedIntoIterDiagSub::RemoveIntoIter {
-                span: receiver_arg.span.shrink_to_hi().to(expr.span.shrink_to_hi()),
+                span: span.shrink_to_hi().to(expr.span.shrink_to_hi()),
             })
-        } else if can_suggest_ufcs {
+        } else if can_suggest_ufcs && let Some(span) = span {
             Some(ShadowedIntoIterDiagSub::UseExplicitIntoIter {
                 start_span: expr.span.shrink_to_lo(),
-                end_span: receiver_arg.span.shrink_to_hi().to(expr.span.shrink_to_hi()),
+                end_span: span.shrink_to_hi().to(expr.span.shrink_to_hi()),
             })
         } else {
             None
         };
 
-        cx.emit_span_lint(lint, call.ident.span, ShadowedIntoIterDiag {
-            target,
-            edition,
-            suggestion: call.ident.span,
-            sub,
-        });
+        cx.emit_span_lint(
+            lint,
+            call.ident.span,
+            ShadowedIntoIterDiag { target, edition, suggestion: call.ident.span, sub },
+        );
     }
 }

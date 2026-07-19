@@ -2,8 +2,11 @@
 
 use std::fs;
 
-use cargo_test_support::prelude::*;
-use cargo_test_support::{basic_manifest, project, str};
+use crate::prelude::*;
+use cargo_test_support::basic_manifest;
+use cargo_test_support::project;
+use cargo_test_support::str;
+use cargo_test_support::target_spec_json;
 
 const MINIMAL_LIB: &str = r#"
 #![allow(internal_features)]
@@ -11,28 +14,23 @@ const MINIMAL_LIB: &str = r#"
 #![feature(lang_items)]
 #![no_core]
 
+#[lang = "pointee_sized"]
+pub trait PointeeSized {
+    // Empty.
+}
+
+#[lang = "meta_sized"]
+pub trait MetaSized: PointeeSized {
+    // Empty.
+}
+
 #[lang = "sized"]
-pub trait Sized {
+pub trait Sized: MetaSized {
     // Empty.
 }
 #[lang = "copy"]
 pub trait Copy {
     // Empty.
-}
-"#;
-
-const SIMPLE_SPEC: &str = r#"
-{
-    "llvm-target": "x86_64-unknown-none-gnu",
-    "data-layout": "e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128",
-    "arch": "x86_64",
-    "target-endian": "little",
-    "target-pointer-width": "64",
-    "target-c-int-width": "32",
-    "os": "none",
-    "linker-flavor": "ld.lld",
-    "linker": "rust-lld",
-    "executables": true
 }
 "#;
 
@@ -50,7 +48,7 @@ fn custom_target_minimal() {
             "
             .replace("__MINIMAL_LIB__", MINIMAL_LIB),
         )
-        .file("custom-target.json", SIMPLE_SPEC)
+        .file("custom-target.json", target_spec_json())
         .build();
 
     p.cargo("build --lib --target custom-target.json -v").run();
@@ -58,8 +56,8 @@ fn custom_target_minimal() {
         .run();
 
     // Ensure that the correct style of flag is passed to --target with doc tests.
-    p.cargo("test --doc --target src/../custom-target.json -v -Zdoctest-xcompile")
-        .masquerade_as_nightly_cargo(&["doctest-xcompile", "no_core", "lang_items"])
+    p.cargo("test --doc --target src/../custom-target.json -v")
+        .masquerade_as_nightly_cargo(&["no_core", "lang_items"])
         .with_stderr_data(str![[r#"
 [FRESH] foo v0.0.1 ([ROOT]/foo)
 [FINISHED] `test` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s
@@ -118,7 +116,7 @@ fn custom_target_dependency() {
             "
             .replace("__MINIMAL_LIB__", MINIMAL_LIB),
         )
-        .file("custom-target.json", SIMPLE_SPEC)
+        .file("custom-target.json", target_spec_json())
         .build();
 
     p.cargo("build --lib --target custom-target.json -v").run();
@@ -137,7 +135,7 @@ fn custom_bin_target() {
             "
             .replace("__MINIMAL_LIB__", MINIMAL_LIB),
         )
-        .file("custom-bin-target.json", SIMPLE_SPEC)
+        .file("custom-bin-target.json", target_spec_json())
         .build();
 
     p.cargo("build --target custom-bin-target.json -v").run();
@@ -158,7 +156,7 @@ fn changing_spec_rebuilds() {
             "
             .replace("__MINIMAL_LIB__", MINIMAL_LIB),
         )
-        .file("custom-target.json", SIMPLE_SPEC)
+        .file("custom-target.json", target_spec_json())
         .build();
 
     p.cargo("build --lib --target custom-target.json -v").run();
@@ -203,7 +201,7 @@ fn changing_spec_relearns_crate_types() {
             "#,
         )
         .file("src/lib.rs", MINIMAL_LIB)
-        .file("custom-target.json", SIMPLE_SPEC)
+        .file("custom-target.json", target_spec_json())
         .build();
 
     p.cargo("build --lib --target custom-target.json -v")
@@ -245,8 +243,8 @@ fn custom_target_ignores_filepath() {
             "
             .replace("__MINIMAL_LIB__", MINIMAL_LIB),
         )
-        .file("b/custom-target.json", SIMPLE_SPEC)
-        .file("a/custom-target.json", SIMPLE_SPEC)
+        .file("b/custom-target.json", target_spec_json())
+        .file("a/custom-target.json", target_spec_json())
         .build();
 
     // Should build the library the first time.
@@ -258,7 +256,7 @@ fn custom_target_ignores_filepath() {
 "#]])
         .run();
 
-    // But not the second time, even though the path to the custom target is dfferent.
+    // But not the second time, even though the path to the custom target is different.
     p.cargo("build --lib --target b/custom-target.json")
         .with_stderr_data(str![[r#"
 [FINISHED] `dev` profile [unoptimized + debuginfo] target(s) in [ELAPSED]s

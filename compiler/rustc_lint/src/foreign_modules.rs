@@ -2,11 +2,13 @@ use rustc_abi::FIRST_VARIANT;
 use rustc_data_structures::stack::ensure_sufficient_stack;
 use rustc_data_structures::unord::{UnordMap, UnordSet};
 use rustc_hir as hir;
+use rustc_hir::attrs::AttributeKind;
 use rustc_hir::def::DefKind;
+use rustc_hir::find_attr;
 use rustc_middle::query::Providers;
 use rustc_middle::ty::{self, AdtDef, Instance, Ty, TyCtxt};
 use rustc_session::declare_lint;
-use rustc_span::{Span, Symbol, sym};
+use rustc_span::{Span, Symbol};
 use tracing::{debug, instrument};
 
 use crate::lints::{BuiltinClashingExtern, BuiltinClashingExternSub};
@@ -35,12 +37,12 @@ declare_lint! {
     ///
     /// ```rust
     /// mod m {
-    ///     extern "C" {
+    ///     unsafe extern "C" {
     ///         fn foo();
     ///     }
     /// }
     ///
-    /// extern "C" {
+    /// unsafe extern "C" {
     ///     fn foo(_: u32);
     /// }
     /// ```
@@ -104,7 +106,7 @@ impl ClashingExternDeclarations {
     /// for the item, return its HirId without updating the set.
     fn insert(&mut self, tcx: TyCtxt<'_>, fi: hir::ForeignItemId) -> Option<hir::OwnerId> {
         let did = fi.owner_id.to_def_id();
-        let instance = Instance::new(did, ty::List::identity_for_item(tcx, did));
+        let instance = Instance::new_raw(did, ty::List::identity_for_item(tcx, did));
         let name = Symbol::intern(tcx.symbol_name(instance).name);
         if let Some(&existing_id) = self.seen_decls.get(&name) {
             // Avoid updating the map with the new entry when we do find a collision. We want to
@@ -134,7 +136,6 @@ impl ClashingExternDeclarations {
             ty::TypingEnv::non_body_analysis(tcx, this_fi.owner_id),
             existing_decl_ty,
             this_decl_ty,
-            types::CItemKind::Declaration,
         ) {
             let orig = name_of_extern_decl(tcx, existing_did);
 
@@ -177,12 +178,16 @@ impl ClashingExternDeclarations {
 /// symbol's name.
 fn name_of_extern_decl(tcx: TyCtxt<'_>, fi: hir::OwnerId) -> SymbolName {
     if let Some((overridden_link_name, overridden_link_name_span)) =
-        tcx.codegen_fn_attrs(fi).link_name.map(|overridden_link_name| {
+        tcx.codegen_fn_attrs(fi).symbol_name.map(|overridden_link_name| {
             // FIXME: Instead of searching through the attributes again to get span
             // information, we could have codegen_fn_attrs also give span information back for
             // where the attribute was defined. However, until this is found to be a
             // bottleneck, this does just fine.
-            (overridden_link_name, tcx.get_attr(fi, sym::link_name).unwrap().span)
+            (
+                overridden_link_name,
+                find_attr!(tcx.get_all_attrs(fi), AttributeKind::LinkName {span, ..} => *span)
+                    .unwrap(),
+            )
         })
     {
         SymbolName::Link(overridden_link_name, overridden_link_name_span)
@@ -208,10 +213,9 @@ fn structurally_same_type<'tcx>(
     typing_env: ty::TypingEnv<'tcx>,
     a: Ty<'tcx>,
     b: Ty<'tcx>,
-    ckind: types::CItemKind,
 ) -> bool {
     let mut seen_types = UnordSet::default();
-    let result = structurally_same_type_impl(&mut seen_types, tcx, typing_env, a, b, ckind);
+    let result = structurally_same_type_impl(&mut seen_types, tcx, typing_env, a, b);
     if cfg!(debug_assertions) && result {
         // Sanity-check: must have same ABI, size and alignment.
         // `extern` blocks cannot be generic, so we'll always get a layout here.
@@ -230,7 +234,6 @@ fn structurally_same_type_impl<'tcx>(
     typing_env: ty::TypingEnv<'tcx>,
     a: Ty<'tcx>,
     b: Ty<'tcx>,
-    ckind: types::CItemKind,
 ) -> bool {
     debug!("structurally_same_type_impl(tcx, a = {:?}, b = {:?})", a, b);
 
@@ -241,10 +244,7 @@ fn structurally_same_type_impl<'tcx>(
             if let ty::Adt(def, args) = *ty.kind() {
                 let is_transparent = def.repr().transparent();
                 let is_non_null = types::nonnull_optimization_guaranteed(tcx, def);
-                debug!(
-                    "non_transparent_ty({:?}) -- type is transparent? {}, type is non-null? {}",
-                    ty, is_transparent, is_non_null
-                );
+                debug!(?ty, is_transparent, is_non_null);
                 if is_transparent && !is_non_null {
                     debug_assert_eq!(def.variants().len(), 1);
                     let v = &def.variant(FIRST_VARIANT);
@@ -273,14 +273,12 @@ fn structurally_same_type_impl<'tcx>(
         true
     } else {
         // Do a full, depth-first comparison between the two.
-        use rustc_type_ir::TyKind::*;
-
         let is_primitive_or_pointer =
-            |ty: Ty<'tcx>| ty.is_primitive() || matches!(ty.kind(), RawPtr(..) | Ref(..));
+            |ty: Ty<'tcx>| ty.is_primitive() || matches!(ty.kind(), ty::RawPtr(..) | ty::Ref(..));
 
         ensure_sufficient_stack(|| {
             match (a.kind(), b.kind()) {
-                (&Adt(a_def, a_gen_args), &Adt(b_def, b_gen_args)) => {
+                (&ty::Adt(a_def, a_gen_args), &ty::Adt(b_def, b_gen_args)) => {
                     // Only `repr(C)` types can be compared structurally.
                     if !(a_def.repr().c() && b_def.repr().c()) {
                         return false;
@@ -306,35 +304,28 @@ fn structurally_same_type_impl<'tcx>(
                                 typing_env,
                                 tcx.type_of(a_did).instantiate(tcx, a_gen_args),
                                 tcx.type_of(b_did).instantiate(tcx, b_gen_args),
-                                ckind,
                             )
                         },
                     )
                 }
-                (Array(a_ty, a_len), Array(b_ty, b_len)) => {
+                (ty::Array(a_ty, a_len), ty::Array(b_ty, b_len)) => {
                     // For arrays, we also check the length.
                     a_len == b_len
-                        && structurally_same_type_impl(
-                            seen_types, tcx, typing_env, *a_ty, *b_ty, ckind,
-                        )
+                        && structurally_same_type_impl(seen_types, tcx, typing_env, *a_ty, *b_ty)
                 }
-                (Slice(a_ty), Slice(b_ty)) => {
-                    structurally_same_type_impl(seen_types, tcx, typing_env, *a_ty, *b_ty, ckind)
+                (ty::Slice(a_ty), ty::Slice(b_ty)) => {
+                    structurally_same_type_impl(seen_types, tcx, typing_env, *a_ty, *b_ty)
                 }
-                (RawPtr(a_ty, a_mutbl), RawPtr(b_ty, b_mutbl)) => {
+                (ty::RawPtr(a_ty, a_mutbl), ty::RawPtr(b_ty, b_mutbl)) => {
                     a_mutbl == b_mutbl
-                        && structurally_same_type_impl(
-                            seen_types, tcx, typing_env, *a_ty, *b_ty, ckind,
-                        )
+                        && structurally_same_type_impl(seen_types, tcx, typing_env, *a_ty, *b_ty)
                 }
-                (Ref(_a_region, a_ty, a_mut), Ref(_b_region, b_ty, b_mut)) => {
+                (ty::Ref(_a_region, a_ty, a_mut), ty::Ref(_b_region, b_ty, b_mut)) => {
                     // For structural sameness, we don't need the region to be same.
                     a_mut == b_mut
-                        && structurally_same_type_impl(
-                            seen_types, tcx, typing_env, *a_ty, *b_ty, ckind,
-                        )
+                        && structurally_same_type_impl(seen_types, tcx, typing_env, *a_ty, *b_ty)
                 }
-                (FnDef(..), FnDef(..)) => {
+                (ty::FnDef(..), ty::FnDef(..)) => {
                     let a_poly_sig = a.fn_sig(tcx);
                     let b_poly_sig = b.fn_sig(tcx);
 
@@ -346,7 +337,7 @@ fn structurally_same_type_impl<'tcx>(
                     (a_sig.abi, a_sig.safety, a_sig.c_variadic)
                         == (b_sig.abi, b_sig.safety, b_sig.c_variadic)
                         && a_sig.inputs().iter().eq_by(b_sig.inputs().iter(), |a, b| {
-                            structurally_same_type_impl(seen_types, tcx, typing_env, *a, *b, ckind)
+                            structurally_same_type_impl(seen_types, tcx, typing_env, *a, *b)
                         })
                         && structurally_same_type_impl(
                             seen_types,
@@ -354,39 +345,41 @@ fn structurally_same_type_impl<'tcx>(
                             typing_env,
                             a_sig.output(),
                             b_sig.output(),
-                            ckind,
                         )
                 }
-                (Tuple(..), Tuple(..)) => {
+                (ty::Tuple(..), ty::Tuple(..)) => {
                     // Tuples are not `repr(C)` so these cannot be compared structurally.
                     false
                 }
                 // For these, it's not quite as easy to define structural-sameness quite so easily.
                 // For the purposes of this lint, take the conservative approach and mark them as
                 // not structurally same.
-                (Dynamic(..), Dynamic(..))
-                | (Error(..), Error(..))
-                | (Closure(..), Closure(..))
-                | (Coroutine(..), Coroutine(..))
-                | (CoroutineWitness(..), CoroutineWitness(..))
-                | (Alias(ty::Projection, ..), Alias(ty::Projection, ..))
-                | (Alias(ty::Inherent, ..), Alias(ty::Inherent, ..))
-                | (Alias(ty::Opaque, ..), Alias(ty::Opaque, ..)) => false,
+                (ty::Dynamic(..), ty::Dynamic(..))
+                | (ty::Error(..), ty::Error(..))
+                | (ty::Closure(..), ty::Closure(..))
+                | (ty::Coroutine(..), ty::Coroutine(..))
+                | (ty::CoroutineWitness(..), ty::CoroutineWitness(..))
+                | (ty::Alias(ty::Projection, ..), ty::Alias(ty::Projection, ..))
+                | (ty::Alias(ty::Inherent, ..), ty::Alias(ty::Inherent, ..))
+                | (ty::Alias(ty::Opaque, ..), ty::Alias(ty::Opaque, ..)) => false,
 
                 // These definitely should have been caught above.
-                (Bool, Bool) | (Char, Char) | (Never, Never) | (Str, Str) => unreachable!(),
+                (ty::Bool, ty::Bool)
+                | (ty::Char, ty::Char)
+                | (ty::Never, ty::Never)
+                | (ty::Str, ty::Str) => unreachable!(),
 
                 // An Adt and a primitive or pointer type. This can be FFI-safe if non-null
                 // enum layout optimisation is being applied.
-                (Adt(..), _) if is_primitive_or_pointer(b) => {
-                    if let Some(a_inner) = types::repr_nullable_ptr(tcx, typing_env, a, ckind) {
+                (ty::Adt(..) | ty::Pat(..), _) if is_primitive_or_pointer(b) => {
+                    if let Some(a_inner) = types::repr_nullable_ptr(tcx, typing_env, a) {
                         a_inner == b
                     } else {
                         false
                     }
                 }
-                (_, Adt(..)) if is_primitive_or_pointer(a) => {
-                    if let Some(b_inner) = types::repr_nullable_ptr(tcx, typing_env, b, ckind) {
+                (_, ty::Adt(..) | ty::Pat(..)) if is_primitive_or_pointer(a) => {
+                    if let Some(b_inner) = types::repr_nullable_ptr(tcx, typing_env, b) {
                         b_inner == a
                     } else {
                         false

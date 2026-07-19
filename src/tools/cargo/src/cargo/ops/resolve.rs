@@ -1,7 +1,7 @@
 //! High-level APIs for executing the resolver.
 //!
 //! This module provides functions for running the resolver given a workspace, including loading
-//! the `Cargo.lock` file and checkinf if it needs updating.
+//! the `Cargo.lock` file and checking if it needs updating.
 //!
 //! There are roughly 3 main functions:
 //!
@@ -41,7 +41,7 @@
 //!     the information that can be found in a registry index. Queries against the
 //!     `PackageRegistry` yields a `Summary`. The resolver uses the summary
 //!     information to build the dependency graph.
-//! - [`PackageSet`] --- Contains all of the `Package` objects. This works with the
+//! - [`PackageSet`] --- Contains all the `Package` objects. This works with the
 //!   [`Downloads`] struct to coordinate downloading packages. It has a reference
 //!   to the `SourceMap` to get the `Source` objects which tell the `Downloads`
 //!   struct which URLs to fetch.
@@ -55,6 +55,14 @@
 //! [source implementations]: crate::sources
 //! [`Downloads`]: crate::core::package::Downloads
 
+use crate::core::Dependency;
+use crate::core::GitReference;
+use crate::core::PackageId;
+use crate::core::PackageIdSpec;
+use crate::core::PackageIdSpecQuery;
+use crate::core::PackageSet;
+use crate::core::SourceId;
+use crate::core::Workspace;
 use crate::core::compiler::{CompileKind, RustcTargetData};
 use crate::core::registry::{LockedPatchDependency, PackageRegistry};
 use crate::core::resolver::features::{
@@ -64,23 +72,20 @@ use crate::core::resolver::{
     self, HasDevUnits, Resolve, ResolveOpts, ResolveVersion, VersionOrdering, VersionPreferences,
 };
 use crate::core::summary::Summary;
-use crate::core::Dependency;
-use crate::core::GitReference;
-use crate::core::PackageId;
-use crate::core::PackageIdSpec;
-use crate::core::PackageIdSpecQuery;
-use crate::core::PackageSet;
-use crate::core::SourceId;
-use crate::core::Workspace;
 use crate::ops;
 use crate::sources::RecursivePathSource;
-use crate::util::cache_lock::CacheLockMode;
-use crate::util::errors::CargoResult;
 use crate::util::CanonicalUrl;
+use crate::util::cache_lock::CacheLockMode;
+use crate::util::context::FeatureUnification;
+use crate::util::errors::CargoResult;
+use annotate_snippets::Group;
+use annotate_snippets::Level;
 use anyhow::Context as _;
 use cargo_util::paths;
 use cargo_util_schemas::core::PartialVersion;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use tracing::{debug, trace};
 
 /// Filter for keep using Package ID from previous lockfile.
@@ -95,9 +100,18 @@ pub struct WorkspaceResolve<'gctx> {
     /// This may be `None` for things like `cargo install` and `-Zavoid-dev-deps`.
     /// This does not include `paths` overrides.
     pub workspace_resolve: Option<Resolve>,
-    /// The narrowed resolve, with the specific features enabled, and only the
-    /// given package specs requested.
+    /// The narrowed resolve, with the specific features enabled.
     pub targeted_resolve: Resolve,
+    /// Package specs requested for compilation along with specific features enabled. This usually
+    /// has the length of one but there may be more specs with different features when using the
+    /// `package` feature resolver.
+    pub specs_and_features: Vec<SpecsAndResolvedFeatures>,
+}
+
+/// Pair of package specs requested for compilation along with enabled features.
+pub struct SpecsAndResolvedFeatures {
+    /// Packages that are supposed to be built.
+    pub specs: Vec<PackageIdSpec>,
     /// The features activated per package.
     pub resolved_features: ResolvedFeatures,
 }
@@ -144,6 +158,21 @@ pub fn resolve_ws_with_opts<'gctx>(
     force_all_targets: ForceAllTargets,
     dry_run: bool,
 ) -> CargoResult<WorkspaceResolve<'gctx>> {
+    let feature_unification = ws.resolve_feature_unification();
+    let individual_specs = match feature_unification {
+        FeatureUnification::Selected => vec![specs.to_owned()],
+        FeatureUnification::Workspace => {
+            vec![ops::Packages::All(Vec::new()).to_package_id_specs(ws)?]
+        }
+        FeatureUnification::Package => specs.iter().map(|spec| vec![spec.clone()]).collect(),
+    };
+    let specs: Vec<_> = individual_specs
+        .iter()
+        .map(|specs| specs.iter())
+        .flatten()
+        .cloned()
+        .collect();
+    let specs = &specs[..];
     let mut registry = ws.package_registry()?;
     let (resolve, resolved_with_overrides) = if ws.ignore_lock() {
         let add_patches = true;
@@ -182,14 +211,27 @@ pub fn resolve_ws_with_opts<'gctx>(
                     .warn(format!("package replacement is not used: {}", replace_spec))?
             }
 
-            if dep.features().len() != 0 || !dep.uses_default_features() {
-                ws.gctx()
-                .shell()
-                .warn(format!(
-                    "replacement for `{}` uses the features mechanism. \
-                    default-features and features will not take effect because the replacement dependency does not support this mechanism",
-                    dep.package_name()
-                ))?
+            let mut unused_fields = Vec::new();
+            if dep.features().len() != 0 {
+                unused_fields.push("`features`");
+            }
+            if !dep.uses_default_features() {
+                unused_fields.push("`default-features`")
+            }
+            if !unused_fields.is_empty() {
+                ws.gctx().shell().print_report(
+                    &[Level::WARNING
+                        .secondary_title(format!(
+                            "unused field in replacement for `{}`: {}",
+                            dep.package_name(),
+                            unused_fields.join(", ")
+                        ))
+                        .element(Level::NOTE.message(format!(
+                            "configure {} in the `dependencies` entry",
+                            unused_fields.join(", ")
+                        )))],
+                    false,
+                )?;
             }
         }
 
@@ -224,9 +266,9 @@ pub fn resolve_ws_with_opts<'gctx>(
 
     let pkg_set = get_resolved_packages(&resolved_with_overrides, registry)?;
 
-    let member_ids = ws
-        .members_with_features(specs, cli_features)?
-        .into_iter()
+    let members_with_features = ws.members_with_features(specs, cli_features)?;
+    let member_ids = members_with_features
+        .iter()
         .map(|(p, _fts)| p.package_id())
         .collect::<Vec<_>>();
     pkg_set.download_accessible(
@@ -238,33 +280,70 @@ pub fn resolve_ws_with_opts<'gctx>(
         force_all_targets,
     )?;
 
-    let feature_opts = FeatureOpts::new(ws, has_dev_units, force_all_targets)?;
-    let resolved_features = FeatureResolver::resolve(
-        ws,
-        target_data,
-        &resolved_with_overrides,
-        &pkg_set,
-        cli_features,
-        specs,
-        requested_targets,
-        feature_opts,
-    )?;
+    let mut specs_and_features = Vec::new();
 
-    pkg_set.warn_no_lib_packages_and_artifact_libs_overlapping_deps(
-        ws,
-        &resolved_with_overrides,
-        &member_ids,
-        has_dev_units,
-        requested_targets,
-        target_data,
-        force_all_targets,
-    )?;
+    for specs in individual_specs {
+        let feature_opts = FeatureOpts::new(ws, has_dev_units, force_all_targets)?;
+
+        // We want to narrow the features to the current specs so that stuff like `cargo check -p a
+        // -p b -F a/a,b/b` works and the resolver does not contain that `a` does not have feature
+        // `b` and vice-versa. However, resolver v1 needs to see even features of unselected
+        // packages turned on if it was because of working directory being inside the unselected
+        // package, because they might turn on a feature of a selected package.
+        let narrowed_features = match feature_unification {
+            FeatureUnification::Package => {
+                let mut narrowed_features = cli_features.clone();
+                let enabled_features = members_with_features
+                    .iter()
+                    .filter_map(|(package, cli_features)| {
+                        specs
+                            .iter()
+                            .any(|spec| spec.matches(package.package_id()))
+                            .then_some(cli_features.features.iter())
+                    })
+                    .flatten()
+                    .cloned()
+                    .collect();
+                narrowed_features.features = Rc::new(enabled_features);
+                Cow::Owned(narrowed_features)
+            }
+            FeatureUnification::Selected | FeatureUnification::Workspace => {
+                Cow::Borrowed(cli_features)
+            }
+        };
+
+        let resolved_features = FeatureResolver::resolve(
+            ws,
+            target_data,
+            &resolved_with_overrides,
+            &pkg_set,
+            &*narrowed_features,
+            &specs,
+            requested_targets,
+            feature_opts,
+        )?;
+
+        pkg_set.warn_no_lib_packages_and_artifact_libs_overlapping_deps(
+            ws,
+            &resolved_with_overrides,
+            &member_ids,
+            has_dev_units,
+            requested_targets,
+            target_data,
+            force_all_targets,
+        )?;
+
+        specs_and_features.push(SpecsAndResolvedFeatures {
+            specs,
+            resolved_features,
+        });
+    }
 
     Ok(WorkspaceResolve {
         pkg_set,
         workspace_resolve: resolve,
         targeted_resolve: resolved_with_overrides,
-        resolved_features,
+        specs_and_features,
     })
 }
 
@@ -369,6 +448,9 @@ pub fn resolve_with_previous<'gctx>(
         }
         version_prefs.rust_versions(rust_versions);
     }
+    if let Some(publish_time) = ws.resolve_publish_time() {
+        version_prefs.publish_time(publish_time);
+    }
 
     let avoid_patch_ids = if register_patches {
         register_patch_entries(registry, ws, previous, &mut version_prefs, keep_previous)?
@@ -453,7 +535,7 @@ pub fn add_overrides<'a>(
     ws: &Workspace<'a>,
 ) -> CargoResult<()> {
     let gctx = ws.gctx();
-    let Some(paths) = gctx.get_list("paths")? else {
+    let Some(paths) = gctx.paths_overrides()? else {
         return Ok(());
     };
 
@@ -461,7 +543,7 @@ pub fn add_overrides<'a>(
         // The path listed next to the string is the config file in which the
         // key was located, so we want to pop off the `.cargo/config` component
         // to get the directory containing the `.cargo` folder.
-        (paths::normalize_path(&def.root(gctx).join(s)), def)
+        (paths::normalize_path(&def.root(gctx.cwd()).join(s)), def)
     });
 
     for (path, definition) in paths {
@@ -734,7 +816,7 @@ fn emit_warnings_of_unused_patches(
     resolve: &Resolve,
     registry: &PackageRegistry<'_>,
 ) -> CargoResult<()> {
-    const MESSAGE: &str = "was not used in the crate graph.";
+    const MESSAGE: &str = "was not used in the crate graph";
 
     // Patch package with the source URLs being patch
     let mut patch_pkgid_to_urls = HashMap::new();
@@ -758,8 +840,8 @@ fn emit_warnings_of_unused_patches(
 
     let mut unemitted_unused_patches = Vec::new();
     for unused in resolve.unused_patches().iter() {
-        // Show alternative source URLs if the source URLs being patch
-        // cannot not be found in the crate graph.
+        // Show alternative source URLs if the source URLs being patched
+        // cannot be found in the crate graph.
         match (
             source_ids_grouped_by_pkg_name.get(&unused.name()),
             patch_pkgid_to_urls.get(unused),
@@ -769,18 +851,17 @@ fn emit_warnings_of_unused_patches(
                     .iter()
                     .all(|id| !patched_urls.contains(id.canonical_url())) =>
             {
-                use std::fmt::Write;
-                let mut msg = String::new();
-                writeln!(msg, "Patch `{}` {}", unused, MESSAGE)?;
-                write!(
-                    msg,
-                    "Perhaps you misspelled the source URL being patched.\n\
-                    Possible URLs for `[patch.<URL>]`:",
-                )?;
-                for id in ids.iter() {
-                    write!(msg, "\n    {}", id.display_registry_name())?;
+                let mut help = "perhaps you meant one of the following:".to_owned();
+                for id in ids {
+                    help.push_str("\n\t");
+                    help.push_str(&id.display_registry_name());
                 }
-                ws.gctx().shell().warn(msg)?;
+                ws.gctx().shell().print_report(
+                    &[Level::WARNING
+                        .secondary_title(format!("patch `{unused}` {MESSAGE}"))
+                        .element(Level::HELP.message(help))],
+                    false,
+                )?;
             }
             _ => unemitted_unused_patches.push(unused),
         }
@@ -788,13 +869,18 @@ fn emit_warnings_of_unused_patches(
 
     // Show general help message.
     if !unemitted_unused_patches.is_empty() {
-        let warnings: Vec<_> = unemitted_unused_patches
+        let mut warnings: Vec<_> = unemitted_unused_patches
             .iter()
-            .map(|pkgid| format!("Patch `{}` {}", pkgid, MESSAGE))
+            .map(|pkgid| {
+                Group::with_title(
+                    Level::WARNING.secondary_title(format!("patch `{pkgid}` {MESSAGE}")),
+                )
+            })
             .collect();
-        ws.gctx()
-            .shell()
-            .warn(format!("{}\n{}", warnings.join("\n"), UNUSED_PATCH_WARNING))?;
+        warnings.push(Group::with_title(
+            Level::HELP.secondary_title(UNUSED_PATCH_WARNING),
+        ));
+        ws.gctx().shell().print_report(&warnings, false)?;
     }
 
     return Ok(());

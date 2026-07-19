@@ -1,21 +1,28 @@
 use std::path::{Path, PathBuf};
 
 use cargo_util_schemas::core::PackageIdSpec;
-use serde::ser;
 use serde::Serialize;
-use serde_json::{json, value::RawValue};
+use serde::ser;
+use serde_json::value::RawValue;
 
-use crate::core::compiler::CompileMode;
 use crate::core::Target;
+use crate::core::compiler::{CompilationSection, CompileMode};
 
 pub trait Message: ser::Serialize {
     fn reason(&self) -> &str;
 
     fn to_json_string(&self) -> String {
-        let json = serde_json::to_string(self).unwrap();
-        assert!(json.starts_with("{\""));
-        let reason = json!(self.reason());
-        format!("{{\"reason\":{},{}", reason, &json[1..])
+        #[derive(Serialize)]
+        struct WithReason<'a, S: Serialize> {
+            reason: &'a str,
+            #[serde(flatten)]
+            msg: &'a S,
+        }
+        let with_reason = WithReason {
+            reason: self.reason(),
+            msg: &self,
+        };
+        serde_json::to_string(&with_reason).unwrap()
     }
 }
 
@@ -95,6 +102,8 @@ pub struct TimingInfo<'a> {
     pub duration: f64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rmeta_time: Option<f64>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sections: Vec<(String, CompilationSection)>,
 }
 
 impl<'a> Message for TimingInfo<'a> {

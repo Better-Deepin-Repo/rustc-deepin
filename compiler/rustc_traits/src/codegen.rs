@@ -10,7 +10,7 @@ use rustc_middle::ty::{self, PseudoCanonicalInput, TyCtxt, TypeVisitableExt};
 use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
 use rustc_trait_selection::traits::{
     ImplSource, Obligation, ObligationCause, ObligationCtxt, ScrubbedTraitError, SelectionContext,
-    Unimplemented,
+    SelectionError,
 };
 use tracing::debug;
 
@@ -40,7 +40,7 @@ pub(crate) fn codegen_select_candidate<'tcx>(
     let selection = match selcx.select(&obligation) {
         Ok(Some(selection)) => selection,
         Ok(None) => return Err(CodegenObligationError::Ambiguity),
-        Err(Unimplemented) => return Err(CodegenObligationError::Unimplemented),
+        Err(SelectionError::Unimplemented) => return Err(CodegenObligationError::Unimplemented),
         Err(e) => {
             bug!("Encountered error `{:?}` selecting `{:?}` during codegen", e, trait_ref)
         }
@@ -51,7 +51,6 @@ pub(crate) fn codegen_select_candidate<'tcx>(
     // Currently, we use a fulfillment context to completely resolve
     // all nested obligations. This is because they can inform the
     // inference of the impl's type parameters.
-    // FIXME(-Znext-solver): Doesn't need diagnostics if new solver.
     let ocx = ObligationCtxt::new(&infcx);
     let impl_source = selection.map(|obligation| {
         ocx.register_obligation(obligation);
@@ -60,7 +59,7 @@ pub(crate) fn codegen_select_candidate<'tcx>(
     // In principle, we only need to do this so long as `impl_source`
     // contains unbound type parameters. It could be a slight
     // optimization to stop iterating early.
-    let errors = ocx.select_all_or_error();
+    let errors = ocx.evaluate_obligations_error_on_ambiguity();
     if !errors.is_empty() {
         // `rustc_monomorphize::collector` assumes there are no type errors.
         // Cycle errors are the only post-monomorphization errors possible; emit them now so
@@ -70,26 +69,24 @@ pub(crate) fn codegen_select_candidate<'tcx>(
                 infcx.err_ctxt().report_overflow_obligation_cycle(&cycle);
             }
         }
-        return Err(CodegenObligationError::FulfillmentError);
+        return Err(CodegenObligationError::Unimplemented);
     }
 
     let impl_source = infcx.resolve_vars_if_possible(impl_source);
-    let impl_source = tcx.erase_regions(impl_source);
+    let impl_source = tcx.erase_and_anonymize_regions(impl_source);
     if impl_source.has_non_region_infer() {
         // Unused generic types or consts on an impl get replaced with inference vars,
         // but never resolved, causing the return value of a query to contain inference
         // vars. We do not have a concept for this and will in fact ICE in stable hashing
         // of the return value. So bail out instead.
-        match impl_source {
-            ImplSource::UserDefined(impl_) => {
-                tcx.dcx().span_delayed_bug(
-                    tcx.def_span(impl_.impl_def_id),
-                    "this impl has unconstrained generic parameters",
-                );
-            }
+        let guar = match impl_source {
+            ImplSource::UserDefined(impl_) => tcx.dcx().span_delayed_bug(
+                tcx.def_span(impl_.impl_def_id),
+                "this impl has unconstrained generic parameters",
+            ),
             _ => unreachable!(),
-        }
-        return Err(CodegenObligationError::FulfillmentError);
+        };
+        return Err(CodegenObligationError::UnconstrainedParam(guar));
     }
 
     Ok(&*tcx.arena.alloc(impl_source))

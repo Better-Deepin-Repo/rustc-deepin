@@ -1,3 +1,4 @@
+//@ edition:2015..2021
 // Test for std::panic::set_backtrace_style.
 
 //@ compile-flags: -O
@@ -5,6 +6,9 @@
 //@ run-fail
 //@ check-run-results
 //@ exec-env:RUST_BACKTRACE=0
+
+// FIXME(#61117): Respect debuginfo-level-tests, do not force debuginfo-level=0
+//@ compile-flags: -Cdebuginfo=0
 
 // This is needed to avoid test output differences across std being built with v0 symbols vs legacy
 // symbols.
@@ -18,9 +22,8 @@
 //@ ignore-android FIXME #17520
 //@ ignore-openbsd no support for libbacktrace without filename
 //@ ignore-wasm no backtrace support
-//@ ignore-emscripten no panic or subprocess support
-//@ ignore-sgx no subprocess support
 //@ ignore-fuchsia Backtrace not symbolized
+//@ needs-subprocess
 
 #![feature(panic_backtrace_config)]
 

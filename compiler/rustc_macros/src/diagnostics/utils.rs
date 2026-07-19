@@ -146,7 +146,7 @@ impl<'ty> FieldInnerTy<'ty> {
             };
 
             let path = &ty_path.path;
-            let ty = path.segments.iter().last().unwrap();
+            let ty = path.segments.last().unwrap();
             let syn::PathArguments::AngleBracketed(bracketed) = &ty.arguments else {
                 panic!("expected bracketed generic arguments");
             };
@@ -760,8 +760,8 @@ impl SubdiagnosticVariant {
                 }
                 (
                     "applicability",
-                    SubdiagnosticKind::Suggestion { ref mut applicability, .. }
-                    | SubdiagnosticKind::MultipartSuggestion { ref mut applicability, .. },
+                    SubdiagnosticKind::Suggestion { applicability, .. }
+                    | SubdiagnosticKind::MultipartSuggestion { applicability, .. },
                 ) => {
                     let value = get_string!();
                     let value = Applicability::from_str(&value.value()).unwrap_or_else(|()| {

@@ -1,11 +1,11 @@
-use crate::spec::base::apple::{Arch, TargetAbi, base};
-use crate::spec::{FramePointer, SanitizerSet, Target, TargetOptions};
+use crate::spec::base::apple::{Arch, TargetEnv, base};
+use crate::spec::{Os, SanitizerSet, Target, TargetMetadata, TargetOptions};
 
 pub(crate) fn target() -> Target {
-    let (opts, llvm_target, arch) = base("ios", Arch::Arm64e, TargetAbi::Normal);
+    let (opts, llvm_target, arch) = base(Os::IOs, Arch::Arm64e, TargetEnv::Normal);
     Target {
         llvm_target,
-        metadata: crate::spec::TargetMetadata {
+        metadata: TargetMetadata {
             description: Some("ARM64e Apple iOS".into()),
             tier: Some(3),
             host_tools: Some(false),
@@ -16,9 +16,8 @@ pub(crate) fn target() -> Target {
             .into(),
         arch,
         options: TargetOptions {
-            features: "+neon,+fp-armv8,+apple-a12,+v8.3a,+pauth".into(),
+            features: "+neon,+apple-a12,+v8.3a,+paca,+pacg".into(),
             max_atomic_width: Some(128),
-            frame_pointer: FramePointer::NonLeaf,
             supported_sanitizers: SanitizerSet::ADDRESS | SanitizerSet::THREAD,
             ..opts
         },

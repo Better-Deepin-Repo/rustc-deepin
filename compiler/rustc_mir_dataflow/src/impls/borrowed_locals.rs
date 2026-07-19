@@ -1,4 +1,4 @@
-use rustc_index::bit_set::BitSet;
+use rustc_index::bit_set::DenseBitSet;
 use rustc_middle::mir::visit::Visitor;
 use rustc_middle::mir::*;
 
@@ -11,7 +11,6 @@ use crate::{Analysis, GenKill};
 /// At present, this is used as a very limited form of alias analysis. For example,
 /// `MaybeBorrowedLocals` is used to compute which locals are live during a yield expression for
 /// immovable coroutines.
-#[derive(Clone)]
 pub struct MaybeBorrowedLocals;
 
 impl MaybeBorrowedLocals {
@@ -21,12 +20,12 @@ impl MaybeBorrowedLocals {
 }
 
 impl<'tcx> Analysis<'tcx> for MaybeBorrowedLocals {
-    type Domain = BitSet<Local>;
+    type Domain = DenseBitSet<Local>;
     const NAME: &'static str = "maybe_borrowed_locals";
 
     fn bottom_value(&self, body: &Body<'tcx>) -> Self::Domain {
         // bottom = unborrowed
-        BitSet::new_empty(body.local_decls().len())
+        DenseBitSet::new_empty(body.local_decls().len())
     }
 
     fn initialize_start_block(&self, _: &Body<'tcx>, _: &mut Self::Domain) {
@@ -34,7 +33,7 @@ impl<'tcx> Analysis<'tcx> for MaybeBorrowedLocals {
     }
 
     fn apply_primary_statement_effect(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         statement: &Statement<'tcx>,
         location: Location,
@@ -43,7 +42,7 @@ impl<'tcx> Analysis<'tcx> for MaybeBorrowedLocals {
     }
 
     fn apply_primary_terminator_effect<'mir>(
-        &mut self,
+        &self,
         state: &mut Self::Domain,
         terminator: &'mir Terminator<'tcx>,
         location: Location,
@@ -91,13 +90,13 @@ where
             | Rvalue::Use(..)
             | Rvalue::ThreadLocalRef(..)
             | Rvalue::Repeat(..)
-            | Rvalue::Len(..)
             | Rvalue::BinaryOp(..)
             | Rvalue::NullaryOp(..)
             | Rvalue::UnaryOp(..)
             | Rvalue::Discriminant(..)
             | Rvalue::Aggregate(..)
-            | Rvalue::CopyForDeref(..) => {}
+            | Rvalue::CopyForDeref(..)
+            | Rvalue::WrapUnsafeBinder(..) => {}
         }
     }
 
@@ -138,8 +137,8 @@ where
 }
 
 /// The set of locals that are borrowed at some point in the MIR body.
-pub fn borrowed_locals(body: &Body<'_>) -> BitSet<Local> {
-    struct Borrowed(BitSet<Local>);
+pub fn borrowed_locals(body: &Body<'_>) -> DenseBitSet<Local> {
+    struct Borrowed(DenseBitSet<Local>);
 
     impl GenKill<Local> for Borrowed {
         #[inline]
@@ -152,7 +151,7 @@ pub fn borrowed_locals(body: &Body<'_>) -> BitSet<Local> {
         }
     }
 
-    let mut borrowed = Borrowed(BitSet::new_empty(body.local_decls.len()));
+    let mut borrowed = Borrowed(DenseBitSet::new_empty(body.local_decls.len()));
     TransferFunction { trans: &mut borrowed }.visit_body(body);
     borrowed.0
 }

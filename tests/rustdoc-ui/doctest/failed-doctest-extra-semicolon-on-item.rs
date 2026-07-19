@@ -4,12 +4,13 @@
 //@ compile-flags:--test
 //@ normalize-stdout: "tests/rustdoc-ui/doctest" -> "$$DIR"
 //@ normalize-stdout: "finished in \d+\.\d+s" -> "finished in $$TIME"
-//@ failure-status: 101
+//@ check-pass
 
 /// <https://github.com/rust-lang/rust/issues/91014>
 ///
 /// ```rust
-/// struct S {}; // unexpected semicolon after struct def
+//~^ WARN the `main` function of this doctest won't be run
+/// struct S {};
 ///
 /// fn main() {
 ///    assert_eq!(0, 1);

@@ -1,12 +1,21 @@
+//@ edition:2015
 // Regression test for the ICE reported in issue #83471.
 
 #![crate_type="lib"]
 #![feature(no_core)]
 #![no_core]
 
+#[lang = "pointee_sized"]
+//~^ ERROR: lang items are subject to change [E0658]
+pub trait PointeeSized {}
+
+#[lang = "meta_sized"]
+//~^ ERROR: lang items are subject to change [E0658]
+pub trait MetaSized: PointeeSized {}
+
 #[lang = "sized"]
 //~^ ERROR: lang items are subject to change [E0658]
-trait Sized {}
+trait Sized: MetaSized {}
 
 #[lang = "fn"]
 //~^ ERROR: lang items are subject to change [E0658]

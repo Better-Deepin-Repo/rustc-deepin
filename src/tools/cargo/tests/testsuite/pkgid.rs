@@ -1,9 +1,12 @@
 //! Tests for the `cargo pkgid` command.
 
+use std::path::PathBuf;
+
+use crate::prelude::*;
+use cargo_test_support::basic_bin_manifest;
 use cargo_test_support::basic_lib_manifest;
 use cargo_test_support::compare::assert_e2e;
 use cargo_test_support::git;
-use cargo_test_support::prelude::*;
 use cargo_test_support::project;
 use cargo_test_support::registry::Package;
 use cargo_test_support::str;
@@ -63,7 +66,7 @@ Caused by:
         .with_stderr_data(str![[r#"
 [ERROR] invalid package ID specification: `./bar`
 
-	Did you mean `bar`?
+[HELP] a package with a similar name exists: `bar`
 
 Caused by:
   package ID specification `./bar` looks like a file path, maybe try [ROOTURL]/foo/bar
@@ -106,7 +109,7 @@ registry+https://github.com/rust-lang/crates.io-index#crates-io@0.1.0
         .with_status(101)
         .with_stderr_data(str![[r#"
 [ERROR] package ID specification `https://example.com/crates-io` did not match any packages
-Did you mean one of these?
+[HELP] there are similar package ID specifications:
 
   crates-io@0.1.0
 
@@ -119,7 +122,7 @@ Did you mean one of these?
         .with_stderr_data(str![[r#"
 [ERROR] package ID specification `crates_io` did not match any packages
 
-	Did you mean `crates-io`?
+[HELP] a package with a similar name exists: `crates-io`
 
 "#]])
         .run();
@@ -193,7 +196,7 @@ Please re-run this command with one of the following specifications:
         .with_status(101)
         .with_stderr_data(str![[r#"
 [ERROR] package ID specification `two-ver@0.3.0` did not match any packages
-Did you mean one of these?
+[HELP] there are similar package ID specifications:
 
   two-ver@0.1.0
   two-ver@0.2.0
@@ -291,11 +294,12 @@ Please re-run this command with one of the following specifications:
 // * Package ID specifications
 // * machine-readable message via `--message-format=json`
 // * `cargo metadata` output
+// * SBOMs
 #[cargo_test]
 fn pkgid_json_message_metadata_consistency() {
     let p = project()
-        .file("Cargo.toml", &basic_lib_manifest("foo"))
-        .file("src/lib.rs", "fn unused() {}")
+        .file("Cargo.toml", &basic_bin_manifest("foo"))
+        .file("src/main.rs", "fn main() {}")
         .file("build.rs", "fn main() {}")
         .build();
 
@@ -319,12 +323,6 @@ fn pkgid_json_message_metadata_consistency() {
   {
     "package_id": "path+[ROOTURL]/foo#0.5.0",
     "reason": "build-script-executed",
-    "...": "{...}"
-  },
-  {
-    "manifest_path": "[ROOT]/foo/Cargo.toml",
-    "package_id": "path+[ROOTURL]/foo#0.5.0",
-    "reason": "compiler-message",
     "...": "{...}"
   },
   {
@@ -391,6 +389,7 @@ fn pkgid_json_message_metadata_consistency() {
     "root": "path+[ROOTURL]/foo#0.5.0"
   },
   "target_directory": "[ROOT]/foo/target",
+  "build_directory": "[ROOT]/foo/target",
   "version": 1,
   "workspace_default_members": [
     "path+[ROOTURL]/foo#0.5.0"
@@ -404,4 +403,53 @@ fn pkgid_json_message_metadata_consistency() {
             .is_json(),
         )
         .run();
+
+    p.cargo("build -Zsbom")
+        .env("CARGO_BUILD_SBOM", "true")
+        .masquerade_as_nightly_cargo(&["sbom"])
+        .run();
+
+    let path = {
+        let mut path = p.bin("foo").into_os_string();
+        path.push(".cargo-sbom.json");
+        PathBuf::from(path)
+    };
+
+    assert!(path.is_file());
+    let output = std::fs::read_to_string(&path).unwrap();
+    assert_e2e().eq(
+        output,
+        snapbox::str![[r#"
+{
+  "crates": [
+    {
+      "dependencies": [
+        {
+          "index": 1,
+          "kind": "build"
+        }
+      ],
+      "features": [],
+      "id": "path+[ROOTURL]/foo#0.5.0",
+      "kind": [
+        "bin"
+      ]
+    },
+    {
+      "dependencies": [],
+      "features": [],
+      "id": "path+[ROOTURL]/foo#0.5.0",
+      "kind": [
+        "custom-build"
+      ]
+    }
+  ],
+  "root": 0,
+  "rustc": "{...}",
+  "target": "[HOST_TARGET]",
+  "version": 1
+}
+"#]]
+        .is_json(),
+    );
 }

@@ -1,13 +1,13 @@
 use clippy_config::Conf;
-use clippy_utils::diagnostics::{span_lint_and_then, span_lint_hir_and_then};
+use clippy_utils::diagnostics::span_lint_and_then;
+use clippy_utils::is_from_proc_macro;
 use clippy_utils::msrvs::{self, Msrv};
-use clippy_utils::{get_parent_expr, is_from_proc_macro};
+use clippy_utils::source::SpanRangeExt;
 use hir::def_id::DefId;
 use rustc_errors::Applicability;
 use rustc_hir as hir;
 use rustc_hir::{ExprKind, Item, ItemKind, QPath, UseKind};
 use rustc_lint::{LateContext, LateLintPass, LintContext};
-use rustc_middle::lint::in_external_macro;
 use rustc_session::impl_lint_pass;
 use rustc_span::symbol::kw;
 use rustc_span::{Symbol, sym};
@@ -40,9 +40,7 @@ pub struct LegacyNumericConstants {
 
 impl LegacyNumericConstants {
     pub fn new(conf: &'static Conf) -> Self {
-        Self {
-            msrv: conf.msrv.clone(),
-        }
+        Self { msrv: conf.msrv }
     }
 }
 
@@ -52,10 +50,12 @@ impl<'tcx> LateLintPass<'tcx> for LegacyNumericConstants {
     fn check_item(&mut self, cx: &LateContext<'tcx>, item: &'tcx Item<'tcx>) {
         // Integer modules are "TBD" deprecated, and the contents are too,
         // so lint on the `use` statement directly.
-        if let ItemKind::Use(path, kind @ (UseKind::Single | UseKind::Glob)) = item.kind
-            && self.msrv.meets(msrvs::NUMERIC_ASSOCIATED_CONSTANTS)
-            && !in_external_macro(cx.sess(), item.span)
-            && let Some(def_id) = path.res[0].opt_def_id()
+        if let ItemKind::Use(path, kind @ (UseKind::Single(_) | UseKind::Glob)) = item.kind
+            && !item.span.in_external_macro(cx.sess().source_map())
+            // use `present_items` because it could be in either type_ns or value_ns
+            && let Some(res) = path.res.present_items().next()
+            && let Some(def_id) = res.opt_def_id()
+            && self.msrv.meets(cx, msrvs::NUMERIC_ASSOCIATED_CONSTANTS)
         {
             let module = if is_integer_module(cx, def_id) {
                 true
@@ -75,7 +75,9 @@ impl<'tcx> LateLintPass<'tcx> for LegacyNumericConstants {
                     "importing a legacy numeric constant"
                 },
                 |diag| {
-                    if item.ident.name == kw::Underscore {
+                    if let UseKind::Single(ident) = kind
+                        && ident.name == kw::Underscore
+                    {
                         diag.help("remove this import");
                         return;
                     }
@@ -101,50 +103,39 @@ impl<'tcx> LateLintPass<'tcx> for LegacyNumericConstants {
     }
 
     fn check_expr(&mut self, cx: &LateContext<'tcx>, expr: &'tcx rustc_hir::Expr<'tcx>) {
-        let ExprKind::Path(qpath) = &expr.kind else {
-            return;
-        };
-
         // `std::<integer>::<CONST>` check
-        let (span, sugg, msg) = if let QPath::Resolved(None, path) = qpath
+        let (sugg, msg) = if let ExprKind::Path(qpath) = &expr.kind
+            && let QPath::Resolved(None, path) = qpath
             && let Some(def_id) = path.res.opt_def_id()
             && is_numeric_const(cx, def_id)
-            && let def_path = cx.get_def_path(def_id)
-            && let [.., mod_name, name] = &*def_path
+            && let [.., mod_name, name] = &*cx.get_def_path(def_id)
             // Skip linting if this usage looks identical to the associated constant,
             // since this would only require removing a `use` import (which is already linted).
             && !is_numeric_const_path_canonical(path, [*mod_name, *name])
         {
-            (
-                expr.span,
-                format!("{mod_name}::{name}"),
-                "usage of a legacy numeric constant",
-            )
+            (format!("{mod_name}::{name}"), "usage of a legacy numeric constant")
         // `<integer>::xxx_value` check
-        } else if let QPath::TypeRelative(_, last_segment) = qpath
-            && let Some(def_id) = cx.qpath_res(qpath, expr.hir_id).opt_def_id()
-            && let Some(par_expr) = get_parent_expr(cx, expr)
-            && let ExprKind::Call(_, []) = par_expr.kind
+        } else if let ExprKind::Call(func, []) = &expr.kind
+            && let ExprKind::Path(qpath) = &func.kind
+            && let QPath::TypeRelative(ty, last_segment) = qpath
+            && let Some(def_id) = cx.qpath_res(qpath, func.hir_id).opt_def_id()
             && is_integer_method(cx, def_id)
+            && let Some(mod_name) = ty.span.get_source_text(cx)
+            && ty.span.eq_ctxt(last_segment.ident.span)
         {
-            let name = last_segment.ident.name.as_str();
-
-            (
-                last_segment.ident.span.with_hi(par_expr.span.hi()),
-                name[..=2].to_ascii_uppercase(),
-                "usage of a legacy numeric method",
-            )
+            let name = last_segment.ident.name.as_str()[..=2].to_ascii_uppercase();
+            (format!("{mod_name}::{name}"), "usage of a legacy numeric method")
         } else {
             return;
         };
 
-        if self.msrv.meets(msrvs::NUMERIC_ASSOCIATED_CONSTANTS)
-            && !in_external_macro(cx.sess(), expr.span)
+        if !expr.span.in_external_macro(cx.sess().source_map())
+            && self.msrv.meets(cx, msrvs::NUMERIC_ASSOCIATED_CONSTANTS)
             && !is_from_proc_macro(cx, expr)
         {
-            span_lint_hir_and_then(cx, LEGACY_NUMERIC_CONSTANTS, expr.hir_id, span, msg, |diag| {
+            span_lint_and_then(cx, LEGACY_NUMERIC_CONSTANTS, expr.span, msg, |diag| {
                 diag.span_suggestion_verbose(
-                    span,
+                    expr.span,
                     "use the associated constant instead",
                     sugg,
                     Applicability::MaybeIncorrect,
@@ -152,8 +143,6 @@ impl<'tcx> LateLintPass<'tcx> for LegacyNumericConstants {
             });
         }
     }
-
-    extract_msrv_attr!(LateContext);
 }
 
 fn is_integer_module(cx: &LateContext<'_>, did: DefId) -> bool {

@@ -1,11 +1,11 @@
+r[items.const]
 # Constant items
 
-r[items.const]
-
 r[items.const.syntax]
-> **<sup>Syntax</sup>**\
-> _ConstantItem_ :\
-> &nbsp;&nbsp; `const` ( [IDENTIFIER] | `_` ) `:` [_Type_] ( `=` [_Expression_] )<sup>?</sup> `;`
+```grammar,items
+ConstantItem ->
+    `const` ( IDENTIFIER | `_` ) `:` Type ( `=` Expression )? `;`
+```
 
 r[items.const.intro]
 A *constant item* is an optionally named _[constant value]_ which is not associated
@@ -48,15 +48,11 @@ const BITS_N_STRINGS: BitsNStrings<'static> = BitsNStrings {
 };
 ```
 
-r[items.const.final-value-immutable]
-The final value of a `const` item cannot contain references to anything mutable.
-
 r[items.const.expr-omission]
 The constant expression may only be omitted in a [trait definition].
 
-## Constants with Destructors
-
 r[items.const.destructor]
+## Constants with destructors
 
 Constants can contain destructors. Destructors are run when the value goes out
 of scope.
@@ -79,9 +75,8 @@ fn create_and_drop_zero_with_destructor() {
 }
 ```
 
-## Unnamed constant
-
 r[items.const.unnamed]
+## Unnamed constant
 
 r[items.const.unnamed.intro]
 Unlike an [associated constant], a [free] constant may be unnamed by using
@@ -109,9 +104,8 @@ m!(const _: () = (););
 // const _: () = ();
 ```
 
-## Evaluation
-
 r[items.const.eval]
+## Evaluation
 
 [Free][free] constants are always [evaluated][const_eval] at compile-time to surface
 panics. This happens even within an unused function:
@@ -130,12 +124,9 @@ fn unused_generic_function<T>() {
 [associated constant]: ../items/associated-items.md#associated-constants
 [constant value]: ../const_eval.md#constant-expressions
 [free]: ../glossary.md#free-item
-[static lifetime elision]: ../lifetime-elision.md#static-lifetime-elision
+[static lifetime elision]: ../lifetime-elision.md#const-and-static-elision
 [trait definition]: traits.md
-[IDENTIFIER]: ../identifiers.md
 [underscore imports]: use-declarations.md#underscore-imports
-[_Type_]: ../types.md#type-expressions
-[_Expression_]: ../expressions.md
 [`Copy`]: ../special-types-and-traits.md#copy
 [value namespace]: ../names/namespaces.md
-[promotion]: ../destructors.md#constant-promotion
+[promotion]: destructors.scope.const-promotion

@@ -1,11 +1,14 @@
 use crate::pool::{Connection, ConnectionManager, ManagedConnection, Transaction};
+use crate::selector::CompileTestCase;
 use crate::{
-    ArtifactCollection, ArtifactId, Benchmark, CodegenBackend, CollectionId, Commit, CommitType,
-    CompileBenchmark, Date, Profile,
+    ArtifactCollection, ArtifactId, Benchmark, BenchmarkJob, BenchmarkJobConclusion,
+    BenchmarkJobKind, BenchmarkRequest, BenchmarkRequestIndex, BenchmarkRequestStatus,
+    BenchmarkRequestWithErrors, BenchmarkSet, CodegenBackend, CollectionId, CollectorConfig,
+    Commit, CommitType, CompileBenchmark, Date, PendingBenchmarkRequests, Profile, Target,
 };
 use crate::{ArtifactIdNumber, Index, QueuedCommit};
 use chrono::{DateTime, TimeZone, Utc};
-use hashbrown::HashMap;
+use hashbrown::{HashMap, HashSet};
 use rusqlite::params;
 use rusqlite::OptionalExtension;
 use std::path::PathBuf;
@@ -20,7 +23,7 @@ pub struct SqliteTransaction<'a> {
 }
 
 #[async_trait::async_trait]
-impl<'a> Transaction for SqliteTransaction<'a> {
+impl Transaction for SqliteTransaction<'_> {
     async fn commit(mut self: Box<Self>) -> Result<(), anyhow::Error> {
         self.finished = true;
         Ok(self.conn.raw().execute_batch("COMMIT")?)
@@ -163,13 +166,12 @@ impl Migration {
                     let foreign_col: String = row.get_unwrap(4);
                     panic!(
                         "Foreign key violation encountered during migration\n\
-                            table: {},\n\
-                            column: {},\n\
-                            row_id: {:?},\n\
-                            foreign table: {},\n\
-                            foreign column: {}\n\
-                            migration ID: {}\n",
-                        table, col, row_id, foreign_table, foreign_col, migration_id,
+                            table: {table},\n\
+                            column: {col},\n\
+                            row_id: {row_id:?},\n\
+                            foreign table: {foreign_table},\n\
+                            foreign column: {foreign_col}\n\
+                            migration ID: {migration_id}\n",
                     );
                 },
             )
@@ -385,6 +387,50 @@ static MIGRATIONS: &[Migration] = &[
         alter table pstat_series_new rename to pstat_series;
     "#,
     ),
+    Migration::new("alter table pull_request_build add column backends text"),
+    // Add target as a unique constraint, defaulting to 'x86_64-unknown-linux-gnu'
+    Migration::without_foreign_key_constraints(
+        r#"
+        create table pstat_series_with_target(
+            id integer primary key not null,
+            crate text not null references benchmark(name) on delete cascade on update cascade,
+            profile text not null,
+            scenario text not null,
+            backend text not null,
+            target text not null default 'x86_64-unknown-linux-gnu',
+            metric text not null,
+            UNIQUE(crate, profile, scenario, backend, target, metric)
+        );
+        insert into pstat_series_with_target select id, crate, profile, scenario, backend, 'x86_64-unknown-linux-gnu', metric from pstat_series;
+        drop table pstat_series;
+        alter table pstat_series_with_target rename to pstat_series;
+    "#,
+    ),
+    Migration::new(
+        r#"
+        CREATE TABLE error_new (
+            id      INTEGER PRIMARY KEY,
+            aid     INTEGER NOT NULL REFERENCES artifact(id) ON DELETE CASCADE ON UPDATE CASCADE,
+            message TEXT NOT NULL,
+            context TEXT NOT NULL,
+            job_id  INTEGER
+        );
+
+        INSERT INTO
+            error_new (aid, message, context)
+        SELECT
+            aid,
+            error,
+            benchmark
+        FROM
+            error;
+
+        DROP TABLE error;
+        ALTER TABLE error_new RENAME TO error;
+
+        CREATE INDEX error_artifact_idx ON error(aid);
+        "#,
+    ),
 ];
 
 #[async_trait::async_trait]
@@ -434,9 +480,20 @@ impl SqliteConnection {
     pub fn raw(&mut self) -> &mut rusqlite::Connection {
         self.conn.get_mut().unwrap_or_else(|e| e.into_inner())
     }
-    pub fn raw_ref(&self) -> std::sync::MutexGuard<rusqlite::Connection> {
+    pub fn raw_ref(&self) -> std::sync::MutexGuard<'_, rusqlite::Connection> {
         self.conn.lock().unwrap_or_else(|e| e.into_inner())
     }
+}
+
+macro_rules! no_queue_implementation_abort {
+    () => {
+        panic!(
+            "Queueing for SQLite has not been implemented; if you want to test the queueing \
+             functionality please use Postgres. Presuming you have Docker installed, at the \
+             root of the repo you can run `make start-postgres` to spin up a Postgres \
+             database."
+        )
+    };
 }
 
 #[async_trait::async_trait]
@@ -500,7 +557,9 @@ impl Connection for SqliteConnection {
             .collect();
         let pstat_series = self
             .raw()
-            .prepare("select id, crate, profile, scenario, backend, metric from pstat_series;")
+            .prepare(
+                "select id, crate, profile, scenario, backend, target, metric from pstat_series;",
+            )
             .unwrap()
             .query_map(params![], |row| {
                 Ok((
@@ -510,7 +569,8 @@ impl Connection for SqliteConnection {
                         Profile::from_str(row.get::<_, String>(2)?.as_str()).unwrap(),
                         row.get::<_, String>(3)?.as_str().parse().unwrap(),
                         CodegenBackend::from_str(row.get::<_, String>(4)?.as_str()).unwrap(),
-                        row.get::<_, String>(5)?.as_str().into(),
+                        Target::from_str(row.get::<_, String>(5)?.as_str()).unwrap(),
+                        row.get::<_, String>(6)?.as_str().into(),
                     ),
                 ))
             })
@@ -653,24 +713,28 @@ impl Connection for SqliteConnection {
         profile: Profile,
         scenario: crate::Scenario,
         backend: CodegenBackend,
+        target: Target,
         metric: &str,
         value: f64,
     ) {
         let profile = profile.to_string();
         let scenario = scenario.to_string();
         let backend = backend.to_string();
-        self.raw_ref().execute("insert or ignore into pstat_series (crate, profile, scenario, backend, metric) VALUES (?, ?, ?, ?, ?)", params![
+        let target = target.to_string();
+        self.raw_ref().execute("insert or ignore into pstat_series (crate, profile, scenario, backend, target, metric) VALUES (?, ?, ?, ?, ?, ?)", params![
             &benchmark,
             &profile,
             &scenario,
             &backend,
+            &target,
             &metric,
         ]).unwrap();
-        let sid: i32 = self.raw_ref().query_row("select id from pstat_series where crate = ? and profile = ? and scenario = ? and backend = ? and metric = ?", params![
+        let sid: i32 = self.raw_ref().query_row("select id from pstat_series where crate = ? and profile = ? and scenario = ? and backend = ? and target = ? and metric = ?", params![
             &benchmark,
             &profile,
             &scenario,
             &backend,
+            &target,
             &metric,
         ], |r| r.get(0)).unwrap();
         self.raw_ref()
@@ -726,11 +790,20 @@ impl Connection for SqliteConnection {
         unimplemented!("recording raw self profile files is not implemented for sqlite")
     }
 
-    async fn record_error(&self, artifact: ArtifactIdNumber, krate: &str, error: &str) {
+    async fn record_error(
+        &self,
+        artifact: ArtifactIdNumber,
+        context: &str,
+        message: &str,
+        job_id: Option<u32>,
+    ) {
+        if job_id.is_some() {
+            no_queue_implementation_abort!()
+        }
         self.raw_ref()
             .execute(
-                "insert into error (benchmark, aid, error) VALUES (?, ?, ?)",
-                params![krate, &artifact.0, &error],
+                "insert into error (context, aid, message) VALUES (?, ?, ?)",
+                params![context, &artifact.0, &message],
             )
             .unwrap();
     }
@@ -849,7 +922,7 @@ impl Connection for SqliteConnection {
                             query
                                 .query_row(params![&sid, &aid.0], |row| row.get(0))
                                 .unwrap_or_else(|e| {
-                                    panic!("{:?}: series={:?}, aid={:?}", e, sid, aid);
+                                    panic!("{e:?}: series={sid:?}, aid={aid:?}");
                                 })
                         })
                     })
@@ -881,7 +954,7 @@ impl Connection for SqliteConnection {
                             query
                                 .query_row(params![&sid, &aid.0], |row| row.get(0))
                                 .unwrap_or_else(|e| {
-                                    panic!("{:?}: series={:?}, aid={:?}", e, sid, aid);
+                                    panic!("{e:?}: series={sid:?}, aid={aid:?}");
                                 })
                         })
                     })
@@ -896,7 +969,7 @@ impl Connection for SqliteConnection {
     }
     async fn get_error(&self, aid: crate::ArtifactIdNumber) -> HashMap<String, String> {
         self.raw_ref()
-            .prepare_cached("select benchmark, error from error where aid = ?")
+            .prepare_cached("select context, message from error where aid = ?")
             .unwrap()
             .query_map(params![&aid.0], |row| Ok((row.get(0)?, row.get(1)?)))
             .unwrap()
@@ -909,13 +982,14 @@ impl Connection for SqliteConnection {
         include: Option<&str>,
         exclude: Option<&str>,
         runs: Option<i32>,
+        backends: Option<&str>,
     ) {
         self.raw_ref()
             .prepare_cached(
-                "insert into pull_request_build (pr, complete, requested, include, exclude, runs) VALUES (?, 0, strftime('%s','now'), ?, ?, ?)",
+                "insert into pull_request_build (pr, complete, requested, include, exclude, runs, backends) VALUES (?, 0, strftime('%s','now'), ?, ?, ?, ?)",
             )
             .unwrap()
-            .execute(params![pr, include, exclude, &runs])
+            .execute(params![pr, include, exclude, &runs, backends])
             .unwrap();
     }
     async fn pr_attach_commit(
@@ -939,7 +1013,7 @@ impl Connection for SqliteConnection {
     async fn queued_commits(&self) -> Vec<QueuedCommit> {
         self.raw_ref()
             .prepare_cached(
-                "select pr, bors_sha, parent_sha, include, exclude, runs, commit_date from pull_request_build
+                "select pr, bors_sha, parent_sha, include, exclude, runs, commit_date, backends from pull_request_build
                 where complete is false and bors_sha is not null
                 order by requested asc",
             )
@@ -954,7 +1028,8 @@ impl Connection for SqliteConnection {
                     include: row.get(3).unwrap(),
                     exclude: row.get(4).unwrap(),
                     runs: row.get(5).unwrap(),
-                    commit_date: row.get::<_, Option<i64>>(6).unwrap().map(|timestamp| Date(DateTime::from_timestamp(timestamp, 0).unwrap()))
+                    commit_date: row.get::<_, Option<i64>>(6).unwrap().map(|timestamp| Date(DateTime::from_timestamp(timestamp, 0).unwrap())),
+                    backends: row.get(7).unwrap(),
                 })
             })
             .collect::<Result<Vec<_>, _>>()
@@ -964,7 +1039,7 @@ impl Connection for SqliteConnection {
         let count = self
             .raw_ref()
             .execute(
-                "update pull_request_build SET complete = 1 where sha = ? and complete = 0",
+                "update pull_request_build SET complete = 1 where bors_sha = ? and complete = 0",
                 params![sha],
             )
             .unwrap();
@@ -974,8 +1049,8 @@ impl Connection for SqliteConnection {
         assert_eq!(count, 1, "sha is unique column");
         self.raw_ref()
             .query_row(
-                "select pr, sha, parent_sha, include, exclude, runs, commit_date from pull_request_build
-            where sha = ?",
+                "select pr, bors_sha, parent_sha, include, exclude, runs, commit_date, backends from pull_request_build
+            where bors_sha = ?",
                 params![sha],
                 |row| {
                     Ok(QueuedCommit {
@@ -985,7 +1060,8 @@ impl Connection for SqliteConnection {
                         include: row.get(3).unwrap(),
                         exclude: row.get(4).unwrap(),
                         runs: row.get(5).unwrap(),
-                        commit_date: row.get::<_, Option<i64>>(6).unwrap().map(|timestamp| Date(DateTime::from_timestamp(timestamp, 0).unwrap()))
+                        commit_date: row.get::<_, Option<i64>>(6).unwrap().map(|timestamp| Date(DateTime::from_timestamp(timestamp, 0).unwrap())),
+                        backends: row.get(7).unwrap(),
                     })
                 },
             )
@@ -1012,7 +1088,7 @@ impl Connection for SqliteConnection {
         self.raw_ref()
             .execute(
                 "update collector_progress set start = strftime('%s','now') \
-                where aid = ? and step = ? and end is null;",
+                where aid = ? and step = ? and start is null and end is null;",
                 params![&aid.0, &step],
             )
             .unwrap()
@@ -1020,18 +1096,13 @@ impl Connection for SqliteConnection {
     }
 
     async fn collector_end_step(&self, aid: ArtifactIdNumber, step: &str) {
-        let did_modify = self
-            .raw_ref()
+        self.raw_ref()
             .execute(
                 "update collector_progress set end = strftime('%s','now') \
-                where aid = ? and step = ? and start is not null and end is null;",
+                where aid = ? and step = ? and start is not null;",
                 params![&aid.0, &step],
             )
-            .unwrap()
-            == 1;
-        if !did_modify {
-            log::error!("did not end {} for {:?}", step, aid);
-        }
+            .unwrap();
     }
 
     async fn collector_remove_step(&self, aid: ArtifactIdNumber, step: &str) {
@@ -1216,6 +1287,162 @@ impl Connection for SqliteConnection {
         self.raw_ref()
             .execute("delete from artifact where name = ?1", [info.name])
             .unwrap();
+        self.raw_ref()
+            .execute(
+                "delete from pull_request_build where bors_sha = ?1",
+                [info.name],
+            )
+            .unwrap();
+    }
+
+    async fn insert_benchmark_request(
+        &self,
+        _benchmark_request: &BenchmarkRequest,
+    ) -> anyhow::Result<()> {
+        no_queue_implementation_abort!()
+    }
+
+    async fn load_benchmark_request_index(&self) -> anyhow::Result<BenchmarkRequestIndex> {
+        Ok(BenchmarkRequestIndex {
+            all: Default::default(),
+        })
+    }
+
+    async fn load_pending_benchmark_requests(&self) -> anyhow::Result<PendingBenchmarkRequests> {
+        no_queue_implementation_abort!()
+    }
+
+    async fn update_benchmark_request_status(
+        &self,
+        _tag: &str,
+        _status: BenchmarkRequestStatus,
+    ) -> anyhow::Result<()> {
+        no_queue_implementation_abort!()
+    }
+
+    async fn attach_shas_to_try_benchmark_request(
+        &self,
+        _pr: u32,
+        _sha: &str,
+        _parent_sha: &str,
+        _commit_date: DateTime<Utc>,
+    ) -> anyhow::Result<()> {
+        no_queue_implementation_abort!()
+    }
+
+    async fn enqueue_benchmark_job(
+        &self,
+        _request_tag: &str,
+        _target: Target,
+        _backend: CodegenBackend,
+        _profile: Profile,
+        _benchmark_set: u32,
+        _kind: BenchmarkJobKind,
+    ) -> anyhow::Result<Option<u32>> {
+        no_queue_implementation_abort!()
+    }
+
+    async fn enqueue_parent_benchmark_job(
+        &self,
+        _parent_sha: &str,
+        _target: Target,
+        _backend: CodegenBackend,
+        _profile: Profile,
+        _benchmark_set: u32,
+        _kind: BenchmarkJobKind,
+    ) -> (bool, anyhow::Result<u32>) {
+        no_queue_implementation_abort!()
+    }
+
+    async fn get_compile_test_cases_with_measurements(
+        &self,
+        artifact_row_id: &ArtifactIdNumber,
+    ) -> anyhow::Result<HashSet<CompileTestCase>> {
+        Ok(self
+            .raw_ref()
+            .prepare_cached(
+                "SELECT DISTINCT crate, profile, scenario, backend, target
+                FROM pstat_series
+                WHERE id IN (
+                    SELECT DISTINCT series
+                    FROM pstat
+                    WHERE aid = ?
+                );",
+            )?
+            .query_map(params![artifact_row_id.0], |row| {
+                Ok(CompileTestCase {
+                    benchmark: Benchmark::from(row.get::<_, String>(0)?.as_str()),
+                    profile: row.get::<_, String>(1)?.parse().unwrap(),
+                    scenario: row.get::<_, String>(2)?.parse().unwrap(),
+                    backend: row.get::<_, String>(3)?.parse().unwrap(),
+                    target: row.get::<_, String>(4)?.parse().unwrap(),
+                })
+            })?
+            .collect::<Result<_, _>>()?)
+    }
+
+    async fn start_collector(
+        &self,
+        _collector_name: &str,
+        _commit_sha: &str,
+    ) -> anyhow::Result<Option<CollectorConfig>> {
+        no_queue_implementation_abort!()
+    }
+
+    async fn dequeue_benchmark_job(
+        &self,
+        _collector_name: &str,
+        _target: Target,
+        _benchmark_set: BenchmarkSet,
+    ) -> anyhow::Result<Option<(BenchmarkJob, ArtifactId)>> {
+        no_queue_implementation_abort!()
+    }
+
+    async fn add_collector_config(
+        &self,
+        _collector_name: &str,
+        _target: Target,
+        _benchmark_set: u32,
+        _is_active: bool,
+    ) -> anyhow::Result<CollectorConfig> {
+        no_queue_implementation_abort!()
+    }
+
+    async fn maybe_mark_benchmark_request_as_completed(&self, _tag: &str) -> anyhow::Result<bool> {
+        no_queue_implementation_abort!()
+    }
+
+    async fn mark_benchmark_job_as_completed(
+        &self,
+        _id: u32,
+        _conclusion: BenchmarkJobConclusion,
+    ) -> anyhow::Result<()> {
+        no_queue_implementation_abort!()
+    }
+
+    async fn get_jobs_of_in_progress_benchmark_requests(
+        &self,
+    ) -> anyhow::Result<HashMap<String, Vec<BenchmarkJob>>> {
+        no_queue_implementation_abort!()
+    }
+
+    async fn get_collector_configs(&self) -> anyhow::Result<Vec<CollectorConfig>> {
+        no_queue_implementation_abort!()
+    }
+
+    async fn update_collector_heartbeat(&self, _collector_name: &str) -> anyhow::Result<()> {
+        no_queue_implementation_abort!()
+    }
+
+    async fn get_last_n_completed_benchmark_requests(
+        &self,
+        _count: u64,
+    ) -> anyhow::Result<Vec<BenchmarkRequestWithErrors>> {
+        no_queue_implementation_abort!()
+    }
+
+    fn supports_job_queue(&self) -> bool {
+        false
     }
 }
 
@@ -1237,6 +1464,6 @@ fn parse_artifact_id(ty: &str, sha: &str, date: Option<i64>) -> ArtifactId {
             r#type: CommitType::Try,
         }),
         "release" => ArtifactId::Tag(sha.to_owned()),
-        _ => panic!("unknown artifact type: {:?}", ty),
+        _ => panic!("unknown artifact type: {ty:?}"),
     }
 }

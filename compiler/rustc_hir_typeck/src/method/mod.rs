@@ -11,15 +11,14 @@ use rustc_errors::{Applicability, Diag, SubdiagMessage};
 use rustc_hir as hir;
 use rustc_hir::def::{CtorOf, DefKind, Namespace};
 use rustc_hir::def_id::DefId;
-use rustc_infer::infer::{self, InferOk};
+use rustc_infer::infer::{BoundRegionConversionTime, InferOk};
 use rustc_infer::traits::PredicateObligations;
-use rustc_middle::query::Providers;
 use rustc_middle::traits::ObligationCause;
 use rustc_middle::ty::{
     self, GenericArgs, GenericArgsRef, GenericParamDefKind, Ty, TypeVisitableExt,
 };
 use rustc_middle::{bug, span_bug};
-use rustc_span::{ErrorGuaranteed, Ident, Span};
+use rustc_span::{ErrorGuaranteed, Ident, Span, Symbol};
 use rustc_trait_selection::traits::query::evaluate_obligation::InferCtxtExt;
 use rustc_trait_selection::traits::{self, NormalizeExt};
 use tracing::{debug, instrument};
@@ -27,10 +26,7 @@ use tracing::{debug, instrument};
 pub(crate) use self::MethodError::*;
 use self::probe::{IsSuggestion, ProbeScope};
 use crate::FnCtxt;
-
-pub(crate) fn provide(providers: &mut Providers) {
-    probe::provide(providers);
-}
+use crate::method::probe::UnsatisfiedPredicates;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct MethodCallee<'tcx> {
@@ -76,8 +72,7 @@ pub(crate) enum MethodError<'tcx> {
 #[derive(Debug)]
 pub(crate) struct NoMatchData<'tcx> {
     pub static_candidates: Vec<CandidateSource>,
-    pub unsatisfied_predicates:
-        Vec<(ty::Predicate<'tcx>, Option<ty::Predicate<'tcx>>, Option<ObligationCause<'tcx>>)>,
+    pub unsatisfied_predicates: UnsatisfiedPredicates<'tcx>,
     pub out_of_scope_traits: Vec<DefId>,
     pub similar_candidate: Option<ty::AssocItem>,
     pub mode: probe::Mode,
@@ -122,7 +117,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             Err(Ambiguity(..)) => true,
             Err(PrivateMatch(..)) => false,
             Err(IllegalSizedBound { .. }) => true,
-            Err(BadReturnType) => false,
+            Err(BadReturnType) => true,
             Err(ErrorReported(_)) => false,
         }
     }
@@ -247,7 +242,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         match *source {
                             // Note: this cannot come from an inherent impl,
                             // because the first probing succeeded.
-                            CandidateSource::Impl(def) => self.tcx.trait_id_of_impl(def),
+                            CandidateSource::Impl(def) => Some(self.tcx.impl_trait_id(def)),
                             CandidateSource::Trait(_) => None,
                         }
                     })
@@ -322,20 +317,40 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         )?;
         Ok(pick)
     }
+}
 
+/// Used by [FnCtxt::lookup_method_for_operator] with `-Znext-solver`.
+///
+/// With `AsRigid` we error on `impl Opaque: NotInItemBounds` while
+/// `AsInfer` just treats it as ambiguous and succeeds. This is necessary
+/// as we want [FnCtxt::check_expr_call] to treat not-yet-defined opaque
+/// types as rigid to support `impl Deref<Target = impl FnOnce()>` and
+/// `Box<impl FnOnce()>`.
+///
+/// We only want to treat opaque types as rigid if we need to eagerly choose
+/// between multiple candidates. We otherwise treat them as ordinary inference
+/// variable to avoid rejecting otherwise correct code.
+#[derive(Debug)]
+pub(super) enum TreatNotYetDefinedOpaques {
+    AsInfer,
+    AsRigid,
+}
+
+impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     /// `lookup_method_in_trait` is used for overloaded operators.
     /// It does a very narrow slice of what the normal probe/confirm path does.
     /// In particular, it doesn't really do any probing: it simply constructs
     /// an obligation for a particular trait with the given self type and checks
     /// whether that trait is implemented.
     #[instrument(level = "debug", skip(self))]
-    pub(super) fn lookup_method_in_trait(
+    pub(super) fn lookup_method_for_operator(
         &self,
         cause: ObligationCause<'tcx>,
-        m_name: Ident,
+        method_name: Symbol,
         trait_def_id: DefId,
         self_ty: Ty<'tcx>,
         opt_rhs_ty: Option<Ty<'tcx>>,
+        treat_opaques: TreatNotYetDefinedOpaques,
     ) -> Option<InferOk<'tcx, MethodCallee<'tcx>>> {
         // Construct a trait-reference `self_ty : Trait<input_tys>`
         let args = GenericArgs::for_item(self.tcx, trait_def_id, |param, _| match param.kind {
@@ -365,7 +380,14 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         );
 
         // Now we want to know if this can be matched
-        if !self.predicate_may_hold(&obligation) {
+        let matches_trait = match treat_opaques {
+            TreatNotYetDefinedOpaques::AsInfer => self.predicate_may_hold(&obligation),
+            TreatNotYetDefinedOpaques::AsRigid => {
+                self.predicate_may_hold_opaque_types_jank(&obligation)
+            }
+        };
+
+        if !matches_trait {
             debug!("--> Cannot match obligation");
             // Cannot be matched, no such method resolution is possible.
             return None;
@@ -374,13 +396,20 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // Trait must have a method named `m_name` and it should not have
         // type parameters or early-bound regions.
         let tcx = self.tcx;
-        let Some(method_item) = self.associated_value(trait_def_id, m_name) else {
+        // We use `Ident::with_dummy_span` since no built-in operator methods have
+        // any macro-specific hygiene, so the span's context doesn't really matter.
+        let Some(method_item) =
+            self.associated_value(trait_def_id, Ident::with_dummy_span(method_name))
+        else {
             bug!("expected associated item for operator trait")
         };
 
         let def_id = method_item.def_id;
-        if method_item.kind != ty::AssocKind::Fn {
-            span_bug!(tcx.def_span(def_id), "expected `{m_name}` to be an associated function");
+        if !method_item.is_fn() {
+            span_bug!(
+                tcx.def_span(def_id),
+                "expected `{method_name}` to be an associated function"
+            );
         }
 
         debug!("lookup_in_trait_adjusted: method_item={:?}", method_item);
@@ -393,8 +422,11 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         // function signature so that normalization does not need to deal
         // with bound regions.
         let fn_sig = tcx.fn_sig(def_id).instantiate(self.tcx, args);
-        let fn_sig =
-            self.instantiate_binder_with_fresh_vars(obligation.cause.span, infer::FnCall, fn_sig);
+        let fn_sig = self.instantiate_binder_with_fresh_vars(
+            obligation.cause.span,
+            BoundRegionConversionTime::FnCall,
+            fn_sig,
+        );
 
         let InferOk { value: fn_sig, obligations: o } =
             self.at(&obligation.cause, self.param_env).normalize(fn_sig);
@@ -423,19 +455,18 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         ));
 
         // Also add an obligation for the method type being well-formed.
-        let method_ty = Ty::new_fn_ptr(tcx, ty::Binder::dummy(fn_sig));
         debug!(
-            "lookup_method_in_trait: matched method method_ty={:?} obligation={:?}",
-            method_ty, obligation
+            "lookup_method_in_trait: matched method fn_sig={:?} obligation={:?}",
+            fn_sig, obligation
         );
-        obligations.push(traits::Obligation::new(
-            tcx,
-            obligation.cause,
-            self.param_env,
-            ty::Binder::dummy(ty::PredicateKind::Clause(ty::ClauseKind::WellFormed(
-                method_ty.into(),
-            ))),
-        ));
+        for ty in fn_sig.inputs_and_output {
+            obligations.push(traits::Obligation::new(
+                tcx,
+                obligation.cause.clone(),
+                self.param_env,
+                ty::Binder::dummy(ty::PredicateKind::Clause(ty::ClauseKind::WellFormed(ty.into()))),
+            ));
+        }
 
         let callee = MethodCallee { def_id, args, sig: fn_sig };
         debug!("callee = {:?}", callee);
@@ -529,17 +560,17 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             }
         }
 
-        let def_kind = pick.item.kind.as_def_kind();
+        let def_kind = pick.item.as_def_kind();
         tcx.check_stability(pick.item.def_id, Some(expr_id), span, Some(method_name.span));
         Ok((def_kind, pick.item.def_id))
     }
 
-    /// Finds item with name `item_name` defined in impl/trait `def_id`
+    /// Finds item with name `item_ident` defined in impl/trait `def_id`
     /// and return it, or `None`, if no such item was defined there.
-    fn associated_value(&self, def_id: DefId, item_name: Ident) -> Option<ty::AssocItem> {
+    fn associated_value(&self, def_id: DefId, item_ident: Ident) -> Option<ty::AssocItem> {
         self.tcx
             .associated_items(def_id)
-            .find_by_name_and_namespace(self.tcx, item_name, Namespace::ValueNS, def_id)
+            .find_by_ident_and_namespace(self.tcx, item_ident, Namespace::ValueNS, def_id)
             .copied()
     }
 }

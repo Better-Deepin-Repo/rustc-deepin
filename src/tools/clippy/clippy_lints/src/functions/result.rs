@@ -1,13 +1,14 @@
 use clippy_utils::msrvs::{self, Msrv};
+use clippy_utils::res::MaybeDef;
 use rustc_errors::Diag;
 use rustc_hir as hir;
 use rustc_lint::{LateContext, LintContext};
-use rustc_middle::lint::in_external_macro;
 use rustc_middle::ty::{self, Ty};
+use rustc_span::def_id::DefIdSet;
 use rustc_span::{Span, sym};
 
 use clippy_utils::diagnostics::{span_lint_and_help, span_lint_and_then};
-use clippy_utils::ty::{AdtVariantInfo, approx_ty_size, is_type_diagnostic_item};
+use clippy_utils::ty::{AdtVariantInfo, approx_ty_size};
 use clippy_utils::{is_no_std_crate, trait_ref_of_method};
 
 use super::{RESULT_LARGE_ERR, RESULT_UNIT_ERR};
@@ -20,12 +21,12 @@ fn result_err_ty<'tcx>(
     id: hir::def_id::LocalDefId,
     item_span: Span,
 ) -> Option<(&'tcx hir::Ty<'tcx>, Ty<'tcx>)> {
-    if !in_external_macro(cx.sess(), item_span)
+    if !item_span.in_external_macro(cx.sess().source_map())
         && let hir::FnRetTy::Return(hir_ty) = decl.output
         && let ty = cx
             .tcx
             .instantiate_bound_regions_with_erased(cx.tcx.fn_sig(id).instantiate_identity().output())
-        && is_type_diagnostic_item(cx, ty, sym::Result)
+        && ty.is_diag_item(cx, sym::Result)
         && let ty::Adt(_, args) = ty.kind()
     {
         let err_ty = args.type_at(1);
@@ -35,15 +36,21 @@ fn result_err_ty<'tcx>(
     }
 }
 
-pub(super) fn check_item<'tcx>(cx: &LateContext<'tcx>, item: &hir::Item<'tcx>, large_err_threshold: u64, msrv: &Msrv) {
-    if let hir::ItemKind::Fn(ref sig, _generics, _) = item.kind
+pub(super) fn check_item<'tcx>(
+    cx: &LateContext<'tcx>,
+    item: &hir::Item<'tcx>,
+    large_err_threshold: u64,
+    large_err_ignored: &DefIdSet,
+    msrv: Msrv,
+) {
+    if let hir::ItemKind::Fn { ref sig, .. } = item.kind
         && let Some((hir_ty, err_ty)) = result_err_ty(cx, sig.decl, item.owner_id.def_id, item.span)
     {
         if cx.effective_visibilities.is_exported(item.owner_id.def_id) {
             let fn_header_span = item.span.with_hi(sig.decl.output.span().hi());
             check_result_unit_err(cx, err_ty, fn_header_span, msrv);
         }
-        check_result_large_err(cx, err_ty, hir_ty.span, large_err_threshold);
+        check_result_large_err(cx, err_ty, hir_ty.span, large_err_threshold, large_err_ignored);
     }
 }
 
@@ -51,18 +58,19 @@ pub(super) fn check_impl_item<'tcx>(
     cx: &LateContext<'tcx>,
     item: &hir::ImplItem<'tcx>,
     large_err_threshold: u64,
-    msrv: &Msrv,
+    large_err_ignored: &DefIdSet,
+    msrv: Msrv,
 ) {
     // Don't lint if method is a trait's implementation, we can't do anything about those
     if let hir::ImplItemKind::Fn(ref sig, _) = item.kind
         && let Some((hir_ty, err_ty)) = result_err_ty(cx, sig.decl, item.owner_id.def_id, item.span)
-        && trait_ref_of_method(cx, item.owner_id.def_id).is_none()
+        && trait_ref_of_method(cx, item.owner_id).is_none()
     {
         if cx.effective_visibilities.is_exported(item.owner_id.def_id) {
             let fn_header_span = item.span.with_hi(sig.decl.output.span().hi());
             check_result_unit_err(cx, err_ty, fn_header_span, msrv);
         }
-        check_result_large_err(cx, err_ty, hir_ty.span, large_err_threshold);
+        check_result_large_err(cx, err_ty, hir_ty.span, large_err_threshold, large_err_ignored);
     }
 }
 
@@ -70,7 +78,8 @@ pub(super) fn check_trait_item<'tcx>(
     cx: &LateContext<'tcx>,
     item: &hir::TraitItem<'tcx>,
     large_err_threshold: u64,
-    msrv: &Msrv,
+    large_err_ignored: &DefIdSet,
+    msrv: Msrv,
 ) {
     if let hir::TraitItemKind::Fn(ref sig, _) = item.kind {
         let fn_header_span = item.span.with_hi(sig.decl.output.span().hi());
@@ -78,13 +87,13 @@ pub(super) fn check_trait_item<'tcx>(
             if cx.effective_visibilities.is_exported(item.owner_id.def_id) {
                 check_result_unit_err(cx, err_ty, fn_header_span, msrv);
             }
-            check_result_large_err(cx, err_ty, hir_ty.span, large_err_threshold);
+            check_result_large_err(cx, err_ty, hir_ty.span, large_err_threshold, large_err_ignored);
         }
     }
 }
 
-fn check_result_unit_err(cx: &LateContext<'_>, err_ty: Ty<'_>, fn_header_span: Span, msrv: &Msrv) {
-    if err_ty.is_unit() && (!is_no_std_crate(cx) || msrv.meets(msrvs::ERROR_IN_CORE)) {
+fn check_result_unit_err(cx: &LateContext<'_>, err_ty: Ty<'_>, fn_header_span: Span, msrv: Msrv) {
+    if err_ty.is_unit() && (!is_no_std_crate(cx) || msrv.meets(cx, msrvs::ERROR_IN_CORE)) {
         span_lint_and_help(
             cx,
             RESULT_UNIT_ERR,
@@ -96,15 +105,22 @@ fn check_result_unit_err(cx: &LateContext<'_>, err_ty: Ty<'_>, fn_header_span: S
     }
 }
 
-fn check_result_large_err<'tcx>(cx: &LateContext<'tcx>, err_ty: Ty<'tcx>, hir_ty_span: Span, large_err_threshold: u64) {
+fn check_result_large_err<'tcx>(
+    cx: &LateContext<'tcx>,
+    err_ty: Ty<'tcx>,
+    hir_ty_span: Span,
+    large_err_threshold: u64,
+    large_err_ignored: &DefIdSet,
+) {
+    if let ty::Adt(adt, _) = err_ty.kind()
+        && large_err_ignored.contains(&adt.did())
+    {
+        return;
+    }
     if let ty::Adt(adt, subst) = err_ty.kind()
-        && let Some(local_def_id) = err_ty
-            .ty_adt_def()
-            .expect("already checked this is adt")
-            .did()
-            .as_local()
+        && let Some(local_def_id) = adt.did().as_local()
         && let hir::Node::Item(item) = cx.tcx.hir_node_by_def_id(local_def_id)
-        && let hir::ItemKind::Enum(ref def, _) = item.kind
+        && let hir::ItemKind::Enum(_, _, ref def) = item.kind
     {
         let variants_size = AdtVariantInfo::new(cx, *adt, subst);
         if let Some((first_variant, variants)) = variants_size.split_first()

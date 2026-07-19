@@ -1,23 +1,23 @@
+use crate::core::Registry as _;
 use crate::core::dependency::Dependency;
 use crate::core::registry::PackageRegistry;
 use crate::core::resolver::features::{CliFeatures, HasDevUnits};
 use crate::core::shell::Verbosity;
-use crate::core::Registry as _;
 use crate::core::{PackageId, PackageIdSpec, PackageIdSpecQuery};
 use crate::core::{Resolve, SourceId, Workspace};
 use crate::ops;
-use crate::sources::source::QueryKind;
 use crate::sources::IndexSummary;
+use crate::sources::source::QueryKind;
 use crate::util::cache_lock::CacheLockMode;
 use crate::util::context::GlobalContext;
 use crate::util::toml_mut::dependency::{MaybeWorkspace, Source};
 use crate::util::toml_mut::manifest::LocalManifest;
 use crate::util::toml_mut::upgrade::upgrade_requirement;
-use crate::util::{style, OptVersionReq};
 use crate::util::{CargoResult, VersionExt};
+use crate::util::{OptVersionReq, style};
 use anyhow::Context as _;
 use cargo_util_schemas::core::PartialVersion;
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 use itertools::Itertools;
 use semver::{Op, Version, VersionReq};
 use std::cmp::Ordering;
@@ -136,22 +136,19 @@ pub fn update_lockfile(ws: &Workspace<'_>, opts: &UpdateOptions<'_>) -> CargoRes
         // Mirror `--workspace` and never avoid workspace members.
         // Filtering them out here so the above processes them normally
         // so their dependencies can be updated as requested
-        to_avoid = to_avoid
-            .into_iter()
-            .filter(|id| {
-                for package in ws.members() {
-                    let member_id = package.package_id();
-                    // Skip checking the `version` because `previous_resolve` might have a stale
-                    // value.
-                    // When dealing with workspace members, the other fields should be a
-                    // sufficiently unique match.
-                    if id.name() == member_id.name() && id.source_id() == member_id.source_id() {
-                        return false;
-                    }
+        to_avoid.retain(|id| {
+            for package in ws.members() {
+                let member_id = package.package_id();
+                // Skip checking the `version` because `previous_resolve` might have a stale
+                // value.
+                // When dealing with workspace members, the other fields should be a
+                // sufficiently unique match.
+                if id.name() == member_id.name() && id.source_id() == member_id.source_id() {
+                    return false;
                 }
-                true
-            })
-            .collect();
+            }
+            true
+        });
 
         registry.add_sources(sources)?;
     }
@@ -241,6 +238,8 @@ pub fn upgrade_manifests(
     let mut registry = ws.package_registry()?;
     registry.lock_patches();
 
+    let mut remaining_specs: IndexSet<_> = to_update.iter().cloned().collect();
+
     for member in ws.members_mut().sorted() {
         debug!("upgrading manifest for `{}`", member.name());
 
@@ -255,9 +254,56 @@ pub fn upgrade_manifests(
                     &mut registry,
                     &mut upgrades,
                     &mut upgrade_messages,
+                    &mut remaining_specs,
                     d,
                 )
             })?;
+    }
+
+    if !remaining_specs.is_empty() {
+        let previous_resolve = ops::load_pkg_lockfile(ws)?;
+        let plural = if remaining_specs.len() == 1 { "" } else { "s" };
+
+        let mut error_msg = format!(
+            "package ID specification{plural} did not match any direct dependencies that could be upgraded"
+        );
+
+        let mut transitive_specs = Vec::new();
+        for spec in &remaining_specs {
+            error_msg.push_str(&format!("\n  {spec}"));
+
+            // Check if spec is in the lockfile (could be transitive)
+            let in_lockfile = if let Some(ref resolve) = previous_resolve {
+                spec.query(resolve.iter()).is_ok()
+            } else {
+                false
+            };
+
+            // Check if spec matches any direct dependency in the workspace
+            let matches_direct_dep = ws.members().any(|member| {
+                member.dependencies().iter().any(|dep| {
+                    spec.name() == dep.package_name().as_str()
+                        && dep.source_id().is_registry()
+                        && spec.url().map_or(true, |url| url == dep.source_id().url())
+                        && spec
+                            .version()
+                            .map_or(true, |v| dep.version_req().matches(&v))
+                })
+            });
+
+            // Track transitive specs for notes at the end
+            if in_lockfile && !matches_direct_dep {
+                transitive_specs.push(spec);
+            }
+        }
+
+        for spec in transitive_specs {
+            error_msg.push_str(&format!(
+                "\nnote: `{spec}` exists as a transitive dependency but those are not available for upgrading through `--breaking`"
+            ));
+        }
+
+        anyhow::bail!("{error_msg}");
     }
 
     Ok(upgrades)
@@ -269,6 +315,7 @@ fn upgrade_dependency(
     registry: &mut PackageRegistry<'_>,
     upgrades: &mut UpgradeMap,
     upgrade_messages: &mut HashSet<String>,
+    remaining_specs: &mut IndexSet<PackageIdSpec>,
     dependency: Dependency,
 ) -> CargoResult<Dependency> {
     let name = dependency.package_name();
@@ -370,6 +417,10 @@ fn upgrade_dependency(
 
     upgrades.insert((name.to_string(), dependency.source_id()), latest.clone());
 
+    // Remove this spec from remaining_specs since we successfully upgraded it
+    remaining_specs
+        .retain(|spec| !(spec.name() == name.as_str() && dependency.source_id().is_registry()));
+
     let req = OptVersionReq::Req(VersionReq::parse(&latest.to_string())?);
     let mut dep = dependency.clone();
     dep.set_version_req(req);
@@ -463,8 +514,7 @@ pub fn write_manifest_upgrades(
                 let [comparator] = &new_req.comparators[..] else {
                     trace!(
                         "skipping dependency `{}` with multiple version comparators: {:?}",
-                        name,
-                        new_req.comparators
+                        name, new_req.comparators
                     );
                     continue;
                 };
@@ -693,9 +743,9 @@ fn print_lockfile_updates(
     }
 
     if ws.gctx().shell().verbosity() == Verbosity::Verbose {
-        ws.gctx().shell().note(
-            "to see how you depend on a package, run `cargo tree --invert --package <dep>@<ver>`",
-        )?;
+        ws.gctx()
+            .shell()
+            .note("to see how you depend on a package, run `cargo tree --invert <dep>@<ver>`")?;
     } else {
         if 0 < unchanged_behind {
             ws.gctx().shell().note(format!(
@@ -726,6 +776,9 @@ fn status_locking(ws: &Workspace<'_>, num_pkgs: usize) -> CargoResult<()> {
             write!(&mut cfg, " Rust {rust_version}")?;
         }
         write!(&mut cfg, " compatible version{plural}")?;
+        if let Some(publish_time) = ws.resolve_publish_time() {
+            write!(&mut cfg, " as of {publish_time}")?;
+        }
     }
 
     ws.gctx()
@@ -1062,11 +1115,11 @@ impl PackageChangeKind {
 
     pub fn style(&self) -> anstyle::Style {
         match self {
-            Self::Added => style::NOTE,
-            Self::Removed => style::ERROR,
-            Self::Upgraded => style::GOOD,
-            Self::Downgraded => style::WARN,
-            Self::Unchanged => anstyle::Style::new().bold(),
+            Self::Added => style::UPDATE_ADDED,
+            Self::Removed => style::UPDATE_REMOVED,
+            Self::Upgraded => style::UPDATE_UPGRADED,
+            Self::Downgraded => style::UPDATE_DOWNGRADED,
+            Self::Unchanged => style::UPDATE_UNCHANGED,
         }
     }
 }

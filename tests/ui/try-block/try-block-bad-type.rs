@@ -1,10 +1,10 @@
-//@ compile-flags: --edition 2018
+//@ edition: 2018
 
 #![feature(try_blocks)]
 
 pub fn main() {
     let res: Result<u32, std::array::TryFromSliceError> = try {
-        Err("")?; //~ ERROR `?` couldn't convert the error
+        Err("")?; //~ ERROR mismatched types
         5
     };
 
